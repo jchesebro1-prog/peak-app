@@ -28,6 +28,31 @@ and migrations apply themselves during the build.
 **Who can sign in:** active people on Settings → Team (email or their
 `googleEmail`). Add a teammate there before inviting them.
 
+## 2b. What's usable today (Phases 1–3 ✅)
+
+Signed in, you can already drive the whole **Sales** side against real data:
+- **Home** — live dashboard (pipeline value, win rate, inbox waiting, your
+  leads to follow up, designs, needs-attention).
+- **Leads** — pipeline board (drag between stages), follow-up worklist, and
+  table; open a lead to log touches, set follow-ups, assign, or convert →
+  customer + draft quote. Public request form at `/lead-intake`.
+- **Quotes / Estimator** — the full line-item builder (catalog parts,
+  curtain / fixture / labor configurators, per-section margin + freight,
+  customer PDF preview). Marking a quote **Won** auto-creates its Installs
+  project and, for flame-test quotes, its service job.
+- **Reviews** — submit/claim/approve/request-changes for quotes & designs.
+- **Quick Design** — budgetary Good/Better/Best estimator with generated
+  groundplans; save as a design, promote to a quote.
+- **Inbox** — the in-app email client (personal + shared mailboxes, folders,
+  compose/reply/forward, link-to-work, call/meeting log). Still simulated
+  send until Gmail connects (Phase 7).
+- **⌘K search** across quotes, designs, surveys, inspections, threads,
+  customers, catalog.
+
+Service, Installs, and the General tools (Flame Tests, Repairs, Inspections,
+Projects, Scheduling, Customers, Reports, Import…) are the next phases —
+their nav tabs currently open a "coming in Phase N" placeholder.
+
 ## 3. Day-to-day operations
 
 - **Add/remove team members:** Settings → Team (Admin only). Deactivate
