@@ -69,6 +69,33 @@ export default function Nav({
   const [narrow, setNarrow] = useState(false);
   const [online, setOnline] = useState(true);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [searchQ, setSearchQ] = useState("");
+  const [searchGroups, setSearchGroups] = useState<
+    Array<{ label: string; items: Array<{ id: string; title: string; sub: string; href: string; letter: string; color: string }> }>
+  >([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const runSearch = (q: string) => {
+    setSearchQ(q);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (q.trim().length < 2) {
+      setSearchGroups([]);
+      setSearchOpen(false);
+      return;
+    }
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { groups: typeof searchGroups };
+        setSearchGroups(data.groups || []);
+        setSearchOpen(true);
+      } catch {
+        /* offline — search silently unavailable */
+      }
+    }, 180);
+  };
 
   useEffect(() => {
     const check = () => setNarrow(window.innerWidth <= 860);
@@ -99,6 +126,7 @@ export default function Nav({
         setMenuOpen(false);
         setNotifOpen(false);
         setDrawerOpen(false);
+        setSearchOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -111,6 +139,7 @@ export default function Nav({
     setMenuOpen(false);
     setNotifOpen(false);
     setDrawerOpen(false);
+    setSearchOpen(false);
   }, [pathname]);
 
   const markLetter = (companyName.trim().charAt(0) || "P").toUpperCase();
@@ -227,15 +256,134 @@ export default function Nav({
           </div>
 
           {!narrow && (
-            <div className="pk-search">
-              <span className="pk-magnifier" />
-              <input
-                ref={searchRef}
-                placeholder="Search…"
-                title="Global search comes online with the data stores (Phase 2)"
-                readOnly
-              />
-              <span className="pk-kbd">⌘K</span>
+            <div style={{ position: "relative" }}>
+              <div className="pk-search">
+                <span className="pk-magnifier" />
+                <input
+                  ref={searchRef}
+                  placeholder="Search…"
+                  value={searchQ}
+                  onChange={(e) => runSearch(e.target.value)}
+                  onFocus={() => searchGroups.length && setSearchOpen(true)}
+                />
+                <span className="pk-kbd">⌘K</span>
+              </div>
+              {searchOpen && (
+                <>
+                  <div
+                    className="pk-backdrop"
+                    onClick={() => setSearchOpen(false)}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 44,
+                      right: 0,
+                      width: 344,
+                      maxWidth: "88vw",
+                      maxHeight: "60vh",
+                      overflowY: "auto",
+                      background: "#fff",
+                      border: "1px solid #e8eaee",
+                      borderRadius: 12,
+                      boxShadow: "0 16px 46px rgba(0,0,0,.24)",
+                      padding: 6,
+                      zIndex: 70,
+                      color: "#16181d",
+                    }}
+                  >
+                    {searchGroups.length === 0 ? (
+                      <div style={{ padding: "18px 12px", fontSize: 12.5, color: "#9aa0ab", textAlign: "center" }}>
+                        No matches for “{searchQ}”
+                      </div>
+                    ) : (
+                      searchGroups.map((g) => (
+                        <div key={g.label}>
+                          <div
+                            style={{
+                              fontSize: 9.5,
+                              fontWeight: 600,
+                              letterSpacing: ".07em",
+                              textTransform: "uppercase",
+                              color: "#aab0bb",
+                              padding: "8px 10px 3px",
+                            }}
+                          >
+                            {g.label}
+                          </div>
+                          {g.items.map((it) => (
+                            <Link
+                              key={it.id}
+                              href={it.href}
+                              className="pk-todo-item"
+                              onClick={() => {
+                                setSearchOpen(false);
+                                setSearchQ("");
+                                setSearchGroups([]);
+                              }}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 10,
+                                padding: "8px 10px",
+                                borderRadius: 8,
+                                textDecoration: "none",
+                                color: "inherit",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  width: 24,
+                                  height: 24,
+                                  borderRadius: 7,
+                                  background: it.color,
+                                  color: "#fff",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  fontFamily: "var(--font-mono)",
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {it.letter}
+                              </span>
+                              <span style={{ flex: 1, minWidth: 0 }}>
+                                <span
+                                  style={{
+                                    display: "block",
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    whiteSpace: "nowrap",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                  }}
+                                >
+                                  {it.title}
+                                </span>
+                                <span
+                                  style={{
+                                    display: "block",
+                                    fontSize: 11,
+                                    color: "#9aa0ab",
+                                    fontFamily: "var(--font-mono)",
+                                    whiteSpace: "nowrap",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                  }}
+                                >
+                                  {it.sub}
+                                </span>
+                              </span>
+                            </Link>
+                          ))}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
 

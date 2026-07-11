@@ -96,3 +96,36 @@ Anything you want changed, just say so — none of these are hard to reverse.
 - **D18. Soft deletes everywhere:** prototype hard-deleted locally; the
   rebuild tombstones (`deleted:true`) so offline devices converge — and
   record ids are never reused after deletion.
+
+## Phase 3 (2026-07-11) — Sales screens
+
+- **D19. View switchers via SegmentedToggle:** the prototype showed some
+  screens' variants as separate design canvases (Leads 1a/1b/1c). Production
+  needs one screen, so those became a Board/Worklist/Table segmented switch
+  (URL `?view=`). Leads defaults to Table (matches the shipped
+  `Leads.dc.html`).
+- **D20. Estimator quote spec** persists `{ sections, mobs }` on
+  `quote.spec` (prototype saved only `mobs`). Section/item field names match
+  what `projects.ts` already reads, so won quotes still spawn projects with
+  correct procurement lines. `contactName`/`quoteNote` ride on the quote doc
+  via a typed extension (prototype did the same dynamically).
+- **D21. Flame-test quotes** open in `/estimator` for now; the dedicated
+  Flame Test Quote builder is a Phase 4 screen. The "+ New quote → Flame
+  test" menu points at `/flame-tests` until then.
+- **D22. Plan-drawing editor deferred (pre-approved):** Quick Design's and
+  Design's freehand manual-layout canvas (drag-drop placements, plan import,
+  line-set schedule table) shows a styled "arrives with the spatial-
+  estimating work" panel — matches IDEAS #4/#9 being open scope. Everything
+  auto-mode (venue → sizing formulas → tiers → BOM → generated groundplan
+  with draggable walls/doors) is fully live. `placements`/plan fields still
+  round-trip untouched in the design `config`.
+- **D23. Global ⌘K search** (`/api/search`) ported from the Nav's search
+  sources — quotes, designs, surveys, inspections, threads, customers,
+  catalog — grouped results, live as-you-type.
+- **D24. Public Lead Intake** lives at `/lead-intake` (outside auth), posts
+  to `/api/leads/intake` (honeypot + Zod validation); budget band is folded
+  into the lead message since the pipeline has no dedicated value field on
+  intake.
+- **D25. Tier definitions** (Quick Design Good/Better/Best specs) stay
+  localStorage-per-browser like the prototype — they're a per-estimator
+  preference, no shared-store contract exists for them yet.

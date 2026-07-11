@@ -1,0 +1,55 @@
+/* Design dashboard — screen-scoped styles ported from Design.dc.html */
+
+.dd-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+.dd-scroll::-webkit-scrollbar-thumb {
+  background: #d6d9e0;
+  border-radius: 8px;
+  border: 3px solid #f7f8fa;
+}
+
+.dd-sel {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #3a3f4a;
+  background: #fff;
+  border: 1px solid #e4e7ec;
+  border-radius: 9px;
+  padding: 9px 30px 9px 12px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238c919c' stroke-width='1.5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+}
+
+.dd-open-link:hover {
+  border-color: #c4c9d2 !important;
+}
+.dd-accent-btn:hover {
+  filter: brightness(1.06);
+}
+.dd-newtile:hover {
+  border-color: var(--accent) !important;
+  color: color-mix(in srgb, var(--accent) 72%, #16181d) !important;
+  background: color-mix(in srgb, var(--accent) 13%, #fff) !important;
+}
+
+@media (max-width: 860px) {
+  .dd-head {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .dd-stats {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .dd-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .dd-detail-cols {
+    grid-template-columns: 1fr !important;
+  }
+}

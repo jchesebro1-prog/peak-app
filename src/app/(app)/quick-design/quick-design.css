@@ -1,0 +1,69 @@
+/* Quick Design — screen-scoped styles ported from Quick Design.dc.html */
+
+.qd-scroll::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.qd-scroll::-webkit-scrollbar-thumb {
+  background: #d6d9e0;
+  border-radius: 8px;
+  border: 2px solid #fbfbfc;
+}
+
+.qd-name-input:hover {
+  background: #f4f5f7;
+}
+.qd-name-input:focus {
+  background: #f4f5f7;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 12%, #fff);
+}
+
+.qd-ghostbtn:hover {
+  color: #16181d !important;
+  border-color: #c4c9d2 !important;
+}
+.qd-outline:hover {
+  border-color: #c4c9d2 !important;
+}
+.qd-focus-accent:focus {
+  border-color: var(--accent) !important;
+}
+
+@media (max-width: 860px) {
+  .qd-root {
+    height: auto !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+  }
+  .qd-body {
+    flex-direction: column !important;
+  }
+  .qd-inputs {
+    width: 100% !important;
+    flex-shrink: 0 !important;
+    overflow: visible !important;
+    border-right: none !important;
+    border-bottom: 1px solid #ececf0 !important;
+  }
+  .qd-pvscroll {
+    overflow: visible !important;
+  }
+  .qd-foot {
+    flex-wrap: wrap !important;
+  }
+  .qd-foot a,
+  .qd-foot button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .qd-tierbar {
+    width: 100% !important;
+    flex-shrink: 0 !important;
+    overflow: visible !important;
+    border-left: none !important;
+    border-top: 1px solid #ececf0 !important;
+  }
+  .qd-siderail {
+    display: none !important;
+  }
+}

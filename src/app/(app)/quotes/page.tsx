@@ -1,12 +1,806 @@
-import PlaceholderScreen from "@/components/placeholder-screen";
+import Link from "next/link";
+import type { CSSProperties } from "react";
+import { requireUser } from "@/lib/session";
+import {
+  getAll,
+  timeAgo,
+  STAGES,
+  STAGE_LABEL,
+  type Quote,
+  type QuoteStatus,
+} from "@/lib/stores/quotes";
+import { all as allCustomers } from "@/lib/stores/customers";
+import { allUsers, reviewers } from "@/lib/users";
+import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
+import { money } from "@/lib/format";
+import { NewQuoteMenu, OwnerSelect } from "./controls";
+import { setQuoteStatus, submitQuoteForReview } from "./actions";
 
-export default function Page() {
+export const metadata = { title: "Quotes — Peak Backend" };
+
+/* ---- prototype token maps (Quotes.dc.html statusMeta / rMeta, Estimator rbMeta) ---- */
+
+const STATUS_META: Record<QuoteStatus, { ink: string; soft: string; bd: string }> = {
+  draft: { ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" },
+  sent: { ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" },
+  won: { ink: "#2f7d52", soft: "#e6f4ec", bd: "#cce7d6" },
+  lost: { ink: "#b4543a", soft: "#f7e9e5", bd: "#f0d6cd" },
+};
+
+const REVIEW_CHIP: Record<string, { label: string; ink: string; soft: string; bd: string }> = {
+  in_review: { label: "In review", ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" },
+  approved: { label: "Approved", ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da" },
+  changes: { label: "Changes", ink: "#b4543a", soft: "#f7e9e5", bd: "#f0d6cd" },
+};
+
+const RB_META: Record<string, { bg: string; bd: string; ink: string; icon: string; title: string }> = {
+  none: { bg: "#f4f5f7", bd: "#e4e7ec", ink: "#5b616e", icon: "○", title: "Not submitted for review" },
+  in_review: { bg: "#eef3fc", bd: "#d4ddf3", ink: "#3155a8", icon: "◴", title: "In review" },
+  approved: { bg: "#ecf6f0", bd: "#cce9da", ink: "#1f7a52", icon: "✓", title: "Approved" },
+  changes: { bg: "#fcefe9", bd: "#f0d6cd", ink: "#b4543a", icon: "↩", title: "Changes requested" },
+};
+
+const GRID = "30px minmax(0,1fr) 200px 120px 96px 92px";
+
+/** Prototype shortMoney: $48.0k / $313k / $860. */
+function shortMoney(n: number): string {
+  return n >= 1000
+    ? "$" + (n / 1000).toFixed(n >= 100000 ? 0 : 1) + "k"
+    : "$" + Math.round(n);
+}
+
+function one(v: string | string[] | undefined): string {
+  return Array.isArray(v) ? v[0] ?? "" : v ?? "";
+}
+
+const SEG_BASE: CSSProperties = {
+  fontFamily: "var(--font-ui)",
+  fontSize: 12.5,
+  fontWeight: 600,
+  borderRadius: 7,
+  padding: "8px 14px",
+  textDecoration: "none",
+};
+
+const CSS = `
+  .qt-rowscroll::-webkit-scrollbar { display: none; }
+  .qt-rowscroll { -ms-overflow-style: none; scrollbar-width: none; }
+  select.qt-sel { -webkit-appearance: none; appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238c919c' stroke-width='1.5'/></svg>"); background-repeat: no-repeat; background-position: right 11px center; }
+  .qt-newbtn:hover { filter: brightness(1.06); }
+  .qt-menuitem:hover { background: #f6f7f9; }
+  .qt-rowlink:hover { background: #fafbff; }
+  @media (max-width: 860px) {
+    .qt-pad { padding-left: 16px !important; padding-right: 16px !important; }
+    .qt-head { flex-direction: column !important; align-items: stretch !important; }
+    .qt-stats { grid-template-columns: repeat(2, 1fr) !important; }
+    .qt-controls { flex-direction: column !important; align-items: stretch !important; }
+    .qt-row { grid-template-columns: 26px minmax(0,1fr) auto !important; }
+    .qt-cust, .qt-edited { display: none !important; }
+  }
+`;
+
+export default async function QuotesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const [user, sp, quotes, customers, users, reviewerRows] = await Promise.all([
+    requireUser(),
+    searchParams,
+    getAll(),
+    allCustomers(),
+    allUsers(),
+    reviewers(),
+  ]);
+  const me = user.name;
+
+  /* ---- identity + customer lookups (port of Team.person / CustomerStore) ---- */
+  const identity = new Map(users.map((u) => [u.name, { color: u.color, initials: u.initials }]));
+  const colorOf = (n: string) => identity.get(n)?.color || fallbackColor(n || "");
+  const initialsOf = (n: string) => identity.get(n)?.initials || deriveInitials(n || "");
+  const custById = new Map(customers.map((c) => [c.id, c.name || ""]));
+  const custIdByName = new Map(customers.map((c) => [(c.name || "").toLowerCase(), c.id]));
+  const customerLabel = (q: Quote) => {
+    const cid =
+      q.customerId || custIdByName.get((q.customer || "").toLowerCase()) || null;
+    return (cid ? custById.get(cid) || "" : "") || q.customer || "—";
+  };
+
+  /* ---- URL state: ownership scope, status filter, selected row ---- */
+  const whoRaw = one(sp.who);
+  const scope =
+    !whoRaw || whoRaw === "all"
+      ? "all"
+      : whoRaw === "mine" || whoRaw === me
+        ? "mine"
+        : whoRaw;
+  const statusParam = one(sp.status);
+  const filter =
+    (STAGES as readonly string[]).includes(statusParam) ? (statusParam as QuoteStatus) : "all";
+  const selectedId = one(sp.id);
+
+  const hrefFor = (over: { who?: string; status?: string; id?: string | null }) => {
+    const qs = new URLSearchParams();
+    const w = over.who ?? (scope === "all" ? "all" : scope);
+    const st = over.status ?? filter;
+    if (w && w !== "all") qs.set("who", w);
+    if (st && st !== "all") qs.set("status", st);
+    if (over.id) qs.set("id", over.id);
+    const s = qs.toString();
+    return "/quotes" + (s ? "?" + s : "");
+  };
+
+  /* ---- ownership scope ---- */
+  let scoped = quotes;
+  if (scope === "mine") scoped = quotes.filter((q) => q.owner === me);
+  else if (scope !== "all") scoped = quotes.filter((q) => q.owner === scope);
+
+  const roster = users.filter((u) => u.active);
+  const ownerOptions = [
+    { value: "all", label: "All teammates", href: hrefFor({ who: "all" }) },
+  ].concat(
+    roster.map((p) => ({
+      value: p.name === me ? "mine" : p.name,
+      label: p.name === me ? p.name + " (me)" : p.name,
+      href: hrefFor({ who: p.name === me ? "mine" : p.name }),
+    }))
+  );
+  const ownerSelectValue = scope === "all" ? "all" : scope === "mine" ? "mine" : scope;
+
+  /* ---- status pipeline filter (over the scoped set) ---- */
+  const counts: Record<string, number> = {
+    all: scoped.length,
+    draft: scoped.filter((q) => q.status === "draft").length,
+    sent: scoped.filter((q) => q.status === "sent").length,
+    won: scoped.filter((q) => q.status === "won").length,
+    lost: scoped.filter((q) => q.status === "lost").length,
+  };
+  const filterDefs: Array<[string, string]> = [
+    ["all", "All"],
+    ["draft", STAGE_LABEL.draft],
+    ["sent", STAGE_LABEL.sent],
+    ["won", STAGE_LABEL.won],
+    ["lost", STAGE_LABEL.lost],
+  ];
+
+  const filtered = scoped.filter((q) => filter === "all" || q.status === filter);
+
+  /* ---- stat tiles (over the scoped set) ---- */
+  const open = scoped.filter((q) => q.status === "draft" || q.status === "sent");
+  const openValue = open.reduce((a, q) => a + (q.value || 0), 0);
+  const won = scoped.filter((q) => q.status === "won");
+  const lost = scoped.filter((q) => q.status === "lost");
+  const decided = won.length + lost.length;
+  const winRate = decided > 0 ? Math.round((won.length / decided) * 100) : 0;
+  const wonValue = won.reduce((a, q) => a + (q.value || 0), 0);
+  const stats = [
+    { label: "Open pipeline", value: shortMoney(openValue), sub: open.length + " active quotes" },
+    { label: "Win rate", value: winRate + "%", sub: won.length + " won · " + lost.length + " lost" },
+    { label: "Won value", value: shortMoney(wonValue), sub: "closed this view" },
+    { label: "Total quotes", value: String(scoped.length), sub: "in this view" },
+  ];
+
+  const scopeLabel =
+    scope === "mine" ? "your" : scope === "all" ? "the team’s" : firstName(scope) + "’s";
+  const standfirst =
+    scoped.length + " quotes · " + money(openValue) + " open in " + scopeLabel + " pipeline";
+  const emptyMsg =
+    scope === "mine" ? "You have no quotes in this stage." : "No quotes in this stage.";
+
   return (
-    <PlaceholderScreen
-      title="Quotes"
-      sub="Quote pipeline \u2014 draft, sent, won, lost."
-      phase="Phase 3"
-      details="The pipeline list from store.js, plus the Estimator and Quick Design builders."
-    />
+    <div className="pk-content qt-pad">
+      <style>{CSS}</style>
+
+      {/* heading */}
+      <div
+        className="qt-head"
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+          rowGap: 14,
+          marginBottom: 18,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Quotes</div>
+          <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5 }}>{standfirst}</div>
+        </div>
+        <NewQuoteMenu />
+      </div>
+
+      {/* stat tiles */}
+      <div
+        className="qt-stats"
+        style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 20 }}
+      >
+        {stats.map((s) => (
+          <div
+            key={s.label}
+            style={{
+              background: "#fff",
+              border: "1px solid #ececf0",
+              borderRadius: 12,
+              padding: "16px 17px",
+              boxShadow: "0 1px 2px rgba(0,0,0,.04)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: "#9aa0ab",
+                letterSpacing: ".05em",
+                textTransform: "uppercase",
+              }}
+            >
+              {s.label}
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 24,
+                fontWeight: 600,
+                letterSpacing: "-.01em",
+                marginTop: 10,
+              }}
+            >
+              {s.value}
+            </div>
+            <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 7 }}>{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ownership + status controls */}
+      <div
+        className="qt-controls"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+          rowGap: 11,
+          marginBottom: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", background: "#eceef1", borderRadius: 9, padding: 3 }}>
+            <Link
+              href={hrefFor({ who: "mine" })}
+              style={{
+                ...SEG_BASE,
+                ...(scope === "mine"
+                  ? { color: "#16181d", background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,.08)" }
+                  : { color: "#787d87", background: "transparent" }),
+              }}
+            >
+              My work
+            </Link>
+            <Link
+              href={hrefFor({ who: "all" })}
+              style={{
+                ...SEG_BASE,
+                ...(scope === "all"
+                  ? { color: "#16181d", background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,.08)" }
+                  : { color: "#787d87", background: "transparent" }),
+              }}
+            >
+              Everyone
+            </Link>
+          </div>
+          <OwnerSelect value={ownerSelectValue} options={ownerOptions} />
+        </div>
+        <div
+          className="qt-rowscroll"
+          style={{
+            display: "flex",
+            background: "#f1f2f5",
+            borderRadius: 8,
+            padding: 2,
+            maxWidth: "100%",
+            overflowX: "auto",
+          }}
+        >
+          {filterDefs.map(([key, label]) => {
+            const active = filter === key;
+            return (
+              <Link
+                key={key}
+                href={hrefFor({ status: key })}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  whiteSpace: "nowrap",
+                  padding: "7px 12px",
+                  borderRadius: 7,
+                  textDecoration: "none",
+                  ...(active
+                    ? { background: "#fff", color: "#16181d", boxShadow: "0 1px 2px rgba(0,0,0,.08)" }
+                    : { background: "transparent", color: "#787d87" }),
+                }}
+              >
+                {label}
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: active ? "var(--accent)" : "#aab0bb",
+                  }}
+                >
+                  {counts[key]}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* quotes table */}
+      <div
+        style={{
+          background: "#fff",
+          border: "1px solid #ececf0",
+          borderRadius: 13,
+          boxShadow: "0 1px 2px rgba(0,0,0,.04)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          className="qt-row"
+          style={{
+            display: "grid",
+            gridTemplateColumns: GRID,
+            gap: 12,
+            padding: "11px 18px",
+            fontSize: 10,
+            fontWeight: 600,
+            color: "#aab0bb",
+            textTransform: "uppercase",
+            letterSpacing: ".05em",
+            borderBottom: "1px solid #f0f1f4",
+            background: "#fbfbfc",
+          }}
+        >
+          <span />
+          <span>Quote</span>
+          <span className="qt-cust">Customer</span>
+          <span style={{ textAlign: "right" }}>Value</span>
+          <span style={{ textAlign: "center" }}>Status</span>
+          <span className="qt-edited" style={{ textAlign: "right" }}>
+            Edited
+          </span>
+        </div>
+
+        {filtered.map((q) => {
+          const m = STATUS_META[q.status] || STATUS_META.draft;
+          const rState = q.review?.state || "none";
+          const rMeta = REVIEW_CHIP[rState];
+          const selected = q.id === selectedId;
+          const owner = q.owner || "Unassigned";
+          return (
+            <div key={q.id}>
+              <Link
+                href={hrefFor({ id: selected ? null : q.id })}
+                scroll={false}
+                className="qt-row qt-rowlink"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: GRID,
+                  gap: 12,
+                  padding: "13px 18px",
+                  alignItems: "center",
+                  borderBottom: "1px solid #f5f6f8",
+                  textDecoration: "none",
+                  color: "#16181d",
+                  background: selected ? "#fafbff" : undefined,
+                }}
+              >
+                <span
+                  title={owner}
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: "50%",
+                    background: colorOf(q.owner),
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    flexShrink: 0,
+                  }}
+                >
+                  {initialsOf(q.owner)}
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                    <span
+                      style={{
+                        fontSize: 13.5,
+                        fontWeight: 600,
+                        lineHeight: 1.3,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {q.name}
+                    </span>
+                    {q.quoteType === "flame_test" && (
+                      <span
+                        style={{
+                          flexShrink: 0,
+                          fontSize: 9,
+                          fontWeight: 700,
+                          letterSpacing: ".04em",
+                          textTransform: "uppercase",
+                          color: "#b4543a",
+                          background: "#f7e9e5",
+                          border: "1px solid #f0d6cd",
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                        }}
+                      >
+                        Flame test
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 10.5,
+                      color: "#aab0bb",
+                      marginTop: 3,
+                    }}
+                  >
+                    {q.id} · {owner}
+                  </div>
+                </div>
+                <div
+                  className="qt-cust"
+                  style={{
+                    fontSize: 12.5,
+                    color: "#5b616e",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {customerLabel(q)}
+                </div>
+                <div
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    textAlign: "right",
+                  }}
+                >
+                  {shortMoney(q.value || 0)}
+                </div>
+                <div
+                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}
+                >
+                  <span
+                    style={{
+                      display: "inline-block",
+                      fontSize: 10.5,
+                      fontWeight: 600,
+                      color: m.ink,
+                      background: m.soft,
+                      border: `1px solid ${m.bd}`,
+                      padding: "2px 9px",
+                      borderRadius: 20,
+                    }}
+                  >
+                    {STAGE_LABEL[q.status] || STAGE_LABEL.draft}
+                  </span>
+                  {rMeta && (
+                    <span
+                      style={{
+                        display: "inline-block",
+                        fontSize: 9.5,
+                        fontWeight: 600,
+                        color: rMeta.ink,
+                        background: rMeta.soft,
+                        border: `1px solid ${rMeta.bd}`,
+                        padding: "1px 7px",
+                        borderRadius: 20,
+                        marginTop: 4,
+                      }}
+                    >
+                      {rMeta.label}
+                    </span>
+                  )}
+                </div>
+                <div
+                  className="qt-edited"
+                  style={{ fontSize: 11.5, color: "#9aa0ab", textAlign: "right" }}
+                >
+                  {timeAgo(q.updatedAt)}
+                </div>
+              </Link>
+
+              {selected && (
+                <SelectedPanel
+                  q={q}
+                  me={me}
+                  reviewerNames={reviewerRows
+                    .filter((u) => u.name !== me && u.name !== q.owner)
+                    .map((u) => u.name)}
+                />
+              )}
+            </div>
+          );
+        })}
+
+        {filtered.length === 0 && (
+          <div
+            style={{
+              padding: "44px 18px",
+              textAlign: "center",
+              color: "#9aa0ab",
+              fontSize: 13,
+              lineHeight: 1.6,
+            }}
+          >
+            {emptyMsg}
+            <br />
+            <Link
+              href="/estimator"
+              style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}
+            >
+              Start a new quote →
+            </Link>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Expanded actions for the ?id=-selected row — the Estimator's review &
+ * approval banner + status control, surfaced on the list (the prototype
+ * keeps these on the Estimator screen; the list rows there deep-link into
+ * it).
+ */
+function SelectedPanel({
+  q,
+  me,
+  reviewerNames,
+}: {
+  q: Quote;
+  me: string;
+  reviewerNames: string[];
+}) {
+  const rev = q.review || { state: "none" as const, reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" };
+  const rm = RB_META[rev.state] || RB_META.none;
+  const isOwner = q.owner === me;
+  const sentAlready = q.status === "sent" || q.status === "won" || q.status === "lost";
+  const canSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && !sentAlready;
+  const canSend = isOwner && rev.state === "approved" && !sentAlready;
+
+  let rbSub: string;
+  if (rev.state === "none")
+    rbSub = "Submit for a reviewer’s approval before sending to the customer.";
+  else if (rev.state === "in_review")
+    rbSub = rev.reviewer
+      ? "With " + firstName(rev.reviewer) + " for approval"
+      : "In the shared queue — awaiting a reviewer";
+  else if (rev.state === "approved")
+    rbSub =
+      "Approved by " +
+      firstName(rev.decidedBy || rev.reviewer || "") +
+      " — ready to send to the customer";
+  else
+    rbSub = rev.note
+      ? "“" + rev.note + "” — " + firstName(rev.decidedBy || "")
+      : "Returned by " + firstName(rev.decidedBy || "");
+
+  const marginPct = Math.round((q.margin || 0) * 100);
+
+  return (
+    <div
+      style={{
+        padding: "12px 18px 16px",
+        background: "#fbfbfc",
+        borderBottom: "1px solid #f0f1f4",
+      }}
+    >
+      {/* review & approval banner (Estimator port) */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          flexWrap: "wrap",
+          rowGap: 11,
+          padding: "11px 14px",
+          background: rm.bg,
+          border: `1px solid ${rm.bd}`,
+          borderRadius: 10,
+        }}
+      >
+        <span
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: "50%",
+            background: "#fff",
+            border: `1px solid ${rm.bd}`,
+            color: rm.ink,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 14,
+            flexShrink: 0,
+          }}
+        >
+          {rm.icon}
+        </span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: rm.ink }}>{rm.title}</div>
+          <div style={{ fontSize: 12, color: "#5b616e", marginTop: 1 }}>{rbSub}</div>
+        </div>
+        {canSubmit && (
+          <form
+            action={submitQuoteForReview}
+            style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}
+          >
+            <input type="hidden" name="id" value={q.id} />
+            <select
+              name="reviewer"
+              defaultValue="queue"
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "#3a3f4a",
+                background: "#fff",
+                border: "1px solid #e4e7ec",
+                borderRadius: 8,
+                padding: "8px 11px",
+                cursor: "pointer",
+              }}
+            >
+              <option value="queue">Shared queue (any reviewer)</option>
+              {reviewerNames.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "#fff",
+                background: "#3155a8",
+                border: "none",
+                borderRadius: 8,
+                padding: "9px 15px",
+                cursor: "pointer",
+              }}
+            >
+              {rev.state === "changes" ? "Resubmit for review" : "Submit for review"}
+            </button>
+          </form>
+        )}
+        {canSend && (
+          <form action={setQuoteStatus}>
+            <input type="hidden" name="id" value={q.id} />
+            <button
+              type="submit"
+              name="status"
+              value="sent"
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "#fff",
+                background: "#1f7a52",
+                border: "none",
+                borderRadius: 8,
+                padding: "9px 15px",
+                cursor: "pointer",
+              }}
+            >
+              Send to customer →
+            </button>
+          </form>
+        )}
+      </div>
+
+      {/* meta + status + open */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          rowGap: 10,
+          flexWrap: "wrap",
+          marginTop: 12,
+        }}
+      >
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>
+          {money(q.value || 0)} quoted{marginPct > 0 ? ` · ${marginPct}% margin` : ""}
+        </span>
+        <div
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: "#aab0bb",
+              textTransform: "uppercase",
+              letterSpacing: ".05em",
+            }}
+          >
+            Status
+          </span>
+          <form action={setQuoteStatus} style={{ display: "flex", gap: 6 }}>
+            <input type="hidden" name="id" value={q.id} />
+            {STAGES.map((s) => {
+              const cur = s === q.status;
+              const sm = STATUS_META[s];
+              return cur ? (
+                <span
+                  key={s}
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: sm.ink,
+                    background: sm.soft,
+                    border: `1px solid ${sm.bd}`,
+                    borderRadius: 7,
+                    padding: "7px 11px",
+                  }}
+                >
+                  {STAGE_LABEL[s]}
+                </span>
+              ) : (
+                <button key={s} type="submit" name="status" value={s} className="pk-btn-outline">
+                  {STAGE_LABEL[s]}
+                </button>
+              );
+            })}
+          </form>
+          <Link
+            href={`/estimator?id=${encodeURIComponent(q.id)}`}
+            style={{
+              fontSize: 12.5,
+              fontWeight: 600,
+              color: "#fff",
+              background: "var(--accent)",
+              borderRadius: 8,
+              padding: "9px 14px",
+              textDecoration: "none",
+            }}
+          >
+            Open in Estimator →
+          </Link>
+        </div>
+      </div>
+    </div>
   );
 }

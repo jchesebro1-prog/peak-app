@@ -72,9 +72,11 @@ See `.env.example`.
 
 1. ✅ Scaffold, DB, Google SSO + invite list, team/roles port, nav shell,
    Settings (branding/team/roles), deploy-ready config (DEPLOY.md)
-2. ⬜ Core data stores + seed fixtures (customers, quotes, leads, projects,
-   flame jobs, repairs, inspections, surveys, comms, pricing)
-3. ⬜ Sales screens (Home, Leads, Quotes, Estimator, Quick Design, Reviews, Inbox UI)
+2. ✅ Core data stores + seed fixtures (all 11 collections + pricing/rates/
+   catalog; doc-store + sync push/pull endpoints; live nav badges + to-do bell)
+3. ✅ Sales screens (Home, Leads board/worklist/table + drawer + public
+   intake, Quotes, Reviews, Estimator + 3 configurators, Quick Design,
+   Design, Inbox email client, ⌘K global search)
 4. ⬜ Service screens (Flame Tests suite, Repairs, Inspections, documents)
 5. ⬜ Installs + General (Projects, Scheduling, Field Work, Customers,
    Surveys, Import, Reports, Estimating Rules, full Settings)
