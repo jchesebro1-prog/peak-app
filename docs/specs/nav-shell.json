@@ -1,0 +1,281 @@
+{
+  "tokens": {
+    "navBackground": "#16181d (top bar; also <meta name=\"theme-color\" content=\"#16181d\">)",
+    "navDimensions": "Nav is a HORIZONTAL TOP BAR, not a sidebar. Full width, 56px tall (embedded with hint-size=\"100%,56px\"). Bar padding: calc(11px + env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) 11px max(20px,env(safe-area-inset-left)); z-index:40. Wide/narrow breakpoint: window.innerWidth > 860 (wide shows inline tabs; narrow shows hamburger + 300px slide-in drawer, max-width 86vw)",
+    "contentBackground": "#f7f8fa (screen body, e.g. Home.dc.html); content column max-width:1240px, margin:0 auto, padding:24px 28px 64px",
+    "fontFamilies": {
+      "ui": "'Public Sans',sans-serif \u2014 Google Fonts, weights 400;500;600;700",
+      "mono": "'IBM Plex Mono',monospace \u2014 Google Fonts, weights 400;500 loaded (badges rendered at 700)"
+    },
+    "topLevelTab": {
+      "base": "display:flex;align-items:center;gap:7px;font-size:13px;line-height:1;padding:7px 12px;border-radius:7px;white-space:nowrap;font-family:'Public Sans',sans-serif",
+      "active": "font-weight:600;color:#fff;background:#2b2e35",
+      "inactive": "font-weight:500;color:#9aa0ab",
+      "hover": "color:#fff;background:#23262d",
+      "groupChevron": "'\u25be' text, font-size:9px;opacity:.65;transition:transform .15s ease; rotate(180deg) when open"
+    },
+    "groupDropdown": {
+      "panel": "position:absolute;top:calc(100% + 6px);left:0;min-width:214px;background:#fff;border:1px solid #e8eaee;border-radius:12px;box-shadow:0 14px 44px rgba(0,0,0,.22);z-index:70;color:#16181d;padding:6px (backdrop: fixed inset-0 z-65 transparent click-catcher)",
+      "item": "display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:8px;font-size:13px;color:#16181d;font-weight:500 (600 + background:#f4f5f7 when active);hover background:#f4f5f7"
+    },
+    "badges": {
+      "dropdownChildBadge": "font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;color:#fff;background:{accent};padding:1px 7px;border-radius:20px",
+      "topLevelBadge": "same but padding:1px 6px \u2014 DEFINED IN MARKUP BUT NEVER SHOWN: showBadge is hardcoded false for all top-level items (links and groups) in wide mode; badges only render on dropdown children, drawer items, and the bell",
+      "drawerBadge": "font-size:11px;font-weight:700;color:#fff;background:{accent};padding:2px 8px;border-radius:20px",
+      "bellBadge": "position:absolute;top:-5px;right:-5px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:{accent};color:#fff;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;border:2px solid #16181d"
+    },
+    "companyRow": {
+      "markTile": "30x30px, border-radius:7px, background:{accent}, color:#fff, font-weight:700, font-size:12px; letter = companyName.trim().charAt(0).toUpperCase() || 'P'",
+      "companyName": "font-size:14px;font-weight:600;letter-spacing:-.01em;color:#fff (ellipsis overflow); default 'Peak Systems Group'",
+      "betaChip": "'BETA' \u2014 IBM Plex Mono 9.5px, weight 600, letter-spacing:.08em, color:{accent}, border:1px solid #3a3e46, background:#23262d, padding:2px 6px, border-radius:5px"
+    },
+    "search": {
+      "field": "background:#23262d;border:1px solid #2f323a;border-radius:9px;padding:8px 12px;min-width:200px; focus-within: border-color:#4a4f59;background:#272a31",
+      "input": "font-size:12.5px;color:#fff;placeholder 'Search\u2026'",
+      "kbdChip": "'\u2318K' IBM Plex Mono 11px color #5b606a border 1px solid #3a3e46 radius 4px padding 1px 5px",
+      "magnifierIcon": "pure CSS: 13px circle, border:1.6px solid #6b7079, handle 6x1.6px rotated 45deg",
+      "resultsPanel": "top:44px;right:0;width:344px;max-width:88vw;max-height:60vh;bg #fff;border 1px #e8eaee;radius 12px;shadow 0 16px 46px rgba(0,0,0,.24);padding:6px; group labels 9.5px/600/ls .07em/uppercase/#aab0bb; result icon 24x24 radius 7px mono 10px 700 white-on-color; title 13px 600; sub 11px #9aa0ab mono; searches QuoteStore/SandboxStore/SurveyStore/InspectionStore/CommStore/customers-from-quotes/MASTER_CATALOG parts; Cmd/Ctrl+K focuses"
+    },
+    "syncChip": {
+      "chip": "display:flex;gap:7px;background:#23262d;border:1px solid #2f323a;border-radius:20px;padding:7px 12px;min-height:34px;font:'Public Sans' 11.5px weight 600;color:#e7e9ee",
+      "dot": "9px circle; syncing:#3d8bf2 + animation nav-pulse 1s ease-in-out infinite (opacity 1\u2192.35\u21921); offline or pending:#d98a2b; synced:#3fae74",
+      "labels": "'Syncing\u2026' | 'Offline \u00b7 {N}' or 'Offline' | '{N} pending' | 'Synced'"
+    },
+    "bellButton": "34x34px, border-radius:9px, background:#23262d, border:1px solid #2f323a, color:#cfd3da; 17x17 inline SVG bell, stroke:currentColor, stroke-width:2",
+    "accountButton": "34x34px circle, background:{accent}, color:#fff, initials font-size:12px weight 600",
+    "adminChip": "'ADMIN' \u2014 IBM Plex Mono 9px weight 600 ls .06em, color:#8a6d1f, background:#fbf3dd, border:1px solid #f0e2bd, padding:1px 6px, radius 5px",
+    "accentApplication": "accent = window.AppSettings.get().accent (settings.js, localStorage-backed) falling back to prop default '#7b3f8a'. Applied to: company mark tile bg, BETA chip text, all count badges bg, bell badge bg, notif '{N} open' chip (text color + bg color-mix(in srgb, {accent} 13%, #fff)), account avatar bg, drawer avatar bg, roster current-user checkmark, drawer active-item 6px dot, 'Sync now' button bg (when enabled), 'Q' quote icons in search/notifs. Nav re-renders on window events 'rss-settings','rss-notifprefs','rss-sync','rss-survey','rss-lead' + resize",
+    "otherColors": "hamburger bars #e7e9ee on #23262d/#2f323a button 42x42 radius 10px; drawer bg #16181d, borders #23262d, sync block bg #1d2026 border #2b2e35 radius 13px; menu dividers #f0f1f4; muted text #9aa0ab; section labels #aab0bb (light panels) / #6b7079 (drawer); secondary text #cfd3da; sign-out #8c919c; list chevron '\u203a' #c4c9d2; scrims rgba(16,18,22,.5)/.55"
+  },
+  "navGroups": [
+    {
+      "kind": "link",
+      "key": "home",
+      "label": "Home",
+      "href": "Home.dc.html",
+      "badge": "none",
+      "icon": "none \u2014 nav items are text-only (groups add '\u25be' chevron)"
+    },
+    {
+      "kind": "link",
+      "key": "inbox",
+      "label": "Inbox",
+      "href": "Inbox.dc.html",
+      "badge": "commWaiting = CommStore.unreadCount() if present, else count of CommStore threads with status==='waiting_us' \u2014 NOTE: computed but never displayed at top level (showBadge:false in wide nav); shows only in narrow drawer",
+      "icon": "none"
+    },
+    {
+      "kind": "group",
+      "key": "sales",
+      "label": "Sales",
+      "children": [
+        {
+          "key": "leads",
+          "label": "Leads",
+          "href": "Leads.dc.html",
+          "badge": "LeadStore.followUpCount({unownedOrMine:true, me}) \u2014 inbound leads needing follow-up that are mine or unassigned"
+        },
+        {
+          "key": "quotes",
+          "label": "Quotes",
+          "href": "Quotes.dc.html",
+          "badge": "0 (never)"
+        },
+        {
+          "key": "design",
+          "label": "Design",
+          "href": "Design.dc.html",
+          "badge": "0 (never)"
+        },
+        {
+          "key": "reviews",
+          "label": "Reviews",
+          "href": "Reviews.dc.html",
+          "badge": "reviewInbox = QuoteStore items where review.state==='in_review' && review.reviewer===me && owner!==me, PLUS same filter over SandboxStore (designs)"
+        }
+      ],
+      "groupBadge": "badgeSum of children computed but showBadge:false \u2014 group header never shows a badge"
+    },
+    {
+      "kind": "group",
+      "key": "installs",
+      "label": "Installs",
+      "children": [
+        {
+          "key": "projects",
+          "label": "Projects",
+          "href": "Projects.dc.html",
+          "badge": "ProjectStore items with stage!=='complete' && ProjectStore.riskFlags(p).length > 0"
+        },
+        {
+          "key": "schedule",
+          "label": "Schedule",
+          "href": "Scheduling.dc.html",
+          "badge": "0 (never)"
+        },
+        {
+          "key": "fieldwork",
+          "label": "Field Work",
+          "href": "Field Work.dc.html",
+          "badge": "0 (never)"
+        }
+      ]
+    },
+    {
+      "kind": "group",
+      "key": "service",
+      "label": "Service",
+      "children": [
+        {
+          "key": "flametests",
+          "label": "Flame Tests",
+          "href": "Flame Tests.dc.html",
+          "badge": "FlameJobStore.renewals({dueOnly:true}).length \u2014 annual renewals overdue + due-soon"
+        },
+        {
+          "key": "inspections",
+          "label": "Rigging Inspections",
+          "href": "Inspections.dc.html",
+          "badge": "InspectionStore items with (stage||'requested')==='requested'"
+        },
+        {
+          "key": "repairs",
+          "label": "Repairs",
+          "href": "Repairs.dc.html",
+          "badge": "RepairStore: count(stage==='approved') + RepairStore.flaggedFromInspections().length; fallback if no RepairStore: sum of InspectionStore.counts(r).urgent.open"
+        }
+      ]
+    },
+    {
+      "kind": "group",
+      "key": "general",
+      "label": "General",
+      "children": [
+        {
+          "key": "customers",
+          "label": "Customers",
+          "href": "Customers.dc.html",
+          "badge": "0 (never)"
+        },
+        {
+          "key": "field",
+          "label": "Field Survey",
+          "href": "Field Survey.dc.html",
+          "badge": "SurveyStore items with (stage||'requested')==='requested'"
+        },
+        {
+          "key": "catalog",
+          "label": "Catalog",
+          "href": "Catalog Import.dc.html",
+          "badge": "0 (never)"
+        },
+        {
+          "key": "reports",
+          "label": "Reports",
+          "href": "Reports.dc.html",
+          "badge": "0 (never)"
+        },
+        {
+          "key": "rules",
+          "label": "Estimating Rules",
+          "href": "Estimating Rules.dc.html",
+          "badge": "0 (never)"
+        },
+        {
+          "key": "import",
+          "label": "Import / Export",
+          "href": "Import.dc.html",
+          "badge": "0 (never)"
+        }
+      ]
+    }
+  ],
+  "shell": {
+    "layout": "Dark top bar (NOT a sidebar): single 56px-tall row, background #16181d, z-index:40, flex row space-between. LEFT cluster (gap 16px): [narrow-only hamburger 42x42] + company-mark tile 30x30 + company name + BETA chip, then (wide only, gap 3px) inline nav tabs Home / Inbox / Sales\u25be / Installs\u25be / Service\u25be / General\u25be. RIGHT cluster (gap 10px): sync status chip (order default), search field (order:2), bell/to-do (order:3), account avatar (order:4); on narrow, search field+avatar are replaced by a 42x42 search button (order:2) that opens a full-width top search sheet",
+    "padding": "bar: calc(11px + env(safe-area-inset-top)) top, 11px bottom, max(20px, env(safe-area-inset-left/right)) horizontal",
+    "embedding": "Every screen embeds it as <dc-import name=\"Nav\" active=\"<key>\" hint-size=\"100%,56px\" style=\"flex-shrink:0;position:relative;z-index:30;\"></dc-import> inside a height:100vh flex-column wrapper; the page body below is flex:1;overflow-y:auto (nav itself never scrolls, it is sticky by layout). support.js walks <dc-import> tags, loads Nav.dc.html's <x-dc> template + Component class, and passes attributes as props",
+    "activeProp": "active prop enum: home,inbox,sales,leads,quotes,design,reviews,installs,projects,schedule,fieldwork,service,flametests,inspections,repairs,general,customers,field,catalog,reports,rules,import,settings,''. Active child key maps to its parent group (activeParent) so the group tab gets the active style (#2b2e35 bg, #fff, 600) when any child screen is open; dropdown marks the exact child with #f4f5f7 bg + weight 600",
+    "dropdownBehavior": "one group open at a time (state.openGroup); transparent fixed overlay (z-65) closes on outside click; Escape closes; opening notif/menu closes others",
+    "narrowDrawer": "left slide-in drawer 300px (max 86vw), bg #16181d, shadow 18px 0 50px rgba(0,0,0,.5), scrim rgba(16,18,22,.55), animations nav-scrim .18s / nav-drawer .22s cubic-bezier(.22,.61,.36,1). Contains: account header (42px accent avatar, name 15px/600, role 11.5px #9aa0ab, 36x36 close button), sync status block (bg #1d2026, border 1px #2b2e35, radius 13px, headline 13px/600, detail 11.5px #9aa0ab, 'Sync now' button flex:1 13px/600 white on {accent} \u2014 disabled state bg #2b2e35 opacity .6 \u2014 and 'Work offline'/'Go online' outline button border 1px #2f323a color #cfd3da), scrollable nav list (links 15px, section headers 10px/600/uppercase/#6b7079, child links 14.5px padded-left 18px; active: #fff on #23262d weight 600 + 6px accent dot; inactive #cfd3da weight 500; badges shown when >0), appended 'Account settings' and 'Settings' links, footer 'Sign out' (#8c919c) above safe-area padding",
+    "syncIndicator": "online/offline indicator = sync chip (always visible, all widths). Reads window.SyncEngine.status() -> {online, paused, connected, pending, syncing, lastSyncAt}. States: syncing (dot #3d8bf2 pulsing, 'Syncing\u2026'), not connected (dot #d98a2b, 'Offline \u00b7 N' or 'Offline'; headline 'Working offline' if paused else 'No connection'), pending>0 (dot #d98a2b, 'N pending'), else (dot #3fae74, 'Synced', detail 'Everything on this device is in the office. Last sync {timeAgo}.'). Chip click: if disconnected \u2192 open drawer (to reach sync block), else SyncEngine.syncNow(). Drawer also has a Work offline/Go online toggle via SyncEngine.setPaused()"
+  },
+  "accountMenu": {
+    "trigger": "34x34 circle button, background {accent}, white initials 12px/600. Initials = Team.initials(me); current user me = window.Team.CURRENT || 'Jeff Chesebro'",
+    "panel": "position:absolute;top:42px;right:0;width:238px;background:#fff;border:1px solid #e8eaee;border-radius:12px;box-shadow:0 14px 44px rgba(0,0,0,.22);z-index:70;color:#16181d; fixed transparent backdrop z-65 closes it",
+    "header": "34px accent avatar + fullName (13px/600, ellipsis) + roleLabel (11px #9aa0ab; Team.roleOf(me) || 'Administrator'); padding 13px 14px; border-bottom 1px #f0f1f4",
+    "switchUser": "section label 'SWITCH USER' 10px/600/ls .06em/uppercase/#aab0bb; scrollable max-height:172px; rows from Team.roster(): 26px avatar in per-user color (u.color), name 13px/500 #3a3f4a, accent '\u2713' 13px/700 on current user; hover #f7f8fa; click = Team.setCurrent(name) + location.reload()",
+    "links": [
+      "'Account settings' -> Account%20Settings.dc.html (13px/500 #3a3f4a, padding 11px 14px, hover #f7f8fa)",
+      "'General settings' -> Settings.dc.html, right-aligned ADMIN chip (IBM Plex Mono 9px/600 ls .06em, #8a6d1f on #fbf3dd, border 1px #f0e2bd, padding 1px 6px, radius 5px)"
+    ],
+    "footer": "border-top 1px #f0f1f4: 'Send feedback' button (13px #3a3f4a) opens mailto:{AppSettings.feedbackEmail()}?subject='Peak beta feedback' with body containing From/Page/Time; 'Sign out' button (13px #8c919c) \u2014 prototype only closes the menu",
+    "narrowEquivalent": "on narrow screens the avatar/menu is absent from the bar; drawer header shows 42px avatar + name 15px/600 + role, and drawer list carries the Account settings / Settings / Sign out entries"
+  },
+  "todoCenter": {
+    "trigger": "bell button (34x34, radius 9, #23262d bg, 1px #2f323a border, #cfd3da icon, 17x17 stroke-2 SVG bell), positioned right of search (order:3), always visible at all widths. Count badge only when count>0: -5px/-5px offset, min-width 17px, h 17px, radius 9px, {accent} bg, white IBM Plex Mono 10px/700, 2px #16181d border",
+    "panel": "top:44px;right:0;width:360px;max-width:92vw;max-height:70vh;overflow-y:auto;background:#fff;border:1px solid #e8eaee;border-radius:12px;box-shadow:0 16px 46px rgba(0,0,0,.24);z-index:70. Sticky header: 'To-do' 14px/600 + count chip '{N} open' (IBM Plex Mono 10.5px/600, color {accent}, bg color-mix(in srgb,{accent} 13%,#fff), padding 2px 8px, radius 20px), padding 13px 15px 11px, border-bottom 1px #f0f1f4",
+    "itemLayout": "group label 9.5px/600/ls .07em/uppercase/#aab0bb (padding 10px 10px 4px); item = <a> flex gap 11px padding 10px radius 8px hover #f4f5f7: 26x26 radius-7 letter tile (IBM Plex Mono 10px/700 white on category color) + title 13px/600 ellipsis + sub 11px #9aa0ab + '\u203a' 15px #c4c9d2",
+    "emptyState": "'You\u2019re all caught up' 13px/600 #3a3f4a + 'Reviews, survey requests and at-risk projects assigned to you show up here.' 12px #9aa0ab, padding 34px 18px centered",
+    "categories": [
+      {
+        "key": "comms",
+        "label": "Customers waiting on a reply",
+        "source": "CommStore: status==='waiting_us' && assignedTo===me, sorted by waitHours desc",
+        "icon": "'@' on #b4543a",
+        "href": "Inbox.dc.html",
+        "sub": "{subject} \u00b7 waiting {waitLabel}"
+      },
+      {
+        "key": "reviews",
+        "label": "Needs your review",
+        "source": "QuoteStore + SandboxStore: review.state==='in_review' && review.reviewer===me && owner!==me",
+        "icon": "'Q' on {accent} (quotes) / 'D' on #3155a8 (designs)",
+        "href": "Estimator.dc.html?id={id} / Quick Design.dc.html?design={id}"
+      },
+      {
+        "key": "surveys",
+        "label": "Survey requests to schedule",
+        "source": "SurveyStore: (stage||'requested')==='requested'",
+        "icon": "'S' on #1f7a52",
+        "href": "Survey.dc.html?id={id}"
+      },
+      {
+        "key": "inspections",
+        "label": "Inspections to schedule",
+        "source": "InspectionStore: (stage||'requested')==='requested'",
+        "icon": "'I' on #7b3f8a",
+        "href": "Inspection.dc.html?id={id}"
+      },
+      {
+        "key": "projects",
+        "label": "Projects need attention",
+        "source": "ProjectStore: stage!=='complete' && riskFlags(p).length; sub = first risk flag",
+        "icon": "'P' on #b4543a",
+        "href": "Projects.dc.html"
+      },
+      {
+        "key": "flame",
+        "label": "Flame tests due for renewal",
+        "source": "FlameJobStore.renewals({dueOnly:true}); sub uses dueLabel(days,state)",
+        "icon": "'F' on #b4543a",
+        "href": "Flame%20Tests.dc.html"
+      },
+      {
+        "key": "repairs",
+        "label": "Repairs awaiting scheduling",
+        "source": "RepairStore: stage==='approved'; sub includes priorityMeta label + 'awaiting scheduling'",
+        "icon": "'R' on #b4543a, or #8a2f22 when priority==='emergency'",
+        "href": "Repairs.dc.html"
+      },
+      {
+        "key": "leads",
+        "label": "Leads needing follow-up",
+        "source": "LeadStore.followUps({unownedOrMine:true, me}); sub = followUpInfo label + source short (+ ' \u00b7 unassigned' when no owner)",
+        "icon": "'L' on #b4543a",
+        "href": "Leads.dc.html"
+      }
+    ],
+    "badgeMath": "groups are filtered by per-user prefs: NotifPrefs.get(me) hides any group whose key has prefs[key]===false; count = sum of items across VISIBLE groups; bell badge and '{N} open' chip render only when count>0, panel shows empty state when count===0. NOTE: the bell count is independent of the nav item badges \u2014 it re-derives from the stores directly (same underlying filters, different code paths)"
+  },
+  "notes": "Key files: /Users/sm/Downloads/design_handoff_claude_code/app/Nav.dc.html (component), /Users/sm/Downloads/design_handoff_claude_code/app/support.js (DC runtime: resolves <dc-import name=\\\"Nav\\\"> at line ~574 and mounts the template + Component class), /Users/sm/Downloads/design_handoff_claude_code/app/settings.js (AppSettings defaults: accent '#7b3f8a', companyName 'Peak Systems Group', feedbackEmail ''). Data stores loaded by the Nav helmet: settings.js, team.js, notifprefs.js, store.js (QuoteStore), sandbox.js (SandboxStore), sync.js (SyncEngine), survey.js (SurveyStore), project.js (ProjectStore), inspect.js (InspectionStore), comm.js (CommStore), flamejobs.js (FlameJobStore), repair.js/repairjobs.js (RepairStore), lead.js (LeadStore), catalog-data.js (MASTER_CATALOG). Gotchas for a pixel-faithful rebuild: (1) this is a top bar, height 56px \u2014 there is no left sidebar in wide mode; (2) top-level tabs NEVER show badges (showBadge hardcoded false) even though badge markup exists \u2014 badges appear only in group dropdowns, the narrow drawer, and the bell; (3) 'Sign out' is a no-op (closes menu); (4) the '{N} open' chip uses CSS color-mix(in srgb, accent 13%, #fff); (5) Cmd/Ctrl+K focuses search (wide) or opens the search sheet (narrow), Escape closes all popovers; (6) Nav listens to window events rss-settings, rss-notifprefs, rss-sync, rss-survey, rss-lead to re-render; (7) the Home.png screenshot shows the sync chip overlapping tabs at 924px width because it renders in wide mode near the breakpoint \u2014 real breakpoint for narrow is <=860px; (8) hrefs contain spaces/percent-encoding exactly as listed (e.g. 'Field Work.dc.html', 'Flame%20Tests.dc.html' in notif links but 'Flame Tests.dc.html' in nav config)."
+}

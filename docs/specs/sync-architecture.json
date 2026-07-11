@@ -1,0 +1,179 @@
+{
+  "syncEngine": {
+    "file": "/Users/sm/Downloads/design_handoff_claude_code/app/sync.js",
+    "exposes": [
+      "window.SyncEngine",
+      "window.CloudStore"
+    ],
+    "localStorageKeys": {
+      "rss_sync_paused_v1": "manual 'work offline' toggle; string '1'/'0'",
+      "rss_sync_last_v1": "last successful sync timestamp, epoch-ms string",
+      "rss_cloud_v1": "the simulated cloud/office datastore: JSON object { [collectionName]: record[] }"
+    },
+    "apiSurface": {
+      "register(collection)": "pushes the collection object onto an in-memory array; if connected(), schedules syncNow() after 350ms; emits 'rss-sync'. Collections register once per page load (each .dc.html page re-registers on load \u2014 there is no persistence of registrations).",
+      "status()": "returns { online: navigator.onLine, paused: bool, connected: online && !paused, pending: sum of listPending().length across all registered collections, syncing: bool, lastSyncAt: epoch-ms }",
+      "isPaused()": "reads rss_sync_paused_v1 === '1'",
+      "setPaused(v)": "writes '1'/'0' to rss_sync_paused_v1, emits, and calls syncNow() when unpausing",
+      "timeAgo(ts)": "relative-time label helper ('just now', 'Nm ago', 'Nh ago', 'Nd ago', 'never')",
+      "syncNow()": "async, re-entry guarded by a module-level `syncing` flag. Flow: (1) return if already syncing or !connected(); (2) build batch = flatMap of every collection's listPending() as {c, r} pairs; (3) for each pair: c.markSyncing(r.id) if present -> emit -> await 650-1150ms simulated latency -> if connection lost mid-batch, break (remaining records stay 'pending') -> try { c.push(r); c.markSynced(r.id) } catch { c.markError(r.id) } -> emit; (4) syncing=false, persist lastSyncAt=Date.now(), emit.",
+      "CloudStore": "also exposed as a property on the API object"
+    },
+    "registeredStoreContract": {
+      "shape": "{ name: string, listPending(): record[], markSyncing?(id): void, push(record): void (MUST throw on failure), markSynced?(id): void, markError?(id): void }",
+      "name": "collection name used as the CloudStore bucket key: 'comms' | 'leads' | 'surveys' | 'flamejobs' | 'inspections' | 'repairjobs'",
+      "listPending": "returns records whose syncState === 'pending' (the outbox). SyncEngine never reads store internals \u2014 this closure is the ONLY read seam.",
+      "push": "the ONLY write seam. In the prototype it is `(rec) => window.CloudStore._put(name, rec)`. Replace this one line per store with a real API call (fetch POST). Errors must throw so markError fires; success falls through to markSynced.",
+      "markSyncing/markSynced/markError": "all delegate to the store's private _setSync(id, state) which sets record.syncState, stamps record.syncedAt = Date.now() when state==='synced', writes the list, and emits the store's domain event so mounted screens re-render per-record sync badges."
+    },
+    "globalListeners": "window 'online' -> emit + syncNow(); window 'offline' -> emit. Every state transition dispatches CustomEvent('rss-sync', { detail: API.status() }).",
+    "pushPullContract": "Prototype is PUSH-ONLY (device -> cloud), whole-record, at-least-once (re-push of an already-synced id is an upsert by id). There is no pull; the 'office' screens read CloudStore directly from the same localStorage. A real backend adds pull as a new capability without touching the seam (see apiRecommendation)."
+  },
+  "cloudStore": {
+    "file": "/Users/sm/Downloads/design_handoff_claude_code/app/sync.js (lines 27-62)",
+    "storage": "single JSON blob under 'rss_cloud_v1': { [collection]: record[] }",
+    "methods": {
+      "list(coll)": "returns a copy sorted DESC by cloudReceivedAt \u2014 the office inbox ordering",
+      "get(coll, id)": "find by record.id or null",
+      "count(coll)": "length of the collection",
+      "_put(coll, rec)": "engine-only upsert: deep-clones the record, stamps clone.cloudReceivedAt = Date.now(), upserts by id. CRITICAL SEMANTIC: on update it PRESERVES the existing server-side `review` sub-object (clone.review = existing.review || clone.review || {state:'new'}) so a client re-push can never clobber office review state; on insert it defaults review = {state:'new'}.",
+      "setReview(coll, id, patch)": "office-side review action: record.review = { state:'new', ...existingReview, ...patch, at: Date.now() }; persists and emits 'rss-sync'. Used by office screens to mark records reviewed/flagged."
+    },
+    "whatARealBackendMustImplement": [
+      "Per-collection idempotent UPSERT accepting the full client record (push replaces the whole document, keyed by client id)",
+      "Server-stamped receivedAt (authoritative arrival time, used for office-inbox ordering) \u2014 never trust client clocks for this",
+      "A server-OWNED review/triage sub-document ({ state: 'new'|reviewed states, at, ...patch fields }) that client pushes cannot overwrite \u2014 merge policy: client doc wins for field data, server wins for review",
+      "list (sorted by receivedAt desc), get, count per collection for the office screens",
+      "A review-mutation endpoint (replaces setReview) whose result is broadcast/pullable so field devices see office decisions"
+    ]
+  },
+  "storeRegistrationPattern": {
+    "canonicalExample": "/Users/sm/Downloads/design_handoff_claude_code/app/store.js (QuoteStore, key rss_pipeline_v2 \u2014 NOT sync-registered) and /Users/sm/Downloads/design_handoff_claude_code/app/lead.js (LeadStore \u2014 the full sync-registered variant)",
+    "commonShape": "Every store is an IIFE that owns exactly one versioned localStorage key holding a JSON array (or object for settings/prefs), exposes a window.<X>Store global, and follows read/write/ensure/seed: read() = try JSON.parse(localStorage.getItem(KEY)) catch null; write(list) = JSON.stringify + setItem, refreshing an in-module read cache (_ckey = raw string, _clist = parsed) keyed on the EXACT raw stored string so writes from other tabs invalidate automatically; ensure() = return cache if raw===_ckey, else parse, and if not an array seed via seedData() ONLY when window.AppSettings.get().seedDemo is true (beta default false = empty app), then run migrate/backfill passes (e.g. store.js backfills owner/review/customerId; survey.js backfills stage from syncState) which may write().",
+    "mutationPattern": "Every mutation: ensure() -> mutate in place -> write(list) -> emit domain event. Sync-registered stores additionally run dirty(rec) { rec.updatedAt = Date.now(); rec.syncState = 'pending'; rec.rev = (rec.rev||1)+1 } before write, then emitSync() (re-dispatch 'rss-sync' with SyncEngine.status()) and kick() (SyncEngine.syncNow()) \u2014 i.e. every local edit immediately attempts a flush.",
+    "syncedRecordFields": "syncState: 'pending'|'syncing'|'synced'|'error'; syncedAt: epoch-ms|null; rev: int starting at 1, incremented per mutation. Plus createdAt/updatedAt epoch-ms.",
+    "registrationBoilerplate": "function registerWithSync() { if (!window.SyncEngine) { setTimeout(registerWithSync, 50); return; } window.SyncEngine.register({ name, listPending: () => ensure().filter(r => r.syncState === 'pending'), markSyncing: id => API._setSync(id,'syncing'), push: rec => { if (window.CloudStore) window.CloudStore._put(name, rec); }, markSynced: id => API._setSync(id,'synced'), markError: id => API._setSync(id,'error') }); } \u2014 identical in comm.js, lead.js, survey.js, flamejobs.js, inspect.js, repairjobs.js (script load order is not guaranteed, hence the retry poll).",
+    "cloudSeedPattern": "Each synced store runs initCloudSeed(): polls for window.CloudStore, then one time only (guarded by a 'rss_cloud_*_seeded_*' flag key) pushes its already-synced seed records into CloudStore so the office view matches on first run.",
+    "syncRegisteredStores": {
+      "comms": "comm.js -> rss_comms_v2",
+      "leads": "lead.js -> rss_leads_v1",
+      "surveys": "survey.js -> rss_surveys_v4",
+      "flamejobs": "flamejobs.js -> rss_flamejobs_v1",
+      "inspections": "inspect.js -> rss_inspections_v1",
+      "repairjobs": "repairjobs.js -> rss_repairjobs_v1"
+    },
+    "nonSyncedStores_sameShapeNoSeam": "QuoteStore (rss_pipeline_v2), CustomerStore (rss_customer_dir_v1 canonical + rss_customer_locs_v2 derived name->locations cache), Customers.dc.html authoring list (rss_customers_full_v2, bridged by importkit.js), ProjectStore (rss_projects_v2 + rss_projects_dismissed_v2), Sandbox designs (rss_sandbox_v2), Team/Users (rss_users_v1 + rss_current_user_v1), AppSettings (rss_settings_v1), NotifPrefs (rss_notifprefs_v1, per-user map keyed by user NAME), Pricing rules (rss_pricing_rules_v1), FlameTest rates (rss_flametest_rates_v1), Repair rates (rss_repair_rates_v1), Geo route cache (rss_geo_routecache_v1)",
+    "allLocalStorageKeys": [
+      "rss_pipeline_v2",
+      "rss_customer_dir_v1",
+      "rss_customer_locs_v2",
+      "rss_customers_full_v2",
+      "rss_leads_v1",
+      "rss_surveys_v4",
+      "rss_comms_v2",
+      "rss_flamejobs_v1",
+      "rss_inspections_v1",
+      "rss_repairjobs_v1",
+      "rss_projects_v2",
+      "rss_projects_dismissed_v2",
+      "rss_sandbox_v2",
+      "rss_users_v1",
+      "rss_current_user_v1",
+      "rss_settings_v1",
+      "rss_notifprefs_v1",
+      "rss_pricing_rules_v1",
+      "rss_flametest_rates_v1",
+      "rss_repair_rates_v1",
+      "rss_geo_routecache_v1",
+      "rss_sync_paused_v1",
+      "rss_sync_last_v1",
+      "rss_cloud_v1",
+      "rss_cloud_comms_seeded_v2",
+      "rss_cloud_leads_seeded_v1",
+      "rss_cloud_seeded_v4 (surveys)",
+      "rss_cloud_seeded_flamejobs_v1",
+      "rss_cloud_seeded_inspect_v1",
+      "rss_cloud_seeded_repairjobs_v1",
+      "rss_inspect_rubric_seed_v1",
+      "rss_inspect_venue_seed_v1"
+    ]
+  },
+  "eventNames": [
+    "rss-sync \u2014 dispatched by sync.js (detail: SyncEngine.status()) on every engine transition and by CloudStore.setReview; RE-dispatched (same detail) by comm.js, lead.js, survey.js, flamejobs.js, inspect.js, repairjobs.js after every mutation, and as a bare Event by importkit.js after imports",
+    "rss-comm \u2014 comm.js (thread list changed)",
+    "rss-lead \u2014 lead.js (lead list changed); also re-fired by importkit.js",
+    "rss-survey \u2014 survey.js (survey list changed); also re-fired by importkit.js",
+    "rss-flamejobs \u2014 flamejobs.js (flame job list changed); also re-fired by importkit.js",
+    "rss-inspect \u2014 inspect.js (inspection list changed)",
+    "rss-repairjobs \u2014 repairjobs.js (repair job list changed)",
+    "rss-projects \u2014 project.js (project/order list changed)",
+    "rss-settings \u2014 settings.js (detail: AppSettings.get()) and also fired from notifprefs-adjacent settings paths",
+    "rss-notifprefs \u2014 notifprefs.js (per-user bell category prefs changed)",
+    "rss-pricing \u2014 pricing.js (pricing/rate rules changed; plain Event, no detail)"
+  ],
+  "idConventions": {
+    "pattern": "Human-prefixed sequential ids generated CLIENT-SIDE by scanning the local list for the max numeric suffix: nextId() regex /<PREFIX>-(\\d+)/ with a hardcoded base floor, returns PREFIX-(max+1). create(partial) always honors a caller-supplied partial.id, so a server-assigned id can be threaded through unchanged.",
+    "perStore": {
+      "quotes (QuoteStore)": "Q-#### (base 2041); history[] entries {at, from?, to}",
+      "flame-test quotes": "FTQ-#### (seeded 1001+, referenced from flame jobs via quoteId)",
+      "leads (LeadStore)": "L-#### (base 1050); activity ids 'a'+6-char base36 random (aid())",
+      "surveys (SurveyStore)": "FS-#### (base 1053)",
+      "comm threads (CommStore)": "C-#### (base 1032); message ids 'm<n>-<4-char base36>' (mid())",
+      "flame jobs (FlameJobStore)": "FT-#### (seeded 3001+)",
+      "inspections (InspectionStore)": "RI-#### (base 2041)",
+      "repair jobs (RepairJobStore)": "RP-#### (base 4000)",
+      "projects (ProjectStore)": "P-#### (base 3000) for kind 'project', S-#### (base 4000) for kind 'order'; sub-records uid(prefix) = prefix + 6-char base36 random",
+      "designs (Sandbox)": "D-### (base 100)",
+      "users (Team/Users)": "u<N> \u2014 u1, u2, ... (nextId scans /u(\\d+)/)",
+      "customers (CustomerStore)": "human slug ids ('lakefront', 'northridge', 'badger', ...); LeadStore.convert() derives them: org name lowercased, '&'->'and', non-alnum stripped, max 18 chars, numeric suffix (base2, base3...) on collision. Location ids are short slugs ('lf1', 'nr1', 'loc1'); office ids 'hq'/'mad'; contacts have no ids (keyed by name)"
+    },
+    "timestamps": "ALL timestamps are epoch milliseconds from Date.now(): createdAt, updatedAt, syncedAt, cloudReceivedAt, lastSyncAt, review.at, history[].at, activities[].at, firstContactAt, nextActionAt, convertedAt. No ISO strings anywhere in stored records (importkit coerces imported dates via toISO but stores epoch-ms).",
+    "revisions": "rev: integer, starts at 1, incremented by dirty() on every mutation of sync-registered records; used only informationally in the prototype (no conflict detection) but is the ready-made optimistic-concurrency token for a real API.",
+    "userIdentity": "Records reference users by display NAME string (owner: 'Jeff Chesebro'), not by u<N> id \u2014 Team.CURRENT (rss_current_user_v1) is a name. NotifPrefs is keyed by name too. A real backend should map names -> user ids at migration."
+  },
+  "offlineModel": {
+    "serviceWorker": {
+      "file": "/Users/sm/Downloads/design_handoff_claude_code/app/sw.js",
+      "cacheName": "rss-shell-v9 (bump version to invalidate; activate deletes all other caches and claims clients)",
+      "precache": "SHELL list of pages/js/icons/manifest, added individually so one 404 doesn't abort install; skipWaiting on install",
+      "sameOrigin": "NETWORK-FIRST for all same-origin GETs, cached under origin+pathname (query string stripped) so transient preview params never fragment or poison the cache; only complete 200 responses are cached; offline falls back to the path-keyed cache entry",
+      "crossOrigin": "cache-first with ignoreSearch for fonts/CDN (opaque responses allowed), EXCEPT nominatim.openstreetmap.org and router.project-osrm.org which are network-only because the query string IS the request (callers fall back to built-in travel estimates offline)",
+      "dataPolicy": "App DATA is deliberately not in the SW \u2014 all state lives in localStorage, so offline reads/writes work as soon as the shell is cached"
+    },
+    "outboxPattern": "There is no separate queue structure: the outbox IS the per-record syncState==='pending' flag inside each store's array, discovered lazily by SyncEngine via each collection's listPending() closure. Writes are optimistic-local-first (mutate, rev++, syncState='pending', write, emit, kick syncNow). A connection loss mid-batch leaves unsent records 'pending'; the next 'online' event, register(), or unpause retries automatically. Failed pushes get syncState='error' (visible in UI) and are NOT auto-retried until another mutation or listPending re-includes them \u2014 note listPending filters ONLY 'pending', so 'error' records need a re-dirty to retry; a real client should decide explicitly whether errors re-enter the queue.",
+    "mustSurviveOffline": [
+      "Full CRUD on every store, including id generation (ids are minted from local data \u2014 a real backend must accept client-generated ids or provide reserved blocks)",
+      "The pending/syncing/synced/error per-record status for UI badges and the aggregate pending count in the Nav",
+      "The manual 'work offline' pause toggle (rss_sync_paused_v1) \u2014 user-controlled, must gate any real transport too",
+      "Survey photos, stored as downscaled data-URL strings ON the record (a real backend needs a blob outbox to object storage)",
+      "lastSyncAt display (rss_sync_last_v1) and the office/field split: a record the office can see is exactly a record that reached the cloud \u2014 pending work is invisible to the office by design"
+    ]
+  },
+  "apiRecommendation": {
+    "principle": "The seam is one line per store: `push: (rec) => CloudStore._put(name, rec)`. Keep SyncEngine's collection contract (name/listPending/markSyncing/push/markSynced/markError) byte-for-byte and swap only push() to an authenticated fetch, plus add a pull loop the prototype never had. Server APIs should therefore be document-shaped per collection, not field-shaped.",
+    "syncEndpoints": {
+      "POST /api/sync/push": "Batched, mirrors SyncEngine's batch loop. Body: { collections: { [coll]: [{ id, rev, updatedAt, doc }] } }. Response per record: { id, status: 'ok'|'conflict'|'error', serverSeq, receivedAt, review, canonicalId? }. Server upserts whole documents keyed by (org_id, collection, id); server preserves server-owned fields (review, receivedAt, serverSeq); accepts client ids, returning canonicalId if a collision forced a remap. Concurrency: compare incoming rev to stored rev \u2014 if incoming.rev <= stored.rev and updatedAt differs, return 'conflict' with the server copy; client policy can stay last-write-wins to match prototype behavior, but the rev field already on every record makes real optimistic concurrency free.",
+      "GET /api/sync/pull?cursor=<seq>&collections=comms,leads,...": "Returns { changes: { [coll]: [records] }, cursor }. Use a single monotonically increasing bigserial `seq` column stamped on every server write (including review changes) as the cursor \u2014 NOT timestamps. This is the new capability that makes the office/field split real across devices; the client applies pulls into localStorage and dispatches the existing rss-* domain events so no screen changes.",
+      "transport": "Add SSE (GET /api/sync/events) or polling to nudge clients to pull; on the client, translate into the existing 'rss-sync' + domain events."
+    },
+    "restResources": {
+      "office/online CRUD (server is source of truth when online)": [
+        "GET/POST /api/quotes ; GET/PATCH/DELETE /api/quotes/:id ; POST /api/quotes/:id/status ; POST /api/quotes/:id/review {action: submit|claim|approve|request_changes, by, note} (maps 1:1 to QuoteStore.submitForReview/claimReview/approve/requestChanges)",
+        "GET/POST /api/customers ; GET/PUT /api/customers/:id (locations + contacts embedded, matching CustomerStore.upsert/normalizeRecord) ; GET /api/customers/resolve?name= (resolveId seam)",
+        "GET/POST /api/leads ; PATCH /api/leads/:id ; POST /api/leads/:id/activities ; POST /api/leads/:id/stage ; POST /api/leads/:id/assign ; POST /api/leads/:id/convert (transactional: upsert customer + create draft quote + link lead \u2014 mirrors LeadStore.convert) ; PUBLIC POST /api/leads/intake for the website form (lead.js names this as the one real seam for website capture)",
+        "Same CRUD pattern for /api/surveys, /api/inspections, /api/flamejobs, /api/repairjobs, /api/projects, /api/comms (+ POST /api/comms/:id/messages)",
+        "PATCH /api/review/:collection/:id \u2014 replaces CloudStore.setReview; writes the server-owned review subdoc and bumps seq so field devices pull it",
+        "GET/PATCH /api/org/settings (AppSettings) ; GET/POST /api/users, PATCH /api/users/:id (Team/Users) ; GET/PUT /api/me/notifprefs (per-user category map, defaults ON) ; GET/PUT /api/org/pricing (pricing + flametest + repair rate blobs)"
+      ],
+      "media": "POST /api/uploads (presigned S3/R2) \u2014 migrate survey photo data URLs to object storage keys; client keeps a blob outbox alongside the record outbox"
+    },
+    "postgresModeling": {
+      "recommendation": "Hybrid, biased to per-store JSONB documents. One table per synced collection: records(org_id, collection-or-per-table, id text, rev int, seq bigserial, updated_at timestamptz, received_at timestamptz, review jsonb, doc jsonb, deleted bool, PRIMARY KEY (org_id, id)). Push writes the whole doc; pull selects WHERE seq > cursor. This matches the client exactly: records are deep, evolving documents (survey measurement groups, lead activities arrays, quote history) pushed whole, so normalizing them forces the API to reassemble the precise document shape on every read and to migrate schema on every prototype field addition.",
+      "promoteHotFields": "Add generated columns or real columns + indexes for query paths the office screens need: status/stage, owner, customer_id, value, updated_at, review->>'state'. This gives dashboard SQL without giving up document semantics.",
+      "normalizeTheSpine": "Fully normalize only the relational core the client already treats as canonical-by-id: customers (with child tables or JSONB for locations/contacts \u2014 JSONB is fine since CustomerStore reads them embedded), users (map display names -> user ids at migration), and org settings. Keep cross-refs (quote.customer_id -> customers.id, lead.converted_quote_id -> quotes.id) as FK columns even when the rest of the record is JSONB, so renames stay rename-safe like CustomerStore promises.",
+      "whyNotFullyNormalized": "Full normalization buys reporting joins the JSONB+promoted-columns approach already covers, at the cost of breaking the whole-document push/pull seam, multiplying endpoints, and coupling server schema to a UI that is still churning. Revisit per-collection normalization (e.g. quotes line items) only when a real reporting/billing need appears."
+    },
+    "ids": "Accept client-generated ids to preserve offline creation (unique per org). Either keep the human prefixes by letting the server hand out reserved blocks (GET /api/ids/reserve?prefix=Q&count=20 cached locally), or generate ULIDs client-side and keep the human code as a separate server-assigned display column. Simplest parity-preserving v1: accept the client id, and on conflict return canonicalId in the push response for the client to remap."
+  },
+  "notes": "Source files read in full: /Users/sm/Downloads/design_handoff_claude_code/app/sync.js, store.js, customers.js, lead.js, sw.js, notifprefs.js; registration blocks and key/event/id patterns verified by grep across all 25 .js modules in /Users/sm/Downloads/design_handoff_claude_code/app/. Gotchas worth flagging for the rebuild: (1) SyncEngine.listPending filters only syncState==='pending', so records marked 'error' silently leave the retry queue until re-mutated \u2014 decide an explicit retry policy server-side. (2) CloudStore._put preserves the existing review subdoc on re-push; replicate this server-owns-review merge or office triage state will be clobbered by field re-pushes. (3) Six stores register with SyncEngine (comms, leads, surveys, flamejobs, inspections, repairjobs); QuoteStore, CustomerStore, ProjectStore, Sandbox, Team, Settings, NotifPrefs, pricing/rates do NOT \u2014 in the prototype those are implicitly 'shared' only because every browser profile is its own universe; in the rebuild they all become server-backed CRUD, and quotes/customers especially need the review + directory semantics the synced stores model. (4) Registration uses a 50ms setTimeout poll for window.SyncEngine because script order isn't guaranteed \u2014 a bundler import graph removes this. (5) Seed data only loads when AppSettings.seedDemo is true (beta ships empty); one-time rss_cloud_*_seeded flags mirror synced seeds into CloudStore. (6) Users are referenced by display-name strings everywhere (owner, reviewer, NotifPrefs keys, Team.CURRENT in rss_current_user_v1) \u2014 plan a name->user_id migration. (7) importkit.js writes the Customers authoring list under rss_customers_full_v2 and re-fires rss-sync/rss-lead/rss-survey/rss-flamejobs as plain Events after imports; Customers.dc.html re-pushes that list into CustomerStore.setDirectory on mount/save. (8) sw.js exempts nominatim.openstreetmap.org and router.project-osrm.org from caching \u2014 keep any real API host on the same never-cache path (or same-origin network-first) so stale responses can't be served as data."
+}

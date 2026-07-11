@@ -1,0 +1,243 @@
+{
+  "layout": {
+    "source": "/Users/sm/Downloads/design_handoff_claude_code/app/Settings.dc.html",
+    "screenshot": "/Users/sm/Downloads/design_handoff_claude_code/screenshots/Settings.png",
+    "pageShell": {
+      "root": "height:100vh; display:flex; flex-direction:column; font-family:'Public Sans',sans-serif; color:#16181d; background:#f7f8fa; overflow:hidden",
+      "fonts": "Google Fonts: Public Sans (400,500,600,700) for UI text; IBM Plex Mono (400,500) for emails, counts, ZIP/lat-lng inputs, addresses",
+      "nav": "Shared Nav component imported at top (active='settings'), flex-shrink:0, position:relative, z-index:30, hint size 100% x 56px",
+      "scrollArea": "flex:1; overflow-y:auto; min-height:0; custom scrollbar (.st-scroll::-webkit-scrollbar width:10px; thumb background:#d6d9e0, border-radius:8px, border:3px solid #f7f8fa)",
+      "contentColumn": "max-width:1080px; margin:0 auto; padding:26px 30px 64px (class st-pad)"
+    },
+    "pageHeader": {
+      "title": {
+        "text": "Settings",
+        "style": "font-size:23px; font-weight:600; letter-spacing:-.015em"
+      },
+      "subtitle": {
+        "text": "Manage team members, roles, and what each person can do.",
+        "style": "font-size:13.5px; color:#8c919c; margin-top:5px; margin-bottom:22px"
+      }
+    },
+    "sectionOrder": [
+      "(no-access card, only when !isAdmin)",
+      "Branding card",
+      "Federal holidays card",
+      "Locations card",
+      "Beta card (demo data + feedback email)",
+      "two-column grid: Team members table (left, minmax(0,1fr)) + Roles & permissions legend (right, 320px)"
+    ],
+    "cardStyle": "Every section card: background:#fff; border:1px solid #ececf0; border-radius:13px; box-shadow:0 1px 2px rgba(0,0,0,.04); padding:17px 18px; margin-bottom:20px. (Team table card has padding:0 with overflow:hidden; internal rows carry their own padding.)",
+    "sectionHeaderPattern": {
+      "title": "font-size:14.5px; font-weight:600",
+      "desc": "font-size:12px; color:#9aa0ab; margin-top:3px"
+    },
+    "fieldLabelPattern": "display:block; font-size:11px; font-weight:600; color:#9aa0ab; letter-spacing:.04em; text-transform:uppercase; margin-bottom:7px (6px in modals)",
+    "inputPattern": "width:100%; border:1px solid #e4e7ec; border-radius:9px; padding:11px 13px; font-size:14px; font-family:'Public Sans'; outline:none; focus state border-color:#c4c9d2",
+    "bottomGrid": "class st-grid: display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:20px; align-items:start",
+    "responsive_max860px": [
+      ".st-desknav display:none, .st-mobnav display:flex (nav internals)",
+      ".st-pad padding-left/right:16px",
+      ".st-grid grid-template-columns:1fr (legend stacks under table)",
+      ".st-urow grid-template-columns:32px minmax(0,1fr) auto (user rows collapse)",
+      ".st-email and .st-roles-col display:none (email line, roles column and its header hidden)"
+    ],
+    "modals": {
+      "overlay": "position:fixed; inset:0; background:rgba(16,22,30,.46); display:flex; align-items:center; justify-content:center; padding:28px; z-index:60; clicking overlay closes (inner panel calls e.stopPropagation())",
+      "panel": "user modal width:480px (office modal 520px); max-width:100%; background:#fff; border-radius:15px; box-shadow:0 24px 70px rgba(0,0,0,.32); overflow:hidden",
+      "header": "flex row space-between; padding:17px 22px; border-bottom:1px solid #f0f1f4; title font-size:16px font-weight:600; close button 30x30, border-radius:8px, background:#f1f2f5, color:#5b616e, font-size:17px, text '\u00d7'",
+      "body": "padding:20px 22px",
+      "footer": "flex space-between; padding:14px 22px; border-top:1px solid #f0f1f4; Cancel = borderless text button font-size:13px font-weight:600 color:#5b616e padding:10px 12px; primary save = color:#fff background:{accent} border-radius:9px padding:10px 18px font-size:13px font-weight:600"
+    },
+    "accentDerivations": "accent = AppSettings.get().accent || props.accentColor || '#7b3f8a'; accentSoft = color-mix(in srgb, {accent} 13%, #fff); accentInk = color-mix(in srgb, {accent} 70%, #16181d); accentBorder = color-mix(in srgb, {accent} 45%, #16181d); accentNavSoft = color-mix(in srgb, {accent} 18%, #16181d)",
+    "otherSections": {
+      "federalHolidays": {
+        "copy": {
+          "title": "Federal holidays",
+          "desc": "Grey out the 8 U.S. federal holidays company-wide on the schedule, and flag crew booked over them."
+        },
+        "toggle": "track: width:44px; height:26px; border-radius:13px; background accent when on / #cdd1d9 when off; knob: 20x20 white circle, top:3px, left 21px on / 3px off, box-shadow:0 1px 2px rgba(0,0,0,.3); click toggles AppSettings.set({federalHolidays: !current}); on = get().federalHolidays !== false"
+      },
+      "locations": {
+        "copy": {
+          "title": "Locations",
+          "desc": "Used as the travel origin when estimating a job \u2014 the nearest location to the site is picked automatically.",
+          "addButton": "+ Add location",
+          "empty": "No locations yet \u2014 add one to enable automatic travel estimates."
+        },
+        "row": "flex row gap:13px; border:1px solid #eef0f3; border-radius:11px; padding:12px 14px; background:#fafbfc; 34x34 pin chip (border-radius:9px, background accentSoft, color accentInk, '\ud83d\udccd'); name 13.5px/600 + type pill (accent-tinted, 10px/600, radius 20px); address line IBM Plex Mono 11px #8c919c joined with '  \u00b7  '; geo status pill 'Located' (#1f7a52 on #e8f3ee, border #cfe6db) or 'No coords' (#a06a2b on #f7efe2, border #ecdcc2); 'Edit' button 11.5px/600 #3a3f4a on #fff border #e4e7ec radius 7px padding 7px 11px",
+        "modal": "Add/Edit location modal: type pill picker (Main Office/Satellite/Shop/Temporary), name, street with live Nominatim/OSM search (450ms debounce via window.Geo.search limit 6), City/State/ZIP grid minmax(0,1.7fr) 72px 104px, Lat/Lng + 'Auto-locate' accent-soft button, footer 'Remove location' (danger) / Cancel / 'Save location'; saves via AppSettings.set({offices})"
+      },
+      "beta": {
+        "copy": {
+          "title": "Beta",
+          "desc": "Start from an empty app, or load sample data to explore. Set where in-app feedback is sent.",
+          "buttons": [
+            "Load demo data",
+            "Clear all data"
+          ],
+          "modeLabels": [
+            "Demo data is loaded.",
+            "Running on an empty app \u2014 no demo data."
+          ],
+          "feedbackLabel": "FEEDBACK EMAIL",
+          "feedbackHelp": "Where the \u201cSend feedback\u201d button (top-right menu) sends reports.",
+          "confirmDemo": "Load sample demo data? This replaces current customers, quotes, designs, projects, surveys and schedule entries.",
+          "confirmClear": "Clear ALL data? This permanently removes every customer, quote, design, project, survey and schedule entry."
+        },
+        "behavior": "resetData(demo): window.confirm, then AppSettings.set({seedDemo: !!demo}), removes 17 rss_* localStorage keys (rss_pipeline_v2/v1, rss_sandbox_v2/v1, rss_projects_v2/v1, rss_projects_dismissed_v2/v1, rss_surveys_v2/v1, rss_customer_dir_v1, rss_customer_locs_v2/v1, rss_customers_full_v2, rss_timeoff_v1, rss_cloud_v1, rss_cloud_seeded_v2/v1), then location.reload(). 'Clear all data' button is danger-styled: color:#b4543a; background:#f9ece8; border:1px solid #f0d6cd"
+      }
+    }
+  },
+  "branding": {
+    "card": {
+      "title": "Branding",
+      "desc": "Company name and accent color \u2014 applied across every screen.",
+      "layout": "below header: display:flex; gap:26px; flex-wrap:wrap; margin-top:16px; align-items:flex-start. Left block (company name) flex:1 min-width:240px; right block accent swatches."
+    },
+    "companyName": {
+      "label": "COMPANY NAME (uppercase label style: 11px/600 #9aa0ab letter-spacing:.04em)",
+      "input": "value = AppSettings.get().companyName || 'Peak Systems Group'; placeholder 'Company name'; style: width:100%; border:1px solid #e4e7ec; border-radius:9px; padding:11px 13px; font-size:14px; Public Sans; focus border-color:#c4c9d2",
+      "behavior": "onInput AND onChange both call AppSettings.set({ companyName: e.target.value }) \u2014 saves live on every keystroke; rss-settings event re-renders nav/company name everywhere"
+    },
+    "accentColor": {
+      "label": "ACCENT COLOR (same uppercase label style, margin-bottom:7px)",
+      "options": "AppSettings.ACCENTS = ['#7b3f8a' (purple, default), '#1f8a5b' (green), '#3d4eb0' (blue), '#b4543a' (rust)] \u2014 fallback list in component is identical",
+      "swatchRow": "display:flex; gap:13px",
+      "swatch": "button 32x32; border-radius:9px; border:none; background:{hex}; unselected: box-shadow:inset 0 0 0 1px rgba(0,0,0,.08); selected: box-shadow:0 0 0 2px #fff, 0 0 0 4px {hex} (white gap ring) plus centered white '\u2713' (font-size:14px; font-weight:700; line-height:1); title attribute = hex",
+      "selection": "on = hex.toLowerCase() === accent.toLowerCase(); click calls AppSettings.set({ accent: hex }); page re-renders via rss-settings listener so all accent-derived colors (buttons, pills, toggles) update instantly"
+    }
+  },
+  "team": {
+    "card": "White card, border 1px #ececf0, radius 13px, shadow 0 1px 2px rgba(0,0,0,.04), overflow:hidden, NO outer padding (left cell of the bottom grid)",
+    "header": {
+      "layout": "flex space-between; padding:15px 18px; border-bottom:1px solid #f0f1f4",
+      "title": "'Team members' 15px/600, followed (baseline-aligned, gap:9px) by count in IBM Plex Mono 12px #9aa0ab (userCount = users.length, includes deactivated)",
+      "addButton": "'+ Add user' \u2014 font-size:12.5px; font-weight:600; color:#fff; background:{accent}; border:none; border-radius:8px; padding:9px 14px"
+    },
+    "columnHeaderRow": "grid 36px | minmax(0,1.4fr) | minmax(0,1.6fr) | 130px; gap:12px; padding:10px 18px; font-size:10px; font-weight:600; color:#aab0bb; uppercase; letter-spacing:.05em; background:#fbfbfc; border-bottom:1px solid #f0f1f4; cells: (blank), 'Name', 'Roles', 'Actions' (right-aligned)",
+    "row": {
+      "grid": "same 36px | minmax(0,1.4fr) | minmax(0,1.6fr) | 130px; gap:12px; padding:13px 18px; align-items:center; border-bottom:1px solid #f5f6f8; deactivated rows get opacity:.55",
+      "avatar": "32x32 circle; background = u.color; color:#fff; centered initials 11px/600. Seed identity colors: Jeff Chesebro JC #5b4b8a, Nic Trapani NT #2f6f4f, Jena Tolksdorf JT #b5683a, Jack Hamilton JH #3155a8, Jason Keagy JK #8a6d1f, Isaac Mittlesteadt IM #b4543a; new users get hash-picked fallback color from ['#6b7079','#4a6b8a','#7a5a8a','#8a6d4a','#3f7a6a','#9a5a6a'] and derived initials (first+last initial)",
+      "name": "13.5px/600, line-height:1.3, nowrap+ellipsis; 'You' chip when u.name === current user's name: font-size:10px/600; color:{accentInk}; background:{accentSoft}; padding:1px 6px; border-radius:5px; margin-left:6px",
+      "email": "IBM Plex Mono 10.5px #aab0bb, margin-top:2px, nowrap+ellipsis, hidden under 860px (class st-email). Seed emails derived: first initial + last name @peaksystemsgroup.com (e.g. jchesebro@peaksystemsgroup.com)",
+      "roleBadges": "flex wrap gap:5px; one pill per role. Pill: font-size:10px; font-weight:600; padding:2px 8px; border-radius:20px; color:{c}; background:color-mix(in srgb,{c} 11%,#fff); border:1px solid color-mix(in srgb,{c} 26%,#fff). Role colors: Admin #5b4b8a, Manager #3155a8, Estimator #5b616e, Reviewer #1f7a52 (fallback #5b616e). Inactive users additionally show 'Deactivated' pill: color:#8c919c; background:#f1f2f5; border:1px solid #e4e7ec; padding:2px 8px; border-radius:20px",
+      "actions": "right-aligned, gap:6px: (1) 'Roles' button (title='Edit roles'): 11.5px/600 #3a3f4a on #fff, border 1px #e4e7ec, radius 7px, padding 7px 11px, hover border-color:#c4c9d2 \u2014 opens edit-roles modal; (2) toggle-active icon button: 13px #8c919c on #fff, border 1px #e4e7ec, radius 7px, padding 6px 9px \u2014 icon '\u23fb' with title 'Deactivate' when active, '\u21ba' with title 'Reactivate' when inactive; click calls Users.setActive(id, !active) immediately (no modal)"
+    },
+    "seedRoster": [
+      "u1 Jeff Chesebro \u2014 Admin, Estimator (default current user)",
+      "u2 Nic Trapani \u2014 Estimator",
+      "u3 Jena Tolksdorf \u2014 Estimator",
+      "u4 Jack Hamilton \u2014 Manager",
+      "u5 Jason Keagy \u2014 Estimator",
+      "u6 Isaac Mittlesteadt \u2014 Reviewer"
+    ],
+    "addUserFlow": {
+      "trigger": "'+ Add user' \u2192 modal state 'new', draft { name:'', email:'', roles:['Estimator'] }",
+      "modalTitle": "Add team member",
+      "fields": "FULL NAME (placeholder 'e.g. Dana Reyes', Public Sans 14px, margin-bottom:14px) and EMAIL (placeholder 'name@peaksystemsgroup.com', IBM Plex Mono 14px, margin-bottom:16px) \u2014 shown only when isNew; then ROLES checklist",
+      "save": "'Add user' button; blocked if roles empty or name blank (silent no-op); Users.addUser trims name, defaults email via emailFor(name), defaults roles to ['Estimator'] if empty, assigns id 'u{max+1}', fallback color+derived initials, active:true"
+    },
+    "editRolesFlow": {
+      "trigger": "'Roles' button \u2192 modal state = user id, draft { name, email, roles: slice() }",
+      "modalTitle": "Edit roles",
+      "fields": "name/email inputs hidden; only ROLES checklist shown",
+      "roleChecklist": "one full-width button per role (Admin/Manager/Estimator/Reviewer), column gap:8px. Button: flex space-between; padding:11px 13px; border-radius:10px; unselected background:#fff border:1px solid #e8eaee; selected background:{accentSoft} border:1px solid color-mix(in srgb,{accent} 45%,#fff). Inside: 20x20 checkbox (border-radius:6px; selected background {accent} border 1.5px {accent} with white '\u2713' 12px/700; unselected #fff border 1.5px #d6d9e0), role name 13px/600, role desc 11px #8c919c line-height:1.35. Multi-select toggle; saving with zero roles is a silent no-op",
+      "save": "'Save roles' \u2192 Users.setRoles(id, roles) (falls back to ['Estimator'] if list empty at store level)",
+      "delete": "'Remove user' danger button (12.5px/600; color:#b4543a; background:#f9ece8; border:1px solid #f0d6cd; radius 9px; padding:10px 14px) shown only when editing AND draft name !== current user's name (canDelete); hidden for self and for new users (a spacer <span> keeps footer alignment). Calls Users.remove(id) \u2014 hard delete, no confirm"
+    },
+    "activeToggle": "Deactivation is one-click from the row (no confirm). Inactive: row dims to opacity .55, 'Deactivated' grey pill appended after role badges, icon flips to '\u21ba'/'Reactivate'. Deactivated users still count in the header count and stay in the table; Users.active()/roster() exclude them elsewhere in the app"
+  },
+  "roles": {
+    "legendCard": {
+      "position": "right column of bottom grid, fixed 320px wide (stacks full-width under 860px)",
+      "cardStyle": "standard white card, padding:17px 18px",
+      "title": "Roles & permissions (14.5px/600, margin-bottom:4px)",
+      "subtitle": "Permissions are preset by role. A user can hold more than one. (12px #9aa0ab, margin-bottom:14px)",
+      "roleBlock": "one per role: padding:11px 0; border-top:1px solid #f3f4f7; contains (a) role pill using the same roleBadgeStyle as table rows, (b) description 11.5px #8c919c margin-top:6px line-height:1.45, (c) permission chips flex-wrap gap:5px margin-top:8px",
+      "permChip": "font-size:10px; font-weight:500; color:#5b616e; background:#f7f8fa; border:1px solid #eceef1; padding:2px 8px; border-radius:5px"
+    },
+    "dataSource": "window.Users (team.js). ROLES = ['Admin','Manager','Estimator','Reviewer'] (order fixed). ROLE_PERMS: Admin=[manage_users,approve,create,send]; Manager=[approve,create,send]; Estimator=[create,send]; Reviewer=[approve]. Chips render PERM_LABEL[p]: manage_users\u2192'Manage users', approve\u2192'Review & approve', create\u2192'Create quotes & designs', send\u2192'Send to customer'",
+    "roleDescriptions": {
+      "Admin": "Full access \u2014 manage users, approve, create & send",
+      "Manager": "Sees everything, can approve, create & send",
+      "Estimator": "Creates quotes & designs, submits for review",
+      "Reviewer": "Reviews & approves submitted work"
+    },
+    "editability": "ROLE_PERMS are read-only presets \u2014 the legend only displays them; there is no per-permission editing UI anywhere. The only editing surface is assigning roles to users (multi-select checklist in the add/edit modal). Permissions resolve as the union of a user's roles via Users.permsFor(roles); helpers Users.can(perm), canApprove, canManageUsers, canCreate, canSend",
+    "roleColors": "Same map as table badges: Admin #5b4b8a, Manager #3155a8, Estimator #5b616e, Reviewer #1f7a52; pill = 10px/600, padding 2px 8px, radius 20px, color {c}, background color-mix(in srgb,{c} 11%,#fff), border 1px color-mix(in srgb,{c} 26%,#fff)"
+  },
+  "adminGating": {
+    "logic": "isAdmin = window.Users ? Users.canManageUsers() : true (checks 'manage_users' perm on the current user \u2014 Admin role only); noAccess = !isAdmin. The whole admin content (Branding, Federal holidays, Locations, Beta, Team table, Roles legend) is wrapped in <sc-if isAdmin>; the no-access card is in <sc-if noAccess>. Page title + subtitle render for everyone. Fallback current user when Users hasn't loaded: { name:'Jeff Chesebro', initials:'JC', roles:['Admin'] } so it defaults open",
+    "noAccessCard": {
+      "container": "background:#fff; border:1px solid #ececf0; border-radius:13px; padding:48px 24px; text-align:center; box-shadow:0 1px 2px rgba(0,0,0,.04)",
+      "icon": "46x46; border-radius:12px; background:#f1f2f5; color:#8c919c; centered; font-size:22px; content '\ud83d\udd12'; margin:0 auto 14px",
+      "heading": {
+        "text": "Admin access required",
+        "style": "font-size:15px; font-weight:600"
+      },
+      "body": {
+        "text": "Only users with the Admin role can manage the team. Ask an admin if you need access.",
+        "style": "font-size:13px; color:#9aa0ab; margin-top:6px"
+      }
+    },
+    "notes": "Gate is UI-only in the prototype (no route guard). Current user comes from localStorage 'rss_current_user_v1' (default 'Jeff Chesebro'); switching to a non-admin user via the account menu flips the page to the lock card."
+  },
+  "appSettingsModel": {
+    "file": "/Users/sm/Downloads/design_handoff_claude_code/app/settings.js",
+    "global": "window.AppSettings (IIFE)",
+    "localStorageKey": "rss_settings_v1",
+    "event": "Dispatches window CustomEvent 'rss-settings' (detail = full merged settings from get()) on every set() and reset(). Settings page listens and forceUpdate()s; other screens (e.g. Account Settings) also subscribe to re-render live",
+    "DEFAULTS": {
+      "accent": "#7b3f8a",
+      "companyName": "Peak Systems Group",
+      "federalHolidays": true,
+      "seedDemo": false,
+      "feedbackEmail": "",
+      "offices": [
+        {
+          "id": "hq",
+          "name": "Milwaukee Shop (HQ)",
+          "street": "2150 W Canal St",
+          "city": "Milwaukee",
+          "state": "WI",
+          "zip": "53233",
+          "phone": "(414) 763-2200",
+          "lat": 43.032,
+          "lng": -87.945
+        },
+        {
+          "id": "mad",
+          "name": "Madison Office",
+          "street": "2310 Daniels St",
+          "city": "Madison",
+          "state": "WI",
+          "zip": "53718",
+          "phone": "(608) 241-7500",
+          "lat": 43.085,
+          "lng": -89.301
+        }
+      ]
+    },
+    "ACCENTS": [
+      "#7b3f8a",
+      "#1f8a5b",
+      "#3d4eb0",
+      "#b4543a"
+    ],
+    "api": {
+      "get()": "returns Object.assign({}, DEFAULTS, storedPatch) \u2014 stored object is a sparse patch over defaults",
+      "accent()": "get().accent",
+      "companyName()": "get().companyName",
+      "seedDemo()": "!!get().seedDemo",
+      "feedbackEmail()": "get().feedbackEmail || ''",
+      "offices()": "get().offices if Array.isArray else DEFAULTS.offices.slice()",
+      "set(patch)": "merges patch into raw stored object (not into defaults), writes JSON to localStorage, dispatches 'rss-settings', returns get()",
+      "reset()": "writes {} (back to pure defaults), dispatches 'rss-settings', returns get()",
+      "DEFAULTS / ACCENTS": "exposed as properties on the API object"
+    },
+    "caching": "read() caches parsed JSON keyed on the exact stored string (_ckey/_cobj) \u2014 skips JSON.parse when unchanged since get() runs ~2x per render on nearly every screen; cache invalidates automatically on write. All localStorage access wrapped in try/catch (fails silent)",
+    "note_officeFields": "offices saved from the Settings UI have shape {id, type, name, street, city, state, zip, lat, lng} \u2014 seed offices lack 'type' (UI defaults display to 'Main Office') and carry an extra 'phone' the UI never edits; lat/lng null when blank (saveOffice attempts Geo.geocode(city,state) fill). New office ids are 'of' + Date.now()"
+  },
+  "notes": "Related data layer: /Users/sm/Downloads/design_handoff_claude_code/app/team.js defines window.Users / window.Team on localStorage keys 'rss_users_v1' (roster) and 'rss_current_user_v1' (current user name, default 'Jeff Chesebro'). Team store API: all(), active(), get(id), getByName(name), current(), permsFor(roles), can/canApprove/canManageUsers/canCreate/canSend, reviewers(), addUser(partial), setRoles(id,roles), setActive(id,active), update(id,patch), remove(id), resetToSeed(); Team identity helpers roster()/person()/initials()/color()/firstName()/isMine()/roleOf(). Note: team writes do NOT dispatch any event \u2014 the Settings component calls this.refresh() manually after each mutation; other screens won't see roster changes until re-mount. The Settings component polls for window.Users up to 80 times at 40ms intervals before rendering (ready flag). Account Settings page (/Users/sm/Downloads/design_handoff_claude_code/app/Account Settings.dc.html) is a separate personal page: max-width:760px column, title 'Account settings' / subtitle 'Your personal preferences \u2014 only you see these.', an identity card (46px avatar circle with u.color, name 15px/600, email IBM Plex Mono 11.5px #aab0bb, roles joined with ' \u00b7 ' via Team.roleOf, right-aligned hint 'Switch users from the account menu, top-right.' hidden <680px) and a 'To-do notifications' card driven by window.NotifPrefs (per-category 44x26 accent toggles identical in style to the federal-holidays toggle, count label like '7 of 7 on' in Plex Mono, 'Mute all'/'Enable all' button, footer copy 'Muted categories are hidden from the bell and don't count toward its badge. This only changes your account.'); it listens to both 'rss-notifprefs' and 'rss-settings'. Screenshot confirms rendering (default purple accent #7b3f8a, JC avatar #5b4b8a). Minor prototype quirk worth preserving or consciously fixing in the React rebuild: in the role-choice checklist the selected border is computed as accentBorder.replace('16181d','fff'), i.e. color-mix(in srgb, {accent} 45%, #fff)."
+}
