@@ -36,12 +36,23 @@ async function createDb(): Promise<Db> {
   const client = new PGlite(dataDir);
   const db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db as never, { migrationsFolder: path.join(process.cwd(), "drizzle") });
-  const { seedIfEmpty } = await import("./seed-data");
-  await seedIfEmpty(db);
   return db;
 }
 
 export function getDb(): Promise<Db> {
-  if (!globalForDb.__peakDb) globalForDb.__peakDb = createDb();
+  if (!globalForDb.__peakDb) {
+    globalForDb.__peakDb = createDb();
+    // Dev auto-seed runs AFTER the db promise resolves — never inside
+    // createDb(), because seeding uses doc-store helpers that call getDb()
+    // (awaiting the same promise → deadlock).
+    if (!process.env.DATABASE_URL) {
+      void globalForDb.__peakDb
+        .then(async (db) => {
+          const { seedIfEmpty } = await import("./seed-data");
+          await seedIfEmpty(db);
+        })
+        .catch((err) => console.error("[db] dev auto-seed failed:", err));
+    }
+  }
   return globalForDb.__peakDb;
 }

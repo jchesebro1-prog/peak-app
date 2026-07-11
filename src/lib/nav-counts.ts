@@ -1,0 +1,216 @@
+import { followUpCount, followUps, followUpInfo } from "@/lib/stores/leads";
+import { getAll as allQuotes } from "@/lib/stores/quotes";
+import { getAllDesigns } from "@/lib/stores/designs";
+import { getAllProjects, riskFlags } from "@/lib/stores/projects";
+import { renewals, dueLabel } from "@/lib/stores/flame-jobs";
+import { getAll as allInspections } from "@/lib/stores/inspections";
+import {
+  getAll as allRepairs,
+  flaggedFromInspections,
+  priorityMeta,
+} from "@/lib/stores/repair-jobs";
+import { getAll as allSurveys } from "@/lib/stores/surveys";
+import { getAll as allComms, waitHours, unreadCount } from "@/lib/stores/comms";
+import { getPrefs } from "@/lib/stores/notif-prefs";
+import type {
+  NavCounts,
+  BellGroup,
+  BellItem,
+} from "@/components/nav/nav-data";
+
+/**
+ * Server-side aggregation feeding the nav badges + to-do bell — port of
+ * Nav.dc.html's badge formulas and notifications() categories
+ * (docs/specs/nav-shell.json). The bell list is NotifPrefs-filtered per
+ * user, exactly like the prototype.
+ */
+
+export type { BellItem, BellGroup };
+
+export async function navData(me: string): Promise<{
+  counts: NavCounts;
+  bell: BellGroup[];
+  bellCount: number;
+}> {
+  const [
+    quotes,
+    designs,
+    projects,
+    inspections,
+    repairs,
+    flagged,
+    surveys,
+    comms,
+    leadFollowUps,
+    leadCount,
+    renewalRows,
+    prefs,
+  ] = await Promise.all([
+    allQuotes(),
+    getAllDesigns(),
+    getAllProjects(),
+    allInspections(),
+    allRepairs(),
+    flaggedFromInspections(),
+    allSurveys(),
+    allComms(),
+    followUps({ unownedOrMine: true, me }),
+    followUpCount({ unownedOrMine: true, me }),
+    renewals({ dueOnly: true }),
+    getPrefs(me),
+  ]);
+  const inboxUnread = await unreadCount(me);
+
+  const reviewQuotes = quotes.filter(
+    (q) =>
+      q.review?.state === "in_review" &&
+      q.review?.reviewer === me &&
+      q.owner !== me
+  );
+  const reviewDesigns = designs.filter(
+    (d) =>
+      d.review?.state === "in_review" &&
+      d.review?.reviewer === me &&
+      d.owner !== me
+  );
+  const riskProjects = projects.filter(
+    (p) => p.stage !== "complete" && riskFlags(p).length > 0
+  );
+  const requestedInspections = inspections.filter(
+    (r) => (r.stage || "requested") === "requested"
+  );
+  const approvedRepairs = repairs.filter((r) => r.stage === "approved");
+  const requestedSurveys = surveys.filter(
+    (s) => (s.stage || "requested") === "requested"
+  );
+  const waitingComms = comms
+    .filter((t) => t.status === "waiting_us" && t.assignedTo === me)
+    .sort((a, b) => waitHours(b) - waitHours(a));
+
+  const counts: NavCounts = {
+    inbox: inboxUnread,
+    leads: leadCount,
+    reviews: reviewQuotes.length + reviewDesigns.length,
+    projects: riskProjects.length,
+    flametests: renewalRows.length,
+    inspections: requestedInspections.length,
+    repairs: approvedRepairs.length + flagged.length,
+    field: requestedSurveys.length,
+  };
+
+  const groups: BellGroup[] = [];
+  const push = (key: string, label: string, items: BellItem[]) => {
+    if ((prefs as Record<string, boolean>)[key] === false || !items.length)
+      return;
+    groups.push({ key, label, items });
+  };
+
+  push(
+    "comms",
+    "Customers waiting on a reply",
+    waitingComms.map((t) => ({
+      id: t.id,
+      title: t.customer || t.contactName || t.contactEmail || t.subject,
+      sub: `${t.subject} · waiting ${Math.round(waitHours(t))}h`,
+      href: "/inbox",
+      letter: "@",
+      color: "#b4543a",
+    }))
+  );
+  push("reviews", "Needs your review", [
+    ...reviewQuotes.map((q) => ({
+      id: q.id,
+      title: q.name,
+      sub: `${q.customer || ""} · quote`,
+      href: "/quotes",
+      letter: "Q",
+      color: "var(--accent)",
+    })),
+    ...reviewDesigns.map((d) => ({
+      id: d.id,
+      title: d.name,
+      sub: `${d.customer || ""} · design`,
+      href: "/design",
+      letter: "D",
+      color: "#3155a8",
+    })),
+  ]);
+  push(
+    "surveys",
+    "Survey requests to schedule",
+    requestedSurveys.map((s) => ({
+      id: s.id,
+      title: (s.customer as string) || s.id,
+      sub: (s.venue as string) || "Site survey",
+      href: "/field-survey",
+      letter: "S",
+      color: "#1f7a52",
+    }))
+  );
+  push(
+    "inspections",
+    "Inspections to schedule",
+    requestedInspections.map((r) => ({
+      id: r.id,
+      title: (r.customer as string) || r.id,
+      sub: (r.venue as string) || "Rigging inspection",
+      href: "/inspections",
+      letter: "I",
+      color: "#7b3f8a",
+    }))
+  );
+  push(
+    "projects",
+    "Projects need attention",
+    riskProjects.map((p) => ({
+      id: p.id,
+      title: p.name,
+      sub: riskFlags(p)[0]?.label || "",
+      href: "/projects",
+      letter: "P",
+      color: "#b4543a",
+    }))
+  );
+  push(
+    "flame",
+    "Flame tests due for renewal",
+    renewalRows.map((r) => ({
+      id: r.id,
+      title: `${r.customer}${r.venues?.[0]?.label ? " — " + r.venues[0].label : ""}`,
+      sub: dueLabel(r._renewal.days, r._renewal.state),
+      href: "/flame-tests",
+      letter: "F",
+      color: "#b4543a",
+    }))
+  );
+  push(
+    "repairs",
+    "Repairs awaiting scheduling",
+    approvedRepairs.map((r) => ({
+      id: r.id,
+      title: (r.customer as string) || r.id,
+      sub: `${priorityMeta(r.priority).label} · awaiting scheduling`,
+      href: "/repairs",
+      letter: "R",
+      color: r.priority === "emergency" ? "#8a2f22" : "#b4543a",
+    }))
+  );
+  push(
+    "leads",
+    "Leads needing follow-up",
+    leadFollowUps.map((l) => {
+      const info = followUpInfo(l);
+      return {
+        id: l.id,
+        title: l.org || l.contact || l.id,
+        sub: `${info?.label || ""}${l.owner ? "" : " · unassigned"}`,
+        href: "/leads",
+        letter: "L",
+        color: "#b4543a",
+      };
+    })
+  );
+
+  const bellCount = groups.reduce((n, g) => n + g.items.length, 0);
+  return { counts, bell: groups, bellCount };
+}

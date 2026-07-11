@@ -94,5 +94,16 @@ export function parentGroupOf(key: string): string | null {
   return null;
 }
 
-/** Badge counts per child key. Phase 1: all zero (stores land in Phase 2). */
+/** Badge counts per child key (computed server-side in lib/nav-counts). */
 export type NavCounts = Partial<Record<string, number>>;
+
+/** To-do bell payload (client-safe types; built in lib/nav-counts). */
+export type BellItem = {
+  id: string;
+  title: string;
+  sub: string;
+  href: string;
+  letter: string;
+  color: string;
+};
+export type BellGroup = { key: string; label: string; items: BellItem[] };

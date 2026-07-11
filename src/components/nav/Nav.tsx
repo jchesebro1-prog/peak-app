@@ -9,6 +9,7 @@ import {
   activeKeyFor,
   parentGroupOf,
   type NavCounts,
+  type BellGroup,
 } from "./nav-data";
 
 /**
@@ -47,6 +48,7 @@ export default function Nav({
   devLogin,
   roster,
   counts = {},
+  bell = [],
 }: {
   user: NavUser;
   companyName: string;
@@ -54,6 +56,7 @@ export default function Nav({
   devLogin: boolean;
   roster: RosterEntry[];
   counts?: NavCounts;
+  bell?: BellGroup[];
 }) {
   const pathname = usePathname();
   const activeKey = activeKeyFor(pathname);
@@ -111,7 +114,7 @@ export default function Nav({
   }, [pathname]);
 
   const markLetter = (companyName.trim().charAt(0) || "P").toUpperCase();
-  const bellCount = 0; // to-do categories arrive with the stores (Phase 2)
+  const bellCount = bell.reduce((n, g) => n + g.items.length, 0);
 
   const closeAll = () => {
     setOpenGroup(null);
@@ -262,15 +265,99 @@ export default function Nav({
                       <span className="pk-open-chip">{bellCount} open</span>
                     )}
                   </div>
-                  <div style={{ padding: "34px 18px", textAlign: "center" }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#3a3f4a" }}>
-                      You’re all caught up
+                  {bellCount === 0 ? (
+                    <div style={{ padding: "34px 18px", textAlign: "center" }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#3a3f4a" }}>
+                        You’re all caught up
+                      </div>
+                      <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 4 }}>
+                        Reviews, survey requests and at-risk projects assigned
+                        to you show up here.
+                      </div>
                     </div>
-                    <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 4 }}>
-                      Reviews, survey requests and at-risk projects assigned to
-                      you show up here.
+                  ) : (
+                    <div style={{ padding: "4px 6px 8px" }}>
+                      {bell.map((g) => (
+                        <div key={g.key}>
+                          <div
+                            style={{
+                              fontSize: 9.5,
+                              fontWeight: 600,
+                              letterSpacing: ".07em",
+                              textTransform: "uppercase",
+                              color: "#aab0bb",
+                              padding: "10px 10px 4px",
+                            }}
+                          >
+                            {g.label}
+                          </div>
+                          {g.items.map((it) => (
+                            <Link
+                              key={it.id}
+                              href={it.href}
+                              onClick={() => setNotifOpen(false)}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 11,
+                                padding: 10,
+                                borderRadius: 8,
+                                textDecoration: "none",
+                                color: "inherit",
+                              }}
+                              className="pk-todo-item"
+                            >
+                              <span
+                                style={{
+                                  width: 26,
+                                  height: 26,
+                                  borderRadius: 7,
+                                  background: it.color,
+                                  color: "#fff",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  fontFamily: "var(--font-mono)",
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {it.letter}
+                              </span>
+                              <span style={{ flex: 1, minWidth: 0 }}>
+                                <span
+                                  style={{
+                                    display: "block",
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    whiteSpace: "nowrap",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                  }}
+                                >
+                                  {it.title}
+                                </span>
+                                <span
+                                  style={{
+                                    display: "block",
+                                    fontSize: 11,
+                                    color: "#9aa0ab",
+                                    whiteSpace: "nowrap",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                  }}
+                                >
+                                  {it.sub}
+                                </span>
+                              </span>
+                              <span style={{ fontSize: 15, color: "#c4c9d2" }}>›</span>
+                            </Link>
+                          ))}
+                        </div>
+                      ))}
                     </div>
-                  </div>
+                  )}
                 </div>
               </>
             )}

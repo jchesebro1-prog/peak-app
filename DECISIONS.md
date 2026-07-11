@@ -76,3 +76,23 @@ Anything you want changed, just say so — none of these are hard to reverse.
   Node+Postgres host works. Deployment needs accounts only Jeff can create
   (Vercel, Neon, Google Cloud OAuth), so Phase 1 ships deploy-ready config +
   instructions rather than a live URL; see QUESTIONS.md "Phase 1 blockers".
+
+## Phase 2 (2026-07-11)
+
+- **D15. Flame-test $150 floor semantics:** the IDEAS.md sketch said
+  "max($150, curtain labor) per bundled venue," but `flametest.js` (the
+  authoritative code) applies the floor to a standalone job's whole cost
+  including travel. Ported the code. Also settled: 5 minutes per curtain
+  (both engine sources agree), not the 2 in the IDEAS sketch.
+- **D16. Demo data defaults:** local dev seeds the full prototype demo book
+  automatically (explorable app out of the box); hosted databases start
+  clean — flip Settings → Beta → Demo data (or `SEED_DEMO=true npm run
+  db:seed`) to fill empty collections. Existing records are never touched.
+- **D17. Sync bookkeeping:** on the server, a write IS the office copy, so
+  records are stored `synced`; the prototype's per-record pending/error
+  states return on the client side with Phase 6 offline capture. The
+  push/pull endpoints (rev + seq cursors, server-owned review subdoc)
+  are already live.
+- **D18. Soft deletes everywhere:** prototype hard-deleted locally; the
+  rebuild tombstones (`deleted:true`) so offline devices converge — and
+  record ids are never reused after deletion.

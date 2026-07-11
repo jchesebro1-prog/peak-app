@@ -3,6 +3,7 @@ import { getSettings } from "@/lib/settings";
 import { activeUsers } from "@/lib/users";
 import { devLoginEnabled } from "@/auth";
 import { can } from "@/lib/team";
+import { navData } from "@/lib/nav-counts";
 import Nav, { type RosterEntry } from "@/components/nav/Nav";
 
 export default async function AppLayout({
@@ -21,10 +22,13 @@ export default async function AppLayout({
         color: u.color,
       }))
     : [];
+  const { counts, bell } = await navData(user.name);
 
   return (
     <div className="pk-shell">
       <Nav
+        counts={counts}
+        bell={bell}
         user={{
           id: user.id,
           name: user.name,

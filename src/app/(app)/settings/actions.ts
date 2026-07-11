@@ -120,6 +120,12 @@ export async function saveSettingsAction(patch: {
   if (typeof patch.feedbackEmail === "string")
     clean.feedbackEmail = patch.feedbackEmail;
   await setSettings(clean);
+  // Turning demo data ON fills any still-empty collections with the
+  // prototype fixtures (existing data is never touched).
+  if (patch.seedDemo === true) {
+    const { seedDemoCollections } = await import("@/db/seed-data");
+    await seedDemoCollections();
+  }
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

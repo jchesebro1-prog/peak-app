@@ -1,6 +1,19 @@
 import { users, appSettings } from "./schema";
 import type { Db } from "./index";
 import { IDENTITY, emailFor } from "@/lib/team";
+import { listDocs, upsertDoc, type Doc } from "./doc-store";
+import type { CollectionName } from "./doc-tables";
+import { customersSeed } from "./seeds/customers";
+import { quotesSeed } from "./seeds/quotes";
+import { catalogSeed } from "./seeds/catalog";
+import { leadsSeed } from "./seeds/leads";
+import { surveysSeed } from "./seeds/surveys";
+import { commsSeed } from "./seeds/comms";
+import { flameJobsSeed } from "./seeds/flame-jobs";
+import { repairJobsSeed } from "./seeds/repair-jobs";
+import { inspectionsSeed } from "./seeds/inspections";
+import { projectsSeed } from "./seeds/projects";
+import { designsSeed } from "./seeds/designs";
 
 /**
  * Development fixtures — the prototype's seed roster from team.js seedData().
@@ -73,20 +86,60 @@ export function seedUsers() {
   }));
 }
 
+/**
+ * Demo fixtures per collection — the prototype's store seeds, ported
+ * verbatim by the Phase 2 port (src/db/seeds/*). Seeded only when the
+ * collection is empty AND demo data is on (Settings → Beta → Demo data;
+ * local dev turns it on by default, DECISIONS.md D16).
+ */
+const DEMO_SEEDS: Array<[CollectionName, () => Doc[]]> = [
+  ["customers", customersSeed as () => Doc[]],
+  ["catalog_parts", catalogSeed as unknown as () => Doc[]],
+  ["quotes", quotesSeed as unknown as () => Doc[]],
+  ["leads", leadsSeed as unknown as () => Doc[]],
+  ["surveys", surveysSeed as unknown as () => Doc[]],
+  ["comms", commsSeed as unknown as () => Doc[]],
+  ["flame_jobs", flameJobsSeed as unknown as () => Doc[]],
+  ["repair_jobs", repairJobsSeed as unknown as () => Doc[]],
+  ["inspections", inspectionsSeed as unknown as () => Doc[]],
+  ["projects", projectsSeed as unknown as () => Doc[]],
+  ["designs", designsSeed as unknown as () => Doc[]],
+];
+
+export async function seedDemoCollections(): Promise<number> {
+  let seeded = 0;
+  for (const [coll, make] of DEMO_SEEDS) {
+    const existing = await listDocs(coll, { includeDeleted: true });
+    if (existing.length) continue;
+    for (const doc of make()) {
+      await upsertDoc(coll, doc);
+      seeded++;
+    }
+  }
+  return seeded;
+}
+
 export async function seedIfEmpty(db: Db) {
   const existing = await db.select({ id: users.id }).from(users).limit(1);
   if (existing.length === 0) {
     await db.insert(users).values(seedUsers());
   }
-  const settings = await db
-    .select({ id: appSettings.id })
-    .from(appSettings)
-    .limit(1);
-  if (settings.length === 0) {
+  const settingsRows = await db.select().from(appSettings).limit(1);
+  // Local dev (no DATABASE_URL) gets demo data on by default so the app is
+  // explorable; hosted databases start clean unless SEED_DEMO=true.
+  const demoDefault = !process.env.DATABASE_URL || process.env.SEED_DEMO === "true";
+  if (settingsRows.length === 0) {
     await db.insert(appSettings).values({
       id: "main",
-      data: DEFAULT_SETTINGS,
+      data: { ...DEFAULT_SETTINGS, seedDemo: demoDefault },
       updatedAt: Date.now(),
     });
+  }
+  const data =
+    settingsRows.length === 0
+      ? { ...DEFAULT_SETTINGS, seedDemo: demoDefault }
+      : { ...DEFAULT_SETTINGS, ...(settingsRows[0].data as Record<string, unknown>) };
+  if (data.seedDemo === true) {
+    await seedDemoCollections();
   }
 }
