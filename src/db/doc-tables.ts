@@ -1,0 +1,94 @@
+import {
+  pgTable,
+  text,
+  jsonb,
+  integer,
+  bigint,
+  bigserial,
+  boolean,
+} from "drizzle-orm/pg-core";
+
+/**
+ * Document-collection tables — the server side of the prototype's store
+ * seam (docs/specs/sync-architecture.json). Each prototype store becomes
+ * one table of whole JSON documents:
+ *
+ * - id:   the prototype's human id ('Q-2042', 'FT-3001', 'lakefront', …)
+ * - doc:  the full record, exactly the prototype's shape (field names are
+ *         the spec — do not rename)
+ * - rev:  optimistic-concurrency counter (prototype's dirty() rev)
+ * - seq:  monotonic per-table write cursor — powers Phase 6 pull sync
+ * - review: server-owned triage subdoc (CloudStore._put preserved it on
+ *         re-push; same rule here — client pushes never overwrite it)
+ * - deleted: soft delete so offline clients learn about removals via pull
+ *
+ * Business volumes are small (hundreds of records); screens filter in JS
+ * like the prototype did. Promote hot fields to real columns only when a
+ * query actually needs it (documented upgrade path in AGENTS.md).
+ */
+function docTable(name: string) {
+  return pgTable(name, {
+    id: text("id").primaryKey(),
+    doc: jsonb("doc").$type<Record<string, unknown>>().notNull(),
+    rev: integer("rev").notNull().default(1),
+    seq: bigserial("seq", { mode: "number" }).notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+    receivedAt: bigint("received_at", { mode: "number" }).notNull(),
+    review: jsonb("review").$type<Record<string, unknown> | null>(),
+    deleted: boolean("deleted").notNull().default(false),
+  });
+}
+
+/** Prototype store → table (localStorage key it replaces in comments). */
+export const quotes = docTable("quotes"); // rss_pipeline_v2 (QuoteStore)
+export const customers = docTable("customers"); // rss_customer_dir_v1 (CustomerStore)
+export const leads = docTable("leads"); // rss_leads_v1 (LeadStore)
+export const surveys = docTable("surveys"); // rss_surveys_v4 (SurveyStore)
+export const comms = docTable("comms"); // rss_comms_v2 (CommStore threads)
+export const flameJobs = docTable("flame_jobs"); // rss_flamejobs_v1 (FlameJobStore)
+export const inspections = docTable("inspections"); // rss_inspections_v1 (InspectionStore)
+export const repairJobs = docTable("repair_jobs"); // rss_repairjobs_v1 (RepairStore)
+export const projects = docTable("projects"); // rss_projects_v2 (ProjectStore)
+export const designs = docTable("designs"); // rss_sandbox_v2 (SandboxStore)
+export const catalogParts = docTable("catalog_parts"); // catalog-data.js MASTER_CATALOG
+
+export const DOC_TABLES = {
+  quotes,
+  customers,
+  leads,
+  surveys,
+  comms,
+  flame_jobs: flameJobs,
+  inspections,
+  repair_jobs: repairJobs,
+  projects,
+  designs,
+  catalog_parts: catalogParts,
+} as const;
+
+export type CollectionName = keyof typeof DOC_TABLES;
+
+/**
+ * Small-blob singletons (prototype localStorage blobs that aren't
+ * collections): pricing_rules (rss_pricing_rules_v1), flametest_rates
+ * (rss_flametest_rates_v1), repair_rates (rss_repair_rates_v1).
+ */
+export const blobs = pgTable("blobs", {
+  id: text("id").primaryKey(),
+  data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});
+
+/** Per-user notification category mutes — rss_notifprefs_v1 (notifprefs.js). */
+export const notifPrefs = pgTable("notif_prefs", {
+  userName: text("user_name").primaryKey(),
+  prefs: jsonb("prefs").$type<Record<string, boolean>>().notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});
+
+/** Cached geocode/route results — rss_geo_routecache_v1 (geo.js). */
+export const geoCache = pgTable("geo_cache", {
+  key: text("key").primaryKey(),
+  data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});

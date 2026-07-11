@@ -1,5 +1,7 @@
 import { pgTable, text, boolean, bigint, jsonb } from "drizzle-orm/pg-core";
 
+export * from "./doc-tables";
+
 /**
  * Team roster — ported from the prototype's team.js (window.Users).
  * Field names and id format ('u1', 'u2', …) are preserved; the prototype's
