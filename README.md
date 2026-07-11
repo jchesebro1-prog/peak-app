@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Peak Backend
 
-## Getting Started
+The production rebuild of the Peak Systems Group business app — sales,
+service (flame tests / inspections / repairs), installs, CRM, and admin —
+ported phase by phase from the HTML prototype in
+`design_handoff_claude_code/`.
 
-First, run the development server:
+**Status: Phase 1 complete** — sign-in (Google SSO + invite list), team &
+roles, the app shell, and Settings are live. See `AGENTS.md` for the full
+phase plan and conventions, `DECISIONS.md` for choices made along the way,
+and `QUESTIONS.md` for the things that need Jeff.
+
+## See it locally (one command)
 
 ```bash
+cd ~/Downloads/peak-app
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open **http://localhost:3000** — you'll get the sign-in screen. While
+Google SSO isn't configured yet, the login page shows a **Dev sign-in**
+list; pick “Jeff Chesebro” (Admin). No database setup is needed — local dev
+uses an embedded database in `.data/` that creates and seeds itself.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Try: **avatar menu → General settings** for Branding (change the accent
+color — the whole app follows) and **Team members** (add someone, edit
+roles, deactivate). The account menu's **Switch user** lets you see the app
+as each role — e.g. non-admins get locked out of Settings.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Put it on the internet
 
-## Learn More
+Follow **DEPLOY.md** — about 30 minutes the first time, mostly clicking
+“create account.” It covers Vercel (hosting), Neon (database), and the
+Google sign-in credentials, each with exact values to paste.
 
-To learn more about Next.js, take a look at the following resources:
+## Commands
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Run locally at localhost:3000 |
+| `npm run build` | Production build (applies DB migrations when `DATABASE_URL` is set) |
+| `npm run db:seed` | Load the starter roster/settings into the database (safe to re-run; used once when setting up production) |
+| `npm run db:reset-local` | Wipe the local dev database and start fresh |
+| `npm run db:generate` | (development) create a migration after schema changes |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Note: run `db:seed`/`db:reset-local` with the dev server stopped when
+targeting the local database — they share the same embedded files.
 
-## Deploy on Vercel
+## Where things are
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/app/(app)/` — one folder per screen (placeholders name their phase)
+- `src/components/nav/` — the shared shell (top bar, drawer, menus)
+- `src/db/` — schema, client, seed fixtures
+- `src/lib/` — team/roles port, users store, settings, session guards
+- `docs/specs/` — exact UI + architecture specs extracted from the prototype
+- `drizzle/` — database migrations (generated, committed)
