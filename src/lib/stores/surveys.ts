@@ -6,6 +6,16 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import {
+  blankSystemsState,
+  type DisciplineData,
+  type InventoryRow,
+  type SystemState,
+} from "./survey-intake";
+
+// Site Intake extension model (tiers, disciplines, inventory catalog) — pure
+// module shared with the client editor; re-exported for server callers.
+export * from "./survey-intake";
 
 /**
  * SurveyStore — direct port of app/survey.js v3 (rss_surveys_v4).
@@ -252,11 +262,36 @@ export const FOH_FIELDS: MeasureField[] = [
   { key: "tormTrim", label: "Tormentor — height / trim" },
   { key: "tormLen", label: "Tormentor — position length" },
 ];
+// ---- house / room rough measurements (IDEAS #49 — capture now so surveys
+// feed the future auto-built 3D venue model; ceiling height stays houseH in
+// the section group per the shared-key rule) ----
+export const BOOTH_LOCATIONS: string[] = [
+  "Rear of house — center",
+  "Rear of house — left",
+  "Rear of house — right",
+  "Balcony",
+  "Floor / portable",
+  "None",
+];
+export const HOUSE_FIELDS: MeasureField[] = [
+  { key: "houseWidth", label: "House width (overall)" },
+  { key: "houseDepth", label: "House depth (plaster→back wall)" },
+  { key: "centerAisleW", label: "Center aisle width" },
+  { key: "doorCount", label: "House doors — count" },
+  { key: "doorMainWH", label: "Main door size (W × H)" },
+  { key: "catwalkCount", label: "Catwalks — count" },
+  { key: "catwalkH", label: "Catwalk height (above house floor)" },
+  { key: "catwalk1Dist", label: "1st catwalk — distance from plaster" },
+  { key: "boothLoc", label: "Booth location", type: "select", options: BOOTH_LOCATIONS },
+  { key: "boothWD", label: "Booth size (W × D)" },
+  { key: "boothDist", label: "Booth — distance from plaster" },
+];
 export const MEASURE_GROUPS: MeasureGroup[] = [
   { id: "mLayout", title: "Stage layout", subtitle: "Plan-view widths & depths", fields: LAYOUT_FIELDS },
   { id: "mSection", title: "Stage section", subtitle: "Heights & vertical trims", fields: SECTION_FIELDS },
   { id: "mBeams", title: "Beams & rigging", subtitle: "Structure, draw & existing rig", fields: BEAM_FIELDS },
   { id: "mFOH", title: "FOH positions", subtitle: "Front-of-house lighting positions", fields: FOH_FIELDS },
+  { id: "mHouse", title: "House & room", subtitle: "Auditorium shell — doors, catwalks, booth & aisles", fields: HOUSE_FIELDS },
 ];
 
 export const CONDITIONS: string[] = [
@@ -323,6 +358,14 @@ export interface SurveyDraft {
   measurements: Record<string, string>;
   conditions: string[];
   photos: SurveyPhoto[];
+  // ---- Site Intake extension (IDEAS #45 — see survey-intake.ts) ----
+  auditoriumSize: string; // Tier 2 — small/medium/large by seats
+  yearBuilt: string; // Tier 2
+  systemsState: Record<string, SystemState>; // Tier 3 — installed systems yes/no + describe
+  disciplines: Record<string, DisciplineData>; // discipline branch forms
+  disciplinesActive: string[]; // which branches the rep opened
+  inventory: InventoryRow[]; // structured type+qty rows (Lighting/AV)
+  intakeReady: boolean; // explicit "ready for quote" flag
 }
 
 export interface SurveyRecord extends SurveyDraft {
@@ -375,6 +418,13 @@ export function blank(partial: Partial<SurveyDraft> = {}): SurveyDraft {
     measurements: {},
     conditions: [],
     photos: [],
+    auditoriumSize: "",
+    yearBuilt: "",
+    systemsState: blankSystemsState(),
+    disciplines: {},
+    disciplinesActive: [],
+    inventory: [],
+    intakeReady: false,
   };
   const rec: Record<string, unknown> = {};
   Object.keys(def).forEach((k) => {

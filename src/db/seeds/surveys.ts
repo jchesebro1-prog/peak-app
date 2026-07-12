@@ -1,4 +1,5 @@
 import type { SurveyRecord } from "@/lib/stores/surveys";
+import { blankSystemsState } from "@/lib/stores/survey-intake";
 
 /**
  * Survey seed — exact port of app/survey.js seedData() (rss_surveys_v4).
@@ -10,10 +11,23 @@ export function surveysSeed(): SurveyRecord[] {
   const now = Date.now();
   const ago = (d: number) => now - d * DAY;
 
+  // Site Intake extension defaults (IDEAS #45) — the prototype fixtures
+  // predate the tiered intake, so every seed record starts blank there.
+  const intake = () => ({
+    auditoriumSize: "",
+    yearBuilt: "",
+    systemsState: blankSystemsState(),
+    disciplines: {},
+    disciplinesActive: [],
+    inventory: [],
+    intakeReady: false,
+  });
+
   return [
     // 1) REQUESTED — office brief filled, awaiting scheduling
     {
       id: "FS-1055",
+      ...intake(),
       customer: "Lakeside Community Church",
       customerId: "lakeside",
       locationId: "lc1",
@@ -62,6 +76,7 @@ export function surveysSeed(): SurveyRecord[] {
     // 2) SCHEDULED — assigned + dated, not yet visited
     {
       id: "FS-1053",
+      ...intake(),
       customer: "North Ridge High School",
       customerId: "northridge",
       locationId: "nr1",
@@ -112,6 +127,7 @@ export function surveysSeed(): SurveyRecord[] {
     // 3) ON-SITE — assigned to me, capture in progress
     {
       id: "FS-1054",
+      ...intake(),
       customer: "Badger Ballet Company",
       customerId: "badger",
       locationId: "bb1",
@@ -167,6 +183,7 @@ export function surveysSeed(): SurveyRecord[] {
     // 4) COMPLETED — fully captured, ready to quote
     {
       id: "FS-1042",
+      ...intake(),
       customer: "Lakefront Performing Arts Center",
       customerId: "lakefront",
       locationId: "lf1",

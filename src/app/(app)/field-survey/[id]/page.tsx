@@ -15,8 +15,10 @@ import {
   MEASURE_GROUPS,
   type MeasureField,
 } from "@/lib/stores/surveys";
+import { mergedCatalog } from "@/lib/stores/survey-intake";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { activeUsers } from "@/lib/users";
+import { getSettings } from "@/lib/settings";
 import SurveyEditor, { type EditorMeta, type EditorCustomer } from "./controls";
 
 export const metadata = { title: "Site survey — Peak Backend" };
@@ -27,11 +29,12 @@ export default async function SurveyEditorPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [, rec, customers, users] = await Promise.all([
+  const [, rec, customers, users, settings] = await Promise.all([
     requireUser(),
     get(id),
     allCustomers(),
     activeUsers(),
+    getSettings(),
   ]);
   if (!rec) notFound();
 
@@ -75,6 +78,7 @@ export default async function SurveyEditorPage({
     measureGroups: MEASURE_GROUPS,
     measureFieldsByType,
     defaultMeasureFields,
+    intakeCatalog: mergedCatalog(settings.intakeCatalog),
   };
 
   const roster = users.map((u) => u.name);

@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
+    "@types/three": "^0.185.1",
     "drizzle-orm": "^0.45.2",
     "leaflet": "^1.9.4",
     "next": "16.2.10",
@@ -23,6 +24,7 @@
     "postgres": "^3.4.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "three": "^0.185.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

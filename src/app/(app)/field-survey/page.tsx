@@ -6,6 +6,8 @@ import {
   stageMeta,
   timeAgo,
   STAGES,
+  intakeStatus,
+  INTAKE_STATUS_META,
   type SurveyRecord,
   type SurveyStage,
 } from "@/lib/stores/surveys";
@@ -374,6 +376,8 @@ export default async function FieldSurveyPage({
           {list.map((s) => {
             const sm = stageMeta(stKey(s));
             const sy = syncMeta(s.syncState);
+            const ist = intakeStatus(s);
+            const im = INTAKE_STATUS_META[ist];
             const assignee = (s.assignedTo || "").trim();
             const sched = fmtDate(s.scheduledDate);
             const venueBits = [s.venue, s.venueType].filter((b) => (b || "").trim());
@@ -400,19 +404,37 @@ export default async function FieldSurveyPage({
                   style={{ textAlign: "left", textDecoration: "none", color: "inherit", padding: "14px 15px 0" }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                    <span
-                      style={{
-                        fontSize: 10.5,
-                        fontWeight: 600,
-                        color: sm.ink,
-                        background: sm.soft,
-                        border: `1px solid ${sm.bd}`,
-                        padding: "3px 10px",
-                        borderRadius: 20,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {sm.label}
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flexWrap: "wrap" }}>
+                      <span
+                        style={{
+                          fontSize: 10.5,
+                          fontWeight: 600,
+                          color: sm.ink,
+                          background: sm.soft,
+                          border: `1px solid ${sm.bd}`,
+                          padding: "3px 10px",
+                          borderRadius: 20,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {sm.label}
+                      </span>
+                      {ist !== "draft" && (
+                        <span
+                          style={{
+                            fontSize: 10.5,
+                            fontWeight: 600,
+                            color: im.ink,
+                            background: im.soft,
+                            border: `1px solid ${im.bd}`,
+                            padding: "3px 10px",
+                            borderRadius: 20,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {im.label}
+                        </span>
+                      )}
                     </span>
                     <span
                       style={{

@@ -62,6 +62,14 @@ export type SurveyPatch = Partial<
     | "measurements"
     | "conditions"
     | "photos"
+    // Site Intake extension (IDEAS #45)
+    | "auditoriumSize"
+    | "yearBuilt"
+    | "systemsState"
+    | "disciplines"
+    | "disciplinesActive"
+    | "inventory"
+    | "intakeReady"
   >
 >;
 

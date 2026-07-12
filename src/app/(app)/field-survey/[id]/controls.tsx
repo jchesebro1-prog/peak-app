@@ -10,7 +10,23 @@ import type {
   MeasureField,
   MeasureGroup,
 } from "@/lib/stores/surveys";
+import {
+  AUDITORIUM_SIZES,
+  DISCIPLINE_GROUPS,
+  INTAKE_STATUS_META,
+  SYSTEM_KEYS,
+  blankSystemsState,
+  intakeStatus,
+  newInventoryId,
+  tier1Items,
+  tier1Complete,
+  type DisciplineData,
+  type DisciplineKey,
+  type InventoryRow,
+  type SystemState,
+} from "@/lib/stores/survey-intake";
 import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, type SurveyPatch } from "./actions";
+import Venue3D from "./venue-3d";
 import { saveThroughOutbox } from "@/lib/sync/save";
 
 /* ============================================================
@@ -41,6 +57,8 @@ export type EditorMeta = {
   measureGroups: MeasureGroup[];
   measureFieldsByType: Record<string, MeasureField[]>;
   defaultMeasureFields: MeasureField[];
+  /** settings-merged site-intake type catalog, keyed by category */
+  intakeCatalog: Record<string, string[]>;
 };
 
 /** Local draft — the editable slice of the record plus updatedAt for display. */
@@ -81,6 +99,14 @@ type Draft = {
   measurements: Record<string, string | boolean>;
   conditions: string[];
   photos: SurveyPhoto[];
+  // Site Intake extension (IDEAS #45)
+  auditoriumSize: string;
+  yearBuilt: string;
+  systemsState: Record<string, SystemState>;
+  disciplines: Record<string, DisciplineData>;
+  disciplinesActive: string[];
+  inventory: InventoryRow[];
+  intakeReady: boolean;
   updatedAt: number;
 };
 
@@ -129,7 +155,7 @@ type SectionDef = {
   id: string;
   title: string;
   subtitle: string;
-  group: "brief" | "field";
+  group: "brief" | "field" | "intake";
   step: number;
   advanced?: boolean;
 } & (
@@ -137,15 +163,23 @@ type SectionDef = {
   | { kind: "fields"; fields: FieldDef[] }
   | { kind: "conditions" }
   | { kind: "photos" }
+  | { kind: "viz3d" }
+  | { kind: "tier1" }
+  | { kind: "systems" }
+  | { kind: "discipline"; disc: DisciplineKey }
 );
 
-const STEP_LABELS = ["Brief", "Site & access", "Measurements", "Details"];
+const STEP_LABELS = ["Brief", "Site & access", "Measurements", "Site intake", "Details"];
 const STEP_BY_ID: Record<string, number> = {
   cust: 0, visit: 0, project: 0, assign: 0, site: 1, conditions: 1,
-  mQuick: 2, mLayout: 2, mSection: 2, mBeams: 2, mFOH: 2, photos: 3, notes: 3,
+  mQuick: 2, mLayout: 2, mSection: 2, mBeams: 2, mFOH: 2, mHouse: 2, m3d: 2,
+  tier1: 3, systems: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3,
+  photos: 4, notes: 4,
 };
 const BRIEF_IDS: Record<string, boolean> = { cust: true, visit: true, project: true, assign: true };
-const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "photos", "notes"];
+const INTAKE_IDS: Record<string, boolean> = { tier1: true, systems: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true };
+const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "systems", "dRigging", "dCurtain", "dLighting", "dAv", "photos", "notes"];
+const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", curtain: "dCurtain", lighting: "dLighting", av: "dAv" };
 
 let photoSeq = 0;
 function newPhotoId(): string {
@@ -204,6 +238,13 @@ function toDraft(r: SurveyRecord): Draft {
     measurements: { ...(r.measurements || {}) },
     conditions: [...(r.conditions || [])],
     photos: [...(r.photos || [])],
+    auditoriumSize: r.auditoriumSize || "",
+    yearBuilt: r.yearBuilt || "",
+    systemsState: { ...blankSystemsState(), ...(r.systemsState || {}) },
+    disciplines: { ...(r.disciplines || {}) },
+    disciplinesActive: [...(r.disciplinesActive || [])],
+    inventory: [...(r.inventory || [])],
+    intakeReady: !!r.intakeReady,
     updatedAt: r.updatedAt || 0,
   };
 }
@@ -255,6 +296,55 @@ export default function SurveyEditor({
     else set.push(c);
     patchDraft({ conditions: set });
   };
+
+  /* ---------- site intake: discipline data + inventory helpers ---------- */
+  const tier1 = tier1Items(draft);
+  const tier1Done = tier1Complete(draft);
+  const intakeSt = intakeStatus(draft);
+  const intakeMeta = INTAKE_STATUS_META[intakeSt];
+
+  const dv = (disc: DisciplineKey, key: string): string | boolean | string[] => {
+    const d = draft.disciplines[disc];
+    return d && d[key] != null ? d[key] : "";
+  };
+  const setDisc = (disc: DisciplineKey, key: string, val: string | boolean | string[]) =>
+    patchDraft({
+      disciplines: { ...draft.disciplines, [disc]: { ...(draft.disciplines[disc] || {}), [key]: val } },
+      disciplinesActive: draft.disciplinesActive.includes(disc)
+        ? draft.disciplinesActive
+        : draft.disciplinesActive.concat(disc),
+    });
+  const toggleDiscScope = (disc: DisciplineKey, opt: string) => {
+    const cur = dv(disc, "scope");
+    const set = Array.isArray(cur) ? cur.slice() : [];
+    const i = set.indexOf(opt);
+    if (i >= 0) set.splice(i, 1);
+    else set.push(opt);
+    setDisc(disc, "scope", set);
+  };
+  const setSystem = (key: string, patch: Partial<SystemState>) =>
+    patchDraft({
+      systemsState: {
+        ...draft.systemsState,
+        [key]: { ...(draft.systemsState[key] || { installed: "", desc: "" }), ...patch },
+      },
+    });
+
+  const invRows = (disc: DisciplineKey, category: string) =>
+    draft.inventory.filter((r) => r.discipline === disc && r.category === category);
+  const addInvRow = (disc: DisciplineKey, category: string) =>
+    patchDraft({
+      inventory: draft.inventory.concat([
+        { id: newInventoryId(), discipline: disc, category, type: "", quantity: "", flag: false, notes: "" },
+      ]),
+      disciplinesActive: draft.disciplinesActive.includes(disc)
+        ? draft.disciplinesActive
+        : draft.disciplinesActive.concat(disc),
+    });
+  const patchInvRow = (id: string, patch: Partial<InventoryRow>) =>
+    patchDraft({ inventory: draft.inventory.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
+  const removeInvRow = (id: string) =>
+    patchDraft({ inventory: draft.inventory.filter((r) => r.id !== id) });
 
   /* ---------- customer & venue linkage ---------- */
   const custObj = (id: string | null) => (id ? customers.find((c) => c.id === id) || null : null);
@@ -434,9 +524,28 @@ export default function SurveyEditor({
     meta.measureGroups.forEach((g) => {
       secs.push({ id: g.id, title: g.title, subtitle: g.subtitle, group: "field", step: 2, advanced: true, kind: "fields", fields: groupFields(g) });
     });
-    secs.push({ id: "photos", title: "Photos", subtitle: "Up to 8", group: "field", step: 3, kind: "photos" });
+    // 3D preview (IDEAS #49 P1) — parametric model auto-built from measurements
+    secs.push({ id: "m3d", title: "3D preview", subtitle: "Auto-built from measurements — drag to orbit", group: "field", step: 2, advanced: true, kind: "viz3d" });
+    // ---- Site intake (IDEAS #45): kill-question gate, current systems,
+    // discipline branches. Soft gate — sections lock until Tier 1 is done,
+    // but the record always saves as a draft.
     secs.push({
-      id: "notes", title: "Scope & notes", subtitle: "Free text", group: "field", step: 3, kind: "fields",
+      id: "tier1", title: "Kill questions", subtitle: "Required before the discipline intakes unlock",
+      group: "intake", step: 3, kind: "tier1",
+    });
+    secs.push({
+      id: "systems", title: "Existing systems", subtitle: "What's installed today — yes / no, then describe",
+      group: "intake", step: 3, kind: "systems",
+    });
+    DISCIPLINE_GROUPS.forEach((g) => {
+      secs.push({
+        id: DISC_SECTION_ID[g.key], title: g.title, subtitle: g.subtitle,
+        group: "intake", step: 3, advanced: true, kind: "discipline", disc: g.key,
+      });
+    });
+    secs.push({ id: "photos", title: "Photos", subtitle: "Up to 8", group: "field", step: 4, kind: "photos" });
+    secs.push({
+      id: "notes", title: "Scope & notes", subtitle: "Free text", group: "field", step: 4, kind: "fields",
       fields: [
         { kind: "textarea", key: "scopeOfWork", label: "Scope of work", placeholder: "What are we scoping / installing?" },
         { kind: "textarea", key: "quoteLook", label: "How the quote should look", placeholder: "Format, breakdown, alternates the customer wants to see…" },
@@ -444,7 +553,7 @@ export default function SurveyEditor({
       ],
     });
     secs.forEach((s) => {
-      s.group = BRIEF_IDS[s.id] ? "brief" : "field";
+      s.group = BRIEF_IDS[s.id] ? "brief" : INTAKE_IDS[s.id] ? "intake" : "field";
       if (STEP_BY_ID[s.id] != null) s.step = STEP_BY_ID[s.id];
     });
     secs.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
@@ -509,6 +618,13 @@ export default function SurveyEditor({
       measurements: draft.measurements as Record<string, string>,
       conditions: draft.conditions,
       photos: draft.photos,
+      auditoriumSize: draft.auditoriumSize,
+      yearBuilt: draft.yearBuilt,
+      systemsState: draft.systemsState,
+      disciplines: draft.disciplines,
+      disciplinesActive: draft.disciplinesActive,
+      inventory: draft.inventory,
+      intakeReady: draft.intakeReady,
       ...over,
     };
   }
@@ -863,8 +979,102 @@ export default function SurveyEditor({
             <label style={labelStyle}>Contact email</label>
             <input type="email" value={draft.contactEmail} onChange={(e) => setField("contactEmail", e.target.value)} placeholder="name@venue.org" style={inpStyle} />
           </div>
+          <div>
+            <label style={labelStyle}>Auditorium size</label>
+            <select value={draft.auditoriumSize} onChange={(e) => setField("auditoriumSize", e.target.value)} style={selStyle}>
+              <option value="">— Select —</option>
+              {AUDITORIUM_SIZES.map((o) => (
+                <option key={o} value={o}>{o}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={labelStyle}>Built year</label>
+            <input inputMode="numeric" value={draft.yearBuilt} onChange={(e) => setField("yearBuilt", e.target.value)} placeholder="e.g. 1998" style={inpStyle} />
+          </div>
         </div>
       </>
+    );
+  }
+
+  /* ---------- site intake renderers ---------- */
+  function renderDiscField(disc: DisciplineKey, f: MeasureField) {
+    if (f.type === "check") {
+      const c = dv(disc, f.key) === true;
+      return (
+        <div key={f.key} style={{ gridColumn: "1 / -1" }}>
+          <div onClick={() => setDisc(disc, f.key, !c)} style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", border: "1px solid #e4e7ec", borderRadius: 10, cursor: "pointer", background: "#fff" }}>
+            <span style={boxStyle(c)}>{c ? "✓" : ""}</span>
+            <span style={{ fontSize: 14, fontWeight: 500, color: "#3a3f4a" }}>{f.label}</span>
+          </div>
+        </div>
+      );
+    }
+    if (f.type === "select") {
+      return (
+        <div key={f.key}>
+          <label style={labelStyle}>{f.label}</label>
+          <select value={String(dv(disc, f.key) || "")} onChange={(e) => setDisc(disc, f.key, e.target.value)} style={selStyle}>
+            <option value="">— Select —</option>
+            {(f.options || []).map((o) => (
+              <option key={o} value={o}>{o}</option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+    return (
+      <div key={f.key}>
+        <label style={labelStyle}>{f.label}</label>
+        <input value={String(dv(disc, f.key) || "")} onChange={(e) => setDisc(disc, f.key, e.target.value)} style={inpStyle} />
+      </div>
+    );
+  }
+
+  function renderInventory(disc: DisciplineKey, category: string, label: string) {
+    const rows = invRows(disc, category);
+    const types = meta.intakeCatalog[category] || [];
+    return (
+      <div key={category} style={{ gridColumn: "1 / -1" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 7 }}>
+          <label style={{ ...labelStyle, marginBottom: 0 }}>{label}</label>
+          <span style={{ fontSize: 11, color: "#aab0bb" }}>type · qty · flag if it needs attention</span>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          {rows.map((r) => {
+            const known = !r.type || types.includes(r.type);
+            return (
+              <div key={r.id} className="sv-inv-row">
+                <select value={known ? r.type : "__custom__"} onChange={(e) => patchInvRow(r.id, { type: e.target.value === "__custom__" ? r.type || " " : e.target.value })} style={{ ...selStyle, padding: "10px 11px" }}>
+                  <option value="">— Type —</option>
+                  {types.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                  {!known && <option value="__custom__">{r.type}</option>}
+                </select>
+                <input inputMode="numeric" value={r.quantity} onChange={(e) => patchInvRow(r.id, { quantity: e.target.value })} placeholder="Qty" style={{ ...measStyle, padding: "10px 10px", textAlign: "center" }} />
+                <button
+                  onClick={() => patchInvRow(r.id, { flag: !r.flag })}
+                  title="Flag — needs attention / replace / verify"
+                  style={{ minHeight: 42, borderRadius: 9, cursor: "pointer", fontSize: 15, lineHeight: 1, border: `1px solid ${r.flag ? "#f0e2bd" : "#e4e7ec"}`, background: r.flag ? "#fbf3dd" : "#fff", color: r.flag ? "#8a6d1f" : "#c4c9d2" }}
+                >
+                  ⚑
+                </button>
+                <input value={r.notes} onChange={(e) => patchInvRow(r.id, { notes: e.target.value })} placeholder="Notes / model" style={{ ...inpStyle, padding: "10px 11px" }} />
+                <button onClick={() => removeInvRow(r.id)} aria-label="Remove row" style={{ minHeight: 42, borderRadius: 9, cursor: "pointer", fontSize: 16, lineHeight: 1, border: "1px solid #e4e7ec", background: "#fff", color: "#aab0bb" }}>
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <button
+          onClick={() => addInvRow(disc, category)}
+          style={{ marginTop: rows.length ? 8 : 0, fontSize: 12.5, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER_LT}`, borderRadius: 9, padding: "9px 13px", cursor: "pointer", minHeight: 38 }}
+        >
+          + Add {label.toLowerCase().replace(/s$/, "")}
+        </button>
+      </div>
     );
   }
 
@@ -879,7 +1089,8 @@ export default function SurveyEditor({
         .sv-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px 14px; }
         .sv-rail::-webkit-scrollbar { display:none; }
         .sv-rail { -ms-overflow-style:none; scrollbar-width:none; }
-        @media (max-width:640px){ .sv-grid{ grid-template-columns:1fr !important; } .sv-pad{ padding-left:15px !important; padding-right:15px !important; } }
+        .sv-inv-row { display:grid; grid-template-columns:minmax(130px,1.3fr) 68px 44px minmax(110px,1fr) 40px; gap:7px; align-items:stretch; }
+        @media (max-width:640px){ .sv-grid{ grid-template-columns:1fr !important; } .sv-pad{ padding-left:15px !important; padding-right:15px !important; } .sv-inv-row{ grid-template-columns:minmax(0,1.3fr) 58px 42px minmax(0,1fr) 38px; } }
       `}</style>
 
       {/* sticky header */}
@@ -890,9 +1101,10 @@ export default function SurveyEditor({
           </Link>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.25, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#aab0bb" }}>{sub}</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: savePillInk, background: savePillBg }}>{savePillLabel}</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>{intakeMeta.label}</span>
             </div>
           </div>
           <button onClick={onDelete} disabled={saving} style={{ flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#b4543a", background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 9, padding: "10px 14px", cursor: saving ? "default" : "pointer", minHeight: 42 }}>
@@ -960,31 +1172,52 @@ export default function SurveyEditor({
       <div className="sv-pad" style={{ maxWidth: 900, margin: "0 auto", padding: "20px 24px 90px" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {visibleSections.map((sec) => {
-            const collapsible = isCollapsible(sec);
-            const open = isOpen(sec);
+            const locked = sec.kind === "discipline" && !tier1Done;
+            const collapsible = isCollapsible(sec) || sec.kind === "discipline";
+            const open = locked ? false : isOpen(sec);
             const showGroupHeader = layoutMode !== "wizard" && sec.group !== prevGroup;
             prevGroup = sec.group;
             const filled = sec.kind === "fields" && sec.advanced ? measFilled(sec.fields) : 0;
+            const discFilled =
+              sec.kind === "discipline"
+                ? Object.values(draft.disciplines[sec.disc] || {}).filter((v) =>
+                    Array.isArray(v) ? v.length > 0 : typeof v === "boolean" ? v : String(v ?? "").trim() !== ""
+                  ).length + draft.inventory.filter((r) => r.discipline === sec.disc).length
+                : 0;
+            const headerClick = collapsible
+              ? () => {
+                  if (locked) {
+                    flash("Answer the kill questions to unlock the discipline intakes");
+                    jumpTo("tier1");
+                  } else {
+                    toggleSection(sec.id);
+                  }
+                }
+              : undefined;
             return (
               <div key={sec.id}>
                 {showGroupHeader && (
                   <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "6px 2px 10px", flexWrap: "wrap" }}>
                     <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "#5b616e" }}>
-                      {sec.group === "brief" ? "Office brief" : "Field capture"}
+                      {sec.group === "brief" ? "Office brief" : sec.group === "intake" ? "Site intake" : "Field capture"}
                     </span>
                     <span style={{ fontSize: 11.5, color: "#aab0bb" }}>
-                      {sec.group === "brief" ? "Filled when the request is created" : "Filled on-site by the surveyor"}
+                      {sec.group === "brief"
+                        ? "Filled when the request is created"
+                        : sec.group === "intake"
+                          ? "Venue baseline, then branch into a discipline"
+                          : "Filled on-site by the surveyor"}
                     </span>
                   </div>
                 )}
-                <div id={"sec-" + sec.id} style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 14, boxShadow: "0 1px 2px rgba(0,0,0,.04)", overflow: "hidden" }}>
+                <div id={"sec-" + sec.id} style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 14, boxShadow: "0 1px 2px rgba(0,0,0,.04)", overflow: "hidden", opacity: locked ? 0.72 : 1 }}>
                   <div
-                    onClick={collapsible ? () => toggleSection(sec.id) : undefined}
+                    onClick={headerClick}
                     style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: `16px 18px ${open ? "10px" : "16px"}`, cursor: collapsible ? "pointer" : "default" }}
                   >
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 14.5, fontWeight: 600, letterSpacing: "-.01em" }}>{sec.title}</div>
-                      {sec.subtitle && <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>{sec.subtitle}</div>}
+                      {sec.subtitle && <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>{locked ? "Locked — answer the kill questions above first" : sec.subtitle}</div>}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                       {sec.advanced && filled > 0 && (
@@ -992,7 +1225,15 @@ export default function SurveyEditor({
                           {filled} filled
                         </span>
                       )}
-                      {collapsible && (
+                      {sec.kind === "discipline" && !locked && discFilled > 0 && (
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER_LT}`, padding: "3px 9px", borderRadius: 20 }}>
+                          {discFilled} captured
+                        </span>
+                      )}
+                      {locked && (
+                        <span style={{ fontSize: 13, color: "#aab0bb" }} title="Complete the kill questions to unlock">🔒</span>
+                      )}
+                      {collapsible && !locked && (
                         <span style={{ fontSize: 11, color: "#aab0bb", display: "inline-block", transition: "transform .15s ease", transform: open ? "rotate(180deg)" : "none" }}>▾</span>
                       )}
                     </div>
@@ -1002,6 +1243,100 @@ export default function SurveyEditor({
                     <div style={{ padding: "4px 18px 20px" }}>
                       {sec.kind === "custvenue" && renderCustVenue()}
                       {sec.kind === "fields" && <div className="sv-grid">{sec.fields.map(renderField)}</div>}
+                      {sec.kind === "tier1" && (
+                        <div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                            {tier1.map((item) => (
+                              <button
+                                key={item.key}
+                                onClick={() => jumpTo(item.section)}
+                                title={item.done ? "Answered" : "Missing — tap to jump to the field"}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 7,
+                                  fontFamily: "var(--font-ui)", fontSize: 12.5, fontWeight: 600,
+                                  padding: "9px 13px", borderRadius: 20, cursor: "pointer", minHeight: 40,
+                                  border: `1px solid ${item.done ? "#cce9da" : "#f0e2bd"}`,
+                                  background: item.done ? "#eaf6ef" : "#fbf3dd",
+                                  color: item.done ? "#1f7a52" : "#8a6d1f",
+                                }}
+                              >
+                                <span style={{ fontSize: 12 }}>{item.done ? "✓" : "○"}</span>
+                                {item.label}
+                              </button>
+                            ))}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 600, padding: "4px 10px", borderRadius: 20, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>
+                              {intakeMeta.label}
+                            </span>
+                            <span style={{ fontSize: 12, color: "#9aa0ab" }}>
+                              {tier1Done
+                                ? "Discipline intakes are unlocked."
+                                : "The record saves as a draft any time — but discipline intakes stay locked until these are answered."}
+                            </span>
+                            <div style={{ flex: 1, minWidth: 8 }} />
+                            {intakeSt === "discipline-added" && (
+                              <button onClick={() => setField("intakeReady", true)} style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: "#1f7a52", border: "none", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
+                                Mark ready for quote
+                              </button>
+                            )}
+                            {intakeSt === "ready-for-quote" && (
+                              <button onClick={() => setField("intakeReady", false)} style={{ fontSize: 12.5, fontWeight: 600, color: "#1f7a52", background: "#eaf6ef", border: "1px solid #cce9da", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
+                                ✓ Ready — undo
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {sec.kind === "systems" && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+                          {SYSTEM_KEYS.map((s) => {
+                            const st = draft.systemsState[s.key] || { installed: "", desc: "" };
+                            return (
+                              <div key={s.key} style={{ border: "1px solid #e4e7ec", borderRadius: 10, padding: "11px 13px", background: "#fff" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                                  <span style={{ fontSize: 14, fontWeight: 500, color: "#3a3f4a", flex: 1, minWidth: 120 }}>{s.label}</span>
+                                  <div style={{ display: "flex", gap: 7 }}>
+                                    <button onClick={() => setSystem(s.key, { installed: st.installed === "yes" ? "" : "yes" })} style={{ ...toggleBtn(st.installed === "yes"), flex: "none", padding: "8px 16px", minHeight: 38 }}>Yes</button>
+                                    <button onClick={() => setSystem(s.key, { installed: st.installed === "no" ? "" : "no" })} style={{ ...toggleBtn(st.installed === "no"), flex: "none", padding: "8px 16px", minHeight: 38 }}>No</button>
+                                  </div>
+                                </div>
+                                {st.installed === "yes" && (
+                                  <input value={st.desc} onChange={(e) => setSystem(s.key, { desc: e.target.value })} placeholder={"Describe — " + s.hint} style={{ ...inpStyle, marginTop: 9, padding: "10px 12px" }} />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {sec.kind === "discipline" && (() => {
+                        const g = DISCIPLINE_GROUPS.find((x) => x.key === sec.disc);
+                        if (!g) return null;
+                        const scope = dv(g.key, "scope");
+                        const scopeSet = Array.isArray(scope) ? scope : [];
+                        return (
+                          <div>
+                            <div className="sv-grid">{g.fields.map((f) => renderDiscField(g.key, f))}</div>
+                            <div style={{ marginTop: 14 }}>
+                              <label style={labelStyle}>{g.scopeLabel}</label>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                                {g.scopeOptions.map((o) => (
+                                  <button key={o} onClick={() => toggleDiscScope(g.key, o)} style={chipStyle(scopeSet.includes(o))}>{o}</button>
+                                ))}
+                              </div>
+                            </div>
+                            {g.inventories.length > 0 && (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 16 }}>
+                                {g.inventories.map((inv) => renderInventory(g.key, inv.category, inv.label))}
+                              </div>
+                            )}
+                            <div style={{ marginTop: 14 }}>
+                              <label style={labelStyle}>Notes</label>
+                              <textarea value={String(dv(g.key, "notes") || "")} onChange={(e) => setDisc(g.key, "notes", e.target.value)} style={taStyle} />
+                            </div>
+                          </div>
+                        );
+                      })()}
                       {sec.kind === "conditions" && (
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                           {meta.conditions.map((c) => {
@@ -1012,6 +1347,7 @@ export default function SurveyEditor({
                           })}
                         </div>
                       )}
+                      {sec.kind === "viz3d" && <Venue3D venueType={draft.venueType} measurements={draft.measurements} />}
                       {sec.kind === "photos" && (
                         <>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>

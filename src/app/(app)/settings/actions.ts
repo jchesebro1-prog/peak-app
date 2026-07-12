@@ -139,6 +139,28 @@ export async function saveSettingsAction(patch: {
 }
 
 /**
+ * Site-intake type catalog (survey-intake.ts DEFAULT_INTAKE_CATALOG
+ * overrides). Only known categories are accepted; each list is trimmed,
+ * de-blanked and capped so a bad payload can't bloat the settings row.
+ */
+export async function saveIntakeCatalogAction(catalog: Record<string, string[]>) {
+  await requirePerm("manage_users");
+  const { DEFAULT_INTAKE_CATALOG } = await import("@/lib/stores/survey-intake");
+  const clean: Record<string, string[]> = {};
+  for (const key of Object.keys(DEFAULT_INTAKE_CATALOG)) {
+    const list = catalog?.[key];
+    if (!Array.isArray(list)) continue;
+    clean[key] = list
+      .map((t) => String(t ?? "").trim())
+      .filter(Boolean)
+      .slice(0, 60);
+  }
+  await setSettings({ intakeCatalog: clean });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/**
  * Go-live reset — permanently removes all demo records so real data can be
  * imported into a clean database. Admin-only, and guarded by a typed
  * confirmation phrase so it can never fire by accident. Also turns the demo-

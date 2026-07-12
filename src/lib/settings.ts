@@ -30,6 +30,9 @@ export type AppSettingsData = {
   seedDemo: boolean;
   feedbackEmail: string;
   offices: Office[];
+  /** Site-intake type catalog overrides, keyed by category (e.g.
+   * "lighting.fixture") — see DEFAULT_INTAKE_CATALOG in survey-intake.ts. */
+  intakeCatalog?: Record<string, string[]>;
 };
 
 export async function getSettingsPatch(): Promise<Record<string, unknown>> {

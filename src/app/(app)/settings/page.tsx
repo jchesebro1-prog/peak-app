@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
+import { mergedCatalog } from "@/lib/stores/survey-intake";
 import { allUsers } from "@/lib/users";
 import { gmailEnabled, personalKey, SHARED_KEYS } from "@/lib/gmail/config";
 import { listConnections } from "@/lib/gmail/connections";
@@ -115,6 +116,7 @@ export default async function SettingsPage() {
             seedDemo: settings.seedDemo,
             feedbackEmail: settings.feedbackEmail,
           }}
+          intakeCatalog={mergedCatalog(settings.intakeCatalog)}
           offices={settings.offices.map((o) => ({
             id: o.id,
             type: o.type || "Main Office",
