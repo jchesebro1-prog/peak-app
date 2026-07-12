@@ -94,6 +94,53 @@ you can also just ask Claude Code to run.
    `jchesebro1@gmail.com`; add teammates' emails (their real sign-in
    addresses) in Settings → Team before inviting them.
 
+## 5) Gmail integration (optional — do this after sign-in works)
+
+The app runs fine without this: the Inbox stays in *simulated* mode (sends
+are logged, "Get mail" drops demo messages). Turn on real Gmail only when
+you want the Inbox to send and receive actual email. Uses the **same Google
+Cloud project** from step 4.
+
+1. **Enable the Gmail API:** console.cloud.google.com → **APIs & Services →
+   Library** → search **Gmail API** → **Enable**.
+2. **OAuth consent screen → Data access → Add or remove scopes**, add these
+   three, then Save:
+   - `.../auth/gmail.send`
+   - `.../auth/gmail.readonly`
+   - `.../auth/userinfo.email`
+
+   (These are "sensitive/restricted" scopes. While your app is in **Testing**
+   they work immediately for accounts you add under **Audience → Test users**;
+   Google only requires verification once you **Publish** to the public. For a
+   handful of company mailboxes, staying in Testing with those mailboxes as
+   test users is fine.)
+3. **APIs & Services → Credentials → your OAuth client → Authorized redirect
+   URIs**, add (replace with your real domain):
+   - `https://YOUR-APP.vercel.app/api/gmail/callback`
+   - `http://localhost:3000/api/gmail/callback` (for local testing)
+4. **Vercel → Settings → Environment Variables**, add:
+
+   | Name | Value |
+   | --- | --- |
+   | `GMAIL_ENABLED` | `true` |
+
+   Redeploy. (`AUTH_SECRET`, already set, also encrypts the stored mailbox
+   tokens — nothing else to add.)
+5. In the app: **Settings → Mailboxes** now shows **Gmail enabled**. Click
+   **Connect** on your own inbox and on each shared box (Sales / Installs /
+   Info), signing in with that mailbox's Google account and granting access.
+6. In the **Inbox**, click **Send / Receive** once — it imports the last 90
+   days of that mailbox's history, then keeps pulling new mail on each click.
+   Emails sent from the app now appear in the mailbox's Gmail **Sent** too.
+
+**Who can connect what:** you (admin) can connect any box from Settings.
+Each teammate can connect their own inbox from the same **Connect** link.
+Shared boxes are plain Gmail accounts you (or the team) hold the password to
+— connect each one once.
+
+To stop using Gmail, set `GMAIL_ENABLED` blank (or **Disconnect** a mailbox
+in Settings) — the app falls back to simulated mode; no data is lost.
+
 ## Afterwards
 
 - **Updates:** every `git push` to `main` redeploys automatically

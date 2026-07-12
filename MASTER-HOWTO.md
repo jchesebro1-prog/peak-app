@@ -141,12 +141,39 @@ The app is an installable web app (PWA) that keeps working with no signal.
   *open a job for the first time* while you have signal; once opened it's
   available offline.
 
-## 5. Gmail integration *(Phase 7 — pending)*
+## 5. Gmail integration ✅ *(Phase 7 — built; flip on when you're ready)*
 
-Will cover: enabling the Gmail API in the same Google Cloud project,
-adding the OAuth scopes + redirect URI, connecting personal and shared
-(Sales/Installs/Info) mailboxes from the Inbox screen, history import
-depth, and the forward-to-log address.
+The Inbox is wired for real Gmail but ships **off** — it stays in simulated
+mode (sends are logged, "Get mail" drops demo messages) until you enable it.
+Nothing about the rest of the app depends on it.
+
+**Turn it on** (one-time, ~15 min): the click-by-click is in **DEPLOY.md §5**
+— enable the Gmail API in the same Google project, add three scopes
+(`gmail.send`, `gmail.readonly`, `userinfo.email`) and the
+`/api/gmail/callback` redirect URI, then set `GMAIL_ENABLED=true` in Vercel.
+
+**Then, in the app:**
+- **Settings → Mailboxes** shows a "Gmail enabled" badge and a card per
+  mailbox. Click **Connect** on your own inbox and on each shared box
+  (Sales / Installs / Info); sign in as that mailbox and approve.
+- In the **Inbox**, **Send / Receive** imports that mailbox's **last 90 days**
+  and then pulls new mail each time you click it. Mail you send from the app
+  lands in the mailbox's Gmail **Sent** as well.
+- The composer's "from" picker chooses which connected mailbox a message goes
+  out as (yourself or a shared address).
+
+**How it works under the hood** (for reference): tokens are encrypted at rest
+with `AUTH_SECRET`; each mailbox keeps its own Gmail sync cursor; a message
+carries its Gmail id once sent/imported so re-syncs never duplicate. It's
+env-gated end-to-end (`lib/gmail/config.ts`) — blank `GMAIL_ENABLED` = fully
+inert.
+
+**Not yet wired (small follow-ups, see MASTER-QUESTIONS §C):** a per-user
+"Connect my mailbox" button on the Account page (admins can connect any box
+from Settings today; the connect link already authorizes a user for their own
+box); Google Calendar sync for calls/meetings (manual log for now, C5); and
+smart parsing of forward-to-`log@` messages (inbound is matched to customers
+by email address today, C6).
 
 ## 6. AI features *(Phase 8 — pending)*
 

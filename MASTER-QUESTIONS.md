@@ -56,6 +56,23 @@ guide; I do all terminal work.
   the customer). ✦ enabled once Gmail connects; suggested
   `log@peaksystemsgroup.com` ☐ different: ______
 
+> **Phase 7 built (2026-07-11).** The Gmail bridge is complete and env-gated —
+> flip on with `GMAIL_ENABLED=true` after the ~15-min Google setup in
+> **DEPLOY.md §5**; until then the Inbox stays simulated. Defaults taken:
+> C1 own + all three shared boxes (connect each from Settings → Mailboxes);
+> C2 send-as = the composer's existing "from" picker; C3 = 90-day import;
+> C4 = yes (sends land in Gmail Sent via `gmail.send`); C5 = manual log
+> (no Calendar sync yet); C6 = inbound is matched to a customer by email
+> address (dedicated `log@` forward-parsing not yet built). Small follow-ups
+> to confirm/prioritise:
+> - **C7.** Should each teammate connect their **own** inbox themselves? If
+>   yes we add a "Connect my mailbox" button on the Account page (the backend
+>   route already allows it). ✦ yes ☐ admin connects all boxes centrally
+> - **C8.** Want Google **Calendar** sync for calls/meetings (C5), or keep the
+>   manual log? ✦ manual for now ☐ add Calendar later
+> - **C9.** Do you actually use a forward-to-`log@` habit? If so we'll parse
+>   the forwarded headers to attribute to the original customer (C6). ☐ yes ☐ no
+
 ## D. AI features (Phase 8 — built, awaits Anthropic API key)
 
 Rank or tick the ones you want first; each is independently switchable.

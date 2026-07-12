@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ROLES,
   ROLE_DESC,
@@ -15,6 +15,7 @@ import {
   removeOfficeAction,
   removeUserAction,
   saveOfficeAction,
+  disconnectMailboxAction,
   saveSettingsAction,
   searchAddressAction,
   setActiveAction,
@@ -73,15 +74,39 @@ type OfficeDraft = {
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
+type MailboxVM = {
+  key: string;
+  label: string;
+  kind: "personal" | "shared";
+  desc: string;
+  connected: boolean;
+  address: string | null;
+  connectedBy: string | null;
+  initialImportDone: boolean;
+  lastSyncAt: number | null;
+};
+
+const GMAIL_BANNER: Record<string, { msg: string; ok: boolean }> = {
+  connected: { msg: "Mailbox connected. Use “Get mail” in the Inbox to import history and receive new mail.", ok: true },
+  disabled: { msg: "Gmail isn’t enabled on this deployment yet (set GMAIL_ENABLED once the API is configured — see DEPLOY §5).", ok: false },
+  denied: { msg: "Google sign-in was cancelled — the mailbox wasn’t connected.", ok: false },
+  forbidden: { msg: "You don’t have permission to connect that mailbox.", ok: false },
+  badstate: { msg: "The connect link expired or didn’t match your session — try again.", ok: false },
+  badmailbox: { msg: "Unknown mailbox.", ok: false },
+  error: { msg: "Couldn’t finish connecting the mailbox. Please try again.", ok: false },
+};
+
 export default function SettingsClient({
   meId,
   meName,
+  gmail,
   settings,
   offices,
   users,
 }: {
   meId: string;
   meName: string;
+  gmail: { enabled: boolean; mailboxes: MailboxVM[] };
   settings: {
     companyName: string;
     accent: string;
@@ -93,6 +118,9 @@ export default function SettingsClient({
   users: UserVM[];
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const gmailStatus = searchParams.get("gmail");
+  const banner = gmailStatus ? GMAIL_BANNER[gmailStatus] : null;
   const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -295,6 +323,23 @@ export default function SettingsClient({
           }}
         >
           {error}
+        </div>
+      )}
+
+      {banner && (
+        <div
+          style={{
+            background: banner.ok ? "#eaf6ef" : "#f9ece8",
+            border: `1px solid ${banner.ok ? "#cce9da" : "#f0d6cd"}`,
+            color: banner.ok ? "#1f7a52" : "#b4543a",
+            borderRadius: 10,
+            padding: "10px 14px",
+            fontSize: 13,
+            fontWeight: 500,
+            marginBottom: 16,
+          }}
+        >
+          {banner.msg}
         </div>
       )}
 
@@ -510,6 +555,151 @@ export default function SettingsClient({
               No locations yet — add one to enable automatic travel estimates.
             </div>
           )}
+        </div>
+      </section>
+
+      {/* ---- Mailboxes (Gmail) ---- */}
+      <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 14.5, fontWeight: 600 }}>Mailboxes</div>
+            <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
+              Connect Gmail so the Inbox sends and receives real email. Connect
+              your own inbox and the shared Sales / Installs / Info addresses.
+            </div>
+          </div>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              padding: "3px 10px",
+              borderRadius: 20,
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+              color: gmail.enabled ? "#1f7a52" : "#8c919c",
+              background: gmail.enabled ? "#e8f3ee" : "#f1f2f5",
+              border: `1px solid ${gmail.enabled ? "#cfe6db" : "#e4e7ec"}`,
+            }}
+          >
+            {gmail.enabled ? "Gmail enabled" : "Not enabled"}
+          </span>
+        </div>
+
+        {!gmail.enabled && (
+          <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 12, lineHeight: 1.5 }}>
+            The Gmail API isn’t configured on this deployment yet. Enable it by
+            adding the Gmail scopes to the Google project and setting{" "}
+            <b style={{ color: "#5b616e", fontFamily: "var(--font-mono)" }}>GMAIL_ENABLED=true</b>{" "}
+            — the step-by-step is in <b style={{ color: "#5b616e" }}>DEPLOY.md §5</b>. Until then the
+            Inbox stays in simulated mode.
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+          {gmail.mailboxes.map((mb) => (
+            <div
+              key={mb.key}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 13,
+                border: "1px solid #eef0f3",
+                borderRadius: 11,
+                padding: "12px 14px",
+                background: "#fafbfc",
+              }}
+            >
+              <span
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 9,
+                  background: "var(--accent-soft)",
+                  color: "color-mix(in srgb, var(--accent) 70%, #16181d)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 15,
+                  flexShrink: 0,
+                }}
+              >
+                {mb.kind === "personal" ? "👤" : "✉️"}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{mb.label}</span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      padding: "2px 9px",
+                      borderRadius: 20,
+                      flexShrink: 0,
+                      whiteSpace: "nowrap",
+                      color: "color-mix(in srgb, var(--accent) 70%, #16181d)",
+                      background: "var(--accent-soft)",
+                      border: "1px solid color-mix(in srgb, var(--accent) 22%, #fff)",
+                    }}
+                  >
+                    {mb.kind === "personal" ? "You" : "Shared"}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11,
+                    color: "#8c919c",
+                    marginTop: 2,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {mb.connected
+                    ? mb.address +
+                      (mb.connectedBy ? "  ·  by " + mb.connectedBy : "") +
+                      (mb.initialImportDone ? "  ·  history imported" : "")
+                    : mb.desc}
+                </div>
+              </div>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: "2px 9px",
+                  borderRadius: 20,
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
+                  color: mb.connected ? "#1f7a52" : "#a06a2b",
+                  background: mb.connected ? "#e8f3ee" : "#f7efe2",
+                  border: `1px solid ${mb.connected ? "#cfe6db" : "#ecdcc2"}`,
+                }}
+              >
+                {mb.connected ? "Connected" : "Not connected"}
+              </span>
+              {mb.connected ? (
+                <button
+                  className="pk-btn-outline"
+                  style={{ color: "#8c919c" }}
+                  onClick={() => run(() => disconnectMailboxAction(mb.key))}
+                >
+                  Disconnect
+                </button>
+              ) : gmail.enabled ? (
+                <a
+                  className="pk-btn-accent"
+                  href={"/api/gmail/connect?mailbox=" + encodeURIComponent(mb.key)}
+                  style={{ flexShrink: 0, textDecoration: "none" }}
+                >
+                  Connect
+                </a>
+              ) : (
+                <button className="pk-btn-outline" disabled style={{ opacity: 0.5, cursor: "not-allowed" }}>
+                  Connect
+                </button>
+              )}
+            </div>
+          ))}
         </div>
       </section>
 

@@ -218,6 +218,20 @@ export async function removeOfficeAction(id: string) {
   return { ok: true as const };
 }
 
+/* ---------------- Mailboxes (Gmail — Phase 7) ----------------
+   Connecting a mailbox is a redirect handshake (GET /api/gmail/connect →
+   Google → /api/gmail/callback), so the UI links straight to that route.
+   Disconnecting just drops the stored tokens. Both admin-gated, like the rest
+   of Settings. */
+
+export async function disconnectMailboxAction(mailboxKey: string) {
+  await requirePerm("manage_users");
+  const { removeConnection } = await import("@/lib/gmail/connections");
+  await removeConnection(mailboxKey);
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
 /** Live address search (Nominatim, server-side per Geo usage policy). */
 export async function searchAddressAction(query: string): Promise<GeoSearchHit[]> {
   await requirePerm("manage_users");

@@ -177,3 +177,50 @@ Anything you want changed, just say so — none of these are hard to reverse.
   never loaded still needs signal (the SW serves any *previously visited*
   record offline); a full pre-download of all assigned jobs is a possible
   later enhancement.
+
+## Phase 7 — Gmail integration
+
+- **D33. The Gmail bridge is env-gated and lazy; deliverMessage() stays the
+  sync local stamp.** Real Gmail send is async, but comms's `deliverMessage()`
+  runs inside doc-store *synchronous* mutate callbacks, so it can't do network
+  I/O. Decision: keep `deliverMessage()` as the optimistic local stamp (queued
+  cleared, at=now) — the entire simulated path when Gmail is off — and add an
+  async `dispatchOutbound()` that the comms mutators call AFTER the write. It
+  lazily `import()`s `lib/gmail/bridge` only when `gmailBridgeActive()` (both
+  Google creds present AND `GMAIL_ENABLED=true`). The lazy import keeps Gmail
+  code out of the simulated path and breaks the static cycle (bridge imports
+  comms). Inbound: `checkMail()` delegates to `bridge.pollInbound()` under the
+  same gate, else the canned queue. Net: with no credentials the app behaves
+  exactly as Phases 1–6 did.
+- **D34. One Google project, a SEPARATE consent for mailboxes.** Gmail reuses
+  the Auth.js Google OAuth *client* (AUTH_GOOGLE_ID/SECRET) but runs its own
+  authorization-code flow (`/api/gmail/connect` → Google → `/api/gmail/callback`)
+  requesting Gmail scopes + `access_type=offline`. Sign-in keeps its minimal
+  openid/email scopes; connecting a mailbox is an explicit, incremental extra
+  consent, so simply enabling Google SSO never starts touching mail. Scopes are
+  least-privilege: `gmail.send` (a send also lands in that account's Gmail
+  Sent — satisfies C4), `gmail.readonly` (import + poll), `userinfo.email`
+  (learn the connected address).
+- **D35. Per-mailbox connections in a relational table; tokens encrypted at
+  rest.** New `gmail_connections` table (not a doc collection — it's config,
+  not business data), one row per mailbox key (`personal:<userId>` |
+  `sales`/`installs`/`info`). Refresh/access tokens are AES-256-GCM encrypted
+  with a key derived from AUTH_SECRET (`lib/gmail/crypto.ts`); the Settings UI
+  and all reads only ever see the address + status, never token material.
+  Access tokens are refreshed transparently 60s before expiry.
+- **D36. No new npm dependency — Gmail over plain fetch.** Every Google call
+  (OAuth token, userinfo, Gmail v1 send/list/get/history/profile) is a `fetch`
+  against the documented REST endpoint; MIME is built/parsed by hand
+  (`lib/gmail/mime.ts`, plain-text bodies only). Rationale: this locked-down
+  machine has no Homebrew/global toolchain and we've kept the dependency
+  surface tiny all along; `googleapis` would add a large tree for a handful of
+  endpoints. Inbound history import runs lazily on the first "Get mail" after
+  connect (90-day window, `newer_than:90d`), then incrementally via the Gmail
+  `history.list` cursor stored on the connection row.
+- **D37. Mailbox connection UI lives in admin Settings for v1.** The Settings
+  "Mailboxes" card connects the admin's own inbox + all shared boxes. The
+  `/api/gmail/connect` route already authorizes any user to connect their OWN
+  personal box (self, no admin needed), so surfacing a per-user "Connect my
+  mailbox" button on the Account page is a thin follow-up (MASTER-QUESTIONS
+  §C) — deferred to keep Phase 7 scoped, since the go-live team is small and
+  Jeff (admin) can manage connections centrally.

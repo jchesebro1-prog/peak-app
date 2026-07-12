@@ -15,6 +15,13 @@
       "when": 1783803941597,
       "tag": "0001_stores",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783826178948,
+      "tag": "0002_round_nico_minoru",
+      "breakpoints": true
     }
   ]
 }

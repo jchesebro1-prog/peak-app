@@ -2,15 +2,58 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
 import { allUsers } from "@/lib/users";
+import { gmailEnabled, personalKey, SHARED_KEYS } from "@/lib/gmail/config";
+import { listConnections } from "@/lib/gmail/connections";
 import SettingsClient from "./settings-client";
 
 export const metadata = { title: "Settings — Peak Backend" };
+
+const SHARED_LABEL: Record<string, string> = {
+  sales: "Sales",
+  installs: "Installs",
+  info: "Info",
+};
 
 export default async function SettingsPage() {
   const me = await requireUser();
   const isAdmin = can("manage_users", me.roles);
   const settings = await getSettings();
   const users = isAdmin ? await allUsers() : [];
+
+  // ---- Mailboxes (Gmail) — admin surface, env-gated ----
+  const gmailOn = gmailEnabled();
+  const connections = isAdmin && gmailOn ? await listConnections() : [];
+  const connByKey = new Map(connections.map((c) => [c.mailboxKey, c]));
+  const myKey = personalKey(me.id);
+  const mailboxVMs = [
+    {
+      key: myKey,
+      label: me.name,
+      kind: "personal" as const,
+      desc: "Your own inbox — send as yourself and log your threads.",
+    },
+    ...SHARED_KEYS.map((k) => ({
+      key: k as string,
+      label: SHARED_LABEL[k] || k,
+      kind: "shared" as const,
+      desc:
+        k === "sales"
+          ? "Quotes, bids & customer questions."
+          : k === "installs"
+            ? "Projects, scheduling & field coordination."
+            : "General inbound — the address on the website.",
+    })),
+  ].map((mb) => {
+    const c = connByKey.get(mb.key);
+    return {
+      ...mb,
+      connected: !!c,
+      address: c?.address || null,
+      connectedBy: c?.connectedBy || null,
+      initialImportDone: c?.initialImportDone ?? false,
+      lastSyncAt: c?.lastSyncAt ?? null,
+    };
+  });
 
   return (
     <div className="pk-content" style={{ maxWidth: 1080, padding: "26px 30px 64px" }}>
@@ -54,6 +97,7 @@ export default async function SettingsPage() {
         <SettingsClient
           meId={me.id}
           meName={me.name}
+          gmail={{ enabled: gmailOn, mailboxes: mailboxVMs }}
           settings={{
             companyName: settings.companyName,
             accent: settings.accent,

@@ -142,6 +142,11 @@ export type CommMessage = {
   author: string;
   body: string;
   queued?: boolean; // offline outbox flag — cleared by deliverMessage()
+  // Gmail bridge (Phase 7) — set once a message is delivered to / imported from
+  // Gmail; absent in the simulated path and for calls/meetings.
+  gmailId?: string; // Gmail message id (delivered/imported)
+  gmailThreadId?: string; // Gmail thread id
+  gmailMessageId?: string; // RFC-2822 Message-ID header (for reply threading)
 };
 
 export type CommDraft = {
@@ -176,6 +181,7 @@ export type CommThread = {
   syncState?: SyncState;
   syncedAt?: number | null;
   rev?: number;
+  gmailThreadId?: string; // Gmail thread id, once any message is bridged (Phase 7)
 };
 
 function mid(n: number): string {
@@ -378,16 +384,46 @@ export function online(): boolean {
 }
 
 /* ------------------------------------------------------------------
- * >>> GMAIL BRIDGE SEAM <<<
- * The prototype cannot open a live mail connection; "delivery" is
- * simulated. Every outbound email funnels through this ONE function,
- * which today just stamps the message sent (at = now, queued cleared).
- * The real Gmail bridge replaces the body of deliverMessage() — and
- * checkMail() below for inbound — and nothing else changes.
+ * >>> GMAIL BRIDGE SEAM <<<  (Phase 7 wired)
+ * deliverMessage() is the SYNCHRONOUS local stamp — it runs inside the
+ * doc-store mutate callbacks (which must stay sync) and marks a message
+ * optimistically sent (at = now, queued cleared). This is the whole story
+ * when the Gmail gate is OFF (dev + any deployment without credentials):
+ * behaviour is identical to the prototype's simulation.
+ *
+ * The real NETWORK delivery is async, so it can't live in a sync mutate.
+ * When gmailBridgeActive() is true, the async comms mutators (create /
+ * addMessage / flushOutbox) call dispatchOutbound() AFTER the write, which
+ * lazily loads lib/gmail/bridge and actually sends via Gmail, stamping the
+ * Gmail ids back onto the message. checkMail() likewise delegates inbound to
+ * the bridge's pollInbound(). The lazy import keeps the Gmail code out of the
+ * simulated path entirely and avoids a static import cycle (bridge imports
+ * comms). See DECISIONS D33.
  * ------------------------------------------------------------------ */
 function deliverMessage(msg: CommMessage): void {
   msg.at = now();
   if (msg.queued) msg.queued = false;
+}
+
+/** Env gate — mirrors lib/gmail/config.gmailEnabled() without importing it
+ *  (keeps this store dependency-light and cycle-free). */
+function gmailBridgeActive(): boolean {
+  return (
+    !!process.env.AUTH_GOOGLE_ID &&
+    !!process.env.AUTH_GOOGLE_SECRET &&
+    process.env.GMAIL_ENABLED === "true"
+  );
+}
+
+/** Post-write outbound delivery — no-op unless the Gmail gate is on. */
+async function dispatchOutbound(threadId: string): Promise<void> {
+  if (!gmailBridgeActive()) return;
+  try {
+    const { deliverThreadOutbound } = await import("@/lib/gmail/bridge");
+    await deliverThreadOutbound(threadId);
+  } catch (err) {
+    console.error("[gmail] outbound dispatch failed:", err);
+  }
 }
 
 /* ---- pure thread helpers -------------------------------------------------- */
@@ -698,6 +734,7 @@ export async function create(
     rev: 1,
   };
   await upsertDoc<CommThread>("comms", rec);
+  if (dir === "out" && !msg.queued) await dispatchOutbound(id); // GMAIL BRIDGE SEAM
   return rec;
 }
 
@@ -721,8 +758,9 @@ export async function addMessage(
   threadId: string,
   m: AddMessageInput = {}
 ): Promise<CommThread | null> {
-  return patchDoc<CommThread>("comms", threadId, (t) => {
-    const dir: Direction = m.direction === "in" ? "in" : "out";
+  const dir: Direction = m.direction === "in" ? "in" : "out";
+  let queued = false;
+  const res = await patchDoc<CommThread>("comms", threadId, (t) => {
     const channel = asChannel(m.channel, t.channel || "email");
     const me = m.me || DEFAULT_USER;
     const author =
@@ -736,8 +774,11 @@ export async function addMessage(
       body: m.body || "",
     };
     if (dir === "out") {
-      if (online()) deliverMessage(msg); // GMAIL BRIDGE SEAM
-      else msg.queued = true;
+      if (online()) deliverMessage(msg); // GMAIL BRIDGE SEAM (local stamp)
+      else {
+        msg.queued = true;
+        queued = true;
+      }
     }
     t.messages = (t.messages || []).concat([msg]);
     t.status = m.status || statusFromDirection(dir);
@@ -746,6 +787,11 @@ export async function addMessage(
     if (t.status !== "draft") t.archived = false;
     touch(t);
   });
+  // real Gmail send happens after the optimistic write (async, gated)
+  if (res && dir === "out" && !queued && m.channel !== "call" && m.channel !== "meeting") {
+    await dispatchOutbound(threadId);
+  }
+  return res;
 }
 
 /** Reply to a thread as an email (honours offline → Outbox). */
@@ -886,12 +932,13 @@ export async function flushOutbox(): Promise<number> {
     await patchDoc<CommThread>("comms", t.id, (d) => {
       (d.messages || []).forEach((m) => {
         if (m.queued) {
-          deliverMessage(m); // GMAIL BRIDGE SEAM
+          deliverMessage(m); // GMAIL BRIDGE SEAM (local stamp)
           n++;
         }
       });
       d.updatedAt = now();
     });
+    await dispatchOutbound(t.id); // real send of the just-unqueued messages (gated)
   }
   return n;
 }
@@ -944,6 +991,16 @@ function incomingQueue(): IncomingItem[] {
 export async function checkMail(): Promise<string | null> {
   await flushOutbox();
   if (!online()) return null;
+  // Real inbound poll when the Gmail gate is on; canned simulation otherwise.
+  if (gmailBridgeActive()) {
+    try {
+      const { pollInbound } = await import("@/lib/gmail/bridge");
+      return await pollInbound();
+    } catch (err) {
+      console.error("[gmail] inbound poll failed:", err);
+      return null;
+    }
+  }
   const q = incomingQueue();
   if (!q.length) return null;
   const item = q.shift();

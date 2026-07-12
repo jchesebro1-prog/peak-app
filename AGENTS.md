@@ -97,7 +97,14 @@ See `.env.example`.
    Nav sync chip + "Work offline" toggle. Capture editors (Field Survey,
    Inspections, Flame/Repair results, Field Work) save through the outbox seam
    and sync on reconnect. Decisions D26–D32; deviations in MASTER-QUESTIONS.
-7. ⬜ Gmail integration (OAuth, read/send/threads, shared boxes)
+7. ✅ Gmail integration — env-gated bridge replacing the comms
+   `deliverMessage()`/`checkMail()` seam. Own OAuth flow (`/api/gmail/connect`
+   + `/callback`) reusing the Auth.js Google client with Gmail scopes;
+   per-mailbox tokens (encrypted) in the new `gmail_connections` table;
+   `lib/gmail/*` sends via Gmail (lands in Sent) and imports 90 days + polls
+   incrementally; Settings → Mailboxes connects personal + shared boxes. Inert
+   unless `GMAIL_ENABLED=true`. Decisions D33–D37; follow-ups MASTER-QUESTIONS
+   C7–C9.
 8. ⬜ AI features (Claude API: renewal drafts, thread summaries, import extraction)
 9. ⬜ Data migration + go-live
 

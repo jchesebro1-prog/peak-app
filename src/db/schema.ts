@@ -40,3 +40,29 @@ export const appSettings = pgTable("app_settings", {
 
 export type UserRow = typeof users.$inferSelect;
 export type NewUserRow = typeof users.$inferInsert;
+
+/**
+ * Gmail mailbox connections (Phase 7). One row per connected mailbox — a
+ * person's own inbox (`personal:<userId>`) or a shared box (`sales`/`installs`/
+ * `info`). Holds the OAuth tokens (encrypted at rest, see lib/gmail/crypto.ts)
+ * and the Gmail sync cursor. Empty until someone connects a mailbox from
+ * Settings; the whole feature is env-gated (lib/gmail/config.ts).
+ */
+export const gmailConnections = pgTable("gmail_connections", {
+  mailboxKey: text("mailbox_key").primaryKey(), // "personal:u1" | "sales" | "installs" | "info"
+  address: text("address").notNull(), // the Gmail address that authorized
+  userId: text("user_id"), // set for personal mailboxes
+  connectedBy: text("connected_by").notNull(), // display name of the connector
+  refreshToken: text("refresh_token").notNull(), // encrypted
+  accessToken: text("access_token"), // encrypted, cached until expiry
+  expiresAt: bigint("expires_at", { mode: "number" }), // access-token expiry (epoch-ms)
+  scope: text("scope"),
+  historyId: text("history_id"), // Gmail incremental-sync cursor
+  initialImportDone: boolean("initial_import_done").notNull().default(false),
+  lastSyncAt: bigint("last_sync_at", { mode: "number" }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});
+
+export type GmailConnectionRow = typeof gmailConnections.$inferSelect;
+export type NewGmailConnectionRow = typeof gmailConnections.$inferInsert;
