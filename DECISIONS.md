@@ -266,3 +266,31 @@ Anything you want changed, just say so — none of these are hard to reverse.
   itself re-checks the gate (URL access) and shows a "not enabled" note when
   off. The snapshot is company-wide but scoped to the user's own Inbox view for
   the inbox lines, matching what they already see across the app.
+
+## Phase 9 — Data migration & go-live (2026-07-11)
+
+- **D43. "Clear demo data" is a hard delete, and the exact inverse of the
+  seed.** `clearDemoData()` (src/db/seed-data.ts) removes every row from the
+  same collection list `seedDemoCollections()` fills — customers, leads,
+  quotes, surveys, comms, flame/repair jobs, inspections, projects, designs,
+  and catalog parts — via a new `clearCollection()` that DELETEs rows outright
+  rather than tombstoning. Rationale: go-live runs on a fresh prod DB with no
+  field clients holding demo data yet, so soft-delete tombstones would only be
+  noise; an empty table is the honest starting point. The two functions read
+  from one `DEMO_SEEDS` list so seed and clear can never drift.
+- **D44. The reset keeps configuration, wipes only demo business records.**
+  Team/users, app settings (company name, accent, locations), estimating-rate
+  blobs, and Gmail connections are deliberately untouched — they're real setup,
+  not fixtures. So the go-live path is: keep your team + settings, clear the
+  demo records, import your real data.
+- **D45. Destructive action gated by a typed `CLEAR` confirmation, Admin-only.**
+  `clearDemoDataAction` requires `manage_users` and the literal phrase, and it
+  also flips `seedDemo` off so the collections don't re-seed on next boot. It
+  lives in Settings → Beta next to the demo-data toggle (its natural pair),
+  not behind a CLI, so a non-developer owner can run go-live themselves.
+- **D46. `npm run db:export` is one timestamped JSON of the whole database.**
+  scripts/export.ts dumps every doc collection + blobs + users + settings +
+  notif prefs + Gmail connections to `backups/peak-backup-<stamp>.json`
+  (gitignored — it contains encrypted tokens). One portable file is simpler for
+  a non-developer to store in Google Drive (MASTER-QUESTIONS I5) than a
+  per-table dump; it respects `DATABASE_URL` so the same command backs up Neon.

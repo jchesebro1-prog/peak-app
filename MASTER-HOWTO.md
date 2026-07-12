@@ -107,8 +107,11 @@ Settings "clear all", a survey store-type tidy).
 - **Branding:** Settings → Branding (name + accent color, app-wide).
 - **Estimating rates:** General → Estimating Rules — live numbers used by
   the quote engines; export CSV/JSON from that screen. ✅
-- **Backups:** Neon keeps point-in-time restore automatically. Monthly
-  export: run `npm run db:export` *(lands Phase 9)* or download from Neon.
+- **Backups:** Neon keeps point-in-time restore automatically. For a
+  portable snapshot, run `npm run db:export` (Claude Code does this for
+  you) — it writes one timestamped JSON of every record to `backups/`,
+  which you can drop in Google Drive. Set `DATABASE_URL=...` first to back
+  up the live Neon database rather than the local one. ✅
 - **Updates:** tell Claude Code what you want changed; it commits and
   pushes; Vercel redeploys automatically.
 
@@ -216,12 +219,85 @@ present. `AI_TIMEOUT_MS` caps each request (default 60000).
 short request). Usage is entirely under your control — the features only run
 when someone clicks them.
 
-## 7. Real data migration & go-live *(Phase 9 — pending)*
+## 7. Real data migration & go-live ✅ *(Phase 9 — tooling built)*
 
-Will cover: the Import screen workflow per data type (customers, projects,
-quote history, compliance history, catalog), the spreadsheet templates,
-dedupe rules, turning off demo data, inviting the team, and the cutover
-checklist.
+Everything you need to move Peak from demo data to your real business is in
+the app. The one thing still on **you**: the source files (where your
+customers, projects, and compliance history live today) and the hosting
+accounts from §2 — see MASTER-QUESTIONS §I and item A.
+
+### The import hub — General → Import / Export
+
+One screen handles every data type. Each type has a card showing how many
+records are already in Peak. For each one you:
+
+1. **Download the template** — a blank spreadsheet (CSV) with the exact
+   columns Peak expects and one example row. Open it in Excel or Google
+   Sheets, paste your data under the headers, save.
+2. **Bring the data in** — either **upload the CSV**, or **paste** rows
+   straight from a spreadsheet. Column headers auto-map even if yours are
+   named differently (e.g. "Company" → Customer name). If AI is on
+   (§6), the paste box also turns *messy* text — an emailed price list, a
+   copied table — into clean rows for you.
+3. **Preview & confirm** — Peak shows exactly what will be created or
+   updated, and flags rows with problems, **before** anything is saved.
+   Nothing is written until you confirm.
+
+The types, and what each is matched on to avoid duplicates (**dedupe key**):
+
+| Type | Matched on (duplicate check) |
+|------|------------------------------|
+| Customers & contacts | customer name |
+| Leads | organization + email |
+| Flame-test compliance | customer + venue |
+| Rigging inspections | customer + venue + date |
+| Field surveys | customer + venue |
+| Team members | email (or name) |
+| Quotes | quote name |
+| Active projects | project name |
+| Catalog / price book | part number (Catalog → Import price book) |
+
+On confirm you choose how matches are handled: **skip** them, **update**
+them, or **create** anyway. Start with customers (everything else references
+them by name), then leads/quotes/projects, then the compliance history.
+
+### The go-live sequence
+
+1. **Back up** what you have: Claude Code runs `npm run db:export`.
+2. **Export a copy of the demo catalog and estimating rates** if you want a
+   starting point to edit (Import/Export → Catalog, and Estimating Rules →
+   Export). Your real numbers replace these in-app.
+3. **Clear the demo data:** Settings → Beta → **Clear demo data (go-live)**.
+   Type `CLEAR` to confirm. This permanently removes every demo customer,
+   lead, quote, project, flame test, inspection, survey and catalog part so
+   you start from an empty, clean database. It **keeps** your team, company
+   settings (name, accent, locations), estimating rates, and any mailbox
+   connections. It also turns the "Demo data" switch off so nothing
+   re-seeds.
+4. **Import your real data** through the hub, in the order above.
+5. **Set your real estimating rates:** General → Estimating Rules.
+6. **Invite the team:** Settings → Team → Add user (or import the Team
+   type). Deactivate rather than remove to keep history attribution.
+7. **Spot-check** each area against a few known records before the team
+   starts using it.
+
+### Cutover checklist
+
+- [ ] Hosting live (§2) — the app is on the internet at your real URL.
+- [ ] `npm run db:export` backup taken and saved off-app.
+- [ ] Demo data cleared (Settings → Beta).
+- [ ] Customers imported and spot-checked.
+- [ ] Leads / quotes / active projects imported.
+- [ ] Flame-test + inspection compliance history imported (renewal due
+      dates track a year from the last test).
+- [ ] Catalog / price book imported (Catalog → Import price book).
+- [ ] Estimating rates set to your real numbers.
+- [ ] Team invited; each person can sign in and sees the right areas.
+- [ ] Phones: install the app on field devices (§4).
+- [ ] One real quote and one real flame-test letter produced end-to-end.
+
+Recommended cutover style (MASTER-QUESTIONS I6): switch area by area as each
+is verified, rather than everything at once.
 
 ## 8. If something breaks
 

@@ -138,6 +138,25 @@ export async function saveSettingsAction(patch: {
   return { ok: true as const };
 }
 
+/**
+ * Go-live reset — permanently removes all demo records so real data can be
+ * imported into a clean database. Admin-only, and guarded by a typed
+ * confirmation phrase so it can never fire by accident. Also turns the demo-
+ * data toggle off, so the collections aren't re-seeded on the next boot.
+ * Leaves team, settings, estimating rates and Gmail connections intact.
+ */
+export async function clearDemoDataAction(confirm: string) {
+  await requirePerm("manage_users");
+  if (confirm !== "CLEAR") {
+    return { ok: false as const, error: 'Type CLEAR to confirm.' };
+  }
+  const { clearDemoData } = await import("@/db/seed-data");
+  const cleared = await clearDemoData();
+  await setSettings({ seedDemo: false });
+  revalidatePath("/", "layout");
+  return { ok: true as const, cleared };
+}
+
 /* ---------------- Locations (offices) ----------------
    Port of Settings.dc.html saveOffice/removeOffice — the offices array is a
    field of the AppSettings blob (setSettings({ offices })). Coords come from

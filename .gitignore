@@ -43,3 +43,6 @@ next-env.d.ts
 
 # local embedded database + env
 .data/
+
+# database backups (npm run db:export) — contain encrypted tokens, keep private
+/backups/

@@ -105,8 +105,18 @@ See `.env.example`.
    incrementally; Settings → Mailboxes connects personal + shared boxes. Inert
    unless `GMAIL_ENABLED=true`. Decisions D33–D37; follow-ups MASTER-QUESTIONS
    C7–C9.
-8. ⬜ AI features (Claude API: renewal drafts, thread summaries, import extraction)
-9. ⬜ Data migration + go-live
+8. ✅ AI features — env-gated Anthropic layer (renewal drafts, thread/customer
+   summaries, import extraction, quote scope/line drafting, an "ask your
+   business data" assistant). Inert unless `ANTHROPIC_API_KEY` is set; AI
+   drafts, humans always send. Decisions D38–D42; follow-ups MASTER-QUESTIONS
+   D1–D8.
+9. ✅ Data migration + go-live (tooling) — the Import/Export hub (per-type
+   templates, dedupe, paste + AI extraction, preview→confirm), a
+   `Clear demo data (go-live)` reset (Settings → Beta) that wipes demo records
+   but keeps team/settings/rates, and `npm run db:export` full backup. Guide +
+   cutover checklist in MASTER-HOWTO §7. Decisions D43–D46. Remaining is
+   Jeff-gated: real source files (MASTER-QUESTIONS §I) + hosting accounts
+   (item A / DEPLOY.md), then a real-data dry run.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

@@ -40,6 +40,7 @@ Google sign-in credentials, each with exact values to paste.
 | `npm run dev` | Run locally at localhost:3000 |
 | `npm run build` | Production build (applies DB migrations when `DATABASE_URL` is set) |
 | `npm run db:seed` | Load the starter roster/settings into the database (safe to re-run; used once when setting up production) |
+| `npm run db:export` | Write a full-database backup to `backups/*.json` (respects `DATABASE_URL` for the live DB) |
 | `npm run db:reset-local` | Wipe the local dev database and start fresh |
 | `npm run db:generate` | (development) create a migration after schema changes |
 

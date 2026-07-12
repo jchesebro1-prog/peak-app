@@ -178,7 +178,14 @@ Estimating Rules — these just need real values before go-live)
   prototype downscaled a captured image to a data URL). ✦ enable later with
   the Phase 6 offline capture work ☐ needed sooner: ______
 
-## I. Data migration & go-live (Phase 9 — tooling built)
+## I. Data migration & go-live (Phase 9 — tooling built ✅)
+
+The whole go-live toolkit now exists and is verified: the Import/Export hub
+with per-type templates + dedupe (Phase 5), AI paste-extraction (Phase 8),
+a one-click **Clear demo data (go-live)** reset in Settings → Beta, and a
+`npm run db:export` full backup. Step-by-step in MASTER-HOWTO §7. What's
+left is *your* input — the answers below plus item A (accounts) — and a
+dry run on your real files.
 
 - **I1.** Where does current data live? Per type — customers: ______ ·
   active projects: ______ · quote history: ______ · flame-test/inspection

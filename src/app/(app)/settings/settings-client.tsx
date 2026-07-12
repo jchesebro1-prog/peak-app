@@ -11,6 +11,7 @@ import {
 } from "@/lib/team";
 import {
   addUserAction,
+  clearDemoDataAction,
   geocodeCityAction,
   removeOfficeAction,
   removeUserAction,
@@ -149,6 +150,25 @@ export default function SettingsClient({
 
   const saveSetting = (patch: Parameters<typeof saveSettingsAction>[0]) =>
     run(() => saveSettingsAction(patch));
+
+  // ---- Go-live: clear demo data ----
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState("");
+  const [clearDone, setClearDone] = useState<string | null>(null);
+  const clearDemoData = () =>
+    startTransition(async () => {
+      setError(null);
+      setClearDone(null);
+      const res = await clearDemoDataAction(clearConfirm.trim().toUpperCase());
+      if (!res.ok) {
+        setError(res.error || "Something went wrong.");
+        return;
+      }
+      setClearConfirm("");
+      setClearOpen(false);
+      setClearDone(`Removed ${res.cleared} demo record${res.cleared === 1 ? "" : "s"}. The app is ready for your real data.`);
+      router.refresh();
+    });
 
   // ---- Locations (offices) ----
   // officeModal: null | "__new__" | officeId
@@ -839,6 +859,84 @@ export default function SettingsClient({
           </div>
           <Toggle on={settings.seedDemo} onChange={(v) => saveSetting({ seedDemo: v })} />
         </div>
+
+        {/* Go-live: clear demo data */}
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+            <div>
+              <div style={{ fontSize: 13.5, fontWeight: 600 }}>Clear demo data (go-live)</div>
+              <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2, maxWidth: 460 }}>
+                Permanently removes every demo customer, lead, quote, project,
+                flame test, inspection, survey and catalog part so you can
+                import your real data into a clean database. Keeps your team,
+                company settings, estimating rates and mailbox connections.
+                This cannot be undone — export a backup first.
+              </div>
+            </div>
+            {!clearOpen && (
+              <button
+                className="pk-btn-danger"
+                style={{ whiteSpace: "nowrap" }}
+                onClick={() => {
+                  setClearDone(null);
+                  setClearOpen(true);
+                }}
+              >
+                Clear demo data…
+              </button>
+            )}
+          </div>
+          {clearOpen && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: "12px 14px",
+                border: "1px solid #e7c3bd",
+                background: "#fbf3f1",
+                borderRadius: 8,
+                maxWidth: 460,
+              }}
+            >
+              <div style={{ fontSize: 12.5, color: "#8a3a2a", marginBottom: 8 }}>
+                Type <strong>CLEAR</strong> to permanently remove all demo records.
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  style={{ ...inputStyle, fontFamily: "var(--font-mono)", maxWidth: 140 }}
+                  value={clearConfirm}
+                  placeholder="CLEAR"
+                  autoFocus
+                  onChange={(e) => setClearConfirm(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && clearConfirm.trim().toUpperCase() === "CLEAR") clearDemoData();
+                  }}
+                />
+                <button
+                  className="pk-btn-danger"
+                  disabled={clearConfirm.trim().toUpperCase() !== "CLEAR"}
+                  onClick={clearDemoData}
+                >
+                  Remove all demo data
+                </button>
+                <button
+                  className="pk-btn-outline"
+                  onClick={() => {
+                    setClearOpen(false);
+                    setClearConfirm("");
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          {clearDone && (
+            <div style={{ marginTop: 10, fontSize: 12.5, color: "#1f7a52", fontWeight: 500 }}>
+              {clearDone}
+            </div>
+          )}
+        </div>
+
         <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7", maxWidth: 380 }}>
           <label style={labelStyle}>Feedback email</label>
           <input

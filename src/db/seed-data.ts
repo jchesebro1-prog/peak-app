@@ -1,7 +1,7 @@
 import { users, appSettings } from "./schema";
 import type { Db } from "./index";
 import { IDENTITY, emailFor } from "@/lib/team";
-import { listDocs, upsertDoc, type Doc } from "./doc-store";
+import { listDocs, upsertDoc, clearCollection, type Doc } from "./doc-store";
 import type { CollectionName } from "./doc-tables";
 import { customersSeed } from "./seeds/customers";
 import { quotesSeed } from "./seeds/quotes";
@@ -117,6 +117,24 @@ export async function seedDemoCollections(): Promise<number> {
     }
   }
   return seeded;
+}
+
+/** Collections filled by the demo seed — the surface a go-live reset wipes. */
+export const DEMO_COLLECTIONS: CollectionName[] = DEMO_SEEDS.map(([coll]) => coll);
+
+/**
+ * Go-live reset — the inverse of seedDemoCollections. Hard-deletes every
+ * demo business/catalog record so real data can be imported into a clean
+ * database. Deliberately leaves team members, app settings (company name,
+ * accent, offices), estimating-rate blobs, and Gmail connections untouched —
+ * those are real configuration, not demo fixtures. Returns rows removed.
+ */
+export async function clearDemoData(): Promise<number> {
+  let cleared = 0;
+  for (const coll of DEMO_COLLECTIONS) {
+    cleared += await clearCollection(coll);
+  }
+  return cleared;
 }
 
 export async function seedIfEmpty(db: Db) {

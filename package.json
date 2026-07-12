@@ -11,6 +11,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx scripts/seed.ts",
+    "db:export": "tsx scripts/export.ts",
     "db:reset-local": "rm -rf .data && npm run db:seed"
   },
   "dependencies": {

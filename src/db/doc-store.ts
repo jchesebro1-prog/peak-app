@@ -120,6 +120,20 @@ export async function softDeleteDoc(
     .where(eq(t.id, id));
 }
 
+/**
+ * Hard-delete every document in a collection. Unlike softDeleteDoc, this
+ * removes the rows entirely (no tombstones) — used only by the go-live
+ * "clear demo data" reset, where the goal is a genuinely empty table before
+ * real records are imported. Returns the number of rows removed.
+ */
+export async function clearCollection(coll: CollectionName): Promise<number> {
+  const db = await getDb();
+  const t = table(coll);
+  const rows = await db.select({ id: t.id }).from(t);
+  if (rows.length) await db.delete(t);
+  return rows.length;
+}
+
 /** Office triage subdoc — the only writer of `review` (port of CloudStore.setReview). */
 export async function setReview(
   coll: CollectionName,
