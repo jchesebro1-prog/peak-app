@@ -294,3 +294,35 @@ Anything you want changed, just say so — none of these are hard to reverse.
   (gitignored — it contains encrypted tokens). One portable file is simpler for
   a non-developer to store in Google Drive (MASTER-QUESTIONS I5) than a
   per-table dump; it respects `DATABASE_URL` so the same command backs up Neon.
+
+## Site Intake extension (built 2026-07-12)
+
+- **D47. Site Intake ships as an extension of Field Surveys, not a new module.**
+  Jeff's site-intake sketch + module spec (dictated 2026-07-11; ideas ledger
+  #45) called for a tiered venue intake with discipline branches. ~60% of the
+  general form already existed on the survey record, and offline capture — a
+  hard requirement in the spec — was already solved by the survey outbox, so
+  the intake fields live on `SurveyRecord` and the editor gains a "Site
+  intake" group. Venue identity keeps riding customers/locations; no separate
+  Venue table.
+- **D48. Tier-1 "kill questions" are a soft gate.** Venue name, contact
+  name/email/phone, stage width + depth must be answered before the four
+  discipline intakes (Rigging / Curtain / Lighting / AV) unlock, but the
+  record always saves as a draft — a rep in the field never loses work. The
+  sketch left gate strictness open; Jeff chose soft (2026-07-12). Width/depth
+  accept the venue-type-specific quick-measurement keys, so a black-box room
+  width satisfies "stage width".
+- **D49. Lighting + AV get structured inventories; Rigging + Curtain stay
+  free-text (v1).** Inventory rows are type + quantity + attention-flag +
+  note, with types from an admin-editable catalog (Settings → "Site intake —
+  type catalog", stored as a settings patch over `DEFAULT_INTAKE_CATALOG`).
+  Standardized types are the future join key to the quote engine — this
+  module deliberately carries **no pricing** (spec decision #3).
+- **D50. Intake status is derived, not hand-set — except the last step.**
+  draft → general-complete → discipline-added derive from the data
+  (tier-1 completeness, any discipline/inventory content); ready-for-quote is
+  an explicit flag the user sets from the Kill-questions card. Status shows
+  as a chip in the editor header and on survey list cards (hidden while
+  draft, since every pre-intake survey is a draft). Model lives in
+  `src/lib/stores/survey-intake.ts` — a pure module shared by the DB-backed
+  store and the client editor.
