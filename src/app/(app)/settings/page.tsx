@@ -63,9 +63,14 @@ export default async function SettingsPage() {
           }}
           offices={settings.offices.map((o) => ({
             id: o.id,
+            type: o.type || "Main Office",
             name: o.name,
-            line: `${o.street}, ${o.city}, ${o.state} ${o.zip}`,
-            phone: o.phone || "",
+            street: o.street || "",
+            city: o.city || "",
+            state: o.state || "",
+            zip: o.zip || "",
+            lat: o.lat,
+            lng: o.lng,
           }))}
           users={users.map((u) => ({
             id: u.id,

@@ -28,7 +28,7 @@ and migrations apply themselves during the build.
 **Who can sign in:** active people on Settings → Team (email or their
 `googleEmail`). Add a teammate there before inviting them.
 
-## 2b. What's usable today (Phases 1–4 ✅)
+## 2b. What's usable today (Phases 1–5 ✅)
 
 Signed in, you can already drive the whole **Sales** side against real data:
 - **Home** — live dashboard (pipeline value, win rate, inbox waiting, your
@@ -70,17 +70,43 @@ A few service follow-ups are parked for your call in MASTER-QUESTIONS
 quote/report screen, renovation-quote back-link; G1: unify the report
 letterhead once the final logo files land).
 
-Installs and the General tools (Projects, Scheduling, Customers, Reports,
-Import…) are the next phases — their nav tabs currently open a "coming in
-Phase N" placeholder.
+And now the whole **Installs** side + **General** tools (Phase 5):
+- **Projects** — the project book (active / at-risk / orders / complete), each
+  opening to procurement lines, deliveries, crew & schedule, an install
+  timeline, and sign-off. Won quotes flow in automatically.
+- **Schedule** — the crew board and project timeline: book/reschedule crews
+  onto jobs, week/zoom navigation, route map.
+- **Field Work** — the on-site day view: today's jobs, task checklists, field
+  notes, and time logging for the crew.
+- **Customers** — searchable directory with open/won rollups + a map, and a
+  full customer record (locations with travel estimates, contacts,
+  communications, and every quote / project / survey for that account).
+- **Field Survey** — the survey list (requested → scheduled → on-site →
+  completed) and the field **capture editor** (venue facts, measurements by
+  venue type, beams/rigging/FOH, conditions, photos, notes).
+- **Catalog** — browse/search/edit the parts catalog, and import a price book
+  by pasting a CSV.
+- **Import / Export** — move records in or out one data type at a time
+  (paste-CSV import with preview→confirm; CSV/JSON export + blank templates).
+- **Reports** — Sales (pipeline, win rate, top customers, by-estimator) and
+  Installs (backlog, billing forecast, margin, completion timeline) dashboards.
+- **Estimating Rules** — edit every rate & formula the estimators run on, with
+  live/reference tags, defaults, reset, and CSV/JSON export.
+- **Settings** now also manages office **Locations** (travel origins) and each
+  person's **Account → to-do notifications**.
+
+Deliberate Phase 5 deviations parked for your call are in MASTER-QUESTIONS
+(H2/H3 drag-scheduling + note photos; J1–J7: customer-record fields, derived
+account owner, import losslessness, access gates, Reports sourcing table,
+Settings "clear all", a survey store-type tidy).
 
 ## 3. Day-to-day operations
 
 - **Add/remove team members:** Settings → Team (Admin only). Deactivate
   instead of remove to keep history attribution.
 - **Branding:** Settings → Branding (name + accent color, app-wide).
-- **Estimating rates:** Settings → Estimating Rules — live numbers used by
-  the quote engines; export CSV/JSON from that screen. *(lands Phase 5)*
+- **Estimating rates:** General → Estimating Rules — live numbers used by
+  the quote engines; export CSV/JSON from that screen. ✅
 - **Backups:** Neon keeps point-in-time restore automatically. Monthly
   export: run `npm run db:export` *(lands Phase 9)* or download from Neon.
 - **Updates:** tell Claude Code what you want changed; it commits and

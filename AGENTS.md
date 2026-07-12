@@ -84,8 +84,13 @@ See `.env.example`.
    rubric/measurements/issue-library/findings, client report). Won repair
    quotes now auto-spawn repair jobs. Open follow-ups logged in MASTER-QUESTIONS
    F9–F11, G1.
-5. ⬜ Installs + General (Projects, Scheduling, Field Work, Customers,
-   Surveys, Import, Reports, Estimating Rules, full Settings)
+5. ✅ Installs + General — Projects (book + procurement/crew/timeline/sign-off),
+   Schedule (crew board + project timeline), Field Work (on-site day view),
+   Customers (directory + full customer record), Field Survey (list + capture
+   editor), Catalog (browse + price-book import), Import/Export (per-type CSV),
+   Reports (Sales + Installs dashboards), Estimating Rules (rate/formula editor),
+   full Settings (Locations) + Account (to-do notifications). Deviations logged
+   in MASTER-QUESTIONS H2–H3, J1–J7.
 6. ⬜ Offline field capture (PWA + outbox sync per sync-architecture spec)
 7. ⬜ Gmail integration (OAuth, read/send/threads, shared boxes)
 8. ⬜ AI features (Claude API: renewal drafts, thread summaries, import extraction)

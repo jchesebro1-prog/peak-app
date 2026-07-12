@@ -2,7 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
-import { setSettings } from "@/lib/settings";
+import { getSettings, setSettings, type Office } from "@/lib/settings";
+import {
+  geocode as geoGeocode,
+  search as geoSearch,
+  type GeoSearchHit,
+  type LatLng,
+} from "@/lib/geo";
 import {
   addUser,
   allUsers,
@@ -11,6 +17,8 @@ import {
   setRoles,
 } from "@/lib/users";
 import { permsFor, ROLES } from "@/lib/team";
+
+const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
 /**
  * Admin actions for Settings. All gated on manage_users (Admin role), like
@@ -128,4 +136,99 @@ export async function saveSettingsAction(patch: {
   }
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/* ---------------- Locations (offices) ----------------
+   Port of Settings.dc.html saveOffice/removeOffice — the offices array is a
+   field of the AppSettings blob (setSettings({ offices })). Coords come from
+   an explicit lat/lng, a picked address search hit, or an offline city
+   geocode fallback (exactly the prototype's priority). */
+
+export async function saveOfficeAction(input: {
+  id?: string;
+  type?: string;
+  name: string;
+  street?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  lat?: number | string | null;
+  lng?: number | string | null;
+}) {
+  await requirePerm("manage_users");
+  const name = (input.name || "").trim();
+  if (!name) return { ok: false as const, error: "Location name is required." };
+
+  const type = OFFICE_TYPES.includes(input.type || "")
+    ? (input.type as string)
+    : "Main Office";
+  const city = (input.city || "").trim();
+  const state = (input.state || "").trim();
+
+  let lat: number | null =
+    input.lat === "" || input.lat == null ? null : Number(input.lat);
+  let lng: number | null =
+    input.lng === "" || input.lng == null ? null : Number(input.lng);
+  if (lat != null && isNaN(lat)) lat = null;
+  if (lng != null && isNaN(lng)) lng = null;
+  // Offline city-level fallback when no explicit coords (prototype saveOffice).
+  if (lat == null || lng == null) {
+    const g = geoGeocode(city, state);
+    if (g) {
+      lat = g.lat;
+      lng = g.lng;
+    }
+  }
+
+  const settings = await getSettings();
+  const offices = Array.isArray(settings.offices) ? settings.offices.slice() : [];
+  const isNew = !input.id;
+  const clean: Office = {
+    id: isNew ? "of" + Date.now() : (input.id as string),
+    type,
+    name,
+    street: (input.street || "").trim(),
+    city,
+    state,
+    zip: (input.zip || "").trim(),
+    lat,
+    lng,
+  };
+  if (isNew) {
+    offices.push(clean);
+  } else {
+    const i = offices.findIndex((o) => o.id === input.id);
+    // Preserve fields the modal never edits (e.g. seed offices' `phone`).
+    if (i >= 0) offices[i] = { ...offices[i], ...clean };
+    else offices.push(clean);
+  }
+  await setSettings({ offices });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+export async function removeOfficeAction(id: string) {
+  await requirePerm("manage_users");
+  const settings = await getSettings();
+  const offices = (Array.isArray(settings.offices) ? settings.offices : []).filter(
+    (o) => o.id !== id
+  );
+  await setSettings({ offices });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** Live address search (Nominatim, server-side per Geo usage policy). */
+export async function searchAddressAction(query: string): Promise<GeoSearchHit[]> {
+  await requirePerm("manage_users");
+  return geoSearch(query, { limit: 6 });
+}
+
+/** Offline city-level geocode for the "Auto-locate" button. */
+export async function geocodeCityAction(
+  city: string,
+  state: string
+): Promise<LatLng | null> {
+  await requirePerm("manage_users");
+  return geoGeocode(city, state);
 }

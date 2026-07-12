@@ -141,6 +141,15 @@ Estimating Rules — these just need real values before go-live)
   ☐ real invoicing/QuickBooks integration (Phase 10+): ______
 - **H2.** Crew board: keep prototype behaviors (time-off, mobilization
   chips, federal holidays toggle). ☐ changes: ______
+  Note (Phase 5): the schedule/field-work screens ship as server-rendered
+  forms — booking/reschedule use a popover form, **not** pointer drag-and-drop;
+  **time-off lanes** and **federal-holiday shading** were omitted (time-off was
+  localStorage-only in the prototype, no backing store). Confirm whether true
+  drag scheduling + time-off tracking are required (each needs a client
+  scheduler component + a new store field) or the form flow is sufficient.
+- **H3.** Field-work note photos: post-a-note is text-only for now (the
+  prototype downscaled a captured image to a data URL). ✦ enable later with
+  the Phase 6 offline capture work ☐ needed sooner: ______
 
 ## I. Data migration & go-live (Phase 9 — tooling built)
 
@@ -158,6 +167,43 @@ Estimating Rules — these just need real values before go-live)
 - **I6.** Cutover. ✦ per-module switch as each area is verified ☐ parallel
   run ☐ hard switch
 - **I7.** Phones. ✦ installable web app (PWA — built) ☐ native app later
+
+## J. Phase 5 review — Installs + General (screens built 2026-07-11)
+
+All nine Installs + General screens (Projects, Scheduling, Field Work,
+Customers, Field Survey, Catalog, Import/Export, Reports, Estimating Rules)
+plus full Settings + Account are live, verified against seed data. Items below
+are deliberate deviations that touch the **data model** or need a product call —
+everything else was ported faithfully.
+
+- **J1.** Customer record shape. The ported `customers` store persists only
+  `{name, type, location(s), contact(s)}`. The prototype's Customer Context also
+  showed **Notes**, **"Customer since"**, and **per-venue stage dimensions**
+  (W×D×H, grid clearance) — these are currently **not stored** and are omitted
+  from the detail view + edit modal. ✦ add these fields to the customer store
+  ☐ leave out: ______
+- **J2.** Account owner is **derived** (newest linked quote/project owner), not
+  a stored field — it drives the directory owner column + "My work" filter.
+  ✦ keep the heuristic ☐ add an explicit owner field to the customer record
+- **J3.** Data import is **lossy** for columns the store doesn't hold (customer
+  phone/street/zip). Import dedupe is **name-based**. ✦ fine ☐ add those
+  columns / change dedupe key: ______
+- **J4.** Access gates: **Import/Export** and **Estimating Rules** are
+  admin-only (`manage_users`, matching the prototype); **Catalog** is open to
+  any signed-in user (prototype had no gate). ✦ keep ☐ change: ______
+- **J5.** Reports "most-quoted products · projected sourcing" table was
+  **synthetic demo data** in the prototype (seed quotes carry no product line
+  items) — replaced with a real **"Pipeline by estimator"** breakdown. To build
+  the real projected-sourcing table, quotes need product-level line items.
+  ☐ product line items are a requirement: ______
+- **J6.** Settings **Beta → "Clear all data"** (destructive wipe) was **not**
+  ported — kept the reversible demo-seed toggle instead. There is no store-wipe
+  function and mass hard-delete is out of scope. ☐ a real "clear all" is wanted
+  (needs a backing function): ______
+- **J7.** Field Survey **measurement check-fields** (loading bridge, HH sheet,
+  brick drawing) are stored as booleans but the store types `measurements` as
+  `Record<string, string>` (cast at the save boundary). Minor store-type
+  imprecision — widen to `string | boolean` in `surveys.ts` at a convenient time.
 
 ---
 
