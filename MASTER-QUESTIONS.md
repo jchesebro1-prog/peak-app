@@ -205,6 +205,38 @@ everything else was ported faithfully.
   `Record<string, string>` (cast at the save boundary). Minor store-type
   imprecision — widen to `string | boolean` in `surveys.ts` at a convenient time.
 
+## K. Phase 6 review — Offline field capture (built 2026-07-11)
+
+The app is now an installable PWA with a durable offline outbox. Field Survey,
+Rigging Inspection, Flame-test results, Repair results, and Field Work all
+capture with no signal and sync when the connection returns (decisions
+D26–D32). Items below are deliberate limits / product calls — everything else
+follows the sync-architecture spec.
+
+- **K1.** **App icon** is a placeholder monogram (`public/icon.svg`, dark "P").
+  ✦ swap for the real logo when the G1 files land ☐ specific icon: ______
+- **K2.** **Conflict policy** when a record is edited in the office *and* on an
+  offline device at the same time: the office version wins and the field
+  device notes it in the sync panel (no manual merge screen). ✦ keep
+  ☐ want a "review my un-synced change" merge step: ______
+- **K3.** **Cold open needs signal.** You can capture offline on any job you
+  opened while online, and any page you visited reloads offline — but opening a
+  brand-new job for the first time needs a connection. ✦ fine
+  ☐ pre-download all of a tech's assigned jobs for the day (a "download for
+  offline" button): ______
+- **K4.** **Survey/field photos** ride on the record as downscaled data-URLs
+  (as in the prototype) and sync with it in the same outbox — no separate
+  blob/object-storage upload yet. ✦ fine for now ☐ move photos to cloud
+  storage (needed if photo volume grows): ______ — this also unblocks
+  field-work note photos (H3).
+- **K5.** **Online-only actions** (need a server round-trip, so they show an
+  error with no signal rather than queueing): delete, "create quote from
+  survey/inspection", and office review/approve. ✦ correct — these aren't
+  field operations ☐ change: ______
+- **K6.** **Background sync** is a 60-second poll + on-reconnect flush (no push
+  server yet). ✦ fine; live push (SSE) can come with Gmail/Phase 7
+  ☐ want instant office↔field updates sooner: ______
+
 ---
 
 *Answered items get moved into DECISIONS.md with a date. This form

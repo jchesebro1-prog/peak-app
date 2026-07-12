@@ -112,11 +112,34 @@ Settings "clear all", a survey store-type tidy).
 - **Updates:** tell Claude Code what you want changed; it commits and
   pushes; Vercel redeploys automatically.
 
-## 4. Offline field use *(Phase 6 — pending)*
+## 4. Offline field use ✅
 
-Will cover: installing the app on a phone (PWA), what works with no
-signal (surveys, inspections, flame-test results, field work), how the
-outbox/sync indicator behaves, and the "Work offline" toggle.
+The app is an installable web app (PWA) that keeps working with no signal.
+
+- **Install it on a phone:** open the site in the phone's browser → **Share →
+  Add to Home Screen** (iPhone) or the **Install app** prompt (Android). It
+  opens full-screen like a native app. (The icon is a placeholder "P" until
+  the real logo files land — see Branding.)
+- **What works offline:** any page you opened while you had signal reloads
+  with no signal, and you can keep capturing — **Field Survey**, **Rigging
+  Inspection**, **Flame-test results**, **Repair results**, and **Field Work**
+  (notes/time). Saves land **on the device** and show
+  *"Saved on this device — will sync when you're back online."*
+- **The sync chip** (top-right, next to search) is the status light:
+  **Synced** (all captures are in the office) · **Syncing…** · **N to sync**
+  (waiting to upload) · **Offline** (no connection) · **Work offline** (you
+  turned syncing off). Tap it for the last-sync time, a **Sync now** button,
+  and the **Work offline** toggle.
+- **"Work offline"** lets a tech deliberately stop syncing (e.g. to save data
+  or battery in the field); captures queue until it's turned back on. Queued
+  work uploads automatically the moment the connection returns — no action
+  needed. Nothing is lost if the app is closed or the phone restarts (the
+  queue is stored on the device).
+- **One rule to know:** work the office edits while a device is offline wins
+  if the same record is changed in both places — the field device keeps a note
+  of it in the sync panel rather than overwriting the office. And you can only
+  *open a job for the first time* while you have signal; once opened it's
+  available offline.
 
 ## 5. Gmail integration *(Phase 7 — pending)*
 

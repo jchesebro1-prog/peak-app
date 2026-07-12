@@ -129,3 +129,51 @@ Anything you want changed, just say so — none of these are hard to reverse.
 - **D25. Tier definitions** (Quick Design Good/Better/Best specs) stay
   localStorage-per-browser like the prototype — they're a per-estimator
   preference, no shared-store contract exists for them yet.
+
+## Phase 6 (2026-07-11) — Offline field capture (PWA + outbox)
+
+- **D26. Durable outbox in IndexedDB, not localStorage.** The prototype's
+  "outbox" was the per-record `syncState:'pending'` flag inside each
+  localStorage array. The rebuild is server-authoritative, so the outbox
+  becomes a real durable queue in IndexedDB (`peak-sync` DB, `src/lib/sync/`):
+  `outbox` (whole docs awaiting push), `mirror` (read-cache of the field
+  collections), `meta` (pull cursors, lastSyncAt). Dependency-free — no PWA
+  library added, so Jeff's install stays a plain `npm install`.
+- **D27. Save-seam, one line per editor.** Faithful to the spec's "the seam
+  is one line per store." Capture editors save through
+  `saveThroughOutbox({collection,id,doc,action})` (`src/lib/sync/save.ts`):
+  online + not paused → run the normal server action (the cloud write, which
+  also revalidates the SSR UI) and mirror the doc; offline / "Work offline" /
+  network-drop-mid-save → queue the WHOLE resulting document and flush it to
+  the existing `POST /api/sync/push` (whole-doc upsert by client id) on
+  reconnect. Pull runs against `GET /api/sync/pull` (seq cursors) to bring
+  office changes into the mirror and `router.refresh()` the current screen.
+- **D28. Last-write-wins, office wins on conflict.** `/api/sync/push` returns
+  `conflict` only when the queued rev is strictly behind the server (the
+  office edited the same record while the device was offline). Policy: keep
+  the server copy, drop the stale capture, and surface a count in the sync
+  panel — matches the prototype's "server-owns-review, client-owns-field-data"
+  merge without a manual merge UI (out of scope for v1).
+- **D29. Manual "Work offline" toggle** persists under the prototype's exact
+  key `rss_sync_paused_v1` (lastSync under `rss_sync_last_v1`); the live Nav
+  sync chip replaces Phase 1's `navigator.onLine`-only placeholder and shows
+  offline / work-offline / syncing / N-to-sync / synced with a panel to sync
+  now or toggle offline.
+- **D30. App shell cached by a hand-rolled service worker** (`public/sw.js`,
+  `peak-shell-v1`), a direct port of the prototype's `sw.js` policy:
+  network-first for same-origin GETs (path-keyed, query stripped) so any page
+  visited with signal reloads offline; API routes never cached; fonts
+  cache-first. App DATA lives in IndexedDB, not the SW. Installable via
+  `manifest.webmanifest` + `icon.svg`.
+- **D31. App icon is a temporary monogram** (`public/icon.svg`, dark "P"),
+  same placeholder posture as the letterhead in G1 — swap for the real logo
+  files when they land (one asset, all surfaces).
+- **D32. Offline scope = the field-capture surfaces.** Made offline-capable:
+  Field Survey editor, Rigging Inspection editor, Flame-test results, Repair
+  results, and Field Work captures. Deliberately online-only (need a server
+  round-trip / redirect / cross-record transaction, not a field operation with
+  no signal): delete, "create quote from survey/inspection", won-quote
+  spawning, and office review/triage. Cold-opening a record the device has
+  never loaded still needs signal (the SW serves any *previously visited*
+  record offline); a full pre-download of all assigned jobs is a possible
+  later enhancement.

@@ -11,17 +11,17 @@ import {
   type NavCounts,
   type BellGroup,
 } from "./nav-data";
+import SyncChip from "./SyncChip";
 
 /**
  * The shared app shell — port of Nav.dc.html (spec: docs/specs/nav-shell.json).
  * Horizontal dark top bar, 56px: company mark + tabs (wide) / hamburger +
  * drawer (≤860px); right cluster = sync chip · search · bell · avatar.
  *
- * Phase 1 notes (see DECISIONS.md):
- * - Badges and the to-do center aggregate the data stores; those land in
- *   Phase 2, so counts are zero and the bell shows its empty state.
- * - The sync chip reflects navigator.onLine only; the full SyncEngine port
- *   (pending counts, work-offline toggle) arrives with offline capture.
+ * Notes (see DECISIONS.md):
+ * - Badges and the to-do center aggregate the data stores (Phase 2).
+ * - The sync chip is the live SyncChip (Phase 6): full SyncEngine status —
+ *   pending counts, syncing, offline, and the "Work offline" toggle.
  * - "Switch user" in the account menu appears only in dev sign-in mode.
  */
 
@@ -67,7 +67,6 @@ export default function Nav({
   const [notifOpen, setNotifOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [narrow, setNarrow] = useState(false);
-  const [online, setOnline] = useState(true);
   const searchRef = useRef<HTMLInputElement>(null);
   const [searchQ, setSearchQ] = useState("");
   const [searchGroups, setSearchGroups] = useState<
@@ -102,17 +101,6 @@ export default function Nav({
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
-  }, []);
-
-  useEffect(() => {
-    const sync = () => setOnline(navigator.onLine);
-    sync();
-    window.addEventListener("online", sync);
-    window.addEventListener("offline", sync);
-    return () => {
-      window.removeEventListener("online", sync);
-      window.removeEventListener("offline", sync);
-    };
   }, []);
 
   useEffect(() => {
@@ -243,17 +231,7 @@ export default function Nav({
         </div>
 
         <div className="pk-nav-right">
-          <div
-            className="pk-sync"
-            title={
-              online
-                ? "Everything on this device is in the office."
-                : "No connection — changes will sync when you're back online."
-            }
-          >
-            <span className={`pk-sync-dot${online ? "" : " offline"}`} />
-            <span>{online ? "Synced" : "Offline"}</span>
-          </div>
+          <SyncChip />
 
           {!narrow && (
             <div style={{ position: "relative" }}>
@@ -702,24 +680,7 @@ export default function Nav({
               </button>
             </div>
 
-            <div
-              style={{
-                margin: 14,
-                background: "#1d2026",
-                border: "1px solid #2b2e35",
-                borderRadius: 13,
-                padding: 13,
-              }}
-            >
-              <div style={{ color: "#fff", fontSize: 13, fontWeight: 600 }}>
-                {online ? "Synced" : "No connection"}
-              </div>
-              <div style={{ color: "#9aa0ab", fontSize: 11.5, marginTop: 3 }}>
-                {online
-                  ? "Everything on this device is in the office."
-                  : "Changes will sync when you're back online."}
-              </div>
-            </div>
+            <SyncChip variant="drawer" />
 
             <nav style={{ flex: 1, overflowY: "auto", padding: "0 10px" }}>
               {NAV.map((entry) =>

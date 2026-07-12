@@ -5,6 +5,7 @@ import { devLoginEnabled } from "@/auth";
 import { can } from "@/lib/team";
 import { navData } from "@/lib/nav-counts";
 import Nav, { type RosterEntry } from "@/components/nav/Nav";
+import { SyncProvider } from "@/lib/sync/SyncProvider";
 
 export default async function AppLayout({
   children,
@@ -25,24 +26,26 @@ export default async function AppLayout({
   const { counts, bell } = await navData(user.name);
 
   return (
-    <div className="pk-shell">
-      <Nav
-        counts={counts}
-        bell={bell}
-        user={{
-          id: user.id,
-          name: user.name,
-          initials: user.initials,
-          color: user.color,
-          roleLabel: user.roles.join(" · "),
-          isAdmin: can("manage_users", user.roles),
-        }}
-        companyName={settings.companyName}
-        feedbackEmail={settings.feedbackEmail}
-        devLogin={devLogin}
-        roster={roster}
-      />
-      <main className="pk-main">{children}</main>
-    </div>
+    <SyncProvider>
+      <div className="pk-shell">
+        <Nav
+          counts={counts}
+          bell={bell}
+          user={{
+            id: user.id,
+            name: user.name,
+            initials: user.initials,
+            color: user.color,
+            roleLabel: user.roles.join(" · "),
+            isAdmin: can("manage_users", user.roles),
+          }}
+          companyName={settings.companyName}
+          feedbackEmail={settings.feedbackEmail}
+          devLogin={devLogin}
+          roster={roster}
+        />
+        <main className="pk-main">{children}</main>
+      </div>
+    </SyncProvider>
   );
 }

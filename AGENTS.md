@@ -91,7 +91,12 @@ See `.env.example`.
    Reports (Sales + Installs dashboards), Estimating Rules (rate/formula editor),
    full Settings (Locations) + Account (to-do notifications). Deviations logged
    in MASTER-QUESTIONS H2–H3, J1–J7.
-6. ⬜ Offline field capture (PWA + outbox sync per sync-architecture spec)
+6. ✅ Offline field capture — installable PWA (`manifest.webmanifest` +
+   `public/sw.js` shell cache), a durable IndexedDB outbox + client SyncEngine
+   (`src/lib/sync/`) flushing to the existing `/api/sync/push`+`/pull`, live
+   Nav sync chip + "Work offline" toggle. Capture editors (Field Survey,
+   Inspections, Flame/Repair results, Field Work) save through the outbox seam
+   and sync on reconnect. Decisions D26–D32; deviations in MASTER-QUESTIONS.
 7. ⬜ Gmail integration (OAuth, read/send/threads, shared boxes)
 8. ⬜ AI features (Claude API: renewal drafts, thread summaries, import extraction)
 9. ⬜ Data migration + go-live

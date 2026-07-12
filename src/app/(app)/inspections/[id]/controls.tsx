@@ -20,6 +20,7 @@ import type {
   IssueTemplate,
 } from "@/lib/stores/inspections";
 import { saveInspection, advanceInspectionStage, deleteInspection, type InspectionPatch } from "./actions";
+import { saveThroughOutbox } from "@/lib/sync/save";
 
 /* ============================================================
  * Serializable props from the server (the store is DB-backed and
@@ -617,14 +618,39 @@ export default function InspectionEditor({
       ...over,
     };
   }
+  /**
+   * The WHOLE resulting inspection document for the offline outbox
+   * (/api/sync/push does a whole-doc upsert by id). Merge the SSR record with
+   * the editor patch and stamp it the way the store's update() would when a
+   * write reaches the cloud (synced, rev bumped).
+   */
+  function buildFullDoc(over?: Partial<InspectionPatch>): Record<string, unknown> {
+    return {
+      ...(record as unknown as Record<string, unknown>),
+      ...(buildPatch(over) as Record<string, unknown>),
+      updatedAt: Date.now(),
+      rev: (record.rev || 1) + 1,
+      syncState: "synced",
+    };
+  }
   async function onSave() {
     if (!validate() || saving) return;
     setSaving(true);
     try {
-      await saveInspection(record.id, buildPatch());
+      const patch = buildPatch();
+      const { queued } = await saveThroughOutbox({
+        collection: "inspections",
+        id: record.id,
+        doc: buildFullDoc(),
+        action: () => saveInspection(record.id, patch),
+      });
       setDirty(false);
       setDraft((d) => ({ ...d, updatedAt: Date.now() }));
-      flash("Saved on this device — will sync to the office");
+      flash(
+        queued
+          ? "Saved on this device — will sync when you're back online"
+          : "Saved to the office"
+      );
     } catch {
       setSaveError("Could not save — please try again.");
     } finally {
@@ -640,10 +666,20 @@ export default function InspectionEditor({
     }
     setSaving(true);
     try {
-      await advanceInspectionStage(record.id, buildPatch({ reportDate }), target);
+      const patch = buildPatch({ reportDate });
+      const { queued } = await saveThroughOutbox({
+        collection: "inspections",
+        id: record.id,
+        doc: buildFullDoc({ reportDate }),
+        action: () => advanceInspectionStage(record.id, patch, target),
+      });
       setDraft((d) => ({ ...d, stage: target, reportDate, updatedAt: Date.now() }));
       setDirty(false);
-      flash("Moved to " + meta.stageMeta[target].label);
+      flash(
+        queued
+          ? `Moved to ${meta.stageMeta[target].label} — will sync when you're back online`
+          : "Moved to " + meta.stageMeta[target].label
+      );
     } catch {
       setSaveError("Could not update stage — please try again.");
     } finally {

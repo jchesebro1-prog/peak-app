@@ -5,7 +5,6 @@ import {
   get,
   iso,
   msOf,
-  money,
   fmtShort,
   fmtLong,
   stageMeta,
@@ -15,7 +14,7 @@ import {
   warrantyMonthsOf,
   DEFAULT_WARRANTY_MONTHS,
 } from "@/lib/stores/repair-jobs";
-import { completeRepair, reopenRepair } from "../actions";
+import { ResultsForm } from "./controls";
 
 export const metadata = { title: "Repair results — Peak Backend" };
 
@@ -24,27 +23,6 @@ const MONTH_MS = 30 * 86400000;
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
 }
-
-const LABEL: React.CSSProperties = {
-  display: "block",
-  fontSize: 11,
-  fontWeight: 600,
-  color: "#9aa0ab",
-  letterSpacing: ".05em",
-  textTransform: "uppercase",
-  marginBottom: 7,
-};
-
-const INPUT: React.CSSProperties = {
-  width: "100%",
-  fontSize: 13.5,
-  color: "#16181d",
-  background: "#fff",
-  border: "1px solid #e4e7ec",
-  borderRadius: 9,
-  padding: "10px 12px",
-  outline: "none",
-};
 
 export default async function RepairResultsPage({
   searchParams,
@@ -289,196 +267,21 @@ export default async function RepairResultsPage({
       )}
 
       {/* form */}
-      <form action={completeRepair}>
-        <input type="hidden" name="id" value={job.id} />
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #ececf0",
-            borderRadius: 13,
-            boxShadow: "0 1px 2px rgba(0,0,0,.04)",
-            padding: 20,
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr",
-              gap: 14,
-              marginBottom: 20,
-            }}
-          >
-            <div>
-              <label style={LABEL}>Date performed</label>
-              <input
-                type="date"
-                name="completedDate"
-                defaultValue={performedDate}
-                required
-                style={{ ...INPUT, fontFamily: "var(--font-mono)" }}
-              />
-            </div>
-            <div>
-              <label style={LABEL}>Performed by</label>
-              <select
-                name="performedBy"
-                defaultValue={performedBy}
-                style={{ ...INPUT, cursor: "pointer", paddingRight: 34 }}
-              >
-                <option value="">Select technician…</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.name}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={LABEL}>Warranty (months)</label>
-              <input
-                type="number"
-                min={0}
-                name="warrantyMonths"
-                defaultValue={warrantyMonths || DEFAULT_WARRANTY_MONTHS}
-                style={{ ...INPUT, fontFamily: "var(--font-mono)" }}
-              />
-            </div>
-          </div>
-
-          {/* scope reference */}
-          {(job.items?.length ?? 0) > 0 && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={LABEL}>Scope of work</div>
-              <div style={{ border: "1px solid #f0f1f4", borderRadius: 9, overflow: "hidden" }}>
-                {job.items.map((it, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "minmax(0,1fr) 56px",
-                      gap: 10,
-                      alignItems: "center",
-                      padding: "9px 12px",
-                      borderTop: i === 0 ? "none" : "1px solid #f3f4f7",
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{it.label}</div>
-                      {it.note && (
-                        <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 1 }}>{it.note}</div>
-                      )}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 12.5,
-                        color: "#5b616e",
-                        textAlign: "right",
-                      }}
-                    >
-                      ×{it.qty}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div style={{ marginBottom: 16 }}>
-            <label style={LABEL}>Work performed</label>
-            <textarea
-              name="workPerformed"
-              rows={3}
-              defaultValue={completion?.workPerformed || job.scope || ""}
-              placeholder="What was done on site, method, and any parts replaced…"
-              style={{ ...INPUT, lineHeight: 1.5, resize: "vertical" }}
-            />
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
-            <div>
-              <label style={LABEL}>Parts used (one per line)</label>
-              <textarea
-                name="partsUsed"
-                rows={4}
-                defaultValue={partsPrefill}
-                placeholder={"e.g.\n2× Wire rope clip\n1× Lift line 3/16″"}
-                style={{ ...INPUT, fontFamily: "var(--font-mono)", lineHeight: 1.5, resize: "vertical" }}
-              />
-              {(job.parts?.length ?? 0) > 0 && (
-                <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 6, lineHeight: 1.5 }}>
-                  Quoted parts:{" "}
-                  {job.parts
-                    .map((p) => (p.qty ? p.qty + "× " : "") + p.name + " (" + money(p.cost) + ")")
-                    .join(", ")}
-                </div>
-              )}
-            </div>
-            <div>
-              <label style={LABEL}>Follow-up needed</label>
-              <textarea
-                name="followUp"
-                rows={4}
-                defaultValue={completion?.followUp || ""}
-                placeholder="Any re-visit, re-quote, or monitoring the office should track…"
-                style={{ ...INPUT, lineHeight: 1.5, resize: "vertical" }}
-              />
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              marginTop: 20,
-              paddingTop: 18,
-              borderTop: "1px solid #f0f1f4",
-            }}
-          >
-            <div style={{ fontSize: 11.5, color: "#9aa0ab", lineHeight: 1.5, flex: 1 }}>
-              On save, this repair is marked complete and its {warrantyMonths}-month warranty runs
-              through {fmtLong(previewExpiry)}.
-            </div>
-            {isCompleted && (
-              <button
-                type="submit"
-                formAction={reopenRepair}
-                style={{
-                  fontFamily: "var(--font-ui)",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#b4543a",
-                  background: "#fff",
-                  border: "1px solid #f0d6cd",
-                  borderRadius: 10,
-                  padding: "11px 16px",
-                  cursor: "pointer",
-                }}
-              >
-                Reopen
-              </button>
-            )}
-            <button
-              type="submit"
-              style={{
-                fontFamily: "var(--font-ui)",
-                fontSize: 13.5,
-                fontWeight: 600,
-                color: "#fff",
-                border: "none",
-                borderRadius: 10,
-                padding: "12px 20px",
-                cursor: "pointer",
-                background: "var(--accent)",
-                flexShrink: 0,
-              }}
-            >
-              {isCompleted ? "Update results" : "Complete & log results"}
-            </button>
-          </div>
-        </div>
-      </form>
+      <ResultsForm
+        record={job}
+        users={users.map((u) => ({ id: u.id, name: u.name }))}
+        items={job.items}
+        parts={job.parts}
+        performedDate={performedDate}
+        performedBy={performedBy}
+        warrantyMonths={warrantyMonths}
+        defaultWarrantyMonths={DEFAULT_WARRANTY_MONTHS}
+        partsPrefill={partsPrefill}
+        workPerformedDefault={completion?.workPerformed || job.scope || ""}
+        followUpDefault={completion?.followUp || ""}
+        previewExpiryLabel={fmtLong(previewExpiry)}
+        isCompleted={isCompleted}
+      />
     </div>
   );
 }

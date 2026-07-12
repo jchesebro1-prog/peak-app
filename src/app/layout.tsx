@@ -19,9 +19,17 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Peak Backend",
   description: "Peak Systems Group — business management",
+  manifest: "/manifest.webmanifest",
+  icons: { icon: "/icon.svg", apple: "/icon.svg" },
+  appleWebApp: { capable: true, title: "Peak", statusBarStyle: "black-translucent" },
 };
 
-export const viewport = { themeColor: "#16181d" };
+export const viewport = {
+  themeColor: "#16181d",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover" as const,
+};
 
 export default async function RootLayout({
   children,

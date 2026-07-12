@@ -2,6 +2,21 @@
 
 import { useState } from "react";
 import { completeFlameTest } from "../actions";
+import { saveThroughOutbox } from "@/lib/sync/save";
+import type {
+  FlameJob,
+  FlameJobResults,
+  FlameJobVenueResult,
+} from "@/lib/stores/flame-jobs";
+
+const YEAR = 365 * 86400000;
+
+/** Client mirror of flame-jobs.msOf (the store is server-only). */
+function msOfIso(s: string): number | null {
+  const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s || "");
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3]).getTime();
+}
 
 export type VenueInit = {
   id: string | null;
@@ -34,6 +49,7 @@ function num(s: string): number {
  * untouched overall follows the suggestion.
  */
 export function ResultsEditor({
+  record,
   jobId,
   stage,
   venues,
@@ -46,6 +62,7 @@ export function ResultsEditor({
   techOptions,
   renewNoteDate,
 }: {
+  record: FlameJob;
   jobId: string;
   stage: string;
   venues: VenueInit[];
@@ -75,6 +92,9 @@ export function ResultsEditor({
   const [overallVal, setOverallVal] = useState(overall);
   const [touched, setTouched] = useState(overallTouched);
   const [notesVal, setNotesVal] = useState(notes);
+  const [saving, setSaving] = useState(false);
+  const [queuedMsg, setQueuedMsg] = useState("");
+  const [errMsg, setErrMsg] = useState("");
 
   const key = (v: VenueInit) => v.id ?? v.label;
   const setVal = (k: string, field: keyof VenueVals, raw: string) =>
@@ -121,6 +141,78 @@ export function ResultsEditor({
     (retreated ? " · " + retreated + " IFR" : "") +
     (failed ? " · " + failed + " failed" : "");
 
+  /** Results subdoc exactly as completeFlameTest builds it server-side. */
+  function buildResults(): FlameJobResults {
+    const resultVenues: FlameJobVenueResult[] = payloadVenues.map((v) => {
+      const f = Math.max(0, v.tested - v.passed - v.retreated);
+      return {
+        id: v.id,
+        label: v.label,
+        tested: v.tested,
+        passed: v.passed,
+        failed: f,
+        retreated: v.retreated,
+        treatment: v.retreated ? "Re-treated on site" : "Passed field test",
+        notes: "",
+      };
+    });
+    return {
+      overall: effOverall,
+      cert: certVal.trim(),
+      performedBy: byVal,
+      method: "Field flame test per NFPA 705",
+      venues: resultVenues,
+      notes: notesVal.trim(),
+    };
+  }
+
+  /**
+   * The WHOLE resulting flame-job document for the offline outbox
+   * (/api/sync/push upserts by id). Merge the SSR record with the completion
+   * fields complete() stamps on the cloud write — stage/completedAt/dueAt
+   * (+1yr)/results/assignedTo — and mark it synced with a bumped rev.
+   */
+  function buildFullDoc(): Record<string, unknown> {
+    const completedAt = msOfIso(dateVal) || Date.now();
+    const rev = (record as { rev?: number }).rev;
+    return {
+      ...(record as unknown as Record<string, unknown>),
+      stage: "completed",
+      completedAt,
+      dueAt: completedAt + YEAR,
+      results: buildResults(),
+      assignedTo: byVal || record.assignedTo || "",
+      updatedAt: Date.now(),
+      rev: (rev || 1) + 1,
+      syncState: "synced",
+    };
+  }
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!canSave || saving) return;
+    // Preserve the existing FormData contract for the online server write.
+    const formData = new FormData(e.currentTarget);
+    setSaving(true);
+    setErrMsg("");
+    try {
+      const { queued } = await saveThroughOutbox({
+        collection: "flame_jobs",
+        id: jobId,
+        doc: buildFullDoc(),
+        action: () => completeFlameTest(formData),
+      });
+      // queued === false → completeFlameTest redirected to the saved view.
+      if (queued) {
+        setQueuedMsg("Saved on this device — will sync when you're back online");
+      }
+    } catch {
+      setErrMsg("Could not save results — please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const inputBase: React.CSSProperties = {
     width: "100%",
     fontFamily: "var(--font-mono)",
@@ -161,7 +253,7 @@ export function ResultsEditor({
   };
 
   return (
-    <form action={completeFlameTest}>
+    <form onSubmit={onSubmit}>
       <input type="hidden" name="id" value={jobId} />
       <input type="hidden" name="completedDate" value={dateVal} />
       <input type="hidden" name="performedBy" value={byVal} />
@@ -366,7 +458,7 @@ export function ResultsEditor({
         </div>
         <button
           type="submit"
-          disabled={!canSave}
+          disabled={!canSave || saving}
           style={{
             fontFamily: "var(--font-ui)",
             fontSize: 13.5,
@@ -375,14 +467,50 @@ export function ResultsEditor({
             border: "none",
             borderRadius: 10,
             padding: "12px 20px",
-            cursor: canSave ? "pointer" : "not-allowed",
-            background: canSave ? "var(--accent)" : "#c8ccd3",
+            cursor: !canSave || saving ? "not-allowed" : "pointer",
+            background: !canSave || saving ? "#c8ccd3" : "var(--accent)",
             flexShrink: 0,
           }}
         >
-          {stage === "completed" ? "Update results" : "Complete & log results"}
+          {saving
+            ? "Saving…"
+            : stage === "completed"
+              ? "Update results"
+              : "Complete & log results"}
         </button>
       </div>
+
+      {queuedMsg && (
+        <div
+          style={{
+            marginTop: 14,
+            padding: "13px 15px",
+            background: "#eaf6ef",
+            border: "1px solid #cce9da",
+            borderRadius: 10,
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#1f7a52",
+          }}
+        >
+          {queuedMsg}
+        </div>
+      )}
+      {errMsg && (
+        <div
+          style={{
+            marginTop: 14,
+            padding: "13px 15px",
+            background: "#f7e9e5",
+            border: "1px solid #f0d6cd",
+            borderRadius: 10,
+            fontSize: 13,
+            color: "#b4543a",
+          }}
+        >
+          {errMsg}
+        </div>
+      )}
     </form>
   );
 }

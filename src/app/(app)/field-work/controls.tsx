@@ -1,0 +1,1027 @@
+"use client";
+
+import { useRef, useState } from "react";
+import Link from "next/link";
+import { firstName } from "@/lib/team";
+import type { ProjectRecord, ProjectStage } from "@/lib/stores/projects";
+import {
+  toggleFieldTask,
+  addFieldTask,
+  postFieldNote,
+  logFieldTime,
+} from "./actions";
+import { saveThroughOutbox } from "@/lib/sync/save";
+
+/* ============================================================
+ * Field Work — job detail (client, offline-capable).
+ *
+ * The on-site captures (toggle task, add task, post note, log time) are the
+ * genuine no-signal writes, so this view owns the project record locally and
+ * saves every mutation through the sync outbox: online it runs the existing
+ * FormData server action (the cloud write + revalidate); offline/paused it
+ * queues the WHOLE mutated project doc for /api/sync/push on reconnect.
+ *
+ * Markup, styles and fields are a verbatim port of the server-rendered detail
+ * view — the only change is that <form action={serverAction}> submits become
+ * client handlers that mutate a local copy, build the matching FormData, and
+ * pass both through saveThroughOutbox. The store (DB-backed) can't ship in a
+ * client bundle, so its pure palettes/formatters are reproduced below.
+ * ============================================================ */
+
+/** Identity (initials + avatar colour) for a person, resolved server-side. */
+export type FieldIdentity = { initials: string; color: string };
+
+export type FieldWorkDetailProps = {
+  project: ProjectRecord;
+  meName: string;
+  identity: Record<string, FieldIdentity>;
+  initialTab: string;
+};
+
+/* ---- palettes & formatters (ported from page.tsx / projects.ts — pure) ---- */
+
+const STAGE_META: Record<
+  ProjectStage,
+  { label: string; soft: string; ink: string; bd: string }
+> = {
+  procurement: { label: "Prep", soft: "#fbf3dd", ink: "#8a6d1f", bd: "#f0e2bd" },
+  delivery: { label: "Awaiting delivery", soft: "#e9eefb", ink: "#3155a8", bd: "#d4ddf3" },
+  scheduled: { label: "Scheduled", soft: "#efeaf6", ink: "#5b4b8a", bd: "#ddd3ec" },
+  install: { label: "Installing", soft: "#fbeede", ink: "#9a5a1f", bd: "#f0dcc0" },
+  training: { label: "Training", soft: "#e4f1f6", ink: "#1f6a8a", bd: "#c5e2ec" },
+  signoff: { label: "Sign-off", soft: "#eaf6ef", ink: "#1f7a52", bd: "#cce9da" },
+  complete: { label: "Complete", soft: "#f1f2f5", ink: "#5b616e", bd: "#e4e7ec" },
+};
+
+const LINE_STATUS_COLOR: Record<string, string> = {
+  received: "#1f7a52",
+  shipped: "#5b4b8a",
+  ordered: "#3155a8",
+  pending: "#9a6a1f",
+};
+const LINE_STATUS_LABEL: Record<string, string> = {
+  received: "On site",
+  shipped: "Shipped",
+  ordered: "On order",
+  pending: "Not ordered",
+};
+
+const TABS: Array<[string, string]> = [
+  ["tasks", "Tasks"],
+  ["notes", "Notes"],
+  ["time", "Time"],
+  ["bom", "BOM"],
+];
+
+const CSS = `
+  .fw-tab:hover { color: #16181d; }
+  .fw-card-link:hover { background: #fafbff; }
+`;
+
+const DAY = 86400000;
+
+function timeAgo(ts: number | null | undefined): string {
+  if (!ts) return "—";
+  const diff = Date.now() - ts;
+  const d = Math.floor(diff / DAY);
+  if (d <= 0) {
+    const h = Math.floor(diff / 3600000);
+    return h <= 0 ? "just now" : h + "h ago";
+  }
+  if (d === 1) return "yesterday";
+  if (d < 14) return d + "d ago";
+  return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function fmtDate(ts: number | null | undefined): string {
+  return ts
+    ? new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : "—";
+}
+
+/** Prototype uid() — (prefix)+6 base36 chars (project.js). */
+function uid(p: string): string {
+  return p + Math.random().toString(36).slice(2, 8);
+}
+
+function chipDark(stage: ProjectStage): React.CSSProperties {
+  const m = STAGE_META[stage] || STAGE_META.procurement;
+  return {
+    display: "inline-block",
+    fontSize: 10,
+    fontWeight: 600,
+    color: "#fff",
+    background: m.ink,
+    padding: "3px 10px",
+    borderRadius: 20,
+  };
+}
+
+const uppLabel: React.CSSProperties = {
+  fontSize: 10,
+  color: "#8b909a",
+  textTransform: "uppercase",
+  letterSpacing: ".05em",
+};
+
+export default function FieldWorkDetail({
+  project,
+  meName,
+  identity,
+  initialTab,
+}: FieldWorkDetailProps) {
+  const [p, setP] = useState<ProjectRecord>(project);
+  // Latest record for building the whole-doc offline payload, synchronously —
+  // rapid checkbox taps must each mutate from the freshest state.
+  const pRef = useRef<ProjectRecord>(project);
+  const [tab, setTab] = useState(
+    TABS.some((t) => t[0] === initialTab) ? initialTab : "tasks"
+  );
+  const [taskTitle, setTaskTitle] = useState("");
+  const [noteText, setNoteText] = useState("");
+  const [hours, setHours] = useState("");
+  const [timeNote, setTimeNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function flash(msg: string) {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 3000);
+  }
+
+  function identityOf(name: string): FieldIdentity {
+    return identity[name] || { initials: "—", color: "#9aa0ab" };
+  }
+
+  /**
+   * The WHOLE resulting project document for the offline outbox
+   * (/api/sync/push does a whole-doc upsert by id). Stamp it the way the store
+   * would when the write reaches the cloud — projects carry updatedAt only
+   * (no syncState on the record), and rev bumps for the outbox version hint.
+   */
+  function stampDoc(next: ProjectRecord): Record<string, unknown> {
+    const rev = Number((pRef.current as Record<string, unknown>).rev) || 1;
+    return { ...(next as Record<string, unknown>), updatedAt: Date.now(), rev: rev + 1 };
+  }
+
+  /**
+   * Apply an optimistic mutation, then save it through the seam. Online runs
+   * the existing server action (cloud write + revalidate); offline/paused the
+   * whole mutated doc is queued and the crew is told it's saved on-device.
+   */
+  async function persist(
+    next: ProjectRecord,
+    action: () => Promise<void>
+  ): Promise<void> {
+    const prev = pRef.current;
+    pRef.current = next;
+    setP(next);
+    setBusy(true);
+    try {
+      const { queued } = await saveThroughOutbox({
+        collection: "projects",
+        id: next.id,
+        doc: stampDoc(next),
+        action,
+      });
+      if (queued) flash("Saved on this device — will sync when you're back online");
+    } catch {
+      pRef.current = prev;
+      setP(prev);
+      flash("Couldn't save — please try again");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* ---------- capture handlers ---------- */
+
+  function onToggleTask(taskId: string) {
+    const cur = pRef.current;
+    if (!(cur.tasks || []).some((t) => t.id === taskId)) return;
+    const next: ProjectRecord = {
+      ...cur,
+      tasks: (cur.tasks || []).map((t) =>
+        t.id === taskId
+          ? { ...t, done: !t.done, doneAt: !t.done ? Date.now() : null }
+          : t
+      ),
+    };
+    const fd = new FormData();
+    fd.set("id", cur.id);
+    fd.set("taskId", taskId);
+    void persist(next, () => toggleFieldTask(fd));
+  }
+
+  function onAddTask(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    const cur = pRef.current;
+    const title = taskTitle.trim();
+    if (!title) return;
+    const next: ProjectRecord = {
+      ...cur,
+      tasks: [
+        ...(cur.tasks || []),
+        { id: uid("tk-"), title, section: "Install", assignee: meName, done: false },
+      ],
+    };
+    setTaskTitle("");
+    const fd = new FormData();
+    fd.set("id", cur.id);
+    fd.set("title", title);
+    void persist(next, () => addFieldTask(fd));
+  }
+
+  function onPostNote(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    const cur = pRef.current;
+    const text = noteText.trim();
+    if (!text) return;
+    const next: ProjectRecord = {
+      ...cur,
+      // addNote unshifts (newest first)
+      notes: [
+        { id: uid("nt-"), by: meName, at: Date.now(), text, photo: null },
+        ...(cur.notes || []),
+      ],
+    };
+    setNoteText("");
+    const fd = new FormData();
+    fd.set("id", cur.id);
+    fd.set("text", text);
+    void persist(next, () => postFieldNote(fd));
+  }
+
+  function onLogTime(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    const cur = pRef.current;
+    const hrs = parseFloat(hours);
+    if (!(hrs > 0)) return;
+    const note = timeNote.trim();
+    const next: ProjectRecord = {
+      ...cur,
+      timeLogs: [
+        ...(cur.timeLogs || []),
+        { id: uid("tl-"), person: meName, date: Date.now(), hours: hrs, note },
+      ],
+    };
+    setHours("");
+    setTimeNote("");
+    const fd = new FormData();
+    fd.set("id", cur.id);
+    fd.set("hours", hours);
+    fd.set("note", note);
+    void persist(next, () => logFieldTime(fd));
+  }
+
+  /* ---------- derived (from local state) ---------- */
+
+  const myLogs = (p.timeLogs || []).filter((l) => l.person === meName);
+  const myHours = myLogs.reduce((a, l) => a + (l.hours || 0), 0);
+  const crewHours = (p.timeLogs || []).reduce((a, l) => a + (l.hours || 0), 0);
+
+  // tasks grouped by section (insertion order preserved)
+  const groupsMap: Record<string, typeof p.tasks> = {};
+  const order: string[] = [];
+  (p.tasks || []).forEach((t) => {
+    if (!groupsMap[t.section]) {
+      groupsMap[t.section] = [];
+      order.push(t.section);
+    }
+    groupsMap[t.section].push(t);
+  });
+
+  const segStyle = (on: boolean): React.CSSProperties => ({
+    flex: 1,
+    fontFamily: "var(--font-ui)",
+    fontSize: 12.5,
+    fontWeight: 600,
+    padding: "9px 6px",
+    borderRadius: 9,
+    border: "none",
+    cursor: "pointer",
+    textAlign: "center",
+    textDecoration: "none",
+    ...(on
+      ? { background: "#fff", color: "#16181d", boxShadow: "0 1px 2px rgba(0,0,0,.1)" }
+      : { background: "transparent", color: "#787d87" }),
+  });
+
+  return (
+    <div style={{ maxWidth: 560, margin: "0 auto", padding: "18px 16px 80px" }}>
+      <style>{CSS}</style>
+
+      <Link
+        href="/field-work"
+        className="fw-tab"
+        style={{
+          display: "inline-block",
+          fontSize: 13,
+          fontWeight: 600,
+          color: "var(--accent)",
+          textDecoration: "none",
+          padding: "2px 0 12px",
+        }}
+      >
+        ‹ All field jobs
+      </Link>
+
+      {/* job header */}
+      <div
+        style={{
+          background: "#16181d",
+          color: "#fff",
+          borderRadius: 16,
+          padding: "17px 18px",
+          marginBottom: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
+          <span style={chipDark(p.stage)}>{STAGE_META[p.stage]?.label || p.stage}</span>
+          <span
+            style={{
+              marginLeft: "auto",
+              fontFamily: "var(--font-mono)",
+              fontSize: 10.5,
+              color: "#8b909a",
+            }}
+          >
+            {p.id}
+          </span>
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 600, lineHeight: 1.25 }}>{p.name}</div>
+        <div style={{ fontSize: 12.5, color: "#aab0bb", marginTop: 4 }}>{p.customer || "—"}</div>
+        <div style={{ display: "flex", gap: 20, marginTop: 14 }}>
+          <div>
+            <div style={uppLabel}>Install window</div>
+            <div style={{ fontSize: 13.5, fontWeight: 600, marginTop: 3 }}>
+              {p.installStart ? fmtDate(p.installStart) + " – " + fmtDate(p.installEnd) : "TBD"}
+            </div>
+          </div>
+          <div>
+            <div style={uppLabel}>My hours</div>
+            <div
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 13.5,
+                fontWeight: 600,
+                marginTop: 3,
+              }}
+            >
+              {myHours}h
+            </div>
+          </div>
+          <Link
+            href={"/projects?id=" + encodeURIComponent(p.id)}
+            style={{
+              marginLeft: "auto",
+              alignSelf: "center",
+              fontSize: 12,
+              fontWeight: 600,
+              color: "#cfd3da",
+              textDecoration: "none",
+              border: "1px solid #3a3e46",
+              borderRadius: 8,
+              padding: "7px 11px",
+            }}
+          >
+            PM view
+          </Link>
+        </div>
+      </div>
+
+      {/* segmented tabs — local state so switching works with no signal */}
+      <div
+        style={{
+          display: "flex",
+          background: "#e4e6ea",
+          borderRadius: 11,
+          padding: 3,
+          marginBottom: 14,
+        }}
+      >
+        {TABS.map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setTab(k)}
+            style={segStyle(tab === k)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* TASKS */}
+      {tab === "tasks" && (
+        <>
+          {order.map((sec) => (
+            <div key={sec}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "#9aa0ab",
+                  letterSpacing: ".05em",
+                  textTransform: "uppercase",
+                  margin: "6px 2px 8px",
+                }}
+              >
+                {sec}
+              </div>
+              <div
+                style={{
+                  background: "#fff",
+                  border: "1px solid #e7e9ee",
+                  borderRadius: 13,
+                  overflow: "hidden",
+                  marginBottom: 14,
+                }}
+              >
+                {groupsMap[sec].map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => onToggleTask(t.id)}
+                    className="fw-card-link"
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 12,
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "14px 15px",
+                      border: "none",
+                      borderBottom: "1px solid #f3f4f7",
+                      background: "transparent",
+                      cursor: "pointer",
+                      fontFamily: "var(--font-ui)",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: 7,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                        marginTop: 1,
+                        border: `2px solid ${t.done ? "var(--accent)" : "#cdd2da"}`,
+                        background: t.done ? "var(--accent)" : "#fff",
+                        color: "#fff",
+                      }}
+                    >
+                      {t.done ? "✓" : ""}
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: 14,
+                          fontWeight: 500,
+                          lineHeight: 1.35,
+                          ...(t.done
+                            ? { textDecoration: "line-through", color: "#aab0bb" }
+                            : { color: "#16181d" }),
+                        }}
+                      >
+                        {t.title}
+                      </span>
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: 11.5,
+                          color: "#9aa0ab",
+                          marginTop: 3,
+                        }}
+                      >
+                        {(t.assignee ? firstName(t.assignee) : "Unassigned") +
+                          (t.done && t.doneAt ? " · done " + timeAgo(t.doneAt) : "")}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          <form onSubmit={onAddTask} style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <input
+              name="title"
+              value={taskTitle}
+              onChange={(e) => setTaskTitle(e.target.value)}
+              placeholder="Add a task…"
+              style={{
+                flex: 1,
+                fontFamily: "var(--font-ui)",
+                fontSize: 13.5,
+                border: "1px solid #e4e7ec",
+                borderRadius: 10,
+                padding: "12px 13px",
+                outline: "none",
+                background: "#fff",
+              }}
+            />
+            <button
+              type="submit"
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 13.5,
+                fontWeight: 600,
+                color: "#fff",
+                background: "var(--accent)",
+                border: "none",
+                padding: "0 18px",
+                borderRadius: 10,
+                cursor: "pointer",
+              }}
+            >
+              Add
+            </button>
+          </form>
+        </>
+      )}
+
+      {/* NOTES */}
+      {tab === "notes" && (
+        <>
+          <form
+            onSubmit={onPostNote}
+            style={{
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              padding: "13px 14px",
+              marginBottom: 14,
+            }}
+          >
+            <textarea
+              name="text"
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="Log a field note — conditions, blockers, changes…"
+              rows={3}
+              style={{
+                width: "100%",
+                fontFamily: "var(--font-ui)",
+                fontSize: 14,
+                border: "none",
+                outline: "none",
+                resize: "vertical",
+                color: "#16181d",
+                background: "transparent",
+              }}
+            />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 9,
+                marginTop: 10,
+                paddingTop: 10,
+                borderTop: "1px solid #f3f4f7",
+              }}
+            >
+              <button
+                type="submit"
+                style={{
+                  marginLeft: "auto",
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#fff",
+                  background: "var(--accent)",
+                  border: "none",
+                  padding: "9px 16px",
+                  borderRadius: 9,
+                  cursor: "pointer",
+                }}
+              >
+                Post note
+              </button>
+            </div>
+          </form>
+
+          {(p.notes || []).map((n) => {
+            const idn = identityOf(n.by);
+            return (
+              <div
+                key={n.id}
+                style={{
+                  background: "#fff",
+                  border: "1px solid #e7e9ee",
+                  borderRadius: 13,
+                  padding: "13px 14px",
+                  marginBottom: 10,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+                  <span
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: "50%",
+                      background: idn.color,
+                      color: "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {idn.initials}
+                  </span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{firstName(n.by)}</span>
+                  <span style={{ marginLeft: "auto", fontSize: 11, color: "#aab0bb" }}>
+                    {timeAgo(n.at)}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13.5, lineHeight: 1.5, color: "#2f333b" }}>{n.text}</div>
+                {n.photo && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={n.photo}
+                    alt=""
+                    style={{
+                      marginTop: 10,
+                      maxHeight: 200,
+                      maxWidth: "100%",
+                      borderRadius: 10,
+                      display: "block",
+                    }}
+                  />
+                )}
+              </div>
+            );
+          })}
+          {(p.notes || []).length === 0 && (
+            <div
+              style={{ textAlign: "center", color: "#9aa0ab", fontSize: 12.5, padding: 14 }}
+            >
+              No notes yet — log the first one above.
+            </div>
+          )}
+        </>
+      )}
+
+      {/* TIME */}
+      {tab === "time" && (
+        <>
+          <form
+            onSubmit={onLogTime}
+            style={{
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              padding: 14,
+              marginBottom: 14,
+            }}
+          >
+            <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 11 }}>
+              Log hours — today
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                name="hours"
+                value={hours}
+                onChange={(e) => setHours(e.target.value)}
+                inputMode="decimal"
+                placeholder="Hrs"
+                style={{
+                  width: 74,
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 15,
+                  textAlign: "center",
+                  border: "1px solid #e4e7ec",
+                  borderRadius: 10,
+                  padding: "12px 8px",
+                  outline: "none",
+                }}
+              />
+              <input
+                name="note"
+                value={timeNote}
+                onChange={(e) => setTimeNote(e.target.value)}
+                placeholder="What you worked on"
+                style={{
+                  flex: 1,
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 13.5,
+                  border: "1px solid #e4e7ec",
+                  borderRadius: 10,
+                  padding: "12px 13px",
+                  outline: "none",
+                }}
+              />
+            </div>
+            <button
+              type="submit"
+              style={{
+                width: "100%",
+                marginTop: 11,
+                fontFamily: "var(--font-ui)",
+                fontSize: 13.5,
+                fontWeight: 600,
+                color: "#fff",
+                background: "var(--accent)",
+                border: "none",
+                padding: 12,
+                borderRadius: 10,
+                cursor: "pointer",
+              }}
+            >
+              Log time
+            </button>
+          </form>
+
+          <div style={{ display: "flex", gap: 11, marginBottom: 14 }}>
+            <div
+              style={{
+                flex: 1,
+                background: "#fff",
+                border: "1px solid #e7e9ee",
+                borderRadius: 13,
+                padding: "13px 14px",
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 20, fontWeight: 600 }}>
+                {myHours}h
+              </div>
+              <div style={{ fontSize: 10.5, color: "#9aa0ab", marginTop: 3 }}>my hours</div>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                background: "#fff",
+                border: "1px solid #e7e9ee",
+                borderRadius: 13,
+                padding: "13px 14px",
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 20, fontWeight: 600 }}>
+                {crewHours}h
+              </div>
+              <div style={{ fontSize: 10.5, color: "#9aa0ab", marginTop: 3 }}>crew total</div>
+            </div>
+          </div>
+
+          {(p.timeLogs || [])
+            .slice()
+            .sort((a, b) => (b.date || 0) - (a.date || 0))
+            .map((l) => {
+              const idn = identityOf(l.person);
+              return (
+                <div
+                  key={l.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 11,
+                    background: "#fff",
+                    border: "1px solid #e7e9ee",
+                    borderRadius: 11,
+                    padding: "11px 13px",
+                    marginBottom: 8,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: "50%",
+                      background: idn.color,
+                      color: "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {idn.initials}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{firstName(l.person)}</div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "#9aa0ab",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {l.note || "—"}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div
+                      style={{ fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 600 }}
+                    >
+                      {l.hours}h
+                    </div>
+                    <div style={{ fontSize: 10, color: "#aab0bb" }}>{timeAgo(l.date)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          {(p.timeLogs || []).length === 0 && (
+            <div style={{ textAlign: "center", color: "#9aa0ab", fontSize: 12.5, padding: 10 }}>
+              No hours logged yet.
+            </div>
+          )}
+        </>
+      )}
+
+      {/* BOM / PLAN */}
+      {tab === "bom" && (
+        <>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 9,
+              background: "#eef3f0",
+              border: "1px solid #d6e6dd",
+              borderRadius: 12,
+              padding: "12px 14px",
+              marginBottom: 13,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: ".06em",
+                color: "#1f7a52",
+                background: "#fff",
+                border: "1px solid #cce9da",
+                padding: "3px 7px",
+                borderRadius: 5,
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              READ-ONLY
+            </span>
+            <span style={{ fontSize: 12, color: "#3a6650" }}>
+              Bill of materials &amp; plan — view only on site.
+            </span>
+          </div>
+          <Link
+            href="/quick-design"
+            className="fw-card-link"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              padding: "14px 15px",
+              marginBottom: 13,
+              textDecoration: "none",
+              color: "inherit",
+            }}
+          >
+            <span
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 9,
+                background: "#f1f2f5",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 17,
+                flexShrink: 0,
+              }}
+            >
+              ◳
+            </span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600 }}>Stage plan &amp; layout</div>
+              <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
+                Open the groundplan drawing
+              </div>
+            </div>
+            <span style={{ color: "#c4c9d2", fontSize: 18 }}>›</span>
+          </Link>
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: "#9aa0ab",
+                letterSpacing: ".05em",
+                textTransform: "uppercase",
+                padding: "12px 15px 9px",
+              }}
+            >
+              Bill of materials
+            </div>
+            {(p.procurement || []).map((l) => {
+              const color = LINE_STATUS_COLOR[l.status] || "#9aa0ab";
+              return (
+                <div
+                  key={l.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 11,
+                    padding: "11px 15px",
+                    borderTop: "1px solid #f3f4f7",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      flexShrink: 0,
+                      background: color,
+                    }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.3 }}>{l.desc}</div>
+                    <div
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 10.5,
+                        color: "#aab0bb",
+                        marginTop: 2,
+                      }}
+                    >
+                      {(l.sku || "—") + " · " + l.qty + " " + l.unit}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 600, color, flexShrink: 0 }}>
+                    {LINE_STATUS_LABEL[l.status] || l.status}
+                  </span>
+                </div>
+              );
+            })}
+            {(p.procurement || []).length === 0 && (
+              <div
+                style={{
+                  padding: "16px 15px",
+                  fontSize: 12.5,
+                  color: "#9aa0ab",
+                  textAlign: "center",
+                }}
+              >
+                No materials on this job.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            left: "50%",
+            bottom: 22,
+            transform: "translateX(-50%)",
+            zIndex: 90,
+            display: "flex",
+            alignItems: "center",
+            gap: 11,
+            background: "#16181d",
+            color: "#fff",
+            borderRadius: 12,
+            padding: "13px 17px",
+            boxShadow: "0 12px 40px rgba(0,0,0,.3)",
+            maxWidth: "92vw",
+          }}
+        >
+          <span
+            style={{ width: 8, height: 8, borderRadius: "50%", background: "#5fd29a", flexShrink: 0 }}
+          />
+          <span style={{ fontSize: 13, lineHeight: 1.4 }}>{toast}</span>
+        </div>
+      )}
+    </div>
+  );
+}

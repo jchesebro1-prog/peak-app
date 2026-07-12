@@ -229,6 +229,7 @@ export default async function FlameResultsPage({
         }}
       >
         <ResultsEditor
+          record={job}
           jobId={job.id}
           stage={job.stage}
           venues={venues}
