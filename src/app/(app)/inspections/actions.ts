@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import { create } from "@/lib/stores/inspections";
+import { assign, create, unschedule } from "@/lib/stores/inspections";
 
 /**
  * Inspection inbox mutations. `createInspection` mirrors the prototype's
@@ -20,4 +20,25 @@ export async function createInspection(): Promise<void> {
   });
   revalidatePath("/", "layout");
   redirect(`/inspections/${encodeURIComponent(rec.id)}`);
+}
+
+/** Scheduler mutations (inspection twins of the flame-test scheduler's). */
+export async function scheduleInspection(formData: FormData): Promise<void> {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  if (!id) return;
+  await assign(
+    id,
+    String(formData.get("assignedTo") || ""),
+    String(formData.get("scheduledDate") || "")
+  );
+  revalidatePath("/", "layout");
+}
+
+export async function unscheduleInspection(formData: FormData): Promise<void> {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  if (!id) return;
+  await unschedule(id);
+  revalidatePath("/", "layout");
 }

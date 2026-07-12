@@ -326,3 +326,42 @@ Anything you want changed, just say so — none of these are hard to reverse.
   draft, since every pre-intake survey is a draft). Model lives in
   `src/lib/stores/survey-intake.ts` — a pure module shared by the DB-backed
   store and the client editor.
+
+## Repairs + Inspections buildout — IDEAS #44 completion (built 2026-07-12)
+
+- **D51. Repair report ships in three variants — letter / summary / service
+  report — defaulting to the formal service report.** Mirrors the flame-test
+  report's variant pattern exactly (same toolbar tabs, same .pk-doc-page
+  foundation). The completion record (work performed, parts used, follow-up)
+  drives the copy; a follow-up note flips the status chip to "Follow-up
+  Recommended". A three-up comparison canvas lives at /repairs/report/options
+  (reference the variants as 2a / 2b / 2c when you pick a default).
+- **D52. Inspection pricing is a NEW engine (no prototype existed) shaped
+  after the flame/repair engines.** hours = (baseHours + lineSets ×
+  lineSetMinutes/60) × (Level 2 ? ×level2Mult : 1); total = max(minFee,
+  (hours × laborRate + shared trip travel) ÷ (1 − margin)). Trip math is
+  IMPORTED from the repair engine so the two can never drift. Defaults are
+  placeholders ($95/hr, 15 min/line set, 2 base hrs, ×1.75 L2, $650 min,
+  30-pt margin) — all live-editable in Estimating Rules → "Inspection
+  pricing" (blob `inspection_rates`).
+- **D53. An accepted inspection quote spawns ONE `requested` record PER
+  QUOTED VENUE.** Inspection records are per-venue (one report per venue),
+  while the quote prices multiple venues as one shared trip — so the spawn
+  fans out, splitting the quote value evenly across venues (rounding
+  remainder on the first). Same accepted-quote seam as flame/repairs:
+  status 'won' → createFromQuote/syncFromQuotes, wired into the Quotes hub's
+  won action too.
+- **D54. Renewals track BOTH cadences independently — latest completed
+  inspection per customer + venue + LEVEL.** Level 1 = annual, Level 2 =
+  every 5 years (Jeff's Q&A in the #44 ledger entry); the anchor is the
+  inspection's surveyDate and the lead window is 60 days (same as flame,
+  per MASTER-QUESTIONS Q24 default). "Start renewal" opens a prefilled
+  inspection quote at the venue's level — the quote front now IS the renewal
+  path (carryForward remains for pulling open logs into the new capture).
+- **D55. Inspections "Report Options" compares the EXISTING report's three
+  layouts** (report / dossier / compact at /inspections/report/options,
+  reference 3a / 3b / 3c) rather than inventing new variants — the client
+  report already shipped with layout + section toggles, so the options
+  canvas is a picker over those. The quotes hub also gained type badges
+  (Flame test / Repair / Inspection) and per-type "Open …" edit links, and
+  the "+ New quote" menu now lists all three auto-priced service quotes.

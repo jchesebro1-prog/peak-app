@@ -1,412 +1,1186 @@
 import Link from "next/link";
+import type { CSSProperties } from "react";
 import { requireUser } from "@/lib/session";
 import {
   getAll,
   counts,
+  renewals,
+  renewalMeta,
   stageMeta,
-  severityMeta,
+  levelMeta,
+  dueAtOf,
+  fmtShort,
+  dueLabel,
   timeAgo,
-  fmtLong,
-  STAGES,
+  RENEWAL_LEAD_DAYS,
   type InspectionRecord,
   type InspectionStageKey,
 } from "@/lib/stores/inspections";
-import { firstName } from "@/lib/team";
+import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
+import { all as allCustomers } from "@/lib/stores/customers";
+import { coordsOf } from "@/lib/geo";
+import { InspectionMap } from "./controls";
 import { createInspection } from "./actions";
+import type { MapPin } from "@/components/map/LeafletMap";
 
 export const metadata = { title: "Rigging Inspections — Peak Backend" };
 
-/* accent-derived tints (prototype color-mix over the office accent) */
-const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 13%, #fff)";
-const ACCENT_INK = "color-mix(in srgb, var(--accent) 72%, #000)";
-const ACCENT_BORDER_LT = "color-mix(in srgb, var(--accent) 30%, #fff)";
+/**
+ * Rigging Inspections DASHBOARD — the flame-tests-style upgrade of the old
+ * inbox (IDEAS #44): KPI strip, renewals-due panel tracking BOTH cadences
+ * (Level 1 annual · Level 2 every 5 years), the all-inspections work list
+ * with `quoted` pre-record rows from open inspection quotes, a Leaflet
+ * location map, and the by-status summary.
+ */
 
-/* device-sync badge meta (Inspections.dc.html syncMeta) */
-const SYNC_META: Record<string, { ink: string; soft: string; bd: string; label: string }> = {
-  pending: { ink: "#9a6a1f", soft: "#fbf3dd", bd: "#f0e2bd", label: "On device" },
-  syncing: { ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3", label: "Syncing…" },
-  synced: { ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da", label: "Synced" },
-  error: { ink: "#b4543a", soft: "#f7e9e5", bd: "#f0d6cd", label: "Retry" },
+const DAY = 86400000;
+
+/* ---- local stage meta including the "quoted" pre-record row ---- */
+
+type RowStage = "quoted" | InspectionStageKey;
+
+const STAGE_DOT: Record<RowStage, string> = {
+  quoted: "#8c919c",
+  requested: "#c98a2b",
+  scheduled: "#3155a8",
+  onsite: "#7b3f8a",
+  completed: "#1f7a52",
 };
-function syncMeta(st: string | null | undefined) {
-  return SYNC_META[st || ""] || { ink: "#8c919c", soft: "#f1f2f5", bd: "#e4e7ec", label: st || "" };
+
+const QUOTED_META = { label: "Quoted", ink: "#5b616e", soft: "#f1f2f5", bd: "#e4e7ec" };
+
+function localStage(k: RowStage) {
+  return k === "quoted" ? QUOTED_META : stageMeta(k);
 }
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
 }
 
+function money(n: number | null | undefined): string {
+  return "$" + Math.round(n || 0).toLocaleString("en-US");
+}
+
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+/** ms → 'July 12, 2026' (the store's fmt* helpers take ISO strings). */
+function fmtLongMs(ts: number): string {
+  const d = new Date(ts);
+  return MONTHS[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear();
+}
+
+/* renewal window presets shared by the renewals card + map chips */
+const WINDOW_DEFS: Array<[number, string]> = [
+  [-30, "−30d"],
+  [30, "+30d"],
+  [60, "+60d"],
+  [90, "+90d"],
+];
+
+const STATUS_KEYS: InspectionStageKey[] = ["requested", "scheduled", "onsite", "completed"];
+
 const CSS = `
-  .in-rail::-webkit-scrollbar { display: none; }
-  .in-rail { -ms-overflow-style: none; scrollbar-width: none; }
-  .in-newbtn:hover { filter: brightness(1.06); }
-  .in-card-edit:hover { border-color: #c4c9d2; }
-  .in-card-report:hover { filter: brightness(.98); }
-  @media (max-width: 720px) {
-    .in-pad { padding-left: 15px !important; padding-right: 15px !important; }
-    .in-head { flex-direction: column !important; align-items: stretch !important; }
-    .in-newbtn { width: 100%; justify-content: center; }
-    .in-stats { grid-template-columns: repeat(2, 1fr) !important; }
+  .ind-grid { display: grid; grid-template-columns: minmax(0,1fr) 400px; gap: 18px; align-items: start; }
+  .ind-kpis { display: grid; grid-template-columns: repeat(4,1fr); gap: 13px; }
+  .ind-rowlink:hover { background: #fafbfc; }
+  .ind-renewrow:hover .ind-renewhit { background: #faf9fb; }
+  @media (max-width: 940px) {
+    .ind-grid { grid-template-columns: 1fr !important; }
+    .ind-kpis { grid-template-columns: 1fr 1fr !important; }
   }
 `;
-
-const EMPTY_BY_FILTER: Record<string, [string, string]> = {
-  all: ["No inspections yet", "Create your first rigging inspection, or open a sample report to see the finished deliverable."],
-  requested: ["No requested inspections", "Requests waiting to be scheduled will appear here."],
-  scheduled: ["Nothing scheduled", "Assigned, dated inspections show up here."],
-  onsite: ["No inspections on site", "Inspections being captured in the field appear here."],
-  completed: ["No completed inspections", "Finished inspections ready to issue as a report land here."],
-};
 
 export default async function InspectionsPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, all] = await Promise.all([requireUser(), searchParams, getAll()]);
+  const [, sp, records, quotes, customers] = await Promise.all([
+    requireUser(),
+    searchParams,
+    getAll(),
+    allQuotes(),
+    allCustomers(),
+  ]);
 
-  const filterParam = one(sp.filter);
-  const filter: string = (STAGES as ReadonlyArray<{ key: string }>).some((s) => s.key === filterParam)
-    ? filterParam
-    : "all";
+  /* ---- URL state: status filter + renewal window + map status visibility ---- */
+  const filterParam = one(sp.filter) as RowStage | "all" | "";
+  const filter: RowStage | "all" =
+    filterParam === "quoted" || STATUS_KEYS.includes(filterParam as InspectionStageKey)
+      ? (filterParam as RowStage)
+      : "all";
 
-  const stageOf = (x: InspectionRecord) => x.stage || "requested";
-  const stageCount = (k: InspectionStageKey) => all.filter((x) => stageOf(x) === k).length;
-  const openInspections = all.filter((x) => stageOf(x) !== "completed");
-  const totalUrgent = all.reduce((a, x) => a + counts(x).urgent.open, 0);
-  const completed = all.filter((x) => x.stage === "completed");
+  const winParam = parseInt(one(sp.win), 10);
+  const selWin = [-30, 30, 60, 90].includes(winParam) ? winParam : 60;
 
-  const stats = [
-    { label: "Active", value: String(openInspections.length), sub: "in progress", ink: "#16181d" },
-    { label: "Urgent open", value: String(totalUrgent), sub: "across all sites", ink: "#b4543a" },
-    { label: "Completed", value: String(completed.length), sub: "ready to issue", ink: "#1f7a52" },
-    { label: "Requested", value: String(stageCount("requested")), sub: "awaiting schedule", ink: "#8a6d1f" },
+  const hidden = new Set(one(sp.hide).split(",").filter(Boolean));
+  const statusOn = (k: InspectionStageKey) => !hidden.has(k);
+
+  const hrefFor = (over: { filter?: string; win?: number; hide?: string }) => {
+    const qs = new URLSearchParams();
+    const f = over.filter ?? filter;
+    const w = over.win ?? selWin;
+    const h = over.hide ?? Array.from(hidden).join(",");
+    if (f && f !== "all") qs.set("filter", f);
+    if (w !== 60) qs.set("win", String(w));
+    if (h) qs.set("hide", h);
+    const s = qs.toString();
+    return "/inspections" + (s ? "?" + s : "");
+  };
+
+  /* ---- coords per record (resolved from the customer directory) ---- */
+  const locCoords = new Map<string, { lat: number; lng: number }>();
+  customers.forEach((c) => {
+    (c.locations || []).forEach((l) => {
+      const co = coordsOf(l);
+      if (co && l.id) locCoords.set(c.id + "|" + l.id, { lat: co.lat, lng: co.lng });
+    });
+  });
+  const recCoords = (r: InspectionRecord) =>
+    r.customerId && r.locationId
+      ? locCoords.get(r.customerId + "|" + r.locationId) || null
+      : null;
+
+  /* ---- open inspection quotes without a spawned record yet ---- */
+  const haveQ = new Set<string>();
+  records.forEach((r) => {
+    if (r.quoteId) haveQ.add(r.quoteId);
+  });
+  const openQuotes = quotes.filter(
+    (q: Quote) =>
+      q.quoteType === "inspection" &&
+      (q.status === "draft" || q.status === "sent") &&
+      !haveQ.has(q.id)
+  );
+
+  type Row = {
+    key: string;
+    stage: RowStage;
+    id: string | null;
+    customer: string;
+    sub: string;
+    value: number;
+    updatedAt: number;
+    href: string;
+    isCompleted: boolean;
+  };
+
+  const custById = new Map(customers.map((c) => [c.id, c.name || ""]));
+  const nameFor = (id: string | null) => (id ? custById.get(id) || "" : "");
+
+  const allRows: Row[] = [];
+  openQuotes.forEach((q) => {
+    const insp = (q.inspection || {}) as { level?: number; lineSetsTotal?: number };
+    const lm = levelMeta(insp.level);
+    allRows.push({
+      key: "q-" + q.id,
+      stage: "quoted",
+      id: q.id,
+      customer: q.customer || nameFor(q.customerId) || "Customer",
+      sub:
+        (q.name || "Inspection quote") +
+        " · " +
+        lm.label +
+        (insp.lineSetsTotal ? " · " + insp.lineSetsTotal + " line sets" : ""),
+      value: q.value || 0,
+      updatedAt: q.updatedAt || q.createdAt || 0,
+      href: "/inspections/quote?id=" + encodeURIComponent(q.id),
+      isCompleted: false,
+    });
+  });
+  records.forEach((r) => {
+    const cnt = counts(r);
+    const lm = levelMeta(r.level);
+    const bits = [r.venue || "—", lm.label];
+    if (cnt.total > 0)
+      bits.push(
+        cnt.open + " open" + (cnt.urgent.open ? " · " + cnt.urgent.open + " urgent" : "")
+      );
+    else if (r.lineSets) bits.push(r.lineSets + " line sets");
+    allRows.push({
+      key: "r-" + r.id,
+      stage: r.stage || "requested",
+      id: r.id,
+      customer: r.customer || "Customer",
+      sub: bits.join(" · "),
+      value: r.value || 0,
+      updatedAt: r.updatedAt || 0,
+      href:
+        r.stage === "requested"
+          ? "/inspections/scheduling"
+          : "/inspections/" + encodeURIComponent(r.id),
+      isCompleted: r.stage === "completed",
+    });
+  });
+
+  const cnt: Record<RowStage, number> = {
+    quoted: 0,
+    requested: 0,
+    scheduled: 0,
+    onsite: 0,
+    completed: 0,
+  };
+  allRows.forEach((r) => {
+    cnt[r.stage] = (cnt[r.stage] || 0) + 1;
+  });
+  const active = cnt.requested + cnt.scheduled + cnt.onsite;
+  const totalUrgent = records.reduce((a, x) => a + counts(x).urgent.open, 0);
+
+  /* ---- renewals (both cadences) ---- */
+  const dueRows = await renewals({ dueOnly: true });
+  const overdueCount = dueRows.filter((r) => r._renewal.state === "overdue").length;
+  const dueSoonCount = dueRows.filter((r) => r._renewal.state === "due_soon").length;
+  const dueTotal = dueRows.length;
+
+  const allRenewals = await renewals({});
+  const winCutoff = (w: number) => Date.now() + w * DAY;
+  const inWin = (r: InspectionRecord, w: number) => {
+    const d = dueAtOf(r);
+    return d != null && d <= winCutoff(w);
+  };
+  const windowRows = allRenewals
+    .filter((r) => inWin(r, selWin))
+    .sort((a, b) => (dueAtOf(a) || 0) - (dueAtOf(b) || 0));
+  const winOverdue = windowRows.filter((r) => r._renewal.state === "overdue").length;
+
+  /* ---- KPI strip ---- */
+  const bar = (c: string): CSSProperties => ({
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: 3,
+    height: "100%",
+    background: c,
+  });
+  const kpis = [
+    {
+      label: "Active inspections",
+      value: String(active),
+      color: "#16181d",
+      barStyle: bar("var(--accent)"),
+      sub:
+        cnt.scheduled + " scheduled · " + cnt.onsite + " on-site · " + cnt.requested + " to schedule",
+    },
+    {
+      label: "Awaiting schedule",
+      value: String(cnt.requested),
+      color: cnt.requested ? "#9a6a1f" : "#16181d",
+      barStyle: bar("#c98a2b"),
+      sub: "requested, no date yet",
+    },
+    {
+      label: "Due for renewal",
+      value: String(dueTotal),
+      color: overdueCount ? "#b4543a" : dueTotal ? "#9a6a1f" : "#16181d",
+      barStyle: bar(overdueCount ? "#b4543a" : "#c98a2b"),
+      sub: overdueCount
+        ? overdueCount + " overdue · " + dueSoonCount + " due soon"
+        : "within " + RENEWAL_LEAD_DAYS + " days",
+    },
+    {
+      label: "Urgent open",
+      value: String(totalUrgent),
+      color: totalUrgent ? "#b4543a" : "#1f7a52",
+      barStyle: bar(totalUrgent ? "#b4543a" : "#1f7a52"),
+      sub: "across all sites",
+    },
   ];
 
-  const filterDefs: Array<[string, string]> = [
-    ["all", "All"],
-    ["requested", "Requested"],
-    ["scheduled", "Scheduled"],
-    ["onsite", "On-site"],
-    ["completed", "Completed"],
+  /* ---- all-inspections filter chips ---- */
+  const filterDefs: Array<[RowStage | "all", string, number]> = [
+    ["all", "All", allRows.length],
+    ["quoted", "Quoted", cnt.quoted],
+    ["requested", "Requested", cnt.requested],
+    ["scheduled", "Scheduled", cnt.scheduled],
+    ["onsite", "On-site", cnt.onsite],
+    ["completed", "Completed", cnt.completed],
   ];
-  const hrefFor = (key: string) => "/inspections" + (key === "all" ? "" : `?filter=${key}`);
-  const countFor = (key: string) => (key === "all" ? all.length : stageCount(key as InspectionStageKey));
+  let rows = allRows.slice();
+  if (filter !== "all") rows = rows.filter((r) => r.stage === filter);
+  rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
-  const filtered = all.filter((x) => filter === "all" || stageOf(x) === filter);
-  const emp = EMPTY_BY_FILTER[filter] || EMPTY_BY_FILTER.all;
+  /* ---- by-status bars ---- */
+  const statusDefs = [
+    { label: "Quoted", count: cnt.quoted, dot: STAGE_DOT.quoted },
+    { label: "Requested", count: cnt.requested, dot: STAGE_DOT.requested },
+    { label: "Scheduled", count: cnt.scheduled, dot: STAGE_DOT.scheduled },
+    { label: "On-site", count: cnt.onsite, dot: STAGE_DOT.onsite },
+    { label: "Completed", count: cnt.completed, dot: STAGE_DOT.completed },
+    { label: "Overdue renewals", count: overdueCount, dot: renewalMeta("overdue").dot },
+  ];
+  const maxC = Math.max(1, ...statusDefs.map((d) => d.count));
+
+  /* ---- map pins (respecting status visibility; renewal-due venues ringed) ---- */
+  const renewalByKey: Record<string, string> = {};
+  windowRows.forEach((r) => {
+    const c = recCoords(r);
+    if (c) renewalByKey[c.lat.toFixed(3) + "," + c.lng.toFixed(3)] = r._renewal.state;
+  });
+  const mapCounts: Record<InspectionStageKey, number> = {
+    requested: 0,
+    scheduled: 0,
+    onsite: 0,
+    completed: 0,
+  };
+  const pins: MapPin[] = [];
+  records.forEach((r) => {
+    const stage = (r.stage || "requested") as InspectionStageKey;
+    const c = recCoords(r);
+    if (!c) return;
+    mapCounts[stage] = (mapCounts[stage] || 0) + 1;
+    if (!statusOn(stage)) return;
+    const m = stageMeta(stage);
+    const rKey = c.lat.toFixed(3) + "," + c.lng.toFixed(3);
+    const rState = renewalByKey[rKey];
+    const rMeta = rState ? renewalMeta(rState) : null;
+    let when = " — awaiting scheduling";
+    if (stage === "completed") when = " — inspected " + fmtShort(r.surveyDate);
+    else if (stage === "scheduled") when = " — scheduled " + fmtShort(r.scheduledDate);
+    else if (stage === "onsite") when = " — on site now";
+    pins.push({
+      id: r.id,
+      lat: c.lat,
+      lng: c.lng,
+      color: rMeta ? rMeta.dot : STAGE_DOT[stage] || m.ink,
+      ring: !!rMeta,
+      label: r.customer || "Venue",
+      sub: (r.venue || "") + " · " + levelMeta(r.level).label + when,
+    });
+  });
+  const visibleCount = STATUS_KEYS.reduce(
+    (a, k) => a + (statusOn(k) ? mapCounts[k] || 0 : 0),
+    0
+  );
+  const anyMappable = STATUS_KEYS.reduce((a, k) => a + (mapCounts[k] || 0), 0) > 0;
+
+  const totalRows = allRows.length;
   const standfirst =
-    openInspections.length + " active · " + totalUrgent + " urgent open · " + completed.length + " completed";
+    totalRows +
+    " inspection" +
+    (totalRows === 1 ? "" : "s") +
+    " tracked · " +
+    (dueTotal
+      ? dueTotal + " due for renewal (L1 annual · L2 five-year)"
+      : "all current on both cadences") +
+    " · " +
+    totalUrgent +
+    " urgent open";
+
+  const chipStyle = (on: boolean): CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    fontSize: 12,
+    fontWeight: 600,
+    whiteSpace: "nowrap",
+    padding: "6px 12px",
+    borderRadius: 20,
+    textDecoration: "none",
+    border: on ? "1px solid var(--accent)" : "1px solid #e4e7ec",
+    background: on ? "var(--accent)" : "#fff",
+    color: on ? "#fff" : "#5b616e",
+  });
 
   return (
-    <div className="pk-content in-pad">
+    <div className="pk-content">
       <style>{CSS}</style>
 
       {/* header */}
       <div
-        className="in-head"
-        style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, marginBottom: 18 }}
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+          marginBottom: 22,
+        }}
       >
-        <div>
-          <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Rigging inspections</div>
-          <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 4 }}>{standfirst}</div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>
+            Rigging inspections
+          </div>
+          <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5 }}>{standfirst}</div>
         </div>
-        <form action={createInspection} style={{ flexShrink: 0 }}>
-          <button
-            type="submit"
-            className="in-newbtn"
+        <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+          <form action={createInspection}>
+            <button
+              type="submit"
+              title="Create a requested inspection directly (no quote)"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#16181d",
+                background: "#fff",
+                border: "1px solid #e4e7ec",
+                borderRadius: 10,
+                padding: "10px 15px",
+                cursor: "pointer",
+                fontFamily: "var(--font-ui)",
+              }}
+            >
+              + Direct request
+            </button>
+          </form>
+          <Link
+            href="/inspections/scheduling"
             style={{
-              display: "flex",
+              display: "inline-flex",
               alignItems: "center",
-              gap: 8,
+              gap: 7,
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#16181d",
+              background: "#fff",
+              border: "1px solid #e4e7ec",
+              borderRadius: 10,
+              padding: "10px 15px",
+              textDecoration: "none",
+            }}
+          >
+            Scheduler →
+          </Link>
+          <Link
+            href="/inspections/quote"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 7,
               fontSize: 13,
               fontWeight: 600,
               color: "#fff",
               background: "var(--accent)",
-              padding: "12px 17px",
-              borderRadius: 9,
-              border: "none",
-              cursor: "pointer",
-              boxShadow: "0 1px 3px var(--accent-soft)",
-              fontFamily: "var(--font-ui)",
+              borderRadius: 10,
+              padding: "10px 16px",
+              textDecoration: "none",
             }}
           >
-            <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> New inspection
-          </button>
-        </form>
+            + New inspection quote
+          </Link>
+        </div>
       </div>
 
-      {/* stat tiles */}
-      <div
-        className="in-stats"
-        style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 13, marginBottom: 20 }}
-      >
-        {stats.map((s) => (
+      {/* KPI strip */}
+      <div className="ind-kpis" style={{ marginBottom: 18 }}>
+        {kpis.map((k) => (
           <div
-            key={s.label}
+            key={k.label}
             style={{
               background: "#fff",
               border: "1px solid #ececf0",
               borderRadius: 12,
-              padding: "15px 16px",
+              padding: "15px 17px",
               boxShadow: "0 1px 2px rgba(0,0,0,.04)",
+              position: "relative",
+              overflow: "hidden",
             }}
           >
-            <div style={{ fontSize: 10.5, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" }}>
-              {s.label}
+            <div style={k.barStyle} />
+            <div
+              style={{
+                fontSize: 10.5,
+                fontWeight: 600,
+                color: "#9aa0ab",
+                letterSpacing: ".05em",
+                textTransform: "uppercase",
+              }}
+            >
+              {k.label}
             </div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 23, fontWeight: 600, letterSpacing: "-.01em", marginTop: 9, color: s.ink }}>
-              {s.value}
+            <div
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 26,
+                fontWeight: 600,
+                marginTop: 8,
+                color: k.color,
+              }}
+            >
+              {k.value}
             </div>
-            <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 6 }}>{s.sub}</div>
+            <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 5 }}>{k.sub}</div>
           </div>
         ))}
       </div>
 
-      {/* filter pills */}
-      <div
-        className="in-rail"
-        style={{ display: "flex", alignItems: "center", gap: 8, overflowX: "auto", marginBottom: 16, paddingBottom: 2 }}
-      >
-        {filterDefs.map(([key, label]) => {
-          const active = filter === key;
-          return (
-            <Link
-              key={key}
-              href={hrefFor(key)}
+      {/* main grid */}
+      <div className="ind-grid">
+        {/* LEFT */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
+          {/* renewals due */}
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #ececf0",
+              borderRadius: 13,
+              boxShadow: "0 1px 2px rgba(0,0,0,.04)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "15px 20px 13px",
+                borderBottom: "1px solid #f0f1f4",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <div style={{ fontSize: 14.5, fontWeight: 600 }}>Renewals due</div>
+                {windowRows.length > 0 && (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: "#fff",
+                      background: winOverdue ? "#b4543a" : "#c98a2b",
+                      padding: "2px 8px",
+                      borderRadius: 20,
+                    }}
+                  >
+                    {winOverdue ? winOverdue + " overdue" : windowRows.length + " due"}
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>L1 annual · L2 every 5 yrs</div>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap",
+                padding: "12px 20px 4px",
+              }}
+            >
+              {WINDOW_DEFS.map(([w, label]) => (
+                <Link key={w} href={hrefFor({ win: w })} style={chipStyle(selWin === w)}>
+                  {label}{" "}
+                  <span style={{ opacity: 0.6 }}>
+                    {allRenewals.filter((r) => inWin(r, w)).length}
+                  </span>
+                </Link>
+              ))}
+            </div>
+            <div style={{ padding: "0 20px 12px", fontSize: 11, color: "#aab0bb" }}>
+              Due on or before {fmtLongMs(winCutoff(selWin))}
+            </div>
+            {windowRows.map((r) => {
+              const rs = r._renewal;
+              const m = renewalMeta(rs.state);
+              const lm = levelMeta(r.level);
+              const email = r.contactEmail || "";
+              const subject = encodeURIComponent(
+                lm.label + " rigging inspection renewal — " + (r.customer || "")
+              );
+              const body = encodeURIComponent(
+                "Hi " +
+                  (r.contact || "there") +
+                  ",\n\nOur records show the " +
+                  lm.long.toLowerCase() +
+                  " rigging inspection at " +
+                  (r.customer || "your venue") +
+                  " (" +
+                  (r.venue || "") +
+                  ") is due for renewal. Would you like us to schedule this year's inspection?\n\nThanks,"
+              );
+              const mailto = email
+                ? "mailto:" + email + "?subject=" + subject + "&body=" + body
+                : "#";
+              const renewHref =
+                "/inspections/quote?level=" +
+                lm.key +
+                (r.customerId ? "&customer=" + encodeURIComponent(r.customerId) : "");
+              return (
+                <div
+                  key={r.id}
+                  className="ind-renewrow"
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0,1fr) auto",
+                    gap: 12,
+                    alignItems: "center",
+                    padding: "13px 20px",
+                    borderBottom: "1px solid #f5f6f8",
+                  }}
+                >
+                  <Link
+                    href={"/inspections/" + encodeURIComponent(r.id) + "/report"}
+                    title="View the last report"
+                    className="ind-renewhit"
+                    style={{
+                      minWidth: 0,
+                      display: "block",
+                      textDecoration: "none",
+                      color: "inherit",
+                      margin: "-6px -8px",
+                      padding: "6px 8px",
+                      borderRadius: 9,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span
+                        style={{
+                          width: 9,
+                          height: 9,
+                          borderRadius: "50%",
+                          flexShrink: 0,
+                          background: m.dot,
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontSize: 13.5,
+                          fontWeight: 600,
+                          lineHeight: 1.25,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {r.customer || "Customer"}
+                      </span>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          letterSpacing: ".04em",
+                          textTransform: "uppercase",
+                          color: lm.ink,
+                          background: lm.soft,
+                          border: "1px solid " + lm.bd,
+                          padding: "2px 7px",
+                          borderRadius: 5,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {lm.label}
+                      </span>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          letterSpacing: ".04em",
+                          textTransform: "uppercase",
+                          color: m.ink,
+                          background: m.soft,
+                          border: "1px solid " + m.bd,
+                          padding: "2px 7px",
+                          borderRadius: 5,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {dueLabel(rs.days, rs.state)}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11.5,
+                        color: "#9aa0ab",
+                        marginTop: 3,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {(r.venue || "") +
+                        " · last inspected " +
+                        fmtShort(r.surveyDate || r.reportDate)}{" "}
+                      · <span style={{ color: "#b3b8c1" }}>last report ›</span>
+                    </div>
+                  </Link>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                    <a
+                      href={mailto}
+                      title="Email the contact"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 34,
+                        height: 34,
+                        borderRadius: 9,
+                        border: "1px solid #e4e7ec",
+                        background: "#fff",
+                        color: "#5b616e",
+                        textDecoration: "none",
+                        fontSize: 15,
+                      }}
+                    >
+                      ✉
+                    </a>
+                    <Link
+                      href={renewHref}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        color: "#fff",
+                        background: "var(--accent)",
+                        borderRadius: 9,
+                        padding: "9px 13px",
+                        textDecoration: "none",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Start renewal
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+            {windowRows.length === 0 && (
+              <div
+                style={{
+                  padding: "30px 20px",
+                  textAlign: "center",
+                  color: "#9aa0ab",
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                }}
+              >
+                {selWin < 0
+                  ? "No renewals overdue by that much."
+                  : "No renewals due within this window."}
+              </div>
+            )}
+          </div>
+
+          {/* all inspections */}
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #ececf0",
+              borderRadius: 13,
+              boxShadow: "0 1px 2px rgba(0,0,0,.04)",
+              overflow: "hidden",
+            }}
+          >
+            <div style={{ padding: "15px 20px 12px", fontSize: 14.5, fontWeight: 600 }}>
+              All inspections
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                flexWrap: "wrap",
+                padding: "0 20px 13px",
+              }}
+            >
+              {filterDefs.map(([key, label, count]) => (
+                <Link key={key} href={hrefFor({ filter: key })} style={chipStyle(filter === key)}>
+                  {label} <span style={{ opacity: 0.6 }}>{count}</span>
+                </Link>
+              ))}
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0,1fr) 110px 96px 78px",
+                gap: 12,
+                padding: "0 20px 8px",
+                fontSize: 10,
+                fontWeight: 600,
+                color: "#aab0bb",
+                textTransform: "uppercase",
+                letterSpacing: ".05em",
+              }}
+            >
+              <span>Inspection</span>
+              <span>Status</span>
+              <span style={{ textAlign: "right" }}>Value</span>
+              <span style={{ textAlign: "right" }}>Updated</span>
+            </div>
+            {rows.map((r) => {
+              const m = localStage(r.stage);
+              return (
+                <div
+                  key={r.key}
+                  className="ind-rowlink"
+                  style={{
+                    position: "relative",
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0,1fr) 110px 96px 78px",
+                    gap: 12,
+                    alignItems: "center",
+                    padding: "12px 20px",
+                    borderTop: "1px solid #f3f4f7",
+                    color: "#16181d",
+                  }}
+                >
+                  <Link
+                    href={r.href}
+                    aria-label="Open inspection"
+                    style={{ position: "absolute", inset: 0, zIndex: 1 }}
+                  />
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 13.5,
+                        fontWeight: 600,
+                        lineHeight: 1.25,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {r.customer}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "#9aa0ab",
+                        marginTop: 2,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {r.sub}
+                    </div>
+                  </div>
+                  <span>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        letterSpacing: ".04em",
+                        textTransform: "uppercase",
+                        color: m.ink,
+                        background: m.soft,
+                        border: "1px solid " + m.bd,
+                        padding: "2px 8px",
+                        borderRadius: 5,
+                      }}
+                    >
+                      {m.label}
+                    </span>
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      textAlign: "right",
+                      color: r.value ? "#16181d" : "#c4c9d2",
+                    }}
+                  >
+                    {r.value ? money(r.value) : "—"}
+                  </span>
+                  <span style={{ textAlign: "right" }}>
+                    <div
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 11.5,
+                        color: "#9aa0ab",
+                      }}
+                    >
+                      {timeAgo(r.updatedAt)}
+                    </div>
+                    {r.isCompleted && r.id && (
+                      <Link
+                        href={"/inspections/" + encodeURIComponent(r.id) + "/report"}
+                        style={{
+                          position: "relative",
+                          zIndex: 2,
+                          display: "inline-block",
+                          marginTop: 3,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "var(--accent)",
+                          textDecoration: "none",
+                        }}
+                      >
+                        Report ›
+                      </Link>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+            {rows.length === 0 && (
+              <div
+                style={{
+                  padding: "30px 20px",
+                  textAlign: "center",
+                  color: "#9aa0ab",
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  borderTop: "1px solid #f3f4f7",
+                }}
+              >
+                No inspections in this view.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {/* inspection locations map */}
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #ececf0",
+              borderRadius: 13,
+              boxShadow: "0 1px 2px rgba(0,0,0,.04)",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "15px 18px 13px",
+                borderBottom: "1px solid #f0f1f4",
+              }}
+            >
+              <div style={{ fontSize: 14.5, fontWeight: 600 }}>Inspection locations</div>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 11.5,
+                  color: "#8c919c",
+                }}
+              >
+                <span
+                  style={{
+                    width: 9,
+                    height: 9,
+                    borderRadius: "50%",
+                    background: "#8c919c",
+                    border: "2px solid #fff",
+                    boxShadow: "0 0 0 1px #cbd0d8",
+                  }}
+                />
+                {visibleCount} mapped
+              </span>
+            </div>
+            <div style={{ position: "relative" }}>
+              <InspectionMap pins={pins} height={340} />
+              {pins.length === 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 12,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    zIndex: 5,
+                    textAlign: "center",
+                    color: "#5b616e",
+                    fontSize: 12,
+                    padding: "6px 12px",
+                    background: "rgba(255,255,255,.92)",
+                    border: "1px solid #e7eaee",
+                    borderRadius: 8,
+                    boxShadow: "0 1px 4px rgba(0,0,0,.1)",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {anyMappable
+                    ? "No statuses selected — tap one below to show pins."
+                    : "No mappable inspections yet."}
+                </div>
+              )}
+            </div>
+            <div
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 7,
-                fontFamily: "var(--font-ui)",
-                fontSize: 12.5,
-                fontWeight: 600,
-                padding: "9px 14px",
-                borderRadius: 9,
-                border: active ? "1px solid var(--accent)" : "1px solid #e4e7ec",
-                whiteSpace: "nowrap",
-                minHeight: 40,
-                flexShrink: 0,
-                textDecoration: "none",
-                background: active ? "var(--accent)" : "#fff",
-                color: active ? "#fff" : "#5b616e",
+                flexWrap: "wrap",
+                padding: "11px 18px 7px",
+                borderTop: "1px solid #f0f1f4",
               }}
             >
-              {label}
               <span
                 style={{
-                  fontFamily: "var(--font-mono)",
                   fontSize: 10,
-                  fontWeight: 600,
-                  padding: "1px 6px",
-                  borderRadius: 9,
-                  background: active ? "rgba(255,255,255,.22)" : "#f1f2f5",
-                  color: active ? "#fff" : "#9aa0ab",
+                  fontWeight: 700,
+                  color: "#aab0bb",
+                  textTransform: "uppercase",
+                  letterSpacing: ".06em",
                 }}
               >
-                {countFor(key)}
+                Status
               </span>
-            </Link>
-          );
-        })}
-      </div>
-
-      {/* inspection cards */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {filtered.map((x) => {
-          const sm = stageMeta(stageOf(x));
-          const cnt = counts(x);
-          const stage = stageOf(x);
-          const sy = syncMeta(x.syncState);
-          const isCompleted = stage === "completed";
-          const um = severityMeta("urgent");
-          const nm = severityMeta("necessary");
-          const bm = severityMeta("basic");
-          const tallies = [
-            { n: cnt.urgent.open, label: "Urg", m: um },
-            { n: cnt.necessary.open, label: "Nec", m: nm },
-            { n: cnt.basic.open, label: "Bas", m: bm },
-          ];
-          let sub: string;
-          let metaLine: string;
-          if (stage === "requested") {
-            sub = "requested " + timeAgo(x.requestedAt);
-            metaLine = "Requested by " + firstName(x.requestedBy) + (x.contact ? " · contact " + x.contact : "");
-          } else if (stage === "scheduled") {
-            sub = x.venueType || "inspection";
-            metaLine =
-              (x.assignedTo ? firstName(x.assignedTo) + " assigned" : "Unassigned") +
-              (x.scheduledDate ? " · " + fmtLong(x.scheduledDate) : "");
-          } else if (stage === "onsite") {
-            sub = "capture in progress";
-            metaLine = (x.inspector ? firstName(x.inspector) + " on site" : "On site") + " · " + cnt.total + " logs so far";
-          } else {
-            sub = cnt.total + " findings";
-            metaLine = "Surveyed " + fmtLong(x.surveyDate) + (x.reportDate ? " · reported " + fmtLong(x.reportDate) : "");
-          }
-          const editLabel = isCompleted ? "Open inspection" : stage === "requested" ? "Open brief" : "Open capture";
-          const canReport = isCompleted || cnt.total > 0;
-
-          return (
+              {(["completed", "onsite", "scheduled", "requested"] as InspectionStageKey[]).map(
+                (key) => {
+                  const m = stageMeta(key);
+                  const isOn = statusOn(key);
+                  const nextHidden = new Set(hidden);
+                  if (isOn) nextHidden.add(key);
+                  else nextHidden.delete(key);
+                  return (
+                    <Link
+                      key={key}
+                      href={hrefFor({ hide: Array.from(nextHidden).join(",") })}
+                      title={(isOn ? "Hide " : "Show ") + m.label.toLowerCase() + " inspections"}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 7,
+                        fontSize: 11.5,
+                        fontWeight: 600,
+                        padding: "5px 11px",
+                        borderRadius: 20,
+                        textDecoration: "none",
+                        border: isOn ? "1px solid #e4e7ec" : "1px solid #eeeff2",
+                        background: isOn ? "#fff" : "#f6f7f9",
+                        color: isOn ? "#3a3f4a" : "#b3b8c1",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 9,
+                          height: 9,
+                          borderRadius: "50%",
+                          flexShrink: 0,
+                          background: STAGE_DOT[key],
+                          opacity: isOn ? 1 : 0.3,
+                        }}
+                      />
+                      {m.label}{" "}
+                      <span style={{ fontFamily: "var(--font-mono)", opacity: 0.65 }}>
+                        {mapCounts[key] || 0}
+                      </span>
+                    </Link>
+                  );
+                }
+              )}
+            </div>
             <div
-              key={x.id}
               style={{
-                background: "#fff",
-                border: "1px solid #e7e9ee",
-                borderRadius: 14,
-                boxShadow: "0 1px 2px rgba(0,0,0,.04)",
-                overflow: "hidden",
+                display: "flex",
+                alignItems: "center",
+                gap: 7,
+                flexWrap: "wrap",
+                padding: "0 18px 8px",
               }}
             >
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 16, padding: "16px 18px", flexWrap: "wrap", rowGap: 12 }}>
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8, flexWrap: "wrap" }}>
-                    <span
-                      style={{
-                        display: "inline-block",
-                        fontSize: 10,
-                        fontWeight: 600,
-                        color: sm.ink,
-                        background: sm.soft,
-                        border: `1px solid ${sm.bd}`,
-                        padding: "3px 10px",
-                        borderRadius: 20,
-                      }}
-                    >
-                      {sm.label}
-                    </span>
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 9,
-                        fontWeight: 600,
-                        letterSpacing: ".04em",
-                        color: sy.ink,
-                        background: sy.soft,
-                        border: `1px solid ${sy.bd}`,
-                        padding: "2px 7px",
-                        borderRadius: 5,
-                      }}
-                    >
-                      {sy.label}
-                    </span>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb" }}>{x.id}</span>
-                  </div>
-                  <div style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.25 }}>{x.venue || "—"}</div>
-                  <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 3 }}>
-                    {(x.customer || "—") + " · " + sub}
-                  </div>
-                  {metaLine && <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 9 }}>{metaLine}</div>}
-                </div>
-
-                {cnt.total > 0 && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                    {tallies.map((t) => (
-                      <div
-                        key={t.label}
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          minWidth: 44,
-                          padding: "8px 6px",
-                          borderRadius: 8,
-                          border: `1px solid ${t.m.bd}`,
-                          background: t.m.soft,
-                          color: t.m.ink,
-                        }}
-                      >
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 600 }}>{t.n}</span>
-                        <span style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", marginTop: 2 }}>
-                          {t.label}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div
+              <span
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "12px 18px",
-                  borderTop: "1px solid #f3f4f7",
-                  background: "#fbfbfc",
-                  flexWrap: "wrap",
-                  rowGap: 8,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: "#aab0bb",
+                  textTransform: "uppercase",
+                  letterSpacing: ".06em",
                 }}
               >
-                <Link
-                  href={`/inspections/${encodeURIComponent(x.id)}`}
-                  className="in-card-edit"
+                Renewals due
+              </span>
+              {WINDOW_DEFS.map(([w, label]) => (
+                <Link key={w} href={hrefFor({ win: w })} style={chipStyle(selWin === w)}>
+                  {label}{" "}
+                  <span style={{ opacity: 0.6 }}>
+                    {allRenewals.filter((r) => inWin(r, w)).length}
+                  </span>
+                </Link>
+              ))}
+            </div>
+            <div
+              style={{
+                padding: "0 18px 12px",
+                fontSize: 11,
+                color: "#aab0bb",
+                lineHeight: 1.5,
+              }}
+            >
+              Ringed venues are due for renewal in the selected window — either cadence.
+            </div>
+          </div>
+
+          {/* by status */}
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #ececf0",
+              borderRadius: 13,
+              boxShadow: "0 1px 2px rgba(0,0,0,.04)",
+              padding: "16px 18px",
+            }}
+          >
+            <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 13 }}>By status</div>
+            {statusDefs.map((s) => (
+              <div key={s.label} style={{ marginBottom: 12 }}>
+                <div
                   style={{
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    color: "#5b616e",
-                    textDecoration: "none",
-                    padding: "9px 14px",
-                    borderRadius: 8,
-                    border: "1px solid #e4e7ec",
-                    background: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 6,
                   }}
                 >
-                  {editLabel}
-                </Link>
-                {canReport && (
-                  <Link
-                    href={`/inspections/${encodeURIComponent(x.id)}/report`}
-                    className="in-card-report"
+                  <span
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: 7,
+                      gap: 8,
                       fontSize: 12.5,
                       fontWeight: 600,
-                      color: ACCENT_INK,
-                      background: ACCENT_SOFT,
-                      border: `1px solid ${ACCENT_BORDER_LT}`,
-                      padding: "9px 14px",
-                      borderRadius: 8,
-                      textDecoration: "none",
                     }}
                   >
-                    <span style={{ fontSize: 13 }}>⎙</span> View report
-                  </Link>
-                )}
-                <span style={{ marginLeft: "auto", fontSize: 11.5, color: "#aab0bb" }}>Updated {timeAgo(x.updatedAt)}</span>
-              </div>
-            </div>
-          );
-        })}
-
-        {filtered.length === 0 && (
-          <div style={{ background: "#fff", border: "1px solid #e7e9ee", borderRadius: 14, padding: "44px 20px", textAlign: "center" }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#3a3f4a" }}>{emp[0]}</div>
-            <div style={{ fontSize: 13, color: "#9aa0ab", marginTop: 6, lineHeight: 1.6 }}>{emp[1]}</div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-              <form action={createInspection}>
-                <button
-                  type="submit"
+                    <span
+                      style={{
+                        width: 9,
+                        height: 9,
+                        borderRadius: 3,
+                        flexShrink: 0,
+                        background: s.dot,
+                      }}
+                    />
+                    {s.label}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {s.count}
+                  </span>
+                </div>
+                <div
                   style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "#fff",
-                    background: "var(--accent)",
-                    padding: "11px 17px",
-                    borderRadius: 9,
-                    border: "none",
-                    cursor: "pointer",
-                    fontFamily: "var(--font-ui)",
+                    height: 7,
+                    background: "#f1f2f5",
+                    borderRadius: 6,
+                    overflow: "hidden",
                   }}
                 >
-                  + New inspection
-                </button>
-              </form>
-            </div>
+                  <div
+                    style={{
+                      height: "100%",
+                      borderRadius: 6,
+                      width: Math.round((s.count / maxC) * 100) + "%",
+                      background: s.dot,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

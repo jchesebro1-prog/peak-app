@@ -80,8 +80,42 @@ export const REPAIR_RATE_DEFAULTS: RepairRates = {
   travelRoundMin: 15,
 };
 
+export type InspectionRates = {
+  /** $/hour — rigging-inspection labor */
+  laborRate: number;
+  /** $/mile — federal standard mileage rate */
+  mileageRate: number;
+  /** minutes to inspect one line set (Level 1 visual pass) */
+  lineSetMinutes: number;
+  /** fixed on-site hours per visit (setup, walkthrough, findings write-up) */
+  baseHours: number;
+  /** inspection-time multiplier for a Level 2 (5-year in-depth) inspection */
+  level2Mult: number;
+  /** $ minimum for the whole job */
+  minFee: number;
+  /** 30 points, margin of the sell price */
+  margin: number;
+  /** round total travel time up to the nearest N minutes */
+  travelRoundMin: number;
+};
+
+/** Inspection estimating defaults — seed/fallback for blob `inspection_rates`.
+ *  New under IDEAS #44 (no prototype engine existed); numbers are placeholders
+ *  editable in Estimating Rules, same as every other rate. */
+export const INSPECTION_RATE_DEFAULTS: InspectionRates = {
+  laborRate: 95,
+  mileageRate: 0.70,
+  lineSetMinutes: 15,
+  baseHours: 2,
+  level2Mult: 1.75,
+  minFee: 650,
+  margin: 0.30,
+  travelRoundMin: 15,
+};
+
 export const FLAMETEST_RATES_BLOB = "flametest_rates";
 export const REPAIR_RATES_BLOB = "repair_rates";
+export const INSPECTION_RATES_BLOB = "inspection_rates";
 /** General editable rates — replaces rss_pricing_rules_v1. */
 const PRICING_RULES_BLOB = "pricing_rules";
 
@@ -107,9 +141,19 @@ export async function setRepairRates(
   await setBlob(REPAIR_RATES_BLOB, patch);
 }
 
+export async function getInspectionRates(): Promise<InspectionRates> {
+  return getBlob(INSPECTION_RATES_BLOB, { ...INSPECTION_RATE_DEFAULTS });
+}
+
+export async function setInspectionRates(
+  patch: Partial<InspectionRates>
+): Promise<void> {
+  await setBlob(INSPECTION_RATES_BLOB, patch);
+}
+
 /* ---------- registry entry types & builders ---------- */
 
-export type RateStore = "general" | "flame" | "repair";
+export type RateStore = "general" | "flame" | "repair" | "inspection";
 
 export type RateEntry = {
   kind: "rate";
@@ -269,6 +313,23 @@ export const GROUPS: PricingGroup[] = [
     ],
   },
   {
+    key: "inspection", label: "Inspection pricing", live: true,
+    sub: "Rigging inspections — Level 1 annual · Level 2 every 5 years",
+    note: "Live — editing any rate here reprices every inspection quote immediately (shared with the inspection estimating engine). Placeholder numbers — adjust as pricing firms up.",
+    items: [
+      rate("inspection.laborRate", "Labor rate (inspection & travel)", 95, "$/hr", { min: 0, max: 300, step: 1, store: "inspection", key: "laborRate" }),
+      rate("inspection.mileageRate", "Mileage rate", 0.70, "$/mi", { min: 0, max: 2, step: 0.01, store: "inspection", key: "mileageRate", help: "Round-trip miles from the nearest office, shared across venues on one trip." }),
+      rate("inspection.lineSetMinutes", "Minutes to inspect one line set", 15, "min", { min: 1, max: 120, step: 1, store: "inspection", key: "lineSetMinutes", help: "Level 1 visual pass, per line set — covers the full component walkthrough." }),
+      rate("inspection.baseHours", "Base on-site hours (per visit)", 2, "hr", { min: 0, max: 16, step: 0.5, store: "inspection", key: "baseHours", help: "Setup, venue walkthrough, and findings write-up — charged once per visit." }),
+      rate("inspection.level2Mult", "Level 2 (5-year) ×", 1.75, "×", { min: 1, max: 4, step: 0.05, store: "inspection", key: "level2Mult", help: "Multiplies inspection time for the in-depth 5-year inspection." }),
+      rate("inspection.minFee", "Minimum inspection fee", 650, "$", { min: 0, max: 5000, step: 25, store: "inspection", key: "minFee", help: "Floor on the whole job after labor + travel." }),
+      rate("inspection.margin", "Inspection margin", 30, "%", { min: 0, max: 60, step: 1, store: "inspection", key: "margin", pctStored: true }),
+      rate("inspection.travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "inspection", key: "travelRoundMin" }),
+      formula("inspection.hours", "Inspection hours", "hours = ( baseHours + lineSets × lineSetMin ÷ 60 ) × (level 2 ? level2× : 1)"),
+      formula("inspection.total", "Inspection total", "max( $minimum ,  (hours × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ÷  (1 − margin) )"),
+    ],
+  },
+  {
     key: "travel", label: "Travel & mileage", live: false,
     sub: "Distance / drive-time estimate (feeds flame-test + any travel line)",
     note: "Reference defaults. When live road routing (OSRM) is available it overrides these; offline they are the fallback.",
@@ -327,22 +388,24 @@ reindex();
 
 /* ---------- engine-backed stores (rates proxied to a pricing engine's own blob, so editing is LIVE) ---------- */
 
-async function engineGet(
-  store: "flame" | "repair"
-): Promise<Record<string, number>> {
-  if (store === "flame")
-    return getBlob(FLAMETEST_RATES_BLOB, { ...FLAMETEST_RATE_DEFAULTS });
-  return getBlob(REPAIR_RATES_BLOB, { ...REPAIR_RATE_DEFAULTS });
+type EngineStore = "flame" | "repair" | "inspection";
+
+const ENGINE_BLOBS: Record<EngineStore, [string, Record<string, number>]> = {
+  flame: [FLAMETEST_RATES_BLOB, FLAMETEST_RATE_DEFAULTS],
+  repair: [REPAIR_RATES_BLOB, REPAIR_RATE_DEFAULTS],
+  inspection: [INSPECTION_RATES_BLOB, INSPECTION_RATE_DEFAULTS],
+};
+
+async function engineGet(store: EngineStore): Promise<Record<string, number>> {
+  const [blob, defaults] = ENGINE_BLOBS[store];
+  return getBlob(blob, { ...defaults });
 }
 
 async function engineSet(
-  store: "flame" | "repair",
+  store: EngineStore,
   patch: Record<string, number>
 ): Promise<void> {
-  await setBlob(
-    store === "flame" ? FLAMETEST_RATES_BLOB : REPAIR_RATES_BLOB,
-    patch
-  );
+  await setBlob(ENGINE_BLOBS[store][0], patch);
 }
 
 /* ---------- value get / set ---------- */
@@ -352,7 +415,7 @@ export async function value(
 ): Promise<number | null> {
   const it = typeof item === "string" ? BY_ID[item] : item;
   if (!it || it.kind !== "rate") return null;
-  if (it.store === "flame" || it.store === "repair") {
+  if (it.store !== "general") {
     const r = await engineGet(it.store);
     let v: number | undefined = r[it.key || it.id];
     if (v == null) v = it.pctStored ? it.def / 100 : it.def;
@@ -372,7 +435,7 @@ export async function setValue(
   let v = typeof val === "number" ? val : parseFloat(val);
   if (isNaN(v)) return;
   v = Math.max(it.min, Math.min(it.max, v));
-  if (it.store === "flame" || it.store === "repair") {
+  if (it.store !== "general") {
     await engineSet(it.store, { [it.key || it.id]: it.pctStored ? v / 100 : v });
     return;
   }
@@ -397,6 +460,7 @@ export async function resetAll(): Promise<void> {
   await setBlob(PRICING_RULES_BLOB, clear);
   await setBlob(FLAMETEST_RATES_BLOB, { ...FLAMETEST_RATE_DEFAULTS });
   await setBlob(REPAIR_RATES_BLOB, { ...REPAIR_RATE_DEFAULTS });
+  await setBlob(INSPECTION_RATES_BLOB, { ...INSPECTION_RATE_DEFAULTS });
 }
 
 /** Read a general rate by id with fallback (Quick Design install/freight/contingency). */

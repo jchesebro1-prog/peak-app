@@ -155,7 +155,7 @@ export default async function RepairSchedulingPage({
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5 }}>{standfirst}</div>
         </div>
         <Link
-          href="/estimator"
+          href="/repairs/quote"
           style={{
             display: "inline-flex",
             alignItems: "center",

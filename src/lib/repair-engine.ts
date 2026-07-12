@@ -97,6 +97,13 @@ export function roundUpTo(min: number | null | undefined, step?: number): number
   return Math.ceil(min / step) * step;
 }
 
+/** The travel knobs tripTravel actually reads — lets the inspection engine
+ *  share the exact same trip math without carrying repair-only rates. */
+export type TravelRates = Pick<
+  RepairRates,
+  "laborRate" | "mileageRate" | "travelRoundMin"
+>;
+
 /**
  * Shared trip travel over the whole route: office -> v1 -> ... -> vn -> office.
  * Same approach as the flame-test engine so both price travel identically.
@@ -104,7 +111,7 @@ export function roundUpTo(min: number | null | undefined, step?: number): number
 export function tripTravel(
   office: { lat?: number | null; lng?: number | null } | null | undefined,
   venues: TripVenueInput[],
-  C: RepairRates,
+  C: TravelRates,
   geo?: GeoAdapter | null
 ): TripTravel {
   const legs: TripLeg[] = [];

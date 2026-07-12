@@ -280,7 +280,7 @@ export default async function RepairsPage({
             Scheduler →
           </Link>
           <Link
-            href="/estimator"
+            href="/repairs/quote"
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -507,7 +507,15 @@ export default async function RepairsPage({
                     </div>
                   </Link>
                   <Link
-                    href={"/estimator"}
+                    href={
+                      "/repairs/quote?inspection=" +
+                      encodeURIComponent(x.rec.id) +
+                      "&log=" +
+                      encodeURIComponent(String(x.log.id)) +
+                      (x.rec.customerId
+                        ? "&customer=" + encodeURIComponent(x.rec.customerId)
+                        : "")
+                    }
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
@@ -613,11 +621,11 @@ export default async function RepairsPage({
               const cat = categoryMeta(r.category);
               const sub = [r.customer, r.venue, cat.short].filter(Boolean).join(" · ");
               return (
-                <Link
+                <div
                   key={r.id}
-                  href={rowHref(r)}
                   className="rp-rowlink"
                   style={{
+                    position: "relative",
                     display: "grid",
                     gridTemplateColumns: "minmax(0,1fr) 120px 96px 78px",
                     gap: 12,
@@ -628,6 +636,11 @@ export default async function RepairsPage({
                     textDecoration: "none",
                   }}
                 >
+                  <Link
+                    href={rowHref(r)}
+                    aria-label="Open repair"
+                    style={{ position: "absolute", inset: 0, zIndex: 1 }}
+                  />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                       <span
@@ -685,20 +698,24 @@ export default async function RepairsPage({
                       {timeAgo(r.updatedAt)}
                     </div>
                     {r.stage === "completed" && (
-                      <span
+                      <Link
+                        href={"/repairs/report?job=" + encodeURIComponent(r.id)}
                         style={{
+                          position: "relative",
+                          zIndex: 2,
                           display: "inline-block",
                           marginTop: 3,
                           fontSize: 11,
                           fontWeight: 600,
                           color: "var(--accent)",
+                          textDecoration: "none",
                         }}
                       >
                         Report ›
-                      </span>
+                      </Link>
                     )}
                   </span>
-                </Link>
+                </div>
               );
             })}
             {rows.length === 0 && (
@@ -1007,7 +1024,12 @@ export default async function RepairsPage({
                       ✉
                     </a>
                     <Link
-                      href="/estimator"
+                      href={
+                        "/repairs/quote" +
+                        (r.customerId
+                          ? "?customer=" + encodeURIComponent(r.customerId)
+                          : "")
+                      }
                       style={{
                         display: "inline-flex",
                         alignItems: "center",

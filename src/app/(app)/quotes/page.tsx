@@ -42,6 +42,27 @@ const RB_META: Record<string, { bg: string; bd: string; ink: string; icon: strin
 
 const GRID = "30px minmax(0,1fr) 200px 120px 96px 92px";
 
+/** Service quote-type badges (system quotes stay unbadged). */
+const TYPE_BADGE: Record<
+  string,
+  { label: string; ink: string; soft: string; bd: string }
+> = {
+  flame_test: { label: "Flame test", ink: "#b4543a", soft: "#f7e9e5", bd: "#f0d6cd" },
+  repair: { label: "Repair", ink: "#9a6a1f", soft: "#fbf3dd", bd: "#f0e2bd" },
+  inspection: { label: "Inspection", ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" },
+};
+
+/** Each service quote type edits in its own builder; system quotes in the Estimator. */
+function editHrefFor(q: Quote): { href: string; label: string } {
+  if (q.quoteType === "flame_test")
+    return { href: `/flame-tests/quote?id=${encodeURIComponent(q.id)}`, label: "Open flame test quote →" };
+  if (q.quoteType === "repair")
+    return { href: `/repairs/quote?id=${encodeURIComponent(q.id)}`, label: "Open repair quote →" };
+  if (q.quoteType === "inspection")
+    return { href: `/inspections/quote?id=${encodeURIComponent(q.id)}`, label: "Open inspection quote →" };
+  return { href: `/estimator?id=${encodeURIComponent(q.id)}`, label: "Open in Estimator →" };
+}
+
 /** Prototype shortMoney: $48.0k / $313k / $860. */
 function shortMoney(n: number): string {
   return n >= 1000
@@ -436,7 +457,7 @@ export default async function QuotesPage({
                     >
                       {q.name}
                     </span>
-                    {q.quoteType === "flame_test" && (
+                    {TYPE_BADGE[q.quoteType || ""] && (
                       <span
                         style={{
                           flexShrink: 0,
@@ -444,14 +465,14 @@ export default async function QuotesPage({
                           fontWeight: 700,
                           letterSpacing: ".04em",
                           textTransform: "uppercase",
-                          color: "#b4543a",
-                          background: "#f7e9e5",
-                          border: "1px solid #f0d6cd",
+                          color: TYPE_BADGE[q.quoteType || ""].ink,
+                          background: TYPE_BADGE[q.quoteType || ""].soft,
+                          border: `1px solid ${TYPE_BADGE[q.quoteType || ""].bd}`,
                           padding: "2px 6px",
                           borderRadius: 4,
                         }}
                       >
-                        Flame test
+                        {TYPE_BADGE[q.quoteType || ""].label}
                       </span>
                     )}
                   </div>
@@ -786,7 +807,7 @@ function SelectedPanel({
             })}
           </form>
           <Link
-            href={`/estimator?id=${encodeURIComponent(q.id)}`}
+            href={editHrefFor(q).href}
             style={{
               fontSize: 12.5,
               fontWeight: 600,
@@ -797,7 +818,7 @@ function SelectedPanel({
               textDecoration: "none",
             }}
           >
-            Open in Estimator →
+            {editHrefFor(q).label}
           </Link>
         </div>
       </div>

@@ -147,6 +147,20 @@ Estimating Rules — these just need real values before go-live)
   typed inspection/quote records have no field for it). The button still
   creates a sourced quote and opens the Estimator, but the report won't
   later show "view existing renovation quote". ✦ fine ☐ add the link field
+- **F12.** *(Jul 12 — IDEAS #44 completion)* **Repair report default
+  variant:** compare at /repairs/report/options. ✦ 2c service report
+  ☐ 2a letter ☐ 2b letter + service panel. **Inspection report default
+  layout:** compare at /inspections/report/options. ✦ 3a report
+  ☐ 3b dossier ☐ 3c compact.
+- **F13.** *(Jul 12)* **Inspection pricing defaults are placeholders** —
+  $95/hr labor, 15 min per line set, 2 base hrs per visit, ×1.75 for a
+  Level 2, $650 job minimum, 30-pt margin. All editable in Estimating
+  Rules → "Inspection pricing" (changes reprice live). ☐ real numbers:
+  ______
+- **F14.** *(Jul 12)* A multi-venue inspection quote spawns **one requested
+  inspection per venue**, splitting the quote value evenly across venues
+  (records/reports are per-venue; travel was priced once for the trip).
+  ✦ even split is fine ☐ weight by line-set count instead
 
 ## G. Documents & branding
 

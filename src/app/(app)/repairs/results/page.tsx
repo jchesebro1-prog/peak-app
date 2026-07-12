@@ -248,21 +248,37 @@ export default async function RepairResultsPage({
               This repair is complete and on the warranty follow-up clock.
             </div>
           </div>
-          <Link
-            href="/repairs"
-            style={{
-              fontSize: 12.5,
-              fontWeight: 600,
-              color: "#fff",
-              background: "#1f7a52",
-              borderRadius: 9,
-              padding: "9px 14px",
-              textDecoration: "none",
-              flexShrink: 0,
-            }}
-          >
-            Back to dashboard →
-          </Link>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, flexShrink: 0 }}>
+            <Link
+              href={"/repairs/report?job=" + encodeURIComponent(job.id)}
+              style={{
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "#1f7a52",
+                background: "#fff",
+                border: "1px solid #cce9da",
+                borderRadius: 9,
+                padding: "9px 14px",
+                textDecoration: "none",
+              }}
+            >
+              View service report →
+            </Link>
+            <Link
+              href="/repairs"
+              style={{
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "#fff",
+                background: "#1f7a52",
+                borderRadius: 9,
+                padding: "9px 14px",
+                textDecoration: "none",
+              }}
+            >
+              Back to dashboard →
+            </Link>
+          </div>
         </div>
       )}
 

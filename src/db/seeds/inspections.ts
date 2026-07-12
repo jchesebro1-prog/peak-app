@@ -138,9 +138,12 @@ export function seedLogs(): InspectionLog[] {
 
 export function inspectionsSeed(): InspectionRecord[] {
   return [
-    // 1) COMPLETED — the rich demo report (Lakefront PAC, Main Hall)
+    // 1) COMPLETED — the rich demo report (Lakefront PAC, Main Hall).
+    // Level 1 (annual) performed 2023-12-05 → renewal long overdue, so the
+    // dashboard's renewals panel has a live overdue row out of the box.
     {
-      id: "RI-2042", customer: "Lakefront Performing Arts Center", customerId: "lakefront", locationId: "lf1",
+      id: "RI-2042", quoteId: null, level: 1, lineSets: 32, value: 0,
+      customer: "Lakefront Performing Arts Center", customerId: "lakefront", locationId: "lf1",
       venue: "Main Hall", venueType: "Proscenium theater", address: "929 N Water St, Milwaukee, WI 53202",
       contact: "Tom Reyes", contactPhone: "(414) 555-0148", contactEmail: "treyes@lakefrontpac.org",
       surveyDate: "2023-12-05", reportDate: "2024-01-26", inspector: "Nic Trapani",
@@ -157,9 +160,36 @@ export function inspectionsSeed(): InspectionRecord[] {
       owner: "Nic Trapani", createdAt: ago(70), updatedAt: ago(6),
       syncState: "synced", syncedAt: ago(6), rev: 8,
     },
+    // 1b) COMPLETED — a LEVEL 2 (five-year in-depth) inspection at Northshore,
+    // performed Aug 2021 → its 5-year renewal lands inside the 60-day lead
+    // window, exercising the second cadence in the renewals panel.
+    {
+      id: "RI-2043", quoteId: null, level: 2, lineSets: 18, value: 0,
+      customer: "Northshore Theater", customerId: "northshore", locationId: "ns1",
+      venue: "Main House", venueType: "Proscenium theater", address: "618 N 8th St, Sheboygan, WI 53081",
+      contact: "Susan Marsh", contactPhone: "(920) 555-0155", contactEmail: "smarsh@northshoretheater.org",
+      surveyDate: "2021-08-28", reportDate: "2021-09-10", inspector: "Nic Trapani",
+      condition: "good",
+      scope: "Level 2 in-depth inspection — (18) single-purchase line sets, wear measurement on all lift lines and blocks.",
+      narrative: "The counterweight system is in good overall condition for its age. Wear measurements on the lift lines and sheaves are within tolerance; the items logged below were corrected on site or scheduled with venue staff.",
+      logs: renumber([
+        blankLog({ severity: "necessary", status: "closed", problem: "Rope lock jaws out of adjustment on three sets", location: "Operating rail", seq: 0,
+          explanation: "Three rope locks did not hold the empty hand line at the required grip.",
+          workPerformed: "Adjusted the jaws on all three locks during the inspection and cycled each set under load.", firstNoted: "2021-08-28", hasAfter: true }),
+        blankLog({ severity: "basic", status: "open", problem: "Batten numbers do not face the operator", location: "Battens (system-wide)", seq: 1,
+          explanation: "Batten numbering faces upstage, slowing safe operation from the rail.",
+          solution: "Reorient the batten numbers to face down toward the operating position.", firstNoted: "2021-08-28" }),
+      ]),
+      priorInspectionId: null, priorSurveyDate: "",
+      stage: "completed", assignedTo: "Nic Trapani", scheduledDate: "2021-08-28",
+      requestedBy: "Jeff Chesebro", requestedAt: ago(1780),
+      owner: "Nic Trapani", createdAt: ago(1780), updatedAt: ago(1740),
+      syncState: "synced", syncedAt: ago(1740), rev: 4,
+    },
     // 2) ON-SITE — capture in progress (Badger Ballet), a few logs
     {
-      id: "RI-2044", customer: "Badger Ballet Company", customerId: "badger", locationId: "bb1",
+      id: "RI-2044", quoteId: null, level: 1, lineSets: 24, value: 0,
+      customer: "Badger Ballet Company", customerId: "badger", locationId: "bb1",
       venue: "Main Stage", venueType: "Proscenium theater", address: "2201 Atwood Ave, Madison, WI 53704",
       contact: "Karl Vogt", contactPhone: "(608) 555-0127", contactEmail: "kvogt@badgerballet.org",
       surveyDate: "2026-07-01", reportDate: "", inspector: "Jeff Chesebro",
@@ -183,7 +213,8 @@ export function inspectionsSeed(): InspectionRecord[] {
     },
     // 3) SCHEDULED — assigned, dated, no logs yet (North Ridge HS)
     {
-      id: "RI-2045", customer: "North Ridge High School", customerId: "northridge", locationId: "nr1",
+      id: "RI-2045", quoteId: null, level: 1, lineSets: 0, value: 0,
+      customer: "North Ridge High School", customerId: "northridge", locationId: "nr1",
       venue: "Main Auditorium", venueType: "Proscenium theater", address: "1515 E Newberry St, Appleton, WI 54915",
       contact: "Greg Salas", contactPhone: "(920) 555-0176", contactEmail: "gsalas@northridgehs.edu",
       surveyDate: "2026-07-09", reportDate: "", inspector: "Nic Trapani",
@@ -197,7 +228,8 @@ export function inspectionsSeed(): InspectionRecord[] {
     },
     // 4) REQUESTED — office brief, awaiting scheduling (Northshore Theater)
     {
-      id: "RI-2046", customer: "Northshore Theater", customerId: "northshore", locationId: "ns1",
+      id: "RI-2046", quoteId: null, level: 1, lineSets: 0, value: 0,
+      customer: "Northshore Theater", customerId: "northshore", locationId: "ns1",
       venue: "Main House", venueType: "Proscenium theater", address: "618 N 8th St, Sheboygan, WI 53081",
       contact: "Susan Marsh", contactPhone: "(920) 555-0155", contactEmail: "smarsh@northshoretheater.org",
       surveyDate: "", reportDate: "", inspector: "",

@@ -84,6 +84,15 @@ See `.env.example`.
    rubric/measurements/issue-library/findings, client report). Won repair
    quotes now auto-spawn repair jobs. Open follow-ups logged in MASTER-QUESTIONS
    F9–F11, G1.
+   ✅ IDEAS #44 completion (Jul 12): Repairs gained the auto-priced quote
+   builder + proposal letter + service report (letter/summary/report variants
+   + options canvas); Inspections gained the full flame-style suite — pricing
+   engine + Estimating Rules group, auto-priced quote builder + letter,
+   accepted-quote spawn (one requested record per venue), scheduler,
+   dashboard (KPIs/renewals/map/by-status), L1-annual/L2-five-year renewals,
+   and a report-options canvas. Quotes hub: type badges + per-type edit
+   links + all three service quotes on "+ New quote". Decisions D51–D55;
+   follow-ups MASTER-QUESTIONS F12–F14.
 5. ✅ Installs + General — Projects (book + procurement/crew/timeline/sign-off),
    Schedule (crew board + project timeline), Field Work (on-site day view),
    Customers (directory + full customer record), Field Survey (list + capture

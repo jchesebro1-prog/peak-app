@@ -69,10 +69,14 @@ export type Quote = {
   status: QuoteStatus;
   /** 'estimator' | 'quick' */
   source: string;
-  /** 'system' (default) | 'flame_test' | 'repair' — absent on seed rows. */
+  /** 'system' (default) | 'flame_test' | 'repair' | 'inspection' — absent on seed rows. */
   quoteType?: string;
   /** Flame-test engine subdoc (owned by the flame-test module). */
   flameTest?: unknown;
+  /** Repair engine subdoc (owned by the repairs module). */
+  repair?: unknown;
+  /** Inspection engine subdoc (owned by the inspections module). */
+  inspection?: unknown;
   contact?: unknown;
   owner: string;
   /** Estimator/Quick Design spec subdoc. */
@@ -128,6 +132,8 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     source: partial.source || "quick",
     quoteType: partial.quoteType || "system",
     flameTest: partial.flameTest || null,
+    repair: partial.repair || null,
+    inspection: partial.inspection || null,
     contact: partial.contact || null,
     owner: partial.owner || "Jeff Chesebro",
     spec: partial.spec || null,

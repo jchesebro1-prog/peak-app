@@ -17,6 +17,19 @@ import {
  *
  * Lifecycle: requested → scheduled → onsite → completed (mirrors SurveyStore).
  *
+ * Quote front (IDEAS #44 buildout — new, no prototype equivalent): an
+ * inspection can now start life as an auto-priced QUOTE (quoteType
+ * 'inspection', priced by src/lib/inspection-engine.ts). When that quote is
+ * accepted (status 'won'), createFromQuote() spawns one `requested` record
+ * per quoted venue — the same accepted-quote seam as flame tests and repairs,
+ * in front of the existing requested → … → completed lifecycle.
+ *
+ * Recurrence (IDEAS #44): inspections run on two cadences by LEVEL —
+ * Level 1 every year, Level 2 (in-depth) every 5 years. A completed
+ * inspection's renewal anchors on its surveyDate; renewals() surfaces the
+ * latest completed inspection per customer + venue + level so both cadences
+ * are tracked independently, with the flame-test 60-day lead.
+ *
  * Year-over-year: carryForward() spins up a fresh inspection that pulls every
  * OPEN log from a prior report forward (as open, with a firstNoted date
  * preserved) so a re-inspection can close them or keep them open across
@@ -35,6 +48,9 @@ import {
  */
 
 const DAY = 86400000;
+const YEAR = 365 * DAY;
+/** Flag a renewal this many days before the anniversary (same as flame tests). */
+export const RENEWAL_LEAD_DAYS = 60;
 
 function now(): number {
   return Date.now();
@@ -85,6 +101,65 @@ export function stageMeta(k: string | null | undefined): InspectionStageMeta {
 export function stageIndex(k: string | null | undefined): number {
   const i = STAGES.findIndex((s) => s.key === k);
   return i < 0 ? 0 : i;
+}
+
+/* ---- inspection level (which cadence the inspection runs on) ---- */
+
+export type InspectionLevel = {
+  key: number;
+  label: string;
+  long: string;
+  years: number;
+  blurb: string;
+  ink: string;
+  soft: string;
+  bd: string;
+};
+
+export const LEVELS: InspectionLevel[] = [
+  { key: 1, label: "Level 1", long: "Level 1 — annual", years: 1,
+    blurb: "Visual inspection of every accessible rigging component, performed every year.",
+    ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" },
+  { key: 2, label: "Level 2", long: "Level 2 — every 5 years", years: 5,
+    blurb: "In-depth inspection with wear measurement and load-path review, performed every five years.",
+    ink: "#7b3f8a", soft: "#f3eaf5", bd: "#e6d3ea" },
+];
+
+export function levelMeta(k: number | string | null | undefined): InspectionLevel {
+  return LEVELS.find((l) => l.key === Number(k)) || LEVELS[0];
+}
+
+/* ---- renewal status (both cadences, flame-test badge shapes) ---- */
+
+export type RenewalState = "overdue" | "due_soon" | "upcoming" | "ok" | "none";
+
+export type RenewalBadge = {
+  label: string;
+  ink: string;
+  soft: string;
+  bd: string;
+  dot: string;
+};
+
+export const RENEWAL_META: Record<RenewalState, RenewalBadge> = {
+  overdue: { label: "Overdue", ink: "#b4543a", soft: "#f7e9e5", bd: "#f0d6cd", dot: "#b4543a" },
+  due_soon: { label: "Due soon", ink: "#9a6a1f", soft: "#fbf3dd", bd: "#f0e2bd", dot: "#c98a2b" },
+  upcoming: { label: "Upcoming", ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3", dot: "#3155a8" },
+  ok: { label: "On schedule", ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da", dot: "#1f7a52" },
+  none: { label: "—", ink: "#8c919c", soft: "#f1f2f5", bd: "#e4e7ec", dot: "#c4c9d2" },
+};
+
+export function renewalMeta(k: string | null | undefined): RenewalBadge {
+  return (RENEWAL_META as Record<string, RenewalBadge>)[k || ""] || RENEWAL_META.none;
+}
+
+/** Human label for a renewalStatus() result (flame-test dueLabel). */
+export function dueLabel(days: number, state: RenewalState | string): string {
+  if (state === "overdue")
+    return days === 0 ? "due today" : days + " day" + (days === 1 ? "" : "s") + " overdue";
+  if (state === "due_soon" || state === "upcoming")
+    return days === 0 ? "due today" : "due in " + days + " day" + (days === 1 ? "" : "s");
+  return "on schedule";
 }
 
 /* ---- severity (level of problem) ---- */
@@ -593,6 +668,14 @@ export type InspectionLog = {
 
 export type InspectionRecord = {
   id: string;
+  /** Accepted inspection quote this record was spawned from (IDEAS #44). */
+  quoteId: string | null;
+  /** 1 = annual · 2 = five-year in-depth — drives the renewal cadence. */
+  level: number;
+  /** Line sets covered (from the quote; informs the estimate + scope). */
+  lineSets: number;
+  /** Quoted value carried onto the record (whole-quote share for this venue). */
+  value: number;
   customer: string;
   customerId: string | null;
   locationId: string | null;
@@ -812,6 +895,10 @@ export function findingsFromRubricRating(
 /* ---------- blank record & counts ---------- */
 
 export type InspectionDraft = {
+  quoteId: string | null;
+  level: number;
+  lineSets: number;
+  value: number;
   customer: string;
   customerId: string | null;
   locationId: string | null;
@@ -844,6 +931,7 @@ export type InspectionDraft = {
  *  value when it is neither undefined nor null. Unknown keys are dropped. */
 export function blank(partial: Partial<InspectionRecord> = {}): InspectionDraft {
   const def: InspectionDraft = {
+    quoteId: null, level: 1, lineSets: 0, value: 0,
     customer: "", customerId: null, locationId: null, venue: "",
     venueType: VENUE_TYPES[0], address: "",
     contact: "", contactPhone: "", contactEmail: "",
@@ -970,6 +1058,217 @@ export async function assign(
     scheduledDate: scheduledDate || "",
     stage: "scheduled",
   });
+}
+
+export async function unschedule(id: string): Promise<InspectionRecord | null> {
+  return update(id, { stage: "requested", scheduledDate: "", assignedTo: "" });
+}
+
+/* ---- renewal math (both cadences: L1 annual · L2 every 5 years) ---- */
+
+export function msOf(isoStr: string | null | undefined): number | null {
+  const d = parseISO(isoStr);
+  return d ? d.getTime() : null;
+}
+
+/** When the inspection was performed — anchors the renewal clock. */
+export function completedAtOf(
+  rec: Pick<InspectionRecord, "stage" | "surveyDate" | "reportDate" | "updatedAt"> | null | undefined
+): number | null {
+  if (!rec || rec.stage !== "completed") return null;
+  return msOf(rec.surveyDate) ?? msOf(rec.reportDate) ?? rec.updatedAt ?? null;
+}
+
+/** Next inspection due — performed date + the level's cadence (1 or 5 years). */
+export function dueAtOf(
+  rec: Pick<InspectionRecord, "stage" | "surveyDate" | "reportDate" | "updatedAt" | "level"> | null | undefined
+): number | null {
+  const at = completedAtOf(rec);
+  if (at == null) return null;
+  return at + levelMeta(rec && rec.level).years * YEAR;
+}
+
+export type RenewalStatus = {
+  state: RenewalState;
+  days: number;
+  dueAt: number | null;
+};
+
+export function renewalStatus(
+  rec: InspectionRecord | null | undefined
+): RenewalStatus {
+  const due = dueAtOf(rec);
+  if (due == null) return { state: "none", days: 0, dueAt: null };
+  const diff = due - now();
+  if (diff < 0) return { state: "overdue", days: Math.round(-diff / DAY), dueAt: due };
+  if (diff <= RENEWAL_LEAD_DAYS * DAY)
+    return { state: "due_soon", days: Math.round(diff / DAY), dueAt: due };
+  if (diff <= 120 * DAY)
+    return { state: "upcoming", days: Math.round(diff / DAY), dueAt: due };
+  return { state: "ok", days: Math.round(diff / DAY), dueAt: due };
+}
+
+/**
+ * Latest completed inspection per customer + venue + LEVEL, with renewal
+ * status attached — both cadences tracked independently (an L2 five-year
+ * clock never hides the venue's annual L1 clock and vice versa). dueOnly
+ * keeps overdue + due_soon rows. Sorted soonest-due first.
+ */
+export async function renewals(
+  opts: { dueOnly?: boolean } = {}
+): Promise<Array<InspectionRecord & { _renewal: RenewalStatus }>> {
+  const all = await listDocs<InspectionRecord>("inspections");
+  const completed = all.filter((r) => r.stage === "completed");
+  const latest: Record<string, InspectionRecord> = {};
+  completed.forEach((r) => {
+    const k =
+      (r.customerId || r.customer || "") +
+      "|" +
+      (r.locationId || r.venue || "") +
+      "|" +
+      levelMeta(r.level).key;
+    if (!latest[k] || (completedAtOf(r) || 0) > (completedAtOf(latest[k]) || 0)) {
+      latest[k] = r;
+    }
+  });
+  let rows = Object.keys(latest).map((k) => ({
+    ...latest[k],
+    _renewal: renewalStatus(latest[k]),
+  }));
+  if (opts.dueOnly) {
+    rows = rows.filter(
+      (r) => r._renewal.state === "overdue" || r._renewal.state === "due_soon"
+    );
+  }
+  rows.sort((a, b) => (dueAtOf(a) || 0) - (dueAtOf(b) || 0));
+  return rows;
+}
+
+/* ---- accepted-quote spawn (the quote → approved front, IDEAS #44) ---- */
+
+/** Minimal structural view of an inspection quote doc (collection "quotes"). */
+export type InspectionQuoteLike = {
+  id: string;
+  quoteType?: string;
+  status?: string;
+  customer?: string;
+  customerId?: string | null;
+  locationId?: string | null;
+  value?: number;
+  owner?: string;
+  contact?: { name?: string; role?: string; email?: string; phone?: string } | null;
+  inspection?: {
+    level?: number;
+    scope?: string;
+    venues?: Array<{ id?: string | null; label?: string; lineSets?: number }>;
+    contact?: { name?: string; email?: string; phone?: string } | null;
+  } | null;
+};
+
+/** Minimal structural view of a customer doc (for the venue address). */
+type CustomerDocLike = {
+  id: string;
+  name?: string;
+  locations?: Array<{
+    id?: string;
+    label?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+  }>;
+};
+
+export async function byQuote(qid: string): Promise<InspectionRecord[]> {
+  const list = await listDocs<InspectionRecord>("inspections");
+  return list.filter((r) => r.quoteId === qid);
+}
+
+/**
+ * Spawn the `requested` inspection record(s) for one accepted inspection
+ * quote — ONE RECORD PER QUOTED VENUE (an inspection record is per-venue;
+ * the quote prices the venues as one shared trip). Idempotent: returns the
+ * existing records when the quote already spawned; null when the quote is
+ * missing or not an inspection quote.
+ */
+export async function createFromQuote(
+  qid: string
+): Promise<InspectionRecord[] | null> {
+  const existing = await byQuote(qid);
+  if (existing.length) return existing;
+  const q = await getDoc<InspectionQuoteLike>("quotes", qid);
+  if (!q || q.quoteType !== "inspection") return null;
+  const insp = q.inspection || {};
+  const level = levelMeta(insp.level).key;
+  const cust = q.customerId
+    ? await getDoc<CustomerDocLike>("customers", q.customerId)
+    : null;
+  const venues =
+    insp.venues && insp.venues.length
+      ? insp.venues
+      : [{ id: q.locationId, label: "", lineSets: 0 }];
+  const share = Math.round((q.value || 0) / venues.length);
+  const contact = q.contact || insp.contact || null;
+  const made: InspectionRecord[] = [];
+  for (let i = 0; i < venues.length; i++) {
+    const v = venues[i];
+    const loc = cust
+      ? (cust.locations || []).find((l) => l.id === v.id) || null
+      : null;
+    const address = loc
+      ? [loc.street, [loc.city, loc.state].filter(Boolean).join(", "), loc.zip]
+          .filter(Boolean)
+          .join(", ")
+      : "";
+    const lineSets = Math.max(0, Number(v.lineSets) || 0);
+    const rec = await create({
+      quoteId: q.id,
+      level,
+      lineSets,
+      // first venue absorbs the rounding remainder
+      value: i === 0 ? (q.value || 0) - share * (venues.length - 1) : share,
+      customer: q.customer || (cust && cust.name) || "",
+      customerId: q.customerId || null,
+      locationId: v.id ?? null,
+      venue: v.label || (loc && loc.label) || "Venue",
+      address,
+      contact: (contact && contact.name) || "",
+      contactPhone: (contact && contact.phone) || "",
+      contactEmail: (contact && contact.email) || "",
+      scope:
+        insp.scope ||
+        levelMeta(level).long +
+          " rigging inspection" +
+          (lineSets ? " — " + lineSets + " line sets." : "."),
+      stage: "requested",
+      owner: q.owner || "Jeff Chesebro",
+      requestedBy: q.owner || "Jeff Chesebro",
+    });
+    made.push(rec);
+  }
+  return made;
+}
+
+/** Scan accepted (won) inspection quotes and spawn any records not made yet.
+ *  Returns the number of records created. */
+export async function syncFromQuotes(): Promise<number> {
+  const quotes = await listDocs<InspectionQuoteLike>("quotes");
+  const recs = await listDocs<InspectionRecord>("inspections");
+  const have: Record<string, boolean> = {};
+  recs.forEach((r) => {
+    if (r.quoteId) have[r.quoteId] = true;
+  });
+  let made = 0;
+  for (const q of quotes) {
+    if (q.quoteType !== "inspection" || q.status !== "won") continue;
+    if (have[q.id]) continue;
+    const out = await createFromQuote(q.id);
+    if (out && out.length) {
+      have[q.id] = true;
+      made += out.length;
+    }
+  }
+  return made;
 }
 
 /* ---- log CRUD (operate on a record's logs[], keep them renumbered) ---- */
