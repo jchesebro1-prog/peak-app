@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { autoMap, parseCsv, prepareRows, type FieldDef } from "./parse";
-import { importRecords } from "./actions";
+import { importRecords, extractRowsAction } from "./actions";
 
 /**
  * Paste → live preview → confirm, the client leaf of the import flow. It parses
@@ -15,14 +15,48 @@ export function PastePreview({
   fields,
   dedupeLabel,
   accent,
+  aiEnabled = false,
 }: {
   typeKey: string;
   fields: FieldDef[];
   dedupeLabel: string;
   accent: string;
+  aiEnabled?: boolean;
 }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"skip" | "update" | "create">("skip");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
+
+  /**
+   * Extract-with-AI (D3): send the messy pasted text to the server action,
+   * then convert the drafted rows into a clean CSV block (header = field labels,
+   * one line per record, values in field order) and drop it back into the SAME
+   * textarea. That re-runs parseCsv below, so the existing preview → auto-map →
+   * prepare → confirm → commit pipeline consumes the drafted rows unchanged and
+   * a human still reviews/edits before importing (D6 guardrail).
+   */
+  async function runExtract() {
+    if (!text.trim() || aiBusy) return;
+    setAiBusy(true);
+    setAiError("");
+    try {
+      const res = await extractRowsAction(typeKey, text);
+      if (!res.ok) {
+        setAiError(res.error);
+        return;
+      }
+      if (!res.rows.length) {
+        setAiError("Couldn’t find any records in that text.");
+        return;
+      }
+      setText(rowsToCsv(res.rows, fields));
+    } catch (e) {
+      setAiError((e as Error).message || "Extraction failed.");
+    } finally {
+      setAiBusy(false);
+    }
+  }
 
   const trimmed = text.trim();
   const parsed = trimmed ? parseCsv(text) : null;
@@ -85,6 +119,79 @@ export function PastePreview({
           outline: "none",
         }}
       />
+
+      {/* Extract with AI (D3) — only when the gate is on and there's text to work on */}
+      {aiEnabled && trimmed && (
+        <div style={{ marginTop: 10 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <button
+              type="button"
+              onClick={runExtract}
+              disabled={aiBusy}
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 12.5,
+                fontWeight: 600,
+                border: "1px solid color-mix(in srgb, var(--accent) 30%, #fff)",
+                borderRadius: 9,
+                padding: "8px 14px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                color: "color-mix(in srgb, var(--accent) 70%, #000)",
+                background: "var(--accent-soft)",
+                cursor: aiBusy ? "wait" : "pointer",
+                opacity: aiBusy ? 0.7 : 1,
+              }}
+            >
+              {aiBusy ? (
+                <span
+                  aria-hidden
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: "50%",
+                    border: "2px solid color-mix(in srgb, var(--accent) 40%, #fff)",
+                    borderTopColor: "var(--accent)",
+                    display: "inline-block",
+                    animation: "pk-spin 0.7s linear infinite",
+                  }}
+                />
+              ) : (
+                <span aria-hidden>✨</span>
+              )}
+              {aiBusy ? "Extracting…" : "Extract with AI"}
+            </button>
+            <span style={{ fontSize: 11.5, color: "#aab0bb", lineHeight: 1.4 }}>
+              Not a clean table? Turn a price list, an emailed spec or copied notes into rows to
+              review.
+            </span>
+          </div>
+          <style>{"@keyframes pk-spin{to{transform:rotate(360deg)}}"}</style>
+        </div>
+      )}
+      {aiError && (
+        <div
+          style={{
+            marginTop: 12,
+            background: "#f9ece8",
+            border: "1px solid #f0d6cd",
+            borderRadius: 9,
+            padding: "10px 12px",
+            fontSize: 12.5,
+            color: "#a0442b",
+          }}
+        >
+          {aiError}
+        </div>
+      )}
 
       {/* stats */}
       {prep && (
@@ -301,6 +408,23 @@ export function PastePreview({
       </div>
     </form>
   );
+}
+
+/**
+ * Serialize AI-drafted row objects (keyed by field key) into a clean CSV block
+ * whose header row is the field LABELS in field order. parseCsv then rebuilds
+ * the exact ParsedTable, and because the headers equal the field labels autoMap
+ * lines every column up 1:1 — so the drafted rows flow through the unchanged
+ * preview/commit pipeline just like a pasted spreadsheet.
+ */
+function rowsToCsv(rows: Record<string, string>[], fields: FieldDef[]): string {
+  const esc = (v: unknown) => {
+    const s = v == null ? "" : String(v);
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const header = fields.map((f) => esc(f.label)).join(",");
+  const lines = rows.map((r) => fields.map((f) => esc(r[f.key] ?? "")).join(","));
+  return [header, ...lines].join("\n");
 }
 
 function gridCols(n: number): string {

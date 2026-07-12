@@ -7,6 +7,7 @@ import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import {
   approveReviewAction,
   claimReviewAction,
+  draftQuoteScopeAction,
   requestChangesAction,
   saveQuoteAction,
   sendToCustomerAction,
@@ -15,6 +16,7 @@ import {
   updateQuoteMetaAction,
   type ReviewSync,
 } from "./actions";
+import type { DraftedLine } from "@/lib/ai/features";
 import {
   demoSections,
   DISC_LABEL,
@@ -50,6 +52,7 @@ import type {
 } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import SectionCard from "./section-card";
+import AiScopeModal from "./ai-scope-modal";
 import CurtainModal from "./curtain-modal";
 import FixtureModal from "./fixture-modal";
 import LaborModal from "./labor-modal";
@@ -222,6 +225,8 @@ export default function EstimatorClient({
   reviewers,
   me,
   canApprove,
+  aiEnabled,
+  aiSource,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   const [sections, setSections] = useState<SpecSection[]>(
@@ -273,6 +278,15 @@ export default function EstimatorClient({
   const [laborFor, setLaborFor] = useState<string | null>(null);
   const [laborDraft, setLaborDraft] = useState<LaborDraft>(() => freshLabor(null));
   const [, startTransition] = useTransition();
+
+  /* ---- AI scope draft (Phase 8, D4) — drafts only, estimator sets prices ---- */
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiErr, setAiErr] = useState<string | null>(null);
+  const [aiScope, setAiScope] = useState<string | null>(null);
+  const [aiLines, setAiLines] = useState<DraftedLine[] | null>(null);
+  const [aiScopeInserted, setAiScopeInserted] = useState(false);
+  const [aiAdded, setAiAdded] = useState<Record<number, boolean>>({});
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -533,6 +547,69 @@ export default function EstimatorClient({
       { id: nextId(), sku: cat.sku, desc: cat.desc, qty: 1, unit: cat.unit, cost: cat.cost, price: cat.price },
     ]);
     setOpenCatalog(null);
+  };
+
+  /* ---- AI scope draft (Phase 8, D4) ----
+     The AI drafts a scope paragraph + suggested lines (no price). "Insert
+     scope" appends the paragraph to the quote note; each "Add" routes a line
+     through pushItems() with cost/price 0 for the estimator to fill in. */
+  const aiTargetSection = (): SpecSection | null =>
+    sections.find((s) => s.id === activeId) || sections[0] || null;
+
+  const runAiDraft = () => {
+    if (!aiSource) return;
+    setAiBusy(true);
+    setAiErr(null);
+    startTransition(async () => {
+      const res = await draftQuoteScopeAction(
+        aiSource.kind === "survey"
+          ? { surveyId: aiSource.id }
+          : { inspectionId: aiSource.id }
+      );
+      if (res.ok) {
+        setAiScope(res.scope);
+        setAiLines(res.lines);
+      } else {
+        setAiErr(res.error);
+      }
+      setAiBusy(false);
+    });
+  };
+
+  const openAiDraft = () => {
+    setAiOpen(true);
+    setAiScopeInserted(false);
+    setAiAdded({});
+    setAiScope(null);
+    setAiLines(null);
+    runAiDraft();
+  };
+
+  const insertAiScope = () => {
+    if (aiScope == null) return;
+    const cur = (quoteNote || "").trim();
+    onQuoteNote(cur ? cur + "\n\n" + aiScope : aiScope);
+    setAiScopeInserted(true);
+  };
+
+  const addAiLine = (index: number, line: DraftedLine) => {
+    const target = aiTargetSection();
+    if (!target) return;
+    const qty = Number.isFinite(line.qty) && line.qty > 0 ? line.qty : 1;
+    // Price/cost left at 0 — the estimator sets pricing (guardrail D6).
+    pushItems(target.id, [
+      {
+        id: nextId(),
+        sku: "AI",
+        desc: line.description,
+        qty,
+        unit: (line.unit || "ea").trim() || "ea",
+        cost: 0,
+        price: 0,
+        custom: true,
+      },
+    ]);
+    setAiAdded((m) => ({ ...m, [index]: true }));
   };
 
   /* ---------------- add-flows (portals + modals) ---------------- */
@@ -1034,6 +1111,26 @@ export default function EstimatorClient({
                   <option value="lost">Lost</option>
                 </select>
               </div>
+              {aiEnabled && aiSource && (
+                <button
+                  type="button"
+                  onClick={openAiDraft}
+                  title={"Draft scope & line items from " + aiSource.label}
+                  style={{
+                    fontFamily: "var(--font-ui)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    borderRadius: 8,
+                    padding: "9px 15px",
+                    cursor: "pointer",
+                    border: "1px solid var(--accent)",
+                    background: ACCENT_SOFT,
+                    color: ACCENT_INK,
+                  }}
+                >
+                  Draft from survey/inspection ✨
+                </button>
+              )}
               <button
                 type="button"
                 onClick={doSave}
@@ -1776,6 +1873,26 @@ export default function EstimatorClient({
               onApplyAutoMiles={applyAutoMiles}
               onAdd={() => addLabor(laborFor)}
               onClose={() => setLaborFor(null)}
+            />
+          )}
+          {aiEnabled && aiSource && aiOpen && (
+            <AiScopeModal
+              sourceLabel={
+                (aiSource.kind === "survey" ? "field survey" : "inspection") +
+                " · " +
+                aiSource.label
+              }
+              targetSection={aiTargetSection()?.name || ""}
+              busy={aiBusy}
+              error={aiErr}
+              scope={aiScope}
+              lines={aiLines}
+              scopeInserted={aiScopeInserted}
+              addedLines={aiAdded}
+              onInsertScope={insertAiScope}
+              onAddLine={addAiLine}
+              onRetry={runAiDraft}
+              onClose={() => setAiOpen(false)}
             />
           )}
         </div>

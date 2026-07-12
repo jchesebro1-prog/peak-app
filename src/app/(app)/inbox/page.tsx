@@ -48,6 +48,7 @@ import type {
   SidebarVM,
   ThreadRowVM,
 } from "./types";
+import { aiEnabled } from "@/lib/ai/config";
 import InboxShell from "./inbox-shell";
 
 export const metadata = { title: "Inbox — Peak Backend" };
@@ -559,6 +560,7 @@ export default async function InboxPage({
         contactEmails={contactEmails}
         fromOptions={fromOptions}
         initialCompose={initialCompose}
+        aiEnabled={aiEnabled()}
       />
     </>
   );

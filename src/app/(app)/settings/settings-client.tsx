@@ -100,6 +100,7 @@ export default function SettingsClient({
   meId,
   meName,
   gmail,
+  ai,
   settings,
   offices,
   users,
@@ -107,6 +108,11 @@ export default function SettingsClient({
   meId: string;
   meName: string;
   gmail: { enabled: boolean; mailboxes: MailboxVM[] };
+  ai: {
+    enabled: boolean;
+    model: string;
+    features: { label: string; desc: string; where: string }[];
+  };
   settings: {
     companyName: string;
     accent: string;
@@ -698,6 +704,110 @@ export default function SettingsClient({
                   Connect
                 </button>
               )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ---- AI Assistant (Phase 8) ---- */}
+      <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 14.5, fontWeight: 600 }}>AI Assistant</div>
+            <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
+              Anthropic-powered drafting and summaries across the app. Everything
+              stays a draft — a person always reviews and sends.
+            </div>
+          </div>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              padding: "3px 10px",
+              borderRadius: 20,
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+              color: ai.enabled ? "#1f7a52" : "#8c919c",
+              background: ai.enabled ? "#e8f3ee" : "#f1f2f5",
+              border: `1px solid ${ai.enabled ? "#cfe6db" : "#e4e7ec"}`,
+            }}
+          >
+            {ai.enabled ? "AI enabled" : "Not enabled"}
+          </span>
+        </div>
+
+        {!ai.enabled ? (
+          <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 12, lineHeight: 1.5 }}>
+            AI features are off on this deployment. Turn them on by setting{" "}
+            <b style={{ color: "#5b616e", fontFamily: "var(--font-mono)" }}>ANTHROPIC_API_KEY</b>{" "}
+            — the step-by-step is in <b style={{ color: "#5b616e" }}>MASTER-HOWTO §AI</b>. Until then
+            these features stay hidden and the rest of the app is unchanged.
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 12, lineHeight: 1.5 }}>
+            Model:{" "}
+            <b style={{ color: "#5b616e", fontFamily: "var(--font-mono)" }}>{ai.model}</b>
+            . Override with{" "}
+            <b style={{ color: "#5b616e", fontFamily: "var(--font-mono)" }}>ANTHROPIC_MODEL</b>{" "}
+            or pause everything with{" "}
+            <b style={{ color: "#5b616e", fontFamily: "var(--font-mono)" }}>AI_DISABLED=true</b>.
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+          {ai.features.map((f) => (
+            <div
+              key={f.label}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 13,
+                border: "1px solid #eef0f3",
+                borderRadius: 11,
+                padding: "12px 14px",
+                background: "#fafbfc",
+                opacity: ai.enabled ? 1 : 0.72,
+              }}
+            >
+              <span
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 9,
+                  background: "var(--accent-soft)",
+                  color: "color-mix(in srgb, var(--accent) 70%, #16181d)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 15,
+                  flexShrink: 0,
+                }}
+              >
+                ✨
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{f.label}</span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      padding: "2px 9px",
+                      borderRadius: 20,
+                      flexShrink: 0,
+                      whiteSpace: "nowrap",
+                      color: "#8c919c",
+                      background: "#f1f2f5",
+                      border: "1px solid #e4e7ec",
+                    }}
+                  >
+                    {f.where}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: "#8c919c", marginTop: 3, lineHeight: 1.45 }}>
+                  {f.desc}
+                </div>
+              </div>
             </div>
           ))}
         </div>

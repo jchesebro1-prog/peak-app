@@ -224,3 +224,45 @@ Anything you want changed, just say so — none of these are hard to reverse.
   mailbox" button on the Account page is a thin follow-up (MASTER-QUESTIONS
   §C) — deferred to keep Phase 7 scoped, since the go-live team is small and
   Jeff (admin) can manage connections centrally.
+
+## Phase 8 — AI features (2026-07-11)
+
+- **D38. AI is env-gated on `ANTHROPIC_API_KEY` alone (no separate opt-in
+  flag).** Unlike Gmail — where Google SSO can be configured for sign-in
+  without wanting mailbox access, hence the extra `GMAIL_ENABLED` toggle — an
+  Anthropic key exists for exactly one purpose, so its presence *is* the
+  opt-in. `aiEnabled()` (`lib/ai/config.ts`) is true iff the key is set and
+  `AI_DISABLED !== "true"` (a kill switch for incidents). Off → every UI
+  affordance is absent, the Assistant nav link and page are hidden, and every
+  server action returns `{ok:false, error:"AI features are not enabled."}`
+  without touching the network. Same "inert until the credential lands" posture
+  as Phase 7.
+- **D39. No new npm dependency — Anthropic over plain fetch.** Every model call
+  is a `fetch` against `POST /v1/messages` (`lib/ai/client.ts`), mirroring the
+  Gmail bridge's fetch-only Google calls (D36). Rationale identical: this
+  locked-down machine has no global toolchain and we've kept the dependency
+  surface tiny; the `@anthropic-ai/sdk` tree isn't worth it for a handful of
+  calls. Model `claude-opus-4-8` (override via `ANTHROPIC_MODEL`); structured
+  output uses `output_config.format` (json_schema); `stop_reason:"refusal"` is
+  handled; a `AbortController` timeout bounds each request.
+- **D40. The guardrail is structural: AI drafts, humans send (MASTER-QUESTIONS
+  D6).** The `lib/ai/features.ts` functions return drafts/suggestions only and
+  never import a store; each route's server action owns the write. Renewal
+  drafts land in Inbox **Drafts** (never sent); import extraction feeds the
+  existing paste→preview→confirm pipeline (the server re-parses the reviewed
+  rows, never AI output directly); estimator line drafts carry NO price (price
+  stays estimator-set); the Assistant is read-only. Nothing auto-sends,
+  auto-commits, or auto-persists.
+- **D41. `lib/ai/` is store-decoupled; routes gather their own data.** The AI
+  layer (`config`/`client`/`features`) knows nothing about stores, so there's
+  no import cycle and it's reusable. Each feature's server action reads the
+  stores it needs and passes typed context in. The Assistant's live snapshot is
+  built in `app/(app)/assistant/snapshot.ts` (route-local, server-only) and the
+  model is instructed to answer ONLY from it and to say so when a question
+  needs data the snapshot doesn't carry — no tool-use/RAG in v1.
+- **D42. Assistant is a gated top-level nav link, not a Sales/General child.**
+  `navEntries(aiEnabled)` inserts the "Assistant" entry after Inbox only when
+  AI is on, so there's never a dead tab pointing at an inert feature; the page
+  itself re-checks the gate (URL access) and shows a "not enabled" note when
+  off. The snapshot is company-wide but scoped to the user's own Inbox view for
+  the inbox lines, matching what they already see across the app.

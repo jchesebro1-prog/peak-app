@@ -149,6 +149,18 @@ export type InitialQuote = {
   sections: SpecSection[] | null;
 };
 
+/**
+ * The field-survey / inspection this quote is drafting from (Phase 8, D4).
+ * Resolved server-side in page.tsx from ?surveyId= / ?inspectionId= and passed
+ * in only when the AI gate is on. `null` → no source linked (button hidden).
+ */
+export type AiSource = {
+  kind: "survey" | "inspection";
+  id: string;
+  /** Human label for the button/modal (venue or customer, falls back to id). */
+  label: string;
+};
+
 export type EstimatorProps = {
   initial: InitialQuote;
   fabrics: FabricOpt[];
@@ -161,4 +173,8 @@ export type EstimatorProps = {
   reviewers: string[];
   me: string;
   canApprove: boolean;
+  /** AI env gate (server-computed). When false, no AI affordance renders. */
+  aiEnabled: boolean;
+  /** Linked survey/inspection to draft from, or null. Only set when aiEnabled. */
+  aiSource: AiSource | null;
 };

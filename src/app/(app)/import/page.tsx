@@ -4,6 +4,7 @@ import { can } from "@/lib/team";
 import { IMPORT_TYPES, getTypeMeta } from "./types";
 import { allCounts } from "./registry";
 import { PastePreview } from "./controls";
+import { aiEnabled } from "@/lib/ai/config";
 
 export const metadata = { title: "Import & export — Peak Backend" };
 
@@ -506,6 +507,7 @@ function ImportFlowModal({
   anotherHref: string;
 }) {
   const done = parseResult(resultRaw);
+  const aiOn = aiEnabled();
 
   return (
     <>
@@ -645,6 +647,7 @@ function ImportFlowModal({
                   fields={type.fields}
                   dedupeLabel={type.dedupeLabel}
                   accent="var(--accent)"
+                  aiEnabled={aiOn}
                 />
               </>
             )}

@@ -175,11 +175,46 @@ box); Google Calendar sync for calls/meetings (manual log for now, C5); and
 smart parsing of forward-to-`log@` messages (inbound is matched to customers
 by email address today, C6).
 
-## 6. AI features *(Phase 8 — pending)*
+## 6. AI features ✅ *(Phase 8 — built; flip on when you're ready)*
 
-Will cover: creating an Anthropic API key, the `ANTHROPIC_API_KEY` env
-var in Vercel, per-feature toggles (renewal drafts, thread summaries,
-import extraction), and the "AI drafts, human sends" guardrail.
+Five AI helpers are wired in and **completely off until you add a key** — same
+"inert until the credential lands" posture as Gmail. No key = the app behaves
+exactly as it does today; nothing calls Anthropic.
+
+**The guardrail (unchangeable):** the AI only ever writes a *draft*. A person
+always reviews and sends/commits. Nothing here sends an email, saves a quote,
+or writes a customer record on its own.
+
+**What you get once it's on:**
+- **Renewal-outreach drafts** — on the Flame Tests "Renewals due" list, a
+  "Draft ✨" button writes a personalized renewal email and drops it in your
+  Inbox **Drafts** to review and send.
+- **Thread & customer summaries** — in the Inbox, "Summary ✨" summarizes a
+  long thread (or a customer's whole history) before you reply.
+- **Import extraction** — in Import, "Extract with AI ✨" turns messy pasted
+  text (a price list, an emailed spec) into clean rows in the normal preview,
+  which you check and confirm as usual.
+- **Quote scope & lines** — in the Estimator, draft a scope paragraph and
+  suggested line items from a field survey or inspection (you set all prices —
+  the AI never prices anything).
+- **Assistant** — a new top-level "Assistant" tab for plain-English questions
+  about your pipeline, quotes, renewals and inbox, answered from live data.
+
+**Turn it on (one variable):**
+1. Create an API key at **console.anthropic.com** → API Keys.
+2. In Vercel → Project → Settings → Environment Variables, add
+   `ANTHROPIC_API_KEY` = your key, then redeploy.
+3. That's it — the Assistant tab appears and the ✨ buttons light up. Confirm on
+   the **Settings → AI Assistant** card (it shows "AI enabled" + the model).
+
+**Optional knobs:** `ANTHROPIC_MODEL` overrides the model (default
+`claude-opus-4-8`; use `claude-haiku-4-5` for a cheaper/faster tier).
+`AI_DISABLED=true` is a kill switch that turns everything off even with a key
+present. `AI_TIMEOUT_MS` caps each request (default 60000).
+
+**Cost:** you're billed by Anthropic per use (each draft/summary/question is one
+short request). Usage is entirely under your control — the features only run
+when someone clicks them.
 
 ## 7. Real data migration & go-live *(Phase 9 — pending)*
 

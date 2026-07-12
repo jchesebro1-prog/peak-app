@@ -17,6 +17,13 @@ import {
   type QuoteReview,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
+import { aiEnabled } from "@/lib/ai/config";
+import { draftQuoteScope, type DraftedLine } from "@/lib/ai/features";
+import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
+import {
+  get as getInspection,
+  type InspectionRecord,
+} from "@/lib/stores/inspections";
 import type { SpecMob, SpecSection } from "./types";
 
 /**
@@ -199,4 +206,134 @@ export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
   await setStatus(id, "sent");
   refresh();
   return syncOf(id);
+}
+
+/* ============================================================
+   D4 — Draft quote scope + line items from a survey / inspection
+   ============================================================
+
+   The AI only DRAFTS a scope paragraph and suggested line items (description /
+   qty / unit — NEVER a price; pricing is the estimator's job, guardrail D6).
+   Nothing is persisted here; the client renders the draft for the estimator to
+   review, then inserts the scope / adds lines (price blank) via the estimator's
+   own add-line path. This action just reads the source and calls the AI fn. */
+
+export type DraftScopeResult =
+  | { ok: true; scope: string; lines: DraftedLine[] }
+  | { ok: false; error: string };
+
+/** Plain-text "key: value" line, dropped when the value is empty. */
+function kv(label: string, value: unknown): string {
+  const v = (value == null ? "" : String(value)).trim();
+  return v ? `${label}: ${v}` : "";
+}
+
+/** Non-empty measurements/facts as indented "  - key: value" lines. */
+function recordLines(rec: Record<string, string> | undefined): string {
+  if (!rec) return "";
+  return Object.entries(rec)
+    .filter(([, v]) => (v == null ? "" : String(v)).trim())
+    .map(([k, v]) => `  - ${k}: ${String(v).trim()}`)
+    .join("\n");
+}
+
+/** Flatten a field survey's brief + field capture into plain-text findings. */
+function surveyFindings(s: SurveyRecord): string {
+  const parts: string[] = [
+    kv("Venue type", s.venueType),
+    kv("Reason for visit", s.reason),
+    kv("Scope of work (field)", s.scopeOfWork),
+    kv("Field notes", s.notes),
+    s.conditions?.length ? kv("Site conditions", s.conditions.join(", ")) : "",
+    kv("Install timeframe", s.installTimeframe),
+  ];
+  const access = [
+    kv("loading dock", s.loadingDock),
+    kv("elevator", s.elevatorSize),
+    kv("floor", s.floorType),
+    kv("access door", s.accessDoorSize),
+    s.liftNeeded
+      ? `lift: ${s.liftNeeded}${s.liftSupplier ? ` (${s.liftSupplier})` : ""}`
+      : "",
+  ].filter(Boolean);
+  if (access.length) parts.push("Access/logistics: " + access.join("; "));
+  const meas = recordLines(s.measurements);
+  if (meas) parts.push("Measurements:\n" + meas);
+  return parts.filter(Boolean).join("\n");
+}
+
+/** Flatten an inspection report (findings/logs + measurements) into plain text. */
+function inspectionFindings(ins: InspectionRecord): string {
+  const parts: string[] = [
+    kv("Venue type", ins.venueType),
+    kv("Overall condition", ins.condition),
+    kv("Scope", ins.scope),
+    kv("Narrative", ins.narrative),
+  ];
+  if (ins.logs?.length) {
+    const issues = ins.logs.map((lg, i) => {
+      const bits = [`[${lg.severity}] ${lg.problem}`.trim()];
+      if (lg.location) bits.push(`location: ${lg.location}`);
+      if (lg.explanation) bits.push(lg.explanation);
+      if (lg.solution) bits.push(`recommended: ${lg.solution}`);
+      if (lg.standards?.length) bits.push(`standards: ${lg.standards.join(", ")}`);
+      return `  ${i + 1}. ${bits.join(" — ")}`;
+    });
+    parts.push("Issues found:\n" + issues.join("\n"));
+  }
+  const facts = recordLines(ins.venueInfo);
+  if (facts) parts.push("Venue facts:\n" + facts);
+  const meas = recordLines(ins.measurements);
+  if (meas) parts.push("Measurements:\n" + meas);
+  return parts.filter(Boolean).join("\n");
+}
+
+export async function draftQuoteScopeAction(input: {
+  surveyId?: string;
+  inspectionId?: string;
+}): Promise<DraftScopeResult> {
+  await requireUser();
+  if (!aiEnabled()) return { ok: false, error: "AI features are not enabled." };
+
+  try {
+    let sourceLabel: string;
+    let customerName: string | undefined;
+    let venue: string | undefined;
+    let findings: string;
+
+    if (input.surveyId) {
+      const s = await getSurvey(input.surveyId);
+      if (!s) return { ok: false, error: "That field survey could not be found." };
+      sourceLabel = "field survey";
+      customerName = s.customer || undefined;
+      venue = s.venue || undefined;
+      findings = surveyFindings(s);
+    } else if (input.inspectionId) {
+      const ins = await getInspection(input.inspectionId);
+      if (!ins) return { ok: false, error: "That inspection could not be found." };
+      sourceLabel = "inspection";
+      customerName = ins.customer || undefined;
+      venue = ins.venue || undefined;
+      findings = inspectionFindings(ins);
+    } else {
+      return { ok: false, error: "No survey or inspection was specified." };
+    }
+
+    if (!findings.trim()) {
+      return {
+        ok: false,
+        error: "That " + sourceLabel + " has no findings to draft from yet.",
+      };
+    }
+
+    const { scope, lines } = await draftQuoteScope({
+      sourceLabel,
+      customerName,
+      venue,
+      findings,
+    });
+    return { ok: true, scope, lines };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 }

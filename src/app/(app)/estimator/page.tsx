@@ -10,8 +10,12 @@ import {
   type CustomerDoc,
 } from "@/lib/stores/customers";
 import { reviewers as reviewerUsers } from "@/lib/users";
+import { aiEnabled } from "@/lib/ai/config";
+import { get as getSurvey } from "@/lib/stores/surveys";
+import { get as getInspection } from "@/lib/stores/inspections";
 import EstimatorClient from "./estimator-client";
 import type {
+  AiSource,
   CustomerLite,
   InitialQuote,
   SpecSection,
@@ -128,6 +132,26 @@ export default async function EstimatorPage({
   const user = await requireUser();
   const sp = await searchParams;
   const rawId = Array.isArray(sp.id) ? sp.id[0] : sp.id;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+
+  /* ---- AI scope draft (Phase 8, D4): resolve the linked survey/inspection ----
+     Only when the AI gate is on. ?surveyId= / ?inspectionId= links the source;
+     we resolve a friendly label here so the client can render the ✨ affordance
+     (the drafting itself happens server-side in draftQuoteScopeAction). */
+  const ai = aiEnabled();
+  let aiSource: AiSource | null = null;
+  if (ai) {
+    const surveyId = one(sp.surveyId);
+    const inspectionId = one(sp.inspectionId);
+    if (surveyId) {
+      const s = await getSurvey(surveyId);
+      if (s) aiSource = { kind: "survey", id: s.id, label: s.venue || s.customer || s.id };
+    } else if (inspectionId) {
+      const ins = await getInspection(inspectionId);
+      if (ins)
+        aiSource = { kind: "inspection", id: ins.id, label: ins.venue || ins.customer || ins.id };
+    }
+  }
 
   let q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
   if (!q) q = (await getQuote("Q-2041")) as QuoteDoc | null; // demo fallback so Save has a target
@@ -194,6 +218,8 @@ export default async function EstimatorPage({
       reviewers={reviewerRows.map((u) => u.name)}
       me={user.name}
       canApprove={can("approve", user.roles)}
+      aiEnabled={ai}
+      aiSource={aiSource}
     />
   );
 }

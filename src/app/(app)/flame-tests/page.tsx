@@ -20,6 +20,8 @@ import {
 import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { FlameMap } from "./controls";
+import { RenewalDraftButton } from "./renewal-ai";
+import { aiEnabled } from "@/lib/ai/config";
 import type { MapPin } from "@/components/map/LeafletMap";
 
 export const metadata = { title: "Flame tests — Peak Backend" };
@@ -83,6 +85,10 @@ export default async function FlameTestsPage({
 
   const custById = new Map(customers.map((c) => [c.id, c.name || ""]));
   const nameFor = (id: string | null) => (id ? custById.get(id) || "" : "");
+
+  // AI env gate — process.env is server-only, so read it here and pass the
+  // boolean down; the Draft ✨ affordance renders only when true.
+  const aiOn = aiEnabled();
 
   /* ---- URL state: status filter + renewal window + map status visibility ---- */
   const filterParam = one(sp.filter) as RowStage | "all" | "";
@@ -605,6 +611,7 @@ export default async function FlameTestsPage({
                     </div>
                   </Link>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                    {aiOn && <RenewalDraftButton jobId={r.id} />}
                     <a
                       href={mailto}
                       title="Email the contact"

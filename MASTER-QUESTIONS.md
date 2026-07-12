@@ -86,6 +86,16 @@ Rank or tick the ones you want first; each is independently switchable.
   auto-send ☐ stricter: ______ ☐ looser: ______
 - **D7.** Create an Anthropic API key (console.anthropic.com) when ready —
   MASTER-HOWTO.md §AI shows where it goes. ☐ done
+- **D8.** Built & verified 2026-07-11 (gate OFF: tsc+build clean, browser-
+  checked — Assistant tab hidden, ✨ affordances absent, existing flows
+  unchanged). Can't live-test AI output until a key lands — first thing to do
+  once D7 is done is sanity-check each of the five features. Deliberate v1
+  limits (deferred, not bugs): the Assistant answers from a compact live
+  *snapshot* (no tool-use/RAG, so very specific "what did customer X say on
+  date Y" questions may miss); there's no per-feature on/off toggle (the key
+  turns the whole layer on — `AI_DISABLED=true` is the only kill switch);
+  import extraction and quote-scope drafting are text-only (no file/PDF upload
+  yet). Flag any you want changed.
 
 ## E. Pricing & estimating (numbers are editable in-app at Settings →
 Estimating Rules — these just need real values before go-live)

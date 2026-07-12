@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Opt, ReaderVM } from "./types";
 import {
@@ -11,6 +11,8 @@ import {
   replyAction,
   setLinkAction,
   setStatusAction,
+  summarizeCustomerAction,
+  summarizeThreadAction,
 } from "./actions";
 import { ChanGlyph, MailEmptyIcon, PaperclipIcon, ReplyIcon, SendIcon } from "./icons";
 
@@ -32,6 +34,7 @@ export default function ThreadReader({
   rosterOptions,
   onClose,
   onAfterSend,
+  aiEnabled,
 }: {
   vm: ReaderVM | null;
   variant: "pane" | "overlay";
@@ -39,6 +42,8 @@ export default function ThreadReader({
   onClose?: () => void;
   /** keeps the replied thread selected (prototype kept selectedId) */
   onAfterSend?: (id: string) => void;
+  /** D2 — when true, render the read-only "Summary ✨" affordance */
+  aiEnabled?: boolean;
 }) {
   const router = useRouter();
 
@@ -60,6 +65,12 @@ export default function ThreadReader({
   // link picker
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [linkType, setLinkType] = useState("quote");
+
+  // AI summary (D2) — read-only; never mutates the thread
+  const [summarizing, startSummary] = useTransition();
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryErr, setSummaryErr] = useState<string | null>(null);
+  const [summaryKind, setSummaryKind] = useState<"thread" | "customer" | null>(null);
 
   if (!vm) {
     return (
@@ -147,6 +158,30 @@ export default function ThreadReader({
     } finally {
       setSending(false);
     }
+  };
+
+  const runThreadSummary = () => {
+    setSummaryErr(null);
+    setSummary(null);
+    setSummaryKind("thread");
+    startSummary(async () => {
+      const r = await summarizeThreadAction(vm.id);
+      if (r.ok) setSummary(r.text);
+      else setSummaryErr(r.error);
+    });
+  };
+
+  const runCustomerSummary = () => {
+    if (!vm.resolvedCustomerId) return;
+    setSummaryErr(null);
+    setSummary(null);
+    setSummaryKind("customer");
+    const cid = vm.resolvedCustomerId;
+    startSummary(async () => {
+      const r = await summarizeCustomerAction(cid);
+      if (r.ok) setSummary(r.text);
+      else setSummaryErr(r.error);
+    });
   };
 
   const suggestedDir: "in" | "out" = vm.waitingUs ? "out" : "in";
@@ -521,6 +556,151 @@ export default function ThreadReader({
             </>
           )}
         </div>
+
+        {/* AI summary (D2) — read-only convenience for the person about to reply */}
+        {aiEnabled && (
+          <div
+            style={{
+              flexShrink: 0,
+              padding: "11px 20px",
+              borderBottom: "1px solid #eef0f3",
+              background: "#fff",
+            }}
+          >
+            <style>{`@keyframes pk-spin{to{transform:rotate(360deg)}}`}</style>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button
+                onClick={runThreadSummary}
+                disabled={summarizing}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  color: ACCENT_INK,
+                  background: ACCENT_SOFT,
+                  border: `1px solid color-mix(in srgb, var(--accent) 22%, #fff)`,
+                  borderRadius: 8,
+                  padding: "6px 11px",
+                  cursor: summarizing ? "default" : "pointer",
+                  opacity: summarizing ? 0.6 : 1,
+                }}
+              >
+                <span aria-hidden>✨</span>
+                Summary
+              </button>
+              {vm.resolvedCustomerId && (
+                <button
+                  onClick={runCustomerSummary}
+                  disabled={summarizing}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontFamily: "var(--font-ui)",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: "#5b616e",
+                    background: "#fff",
+                    border: "1px solid #e4e7ec",
+                    borderRadius: 8,
+                    padding: "6px 11px",
+                    cursor: summarizing ? "default" : "pointer",
+                    opacity: summarizing ? 0.6 : 1,
+                  }}
+                >
+                  <span aria-hidden>✨</span>
+                  Summarize customer history
+                </button>
+              )}
+              {summarizing && (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 7,
+                    fontSize: 11.5,
+                    color: "#9aa0ab",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: "50%",
+                      border: "2px solid #e4e7ec",
+                      borderTopColor: "var(--accent)",
+                      display: "inline-block",
+                      animation: "pk-spin .7s linear infinite",
+                    }}
+                  />
+                  {summaryKind === "customer" ? "Reading history…" : "Summarizing…"}
+                </span>
+              )}
+            </div>
+
+            {!summarizing && summaryErr && (
+              <div
+                style={{
+                  marginTop: 9,
+                  fontSize: 11.5,
+                  lineHeight: 1.5,
+                  color: "#b4543a",
+                  background: "#f8ece7",
+                  border: "1px solid #eccfc4",
+                  borderRadius: 8,
+                  padding: "8px 11px",
+                }}
+              >
+                {summaryErr}
+              </div>
+            )}
+
+            {!summarizing && summary && (
+              <div
+                style={{
+                  marginTop: 9,
+                  borderRadius: 10,
+                  border: `1px solid color-mix(in srgb, var(--accent) 20%, #fff)`,
+                  background: ACCENT_SOFT,
+                  padding: "10px 13px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 9.5,
+                    fontWeight: 700,
+                    letterSpacing: ".05em",
+                    textTransform: "uppercase",
+                    color: ACCENT_INK,
+                    marginBottom: 6,
+                  }}
+                >
+                  <span aria-hidden>✨</span>
+                  {summaryKind === "customer" ? "Customer briefing" : "Thread summary"}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    lineHeight: 1.6,
+                    color: "#2a2f38",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {summary}
+                </div>
+                <div style={{ fontSize: 10, color: "#9aa0ab", marginTop: 7 }}>
+                  AI-generated summary — for reference only.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* conversation */}
         <div

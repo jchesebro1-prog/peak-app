@@ -6,11 +6,13 @@ import {
   addMessage,
   archive,
   assign,
+  byCustomer,
   channelMeta,
   checkMail,
   compose,
   create,
   flushOutbox,
+  get as getThread,
   markRead,
   reopen,
   reply,
@@ -18,13 +20,25 @@ import {
   sendDraft,
   setLink,
   setStatus,
+  statusMeta,
+  timeAgo,
+  timeFull,
   update,
   updateDraft,
   type CommLink,
   type Direction,
   type MailboxId,
 } from "@/lib/stores/comms";
-import { nameFor } from "@/lib/stores/customers";
+import { get as getCustomer, nameFor } from "@/lib/stores/customers";
+import { getAll as getAllQuotes, STAGE_LABEL } from "@/lib/stores/quotes";
+import {
+  getAll as getAllFlameJobs,
+  renewalStatus,
+  RENEWAL_META,
+} from "@/lib/stores/flame-jobs";
+import { getAll as getAllRepairJobs } from "@/lib/stores/repair-jobs";
+import { aiEnabled } from "@/lib/ai/config";
+import { summarizeThread, summarizeCustomer } from "@/lib/ai/features";
 
 /**
  * Inbox server actions — thin wrappers over the comms store (the prototype's
@@ -238,4 +252,133 @@ export async function sendReceiveAction() {
   const id = await checkMail();
   revalidate();
   return { ok: true as const, id };
+}
+
+/* ---- AI summaries (D2) — read-only; never sends, writes, or revalidates ---- */
+
+type SummaryResult =
+  | { ok: true; text: string }
+  | { ok: false; error: string };
+
+/**
+ * Summarize the selected thread for a busy salesperson catching up before they
+ * reply. Reads only — passes the thread's messages to the AI layer and returns
+ * its 2–4 bullet lines. Gated by aiEnabled(); no revalidate (nothing changed).
+ */
+export async function summarizeThreadAction(
+  threadId: string
+): Promise<SummaryResult> {
+  await requireUser();
+  if (!aiEnabled()) return { ok: false, error: "AI features are not enabled." };
+  const t = await getThread(threadId);
+  if (!t) return { ok: false, error: "That conversation could not be found." };
+  const messages = (t.messages || []).map((m) => ({
+    direction: m.direction,
+    author: m.author,
+    when: timeFull(m.at),
+    body: m.body,
+  }));
+  try {
+    const text = await summarizeThread({
+      subject: t.subject || "(no subject)",
+      customer: t.customer || t.contactName || "Customer",
+      messages,
+    });
+    return { ok: true, text };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/**
+ * Brief the salesperson on a customer's whole history before they reply — quotes,
+ * flame-test / repair jobs, and comms threads gathered into a compact factual
+ * snapshot for the AI layer. Read-only; gated by aiEnabled(); no revalidate.
+ */
+export async function summarizeCustomerAction(
+  customerId: string
+): Promise<SummaryResult> {
+  await requireUser();
+  if (!aiEnabled()) return { ok: false, error: "AI features are not enabled." };
+  const cust = await getCustomer(customerId);
+  if (!cust) return { ok: false, error: "That customer could not be found." };
+
+  const [quotes, flameJobs, repairJobs, threads] = await Promise.all([
+    getAllQuotes(),
+    getAllFlameJobs(),
+    getAllRepairJobs(),
+    byCustomer(customerId),
+  ]);
+
+  const myQuotes = quotes.filter((q) => q.customerId === customerId);
+  const myFlame = flameJobs.filter((j) => j.customerId === customerId);
+  const myRepairs = repairJobs.filter((j) => j.customerId === customerId);
+
+  const usd = (n: number) => "$" + Math.round(n || 0).toLocaleString("en-US");
+  const lines: string[] = [];
+
+  lines.push(`Type: ${cust.type || "—"}`);
+  if (cust.location) lines.push(`Location: ${cust.location}`);
+  const primary =
+    (cust.contacts || []).find((c) => c.primary) || (cust.contacts || [])[0];
+  if (primary) {
+    lines.push(
+      `Primary contact: ${primary.name}` +
+        (primary.role ? ` (${primary.role})` : "") +
+        (primary.email ? ` <${primary.email}>` : "")
+    );
+  }
+
+  if (myQuotes.length) {
+    lines.push(`Quotes (${myQuotes.length}):`);
+    for (const q of myQuotes) {
+      lines.push(
+        `  • ${q.id} "${q.name || "Quote"}" — ${STAGE_LABEL[q.status] || q.status}, ${usd(q.value)}`
+      );
+    }
+  }
+
+  if (myFlame.length) {
+    lines.push(`Flame-test jobs (${myFlame.length}):`);
+    for (const j of myFlame) {
+      const r = renewalStatus(j);
+      const renewal =
+        r.state !== "none"
+          ? `, renewal ${RENEWAL_META[r.state].label}` +
+            (r.days ? ` (${r.days}d)` : "")
+          : "";
+      lines.push(
+        `  • ${j.id} ${j.venue || "venue"} — ${j.stage}${renewal}`
+      );
+    }
+  }
+
+  if (myRepairs.length) {
+    lines.push(`Repair jobs (${myRepairs.length}):`);
+    for (const j of myRepairs) {
+      lines.push(
+        `  • ${j.id} "${j.title || "Repair"}" — ${j.category}, ${j.priority} priority, ${j.stage}`
+      );
+    }
+  }
+
+  if (threads.length) {
+    lines.push(`Recent threads (${threads.length}):`);
+    for (const t of threads.slice(0, 8)) {
+      lines.push(
+        `  • "${t.subject || "(no subject)"}" — ${statusMeta(t.status).label}, ${timeAgo(t.updatedAt)}`
+      );
+    }
+  }
+
+  if (!myQuotes.length && !myFlame.length && !myRepairs.length && !threads.length) {
+    lines.push("No quotes, jobs, or prior threads on record yet.");
+  }
+
+  try {
+    const text = await summarizeCustomer({ name: cust.name, facts: lines.join("\n") });
+    return { ok: true, text };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 }

@@ -4,6 +4,7 @@ import { getSettings } from "@/lib/settings";
 import { allUsers } from "@/lib/users";
 import { gmailEnabled, personalKey, SHARED_KEYS } from "@/lib/gmail/config";
 import { listConnections } from "@/lib/gmail/connections";
+import { aiEnabled, aiModel, AI_FEATURES } from "@/lib/ai/config";
 import SettingsClient from "./settings-client";
 
 export const metadata = { title: "Settings — Peak Backend" };
@@ -98,6 +99,15 @@ export default async function SettingsPage() {
           meId={me.id}
           meName={me.name}
           gmail={{ enabled: gmailOn, mailboxes: mailboxVMs }}
+          ai={{
+            enabled: aiEnabled(),
+            model: aiModel(),
+            features: AI_FEATURES.map((f) => ({
+              label: f.label,
+              desc: f.desc,
+              where: f.where,
+            })),
+          }}
           settings={{
             companyName: settings.companyName,
             accent: settings.accent,
