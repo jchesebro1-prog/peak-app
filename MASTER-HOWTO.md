@@ -28,7 +28,7 @@ and migrations apply themselves during the build.
 **Who can sign in:** active people on Settings → Team (email or their
 `googleEmail`). Add a teammate there before inviting them.
 
-## 2b. What's usable today (Phases 1–3 ✅)
+## 2b. What's usable today (Phases 1–4 ✅)
 
 Signed in, you can already drive the whole **Sales** side against real data:
 - **Home** — live dashboard (pipeline value, win rate, inbox waiting, your
@@ -49,9 +49,30 @@ Signed in, you can already drive the whole **Sales** side against real data:
 - **⌘K search** across quotes, designs, surveys, inspections, threads,
   customers, catalog.
 
-Service, Installs, and the General tools (Flame Tests, Repairs, Inspections,
-Projects, Scheduling, Customers, Reports, Import…) are the next phases —
-their nav tabs currently open a "coming in Phase N" placeholder.
+And the whole **Service** side (Phase 4):
+- **Flame Tests** — dashboard (KPIs, renewals-due outreach, test-locations
+  map), the scheduler (to-schedule / booked, route map), results capture, the
+  auto-priced quote builder (travel + curtain-count + multi-venue bundling,
+  live total), the renewal letter, and the NFPA-705 report in three variants
+  (letter / summary / **Certificate of Flame Resistance**). Marking a
+  flame-test quote Won still auto-creates its FT job.
+- **Repairs** — dashboard with the findings **flagged from inspections**
+  intake, warranty follow-ups (with ready-to-send emails), priority board,
+  scheduler, and results capture. Won repair quotes now auto-create repair jobs.
+- **Rigging Inspections** — the inbox (requested → scheduled → on-site →
+  completed), the on-site **capture editor** (venue facts, stage/system
+  measurements, the full rubric with per-item ratings, and issue logging from
+  a standards library), and the client-facing **inspection report** (report /
+  field-dossier / compact layouts). "Mark complete" stamps the report date.
+
+A few service follow-ups are parked for your call in MASTER-QUESTIONS
+(F9–F11: repair scheduling/results field check, no dedicated repair
+quote/report screen, renovation-quote back-link; G1: unify the report
+letterhead once the final logo files land).
+
+Installs and the General tools (Projects, Scheduling, Customers, Reports,
+Import…) are the next phases — their nav tabs currently open a "coming in
+Phase N" placeholder.
 
 ## 3. Day-to-day operations
 

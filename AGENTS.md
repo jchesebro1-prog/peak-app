@@ -77,7 +77,13 @@ See `.env.example`.
 3. ✅ Sales screens (Home, Leads board/worklist/table + drawer + public
    intake, Quotes, Reviews, Estimator + 3 configurators, Quick Design,
    Design, Inbox email client, ⌘K global search)
-4. ⬜ Service screens (Flame Tests suite, Repairs, Inspections, documents)
+4. ✅ Service screens — Flame Tests suite (dashboard, scheduler, results,
+   auto-priced quote builder, letter, report w/ letter/summary/certificate
+   variants); Repairs (dashboard, scheduler, results, flagged-from-inspections
+   intake, warranty follow-ups); Inspections (inbox, capture editor with
+   rubric/measurements/issue-library/findings, client report). Won repair
+   quotes now auto-spawn repair jobs. Open follow-ups logged in MASTER-QUESTIONS
+   F9–F11, G1.
 5. ⬜ Installs + General (Projects, Scheduling, Field Work, Customers,
    Surveys, Import, Reports, Estimating Rules, full Settings)
 6. ⬜ Offline field capture (PWA + outbox sync per sync-architecture spec)

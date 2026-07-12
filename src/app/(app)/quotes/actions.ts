@@ -10,6 +10,7 @@ import {
   type QuoteStatus,
 } from "@/lib/stores/quotes";
 import { syncFromQuotes } from "@/lib/stores/flame-jobs";
+import { syncFromQuotes as syncRepairsFromQuotes } from "@/lib/stores/repair-jobs";
 import { syncProjectsFromQuotes } from "@/lib/stores/projects";
 
 /**
@@ -29,10 +30,11 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
   if (!q) return;
   if (status === "won") {
     // Acceptance auto-spawns downstream work exactly like the prototype:
-    // won flame-test quotes become FT jobs, won system quotes become
-    // Installs projects. Each sync filters to its own quoteType and is
-    // idempotent, so calling both is safe.
+    // won flame-test quotes become FT jobs, won repair quotes become repair
+    // jobs, won system quotes become Installs projects. Each sync filters to
+    // its own quoteType and is idempotent, so calling all three is safe.
     await syncFromQuotes();
+    await syncRepairsFromQuotes();
     await syncProjectsFromQuotes();
   }
   revalidatePath("/", "layout");

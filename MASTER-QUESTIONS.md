@@ -105,11 +105,30 @@ Estimating Rules — these just need real values before go-live)
   ☐ keep pure date window
 - **F8.** Flame-test renewal quote regeneration. ✦ last year's price
   verbatim (per your comment) ☐ re-price at current rates
+- **F9.** Repair scheduling + results screens were **modeled on the
+  flame-test scheduler/results** (the prototype only shipped a Repairs
+  dashboard mock, no scheduling/results mock). Adapted fields: date
+  performed, performed-by, warranty months, scope-of-work reference,
+  work-performed, parts-used, follow-up. ☐ correct? / changes: ______
+- **F10.** There is **no separate "Repair Quote" screen** — "New repair",
+  "Quote repair", and warranty "Re-quote" all deep-link to the Estimator
+  (they lose the inspection/customer pre-fill). And completed repairs show
+  their logged **Results** screen rather than a standalone printable Repair
+  Report. ✦ acceptable for now ☐ build a dedicated repair quote +
+  report doc (needs a mock/spec): ______
+- **F11.** Inspection → renovation-quote **back-link isn't persisted** (the
+  typed inspection/quote records have no field for it). The button still
+  creates a sourced quote and opens the Estimator, but the report won't
+  later show "view existing renovation quote". ✦ fine ☐ add the link field
 
 ## G. Documents & branding
 
 - **G1.** Company logo files — light version (dark nav) + dark version
-  (documents). ☐ attached/placed at: ______ (until then: letter monogram)
+  (documents). ☐ attached/placed at: ______ (until then: letter monogram).
+  Note: flame-test **letters + reports** now use the real Peak letterhead
+  image (`peak-letterhead.jpg`); the **inspection report** still uses a
+  typographic letterhead (company name + tagline). Once the final logo
+  files land, both should point at the same asset for one consistent look.
 - **G2.** Results letter signer. ✦ the job's performing tech/owner
   ☐ always "Jeff Chesebro, Sales/Design"
 - **G3.** Letters brand. ✦ app company name (Settings → Branding)
