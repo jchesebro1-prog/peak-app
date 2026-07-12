@@ -10,17 +10,43 @@ roles, the app shell, and Settings are live. See `AGENTS.md` for the full
 phase plan and conventions, `DECISIONS.md` for choices made along the way,
 and `QUESTIONS.md` for the things that need Jeff.
 
-## See it locally (one command)
+## See it (one command)
 
 ```bash
 cd ~/Downloads/peak-app
 npm run dev
 ```
 
-Then open **http://localhost:3000** — you'll get the sign-in screen. While
-Google SSO isn't configured yet, the login page shows a **Dev sign-in**
-list; pick “Jeff Chesebro” (Admin). No database setup is needed — local dev
-uses an embedded database in `.data/` that creates and seeds itself.
+On this Mac, open **http://localhost:3000** — you'll get the sign-in
+screen. While Google SSO isn't configured yet, the login page shows a
+**Dev sign-in** list; pick “Jeff Chesebro” (Admin). No database setup is
+needed — local dev uses an embedded database in `.data/` that creates and
+seeds itself.
+
+Sign-in works on **any address the server answers on** — `localhost:3000`,
+the Mac's LAN IP, or its `SMs-Mac-mini.local:3000` name — and each keeps
+you on that same address (no bounce between them). This is handled by
+`AUTH_TRUST_HOST=true` in `.env.local` plus the `redirect` callback in
+`src/auth.ts`; no `AUTH_URL` is pinned in dev.
+
+### Test from another machine on the network
+
+Any Mac, iPhone, or iPad on the **same Wi-Fi/network** can open
+**http://SMs-Mac-mini.local:3000** and sign in the same way (the `.local`
+name is preferred over the raw IP because it survives the Mac's network
+address changing). Requirements:
+
+- Both devices on the same network (some guest/office networks isolate
+  devices from each other — if the page won't load at all, that's usually
+  why, not the app).
+- This Mac awake with `npm run dev` running.
+- On Windows, the `.local` name needs Bonjour installed; otherwise use the
+  Mac's current IP address instead.
+
+The Dev sign-in list has **no password** — anyone on the network who opens
+the URL can sign in as any role, including Admin. Fine for a trusted
+network; not for public Wi-Fi. Production uses Google sign-in + the invite
+list (see `DEPLOY.md`).
 
 Try: **avatar menu → General settings** for Branding (change the accent
 color — the whole app follows) and **Team members** (add someone, edit
@@ -37,7 +63,7 @@ Google sign-in credentials, each with exact values to paste.
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | Run locally at localhost:3000 |
+| `npm run dev` | Run locally — reachable at http://localhost:3000 on this Mac, or http://SMs-Mac-mini.local:3000 from other devices on the network |
 | `npm run build` | Production build (applies DB migrations when `DATABASE_URL` is set) |
 | `npm run db:seed` | Load the starter roster/settings into the database (safe to re-run; used once when setting up production) |
 | `npm run db:export` | Write a full-database backup to `backups/*.json` (respects `DATABASE_URL` for the live DB) |

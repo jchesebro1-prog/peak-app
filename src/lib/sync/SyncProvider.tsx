@@ -8,7 +8,12 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import { getEngine, DATA_PULLED_EVENT, type SyncStatus } from "./engine";
+import {
+  getEngine,
+  initialStatus,
+  DATA_PULLED_EVENT,
+  type SyncStatus,
+} from "./engine";
 
 /**
  * Mounts once in the app shell: starts the SyncEngine, registers the service
@@ -27,7 +32,10 @@ const SyncContext = createContext<SyncApi | null>(null);
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const engine = getEngine();
-  const [status, setStatus] = useState<SyncStatus>(() => engine.getStatus());
+  // The first client render must produce the same markup the server did, so
+  // start from the browser-independent snapshot; subscribe() below delivers
+  // the real status (navigator.onLine, pause flag) right after mount.
+  const [status, setStatus] = useState<SyncStatus>(initialStatus);
   const router = useRouter();
 
   useEffect(() => {

@@ -50,6 +50,25 @@ export type SyncStatus = {
   lastSyncAt: number | null;
 };
 
+/**
+ * Deterministic status for SSR and the first client render. getStatus() reads
+ * navigator.onLine and localStorage, which the server can't see — hydrating
+ * from those directly makes the first client render disagree with the server
+ * markup. Matches what getStatus() returns in a browserless environment.
+ */
+export function initialStatus(): SyncStatus {
+  return {
+    online: true,
+    paused: false,
+    connected: true,
+    syncing: false,
+    pending: 0,
+    errors: 0,
+    conflicts: 0,
+    lastSyncAt: null,
+  };
+}
+
 type Listener = (s: SyncStatus) => void;
 
 /** Broadcast to server-rendered screens so they can router.refresh(). */
@@ -102,7 +121,10 @@ class SyncEngine {
   /* ---------- status ---------- */
 
   private isOnline(): boolean {
-    return typeof navigator === "undefined" ? true : navigator.onLine;
+    // Node ≥21 defines a global navigator with no onLine, so check for an
+    // explicit false rather than trusting the field to exist. Without this,
+    // SSR renders the chip "Offline" and hydration mismatches.
+    return typeof navigator === "undefined" || navigator.onLine !== false;
   }
   isPaused(): boolean {
     if (typeof localStorage === "undefined") return false;

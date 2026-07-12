@@ -22,7 +22,9 @@ export default function LoginButtons({
       {google && (
         <button
           className="pk-google-btn"
-          onClick={() => signIn("google", { callbackUrl: "/" })}
+          onClick={() =>
+            signIn("google", { callbackUrl: window.location.origin + "/" })
+          }
         >
           <svg width="17" height="17" viewBox="0 0 48 48">
             <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
@@ -76,7 +78,12 @@ export default function LoginButtons({
             {roster.map((p, i) => (
               <button
                 key={p.id}
-                onClick={() => signIn("dev-login", { userId: p.id, callbackUrl: "/" })}
+                onClick={() =>
+                  signIn("dev-login", {
+                    userId: p.id,
+                    callbackUrl: window.location.origin + "/",
+                  })
+                }
                 style={{
                   display: "flex",
                   alignItems: "center",

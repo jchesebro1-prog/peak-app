@@ -48,6 +48,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   providers,
   callbacks: {
     ...authConfig.callbacks,
+    // Keep the user on whatever host they signed in from — localhost, the
+    // Mac's LAN IP, or its <name>.local address — so a dev/LAN session never
+    // gets bounced to a different origin (where its cookie wouldn't apply).
+    // Only local/private hosts are honored; anything else falls back to the
+    // app root, so this can't be used as an open redirect.
+    async redirect({ url, baseUrl }) {
+      try {
+        const u = new URL(url, baseUrl);
+        const h = u.hostname;
+        const isLocal =
+          h === "localhost" ||
+          h === "127.0.0.1" ||
+          h.endsWith(".local") ||
+          /^10\./.test(h) ||
+          /^192\.168\./.test(h) ||
+          /^172\.(1[6-9]|2\d|3[01])\./.test(h);
+        if (isLocal) return u.origin + u.pathname + u.search;
+      } catch {
+        /* fall through */
+      }
+      if (url.startsWith("/")) return url;
+      return baseUrl;
+    },
     async signIn({ user, account }) {
       if (account?.provider === "google") {
         const row = await getUserByEmail(user.email || "");
