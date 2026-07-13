@@ -394,3 +394,32 @@ Anything you want changed, just say so — none of these are hard to reverse.
   renders the dark logo when present and falls back to the baked-in Peak
   letterhead when not, so nothing changes until Jeff uploads the real files
   (closes the G1 gap from the app side).
+
+## Customer portal — IDEAS #47 phase 1 + quote requests (built 2026-07-12)
+
+- **D60. Portal sign-in = per-person magic links, no passwords.** Exactly the
+  #47 design call: each contact gets their own long random access link,
+  created and revoked from the customer record (Customers → Portal access
+  card). Opening the link plants an httpOnly cookie scoped to /portal
+  (6-month life); revoking a grant kills the link AND any signed-in session
+  immediately. Until link-emailing rides the Gmail integration, the office
+  copies the link into their own email — same ceremony as sharing the public
+  lead-intake URL.
+- **D61. Hard tenant scoping — the portal never reuses team endpoints.**
+  /portal is exempted from the team-auth middleware and runs its own
+  portalSession() check inside EVERY page and server action; the customerId
+  always derives from the grant, never from anything the client posts. The
+  portal reads through the same stores but filters to that one customer.
+- **D62. Customers see PUBLISHED quotes only.** Drafts never appear; sent /
+  won / lost render as "Awaiting your review" / "Accepted" / "Declined" with
+  name, id, date, and total — no margins, costs, or internal notes. Venue
+  compliance chips reuse the renewal math (flame annual · inspection L1/L2)
+  so the portal starts nudging self-serve renewals (#31/#36/#37 thread).
+- **D63. Portal quote requests land in the Leads pipeline as source
+  "existing"** — unassigned, so they enter the SLA response queue (48h),
+  pre-linked to the customer record with the requester, venue, service type
+  and urgency in the message ("[Portal request — <name>] …"). Department
+  scoping is carried structurally on grants (dept field) but v1 shows the
+  customer org's whole published world — mapping people → departments needs
+  Jeff's org info (MASTER-QUESTIONS F15). The #48 self-serve estimator
+  stays parked on the catalog gap.

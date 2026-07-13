@@ -20,6 +20,8 @@ import { shortDate, timeAgo } from "@/lib/format";
 import { Avatar } from "@/components/ui";
 
 export const metadata = { title: "Customer — Peak Backend" };
+import { grantsFor, grantPath } from "@/lib/portal";
+import { PortalAccessCard } from "./portal-access";
 import EditCustomerModal from "../edit-modal";
 import {
   ACCENT_INK,
@@ -146,6 +148,17 @@ export default async function CustomerDetailPage({
   const locN = (cust.locations || []).length;
 
   const contacts = (cust.contacts || []).map((ct) => ({ ...ct, mono: mono(ct.name) }));
+
+  /* ---- portal access grants (IDEAS #47) ---- */
+  const portalGrants = (await grantsFor(cust.id)).map((g) => ({
+    id: g.id,
+    name: g.name,
+    email: g.email,
+    path: grantPath(g),
+    createdAt: g.createdAt,
+    revoked: !!g.revokedAt,
+    lastSeenAt: g.lastSeenAt ?? null,
+  }));
 
   /* ---- edit-modal initial ---- */
   const editInitial: SaveCustomerInput = {
@@ -491,6 +504,15 @@ export default async function CustomerDetailPage({
                 <div style={{ fontSize: 12, color: "#9aa0ab", paddingTop: 4 }}>No contacts yet.</div>
               )}
             </div>
+
+            <PortalAccessCard
+              customerId={cust.id}
+              contacts={(cust.contacts || []).map((ct) => ({
+                name: ct.name,
+                email: ct.email || "",
+              }))}
+              grants={portalGrants}
+            />
           </div>
         </div>
       </div>

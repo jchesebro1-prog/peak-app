@@ -161,6 +161,17 @@ Estimating Rules — these just need real values before go-live)
   inspection per venue**, splitting the quote value evenly across venues
   (records/reports are per-venue; travel was priced once for the trip).
   ✦ even split is fine ☐ weight by line-set count instead
+- **F15.** *(Jul 12 — customer portal)* **Department scoping:** v1 portal
+  logins show the customer org's whole published world. Your design call was
+  person → department scope → optional cross-links; to wire it I need the
+  department per contact for real customers. ✦ org-wide is fine for beta
+  ☐ department map: ______
+- **F16.** *(Jul 12 — customer portal)* Portal access links are copied
+  manually from the customer record for now. Once Gmail is connected
+  (GMAIL_ENABLED), should "Create access link" also **email it to the
+  contact automatically**? ✦ yes, auto-send ☐ keep manual copy. And the
+  next portal slice: ☐ photo/document uploads on requests (P2)
+  ☐ non-binding "Accept quote" button (P3) ☐ both
 
 ## G. Documents & branding
 

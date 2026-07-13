@@ -95,3 +95,40 @@ export async function routeLocationAction(loc: LocationInput): Promise<RouteVM> 
   const est = await estimate(offices, { ...loc, ...coords, travelMiles: null, travelMin: null });
   return { miles: est.miles, minutes: est.minutes, officeName };
 }
+
+/* ---- customer portal access (IDEAS #47) ---- */
+
+export async function createPortalGrantAction(input: {
+  customerId: string;
+  name: string;
+  email: string;
+}) {
+  const user = await requireUser();
+  const { get } = await import("@/lib/stores/customers");
+  const { createGrant, grantPath } = await import("@/lib/portal");
+  const cust = await get(String(input.customerId || ""));
+  const name = String(input.name || "").trim();
+  const email = String(input.email || "").trim();
+  if (!cust) return { ok: false as const, error: "Unknown customer." };
+  if (!name || !email)
+    return { ok: false as const, error: "A name and email are required." };
+  const grant = await createGrant({
+    customerId: cust.id,
+    name,
+    email,
+    createdBy: user.name,
+  });
+  revalidatePath("/customers/" + encodeURIComponent(cust.id));
+  return { ok: true as const, path: grantPath(grant) };
+}
+
+export async function revokePortalGrantAction(input: {
+  customerId: string;
+  grantId: string;
+}) {
+  await requireUser();
+  const { revokeGrant } = await import("@/lib/portal");
+  await revokeGrant(String(input.grantId || ""));
+  revalidatePath("/customers/" + encodeURIComponent(String(input.customerId || "")));
+  return { ok: true as const };
+}

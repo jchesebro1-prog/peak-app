@@ -97,6 +97,11 @@ See `.env.example`.
    results" day sheet at /flame-tests/today (#34), renewal outreach
    worklists on both service dashboards (#37), and logo upload → nav +
    all documents (#32). Decisions D56–D59.
+   ✅ Customer portal phase 1 (#47, Jul 12): /portal with per-person
+   magic-link grants (managed from the customer record), hard tenant
+   scoping outside the team login, published-quotes + venue-compliance
+   dashboard, and a quote-request form that lands in the Leads SLA queue
+   pre-linked to the customer. Decisions D60–D63; picks F15–F16.
 5. ✅ Installs + General — Projects (book + procurement/crew/timeline/sign-off),
    Schedule (crew board + project timeline), Field Work (on-site day view),
    Customers (directory + full customer record), Field Survey (list + capture
