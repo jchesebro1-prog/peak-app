@@ -476,3 +476,38 @@ Anything you want changed, just say so — none of these are hard to reverse.
   hand-edited copy). The D1 "Draft ✨" button now routes through the same
   flow with AI copy replacing the template, so both buttons land on the
   same draft and D1's "quote attached" description is finally literal.
+- **D69. Customer quote document redesigned past the prototype** (Jeff:
+  "the quote seems very boring and needs more", Jul 12). The Estimator
+  preview keeps the prototype's data contract (sections/lines/totals,
+  Show-on-PDF toggles) but the sheet itself deviates: a QUOTE title block
+  with issued/valid-through dates (30 days, matching the terms), the REAL
+  project name + venue (the port hardcoded "Stage Systems Package / Main
+  Auditorium — Phase 1"), a prepared-by column, an accent-tinted
+  total-investment band, accent-edged section bars with numbering, a
+  by-section summary line (that mode previously rendered bare bars), an
+  "Optional additions" block for option-flagged items (previously
+  invisible to the customer) behind a new Options toggle, itemized terms,
+  and an acceptance/signature strip that points at the D60 customer
+  portal. Branding follows the house rules: everything accent-colored
+  flows from --accent/--accent-soft, and the letterhead uses the D59
+  ladder (uploaded logoDark, else the baked sheet) — the estimator was
+  the one document #32 missed.
+
+- **D69. Renewal quotes RE-PRICE at current rates; the email explains the
+  change (Jeff, Jul 12 — supersedes the D65/F8 "last year's price verbatim"
+  default).** The ✉ flow now runs the real pricing engine (flame /
+  inspection) over LAST YEAR'S scope — venues, curtain counts, line sets —
+  with TODAY'S rates and directory travel data, and the quote/PDF carry
+  this year's number. The email always cites last year's price ("$462,
+  compared with $385 last year") and, when the prior quote stored a rate
+  snapshot (every app-minted quote does), itemizes WHY in customer-safe
+  terms: federal mileage rate, labor rate, per-curtain/line-set time,
+  minimum fee (only when the floor actually applied), travel distance, and
+  scope changes. Margin movements are never named to a customer — they fall
+  back to generic "current rates"/"updated pricing" wording, as do seed-era
+  renewals with no snapshot. Inspection renewals from a multi-venue prior
+  quote say plainly that last year's visit combined N venues while this
+  quote covers the venue alone. Unchanged prices say "unchanged from last
+  year"; unknown prior prices skip the comparison. The reason builder is
+  covered by a 15-case unit sweep (scratch harness) plus the live browser
+  pass; re-clicking ✉ still reuses the cycle's quote + draft untouched.

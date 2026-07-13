@@ -218,6 +218,8 @@ const CTX_LABEL: CSSProperties = {
 
 export default function EstimatorClient({
   initial,
+  companyName,
+  logoDark,
   fabrics,
   laborRates,
   customers,
@@ -261,6 +263,7 @@ export default function EstimatorClient({
   const [pdfNotes, setPdfNotes] = useState(true);
   const [pdfCover, setPdfCover] = useState(true);
   const [pdfTerms, setPdfTerms] = useState(true);
+  const [pdfOptions, setPdfOptions] = useState(true);
   const [detail, setDetail] = useState<"itemized" | "sectioned">("itemized");
   const [activeId, setActiveId] = useState<string | null>(
     () => (initial.sections ?? demoSections())[0]?.id ?? null
@@ -1912,6 +1915,15 @@ export default function EstimatorClient({
           }
           hasAttn={hasAttn}
           attnLine={attnLine}
+          projectName={initial.projectName}
+          venueLabel={(() => {
+            const l = locations.find((x) => x.id === locationId);
+            if (!l) return "";
+            return [l.label, l.city].filter(Boolean).join(" — ");
+          })()}
+          ownerName={initial.owner || me}
+          companyName={companyName}
+          logoDark={logoDark}
           quoteNote={quoteNote}
           sections={sections}
           t={t}
@@ -1922,10 +1934,12 @@ export default function EstimatorClient({
           pdfNotes={pdfNotes}
           pdfCover={pdfCover}
           pdfTerms={pdfTerms}
+          pdfOptions={pdfOptions}
           togglePdf={(flag) => {
             if (flag === "pdfQty") setPdfQty((v) => !v);
             else if (flag === "pdfNotes") setPdfNotes((v) => !v);
             else if (flag === "pdfCover") setPdfCover((v) => !v);
+            else if (flag === "pdfOptions") setPdfOptions((v) => !v);
             else setPdfTerms((v) => !v);
           }}
         />

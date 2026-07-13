@@ -3,13 +3,21 @@
 import type { CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
 import { fmt, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
-import type { SpecSection } from "./types";
+import type { SpecItem, SpecSection } from "./types";
 
 /**
- * Customer preview — the quote document (letterhead, prepared-for block,
- * section bars, itemized lines, totals) with the Show-on-PDF toggles.
- * Pixel port of Estimator.dc.html preview mode.
+ * Customer preview — the quote document with the Show-on-PDF toggles.
+ *
+ * D69 redesign (Jeff, Jul 12): richer than the prototype's flat port —
+ * branded accent styling, a document title block, the REAL project/venue
+ * (the prototype hardcoded "Stage Systems Package"), an at-a-glance
+ * investment band, an Optional additions section (option-flagged items
+ * were previously invisible to the customer), itemized terms, and an
+ * acceptance/signature block that mentions the customer portal.
  */
+
+const ACCENT_INK = "color-mix(in srgb, var(--accent) 72%, #000)";
+const ACCENT_BD = "color-mix(in srgb, var(--accent) 28%, #fff)";
 
 const segOn: CSSProperties = {
   fontFamily: "var(--font-ui)",
@@ -35,6 +43,14 @@ const segOff: CSSProperties = {
   cursor: "pointer",
 };
 
+const microLabel: CSSProperties = {
+  color: "#9aa0ab",
+  textTransform: "uppercase",
+  fontSize: 10,
+  letterSpacing: ".06em",
+  marginBottom: 3,
+};
+
 export type PreviewProps = {
   phone: boolean;
   canBuild: boolean;
@@ -45,6 +61,13 @@ export type PreviewProps = {
   custName: string;
   hasAttn: boolean;
   attnLine: string;
+  projectName: string;
+  /** "Label — City" for the selected customer venue ("" when none). */
+  venueLabel: string;
+  ownerName: string;
+  companyName: string;
+  /** Uploaded document logo (Settings → Branding), falls back to the baked letterhead. */
+  logoDark: string | null;
   quoteNote: string;
   sections: SpecSection[];
   t: QuoteTotals;
@@ -55,18 +78,34 @@ export type PreviewProps = {
   pdfNotes: boolean;
   pdfCover: boolean;
   pdfTerms: boolean;
-  togglePdf: (flag: "pdfQty" | "pdfNotes" | "pdfCover" | "pdfTerms") => void;
+  pdfOptions: boolean;
+  togglePdf: (flag: "pdfQty" | "pdfNotes" | "pdfCover" | "pdfTerms" | "pdfOptions") => void;
 };
+
+const DAY_MS = 86400000;
+
+/** The four sentences of the standing terms line, itemized. */
+const TERMS = [
+  "This quote is valid for 30 days from the issue date.",
+  "Pricing reflects current manufacturer list.",
+  "Acceptance generates a sales order in QuickBooks.",
+  "Installation is scheduled upon receipt of a signed quote and 40% deposit.",
+];
+
+function longDate(ms: number): string {
+  return new Date(ms).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
 
 export default function PreviewDoc(p: PreviewProps) {
   const isItemized = p.detail === "itemized";
   const lineCols = p.pdfQty ? "1fr 70px 104px" : "1fr 104px";
   const showCover = !!(p.pdfCover && p.quoteNote && p.quoteNote.trim());
-  const revDateLabel = new Date(p.revDateMs).toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
+  const revDateLabel = longDate(p.revDateMs);
+  const validThruLabel = longDate(p.revDateMs + 30 * DAY_MS);
 
   const previewSections = p.sections
     .filter((sec) => systemItemsRev(sec) > 0 || systemFreight(sec) > 0)
@@ -75,7 +114,8 @@ export default function PreviewDoc(p: PreviewProps) {
       const secFr = systemFreight(sec);
       const sub = systemItemsRev(sec) + secFr;
       return {
-        heading: i + 1 + " · " + sec.name,
+        num: i + 1,
+        name: sec.name,
         subtotalLabel: fmt(sub),
         hasFreight: secFr > 0,
         freightLabel: fmt(secFr),
@@ -103,6 +143,15 @@ export default function PreviewDoc(p: PreviewProps) {
               })),
       };
     });
+
+  const lineCount = previewSections.reduce((a, s) => a + s.lines.length, 0);
+  const optionItems: Array<{ sec: string; it: SpecItem }> = [];
+  p.sections.forEach((sec) =>
+    sec.items.forEach((it) => {
+      if (it.option) optionItems.push({ sec: sec.name, it });
+    })
+  );
+  const showOptions = p.pdfOptions && optionItems.length > 0;
 
   return (
     <div
@@ -216,6 +265,9 @@ export default function PreviewDoc(p: PreviewProps) {
           <button type="button" onClick={() => p.togglePdf("pdfCover")} style={p.pdfCover ? segOn : segOff}>
             {(p.pdfCover ? "✓ " : "") + "Cover note"}
           </button>
+          <button type="button" onClick={() => p.togglePdf("pdfOptions")} style={p.pdfOptions ? segOn : segOff}>
+            {(p.pdfOptions ? "✓ " : "") + "Options"}
+          </button>
           <button type="button" onClick={() => p.togglePdf("pdfTerms")} style={p.pdfTerms ? segOn : segOff}>
             {(p.pdfTerms ? "✓ " : "") + "Terms"}
           </button>
@@ -260,87 +312,191 @@ export default function PreviewDoc(p: PreviewProps) {
             height: "fit-content",
           }}
         >
-          {/* letterhead */}
-          <div style={{ borderBottom: "2px solid #16181d", paddingBottom: 16, marginBottom: 20 }}>
+          {/* letterhead — uploaded logo when set, baked sheet otherwise (D59 ladder) */}
+          <div style={{ borderBottom: `3px solid var(--accent)`, paddingBottom: 16, marginBottom: 22 }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={letterhead.src}
-              alt="Peak Systems Group, Inc."
-              style={{ display: "block", width: "100%", height: "auto" }}
+              src={p.logoDark || letterhead.src}
+              alt={p.companyName}
+              style={
+                p.logoDark
+                  ? { display: "block", maxHeight: 76, maxWidth: "100%", objectFit: "contain" }
+                  : { display: "block", width: "100%", height: "auto" }
+              }
             />
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
-              <div
-                style={{
-                  textAlign: "right",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 11.5,
-                  color: "#5b616e",
-                  lineHeight: 1.7,
-                }}
-              >
-                {p.quoteId} · REV {p.revNum} · {revDateLabel}
-              </div>
-            </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 26, fontSize: 12 }}>
+
+          {/* document title */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-end",
+              gap: 16,
+              marginBottom: 22,
+            }}
+          >
             <div>
               <div
                 style={{
-                  color: "#9aa0ab",
-                  textTransform: "uppercase",
-                  fontSize: 10,
-                  letterSpacing: ".06em",
-                  marginBottom: 3,
+                  fontSize: 27,
+                  fontWeight: 700,
+                  letterSpacing: ".14em",
+                  lineHeight: 1,
+                  color: "#16181d",
                 }}
               >
-                Prepared for
+                QUOTE
               </div>
+              <div
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 12,
+                  color: ACCENT_INK,
+                  marginTop: 7,
+                }}
+              >
+                {p.quoteId} · REV {p.revNum}
+              </div>
+            </div>
+            <div
+              style={{
+                textAlign: "right",
+                fontSize: 11.5,
+                color: "#5b616e",
+                lineHeight: 1.75,
+              }}
+            >
+              <div>
+                Issued <strong style={{ color: "#16181d" }}>{revDateLabel}</strong>
+              </div>
+              <div>
+                Valid through <strong style={{ color: "#16181d" }}>{validThruLabel}</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* prepared for / project / prepared by */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1.1fr 1.3fr 1fr",
+              gap: 18,
+              marginBottom: 20,
+              fontSize: 12,
+            }}
+          >
+            <div>
+              <div style={microLabel}>Prepared for</div>
               <div style={{ fontWeight: 600 }}>{p.custName}</div>
               {p.hasAttn && <div style={{ color: "#5b616e" }}>Attn: {p.attnLine}</div>}
             </div>
-            <div style={{ textAlign: "right" }}>
+            <div>
+              <div style={microLabel}>Project</div>
+              <div style={{ fontWeight: 600 }}>{p.projectName || "Stage systems package"}</div>
+              {p.venueLabel && <div style={{ color: "#5b616e" }}>{p.venueLabel}</div>}
+            </div>
+            <div>
+              <div style={microLabel}>Prepared by</div>
+              <div style={{ fontWeight: 600 }}>{p.ownerName}</div>
+              <div style={{ color: "#5b616e" }}>{p.companyName}</div>
+            </div>
+          </div>
+
+          {/* at-a-glance investment band */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 14,
+              flexWrap: "wrap",
+              background: "var(--accent-soft)",
+              border: `1px solid ${ACCENT_BD}`,
+              borderRadius: 8,
+              padding: "13px 16px",
+              marginBottom: 24,
+            }}
+          >
+            <div>
+              <div style={{ ...microLabel, color: ACCENT_INK, marginBottom: 2 }}>
+                Total investment
+              </div>
               <div
                 style={{
-                  color: "#9aa0ab",
-                  textTransform: "uppercase",
-                  fontSize: 10,
-                  letterSpacing: ".06em",
-                  marginBottom: 3,
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 21,
+                  fontWeight: 600,
+                  letterSpacing: "-.01em",
+                  color: "#16181d",
                 }}
               >
-                Project
+                {fmt(p.t.grand)}
               </div>
-              <div style={{ fontWeight: 600 }}>Stage Systems Package</div>
-              <div style={{ color: "#5b616e" }}>Main Auditorium — Phase 1</div>
+            </div>
+            <div style={{ textAlign: "right", fontSize: 11.5, color: "#5b616e", lineHeight: 1.7 }}>
+              <div>
+                {previewSections.length} {previewSections.length === 1 ? "system" : "systems"} ·{" "}
+                {lineCount} line {lineCount === 1 ? "item" : "items"}
+                {optionItems.length > 0 && showOptions
+                  ? ` · ${optionItems.length} optional`
+                  : ""}
+              </div>
+              <div>Materials, installation &amp; freight included</div>
             </div>
           </div>
 
           {showCover && (
-            <div style={{ fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.65, marginBottom: 24 }}>
+            <div
+              style={{
+                fontSize: 12.5,
+                color: "#3a3f4a",
+                lineHeight: 1.7,
+                marginBottom: 26,
+                paddingLeft: 14,
+                borderLeft: `3px solid ${ACCENT_BD}`,
+              }}
+            >
               {p.quoteNote}
             </div>
           )}
 
           {/* sections */}
           {previewSections.map((ps) => (
-            <div key={ps.heading}>
+            <div key={ps.num + ps.name}>
               <div
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
-                  alignItems: "baseline",
+                  alignItems: "center",
+                  gap: 10,
                   background: "#16181d",
                   color: "#fff",
-                  padding: "8px 13px",
+                  padding: "8px 13px 8px 10px",
                   borderRadius: 4,
+                  borderLeft: "4px solid var(--accent)",
                   marginBottom: 2,
                   marginTop: 14,
                 }}
               >
-                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{ps.heading}</span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{ps.subtotalLabel}</span>
+                <span style={{ display: "flex", alignItems: "baseline", gap: 9, minWidth: 0 }}>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 10.5,
+                      opacity: 0.65,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {String(ps.num).padStart(2, "0")}
+                  </span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{ps.name}</span>
+                </span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, flexShrink: 0 }}>
+                  {ps.subtotalLabel}
+                </span>
               </div>
-              {isItemized && (
+              {isItemized ? (
                 <div style={{ marginBottom: 6 }}>
                   {ps.lines.map((ln) => (
                     <div
@@ -408,12 +564,86 @@ export default function PreviewDoc(p: PreviewProps) {
                     </div>
                   )}
                 </div>
+              ) : (
+                <div
+                  style={{
+                    padding: "7px 13px 9px",
+                    fontSize: 11.5,
+                    color: "#8c919c",
+                    borderBottom: "1px solid #f0f1f4",
+                    marginBottom: 6,
+                  }}
+                >
+                  {ps.lines.length} line {ps.lines.length === 1 ? "item" : "items"}
+                  {ps.hasFreight ? " · includes freight & delivery" : ""}
+                </div>
               )}
             </div>
           ))}
 
+          {/* optional additions — priced, not in the total */}
+          {showOptions && (
+            <div
+              style={{
+                border: `1px dashed ${ACCENT_BD}`,
+                borderRadius: 6,
+                padding: "12px 14px",
+                marginTop: 20,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "baseline",
+                  gap: 10,
+                  marginBottom: 4,
+                }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: ACCENT_INK }}>
+                  Optional additions
+                </span>
+                <span style={{ fontSize: 11, color: "#8c919c" }}>
+                  Priced separately — not included in the total
+                </span>
+              </div>
+              {optionItems.map(({ sec, it }) => (
+                <div
+                  key={sec + "-" + it.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: lineCols,
+                    gap: 8,
+                    padding: "7px 0 5px",
+                    fontSize: 12.5,
+                    borderBottom: "1px solid #f0f1f4",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>
+                    {it.desc}
+                    <span style={{ display: "block", fontSize: 10.5, color: "#9aa0ab", marginTop: 1 }}>
+                      {sec}
+                    </span>
+                  </span>
+                  {p.pdfQty && (
+                    <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#8c919c" }}>
+                      {it.qty} {it.unit}
+                    </span>
+                  )}
+                  <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}>
+                    {fmt(it.qty * it.price)}
+                  </span>
+                </div>
+              ))}
+              <div style={{ fontSize: 11, color: "#8c919c", marginTop: 8, lineHeight: 1.5 }}>
+                Want any of these included? Let us know and we’ll issue a revised quote.
+              </div>
+            </div>
+          )}
+
           {/* totals */}
-          <div style={{ borderTop: "2px solid #16181d", paddingTop: 14, marginTop: 20 }}>
+          <div style={{ borderTop: "2px solid #16181d", paddingTop: 14, marginTop: 22 }}>
             <div
               style={{
                 display: "flex",
@@ -469,7 +699,8 @@ export default function PreviewDoc(p: PreviewProps) {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                background: "#f7f8fa",
+                background: "var(--accent)",
+                color: "#fff",
                 borderRadius: 6,
                 padding: "13px 15px",
               }}
@@ -479,13 +710,80 @@ export default function PreviewDoc(p: PreviewProps) {
                 {fmt(p.t.grand)}
               </span>
             </div>
+
             {p.pdfTerms && (
-              <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 12, lineHeight: 1.6 }}>
-                Valid 30 days. Pricing reflects current manufacturer list. Acceptance generates a
-                sales order in QuickBooks. Installation scheduled upon receipt of signed quote and
-                40% deposit.
-              </div>
+              <>
+                <div style={{ marginTop: 18 }}>
+                  <div style={{ ...microLabel, marginBottom: 6 }}>Terms</div>
+                  <ul
+                    style={{
+                      margin: 0,
+                      paddingLeft: 16,
+                      fontSize: 11,
+                      color: "#5b616e",
+                      lineHeight: 1.75,
+                    }}
+                  >
+                    {TERMS.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* acceptance */}
+                <div
+                  style={{
+                    borderTop: "1px solid #ececf0",
+                    marginTop: 16,
+                    paddingTop: 14,
+                  }}
+                >
+                  <div style={{ ...microLabel, marginBottom: 2 }}>Acceptance</div>
+                  <div style={{ fontSize: 11.5, color: "#5b616e", lineHeight: 1.6, marginBottom: 18 }}>
+                    To proceed, sign and return this quote — or accept it online through your{" "}
+                    {p.companyName} customer portal.
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "2fr 1.4fr 1fr",
+                      gap: 22,
+                      fontSize: 10.5,
+                      color: "#8c919c",
+                    }}
+                  >
+                    <div style={{ borderTop: "1px solid #9aa0ab", paddingTop: 5 }}>
+                      Signature — accepted for {p.custName}
+                    </div>
+                    <div style={{ borderTop: "1px solid #9aa0ab", paddingTop: 5 }}>
+                      Name &amp; title
+                    </div>
+                    <div style={{ borderTop: "1px solid #9aa0ab", paddingTop: 5 }}>Date</div>
+                  </div>
+                </div>
+              </>
             )}
+
+            {/* footer */}
+            <div
+              style={{
+                borderTop: "1px solid #ececf0",
+                marginTop: 20,
+                paddingTop: 10,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              <span style={{ fontSize: 10.5, color: "#9aa0ab" }}>
+                Questions? Reach out to {p.ownerName} — we’re glad to walk through any line.
+              </span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#aab0bb" }}>
+                {p.companyName} · {p.quoteId} · REV {p.revNum} · {revDateLabel}
+              </span>
+            </div>
           </div>
         </div>
       </div>

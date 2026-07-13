@@ -103,12 +103,14 @@ See `.env.example`.
    dashboard, and a quote-request form that lands in the Leads SLA queue
    pre-linked to the customer. Decisions D60–D63; picks F15–F16.
    ✅ One-click renewal outreach (#36, Jul 12): the renewal-row ✉ on both
-   service dashboards mints this year's quote at last year's price (F8),
-   renders the proposal letter to PDF (lib/pdf.ts, zero-dep) and attaches
-   it, lands a linked draft in the Sales box, and opens the Inbox composer
-   (/inbox?draft=); sending stamps the #37 outreach state + quote → sent.
-   Real attachments across comms/composer/reader/Gmail-MIME. Decisions
-   D65–D68; follow-ups MASTER-QUESTIONS F17–F18.
+   service dashboards re-prices this year's quote at current rates over
+   last year's scope (F8 updated per Jeff — D69), renders the proposal
+   letter to PDF (lib/pdf.ts, zero-dep) and attaches it, lands a linked
+   draft in the Sales box whose body cites last year's price + why it
+   changed, and opens the Inbox composer (/inbox?draft=); sending stamps
+   the #37 outreach state + quote → sent. Real attachments across
+   comms/composer/reader/Gmail-MIME. Decisions D65–D69; follow-ups
+   MASTER-QUESTIONS F17–F18.
 5. ✅ Installs + General — Projects (book + procurement/crew/timeline/sign-off),
    Schedule (crew board + project timeline), Field Work (on-site day view),
    Customers (directory + full customer record), Field Survey (list + capture

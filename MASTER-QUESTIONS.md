@@ -133,8 +133,12 @@ Estimating Rules — these just need real values before go-live)
 - **F7.** Renewals-due panel = only customers NOT yet contacted this cycle
   (IDEAS #37). ✦ yes, with a "Reached out — awaiting" secondary view
   ☐ keep pure date window
-- **F8.** Flame-test renewal quote regeneration. ✦ last year's price
-  verbatim (per your comment) ☐ re-price at current rates
+- **F8.** Flame-test renewal quote regeneration. ~~✦ last year's price
+  verbatim (per your comment) ☐ re-price at current rates~~
+  **✓ Decided Jul 12 (your follow-up): re-price at THIS year's rates**;
+  the outreach email cites last year's price for comparison and outlines
+  why the number moved (rate/travel/scope changes — D69). Applies to both
+  flame and inspection renewals.
 - **F9.** Repair scheduling + results screens were **modeled on the
   flame-test scheduler/results** (the prototype only shipped a Repairs
   dashboard mock, no scheduling/results mock). Adapted fields: date

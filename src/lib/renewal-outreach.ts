@@ -18,11 +18,25 @@ import {
   levelMeta,
   type InspectionRecord,
 } from "@/lib/stores/inspections";
-import { locationById } from "@/lib/stores/customers";
+import { get as getCustomer, locationById } from "@/lib/stores/customers";
 import { getSettings, type AppSettingsData } from "@/lib/settings";
 import { allUsers } from "@/lib/users";
 import { firstName } from "@/lib/team";
-import { AVG_MPH } from "@/lib/geo";
+import { AVG_MPH, coordsOf, driveMiles, driveMinutes, nearest } from "@/lib/geo";
+import {
+  compute as computeFlame,
+  getRates as getFlameRates,
+  type FlameTestPricing,
+  type FlameTestRates,
+  type FlameTestVenueInput,
+} from "@/lib/flametest-engine";
+import {
+  computeEstimate as computeInspection,
+  getRates as getInspectionRates,
+  type InspectionEstimate,
+  type InspectionRates,
+  type InspectionVenueInput,
+} from "@/lib/inspection-engine";
 import {
   dataUrlBytes,
   jpegInfo,
@@ -33,11 +47,17 @@ import {
 
 /**
  * IDEAS #36 — one-click renewal outreach. The ✉ on a renewal row runs this:
- * this year's quote is minted from LAST YEAR'S PRICE VERBATIM (Jeff's call,
- * MASTER-QUESTIONS F8), the proposal letter is rendered to a real PDF and
- * attached, and a ready-to-send draft lands in the SALES shared mailbox,
- * linked to the renewal's job/record. The caller redirects to the Inbox with
- * the composer open; sending stamps the #37 renewalOutreach worklist state.
+ * this year's quote is RE-PRICED AT CURRENT RATES (Jeff's Jul-12 call,
+ * updating the F8 default — see D69) from the same venue/scope data as last
+ * year's job, the proposal letter is rendered to a real PDF and attached,
+ * and a ready-to-send draft lands in the SALES shared mailbox, linked to the
+ * renewal's job/record. The email body always cites LAST YEAR'S PRICE for
+ * comparison, and when the number moved it says why — built by diffing the
+ * rate snapshot stored on last year's quote against today's rates (plus
+ * travel/scope changes). Internal knobs (margin) are never named to the
+ * customer; they fall back to generic "current rates" phrasing. The caller
+ * redirects to the Inbox with the composer open; sending stamps the #37
+ * renewalOutreach worklist state.
  *
  * Idempotent by design: the quote is keyed on `renewalOf` and the draft on
  * the thread link, so clicking ✉ twice re-opens the same draft — and an
@@ -75,6 +95,54 @@ function num1(n: number | null | undefined): string {
 function fmtDate(ms: number | null | undefined): string {
   const d = ms ? new Date(ms) : new Date();
   return d.getMonth() + 1 + "/" + d.getDate() + "/" + d.getFullYear();
+}
+
+/** Rates need cents — money() rounds to whole dollars. */
+function usd2(n: number | null | undefined): string {
+  return "$" + (Math.round((n || 0) * 100) / 100).toFixed(2);
+}
+
+/** "a" · "a and b" · "a, b, and c". */
+function listJoin(items: string[]): string {
+  if (items.length <= 1) return items[0] || "";
+  if (items.length === 2) return items[0] + " and " + items[1];
+  return items.slice(0, -1).join(", ") + ", and " + items[items.length - 1];
+}
+
+/** What the ✉ flow learned while minting this year's quote — feeds the
+ *  email's price-comparison sentence (D69). */
+type RenewalPricing = {
+  quote: Quote;
+  /** Last year's price (0 = unknown, e.g. seed-era records). */
+  lastPrice: number;
+  /** Customer-safe phrases explaining a changed price (may be empty). */
+  reasons: string[];
+};
+
+/**
+ * The email's price paragraph: always cites last year's price when known,
+ * and explains a change (or falls back to generic "current rates" wording
+ * when the components can't be reconstructed).
+ */
+function priceParagraph(p: RenewalPricing, kind: string): string {
+  const newPrice = p.quote.value || 0;
+  const closing = ` If it looks good, just reply here and we'll get this year's ${kind} on the schedule.`;
+  if (newPrice > 0 && p.lastPrice > 0) {
+    if (newPrice === p.lastPrice)
+      return (
+        `I've attached this year's quote — ${money(newPrice)}, unchanged ` +
+        `from last year.` + closing
+      );
+    const dir = newPrice > p.lastPrice ? "increase" : "decrease";
+    const why = p.reasons.length ? listJoin(p.reasons) : "our current rates";
+    return (
+      `I've attached this year's quote — ${money(newPrice)}, compared with ` +
+      `${money(p.lastPrice)} last year. The ${dir} reflects ${why}.` + closing
+    );
+  }
+  if (newPrice > 0)
+    return `I've attached this year's quote — ${money(newPrice)}.` + closing;
+  return `I've attached this year's quote.` + closing;
 }
 
 /* ---------------- letterhead ---------------- */
@@ -127,53 +195,170 @@ type FlameTestDoc = {
   contact?: FtContact;
   origin?: { name?: string; street?: string; city?: string; state?: string; zip?: string } | null;
   trip?: { miles?: number; minutes?: number } | null;
-  rates?: { curtainMinutes?: number } | null;
+  /** Rate snapshot the quote was priced with (persist saves r.rates). */
+  rates?: Partial<FlameTestRates> | null;
   total?: number | null;
 };
 
+/** Customer-safe reasons why this year's flame price differs from last
+ *  year's — diff of the rate snapshot stored on the prior quote vs today's
+ *  rates, plus travel/scope movement. Margin changes stay generic (D69). */
+function flameChangeReasons(
+  priorFt: FlameTestDoc | null,
+  r: FlameTestPricing
+): string[] {
+  const out: string[] = [];
+  const old = priorFt?.rates || null;
+  const cur = r.rates;
+  let generic = false;
+  if (old) {
+    if (old.mileageRate != null && old.mileageRate !== cur.mileageRate)
+      out.push(
+        `the current federal mileage rate (${usd2(cur.mileageRate)}/mi, was ${usd2(old.mileageRate)})`
+      );
+    if (old.laborRate != null && old.laborRate !== cur.laborRate)
+      out.push(
+        `our current labor rate ($${cur.laborRate}/hr, was $${old.laborRate})`
+      );
+    if (old.curtainMinutes != null && old.curtainMinutes !== cur.curtainMinutes)
+      out.push(
+        `updated per-curtain testing time (${cur.curtainMinutes} min per curtain, was ${old.curtainMinutes})`
+      );
+    if (old.baseFee != null && old.baseFee !== cur.baseFee && r.baseApplied)
+      out.push(
+        `our minimum service fee ($${Math.round(cur.baseFee)}, was $${Math.round(old.baseFee)})`
+      );
+    if (old.margin != null && old.margin !== cur.margin) generic = true;
+  } else {
+    generic = true;
+  }
+  const oldMiles = priorFt?.trip?.miles;
+  if (oldMiles != null && Math.abs(r.trip.miles - oldMiles) >= 2)
+    out.push(
+      `updated travel distance (${r.trip.miles} mi round trip, was ${Math.round(oldMiles)})`
+    );
+  const oldCurtains = priorFt?.curtainsTotal;
+  if (oldCurtains != null && oldCurtains !== r.curtainsTotal)
+    out.push(
+      `the test now covering ${r.curtainsTotal} curtain${r.curtainsTotal === 1 ? "" : "s"} (was ${oldCurtains})`
+    );
+  if (generic && !out.length) return []; // → "our current rates" fallback
+  if (generic) out.push("our updated pricing");
+  return out;
+}
+
 /** This cycle's renewal quote for a completed flame job — reused when it
- *  already exists, otherwise minted at last year's price verbatim (F8). */
+ *  already exists, otherwise RE-PRICED AT CURRENT RATES from last year's
+ *  venue/curtain data (Jeff's Jul-12 call, D69; the email cites last year's
+ *  price and the reasons for any change). */
 async function ensureFlameRenewalQuote(
   job: FlameJob,
   me: string
-): Promise<Quote> {
+): Promise<RenewalPricing> {
+  const lastPrice = Math.round(job.value || 0);
   const existing = await byRenewalOf(job.id);
-  if (existing && existing.quoteType === "flame_test") return existing;
+  if (existing && existing.quoteType === "flame_test")
+    return { quote: existing, lastPrice, reasons: [] };
 
   const prior = job.quoteId ? await getQuote(job.quoteId) : null;
   const priorFt =
     prior && prior.quoteType === "flame_test" && prior.flameTest
       ? (prior.flameTest as FlameTestDoc)
       : null;
-  // seed-era jobs may predate their quote — reconstruct the subdoc from the job
-  const ft: FlameTestDoc = priorFt || {
-    venues: (job.venues || []).map((v) => ({
-      id: v.id,
-      label: v.label,
+
+  // engine inputs: last year's venues + curtain counts, TODAY's directory
+  // coords/travel numbers (job venues carry coords as a seed-era fallback)
+  const srcVenues: FtVenue[] = priorFt?.venues?.length
+    ? priorFt.venues
+    : (job.venues || []).map((v) => ({
+        id: v.id,
+        label: v.label,
+        curtains: v.curtains,
+      }));
+  const cust = job.customerId ? await getCustomer(job.customerId) : null;
+  const locById = new Map((cust?.locations || []).map((l) => [l.id, l]));
+  const jobVenueById = new Map(
+    (job.venues || []).map((v) => [v.id ?? "", v])
+  );
+  const venueInputs: FlameTestVenueInput[] = srcVenues.map((v) => {
+    const loc = v.id ? locById.get(v.id) : null;
+    const jv = v.id ? jobVenueById.get(v.id) : null;
+    const coords = loc
+      ? coordsOf(loc)
+      : jv && jv.lat != null
+        ? { lat: jv.lat, lng: jv.lng }
+        : null;
+    return {
+      id: v.id ?? null,
+      label: v.label || loc?.label || "Venue",
       curtains: v.curtains,
-    })),
-    curtainsTotal: job.curtainsTotal,
-    contact: job.contact,
-    origin: null,
-    trip: null,
-    rates: null,
-    total: job.value,
-  };
+      coords: coords ? { lat: coords.lat, lng: coords.lng } : null,
+      oneWayMiles: loc?.travelMiles ?? null,
+      oneWayMin: loc?.travelMin ?? null,
+    };
+  });
+
+  const settings = await getSettings();
+  const offices = Array.isArray(settings.offices) ? settings.offices : [];
+  const firstCoords =
+    venueInputs.map((v) => v.coords).find((c) => c && c.lat != null) || null;
+  const office =
+    (firstCoords ? nearest(offices, firstCoords) : null) || offices[0] || null;
+
+  const rates = await getFlameRates();
+  const r = computeFlame({ office: office || undefined, venues: venueInputs }, rates);
+
+  const origin = office
+    ? {
+        name: office.name || "",
+        street: office.street || "",
+        city: office.city || "",
+        state: office.state || "",
+        zip: office.zip || "",
+      }
+    : null;
+  const contact = job.contact || prior?.contact || null;
   const year = new Date().getFullYear();
-  return createQuote({
+  const quote = await createQuote({
     name: (job.customer || "Customer") + " — Flame test renewal " + year,
     customer: job.customer || prior?.customer || "",
     customerId: job.customerId || prior?.customerId || null,
     locationId: job.locationId || prior?.locationId || null,
-    value: job.value || prior?.value || 0, // last year's price, verbatim (F8)
-    margin: prior?.margin || 0,
+    value: Math.round(r.total), // this year's price at current rates (D69)
+    margin: r.margin,
     source: "flametest",
     quoteType: "flame_test",
     owner: me,
-    contact: job.contact || prior?.contact || null,
-    flameTest: ft,
+    contact,
+    flameTest: {
+      rates: r.rates,
+      office: office ? office.name || office.id || "" : "",
+      origin,
+      venues: r.perVenue.map((v) => ({
+        id: v.id,
+        label: v.label,
+        curtains: v.curtains,
+        testingCost: Math.round(v.laborCost),
+      })),
+      curtainsTotal: r.curtainsTotal,
+      trip: {
+        miles: r.trip.miles,
+        minutes: r.trip.minutes,
+        mileageCost: Math.round(r.trip.mileageCost),
+        timeCost: Math.round(r.trip.timeCost),
+        method: r.trip.method,
+      },
+      rawCost: Math.round(r.rawCost),
+      baseFee: Math.round(r.baseFee),
+      baseApplied: r.baseApplied,
+      cost: Math.round(r.cost),
+      marginAmount: Math.round(r.marginAmount),
+      total: Math.round(r.total),
+      contact,
+    },
     renewalOf: job.id,
   });
+  return { quote, lastPrice, reasons: flameChangeReasons(priorFt, r) };
 }
 
 /** The /flame-tests/letter proposal, composed for the PDF renderer. */
@@ -310,51 +495,136 @@ type InspectionDoc = {
   lineSetsTotal?: number | null;
   inspectHours?: number | null;
   trip?: { miles?: number; minutes?: number } | null;
+  /** Rate snapshot the quote was priced with (persist saves r.rates). */
+  rates?: Partial<InspectionRates> | null;
   total?: number | null;
   contact?: FtContact;
 };
 
+/** Customer-safe reasons why this year's inspection price differs — rate
+ *  snapshot diff + travel/scope movement; margin stays generic (D69). */
+function inspectionChangeReasons(
+  priorIn: InspectionDoc | null,
+  r: InspectionEstimate,
+  venueLabel: string
+): string[] {
+  const out: string[] = [];
+  const old = priorIn?.rates || null;
+  const cur = r.rates;
+  let generic = false;
+  if (old) {
+    if (old.laborRate != null && old.laborRate !== cur.laborRate)
+      out.push(
+        `our current labor rate ($${cur.laborRate}/hr, was $${old.laborRate})`
+      );
+    if (old.mileageRate != null && old.mileageRate !== cur.mileageRate)
+      out.push(
+        `the current federal mileage rate (${usd2(cur.mileageRate)}/mi, was ${usd2(old.mileageRate)})`
+      );
+    if (old.lineSetMinutes != null && old.lineSetMinutes !== cur.lineSetMinutes)
+      out.push(
+        `updated per-line-set inspection time (${cur.lineSetMinutes} min, was ${old.lineSetMinutes})`
+      );
+    if (old.baseHours != null && old.baseHours !== cur.baseHours)
+      out.push(
+        `updated base on-site time (${cur.baseHours} hr per visit, was ${old.baseHours})`
+      );
+    if (
+      r.level === 2 &&
+      old.level2Mult != null &&
+      old.level2Mult !== cur.level2Mult
+    )
+      out.push(`an updated five-year in-depth factor`);
+    if (old.minFee != null && old.minFee !== cur.minFee && r.minApplied)
+      out.push(
+        `our minimum service fee ($${Math.round(cur.minFee)}, was $${Math.round(old.minFee)})`
+      );
+    if (old.margin != null && old.margin !== cur.margin) generic = true;
+  } else {
+    generic = true;
+  }
+  // a multi-venue prior quote shared one trip; this quote prices the venue
+  // on its own — that alone moves the number, so say it plainly
+  const priorVenueCount = priorIn?.venues?.length || 0;
+  if (priorVenueCount > 1)
+    out.push(
+      `last year's visit combining ${priorVenueCount} venues on one trip — this quote covers ${venueLabel} on its own`
+    );
+  const oldLineSets = priorIn?.lineSetsTotal;
+  if (
+    priorVenueCount === 1 &&
+    oldLineSets != null &&
+    oldLineSets !== r.lineSetsTotal
+  )
+    out.push(
+      `the inspection now covering ${r.lineSetsTotal} line set${r.lineSetsTotal === 1 ? "" : "s"} (was ${oldLineSets})`
+    );
+  const oldMiles = priorVenueCount === 1 ? priorIn?.trip?.miles : null;
+  if (oldMiles != null && Math.abs(r.trip.miles - oldMiles) >= 2)
+    out.push(
+      `updated travel distance (${r.trip.miles} mi round trip, was ${Math.round(oldMiles)})`
+    );
+  if (generic && !out.length) return []; // → "our current rates" fallback
+  if (generic) out.push("our updated pricing");
+  return out;
+}
+
 /** This cycle's renewal quote for a completed inspection — reused when it
- *  already exists, otherwise minted at last year's price verbatim (F8),
- *  scoped to THIS record's venue + level (records are per-venue, D53). */
+ *  already exists, otherwise RE-PRICED AT CURRENT RATES (D69) for THIS
+ *  record's venue + level (records are per-venue, D53). */
 async function ensureInspectionRenewalQuote(
   rec: InspectionRecord,
   me: string
-): Promise<Quote> {
+): Promise<RenewalPricing> {
+  const lastPrice = Math.round(rec.value || 0);
   const existing = await byRenewalOf(rec.id);
-  if (existing && existing.quoteType === "inspection") return existing;
+  if (existing && existing.quoteType === "inspection")
+    return { quote: existing, lastPrice, reasons: [] };
 
   const prior = rec.quoteId ? await getQuote(rec.quoteId) : null;
   const priorIn =
     prior && prior.quoteType === "inspection" && prior.inspection
       ? (prior.inspection as InspectionDoc)
       : null;
-  const priorVenues = priorIn?.venues || [];
-  const singleVenuePrior = priorVenues.length === 1;
 
-  const venue: InVenue = {
-    id: rec.locationId,
-    label: rec.venue || "Venue",
-    lineSets: rec.lineSets || 0,
+  // engine input: this venue only, TODAY's directory coords/travel numbers
+  const cust = rec.customerId ? await getCustomer(rec.customerId) : null;
+  const loc = rec.locationId
+    ? (cust?.locations || []).find((l) => l.id === rec.locationId) || null
+    : null;
+  const coords = loc ? coordsOf(loc) : null;
+  const venueInput: InspectionVenueInput & { id: string | null } = {
+    id: rec.locationId || null,
+    label: rec.venue || loc?.label || "Venue",
+    lineSets: Math.max(0, Math.round(Number(rec.lineSets) || 0)),
+    coords: coords ? { lat: coords.lat, lng: coords.lng } : null,
+    oneWayMiles: loc?.travelMiles ?? null,
+    oneWayMin: loc?.travelMin ?? null,
   };
-  const insp: InspectionDoc = {
-    level: rec.level || priorIn?.level || 1,
-    scope: (priorIn?.scope || rec.scope || "").trim(),
-    office: priorIn?.office || "",
-    venues: [venue],
-    lineSetsTotal: rec.lineSets || 0,
-    // trip/hours only carry over when the prior quote WAS this single venue —
-    // a multi-venue quote's travel math doesn't apportion per venue
-    inspectHours: singleVenuePrior ? (priorIn?.inspectHours ?? null) : null,
-    trip: singleVenuePrior ? (priorIn?.trip ?? null) : null,
-    total: rec.value || 0,
-    contact: rec.contact
-      ? { name: rec.contact, role: "", email: rec.contactEmail || "" }
-      : priorIn?.contact || null,
-  };
+
+  const settings = await getSettings();
+  const offices = Array.isArray(settings.offices) ? settings.offices : [];
+  const office =
+    (coords ? nearest(offices, coords) : null) || offices[0] || null;
+
+  const level = levelMeta(rec.level).key;
+  const rates = await getInspectionRates();
+  const r = computeInspection(
+    {
+      office: office || undefined,
+      venues: [venueInput],
+      level,
+      geo: { driveMiles, driveMinutes },
+    },
+    rates
+  );
+
+  const contact: FtContact = rec.contact
+    ? { name: rec.contact, role: "", email: rec.contactEmail || "" }
+    : priorIn?.contact || null;
   const lm = levelMeta(rec.level);
   const year = new Date().getFullYear();
-  return createQuote({
+  const quote = await createQuote({
     name:
       (rec.customer || "Customer") +
       " — " +
@@ -364,15 +634,46 @@ async function ensureInspectionRenewalQuote(
     customer: rec.customer || prior?.customer || "",
     customerId: rec.customerId || prior?.customerId || null,
     locationId: rec.locationId || null,
-    value: rec.value || 0, // last year's venue share, verbatim (F8)
-    margin: prior?.margin || 0,
+    value: Math.round(r.total), // this year's price at current rates (D69)
+    margin: r.margin,
     source: "inspection",
     quoteType: "inspection",
     owner: me,
-    contact: insp.contact,
-    inspection: insp,
+    contact,
+    inspection: {
+      rates: r.rates,
+      office: office ? office.name || office.id || "" : "",
+      level,
+      scope: (priorIn?.scope || rec.scope || "").trim(),
+      venues: [
+        { id: venueInput.id, label: venueInput.label, lineSets: venueInput.lineSets },
+      ],
+      lineSetsTotal: r.lineSetsTotal,
+      inspectHours: r.inspectHours,
+      baseHours: r.baseHours,
+      levelMult: r.levelMult,
+      trip: {
+        miles: r.trip.miles,
+        minutes: r.trip.minutes,
+        mileageCost: Math.round(r.trip.mileageCost),
+        timeCost: Math.round(r.trip.timeCost),
+        method: r.trip.method,
+      },
+      laborCost: Math.round(r.laborCost),
+      cost: Math.round(r.cost),
+      minFee: r.minFee,
+      minApplied: r.minApplied,
+      marginAmount: Math.round(r.marginAmount),
+      total: Math.round(r.total),
+      contact,
+    },
     renewalOf: rec.id,
   });
+  return {
+    quote,
+    lastPrice,
+    reasons: inspectionChangeReasons(priorIn, r, venueInput.label || "this venue"),
+  };
 }
 
 /** The /inspections/letter proposal, composed for the PDF renderer. */
@@ -575,10 +876,11 @@ export async function flameRenewalOutreach(
   const job = await getFlameJob(jobId);
   if (!job || job.stage !== "completed") return null;
 
-  const [quote, settings] = await Promise.all([
+  const [pricing, settings] = await Promise.all([
     ensureFlameRenewalQuote(job, me),
     getSettings(),
   ]);
+  const quote = pricing.quote;
   const pdf = renderLetterPdf(await flameLetterDoc(quote, settings));
   const attachment = pdfAttachment(
     "Flame-test-renewal-" + quote.id + ".pdf",
@@ -597,12 +899,8 @@ export async function flameRenewalOutreach(
       (lastLabel ? ` was last performed in ${lastLabel}` : ` is coming due`) +
       `, which makes it due for renewal. Per NFPA 705 these tests are performed ` +
       `yearly to keep your curtains and soft goods compliant.\n\n` +
-      `I've attached this year's quote` +
-      (job.value > 0
-        ? ` — we're holding it at last year's price of ${money(job.value)}`
-        : ``) +
-      `. If it looks good, just reply here and we'll get this year's test on ` +
-      `the schedule.\n\n` +
+      priceParagraph(pricing, "test") +
+      `\n\n` +
       `Thanks,\n${firstName(me)}\n${settings.companyName || "Peak Systems Group"}`,
   };
 
@@ -634,10 +932,11 @@ export async function inspectionRenewalOutreach(
   const rec = await getInspection(recordId);
   if (!rec || rec.stage !== "completed") return null;
 
-  const [quote, settings] = await Promise.all([
+  const [pricing, settings] = await Promise.all([
     ensureInspectionRenewalQuote(rec, me),
     getSettings(),
   ]);
+  const quote = pricing.quote;
   const pdf = renderLetterPdf(await inspectionLetterDoc(quote, settings));
   const attachment = pdfAttachment(
     "Rigging-inspection-renewal-" + quote.id + ".pdf",
@@ -655,12 +954,8 @@ export async function inspectionRenewalOutreach(
       `${customer}` +
       (rec.venue ? ` (${rec.venue})` : "") +
       ` is due for renewal.\n\n` +
-      `I've attached this year's quote` +
-      (rec.value > 0
-        ? ` — we're holding it at last year's price of ${money(rec.value)}`
-        : ``) +
-      `. If it looks good, just reply here and we'll get this year's inspection ` +
-      `on the schedule.\n\n` +
+      priceParagraph(pricing, "inspection") +
+      `\n\n` +
       `Thanks,\n${firstName(me)}\n${settings.companyName || "Peak Systems Group"}`,
   };
 

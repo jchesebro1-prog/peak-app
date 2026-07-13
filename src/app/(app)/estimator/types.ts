@@ -163,6 +163,9 @@ export type AiSource = {
 
 export type EstimatorProps = {
   initial: InitialQuote;
+  /** Branding for the customer document (Settings → Branding, D69). */
+  companyName: string;
+  logoDark: string | null;
   fabrics: FabricOpt[];
   /** Live labor/travel rates from catalog category 'Labor' (sku → cost). */
   laborRates: Record<string, number>;

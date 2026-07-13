@@ -10,6 +10,7 @@ import {
   type CustomerDoc,
 } from "@/lib/stores/customers";
 import { reviewers as reviewerUsers } from "@/lib/users";
+import { getSettings } from "@/lib/settings";
 import { aiEnabled } from "@/lib/ai/config";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
@@ -156,11 +157,12 @@ export default async function EstimatorPage({
   let q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
   if (!q) q = (await getQuote("Q-2041")) as QuoteDoc | null; // demo fallback so Save has a target
 
-  const [fabricRows, laborRows, customerDocs, reviewerRows] = await Promise.all([
+  const [fabricRows, laborRows, customerDocs, reviewerRows, settings] = await Promise.all([
     byCategory("Fabric"),
     byCategory("Labor"),
     allCustomers(),
     reviewerUsers(),
+    getSettings(),
   ]);
 
   const fabrics = fabricRows.map((p) => ({
@@ -211,6 +213,8 @@ export default async function EstimatorPage({
   return (
     <EstimatorClient
       initial={initial}
+      companyName={settings.companyName || "Peak Systems Group"}
+      logoDark={settings.logoDark || null}
       fabrics={fabrics}
       laborRates={laborRates}
       customers={customers}
