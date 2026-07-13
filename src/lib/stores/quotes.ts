@@ -85,6 +85,10 @@ export type Quote = {
    *  quote in the portal. Purely a follow-up flag — the team confirms by
    *  marking the quote Won, which runs the normal spawn machinery. */
   portalAcceptance?: { at: number; by: string; byEmail: string } | null;
+  /** Renewal provenance (IDEAS #36): the completed flame job / inspection
+   *  record this quote renews — the ✉ one-click outreach reuses an existing
+   *  renewal quote for the cycle instead of minting a duplicate. */
+  renewalOf?: string | null;
   review: QuoteReview;
   createdAt: number;
   updatedAt: number;
@@ -120,6 +124,18 @@ export async function get(id: string): Promise<Quote | null> {
   return getDoc<Quote>("quotes", id);
 }
 
+/** The live (not lost) renewal quote already minted for a completed job /
+ *  record this cycle, if any (IDEAS #36 idempotence). */
+export async function byRenewalOf(recordId: string): Promise<Quote | null> {
+  if (!recordId) return null;
+  const list = await listDocs<Quote>("quotes");
+  const live = list.filter(
+    (q) => q.renewalOf === recordId && q.status !== "lost"
+  );
+  live.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  return live[0] || null;
+}
+
 /** Create a new quote; returns the created record. Id: Q-#### from base 2041. */
 export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
   const id = partial.id || (await nextPrefixedId("quotes", "Q", 2041));
@@ -141,6 +157,7 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     contact: partial.contact || null,
     owner: partial.owner || "Jeff Chesebro",
     spec: partial.spec || null,
+    renewalOf: partial.renewalOf || null,
     review: rv("none"),
     createdAt: t,
     updatedAt: t,

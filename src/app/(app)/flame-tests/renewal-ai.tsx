@@ -6,11 +6,11 @@ import { draftRenewalEmailAction } from "./renewal-ai-actions";
 
 /**
  * D1 client control — the "Draft ✨" affordance in the Renewals-due card. Calls
- * the server action (which drops an AI-drafted renewal email into the personal
- * Inbox as a DRAFT), shows a spinner while it runs, then a subtle inline
- * confirmation with a link to the Drafts folder — or the error text on failure.
- * Rendered only when AI is enabled (the parent passes `aiEnabled()` down and
- * gates the render), so the ✉ mailto + Start renewal are untouched when off.
+ * the server action, which drafts personalized copy with AI and lands it on
+ * the SAME renewal draft the ✉ one-click flow uses (IDEAS #36: quote minted at
+ * last year's price, proposal PDF attached). Shows a spinner while it runs,
+ * then a link that opens the draft in the composer — or the error text on
+ * failure. Rendered only when AI is enabled (the parent gates on aiEnabled()).
  */
 export function RenewalDraftButton({ jobId }: { jobId: string }) {
   const [pending, startTransition] = useTransition();
@@ -34,8 +34,8 @@ export function RenewalDraftButton({ jobId }: { jobId: string }) {
   if (threadId) {
     return (
       <Link
-        href="/inbox?box=personal&folder=drafts"
-        title="Open the draft in your Inbox to review and send"
+        href={"/inbox?box=sales&folder=drafts&draft=" + encodeURIComponent(threadId)}
+        title="Open the draft in the Inbox composer to review and send"
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -62,7 +62,7 @@ export function RenewalDraftButton({ jobId }: { jobId: string }) {
         type="button"
         onClick={onClick}
         disabled={pending}
-        title="Draft a personalized renewal email with AI — lands in your Inbox as a draft"
+        title="Draft a personalized renewal email with AI — lands on the renewal draft (quote PDF attached) for review"
         style={{
           display: "inline-flex",
           alignItems: "center",

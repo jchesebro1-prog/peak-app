@@ -45,6 +45,20 @@ export type SidebarVM = {
   forwardAddr: string;
 };
 
+/** A real file on a message (IDEAS #36) — dataUrl doubles as the download href. */
+export type AttachmentVM = {
+  name: string;
+  mime: string;
+  size: number;
+  dataUrl: string;
+};
+
+/** Composer-side attachment chip (no bytes shipped to the client). */
+export type AttachmentMetaVM = {
+  name: string;
+  size: number;
+};
+
 export type DraftPayload = {
   mailbox: string;
   to: string;
@@ -53,6 +67,7 @@ export type DraftPayload = {
   body: string;
   customerId: string;
   contactName: string;
+  attachments?: AttachmentMetaVM[];
 };
 
 export type ThreadRowVM = {
@@ -96,6 +111,7 @@ export type MessageVM = {
   queued: boolean;
   time: string;
   body: string;
+  attachments?: AttachmentVM[];
 };
 
 export type LinkVM = {
@@ -159,6 +175,9 @@ export type ComposeInit = {
   body: string;
   customerId: string;
   contactName: string;
+  /** Files already on the draft (IDEAS #36) — shown as chips; the bytes stay
+   *  server-side on the draft record and ride through sendDraft(). */
+  attachments?: AttachmentMetaVM[];
 };
 
 export type ListVM = {

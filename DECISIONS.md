@@ -436,3 +436,43 @@ Anything you want changed, just say so — none of these are hard to reverse.
   A human confirms by marking the quote Won, which runs the existing
   accepted-quote spawn machinery untouched. Verified live: Q-2045 accepted
   by the Susan Marsh grant → chip + bell → Won → flame job in the scheduler.
+
+## One-click renewal outreach — IDEAS #36 (built 2026-07-12)
+
+- **D65. The ✉ on a renewal row IS Jeff's one-click flow, end to end.**
+  Clicking it mints this year's quote from LAST YEAR'S PRICE VERBATIM (the
+  F8 default, per his Jul-3 comment), renders the proposal letter to a real
+  PDF, lands a ready-to-send draft in the **Sales shared mailbox** (the
+  idea's "right shared mailbox"; the From picker still lets you switch),
+  linked to the renewal's job/record, and redirects to the Inbox with the
+  composer open (`/inbox?draft=<id>`, a new deep-link that opens any saved
+  draft). SENDING — not clicking — stamps the #37 "reached out" state and
+  moves the attached quote draft → sent; "✓ Reached out" stays for phone
+  outreach. Both dashboards get the same flow (flame + inspections, cadence
+  per D54). When the email template has no price to cite (seed-era records
+  carry value 0) the price sentence is omitted rather than quoting "$0".
+- **D66. Attachments are now REAL through the whole comms pipeline** —
+  `CommAttachment {name, mime, size, dataUrl}` on drafts and messages
+  (data-URL storage, same approach as the D59 logos; a letter PDF runs
+  ~120 KB), chips in the composer (read-only) and on reader messages
+  (download via the data-URL), and multipart/mixed MIME in the Gmail bridge
+  when the env gate is on. The composer's fake "Attach (demo)" button is
+  gone — a cosmetic stub next to real attachments would mislead (a manual
+  file-upload affordance is a logged follow-up, MASTER-QUESTIONS F17).
+- **D67. PDF generation is a hand-rolled, zero-dependency renderer**
+  (`lib/pdf.ts`: PDF 1.4, Helvetica/WinAnsi + real width tables, deflate
+  via node:zlib) — same no-new-deps rationale as the fetch-only Gmail (D36)
+  and Anthropic (D39) clients. It composes the SAME letter the on-screen
+  /flame-tests/letter · /inspections/letter routes print: JPEG letterheads
+  embed directly (DCTDecode — the baked Peak sheet, read from the source
+  asset with a graceful skip in bundled deploys, or an uploaded logoDark
+  when it's a JPEG); PNG logos can't embed without a decoder and fall back
+  down the same ladder (MASTER-QUESTIONS F18 flags this for G1).
+- **D68. One renewal, one quote, one draft — idempotent by keys, and the
+  ✨ AI path converges.** The quote carries `renewalOf: <job/record id>`
+  (reused while not lost); the draft is found by its thread link (reused
+  while unsent; clicking ✉ again refreshes the PDF — so re-pricing the
+  quote and re-clicking updates the attachment — but never clobbers
+  hand-edited copy). The D1 "Draft ✨" button now routes through the same
+  flow with AI copy replacing the template, so both buttons land on the
+  same draft and D1's "quote attached" description is finally literal.

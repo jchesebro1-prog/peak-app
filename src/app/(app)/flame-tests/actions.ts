@@ -13,6 +13,7 @@ import {
   type FlameJobResults,
   type FlameJobVenueResult,
 } from "@/lib/stores/flame-jobs";
+import { flameRenewalOutreach } from "@/lib/renewal-outreach";
 
 /**
  * Flame-test job mutations — the FlameJobStore calls the prototype makes from
@@ -136,4 +137,25 @@ export async function markFlameRenewalOutreach(formData: FormData): Promise<void
   if (!job || job.stage !== "completed") return;
   await setRenewalOutreach(id, undo ? null : user.name);
   revalidatePath("/", "layout");
+}
+
+/**
+ * ✉ one-click renewal outreach (IDEAS #36): mint this year's quote at last
+ * year's price (F8), render + attach the proposal PDF, land a ready-to-send
+ * draft in the Sales box, and open it in the Inbox composer. Sending it (not
+ * this click) stamps the #37 "reached out" state.
+ */
+export async function startFlameRenewalOutreach(
+  formData: FormData
+): Promise<void> {
+  const user = await requireUser();
+  const id = String(formData.get("id") || "");
+  if (!id) return;
+  const res = await flameRenewalOutreach(id, user.name);
+  revalidatePath("/", "layout");
+  if (res)
+    redirect(
+      "/inbox?box=sales&folder=drafts&draft=" +
+        encodeURIComponent(res.threadId)
+    );
 }

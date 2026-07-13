@@ -78,6 +78,9 @@ guide; I do all terminal work.
 Rank or tick the ones you want first; each is independently switchable.
 
 - **D1.** ☐ Draft renewal-outreach emails (the ✉ one-click flow, quote attached)
+  *(Jul 12: the ✉ one-click flow itself shipped WITHOUT needing AI — IDEAS
+  #36, D65–D68, template copy built in. With a key, the ✨ button lays
+  AI-personalized copy onto the same draft.)*
 - **D2.** ☐ Summarize long threads / customer history in the Inbox sidebar
 - **D3.** ☐ Extract structured data from uploaded files during Import
 - **D4.** ☐ Draft quote line items / scope text from survey & inspection findings
@@ -173,6 +176,18 @@ Estimating Rules — these just need real values before go-live)
   *(Update, same day: the non-binding "Accept quote" button shipped — D64 —
   so the remaining portal slice is photo/document uploads on requests,
   which also needs the object-storage call from IDEAS #46.)*
+- **F17.** *(Jul 12 — IDEAS #36)* Attachments are real now, but they're
+  born only from the ✉ renewal flow — the composer has **no manual
+  file-upload button** yet (the old "Attach (demo)" stub was removed as
+  misleading, D66). Want manual attachments on ordinary emails?
+  ✦ later, when a real need shows up ☐ add now
+- **F18.** *(Jul 12 — IDEAS #36, ties G1)* The renewal-quote **PDF embeds
+  JPEG letterheads only** (D67): the baked-in Peak sheet works today, and a
+  JPEG logoDark upload will too — but if your real logo (G1) is a **PNG**,
+  the PDF falls back to the baked sheet / typographic letterhead while the
+  on-screen documents show the PNG fine. When you upload the real files,
+  either include a JPEG version of the dark logo or tell me and I'll add
+  PNG embedding. ☐ noted
 
 ## G. Documents & branding
 

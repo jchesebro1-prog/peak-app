@@ -86,12 +86,25 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
 
   for (const m of pending) {
     try {
+      // data-URL attachments → raw base64 MIME parts (IDEAS #36)
+      const attachments = (m.attachments || [])
+        .map((a) => {
+          const comma = (a.dataUrl || "").indexOf(",");
+          if (comma < 0 || !/;base64,/.test(a.dataUrl)) return null;
+          return {
+            name: a.name || "attachment",
+            mime: a.mime || "application/octet-stream",
+            dataBase64: a.dataUrl.slice(comma + 1),
+          };
+        })
+        .filter((a): a is NonNullable<typeof a> => !!a);
       const raw = buildRaw({
         from: fromAddr,
         to: toAddr,
         cc: t.cc || undefined,
         subject: t.subject || "(no subject)",
         body: m.body || "",
+        attachments,
         inReplyTo,
         references: inReplyTo,
       });

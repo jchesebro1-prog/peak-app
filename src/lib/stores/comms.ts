@@ -132,7 +132,24 @@ export type MailboxId = "personal" | "sales" | "installs" | "info";
 export type SmartView = "needs" | "calls";
 export type FolderId = "inbox" | "sent" | "drafts" | "outbox" | "archived";
 
-export type CommLink = { type: string; id: string; label?: string };
+export type CommLink = {
+  type: string;
+  id: string;
+  label?: string;
+  /** This thread IS the renewal outreach for the linked record (IDEAS #36) —
+   *  sending it stamps the record's renewalOutreach (#37). */
+  renewal?: boolean;
+};
+
+/** A real file riding on a message/draft (IDEAS #36). Small documents only —
+ *  stored as a data-URL inside the thread doc, same approach as the D59
+ *  logo uploads (generated quote PDFs run a few KB). */
+export type CommAttachment = {
+  name: string;
+  mime: string;
+  size: number; // bytes
+  dataUrl: string;
+};
 
 export type CommMessage = {
   id: string; // mid() — 'm<n>-<rand4>'
@@ -141,6 +158,7 @@ export type CommMessage = {
   channel: Channel;
   author: string;
   body: string;
+  attachments?: CommAttachment[];
   queued?: boolean; // offline outbox flag — cleared by deliverMessage()
   // Gmail bridge (Phase 7) — set once a message is delivered to / imported from
   // Gmail; absent in the simulated path and for calls/meetings.
@@ -154,6 +172,7 @@ export type CommDraft = {
   cc?: string;
   subject?: string;
   body?: string;
+  attachments?: CommAttachment[];
 };
 
 export type SyncState = "pending" | "syncing" | "synced" | "error";
@@ -748,6 +767,7 @@ export type AddMessageInput = {
   channel?: string;
   author?: string;
   body?: string;
+  attachments?: CommAttachment[];
   status?: ThreadStatus;
   /** Server stand-in for Team.CURRENT (defaults to DEFAULT_USER). */
   me?: string;
@@ -773,6 +793,7 @@ export async function addMessage(
       author,
       body: m.body || "",
     };
+    if (m.attachments && m.attachments.length) msg.attachments = m.attachments;
     if (dir === "out") {
       if (online()) deliverMessage(msg); // GMAIL BRIDGE SEAM (local stamp)
       else {
@@ -843,6 +864,7 @@ export type SaveDraftInput = {
   subject?: string;
   body?: string;
   link?: CommLink | null;
+  attachments?: CommAttachment[];
   me?: string;
 };
 
@@ -874,9 +896,39 @@ export async function saveDraft(p: SaveDraftInput = {}): Promise<CommThread> {
       subject: p.subject || "",
       body: p.body || "",
     };
+    if (p.attachments && p.attachments.length)
+      d.draft.attachments = p.attachments;
     d.status = "draft";
   });
   return t || rec;
+}
+
+/** Replace a draft's attachments (IDEAS #36 — e.g. attach the renewal quote
+ *  PDF to an existing draft that was created without one). */
+export async function setDraftAttachments(
+  id: string,
+  attachments: CommAttachment[]
+): Promise<CommThread | null> {
+  return patchDoc<CommThread>("comms", id, (t) => {
+    if (t.status !== "draft") return;
+    t.draft = { ...(t.draft || {}), attachments };
+    t.updatedAt = now();
+  });
+}
+
+/** Newest un-sent draft thread linked to a given record (IDEAS #36 — clicking
+ *  ✉ twice re-opens the same renewal draft instead of minting another). */
+export async function findDraftByLink(
+  type: string,
+  id: string
+): Promise<CommThread | null> {
+  const list = await listDocs<CommThread>("comms");
+  const matches = list.filter(
+    (t) =>
+      t.status === "draft" && !!t.link && t.link.type === type && t.link.id === id
+  );
+  matches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return matches[0] || null;
 }
 
 export async function updateDraft(
@@ -909,6 +961,7 @@ export async function sendDraft(id: string): Promise<CommThread | null> {
     direction: "out",
     channel: "email",
     body: d.body || "",
+    attachments: d.attachments,
   });
 }
 

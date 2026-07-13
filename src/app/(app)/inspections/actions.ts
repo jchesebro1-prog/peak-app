@@ -10,6 +10,7 @@ import {
   setRenewalOutreach,
   unschedule,
 } from "@/lib/stores/inspections";
+import { inspectionRenewalOutreach } from "@/lib/renewal-outreach";
 
 /**
  * Inspection inbox mutations. `createInspection` mirrors the prototype's
@@ -61,4 +62,25 @@ export async function markInspectionRenewalOutreach(
   if (!rec || rec.stage !== "completed") return;
   await setRenewalOutreach(id, undo ? null : user.name);
   revalidatePath("/", "layout");
+}
+
+/**
+ * ✉ one-click renewal outreach (IDEAS #36) — inspection twin of the flame
+ * flow: this year's quote at last year's price (F8), proposal PDF attached,
+ * ready-to-send Sales draft opened in the Inbox composer. Sending stamps the
+ * #37 "reached out" state.
+ */
+export async function startInspectionRenewalOutreach(
+  formData: FormData
+): Promise<void> {
+  const user = await requireUser();
+  const id = String(formData.get("id") || "");
+  if (!id) return;
+  const res = await inspectionRenewalOutreach(id, user.name);
+  revalidatePath("/", "layout");
+  if (res)
+    redirect(
+      "/inbox?box=sales&folder=drafts&draft=" +
+        encodeURIComponent(res.threadId)
+    );
 }

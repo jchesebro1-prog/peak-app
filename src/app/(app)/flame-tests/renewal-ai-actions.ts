@@ -4,10 +4,10 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 import { get } from "@/lib/stores/flame-jobs";
-import { saveDraft } from "@/lib/stores/comms";
 import { aiEnabled } from "@/lib/ai/config";
 import { draftRenewalEmail } from "@/lib/ai/features";
 import { AiError } from "@/lib/ai/client";
+import { flameRenewalOutreach } from "@/lib/renewal-outreach";
 
 export type DraftRenewalResult =
   | { ok: true; threadId: string }
@@ -37,10 +37,11 @@ function monthYear(ts: number | null | undefined): string {
 
 /**
  * D1 — AI-drafted flame-test renewal outreach. Loads the flame job, asks the
- * AI layer to draft a personalized renewal email, then lands it in the user's
- * personal Inbox mailbox as a DRAFT (guardrail: AI drafts, a human reviews and
- * sends via the existing Inbox flow — this never sends). Gated behind the same
- * requireUser() as the sibling flame-test actions and the aiEnabled() env key.
+ * AI layer to draft a personalized renewal email, then lands it through the
+ * SAME rail as the ✉ one-click flow (IDEAS #36, lib/renewal-outreach): this
+ * year's quote at last year's price, proposal PDF attached, one shared draft
+ * per renewal. Guardrail intact: AI drafts, a human reviews and sends via the
+ * Inbox composer — this never sends. Gated by requireUser() + aiEnabled().
  */
 export async function draftRenewalEmailAction(
   jobId: string
@@ -71,26 +72,17 @@ export async function draftRenewalEmailAction(
       companyName: companyName || undefined,
     });
 
-    const thread = await saveDraft({
-      mailbox: "personal",
-      mailboxUser: user.name,
-      customerId: job.customerId || null,
-      customer: customerName,
-      contactName: contact.name || "",
-      to: contact.email || "",
+    const res = await flameRenewalOutreach(jobId, user.name, {
       subject: draft.subject,
       body: draft.body,
-      link: {
-        type: "flame_job",
-        id: job.id,
-        label: (job.venue || customerName) + " — renewal",
-      },
-      me: user.name,
     });
+    if (!res) {
+      return { ok: false, error: "Could not find that renewal." };
+    }
 
     // Surface the new draft in the Inbox nav counts (Drafts badge).
     revalidatePath("/", "layout");
-    return { ok: true, threadId: thread.id };
+    return { ok: true, threadId: res.threadId };
   } catch (e) {
     if (e instanceof AiError) {
       return { ok: false, error: (e as Error).message };

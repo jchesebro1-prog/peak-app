@@ -20,7 +20,11 @@ import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { coordsOf } from "@/lib/geo";
 import { InspectionMap } from "./controls";
-import { createInspection, markInspectionRenewalOutreach } from "./actions";
+import {
+  createInspection,
+  markInspectionRenewalOutreach,
+  startInspectionRenewalOutreach,
+} from "./actions";
 import type { MapPin } from "@/components/map/LeafletMap";
 
 export const metadata = { title: "Rigging Inspections — Peak Backend" };
@@ -604,24 +608,6 @@ export default async function InspectionsPage({
               const rs = r._renewal;
               const m = renewalMeta(rs.state);
               const lm = levelMeta(r.level);
-              const email = r.contactEmail || "";
-              const subject = encodeURIComponent(
-                lm.label + " rigging inspection renewal — " + (r.customer || "")
-              );
-              const body = encodeURIComponent(
-                "Hi " +
-                  (r.contact || "there") +
-                  ",\n\nOur records show the " +
-                  lm.long.toLowerCase() +
-                  " rigging inspection at " +
-                  (r.customer || "your venue") +
-                  " (" +
-                  (r.venue || "") +
-                  ") is due for renewal. Would you like us to schedule this year's inspection?\n\nThanks,"
-              );
-              const mailto = email
-                ? "mailto:" + email + "?subject=" + subject + "&body=" + body
-                : "#";
               const renewHref =
                 "/inspections/quote?level=" +
                 lm.key +
@@ -729,25 +715,31 @@ export default async function InspectionsPage({
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                     {rvView === "contact" ? (
                       <>
-                        <a
-                          href={mailto}
-                          title="Email the contact"
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            width: 34,
-                            height: 34,
-                            borderRadius: 9,
-                            border: "1px solid #e4e7ec",
-                            background: "#fff",
-                            color: "#5b616e",
-                            textDecoration: "none",
-                            fontSize: 15,
-                          }}
-                        >
-                          ✉
-                        </a>
+                        {/* IDEAS #36 — one-click outreach: quote at last
+                            year's price, PDF attached, composer opens */}
+                        <form action={startInspectionRenewalOutreach}>
+                          <input type="hidden" name="id" value={r.id} />
+                          <button
+                            type="submit"
+                            title="Email the renewal — opens the Inbox with this year's quote attached at last year's price"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              width: 34,
+                              height: 34,
+                              borderRadius: 9,
+                              border: "1px solid #e4e7ec",
+                              background: "#fff",
+                              color: "#5b616e",
+                              cursor: "pointer",
+                              fontSize: 15,
+                              fontFamily: "var(--font-ui)",
+                            }}
+                          >
+                            ✉
+                          </button>
+                        </form>
                         <form action={markInspectionRenewalOutreach}>
                           <input type="hidden" name="id" value={r.id} />
                           <button

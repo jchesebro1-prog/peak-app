@@ -22,7 +22,10 @@ import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { FlameMap } from "./controls";
 import { RenewalDraftButton } from "./renewal-ai";
-import { markFlameRenewalOutreach } from "./actions";
+import {
+  markFlameRenewalOutreach,
+  startFlameRenewalOutreach,
+} from "./actions";
 import { aiEnabled } from "@/lib/ai/config";
 import type { MapPin } from "@/components/map/LeafletMap";
 
@@ -564,23 +567,6 @@ export default async function FlameTestsPage({
             {shownRows.map((r) => {
               const rs = r._renewal;
               const m = renewalMeta(rs.state);
-              const contact = r.contact || {};
-              const email = contact.email || "";
-              const subject = encodeURIComponent(
-                "Annual flame test renewal — " + (r.customer || "")
-              );
-              const body = encodeURIComponent(
-                "Hi " +
-                  (contact.name || "there") +
-                  ",\n\nOur records show the annual flame test at " +
-                  (r.customer || "your venue") +
-                  " (" +
-                  (r.venue || "") +
-                  ") is due for renewal. Per NFPA 705 these are performed yearly — would you like us to schedule this year’s test?\n\nThanks,"
-              );
-              const mailto = email
-                ? "mailto:" + email + "?subject=" + subject + "&body=" + body
-                : "#";
               const renewHref =
                 "/flame-tests/quote" +
                 (r.customerId ? "?customer=" + encodeURIComponent(r.customerId) : "");
@@ -669,25 +655,31 @@ export default async function FlameTestsPage({
                     {rvView === "contact" ? (
                       <>
                         {aiOn && <RenewalDraftButton jobId={r.id} />}
-                        <a
-                          href={mailto}
-                          title="Email the contact"
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            width: 34,
-                            height: 34,
-                            borderRadius: 9,
-                            border: "1px solid #e4e7ec",
-                            background: "#fff",
-                            color: "#5b616e",
-                            textDecoration: "none",
-                            fontSize: 15,
-                          }}
-                        >
-                          ✉
-                        </a>
+                        {/* IDEAS #36 — one-click outreach: quote at last
+                            year's price, PDF attached, composer opens */}
+                        <form action={startFlameRenewalOutreach}>
+                          <input type="hidden" name="id" value={r.id} />
+                          <button
+                            type="submit"
+                            title="Email the renewal — opens the Inbox with this year's quote attached at last year's price"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              width: 34,
+                              height: 34,
+                              borderRadius: 9,
+                              border: "1px solid #e4e7ec",
+                              background: "#fff",
+                              color: "#5b616e",
+                              cursor: "pointer",
+                              fontSize: 15,
+                              fontFamily: "var(--font-ui)",
+                            }}
+                          >
+                            ✉
+                          </button>
+                        </form>
                         <form action={markFlameRenewalOutreach}>
                           <input type="hidden" name="id" value={r.id} />
                           <button

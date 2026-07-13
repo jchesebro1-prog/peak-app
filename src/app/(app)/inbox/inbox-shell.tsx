@@ -138,6 +138,7 @@ export default function InboxShell({
       body: d.body,
       customerId: d.customerId,
       contactName: d.contactName,
+      attachments: d.attachments || [],
     });
   }, []);
 

@@ -30,12 +30,23 @@ import {
   type MailboxId,
 } from "@/lib/stores/comms";
 import { get as getCustomer, nameFor } from "@/lib/stores/customers";
-import { getAll as getAllQuotes, STAGE_LABEL } from "@/lib/stores/quotes";
 import {
+  byRenewalOf,
+  getAll as getAllQuotes,
+  setStatus as setQuoteStatus,
+  STAGE_LABEL,
+} from "@/lib/stores/quotes";
+import {
+  get as getFlameJob,
   getAll as getAllFlameJobs,
   renewalStatus,
+  setRenewalOutreach as setFlameRenewalOutreach,
   RENEWAL_META,
 } from "@/lib/stores/flame-jobs";
+import {
+  get as getInspectionRecord,
+  setRenewalOutreach as setInspectionRenewalOutreach,
+} from "@/lib/stores/inspections";
 import { getAll as getAllRepairJobs } from "@/lib/stores/repair-jobs";
 import { aiEnabled } from "@/lib/ai/config";
 import { summarizeThread, summarizeCustomer } from "@/lib/ai/features";
@@ -149,6 +160,34 @@ export type ComposePayload = {
   contactName: string;
 };
 
+/**
+ * A renewal-outreach draft just went out (IDEAS #36) → stamp this cycle's
+ * "reached out" on the linked job/record (the #37 worklist moves the venue to
+ * "Reached out — awaiting") and move the attached renewal quote to Sent.
+ * No-ops on ordinary threads: only links flagged `renewal` qualify.
+ */
+async function completeRenewalOutreach(
+  threadId: string,
+  me: string
+): Promise<void> {
+  const t = await getThread(threadId);
+  const link = t?.link;
+  if (!link || !link.renewal) return;
+  if (link.type === "flame_job") {
+    const job = await getFlameJob(link.id);
+    if (job && job.stage === "completed" && !job.renewalOutreach)
+      await setFlameRenewalOutreach(link.id, me);
+  } else if (link.type === "inspection") {
+    const rec = await getInspectionRecord(link.id);
+    if (rec && rec.stage === "completed" && !rec.renewalOutreach)
+      await setInspectionRenewalOutreach(link.id, me);
+  } else {
+    return;
+  }
+  const quote = await byRenewalOf(link.id);
+  if (quote && quote.status === "draft") await setQuoteStatus(quote.id, "sent");
+}
+
 export async function composeSendAction(d: ComposePayload) {
   const user = await requireUser();
   const me = user.name;
@@ -161,6 +200,7 @@ export async function composeSendAction(d: ComposePayload) {
     await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body: d.body });
     const rec = await sendDraft(d.id);
     id = rec ? rec.id : d.id;
+    await completeRenewalOutreach(id, me);
   } else {
     const rec = await compose({
       mailbox: asMailbox(d.mailbox),

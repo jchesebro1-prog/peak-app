@@ -789,6 +789,47 @@ export default function ThreadReader({
                   }}
                 >
                   {m.body}
+                  {(m.attachments || []).length > 0 && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 6,
+                        marginTop: 9,
+                        whiteSpace: "normal",
+                      }}
+                    >
+                      {(m.attachments || []).map((a, i) => (
+                        <a
+                          key={`${a.name}-${i}`}
+                          href={a.dataUrl}
+                          download={a.name}
+                          title="Download attachment"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            fontSize: 11.5,
+                            fontWeight: 600,
+                            color: "#3a3f4a",
+                            background: "#fff",
+                            border: "1px solid #e4e7ec",
+                            borderRadius: 7,
+                            padding: "5px 9px",
+                            textDecoration: "none",
+                          }}
+                        >
+                          <PaperclipIcon size={12} />
+                          {a.name}
+                          <span style={{ color: "#aab0bb", fontWeight: 500 }}>
+                            {a.size >= 1024 * 1024
+                              ? (a.size / 1024 / 1024).toFixed(1) + " MB"
+                              : Math.max(1, Math.round(a.size / 1024)) + " KB"}
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

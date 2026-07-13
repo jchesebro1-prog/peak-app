@@ -22,10 +22,18 @@ export default function ComposeModal({
   onSaved: (mailbox: string) => void;
   onSent: (mailbox: string, id: string | null) => void;
 }) {
-  const [cd, setCd] = useState<ComposeInit & { attach: string }>({ ...init, attach: "" });
+  const [cd, setCd] = useState<ComposeInit>({ ...init });
   const [busy, setBusy] = useState<false | "save" | "send">(false);
-  const set = (patch: Partial<ComposeInit & { attach: string }>) =>
+  const set = (patch: Partial<ComposeInit>) =>
     setCd((c) => ({ ...c, ...patch }));
+
+  // real files already on the draft (IDEAS #36) — bytes stay server-side and
+  // ride through sendDraft(); the composer just shows what will go out
+  const attachments = cd.attachments || [];
+  const sizeLabel = (bytes: number) =>
+    bytes >= 1024 * 1024
+      ? (bytes / 1024 / 1024).toFixed(1) + " MB"
+      : Math.max(1, Math.round(bytes / 1024)) + " KB";
 
   const composeReady =
     !!cd.to.trim() && !!(cd.subject.trim() || cd.body.trim());
@@ -285,26 +293,30 @@ export default function ComposeModal({
           }}
         />
 
-        {cd.attach && (
-          <div style={{ padding: "6px 20px 0" }}>
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 11.5,
-                color: "#5b616e",
-                background: "#f4f5f7",
-                border: "1px solid #e8eaee",
-                borderRadius: 7,
-                padding: "5px 9px",
-              }}
-            >
-              📎 {cd.attach}{" "}
-              <span onClick={() => set({ attach: "" })} style={{ cursor: "pointer", color: "#aab0bb" }}>
-                ×
+        {attachments.length > 0 && (
+          <div style={{ padding: "6px 20px 0", display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {attachments.map((a, i) => (
+              <span
+                key={`${a.name}-${i}`}
+                title="Attached — sends with this email"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  color: "#3a3f4a",
+                  background: "#f4f5f7",
+                  border: "1px solid #e8eaee",
+                  borderRadius: 7,
+                  padding: "5px 9px",
+                }}
+              >
+                <PaperclipIcon size={12} />
+                {a.name}
+                <span style={{ color: "#aab0bb", fontWeight: 500 }}>{sizeLabel(a.size)}</span>
               </span>
-            </span>
+            ))}
           </div>
         )}
 
@@ -319,27 +331,6 @@ export default function ComposeModal({
             flexShrink: 0,
           }}
         >
-          <button
-            onClick={() => set({ attach: cd.attach ? "" : "quote-Q-2041.pdf" })}
-            title="Attach (demo)"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 12,
-              fontWeight: 600,
-              color: "#5b616e",
-              background: "#fff",
-              border: "1px solid #e4e7ec",
-              borderRadius: 9,
-              padding: "9px 11px",
-              cursor: "pointer",
-              fontFamily: "var(--font-ui)",
-            }}
-          >
-            <PaperclipIcon size={14} />
-            Attach
-          </button>
           <button
             onClick={onClose}
             style={{

@@ -85,6 +85,7 @@ const LINK_KIND_COLOR: Record<string, string> = {
   survey: "#1f7a52",
   inspection: "#7b3f8a",
   project: "#b4543a",
+  flame_job: "#b4543a",
 };
 
 function linkHref(link: { type: string; id: string }): string {
@@ -93,6 +94,7 @@ function linkHref(link: { type: string; id: string }): string {
   if (link.type === "survey") return `/field-survey?id=${id}`;
   if (link.type === "inspection") return `/inspections?id=${id}`;
   if (link.type === "project") return `/projects`;
+  if (link.type === "flame_job") return `/flame-tests/results?job=${id}`;
   return "#";
 }
 
@@ -128,6 +130,13 @@ export default async function InboxPage({
     box = explicitThread.mailbox === "personal" ? "personal" : explicitThread.mailbox;
     folder = "inbox";
   }
+
+  // ?draft=<threadId> (IDEAS #36) — open a saved draft straight in the
+  // composer (the ✉ renewal outreach redirects here after landing its draft)
+  const draftParam = str(params.draft);
+  const draftThread = draftParam ? await getThread(draftParam) : null;
+  const openDraftThread =
+    draftThread && draftThread.status === "draft" ? draftThread : null;
 
   const isView = !!view;
   const isDrafts = !isView && folder === "drafts";
@@ -309,6 +318,10 @@ export default async function InboxPage({
               body: t.draft?.body || "",
               customerId: t.customerId || "",
               contactName: t.contactName || "",
+              attachments: (t.draft?.attachments || []).map((a) => ({
+                name: a.name,
+                size: a.size,
+              })),
             }
           : null,
     };
@@ -418,6 +431,12 @@ export default async function InboxPage({
       queued: !!m.queued,
       time: timeFull(m.at),
       body: m.body,
+      attachments: (m.attachments || []).map((a) => ({
+        name: a.name,
+        mime: a.mime,
+        size: a.size,
+        dataUrl: a.dataUrl,
+      })),
     }));
 
     reader = {
@@ -499,10 +518,28 @@ export default async function InboxPage({
     label: u.name === me ? `${u.name} (me)` : u.name,
   }));
 
+  // ?draft=<id> opens a saved draft in the composer (IDEAS #36 outreach);
   // ?compose=1 opens a blank sheet; ?new=<customerId> pre-fills the customer
   let initialCompose: ComposeInit | null = null;
   const newCust = str(params.new);
-  if (newCust) {
+  if (openDraftThread) {
+    const d = openDraftThread.draft || {};
+    initialCompose = {
+      id: openDraftThread.id,
+      mailbox: openDraftThread.mailbox || "personal",
+      to: d.to || openDraftThread.contactEmail || "",
+      cc: d.cc || "",
+      showCc: !!d.cc,
+      subject: d.subject || openDraftThread.subject || "",
+      body: d.body || "",
+      customerId: openDraftThread.customerId || "",
+      contactName: openDraftThread.contactName || "",
+      attachments: (d.attachments || []).map((a) => ({
+        name: a.name,
+        size: a.size,
+      })),
+    };
+  } else if (newCust) {
     const c = customerVMs.find((x) => x.id === newCust);
     initialCompose = {
       id: null,
