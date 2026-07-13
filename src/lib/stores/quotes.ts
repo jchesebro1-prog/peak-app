@@ -81,6 +81,10 @@ export type Quote = {
   owner: string;
   /** Estimator/Quick Design spec subdoc. */
   spec?: unknown;
+  /** Non-binding portal acceptance (IDEAS #47 P3): a customer accepted this
+   *  quote in the portal. Purely a follow-up flag — the team confirms by
+   *  marking the quote Won, which runs the normal spawn machinery. */
+  portalAcceptance?: { at: number; by: string; byEmail: string } | null;
   review: QuoteReview;
   createdAt: number;
   updatedAt: number;

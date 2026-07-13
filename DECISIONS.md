@@ -423,3 +423,16 @@ Anything you want changed, just say so — none of these are hard to reverse.
   customer org's whole published world — mapping people → departments needs
   Jeff's org info (MASTER-QUESTIONS F15). The #48 self-serve estimator
   stays parked on the catalog gap.
+
+## Portal quote acceptance — IDEAS #47 P3 slice (built 2026-07-12)
+
+- **D64. The portal "Accept quote" button is exactly Jeff's non-binding
+  design.** Accepting stamps `portalAcceptance {at, by, byEmail}` on the
+  quote (tenant-checked: the quote must belong to the grant's customer and
+  be in the published `sent` state) and changes NOTHING else — the customer
+  sees "Accepted — awaiting confirmation", the team sees a "✓ Customer
+  accepted" chip on the Quotes hub plus a new "Portal acceptances to
+  confirm" to-do bell group (mutable per user in Account → notifications).
+  A human confirms by marking the quote Won, which runs the existing
+  accepted-quote spawn machinery untouched. Verified live: Q-2045 accepted
+  by the Susan Marsh grant → chip + bell → Won → flame job in the scheduler.

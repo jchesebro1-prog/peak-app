@@ -556,6 +556,29 @@ export default async function QuotesPage({
                         {TYPE_BADGE[q.quoteType || ""].label}
                       </span>
                     )}
+                    {q.portalAcceptance && q.status === "sent" && (
+                      <span
+                        title={
+                          "Accepted in the customer portal by " +
+                          q.portalAcceptance.by +
+                          " — non-binding until you confirm by marking it Won."
+                        }
+                        style={{
+                          flexShrink: 0,
+                          fontSize: 9,
+                          fontWeight: 700,
+                          letterSpacing: ".04em",
+                          textTransform: "uppercase",
+                          color: "#1f7a52",
+                          background: "#eaf6ef",
+                          border: "1px solid #cce9da",
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                        }}
+                      >
+                        ✓ Customer accepted
+                      </span>
+                    )}
                   </div>
                   <div
                     style={{

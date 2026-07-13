@@ -36,6 +36,7 @@ export const CATEGORIES = [
   { key: "flame",       label: "Flame tests due for renewal",  desc: "Annual flame-test renewals coming due or overdue." },
   { key: "repairs",     label: "Repairs awaiting scheduling",  desc: "Approved repair jobs and open inspection findings waiting to be scheduled." },
   { key: "leads",       label: "Leads needing follow-up",      desc: "New and open leads overdue for a first response or follow-up." },
+  { key: "portal",      label: "Portal acceptances to confirm", desc: "Quotes a customer accepted in the portal — non-binding until you confirm by marking them Won." },
 ] as const;
 
 export type NotifCategoryKey = (typeof CATEGORIES)[number]["key"];

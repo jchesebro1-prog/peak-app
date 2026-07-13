@@ -19,6 +19,7 @@ import {
   fmtShort as fmtShortIso,
 } from "@/lib/stores/inspections";
 import { PortalShell } from "./shell";
+import { acceptPortalQuote } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -113,6 +114,7 @@ export default async function PortalPage({
   const companyName = settings.companyName || "Peak Systems Group";
   const denied = one(sp.denied) === "1";
   const sent = one(sp.sent) === "1";
+  const accepted = one(sp.accepted) === "1";
 
   /* -------- signed out / invalid link -------- */
   if (!session) {
@@ -243,6 +245,23 @@ export default async function PortalPage({
           shortly. It also appears under “Your open requests” below.
         </div>
       )}
+      {accepted && (
+        <div
+          style={{
+            marginBottom: 18,
+            padding: "14px 16px",
+            background: "#eaf6ef",
+            border: "1px solid #cce9da",
+            borderRadius: 10,
+            fontSize: 13,
+            color: "#1f7a52",
+            fontWeight: 600,
+          }}
+        >
+          Thanks — we’ve flagged your acceptance for the {companyName} team. They’ll confirm and
+          get scheduling underway; nothing is final until they do.
+        </div>
+      )}
 
       {/* open requests */}
       <div style={CARD}>
@@ -295,7 +314,11 @@ export default async function PortalPage({
           <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>as published by {companyName}</div>
         </div>
         {published.map((q) => {
-          const chip = QUOTE_CHIP[q.status] || QUOTE_CHIP.sent;
+          const pendingAccept = q.status === "sent" && !!q.portalAcceptance;
+          const canAccept = q.status === "sent" && !q.portalAcceptance;
+          const chip = pendingAccept
+            ? { label: "Accepted — awaiting confirmation", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
+            : QUOTE_CHIP[q.status] || QUOTE_CHIP.sent;
           return (
             <div
               key={q.id}
@@ -327,7 +350,32 @@ export default async function PortalPage({
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600, textAlign: "right" }}>
                 {money(q.value)}
               </div>
-              <Chip c={chip} />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                <Chip c={chip} />
+                {canAccept && (
+                  <form action={acceptPortalQuote}>
+                    <input type="hidden" name="quote" value={q.id} />
+                    <button
+                      type="submit"
+                      title="Accepting lets our team know to move ahead — nothing is final until they confirm."
+                      style={{
+                        fontFamily: "var(--font-ui)",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#fff",
+                        background: "#1f7a52",
+                        border: "none",
+                        borderRadius: 8,
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Accept quote
+                    </button>
+                  </form>
+                )}
+              </div>
             </div>
           );
         })}

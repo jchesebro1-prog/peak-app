@@ -67,6 +67,9 @@ export async function navData(me: string): Promise<{
       q.review?.reviewer === me &&
       q.owner !== me
   );
+  const portalAccepted = quotes.filter(
+    (q) => q.portalAcceptance && q.status === "sent"
+  );
   const reviewDesigns = designs.filter(
     (d) =>
       d.review?.state === "in_review" &&
@@ -193,6 +196,18 @@ export async function navData(me: string): Promise<{
       href: "/repairs",
       letter: "R",
       color: r.priority === "emergency" ? "#8a2f22" : "#b4543a",
+    }))
+  );
+  push(
+    "portal",
+    "Portal acceptances to confirm",
+    portalAccepted.map((q) => ({
+      id: q.id,
+      title: q.name,
+      sub: `${q.customer || ""} · accepted by ${q.portalAcceptance?.by || "customer"} — confirm by marking Won`,
+      href: "/quotes?id=" + encodeURIComponent(q.id),
+      letter: "✓",
+      color: "#1f7a52",
     }))
   );
   push(

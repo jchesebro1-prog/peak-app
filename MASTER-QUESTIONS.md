@@ -169,9 +169,10 @@ Estimating Rules — these just need real values before go-live)
 - **F16.** *(Jul 12 — customer portal)* Portal access links are copied
   manually from the customer record for now. Once Gmail is connected
   (GMAIL_ENABLED), should "Create access link" also **email it to the
-  contact automatically**? ✦ yes, auto-send ☐ keep manual copy. And the
-  next portal slice: ☐ photo/document uploads on requests (P2)
-  ☐ non-binding "Accept quote" button (P3) ☐ both
+  contact automatically**? ✦ yes, auto-send ☐ keep manual copy.
+  *(Update, same day: the non-binding "Accept quote" button shipped — D64 —
+  so the remaining portal slice is photo/document uploads on requests,
+  which also needs the object-storage call from IDEAS #46.)*
 
 ## G. Documents & branding
 
