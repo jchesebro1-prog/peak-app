@@ -33,6 +33,7 @@ export function InspectionReportSheets({
   showBoiler,
   showClosed,
   showRubric,
+  logoDark = null,
 }: {
   record: InspectionRecord;
   accent: string;
@@ -42,6 +43,9 @@ export function InspectionReportSheets({
   showBoiler: boolean;
   showClosed: boolean;
   showRubric: boolean;
+  /** Uploaded dark brand mark (Settings -> Branding, IDEAS #32) -- replaces
+   *  the typographic letterhead when present. */
+  logoDark?: string | null;
 }) {
   const r = record;
   const isReport = layout === "report";
@@ -113,7 +117,10 @@ export function InspectionReportSheets({
     </div>
   );
   const foot = <div style={footStyle}>{footerText}</div>;
-  const letterhead = (
+  const letterhead = logoDark ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={logoDark} alt={companyName} style={{ display: "block", maxHeight: 60, maxWidth: "3.6in", objectFit: "contain" }} />
+  ) : (
     <div>
       <div style={{ fontSize: 25, fontWeight: 800, letterSpacing: "-.016em", color: "#16181d" }}>{companyName}, Inc.</div>
       <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 500, letterSpacing: ".3em", textTransform: "uppercase", color: accent, marginTop: 5 }}>A Better Solution</div>
@@ -392,8 +399,15 @@ export function InspectionReportSheets({
       {isCompact && (
         <div className="rp-sheet" style={{ ...sheet, padding: "1in 0.9in", alignItems: "stretch", textAlign: "center", justifyContent: "space-between" }}>
           <div style={{ position: "relative", zIndex: 1 }}>
-            <div style={{ fontSize: 31, fontWeight: 800, letterSpacing: "-.016em", color: "#16181d" }}>{companyName}, Inc.</div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 500, letterSpacing: ".34em", textTransform: "uppercase", color: accent, marginTop: 9 }}>A Better Solution</div>
+            {logoDark ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoDark} alt={companyName} style={{ display: "block", maxHeight: 72, maxWidth: "4.2in", objectFit: "contain", margin: "0 auto" }} />
+            ) : (
+              <>
+                <div style={{ fontSize: 31, fontWeight: 800, letterSpacing: "-.016em", color: "#16181d" }}>{companyName}, Inc.</div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 500, letterSpacing: ".34em", textTransform: "uppercase", color: accent, marginTop: 9 }}>A Better Solution</div>
+              </>
+            )}
             <div style={{ fontSize: 12.5, color: "#5b616e", marginTop: 16, lineHeight: 1.55 }}>
               Consultation &nbsp;·&nbsp; Design &nbsp;·&nbsp; Installation
               <br />

@@ -41,6 +41,7 @@ export default async function AppLayout({
             isAdmin: can("manage_users", user.roles),
           }}
           companyName={settings.companyName}
+          logoLight={settings.logoLight || null}
           feedbackEmail={settings.feedbackEmail}
           devLogin={devLogin}
           roster={roster}

@@ -8,6 +8,7 @@ import {
   stageMeta,
   jobCoords,
   dueAtOf,
+  msOf,
   fmtShort,
   fmtLong,
   money,
@@ -21,6 +22,7 @@ import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { FlameMap } from "./controls";
 import { RenewalDraftButton } from "./renewal-ai";
+import { markFlameRenewalOutreach } from "./actions";
 import { aiEnabled } from "@/lib/ai/config";
 import type { MapPin } from "@/components/map/LeafletMap";
 
@@ -103,18 +105,28 @@ export default async function FlameTestsPage({
   const winParam = parseInt(one(sp.win), 10);
   const selWin = [-30, 30, 60, 90].includes(winParam) ? winParam : 60;
 
+  // renewals sub-view (IDEAS #37): to-contact worklist vs. reached-out
+  const rvView = one(sp.rv) === "awaiting" ? "awaiting" : "contact";
+
   // hidden map statuses (comma list); default all visible
   const hidden = new Set(one(sp.hide).split(",").filter(Boolean));
   const statusOn = (k: FlameJobStage) => !hidden.has(k);
 
-  const hrefFor = (over: { filter?: string; win?: number; hide?: string }) => {
+  const hrefFor = (over: {
+    filter?: string;
+    win?: number;
+    hide?: string;
+    rv?: string;
+  }) => {
     const qs = new URLSearchParams();
     const f = over.filter ?? filter;
     const w = over.win ?? selWin;
     const h = over.hide ?? Array.from(hidden).join(",");
+    const rv = over.rv ?? rvView;
     if (f && f !== "all") qs.set("filter", f);
     if (w !== 60) qs.set("win", String(w));
     if (h) qs.set("hide", h);
+    if (rv !== "contact") qs.set("rv", rv);
     const s = qs.toString();
     return "/flame-tests" + (s ? "?" + s : "");
   };
@@ -188,6 +200,16 @@ export default async function FlameTestsPage({
     (j) => j.stage === "completed" && j.completedAt && Date.now() - j.completedAt <= YEAR
   ).length;
 
+  /* day-of quick-start (IDEAS #34): scheduled visits due today or overdue */
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+  const dueTodayCount = jobs.filter(
+    (j) =>
+      j.stage === "scheduled" &&
+      msOf(j.scheduledDate) != null &&
+      (msOf(j.scheduledDate) || 0) <= endOfToday.getTime()
+  ).length;
+
   /* ---- renewals ---- */
   const dueRows = await renewals({ dueOnly: true });
   const overdueCount = dueRows.filter((r) => r._renewal.state === "overdue").length;
@@ -204,6 +226,12 @@ export default async function FlameTestsPage({
     .filter((r) => inWin(r, selWin))
     .sort((a, b) => (dueAtOf(a) || 0) - (dueAtOf(b) || 0));
   const winOverdue = windowRows.filter((r) => r._renewal.state === "overdue").length;
+
+  /* outreach worklist split (IDEAS #37, per F7): the panel defaults to venues
+     NOT yet contacted this cycle; "Reached out — awaiting" holds the rest. */
+  const toContact = windowRows.filter((r) => !r.renewalOutreach);
+  const awaiting = windowRows.filter((r) => !!r.renewalOutreach);
+  const shownRows = rvView === "awaiting" ? awaiting : toContact;
 
   /* ---- KPI strip ---- */
   const bar = (c: string): CSSProperties => ({
@@ -360,6 +388,23 @@ export default async function FlameTestsPage({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
           <Link
+            href="/flame-tests/today"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 7,
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#fff",
+              background: "#1f7a52",
+              borderRadius: 10,
+              padding: "10px 15px",
+              textDecoration: "none",
+            }}
+          >
+            Log results{dueTodayCount ? " · " + dueTodayCount : ""}
+          </Link>
+          <Link
             href="/flame-tests/scheduling"
             style={{
               display: "inline-flex",
@@ -502,11 +547,21 @@ export default async function FlameTestsPage({
                   </span>
                 </Link>
               ))}
+              <span style={{ width: 1, height: 18, background: "#e8eaee", margin: "0 3px" }} />
+              <Link href={hrefFor({ rv: "contact" })} style={chipStyle(rvView === "contact")}>
+                To contact <span style={{ opacity: 0.6 }}>{toContact.length}</span>
+              </Link>
+              <Link href={hrefFor({ rv: "awaiting" })} style={chipStyle(rvView === "awaiting")}>
+                Reached out — awaiting <span style={{ opacity: 0.6 }}>{awaiting.length}</span>
+              </Link>
             </div>
             <div style={{ padding: "0 20px 12px", fontSize: 11, color: "#aab0bb" }}>
               Due on or before {fmtLong(winCutoff(selWin))}
+              {rvView === "contact"
+                ? " · not yet contacted this cycle"
+                : " · contacted, no new test booked yet"}
             </div>
-            {windowRows.map((r) => {
+            {shownRows.map((r) => {
               const rs = r._renewal;
               const m = renewalMeta(rs.state);
               const contact = r.contact || {};
@@ -611,48 +666,127 @@ export default async function FlameTestsPage({
                     </div>
                   </Link>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                    {aiOn && <RenewalDraftButton jobId={r.id} />}
-                    <a
-                      href={mailto}
-                      title="Email the contact"
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: 34,
-                        height: 34,
-                        borderRadius: 9,
-                        border: "1px solid #e4e7ec",
-                        background: "#fff",
-                        color: "#5b616e",
-                        textDecoration: "none",
-                        fontSize: 15,
-                      }}
-                    >
-                      ✉
-                    </a>
-                    <Link
-                      href={renewHref}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        color: "#fff",
-                        background: "var(--accent)",
-                        borderRadius: 9,
-                        padding: "9px 13px",
-                        textDecoration: "none",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Start renewal
-                    </Link>
+                    {rvView === "contact" ? (
+                      <>
+                        {aiOn && <RenewalDraftButton jobId={r.id} />}
+                        <a
+                          href={mailto}
+                          title="Email the contact"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: 34,
+                            height: 34,
+                            borderRadius: 9,
+                            border: "1px solid #e4e7ec",
+                            background: "#fff",
+                            color: "#5b616e",
+                            textDecoration: "none",
+                            fontSize: 15,
+                          }}
+                        >
+                          ✉
+                        </a>
+                        <form action={markFlameRenewalOutreach}>
+                          <input type="hidden" name="id" value={r.id} />
+                          <button
+                            type="submit"
+                            title="Mark as reached out — moves this venue to the awaiting view"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              color: "#1f7a52",
+                              background: "#eaf6ef",
+                              border: "1px solid #cce9da",
+                              borderRadius: 9,
+                              padding: "9px 12px",
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                              fontFamily: "var(--font-ui)",
+                            }}
+                          >
+                            ✓ Reached out
+                          </button>
+                        </form>
+                        <Link
+                          href={renewHref}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            color: "#fff",
+                            background: "var(--accent)",
+                            borderRadius: 9,
+                            padding: "9px 13px",
+                            textDecoration: "none",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          Start renewal
+                        </Link>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontSize: 11.5, color: "#9aa0ab", whiteSpace: "nowrap" }}>
+                          {r.renewalOutreach
+                            ? "reached out " +
+                              timeAgo(r.renewalOutreach.at) +
+                              " · " +
+                              r.renewalOutreach.by
+                            : ""}
+                        </span>
+                        <form action={markFlameRenewalOutreach}>
+                          <input type="hidden" name="id" value={r.id} />
+                          <input type="hidden" name="undo" value="1" />
+                          <button
+                            type="submit"
+                            title="Undo — back to the to-contact list"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: "#5b616e",
+                              background: "#fff",
+                              border: "1px solid #e4e7ec",
+                              borderRadius: 9,
+                              padding: "8px 11px",
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                              fontFamily: "var(--font-ui)",
+                            }}
+                          >
+                            Undo
+                          </button>
+                        </form>
+                        <Link
+                          href={renewHref}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            color: "#fff",
+                            background: "var(--accent)",
+                            borderRadius: 9,
+                            padding: "9px 13px",
+                            textDecoration: "none",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          Start renewal
+                        </Link>
+                      </>
+                    )}
                   </div>
                 </div>
               );
             })}
-            {windowRows.length === 0 && (
+            {shownRows.length === 0 && (
               <div
                 style={{
                   padding: "30px 20px",
@@ -662,9 +796,13 @@ export default async function FlameTestsPage({
                   lineHeight: 1.6,
                 }}
               >
-                {selWin < 0
-                  ? "No renewals overdue by that much."
-                  : "No renewals due within this window."}
+                {rvView === "awaiting"
+                  ? "No venues awaiting a reply — nothing marked reached-out in this window."
+                  : windowRows.length > 0
+                    ? "Every renewal in this window has been reached out to — see the awaiting view."
+                    : selWin < 0
+                      ? "No renewals overdue by that much."
+                      : "No renewals due within this window."}
               </div>
             )}
           </div>

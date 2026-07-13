@@ -115,6 +115,8 @@ export default async function SettingsPage() {
             federalHolidays: settings.federalHolidays,
             seedDemo: settings.seedDemo,
             feedbackEmail: settings.feedbackEmail,
+            logoLight: settings.logoLight || null,
+            logoDark: settings.logoDark || null,
           }}
           intakeCatalog={mergedCatalog(settings.intakeCatalog)}
           offices={settings.offices.map((o) => ({

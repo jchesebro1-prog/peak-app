@@ -151,6 +151,7 @@ export default async function InspectionReportOptionsPage() {
                   showBoiler={d.layout !== "compact"}
                   showClosed
                   showRubric={d.layout === "report"}
+                  logoDark={settings.logoDark || null}
                 />
               </div>
             </div>

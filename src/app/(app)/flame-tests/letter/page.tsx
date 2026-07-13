@@ -286,9 +286,13 @@ export default async function FlameTestLetterPage({
             <div style={{ marginBottom: 26 }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={letterhead.src}
-                alt="Peak Systems Group, Inc."
-                style={{ display: "block", width: "100%", height: "auto" }}
+                src={settings.logoDark || letterhead.src}
+                alt={companyName}
+                style={
+                  settings.logoDark
+                    ? { display: "block", maxHeight: 76, maxWidth: "100%", objectFit: "contain" }
+                    : { display: "block", width: "100%", height: "auto" }
+                }
               />
               <div
                 style={{

@@ -702,6 +702,10 @@ export type InspectionRecord = {
   scheduledDate: string;
   requestedBy: string;
   requestedAt: number;
+  /** Renewal-outreach stamp (IDEAS #37) — the office contacted the customer
+   *  about THIS cycle's renewal. Lives on the latest completed inspection;
+   *  the next completed inspection is a new record, so cycles reset. */
+  renewalOutreach?: { at: number; by: string } | null;
   owner: string;
   createdAt: number;
   updatedAt: number;
@@ -1062,6 +1066,16 @@ export async function assign(
 
 export async function unschedule(id: string): Promise<InspectionRecord | null> {
   return update(id, { stage: "requested", scheduledDate: "", assignedTo: "" });
+}
+
+/** Stamp / clear this cycle's renewal outreach (IDEAS #37). */
+export async function setRenewalOutreach(
+  id: string,
+  by: string | null
+): Promise<InspectionRecord | null> {
+  return update(id, {
+    renewalOutreach: by ? { at: now(), by } : null,
+  });
 }
 
 /* ---- renewal math (both cadences: L1 annual · L2 every 5 years) ---- */

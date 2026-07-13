@@ -3,7 +3,13 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import { assign, create, unschedule } from "@/lib/stores/inspections";
+import {
+  assign,
+  create,
+  get,
+  setRenewalOutreach,
+  unschedule,
+} from "@/lib/stores/inspections";
 
 /**
  * Inspection inbox mutations. `createInspection` mirrors the prototype's
@@ -40,5 +46,19 @@ export async function unscheduleInspection(formData: FormData): Promise<void> {
   const id = String(formData.get("id") || "");
   if (!id) return;
   await unschedule(id);
+  revalidatePath("/", "layout");
+}
+
+/** Stamp / undo this cycle's renewal outreach (IDEAS #37 worklist). */
+export async function markInspectionRenewalOutreach(
+  formData: FormData
+): Promise<void> {
+  const user = await requireUser();
+  const id = String(formData.get("id") || "");
+  const undo = String(formData.get("undo") || "") === "1";
+  if (!id) return;
+  const rec = await get(id);
+  if (!rec || rec.stage !== "completed") return;
+  await setRenewalOutreach(id, undo ? null : user.name);
   revalidatePath("/", "layout");
 }

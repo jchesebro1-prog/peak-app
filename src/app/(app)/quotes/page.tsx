@@ -138,14 +138,24 @@ export default async function QuotesPage({
   const statusParam = one(sp.status);
   const filter =
     (STAGES as readonly string[]).includes(statusParam) ? (statusParam as QuoteStatus) : "all";
+  const TYPE_KEYS = ["system", "flame_test", "repair", "inspection"] as const;
+  const typeParam = one(sp.type);
+  const typeFilter = (TYPE_KEYS as readonly string[]).includes(typeParam) ? typeParam : "all";
   const selectedId = one(sp.id);
 
-  const hrefFor = (over: { who?: string; status?: string; id?: string | null }) => {
+  const hrefFor = (over: {
+    who?: string;
+    status?: string;
+    type?: string;
+    id?: string | null;
+  }) => {
     const qs = new URLSearchParams();
     const w = over.who ?? (scope === "all" ? "all" : scope);
     const st = over.status ?? filter;
+    const ty = over.type ?? typeFilter;
     if (w && w !== "all") qs.set("who", w);
     if (st && st !== "all") qs.set("status", st);
+    if (ty && ty !== "all") qs.set("type", ty);
     if (over.id) qs.set("id", over.id);
     const s = qs.toString();
     return "/quotes" + (s ? "?" + s : "");
@@ -155,6 +165,15 @@ export default async function QuotesPage({
   let scoped = quotes;
   if (scope === "mine") scoped = quotes.filter((q) => q.owner === me);
   else if (scope !== "all") scoped = quotes.filter((q) => q.owner === scope);
+
+  /* ---- quote-type filter (IDEAS #22 — one hub, filtered by type; a quote
+     with no quoteType is a system quote) ---- */
+  const typeOf = (q: Quote) => q.quoteType || "system";
+  const typeCounts: Record<string, number> = { all: scoped.length };
+  TYPE_KEYS.forEach((k) => {
+    typeCounts[k] = scoped.filter((q) => typeOf(q) === k).length;
+  });
+  if (typeFilter !== "all") scoped = scoped.filter((q) => typeOf(q) === typeFilter);
 
   const roster = users.filter((u) => u.active);
   const ownerOptions = [
@@ -363,6 +382,68 @@ export default async function QuotesPage({
             );
           })}
         </div>
+      </div>
+
+      {/* quote-type rail (IDEAS #22 — one hub with a type filter) */}
+      <div
+        className="qt-rowscroll"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          flexWrap: "wrap",
+          marginBottom: 14,
+        }}
+      >
+        {(
+          [
+            ["all", "All types", null],
+            ["system", "System", null],
+            ["flame_test", "Flame test", TYPE_BADGE.flame_test],
+            ["repair", "Repair", TYPE_BADGE.repair],
+            ["inspection", "Inspection", TYPE_BADGE.inspection],
+          ] as Array<[string, string, { ink: string } | null]>
+        ).map(([key, label, badge]) => {
+          const active = typeFilter === key;
+          return (
+            <Link
+              key={key}
+              href={hrefFor({ type: key })}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontFamily: "var(--font-ui)",
+                fontSize: 12,
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+                padding: "6px 12px",
+                borderRadius: 20,
+                textDecoration: "none",
+                border: active ? "1px solid var(--accent)" : "1px solid #e4e7ec",
+                background: active ? "var(--accent)" : "#fff",
+                color: active ? "#fff" : "#5b616e",
+              }}
+            >
+              {badge && (
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                    background: active ? "#fff" : badge.ink,
+                    opacity: active ? 0.85 : 1,
+                  }}
+                />
+              )}
+              {label}{" "}
+              <span style={{ fontFamily: "var(--font-mono)", opacity: 0.65 }}>
+                {typeCounts[key]}
+              </span>
+            </Link>
+          );
+        })}
       </div>
 
       {/* quotes table */}

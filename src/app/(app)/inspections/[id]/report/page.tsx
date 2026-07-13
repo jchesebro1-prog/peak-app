@@ -162,6 +162,7 @@ export default async function InspectionReportPage({
           showBoiler={showBoiler}
           showClosed={showClosed}
           showRubric={showRubric}
+          logoDark={settings.logoDark || null}
         />
       </div>
     </div>

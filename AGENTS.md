@@ -93,6 +93,10 @@ See `.env.example`.
    and a report-options canvas. Quotes hub: type badges + per-type edit
    links + all three service quotes on "+ New quote". Decisions D51–D55;
    follow-ups MASTER-QUESTIONS F12–F14.
+   ✅ Wave 2 (Jul 12): quotes-hub type filter (#22), flame day-of "Log
+   results" day sheet at /flame-tests/today (#34), renewal outreach
+   worklists on both service dashboards (#37), and logo upload → nav +
+   all documents (#32). Decisions D56–D59.
 5. ✅ Installs + General — Projects (book + procurement/crew/timeline/sign-off),
    Schedule (crew board + project timeline), Field Work (on-site day view),
    Customers (directory + full customer record), Field Survey (list + capture

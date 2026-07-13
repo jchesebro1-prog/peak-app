@@ -138,6 +138,30 @@ export async function saveSettingsAction(patch: {
   return { ok: true as const };
 }
 
+/** Logo data-URL prefix + size cap: keep the settings row small (IDEAS #32).
+ *  ~400k chars of base64 ≈ a 300 KB image — plenty for a wordmark. */
+const LOGO_PREFIX = /^data:image\/(png|jpeg|svg\+xml|webp);base64,/;
+const LOGO_MAX_CHARS = 400_000;
+
+/** Upload / clear a brand mark (Settings → Branding, IDEAS #32). */
+export async function saveLogoAction(
+  kind: "logoLight" | "logoDark",
+  dataUrl: string | null
+) {
+  await requirePerm("manage_users");
+  if (kind !== "logoLight" && kind !== "logoDark")
+    return { ok: false as const, error: "Unknown logo slot." };
+  if (dataUrl !== null) {
+    if (typeof dataUrl !== "string" || !LOGO_PREFIX.test(dataUrl))
+      return { ok: false as const, error: "Use a PNG, JPEG, SVG, or WebP image." };
+    if (dataUrl.length > LOGO_MAX_CHARS)
+      return { ok: false as const, error: "Logo is too large — keep it under ~300 KB." };
+  }
+  await setSettings({ [kind]: dataUrl });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
 /**
  * Site-intake type catalog (survey-intake.ts DEFAULT_INTAKE_CATALOG
  * overrides). Only known categories are accepted; each list is trimmed,

@@ -9,6 +9,7 @@ import {
   unschedule,
   complete,
   reopen,
+  setRenewalOutreach,
   type FlameJobResults,
   type FlameJobVenueResult,
 } from "@/lib/stores/flame-jobs";
@@ -122,5 +123,17 @@ export async function reopenFlameTest(formData: FormData): Promise<void> {
   const job = await get(id);
   if (!job || job.stage !== "completed") return;
   await reopen(id);
+  revalidatePath("/", "layout");
+}
+
+/** Stamp / undo this cycle's renewal outreach (IDEAS #37 worklist). */
+export async function markFlameRenewalOutreach(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const id = String(formData.get("id") || "");
+  const undo = String(formData.get("undo") || "") === "1";
+  if (!id) return;
+  const job = await get(id);
+  if (!job || job.stage !== "completed") return;
+  await setRenewalOutreach(id, undo ? null : user.name);
   revalidatePath("/", "layout");
 }

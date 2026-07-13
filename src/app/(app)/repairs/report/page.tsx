@@ -211,6 +211,7 @@ export default async function RepairReportPage({
     companyName: settings.companyName || "Peak Systems Group",
     offices: Array.isArray(settings.offices) ? settings.offices : [],
     users: users.map((u) => ({ name: u.name, roles: u.roles, email: u.email })),
+    letterhead: settings.logoDark || null,
   };
   const model = buildReportModel(job, org);
 

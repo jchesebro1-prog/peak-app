@@ -365,3 +365,32 @@ Anything you want changed, just say so — none of these are hard to reverse.
   canvas is a picker over those. The quotes hub also gained type badges
   (Flame test / Repair / Inspection) and per-type "Open …" edit links, and
   the "+ New quote" menu now lists all three auto-priced service quotes.
+
+## Wave 2 — IDEAS #22 / #32 / #34 / #37 (built 2026-07-12, same day)
+
+- **D56. The day-of "Log results" quick-start (#34) is a day sheet, not a
+  bulk form.** Jeff's ask left scope open; default taken: a green
+  "Log results · N" button on the Flame Tests header opens
+  /flame-tests/today — every scheduled visit due today (overdue visits that
+  were never logged stay in the queue, flagged), one Log-results button per
+  row, with the next five upcoming visits underneath so the sheet is never a
+  dead end. Bulk one-screen entry can layer on later if the day sheet feels
+  slow in the field.
+- **D57. Renewal outreach (#37, per F7) is a stamp on the latest completed
+  job/record — not a separate list.** "✓ Reached out" stores {at, by} on the
+  flame job / inspection record whose renewal is due; completing a new
+  test/inspection starts a fresh record, so every cycle naturally resets to
+  un-contacted (complete() also clears the stamp on re-completion). The
+  renewals panel defaults to the to-contact worklist with a
+  "Reached out — awaiting" secondary view + Undo.
+- **D58. The Quotes hub type filter (#22, per F6) composes owner → type →
+  status.** A quote with no quoteType counts as a System quote; the status
+  counts and stat tiles reflect the type slice so the pipeline numbers match
+  what the list shows.
+- **D59. Logos (#32) are small data-URL images in app settings.** Two slots:
+  light (dark nav bar) and dark (documents), uploaded in Settings → Branding,
+  capped at ~300 KB, admin-only. Every letter + report (flame, repair,
+  inspection — including the inspection report's typographic letterhead)
+  renders the dark logo when present and falls back to the baked-in Peak
+  letterhead when not, so nothing changes until Jeff uploads the real files
+  (closes the G1 gap from the app side).

@@ -54,6 +54,9 @@ export type OrgCtx = {
   companyName: string;
   offices: Array<{ city?: string; phone?: string }>;
   users: Array<{ name: string; roles: string[] | null; email: string }>;
+  /** Uploaded dark brand mark (Settings → Branding, IDEAS #32) — replaces the
+   *  baked-in letterhead image when present. */
+  letterhead?: string | null;
 };
 
 type Row = {
@@ -232,6 +235,8 @@ export function buildReportModel(job: ReportJob, org: OrgCtx) {
   return {
     accent: org.accent,
     companyName: org.companyName,
+    letterheadSrc: org.letterhead || letterhead.src,
+    letterheadIsLogo: !!org.letterhead,
     dateLabel,
     venueName,
     locationLabel,
@@ -269,14 +274,30 @@ export function buildReportModel(job: ReportJob, org: OrgCtx) {
 
 const VENUE_GRID = "minmax(0,1fr) 56px 56px 68px 52px";
 
-function Letterhead({ accent, tag }: { accent: string; tag: boolean }) {
+function Letterhead({
+  accent,
+  tag,
+  src,
+  isLogo,
+  alt,
+}: {
+  accent: string;
+  tag: boolean;
+  src: string;
+  isLogo: boolean;
+  alt: string;
+}) {
   return (
     <div style={{ marginBottom: tag ? 24 : 20 }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={letterhead.src}
-        alt="Peak Systems Group, Inc."
-        style={{ display: "block", width: "100%", height: "auto" }}
+        src={src}
+        alt={alt}
+        style={
+          isLogo
+            ? { display: "block", maxHeight: 76, maxWidth: "100%", objectFit: "contain" }
+            : { display: "block", width: "100%", height: "auto" }
+        }
       />
       <div
         style={{
@@ -514,7 +535,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
         {/* ================= LETTER ================= */}
         {variant === "letter" && (
           <div style={{ fontSize: "11.5pt", lineHeight: 1.55 }}>
-            <Letterhead accent={accent} tag />
+            <Letterhead accent={accent} tag src={m.letterheadSrc} isLogo={m.letterheadIsLogo} alt={m.companyName} />
             <div style={{ marginBottom: 3 }}><span style={{ color: "#6b7079" }}>Date:</span> {m.dateLabel}</div>
             <div style={{ marginBottom: 3 }}><span style={{ color: "#6b7079" }}>Venue Name:</span> <strong>{m.venueName}</strong></div>
             <div style={{ marginBottom: 18 }}><span style={{ color: "#6b7079" }}>Location:</span> {m.locationLabel}</div>
@@ -545,7 +566,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
         {/* ================= SUMMARY ================= */}
         {variant === "summary" && (
           <div style={{ fontSize: "11.5pt", lineHeight: 1.55 }}>
-            <Letterhead accent={accent} tag={false} />
+            <Letterhead accent={accent} tag={false} src={m.letterheadSrc} isLogo={m.letterheadIsLogo} alt={m.companyName} />
             <div style={{ marginBottom: 3 }}><span style={{ color: "#6b7079" }}>Date:</span> {m.dateLabel}</div>
             <div style={{ marginBottom: 3 }}><span style={{ color: "#6b7079" }}>Venue Name:</span> <strong>{m.venueName}</strong></div>
             <div style={{ marginBottom: 16 }}><span style={{ color: "#6b7079" }}>Location:</span> {m.locationLabel}</div>
@@ -618,9 +639,13 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
             <div style={{ borderBottom: "2px solid #16181d", paddingBottom: 14, marginBottom: 22 }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={letterhead.src}
-                alt="Peak Systems Group, Inc."
-                style={{ display: "block", width: "100%", height: "auto" }}
+                src={m.letterheadSrc}
+                alt={m.companyName}
+                style={
+                  m.letterheadIsLogo
+                    ? { display: "block", maxHeight: 76, maxWidth: "100%", objectFit: "contain" }
+                    : { display: "block", width: "100%", height: "auto" }
+                }
               />
             </div>
             <div style={{ textAlign: "center", marginBottom: 16 }}>

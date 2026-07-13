@@ -44,6 +44,7 @@ export type RosterEntry = {
 export default function Nav({
   user,
   companyName,
+  logoLight = null,
   feedbackEmail,
   devLogin,
   roster,
@@ -53,6 +54,8 @@ export default function Nav({
 }: {
   user: NavUser;
   companyName: string;
+  /** Uploaded brand mark for the dark bar (Settings → Branding, IDEAS #32). */
+  logoLight?: string | null;
   feedbackEmail: string;
   devLogin: boolean;
   roster: RosterEntry[];
@@ -179,7 +182,16 @@ export default function Nav({
             </button>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-            <div className="pk-mark">{markLetter}</div>
+            {logoLight ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoLight}
+                alt={companyName}
+                style={{ height: 30, maxWidth: 150, objectFit: "contain", display: "block" }}
+              />
+            ) : (
+              <div className="pk-mark">{markLetter}</div>
+            )}
             <div className="pk-company">{companyName}</div>
             <span className="pk-beta">BETA</span>
           </div>

@@ -166,6 +166,9 @@ Estimating Rules — these just need real values before go-live)
 
 - **G1.** Company logo files — light version (dark nav) + dark version
   (documents). ☐ attached/placed at: ______ (until then: letter monogram).
+  **Update Jul 12:** Settings → Branding now has upload slots for both
+  (IDEAS #32) — drop the files in there and every letter, report, and the
+  nav pick them up automatically; no code change needed.
   Note: flame-test **letters + reports** now use the real Peak letterhead
   image (`peak-letterhead.jpg`); the **inspection report** still uses a
   typographic letterhead (company name + tagline). Once the final logo

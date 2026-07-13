@@ -18,6 +18,7 @@ import {
   saveOfficeAction,
   disconnectMailboxAction,
   saveIntakeCatalogAction,
+  saveLogoAction,
   saveSettingsAction,
   searchAddressAction,
   setActiveAction,
@@ -122,6 +123,8 @@ export default function SettingsClient({
     federalHolidays: boolean;
     seedDemo: boolean;
     feedbackEmail: string;
+    logoLight: string | null;
+    logoDark: string | null;
   };
   intakeCatalog: Record<string, string[]>;
   offices: OfficeVM[];
@@ -467,6 +470,36 @@ export default function SettingsClient({
               })}
             </div>
           </div>
+        </div>
+
+        {/* logo uploads (IDEAS #32) */}
+        <div
+          style={{
+            display: "flex",
+            gap: 16,
+            flexWrap: "wrap",
+            marginTop: 18,
+            paddingTop: 16,
+            borderTop: "1px solid #f0f1f4",
+          }}
+        >
+          <LogoTile
+            kind="logoLight"
+            title="Logo — light version"
+            desc="Shown on the dark nav bar. PNG/SVG with a transparent background works best."
+            value={settings.logoLight}
+            dark
+            onError={setError}
+            onSaved={() => router.refresh()}
+          />
+          <LogoTile
+            kind="logoDark"
+            title="Logo — dark version"
+            desc="Heads letters and reports in place of the built-in letterhead image."
+            value={settings.logoDark}
+            onError={setError}
+            onSaved={() => router.refresh()}
+          />
         </div>
       </section>
 
@@ -1865,5 +1898,121 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
         }}
       />
     </button>
+  );
+}
+
+/** Brand-mark upload tile (IDEAS #32) — reads the file client-side into a
+ *  data URL (≤300 KB) and saves it through saveLogoAction. */
+function LogoTile({
+  kind,
+  title,
+  desc,
+  value,
+  dark,
+  onError,
+  onSaved,
+}: {
+  kind: "logoLight" | "logoDark";
+  title: string;
+  desc: string;
+  value: string | null;
+  dark?: boolean;
+  onError: (msg: string | null) => void;
+  onSaved: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function save(dataUrl: string | null) {
+    setBusy(true);
+    onError(null);
+    try {
+      const res = await saveLogoAction(kind, dataUrl);
+      if (!res.ok) onError(res.error || "Couldn’t save the logo.");
+      else onSaved();
+    } catch {
+      onError("Couldn’t save the logo.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function pick(file: File | null) {
+    if (!file) return;
+    if (file.size > 300 * 1024) {
+      onError("Logo is too large — keep it under 300 KB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => save(String(reader.result || "") || null);
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <div style={{ flex: 1, minWidth: 250 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600 }}>{title}</div>
+      <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2, lineHeight: 1.5 }}>
+        {desc}
+      </div>
+      <div
+        style={{
+          marginTop: 9,
+          height: 74,
+          borderRadius: 10,
+          border: "1px solid " + (dark ? "#2f323a" : "#e4e7ec"),
+          background: dark ? "#16181d" : "#fff",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "hidden",
+          padding: 10,
+        }}
+      >
+        {value ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={value}
+            alt={title}
+            style={{ maxHeight: "100%", maxWidth: "100%", objectFit: "contain" }}
+          />
+        ) : (
+          <span style={{ fontSize: 11.5, color: dark ? "#5b616e" : "#c0c5cd" }}>
+            No logo uploaded
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 9 }}>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/svg+xml,image/webp"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            pick(e.target.files?.[0] || null);
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => inputRef.current?.click()}
+          className="pk-btn-outline"
+          style={{ cursor: busy ? "wait" : "pointer" }}
+        >
+          {value ? "Replace…" : "Upload…"}
+        </button>
+        {value && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => save(null)}
+            className="pk-btn-outline"
+            style={{ color: "#b4543a", cursor: busy ? "wait" : "pointer" }}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

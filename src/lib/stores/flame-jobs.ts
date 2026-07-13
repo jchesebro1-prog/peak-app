@@ -105,6 +105,11 @@ export type FlameJobResults = {
   notes: string;
 };
 
+/** Renewal-outreach stamp (IDEAS #37): the office reached out about this
+ *  cycle's renewal. Lives on the latest completed job — a new completed
+ *  test is a new record, so every cycle starts un-contacted. */
+export type RenewalOutreach = { at: number; by: string };
+
 export type FlameJob = {
   id: string;
   quoteId: string | null;
@@ -127,6 +132,8 @@ export type FlameJob = {
   /** completedAt + 1yr, stamped by complete(); null until completed. */
   dueAt: number | null;
   results: FlameJobResults | null;
+  /** Set when the office contacts the customer about THIS cycle's renewal. */
+  renewalOutreach?: RenewalOutreach | null;
   owner: string;
   createdAt: number;
   updatedAt: number;
@@ -506,7 +513,8 @@ export type CompleteOpts = {
   assignedTo?: string;
 };
 
-/** Log results → completed; stamp completedAt + dueAt (+1yr). */
+/** Log results → completed; stamp completedAt + dueAt (+1yr). Completing
+ *  starts a fresh renewal cycle, so any outreach stamp is cleared. */
 export async function complete(
   id: string,
   opts: CompleteOpts = {}
@@ -519,9 +527,20 @@ export async function complete(
     completedAt,
     dueAt: completedAt + YEAR,
     results: opts.results || null,
+    renewalOutreach: null,
     assignedTo: opts.assignedTo || j.assignedTo || "",
     updatedAt: now(),
   }));
+}
+
+/** Stamp / clear this cycle's renewal outreach (IDEAS #37). */
+export async function setRenewalOutreach(
+  id: string,
+  by: string | null
+): Promise<FlameJob | null> {
+  return update(id, {
+    renewalOutreach: by ? { at: now(), by } : null,
+  });
 }
 
 export async function reopen(id: string): Promise<FlameJob | null> {
