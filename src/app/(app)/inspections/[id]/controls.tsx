@@ -875,9 +875,17 @@ export default function InspectionEditor({
             </div>
           </div>
           {canReport && (
-            <Link href={`/inspections/${encodeURIComponent(record.id)}/report`} style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER_LT}`, borderRadius: 9, padding: "10px 14px", textDecoration: "none", minHeight: 42, boxSizing: "border-box" }}>
-              <span style={{ fontSize: 13 }}>⎙</span> Report
-            </Link>
+            <>
+              <Link href={`/inspections/${encodeURIComponent(record.id)}/report`} style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER_LT}`, borderRadius: 9, padding: "10px 14px", textDecoration: "none", minHeight: 42, boxSizing: "border-box" }}>
+                <span style={{ fontSize: 13 }}>⎙</span> Report
+              </Link>
+              <Link href={`/inspections/results-letter?id=${encodeURIComponent(record.id)}`} title="One-page results letter" style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: ACCENT_INK, background: "transparent", border: `1px solid ${ACCENT_BORDER_LT}`, borderRadius: 9, padding: "10px 12px", textDecoration: "none", minHeight: 42, display: "inline-flex", alignItems: "center", boxSizing: "border-box" }}>
+                Results letter
+              </Link>
+              <Link href={`/inspections/summary-letter?id=${encodeURIComponent(record.id)}`} title="One-page summary letter" style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: ACCENT_INK, background: "transparent", border: `1px solid ${ACCENT_BORDER_LT}`, borderRadius: 9, padding: "10px 12px", textDecoration: "none", minHeight: 42, display: "inline-flex", alignItems: "center", boxSizing: "border-box" }}>
+                Summary letter
+              </Link>
+            </>
           )}
           <button onClick={onSave} disabled={saving} style={{ flexShrink: 0, fontSize: 13.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", borderRadius: 9, padding: "11px 20px", cursor: saving ? "default" : "pointer", minHeight: 42, opacity: saving ? 0.7 : 1 }}>
             {saving ? "Saving…" : "Save changes"}

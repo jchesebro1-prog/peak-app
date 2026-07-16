@@ -224,6 +224,34 @@ export default async function RepairResultsPage({
         </div>
       </div>
 
+      {/* documents (persistent for any completed repair) */}
+      {isCompleted && (
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 16 }}>
+          {[
+            { href: "/repairs/completion-letter?job=" + encodeURIComponent(job.id), label: "Completion letter →" },
+            { href: "/repairs/warranty-record?job=" + encodeURIComponent(job.id), label: "Warranty record →" },
+            { href: "/repairs/report?job=" + encodeURIComponent(job.id), label: "Service report →" },
+          ].map((d) => (
+            <Link
+              key={d.href}
+              href={d.href}
+              style={{
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "var(--accent)",
+                background: "#fff",
+                border: "1px solid #e4e7ec",
+                borderRadius: 9,
+                padding: "9px 14px",
+                textDecoration: "none",
+              }}
+            >
+              {d.label}
+            </Link>
+          ))}
+        </div>
+      )}
+
       {/* saved banner */}
       {saved && isCompleted && (
         <div
@@ -248,7 +276,37 @@ export default async function RepairResultsPage({
               This repair is complete and on the warranty follow-up clock.
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 9, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, flexShrink: 0, flexWrap: "wrap" }}>
+            <Link
+              href={"/repairs/completion-letter?job=" + encodeURIComponent(job.id)}
+              style={{
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "#1f7a52",
+                background: "#fff",
+                border: "1px solid #cce9da",
+                borderRadius: 9,
+                padding: "9px 14px",
+                textDecoration: "none",
+              }}
+            >
+              Completion letter →
+            </Link>
+            <Link
+              href={"/repairs/warranty-record?job=" + encodeURIComponent(job.id)}
+              style={{
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "#1f7a52",
+                background: "#fff",
+                border: "1px solid #cce9da",
+                borderRadius: 9,
+                padding: "9px 14px",
+                textDecoration: "none",
+              }}
+            >
+              Warranty record →
+            </Link>
             <Link
               href={"/repairs/report?job=" + encodeURIComponent(job.id)}
               style={{
