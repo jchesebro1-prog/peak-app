@@ -23,6 +23,7 @@ export const NAV: NavEntry[] = [
       { key: "reviews", label: "Reviews", href: "/reviews" },
     ],
   },
+  { kind: "link", key: "designstudio", label: "Design Studio", href: "/design-studio" },
   {
     kind: "group",
     key: "installs",
@@ -88,6 +89,7 @@ export function activeKeyFor(pathname: string): string {
     "/estimator": "quotes",
     "/design": "design",
     "/quick-design": "design",
+    "/design-studio": "designstudio",
     "/reviews": "reviews",
     "/projects": "projects",
     "/schedule": "schedule",
