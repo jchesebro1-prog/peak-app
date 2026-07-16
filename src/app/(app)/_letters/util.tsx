@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { AppSettingsData } from "@/lib/settings";
+import type { FlameJob } from "@/lib/stores/flame-jobs";
 
 /**
  * Shared helpers for the single-page letter pages (results / summary /
@@ -22,6 +23,31 @@ export function conditionWord(label: string): string {
 export function officePhone(settings: AppSettingsData): string {
   const offices = Array.isArray(settings.offices) ? settings.offices : [];
   return offices[0]?.phone || "";
+}
+
+/** Roll up per-venue flame results into passed / IFR (retreated) / failed /
+ *  tested totals — mirrors the flame report's rows() reduction. */
+export function flameTotals(job: FlameJob) {
+  const rv = job.results?.venues || [];
+  let tested = 0;
+  let passed = 0;
+  let retreated = 0;
+  let failed = 0;
+  for (const v of rv) {
+    const vt = v.tested ?? 0;
+    const vp = v.passed ?? 0;
+    const vr = v.retreated ?? 0;
+    const vf = v.failed ?? Math.max(0, vt - vp - vr);
+    tested += vt;
+    passed += vp;
+    retreated += vr;
+    failed += vf;
+  }
+  if (!rv.length) {
+    tested = job.curtainsTotal || 0;
+    passed = tested;
+  }
+  return { tested, passed, retreated, failed };
 }
 
 /** Simple not-found card for a missing record. */

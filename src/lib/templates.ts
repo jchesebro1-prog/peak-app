@@ -93,14 +93,15 @@ export const TEMPLATES: TemplateDef[] = [
         multiline: true,
         help: "The first paragraph describing the service.",
         default:
-          "{{company}} will perform an annual Field Flame Inspection of the soft goods at {{venue}} — roughly {{curtainsLabel}} — field-testing each curtain in place using the NFPA 705 field-flame method. Every unit is inspected individually and dispositioned pass or fail, so your team leaves with a defensible, per-curtain record for the venue's fire-safety file, not just a checkmark.",
+          "{{company}} proposes to perform an annual field flame inspection at {{venue}}. Installed soft goods will be field-tested in place using the NFPA 705 field-flame method, and each applicable unit will be documented individually so the venue retains a clear, defensible fire-safety record.",
       },
       {
         id: "methodQuote",
-        label: "Standard / method callout",
+        label: "Method callout",
         multiline: true,
-        help: "The quoted NFPA 705 reference shown as a callout.",
-        default: NFPA705_QUOTE,
+        help: "The NFPA 705 method note shown as a callout.",
+        default:
+          "NFPA 705 provides a field screening method for textiles and films already in service when reliable laboratory data are unavailable or added in-place verification is required.",
       },
       {
         id: "priceLine",
@@ -120,17 +121,17 @@ export const TEMPLATES: TemplateDef[] = [
       },
       {
         id: "costTail",
-        label: "Cost note",
+        label: "Cost note / proposed-fee basis",
         multiline: true,
         default:
-          "Covers mobilization, on-site NFPA 705 field testing, and per-curtain documentation. Sales and use tax is billed separately.",
+          "This amount covers mobilization, on-site NFPA 705 field testing, item-by-item disposition, and issuance of the final document set. Applicable sales and use tax, lift rentals, or other site-specific third-party costs may be stated separately when required.",
       },
       {
         id: "signoff",
-        label: "Sign-off / call to action",
+        label: "Sign-off / authorization",
         multiline: true,
         default:
-          "Approve this work order to schedule your inspection window. Sign below and return, or reply to confirm — we'll lock in a date.",
+          "Approving this quote authorizes us to schedule the inspection window and proceed with the services described herein.",
       },
       { id: "taxNote", label: "Tax note", multiline: true, default: TAX_NOTE },
     ],
@@ -488,6 +489,174 @@ export const TEMPLATES: TemplateDef[] = [
       venue: "Lakefront Performing Arts Center",
       testedLabel: "June 12, 2026",
       goodThrough: "June 2027",
+    },
+  },
+  {
+    id: "flame_results_letter",
+    label: "Flame-Test Results Letter",
+    group: "Reports",
+    description:
+      "The single-page client confirmation of flame-test findings, generated from a completed flame job.",
+    placeholders: [
+      { token: "company", desc: "Your company name" },
+      { token: "venue", desc: "Customer / venue name" },
+      { token: "location", desc: "City, State" },
+      { token: "datePerformed", desc: "Date the test was performed" },
+      { token: "technician", desc: "Technician name" },
+      { token: "certNo", desc: "Certificate number" },
+      { token: "unitsTested", desc: "Total units tested" },
+      { token: "goodThrough", desc: "Certification good-through date" },
+      { token: "passedCount", desc: "# Passed" },
+      { token: "ifrCount", desc: "# IFR" },
+      { token: "failedCount", desc: "# Failed" },
+    ],
+    fields: [
+      {
+        id: "intro",
+        label: "Opening paragraph",
+        multiline: true,
+        default:
+          "{{company}} performed a field flame-retardant inspection at {{venue}} on {{datePerformed}} in accordance with NFPA 705, Recommended Practice for a Field Flame Test. This letter serves as the single-page written confirmation of the observed disposition for the current inspection cycle.",
+      },
+      {
+        id: "nfpaQuote",
+        label: "NFPA 705 callout",
+        multiline: true,
+        default:
+          "NFPA 705 §1.1.1 — This recommended practice provides guidance for the field application of an open flame to textiles and films already in use or lacking reliable laboratory data.",
+      },
+      {
+        id: "resultsLine",
+        label: "Results line",
+        multiline: true,
+        default:
+          "Inspection outcome: {{passedCount}} Passed, {{ifrCount}} IFR, and {{failedCount}} Failed. Eligible passing treated goods were tagged for the current inspection cycle, and each certified unit is labeled good through {{goodThrough}}.",
+      },
+      {
+        id: "findingsNote",
+        label: "Findings note",
+        multiline: true,
+        default:
+          "Findings recorded under certificate number {{certNo}} reflect the conditions observed on the inspection date listed above. Where goods are topically treated rather than inherently flame resistant by fiber composition, continued compliance remains dependent on maintenance, exposure, and the condition of the textile at the time of each annual inspection.",
+      },
+      {
+        id: "failedNote",
+        label: "Failed-goods note",
+        multiline: true,
+        default:
+          "Failed goods should be removed, re-treated, or replaced before future certification is represented or relied upon.",
+      },
+      {
+        id: "retainNote",
+        label: "Recordkeeping note",
+        multiline: true,
+        default:
+          "Retain this results letter with the summary letter and certificate record in the venue's life-safety file.",
+      },
+    ],
+    sample: {
+      company: "Peak Systems Group",
+      venue: "Lakefront Performing Arts Center",
+      location: "Milwaukee, WI",
+      datePerformed: "June 12, 2026",
+      technician: "Nic Trapani",
+      certNo: "FT-2026-014",
+      unitsTested: "14",
+      goodThrough: "June 2027",
+      passedCount: "11",
+      ifrCount: "2",
+      failedCount: "1",
+    },
+  },
+  {
+    id: "flame_summary_letter",
+    label: "Flame-Test Summary Letter",
+    group: "Reports",
+    description:
+      "The single-page administrative flame-test record for owner / compliance / AHJ files.",
+    placeholders: [
+      { token: "company", desc: "Your company name" },
+      { token: "venue", desc: "Customer / venue name" },
+      { token: "location", desc: "City, State" },
+      { token: "datePerformed", desc: "Date the test was performed" },
+      { token: "technician", desc: "Technician name" },
+      { token: "certNo", desc: "Certificate number" },
+      { token: "unitsTested", desc: "Total units tested" },
+      { token: "goodThrough", desc: "Certification good-through date" },
+      { token: "passedCount", desc: "# Passed" },
+      { token: "ifrCount", desc: "# IFR" },
+      { token: "failedCount", desc: "# Failed" },
+    ],
+    fields: [
+      {
+        id: "purpose",
+        label: "Purpose paragraph",
+        multiline: true,
+        default:
+          "This summary letter consolidates the principal job data, observed result, and interpretation language most commonly needed for the venue file, owner file, or authority-having-jurisdiction record.",
+      },
+      {
+        id: "summaryStatement",
+        label: "Summary statement",
+        multiline: true,
+        default:
+          "{{company}} performed the field flame-retardant inspection at {{venue}}, located in {{location}}, on {{datePerformed}}, in accordance with NFPA 705, Recommended Practice for a Field Flame Test.",
+      },
+      {
+        id: "nfpaQuote",
+        label: "NFPA 705 callout",
+        multiline: true,
+        default:
+          "NFPA 705 §1.1.1 — This recommended practice provides guidance for the field application of an open flame to textiles and films already in use or lacking reliable laboratory data.",
+      },
+      {
+        id: "outcomeSummary",
+        label: "Outcome summary",
+        multiline: true,
+        default:
+          "Disposition counts for this inspection: {{passedCount}} Passed, {{ifrCount}} IFR, and {{failedCount}} Failed. Passing treated goods may be tagged through {{goodThrough}}. IFR goods remain inherently flame resistant by fiber composition. Failed goods must be re-treated or replaced before they are represented as certified.",
+      },
+      {
+        id: "inBrief",
+        label: "“NFPA 705 in brief” note",
+        multiline: true,
+        default:
+          "The field flame test is a screening practice used for textiles and films already in use. Material that fails should not be represented as certified until corrective action is taken, and annual retesting helps maintain a documentable record of compliance.",
+      },
+      {
+        id: "termPassed",
+        label: "Result term — Passed",
+        multiline: true,
+        default:
+          "Topically treated goods that self-extinguished on the field flame test and were tagged for the current cycle.",
+      },
+      {
+        id: "termIFR",
+        label: "Result term — IFR",
+        multiline: true,
+        default:
+          "Goods flame resistant by fiber composition rather than a topical coating; no topical re-treatment is required.",
+      },
+      {
+        id: "termFailed",
+        label: "Result term — Failed",
+        multiline: true,
+        default:
+          "Goods that did not self-extinguish and must be re-treated or replaced before certification is represented.",
+      },
+    ],
+    sample: {
+      company: "Peak Systems Group",
+      venue: "Lakefront Performing Arts Center",
+      location: "Milwaukee, WI",
+      datePerformed: "June 12, 2026",
+      technician: "Nic Trapani",
+      certNo: "FT-2026-014",
+      unitsTested: "14",
+      goodThrough: "June 2027",
+      passedCount: "11",
+      ifrCount: "2",
+      failedCount: "1",
     },
   },
 

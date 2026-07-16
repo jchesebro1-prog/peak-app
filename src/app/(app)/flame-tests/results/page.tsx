@@ -132,18 +132,26 @@ export default async function FlameResultsPage({
           {job.stage === "completed" ? "Completed" : "Scheduled"}
         </span>
         {job.stage === "completed" && (
-          <Link
-            href={reportHref}
-            style={{
-              marginLeft: "auto",
-              fontSize: 12.5,
-              fontWeight: 600,
-              color: "var(--accent)",
-              textDecoration: "none",
-            }}
-          >
-            View report →
-          </Link>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <Link
+              href={"/flame-tests/results-letter?job=" + encodeURIComponent(job.id)}
+              style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+            >
+              Results letter →
+            </Link>
+            <Link
+              href={"/flame-tests/summary-letter?job=" + encodeURIComponent(job.id)}
+              style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+            >
+              Summary letter →
+            </Link>
+            <Link
+              href={reportHref}
+              style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+            >
+              View report →
+            </Link>
+          </div>
         )}
       </div>
       <div style={{ fontSize: 13.5, color: "#8c919c", marginBottom: 18 }}>
