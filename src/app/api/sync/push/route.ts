@@ -2,10 +2,15 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import {
   DOC_TABLES,
+  SYNCABLE_SET,
   type CollectionName,
 } from "@/db/doc-tables";
 import { getDb } from "@/db";
 import { eq, sql } from "drizzle-orm";
+
+/** Abuse guards for the open sync endpoint. */
+const MAX_RECORDS_PER_COLLECTION = 1000;
+const MAX_DOC_BYTES = 512 * 1024; // 512 KB per document
 
 /**
  * Batched document push — the server side of the prototype's
@@ -45,11 +50,25 @@ export async function POST(req: Request) {
 
   for (const [coll, records] of Object.entries(collections)) {
     const t = DOC_TABLES[coll as CollectionName];
-    if (!t || !Array.isArray(records)) continue;
+    // Only genuinely offline-synced collections may be written here. Quotes,
+    // designs, leads, comms and catalog_parts are managed through
+    // permission-checked server actions — never accept them over sync, or the
+    // approval gate and catalog prices could be rewritten by any active user.
+    if (!t || !SYNCABLE_SET.has(coll) || !Array.isArray(records)) continue;
     results[coll] = [];
-    for (const rec of records) {
-      if (!rec?.id || typeof rec.id !== "string" || !rec.doc) {
+    for (const rec of records.slice(0, MAX_RECORDS_PER_COLLECTION)) {
+      if (
+        !rec?.id ||
+        typeof rec.id !== "string" ||
+        !rec.doc ||
+        typeof rec.doc !== "object" ||
+        Array.isArray(rec.doc)
+      ) {
         results[coll].push({ id: String(rec?.id ?? "?"), status: "error" });
+        continue;
+      }
+      if (JSON.stringify(rec.doc).length > MAX_DOC_BYTES) {
+        results[coll].push({ id: rec.id, status: "error" });
         continue;
       }
       try {

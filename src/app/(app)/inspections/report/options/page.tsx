@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 import { demoInspection } from "@/db/seeds/inspections";
+import { reportBoilerplate } from "@/lib/stores/inspections";
 import {
   InspectionReportSheets,
   type ReportLayout,
@@ -152,6 +153,10 @@ export default async function InspectionReportOptionsPage() {
                   showClosed
                   showRubric={d.layout === "report"}
                   logoDark={settings.logoDark || null}
+                  boiler={reportBoilerplate(settings.templates, {
+                    company: companyName,
+                    venue: rec.customer || "",
+                  })}
                 />
               </div>
             </div>

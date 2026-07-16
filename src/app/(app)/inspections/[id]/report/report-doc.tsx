@@ -14,6 +14,7 @@ import {
   MEASUREMENT_GROUPS,
   type InspectionRecord,
   type InspectionLog,
+  type InspectionBoilerplate,
 } from "@/lib/stores/inspections";
 import type { Office } from "@/lib/settings";
 import { RenovationQuoteButton } from "./controls";
@@ -34,6 +35,7 @@ export function InspectionReportSheets({
   showClosed,
   showRubric,
   logoDark = null,
+  boiler: boilerProp,
 }: {
   record: InspectionRecord;
   accent: string;
@@ -46,13 +48,16 @@ export function InspectionReportSheets({
   /** Uploaded dark brand mark (Settings -> Branding, IDEAS #32) -- replaces
    *  the typographic letterhead when present. */
   logoDark?: string | null;
+  /** Standing report prose, overlaid from the Templates store. Falls back to
+   *  the built-in defaults when omitted. */
+  boiler?: InspectionBoilerplate;
 }) {
   const r = record;
   const isReport = layout === "report";
   const isDossier = layout === "dossier";
   const isCompact = layout === "compact";
   const oneUp = isReport || isDossier;
-  const boiler = boilerplate();
+  const boiler = boilerProp ?? boilerplate();
 
   const accentInk = `color-mix(in srgb, ${accent} 72%, #000)`;
   const hq = offices[0] || ({} as Office);

@@ -27,6 +27,7 @@ export async function upsertPart(formData: FormData): Promise<void> {
     list: num(formData.get("list")),
     cost: num(formData.get("cost")),
     mfr: String(formData.get("mfr") || "").trim() || undefined,
+    note: String(formData.get("note") || "").trim() || undefined,
   };
   await upsert(part);
   revalidatePath("/", "layout");

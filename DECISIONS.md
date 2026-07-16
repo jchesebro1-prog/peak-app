@@ -476,7 +476,7 @@ Anything you want changed, just say so — none of these are hard to reverse.
   hand-edited copy). The D1 "Draft ✨" button now routes through the same
   flow with AI copy replacing the template, so both buttons land on the
   same draft and D1's "quote attached" description is finally literal.
-- **D69. Customer quote document redesigned past the prototype** (Jeff:
+- **D70. Customer quote document redesigned past the prototype** (Jeff:
   "the quote seems very boring and needs more", Jul 12). The Estimator
   preview keeps the prototype's data contract (sections/lines/totals,
   Show-on-PDF toggles) but the sheet itself deviates: a QUOTE title block
@@ -511,3 +511,78 @@ Anything you want changed, just say so — none of these are hard to reverse.
   year"; unknown prior prices skip the comparison. The reason builder is
   covered by a 15-case unit sweep (scratch harness) plus the live browser
   pass; re-clicking ✉ still reuses the cycle's quote + draft untouched.
+
+- **D71. Service proposal LETTERS modernized off their imported reference
+  templates** (Jeff, Jul 12 — "the quote template is based on something I
+  imported, it was meant to be a reference and instead should be refreshed
+  to look more modern and professional"). The flame-test
+  (/flame-tests/letter) and rigging-inspection (/inspections/letter) on-
+  screen proposals were pixel ports of an OLD imported Peak proposal kept
+  as reference. Both now deviate into a modern proposal layout — accent-
+  ruled letterhead, a large title block (proposal name + quote id +
+  level/standard), a Prepared-for / Location / Scope meta grid, an accent-
+  tinted TOTAL price band, a three-tile "your visit, at a glance"
+  (travel each way · on-site testing/inspection · total visit, shown only
+  when trip miles exist), a right-aligned venues table (replacing the
+  bullet list), and a ruled sign-off with a mono doc footer. Every fact,
+  figure, and load-bearing sentence is preserved (NFPA 705 quote block +
+  curtain counts on flame; the OSHA/NFPA/ANSI E1 explainer + level cadence
+  + line-set counts + re-inspection note on inspections), so the emailed
+  PDF twin (lib/renewal-outreach.ts, its own renderer) still matches the
+  on-screen copy. Accent flows from settings via color-mix, letterhead
+  uses the D59 logo ladder. The Estimator quote doc got the same treatment
+  in D70. The old Date/Venue/RE header lines and the "Dear … / contact me
+  directly at:" epistolary framing are dropped in favor of the meta grid +
+  a single greeting; the greeting only renders when a contact name exists
+  (no more "Dear Sir or Madam" on unaddressed drafts).
+
+- **D72. Flame-test quote → "Field Flame Inspection" service work order (new
+  template + rebrand + spicier copy)** (Jeff, Jul 12 — "spice up the
+  verbiage… change the wording on documents to say Field Flame Inspection
+  instead of Flame Test… change the language for the price… I ultimately
+  want a completely new layout and template"). Two changes:
+  (1) RENAME — the customer-facing SERVICE is now "Field Flame Inspection"
+  (was "Flame Test") on the on-screen proposal (/flame-tests/letter) and the
+  emailed PDF twin + email (lib/renewal-outreach.ts: tag, RE, subject/body,
+  filename, quote name, priceParagraph kind). The NFPA 705 standard is still
+  cited accurately ("Recommended Practice for a Field Flame Test" is the
+  standard's real name — the SERVICE is rebranded, the standard is not).
+  Internal ids/routes/type keys (quoteType "flame_test", /flame-tests, badges)
+  are unchanged — display copy only. The Field Flame Inspection RESULTS
+  report/certificate (/flame-tests/report, all three variants) was also swept
+  (see the note under the inspection rework below).
+  (2) NEW TEMPLATE ("Work Order 705", chosen via a 4-way judge-panel design
+  pass over editorial / spec-sheet / safety-authority / boutique directions;
+  spec-sheet won for credibility-to-a-technical-director). The proposal is now
+  framed as an issued NFPA 705 service work order: a document-control header
+  band (title + SERVICE WORK ORDER subhead + an ENGAGEMENT-FEE price
+  counterweight, and a 2×3 control grid DOCUMENT/ISSUED/VALID THROUGH/METHOD/
+  REV/SHEET), an ISSUED TO / ISSUED BY parties row, a line-item SCOPE OF WORK
+  table (a walk-through of the visit — field-test / mobilize / document — with
+  real per-row hours and a TOTAL ON-SITE + TRAVEL footer, replacing the D71
+  "visit at a glance" tiles), a METHOD callout, a bordered ENGAGEMENT FEE box
+  with the total echoed as a 34pt hero numeral and a punchy headline
+  ("Everything above … comes to $462, all in." — replaces "The above services
+  will cost $462."), and an AUTHORIZATION / signature block. One accent only
+  (color-mix tints ≤12%, meaning carried by borders/labels/mono so it survives
+  B/W print); logo via the D59 ladder; body sans + mono figures per D71's font
+  fix. Supersedes the D71 layout for both service proposals: the
+  rigging-inspection proposal (/inspections/letter) was reworked onto the same
+  Work Order 705 template (line sets instead of curtains, a LEVEL control
+  field + level cadence, an OSHA/NFPA/ANSI E1 STANDARD callout + re-inspection
+  note; NOT renamed — it was already "Rigging Inspection"). Its emailed PDF
+  twin (inspectionLetterDoc) carries the same spicier intro/price copy.
+  Finally, the flame RESULTS report/certificate (/flame-tests/report — letter,
+  summary, and certificate variants + the /options compare canvas) was swept:
+  the SERVICE/deliverable labels became "Field Flame Inspection" (report tag
+  "Field Flame Inspection Results", the RE: line, the "Field Flame Inspection
+  Summary" box, the /options eyebrow + tab titles), while the NFPA 705 standard
+  name and the physical field-flame-test METHOD phrases ("passed the field
+  flame test", "Recommended Practice for a Field Flame Test", the "NFPA 705 ·
+  Field Flame Test" certificate eyebrow, the method explainer) are kept
+  verbatim — that's what the authority having jurisdiction expects on a
+  compliance record. Internal team chrome (the nav feature is still "Flame
+  Tests", the report screen's not-found/back-links) is unchanged; renaming the
+  whole feature/route/nav is a bigger, separate call. Note: page.tsx carries a
+  pre-existing `react-hooks/static-components` lint error (an inline `Frame`
+  component) unrelated to this rename.

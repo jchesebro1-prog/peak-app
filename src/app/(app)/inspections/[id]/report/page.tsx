@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
-import { get, counts } from "@/lib/stores/inspections";
+import { get, counts, reportBoilerplate } from "@/lib/stores/inspections";
 import { getSettings } from "@/lib/settings";
 import { PrintButton, RenovationQuoteButton } from "./controls";
 import { InspectionReportSheets, type ReportLayout } from "./report-doc";
@@ -163,6 +163,10 @@ export default async function InspectionReportPage({
           showClosed={showClosed}
           showRubric={showRubric}
           logoDark={settings.logoDark || null}
+          boiler={reportBoilerplate(settings.templates, {
+            company: companyName,
+            venue: rec.customer || "",
+          })}
         />
       </div>
     </div>

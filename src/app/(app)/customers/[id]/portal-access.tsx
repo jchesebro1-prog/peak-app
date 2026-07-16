@@ -99,15 +99,44 @@ export function PortalAccessCard({
     >
       <div
         style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: "#9aa0ab",
-          letterSpacing: ".05em",
-          textTransform: "uppercase",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
           marginBottom: 4,
         }}
       >
-        Customer portal
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: "#9aa0ab",
+            letterSpacing: ".05em",
+            textTransform: "uppercase",
+          }}
+        >
+          Customer portal
+        </div>
+        <a
+          href={`/portal?preview=${encodeURIComponent(customerId)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open this customer's portal exactly as they see it"
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: "#5b616e",
+            background: "#fff",
+            border: "1px solid #e4e7ec",
+            borderRadius: 8,
+            padding: "6px 11px",
+            textDecoration: "none",
+            whiteSpace: "nowrap",
+          }}
+        >
+          👁 Preview portal
+        </a>
       </div>
       <div style={{ fontSize: 11.5, color: "#9aa0ab", lineHeight: 1.5, marginBottom: 12 }}>
         Personal access links — each person gets their own; copy it into an email. They&#39;ll see

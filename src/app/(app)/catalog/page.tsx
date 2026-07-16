@@ -83,11 +83,20 @@ export default async function CatalogPage({
   if (sort === "price") rows = rows.slice().sort((a, b) => (b.list || 0) - (a.list || 0));
   else if (sort === "alpha") rows = rows.slice().sort((a, b) => (a.desc || "").localeCompare(b.desc || ""));
 
+  // The catalog can hold thousands of parts (imported price books); render only
+  // a page of them so the DOM stays light. Filters + search narrow the set.
+  const PAGE = 200;
+  const matchCount = rows.length;
+  const truncated = matchCount > PAGE;
+  rows = rows.slice(0, PAGE);
+
   const catalogMeta = `${parts.length} parts · ${manufacturers.length} manufacturer${manufacturers.length === 1 ? "" : "s"}`;
   const resultLabel =
-    `${rows.length} of ${parts.length} parts` +
+    (truncated ? `Showing ${PAGE} of ${matchCount}` : `${matchCount} of ${parts.length}`) +
+    ` parts` +
     (mfrParam !== "all" ? " · " + mfrParam : "") +
-    (catParam !== "all" ? " · " + catParam : "");
+    (catParam !== "all" ? " · " + catParam : "") +
+    (truncated ? " · refine with search or filters to narrow" : "");
 
   const editingPart = editSku ? await get(editSku) : null;
   const showForm = isNew || !!editingPart;
@@ -274,6 +283,25 @@ export default async function CatalogPage({
                       {p.sku}
                       {p.mfr ? " · " + p.mfr : ""}
                     </span>
+                    {p.note && (
+                      <span
+                        style={{
+                          display: "inline-block",
+                          marginTop: 3,
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          letterSpacing: ".03em",
+                          textTransform: "uppercase",
+                          color: "#8a6d1f",
+                          background: "#fbf3dd",
+                          border: "1px solid #f0e2bd",
+                          borderRadius: 5,
+                          padding: "1px 6px",
+                        }}
+                      >
+                        ⚠ {p.note}
+                      </span>
+                    )}
                   </span>
                   <span style={{ fontSize: 11.5, color: "#8c919c" }}>{p.category || "—"}</span>
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#8c919c", textAlign: "right" }}>
@@ -559,6 +587,13 @@ function PartFormModal({
                   <option key={m} value={m} />
                 ))}
               </datalist>
+            </div>
+            <div style={{ marginTop: 13, marginBottom: 4 }}>
+              {label("Note")}
+              <input name="note" defaultValue={part?.note || ""} placeholder="e.g. verify price" style={inputStyle} />
+              <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 4 }}>
+                Shows as a flag on the part. Clear it once the pricing is confirmed.
+              </div>
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 9, marginTop: 20 }}>

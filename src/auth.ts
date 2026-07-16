@@ -20,8 +20,14 @@ export function googleConfigured(): boolean {
 }
 
 export function devLoginEnabled(): boolean {
+  // Hard rule: passwordless "sign in as any team member" NEVER runs in
+  // production, no matter what the env says. This is the guardrail the
+  // AUTH_DEV_LOGIN comment used to only promise — if the flag ever rides
+  // into a prod deploy, it is ignored here rather than exposing account
+  // takeover on the live login page.
+  if (process.env.NODE_ENV === "production") return false;
   if (process.env.AUTH_DEV_LOGIN === "true") return true;
-  return process.env.NODE_ENV !== "production" && !googleConfigured();
+  return !googleConfigured();
 }
 
 const providers: Provider[] = [];

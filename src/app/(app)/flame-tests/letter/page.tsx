@@ -4,27 +4,32 @@ import { get as getQuote } from "@/lib/stores/quotes";
 import { locationById } from "@/lib/stores/customers";
 import { nameFor } from "@/lib/stores/customers";
 import { getSettings } from "@/lib/settings";
+import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
 import { AVG_MPH } from "@/lib/geo";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
-export const metadata = { title: "Flame test letter — Peak Backend" };
+export const metadata = { title: "Field Flame Inspection — Peak Backend" };
 
 /**
- * Flame test quote LETTER — printable proposal for a saved flame-test
- * quote, on the .pk-doc-page foundation (white letter sheet; toolbar
- * hidden by @media print). Deep-linked as /flame-tests/letter?id=<quoteId>.
+ * Field Flame Inspection PROPOSAL — printable work order for a saved
+ * flame-test quote, on the .pk-doc-page foundation (white letter sheet;
+ * toolbar hidden by @media print). Deep-linked as /flame-tests/letter?id=<id>.
  *
- * D70 (Jeff, Jul 12): the prototype's Letter.dc.html was a pixel port of
- * an OLD imported Peak proposal kept as reference — this page now deviates
- * into a modern proposal document (title block, meta grid, price band,
- * visit-at-a-glance tiles) while keeping the same facts, figures, and the
- * load-bearing sentences the emailed PDF twin (lib/renewal-outreach.ts)
- * also composes.
+ * D72 (Jeff, Jul 12): "completely new layout and template" + rebrand the
+ * service from "Flame Test" to "Field Flame Inspection" + spicier price
+ * language. Chosen via a judge-panel design pass ("Work Order 705"): the
+ * proposal is framed as an issued NFPA 705 service work order — a
+ * document-control header band, a line-item SCOPE OF WORK table (a
+ * walk-through of the visit with real hours), a bordered ENGAGEMENT FEE box
+ * with the total echoed as a header counterweight, and an authorization /
+ * signature block — so it reads like a spec a technical director trusts, not
+ * a sales flyer. The emailed PDF twin (lib/renewal-outreach.ts) carries the
+ * same rename + copy. Supersedes the D71 title-block/meta-grid/tiles layout.
  */
 
-/* ---- prototype display helpers (Letter.dc.html money / num1) ---- */
+/* ---- display helpers (money / num1 / dates) ---- */
 function money(n: number | null | undefined): string {
   return "$" + Math.round(n || 0).toLocaleString("en-US");
 }
@@ -41,6 +46,16 @@ function longDate(ms: number | null | undefined): string {
     day: "numeric",
     year: "numeric",
   });
+}
+function isoDate(ms: number | null | undefined): string {
+  const d = new Date(ms || Date.now());
+  const p = (n: number) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+}
+/** ms + N days, tolerating a null base (kept module-level so the Date.now()
+    fallback stays out of the component body / the react purity rule). */
+function addDays(ms: number | null | undefined, days: number): number {
+  return (ms || Date.now()) + days * 86400000;
 }
 
 function one(v: string | string[] | undefined): string {
@@ -70,6 +85,13 @@ const TOOLBAR_CSS = `
   .ftl-toolbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 18px; background: rgba(247,248,250,.92); backdrop-filter: blur(8px); border-bottom: 1px solid #e4e7ec; }
 `;
 
+/* The .pk-doc-page base is Georgia serif and the app's --font-ui/--font-mono
+   design tokens don't cascade into it — the work order opts into the app's
+   clean sans for body/labels and a true mono for every figure, id, and hour,
+   self-contained so it renders right on-screen and near the Helvetica PDF. */
+const SANS = 'var(--font-ui, "Public Sans"), system-ui, -apple-system, "Segoe UI", sans-serif';
+const MONO = 'var(--font-mono, "IBM Plex Mono"), ui-monospace, SFMono-Regular, Menlo, monospace';
+
 export default async function FlameTestLetterPage({
   searchParams,
 }: {
@@ -90,7 +112,7 @@ export default async function FlameTestLetterPage({
   /* -------- not found -------- */
   if (!ok || !quote) {
     return (
-      <div style={{ minHeight: "100vh", fontFamily: "var(--font-ui)", color: "#16181d" }}>
+      <div style={{ minHeight: "100vh", fontFamily: SANS, color: "#16181d" }}>
         <style>{TOOLBAR_CSS}</style>
         <div className="ftl-toolbar pk-no-print">
           <Link
@@ -121,8 +143,8 @@ export default async function FlameTestLetterPage({
         >
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>Quote not found</div>
           <div style={{ fontSize: 13, color: "#8c919c", lineHeight: 1.6 }}>
-            This letter needs a saved flame-test quote. Open one from the Quotes list, or create a
-            new flame test quote first.
+            This work order needs a saved Field Flame Inspection quote. Open one from the Quotes
+            list, or create a new inspection quote first.
           </div>
           <Link
             href="/quotes"
@@ -182,10 +204,6 @@ export default async function FlameTestLetterPage({
       };
     })
   );
-  const single = locList.length === 1;
-  const locationLabel = single
-    ? locList[0].place || locList[0].label
-    : locList.length + " venues";
   const hasVenueList = locList.length > 1;
 
   const curtainsTotal =
@@ -196,12 +214,12 @@ export default async function FlameTestLetterPage({
 
   /* visit hours from stored trip + curtain testing time */
   const rtMiles = (ft.trip && ft.trip.miles) || 0;
-  const oneWayMiles = rtMiles / 2;
   const mph = AVG_MPH || 50;
-  const oneWayHours = mph ? oneWayMiles / mph : 0;
+  const oneWayHours = mph ? rtMiles / 2 / mph : 0;
   const curtainMin = (ft.rates && ft.rates.curtainMinutes) || 5;
   const inspectionHours = (curtainsTotal * curtainMin) / 60;
-  const totalHours = 2 * oneWayHours + inspectionHours;
+  const travelHours = 2 * oneWayHours;
+  const totalHours = travelHours + inspectionHours;
   const hasTrip = rtMiles > 0;
 
   const totalLabel = money(quote.value != null ? quote.value : ft.total || 0);
@@ -216,23 +234,86 @@ export default async function FlameTestLetterPage({
   const signerTitle = (u && u.roles && u.roles.length ? u.roles[0] : "") || "Estimator";
   const signerEmail = (u && u.email) || "";
 
-  const dateLabel = longDate(quote.createdAt);
   const backHref = "/flame-tests/quote?id=" + encodeURIComponent(quote.id);
 
-  const accentSoft = `color-mix(in srgb, ${accent} 9%, #fff)`;
-  const accentBd = `color-mix(in srgb, ${accent} 26%, #fff)`;
+  /* ---- work-order derived values (Work Order 705, D72) ---- */
   const accentInk = `color-mix(in srgb, ${accent} 74%, #000)`;
-  const microLabel = {
-    color: "#8c919c",
+  const accentTint12 = `color-mix(in srgb, ${accent} 12%, #fff)`;
+  const accentFaint = `color-mix(in srgb, ${accent} 6%, #fff)`;
+  const ctrlLabel = {
+    fontSize: "8pt",
+    letterSpacing: ".08em",
     textTransform: "uppercase" as const,
-    fontSize: "7.5pt",
+    color: "#8c919c",
     fontWeight: 600,
-    letterSpacing: ".07em",
-    marginBottom: 4,
   };
 
+  const validThruMs = addDays(quote.createdAt, 30);
+  const validThruLabel = longDate(validThruMs);
+  const controlFields: Array<{ k: string; v: string }> = [
+    { k: "Document", v: quote.id },
+    { k: "Issued", v: isoDate(quote.createdAt) },
+    { k: "Valid through", v: isoDate(validThruMs) },
+    { k: "Method", v: "NFPA 705" },
+    { k: "Rev", v: "—" },
+    { k: "Sheet", v: "1 of 1" },
+  ];
+
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const scopeRows: Array<{ item: string; desc: string; sub?: string; qty: string; hours: string }> =
+    [];
+  let sr = 1;
+  if (hasVenueList) {
+    locList.forEach((v) => {
+      scopeRows.push({
+        item: pad2(sr++),
+        desc: "Field-test installed soft goods in place, NFPA 705 field-flame method",
+        sub: v.label + (v.place ? " — " + v.place : ""),
+        qty: v.curtains + " curtain" + (v.curtains === 1 ? "" : "s"),
+        hours: num1((v.curtains * curtainMin) / 60) + " hrs",
+      });
+    });
+  } else {
+    scopeRows.push({
+      item: pad2(sr++),
+      desc: "Arrive & field-test installed soft goods in place, NFPA 705 field-flame method",
+      qty: curtainsLabel,
+      hours: num1(inspectionHours) + " hrs",
+    });
+  }
+  if (hasTrip) {
+    scopeRows.push({
+      item: pad2(sr++),
+      desc: "Round-trip site mobilization from " + originCity,
+      qty: Math.round(rtMiles) + " mi rt",
+      hours: num1(travelHours) + " hrs",
+    });
+  }
+  scopeRows.push({
+    item: pad2(sr++),
+    desc: "Document & disposition each curtain pass/fail; issue findings report",
+    qty: "1 report",
+    hours: "incl.",
+  });
+
+  const introSentence = renderField(settings.templates, "flame_proposal", "intro", {
+    company: companyName,
+    venue: venueName,
+    curtainsLabel,
+  });
+  const priceHeadline = renderField(
+    settings.templates,
+    "flame_proposal",
+    hasTrip ? "priceLine" : "priceLineNoTravel",
+    { curtainsLabel, price: totalLabel }
+  );
+  const priceSupport = renderField(settings.templates, "flame_proposal", "costTail", {});
+  const signoffCta = renderField(settings.templates, "flame_proposal", "signoff", {});
+
+  const cellPad = "9px 11px";
+
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "var(--font-ui)", color: "#16181d" }}>
+    <div style={{ minHeight: "100vh", fontFamily: SANS, color: "#111" }}>
       <style>{TOOLBAR_CSS}</style>
 
       {/* print-hidden toolbar */}
@@ -271,244 +352,315 @@ export default async function FlameTestLetterPage({
         </div>
       </div>
 
-      {/* letter sheet */}
+      {/* work-order sheet */}
       <div style={{ padding: "26px 16px 60px" }}>
         <div className="pk-doc-page">
-          <div style={{ fontFamily: "var(--font-ui)", fontSize: "11pt", lineHeight: 1.55, color: "#1a1c20" }}>
-            {/* letterhead — uploaded logo when set, baked sheet otherwise (D59 ladder) */}
-            <div style={{ borderBottom: `3px solid ${accent}`, paddingBottom: 14, marginBottom: 20 }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={settings.logoDark || letterhead.src}
-                alt={companyName}
-                style={
-                  settings.logoDark
-                    ? { display: "block", maxHeight: 76, maxWidth: "100%", objectFit: "contain" }
-                    : { display: "block", width: "100%", height: "auto" }
-                }
-              />
-            </div>
+          <div style={{ fontFamily: SANS, fontSize: "11pt", lineHeight: 1.5, color: "#111" }}>
+            {/* 1) letterhead + accent hairline */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={settings.logoDark || letterhead.src}
+              alt={companyName}
+              style={
+                settings.logoDark
+                  ? { display: "block", maxHeight: 64, maxWidth: "100%", objectFit: "contain" }
+                  : { display: "block", width: "100%", height: "auto" }
+              }
+            />
+            <div style={{ height: 1, background: accent, marginTop: 12, marginBottom: 18 }} />
 
-            {/* title block */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-end",
-                gap: 16,
-                marginBottom: 20,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: "19pt", fontWeight: 700, letterSpacing: "-.015em", lineHeight: 1.1 }}>
-                  Flame Test Proposal
-                </div>
-                <div
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "9pt",
-                    color: accentInk,
-                    marginTop: 6,
-                  }}
-                >
-                  {quote.id} · NFPA 705 field flame testing
-                </div>
-              </div>
-              <div style={{ textAlign: "right", fontSize: "9.5pt", color: "#5b616e" }}>
-                {dateLabel}
-              </div>
-            </div>
-
-            {/* meta grid */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1.2fr 1fr 1fr",
-                gap: 18,
-                marginBottom: 18,
-                fontSize: "10pt",
-              }}
-            >
-              <div>
-                <div style={microLabel}>Prepared for</div>
-                <div style={{ fontWeight: 600 }}>{venueName}</div>
-                {contactName && (
-                  <div style={{ color: "#5b616e" }}>
-                    Attn: {contactName}
-                    {contactRole ? " · " + contactRole : ""}
-                  </div>
-                )}
-              </div>
-              <div>
-                <div style={microLabel}>Location</div>
-                <div style={{ fontWeight: 600 }}>{locationLabel}</div>
-              </div>
-              <div>
-                <div style={microLabel}>Scope</div>
-                <div style={{ fontWeight: 600 }}>{curtainsLabel}</div>
-                <div style={{ color: "#5b616e" }}>annual flame test</div>
-              </div>
-            </div>
-
-            {/* price band */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 14,
-                background: accentSoft,
-                border: `1px solid ${accentBd}`,
-                borderRadius: 8,
-                padding: "11px 15px",
-                marginBottom: 20,
-              }}
-            >
-              <div>
-                <div style={{ ...microLabel, color: accentInk, marginBottom: 1 }}>Total</div>
-                <div
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "16pt",
-                    fontWeight: 600,
-                    letterSpacing: "-.01em",
-                  }}
-                >
-                  {totalLabel}
-                </div>
-              </div>
-              <div style={{ textAlign: "right", fontSize: "9pt", color: "#5b616e", lineHeight: 1.6 }}>
+            {/* 2) document-control header band */}
+            <div style={{ display: "flex", border: "1px solid #cfcfcf" }}>
+              <div
+                style={{
+                  flex: "0 0 58%",
+                  padding: 16,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 18,
+                  borderRight: "1px solid #cfcfcf",
+                }}
+              >
                 <div>
-                  {curtainsLabel} · {locList.length > 1 ? locList.length + " venues" : "on-site testing"}
-                </div>
-                <div>plus applicable sales/use tax</div>
-              </div>
-            </div>
-
-            {contactName && <div style={{ marginBottom: 12 }}>Dear {contactName},</div>}
-
-            <p style={{ margin: "0 0 13px" }}>
-              This proposal outlines the services {companyName} would perform for the annual flame
-              test at {venueName} of roughly {curtainsLabel}, per NFPA 705 — Recommended Practice
-              for a Field Flame Test, outlined below:
-            </p>
-
-            <p
-              style={{
-                margin: "0 0 16px",
-                fontSize: "9.5pt",
-                color: "#40454e",
-                padding: "10px 14px",
-                background: "#f7f8fa",
-                borderLeft: `3px solid ${accentBd}`,
-                borderRadius: "0 6px 6px 0",
-              }}
-            >
-              NFPA 705 §1.1.1: This recommended practice provides guidance to enforcement officials
-              for the field application of an open flame to textiles and films that have been in use
-              in the field or for which reliable laboratory data are not available.
-            </p>
-
-            {hasVenueList && (
-              <div style={{ margin: "0 0 16px" }}>
-                <div style={microLabel}>Venues included</div>
-                {locList.map((v, i) => (
+                  <div style={{ fontSize: "23pt", fontWeight: 600, letterSpacing: "-.01em", lineHeight: 1.05 }}>
+                    Field Flame Inspection
+                  </div>
                   <div
-                    key={i}
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "baseline",
-                      gap: 10,
-                      padding: "5px 2px",
-                      borderBottom: "1px solid #f0f1f4",
-                      fontSize: "10pt",
+                      fontFamily: MONO,
+                      fontSize: "8pt",
+                      letterSpacing: ".1em",
+                      textTransform: "uppercase",
+                      color: "#8c919c",
+                      marginTop: 7,
                     }}
                   >
-                    <span>
-                      {v.label}
-                      {v.place ? <span style={{ color: "#8c919c" }}> — {v.place}</span> : null}
+                    Service Work Order · NFPA 705 Field-Flame Method
+                  </div>
+                </div>
+                <div style={{ marginTop: "auto" }}>
+                  <div style={{ ...ctrlLabel, fontSize: "7.5pt", color: accentInk, marginBottom: 3 }}>
+                    Engagement fee
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                    <span style={{ fontFamily: MONO, fontSize: "27pt", fontWeight: 600, letterSpacing: "-.02em" }}>
+                      {totalLabel}
                     </span>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "9pt", color: "#5b616e", flexShrink: 0 }}>
-                      {v.curtains} curtain{v.curtains === 1 ? "" : "s"}
+                    <span style={{ fontFamily: MONO, fontSize: "8pt", color: "#9aa0ab", letterSpacing: ".08em" }}>
+                      USD
                     </span>
+                  </div>
+                </div>
+              </div>
+              <div style={{ flex: "1 1 42%", display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+                {controlFields.map((f, i) => (
+                  <div
+                    key={f.k}
+                    style={{
+                      padding: "10px 12px",
+                      borderBottom: i < 4 ? "1px solid #e4e7ec" : "none",
+                      borderLeft: i % 2 ? "1px solid #e4e7ec" : "none",
+                    }}
+                  >
+                    <div style={{ ...ctrlLabel, fontSize: "7pt", color: "#9aa0ab", marginBottom: 3 }}>
+                      {f.k}
+                    </div>
+                    <div style={{ fontFamily: MONO, fontSize: "9.5pt", color: "#111" }}>{f.v}</div>
                   </div>
                 ))}
               </div>
-            )}
+            </div>
 
-            {hasTrip && (
-              <div style={{ margin: "0 0 18px" }}>
-                <div style={microLabel}>Your visit, at a glance</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-                  {[
-                    {
-                      label: "Travel each way",
-                      value: num1(oneWayHours) + " hrs",
-                      sub: num1(oneWayMiles) + " miles from " + originCity,
-                    },
-                    {
-                      label: "On-site testing",
-                      value: num1(inspectionHours) + " hrs",
-                      sub: curtainsLabel + " tested",
-                    },
-                    {
-                      label: "Total visit",
-                      value: num1(totalHours) + " hrs",
-                      sub: "door to door",
-                    },
-                  ].map((tile) => (
+            {/* 3) parties row */}
+            <div style={{ display: "flex", border: "1px solid #cfcfcf", borderTop: "none", marginBottom: 24 }}>
+              <div style={{ flex: "1 1 50%", padding: "13px 16px", borderRight: "1px solid #cfcfcf" }}>
+                <div style={ctrlLabel}>Issued to</div>
+                <div style={{ fontWeight: 600, marginTop: 5 }}>{venueName}</div>
+                {contactName && (
+                  <div style={{ color: "#5b616e", fontSize: "10pt" }}>
+                    {contactName}
+                    {contactRole ? " · " + contactRole : ""}
+                  </div>
+                )}
+                {locList.map((v, i) => (
+                  <div key={i} style={{ color: "#5b616e", fontSize: "9.5pt", marginTop: 2 }}>
+                    {v.label}
+                    {v.place ? " — " + v.place : ""}
+                  </div>
+                ))}
+              </div>
+              <div style={{ flex: "1 1 50%", padding: "13px 16px" }}>
+                <div style={ctrlLabel}>Issued by</div>
+                <div style={{ fontWeight: 600, marginTop: 5 }}>{companyName}</div>
+                <div style={{ color: "#5b616e", fontSize: "9.5pt" }}>Mobilizing from {originCity}</div>
+                <div style={{ color: "#5b616e", fontSize: "10pt", marginTop: 2 }}>
+                  {owner}
+                  {signerTitle ? " · " + signerTitle : ""}
+                </div>
+                {signerEmail && <div style={{ color: "#5b616e", fontSize: "9.5pt" }}>{signerEmail}</div>}
+              </div>
+            </div>
+
+            {/* 4) scope of work */}
+            <div style={{ marginBottom: 20 }}>
+              <div
+                style={{
+                  display: "inline-block",
+                  fontSize: "10pt",
+                  fontWeight: 700,
+                  letterSpacing: ".1em",
+                  textTransform: "uppercase",
+                  color: accentInk,
+                  borderBottom: `1px solid ${accent}`,
+                  paddingBottom: 3,
+                }}
+              >
+                Scope of work
+              </div>
+              <p style={{ margin: "12px 0 14px", fontSize: "10.5pt", color: "#3a3f4a", lineHeight: 1.6 }}>
+                {introSentence}
+              </p>
+              <div style={{ border: "1px solid #cfcfcf" }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "8% 56% 18% 18%",
+                    background: accentTint12,
+                    borderBottom: "1px solid #cfcfcf",
+                  }}
+                >
+                  {["Item", "Description", "Qty / Basis", "Hours"].map((h, i) => (
                     <div
-                      key={tile.label}
+                      key={h}
                       style={{
-                        border: "1px solid #ececf0",
-                        borderRadius: 8,
-                        padding: "9px 12px",
+                        padding: "7px 11px",
+                        fontSize: "7.5pt",
+                        letterSpacing: ".07em",
+                        textTransform: "uppercase",
+                        fontWeight: 700,
+                        color: accentInk,
+                        textAlign: i >= 2 ? "right" : "left",
                       }}
                     >
-                      <div style={{ ...microLabel, marginBottom: 2 }}>{tile.label}</div>
-                      <div style={{ fontFamily: "var(--font-mono)", fontSize: "12pt", fontWeight: 600 }}>
-                        {tile.value}
-                      </div>
-                      <div style={{ fontSize: "8.5pt", color: "#8c919c", marginTop: 2 }}>{tile.sub}</div>
+                      {h}
                     </div>
                   ))}
                 </div>
+                {scopeRows.map((r, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "8% 56% 18% 18%",
+                      borderBottom: i < scopeRows.length - 1 ? "1px solid #f0f1f4" : "none",
+                      alignItems: "baseline",
+                    }}
+                  >
+                    <div style={{ padding: cellPad, fontFamily: MONO, fontSize: "9pt", color: "#9aa0ab" }}>
+                      {r.item}
+                    </div>
+                    <div style={{ padding: cellPad, fontSize: "10pt" }}>
+                      {r.desc}
+                      {r.sub && (
+                        <span style={{ display: "block", fontSize: "8.5pt", color: "#8c919c", marginTop: 2 }}>
+                          {r.sub}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        padding: cellPad,
+                        fontFamily: MONO,
+                        fontSize: "9pt",
+                        color: "#5b616e",
+                        textAlign: "right",
+                      }}
+                    >
+                      {r.qty}
+                    </div>
+                    <div
+                      style={{
+                        padding: cellPad,
+                        fontFamily: MONO,
+                        fontSize: "9pt",
+                        color: "#111",
+                        fontWeight: 600,
+                        textAlign: "right",
+                      }}
+                    >
+                      {r.hours}
+                    </div>
+                  </div>
+                ))}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    padding: "8px 11px",
+                    borderTop: "1px solid #cfcfcf",
+                    background: "#fbfbfc",
+                  }}
+                >
+                  <span style={{ fontFamily: MONO, fontSize: "8.5pt", letterSpacing: ".04em", color: "#5b616e" }}>
+                    TOTAL ON-SITE + TRAVEL — {num1(totalHours)} HRS
+                  </span>
+                </div>
               </div>
-            )}
+            </div>
 
-            <p style={{ margin: "0 0 4px" }}>
-              <strong>The above services will cost {totalLabel}.</strong> Sales/Use taxes are not
-              included.
-            </p>
-            <p style={{ margin: "0 0 20px", fontSize: "9.5pt", color: "#40454e" }}>
-              Sales tax, if required, will be billed at the local sales tax rates in force at the
-              time of billing.
-            </p>
-
-            {/* sign-off */}
+            {/* 5) method & standard callout */}
             <div
               style={{
-                borderTop: "1px solid #ececf0",
-                paddingTop: 14,
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-end",
-                gap: 14,
+                borderLeft: `3px solid ${accent}`,
+                background: accentFaint,
+                padding: "9px 13px",
+                marginBottom: 22,
+                fontSize: "9.5pt",
+                color: "#40454e",
+                lineHeight: 1.55,
               }}
             >
-              <div style={{ lineHeight: 1.5 }}>
-                <div style={{ fontSize: "9.5pt", color: "#5b616e", marginBottom: 8 }}>
-                  Questions? Contact me directly — we’re glad to adjust the scope.
+              <span
+                style={{
+                  fontFamily: MONO,
+                  fontSize: "8pt",
+                  letterSpacing: ".07em",
+                  textTransform: "uppercase",
+                  color: accentInk,
+                  marginRight: 8,
+                }}
+              >
+                Method
+              </span>
+              {renderField(settings.templates, "flame_proposal", "methodQuote", {})}
+            </div>
+
+            {/* 6) engagement fee box */}
+            <div
+              style={{
+                border: `1.5px solid ${accent}`,
+                borderTop: `3px solid ${accent}`,
+                borderRadius: 2,
+                padding: "14px 16px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 18,
+                marginBottom: 8,
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ ...ctrlLabel, color: accentInk, fontWeight: 700, marginBottom: 5 }}>
+                  Engagement fee
                 </div>
-                <div style={{ fontWeight: 600 }}>{owner}</div>
-                <div style={{ color: "#40454e", fontSize: "10pt" }}>
-                  {signerTitle}
-                  {signerEmail ? " · " + signerEmail : ""}
+                <div style={{ fontSize: "11pt", fontWeight: 600, color: "#111", lineHeight: 1.45 }}>
+                  {priceHeadline}
+                </div>
+                <div style={{ fontSize: "9pt", color: "#8c919c", marginTop: 6, lineHeight: 1.5 }}>
+                  {priceSupport}
                 </div>
               </div>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: "8pt", color: "#aab0bb", flexShrink: 0 }}>
-                {companyName} · {quote.id} · {dateLabel}
+              <div style={{ flexShrink: 0, display: "flex", alignItems: "baseline", gap: 5 }}>
+                <span style={{ fontFamily: MONO, fontSize: "34pt", fontWeight: 600, letterSpacing: "-.02em", color: "#111" }}>
+                  {totalLabel}
+                </span>
+                <span style={{ fontFamily: MONO, fontSize: "9pt", color: "#9aa0ab", letterSpacing: ".08em" }}>
+                  USD
+                </span>
+              </div>
+            </div>
+
+            {/* 7) authorization / sign-off */}
+            <div style={{ borderTop: "1px solid #cfcfcf", marginTop: 22, paddingTop: 16 }}>
+              <p style={{ margin: "0 0 18px", fontSize: "10pt", color: "#3a3f4a", lineHeight: 1.6 }}>
+                {signoffCta}
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28 }}>
+                <div>
+                  <div style={ctrlLabel}>Prepared by</div>
+                  <div style={{ fontWeight: 600, marginTop: 6 }}>{owner}</div>
+                  <div style={{ color: "#5b616e", fontSize: "9.5pt" }}>{signerTitle}</div>
+                  {signerEmail && <div style={{ color: "#5b616e", fontSize: "9.5pt" }}>{signerEmail}</div>}
+                </div>
+                <div>
+                  <div style={ctrlLabel}>Authorized to proceed</div>
+                  <div style={{ borderBottom: "1px solid #9aa0ab", height: 30 }} />
+                  <div style={{ fontSize: "8pt", color: "#9aa0ab", marginTop: 3 }}>Signature · print name</div>
+                  <div style={{ borderBottom: "1px solid #9aa0ab", height: 24, marginTop: 14 }} />
+                  <div style={{ fontSize: "8pt", color: "#9aa0ab", marginTop: 3 }}>Date</div>
+                </div>
+              </div>
+              <div
+                style={{
+                  fontFamily: MONO,
+                  fontSize: "7.5pt",
+                  color: "#aab0bb",
+                  marginTop: 20,
+                  letterSpacing: ".02em",
+                }}
+              >
+                Work Order {quote.id} · Valid through {validThruLabel} · This work order constitutes a
+                proposal valid for 30 days from issue.
               </div>
             </div>
           </div>

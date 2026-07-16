@@ -1,4 +1,4 @@
-import { asc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { DOC_TABLES, blobs, type CollectionName } from "./doc-tables";
 
@@ -32,6 +32,33 @@ export async function listDocs<T extends Doc = Doc>(
   const rows = opts.includeDeleted
     ? await db.select().from(t).orderBy(asc(t.id))
     : await db.select().from(t).where(eq(t.deleted, false)).orderBy(asc(t.id));
+  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
+}
+
+/**
+ * Candidate rows whose JSON contains `query` (case-insensitive), capped at
+ * `limit`. Filters in SQL so global search never materializes a whole table
+ * (the catalog is ~10.7k rows) — the caller applies its precise per-field
+ * match to the small candidate set. Matches anywhere in the document text;
+ * that's a superset of any field-specific match, so nothing real is missed.
+ */
+export async function searchDocs<T extends Doc = Doc>(
+  coll: CollectionName,
+  query: string,
+  limit: number
+): Promise<T[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const db = await getDb();
+  const t = table(coll);
+  // Escape LIKE metacharacters so a user typing % or _ isn't a wildcard.
+  const pattern = "%" + q.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+  const rows = await db
+    .select()
+    .from(t)
+    .where(and(eq(t.deleted, false), sql`${t.doc}::text ILIKE ${pattern}`))
+    .orderBy(asc(t.id))
+    .limit(limit);
   return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
 }
 

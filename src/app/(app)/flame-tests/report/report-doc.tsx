@@ -1,11 +1,17 @@
 import { fmtLong } from "@/lib/stores/flame-jobs";
+import { renderField } from "@/lib/templates";
+import type { TemplateOverrides } from "@/lib/templates";
 import letterhead from "./peak-letterhead.jpg";
 
 /**
- * Flame Test Report document body — the three printable variants (letter /
- * summary / certificate) from Flame Test Report.dc.html, rendered on the
- * .pk-doc-page foundation. Shared by the live report (report/page.tsx) and
+ * Field Flame Inspection report document body — the three printable variants
+ * (letter / summary / certificate) from Flame Test Report.dc.html, rendered on
+ * the .pk-doc-page foundation. Shared by the live report (report/page.tsx) and
  * the three-up comparison (report/options/page.tsx).
+ *
+ * D72 rebrand: the SERVICE/deliverable is "Field Flame Inspection"; the NFPA
+ * 705 standard name and the physical field-flame-test method phrases stay
+ * verbatim (they're what the AHJ expects on a compliance record).
  *
  * buildReportModel() is the pure port of the .dc.html renderVals(); ReportBody
  * renders the resolved model for the active variant.
@@ -57,6 +63,9 @@ export type OrgCtx = {
   /** Uploaded dark brand mark (Settings → Branding, IDEAS #32) — replaces the
    *  baked-in letterhead image when present. */
   letterhead?: string | null;
+  /** Admin template-wording overrides (settings.templates); resolved against
+   *  the `flame_report` template for the editable report prose. */
+  templates?: TemplateOverrides;
 };
 
 type Row = {
@@ -206,6 +215,22 @@ export function buildReportModel(job: ReportJob, org: OrgCtx) {
   const testedLabel = t.tested + " curtain" + (t.tested === 1 ? "" : "s");
   const resultsPara = narrative(t, goodThrough);
 
+  /* editable report prose (flame_report template, override-or-default) */
+  const ov = org.templates;
+  const letterIntro = renderField(ov, "flame_report", "letterIntro", {
+    company: org.companyName,
+    venue: venueName,
+    testedLabel,
+  });
+  const nfpaQuote = renderField(ov, "flame_report", "nfpaQuote", {});
+  const closing = renderField(ov, "flame_report", "closing", {});
+  const certificateParagraph = renderField(ov, "flame_report", "certificateParagraph", {
+    company: org.companyName,
+    venue: venueName,
+    testedLabel,
+    goodThrough,
+  });
+
   const venueRows = rws.map((r) => ({
     label: r.label,
     tested: String(r.tested),
@@ -243,6 +268,10 @@ export function buildReportModel(job: ReportJob, org: OrgCtx) {
     greetingName,
     testedLabel,
     resultsPara,
+    letterIntro,
+    nfpaQuote,
+    closing,
+    certificateParagraph,
     hasCert: !!cert,
     cert,
     techName,
@@ -319,7 +348,7 @@ function Letterhead({
             textTransform: "uppercase",
           }}
         >
-          Flame Test Results
+          Field Flame Inspection Results
         </span>
         <span
           style={{
@@ -473,9 +502,7 @@ function MetaGrid({ m, bordered }: { m: ReportModel; bordered: boolean }) {
   );
 }
 
-function Nfpa({ accent, soft }: { accent: string; soft: boolean }) {
-  const text =
-    "NFPA 705 §1.1.1: This recommended practice provides guidance to enforcement officials for the field application of an open flame to textiles and films that have been in use in the field or for which reliable laboratory data are not available.";
+function Nfpa({ accent, soft, text }: { accent: string; soft: boolean; text: string }) {
   if (soft) {
     return <p style={{ margin: "0 0 14px", fontSize: "9.5pt", color: "#6b7079", lineHeight: 1.5 }}>{text}</p>;
   }
@@ -539,14 +566,10 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
             <div style={{ marginBottom: 3 }}><span style={{ color: "#6b7079" }}>Date:</span> {m.dateLabel}</div>
             <div style={{ marginBottom: 3 }}><span style={{ color: "#6b7079" }}>Venue Name:</span> <strong>{m.venueName}</strong></div>
             <div style={{ marginBottom: 18 }}><span style={{ color: "#6b7079" }}>Location:</span> {m.locationLabel}</div>
-            <div style={{ marginBottom: 3 }}><span style={{ color: "#6b7079" }}>RE:</span> Flame Testing at {m.venueName}</div>
+            <div style={{ marginBottom: 3 }}><span style={{ color: "#6b7079" }}>RE:</span> Field Flame Inspection at {m.venueName}</div>
             <div style={{ marginBottom: 16 }}>Dear {m.greetingName},</div>
-            <p style={{ margin: "0 0 13px" }}>
-              Per your request, {m.companyName} performed a field flame-retardant test at{" "}
-              {m.venueName} on {m.testedLabel} per NFPA 705 — Recommended Practice for a Field Flame
-              Test. The findings are outlined below:
-            </p>
-            <Nfpa accent={accent} soft={false} />
+            <p style={{ margin: "0 0 13px" }}>{m.letterIntro}</p>
+            <Nfpa accent={accent} soft={false} text={m.nfpaQuote} />
             <p style={{ margin: "0 0 13px" }}>{m.resultsPara}</p>
             {m.hasCert && (
               <p style={{ margin: "0 0 13px" }}>
@@ -554,10 +577,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
                 {m.dateLabel} by {m.techName}.
               </p>
             )}
-            <p style={{ margin: "0 0 16px" }}>
-              Enclosed you will find an invoice for these services and a sample flame tag for your
-              records.
-            </p>
+            <p style={{ margin: "0 0 16px" }}>{m.closing}</p>
             <p style={{ margin: "0 0 6px" }}>If you have any questions, please contact me directly at:</p>
             <Signer m={m} />
           </div>
@@ -605,7 +625,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
                     color: "#8c919c",
                   }}
                 >
-                  Field Test Summary
+                  Field Flame Inspection Summary
                 </div>
                 {chip}
               </div>
@@ -617,17 +637,14 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
               )}
             </div>
 
-            <Nfpa accent={accent} soft={false} />
+            <Nfpa accent={accent} soft={false} text={m.nfpaQuote} />
             <p style={{ margin: "0 0 13px" }}>{m.resultsPara}</p>
             {m.hasNotes && (
               <p style={{ margin: "0 0 13px", fontSize: "10.5pt", color: "#40454e" }}>
                 <span style={{ color: "#8c919c" }}>Field notes:</span> {m.notes}
               </p>
             )}
-            <p style={{ margin: "0 0 16px" }}>
-              Enclosed you will find an invoice for these services and a sample flame tag for your
-              records.
-            </p>
+            <p style={{ margin: "0 0 16px" }}>{m.closing}</p>
             <p style={{ margin: "0 0 6px" }}>If you have any questions, please contact me directly at:</p>
             <Signer m={m} />
           </div>
@@ -701,10 +718,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
                 margin: "0 auto 22px",
               }}
             >
-              This certifies that {m.companyName} performed a field flame-retardant test at{" "}
-              <strong style={{ color: "#1a1c20" }}>{m.venueName}</strong> ({m.locationLabel}) on{" "}
-              {m.dateLabel}, in accordance with NFPA 705 — Recommended Practice for a Field Flame
-              Test.
+              {m.certificateParagraph}
             </p>
 
             <MetaGrid m={m} bordered />
@@ -715,7 +729,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
               </div>
             )}
 
-            <Nfpa accent={accent} soft />
+            <Nfpa accent={accent} soft text={m.nfpaQuote} />
             {m.hasNotes && (
               <p style={{ margin: "0 0 14px", fontSize: "10pt", color: "#40454e" }}>
                 <span style={{ color: "#8c919c" }}>Field notes:</span> {m.notes}

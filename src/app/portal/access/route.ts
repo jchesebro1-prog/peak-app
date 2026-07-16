@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { grantByToken, PORTAL_COOKIE } from "@/lib/portal";
+import { grantByToken, PORTAL_COOKIE, PORTAL_TTL_DAYS } from "@/lib/portal";
 
 /**
  * Magic-link landing (IDEAS #47): /portal/access?t=<token> validates the
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/portal",
-      maxAge: 60 * 60 * 24 * 180, // 6 months; revoke any time from the customer record
+      maxAge: 60 * 60 * 24 * PORTAL_TTL_DAYS, // matches the grant's hard expiry; revoke any time
     });
   } else {
     res.cookies.delete(PORTAL_COOKIE);

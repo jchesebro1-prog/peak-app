@@ -117,6 +117,20 @@ export type LaborDraft = {
 
 export type FabricOpt = { sku: string; name: string; costPerSqft: number };
 
+/** One catalog search hit for the estimator's "Add part from catalog" picker. */
+export type CatalogHit = {
+  sku: string;
+  desc: string;
+  category: string;
+  unit: string;
+  cost: number;
+  list: number;
+  mfr: string;
+};
+
+/** A page of catalog search results (total = matches before the display cap). */
+export type CatalogSearch = { hits: CatalogHit[]; total: number };
+
 export type CustomerLite = {
   id: string;
   name: string;

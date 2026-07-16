@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { listDocs } from "@/db/doc-store";
+import { searchDocs } from "@/db/doc-store";
 
 /**
  * Global nav search (⌘K) — port of Nav.dc.html's search sources:
@@ -37,15 +37,19 @@ export async function GET(req: Request) {
     .toLowerCase();
   if (q.length < 2) return NextResponse.json({ groups: [] });
 
+  // Pull only a small candidate set per table from SQL (matches anywhere in
+  // the doc), then apply the precise per-field filter below. Avoids
+  // materializing whole tables — the catalog alone is ~10.7k rows.
+  const CANDIDATES = 100;
   const [quotes, designs, surveys, inspections, comms, customers, parts] =
     await Promise.all([
-      listDocs("quotes"),
-      listDocs("designs"),
-      listDocs("surveys"),
-      listDocs("inspections"),
-      listDocs("comms"),
-      listDocs("customers"),
-      listDocs("catalog_parts"),
+      searchDocs("quotes", q, CANDIDATES),
+      searchDocs("designs", q, CANDIDATES),
+      searchDocs("surveys", q, CANDIDATES),
+      searchDocs("inspections", q, CANDIDATES),
+      searchDocs("comms", q, CANDIDATES),
+      searchDocs("customers", q, CANDIDATES),
+      searchDocs("catalog_parts", q, CANDIDATES),
     ]);
 
   const groups: Group[] = [];

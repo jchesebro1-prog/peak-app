@@ -35,6 +35,9 @@ export type CatalogPart = {
   discipline?: string;
   /** Labor rows — 'labor' | 'ot' | 'sup' | 'shop' | 'travel' | 'equip'. */
   role?: string;
+  /** Freeform flag shown in the catalog (e.g. "verify price" on imported rows
+   *  whose price looked off). Cleared once a human confirms the pricing. */
+  note?: string;
 };
 
 /** All parts (port of window.MASTER_CATALOG reads). */

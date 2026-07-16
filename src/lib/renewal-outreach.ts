@@ -44,6 +44,7 @@ import {
   type LetterBlock,
   type LetterDoc,
 } from "@/lib/pdf";
+import { renderField } from "@/lib/templates";
 
 /**
  * IDEAS #36 — one-click renewal outreach. The ✉ on a renewal row runs this:
@@ -320,7 +321,7 @@ async function ensureFlameRenewalQuote(
   const contact = job.contact || prior?.contact || null;
   const year = new Date().getFullYear();
   const quote = await createQuote({
-    name: (job.customer || "Customer") + " — Flame test renewal " + year,
+    name: (job.customer || "Customer") + " — Field Flame Inspection renewal " + year,
     customer: job.customer || prior?.customer || "",
     customerId: job.customerId || prior?.customerId || null,
     locationId: job.locationId || prior?.locationId || null,
@@ -409,22 +410,17 @@ async function flameLetterDoc(
   const curtainsLabel =
     curtainsTotal + " curtain" + (curtainsTotal === 1 ? "" : "s");
 
+  const ov = settings.templates;
   const blocks: LetterBlock[] = [
     {
       kind: "p",
-      text:
-        `This proposal outlines the services ${companyName} would perform for the annual ` +
-        `flame test at ${venueName} of roughly ${curtainsLabel}, per NFPA 705 — ` +
-        `Recommended Practice for a Field Flame Test, outlined below:`,
+      text: renderField(ov, "flame_proposal", "intro", {
+        company: companyName,
+        venue: venueName,
+        curtainsLabel,
+      }),
     },
-    {
-      kind: "quote",
-      text:
-        "NFPA 705 §1.1.1: This recommended practice provides guidance to enforcement " +
-        "officials for the field application of an open flame to textiles and films " +
-        "that have been in use in the field or for which reliable laboratory data " +
-        "are not available.",
-    },
+    { kind: "quote", text: renderField(ov, "flame_proposal", "methodQuote", {}) },
   ];
   if (locList.length > 1) {
     blocks.push({
@@ -453,7 +449,7 @@ async function flameLetterDoc(
       text:
         `The distance from ${companyName} (${originCity}) to ${venueName} is ` +
         `approximately ${num1(oneWayMiles)} miles. Travel time is about ` +
-        `${num1(oneWayHours)} hours each way, and the on-site testing should take ` +
+        `${num1(oneWayHours)} hours each way, and the on-site inspection should take ` +
         `approximately ${num1(inspectionHours)} hours — for a total of roughly ` +
         `${num1(2 * oneWayHours + inspectionHours)} hours for the visit.`,
     });
@@ -466,20 +462,26 @@ async function flameLetterDoc(
     accent: settings.accent || "#7b3f8a",
     headerJpeg: head.jpeg,
     headerFull: head.full,
-    tag: "Flame Test Proposal",
+    tag: "Field Flame Inspection Proposal",
     meta: [
       { label: "Date:", value: fmtDate(quote.createdAt) },
       { label: "Venue Name:", value: venueName, strong: true },
       { label: "Location:", value: locationLabel },
     ],
-    re: `Flame Testing at ${venueName}`,
+    re: `Field Flame Inspection at ${venueName}`,
     greeting: contact?.name || "Sir or Madam",
     blocks,
-    costLine: `The above services will cost ${money(quote.value != null ? quote.value : ft.total || 0)}.`,
-    costTail: "Sales/Use taxes are not included.",
-    taxNote:
-      "Sales tax, if required, will be billed at the local sales tax rates in force " +
-      "at the time of billing.",
+    costLine: renderField(
+      ov,
+      "flame_proposal",
+      rtMiles > 0 ? "priceLine" : "priceLineNoTravel",
+      {
+        curtainsLabel,
+        price: money(quote.value != null ? quote.value : ft.total || 0),
+      }
+    ),
+    costTail: renderField(ov, "flame_proposal", "costTail", {}),
+    taxNote: renderField(ov, "flame_proposal", "taxNote", {}),
     signer: await signerFor(quote.owner || "Jeff Chesebro"),
   };
 }
@@ -721,22 +723,17 @@ async function inspectionLetterDoc(
     lineSetsTotal + " line set" + (lineSetsTotal === 1 ? "" : "s");
   const scope = (insp.scope || "").trim();
 
+  const ov = settings.templates;
   const blocks: LetterBlock[] = [
     {
       kind: "p",
-      text:
-        `This proposal outlines the services ${companyName} would perform for ` +
-        `${cadence} at ${venueName}, covering roughly ${lineSetsLabel}, outlined below:`,
+      text: renderField(ov, "inspection_proposal", "intro", {
+        company: companyName,
+        venue: venueName,
+        cadence,
+      }),
     },
-    {
-      kind: "quote",
-      text:
-        "A rigging inspection checks every accessible component of the system — " +
-        "anything that leaves the ground — against current federal regulations and " +
-        "theatrical industry standards (OSHA, NFPA, ANSI E1). Every finding is " +
-        "documented in a written report, sorted Urgent / Necessary / Basic, with " +
-        "photographs and recommended corrections.",
-    },
+    { kind: "quote", text: renderField(ov, "inspection_proposal", "standardsQuote", {}) },
   ];
   if (scope) blocks.push({ kind: "p", text: "Scope: " + scope });
   if (locList.length > 1) {
@@ -788,11 +785,17 @@ async function inspectionLetterDoc(
     re: `Rigging Inspection at ${venueName}`,
     greeting: contact?.name || "Sir or Madam",
     blocks,
-    costLine: `The above services will cost ${money(quote.value != null ? quote.value : insp.total || 0)}.`,
-    costTail: "Sales/Use taxes are not included.",
-    taxNote:
-      "Sales tax, if required, will be billed at the local sales tax rates in force " +
-      "at the time of billing.",
+    costLine: renderField(
+      ov,
+      "inspection_proposal",
+      rtMiles > 0 ? "priceLine" : "priceLineNoTravel",
+      {
+        lineSetsLabel,
+        price: money(quote.value != null ? quote.value : insp.total || 0),
+      }
+    ),
+    costTail: renderField(ov, "inspection_proposal", "costTail", {}),
+    taxNote: renderField(ov, "inspection_proposal", "taxNote", {}),
     signer: await signerFor(quote.owner || "Jeff Chesebro"),
   };
 }
@@ -883,25 +886,29 @@ export async function flameRenewalOutreach(
   const quote = pricing.quote;
   const pdf = renderLetterPdf(await flameLetterDoc(quote, settings));
   const attachment = pdfAttachment(
-    "Flame-test-renewal-" + quote.id + ".pdf",
+    "Field-flame-inspection-renewal-" + quote.id + ".pdf",
     pdf
   );
 
   const contact = job.contact || null;
   const customer = job.customer || "your venue";
   const lastLabel = monthYear(job.completedAt);
+  const ov = settings.templates;
   const template: Copy = {
-    subject: "Annual flame test renewal — " + (job.customer || ""),
-    body:
-      `Hi ${firstName(contact?.name || "") || "there"},\n\n` +
-      `Our records show the annual flame test at ${customer}` +
-      (job.venue ? ` (${job.venue})` : "") +
-      (lastLabel ? ` was last performed in ${lastLabel}` : ` is coming due`) +
-      `, which makes it due for renewal. Per NFPA 705 these tests are performed ` +
-      `yearly to keep your curtains and soft goods compliant.\n\n` +
-      priceParagraph(pricing, "test") +
-      `\n\n` +
-      `Thanks,\n${firstName(me)}\n${settings.companyName || "Peak Systems Group"}`,
+    subject: renderField(ov, "flame_renewal_email", "subject", {
+      customer: job.customer || "",
+    }),
+    body: renderField(ov, "flame_renewal_email", "body", {
+      contactFirstName: firstName(contact?.name || "") || "there",
+      customer,
+      venueSuffix: job.venue ? ` (${job.venue})` : "",
+      lastPerformedClause: lastLabel
+        ? `was last performed in ${lastLabel}`
+        : "is coming due",
+      priceParagraph: priceParagraph(pricing, "inspection"),
+      senderFirstName: firstName(me),
+      company: settings.companyName || "Peak Systems Group",
+    }),
   };
 
   const threadId = await upsertRenewalDraft({
@@ -946,17 +953,21 @@ export async function inspectionRenewalOutreach(
   const lm = levelMeta(rec.level);
   const cadenceShort = lm.key === 2 ? "five-year Level 2" : "annual Level 1";
   const customer = rec.customer || "your venue";
+  const ov = settings.templates;
   const template: Copy = {
-    subject: lm.label + " rigging inspection renewal — " + (rec.customer || ""),
-    body:
-      `Hi ${firstName(rec.contact || "") || "there"},\n\n` +
-      `Our records show the ${cadenceShort} rigging inspection at ` +
-      `${customer}` +
-      (rec.venue ? ` (${rec.venue})` : "") +
-      ` is due for renewal.\n\n` +
-      priceParagraph(pricing, "inspection") +
-      `\n\n` +
-      `Thanks,\n${firstName(me)}\n${settings.companyName || "Peak Systems Group"}`,
+    subject: renderField(ov, "inspection_renewal_email", "subject", {
+      levelLabel: lm.label,
+      customer: rec.customer || "",
+    }),
+    body: renderField(ov, "inspection_renewal_email", "body", {
+      contactFirstName: firstName(rec.contact || "") || "there",
+      customer,
+      venueSuffix: rec.venue ? ` (${rec.venue})` : "",
+      cadenceShort,
+      priceParagraph: priceParagraph(pricing, "inspection"),
+      senderFirstName: firstName(me),
+      company: settings.companyName || "Peak Systems Group",
+    }),
   };
 
   const threadId = await upsertRenewalDraft({

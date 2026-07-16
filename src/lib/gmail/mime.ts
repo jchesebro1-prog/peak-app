@@ -11,11 +11,20 @@ function base64url(buf: Buffer): string {
   return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-/** RFC-2047 encode a header value if it contains non-ASCII. */
-function encodeHeader(value: string): string {
+/** Strip CR/LF (and other control chars) so a value can't inject extra
+ *  header lines into the message. Applied to every interpolated header. */
+function oneLine(value: string): string {
   // eslint-disable-next-line no-control-regex
-  if (/^[\x00-\x7F]*$/.test(value)) return value;
-  return "=?UTF-8?B?" + Buffer.from(value, "utf8").toString("base64") + "?=";
+  return (value || "").replace(/[\r\n\x00-\x1F\x7F]+/g, " ").trim();
+}
+
+/** RFC-2047 encode a header value if it contains non-ASCII. Always
+ *  single-lined first to prevent header injection via embedded CRLF. */
+function encodeHeader(value: string): string {
+  const v = oneLine(value);
+  // eslint-disable-next-line no-control-regex
+  if (/^[\x00-\x7F]*$/.test(v)) return v;
+  return "=?UTF-8?B?" + Buffer.from(v, "utf8").toString("base64") + "?=";
 }
 
 export type OutboundAttachment = {
@@ -47,10 +56,10 @@ function wrap76(b64: string): string {
  *  Plain text by default; multipart/mixed when attachments are present. */
 export function buildRaw(m: OutboundMime): string {
   const headers: string[] = [
-    "From: " + m.from,
-    "To: " + m.to,
+    "From: " + oneLine(m.from),
+    "To: " + oneLine(m.to),
   ];
-  if (m.cc) headers.push("Cc: " + m.cc);
+  if (m.cc) headers.push("Cc: " + oneLine(m.cc));
   headers.push("Subject: " + encodeHeader(m.subject));
   headers.push("MIME-Version: 1.0");
   if (m.inReplyTo) headers.push("In-Reply-To: " + m.inReplyTo);

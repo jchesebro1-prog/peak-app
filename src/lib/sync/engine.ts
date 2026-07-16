@@ -26,6 +26,9 @@
 import { idb, outboxKey, type OutboxEntry, type MirrorEntry } from "./idb";
 
 /** Collections a field device mirrors locally for offline reads. */
+// Keep in sync with SYNCABLE_COLLECTIONS in src/db/doc-tables.ts — the server
+// push endpoint rejects any collection not in that allowlist, so adding one
+// here without adding it there means its pushes are silently dropped.
 export const FIELD_COLLECTIONS = [
   "surveys",
   "inspections",

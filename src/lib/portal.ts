@@ -1,5 +1,7 @@
+import { timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { getBlob, setBlob } from "@/db/doc-store";
+import { encryptToken, decryptToken } from "@/lib/gmail/crypto";
 
 /**
  * Customer portal access (IDEAS #47 phase 1) — per-PERSON magic-link grants,
@@ -28,9 +30,16 @@ export type PortalGrant = {
   name: string;
   email: string;
   dept?: string;
-  token: string;
+  /** Magic-link token, AES-256-GCM encrypted at rest (see gmail/crypto). A
+   *  leaked DB/backup blob no longer hands over usable portal sessions. */
+  tokenEnc: string;
+  /** Legacy plaintext token from before at-rest encryption — read-only
+   *  fallback so links created earlier keep working. */
+  token?: string;
   createdAt: number;
   createdBy: string;
+  /** Hard expiry — the grant stops working after this even if never revoked. */
+  expiresAt: number;
   revokedAt?: number | null;
   lastSeenAt?: number | null;
 };
@@ -44,6 +53,11 @@ export type PortalSession = {
 
 const BLOB_ID = "portal_grants";
 export const PORTAL_COOKIE = "pk_portal";
+/** Portal login lifetime: the grant hard-expires and the cookie lives this
+ *  long. Was an unbounded grant behind a 180-day cookie; 90 days halves the
+ *  replay window while staying generous for a customer. Tune here. */
+export const PORTAL_TTL_DAYS = 90;
+const GRANT_TTL_MS = PORTAL_TTL_DAYS * 24 * 60 * 60 * 1000;
 /** Refresh lastSeenAt at most this often (avoid a write per request). */
 const SEEN_REFRESH_MS = 10 * 60 * 1000;
 
@@ -74,15 +88,17 @@ export async function createGrant(input: {
   dept?: string;
   createdBy: string;
 }): Promise<PortalGrant> {
+  const now = Date.now();
   const grant: PortalGrant = {
     id: "PG-" + randomToken().slice(0, 10),
     customerId: input.customerId,
     name: input.name.trim(),
     email: input.email.trim(),
     ...(input.dept ? { dept: input.dept.trim() } : {}),
-    token: randomToken(),
-    createdAt: Date.now(),
+    tokenEnc: encryptToken(randomToken()),
+    createdAt: now,
     createdBy: input.createdBy,
+    expiresAt: now + GRANT_TTL_MS,
     revokedAt: null,
     lastSeenAt: null,
   };
@@ -97,18 +113,40 @@ export async function revokeGrant(id: string): Promise<void> {
   await setBlob(BLOB_ID, { [id]: { ...g, revokedAt: Date.now() } });
 }
 
-/** The magic-link path for a grant (prefix with the site origin to share). */
-export function grantPath(g: Pick<PortalGrant, "token">): string {
-  return "/portal/access?t=" + g.token;
+/** The raw magic-link token for a grant — decrypted from tokenEnc (or the
+ *  legacy plaintext field for pre-encryption grants). */
+function rawToken(g: Pick<PortalGrant, "tokenEnc" | "token">): string {
+  if (g.tokenEnc) {
+    try {
+      return decryptToken(g.tokenEnc);
+    } catch {
+      return "";
+    }
+  }
+  return g.token || "";
 }
 
-/** Resolve a raw token to its active grant (null when unknown/revoked). */
+/** The magic-link path for a grant (prefix with the site origin to share). */
+export function grantPath(g: Pick<PortalGrant, "tokenEnc" | "token">): string {
+  return "/portal/access?t=" + rawToken(g);
+}
+
+/** Resolve a raw token to its active grant (null when unknown/revoked/expired).
+ *  Constant-time comparison so a stored token can't be recovered by timing. */
 export async function grantByToken(token: string): Promise<PortalGrant | null> {
   if (!token || token.length < 32) return null;
   const map = await allGrants();
-  const g = Object.values(map).find((x) => x.token === token) || null;
-  if (!g || g.revokedAt) return null;
-  return g;
+  const now = Date.now();
+  const wanted = Buffer.from(token);
+  for (const g of Object.values(map)) {
+    if (g.revokedAt) continue;
+    if (g.expiresAt && now > g.expiresAt) continue;
+    const have = Buffer.from(rawToken(g));
+    if (have.length === wanted.length && timingSafeEqual(have, wanted)) {
+      return g;
+    }
+  }
+  return null;
 }
 
 /**

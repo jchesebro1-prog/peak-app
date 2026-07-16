@@ -165,11 +165,16 @@ export default async function EstimatorPage({
     getSettings(),
   ]);
 
-  const fabrics = fabricRows.map((p) => ({
-    sku: p.sku,
-    name: p.desc,
-    costPerSqft: p.costPerSqft ?? 0,
-  }));
+  // Only catalog fabrics with a real per-sq-ft basis feed the curtain
+  // configurator — imported vendor fabric rows (priced per unit, no costPerSqft)
+  // would otherwise show up as $0/sq ft options.
+  const fabrics = fabricRows
+    .filter((p) => (p.costPerSqft ?? 0) > 0)
+    .map((p) => ({
+      sku: p.sku,
+      name: p.desc,
+      costPerSqft: p.costPerSqft ?? 0,
+    }));
   const laborRates: Record<string, number> = {};
   laborRows.forEach((p) => {
     laborRates[p.sku] = p.cost;

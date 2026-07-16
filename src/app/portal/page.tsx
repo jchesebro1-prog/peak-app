@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getSettings } from "@/lib/settings";
-import { portalSession } from "@/lib/portal";
+import { portalSession, type PortalSession } from "@/lib/portal";
+import { getOptionalUser } from "@/lib/session";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAll as allLeads, OPEN_STAGES, type LeadStage } from "@/lib/stores/leads";
@@ -79,6 +80,26 @@ const CARD_HEAD: React.CSSProperties = {
   gap: 12,
 };
 
+const CTA_PRIMARY: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 7,
+  fontSize: 13.5,
+  fontWeight: 600,
+  color: "#fff",
+  background: "var(--accent)",
+  borderRadius: 10,
+  padding: "12px 18px",
+  textDecoration: "none",
+};
+
+const CTA_SECONDARY: React.CSSProperties = {
+  ...CTA_PRIMARY,
+  color: "var(--accent)",
+  background: "#fff",
+  border: "1px solid var(--accent)",
+};
+
 function Chip({ c }: { c: { label: string; ink: string; soft: string; bd: string } }) {
   return (
     <span
@@ -106,15 +127,38 @@ export default async function PortalPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [sp, settings, session] = await Promise.all([
-    searchParams,
-    getSettings(),
-    portalSession(),
-  ]);
+  const [sp, settings] = await Promise.all([searchParams, getSettings()]);
   const companyName = settings.companyName || "Peak Systems Group";
   const denied = one(sp.denied) === "1";
   const sent = one(sp.sent) === "1";
   const accepted = one(sp.accepted) === "1";
+  const estimate = one(sp.estimate) === "1";
+
+  // Team-gated PREVIEW: a signed-in team member can view a customer's portal as
+  // that customer would see it (from the customer record's "Preview portal"
+  // button, ?preview=<customerId>). Takes precedence over any stale portal
+  // cookie so the team member always previews the requested customer. A real
+  // customer has no team session, so ?preview never grants them anyone's portal.
+  const previewCid = one(sp.preview);
+  let preview = false;
+  let session: PortalSession | null = null;
+  if (previewCid) {
+    const teamUser = await getOptionalUser();
+    if (teamUser) {
+      const pc = await getCustomer(previewCid);
+      if (pc) {
+        const primary = (pc.contacts || []).find((c) => c.primary) || (pc.contacts || [])[0];
+        session = {
+          grantId: "preview",
+          customerId: previewCid,
+          name: primary?.name || teamUser.name,
+          email: primary?.email || "",
+        };
+        preview = true;
+      }
+    }
+  }
+  if (!session) session = await portalSession();
 
   /* -------- signed out / invalid link -------- */
   if (!session) {
@@ -162,8 +206,15 @@ export default async function PortalPage({
   const custName = cust?.name || "your organization";
   const venues = cust?.locations || [];
 
+  // Published quotes the team sent, PLUS the customer's own self-serve estimates
+  // still in draft (source "portal-self-serve") so they can see what they
+  // submitted. Internal drafts stay hidden — only the customer's own drafts.
   const published = quotes
-    .filter((q) => q.customerId === cid && q.status !== "draft")
+    .filter(
+      (q) =>
+        q.customerId === cid &&
+        (q.status !== "draft" || q.source === "portal-self-serve")
+    )
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
   const requests = leads
@@ -189,6 +240,34 @@ export default async function PortalPage({
       logoLight={settings.logoLight || null}
       person={{ name: session.name, customer: custName }}
     >
+      {preview && (
+        <div
+          style={{
+            marginBottom: 18,
+            padding: "11px 16px",
+            background: "#fbf3dd",
+            border: "1px solid #f0e2bd",
+            borderRadius: 10,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ fontSize: 12.5, color: "#8a6d1f", fontWeight: 600 }}>
+            👁 Team preview — this is exactly what {custName} sees in their portal. Actions here
+            still affect real data.
+          </div>
+          <Link
+            href={`/customers/${cid}`}
+            style={{ fontSize: 12, fontWeight: 600, color: "#8a6d1f", textDecoration: "none", whiteSpace: "nowrap" }}
+          >
+            ← Back to customer record
+          </Link>
+        </div>
+      )}
+
       {/* header + request CTA */}
       <div
         style={{
@@ -208,24 +287,27 @@ export default async function PortalPage({
             Everything {companyName} tracks for {custName} — and a fast lane to request new work.
           </div>
         </div>
-        <Link
-          href="/portal/request"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 7,
-            fontSize: 13.5,
-            fontWeight: 600,
-            color: "#fff",
-            background: "var(--accent)",
-            borderRadius: 10,
-            padding: "12px 18px",
-            textDecoration: "none",
-            flexShrink: 0,
-          }}
-        >
-          + Request a quote
-        </Link>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", flexShrink: 0 }}>
+          {preview ? (
+            <>
+              <span title="Disabled in preview" style={{ ...CTA_SECONDARY, opacity: 0.45, cursor: "not-allowed" }}>
+                Build your own estimate
+              </span>
+              <span title="Disabled in preview" style={{ ...CTA_PRIMARY, opacity: 0.45, cursor: "not-allowed" }}>
+                + Request a quote
+              </span>
+            </>
+          ) : (
+            <>
+              <Link href="/portal/estimate" style={CTA_SECONDARY}>
+                Build your own estimate
+              </Link>
+              <Link href="/portal/request" style={CTA_PRIMARY}>
+                + Request a quote
+              </Link>
+            </>
+          )}
+        </div>
       </div>
 
       {sent && (
@@ -243,6 +325,24 @@ export default async function PortalPage({
         >
           Request received — the {companyName} team has it in their queue and will follow up
           shortly. It also appears under “Your open requests” below.
+        </div>
+      )}
+      {estimate && (
+        <div
+          style={{
+            marginBottom: 18,
+            padding: "14px 16px",
+            background: "#eaf6ef",
+            border: "1px solid #cce9da",
+            borderRadius: 10,
+            fontSize: 13,
+            color: "#1f7a52",
+            fontWeight: 600,
+          }}
+        >
+          Estimate received — the {companyName} team will review the numbers and follow up with a
+          confirmed quote. It appears under “Your quotes &amp; estimates” below. Nothing is binding
+          until they do.
         </div>
       )}
       {accepted && (
@@ -310,13 +410,18 @@ export default async function PortalPage({
       {/* quotes */}
       <div style={CARD}>
         <div style={CARD_HEAD}>
-          <div style={{ fontSize: 14.5, fontWeight: 600 }}>Your quotes</div>
-          <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>as published by {companyName}</div>
+          <div style={{ fontSize: 14.5, fontWeight: 600 }}>Your quotes &amp; estimates</div>
+          <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>
+            estimates you&#39;ve submitted and quotes from {companyName}
+          </div>
         </div>
         {published.map((q) => {
+          const isDraft = q.status === "draft"; // only the customer's own self-serve drafts reach here
           const pendingAccept = q.status === "sent" && !!q.portalAcceptance;
-          const canAccept = q.status === "sent" && !q.portalAcceptance;
-          const chip = pendingAccept
+          const canAccept = q.status === "sent" && !q.portalAcceptance && !preview;
+          const chip = isDraft
+            ? { label: "In review with our team", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
+            : pendingAccept
             ? { label: "Accepted — awaiting confirmation", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
             : QUOTE_CHIP[q.status] || QUOTE_CHIP.sent;
           return (
@@ -381,7 +486,7 @@ export default async function PortalPage({
         })}
         {published.length === 0 && (
           <div style={{ padding: "22px 20px", fontSize: 12.5, color: "#9aa0ab", textAlign: "center" }}>
-            No published quotes yet — anything we send you will appear here.
+            Nothing here yet — build an estimate or anything we send you will appear here.
           </div>
         )}
       </div>

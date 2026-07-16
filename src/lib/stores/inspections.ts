@@ -6,6 +6,11 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import {
+  fieldValue,
+  renderTemplate,
+  type TemplateOverrides,
+} from "@/lib/templates";
 
 /**
  * InspectionStore — server port of app/inspect.js (rss_inspections_v1).
@@ -594,6 +599,28 @@ export function boilerplate(
   overrides?: Partial<InspectionBoilerplate> | null
 ): InspectionBoilerplate {
   return { ...BOILERPLATE_DEFAULTS, ...(overrides || {}) };
+}
+
+/**
+ * InspectionBoilerplate with its six prose fields overlaid from the Templates
+ * store (the `inspection_report` template). Falls back to BOILERPLATE_DEFAULTS
+ * for anything an admin hasn't edited; the `standards` list stays built-in.
+ * This is what wires the report's standing text to the Templates screen.
+ */
+export function reportBoilerplate(
+  overrides?: TemplateOverrides,
+  vars: Record<string, string | number | null | undefined> = {}
+): InspectionBoilerplate {
+  const f = (id: string) =>
+    renderTemplate(fieldValue(overrides, "inspection_report", id), vars);
+  return boilerplate({
+    about: f("about"),
+    standardsIntro: f("standardsIntro"),
+    mission: f("mission"),
+    inspectionPurpose: f("inspectionPurpose"),
+    howToUse: f("howToUse"),
+    disclaimer: f("disclaimer"),
+  });
 }
 
 /* ---------- date helpers (records store ISO 'YYYY-MM-DD') ---------- */

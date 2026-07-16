@@ -1,4 +1,4 @@
-import { followUpCount, followUps, followUpInfo } from "@/lib/stores/leads";
+import { followUps, followUpInfo } from "@/lib/stores/leads";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAllDesigns } from "@/lib/stores/designs";
 import { getAllProjects, riskFlags } from "@/lib/stores/projects";
@@ -10,7 +10,7 @@ import {
   priorityMeta,
 } from "@/lib/stores/repair-jobs";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
-import { getAll as allComms, waitHours, unreadCount } from "@/lib/stores/comms";
+import { getAll as allComms, waitHours, unreadCountFrom } from "@/lib/stores/comms";
 import { getPrefs } from "@/lib/stores/notif-prefs";
 import type {
   NavCounts,
@@ -38,11 +38,9 @@ export async function navData(me: string): Promise<{
     projects,
     inspections,
     repairs,
-    flagged,
     surveys,
     comms,
     leadFollowUps,
-    leadCount,
     renewalRows,
     prefs,
   ] = await Promise.all([
@@ -51,15 +49,20 @@ export async function navData(me: string): Promise<{
     getAllProjects(),
     allInspections(),
     allRepairs(),
-    flaggedFromInspections(),
     allSurveys(),
     allComms(),
     followUps({ unownedOrMine: true, me }),
-    followUpCount({ unownedOrMine: true, me }),
     renewals({ dueOnly: true }),
     getPrefs(me),
   ]);
-  const inboxUnread = await unreadCount(me);
+  // Everything below is derived from the arrays already fetched above — no
+  // extra table scans. Previously these re-fetched inspections+repairs
+  // (flagged), leads (leadCount), and comms (unread) a second time, plus a
+  // serial round-trip for unread after the parallel batch. navData runs on
+  // every app page, so this is per-navigation overhead removed.
+  const flagged = await flaggedFromInspections({ jobs: repairs, inspections });
+  const leadCount = leadFollowUps.length;
+  const inboxUnread = unreadCountFrom(comms, me);
 
   const reviewQuotes = quotes.filter(
     (q) =>

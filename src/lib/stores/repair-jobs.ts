@@ -722,9 +722,19 @@ export type FlaggedFinding = { rec: InspectionRecordLike; log: InspectionLogLike
 
 /** Open rigging-inspection findings (Urgent / Necessary) not yet turned into
  *  a repair job. Reads the "inspections" collection via doc-store. */
-export async function flaggedFromInspections(): Promise<FlaggedFinding[]> {
-  const jobs = await listDocs<RepairJobRecord>("repair_jobs");
-  const inspections = await listDocs<InspectionRecordLike>("inspections");
+export async function flaggedFromInspections(
+  preloaded?: {
+    jobs?: RepairJobRecord[];
+    inspections?: InspectionRecordLike[];
+  }
+): Promise<FlaggedFinding[]> {
+  // Callers that already hold these arrays (navData fetches both in its
+  // Promise.all) pass them in to avoid re-scanning the tables here.
+  const jobs =
+    preloaded?.jobs ?? (await listDocs<RepairJobRecord>("repair_jobs"));
+  const inspections =
+    preloaded?.inspections ??
+    (await listDocs<InspectionRecordLike>("inspections"));
   const claimed: Record<string, boolean> = {};
   jobs.forEach((j) => {
     if (j.source && j.source.kind === "inspection" && j.source.refId != null)

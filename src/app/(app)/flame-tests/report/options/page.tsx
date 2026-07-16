@@ -10,11 +10,12 @@ import {
   type OrgCtx,
 } from "../report-doc";
 
-export const metadata = { title: "Flame test report — options — Peak Backend" };
+export const metadata = { title: "Field Flame Inspection report — options — Peak Backend" };
 
 /**
- * Flame Test Report OPTIONS — the "three directions to compare" canvas from
- * Flame Test Report Options.dc.html. Renders the same logged sample results
+ * Field Flame Inspection report OPTIONS — the "three directions to compare"
+ * canvas from Flame Test Report Options.dc.html. Renders the same logged
+ * sample results
  * three ways (letter / summary / certificate) so the office can pick a
  * default. Route: /flame-tests/report/options.
  */
@@ -79,6 +80,7 @@ export default async function FlameTestReportOptionsPage() {
     offices: Array.isArray(settings.offices) ? settings.offices : [],
     users: users.map((u) => ({ name: u.name, roles: u.roles, email: u.email })),
     letterhead: settings.logoDark || null,
+    templates: settings.templates,
   };
   const model = buildReportModel(sampleJob(), org);
 
@@ -109,7 +111,7 @@ export default async function FlameTestReportOptionsPage() {
             color: "#8c919c",
           }}
         >
-          Flame test results report
+          Field Flame Inspection results report
         </div>
         <div style={{ fontSize: 25, fontWeight: 600, letterSpacing: "-.015em", marginTop: 6 }}>
           Three directions to compare

@@ -33,9 +33,16 @@ export type ConnectState = {
 };
 
 function stateSecret(): Buffer {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) {
+    // Never sign/verify the OAuth CSRF-state under an empty key — that would
+    // make `state` forgeable. AUTH_SECRET is required everywhere (same as
+    // token encryption in crypto.ts), so fail loud rather than degrade.
+    throw new Error("AUTH_SECRET is required to sign the Gmail OAuth state.");
+  }
   return crypto
     .createHash("sha256")
-    .update((process.env.AUTH_SECRET || "") + ":gmail-state")
+    .update(secret + ":gmail-state")
     .digest();
 }
 

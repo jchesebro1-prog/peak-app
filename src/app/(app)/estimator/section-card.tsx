@@ -5,6 +5,7 @@ import type { SuggestPart } from "./estimator-data";
 import { fmt, marginColor, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
 import type { CustomDraft, SpecSection } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
+import CatalogPicker from "./catalog-picker";
 
 /**
  * One system card — header (badge / rename / cost / price), per-system margin
@@ -617,69 +618,7 @@ export default function SectionCard(p: SectionCardProps) {
               {addBtn("+ Build custom part", p.onToggleCustom)}
             </div>
 
-            {p.catalogOpen && (
-              <div
-                style={{
-                  marginTop: 11,
-                  background: "#fafbfc",
-                  border: "1px solid #eef0f3",
-                  borderRadius: 10,
-                  padding: 7,
-                }}
-              >
-                {p.suggestions.map((cat) => (
-                  <button
-                    type="button"
-                    key={cat.sku}
-                    className="est-sug"
-                    onClick={() => p.onAddPart(cat)}
-                    style={{
-                      width: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 10,
-                      padding: "9px 11px",
-                      background: "transparent",
-                      border: "none",
-                      borderRadius: 8,
-                      cursor: "pointer",
-                      textAlign: "left",
-                    }}
-                  >
-                    <span style={{ minWidth: 0 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 600, display: "block" }}>
-                        {cat.desc}
-                      </span>
-                      <span
-                        style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb" }}
-                      >
-                        {cat.sku}
-                      </span>
-                    </span>
-                    <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                      <span
-                        style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, color: "#5b616e" }}
-                      >
-                        {fmt(cat.price)}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 600,
-                          color: "#fff",
-                          background: "var(--accent)",
-                          padding: "3px 9px",
-                          borderRadius: 6,
-                        }}
-                      >
-                        Add
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
+            {p.catalogOpen && <CatalogPicker onAdd={p.onAddPart} />}
 
             {/* ===== custom part portal ===== */}
             {p.customOpen && (

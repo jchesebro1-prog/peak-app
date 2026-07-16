@@ -592,11 +592,16 @@ export async function folderCounts(
   };
 }
 
-export async function unreadCount(me?: string): Promise<number> {
+/** Unread count from an already-loaded thread list — lets callers that have
+ *  the comms array in hand (e.g. navData) avoid a second full-table scan. */
+export function unreadCountFrom(list: CommThread[], me?: string): number {
   const user = me || DEFAULT_USER;
-  const list = await listDocs<CommThread>("comms");
   return list.filter((t) => t.unread && visibleTo(t, user) && !t.archived)
     .length;
+}
+
+export async function unreadCount(me?: string): Promise<number> {
+  return unreadCountFrom(await listDocs<CommThread>("comms"), me);
 }
 
 export async function needsReplyCount(me?: string): Promise<number> {

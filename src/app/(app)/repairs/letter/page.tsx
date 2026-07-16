@@ -8,6 +8,7 @@ import {
   DEFAULT_WARRANTY_MONTHS,
 } from "@/lib/stores/repair-jobs";
 import { getSettings } from "@/lib/settings";
+import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
 import { AVG_MPH } from "@/lib/geo";
 import { PrintButton } from "./controls";
@@ -463,8 +464,7 @@ export default async function RepairLetterPage({
               time of billing.
             </p>
             <p style={{ margin: "0 0 18px", fontSize: "10pt", color: "#40454e" }}>
-              All workmanship is covered by our {warrantyMonths}-month warranty from the date the
-              repair is completed.
+              {renderField(settings.templates, "repairs_proposal", "warranty", { warrantyMonths })}
             </p>
 
             <p style={{ margin: "0 0 6px" }}>If you have any questions please contact me directly at:</p>

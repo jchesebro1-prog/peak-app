@@ -6,6 +6,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  index,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -27,16 +28,27 @@ import {
  * query actually needs it (documented upgrade path in AGENTS.md).
  */
 function docTable(name: string) {
-  return pgTable(name, {
-    id: text("id").primaryKey(),
-    doc: jsonb("doc").$type<Record<string, unknown>>().notNull(),
-    rev: integer("rev").notNull().default(1),
-    seq: bigserial("seq", { mode: "number" }).notNull(),
-    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
-    receivedAt: bigint("received_at", { mode: "number" }).notNull(),
-    review: jsonb("review").$type<Record<string, unknown> | null>(),
-    deleted: boolean("deleted").notNull().default(false),
-  });
+  return pgTable(
+    name,
+    {
+      id: text("id").primaryKey(),
+      doc: jsonb("doc").$type<Record<string, unknown>>().notNull(),
+      rev: integer("rev").notNull().default(1),
+      seq: bigserial("seq", { mode: "number" }).notNull(),
+      updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+      receivedAt: bigint("received_at", { mode: "number" }).notNull(),
+      review: jsonb("review").$type<Record<string, unknown> | null>(),
+      deleted: boolean("deleted").notNull().default(false),
+    },
+    (t) => [
+      // Pull-sync hot path: `WHERE seq > cursor ORDER BY seq` (doc-store
+      // listSince) — a full scan+sort without this. seq is monotonic per row.
+      index(`${name}_seq_idx`).on(t.seq),
+      // Every listDocs filters `deleted = false`; keeps deleted tombstones
+      // from dragging on scans as they accumulate.
+      index(`${name}_deleted_idx`).on(t.deleted),
+    ]
+  );
 }
 
 /** Prototype store → table (localStorage key it replaces in comments). */
@@ -67,6 +79,29 @@ export const DOC_TABLES = {
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;
+
+/**
+ * Collections a browser client is allowed to write through the open
+ * /api/sync/push endpoint. This MUST mirror FIELD_COLLECTIONS in
+ * src/lib/sync/engine.ts — the offline outbox only ever captures these.
+ *
+ * Everything else (quotes, designs, leads, comms, catalog_parts) is managed
+ * exclusively through permission-checked server actions and must NEVER be
+ * writable via sync push. Quotes/designs carry the approval `review` subdoc
+ * inside their doc, and catalog_parts carries list prices — if those were
+ * pushable, any signed-in user could self-approve a quote or rewrite prices
+ * by POSTing a crafted document. Keeping the endpoint scoped to genuinely
+ * offline-synced, non-approval collections is the guardrail.
+ */
+export const SYNCABLE_COLLECTIONS: CollectionName[] = [
+  "surveys",
+  "inspections",
+  "flame_jobs",
+  "repair_jobs",
+  "projects",
+  "customers",
+];
+export const SYNCABLE_SET: ReadonlySet<string> = new Set(SYNCABLE_COLLECTIONS);
 
 /**
  * Small-blob singletons (prototype localStorage blobs that aren't

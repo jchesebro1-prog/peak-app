@@ -38,6 +38,12 @@ export type AppSettingsData = {
    *  documents (letters + reports) in place of the baked-in letterhead. */
   logoLight?: string | null;
   logoDark?: string | null;
+  /** Document-template wording overrides (IDEAS — centralized templates),
+   *  a sparse map { [templateId]: { [fieldId]: string } } over the built-in
+   *  defaults in lib/templates.ts. Edited in the Templates screen. */
+  templates?: import("@/lib/templates").TemplateOverrides;
+  /** Per-template "last edited by/when" stamp (replace-in-place). */
+  templatesMeta?: Record<string, { by: string; at: number }>;
 };
 
 export async function getSettingsPatch(): Promise<Record<string, unknown>> {

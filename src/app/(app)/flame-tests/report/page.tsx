@@ -11,12 +11,13 @@ import {
   type OrgCtx,
 } from "./report-doc";
 
-export const metadata = { title: "Flame test report — Peak Backend" };
+export const metadata = { title: "Field Flame Inspection report — Peak Backend" };
 
 /**
- * Flame test RESULTS REPORT — printable results document for a completed flame
- * test, in three variants (letter / summary / certificate). Pixel port of
- * Flame Test Report.dc.html on the .pk-doc-page foundation. Deep-linked as
+ * Field Flame Inspection RESULTS REPORT — printable results document for a
+ * completed inspection, in three variants (letter / summary / certificate).
+ * Pixel port of Flame Test Report.dc.html on the .pk-doc-page foundation.
+ * Deep-linked as
  * /flame-tests/report?job=<flameJobId>&variant=<letter|summary|certificate>.
  * Variant is URL state (the toolbar tabs are <Link>s); default is the
  * certificate (the prototype's noted default).
@@ -210,6 +211,7 @@ export default async function FlameTestReportPage({
     offices: Array.isArray(settings.offices) ? settings.offices : [],
     users: users.map((u) => ({ name: u.name, roles: u.roles, email: u.email })),
     letterhead: settings.logoDark || null,
+    templates: settings.templates,
   };
   const model = buildReportModel(job, org);
 

@@ -1,0 +1,22 @@
+CREATE INDEX "catalog_parts_seq_idx" ON "catalog_parts" USING btree ("seq");--> statement-breakpoint
+CREATE INDEX "catalog_parts_deleted_idx" ON "catalog_parts" USING btree ("deleted");--> statement-breakpoint
+CREATE INDEX "comms_seq_idx" ON "comms" USING btree ("seq");--> statement-breakpoint
+CREATE INDEX "comms_deleted_idx" ON "comms" USING btree ("deleted");--> statement-breakpoint
+CREATE INDEX "customers_seq_idx" ON "customers" USING btree ("seq");--> statement-breakpoint
+CREATE INDEX "customers_deleted_idx" ON "customers" USING btree ("deleted");--> statement-breakpoint
+CREATE INDEX "designs_seq_idx" ON "designs" USING btree ("seq");--> statement-breakpoint
+CREATE INDEX "designs_deleted_idx" ON "designs" USING btree ("deleted");--> statement-breakpoint
+CREATE INDEX "flame_jobs_seq_idx" ON "flame_jobs" USING btree ("seq");--> statement-breakpoint
+CREATE INDEX "flame_jobs_deleted_idx" ON "flame_jobs" USING btree ("deleted");--> statement-breakpoint
+CREATE INDEX "inspections_seq_idx" ON "inspections" USING btree ("seq");--> statement-breakpoint
+CREATE INDEX "inspections_deleted_idx" ON "inspections" USING btree ("deleted");--> statement-breakpoint
+CREATE INDEX "leads_seq_idx" ON "leads" USING btree ("seq");--> statement-breakpoint
+CREATE INDEX "leads_deleted_idx" ON "leads" USING btree ("deleted");--> statement-breakpoint
+CREATE INDEX "projects_seq_idx" ON "projects" USING btree ("seq");--> statement-breakpoint
+CREATE INDEX "projects_deleted_idx" ON "projects" USING btree ("deleted");--> statement-breakpoint
+CREATE INDEX "quotes_seq_idx" ON "quotes" USING btree ("seq");--> statement-breakpoint
+CREATE INDEX "quotes_deleted_idx" ON "quotes" USING btree ("deleted");--> statement-breakpoint
+CREATE INDEX "repair_jobs_seq_idx" ON "repair_jobs" USING btree ("seq");--> statement-breakpoint
+CREATE INDEX "repair_jobs_deleted_idx" ON "repair_jobs" USING btree ("deleted");--> statement-breakpoint
+CREATE INDEX "surveys_seq_idx" ON "surveys" USING btree ("seq");--> statement-breakpoint
+CREATE INDEX "surveys_deleted_idx" ON "surveys" USING btree ("deleted");

@@ -6,7 +6,15 @@ import { cookies } from "next/headers";
 import { portalSession, PORTAL_COOKIE } from "@/lib/portal";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { create as createLead } from "@/lib/stores/leads";
-import { get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
+import {
+  create as createQuote,
+  get as getQuote,
+  update as updateQuote,
+} from "@/lib/stores/quotes";
+import { byCategory, get as getCatalogPart } from "@/lib/stores/catalog";
+import { isCustomerBuyable } from "@/lib/portal-catalog";
+import { curtainCost } from "@/lib/curtain-pricing";
+import { curtainQty, type CurtainSpec } from "@/lib/curtain-geom";
 
 /**
  * Portal mutations (IDEAS #47). SECURITY: these run for ANONYMOUS visitors —
@@ -103,6 +111,167 @@ export async function acceptPortalQuote(formData: FormData): Promise<void> {
   }
   revalidatePath("/", "layout");
   redirect("/portal?accepted=1");
+}
+
+/**
+ * Self-serve drapery estimate (IDEAS #48). SECURITY + PRICING: runs for an
+ * anonymous portal visitor — authenticates via portalSession(), scopes to the
+ * grant's customerId, and RECOMPUTES every line server-side from the real
+ * fabric cost basis (curtainCost). The client-posted prices are never trusted;
+ * the persisted draft matches what the team estimator would produce. Lands as a
+ * DRAFT quote (source "portal-self-serve", unassigned) — never published, never
+ * binding. An estimator finalizes and publishes it through the normal flow.
+ */
+export async function submitPortalEstimate(formData: FormData): Promise<void> {
+  const session = await portalSession();
+  if (!session) redirect("/portal?denied=1");
+
+  const cust = await getCustomer(session.customerId);
+  if (!cust) redirect("/portal?denied=1");
+
+  const project = String(formData.get("project") || "").trim().slice(0, 120);
+  const venueId = String(formData.get("venue") || "");
+  const venue = (cust.locations || []).find((l) => l.id === venueId) || null;
+
+  // Parse the posted line specs (raw strings; prices are recomputed here).
+  let raw: unknown = [];
+  try {
+    raw = JSON.parse(String(formData.get("lines") || "[]"));
+  } catch {
+    raw = [];
+  }
+  const specs: CurtainSpec[] = (Array.isArray(raw) ? raw : [])
+    .slice(0, 40)
+    .map((r) => {
+      const o = (r || {}) as Record<string, unknown>;
+      const s = (k: string) => String(o[k] ?? "");
+      return {
+        name: s("name").slice(0, 120),
+        hang: s("hang"),
+        fabric: s("fabric"),
+        qty: s("qty"),
+        width: s("width"),
+        height: s("height"),
+        fullness: s("fullness"),
+        bottom: s("bottom"),
+      };
+    });
+
+  // Fabric cost basis — server-side only. Map sku → { costPerSqft, desc }.
+  const fabricRows = await byCategory("Fabric");
+  const fabricById = new Map(fabricRows.map((p) => [p.sku, p]));
+
+  type Item = {
+    id: number;
+    sku: string;
+    desc: string;
+    qty: number;
+    unit: string;
+    cost: number;
+    price: number;
+    curtain?: true;
+    comment?: string;
+  };
+  const items: Item[] = [];
+  let rev = 0;
+  let cost = 0;
+  let nextId = 1;
+
+  for (const spec of specs) {
+    const fab = fabricById.get(spec.fabric);
+    if (!fab) continue; // unknown fabric — drop the line
+    const { costEach, priceEach } = curtainCost(spec, fab.costPerSqft ?? 0);
+    if (priceEach <= 0) continue; // no dimensions — skip
+    const qty = curtainQty(spec);
+    const h = parseFloat(spec.height) || 0;
+    const w = parseFloat(spec.width) || 0;
+    const fullLabel = spec.fullness === "0" ? "Flat" : (parseFloat(spec.fullness) || 0) + "% fullness";
+    items.push({
+      id: nextId++,
+      sku: fab.sku,
+      desc: (spec.name.trim() || "Curtain") + " — " + fab.desc,
+      qty,
+      unit: "ea",
+      cost: costEach,
+      price: priceEach,
+      curtain: true,
+      comment:
+        w + "′w × " + h + "′h · " + fullLabel + " · " + spec.hang + " hang · " + spec.bottom + " bottom",
+    });
+    rev += qty * priceEach;
+    cost += qty * costEach;
+  }
+
+  const sections: Array<{ id: string; name: string; kind: string; mfr: string; freightPct: number; items: Item[] }> = [];
+  if (items.length > 0) {
+    sections.push({ id: "SEC-DRAPE", name: "Drapery & soft goods", kind: "materials", mfr: "", freightPct: 0, items });
+  }
+
+  // Equipment lines: the client posts { sku, qty }. Look each part up here and
+  // RE-PRICE from the catalog (list = price, cost = cost) — client prices are
+  // never trusted — and reject anything outside the customer-buyable set, so a
+  // guessed internal SKU can't be added.
+  let equipRaw: unknown = [];
+  try {
+    equipRaw = JSON.parse(String(formData.get("equipment") || "[]"));
+  } catch {
+    equipRaw = [];
+  }
+  const equipItems: Item[] = [];
+  for (const r of (Array.isArray(equipRaw) ? equipRaw : []).slice(0, 100)) {
+    const o = (r || {}) as Record<string, unknown>;
+    const sku = String(o.sku ?? "").trim();
+    const qty = Math.max(1, Math.min(9999, parseInt(String(o.qty ?? ""), 10) || 0));
+    if (!sku || qty < 1) continue;
+    const part = await getCatalogPart(sku);
+    if (!isCustomerBuyable(part)) continue; // unknown / internal / flagged part
+    equipItems.push({
+      id: nextId++,
+      sku: part.sku,
+      desc: part.desc,
+      qty,
+      unit: part.unit || "ea",
+      cost: part.cost || 0,
+      price: part.list,
+      ...(part.mfr ? { comment: part.mfr } : {}),
+    });
+    rev += qty * part.list;
+    cost += qty * (part.cost || 0);
+  }
+  if (equipItems.length > 0) {
+    sections.push({ id: "SEC-EQUIP", name: "Equipment & supplies", kind: "materials", mfr: "", freightPct: 0, items: equipItems });
+  }
+
+  if (sections.length === 0) redirect("/portal/estimate?err=empty");
+
+  const margin = rev > 0 ? (rev - cost) / rev : 0;
+  const hasDrape = items.length > 0;
+  const hasEquip = equipItems.length > 0;
+  const defaultName = hasDrape && hasEquip ? "Equipment & drapery estimate" : hasEquip ? "Equipment estimate" : "Drapery estimate";
+
+  const created = await createQuote({
+    name: cust.name + " — " + (project || defaultName),
+    customer: cust.name,
+    customerId: session.customerId,
+    locationId: venue?.id || null,
+    value: Math.round(rev),
+    margin,
+    source: "portal-self-serve",
+    spec: { sections, mobs: [] },
+  });
+  // Stamp portal provenance + leave it unassigned for the response queue.
+  const patch = {
+    owner: "",
+    contactName: session.name,
+    quoteNote:
+      "Submitted by " +
+      session.name +
+      " via the customer portal self-serve estimator. Prices are budgetary — review and confirm before sending.",
+  };
+  await updateQuote(created.id, patch as unknown as Parameters<typeof updateQuote>[1]);
+
+  revalidatePath("/", "layout");
+  redirect("/portal?estimate=1");
 }
 
 export async function portalSignOut(): Promise<void> {

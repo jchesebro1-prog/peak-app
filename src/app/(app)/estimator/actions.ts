@@ -24,7 +24,8 @@ import {
   get as getInspection,
   type InspectionRecord,
 } from "@/lib/stores/inspections";
-import type { SpecMob, SpecSection } from "./types";
+import { list as catalogList } from "@/lib/stores/catalog";
+import type { CatalogSearch, SpecMob, SpecSection } from "./types";
 
 /**
  * Estimator server actions — thin, session-gated wrappers over the quotes
@@ -142,7 +143,18 @@ export async function updateQuoteMetaAction(
 ): Promise<{ ok: boolean }> {
   await requireUser();
   if (!id) return { ok: false };
-  const q = await update(id, meta as QuotePatch);
+  // Allowlist the header fields only — never forward the raw client object.
+  // The runtime type is not enforced by TS, so a caller could otherwise slip
+  // in `review`/`status`/`value`/`owner` and self-approve or re-price a quote,
+  // bypassing the permission-gated review actions below. Approval/status/price
+  // changes have their own checked mutators (approveReviewAction, setStatus…).
+  const patch: QuotePatch = {};
+  if ("customerId" in meta) patch.customerId = meta.customerId;
+  if ("locationId" in meta) patch.locationId = meta.locationId;
+  if (typeof meta.customer === "string") patch.customer = meta.customer;
+  if (typeof meta.contactName === "string") patch.contactName = meta.contactName;
+  if (typeof meta.quoteNote === "string") patch.quoteNote = meta.quoteNote;
+  const q = await update(id, patch);
   refresh();
   return { ok: !!q };
 }
@@ -336,4 +348,51 @@ export async function draftQuoteScopeAction(input: {
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+}
+
+/**
+ * Catalog search for the estimator's "Add part from catalog" picker (team-only).
+ * In-memory substring match over sku/desc/mfr (optionally scoped to a category),
+ * ranked so prefix hits on the SKU or description come first. Returns up to
+ * `limit` hits plus the pre-cap total so the UI can say "refine to narrow".
+ */
+export async function searchCatalog(
+  query: string,
+  category = "",
+  limit = 40
+): Promise<CatalogSearch> {
+  await requireUser();
+  const q = (query || "").trim().toLowerCase();
+  const cat = (category || "").trim();
+  if (!q && !cat) return { hits: [], total: 0 };
+
+  const parts = await catalogList();
+  const scored = parts
+    .filter((p) => (cat ? (p.category || "") === cat : true))
+    .map((p) => {
+      const sku = (p.sku || "").toLowerCase();
+      const desc = (p.desc || "").toLowerCase();
+      const mfr = (p.mfr || "").toLowerCase();
+      const cat = (p.category || "").toLowerCase();
+      if (!q) return { p, score: 0 };
+      let score = -1;
+      if (sku === q || desc === q) score = 5;
+      else if (sku.startsWith(q) || desc.startsWith(q)) score = 4;
+      else if (desc.includes(q) || sku.includes(q)) score = 2;
+      else if (cat.includes(q) || mfr.includes(q)) score = 1;
+      return { p, score };
+    })
+    .filter((s) => s.score >= 0)
+    .sort((a, b) => b.score - a.score || (a.p.desc || "").localeCompare(b.p.desc || ""));
+
+  const hits = scored.slice(0, Math.max(1, limit)).map(({ p }) => ({
+    sku: p.sku,
+    desc: p.desc,
+    category: p.category || "",
+    unit: p.unit || "ea",
+    cost: p.cost || 0,
+    list: p.list || 0,
+    mfr: p.mfr || "",
+  }));
+  return { hits, total: scored.length };
 }
