@@ -1,5 +1,6 @@
 "use client";
 
+// Lineset Builder UI over the ported spreadsheet engine (lib/design/lineset).
 import { useMemo, useState } from "react";
 import {
   generateLineset,
@@ -7,6 +8,7 @@ import {
   type LinesetInputs,
 } from "@/lib/design/lineset";
 import { SaveBar, type SavedRef } from "../save-bar";
+import { downloadCsv } from "../export";
 
 const card: React.CSSProperties = { background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: "16px 18px", boxShadow: "0 1px 2px rgba(0,0,0,.04)" };
 const label: React.CSSProperties = { fontSize: 11.5, fontWeight: 600, color: "#5b616e", marginBottom: 4, display: "block" };
@@ -48,6 +50,18 @@ export function LinesetBuilder({
 
   const out = useMemo(() => generateLineset(inp), [inp]);
   const view = showGrid ? out.slots : out.schedule;
+
+  function exportCsv() {
+    const header = showGrid
+      ? ["Slot", "Downstage", "Upstage", "Active", "Type", "Name", "Rule", "Warning"]
+      : ["#", "Slot", "Downstage", "Type", "Name", "Warning"];
+    const rows = view.map((s, i) =>
+      showGrid
+        ? [s.slot, s.dsPositionLabel, s.usPositionLabel, s.active ? "Yes" : "", s.type, s.name, s.rule, s.warning || ""]
+        : [i + 1, s.slot, s.dsPositionLabel, s.type, s.name, s.warning || ""]
+    );
+    downloadCsv(`lineset-${inp.stageWidthFt}x${inp.stageDepthFt}${showGrid ? "-grid" : ""}`, header, rows);
+  }
 
   return (
     <div>
@@ -102,9 +116,12 @@ export function LinesetBuilder({
           <div style={{ fontSize: 13.5, fontWeight: 700 }}>
             {showGrid ? "8-inch grid" : "Final schedule"} · {view.length} {showGrid ? "slots" : "lines"}
           </div>
-          <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "#5b616e" }}>
-            <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} /> Show full grid
-          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "#5b616e" }}>
+              <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} /> Show full grid
+            </label>
+            <button onClick={exportCsv} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 7, padding: "6px 11px", cursor: "pointer" }}>⭳ CSV</button>
+          </div>
         </div>
         <div style={{ fontSize: 12, color: "#6b7079", marginBottom: 10, background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 8, padding: "8px 11px" }}>
           {out.summary.activeSlotCount} active slots · CYC at slot {out.summary.targetCycSlot} · {out.summary.status}

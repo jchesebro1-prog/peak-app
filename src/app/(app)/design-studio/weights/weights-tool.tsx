@@ -15,6 +15,7 @@ import {
   type LinesetMode,
 } from "@/lib/design/steel";
 import { SaveBar, type SavedRef } from "../save-bar";
+import { downloadCsv } from "../export";
 
 const card: React.CSSProperties = { background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: "16px 18px", boxShadow: "0 1px 2px rgba(0,0,0,.04)" };
 const label: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: "#5b616e", marginBottom: 3, display: "block" };
@@ -62,6 +63,18 @@ export function WeightsTool({
     });
     return { onBatten, setTotal, cw, beamMax };
   }, [computed]);
+
+  function exportCsv() {
+    const header = ["Line", "Fabric", "Width(ft)", "Height(ft)", "Fullness%", "Qty", "Gear(lb)", "Mode", "Hoist", "Weight on batten(lb)", "Check"];
+    const rows: (string | number)[][] = lines.map((l, i) => {
+      const c = computed[i];
+      const mode = l.mode || def.mode;
+      const check = mode === "cw" ? `${c.combo.big}x25+${c.combo.small}x10 brick` : c.over ? "OVER LIMIT" : "OK";
+      return [l.name, l.fab || "", l.w ?? 0, l.h ?? 0, l.full ?? def.full, l.qty ?? 1, l.gear ?? 0, MODE_LABEL[mode], mode === "motor" ? l.hoist || def.hoist : "", Math.round(c.onBatten), check];
+    });
+    rows.push(["TOTAL", "", "", "", "", "", "", "", "", Math.round(totals.onBatten), `${lines.length} lines · peak/beam ${Math.round(totals.beamMax)} lb`]);
+    downloadCsv("lineset-weights", header, rows);
+  }
 
   return (
     <div>
@@ -130,9 +143,10 @@ export function WeightsTool({
             </tbody>
           </table>
         </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
           <button onClick={() => setLines((a) => [...a, { name: "New line", mode: def.mode }])} style={{ ...field, width: "auto", cursor: "pointer", fontWeight: 600, color: "var(--accent)", padding: "7px 12px" }}>+ add line</button>
           <button onClick={() => setLines(DEMO)} style={{ ...field, width: "auto", cursor: "pointer", fontWeight: 600, color: "#5b616e", padding: "7px 12px" }}>Load demo schedule</button>
+          <button onClick={exportCsv} style={{ ...field, width: "auto", cursor: "pointer", fontWeight: 600, color: "var(--accent)", padding: "7px 12px", marginLeft: "auto" }}>⭳ Export CSV</button>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
