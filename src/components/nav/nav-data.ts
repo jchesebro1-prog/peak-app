@@ -19,11 +19,22 @@ export const NAV: NavEntry[] = [
     children: [
       { key: "leads", label: "Leads", href: "/leads" },
       { key: "quotes", label: "Quotes", href: "/quotes" },
-      { key: "design", label: "Design", href: "/design" },
       { key: "reviews", label: "Reviews", href: "/reviews" },
     ],
   },
-  { kind: "link", key: "designstudio", label: "Design Studio", href: "/design-studio" },
+  {
+    kind: "group",
+    key: "designstudio",
+    label: "Design Studio",
+    children: [
+      { key: "dsoverview", label: "Overview", href: "/design-studio" },
+      { key: "dssteel", label: "Steel Calculator", href: "/design-studio/steel" },
+      { key: "dslineset", label: "Lineset Builder", href: "/design-studio/lineset" },
+      { key: "dsweights", label: "Lineset Weights", href: "/design-studio/weights" },
+      { key: "dsmotors", label: "Motor Library", href: "/design-studio/motors" },
+      { key: "design", label: "Design Estimator", href: "/design" },
+    ],
+  },
   {
     kind: "group",
     key: "installs",
@@ -89,7 +100,7 @@ export function activeKeyFor(pathname: string): string {
     "/estimator": "quotes",
     "/design": "design",
     "/quick-design": "design",
-    "/design-studio": "designstudio",
+    "/design-studio": "dsoverview",
     "/reviews": "reviews",
     "/projects": "projects",
     "/schedule": "schedule",

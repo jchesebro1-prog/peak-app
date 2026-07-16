@@ -307,13 +307,7 @@ export function hoistById(id: string): Hoist {
   return PRODIGY_HOISTS.find((h) => h.id === id) || PRODIGY_HOISTS[0];
 }
 
-export type Batten = {
-  label: string;
-  id: string;
-  type: string;
-  wt: number;
-  ladder?: boolean;
-} & Partial<SteelShape>;
+export type Batten = SteelShape & { label: string; ladder?: boolean };
 
 const SCH40_15: Batten = {
   label: '1½″ Sch-40 pipe',
@@ -428,6 +422,139 @@ export function brickCombo(load: number, big = BRICK_LG, small = BRICK_SM) {
     small: bigIsHi ? best!.lo : best!.hi,
     loaded: best!.loaded,
     resid: best!.resid,
+  };
+}
+
+/* ------------------------------ lineset weights ------------------------------ */
+
+export type LinesetMode = "motor" | "dead" | "cw";
+
+/** Schedule-level defaults for the lineset weights tool. */
+export type WeightDefaults = {
+  full: number; // % fullness
+  cut: number; // added cut height (in)
+  hwPerFt: number; // hardware lb/ft of width
+  defl: number; // deflection L/ ratio
+  df: number; // design factor
+  cwBat: boolean; // counterweight the batten too
+  wll: number; // per-line hardware WLL
+  mode: LinesetMode;
+  cableMgmt: boolean;
+  hoist: string; // default hoist id
+  beamspace: number; // max beam spacing (ft)
+  pipe: string; // default batten id
+  battenlen: number; // default batten length (ft)
+  lines: number; // default lift lines
+};
+
+export const DEFAULT_WEIGHTS: WeightDefaults = {
+  full: 50, cut: 6, hwPerFt: 0.5, defl: 120, df: 1, cwBat: false, wll: 0,
+  mode: "motor", cableMgmt: false, hoist: "P1400", beamspace: 14,
+  pipe: 'Pipe 1-1/2" Sch40', battenlen: 44, lines: 6,
+};
+
+/** One curtain/electric line in the weights schedule. Blank per-line values
+ *  inherit the schedule defaults. */
+export type WeightLine = {
+  name: string;
+  fab?: string; // fabric name (— none — for gear-only lines)
+  w?: number; // finished width (ft)
+  h?: number; // finished height (ft)
+  full?: number | null;
+  qty?: number;
+  chain?: string;
+  gear?: number; // extra fixed weight (lb), e.g. electrics
+  pipe?: string; // per-line batten id
+  batten?: number | null; // per-line batten length (ft)
+  track?: string;
+  lines?: number | null; // per-line lift-line count
+  mode?: LinesetMode;
+  hoist?: string;
+};
+
+/** Weight + capacity breakdown for one line. Faithful port of computeLine(). */
+export function computeSetWeight(L: WeightLine, def: WeightDefaults) {
+  const pipe = battenById(L.pipe || def.pipe);
+  const full = (L.full == null ? def.full : L.full) / 100;
+  const f = L.fab ? fabByName(L.fab) : undefined;
+  const qty = L.qty || 1;
+  let goods = 0;
+  if (f && (L.w || 0) > 0 && (L.h || 0) > 0) {
+    const flatW = (L.w || 0) * (1 + full);
+    const cutH = (L.h || 0) + def.cut;
+    const fab = (flatW * cutH * ozPerFt2(f)) / 16;
+    const chain = (CHAINS.find((c) => c.name === L.chain) || CHAINS[0]).lb * (L.w || 0);
+    const hw = def.hwPerFt * (L.w || 0);
+    goods = (fab + chain + hw) * qty;
+  }
+  const gear = L.gear || 0;
+  const battenLen = L.batten != null ? L.batten : def.battenlen;
+  const battenWt = battenLen * (pipe ? pipe.wt : 0);
+  const trackObj = f ? trackByName(L.track || "") : null;
+  const trackWt = trackObj ? trackObj.lbft * battenLen : 0;
+  const onBatten = goods + gear + battenWt + trackWt;
+  const nLines = Math.max(1, L.lines != null ? L.lines : def.lines);
+  const mode: LinesetMode = L.mode || def.mode;
+  const maxLines = def.cableMgmt ? PRODIGY_MAXLINES_CM : PRODIGY_MAXLINES;
+  const hoist = hoistById(L.hoist || def.hoist);
+
+  // Batten bending across the widest lift-line bay (all modes).
+  const nBays = Math.max(1, nLines - 1);
+  let battenUtil: number | null = null;
+  let allowTotal: number | null = null;
+  let perLine: number | null = null;
+  let lineOverWll = false;
+  if (pipe && battenLen > 0) {
+    const spacing = battenLen / nBays;
+    const c = beamCapacity(pipe, spacing, "uniform", 1, def.df, def.defl, spacing);
+    allowTotal = c.asd.gov * nBays;
+    battenUtil = onBatten / allowTotal;
+    perLine = onBatten / nLines;
+    if (def.wll > 0 && perLine > def.wll) lineOverWll = true;
+  }
+
+  let cwLoad = 0;
+  let combo = { big: 0, small: 0, loaded: 0, resid: 0 };
+  let hoistUtil: number | null = null;
+  const perLineLoad = battenLen > 0 ? onBatten / nLines : null;
+  let perLineOverMax = false;
+  let perLineUnderMin = false;
+  let linesOverMax = false;
+  let capUtil = battenUtil;
+  let over = (battenUtil != null && battenUtil > 1) || lineOverWll;
+
+  if (mode === "cw") {
+    cwLoad = def.cwBat ? onBatten : goods + gear;
+    combo = brickCombo(cwLoad);
+  } else if (mode === "motor") {
+    hoistUtil = onBatten > 0 ? onBatten / hoist.cap : 0;
+    const pMax = hoist.perMax || PRODIGY_PERLINE_MAX;
+    const pMin = hoist.perMin || PRODIGY_PERLINE_MIN;
+    if (perLineLoad != null) {
+      perLineOverMax = perLineLoad > pMax;
+      perLineUnderMin = onBatten > 0 && perLineLoad < pMin;
+    }
+    linesOverMax = nLines > maxLines;
+    const utils = [hoistUtil];
+    if (battenUtil != null) utils.push(battenUtil);
+    if (perLineLoad != null) utils.push(perLineLoad / pMax);
+    capUtil = Math.max(...utils);
+    over = hoistUtil > 1 || perLineOverMax || linesOverMax || (battenUtil != null && battenUtil > 1) || lineOverWll;
+  }
+
+  const hoistPw = mode === "motor" ? hoist.pw : 0;
+  const setTotal = onBatten + hoistPw;
+  const totalBeams = Math.max(1, def.lines);
+  const beamSpacing = battenLen > 0 && totalBeams > 1 ? battenLen / (totalBeams - 1) : null;
+  const beamLoad = setTotal / totalBeams;
+  const beamSpacingOver = beamSpacing != null && beamSpacing > def.beamspace;
+  if (mode === "motor" && beamSpacingOver) over = true;
+
+  return {
+    mode, hoist, pipe, maxLines, goods, gear, battenWt, battenLen, trackWt, onBatten,
+    hoistPw, setTotal, cwLoad, combo, battenUtil, allowTotal, perLine, lineOverWll,
+    hoistUtil, perLineLoad, perLineOverMax, perLineUnderMin, linesOverMax,
+    totalBeams, beamSpacing, beamLoad, beamSpacingOver, capUtil, over, nLines,
   };
 }
 

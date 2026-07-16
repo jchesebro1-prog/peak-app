@@ -1,7 +1,21 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import { listDesigns } from "@/lib/stores/studio-designs";
 
 export const metadata = { title: "Design Studio — Peak Backend" };
+
+const KIND_META: Record<string, { label: string; base: string }> = {
+  lineset: { label: "Lineset Builder", base: "/design-studio/lineset?design=" },
+  weights: { label: "Lineset Weights", base: "/design-studio/weights?design=" },
+};
+
+function fmtWhen(at: number): string {
+  try {
+    return new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return "";
+  }
+}
 
 /**
  * Design Studio — the home for system-design tools (IDEAS — design tab). Hosts
@@ -36,6 +50,14 @@ const CARDS: Card[] = [
     ready: true,
   },
   {
+    href: "/design-studio/weights",
+    emoji: "⚖️",
+    title: "Lineset Weights",
+    desc: "Build a line schedule and get goods weight, per-line & hoist checks, counterweight brick combos, and load per support beam.",
+    tag: "Weights → counterweight",
+    ready: true,
+  },
+  {
     href: "/design-studio/motors",
     emoji: "⚙️",
     title: "Motor Library",
@@ -43,10 +65,18 @@ const CARDS: Card[] = [
     tag: "ETC Prodigy P1 · P2 · P75",
     ready: true,
   },
+  {
+    href: "/design",
+    emoji: "✏️",
+    title: "Design Estimator",
+    desc: "Budgetary drapery & equipment designs — build a sandbox estimate that lands as a draft quote. Separate from the priced Quotes pipeline until you add it.",
+    tag: "Budgetary designs → draft quote",
+    ready: true,
+  },
 ];
 
 export default async function DesignStudioPage() {
-  await requireUser();
+  const [, designs] = await Promise.all([requireUser(), listDesigns()]);
   return (
     <div className="pk-content" style={{ maxWidth: 1000 }}>
       <div style={{ marginBottom: 6 }}>
@@ -101,21 +131,29 @@ export default async function DesignStudioPage() {
         ))}
       </div>
 
-      <div
-        style={{
-          marginTop: 22,
-          background: "#fafbfc",
-          border: "1px solid #eef0f3",
-          borderRadius: 10,
-          padding: "13px 16px",
-          fontSize: 13,
-          color: "#6b7079",
-        }}
-      >
-        The <Link href="/design" style={{ color: "var(--accent)", fontWeight: 600 }}>Design estimator</Link>{" "}
-        (budgetary drapery/equipment designs) still lives under Sales → Design for now; it
-        will move into the Design Studio in a later pass.
-      </div>
+      {designs.length > 0 && (
+        <div style={{ marginTop: 26 }}>
+          <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>Saved designs</h2>
+          <div style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, boxShadow: "0 1px 2px rgba(0,0,0,.04)", overflow: "hidden" }}>
+            {designs.map((d) => {
+              const m = KIND_META[d.kind] || { label: d.kind, base: "/design-studio" };
+              return (
+                <Link
+                  key={d.id}
+                  href={m.base + encodeURIComponent(d.id)}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "11px 16px", borderBottom: "1px solid #f4f5f7", textDecoration: "none", color: "inherit" }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>{d.name}</div>
+                    <div style={{ fontSize: 12, color: "#8c919c" }}>{m.label}{d.customer ? ` · ${d.customer}` : ""}</div>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#9aa0ab", whiteSpace: "nowrap" }}>{d.updatedBy} · {fmtWhen(d.updatedAt)} →</div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

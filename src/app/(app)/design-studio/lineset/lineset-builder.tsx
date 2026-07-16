@@ -6,6 +6,7 @@ import {
   DEFAULT_LINESET_INPUTS,
   type LinesetInputs,
 } from "@/lib/design/lineset";
+import { SaveBar, type SavedRef } from "../save-bar";
 
 const card: React.CSSProperties = { background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: "16px 18px", boxShadow: "0 1px 2px rgba(0,0,0,.04)" };
 const label: React.CSSProperties = { fontSize: 11.5, fontWeight: 600, color: "#5b616e", marginBottom: 4, display: "block" };
@@ -29,8 +30,18 @@ function NumF({ v, set, w }: { v: number; set: (n: number) => void; w?: number }
   return <input type="number" value={v} onChange={(e) => set(parseFloat(e.target.value) || 0)} style={{ ...field, ...(w ? { width: w } : {}) }} />;
 }
 
-export function LinesetBuilder() {
-  const [inp, setInp] = useState<LinesetInputs>(DEFAULT_LINESET_INPUTS);
+export function LinesetBuilder({
+  initial,
+  customers = [],
+  saved = [],
+  loaded = null,
+}: {
+  initial?: LinesetInputs;
+  customers?: { id: string; name: string }[];
+  saved?: SavedRef[];
+  loaded?: { id: string; name: string; customerId: string | null } | null;
+} = {}) {
+  const [inp, setInp] = useState<LinesetInputs>(initial || DEFAULT_LINESET_INPUTS);
   const [showGrid, setShowGrid] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const set = <K extends keyof LinesetInputs>(k: K, v: LinesetInputs[K]) => setInp((s) => ({ ...s, [k]: v }));
@@ -39,7 +50,9 @@ export function LinesetBuilder() {
   const view = showGrid ? out.slots : out.schedule;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 300px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+    <div>
+      <SaveBar kind="lineset" getData={() => inp} customers={customers} saved={saved} loaded={loaded} loadBase="/design-studio/lineset?design=" />
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 300px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
       {/* inputs */}
       <div style={card}>
         <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 10 }}>Venue dimensions</div>
@@ -137,6 +150,7 @@ export function LinesetBuilder() {
           across open gaps. ⚠ marks a clearance rule broken (not blocked). Reference layout — verify on site.
         </p>
       </div>
+    </div>
     </div>
   );
 }

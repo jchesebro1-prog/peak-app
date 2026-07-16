@@ -2,12 +2,12 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { listDesigns, getDesign } from "@/lib/stores/studio-designs";
-import type { LinesetInputs } from "@/lib/design/lineset";
-import { LinesetBuilder } from "./lineset-builder";
+import type { WeightDefaults, WeightLine } from "@/lib/design/steel";
+import { WeightsTool } from "./weights-tool";
 
-export const metadata = { title: "Lineset Builder — Peak Backend" };
+export const metadata = { title: "Lineset Weights — Peak Backend" };
 
-export default async function LinesetBuilderPage({
+export default async function WeightsPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -16,26 +16,26 @@ export default async function LinesetBuilderPage({
     requireUser(),
     searchParams,
     allCustomers(),
-    listDesigns({ kind: "lineset" }),
+    listDesigns({ kind: "weights" }),
   ]);
   const customers = custs.map((c) => ({ id: c.id, name: c.name })).sort((a, b) => a.name.localeCompare(b.name));
   const designId = Array.isArray(sp.design) ? sp.design[0] : sp.design;
   const design = designId ? await getDesign(designId) : null;
-  const initial = design && design.kind === "lineset" ? (design.data as LinesetInputs) : undefined;
-  const loaded = design && design.kind === "lineset" ? { id: design.id, name: design.name, customerId: design.customerId } : null;
+  const initial = design && design.kind === "weights" ? (design.data as { defaults: WeightDefaults; lines: WeightLine[] }) : undefined;
+  const loaded = design && design.kind === "weights" ? { id: design.id, name: design.name, customerId: design.customerId } : null;
 
   return (
-    <div className="pk-content" style={{ maxWidth: 1040 }}>
+    <div className="pk-content" style={{ maxWidth: 1060 }}>
       <div style={{ marginBottom: 14 }}>
         <Link href="/design-studio" style={{ fontSize: 12.5, fontWeight: 600, color: "#8c919c", textDecoration: "none" }}>
           ← Design Studio
         </Link>
-        <h1 style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>Lineset Builder</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>Lineset Weights &amp; Counterweight</h1>
         <p style={{ color: "#6b7079", fontSize: 13.5, marginTop: 3 }}>
-          Auto-place a lineset schedule on the 8-inch grid from stage width &amp; depth, using the built-in rules.
+          Build a line schedule → goods weight, per-line &amp; hoist checks, counterweight bricks, and load per support beam.
         </p>
       </div>
-      <LinesetBuilder initial={initial} customers={customers} saved={saved.map((d) => ({ id: d.id, name: d.name, customer: d.customer }))} loaded={loaded} />
+      <WeightsTool initial={initial} customers={customers} saved={saved.map((d) => ({ id: d.id, name: d.name, customer: d.customer }))} loaded={loaded} />
     </div>
   );
 }
