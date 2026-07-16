@@ -447,6 +447,36 @@ export const TEMPLATES: TemplateDef[] = [
         default:
           "This certifies that the soft goods listed above at {{venue}} were field-tested by {{company}} on {{testedLabel}} using the NFPA 705 field-flame method and, except where noted, were found to be flame-resistant. This certification is good through {{goodThrough}}.",
       },
+      {
+        id: "aboutPassed",
+        label: "Result term — Passed",
+        multiline: true,
+        help: '"About this test" explainer on the report.',
+        default:
+          "Topically treated goods that self-extinguished on the field flame test and were tagged for the year.",
+      },
+      {
+        id: "aboutIFR",
+        label: "Result term — IFR (Inherently Flame Retardant)",
+        multiline: true,
+        default:
+          "Flame-resistant by fiber, not by a topical coating. IFR goods don’t lose resistance with age or cleaning and need no re-treatment — but are still inspected annually.",
+      },
+      {
+        id: "aboutFailed",
+        label: "Result term — Failed",
+        multiline: true,
+        default:
+          "Did not self-extinguish; must be re-treated with an approved flame retardant or replaced before it can be certified.",
+      },
+      {
+        id: "aboutBrief",
+        label: "“NFPA 705 in brief” bullets",
+        multiline: true,
+        help: "One bullet per line — each line becomes a bullet on the report.",
+        default:
+          "Applies to textiles & films already in field use, or where reliable lab data (NFPA 701) isn’t available.\nA sample is exposed to an open flame for about 12 seconds, then observed.\nIt passes if it self-extinguishes promptly, chars rather than spreads flame, and drops no flaming residue.\nMaterial that keeps burning fails and must be re-treated with an approved retardant or replaced.\nIFR materials pass by fiber composition and need no chemical treatment.\nField testing is a screening practice, repeated yearly to keep treated goods compliant.",
+      },
     ],
     sample: {
       company: "Peak Systems Group",

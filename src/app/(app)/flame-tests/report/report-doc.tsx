@@ -230,6 +230,13 @@ export function buildReportModel(job: ReportJob, org: OrgCtx) {
     testedLabel,
     goodThrough,
   });
+  const aboutPassed = renderField(ov, "flame_report", "aboutPassed", {});
+  const aboutIFR = renderField(ov, "flame_report", "aboutIFR", {});
+  const aboutFailed = renderField(ov, "flame_report", "aboutFailed", {});
+  const aboutBrief = renderField(ov, "flame_report", "aboutBrief", {})
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   const venueRows = rws.map((r) => ({
     label: r.label,
@@ -272,6 +279,10 @@ export function buildReportModel(job: ReportJob, org: OrgCtx) {
     nfpaQuote,
     closing,
     certificateParagraph,
+    aboutPassed,
+    aboutIFR,
+    aboutFailed,
+    aboutBrief,
     hasCert: !!cert,
     cert,
     techName,
@@ -763,8 +774,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
                 <div>
                   <div style={{ fontSize: "9.5pt", fontWeight: 700, marginBottom: 2 }}>Passed</div>
                   <div style={{ fontSize: "8.5pt", color: "#40454e", lineHeight: 1.45 }}>
-                    Topically treated goods that self-extinguished on the field flame test and were
-                    tagged for the year.
+                    {m.aboutPassed}
                   </div>
                 </div>
                 <div>
@@ -772,16 +782,13 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
                     IFR — Inherently Flame Retardant
                   </div>
                   <div style={{ fontSize: "8.5pt", color: "#40454e", lineHeight: 1.45 }}>
-                    Flame-resistant by fiber, not by a topical coating. IFR goods don’t lose
-                    resistance with age or cleaning and need no re-treatment — but are still
-                    inspected annually.
+                    {m.aboutIFR}
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize: "9.5pt", fontWeight: 700, marginBottom: 2 }}>Failed</div>
                   <div style={{ fontSize: "8.5pt", color: "#40454e", lineHeight: 1.45 }}>
-                    Did not self-extinguish; must be re-treated with an approved flame retardant or
-                    replaced before it can be certified.
+                    {m.aboutFailed}
                   </div>
                 </div>
               </div>
@@ -799,14 +806,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
                     lineHeight: 1.45,
                   }}
                 >
-                  {[
-                    "Applies to textiles & films already in field use, or where reliable lab data (NFPA 701) isn’t available.",
-                    "A sample is exposed to an open flame for about 12 seconds, then observed.",
-                    "It passes if it self-extinguishes promptly, chars rather than spreads flame, and drops no flaming residue.",
-                    "Material that keeps burning fails and must be re-treated with an approved retardant or replaced.",
-                    "IFR materials pass by fiber composition and need no chemical treatment.",
-                    "Field testing is a screening practice, repeated yearly to keep treated goods compliant.",
-                  ].map((li, i) => (
+                  {m.aboutBrief.map((li, i) => (
                     <div key={i} style={{ display: "flex", gap: 7 }}>
                       <span style={{ color: accent, flexShrink: 0 }}>•</span>
                       <span>{li}</span>
