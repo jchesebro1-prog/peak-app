@@ -20,6 +20,7 @@ const GROUP_ORDER: TemplateGroup[] = [
   "Proposal letters",
   "Renewal emails",
   "Reports",
+  "Service & repair",
 ];
 
 /** Current values for every field of every template (override-or-default). */

@@ -21,7 +21,11 @@
  * them). Editing a `default` only changes the built-in fallback.
  */
 
-export type TemplateGroup = "Proposal letters" | "Renewal emails" | "Reports";
+export type TemplateGroup =
+  | "Proposal letters"
+  | "Renewal emails"
+  | "Reports"
+  | "Service & repair";
 
 export type TemplateField = {
   id: string;
@@ -164,13 +168,14 @@ export const TEMPLATES: TemplateDef[] = [
         label: "Opening paragraph",
         multiline: true,
         default:
-          "{{company}} will perform {{cadence}} at {{venue}}, checking every accessible component of the rigging system — anything that leaves the ground — against current federal and theatrical-industry standards. Every line set is inspected in place and each finding is dispositioned by priority, so your team leaves with a defensible, ranked record for the venue's safety file, not just a checkmark.",
+          "{{company}} proposes to perform a rigging inspection at {{venue}}. The inspection addresses the accessible rigging system in place — anything that leaves the ground — and records observed conditions against current federal and entertainment-industry guidance so the venue retains a ranked, defensible safety record.",
       },
       {
         id: "standardsQuote",
-        label: "Standards callout",
+        label: "Standards / reference-set callout",
         multiline: true,
-        default: RIGGING_STANDARDS_QUOTE,
+        default:
+          "Inspection language is typically aligned to OSHA walking-working-surface requirements and applicable ANSI E1 guidance for counterweight, statically suspended, fall-prevention, and rigging-system inspection work.",
       },
       {
         id: "cadenceNoteL1",
@@ -204,17 +209,17 @@ export const TEMPLATES: TemplateDef[] = [
       },
       {
         id: "costTail",
-        label: "Cost note",
+        label: "Cost note / engagement-fee basis",
         multiline: true,
         default:
-          "Covers mobilization, on-site inspection against OSHA / NFPA / ANSI E1, and a prioritized written report. Sales and use tax is billed separately.",
+          "This amount covers mobilization, the agreed rigging inspection scope, prioritization of findings, and issuance of the written results and summary record package. Applicable sales and use tax, lift rentals, or other third-party site costs may be stated separately when required.",
       },
       {
         id: "signoff",
-        label: "Sign-off / call to action",
+        label: "Sign-off / authorization",
         multiline: true,
         default:
-          "Approve this work order to schedule your inspection window. Sign below and return, or reply to confirm — we'll lock in a date.",
+          "Approving this quote authorizes us to schedule the inspection window and proceed with the services described herein.",
       },
       { id: "taxNote", label: "Tax note", multiline: true, default: TAX_NOTE },
     ],
@@ -483,6 +488,318 @@ export const TEMPLATES: TemplateDef[] = [
       venue: "Lakefront Performing Arts Center",
       testedLabel: "June 12, 2026",
       goodThrough: "June 2027",
+    },
+  },
+
+  {
+    id: "inspection_results_letter",
+    label: "Rigging Inspection Results Letter",
+    group: "Reports",
+    description:
+      "The single-page client confirmation of findings that accompanies a rigging inspection.",
+    placeholders: [
+      { token: "company", desc: "Your company name" },
+      { token: "venue", desc: "Customer / venue name" },
+      { token: "location", desc: "City, State" },
+      { token: "surveyDate", desc: "Date the inspection was performed" },
+      { token: "reportNo", desc: "Report number" },
+      { token: "inspector", desc: "Inspector name" },
+      { token: "condition", desc: "Overall condition (Good / Fair / Poor)" },
+      { token: "urgentCount", desc: "# Urgent Repair findings" },
+      { token: "necessaryCount", desc: "# Necessary Repair findings" },
+      { token: "basicCount", desc: "# Basic Improvement findings" },
+      { token: "closedCount", desc: "# Closed findings" },
+    ],
+    fields: [
+      {
+        id: "intro",
+        label: "Opening paragraph",
+        multiline: true,
+        default:
+          "{{company}} performed a rigging inspection at {{venue}} on {{surveyDate}}. This letter serves as the single-page confirmation of the observed condition, logged repair priorities, and report basis for the current inspection cycle.",
+      },
+      {
+        id: "visualScope",
+        label: "Visual scope note",
+        multiline: true,
+        default:
+          "The inspection addresses accessible rigging-system components — anything that leaves the ground — and documents observed deficiencies only. Concealed conditions, internal mechanical failures, and structural analysis are outside scope unless specifically noted.",
+      },
+      {
+        id: "resultsLine",
+        label: "Results line",
+        multiline: true,
+        default:
+          "Findings logged for this survey: {{urgentCount}} Urgent Repair, {{necessaryCount}} Necessary Repair, {{basicCount}} Basic Improvement, and {{closedCount}} Closed. Overall condition at the time of inspection: {{condition}}.",
+      },
+      {
+        id: "priorityGuidance",
+        label: "Priority guidance paragraph",
+        multiline: true,
+        default:
+          "Urgent items should be corrected before further reliance is placed on the affected condition. Necessary items should be scheduled in the near term, while Basic items improve safety, clarity, or operating reliability. Where permanent support steel or other building structure is implicated, review by a qualified structural engineer should be obtained.",
+      },
+      {
+        id: "retainNote",
+        label: "Recordkeeping note",
+        multiline: true,
+        default:
+          "Retain this letter with the detailed inspection report, photographs, and corrective-action records in the venue safety file. Completed repairs may be documented by owner record and formally closed on a future inspection cycle or follow-up visit.",
+      },
+      {
+        id: "termUrgent",
+        label: "Priority term — Urgent Repair",
+        multiline: true,
+        default:
+          "Requires immediate correction because a safety hazard or loss-of-control condition is present.",
+      },
+      {
+        id: "termNecessary",
+        label: "Priority term — Necessary Repair",
+        multiline: true,
+        default:
+          "Should be scheduled in the near term before wear, exposure, or operating risk becomes more serious.",
+      },
+      {
+        id: "termBasic",
+        label: "Priority term — Basic Improvement",
+        multiline: true,
+        default:
+          "Improves safety, clarity, code alignment, or long-term reliability even if use may continue for now.",
+      },
+    ],
+    sample: {
+      company: "Peak Systems Group",
+      venue: "Lakefront Performing Arts Center",
+      location: "Milwaukee, WI",
+      surveyDate: "June 12, 2026",
+      reportNo: "RI-2026-014",
+      inspector: "Nic Trapani",
+      condition: "Fair",
+      urgentCount: "1",
+      necessaryCount: "3",
+      basicCount: "2",
+      closedCount: "4",
+    },
+  },
+  {
+    id: "inspection_summary_letter",
+    label: "Rigging Inspection Summary Letter",
+    group: "Reports",
+    description:
+      "The single-page administrative summary for owner files, board packets, insurers, and AHJ requests.",
+    placeholders: [
+      { token: "company", desc: "Your company name" },
+      { token: "venue", desc: "Customer / venue name" },
+      { token: "location", desc: "City, State" },
+      { token: "surveyDate", desc: "Date the inspection was performed" },
+      { token: "reportDate", desc: "Report date" },
+      { token: "inspector", desc: "Inspector name" },
+      { token: "condition", desc: "Overall condition (Good / Fair / Poor)" },
+      { token: "nextCycle", desc: "Next inspection due date / interval" },
+    ],
+    fields: [
+      {
+        id: "purpose",
+        label: "Purpose paragraph",
+        multiline: true,
+        default:
+          "This summary letter consolidates the venue facts, inspection scope, overall condition, and repair counts most commonly needed for owner files, board packets, insurers, and authority-having-jurisdiction requests.",
+      },
+      {
+        id: "summaryStatement",
+        label: "Summary statement",
+        multiline: true,
+        default:
+          "{{company}} performed the rigging inspection at {{venue}}, located in {{location}}, on {{surveyDate}}, reviewing the accessible rigging system against current OSHA, ANSI E1, and other applicable life-safety guidance.",
+      },
+      {
+        id: "scopeNote",
+        label: "Scope of inspection",
+        multiline: true,
+        default:
+          "The principal assets reviewed — for example, counterweight line sets, statically suspended rigging, fire curtain, catwalks, support points, drapery track, and dead-hung equipment included in the site visit.",
+      },
+      {
+        id: "outcomeSummary",
+        label: "Outcome summary",
+        multiline: true,
+        help: "Overall condition plus a short narrative of key risks and recommended repair posture.",
+        default:
+          "Overall condition: {{condition}}. Summarize the key risks and the recommended repair posture in two or three sentences.",
+      },
+      {
+        id: "countInterpretation",
+        label: "Count interpretation note",
+        multiline: true,
+        default:
+          "Open items reflect conditions present on the survey date, including carried-forward issues where applicable. Closed items are findings previously identified but resolved or no longer observed.",
+      },
+      {
+        id: "disclaimer",
+        label: "Limitations disclaimer",
+        multiline: true,
+        default:
+          "This summary is limited to conditions visually accessible on the inspection date. New deficiencies can develop at any time, and concealed components, electrical internals, and structural engineering analysis are outside scope unless specifically noted.",
+      },
+    ],
+    sample: {
+      company: "Peak Systems Group",
+      venue: "Lakefront Performing Arts Center",
+      location: "Milwaukee, WI",
+      surveyDate: "June 12, 2026",
+      reportDate: "June 15, 2026",
+      inspector: "Nic Trapani",
+      condition: "Fair",
+      nextCycle: "June 2027",
+    },
+  },
+  {
+    id: "service_completion_letter",
+    label: "Service Call Completion Letter",
+    group: "Service & repair",
+    description:
+      "The single-page client confirmation that a repair / service call was completed.",
+    placeholders: [
+      { token: "company", desc: "Your company name" },
+      { token: "venue", desc: "Customer / venue name" },
+      { token: "contactName", desc: "Client contact / title" },
+      { token: "serviceNo", desc: "Service call number" },
+      { token: "completionDate", desc: "Completion date" },
+      { token: "warrantyThrough", desc: "Warranty-through date (or N/A)" },
+      { token: "partsList", desc: "Parts / materials used" },
+      { token: "billingNote", desc: "Invoice / billing note" },
+    ],
+    fields: [
+      {
+        id: "intro",
+        label: "Opening paragraph",
+        multiline: true,
+        default:
+          "{{company}} completed the service call described above at {{venue}} on {{completionDate}}. This letter confirms the work performed, the materials used, and any follow-up items or warranty note that should remain with the venue's service file.",
+      },
+      {
+        id: "completedWork",
+        label: "Completed work",
+        multiline: true,
+        help: "Summarize the work in 2–4 sentences.",
+        default:
+          "Summarize the completed repair work in two to four sentences. State the affected equipment, what was corrected, and whether the system or component was cycled, tested, or otherwise confirmed in service.",
+      },
+      {
+        id: "partsMaterials",
+        label: "Parts & materials",
+        multiline: true,
+        default: "Parts and materials used: {{partsList}}.",
+      },
+      {
+        id: "followUp",
+        label: "Follow-up note",
+        multiline: true,
+        default:
+          "State whether no additional action is required, or identify the next recommended repair, refresh, or owner-observation item.",
+      },
+      {
+        id: "warrantyNote",
+        label: "Warranty note",
+        multiline: true,
+        default:
+          "Workmanship on the completed scope is covered through {{warrantyThrough}} unless otherwise stated. Manufacturer warranties on supplied parts remain subject to their own terms and durations.",
+      },
+      {
+        id: "adminNote",
+        label: "Administrative / billing note",
+        multiline: true,
+        default:
+          "Enclosures and billing: {{billingNote}}. Questions regarding this work may be directed to {{company}} using the service call number above.",
+      },
+    ],
+    sample: {
+      company: "Peak Systems Group",
+      venue: "Badger Ballet Company",
+      contactName: "Sam Rivera",
+      serviceNo: "SC-1042",
+      completionDate: "July 2, 2026",
+      warrantyThrough: "July 2027",
+      partsList: "1 × T-track carrier, 2 × wire rope clips",
+      billingNote: "Invoice enclosed",
+    },
+  },
+  {
+    id: "warranty_record",
+    label: "Warranty & Repair Record",
+    group: "Service & repair",
+    description:
+      "The internal single-page tracker for a warranty callback or follow-up tied to earlier work.",
+    placeholders: [
+      { token: "company", desc: "Your company name" },
+      { token: "venue", desc: "Customer / venue name" },
+      { token: "warrantyThrough", desc: "Warranty-through date (or N/A)" },
+      { token: "technician", desc: "Reviewing technician" },
+    ],
+    fields: [
+      {
+        id: "intro",
+        label: "Purpose paragraph",
+        multiline: true,
+        default:
+          "Use this record to track a completed repair, a warranty callback, or a related follow-up issue tied to previously completed work. It is intended to stay with the service file and give both office staff and the venue a clear record of coverage and resolution.",
+      },
+      {
+        id: "coveredWork",
+        label: "Covered work",
+        multiline: true,
+        default:
+          "Describe the original repair scope that is relevant to this record, including the equipment or area originally serviced.",
+      },
+      {
+        id: "reportedIssue",
+        label: "Reported issue",
+        multiline: true,
+        default:
+          "Describe the recurrence, complaint, or new issue reported after the original completion date, including who reported it and what symptoms were observed.",
+      },
+      {
+        id: "disposition",
+        label: "Disposition / resolution",
+        multiline: true,
+        default:
+          "Record whether the issue was corrected under warranty, determined to be outside the original scope, quoted separately, or found to be not reproducible on the return visit.",
+      },
+      {
+        id: "warrantyCoverage",
+        label: "Warranty term — Coverage",
+        multiline: true,
+        default:
+          "Work performed within the documented scope is warranted through the listed date unless otherwise stated.",
+      },
+      {
+        id: "warrantyRecurs",
+        label: "Warranty term — If something recurs",
+        multiline: true,
+        default:
+          "Contact {{company}} and reference the original service record so the return issue can be logged and evaluated quickly.",
+      },
+      {
+        id: "warrantyExcluded",
+        label: "Warranty term — What is not covered",
+        multiline: true,
+        default:
+          "Normal wear, misuse, unrelated failures, and work outside the documented repair scope remain excluded unless separately approved.",
+      },
+      {
+        id: "fileNote",
+        label: "File note",
+        multiline: true,
+        default:
+          "Retain this record with the original invoice, service photos, related correspondence, and any follow-up quote or corrective-action paperwork tied to the same issue.",
+      },
+    ],
+    sample: {
+      company: "Peak Systems Group",
+      venue: "Badger Ballet Company",
+      warrantyThrough: "July 2027",
+      technician: "Nic Trapani",
     },
   },
 ];
