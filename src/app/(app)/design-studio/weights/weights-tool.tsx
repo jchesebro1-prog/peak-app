@@ -147,6 +147,7 @@ export function WeightsTool({
           <button onClick={() => setLines((a) => [...a, { name: "New line", mode: def.mode }])} style={{ ...field, width: "auto", cursor: "pointer", fontWeight: 600, color: "var(--accent)", padding: "7px 12px" }}>+ add line</button>
           <button onClick={() => setLines(DEMO)} style={{ ...field, width: "auto", cursor: "pointer", fontWeight: 600, color: "#5b616e", padding: "7px 12px" }}>Load demo schedule</button>
           <button onClick={exportCsv} style={{ ...field, width: "auto", cursor: "pointer", fontWeight: 600, color: "var(--accent)", padding: "7px 12px", marginLeft: "auto" }}>⭳ Export CSV</button>
+          <button onClick={() => { try { window.print(); } catch { /* no-op */ } }} className="pk-no-print" style={{ ...field, width: "auto", cursor: "pointer", fontWeight: 600, color: "#5b616e", padding: "7px 12px" }}>⎙ Print</button>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>

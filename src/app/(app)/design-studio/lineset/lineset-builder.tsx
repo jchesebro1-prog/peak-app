@@ -121,6 +121,7 @@ export function LinesetBuilder({
               <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} /> Show full grid
             </label>
             <button onClick={exportCsv} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 7, padding: "6px 11px", cursor: "pointer" }}>⭳ CSV</button>
+            <button onClick={() => { try { window.print(); } catch { /* no-op */ } }} className="pk-no-print" style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 7, padding: "6px 11px", cursor: "pointer" }}>⎙ Print</button>
           </div>
         </div>
         <div style={{ fontSize: 12, color: "#6b7079", marginBottom: 10, background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 8, padding: "8px 11px" }}>
