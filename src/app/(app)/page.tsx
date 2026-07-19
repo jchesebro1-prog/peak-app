@@ -37,10 +37,9 @@ import {
   waitLabel as commWaitLabel,
 } from "@/lib/stores/comms";
 import HomeMyDesigns, { type DesignCard } from "./home-my-designs";
-import HomeCalendar, { type AgendaItem } from "./home-calendar";
+import HomeCalendar from "./home-calendar";
+import { loadHomeAgenda } from "@/lib/agenda";
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
-import { gmailEnabled, hasCalendarScope, personalKey } from "@/lib/gmail/config";
-import { allVisits } from "@/lib/stores/site-visits";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 
 /**
@@ -177,76 +176,6 @@ function CardHeadTitle({ children }: { children: React.ReactNode }) {
 
 /* ======================================================================= */
 
-/**
- * Dashboard agenda (D77): the user's Google Calendar (when their mailbox has
- * the Calendar grant) merged with Peak site visits assigned to them. Site
- * visits are deduped ONLY against events actually fetched this load — a
- * pushed visit whose event didn't come back (fetch failed, scope lost,
- * beyond the cap) still shows locally rather than vanishing (review F1);
- * an invite the assignee accepted into Google is matched by its
- * sv-<id>@peak-app iCalUID (F6).
- */
-async function loadAgenda(
-  userId: string,
-  me: string
-): Promise<{ gmailOn: boolean; calendarOn: boolean; agenda: AgendaItem[] }> {
-  const gmailOn = gmailEnabled();
-  let calendarOn = false;
-  const agenda: AgendaItem[] = [];
-  const now = Date.now();
-  const max = now + 14 * 86_400_000;
-  const fetchedIds = new Set<string>();
-  const fetchedIcal = new Set<string>();
-  if (gmailOn) {
-    try {
-      const { getConnectionInfo } = await import("@/lib/gmail/connections");
-      const info = await getConnectionInfo(personalKey(userId));
-      calendarOn = !!info && hasCalendarScope(info.scope);
-      if (calendarOn) {
-        const { listUpcomingEvents } = await import("@/lib/google/calendar");
-        const evs = await listUpcomingEvents(personalKey(userId), {
-          timeMinMs: now - 3600_000,
-          timeMaxMs: max,
-        });
-        for (const e of evs) {
-          fetchedIds.add(e.id);
-          if (e.iCalUID) fetchedIcal.add(e.iCalUID);
-          agenda.push({
-            key: "g-" + e.id,
-            title: e.title,
-            startMs: e.startMs,
-            endMs: e.endMs,
-            allDay: e.allDay,
-            location: e.location,
-            href: e.htmlLink,
-            source: "google",
-          });
-        }
-      }
-    } catch (err) {
-      console.error("[home] calendar load failed:", err);
-    }
-  }
-  for (const v of await allVisits()) {
-    if (v.assignedTo !== me) continue;
-    if (v.endAt < now - 3600_000 || v.startAt > max) continue;
-    if (v.googleEventId && fetchedIds.has(v.googleEventId)) continue;
-    if (fetchedIcal.has("sv-" + v.id + "@peak-app")) continue;
-    agenda.push({
-      key: "v-" + v.id,
-      title: (v.venue || v.customer) + " — " + v.reason,
-      startMs: v.startAt,
-      endMs: v.endAt,
-      allDay: false,
-      location: v.address,
-      href: "/customers/" + encodeURIComponent(v.customerId),
-      source: "visit",
-    });
-  }
-  agenda.sort((a, b) => a.startMs - b.startMs);
-  return { gmailOn, calendarOn, agenda };
-}
-
 export default async function HomePage({
   searchParams,
 }: {
@@ -293,8 +222,8 @@ export default async function HomePage({
   const initialsOf = (n: string) => ident.get(n)?.initials || deriveInitials(n);
   const colorOf = (n: string) => ident.get(n)?.color || fallbackColor(n);
 
-  /* ---- dashboard calendar (D77) ---- */
-  const { gmailOn, calendarOn, agenda } = await loadAgenda(user.id, me);
+  /* ---- dashboard calendar (D77) — next 14 days via the shared loader ---- */
+  const { gmailOn, calendarOn, items: agenda } = await loadHomeAgenda(user.id, me);
 
 
   /* ---- my pipeline + stat tiles ---- */

@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { addCalendarEventAction } from "./calendar-actions";
+import type { AgendaItem } from "@/lib/agenda";
 
 /**
  * Dashboard calendar card (D77) — the user's next two weeks, merged from
@@ -19,17 +20,7 @@ import { addCalendarEventAction } from "./calendar-actions";
  * may run in UTC.
  */
 
-export type AgendaItem = {
-  key: string;
-  title: string;
-  startMs: number;
-  endMs: number;
-  allDay: boolean;
-  location: string;
-  /** external Google link or internal path ("" = not clickable) */
-  href: string;
-  source: "google" | "visit";
-};
+export type { AgendaItem };
 
 const label: CSSProperties = {
   display: "block",
@@ -193,15 +184,20 @@ export default function HomeCalendar({
             {calendarOn ? " · Google Calendar" : ""}
           </div>
         </div>
-        {calendarOn && (
-          <button
-            className="pk-btn-outline"
-            onClick={() => setAdding((v) => !v)}
-            style={{ fontSize: 12, flexShrink: 0 }}
-          >
-            {adding ? "Close" : "+ Add event"}
-          </button>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          {calendarOn && (
+            <button
+              className="pk-btn-outline"
+              onClick={() => setAdding((v) => !v)}
+              style={{ fontSize: 12 }}
+            >
+              {adding ? "Close" : "+ Add event"}
+            </button>
+          )}
+          <a href="/calendar" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+            Open calendar →
+          </a>
+        </div>
       </div>
 
       {adding && calendarOn && (

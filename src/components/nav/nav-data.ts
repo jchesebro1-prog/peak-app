@@ -11,6 +11,7 @@ export type NavEntry =
 
 export const NAV: NavEntry[] = [
   { kind: "link", key: "home", label: "Home", href: "/" },
+  { kind: "link", key: "calendar", label: "Calendar", href: "/calendar" },
   { kind: "link", key: "inbox", label: "Inbox", href: "/inbox" },
   {
     kind: "group",

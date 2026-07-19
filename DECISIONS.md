@@ -773,3 +773,18 @@ Anything you want changed, just say so — none of these are hard to reverse.
   the extraction path (shared card/label/field/th/td primitives already
   exist in ui.tsx; per-screen inline copies converge as screens are
   touched) is the standing rule going forward.
+- **D81. Full-page calendar module** (S13, Jeff: "yes I want a full page
+  calendar module under home"). New /calendar route + nav entry directly
+  after Home: a month grid (Sunday-start, today ringed, prev/next/Today
+  controls via ?month=YYYY-MM) over the same merged sources as the D77
+  dashboard card — the signed-in user's Google Calendar primary + their
+  Peak site visits, with the same fetch-aware dedup. The agenda assembly
+  moved to a shared lib (src/lib/agenda.ts, loadAgendaRange/loadHomeAgenda)
+  used by both surfaces. Day placement and labels compute in the BROWSER'S
+  timezone after hydration (all-day items place by UTC calendar date); the
+  server fetch pads the month a week each side so edge days populate under
+  any tz combination. Clicking a day arms an inline quick-add for that date
+  (writes to Google Calendar; needs the calendar grant, with honest
+  fallback copy otherwise). Google chips link out to Google Calendar;
+  visit chips link to the customer record; +N-more overflow per day. The
+  dashboard card gained an "Open calendar →" link.
