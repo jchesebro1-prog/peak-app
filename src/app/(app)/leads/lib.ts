@@ -45,7 +45,18 @@ export function fuChip(l: LeadRecord): FuChipVM {
     return { label: "Won", full: "Won", ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da", tone: "ok" };
   if (l.stage === "lost")
     return { label: "Lost", full: "Lost", ink: "#8c919c", soft: "#f1f2f5", bd: "#e4e7ec", tone: "mute" };
-  return { label: "On track", full: "On track", ink: "#5b7a6a", soft: "#eef3f0", bd: "#d8e6de", tone: "ok" };
+  // Nothing is scheduled on this lead. It used to report a green "On track"
+  // here, which read as reassurance for the one state that has no next step at
+  // all (punch item 18). Display-only: followUpInfo() still reports need=false,
+  // so the worklist, counts and urgency sort are unchanged.
+  return {
+    label: "Nothing scheduled",
+    full: "No follow-up scheduled",
+    ink: "#8c919c",
+    soft: "#f1f2f5",
+    bd: "#e4e7ec",
+    tone: "mute",
+  };
 }
 
 export type Ident = { name: string; initials: string; color: string };

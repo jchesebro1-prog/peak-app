@@ -41,14 +41,14 @@ function str(fd: FormData, k: string): string {
 
 /** Jump/advance a project to a stage (stage tracker node + Advance button). */
 export async function setStageAction(formData: FormData): Promise<void> {
-  await requireUser();
+  const user = await requireUser();
   const id = str(formData, "id");
   const stage = str(formData, "stage") as ProjectStage;
   if (!id || !stage) return;
   const p = await getProject(id);
   if (!p) return;
   if (!stagesFor(p.kind).some((s) => s.key === stage)) return; // illegal for kind
-  await setProjectStage(id, stage);
+  await setProjectStage(id, stage, user.name);
   revalidatePath("/", "layout");
 }
 
@@ -98,7 +98,7 @@ export async function removeCrewAction(formData: FormData): Promise<void> {
 
 /** Record customer sign-off at hand-off, then close the job out (→ complete). */
 export async function signoffAction(formData: FormData): Promise<void> {
-  await requireUser();
+  const user = await requireUser();
   const id = str(formData, "id");
   const name = str(formData, "name").trim();
   if (!id || !name) return;
@@ -106,8 +106,8 @@ export async function signoffAction(formData: FormData): Promise<void> {
   if (!p) return;
   const role = str(formData, "role").trim() || "Customer";
   const note = str(formData, "note").trim();
-  await setSignoff(id, { name, role, note });
-  await setProjectStage(id, "complete");
+  await setSignoff(id, { name, role, note }, user.name);
+  await setProjectStage(id, "complete", user.name);
   revalidatePath("/", "layout");
 }
 

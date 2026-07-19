@@ -547,7 +547,7 @@ worth deciding before any team-member work.
 
 ---
 
-## 10. Estimating Rules: display options to tame the scroll — OPEN
+## 10. Estimating Rules: display options to tame the scroll — DONE (D83)
 
 **Area:** `src/app/(app)/estimating-rules/page.tsx`, `estimating-rules/controls.tsx:339-468`,
 `src/lib/stores/pricing.ts`
@@ -583,7 +583,24 @@ on the page — no schema change, no server work.
 default collapsed or expanded. **Recommend: collapsible groups defaulting collapsed, plus a
 search box and a "only modified" chip** — that alone likely resolves the complaint.
 
-**Status:** OPEN — small, self-contained, no data model change
+**DONE 2026-07-19 (D83)** — built the recommendation, all client-side, no schema change:
+- **Collapsible groups, default collapsed.** The page now opens as an 8-row index with a
+  per-group rule count instead of 79 rows. Expand/Collapse all button.
+- **Search** over label, id, unit and help/expr text.
+- **"Only modified"** (with a live count of changed rates), **"Hide formulas"**, **"Only live"**.
+- A filter that narrows the list **force-opens matching groups** — otherwise hits would sit
+  behind collapsed headers and read as "no results". Non-matching groups drop out entirely,
+  with an explicit empty state.
+- View state (filters + which groups are open) **persists in localStorage**, via
+  `useSyncExternalStore` — a lazy `useState` initializer reading localStorage would break
+  hydration, and setState-in-effect trips the repo's lint rule.
+- Browser-verified: 79 → 8 rows on load; search "mileage" → 7 of 79 across 3 auto-expanded
+  groups; "Only modified" → correct empty state; group open state survives reload with no
+  hydration error.
+
+**Still Jeff's call:** default-collapsed is a guess at his preference. One constant flips it.
+
+**Status:** DONE (D83) — pending Jeff's read on the collapsed default
 
 ---
 
@@ -1132,6 +1149,15 @@ and a follow-up warning chip. Stages: `new / contacted / qualified / quoted / wo
 scheduled follow-up and missed it"* (`followUpInfo`, `leads.ts:363-374`). Daylite flags *"nothing
 is scheduled at all."* In Peak, `nextActionAt == null` falls through to a green **"On track"**
 chip — **the exact state Daylite would warn about.** Worth fixing regardless of the board work.
+**FIXED 2026-07-19 (D83)** — `fuChip()` (`leads/lib.ts`) now returns a neutral **"Nothing
+scheduled"** chip instead of a green "On track" for that fallback. Deliberately display-only:
+`followUpInfo()` still reports `need: false`, so the worklist, the "Needs follow-up" count and
+the urgency sort are unchanged — reclassifying it as a real follow-up need would flood the
+worklist, and that's Jeff's call, not a bug fix. **Not observable in the current seed data**
+(all 9 open leads already carry an SLA / overdue / going-cold warning, so the branch isn't
+reached) — verified by inspection, not by browser.
+**Open follow-up for Jeff:** should "nothing scheduled" count as needing follow-up (i.e.
+change `followUpInfo`), or stay a passive display state? Daylite treats it as a warning.
 
 **Also:** a true "Nothing Scheduled" badge is **not currently computable** — there is no
 appointments or tasks store to query (see items 17 and 21).
@@ -1346,7 +1372,16 @@ itself is deferred**, so the data stops being discarded.
   schema change) and covers quote status changes, comms, site visits, job approvals/completions and
   project notes. **Recommend starting there.**
 - **B. Add project stage history now?** Independent of the timeline, and it stops ongoing data loss.
-  **Recommend yes.**
+  **Recommend yes. — DONE 2026-07-19 (D83).** `ProjectStageChange {at, from, to, by}` mirrors
+  `QuoteHistoryEntry` and adds the actor. `stageHistory[]` on `ProjectRecord`, backfilled to `[]`
+  on read, anchored at creation with a `from: null` opening entry. Every stage write now goes
+  through one `recordStageChange()` helper — `setProjectStage()` **and** the silent
+  `setSignoff()` side-write that used to move a project to `signoff` with no record. No-ops when
+  the stage is unchanged. `setStageAction` / `signoffAction` now pass the signed-in user, so
+  transitions are attributed to whoever made them instead of the hardcoded default actor.
+  **Browser-verified** on P-3002: advancing scheduled→install then back recorded both
+  transitions with actor and timestamp. **History before this change is still unrecoverable** —
+  the array only accrues from here forward.
 - **C. Does the timeline need true field-level change tracking** ("who changed what when"), or is
   event-level enough? Field-level is a much bigger commitment.
 - **D. Do notes and attachments become real records?** Both are prerequisites for the "note added"
@@ -1480,9 +1515,28 @@ design/estimate", "First contact complete". So Daylite's activity feed is substa
   legacy cruft in their data? **Worth Jeff confirming before anyone scopes this** — custom fields
   are a large feature and these two look like artifacts of a 2009-era record.
 - **D. Store `owner` on the customer** instead of deriving it? Recommend yes — derived ownership
-  breaks as soon as a customer has no quotes.
+  breaks as soon as a customer has no quotes. **— DONE 2026-07-19 (D83).**
 - **E. Add `createdAt`/`updatedAt` to customers?** Recommend yes regardless; it's near-free and
-  unblocks "Added in last 7 days".
+  unblocks "Added in last 7 days". **— DONE 2026-07-19 (D83).**
+
+**D+E as built:** all three fields are **optional** on `CustomerDoc` — records written before
+this have none and there is no way to reconstruct them, so the type says so rather than lying
+with a default. Two traps handled:
+1. **`normalizeRecord()` rebuilds the doc from form input**, so a naive add would reset
+   `createdAt` and drop a stored `owner` on every save. A `stampMeta(next, prev, t)` helper now
+   carries metadata across both write paths (`upsert` and `setDirectory`).
+2. **`updatedAt` only advances when the content actually changed** (compared with the meta keys
+   stripped). `setDirectory` is a full-replace; stamping unconditionally would make "modified"
+   mean "last time anything saved" for every customer at once. *(Note: `setDirectory` currently
+   has no callers outside the store — `upsert`/`remove` are the live paths — but the
+   full-replace semantics are still there to trip over later.)*
+
+The Customers list now prefers a stored `owner` and **falls back to the quote/project rollup**
+when unset, so nothing changes visually until an owner is actually assigned.
+
+**Still to do before this is user-visible:** no UI writes `owner` yet (the customer edit form
+has no owner field), and nothing renders created/modified dates. **"Added in last 7 days" (item
+22) is unblocked but not built** — and it will only see customers created from here forward.
 - **F. Referral tracking** — a "Referred by" person link, or is the existing lead `source`
   picklist enough?
 

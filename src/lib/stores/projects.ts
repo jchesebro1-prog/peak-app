@@ -209,6 +209,7 @@ export type ProjectRecord = {
   installStart: number | null;
   installEnd: number | null;
   stage: ProjectStage;
+  stageHistory: ProjectStageChange[];
   procurement: ProcurementLine[];
   mobilizations: Mobilization[];
   deliveries: ProjectDelivery[];
@@ -218,6 +219,19 @@ export type ProjectRecord = {
   timeLogs: TimeLog[];
   signoff: ProjectSignoff | null;
   trainingAt: number | null;
+};
+
+/**
+ * One stage transition, appended on every stage write. Mirrors QuoteHistoryEntry
+ * ({at, from, to}) and adds the actor. `from: null` marks the record's opening
+ * stage. Existing projects start with an empty array — history before this
+ * change was overwritten in place and is unrecoverable.
+ */
+export type ProjectStageChange = {
+  at: number;
+  from: ProjectStage | null;
+  to: ProjectStage;
+  by: string;
 };
 
 export type RiskFlag = { kind: "late-order" | "no-crew"; label: string };
@@ -276,6 +290,7 @@ function normalizeProject(p: ProjectRecord): ProjectRecord {
     "notes",
     "timeLogs",
     "mobilizations",
+    "stageHistory",
   ]) {
     if (!Array.isArray(rec[k])) rec[k] = [];
   }
@@ -339,6 +354,7 @@ export async function createProject(
     installStart: null,
     installEnd: null,
     stage: "procurement",
+    stageHistory: [],
     procurement: [],
     mobilizations: [],
     deliveries: [],
@@ -353,6 +369,11 @@ export async function createProject(
     createdAt: t,
     updatedAt: t,
   };
+  // Anchor the history at the stage the record opened in, so the first real
+  // transition has a "from" to render against.
+  if (!p.stageHistory.length) {
+    p.stageHistory = [{ at: t, from: null, to: p.stage, by: p.owner }];
+  }
   await upsertDoc<ProjectRecord>("projects", p);
   return p;
 }
@@ -380,12 +401,21 @@ export async function removeProject(id: string): Promise<void> {
   await softDeleteDoc("projects", id);
 }
 
+/** Append a transition to the record's stage history. No-op when the stage is unchanged. */
+function recordStageChange(p: ProjectRecord, to: ProjectStage, by: string): void {
+  if (p.stage === to) return;
+  if (!Array.isArray(p.stageHistory)) p.stageHistory = [];
+  p.stageHistory.push({ at: now(), from: p.stage ?? null, to, by });
+  p.stage = to;
+}
+
 export async function setProjectStage(
   id: string,
-  stage: ProjectStage
+  stage: ProjectStage,
+  by: string = DEFAULT_ACTOR
 ): Promise<ProjectRecord | null> {
   return patchDoc<ProjectRecord>("projects", id, (p) => {
-    p.stage = stage;
+    recordStageChange(p, stage, by);
     if (stage === "training" && !p.trainingAt) p.trainingAt = now();
     p.updatedAt = now();
     return p;
@@ -489,6 +519,7 @@ function fromQuote(q: QuoteLike): Omit<ProjectRecord, "id"> {
     installStart: labor ? ahead(38) : null,
     installEnd: labor ? ahead(44) : null,
     stage: "procurement",
+    stageHistory: [], // createProject() anchors the opening entry
     procurement: deriveProcurement(q),
     mobilizations: (q.spec && q.spec.mobs) || [],
     deliveries: [],
@@ -746,7 +777,9 @@ export async function setSignoff(
     p.signoff = signoff
       ? { signedBy: signedBy || DEFAULT_ACTOR, signedAt: now(), ...signoff }
       : null;
-    if (signoff && p.stage !== "complete") p.stage = "signoff";
+    if (signoff && p.stage !== "complete") {
+      recordStageChange(p, "signoff", signedBy || DEFAULT_ACTOR);
+    }
     p.updatedAt = now();
     return p;
   });

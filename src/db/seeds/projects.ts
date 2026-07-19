@@ -73,6 +73,7 @@ export function projectsSeed(): ProjectRecord[] {
       installStart: ago(1),
       installEnd: ahead(2),
       stage: "install",
+      stageHistory: [],
       procurement: [
         line({ sku: "RB-MV-MN", desc: "25oz Memorable Velour — main drape", vendor: "Rose Brand", qty: 1, unit: "lot", cost: 9800, leadDays: 32, status: "received", orderedAt: ago(16), po: "PO-1042" }),
         line({ sku: "JC-T6-TRK", desc: "T6 walkalong track, 44ft", vendor: "JR Clancy", qty: 2, unit: "ea", cost: 3120, leadDays: 30, status: "received", orderedAt: ago(16), po: "PO-1043" }),
@@ -126,6 +127,7 @@ export function projectsSeed(): ProjectRecord[] {
       installStart: ahead(8),
       installEnd: ahead(12),
       stage: "scheduled",
+      stageHistory: [],
       procurement: [
         line({ sku: "JC-PWC-SET", desc: "PowerLift counterweight sets (8)", vendor: "JR Clancy", qty: 8, unit: "set", cost: 14400, leadDays: 45, status: "received", orderedAt: ago(40), po: "PO-1031" }),
         line({ sku: "JC-LOFT-BLK", desc: "Loft blocks & head blocks", vendor: "JR Clancy", qty: 1, unit: "lot", cost: 6200, leadDays: 45, status: "received", orderedAt: ago(40), po: "PO-1031" }),
@@ -168,6 +170,7 @@ export function projectsSeed(): ProjectRecord[] {
       installStart: ahead(36),
       installEnd: ahead(42),
       stage: "procurement",
+      stageHistory: [],
       procurement: [
         line({ sku: "ETC-SENSOR3", desc: "Sensor3 dimming + ThruPower racks", vendor: "ETC", qty: 2, unit: "rack", cost: 18600, leadDays: 56, status: "ordered", orderedAt: ago(4), po: "PO-1051" }),
         line({ sku: "JC-PH-HOIST", desc: "PowerAssist line-shaft hoists (6)", vendor: "JR Clancy", qty: 6, unit: "ea", cost: 22800, leadDays: 60, status: "ordered", orderedAt: ago(2), po: "PO-1052" }),
@@ -211,6 +214,7 @@ export function projectsSeed(): ProjectRecord[] {
       installStart: null,
       installEnd: null,
       stage: "delivery",
+      stageHistory: [],
       procurement: [
         line({ sku: "RB-COM-16", desc: "16oz Commando Cloth — black masking", vendor: "Rose Brand", qty: 1, unit: "lot", cost: 7400, leadDays: 32, status: "shipped", orderedAt: ago(6), po: "PO-1048" }),
         line({ sku: "RB-WEBTIE", desc: "Webbing, ties & grommets", vendor: "In-stock", qty: 1, unit: "lot", cost: 520, leadDays: 7, status: "received", orderedAt: ago(6), po: "PO-1049" }),
@@ -246,6 +250,7 @@ export function projectsSeed(): ProjectRecord[] {
       installStart: ago(30),
       installEnd: ago(22),
       stage: "complete",
+      stageHistory: [],
       procurement: [
         line({ sku: "WN-DIVA", desc: "Diva acoustical shell towers (6)", vendor: "Wenger", qty: 6, unit: "ea", cost: 44000, leadDays: 70, status: "received", orderedAt: ago(100), po: "PO-0980" }),
         line({ sku: "WN-CEIL", desc: "Overhead ceiling panels", vendor: "Wenger", qty: 1, unit: "lot", cost: 16500, leadDays: 70, status: "received", orderedAt: ago(100), po: "PO-0981" }),

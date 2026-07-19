@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   setValueAction,
@@ -334,9 +334,193 @@ function FormulaRow({ it }: { it: FormulaVM }) {
   );
 }
 
+/* ---------------- display options (punch item 10) ---------------- */
+
+/**
+ * 79 rows across 8 groups all rendered open was the whole complaint. These are
+ * pure client-side views over data already on the page — no schema change, no
+ * server round-trip.
+ *
+ * Groups default to collapsed so the page opens as an index rather than a
+ * scroll; the open set and the filters persist in localStorage so the screen
+ * comes back the way it was left. When a filter narrows the list, matching
+ * groups force open regardless of their collapsed state — otherwise a search
+ * would appear to return nothing.
+ */
+const PREFS_KEY = "peak.estimatingRules.view";
+
+type ViewPrefs = {
+  q: string;
+  onlyModified: boolean;
+  hideFormulas: boolean;
+  onlyLive: boolean;
+  open: string[];
+};
+
+const DEFAULT_PREFS: ViewPrefs = {
+  q: "",
+  onlyModified: false,
+  hideFormulas: false,
+  onlyLive: false,
+  open: [],
+};
+
+function parsePrefs(raw: string | null): ViewPrefs {
+  if (!raw) return DEFAULT_PREFS;
+  try {
+    const p = JSON.parse(raw) as Partial<ViewPrefs>;
+    return { ...DEFAULT_PREFS, ...p, open: Array.isArray(p.open) ? p.open : [] };
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
+
+/**
+ * localStorage as an external store rather than state-synced-in-an-effect: the
+ * server renders DEFAULT_PREFS, so a lazy useState initializer reading
+ * localStorage would blow up hydration, and setState-in-useEffect is a
+ * cascading render. useSyncExternalStore is the supported shape for both.
+ * The snapshot must be referentially stable, hence the cache.
+ */
+let prefsRaw: string | null = null;
+let prefsCache: ViewPrefs = DEFAULT_PREFS;
+let prefsLoaded = false;
+const prefsListeners = new Set<() => void>();
+
+function subscribePrefs(cb: () => void): () => void {
+  prefsListeners.add(cb);
+  window.addEventListener("storage", cb);
+  return () => {
+    prefsListeners.delete(cb);
+    window.removeEventListener("storage", cb);
+  };
+}
+
+function getPrefsSnapshot(): ViewPrefs {
+  let raw: string | null = null;
+  try {
+    raw = window.localStorage.getItem(PREFS_KEY);
+  } catch {
+    return prefsCache;
+  }
+  if (!prefsLoaded || raw !== prefsRaw) {
+    prefsRaw = raw;
+    prefsCache = parsePrefs(raw);
+    prefsLoaded = true;
+  }
+  return prefsCache;
+}
+
+function getServerPrefsSnapshot(): ViewPrefs {
+  return DEFAULT_PREFS;
+}
+
+function writePrefs(next: ViewPrefs): void {
+  prefsCache = next;
+  prefsRaw = JSON.stringify(next);
+  prefsLoaded = true;
+  try {
+    window.localStorage.setItem(PREFS_KEY, prefsRaw);
+  } catch {
+    /* private mode / quota — the view just doesn't persist */
+  }
+  for (const l of prefsListeners) l();
+}
+
+/** True when the row is a rate whose current value differs from its default. */
+function isModified(it: ItemVM): boolean {
+  return it.kind === "rate" && Math.abs(it.value - it.def) > 1e-9;
+}
+
+function matchesQuery(it: ItemVM, q: string): boolean {
+  if (!q) return true;
+  const hay =
+    it.kind === "rate"
+      ? [it.label, it.id, it.unit, it.help]
+      : [it.label, it.id, it.expr];
+  return hay.some((s) => (s || "").toLowerCase().includes(q));
+}
+
+const CHIP_BASE: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  padding: "7px 12px",
+  borderRadius: 8,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+  lineHeight: 1.2,
+};
+
+function ToggleChip({
+  on,
+  label,
+  onClick,
+}: {
+  on: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={on}
+      style={{
+        ...CHIP_BASE,
+        border: `1px solid ${on ? "var(--accent)" : "#e4e7ec"}`,
+        background: on ? "var(--accent-soft)" : "#fff",
+        color: on ? "var(--accent)" : "#787d87",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 /* ---------------- legend + groups ---------------- */
 
 export function RulesEditor({ groups }: { groups: GroupVM[] }) {
+  const prefs = useSyncExternalStore(
+    subscribePrefs,
+    getPrefsSnapshot,
+    getServerPrefsSnapshot
+  );
+
+  const patch = (p: Partial<ViewPrefs>) => writePrefs({ ...prefs, ...p });
+
+  const q = prefs.q.trim().toLowerCase();
+  const filtering = !!q || prefs.onlyModified || prefs.hideFormulas || prefs.onlyLive;
+
+  const visible = groups
+    .filter((g) => !prefs.onlyLive || g.live)
+    .map((g) => ({
+      ...g,
+      items: g.items.filter(
+        (it) =>
+          (!prefs.hideFormulas || it.kind !== "formula") &&
+          (!prefs.onlyModified || isModified(it)) &&
+          matchesQuery(it, q)
+      ),
+    }))
+    .filter((g) => g.items.length > 0);
+
+  const shownRows = visible.reduce((a, g) => a + g.items.length, 0);
+  const totalRows = groups.reduce((a, g) => a + g.items.length, 0);
+  const modifiedCount = groups.reduce(
+    (a, g) => a + g.items.filter(isModified).length,
+    0
+  );
+
+  const openSet = new Set(prefs.open);
+  const toggleGroup = (key: string) =>
+    patch({
+      open: openSet.has(key)
+        ? prefs.open.filter((k) => k !== key)
+        : [...prefs.open, key],
+    });
+
+  const allOpen = visible.length > 0 && visible.every((g) => openSet.has(g.key));
+
   return (
     <div>
       {/* legend */}
@@ -403,11 +587,128 @@ export function RulesEditor({ groups }: { groups: GroupVM[] }) {
         </div>
       </div>
 
+      {/* display options */}
+      <div
+        className="pk-card"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+          rowGap: 8,
+          padding: "12px 16px",
+          marginBottom: 18,
+        }}
+      >
+        <input
+          type="search"
+          value={prefs.q}
+          onChange={(e) => patch({ q: e.target.value })}
+          placeholder="Search rules…"
+          aria-label="Search estimating rules"
+          style={{
+            flex: "1 1 200px",
+            minWidth: 160,
+            fontSize: 13,
+            padding: "7px 11px",
+            borderRadius: 8,
+            border: "1px solid #e4e7ec",
+            background: "#fbfbfc",
+            outline: "none",
+          }}
+        />
+        <ToggleChip
+          on={prefs.onlyModified}
+          label={`Only modified${modifiedCount ? ` (${modifiedCount})` : ""}`}
+          onClick={() => patch({ onlyModified: !prefs.onlyModified })}
+        />
+        <ToggleChip
+          on={prefs.hideFormulas}
+          label="Hide formulas"
+          onClick={() => patch({ hideFormulas: !prefs.hideFormulas })}
+        />
+        <ToggleChip
+          on={prefs.onlyLive}
+          label="Only live"
+          onClick={() => patch({ onlyLive: !prefs.onlyLive })}
+        />
+        <button
+          type="button"
+          onClick={() => patch({ open: allOpen ? [] : visible.map((g) => g.key) })}
+          style={{ ...CHIP_BASE, border: "1px solid #e4e7ec", background: "#fff", color: "#787d87" }}
+        >
+          {allOpen ? "Collapse all" : "Expand all"}
+        </button>
+        {filtering && (
+          <button
+            type="button"
+            onClick={() =>
+              patch({ q: "", onlyModified: false, hideFormulas: false, onlyLive: false })
+            }
+            style={{
+              ...CHIP_BASE,
+              border: "1px solid transparent",
+              background: "transparent",
+              color: "#9aa0ab",
+              textDecoration: "underline",
+            }}
+          >
+            Clear
+          </button>
+        )}
+        <span style={{ fontSize: 12, color: "#9aa0ab", marginLeft: "auto" }}>
+          {filtering ? `${shownRows} of ${totalRows} rules` : `${totalRows} rules`}
+        </span>
+      </div>
+
+      {filtering && visible.length === 0 && (
+        <div
+          className="pk-card"
+          style={{ padding: "22px 18px", fontSize: 13, color: "#9aa0ab", marginBottom: 18 }}
+        >
+          No rules match these filters.
+        </div>
+      )}
+
       {/* groups */}
-      {groups.map((g) => (
+      {visible.map((g) => {
+        // A filter that narrowed the list forces its matches open; otherwise the
+        // hits would sit behind a collapsed header and read as "no results".
+        const open = filtering || openSet.has(g.key);
+        return (
         <div className="pk-card" style={{ overflow: "hidden", marginBottom: 18 }} key={g.key}>
-          <div style={{ padding: "15px 18px 13px", borderBottom: "1px solid #f0f1f4" }}>
+          <div
+            role="button"
+            tabIndex={0}
+            aria-expanded={open}
+            onClick={() => toggleGroup(g.key)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                toggleGroup(g.key);
+              }
+            }}
+            style={{
+              padding: "15px 18px 13px",
+              borderBottom: open ? "1px solid #f0f1f4" : "none",
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+          >
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span
+                aria-hidden
+                style={{
+                  fontSize: 10,
+                  color: "#9aa0ab",
+                  display: "inline-block",
+                  width: 10,
+                  transform: open ? "rotate(90deg)" : "none",
+                  transition: "transform .12s ease",
+                }}
+              >
+                ▶
+              </span>
               <span style={{ fontSize: 15, fontWeight: 600 }}>{g.label}</span>
               <span
                 style={
@@ -436,9 +737,12 @@ export function RulesEditor({ groups }: { groups: GroupVM[] }) {
               >
                 {g.live ? "LIVE" : "REFERENCE"}
               </span>
+              <span style={{ fontSize: 11.5, color: "#aab0bb", marginLeft: "auto" }}>
+                {g.items.length}
+              </span>
             </div>
             <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>{g.sub}</div>
-            {g.note && (
+            {open && g.note && (
               <div
                 style={{ fontSize: 11.5, color: "#aab0bb", marginTop: 8, lineHeight: 1.5 }}
               >
@@ -446,17 +750,20 @@ export function RulesEditor({ groups }: { groups: GroupVM[] }) {
               </div>
             )}
           </div>
-          <div style={{ padding: "4px 18px 10px" }}>
-            {g.items.map((it) =>
-              it.kind === "rate" ? (
-                <RateRow key={it.id} it={it} />
-              ) : (
-                <FormulaRow key={it.id} it={it} />
-              )
-            )}
-          </div>
+          {open && (
+            <div style={{ padding: "4px 18px 10px" }}>
+              {g.items.map((it) =>
+                it.kind === "rate" ? (
+                  <RateRow key={it.id} it={it} />
+                ) : (
+                  <FormulaRow key={it.id} it={it} />
+                )
+              )}
+            </div>
+          )}
         </div>
-      ))}
+        );
+      })}
 
       <div style={{ fontSize: 11.5, color: "#aab0bb", lineHeight: 1.6, marginTop: 6 }}>
         Flame-test edits take effect on the next flame-test quote immediately. System-design install

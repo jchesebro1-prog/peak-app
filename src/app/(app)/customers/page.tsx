@@ -74,6 +74,9 @@ export default async function CustomersPage({
 
   const rows = customers.map((c) => {
     const r = rollup(c.id, c.name);
+    // A stored owner wins; the rollup is the fallback for records that predate
+    // the field or have never been assigned (D83, punch item 23 D).
+    if (c.owner) r.owner = c.owner;
     return { c, ...r };
   });
 

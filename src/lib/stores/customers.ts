@@ -64,7 +64,22 @@ export type CustomerDoc = {
   location: string;
   locations: CustomerLocation[];
   contacts: CustomerContact[];
+  /**
+   * Record metadata (D83, punch item 23 D/E). All optional: records written
+   * before this change have none, and there is no way to reconstruct them.
+   * `createdAt` is set once and never rewritten; `updatedAt` only moves when
+   * the record's content actually changes, so it stays meaningful as a
+   * "modified" date. `owner` is the stored account owner — the Customers
+   * screen still falls back to deriving one from the newest quote/project
+   * when this is unset.
+   */
+  createdAt?: number;
+  updatedAt?: number;
+  owner?: string;
 };
+
+/** The metadata keys stamped by the store, not by the edit form. */
+const META_KEYS = ["createdAt", "updatedAt"] as const;
 
 /** Loose authoring shapes (what Customers screen edit forms produce). */
 export type CustomerLocationInput = {
@@ -96,6 +111,7 @@ export type CustomerRecordInput = {
   location?: string;
   locations?: CustomerLocationInput[];
   contacts?: CustomerContactInput[];
+  owner?: string;
 };
 
 const COLL = "customers" as const;
@@ -151,7 +167,7 @@ export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
       primary: !!ct.primary,
     }));
   if (contacts.length && !contacts.some((ct) => ct.primary)) contacts[0].primary = true;
-  return {
+  const doc: CustomerDoc = {
     id: c.id,
     name: c.name || "",
     type: c.type || "",
@@ -159,6 +175,34 @@ export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
     locations: locs,
     contacts,
   };
+  const owner = (c.owner || "").trim();
+  if (owner) doc.owner = owner;
+  return doc;
+}
+
+/**
+ * Carry record metadata across a write. `normalizeRecord` rebuilds the doc from
+ * form input, so without this every save would reset createdAt and drop a
+ * stored owner the form didn't submit.
+ *
+ * `updatedAt` advances only when the content changed — the directory is written
+ * on full-replace, and stamping unconditionally would make "modified" mean
+ * "last time anything saved" for every customer at once.
+ */
+function stampMeta(next: CustomerDoc, prev: CustomerDoc | null, t: number): CustomerDoc {
+  if (!prev) return { ...next, createdAt: t, updatedAt: t };
+  const out: CustomerDoc = {
+    ...next,
+    createdAt: prev.createdAt ?? t,
+    owner: next.owner ?? prev.owner,
+  };
+  const content = (d: CustomerDoc) => {
+    const rest: Partial<CustomerDoc> = { ...d };
+    for (const k of META_KEYS) delete rest[k];
+    return JSON.stringify(rest);
+  };
+  out.updatedAt = content(out) === content(prev) ? (prev.updatedAt ?? t) : t;
+  return out;
 }
 
 /* ---------------- canonical directory (id-keyed) ---------------- */
@@ -228,8 +272,12 @@ export async function setDirectory(
   if (!Array.isArray(records)) return;
   const next = records.map(normalizeRecord).filter((c) => c.id);
   const existing = await listDocs<CustomerDoc>(COLL);
+  const prevById = new Map(existing.map((c) => [c.id, c]));
   const keep = new Set(next.map((c) => c.id));
-  for (const rec of next) await upsertDoc(COLL, rec);
+  const t = Date.now();
+  for (const rec of next) {
+    await upsertDoc(COLL, stampMeta(rec, prevById.get(rec.id) ?? null, t));
+  }
   for (const old of existing) {
     if (!keep.has(old.id)) await softDeleteDoc(COLL, old.id);
   }
@@ -239,7 +287,8 @@ export async function upsert(
   record: CustomerRecordInput | null | undefined
 ): Promise<void> {
   if (!record || !record.id) return;
-  await upsertDoc(COLL, normalizeRecord(record));
+  const prev = await getDoc<CustomerDoc>(COLL, record.id);
+  await upsertDoc(COLL, stampMeta(normalizeRecord(record), prev, Date.now()));
 }
 
 /**
