@@ -235,3 +235,62 @@ beat a rules-based approach. Cost when revisited: ~$6–225/mo.
   rather than force-fit to AI.
 
 **Status:** OPEN (long-term)
+
+---
+
+## 5. Monday.com-style UI/UX — OPEN
+
+**Area:** global interface / design system (app-wide)
+
+**Reported:** 2026-07-19 (collected off-machine; logged here 2026-07-19)
+
+**Ask:** Make the interface feel like Monday.com (the team's current PM tool) so adoption
+is seamless — the team should feel it's the same interface they know, with Peak's
+customizations.
+
+**Decisions Jeff needs to make before this gets built:**
+- Which Monday paradigms matter most: boards, timeline, kanban, table with colored
+  status pills, left-nav workspace structure?
+- Visual reskin only (colors, type, status chips, board layouts) or interaction
+  patterns too (drag-to-update status, inline editing, group/collapse)?
+- Any specific Monday screens to mirror?
+
+**Notes:** this is a large, cross-cutting item — likely phased (visual language first,
+interaction patterns per-screen after). Current design tokens live in
+`docs/specs/*.json` + `src/app/globals.css`; nav structure in
+`src/components/nav/nav-data.ts`. Worth a dedicated scoping conversation before any code.
+
+**Status:** OPEN — blocked on the scoping decisions above
+
+---
+
+## 6. Merge Lineset Weights into Lineset Builder — OPEN
+
+**Area:** `/design-studio/lineset` (`lineset-builder.tsx`) + `/design-studio/weights`
+(`weights-tool.tsx`) — currently separate tools/tabs
+
+**Reported:** 2026-07-19 (collected off-machine; logged here 2026-07-19)
+
+**Ask:** Combine into one screen. The team bounces between the two tabs to build a
+lineset then check its weight. Everything from both can live together.
+
+**Approach (proposed with Jeff):** one lineset detail view; weight / arbor total /
+brick count as a live-calculated panel updating as hung items are edited, with the
+out-of-weight warning inline.
+
+**Watch-outs (from the intake conversation):** (a) inputs visually distinct from
+calculated fields; (b) don't lose the show-wide weight rollup; (c) units/weight config
+(brick weight, pipe wt/ft, safety factor) in one clear place; (d) recalc timing so the
+OVER-LIMIT warning doesn't flicker mid-edit; (e) screen density — master list + detail
+pane, or collapsible panel.
+
+**Light code look (2026-07-19):** the tools are separate files with separate state:
+`weights-tool.tsx` keeps its own `lines` array (name/fab/w/h/gear/pipe/mode/hoist) with
+CW brick combos (25/10 lb) + motor limits and its own SaveBar (`kind: "weights"`,
+per-venue save) — weight is entered/derived there, NOT read from Builder data. The
+Builder saves its own kind. A merge therefore needs a shared lineset data model first
+(one saved design carrying both layout and load fields), then the weights panel becomes
+derived UI. Check `save-bar.tsx` kinds and the D71-era save format before designing.
+
+**Status:** OPEN — approach agreed in principle; needs Jeff's go-ahead plus the shared
+data-model design
