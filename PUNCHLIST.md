@@ -604,7 +604,7 @@ search box and a "only modified" chip** — that alone likely resolves the compl
 
 ---
 
-## 11. Customer pricing tiers → default margin (incl. customer portal) — OPEN (B answered; blocked on item 24)
+## 11. Customer pricing tiers → default margin (incl. customer portal) — OPEN (B answered; 24 done, unblocked)
 
 **Area:** `src/lib/stores/customers.ts`, `src/app/(app)/estimator/*`, `src/lib/stores/pricing.ts`,
 `src/lib/curtain-pricing.ts`, `src/app/portal/*`
@@ -1592,7 +1592,7 @@ has no owner field), and nothing renders created/modified dates. **"Added in las
 
 ---
 
-## 24. Quote revisions — snapshot & recall — OPEN
+## 24. Quote revisions — snapshot & recall — DONE (D84)
 
 **Area:** `src/lib/stores/quotes.ts`, `src/app/(app)/estimator/*`, and
 `src/lib/stores/designs.ts` + `quick-design/actions.ts` (the pattern to copy)
@@ -1659,8 +1659,42 @@ mechanism Jeff described in 11 B.
 - **D. Does the customer/portal ever see revision history,** or is it internal only? Recommend
   internal only.
 
-**Status:** OPEN — **prerequisite for item 11.** Pattern is proven on designs; the real work is
-snapshotting resolved prices for the live-rate quote types, and the won/sent lifecycle rules.
+**BUILT 2026-07-19 (D84, `210a43b`).** Answers taken as recommended (A: auto-snapshot on send
+*plus* a manual button; B: block recall on won; C: embedded array; D: internal only).
+
+- `QuoteRevision {rev, at, by, reason, note, name, value, margin, status, quoteType, spec,
+  flameTest, repair, inspection}` — append-only on the quote doc, `revisions?` optional so
+  pre-D84 quotes are untouched.
+- **The payload is stored, not recomputed** — the whole point. The engine subdocs already carry
+  a resolved breakdown written at save time (rates, trip, per-venue charges, totals), and the
+  customer letters already read exactly that, so snapshotting them captures what the customer
+  saw. This turned out much cheaper than feared: no new resolution code was needed.
+- **Auto-snapshot on send** is intercepted in `setStatus()`, not at the call sites — every
+  legitimate transition funnels through it, so one interception covers all six callers.
+- **Recall is non-destructive:** `restoreQuoteRevision()` snapshots the current state *first*
+  (`"Auto-saved before recalling vN"`), applies the old payload, then records `"Recalled vN"`.
+  Walking back never discards the direction walked away from.
+- **Refuses on won quotes** — the spawned project copies `value`/`margin` once at conversion and
+  derives every procurement line cost from `value`, and never re-reads. UI shows a read-only
+  banner instead of Recall controls.
+
+**Bug fixed in passing:** the estimator's `Rev N` label counted `history` — the *status*
+pipeline — so it climbed on every draft→sent→won move with no revision taken. Now counts real
+revisions.
+
+**Implementation note worth keeping:** `quotes/controls.tsx` must not import from the quotes
+store **even type-only** — it is a client bundle and the bundler walks the edge into
+postgres/drizzle regardless. The revision row is a local VM the server maps into, matching the
+`leads/types.ts` pattern.
+
+**Browser-verified** on Q-2047: manual → v1; send → v2 auto `"Sent to customer"`; recall v1 →
+v3 + v4 with nothing lost. Q-2035 (won) showed the banner and no Recall control.
+
+**Status:** DONE (D84) — **item 11 is now unblocked.**
+
+**Not built / deferred:** no revision UI inside the estimator itself (only on the Quotes detail
+panel), no diff between revisions, and recall does not re-open the estimator — it writes the
+recalled numbers straight onto the quote.
 
 ---
 
