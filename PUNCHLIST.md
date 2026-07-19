@@ -604,7 +604,7 @@ search box and a "only modified" chip** — that alone likely resolves the compl
 
 ---
 
-## 11. Customer pricing tiers → default margin (incl. customer portal) — OPEN
+## 11. Customer pricing tiers → default margin (incl. customer portal) — OPEN (B answered; blocked on quote revisions)
 
 **Area:** `src/lib/stores/customers.ts`, `src/app/(app)/estimator/*`, `src/lib/stores/pricing.ts`,
 `src/lib/curtain-pricing.ts`, `src/app/portal/*`
@@ -669,6 +669,27 @@ from "hand-set".
 - **B. Retroactivity.** When a customer moves tiers, do open drafts reprice? Sent quotes? Today
   the answer differs by quote type (finding 2). **Recommend stamping the tier margin onto the
   quote at creation** so history is stable and auditable.
+  **ANSWERED 2026-07-19 (Jeff): stamp at creation — but a REVISION pulls current prices,**
+  "so if someone asks for an updated quote we can just pull a new revision rather than build it
+  from scratch." So the stamp is **per-revision, not per-quote-lineage**: each revision
+  re-stamps at the tier and rates current at the moment it is cut, and earlier revisions stay
+  frozen exactly as sent.
+
+  > **BLOCKER FOUND 2026-07-19 — quotes have no revision concept at all.** This answer presumes
+  > a feature that does not exist:
+  > - **`DesignRevision` exists (`designs.ts:74`) — on designs, not quotes.** Quick Design has
+  >   real save-revision / restore-revision / "Revision v*N*" UI. **Quotes have none of it.**
+  > - `Quote.history` is **only status transitions** (`{at, from, to}` over
+  >   draft/sent/won/lost, written in exactly one place, `quotes.ts:191`). Its only consumers
+  >   are won/lost date extraction in Reports (`reports/page.tsx:503,507`). **It is not a
+  >   revision log and cannot be read as one.**
+  > - **No duplicate / clone / new-version action on quotes anywhere** (zero grep hits).
+  >
+  > **Quote revisions are therefore a prerequisite for item 11, and are their own feature** —
+  > roughly the size of the tier work itself. The design-side pattern is the thing to copy.
+  > **Needs Jeff:** should this be logged as its own punch item, and does "revision" mean an
+  > immutable snapshot you can view/restore (the design model), or a new editable quote that
+  > supersedes the old one and carries the lineage? Those build very differently.
 - **C. Scope.** Which of the five margin systems does the tier touch? Estimator lines only is a
   contained change; all five (incl. curtains' 38% and the portal coupling) is a much bigger job.
 - **D. Portal equipment prices.** Catalog `list` is a per-SKU absolute with no percentage hook.
@@ -1033,7 +1054,7 @@ went" task.** Email can layer on later once item 9 fixes the addresses and a sen
 
 ---
 
-## 17. Tasks on install projects and quotes (review / communication checklist) — OPEN
+## 17. Tasks on install projects and quotes (review / communication checklist) — OPEN (A answered: real table)
 
 **Area:** `src/lib/stores/projects.ts:161-168` (`ProjectTask`), `src/app/(app)/projects/view.tsx`,
 `src/app/(app)/field-work/`, `src/lib/stores/quotes.ts`
@@ -1088,6 +1109,15 @@ lookups — the same fragility flagged in item 9.
   quotes" a full scan of two collections, and gives a task no independent identity** for
   notifications or assignment queries. If the goal is "review quicker", a cross-record task list
   is probably the point. **This is the load-bearing decision.**
+  **ANSWERED 2026-07-19 (Jeff): promote to a real table.** Tasks get independent identity and
+  a cross-record "all my open tasks" query becomes real. Consequences to carry into scoping:
+  this is the app's **first non-doc-store collection of its kind** — every other list is
+  embedded on a parent doc — so it needs a table, a `Task` type, and parent pointers
+  (`projectId` / `quoteId`, nullable). The two dead server actions (`addTaskAction`,
+  `toggleTaskAction`) get rewritten rather than wired up, the embedded `ProjectTask[]` needs a
+  migration path, and the mobile Field Work UI (the only working task surface today) has to
+  move over with it. **Unblocks item 16**, which now has a durable record to hang
+  notifications off.
 - **B. Auto-generated checklist, manual, or both?** "Review whether the quote and project were
   done properly and everything communicated" reads like a **standard template per stage** —
   which is the `blankRubric()` pattern. **Jeff would need to define the actual checklist items.**
@@ -1110,7 +1140,7 @@ sold/completed" is exactly an auto-generated task with an assignee.
 
 ---
 
-## 18. Opportunities board — Daylite parity — OPEN
+## 18. Opportunities board — Daylite parity — OPEN (A answered: merged concept)
 
 **Area:** `src/app/(app)/leads/board-view.tsx`, `leads/page.tsx`, `src/lib/stores/leads.ts`
 
@@ -1168,6 +1198,17 @@ appointments or tasks store to query (see items 17 and 21).
   (New Lead / Collect Information / Create BID / BID Sent / Awarded / PO Received / Order Product)
   span both. **Does the board sit on leads, on quotes, or on a merged concept?** This decides
   everything else.
+  **ANSWERED 2026-07-19 (Jeff): the merged opportunity concept.** One pipeline spanning
+  lead → bid → award. **This is a modeling change across two stores, not a UI change** — it is
+  the honest answer but the most expensive of the three, and it makes 18 substantially bigger
+  than the "~70% already built" framing above, which assumed the board stays on leads.
+  Scoping needs to settle: whether an Opportunity is a **new record** that leads and quotes
+  both point at, or a **read-time union view** over the two existing stores (much cheaper,
+  no migration, but drag-between-stages has to write back to whichever store owns the row);
+  what happens when one lead produces several quotes (does the opportunity fan out?); and
+  which store owns the stage once the two pipelines are merged.
+  **Note the coupling to item 20** — "linked people on cards" is blocked on the person model,
+  which Jeff is building himself.
 - **B. Should Peak's stage names change to the bid-oriented set?** That's data config, not
   architecture — cheap if A is settled.
 - **C. Which filters actually matter?** Owner and date are the obvious ones; Categories /
