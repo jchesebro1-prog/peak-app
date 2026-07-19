@@ -376,6 +376,508 @@ flagged ("M of N specified"); P3 v2 combined save + legacy adapter (old weights
 designs open as custom lines, saving creates a new combined record); P4 one settings
 drawer; P5 narrow 8-column master table with expanding-row editing. The weights
 route redirects; landing tile and nav entry removed.
-(4) add the unspecified-vs-zero state and rollup guard (P2).
 
-**Status:** OPEN — approach agreed, P1 needs a decision before build
+---
+
+## 7. Per-section dashboards (Sales / Design / Install / Service / General) — OPEN
+
+**Area:** `src/components/nav/nav-data.ts`, `src/components/nav/Nav.tsx`, `src/app/(app)/page.tsx`,
+new section routes
+
+**Reported:** 2026-07-19
+
+**Ask:** Every section should have its own customizable dashboard — Sales, Design, Install,
+Service, General. Clicking the section tab goes to that dashboard.
+
+**Code-verified 2026-07-19 — good news and bad news:**
+- **The five sections already exist as nav groups** (`nav-data.ts:12-71`): Sales (Leads/Quotes/
+  Reviews), Design Studio, Installs (Projects/Schedule/Field Work), Service (Flame Tests/
+  Rigging Inspections/Repairs), General (Customers/Field Survey/Catalog/Reports/Templates/
+  Estimating Rules/Import). Naming differs slightly from the ask ("Design Studio", "Installs").
+  Home, Inbox and Assistant sit outside the five.
+- **Clicking a section tab navigates nowhere today.** A group renders as a `<button>` that only
+  toggles a dropdown (`Nav.tsx:211-224`); you reach a screen on the second click. There are no
+  `/sales`, `/installs`, `/service`, `/general` routes. **Precedent exists:** Design Studio has
+  a real overview landing page at `/design-studio` (tile grid) — the model to copy.
+- **There is exactly one dashboard today** — `page.tsx`, **1861 lines**, ~9 cards, only 3 of
+  which are extracted components (`HomeMyDesigns`, `HomeCalendar`, `HomeStageSheet`). The rest
+  are inline JSX sharing one `Promise.all` fetch (`page.tsx:274-290`).
+- **No dashboard customization infrastructure exists** — no widget registry, no card-order or
+  show/hide persistence, no layout library. `appSettings` is a single global row, not per-user.
+  **The one per-user preference pattern that exists** is `notifPrefs` (`doc-tables.ts:126-130`,
+  `stores/notif-prefs.ts`) — userName PK + a JSON blob. That's the template to copy.
+- Current Home content is almost entirely Sales/Design-flavored (quotes, leads, pipeline,
+  designs). **Install, Service and General dashboards need widgets that do not exist yet.**
+- `src/lib/nav-counts.ts` already computes per-section counts server-side — a ready data source
+  for section tiles.
+
+**Decisions Jeff needs to make:**
+- **A. What happens to Home?** Does it stay as a personal cross-section roll-up, become the
+  "General" dashboard, or go away?
+- **B. Click behavior.** If the tab navigates to a dashboard, how do users reach child routes —
+  hover dropdown, sub-nav on the dashboard page, or both? Real UX call, not an implementation
+  detail.
+- **C. How customizable is "customizable"?** Show/hide only, or reorder/resize/drag-and-drop?
+  There is no layout library in the project — drag-and-drop is a net-new dependency.
+- **D. Per-user, per-role, or company default with per-user override?** Roles exist
+  (`users.roles`, seeded Admin/Estimator/Manager/Reviewer) but currently shape nothing in the UI.
+- **E. What goes on the Install, Service and General dashboards?** Those widgets don't exist.
+
+**Honest scale note:** the visible ask (five landing pages) is small. The real work is
+extracting ~9 inline cards out of an 1861-line page into independently-fetching widgets with a
+common contract, then building a per-user layout store. **Suggest phase 1 = five static section
+landing pages** (Design Studio's overview as the pattern) **with no customization at all**,
+which delivers the navigation win immediately and defers C/D.
+
+**Status:** OPEN — needs A–E
+
+---
+
+## 8. Remove the AI panel from General Settings — OPEN
+
+**Area:** `src/app/(app)/settings/settings-client.tsx:966-1070`, `src/app/(app)/settings/page.tsx:130-138`
+
+**Reported:** 2026-07-19
+
+**Ask:** Since we decided to remove the AI, take it out of General Settings and see what happens.
+
+**Code-verified 2026-07-19 — this is safe and small:**
+- The AI section is a **read-only status card**. No toggle, no input, no server action. It shows
+  an "AI enabled / Not enabled" pill, the model id, and a list of the remaining feature cards.
+- **Removal is purely cosmetic.** `AppSettingsData` has no AI field, `DEFAULT_SETTINGS` has no AI
+  default, `settings/actions.ts` contains zero AI references. There is no DB column and no
+  migration. Config is env-only (`aiEnabled()` = `ANTHROPIC_API_KEY` present && `AI_DISABLED !== "true"`,
+  `src/lib/ai/config.ts:48-50`).
+- **Nothing else reads the card's props** — the `ai` prop is built inline in `settings/page.tsx`
+  and consumed only by that card. Deleting it means deleting ~105 lines, one prop, one type, one import.
+- **All actual feature gating lives elsewhere and is untouched** — each consumer calls
+  `aiEnabled()` independently (layout/nav, assistant, inbox, estimator, import).
+- **The only thing lost:** the sole in-app display of the model id and the `ANTHROPIC_MODEL` /
+  `AI_DISABLED` env hints. The card's own copy says the authoritative instructions live in
+  MASTER-HOWTO §AI, so nothing becomes undiscoverable.
+- Four AI features remain registered post-D75: thread/customer summaries, import extraction,
+  quote scope drafting, assistant. **Removing the settings card does not disable them** — if the
+  intent is "no AI visible anywhere", the Assistant nav entry and the four feature entry points
+  are a separate, larger decision (that's item 4).
+- Stale comment to fix while in there: `config.ts:67` still says "The five AI features"; there
+  are four.
+
+**Decision Jeff needs to make:** does "remove the AI" mean **(i)** just hide this settings card
+(what's asked, ~105 lines, zero risk), or **(ii)** actually make the four AI features
+unreachable app-wide? These are very different jobs. **Recommend (i) now** — it's reversible and
+matches the words — and treat (ii) as part of item 4.
+
+**Status:** OPEN — trivial once Jeff confirms (i) vs (ii)
+
+---
+
+## 9. Team members: contact-card detail, email correction, active/archived/removed — OPEN
+
+**Area:** `src/db/schema.ts:16-27` (`users`), `src/lib/users.ts`, `src/app/(app)/settings/settings-client.tsx:1197-1341`,
+`src/auth.ts:81-119`, all letter/report signature blocks
+
+**Reported:** 2026-07-19
+
+**Ask (three parts):**
+1. Team members need more information — essentially a contact card per member, so signatures on
+   all service information can be filled out from it.
+2. The emails are wrong; they should be corrected when the member signs in for the first time.
+3. A toggle for **active / archived / removed**.
+
+**Code-verified 2026-07-19 — the current member record is thin:**
+Complete field list (`schema.ts:16-27`): `id, name, email, googleEmail, roles[], color, initials,
+active, createdAt, photoUrl`. **No phone, no job title, no department, no license/certification
+number, no office assignment.**
+
+**Finding 1 — `roles[0]` is doing double duty as a job title, inconsistently.** Every outbound
+signature resolves the member and prints `roles[0]` as their title. Two different derivations
+coexist: **letters** use `roles[0]` (so Jeff, whose roles are `["Admin","Estimator"]`, signs as
+**"Admin"**), while **reports** strip "Admin" first and sign as **"Estimator"**. Same person,
+two titles, depending on the document. A real `title` field would fix this.
+
+**Finding 2 — the phone on service reports is not the member's.** `repairs/report/report-doc.tsx:104-105`
+reads `offices[0].phone` unconditionally — the *first* office in settings, regardless of who
+signed or where they work. And `offices[].phone` is a field the Locations modal **never edits**
+(passthrough only). So the phone on service paperwork is effectively unmanaged.
+
+**Finding 3 — there is no way to edit an existing member's email, anywhere.** Confirmed absent
+from the UI (the edit modal hides name and email — `settings-client.tsx:1801`), from server
+actions (`addUser`/`setRoles`/`setActive`/`removeUser` only), and from CSV import (update path
+calls `setRoles` only). Seeded emails are **guessed** — `emailFor()` derives
+`first-initial + lastname @peaksystemsgroup.com` (`src/lib/team.ts:47-56`) and is used whenever
+the email field is left blank. **This is why the emails are wrong.**
+
+**Finding 4 — a wrong email is currently a lockout, not a cosmetic issue.** `auth.ts:81-90`
+looks up the signing-in Google identity by email; **no active row match ⇒ sign-in is refused**.
+So a member whose guessed address is wrong cannot sign in, and no admin screen can fix it. Today
+the only remedies are delete-and-re-add, a CSV import that creates rather than updates, or direct
+DB access. The `googleEmail` alternate-address column exists but **no UI writes it**.
+**This makes part 2 of the ask a genuine defect, not an enhancement — and it blocks the
+first-sign-in flow it asks for, because a wrong-email user never reaches first sign-in.**
+
+**Finding 5 — only `active: boolean` exists.** No archived/removed distinction. Hard delete does
+exist (`removeUser` → `db.delete`) with guardrails (can't remove yourself; can't drop to zero
+active admins). Archived-vs-removed semantics = a new column + migration.
+
+**Finding 6 — everything joins members by NAME string, not id.** `quote.owner`, `job.owner`,
+`thread.mailboxUser`, `visit.assignedTo` all store display names, and signature lookup is
+`users.find(x => x.name === owner)`. **Consequences:** renaming a member in Settings silently
+breaks their signature resolution (falls back to "Estimator" and a blank email), and a hard
+delete orphans every historical record. **This argues strongly for archive-not-delete** and is
+worth deciding before any team-member work.
+
+**Decisions Jeff needs to make:**
+- **A. What fields go on the contact card?** Proposed from what signatures actually need: real
+  `title` (replacing the `roles[0]` hack), direct phone, mobile, office assignment, plus
+  certifications/license numbers if those belong on inspection paperwork. **Jeff should confirm
+  the list — especially whether certification numbers need to print on service documents.**
+- **B. First-sign-in email correction — which direction?** If a member signs in with a Google
+  address that doesn't match their roster row, do we (i) let them confirm/correct their own
+  address, or (ii) have an admin fix it in Settings, or (iii) both? Note (i) alone can't work
+  standalone: a mismatched user is refused at the door. **A likely first step is simply making
+  email editable in the Settings edit modal**, which is small and unblocks everything else.
+- **C. Archived vs removed — what's the difference operationally?** Suggested: *archived* = keeps
+  history, can't sign in, hidden from pickers; *removed* = same but also hidden from the
+  Settings list. Given finding 6, **recommend that neither ever hard-deletes the row.**
+- **D. Should the signature phone be the member's direct line** instead of `offices[0].phone`?
+
+**Status:** OPEN — needs A–D; note part 2 is a defect, worth fixing ahead of the rest
+
+---
+
+## 10. Estimating Rules: display options to tame the scroll — OPEN
+
+**Area:** `src/app/(app)/estimating-rules/page.tsx`, `estimating-rules/controls.tsx:339-468`,
+`src/lib/stores/pricing.ts`
+
+**Reported:** 2026-07-19
+
+**Ask:** Estimating rules should allow different display options so the scroll isn't as bad.
+
+**Code-verified 2026-07-19:**
+- **79 rows across 8 groups, all rendered at once**, every group always expanded, page capped at
+  960px wide. 54 editable rates + 25 read-only formulas.
+- **There is no search, filter, sort, collapse, or pagination** — confirmed by grep; the only
+  component state is a per-row edit buffer. Existing affordances are a legend card and
+  CSV/JSON/Print/Reset-all buttons.
+- Groups: System design, Auto BOM & sizing, Flame-test pricing, Repair pricing, Inspection
+  pricing, Travel & mileage, Catalog margin, Lighting fixtures.
+- Admin-gated (`can("manage_users")`); non-admins see a lock card.
+
+**Existing fields that could drive display options with no data model change:**
+- **`kind`** — rate vs formula. **25 of 79 rows are read-only formulas**; a "hide formulas"
+  toggle removes a third of the scroll instantly. Cheapest possible win.
+- **`live` / `ref`** — live-and-wired vs reference-only. Already rendered as badges, not
+  filterable. (Worth knowing: 4 of the 8 groups are non-live.)
+- **changed-vs-default** — already computed per row (drives the amber styling) but has no
+  "show only modified" filter. Likely the single most useful view for day-to-day work.
+- `store` (which engine owns the rate), `unit`, and the dotted `id` (natural sub-grouping).
+
+**Suggested (cheap → expensive):** collapsible groups with state remembered · a text search ·
+"hide formulas" · "only modified" · "only live". All are client-side filters over data already
+on the page — no schema change, no server work.
+
+**Decision Jeff needs to make:** which views he actually wants, and whether groups should
+default collapsed or expanded. **Recommend: collapsible groups defaulting collapsed, plus a
+search box and a "only modified" chip** — that alone likely resolves the complaint.
+
+**Status:** OPEN — small, self-contained, no data model change
+
+---
+
+## 11. Customer pricing tiers → default margin (incl. customer portal) — OPEN
+
+**Area:** `src/lib/stores/customers.ts`, `src/app/(app)/estimator/*`, `src/lib/stores/pricing.ts`,
+`src/lib/curtain-pricing.ts`, `src/app/portal/*`
+
+**Reported:** 2026-07-19
+
+**Ask:** Customers should have a tier system linking them to a typical margin that gets applied
+every time a new quote is done for them. The margin needs to apply to the customer portal too.
+
+**Code-verified 2026-07-19 — this is the largest item on the list. Read before scoping.**
+
+- **No tier concept exists on customers.** `CustomerDoc` has six fields: `id, name, type,
+  location, locations[], contacts[]`. Customers live in the JSON doc-store, so **adding a field
+  needs no migration** — that part is easy.
+- **`customer.type` is NOT a pricing concept** — it's a segment picklist (Performing arts,
+  Education, Worship…) used only to pick a colour chip. No pricing code reads it.
+- **Nothing in the estimator reads the customer record for pricing today.** `pickCustomer` pulls
+  name, contacts, locations, travel — nothing else. **A customer-level pricing mechanism would be
+  the first of its kind in the app.**
+
+**Finding 1 — margin is not one concept. There are five independent systems:**
+| # | Where | How margin works |
+|---|---|---|
+| a | Estimator (detailed quotes) | **Not stored.** A write-only slider that rewrites every line's `price` from `cost`; read back by recomputing `(rev-cost)/rev`. No "quote margin" input exists. |
+| b | Estimating Rules registry | `system.baseMargin` and `catalog.defaultMargin` are **`ref: true` — documentation only, nothing reads them.** Live margins exist per engine (flame/repair/inspection/parts, all 30%). |
+| c | Labor configurator | Per-draft `margin`, 0–95%. |
+| d | Curtains | **Hardcoded 38%, duplicated in two files** that must stay in sync (`estimator/pricing.ts:140`, `curtain-pricing.ts:17`). |
+| e | Quick Design | Hardcoded 30%. |
+
+**Finding 2 (the big one) — historical quotes behave in opposite ways depending on type.**
+Estimator quotes bake absolute prices into the saved spec, so a later rate change does **not**
+move them. Flame-test / repair / inspection quotes read the live rate blob at render time, so
+they **do** reprice retroactively — and `pricing.ts:18-20` documents that as intentional.
+**So a customer tier margin would silently behave one way for system quotes and the opposite way
+for service quotes unless the tier margin is explicitly stamped onto the quote at creation.**
+This is the single most important decision in the feature.
+
+**Finding 3 — the portal already hardcodes 38%, with load-bearing client/server coupling.**
+The portal shows three different kinds of number: stored quote `value`; catalog `list` price
+(per-SKU absolute, **no percentage hook at all**); and a live drapery configurator where the
+server ships **pre-marked-up coefficients** (`sellCoeffs()`, cost ÷ 0.62) that the browser
+multiplies by geometry. Submission recomputes server-side and never trusts posted prices.
+**Applying a tier margin in the portal means changing both the coefficient generator and the
+authoritative recompute in exact agreement — the code comments flag this coupling explicitly,
+because the customer's live preview must equal the quote they receive.**
+Good news: the portal session already carries `customerId`, so the tier lookup key is there.
+
+**Finding 4 — naming collision.** `tier` already means Good/Better/Best **product** level on
+designs (`stores/designs.ts:84`) and in the rules registry (`system.tierGoodCost` etc.).
+**Use a different term for the customer concept** (`pricingTier`, `customerClass`) or expect
+confusing bugs.
+
+**Finding 5 — no discount or price-override mechanism exists** (zero grep hits). A tier system
+duplicates nothing, but it *does* collide with the estimator's manual margin slider, which is
+destructive — it overwrites every line's price, leaving no way to distinguish "tier-derived"
+from "hand-set".
+
+**Decisions Jeff needs to make:**
+- **A. Precedence.** Does the tier margin *seed* the section slider (overridable, one-time) or
+  *enforce* it (recomputed on every change)? Seeding is far simpler and matches how estimators
+  actually work.
+- **B. Retroactivity.** When a customer moves tiers, do open drafts reprice? Sent quotes? Today
+  the answer differs by quote type (finding 2). **Recommend stamping the tier margin onto the
+  quote at creation** so history is stable and auditable.
+- **C. Scope.** Which of the five margin systems does the tier touch? Estimator lines only is a
+  contained change; all five (incl. curtains' 38% and the portal coupling) is a much bigger job.
+- **D. Portal equipment prices.** Catalog `list` is a per-SKU absolute with no percentage hook.
+  Does a tier discount off list, or re-derive list from cost? These expose different pricing
+  philosophies to the customer.
+- **E. Should the customer *see* they're on a tier** (a named discount line), or is it invisible?
+- **F. Tier definition.** Fixed enum, or an admin-editable list with per-tier margins? The rules
+  registry has `defineGroup`/`addRate` that could host per-tier margins cleanly.
+- **G. Existing customers with no tier** — default to a "Standard" tier at today's 30% so nothing
+  reprices silently.
+
+**Suggested phasing:** (1) add `pricingTier` to the customer + an admin-editable tier→margin
+table; (2) seed the estimator section margin from it and stamp it on the quote; (3) portal last,
+since it carries the client/server coupling risk.
+
+**Status:** OPEN — needs A–G. Largest item on the list; do not start without B answered.
+
+---
+
+## 12. New Lead: pick existing customer, link contacts, use canonical contact fields — OPEN
+
+**Area:** `src/app/(app)/leads/lead-drawer.tsx:396-552`, `leads/actions.ts:83-115`,
+`src/lib/stores/leads.ts`, `src/lib/stores/customers.ts`
+
+**Reported:** 2026-07-19
+
+**Ask:** New Lead should let you select from an existing customer or add new. Contact Name should
+link in if there are any. The contact information should be the same fields we need everywhere else.
+
+**Code-verified 2026-07-19 — mostly already plumbed, which makes this cheaper than it looks:**
+- **`LeadRecord.customerId` already exists** (`leads.ts:172`), and `create()` already accepts it
+  (`leads.ts:470,512`). **But `createLeadAction` never passes it**, so every lead made in the app
+  has `customerId: null`. The only writer today is the customer portal.
+- `convert()` **already reuses an existing `customerId` if present** (`leads.ts:680`) and skips
+  minting a duplicate customer. **That is exactly the hook a customer picker should feed** — the
+  downstream half of this feature is already built.
+- The lead detail view doesn't surface the customer link either (`DrawerDetailVM` has no
+  customer field), so even portal leads that *do* carry a customerId don't show it.
+
+**The field delta (the core of the ask):**
+- Lead form collects: Organization/venue*, Contact name, Source, Email, Phone, City, State,
+  What they need, Owner, Est. value.
+- Canonical `CustomerContact` = `name, role, email, phone, primary`;
+  `CustomerLocation` = `label, primary, address, city, state, venueKind, lat/lng, travel…`
+- **Lead is missing `role` (contact title) and street `address`.** It has city/state but no
+  street — and street address is exactly what the D76 site-visit `.ics` invite needs.
+- Lead models exactly **one** contact, flattened onto the record; customers have `contacts[]`.
+
+**Bug found in passing (independent of this feature):** `convert()` at `leads.ts:704-708` builds
+the new customer's contact as `{name, role, email, primary}` — **it drops the phone**, and builds
+the location with no `address`. The inline comment claims `normalizeRecord` discards phone, but
+**that comment went stale at D76** — `customers.ts:150` keeps phone now. So the lead collects a
+phone, and conversion silently throws it away. **Worth fixing on its own.**
+
+**No reusable customer picker exists.** At least **12 screens each roll their own inline
+`<select>` over customers** (estimator ×2, field survey, inspections ×2, repairs, flame tests,
+quick design, save-bar, inbox compose, inbox log). The closest contact picker is inline inside
+`site-visit-modal.tsx:236-243`. **Building a shared `<CustomerPicker>` / `<ContactPicker>` would
+pay for itself immediately across those call sites** — recommend doing that rather than a
+13th bespoke select. `resolveCustomerId` (`comms.ts:1245-1262`) is a reusable resolver already.
+
+**Decisions Jeff needs to make:**
+- **A. Prefill-and-lock, or prefill-and-override?** If a rep picks an existing customer and then
+  edits the phone on the lead, does that write back to the customer record or hold a divergent
+  snapshot?
+- **B. Which contact and which location?** Should the lead store `contactId` + `locationId`
+  rather than free text? Note `CustomerContact` has **no stable id** (only locations do), so
+  referencing a specific contact means adding one or matching by email.
+- **C. Add `role` + `address` to the lead, or stop duplicating and dereference from the customer?**
+  "Same fields we need everywhere else" suggests the former; rename-safety suggests the latter.
+- **D. "Add new" — create the customer immediately, or defer to convert()?** Immediate makes
+  `customerId` non-null from the start and simplifies convert; deferred avoids junk customer
+  records for leads that die at stage "new".
+
+**Status:** OPEN — needs A–D. The convert() phone/address drop is a standalone bug worth fixing first.
+
+---
+
+## 13. Service records → projects (inspections, service, warranty) — OPEN
+
+**Area:** `src/lib/stores/projects.ts`, `inspections.ts`, `repair-jobs.ts`, `flame-jobs.ts`,
+`src/app/(app)/schedule/`, plus three separate scheduler UIs
+
+**Reported:** 2026-07-19
+
+**Ask:** The scheduler in Rigging Inspection should link to projects. Rigging Inspections will be
+a project once signed off. Same for service and warranty calls. Flame Tests and Consulting are
+the only projects that are **not** in the installs window.
+
+**Code-verified 2026-07-19 — start here, because one finding may explain the whole complaint:**
+
+**FINDING: there is a live bug in the projects sync.** `projects.ts:530`:
+```js
+if (q.status !== "won" || q.quoteType === "flame_test") continue;
+```
+**Only flame tests are excluded.** The repair and inspection syncs correctly filter to their own
+types, but the *projects* sync does not — so a won **repair** quote creates both a RepairJob
+**and** a phantom Project, and a won **inspection** quote creates both an Inspection **and** a
+phantom Project. Those phantoms then show up on the Projects list, the Schedule Gantt, and Field
+Work. A comment at `quotes/actions.ts:30-36` claims "each sync filters to its own quoteType" —
+**it doesn't.** Jeff's framing ("Flame Tests and Consulting are the only projects not in the
+installs window") reads like a description of these phantoms from the outside.
+**Recommend fixing this first, independently — it's small, isolated, and until it's fixed nobody
+can reason about what "in the installs window" means, because the data is wrong.**
+
+**There are five parallel, non-unified record types:**
+| Type | Table | Stages | Scheduler | Links to project? |
+|---|---|---|---|---|
+| `ProjectRecord` (kind project/order) | `projects` | 7 / 4 | `/schedule`, crew **spans** | is one |
+| `InspectionRecord` | `inspections` | 4 (requested→scheduled→onsite→completed) | `/inspections/scheduling` | **no** |
+| `RepairJobRecord` (warranty included) | `repair_jobs` | 3 | `/repairs/scheduling` | **no** |
+| `FlameJob` | `flame_jobs` | 3 | `/flame-tests/scheduling` | **no** |
+| `SiteVisit` | `site_visits` | — | calendar / ics | **no** |
+
+**Other key findings:**
+- **No project *type* field.** `kind` is only `project | order` (install-with-labor vs
+  materials-only) and is load-bearing for stage selection. The real discriminator, `quoteType`
+  (`system | flame_test | repair | inspection`), **exists on quotes but is dropped at conversion**
+  — `fromQuote()` never copies it onto the project. So the field Jeff needs half-exists already.
+- **Warranty is not a record type.** It's derived state on a repair job (`warrantyMonths` +
+  computed expired/expiring/active). So "warranty calls become projects" has no record to
+  convert — a warranty call today *is* a repair job.
+- **Inspections have no sign-off concept.** Projects do (`signoff: {signedBy, signedAt, name,
+  role, note}`). The nearest inspection equivalent is advancing stage to "completed", gated on a
+  report date — and **nothing fires on that transition today.** So the hook point exists but the
+  sign-off object and the spawn machinery are both net-new.
+- **The schedulers use incompatible shapes.** Projects book crew **spans** (`{person, start, end}`,
+  multiple crew). Inspections/repairs/flame store a single `assignedTo` + a single `scheduledDate`
+  day. **Unifying the schedulers means either service records grow a crew array, or the main
+  Gantt learns to render single-day single-tech bars.** This is the bulk of the work.
+- **"Consulting" does not exist anywhere in the codebase** — not a quoteType, not a record type.
+  It's a new concept (see the Consulting idea below).
+- Nav already matches Jeff's mental model: Flame Tests / Inspections / Repairs live under
+  **Service**, not **Installs**. So the *UI* grouping is already right; it's the *data* that's wrong.
+- One cross-type link already exists: repairs carry `source: "inspection"` + `refId`, so a repair
+  can already point back at the inspection that found it.
+
+**Decisions Jeff needs to make:**
+- **A. Dual-write or convert?** When an inspection is signed off, does it *stay* an inspection and
+  gain a linked project (two rows — cheaper, and mirrors how quotes→projects already works), or
+  *become* a project (one row, migrated)? **Recommend dual-write.**
+- **B. What is "signed off" on an inspection?** Projects have a signoff object to copy. Does the
+  customer sign, or does the tech? What happens on un-signoff?
+- **C. Does the unified scheduler mean one screen, or the main Gantt reading all four sources?**
+- **D. What is Consulting?** No representation exists at all — needs defining before it can be
+  excluded from anything.
+
+**Honest scale note:** this is a data-model change, not a screen change — four schedulers, four
+stage vocabularies, four tables, no shared discriminator. **Suggest sequencing: (1) fix the sync
+filter bug; (2) carry `quoteType` onto projects as `projectType`; (3) add `projectId` to the three
+service records; (4) sign-off → spawn on inspections; (5) scheduler unification last.**
+
+**Status:** OPEN — needs A–D. Item (1) is a bug fix that should not wait for the rest.
+
+---
+
+## 14. Catalog appears unlinked between dashboard, General, and the estimate window — OPEN
+
+**Area:** `src/app/(app)/page.tsx:72-78` + `:1431-1516`, `src/app/(app)/catalog/`,
+`src/app/(app)/estimator/`, `src/lib/stores/catalog.ts`
+
+**Reported:** 2026-07-19
+
+**Ask:** The catalog in the dashboard doesn't seem to be linked to the same catalog in General,
+or the one in the estimate window.
+
+**Code-verified 2026-07-19 — half right, and the half that's wrong is worth knowing:**
+
+- **The General catalog and the estimate-window catalog ARE correctly linked.** Both resolve to
+  the identical `list()` export in `stores/catalog.ts:44` → the `catalog_parts` doc table.
+  `/catalog` reads it directly; the estimator's picker calls `searchCatalog` →
+  `estimator/actions.ts:369` → the same `catalogList()`. **Same table, same rows, same prices.**
+  Add a part in `/catalog` and it is immediately findable in the estimator. No divergence.
+- **The dashboard card is the actual bug — and it isn't "unlinked", it's fake.** `page.tsx:72-78`
+  is a hardcoded module-level array left over from the HTML prototype:
+  ```js
+  const BOOKS = [ { mono:"JC", name:"JR Clancy", count:214, ageDays:92 }, … ]
+  ```
+  The card's headline "**529 parts · 4 price books**" is `BOOKS.reduce(...)` — a literal. The
+  actual seeded catalog is **27 parts**. The dashboard page never imports the catalog store at
+  all; its only real connection to the catalog is the `href="/catalog"` link.
+  **It will say 529 forever, no matter what is imported.** The vendor names and the "92d / 21d /
+  12d / 40d ago" staleness pills are invented too.
+- **The fix is straightforward** — derive the card from `list()` grouped by `mfr` (a real field,
+  already faceted on `/catalog`). **One wrinkle:** `CatalogPart` has **no `updatedAt`/age field**,
+  so the "book age" pills are not derivable today. Either drop them or add a timestamp to the part
+  shape. **Jeff's call.**
+
+**Second divergence found in passing — this may be what Jeff actually clicked on.** Inside the
+estimator there are two hardcoded fallbacks sitting next to the real catalog reads:
+- **`SUGGEST`** (`estimator/estimator-data.ts:126+`) — the one-click "suggested parts" strip in
+  each section is a literal array. Those SKUs (`CL-LB-UH`, `CL-PIPE-26`, `RB-TRAV`…) **are not in
+  the catalog and are never validated against it.** So on the *same screen*, the suggestions strip
+  shows hardcoded prices while the "Add part from catalog" box right below it shows real ones.
+  **That is a genuine "the catalog doesn't match" experience inside the estimate window.**
+- **`LABOR_RATES_FALLBACK`** (`estimator-data.ts:92-101`) — a second copy of labor rates used when
+  catalog `Labor` rows are missing. Documented as intentional; lower risk, but it can drift.
+
+**Not a divergence (name collision only):** field survey's `mergedCatalog` is the survey intake
+checklist, unrelated to parts. The portal's `customerCatalog()` is a deliberate filtered view of
+the same store with cost/margin stripped.
+
+**Decisions Jeff needs to make:**
+- **A. Book-age pills** — drop them, or add an `updatedAt` to catalog parts to make them real?
+- **B. `SUGGEST`** — retire it in favour of catalog-backed suggestions (e.g. most-used SKUs per
+  section type), or curate it properly as a real, validated quick-pick list?
+
+**Status:** OPEN — the dashboard card fix is small and self-contained; `SUGGEST` needs A/B first
+
+---
+
+## IDEA (not a punch-list item) — Consulting as a project type
+
+**Raised:** 2026-07-19. Jeff was explicit this is *"more of an idea than punch list"*.
+
+Build out a consulting portion of a project: design build-out, tracked reviews and meetings,
+spec generators and other document generation. Likely lives in the **Design Studio**.
+
+**Context from the item 13 recon:** "Consulting" has **no representation anywhere in the codebase**
+today — not a `quoteType`, not a record type. It would be net-new. It's also named in item 13 as
+one of the two things that should *not* appear in the installs window, so the two items are
+coupled: **item 13 can't fully answer "what's excluded from installs" until Consulting is defined.**
+
+Existing pieces it could build on: document generation already exists (PDF letters, service
+reports, flame/inspection/repair letters), `/templates` holds editable wording, and the Design
+Studio already has a save-bar + per-customer saved designs.
+
+**Note:** `IDEAS.md` (the historical feature-idea backlog, referenced from DECISIONS.md and
+MASTER-QUESTIONS.md as `docs/IDEAS.md`) **no longer exists in the repo.** Parked here for now —
+**Jeff: want IDEAS.md recreated as the home for this kind of thing, or keep ideas in this file
+under a clearly marked section?**
