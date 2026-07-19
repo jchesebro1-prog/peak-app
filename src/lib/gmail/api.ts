@@ -63,6 +63,26 @@ export async function listMessageIds(
   return { messages: r.messages || [], nextPageToken: r.nextPageToken };
 }
 
+export type GmailThreadMeta = { id: string };
+
+/** List thread ids matching a Gmail search query (e.g. "in:inbox"). Ids only —
+ *  the inbox reconcile (PUNCHLIST #1) builds membership sets from this and
+ *  never full-fetches. */
+export async function listThreadIds(
+  mailboxKey: string,
+  query: string,
+  pageToken?: string,
+  maxResults = 500
+): Promise<{ threads: GmailThreadMeta[]; nextPageToken?: string }> {
+  const params = new URLSearchParams({ q: query, maxResults: String(maxResults) });
+  if (pageToken) params.set("pageToken", pageToken);
+  const r = await gapi<{
+    threads?: GmailThreadMeta[];
+    nextPageToken?: string;
+  }>(mailboxKey, "/threads?" + params.toString());
+  return { threads: r.threads || [], nextPageToken: r.nextPageToken };
+}
+
 export type GmailHeader = { name: string; value: string };
 export type GmailPart = {
   mimeType?: string;

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { gmailConnections, type GmailConnectionRow } from "@/db/schema";
 import { decryptToken, encryptToken } from "./crypto";
@@ -149,4 +149,37 @@ export async function connectedMailboxKeys(): Promise<string[]> {
   const db = await getDb();
   const rows = await db.select({ k: gmailConnections.mailboxKey }).from(gmailConnections);
   return rows.map((r) => r.k);
+}
+
+/**
+ * Atomically claim a sync slot for one mailbox (PUNCHLIST #1 / D73).
+ * START-stamps last_sync_at via a conditional UPDATE — the claim only
+ * succeeds if the previous stamp is older than minAgeMs, so concurrent
+ * callers (auto ticks from any number of tabs/users, plus the manual button)
+ * can never both start a sync for the same mailbox inside the window, and a
+ * failing sync still advances the stamp (no hammering a dead connection every
+ * tick). Every sync path claims immediately before syncing: the auto path
+ * with its 2-min staleness window, the manual path with a short 10s guard so
+ * a user's click always syncs unless that mailbox literally just started.
+ */
+export async function claimSyncSlot(
+  mailboxKey: string,
+  minAgeMs: number
+): Promise<boolean> {
+  const db = await getDb();
+  const now = Date.now();
+  const rows = await db
+    .update(gmailConnections)
+    .set({ lastSyncAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(gmailConnections.mailboxKey, mailboxKey),
+        or(
+          isNull(gmailConnections.lastSyncAt),
+          lt(gmailConnections.lastSyncAt, now - minAgeMs)
+        )
+      )
+    )
+    .returning({ k: gmailConnections.mailboxKey });
+  return rows.length > 0;
 }

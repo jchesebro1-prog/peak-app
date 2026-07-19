@@ -13,6 +13,7 @@ import {
   setStatusAction,
   summarizeCustomerAction,
   summarizeThreadAction,
+  unarchiveAction,
 } from "./actions";
 import { ChanGlyph, MailEmptyIcon, PaperclipIcon, ReplyIcon, SendIcon } from "./icons";
 
@@ -918,12 +919,13 @@ export default function ThreadReader({
             <ActionBtn
               colors={["#8c919c", "#fff", "#e4e7ec"]}
               onClick={async () => {
-                await archiveAction(vm.id);
+                if (vm.archived) await unarchiveAction(vm.id);
+                else await archiveAction(vm.id);
                 if (onClose) onClose();
                 else router.refresh();
               }}
             >
-              Archive
+              {vm.archived ? "Unarchive" : "Archive"}
             </ActionBtn>
           </div>
 

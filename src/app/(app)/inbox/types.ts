@@ -125,6 +125,9 @@ export type LinkVM = {
 export type ReaderVM = {
   id: string;
   unread: boolean;
+  /** LOCAL Peak archive flag — drives the Archive/Unarchive toggle. (Gmail-
+   *  side archive state is separate and read-only here; see D73.) */
+  archived: boolean;
   subject: string;
   status: string;
   statusLabel: string;

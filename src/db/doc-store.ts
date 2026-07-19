@@ -106,6 +106,33 @@ export async function upsertDoc<T extends Doc>(
   return doc;
 }
 
+/** Insert ONLY if the id is free — returns false on collision instead of
+ *  replacing (upsertDoc would silently clobber the concurrent writer's doc).
+ *  For writers whose ids come from the nextPrefixedId max-scan, which two
+ *  concurrent requests can compute identically (D73). */
+export async function insertDocIfAbsent<T extends Doc>(
+  coll: CollectionName,
+  doc: T
+): Promise<boolean> {
+  const db = await getDb();
+  const t = table(coll);
+  const now = Date.now();
+  const rows = await db
+    .insert(t)
+    .values({
+      id: doc.id,
+      doc: { ...doc },
+      rev: 1,
+      updatedAt: now,
+      receivedAt: now,
+      review: { state: "new" },
+      deleted: false,
+    })
+    .onConflictDoNothing()
+    .returning({ id: t.id });
+  return rows.length > 0;
+}
+
 /** Read-modify-write with rev bump; returns null if the doc doesn't exist. */
 export async function patchDoc<T extends Doc = Doc>(
   coll: CollectionName,

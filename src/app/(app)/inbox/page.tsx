@@ -442,6 +442,7 @@ export default async function InboxPage({
     reader = {
       id: sel.id,
       unread: !!sel.unread,
+      archived: !!sel.archived,
       subject: sel.subject,
       status: sel.status,
       statusLabel: sm.label,

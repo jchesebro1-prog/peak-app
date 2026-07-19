@@ -9,6 +9,7 @@ import {
   byCustomer,
   channelMeta,
   checkMail,
+  checkMailIfStale,
   compose,
   create,
   flushOutbox,
@@ -23,6 +24,7 @@ import {
   statusMeta,
   timeAgo,
   timeFull,
+  unarchive,
   update,
   updateDraft,
   type CommLink,
@@ -79,6 +81,12 @@ export async function markReadAction(id: string) {
 export async function archiveAction(id: string) {
   await requireUser();
   await archive(id);
+  revalidate();
+}
+
+export async function unarchiveAction(id: string) {
+  await requireUser();
+  await unarchive(id);
   revalidate();
 }
 
@@ -292,6 +300,23 @@ export async function sendReceiveAction() {
   const id = await checkMail();
   revalidate();
   return { ok: true as const, id };
+}
+
+/** How stale the newest-synced-least mailbox may get before a background
+ *  auto-sync actually runs (PUNCHLIST #1). The inbox client calls
+ *  autoSyncAction freely; this server-side gate is what makes that cheap. */
+const AUTO_SYNC_MIN_AGE_MS = 2 * 60_000;
+
+/** Background send/receive — same sync as the manual button, but claimed
+ *  per-mailbox and throttled server-side (D73). Deliberately does NOT
+ *  revalidate: revalidatePath inside a server action applies the re-rendered
+ *  tree in the SAME roundtrip, which would swap the auto-selected reader
+ *  while the user is typing. The client decides when to surface the change
+ *  (router.refresh() at the next non-typing moment). */
+export async function autoSyncAction() {
+  await requireUser();
+  const r = await checkMailIfStale(AUTO_SYNC_MIN_AGE_MS);
+  return { ok: true as const, ran: r.ran, changed: r.changed, id: r.id };
 }
 
 /* ---- AI summaries (D2) — read-only; never sends, writes, or revalidates ---- */

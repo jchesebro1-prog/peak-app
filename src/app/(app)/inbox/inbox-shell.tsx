@@ -13,7 +13,7 @@ import type {
   ReaderVM,
   SidebarVM,
 } from "./types";
-import { markReadAction, sendReceiveAction } from "./actions";
+import { autoSyncAction, markReadAction, sendReceiveAction } from "./actions";
 import { FolderGlyph, PencilIcon, PhoneIcon, RefreshIcon } from "./icons";
 import ThreadList from "./thread-list";
 import ThreadReader from "./thread-reader";
@@ -145,6 +145,53 @@ export default function InboxShell({
   const closeOverlay = useCallback(() => {
     router.push(`/inbox?${baseQuery}`);
   }, [router, baseQuery]);
+
+  // PUNCHLIST #1 — "actively sync": a silent background send/receive on mount
+  // and every few minutes while the tab is visible. The server action claims
+  // per-mailbox sync slots atomically (D73), so overlapping clients and quick
+  // remounts are cheap; with the Gmail gate off it is a no-op. The action
+  // does NOT revalidate (that would swap the auto-selected reader in the same
+  // roundtrip) — we refresh here instead, only when a sync actually changed
+  // something and never mid-typing; a change detected while typing is LATCHED
+  // and flushed at the next non-typing moment (next tick or field blur).
+  useEffect(() => {
+    let stop = false;
+    let pending = false;
+    const typing = () => {
+      const el = document.activeElement;
+      if (!el) return false;
+      const tag = el.tagName;
+      return (
+        tag === "TEXTAREA" ||
+        tag === "INPUT" ||
+        (el as HTMLElement).isContentEditable
+      );
+    };
+    const flush = () => {
+      if (stop || !pending || typing()) return;
+      pending = false;
+      router.refresh();
+    };
+    const tick = async () => {
+      if (stop || document.visibilityState !== "visible") return;
+      try {
+        const r = await autoSyncAction();
+        if (r.changed) pending = true;
+        flush();
+      } catch {
+        // background — never surface errors; the manual button still reports
+      }
+    };
+    const onBlur = () => setTimeout(flush, 100); // let focus settle first
+    document.addEventListener("focusout", onBlur);
+    tick();
+    const iv = setInterval(tick, 3 * 60_000);
+    return () => {
+      stop = true;
+      clearInterval(iv);
+      document.removeEventListener("focusout", onBlur);
+    };
+  }, [router]);
 
   const [sendReceiving, setSendReceiving] = useState(false);
   const onSendReceive = useCallback(async () => {

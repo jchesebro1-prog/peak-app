@@ -586,3 +586,53 @@ Anything you want changed, just say so — none of these are hard to reverse.
   whole feature/route/nav is a bigger, separate call. Note: page.tsx carries a
   pre-existing `react-hooks/static-components` lint error (an inline `Frame`
   component) unrelated to this rename.
+- **D73. Inbox mirrors Gmail's INBOX state — one-way, via a per-sync
+  reconcile** (PUNCHLIST #1, Jul 19). Every mailbox sync (manual Send/Receive
+  and the new background auto-sync) ends with an ids-only
+  `threads.list q=in:inbox` sweep that stamps `gmailInboxed: boolean` onto
+  bridged comms threads: archived OR filed-to-a-label on the Gmail side drops
+  the thread out of the Peak inbox (it stays findable under Archived); Gmail
+  re-inboxing it (new inbound, manual move) flips it back. Full-state listing
+  over history label-events on purpose: 1 call/500 threads, immune to
+  event-ordering, and it also covers the two windows history can't — the
+  initial 90-day import (which has no label filter, so Gmail-archived mail
+  used to land in the Peak inbox) and an expired/reset history cursor.
+  `gmailInboxed` is deliberately separate from the user-owned local `archived`
+  flag (no flip-flop wars with Peak's own Archive button; simulated mode
+  untouched). Safety: the sweep is scoped per mailbox key, skips threads
+  without a `gmailThreadId`, and on a truncated listing (>20 pages) only ever
+  re-inboxes, never hides. Adjacent fix, mirroring Gmail + addMessage(): a new
+  INBOUND on a locally-archived thread clears `archived` so replies resurface.
+  Peak→Gmail archive push stays out of scope (needs gmail.modify + re-consent
+  of every mailbox; D34 least-privilege stands). "Actively": the inbox shell
+  now fires a silent autoSyncAction on mount and every 3 min while visible.
+  EVERY sync path claims each mailbox atomically IMMEDIATELY before syncing
+  it (conditional START-stamp of last_sync_at — auto with its 2-min staleness
+  window, manual Send/Receive with a 10s guard so a click always syncs unless
+  that mailbox literally just started), so concurrent tabs/users/paths can't
+  overlap a mailbox and a failing mailbox still advances its stamp instead of
+  defeating the throttle; mailboxes whose one-time initial import hasn't run
+  are skipped by the auto path (the long import stays on the manual button,
+  per the connect flow). Bridge thread creation is id-collision-safe
+  (insert-if-absent + full dedup redo on collision) since nextPrefixedId's
+  max-scan can race. autoSyncAction deliberately does NOT revalidate (a
+  server-action revalidate applies the new tree in the same roundtrip, mid-
+  typing); the inbox client refreshes only when a sync actually changed
+  something and never while typing — changes seen while typing are latched
+  and flushed on the next tick or field blur. Hardening from the
+  adversarial review: pure-outbound threads (composed in Peak / sent-only
+  imports) are never demoted — absence from in:inbox carries no "archived"
+  signal for a thread that was never inboxed; threads carry gmailAccountKey
+  (stamped at import/send) so reconcile judges each thread against the Gmail
+  account that owns its thread id, not a display-name lookup (same-name
+  users, future moveTo claims); the Needs-reply view/count also excludes
+  gmail-archived threads (disposed-in-Gmail shouldn't keep nagging; locally-
+  archived stays included, pre-existing semantics); and the reader's Archive
+  button toggles to Unarchive on locally-archived threads (the Archived
+  folder is now populated, so the missing affordance had become a dead end).
+  Known residual: two MANUAL Send/Receive clicks more than 10s apart during
+  a single mailbox sync that runs longer than that (realistically only the
+  one-time multi-minute initial import) can still overlap (pre-existing
+  exposure; the button self-disables per tab, and thread creation is now
+  collision-safe) — a full lease/heartbeat isn't warranted for a 6-person
+  team.

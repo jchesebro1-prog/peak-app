@@ -1,4 +1,10 @@
-import { getDoc, listDocs, nextPrefixedId, patchDoc, upsertDoc } from "@/db/doc-store";
+import {
+  getDoc,
+  insertDocIfAbsent,
+  listDocs,
+  nextPrefixedId,
+  patchDoc,
+} from "@/db/doc-store";
 import { allUsers } from "@/lib/users";
 import {
   DEFAULT_DOMAIN,
@@ -16,11 +22,19 @@ import {
   type MailboxKey,
 } from "./config";
 import {
+  claimSyncSlot,
   connectedMailboxKeys,
   getConnectionInfo,
   updateSyncState,
 } from "./connections";
-import { getMessage, getProfile, listHistory, listMessageIds, sendRaw } from "./api";
+import {
+  getMessage,
+  getProfile,
+  listHistory,
+  listMessageIds,
+  listThreadIds,
+  sendRaw,
+} from "./api";
 import { buildRaw, parseInbound, type ParsedInbound } from "./mime";
 
 /**
@@ -39,15 +53,23 @@ import { buildRaw, parseInbound, type ParsedInbound } from "./mime";
 
 /* ---- mailbox resolution --------------------------------------------------- */
 
-/** The connection key for the mailbox a thread lives in, or null (personal
- *  box whose user has no connection / unknown name). */
-async function keyForThread(t: CommThread): Promise<MailboxKey | null> {
+/** Pure lookup half of keyForThread — takes an already-loaded user list so
+ *  per-thread loops (the reconcile sweep) don't refetch users N times. */
+function keyForThreadWith(
+  t: CommThread,
+  users: Awaited<ReturnType<typeof allUsers>>
+): MailboxKey | null {
   if (t.mailbox && t.mailbox !== "personal") return t.mailbox; // shared box
   const name = t.mailboxUser || "";
   if (!name) return null;
-  const users = await allUsers();
   const u = users.find((x) => x.name === name);
   return u ? "personal:" + u.id : null;
+}
+
+/** The connection key for the mailbox a thread lives in, or null (personal
+ *  box whose user has no connection / unknown name). */
+async function keyForThread(t: CommThread): Promise<MailboxKey | null> {
+  return keyForThreadWith(t, await allUsers());
 }
 
 /** The mailbox a NEW inbound thread should land in, derived from the key. */
@@ -117,6 +139,7 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
           target.gmailThreadId = sent.threadId;
         }
         if (!d.gmailThreadId) d.gmailThreadId = sent.threadId;
+        if (!d.gmailAccountKey) d.gmailAccountKey = key;
       });
     } catch (err) {
       console.error("[gmail] send failed for", threadId, m.id, err);
@@ -132,10 +155,14 @@ function threadStatusFor(dir: Direction): CommThread["status"] {
 }
 
 /** Record one Gmail message into comms, deduped by Gmail message id. Returns
- *  the touched thread id (or null if it was a duplicate). */
+ *  the touched thread id (or null if it was a duplicate). `attempt` guards the
+ *  id-collision redo (D73): concurrent syncs can compute the same
+ *  nextPrefixedId, so creation inserts-if-absent and re-runs the whole dedup
+ *  on collision rather than clobbering the other writer's thread. */
 async function recordMessage(
   key: MailboxKey,
-  p: ParsedInbound
+  p: ParsedInbound,
+  attempt = 0
 ): Promise<string | null> {
   const all = await listDocs<CommThread>("comms");
   // already imported?
@@ -162,7 +189,15 @@ async function recordMessage(
       d.messages = (d.messages || []).concat([msg]);
       d.updatedAt = Math.max(d.updatedAt || 0, p.at);
       d.status = threadStatusFor(dir);
-      if (dir === "in") d.unread = true;
+      // Which Gmail account owns this thread id — reconcile scopes by this
+      // (thread ids are per-account; display-name lookups can misattribute).
+      if (!d.gmailAccountKey) d.gmailAccountKey = key;
+      // New inbound resurfaces an archived thread — mirrors Gmail (a reply
+      // puts the thread back in the inbox) and addMessage()'s semantics.
+      if (dir === "in") {
+        d.unread = true;
+        d.archived = false;
+      }
     });
     return existing.id;
   }
@@ -191,11 +226,25 @@ async function recordMessage(
     createdAt: p.at,
     updatedAt: p.at,
     gmailThreadId: p.gmailThreadId,
+    gmailAccountKey: key,
     syncState: "synced",
     syncedAt: Date.now(),
     rev: 1,
   };
-  await upsertDoc<CommThread>("comms", rec);
+  const inserted = await insertDocIfAbsent<CommThread>("comms", rec);
+  if (!inserted) {
+    // A concurrent sync won this id. Redo from the top with fresh state: the
+    // other writer may have recorded this very message (dedup catches it) or
+    // created this Gmail thread under another id (attach path catches it).
+    if (attempt >= 3) {
+      // Needs a new thread created between max-scan and insert on FOUR
+      // consecutive tries — vanishingly unlikely. Skipped for this sync
+      // (the cursor moves past it); a manual re-import recovers it.
+      console.error("[gmail] id collision persisted for", p.gmailId);
+      return null;
+    }
+    return recordMessage(key, p, attempt + 1);
+  }
   return id;
 }
 
@@ -206,10 +255,82 @@ async function userNameOfKey(key: MailboxKey): Promise<string | null> {
   return users.find((u) => u.id === uid)?.name ?? null;
 }
 
-/** Import + poll a single mailbox. Returns the last touched thread id. */
-async function syncMailbox(key: MailboxKey): Promise<string | null> {
-  const info = await getConnectionInfo(key);
-  if (!info) return null;
+/* ---- inbox reconcile (PUNCHLIST #1) --------------------------------------- */
+
+/** Safety cap on the ids-only in:inbox listing (500 ids/page = 10k threads).
+ *  If a mailbox somehow exceeds it we still re-inbox threads we found, but
+ *  never hide anything based on a partial listing. */
+const MAX_INBOX_PAGES = 20;
+
+/**
+ * Mirror Gmail's INBOX membership onto this mailbox's comms threads.
+ * Archiving OR filing into a label on the Gmail side removes the INBOX label —
+ * those threads get gmailInboxed=false and drop out of the Peak inbox (they
+ * stay findable under Archived). Gmail putting a thread back (new inbound,
+ * manual move-to-inbox) flips it to true on the next sync. The local
+ * `archived` flag stays user-owned — this never writes it, so Peak-side
+ * archive behaves identically with the gate off.
+ *
+ * State truth comes from one ids-only threads.list ("in:inbox") rather than
+ * replaying history label events: it is 1 API call per 500 threads, immune to
+ * event-ordering bugs, and also covers the two cases history can't — the
+ * initial 90-day import (which has no label filter, so Gmail-archived mail
+ * lands in the Peak inbox) and a reset/expired history cursor.
+ */
+async function reconcileInboxState(key: MailboxKey): Promise<number> {
+  const inboxIds = new Set<string>();
+  let pageToken: string | undefined;
+  let pages = 0;
+  let complete = true;
+  do {
+    const page = await listThreadIds(key, "in:inbox", pageToken);
+    for (const th of page.threads) inboxIds.add(th.id);
+    pageToken = page.nextPageToken;
+    if (pageToken && ++pages >= MAX_INBOX_PAGES) {
+      complete = false; // truncated — only ever re-inbox below
+      break;
+    }
+  } while (pageToken);
+
+  const users = await allUsers();
+  const all = await listDocs<CommThread>("comms");
+  let flips = 0;
+  for (const t of all) {
+    if (!t.gmailThreadId) continue; // never bridged: calls, drafts, local-only
+    // Scope to the Gmail ACCOUNT that owns the thread id (stamped at import/
+    // send). Thread ids are per-account, so judging by the display mailbox —
+    // or a display-name user lookup — can compare against the wrong account's
+    // inbox and hide live mail. Legacy threads without the stamp fall back to
+    // the name-derived key.
+    if ((t.gmailAccountKey ?? keyForThreadWith(t, users)) !== key) continue;
+    const desired = inboxIds.has(t.gmailThreadId);
+    if (!desired && !complete) continue; // don't hide on a partial listing
+    // A pure-outbound thread (composed in Peak / sent-only import) was never
+    // in Gmail's INBOX — absence from in:inbox carries no "archived" signal,
+    // so never demote it. Once the customer replies it gains INBOX and
+    // reconciles normally; a previous explicit true may still flip to false.
+    if (
+      !desired &&
+      t.gmailInboxed !== true &&
+      !(t.messages || []).some((m) => m.direction === "in")
+    )
+      continue;
+    if (t.gmailInboxed !== desired) {
+      await patchDoc<CommThread>("comms", t.id, (d) => {
+        d.gmailInboxed = desired;
+      });
+      flips++;
+    }
+  }
+  return flips;
+}
+
+/** Import + poll a single mailbox's messages. Returns the last touched thread
+ *  id. (Label/INBOX state is reconciled separately by syncMailbox.) */
+async function syncMailboxMessages(
+  key: MailboxKey,
+  info: NonNullable<Awaited<ReturnType<typeof getConnectionInfo>>>
+): Promise<string | null> {
   let last: string | null = null;
 
   if (!info.initialImportDone) {
@@ -265,6 +386,36 @@ async function syncMailbox(key: MailboxKey): Promise<string | null> {
   return last;
 }
 
+/** Import + poll one mailbox, then reconcile Gmail-side INBOX state onto its
+ *  threads. Reconcile runs on EVERY sync — including right after the initial
+ *  import (which pulls in Gmail-archived mail) and after a cursor reset
+ *  (whose gap would otherwise lose label changes) — and never fails the
+ *  message sync. Returns the last touched thread id + whether anything
+ *  actually changed (new mail OR reconcile flips), so callers can skip
+ *  no-op refreshes. */
+async function syncMailbox(
+  key: MailboxKey,
+  claimMinAgeMs: number
+): Promise<{ ran: boolean; last: string | null; changed: boolean }> {
+  const info = await getConnectionInfo(key);
+  if (!info) return { ran: false, last: null, changed: false };
+  // Atomically CLAIM the slot immediately before syncing (D73): the claim
+  // START-stamps last_sync_at, so concurrent callers back off for the given
+  // window and a failing run still advances the gate (no hammering a dead
+  // connection). Claiming here — not batched upfront — keeps the claim→start
+  // gap at ~0 so a slow earlier mailbox can't let the slot be re-won mid-run.
+  if (!(await claimSyncSlot(key, claimMinAgeMs)))
+    return { ran: false, last: null, changed: false };
+  const last = await syncMailboxMessages(key, info);
+  let flips = 0;
+  try {
+    flips = await reconcileInboxState(key);
+  } catch (err) {
+    console.error("[gmail] inbox reconcile failed for", key, err);
+  }
+  return { ran: true, last, changed: last !== null || flips > 0 };
+}
+
 /** Read the persisted Gmail history cursor for a mailbox. */
 async function currentHistoryId(key: MailboxKey): Promise<string | null> {
   const { getDb } = await import("@/db");
@@ -279,20 +430,36 @@ async function currentHistoryId(key: MailboxKey): Promise<string | null> {
   return rows[0]?.h ?? null;
 }
 
-/** Poll every connected mailbox. Returns the most-recent touched thread id
- *  (mirrors the simulated checkMail() contract). */
-export async function pollInbound(): Promise<string | null> {
-  const keys = await connectedMailboxKeys();
+/** Guard for the MANUAL Send/Receive path: short enough to never frustrate a
+ *  user's click, long enough that it skips a mailbox an auto tick (or another
+ *  user's click) started syncing seconds ago instead of racing it. */
+const MANUAL_CLAIM_AGE_MS = 10_000;
+
+/** Poll connected mailboxes — all of them (manual path, 10s claim guard) or a
+ *  given subset with a caller-chosen claim window (the auto path passes its
+ *  staleness threshold, D73). Each mailbox is claimed atomically right before
+ *  it syncs; unclaimed ones are skipped. Returns the most-recent touched
+ *  thread id (mirrors the simulated checkMail() contract), whether any
+ *  mailbox actually ran, and whether anything changed. */
+export async function pollInbound(
+  onlyKeys?: MailboxKey[],
+  claimMinAgeMs: number = MANUAL_CLAIM_AGE_MS
+): Promise<{ ran: boolean; id: string | null; changed: boolean }> {
+  const keys = onlyKeys ?? (await connectedMailboxKeys());
+  let ran = false;
   let last: string | null = null;
+  let changed = false;
   for (const key of keys) {
     try {
-      const touched = await syncMailbox(key);
-      if (touched) last = touched;
+      const r = await syncMailbox(key, claimMinAgeMs);
+      if (r.ran) ran = true;
+      if (r.last) last = r.last;
+      if (r.changed) changed = true;
     } catch (err) {
       console.error("[gmail] mailbox sync failed for", key, err);
     }
   }
-  return last;
+  return { ran, id: last, changed };
 }
 
 export { DEFAULT_DOMAIN };

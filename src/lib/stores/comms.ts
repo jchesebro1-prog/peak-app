@@ -201,6 +201,15 @@ export type CommThread = {
   syncedAt?: number | null;
   rev?: number;
   gmailThreadId?: string; // Gmail thread id, once any message is bridged (Phase 7)
+  // Which connection key's Gmail ACCOUNT owns gmailThreadId (stamped at
+  // import/send). Thread ids are per-account, so the reconcile scopes by this
+  // rather than the display mailbox or a name-derived lookup (D73).
+  gmailAccountKey?: string;
+  // Gmail-side INBOX membership, maintained by the bridge reconcile
+  // (PUNCHLIST #1). undefined = unknown / never bridged; false = archived or
+  // filed on the Gmail side → hidden from the Peak inbox (shows in Archived).
+  // Distinct from `archived`, which stays the user's local Peak flag.
+  gmailInboxed?: boolean;
 };
 
 function mid(n: number): string {
@@ -519,7 +528,15 @@ export async function threadsIn(
   const all = await listDocs<CommThread>("comms");
   let base: CommThread[];
   if (boxId === "needs")
-    base = all.filter((t) => visibleTo(t, user) && t.status === "waiting_us");
+    // gmailInboxed===false = the user already disposed of it on the Gmail
+    // side — exactly the flow PUNCHLIST #1 reconciles, so don't keep nagging.
+    // (Locally-archived threads still show here — pre-existing semantics.)
+    base = all.filter(
+      (t) =>
+        visibleTo(t, user) &&
+        t.status === "waiting_us" &&
+        t.gmailInboxed !== false
+    );
   else if (boxId === "calls")
     base = all.filter(
       (t) => visibleTo(t, user) && t.status !== "draft" && t.channel !== "email"
@@ -527,7 +544,9 @@ export async function threadsIn(
   else {
     base = all.filter((t) => inBox(t, boxId, user));
     if (folder === "inbox")
-      base = base.filter((t) => t.status !== "draft" && !t.archived);
+      base = base.filter(
+        (t) => t.status !== "draft" && !t.archived && t.gmailInboxed !== false
+      );
     else if (folder === "sent")
       base = base.filter(
         (t) =>
@@ -536,7 +555,10 @@ export async function threadsIn(
       );
     else if (folder === "drafts") base = base.filter((t) => t.status === "draft");
     else if (folder === "outbox") base = base.filter((t) => hasQueued(t));
-    else if (folder === "archived") base = base.filter((t) => !!t.archived);
+    else if (folder === "archived")
+      // Locally archived OR archived/filed on the Gmail side — either way the
+      // thread left the inbox, and this is where it stays findable.
+      base = base.filter((t) => !!t.archived || t.gmailInboxed === false);
   }
   const ql = (opts.query || "").trim().toLowerCase();
   if (ql)
@@ -576,7 +598,9 @@ export async function folderCounts(
   const all = (await listDocs<CommThread>("comms")).filter((t) =>
     inBox(t, boxId, user)
   );
-  const inbox = all.filter((t) => t.status !== "draft" && !t.archived);
+  const inbox = all.filter(
+    (t) => t.status !== "draft" && !t.archived && t.gmailInboxed !== false
+  );
   return {
     inbox: inbox.length,
     inboxUnread: inbox.filter((t) => t.unread).length,
@@ -588,7 +612,7 @@ export async function folderCounts(
     ).length,
     drafts: all.filter((t) => t.status === "draft").length,
     outbox: all.filter((t) => hasQueued(t)).length,
-    archived: all.filter((t) => !!t.archived).length,
+    archived: all.filter((t) => !!t.archived || t.gmailInboxed === false).length,
   };
 }
 
@@ -596,8 +620,10 @@ export async function folderCounts(
  *  the comms array in hand (e.g. navData) avoid a second full-table scan. */
 export function unreadCountFrom(list: CommThread[], me?: string): number {
   const user = me || DEFAULT_USER;
-  return list.filter((t) => t.unread && visibleTo(t, user) && !t.archived)
-    .length;
+  return list.filter(
+    (t) =>
+      t.unread && visibleTo(t, user) && !t.archived && t.gmailInboxed !== false
+  ).length;
 }
 
 export async function unreadCount(me?: string): Promise<number> {
@@ -607,8 +633,12 @@ export async function unreadCount(me?: string): Promise<number> {
 export async function needsReplyCount(me?: string): Promise<number> {
   const user = me || DEFAULT_USER;
   const list = await listDocs<CommThread>("comms");
-  return list.filter((t) => visibleTo(t, user) && t.status === "waiting_us")
-    .length;
+  return list.filter(
+    (t) =>
+      visibleTo(t, user) &&
+      t.status === "waiting_us" &&
+      t.gmailInboxed !== false
+  ).length;
 }
 
 export async function callsCount(me?: string): Promise<number> {
@@ -1050,10 +1080,12 @@ export async function checkMail(): Promise<string | null> {
   await flushOutbox();
   if (!online()) return null;
   // Real inbound poll when the Gmail gate is on; canned simulation otherwise.
+  // (pollInbound claims each mailbox with a short 10s window — a click always
+  // syncs unless the very same mailbox was started seconds ago.)
   if (gmailBridgeActive()) {
     try {
       const { pollInbound } = await import("@/lib/gmail/bridge");
-      return await pollInbound();
+      return (await pollInbound()).id;
     } catch (err) {
       console.error("[gmail] inbound poll failed:", err);
       return null;
@@ -1072,6 +1104,43 @@ export async function checkMail(): Promise<string | null> {
     return rec ? rec.id : null;
   }
   return null;
+}
+
+/**
+ * Throttled background poll (PUNCHLIST #1 — "actively sync"). Per connected
+ * mailbox, atomically CLAIMS a sync slot (a conditional start-stamp of
+ * last_sync_at, older-than-maxAgeMs) and syncs only the mailboxes it won — so
+ * any number of open clients can call this freely (mount + interval) without
+ * overlapping syncs or hammering Gmail, and a failing mailbox still advances
+ * its stamp instead of defeating the throttle. Mailboxes whose one-time
+ * initial import hasn't run are SKIPPED: the (long) import belongs to the
+ * manual Send/Receive button, per the connect flow's "runs lazily on the next
+ * Get mail". `changed` is what callers should refresh on — a sync that found
+ * nothing new returns changed:false. No-op in simulated mode: the canned
+ * queue only moves on the manual button.
+ */
+export async function checkMailIfStale(
+  maxAgeMs: number
+): Promise<{ ran: boolean; changed: boolean; id: string | null }> {
+  const none = { ran: false, changed: false, id: null };
+  if (!gmailBridgeActive()) return none;
+  try {
+    const { listConnections } = await import("@/lib/gmail/connections");
+    const eligible = (await listConnections())
+      .filter((c) => c.initialImportDone)
+      .map((c) => c.mailboxKey);
+    if (!eligible.length) return none;
+    await flushOutbox();
+    // pollInbound claims each mailbox atomically right before syncing it,
+    // with OUR staleness window — mailboxes synced more recently are skipped,
+    // so overlapping clients/ticks are cheap and can't double-sync a slot.
+    const { pollInbound } = await import("@/lib/gmail/bridge");
+    const r = await pollInbound(eligible, maxAgeMs);
+    return { ran: r.ran, changed: r.changed, id: r.id };
+  } catch (err) {
+    console.error("[gmail] background sync failed:", err);
+    return none;
+  }
 }
 
 export function hasIncoming(): boolean {
