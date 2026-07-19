@@ -1220,12 +1220,17 @@ reorder) probably wouldn't.
 
 ---
 
-## 20. People and companies as first-class records + multi-linking — OPEN
+## 20. People and companies as first-class records + multi-linking — JEFF (self-assigned 2026-07-19)
 
 **Area:** `src/lib/stores/customers.ts`, `src/db/doc-tables.ts`, and every screen that renders
 "the customer"
 
 **Reported:** 2026-07-19 (Daylite screenshots — project and contact views)
+
+**2026-07-19 — Jeff took this item himself.** He is building the people/companies
+model; nobody else should scope or start it. Check with him before touching
+anything downstream of the person model (18's linked people, 21's linked-record
+rows, 23's people / opportunity fields).
 
 **Ask:** Projects and opportunities should link to **multiple contacts and multiple accounts**
 (Daylite shows one project linked to 10+ people and 5 companies — Grounded Electric, Mainstage
