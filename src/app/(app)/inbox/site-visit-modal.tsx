@@ -39,11 +39,19 @@ const lbl: CSSProperties = {
 
 function tomorrowISO(): string {
   const d = new Date(Date.now() + 24 * 3600_000);
-  return d.toISOString().slice(0, 10);
+  return (
+    d.getFullYear() +
+    "-" +
+    String(d.getMonth() + 1).padStart(2, "0") +
+    "-" +
+    String(d.getDate()).padStart(2, "0")
+  );
 }
 
 function inviteMessage(status: InviteStatus, assignee: string): string {
   switch (status) {
+    case "calendar":
+      return `Added straight to ${assignee}'s Google Calendar.`;
     case "sent":
       return `Calendar invite emailed to ${assignee}.`;
     case "invites-off":

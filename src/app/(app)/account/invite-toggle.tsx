@@ -23,8 +23,9 @@ export default function InviteToggle({ initialOn }: { initialOn: boolean }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14.5, fontWeight: 600 }}>Calendar invites</div>
           <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3, lineHeight: 1.5 }}>
-            When a site visit is scheduled for you, email you a calendar
-            invite (.ics) you can drop into your calendar.
+            When a site visit is scheduled for you, put it on your calendar —
+            written straight to your Google Calendar if your mailbox has
+            calendar access, otherwise emailed as an invite (.ics).
           </div>
         </div>
         <button

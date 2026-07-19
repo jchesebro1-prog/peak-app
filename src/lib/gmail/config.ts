@@ -35,6 +35,19 @@ export const GMAIL_SCOPES = [
  *  (pre-2026-07-19 connects) stay one-way until reconnected. */
 export const GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
 
+/** Google Calendar events scope (D77 — dashboard calendar + direct site-visit
+ *  writes). NOT in GMAIL_SCOPES: calendar access is opt-in per mailbox via
+ *  Settings → Mailboxes → "Enable calendar" (D76-H: Jeff's own mailbox by
+ *  default, anyone else's by choice), which re-runs consent WITH this scope.
+ *  Remember: the Google Cloud consent screen must also list any scope
+ *  requested here — see DEPLOY.md. */
+export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+
+/** Does a stored grant (space-separated scope string) include Calendar? */
+export function hasCalendarScope(scope: string | null | undefined): boolean {
+  return (scope || "").split(/\s+/).includes(CALENDAR_SCOPE);
+}
+
 /** History-import depth on first connect (MASTER-QUESTIONS C3 — last 90 days). */
 export const IMPORT_WINDOW_DAYS = 90;
 

@@ -97,3 +97,16 @@ export async function stampInvite(
     d.updatedAt = Date.now();
   });
 }
+
+/** Record the directly-created Google Calendar event (D77). The dashboard
+ *  agenda uses this to dedup: a visit with a googleEventId shows via Google,
+ *  not as a second local row. */
+export async function stampGoogleEvent(
+  id: string,
+  googleEventId: string
+): Promise<void> {
+  await patchDoc<SiteVisit>("site_visits", id, (d) => {
+    d.googleEventId = googleEventId;
+    d.updatedAt = Date.now();
+  });
+}

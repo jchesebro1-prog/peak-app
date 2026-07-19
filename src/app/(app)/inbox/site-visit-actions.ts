@@ -3,10 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { buildIcs } from "@/lib/ics";
-import { gmailEnabled } from "@/lib/gmail/config";
+import { gmailEnabled, hasCalendarScope, personalKey } from "@/lib/gmail/config";
+import { getConnectionInfo } from "@/lib/gmail/connections";
 import { invitesOn } from "@/lib/stores/notif-prefs";
-import { createVisit } from "@/lib/stores/site-visits";
-import { stampInvite } from "@/lib/stores/site-visits";
+import {
+  createVisit,
+  stampGoogleEvent,
+  stampInvite,
+} from "@/lib/stores/site-visits";
 import { update as updateThread } from "@/lib/stores/comms";
 import { allUsers } from "@/lib/users";
 
@@ -38,6 +42,7 @@ export type CreateSiteVisitInput = {
 };
 
 export type InviteStatus =
+  | "calendar" // D77 — event written straight to the assignee's Google Calendar
   | "sent"
   | "invites-off"
   | "gmail-off"
@@ -108,38 +113,69 @@ export async function createSiteVisitAction(
     ]
       .filter(Boolean)
       .join("\n");
-    const ics = buildIcs({
-      uid: "sv-" + rec.id + "@peak-app",
-      title,
-      description: body,
-      location: input.address || [input.venue, input.customer].filter(Boolean).join(", "),
-      start: input.startAt,
-      end: input.endAt,
-      stampAt: Date.now(),
-    });
-    try {
-      const { sendSiteVisitInvite } = await import("@/lib/gmail/bridge");
-      const sent = await sendSiteVisitInvite({
-        siteVisitId: rec.id,
-        schedulerUserId: me.id,
-        toAddr,
-        subject: title,
-        body,
-        icsText: ics,
+    const location =
+      input.address || [input.venue, input.customer].filter(Boolean).join(", ");
+
+    // D77 — when the assignee's own mailbox has the Calendar grant, write the
+    // event straight onto their primary calendar: it just appears, no email
+    // step. Falls back to the .ics email otherwise (or if the write fails).
+    let wroteCalendar = false;
+    if (assignee) {
+      const akey = personalKey(assignee.id);
+      const info = await getConnectionInfo(akey);
+      if (info && hasCalendarScope(info.scope)) {
+        try {
+          const { insertEvent } = await import("@/lib/google/calendar");
+          const ev = await insertEvent(akey, {
+            title,
+            startMs: input.startAt,
+            endMs: input.endAt,
+            description: body,
+            location,
+          });
+          await stampGoogleEvent(rec.id, ev.id);
+          wroteCalendar = true;
+        } catch (err) {
+          console.error("[site-visit] calendar write failed:", err);
+        }
+      }
+    }
+
+    if (wroteCalendar) inviteStatus = "calendar";
+    else {
+      const ics = buildIcs({
+        uid: "sv-" + rec.id + "@peak-app",
+        title,
+        description: body,
+        location,
+        start: input.startAt,
+        end: input.endAt,
+        stampAt: Date.now(),
       });
-      if (sent) {
-        await stampInvite(rec.id, {
-          sentAt: Date.now(),
-          to: toAddr,
-          fromMailbox: sent.fromMailbox,
-          gmailId: sent.gmailId,
-          gmailThreadId: sent.gmailThreadId,
+      try {
+        const { sendSiteVisitInvite } = await import("@/lib/gmail/bridge");
+        const sent = await sendSiteVisitInvite({
+          siteVisitId: rec.id,
+          schedulerUserId: me.id,
+          toAddr,
+          subject: title,
+          body,
+          icsText: ics,
         });
-        inviteStatus = "sent";
-      } else inviteStatus = "no-mailbox";
-    } catch (err) {
-      console.error("[site-visit] invite send failed:", err);
-      inviteStatus = "failed";
+        if (sent) {
+          await stampInvite(rec.id, {
+            sentAt: Date.now(),
+            to: toAddr,
+            fromMailbox: sent.fromMailbox,
+            gmailId: sent.gmailId,
+            gmailThreadId: sent.gmailThreadId,
+          });
+          inviteStatus = "sent";
+        } else inviteStatus = "no-mailbox";
+      } catch (err) {
+        console.error("[site-visit] invite send failed:", err);
+        inviteStatus = "failed";
+      }
     }
   }
 

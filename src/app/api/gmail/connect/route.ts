@@ -2,7 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { getUser } from "@/lib/users";
 import { can } from "@/lib/team";
-import { gmailEnabled, SHARED_KEYS, isPersonalKey, userIdOfKey } from "@/lib/gmail/config";
+import {
+  CALENDAR_SCOPE,
+  gmailEnabled,
+  SHARED_KEYS,
+  isPersonalKey,
+  userIdOfKey,
+} from "@/lib/gmail/config";
 import { authorizeUrl, signState } from "@/lib/gmail/oauth";
 
 /**
@@ -43,5 +49,9 @@ export async function GET(req: NextRequest) {
 
   const state = signState({ mailboxKey, userId: me.id });
   const hint = ownsPersonal ? me.email : undefined;
-  return NextResponse.redirect(authorizeUrl(state, hint));
+  // ?calendar=1 (D77) — the Settings "Enable calendar" opt-in: same consent
+  // flow, calendar.events appended. include_granted_scopes keeps Gmail.
+  const extraScopes =
+    req.nextUrl.searchParams.get("calendar") === "1" ? [CALENDAR_SCOPE] : [];
+  return NextResponse.redirect(authorizeUrl(state, hint, extraScopes));
 }

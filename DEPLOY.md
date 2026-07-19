@@ -166,6 +166,17 @@ Mailboxes connected before this feature need a one-time **Reconnect** in
 Settings → Mailboxes (the row says "reconnect to enable two-way archive") to
 grant the extra permission.
 
+**Google Calendar (D77):** the dashboard calendar and direct site-visit
+events use the Calendar API. Per mailbox it's opt-in: **Enable calendar** on
+the mailbox row in Settings → Mailboxes re-runs the Google consent with
+Calendar access added. IMPORTANT — the Google Cloud console must list every
+scope the app requests: in **APIs & Services → OAuth consent screen →
+Scopes**, make sure `gmail.send`, `gmail.readonly`, `gmail.modify`, and
+`calendar.events` are all added (and in **APIs & Services → Library**, enable
+the **Google Calendar API** for the project), or consent will fail. If Google
+shows `Error 400: invalid_request`, click "error details" first — it is
+usually a malformed redirect_uri, not a scope problem.
+
 ## Afterwards
 
 - **Updates:** every `git push` to `main` redeploys automatically

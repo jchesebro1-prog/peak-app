@@ -7,6 +7,7 @@ import { allUsers } from "@/lib/users";
 import {
   GMAIL_MODIFY_SCOPE,
   gmailEnabled,
+  hasCalendarScope,
   personalKey,
   SHARED_KEYS,
 } from "@/lib/gmail/config";
@@ -63,6 +64,9 @@ export default async function SettingsPage() {
       // Grant predates the gmail.modify scope (D74) — two-way archive stays
       // off for this mailbox until it's reconnected.
       needsReconnect: !!c && !c.scope.includes(GMAIL_MODIFY_SCOPE),
+      // Calendar opt-in granted (D77) — drives the dashboard calendar and
+      // direct site-visit writes for this mailbox's owner.
+      calendarOn: !!c && hasCalendarScope(c.scope),
     };
   });
 

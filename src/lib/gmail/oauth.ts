@@ -76,13 +76,20 @@ export function verifyState(state: string): ConnectState | null {
 
 /* ---- flow ---- */
 
-/** Build the Google consent URL. `login_hint` pre-selects the mailbox account. */
-export function authorizeUrl(state: string, loginHint?: string): string {
+/** Build the Google consent URL. `login_hint` pre-selects the mailbox
+ *  account; `extraScopes` widens the grant (D77: the calendar opt-in re-runs
+ *  consent with CALENDAR_SCOPE appended — include_granted_scopes keeps the
+ *  Gmail grant either way). */
+export function authorizeUrl(
+  state: string,
+  loginHint?: string,
+  extraScopes: string[] = []
+): string {
   const params = new URLSearchParams({
     client_id: googleClientId(),
     redirect_uri: callbackUrl(),
     response_type: "code",
-    scope: GMAIL_SCOPES.join(" "),
+    scope: [...GMAIL_SCOPES, ...extraScopes].join(" "),
     access_type: "offline", // → refresh token
     prompt: "consent", // force refresh-token issuance every time
     include_granted_scopes: "true",

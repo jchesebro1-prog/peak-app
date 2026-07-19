@@ -91,6 +91,8 @@ type MailboxVM = {
   /** Grant predates the gmail.modify scope (D74) — two-way archive stays off
    *  for this mailbox until it's reconnected. */
   needsReconnect: boolean;
+  /** Calendar scope granted (D77) — dashboard calendar + site-visit writes. */
+  calendarOn: boolean;
 };
 
 const GMAIL_BANNER: Record<string, { msg: string; ok: boolean }> = {
@@ -899,7 +901,8 @@ export default function SettingsClient({
                       (mb.initialImportDone ? "  ·  history imported" : "") +
                       (mb.needsReconnect
                         ? "  ·  reconnect to enable two-way archive"
-                        : "")
+                        : "") +
+                      (mb.calendarOn ? "  ·  calendar on" : "")
                     : mb.desc}
                 </div>
               </div>
@@ -919,13 +922,29 @@ export default function SettingsClient({
                 {mb.connected ? "Connected" : "Not connected"}
               </span>
               {mb.connected ? (
-                <button
-                  className="pk-btn-outline"
-                  style={{ color: "#8c919c" }}
-                  onClick={() => run(() => disconnectMailboxAction(mb.key))}
-                >
-                  Disconnect
-                </button>
+                <>
+                  {mb.kind === "personal" && !mb.calendarOn && (
+                    <a
+                      className="pk-btn-outline"
+                      href={
+                        "/api/gmail/connect?mailbox=" +
+                        encodeURIComponent(mb.key) +
+                        "&calendar=1"
+                      }
+                      title="Re-runs the Google consent with Calendar access added — enables the dashboard calendar and direct site-visit events for this mailbox's owner"
+                      style={{ flexShrink: 0, textDecoration: "none" }}
+                    >
+                      Enable calendar
+                    </a>
+                  )}
+                  <button
+                    className="pk-btn-outline"
+                    style={{ color: "#8c919c" }}
+                    onClick={() => run(() => disconnectMailboxAction(mb.key))}
+                  >
+                    Disconnect
+                  </button>
+                </>
               ) : gmail.enabled ? (
                 <a
                   className="pk-btn-accent"

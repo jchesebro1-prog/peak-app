@@ -700,3 +700,31 @@ Anything you want changed, just say so — none of these are hard to reverse.
   live invite send needs Gmail creds (Q-A). Phase 2 stays open: Google
   Calendar API write (calendar.events scope on Jeff's mailbox only + a
   Settings option per H) and the in-app calendar.
+- **D77. Dashboard Google Calendar — read AND write** (Jeff, Jul 19: "add a
+  calendar to the dashboard that pulls from google calendar and then allow
+  for direct adding to and from"). New Home-page Calendar card (top of the
+  right column): the signed-in user's next 14 days, merging their Google
+  Calendar primary with Peak site visits assigned to them, grouped by day IN
+  THE BROWSER'S timezone (SSR renders a placeholder until hydration; all-day
+  events carry UTC-midnight epochs and render via UTC getters so the
+  calendar date survives any server/browser tz combo). Quick-add ("+ Add
+  event") writes straight to the user's primary Google Calendar. Plumbing:
+  CALENDAR_SCOPE (calendar.events) deliberately NOT in GMAIL_SCOPES — it's
+  opt-in per PERSONAL mailbox via a new "Enable calendar" link on Settings→
+  Mailboxes rows (re-runs consent with the scope added; include_granted_
+  scopes keeps Gmail, and Google returns the union scope on any later
+  reconnect so the grant is sticky). New src/lib/google/calendar.ts — plain-
+  fetch Calendar v3 client (list + insert, primary only, 5s abort so a hung
+  Google can never hang Home; D36 no-deps posture). Site visits now write
+  DIRECTLY to the assignee's calendar when their mailbox has the grant
+  (event stamped as googleEventId, .ics email skipped, still gated by the
+  Account "Calendar invites" toggle whose copy now discloses both paths);
+  .ics remains the fallback. Dashboard dedup is fetch-aware (a pushed visit
+  whose event didn't come back this load still shows locally) and an
+  accepted .ics is matched by its sv-<id>@peak-app iCalUID. Google Cloud
+  prerequisite documented in DEPLOY.md: the consent screen must list
+  gmail.modify + calendar.events and the Calendar API must be enabled —
+  else consent fails. Known product note: a direct-written event lands on
+  the assignee's calendar silently (no email); an in-app notification could
+  accompany it later. The full-page in-app calendar (month/week view) stays
+  open as the remaining slice of PUNCHLIST #2 item 5.
