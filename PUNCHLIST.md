@@ -149,9 +149,15 @@ visit" action in the thread reader (modal prefilled from the resolved customer),
 site_visits collection, Settings-editable reason picklist, .ics invite emailed to the
 assignee honoring a new Account toggle, self-import suppression, sent-invite stamping,
 and customer-record phone + street-address fields end-to-end. Verified in dev
-(SV-5001); live invite send awaits Gmail creds (Q-A). **Phase 2 still open:** direct
-Google Calendar write (calendar.events on Jeff's mailbox + a Settings option, per H)
-and the in-app calendar.
+(SV-5001); live invite send awaits Gmail creds (Q-A). **Phase 2 SHIPPED 2026-07-19** (commit `3a5ab2d`, D77,
+from Jeff's follow-up ask): a dashboard Calendar card pulling the signed-in user's
+Google Calendar (merged with their Peak site visits), quick-add writing straight to
+Google Calendar, per-mailbox "Enable calendar" opt-in in Settings (per H), and site
+visits now written DIRECTLY onto the assignee's calendar when their mailbox has the
+grant (.ics email stays the fallback). One-time setup on the live deployment: add the
+`gmail.modify` + `calendar.events` scopes to the Google Cloud consent screen, enable
+the Calendar API, then use "Enable calendar" on your mailbox (DEPLOY.md). Remaining
+slice of the original item: a full-page month/week in-app calendar view.
 
 ---
 
