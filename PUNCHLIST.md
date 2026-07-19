@@ -469,7 +469,7 @@ which delivers the navigation win immediately and defers C/D.
 unreachable app-wide? These are very different jobs. **Recommend (i) now** — it's reversible and
 matches the words — and treat (ii) as part of item 4.
 
-**Status:** OPEN — trivial once Jeff confirms (i) vs (ii)
+**Status:** DONE as (i) — card removed 2026-07-19 (`01310aa`, D82). (ii) — making the four AI features unreachable app-wide — remains item-4 territory.
 
 ---
 
@@ -543,7 +543,7 @@ worth deciding before any team-member work.
   Settings list. Given finding 6, **recommend that neither ever hard-deletes the row.**
 - **D. Should the signature phone be the member's direct line** instead of `offices[0].phone`?
 
-**Status:** OPEN — needs A–D; note part 2 is a defect, worth fixing ahead of the rest
+**Status:** PART 2 FIXED (`01310aa`, D82) — name/email/google-email now editable in the Settings edit modal, ending the wrong-email lockout. Contact card (A/D) and archived-vs-removed (C) still need answers; B's first step (admin-editable email) is done.
 
 ---
 
@@ -726,7 +726,7 @@ pay for itself immediately across those call sites** — recommend doing that ra
   `customerId` non-null from the start and simplifies convert; deferred avoids junk customer
   records for leads that die at stage "new".
 
-**Status:** OPEN — needs A–D. The convert() phone/address drop is a standalone bug worth fixing first.
+**Status:** OPEN — needs A–D. The convert() PHONE drop is FIXED (`01310aa`); street address still can't pass through because the lead form doesn't collect one (part of decision C).
 
 ---
 
@@ -804,7 +804,7 @@ stage vocabularies, four tables, no shared discriminator. **Suggest sequencing: 
 filter bug; (2) carry `quoteType` onto projects as `projectType`; (3) add `projectId` to the three
 service records; (4) sign-off → spawn on inspections; (5) scheduler unification last.**
 
-**Status:** OPEN — needs A–D. Item (1) is a bug fix that should not wait for the rest.
+**Status:** OPEN — needs A–D. The phantom-projects sync bug is FIXED (`01310aa`, D82): won repair/inspection quotes no longer mint Projects. (Any phantoms already in a DB remain — delete from Projects manually.) The record-unification questions stand.
 
 ---
 
@@ -859,7 +859,7 @@ the same store with cost/margin stripped.
 - **B. `SUGGEST`** — retire it in favour of catalog-backed suggestions (e.g. most-used SKUs per
   section type), or curate it properly as a real, validated quick-pick list?
 
-**Status:** OPEN — the dashboard card fix is small and self-contained; `SUGGEST` needs A/B first
+**Status:** DASHBOARD CARD FIXED (`01310aa`, D82) — derived from the real store (revealed the actual 10,729-part catalog the fake card hid). Age pills dropped pending A; `SUGGEST` still needs B.
 
 ---
 
