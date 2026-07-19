@@ -156,8 +156,10 @@ Google Calendar, per-mailbox "Enable calendar" opt-in in Settings (per H), and s
 visits now written DIRECTLY onto the assignee's calendar when their mailbox has the
 grant (.ics email stays the fallback). One-time setup on the live deployment: add the
 `gmail.modify` + `calendar.events` scopes to the Google Cloud consent screen, enable
-the Calendar API, then use "Enable calendar" on your mailbox (DEPLOY.md). Remaining
-slice of the original item: a full-page month/week in-app calendar view.
+the Calendar API, then use "Enable calendar" on your mailbox (DEPLOY.md). FULLY
+DONE 2026-07-19: the full-page calendar module shipped as /calendar in the nav
+(commit `6d0f7e3`, D81) — month grid over Google Calendar + site visits with
+day-click quick-add. Nothing left on this item.
 
 ---
 
