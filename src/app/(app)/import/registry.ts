@@ -82,12 +82,20 @@ const WRITERS: Record<string, Writer> = {
             id: "l" + id,
             label: str(v.venue) || "Main Venue",
             primary: true,
+            address: str(v.address),
             city: str(v.city),
             state: str(v.state),
           },
         ],
         contacts: v.contactName
-          ? [{ name: str(v.contactName), email: str(v.email), primary: true }]
+          ? [
+              {
+                name: str(v.contactName),
+                email: str(v.email),
+                phone: str(v.phone),
+                primary: true,
+              },
+            ]
           : [],
       });
       cache.push({ id, name: str(v.name) });
@@ -102,12 +110,20 @@ const WRITERS: Record<string, Writer> = {
             id: "l" + str(ex.id),
             label: str(v.venue) || "Main Venue",
             primary: true,
+            address: str(v.address),
             city: str(v.city),
             state: str(v.state),
           },
         ],
         contacts: v.contactName
-          ? [{ name: str(v.contactName), email: str(v.email), primary: true }]
+          ? [
+              {
+                name: str(v.contactName),
+                email: str(v.email),
+                phone: str(v.phone),
+                primary: true,
+              },
+            ]
           : [],
       });
     },
@@ -123,8 +139,9 @@ const WRITERS: Record<string, Writer> = {
           type: rec.type || "",
           contactName: c?.name || "",
           email: c?.email || "",
-          phone: "",
+          phone: c?.phone || "",
           venue: loc?.label || "",
+          address: loc?.address || "",
           city: loc?.city || "",
           state: loc?.state || "",
           notes: "",

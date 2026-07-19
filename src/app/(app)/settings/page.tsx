@@ -2,6 +2,7 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
 import { mergedCatalog } from "@/lib/stores/survey-intake";
+import { mergedVisitReasons } from "@/lib/stores/site-visits";
 import { allUsers } from "@/lib/users";
 import {
   GMAIL_MODIFY_SCOPE,
@@ -140,6 +141,7 @@ export default async function SettingsPage() {
             logoDark: settings.logoDark || null,
           }}
           intakeCatalog={mergedCatalog(settings.intakeCatalog)}
+          visitReasons={mergedVisitReasons(settings.visitReasons)}
           offices={settings.offices.map((o) => ({
             id: o.id,
             type: o.type || "Main Office",

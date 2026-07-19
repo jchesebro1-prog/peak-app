@@ -166,6 +166,10 @@ async function recordMessage(
   p: ParsedInbound,
   attempt = 0
 ): Promise<string | null> {
+  // The app's own site-visit .ics invites (D76-F) — self-addressed mail that
+  // would otherwise reappear as stray inbox threads. Recognized by the
+  // X-Peak-Site-Visit header, which survives the Gmail round-trip.
+  if (p.siteVisitId) return null;
   const all = await listDocs<CommThread>("comms");
   // already imported?
   for (const t of all) {
@@ -325,6 +329,51 @@ async function reconcileInboxState(key: MailboxKey): Promise<number> {
     }
   }
   return flips;
+}
+
+/* ---- site-visit invites (D76) --------------------------------------------- */
+
+/**
+ * Email a site-visit .ics invite to the assignee (D76 decisions B/E: the
+ * scheduler's own connected mailbox sends it; no customer is ever an
+ * attendee). Sender preference: the scheduler's personal mailbox, else the
+ * first connected shared box. Returns the sent ids for stamping on the visit
+ * record (D76-I), or null when no mailbox can send. The X-Peak-Site-Visit
+ * header keeps the import poll from re-recording the mail as an inbox thread.
+ */
+export async function sendSiteVisitInvite(opts: {
+  siteVisitId: string;
+  schedulerUserId: string | null;
+  toAddr: string;
+  subject: string;
+  body: string;
+  icsText: string;
+}): Promise<{ gmailId: string; gmailThreadId: string; fromMailbox: string } | null> {
+  const keys = await connectedMailboxKeys();
+  const personal = opts.schedulerUserId ? "personal:" + opts.schedulerUserId : null;
+  const key =
+    personal && keys.includes(personal)
+      ? personal
+      : keys.find((k) => !isPersonalKey(k)) ?? null;
+  if (!key) return null;
+  const info = await getConnectionInfo(key);
+  if (!info) return null;
+  const raw = buildRaw({
+    from: info.address,
+    to: opts.toAddr,
+    subject: opts.subject,
+    body: opts.body,
+    attachments: [
+      {
+        name: "site-visit.ics",
+        mime: "text/calendar",
+        dataBase64: Buffer.from(opts.icsText, "utf8").toString("base64"),
+      },
+    ],
+    extraHeaders: { "X-Peak-Site-Visit": opts.siteVisitId },
+  });
+  const sent = await sendRaw(key, raw);
+  return { gmailId: sent.id, gmailThreadId: sent.threadId, fromMailbox: key };
 }
 
 /* ---- two-way archive (D74) ------------------------------------------------ */

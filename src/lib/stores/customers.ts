@@ -36,6 +36,9 @@ export type CustomerLocation = {
   id?: string;
   label?: string;
   primary: boolean;
+  /** Street address (site visits / calendar invites, D76) — city/state stay
+   *  the separate fields they always were. */
+  address?: string;
   city?: string;
   state?: string;
   lat?: number | string | null;
@@ -49,6 +52,8 @@ export type CustomerContact = {
   name: string;
   role: string;
   email: string;
+  /** Phone number (site visits / calendar invites, D76). */
+  phone?: string;
   primary: boolean;
 };
 
@@ -66,6 +71,7 @@ export type CustomerLocationInput = {
   id?: string;
   label?: string;
   primary?: boolean;
+  address?: string;
   city?: string;
   state?: string;
   lat?: number | string | null;
@@ -79,6 +85,7 @@ export type CustomerContactInput = {
   name?: string;
   role?: string;
   email?: string;
+  phone?: string;
   primary?: boolean;
 };
 
@@ -118,6 +125,7 @@ export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
     id: l.id,
     label: l.label,
     primary: !!l.primary,
+    address: (l.address || "").trim() || undefined,
     city: l.city,
     state: l.state,
     lat: l.lat,
@@ -139,6 +147,7 @@ export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
       name: ct.name,
       role: ct.role || "",
       email: ct.email || "",
+      phone: (ct.phone || "").trim() || undefined,
       primary: !!ct.primary,
     }));
   if (contacts.length && !contacts.some((ct) => ct.primary)) contacts[0].primary = true;

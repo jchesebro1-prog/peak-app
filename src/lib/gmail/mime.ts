@@ -45,6 +45,9 @@ export type OutboundMime = {
   /** Message-ID of the message being replied to (for threading headers). */
   inReplyTo?: string;
   references?: string;
+  /** Extra custom headers (e.g. X-Peak-Site-Visit — lets the import poll
+   *  recognize and skip the app's own invite mails, D76-F). */
+  extraHeaders?: Record<string, string>;
 };
 
 /** RFC-2045 wants base64 bodies wrapped at ≤76 chars per line. */
@@ -64,6 +67,8 @@ export function buildRaw(m: OutboundMime): string {
   headers.push("MIME-Version: 1.0");
   if (m.inReplyTo) headers.push("In-Reply-To: " + m.inReplyTo);
   if (m.references) headers.push("References: " + m.references);
+  for (const [k, v] of Object.entries(m.extraHeaders || {}))
+    headers.push(k + ": " + oneLine(v));
 
   const atts = m.attachments || [];
   let raw: string;
@@ -151,6 +156,9 @@ export type ParsedInbound = {
   body: string;
   at: number; // epoch-ms
   isOutbound: boolean; // labelled SENT (message the account itself sent)
+  /** Set when the mail carries X-Peak-Site-Visit — one of the app's own
+   *  .ics invite emails; the import poll skips these (D76-F). */
+  siteVisitId?: string;
 };
 
 /** Map a full Gmail message into the shape the bridge records into comms. */
@@ -167,5 +175,6 @@ export function parseInbound(msg: GmailFullMessage): ParsedInbound {
     body: extractBody(msg.payload) || msg.snippet || "",
     at,
     isOutbound: (msg.labelIds || []).includes("SENT"),
+    siteVisitId: header(hs, "X-Peak-Site-Visit") || undefined,
   };
 }

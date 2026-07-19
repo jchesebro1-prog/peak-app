@@ -45,6 +45,7 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "email", header: "Email", label: "Email", kind: "email", aliases: ["email", "e-mail", "contact email", "emailaddress"], example: "maria@riverside.org" },
       { key: "phone", header: "Phone", label: "Phone", aliases: ["phone", "telephone", "tel", "contact phone", "phonenumber"], example: "(608) 555-0110" },
       { key: "venue", header: "Venue", label: "Primary venue", aliases: ["venue", "location", "venue name", "room", "hall", "space", "site"], example: "Main Stage" },
+      { key: "address", header: "Address", label: "Street address", aliases: ["address", "street", "street address", "addr", "address1"], example: "215 W Main St" },
       { key: "city", header: "City", label: "City", aliases: ["city", "town"], example: "Madison" },
       { key: "state", header: "State", label: "State", aliases: ["state", "province", "st"], example: "WI" },
       { key: "notes", header: "Notes", label: "Notes", aliases: ["notes", "note", "comments", "remarks"], example: "Referred by North Ridge HS" },

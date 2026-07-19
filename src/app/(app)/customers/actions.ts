@@ -33,6 +33,7 @@ export async function saveCustomerAction(input: SaveCustomerInput) {
       id: l.id,
       label: (l.label || "").trim() || "Venue",
       primary: !!l.primary,
+      address: (l.address || "").trim(),
       city: (l.city || "").trim(),
       state: (l.state || "").trim(),
       lat: l.lat,
@@ -47,6 +48,7 @@ export async function saveCustomerAction(input: SaveCustomerInput) {
         name: (c.name || "").trim(),
         role: (c.role || "").trim(),
         email: (c.email || "").trim(),
+        phone: (c.phone || "").trim(),
         primary: !!c.primary,
       })),
   });

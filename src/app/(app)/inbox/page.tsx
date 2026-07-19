@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
+import { mergedVisitReasons } from "@/lib/stores/site-visits";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { followUpCount } from "@/lib/stores/leads";
@@ -421,6 +422,32 @@ export default async function InboxPage({
       };
     }
 
+    // D76 — schedule-site-visit modal data (venues/contacts of the resolved
+    // customer, the Settings reason picklist, and the team for assignment)
+    let visit: ReaderVM["visit"] = null;
+    if (resolvedCid) {
+      const cust = customers.find((c) => c.id === resolvedCid) || null;
+      visit = {
+        venues: (cust?.locations || []).map((l, i) => ({
+          id: l.id || "l" + i,
+          label: l.label || "Venue",
+          address: [l.address, [l.city, l.state].filter(Boolean).join(", ")]
+            .filter(Boolean)
+            .join(", "),
+          primary: !!l.primary,
+        })),
+        contacts: (cust?.contacts || []).map((ct) => ({
+          name: ct.name,
+          email: ct.email || "",
+          phone: ct.phone || "",
+          primary: !!ct.primary,
+        })),
+        reasons: mergedVisitReasons(settings.visitReasons),
+        team: roster.map((u) => u.name),
+        me,
+      };
+    }
+
     const messages: MessageVM[] = (sel.messages || []).map((m) => ({
       id: m.id,
       author: m.author,
@@ -477,6 +504,7 @@ export default async function InboxPage({
       resolvedCustomerName: resolvedCustomer || sel.customer || "this contact",
       needsAdopt: !sel.customerId && !!resolvedCid,
       linkOptions,
+      visit,
       lastBody: lastMsg(sel)?.body || "",
       forwardFrom: sel.contactName || sel.contactEmail || "",
     };

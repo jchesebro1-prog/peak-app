@@ -18,6 +18,7 @@ import {
   saveOfficeAction,
   disconnectMailboxAction,
   saveIntakeCatalogAction,
+  saveVisitReasonsAction,
   saveLogoAction,
   saveSettingsAction,
   searchAddressAction,
@@ -109,6 +110,7 @@ export default function SettingsClient({
   ai,
   settings,
   intakeCatalog,
+  visitReasons,
   offices,
   users,
 }: {
@@ -130,6 +132,7 @@ export default function SettingsClient({
     logoDark: string | null;
   };
   intakeCatalog: Record<string, string[]>;
+  visitReasons: string[];
   offices: OfficeVM[];
   users: UserVM[];
 }) {
@@ -193,6 +196,24 @@ export default function SettingsClient({
       if (res.ok) {
         setCatalogDirty(false);
         setCatalogSaved(true);
+      }
+      return res;
+    });
+  /* ---- site-visit reason picklist (D76, one reason per line) ---- */
+  const [reasonsDraft, setReasonsDraft] = useState(visitReasons.join("\n"));
+  const [reasonsDirty, setReasonsDirty] = useState(false);
+  const [reasonsSaved, setReasonsSaved] = useState(false);
+  const saveReasons = () =>
+    run(async () => {
+      const res = await saveVisitReasonsAction(
+        reasonsDraft
+          .split("\n")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      );
+      if (res.ok) {
+        setReasonsDirty(false);
+        setReasonsSaved(true);
       }
       return res;
     });
@@ -590,6 +611,52 @@ export default function SettingsClient({
             </div>
           ))}
         </div>
+      </section>
+
+      {/* ---- Site-visit reasons (D76) ---- */}
+      <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 14.5, fontWeight: 600 }}>Site visits — reason picklist</div>
+            <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
+              The reasons offered when scheduling a site visit (Inbox →
+              Site visit). One per line; the reason becomes part of the
+              calendar-event title.
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {reasonsSaved && !reasonsDirty && (
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#1f7a52" }}>Saved</span>
+            )}
+            <button
+              className="pk-btn-accent"
+              onClick={saveReasons}
+              disabled={!reasonsDirty}
+              style={{ opacity: reasonsDirty ? 1 : 0.5, cursor: reasonsDirty ? "pointer" : "default" }}
+            >
+              Save reasons
+            </button>
+          </div>
+        </div>
+        <textarea
+          value={reasonsDraft}
+          onChange={(e) => {
+            setReasonsDraft(e.target.value);
+            setReasonsDirty(true);
+            setReasonsSaved(false);
+          }}
+          spellCheck={false}
+          style={{
+            ...inputStyle,
+            marginTop: 14,
+            minHeight: 130,
+            maxWidth: 420,
+            resize: "vertical",
+            lineHeight: 1.6,
+            fontFamily: "var(--font-mono)",
+            fontSize: 12.5,
+          }}
+        />
       </section>
 
       {/* ---- Locations ---- */}

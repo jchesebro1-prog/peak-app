@@ -184,6 +184,19 @@ export async function saveIntakeCatalogAction(catalog: Record<string, string[]>)
   return { ok: true as const };
 }
 
+/** Site-visit reason picklist (D76 — DEFAULT_VISIT_REASONS overrides).
+ *  Trimmed, de-blanked, capped; an empty list falls back to the defaults. */
+export async function saveVisitReasonsAction(reasons: string[]) {
+  await requirePerm("manage_users");
+  const clean = (Array.isArray(reasons) ? reasons : [])
+    .map((t) => String(t ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 40);
+  await setSettings({ visitReasons: clean });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
 /**
  * Go-live reset — permanently removes all demo records so real data can be
  * imported into a clean database. Admin-only, and guarded by a typed

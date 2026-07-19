@@ -1,12 +1,14 @@
 import { requireUser } from "@/lib/session";
-import { CATEGORIES, getPrefs } from "@/lib/stores/notif-prefs";
+import { CATEGORIES, getPrefs, invitesOn } from "@/lib/stores/notif-prefs";
 import NotifControls from "./notif-controls";
+import InviteToggle from "./invite-toggle";
 
 export const metadata = { title: "Account settings — Peak Backend" };
 
 export default async function AccountPage() {
   const user = await requireUser();
   const prefs = await getPrefs(user.name);
+  const invites = await invitesOn(user.name);
   const rows = CATEGORIES.map((c) => ({
     key: c.key,
     label: c.label,
@@ -89,6 +91,9 @@ export default async function AccountPage() {
 
       {/* ---- to-do notifications ---- */}
       <NotifControls rows={rows} />
+
+      {/* ---- site-visit calendar invites (D76) ---- */}
+      <InviteToggle initialOn={invites} />
     </div>
   );
 }

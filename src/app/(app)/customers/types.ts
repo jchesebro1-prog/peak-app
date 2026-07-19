@@ -7,6 +7,7 @@ export type LocationInput = {
   id?: string;
   label: string;
   primary: boolean;
+  address: string;
   city: string;
   state: string;
   lat: number | null;
@@ -20,6 +21,7 @@ export type ContactInput = {
   name: string;
   role: string;
   email: string;
+  phone: string;
   primary: boolean;
 };
 

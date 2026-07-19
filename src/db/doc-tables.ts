@@ -63,6 +63,7 @@ export const repairJobs = docTable("repair_jobs"); // rss_repairjobs_v1 (RepairS
 export const projects = docTable("projects"); // rss_projects_v2 (ProjectStore)
 export const designs = docTable("designs"); // rss_sandbox_v2 (SandboxStore)
 export const catalogParts = docTable("catalog_parts"); // catalog-data.js MASTER_CATALOG
+export const siteVisits = docTable("site_visits"); // site visits + .ics invites (D76, no prototype ancestor)
 
 export const DOC_TABLES = {
   quotes,
@@ -76,6 +77,7 @@ export const DOC_TABLES = {
   projects,
   designs,
   catalog_parts: catalogParts,
+  site_visits: siteVisits,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;

@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor } from "@/lib/team";
 import { get as getCustomer } from "@/lib/stores/customers";
+import { visitsForCustomer } from "@/lib/stores/site-visits";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAllProjects, riskFlags, stageIndex, stagesFor } from "@/lib/stores/projects";
 import { getAll as getAllSurveys, stageMeta as surveyStageMeta } from "@/lib/stores/surveys";
@@ -135,7 +136,7 @@ export default async function CustomerDetailPage({
         label: l.label || "Venue",
         primary: !!l.primary,
         kindLabel: venueKindLabel(l.venueKind),
-        address: cityState(l) || "—",
+        address: [l.address, cityState(l)].filter(Boolean).join(" · ") || "—",
         officeName: est.office ? est.office.name : "nearest office",
         miles: fmtMiles(est.miles),
         time: fmtTime(est.minutes),
@@ -148,6 +149,9 @@ export default async function CustomerDetailPage({
   const locN = (cust.locations || []).length;
 
   const contacts = (cust.contacts || []).map((ct) => ({ ...ct, mono: mono(ct.name) }));
+
+  /* ---- site visits (D76) ---- */
+  const visits = await visitsForCustomer(cust.id);
 
   /* ---- portal access grants (IDEAS #47) ---- */
   const portalGrants = (await grantsFor(cust.id)).map((g) => ({
@@ -169,6 +173,7 @@ export default async function CustomerDetailPage({
       id: l.id,
       label: l.label || "",
       primary: !!l.primary,
+      address: l.address || "",
       city: l.city || "",
       state: l.state || "",
       lat: l.lat == null || l.lat === "" ? null : Number(l.lat),
@@ -181,6 +186,7 @@ export default async function CustomerDetailPage({
       name: ct.name,
       role: ct.role,
       email: ct.email,
+      phone: ct.phone || "",
       primary: ct.primary,
     })),
   };
@@ -497,6 +503,11 @@ export default async function CustomerDetailPage({
                         {ct.email}
                       </div>
                     )}
+                    {ct.phone && (
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {ct.phone}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -513,6 +524,29 @@ export default async function CustomerDetailPage({
               }))}
               grants={portalGrants}
             />
+
+            {/* ---- site visits (D76) — scheduled from the Inbox ---- */}
+            {visits.length > 0 && (
+              <div style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, boxShadow: "0 1px 2px rgba(0,0,0,.04)", padding: "15px 16px" }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 12 }}>
+                  Site visits
+                </div>
+                {visits.slice(0, 6).map((v) => (
+                  <div key={v.id} style={{ padding: "8px 0", borderTop: "1px solid #f3f4f7" }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3 }}>
+                      {v.reason}
+                      {v.venue ? " · " + v.venue : ""}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
+                      {new Date(v.startAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                      {" · "}
+                      {v.assignedTo}
+                      {v.invite?.sentAt ? " · invite sent" : ""}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

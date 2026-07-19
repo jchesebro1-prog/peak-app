@@ -117,18 +117,38 @@ export async function toggle(
   return setPref(key, !cur[key], u);
 }
 
-/** Set every category at once (mute all / unmute all). */
+/** Set every category at once (mute all / unmute all). Spreads the stored
+ *  row first so non-category flags (e.g. the D76 invite flag) survive. */
 export async function setAll(
   on: boolean,
   user?: string
 ): Promise<NotifPrefsMap> {
   const u = user || DEFAULT_USER;
-  const mine: Record<string, boolean> = {};
+  const mine: Record<string, boolean> = { ...(await readRow(u)) };
   KEYS.forEach((k) => {
     mine[k] = !!on;
   });
   await writeRow(u, mine);
   return getPrefs(u);
+}
+
+/* ---- per-user flags OUTSIDE the bell categories --------------------------- */
+
+/** D76-A: whether this user wants .ics calendar-invite emails for site
+ *  visits assigned to them. Default ON. Lives in the same per-user prefs row
+ *  but deliberately NOT in CATEGORIES — it has nothing to do with the nav
+ *  bell, so it gets its own accessors instead of a dead bell toggle. */
+export const INVITE_PREF_KEY = "site_visit_invites";
+
+export async function invitesOn(user: string): Promise<boolean> {
+  const stored = await readRow(user);
+  return stored[INVITE_PREF_KEY] !== false;
+}
+
+export async function setInvitesOn(on: boolean, user: string): Promise<void> {
+  const mine = { ...(await readRow(user)) };
+  mine[INVITE_PREF_KEY] = !!on;
+  await writeRow(user, mine);
 }
 
 /** How many categories are on for this user. */

@@ -157,6 +157,14 @@ export type ReaderVM = {
    *  picking a record also adopts the customer onto the thread */
   needsAdopt: boolean;
   linkOptions: Record<"quote" | "survey" | "inspection" | "project", Opt[]>;
+  /** Schedule-site-visit modal data (D76) — present when a customer resolved. */
+  visit: {
+    venues: Array<{ id: string; label: string; address: string; primary: boolean }>;
+    contacts: Array<{ name: string; email: string; phone: string; primary: boolean }>;
+    reasons: string[];
+    team: string[];
+    me: string;
+  } | null;
   /** last message body — quoted into Forward */
   lastBody: string;
   forwardFrom: string;

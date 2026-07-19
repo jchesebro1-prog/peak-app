@@ -28,6 +28,7 @@ type LocRow = {
   id: string;
   label: string;
   primary: boolean;
+  address: string;
   city: string;
   state: string;
   lat: number | null;
@@ -39,7 +40,13 @@ type LocRow = {
   officeHint: string;
 };
 
-type ContactRow = { name: string; role: string; email: string; primary: boolean };
+type ContactRow = {
+  name: string;
+  role: string;
+  email: string;
+  phone: string;
+  primary: boolean;
+};
 
 const microLbl: CSSProperties = {
   fontSize: 10.5,
@@ -84,6 +91,7 @@ function newLoc(primary: boolean): LocRow {
     id: "l" + Date.now() + "-" + uid,
     label: "",
     primary,
+    address: "",
     city: "",
     state: "",
     lat: null,
@@ -117,6 +125,7 @@ export default function EditCustomerModal({
       id: l.id || "l" + i,
       label: l.label || "",
       primary: i === 0 ? l.primary || !src.some((x) => x.primary) : l.primary,
+      address: l.address || "",
       city: l.city || "",
       state: l.state || "",
       lat: l.lat ?? null,
@@ -130,11 +139,13 @@ export default function EditCustomerModal({
   });
   const [contacts, setContacts] = useState<ContactRow[]>(() => {
     const src = initial?.contacts || [];
-    if (!src.length) return [{ name: "", role: "", email: "", primary: true }];
+    if (!src.length)
+      return [{ name: "", role: "", email: "", phone: "", primary: true }];
     return src.map((c) => ({
       name: c.name || "",
       role: c.role || "",
       email: c.email || "",
+      phone: c.phone || "",
       primary: !!c.primary,
     }));
   });
@@ -167,7 +178,10 @@ export default function EditCustomerModal({
   const makePrimaryContact = (i: number) =>
     setContacts((rows) => rows.map((r, idx) => ({ ...r, primary: idx === i })));
   const addContact = () =>
-    setContacts((rows) => [...rows, { name: "", role: "", email: "", primary: rows.length === 0 }]);
+    setContacts((rows) => [
+      ...rows,
+      { name: "", role: "", email: "", phone: "", primary: rows.length === 0 },
+    ]);
   const removeContact = (i: number) =>
     setContacts((rows) => {
       const next = rows.filter((_, idx) => idx !== i);
@@ -204,6 +218,7 @@ export default function EditCustomerModal({
         id: r.id,
         label: r.label,
         primary: r.primary,
+        address: r.address,
         city: r.city,
         state: r.state,
         lat: r.lat,
@@ -232,6 +247,7 @@ export default function EditCustomerModal({
           id: l.id,
           label: l.label,
           primary: l.primary,
+          address: l.address,
           city: l.city,
           state: l.state,
           lat: l.lat,
@@ -244,6 +260,7 @@ export default function EditCustomerModal({
           name: c.name,
           role: c.role,
           email: c.email,
+          phone: c.phone,
           primary: c.primary,
         })),
       });
@@ -480,6 +497,13 @@ export default function EditCustomerModal({
                 )}
               </div>
 
+              <input
+                className="cu-m-in"
+                value={l.address}
+                onChange={(e) => setLoc(i, { address: e.target.value })}
+                placeholder="Street address (for site-visit invites & maps)"
+                style={{ ...inStyle, fontSize: 12.5, padding: "8px 11px", borderRadius: 8, marginBottom: 8, width: "100%" }}
+              />
               <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.7fr) 86px", gap: 8, marginBottom: 10 }}>
                 <input
                   className="cu-m-in"
@@ -588,7 +612,7 @@ export default function EditCustomerModal({
                   </button>
                 )}
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 9 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr 1fr", gap: 9 }}>
                 <input
                   className="cu-m-in"
                   value={c.role}
@@ -601,6 +625,13 @@ export default function EditCustomerModal({
                   value={c.email}
                   onChange={(e) => setContact(i, { email: e.target.value })}
                   placeholder="email@company.com"
+                  style={{ ...inStyle, fontFamily: "var(--font-mono)", fontSize: 12, padding: "8px 11px", borderRadius: 8 }}
+                />
+                <input
+                  className="cu-m-in"
+                  value={c.phone}
+                  onChange={(e) => setContact(i, { phone: e.target.value })}
+                  placeholder="Phone"
                   style={{ ...inStyle, fontFamily: "var(--font-mono)", fontSize: 12, padding: "8px 11px", borderRadius: 8 }}
                 />
               </div>

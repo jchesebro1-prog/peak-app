@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/session";
 import {
   KEYS,
   setAll,
+  setInvitesOn,
   setPref,
   type NotifCategoryKey,
 } from "@/lib/stores/notif-prefs";
@@ -28,6 +29,14 @@ export async function setNotifPrefAction(key: string, on: boolean) {
 export async function setAllNotifAction(on: boolean) {
   const me = await requireUser();
   await setAll(on, me.name);
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** D76-A: per-user opt-out of site-visit .ics invite emails. */
+export async function setInvitePrefAction(on: boolean) {
+  const me = await requireUser();
+  await setInvitesOn(on, me.name);
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

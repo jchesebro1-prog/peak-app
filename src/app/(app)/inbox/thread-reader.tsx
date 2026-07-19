@@ -16,6 +16,7 @@ import {
   unarchiveAction,
 } from "./actions";
 import { ChanGlyph, MailEmptyIcon, PaperclipIcon, ReplyIcon, SendIcon } from "./icons";
+import SiteVisitModal from "./site-visit-modal";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
@@ -56,6 +57,8 @@ export default function ThreadReader({
   const [cBody, setCBody] = useState("");
   const [showCc, setShowCc] = useState(false);
   const [attachNote, setAttachNote] = useState("");
+  // D76 — schedule-site-visit modal
+  const [visitOpen, setVisitOpen] = useState(false);
   const [sending, setSending] = useState(false);
 
   // call/meeting quick log
@@ -916,6 +919,14 @@ export default function ThreadReader({
                 Reopen
               </ActionBtn>
             )}
+            {vm.visit && vm.resolvedCustomerId && (
+              <ActionBtn
+                colors={["#1f7a52", "#e8f3ee", "#cfe6db"]}
+                onClick={() => setVisitOpen(true)}
+              >
+                Site visit
+              </ActionBtn>
+            )}
             <ActionBtn
               colors={["#8c919c", "#fff", "#e4e7ec"]}
               onClick={async () => {
@@ -927,6 +938,17 @@ export default function ThreadReader({
             >
               {vm.archived ? "Unarchive" : "Archive"}
             </ActionBtn>
+            {visitOpen && vm.visit && vm.resolvedCustomerId && (
+              <SiteVisitModal
+                threadId={vm.id}
+                customerId={vm.resolvedCustomerId}
+                customerName={vm.resolvedCustomerName}
+                needsAdopt={vm.needsAdopt}
+                contactEmail={vm.contactEmail}
+                visit={vm.visit}
+                onClose={() => setVisitOpen(false)}
+              />
+            )}
           </div>
 
           {/* EMAIL: reply / reply-all / forward */}

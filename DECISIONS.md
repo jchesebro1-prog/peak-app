@@ -668,3 +668,35 @@ Anything you want changed, just say so — none of these are hard to reverse.
   with it; hand-edits to an existing draft are never clobbered. Net effect vs
   the AI path: the email actually gains the price-comparison sentence the
   model was forbidden from writing.
+- **D76. Site visits phase 1 — schedule from the Inbox, .ics invite to the
+  assignee** (PUNCHLIST #2; all Jeff's 2026-07-19 calls: A phase-1 .ics +
+  settings toggle, B Jeff-only attendees, C personal calendar, D picklist +
+  add the missing fields, E sender = the scheduler's mailbox, F suppress the
+  self-import, G adopt-customer first, H calendar scope later + settings
+  option, I record the send). What shipped: a new site_visits doc collection
+  (migration 0004, first post-rebuild collection; store in
+  stores/site-visits.ts with SV-#### ids); "Site visit" action in the thread
+  reader opening a modal prefilled from the resolved customer (primary venue,
+  thread-matched contact, reason picklist, tomorrow 9am, me as assignee);
+  scheduling an unlinked thread adopts the customer onto it (G). The invite:
+  a zero-dep RFC-5545 builder (lib/ics.ts, METHOD:PUBLISH, no ATTENDEE lines
+  — customers are never auto-invited, B), emailed via buildRaw+sendRaw from
+  the scheduler's personal mailbox (fallback: first connected shared box, E)
+  to the assignee's roster email, honoring a new per-user Account toggle
+  "Calendar invites" (A; stored beside the notif prefs but deliberately NOT a
+  bell category; setAll now preserves foreign keys in the prefs map). Sent
+  ids are stamped on the visit record (I) and the mail carries an
+  X-Peak-Site-Visit header the import poll skips — parseInbound surfaces it
+  and recordMessage drops those messages, so self-addressed invites never
+  reappear as inbox threads (F). Event title = "venue — reason". The reason
+  picklist is Settings-editable ("Site visits — reason picklist", defaults in
+  DEFAULT_VISIT_REASONS, stored as AppSettingsData.visitReasons). Supporting
+  schema work (D-decision): CustomerContact.phone and
+  CustomerLocation.address (street) added end-to-end — store + normalize,
+  edit modal inputs, detail-page render, CSV import/export columns
+  (registry now maps the long-declared phone column). Visits render on the
+  customer page ("Site visits" card). Verified end-to-end in dev: modal →
+  SV-5001 created, honest "Gmail not connected" invite status, card renders;
+  live invite send needs Gmail creds (Q-A). Phase 2 stays open: Google
+  Calendar API write (calendar.events scope on Jeff's mailbox only + a
+  Settings option per H) and the in-app calendar.

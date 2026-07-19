@@ -33,6 +33,9 @@ export type AppSettingsData = {
   /** Site-intake type catalog overrides, keyed by category (e.g.
    * "lighting.fixture") — see DEFAULT_INTAKE_CATALOG in survey-intake.ts. */
   intakeCatalog?: Record<string, string[]>;
+  /** Site-visit reason picklist overrides (D76) — see DEFAULT_VISIT_REASONS
+   *  in stores/site-visits.ts; empty/absent means use the defaults. */
+  visitReasons?: string[];
   /** Brand marks (IDEAS #32) — small data-URL images uploaded in Settings →
    *  Branding. `logoLight` sits on the dark nav bar; `logoDark` heads white
    *  documents (letters + reports) in place of the baked-in letterhead. */
