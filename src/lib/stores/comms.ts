@@ -454,6 +454,22 @@ async function dispatchOutbound(threadId: string): Promise<void> {
   }
 }
 
+/** Post-write two-way archive push (D74) — mirrors a Peak archive/unarchive
+ *  onto the Gmail thread's INBOX label. No-op unless the gate is on; the
+ *  bridge itself skips threads that aren't bridged and mailboxes whose grant
+ *  lacks gmail.modify (they stay one-way until reconnected). Local state is
+ *  already committed when this runs — a push failure just means Gmail catches
+ *  up on the user's next action, never a lost local change. */
+async function dispatchInboxState(threadId: string, inboxed: boolean): Promise<void> {
+  if (!gmailBridgeActive()) return;
+  try {
+    const { pushInboxState } = await import("@/lib/gmail/bridge");
+    await pushInboxState(threadId, inboxed);
+  } catch (err) {
+    console.error("[gmail] archive push failed:", err);
+  }
+}
+
 /* ---- pure thread helpers -------------------------------------------------- */
 
 export function lastMsg(t: CommThread): CommMessage | null {
@@ -701,17 +717,21 @@ export async function markUnread(id: string): Promise<CommThread | null> {
 }
 
 export async function archive(id: string): Promise<CommThread | null> {
-  return patchDoc<CommThread>("comms", id, (d) => {
+  const t = await patchDoc<CommThread>("comms", id, (d) => {
     d.archived = true;
     touch(d);
   });
+  await dispatchInboxState(id, false); // two-way archive (D74)
+  return t;
 }
 
 export async function unarchive(id: string): Promise<CommThread | null> {
-  return patchDoc<CommThread>("comms", id, (d) => {
+  const t = await patchDoc<CommThread>("comms", id, (d) => {
     d.archived = false;
     touch(d);
   });
+  await dispatchInboxState(id, true); // two-way archive (D74)
+  return t;
 }
 
 /* ---- create / messages -------------------------------------------------------- */

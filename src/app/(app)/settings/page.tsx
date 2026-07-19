@@ -3,7 +3,12 @@ import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
 import { mergedCatalog } from "@/lib/stores/survey-intake";
 import { allUsers } from "@/lib/users";
-import { gmailEnabled, personalKey, SHARED_KEYS } from "@/lib/gmail/config";
+import {
+  GMAIL_MODIFY_SCOPE,
+  gmailEnabled,
+  personalKey,
+  SHARED_KEYS,
+} from "@/lib/gmail/config";
 import { listConnections } from "@/lib/gmail/connections";
 import { aiEnabled, aiModel, AI_FEATURES } from "@/lib/ai/config";
 import SettingsClient from "./settings-client";
@@ -54,6 +59,9 @@ export default async function SettingsPage() {
       connectedBy: c?.connectedBy || null,
       initialImportDone: c?.initialImportDone ?? false,
       lastSyncAt: c?.lastSyncAt ?? null,
+      // Grant predates the gmail.modify scope (D74) — two-way archive stays
+      // off for this mailbox until it's reconnected.
+      needsReconnect: !!c && !c.scope.includes(GMAIL_MODIFY_SCOPE),
     };
   });
 

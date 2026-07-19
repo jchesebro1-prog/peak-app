@@ -68,12 +68,8 @@ export type AiFeature = {
 };
 
 export const AI_FEATURES: AiFeature[] = [
-  {
-    key: "renewal",
-    label: "Renewal-outreach drafts",
-    desc: "Draft a personalized annual flame-test renewal email — lands in the Inbox as a draft for you to review and send.",
-    where: "Flame Tests → Renewals due",
-  },
+  // "renewal" retired (D75, 2026-07-19): renewal drafts are rules-based
+  // standard language now — templates editable in /templates, no model call.
   {
     key: "summary",
     label: "Thread & customer summaries",

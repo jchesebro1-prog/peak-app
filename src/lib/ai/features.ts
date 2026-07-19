@@ -24,61 +24,11 @@ const COMPANY_CONTEXT =
   "no-jargon communication.";
 
 /* ============================================================
-   D1 — Renewal-outreach draft
+   D1 — Renewal-outreach draft: RETIRED (D75, Jeff 2026-07-19).
+   Renewal emails are rules-based standard language now — the ✉ one-click
+   flow in Flame Tests fills the flame_renewal_email / inspection_renewal_email
+   templates (editable in /templates) via lib/renewal-outreach.ts.
    ============================================================ */
-
-export type RenewalDraftInput = {
-  customerName: string;
-  venue?: string;
-  contactName?: string;
-  lastTestedLabel?: string; // e.g. "March 2025"
-  senderName: string; // the logged-in user, signs the email
-  companyName?: string;
-};
-
-export type RenewalDraft = { subject: string; body: string };
-
-export async function draftRenewalEmail(
-  input: RenewalDraftInput
-): Promise<RenewalDraft> {
-  const system =
-    COMPANY_CONTEXT +
-    "\n\nYou write short, warm, professional customer emails for this company. " +
-    "Draft a renewal-outreach email reminding a venue that their annual flame test " +
-    "(required yearly under NFPA 705) is due, and offering to schedule this year's test. " +
-    "Keep it to 3–5 short sentences, friendly but not pushy. Reference the venue by name " +
-    "and mention the last test date if given. Sign off from the sender using the company " +
-    "name. Do NOT invent prices, dates, or promises. Plain text only — no markdown, no " +
-    "placeholders like [Name].";
-  const facts = [
-    `Customer: ${input.customerName}`,
-    input.venue ? `Venue: ${input.venue}` : "",
-    input.contactName ? `Contact person: ${input.contactName}` : "",
-    input.lastTestedLabel ? `Last tested: ${input.lastTestedLabel}` : "",
-    `Sender (signs the email): ${input.senderName}`,
-    `Company: ${input.companyName || "Peak Systems Group"}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-  const schema = {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      subject: { type: "string" },
-      body: { type: "string" },
-    },
-    required: ["subject", "body"],
-  };
-  return generateJson<RenewalDraft>({
-    system,
-    prompt:
-      "Draft the renewal email from these facts. Return the subject line and the " +
-      "email body (the body includes the greeting and sign-off).\n\n" +
-      facts,
-    maxTokens: 800,
-    schema,
-  });
-}
 
 /* ============================================================
    D2 — Thread & customer summaries

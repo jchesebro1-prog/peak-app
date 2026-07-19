@@ -61,9 +61,8 @@ import { renderField } from "@/lib/templates";
  * renewalOutreach worklist state.
  *
  * Idempotent by design: the quote is keyed on `renewalOf` and the draft on
- * the thread link, so clicking ✉ twice re-opens the same draft — and an
- * AI-drafted renewal (the AI Draft button, D1/D40) for the same job is upgraded in
- * place (PDF attached, link flagged) instead of duplicated.
+ * the thread link, so clicking ✉ twice re-opens the same
+ * draft with a freshly re-priced PDF (hand-edits preserved, D75).
  */
 
 export type RenewalOutreachResult = { threadId: string; quoteId: string };
@@ -823,20 +822,15 @@ async function upsertRenewalDraft(opts: {
   contactName: string;
   to: string;
   copy: Copy;
-  copyIsOverride: boolean;
   attachment: CommAttachment;
   me: string;
 }): Promise<string> {
   const existing = await findDraftByLink(opts.linkType, opts.linkId);
   if (existing) {
-    // one renewal, one draft: refresh the quote PDF; adopt the copy only when
-    // the caller supplied it (the AI draft path) — hand-edits are never clobbered
+    // one renewal, one draft: refresh the quote PDF but never touch the
+    // subject/body — template copy is written only on first creation, so
+    // hand-edits to an existing draft are never clobbered (D75)
     await setDraftAttachments(existing.id, [opts.attachment]);
-    if (opts.copyIsOverride)
-      await updateDraft(existing.id, {
-        subject: opts.copy.subject,
-        body: opts.copy.body,
-      });
     if (!existing.link?.renewal)
       await setLink(existing.id, {
         type: opts.linkType,
@@ -869,12 +863,10 @@ async function upsertRenewalDraft(opts: {
 /**
  * ✉ one-click flame-test renewal outreach (IDEAS #36). Returns the draft
  * thread + quote ids, or null when the job isn't a completed renewal anchor.
- * `copy` overrides the built-in template (used by the AI draft path).
  */
 export async function flameRenewalOutreach(
   jobId: string,
-  me: string,
-  copy?: Copy
+  me: string
 ): Promise<RenewalOutreachResult | null> {
   const job = await getFlameJob(jobId);
   if (!job || job.stage !== "completed") return null;
@@ -919,8 +911,7 @@ export async function flameRenewalOutreach(
     customer: job.customer || "",
     contactName: contact?.name || "",
     to: contact?.email || "",
-    copy: copy || template,
-    copyIsOverride: !!copy,
+    copy: template,
     attachment,
     me,
   });
@@ -933,8 +924,7 @@ export async function flameRenewalOutreach(
  */
 export async function inspectionRenewalOutreach(
   recordId: string,
-  me: string,
-  copy?: Copy
+  me: string
 ): Promise<RenewalOutreachResult | null> {
   const rec = await getInspection(recordId);
   if (!rec || rec.stage !== "completed") return null;
@@ -978,8 +968,7 @@ export async function inspectionRenewalOutreach(
     customer: rec.customer || "",
     contactName: rec.contact || "",
     to: rec.contactEmail || "",
-    copy: copy || template,
-    copyIsOverride: !!copy,
+    copy: template,
     attachment,
     me,
   });

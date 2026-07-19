@@ -125,8 +125,10 @@ export type LinkVM = {
 export type ReaderVM = {
   id: string;
   unread: boolean;
-  /** LOCAL Peak archive flag — drives the Archive/Unarchive toggle. (Gmail-
-   *  side archive state is separate and read-only here; see D73.) */
+  /** Thread is out of the inbox (locally archived OR archived on the Gmail
+   *  side) — drives the Archive/Unarchive toggle. Unarchive clears the local
+   *  flag and, with two-way archive (D74), pushes INBOX back onto the Gmail
+   *  thread, so it works for both kinds. */
   archived: boolean;
   subject: string;
   status: string;

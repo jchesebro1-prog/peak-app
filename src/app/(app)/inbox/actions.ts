@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { AUTO_SYNC_MIN_AGE_MS } from "@/lib/gmail/config";
 import {
   addMessage,
   archive,
@@ -302,10 +303,7 @@ export async function sendReceiveAction() {
   return { ok: true as const, id };
 }
 
-/** How stale the newest-synced-least mailbox may get before a background
- *  auto-sync actually runs (PUNCHLIST #1). The inbox client calls
- *  autoSyncAction freely; this server-side gate is what makes that cheap. */
-const AUTO_SYNC_MIN_AGE_MS = 2 * 60_000;
+// (AUTO_SYNC_MIN_AGE_MS — the shared staleness window — is imported above.)
 
 /** Background send/receive — same sync as the manual button, but claimed
  *  per-mailbox and throttled server-side (D73). Deliberately does NOT

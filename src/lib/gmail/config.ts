@@ -20,15 +20,29 @@
 /** OAuth scopes requested when connecting a mailbox. Least-privilege:
  *  - gmail.send   → send mail (lands a copy in the account's Gmail "Sent", C4)
  *  - gmail.readonly → read threads/messages for the 90-day import + polling
+ *  - gmail.modify → two-way archive (Jeff, 2026-07-19): Peak archive/unarchive
+ *    pushes INBOX label changes back to Gmail. Mailboxes connected before this
+ *    scope was added keep working read-only; Settings flags them to reconnect.
  *  - userinfo.email → learn which address just authorized (the mailbox addr) */
 export const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.send",
   "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/userinfo.email",
 ];
 
+/** The scope two-way archive needs — connections whose stored grant lacks it
+ *  (pre-2026-07-19 connects) stay one-way until reconnected. */
+export const GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
+
 /** History-import depth on first connect (MASTER-QUESTIONS C3 — last 90 days). */
 export const IMPORT_WINDOW_DAYS = 90;
+
+/** How stale a mailbox may get before a background sync actually runs (D73/
+ *  D74). Shared by every automatic trigger — the inbox client tick, the
+ *  server boot timer, and the /api/gmail/sync cron route — all of which funnel
+ *  into the same atomic per-mailbox claims, so overlapping triggers are cheap. */
+export const AUTO_SYNC_MIN_AGE_MS = 2 * 60_000;
 
 /** Google OAuth / API endpoints. */
 export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";

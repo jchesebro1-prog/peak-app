@@ -19,6 +19,9 @@ export type ConnectionInfo = {
   initialImportDone: boolean;
   lastSyncAt: number | null;
   connectedAt: number;
+  /** Space-separated granted scopes as returned by Google at connect time —
+   *  lets callers detect connections that predate a scope addition (D74). */
+  scope: string;
 };
 
 function toInfo(r: GmailConnectionRow): ConnectionInfo {
@@ -30,6 +33,7 @@ function toInfo(r: GmailConnectionRow): ConnectionInfo {
     initialImportDone: r.initialImportDone,
     lastSyncAt: r.lastSyncAt ?? null,
     connectedAt: r.createdAt,
+    scope: r.scope ?? "",
   };
 }
 

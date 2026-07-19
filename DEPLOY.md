@@ -141,6 +141,31 @@ Shared boxes are plain Gmail accounts you (or the team) hold the password to
 To stop using Gmail, set `GMAIL_ENABLED` blank (or **Disconnect** a mailbox
 in Settings) — the app falls back to simulated mode; no data is lost.
 
+**Server-side sync (D74) — the inbox stays current with no tab open.** Three
+triggers, all safe together (each funnels into the same per-mailbox claim
+throttle):
+
+- Opening the Inbox syncs automatically (built in, nothing to configure).
+- Any long-running server (`next start`, the LAN box, `next dev`) starts a
+  built-in sync timer at boot — nothing to configure.
+- On Vercel (serverless — no long-running process), add ONE more env var:
+
+  | Name | Value |
+  | --- | --- |
+  | `CRON_SECRET` | any long random string (`openssl rand -hex 32`) |
+
+  The repo's `vercel.json` schedules `/api/gmail/sync` every 5 minutes and
+  Vercel sends the secret automatically. **Note:** minute-level cron needs a
+  Vercel Pro plan; on the free Hobby plan crons run at most daily — either
+  rely on the open-tab sync, or point a free external pinger (e.g.
+  cron-job.org) at `https://YOUR-APP.vercel.app/api/gmail/sync` with header
+  `Authorization: Bearer <CRON_SECRET>` every few minutes.
+
+**Two-way archive (D74):** archiving in Peak archives in Gmail and vice versa.
+Mailboxes connected before this feature need a one-time **Reconnect** in
+Settings → Mailboxes (the row says "reconnect to enable two-way archive") to
+grant the extra permission.
+
 ## Afterwards
 
 - **Updates:** every `git push` to `main` redeploys automatically

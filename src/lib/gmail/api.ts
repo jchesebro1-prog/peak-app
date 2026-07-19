@@ -63,6 +63,20 @@ export async function listMessageIds(
   return { messages: r.messages || [], nextPageToken: r.nextPageToken };
 }
 
+/** Add/remove labels on a whole thread (two-way archive, D74: INBOX on/off).
+ *  Requires the gmail.modify scope — callers must check the connection's
+ *  stored grant first. */
+export async function modifyThread(
+  mailboxKey: string,
+  threadId: string,
+  change: { addLabelIds?: string[]; removeLabelIds?: string[] }
+): Promise<void> {
+  await gapi(mailboxKey, "/threads/" + threadId + "/modify", {
+    method: "POST",
+    body: JSON.stringify(change),
+  });
+}
+
 export type GmailThreadMeta = { id: string };
 
 /** List thread ids matching a Gmail search query (e.g. "in:inbox"). Ids only —

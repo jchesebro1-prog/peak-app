@@ -21,12 +21,10 @@ import {
 import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { FlameMap } from "./controls";
-import { RenewalDraftButton } from "./renewal-ai";
 import {
   markFlameRenewalOutreach,
   startFlameRenewalOutreach,
 } from "./actions";
-import { aiEnabled } from "@/lib/ai/config";
 import type { MapPin } from "@/components/map/LeafletMap";
 
 export const metadata = { title: "Flame tests — Peak Backend" };
@@ -91,9 +89,6 @@ export default async function FlameTestsPage({
   const custById = new Map(customers.map((c) => [c.id, c.name || ""]));
   const nameFor = (id: string | null) => (id ? custById.get(id) || "" : "");
 
-  // AI env gate — process.env is server-only, so read it here and pass the
-  // boolean down; the AI draft affordance renders only when true.
-  const aiOn = aiEnabled();
 
   /* ---- URL state: status filter + renewal window + map status visibility ---- */
   const filterParam = one(sp.filter) as RowStage | "all" | "";
@@ -654,9 +649,10 @@ export default async function FlameTestsPage({
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                     {rvView === "contact" ? (
                       <>
-                        {aiOn && <RenewalDraftButton jobId={r.id} />}
-                        {/* IDEAS #36 — one-click outreach: quote at last
-                            year's price, PDF attached, composer opens */}
+                        {/* IDEAS #36 — one-click outreach with standard
+                            language (rules-based per D75; wording editable in
+                            /templates): quote re-priced at current rates,
+                            PDF attached, composer opens */}
                         <form action={startFlameRenewalOutreach}>
                           <input type="hidden" name="id" value={r.id} />
                           <button

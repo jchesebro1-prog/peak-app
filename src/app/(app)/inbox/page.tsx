@@ -442,7 +442,7 @@ export default async function InboxPage({
     reader = {
       id: sel.id,
       unread: !!sel.unread,
-      archived: !!sel.archived,
+      archived: !!sel.archived || sel.gmailInboxed === false,
       subject: sel.subject,
       status: sel.status,
       statusLabel: sm.label,

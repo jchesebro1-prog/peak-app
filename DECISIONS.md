@@ -636,3 +636,35 @@ Anything you want changed, just say so — none of these are hard to reverse.
   exposure; the button self-disables per tab, and thread creation is now
   collision-safe) — a full lease/heartbeat isn't warranted for a 6-person
   team.
+- **D74. Sync is server-side and archive is two-way** (Jeff, Jul 19: "I want
+  Sync to be server side so it is always current" / "Correct Two-Way
+  Archive"). Server-side: three triggers now funnel into the same atomic
+  per-mailbox claim throttle (shared AUTO_SYNC_MIN_AGE_MS in gmail/config) —
+  the D73 inbox client tick, a new instrumentation.ts boot timer (any
+  long-running Node server: next dev/start, the LAN box; singleton across HMR;
+  inert without the Gmail gate), and a new GET /api/gmail/sync cron route
+  (vercel.json crons every 5 min; CRON_SECRET bearer auth, 503 until the env
+  var exists; exempted from the session middleware since crons have no
+  session; Vercel sends the header automatically; DEPLOY.md documents the
+  Hobby-plan cron limitation + external-pinger alternative). Two-way archive:
+  GMAIL_SCOPES now includes gmail.modify; comms.archive()/unarchive()
+  dispatch bridge.pushInboxState(), which adds/removes the Gmail thread's
+  INBOX label via threads.modify and stamps gmailInboxed locally so the UI is
+  right immediately. Connections whose stored grant predates the scope stay
+  one-way and Settings→Mailboxes flags them "reconnect to enable two-way
+  archive" (ConnectionInfo now exposes the granted scope). The reader's
+  Archive/Unarchive toggle now keys on locally-archived OR gmail-archived, so
+  Unarchive genuinely re-inboxes a Gmail-archived thread.
+- **D75. Renewal drafts are rules-based standard language, not AI** (Jeff,
+  Jul 19: "just come up with standard language that we set rules to"). The
+  separate AI-draft button on Flame Tests renewals is REMOVED (renewal-ai.tsx
+  + renewal-ai-actions.ts deleted, draftRenewalEmail dropped from ai/features
+  and the AI_FEATURES registry). The ✉ one-click flow was already the rules
+  path and is now the only one: flame_renewal_email / inspection_renewal_email
+  templates (wording editable in /templates, Admin/Manager), merge fields
+  incl. the auto price-comparison sentence (priceParagraph), quote re-priced
+  at current rates, PDF attached, lands as an EDITABLE draft in Sales→Drafts
+  — never auto-sent. The copy-override plumbing (copyIsOverride) was removed
+  with it; hand-edits to an existing draft are never clobbered. Net effect vs
+  the AI path: the email actually gains the price-comparison sentence the
+  model was forbidden from writing.

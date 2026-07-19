@@ -87,6 +87,9 @@ type MailboxVM = {
   connectedBy: string | null;
   initialImportDone: boolean;
   lastSyncAt: number | null;
+  /** Grant predates the gmail.modify scope (D74) — two-way archive stays off
+   *  for this mailbox until it's reconnected. */
+  needsReconnect: boolean;
 };
 
 const GMAIL_BANNER: Record<string, { msg: string; ok: boolean }> = {
@@ -826,7 +829,10 @@ export default function SettingsClient({
                   {mb.connected
                     ? mb.address +
                       (mb.connectedBy ? "  ·  by " + mb.connectedBy : "") +
-                      (mb.initialImportDone ? "  ·  history imported" : "")
+                      (mb.initialImportDone ? "  ·  history imported" : "") +
+                      (mb.needsReconnect
+                        ? "  ·  reconnect to enable two-way archive"
+                        : "")
                     : mb.desc}
                 </div>
               </div>

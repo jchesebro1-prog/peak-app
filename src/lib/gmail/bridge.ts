@@ -16,6 +16,7 @@ import {
   type MailboxId,
 } from "@/lib/stores/comms";
 import {
+  GMAIL_MODIFY_SCOPE,
   IMPORT_WINDOW_DAYS,
   isPersonalKey,
   userIdOfKey,
@@ -33,6 +34,7 @@ import {
   listHistory,
   listMessageIds,
   listThreadIds,
+  modifyThread,
   sendRaw,
 } from "./api";
 import { buildRaw, parseInbound, type ParsedInbound } from "./mime";
@@ -323,6 +325,34 @@ async function reconcileInboxState(key: MailboxKey): Promise<number> {
     }
   }
   return flips;
+}
+
+/* ---- two-way archive (D74) ------------------------------------------------ */
+
+/**
+ * Push a Peak archive/unarchive to Gmail: remove or add the thread's INBOX
+ * label so both inboxes agree (Jeff, 2026-07-19). No-ops gracefully when the
+ * thread isn't bridged or the connection's grant predates gmail.modify (those
+ * mailboxes stay one-way until reconnected — Settings flags them). Also stamps
+ * gmailInboxed locally so the UI is right immediately, without waiting for the
+ * next reconcile.
+ */
+export async function pushInboxState(
+  threadId: string,
+  inboxed: boolean
+): Promise<void> {
+  const t = await getDoc<CommThread>("comms", threadId);
+  if (!t?.gmailThreadId) return; // never bridged — purely local thread
+  const key = t.gmailAccountKey ?? (await keyForThread(t));
+  if (!key) return;
+  const info = await getConnectionInfo(key);
+  if (!info || !info.scope.includes(GMAIL_MODIFY_SCOPE)) return;
+  await modifyThread(key, t.gmailThreadId, {
+    [inboxed ? "addLabelIds" : "removeLabelIds"]: ["INBOX"],
+  });
+  await patchDoc<CommThread>("comms", threadId, (d) => {
+    d.gmailInboxed = inboxed;
+  });
 }
 
 /** Import + poll a single mailbox's messages. Returns the last touched thread
