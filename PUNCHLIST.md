@@ -44,11 +44,13 @@ plus `src/lib/gmail/api.ts`
   creds (blocked on the deploy accounts, item Q-A). First real Send/Receive after
   connecting will also file all Gmail-archived mail from the 90-day import into
   Archived — expect that one-time shuffle.
-- **Open question for Jeff:** want a faster/slower background cadence, or server-side
-  sync (cron on Vercel / Gmail push) so Peak stays fresh even with no tab open? Current
-  build only syncs while someone has the inbox open. Also: Peak→Gmail archive push
-  (archiving in Peak archives in Gmail) needs the `gmail.modify` scope + re-consenting
-  every mailbox — deliberately not done; say the word if you want it.
+- **ANSWERED 2026-07-19 (Jeff) and built the same day (commit `8315b54`, D74):**
+  - **Server-side sync** — a boot timer covers any long-running server, and
+    `/api/gmail/sync` + `vercel.json` crons cover Vercel (needs a `CRON_SECRET` env
+    var at deploy time; DEPLOY.md documents it, incl. the Hobby-plan cron limitation).
+  - **Two-way archive** — built. Archiving in Peak archives in Gmail (and Unarchive
+    re-inboxes). Mailboxes connected before this need a one-time **Reconnect** in
+    Settings → Mailboxes to grant the extra permission.
 
 ---
 
@@ -137,7 +139,19 @@ plus `src/lib/gmail/api.ts`
   asks for calendar) or a separate calendar-only connection? **I.** should the .ics
   send be recorded on the siteVisit record (it won't appear as a comms thread).
 
-**Status:** OPEN — blocked on decisions A–I (A–D from Jeff's ask, E–I found in code)
+**DECIDED 2026-07-19 — Jeff answered A–I** (A: .ics phase 1 + per-user toggle; B:
+Jeff-only attendees; C: personal calendar; D: picklist + add phone/street fields; E:
+sender = scheduler's mailbox; F: suppress self-import; G: adopt customer first; H:
+calendar scope just Jeff's + settings option later; I: record the send).
+
+**Status:** PHASE 1 DONE (code) — commit `b2d4d91`, decision **D76**. Shipped: "Site
+visit" action in the thread reader (modal prefilled from the resolved customer),
+site_visits collection, Settings-editable reason picklist, .ics invite emailed to the
+assignee honoring a new Account toggle, self-import suppression, sent-invite stamping,
+and customer-record phone + street-address fields end-to-end. Verified in dev
+(SV-5001); live invite send awaits Gmail creds (Q-A). **Phase 2 still open:** direct
+Google Calendar write (calendar.events on Jeff's mailbox + a Settings option, per H)
+and the in-app calendar.
 
 ---
 
@@ -190,9 +204,10 @@ plus `src/lib/gmail/api.ts`
 the ✦, and every U+FE0F selector removed; SVG replacements only where a glyph was a
 container's sole content (admin locks, Design Studio tiles, mailbox avatars, assistant
 spark); functional glyphs untouched. tsc + build + browser-verified; zero targets remain
-in `src/`. One copy judgment to sign off: the Flame Tests renewal button now reads
-**"AI draft"** instead of "Draft ✨" (bare "Draft" was ambiguous next to the ✉ one-click
-flow) — say the word if you want plain "Draft". Templates/letters were scanned: clean.
+in `src/`. Follow-up 2026-07-19 (Jeff: "just come up with standard language that we set rules
+to"): the AI renewal-draft button was **removed entirely** (commit `8315b54`, D75) —
+the ✉ one-click flow is the single, rules-based path, wording editable in /templates.
+Templates/letters were scanned: clean.
 
 ---
 
