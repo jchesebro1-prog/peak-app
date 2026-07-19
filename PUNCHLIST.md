@@ -604,7 +604,7 @@ search box and a "only modified" chip** — that alone likely resolves the compl
 
 ---
 
-## 11. Customer pricing tiers → default margin (incl. customer portal) — OPEN (B answered; blocked on quote revisions)
+## 11. Customer pricing tiers → default margin (incl. customer portal) — OPEN (B answered; blocked on item 24)
 
 **Area:** `src/lib/stores/customers.ts`, `src/app/(app)/estimator/*`, `src/lib/stores/pricing.ts`,
 `src/lib/curtain-pricing.ts`, `src/app/portal/*`
@@ -687,9 +687,11 @@ from "hand-set".
   >
   > **Quote revisions are therefore a prerequisite for item 11, and are their own feature** —
   > roughly the size of the tier work itself. The design-side pattern is the thing to copy.
-  > **Needs Jeff:** should this be logged as its own punch item, and does "revision" mean an
-  > immutable snapshot you can view/restore (the design model), or a new editable quote that
-  > supersedes the old one and carries the lineage? Those build very differently.
+  > **ANSWERED 2026-07-19 (Jeff): immutable snapshots that can be recalled, exactly the design
+  > model** — "if they go in a different direction and the quote is too much we can go back a
+  > revision." **Logged as item 24**, which is a hard prerequisite for this item. Note that 24
+  > solves the finding-2 split for free: a revision that stamps the tier margin *and* the
+  > resolved prices at cut time is the mechanism described here.
 - **C. Scope.** Which of the five margin systems does the tier touch? Estimator lines only is a
   contained change; all five (incl. curtains' 38% and the portal coupling) is a much bigger job.
 - **D. Portal equipment prices.** Catalog `list` is a per-SKU absolute with no percentage hook.
@@ -1587,6 +1589,78 @@ has no owner field), and nothing renders created/modified dates. **"Added in las
   picklist enough?
 
 **Status:** OPEN — A, D and E are cheap and independently useful; C needs Jeff's read before scoping
+
+---
+
+## 24. Quote revisions — snapshot & recall — OPEN
+
+**Area:** `src/lib/stores/quotes.ts`, `src/app/(app)/estimator/*`, and
+`src/lib/stores/designs.ts` + `quick-design/actions.ts` (the pattern to copy)
+
+**Reported:** 2026-07-19 (surfaced while answering item 11 B — Jeff's tier answer assumed this
+feature already existed)
+
+**Ask (Jeff, 2026-07-19):** Quote revisions "like design revisions where they are simply
+snapshots that can be recalled, so if they go in a different direction and the quote is too much
+we can go back a revision." Also the item 11 B mechanism: **a new revision pulls current prices**,
+so an updated quote is a fresh revision rather than a rebuild from scratch.
+
+**Today: quotes have no revision concept at all** (code-verified 2026-07-19).
+- `DesignRevision` is real and works — but **on designs only**.
+- `Quote.history` is *status transitions* (`{at, from, to}` over draft/sent/won/lost), written in
+  exactly one place (`quotes.ts:191`) and consumed only for won/lost dates in Reports
+  (`reports/page.tsx:503,507`). **It is not a revision log.**
+- **No duplicate / clone / new-version action on quotes anywhere** (zero grep hits).
+
+**The design pattern, exactly as it works (copy this):**
+- `addDesignRevision()` (`designs.ts:208-223`) appends `{rev: revs.length+1, at, ...snap}` to an
+  embedded `revisions[]` array. Immutable — nothing is ever rewritten.
+- `saveRevisionAction()` (`quick-design/actions.ts:65-88`) **saves the record first**, then
+  snapshots a **whitelist of fields** (not the whole doc) plus `by: user.name`.
+- `restoreRevision()` (`quick-design-client.tsx:288-297`) is **client-side only** — it merges the
+  snapshot into editor state and writes nothing. The current version is never destroyed; the user
+  saves (and can cut a new revision) from there. **This is exactly the "go back a revision"
+  behaviour Jeff described, and it is non-destructive by construction.**
+
+**The one hard part — a quote snapshot must store computed OUTPUTS, not just inputs.**
+Estimator quotes bake absolute prices into the saved spec, so snapshotting inputs is fine. But
+flame-test / repair / inspection quotes **read the live rate blobs at render time** —
+`stores/pricing.ts:15-17` states it outright: *"editing them here is LIVE: the engines read the
+same blobs, so every flame-test / repair quote reprices immediately."* **So an input-only
+snapshot of a service quote would re-price at whatever the rates are on the day you recall it —
+you would not get back the number you actually sent.** The snapshot has to capture the resolved
+`value`, `margin` and line-level prices for the revision to mean anything.
+
+This is the same split flagged in item 11 finding 2, and **fixing it here fixes it for item 11** —
+a revision that stamps the tier margin *and* the resolved prices at cut time is precisely the
+mechanism Jeff described in 11 B.
+
+**Other scoping notes:**
+- **Snapshot size.** `spec` is the estimator's full section/line tree. N inline snapshots grow the
+  quote row every time. Designs have the same shape but are smaller and fewer. Embedded matches
+  every other list in the app; a side collection is cheaper per read but is the first of its kind
+  (see item 17 A, which just went the other way).
+- **Lifecycle interaction is the risk.** Won quotes spawn projects (`syncFromQuotes`), and a
+  project carries its own `value`/`margin` copied at conversion. **Recalling an old revision on a
+  won quote would silently desync the quote from the project already built from it.** Decide
+  whether revisions are allowed after `won` at all.
+- **The portal reads quote `value`** — recalling a revision on a sent quote changes what the
+  customer sees. Needs a rule.
+- Whitelist the snapshot like designs do; do **not** deep-copy the whole doc (it carries `review`,
+  `history`, `portalAcceptance` and the engine subdocs, none of which should time-travel).
+
+**Decisions Jeff needs to make:**
+- **A. Manual or automatic?** Designs snapshot on an explicit "Save revision" button. Should a
+  quote also auto-snapshot on send (so "what we sent them" is always recoverable)? **Recommend
+  auto-snapshot on send, plus the manual button** — the send snapshot is the one with legal weight.
+- **B. Revisions after won?** Recommend blocking, or warning loudly, because of the project desync.
+- **C. Embedded array or side collection?** Recommend embedded (design parity, cheapest) unless
+  quote specs turn out large in real data.
+- **D. Does the customer/portal ever see revision history,** or is it internal only? Recommend
+  internal only.
+
+**Status:** OPEN — **prerequisite for item 11.** Pattern is proven on designs; the real work is
+snapshotting resolved prices for the live-rate quote types, and the won/sent lifecycle rules.
 
 ---
 
