@@ -1093,6 +1093,403 @@ sold/completed" is exactly an auto-generated task with an assignee.
 
 ---
 
+## 18. Opportunities board — Daylite parity — OPEN
+
+**Area:** `src/app/(app)/leads/board-view.tsx`, `leads/page.tsx`, `src/lib/stores/leads.ts`
+
+**Reported:** 2026-07-19 (Daylite screenshot)
+
+**Ask:** Match Daylite's Opportunities Board — kanban columns per pipeline stage, each column
+showing a count badge and a dollar subtotal; a board header total ("15 Opportunities •
+$4,290,263.00"); cards showing title, linked people, value, a "Nothing Scheduled" warning, an
+age-in-days chip, and an owner avatar; a toolbar with filters (Owners / Forecasted Dates /
+Create Dates / Categories / Keywords / Types), a Sort control, and View Options.
+
+**Code-verified 2026-07-19 — Peak is ~70% there, and the hard part is already built.**
+
+**What already exists** — `/leads?view=board` is a real kanban with hand-rolled HTML5
+drag-and-drop between columns, optimistic re-homing, and a `setStageAction` + refresh
+(`board-view.tsx:98-99, 25-45`). It already renders **per-column count badges and per-column
+dollar subtotals** (`board-view.tsx:77, 58, 80-82`), an owner avatar, a colored urgency strip,
+and a follow-up warning chip. Stages: `new / contacted / qualified / quoted / won / lost`
+(`leads.ts:43-50`) with per-stage colors already defined.
+
+**What's missing — narrow and mostly additive:**
+- **Board header total.** Not found. Peak shows four stat tiles above the columns instead
+  (Open pipeline / Need follow-up / New this week / Conversion). Close in spirit, different shape.
+- **Age-in-days chip.** **The data already exists** — `aging()` (`leads.ts:349-351`) computes days
+  since last activity, but its detailed text gets overwritten with the generic label "Going cold"
+  before display, and `BoardCardVM` has no age field. Small fix.
+- **Linked people on cards.** Cards show `org` + `interest` only. **Blocked on item 20** — there
+  is no person record to list.
+- **The toolbar is the biggest gap.** The board currently has **no filters at all** — `seg` is
+  dropped unless `view === "table"` (`leads/page.tsx:56-63`), so the board renders every lead
+  unconditionally. Sort is hardcoded (`b.urg - a.urg || b.updatedAt - a.updatedAt`). Daylite's
+  six filters + Sort + View Options would all be new. **There is also no owner filter on leads at
+  all** (the `scope` field on leads is scope-of-work text, not ownership).
+
+**Finding — Peak's warning is semantically inverted from Daylite's.** Peak flags *"you had a
+scheduled follow-up and missed it"* (`followUpInfo`, `leads.ts:363-374`). Daylite flags *"nothing
+is scheduled at all."* In Peak, `nextActionAt == null` falls through to a green **"On track"**
+chip — **the exact state Daylite would warn about.** Worth fixing regardless of the board work.
+
+**Also:** a true "Nothing Scheduled" badge is **not currently computable** — there is no
+appointments or tasks store to query (see items 17 and 21).
+
+**Decisions Jeff needs to make:**
+- **A. What is an "opportunity" in Peak?** Daylite has one entity; Peak has **two** — Leads
+  (`new→lost`, 6 stages) and Quotes (`draft/sent/won/lost`). Daylite's bid-oriented stages
+  (New Lead / Collect Information / Create BID / BID Sent / Awarded / PO Received / Order Product)
+  span both. **Does the board sit on leads, on quotes, or on a merged concept?** This decides
+  everything else.
+- **B. Should Peak's stage names change to the bid-oriented set?** That's data config, not
+  architecture — cheap if A is settled.
+- **C. Which filters actually matter?** Owner and date are the obvious ones; Categories /
+  Keywords / Types have no Peak equivalent and would each need a new field.
+
+**Status:** OPEN — needs A first; A is a modeling question, not a UI one
+
+---
+
+## 19. Projects board — Daylite parity — OPEN
+
+**Area:** `src/app/(app)/projects/view.tsx`, `src/lib/stores/projects.ts`,
+`src/app/(app)/leads/board-view.tsx` (the component to generalize)
+
+**Reported:** 2026-07-19 (Daylite screenshot)
+
+**Ask:** A Projects Board in the same kanban shape as the Opportunities Board — columns per
+project pipeline stage, cards showing title, linked people, and a due/age chip.
+
+**Code-verified 2026-07-19 — no board today, but the model is ready:**
+- `/projects` is a **master-detail list** (left column of cards, right detail pane), not a board.
+  `stage` is never used as a grouping axis — it only drives a pill and a progress percentage.
+- **The stage data is well-formed:** `PROJECT_STAGES` = procurement → delivery → scheduled →
+  install → training → signoff → complete, with labels (`projects.ts:77-85`); `ORDER_STAGES` is a
+  4-stage path (`:87-92`). `stageIndex`, `progressPct` and a stage setter all exist.
+- **The project card already renders the two signals Daylite's cards show** — a risk badge and a
+  due/age chip ("Due in 12d" / "3d overdue" / "Due today", `view.tsx:501-510`). That age chip is
+  the one item 18 is missing, already built here.
+- **The realistic path is to generalize `board-view.tsx`**, which is currently hardcoded to
+  lead-shaped VMs and `setStageAction`, into a stage-agnostic component both screens feed.
+
+**Complication to decide:** projects have **two different stage sets keyed on `kind`**
+(`stagesFor`, `projects.ts:94-96`) — 7 columns for installs, 4 for materials-only orders. A single
+board must either filter to one kind or reconcile both pipelines.
+
+**Note:** `package.json` has **no drag-and-drop or board library** (deps are pglite, drizzle,
+leaflet, next, next-auth, postgres, react, three, zod). The one board in the app is hand-rolled
+HTML5 drag. Generalizing it avoids a new dependency; a richer board (multi-select, keyboard
+reorder) probably wouldn't.
+
+**Decisions Jeff needs to make:**
+- **A. One board filtered to `kind = project`, or both pipelines reconciled?**
+- **B. Should dragging a project between stages be allowed?** Stage changes on projects have real
+  downstream meaning (procurement, crew, billing forecast) — unlike leads, where a drag is
+  harmless. Recommend read-only columns first, drag later.
+- **C. Does this replace the master-detail list or sit alongside it as a `?view=board` toggle?**
+  Recommend alongside, matching the leads pattern.
+
+**Status:** OPEN — depends on item 18 (shared component); B is worth thinking about carefully
+
+---
+
+## 20. People and companies as first-class records + multi-linking — OPEN
+
+**Area:** `src/lib/stores/customers.ts`, `src/db/doc-tables.ts`, and every screen that renders
+"the customer"
+
+**Reported:** 2026-07-19 (Daylite screenshots — project and contact views)
+
+**Ask:** Projects and opportunities should link to **multiple contacts and multiple accounts**
+(Daylite shows one project linked to 10+ people and 5 companies — Grounded Electric, Mainstage
+Theatrical Supply, Nexus Solutions, Richland Center High School, Stagewerks). Also a **contact
+detail view** matching Daylite's: a person's own page listing every project and opportunity
+they're linked to.
+
+**Code-verified 2026-07-19 — read this before scoping. This is foundational, not incremental.**
+
+**There is no person record in Peak.** A contact is an anonymous struct embedded in a customer
+blob: `CustomerContact = {name, role, email, phone?, primary}` (`customers.ts:51-58`) — **with no
+`id` field.** There is no `contacts`/`people` collection among the twelve doc tables, and no
+`/people` or `/contacts` route. **You cannot open a contact's page, because a contact is not a
+thing.**
+
+Consequence already biting today: every contact reference is a **name string matched by equality**.
+`contactByName()` does `find(c => c.name === name)`; the estimator silently falls back to the
+primary contact when a stored name no longer matches (`estimator/page.tsx:101`). **Renaming a
+contact silently re-points every quote to a different person.**
+
+**There is no company record distinct from a customer.** `CUSTOMER_TYPES` are venue categories
+(Performing arts / Education / Worship / Civic / Commercial) — nothing for contractor, dealer,
+consultant, or architect. **Vendors are bare strings** on procurement lines (`projects.ts:122`),
+values like `"Rose Brand"`, `"JR Clancy"` — no id, no address, no contacts, no page. So in the
+Daylite example, Peak could hold *Richland Center High School* as a customer, but **Grounded
+Electric, Mainstage, Nexus Solutions and Stagewerks have nowhere to live.**
+
+**Every association in the app is a single scalar.** Quote: `customerId`, `locationId`,
+`contactName` — all singular. Project: `customer`, `customerId`, `locationId`, `owner` — all
+singular. `crew[]` is the only person-ish array and it holds **internal employee name strings**,
+not customer contacts. **There is not one multi-contact or multi-company link anywhere.**
+
+**There is no join table and the persistence layer resists one.** Every collection is
+`{id, doc(jsonb), rev, seq, updatedAt, deleted}` with no foreign keys and no Drizzle `relations()`
+anywhere. The architecture is deliberately document-oriented (`doc-tables.ts:26-28`). A many-to-many
+must be either id arrays denormalized into both sides (hand-maintained consistency) or a genuinely
+new relational join collection — which also has to be reasoned about for offline sync conflict
+(two field techs adding different people to the same project).
+
+**Honest architectural read:** Peak models a *venue-centric service business* — one customer, one
+venue, one contact, one PM, your own crew. It's internally consistent and the code is clean about
+it. Daylite models a *relationship graph*. **These are different products at the data layer.**
+This is a foundational refactor of the customer/contact domain plus a new UI surface, not a
+feature bolt-on.
+
+**What it would require, in dependency order:**
+1. **A `people` collection with stable ids.** Migrate embedded `contacts[]` out, leaving customers
+   with `contactIds[]`. Breaks every name-based lookup and needs a backfill that de-duplicates the
+   same human appearing under multiple customers. **Nothing else on this list is possible until
+   this exists.**
+2. **An `organizations` concept** — or widen `customers` with a role/kind so non-customer companies
+   can exist. **Daylite's answer is that "customer" is a *role on a link*, not a record type** —
+   that's the cleaner model and worth considering.
+3. **A link/role model:** `{recordType, recordId, entityType, entityId, role}`. The roles carry
+   real information — "Grounded Electric (electrical sub)" vs "Richland Center HS (end client)" is
+   exactly what the chip list communicates.
+4. **Rewrite quote/project links from scalars to collections**, keeping a denormalized
+   `primaryCustomerId` so the ~dozen screens that assume one customer keep working during migration.
+5. **New UI:** role-tagged chip lists on project/quote detail, a person detail page with reverse
+   rollups, an org page, and a picker that searches across people and orgs. (Note item 12 already
+   flags that **12 screens each roll their own customer `<select>`** — a shared picker pays for
+   itself here too.)
+
+**Decisions Jeff needs to make:**
+- **A. Is this actually wanted, given the cost?** The honest question. A cheaper 80% might be:
+  give contacts stable ids, add a multi-contact list to projects/quotes, and model outside
+  companies as a lightweight "related organizations" list — **without** promoting people to
+  first-class records with their own pages. **That gets the chip lists without the graph.**
+- **B. If yes: is "customer" a record type or a role on a link?** This is the fork in the road.
+- **C. What roles matter?** End client, GC, electrical sub, consultant, architect, dealer,
+  vendor…? Jeff would need to define the list.
+  **CONFIRMED by the company screenshot (2026-07-19):** Daylite links *do* carry roles — the
+  Portage Center for the Arts record shows `opportunities: Audio System Upgrades · **Participant**`,
+  and its timeline logs *"Linked to Audio System Upgrades as Participant"*. So the role isn't
+  decoration; it's stored on the link and it's what the chip list communicates. **The link/role
+  model in step 3 is required, not optional.**
+- **D. Does a person belong to exactly one company, or many?** Daylite allows many.
+
+**Related:** item 12 (lead→contact linkage) is a subset of this. Item 18's "linked people on
+cards" and the contact-detail view both **depend on step 1**.
+
+**Status:** OPEN — needs **A** before anything else. Largest architectural item on the list.
+
+---
+
+## 21. Per-record activity timeline — OPEN
+
+**Area:** `src/app/(app)/customers/[id]/page.tsx`, `projects/view.tsx`,
+`src/app/(app)/leads/lead-drawer.tsx:817` (the only prior art)
+
+**Reported:** 2026-07-19 (Daylite screenshots — timeline on project and contact views)
+
+**Ask:** A unified Activity timeline on record detail pages, as in Daylite: reverse-chronological,
+bucketed ("Last Seven Days" / "Earlier This Year" / "2025"), mixing appointments, completed tasks,
+notes, "Linked to <record>" events, and status changes ("Won on Oct 23, 2025, $36,000.00",
+"Abandoned", "Open, $255,800.00"), each with a type icon, subtitle and date — plus an
+"All Activity" filter and a feed search.
+
+**Code-verified 2026-07-19 — ~70% of the data exists, ~0% of the machinery.**
+
+**The one piece of prior art:** the lead drawer (`lead-drawer.tsx:817`) renders a real
+Daylite-shaped feed — icon rail, connector line, reverse-chron, "who · when" — from `LeadActivity`
+(`{id, at, type, by, note}`, types `note|call|email|meeting|system|stage`). It's hardcoded to that
+one array, but it's the component pattern to generalize.
+
+**A customer-scoped timeline is mostly an aggregation exercise.** Nearly every collection already
+carries a `customerId` — quotes, leads, comms, projects, flame jobs, repairs, inspections,
+surveys, designs, site visits. **The customer detail page already fetches five of those sources**
+and renders them as five separate stacked cards, unmerged and ungrouped. Merging them is the feature.
+
+**Notable: the data for Daylite's status rows already exists and is thrown away at render.**
+`QuoteHistoryEntry` (`{at, from, to}`, `quotes.ts:53`) is written on **every** status change
+(`quotes.ts:191`) — but is never rendered as a timeline. Its only consumers treat it as a scalar
+(a revision count, and won/lost date extraction in Reports). "Won on Oct 23, $36,000" is a
+formatting job over data Peak is already keeping.
+
+**Project-scoped timelines are much weaker — and there is active data loss.**
+**`ProjectRecord` has no stage history at all. `setStage()` (`projects.ts:385-389`) overwrites
+`p.stage` in place — the previous stage is destroyed on every write.** Flame/repair/inspection
+keep only `approvedAt`/`completedAt` endpoints; inspection `setStage` likewise overwrites.
+**Project stage history is unrecoverable for every existing record** — adding the array only
+starts accruing from the change forward. **Worth adding the history array now even if the timeline
+itself is deferred**, so the data stops being discarded.
+
+**Other gaps:**
+- **No notes system.** Three unrelated per-record fields (`ProjectNote[]` structured and
+  timestamped; `SurveyDraft.notes` and `SiteVisit.notes` are single freeform strings). No
+  attachable note record.
+- **No attachments model.** The `blobs` table is a key/value store for settings JSON, **not** file
+  storage. Real files are base64 data-URLs embedded in parent documents
+  (`CommAttachment`, `SurveyPhoto`, `ProjectNote.photo`, inspection before/after photos, repair
+  completion photos) with no shared model and mostly no timestamps.
+- **Calendar events are not linkable.** `CalendarEvent` carries no customerId/projectId/quoteId —
+  Google events are opaque. Site visits *are* linked, but once pushed to Google they're deduped out
+  of local rendering and show as an opaque Google row. The agenda is also filtered to the signed-in
+  user, so it's a personal agenda, not a record history.
+- **No "Linked to <record>" events.** `CommLink` is the only record-to-record pointer and it's
+  current-state with no timestamp of when the link was made.
+- **No `projectId` on the field-work collections** — repairs, inspections, surveys and flame jobs
+  link to customer and quote but not project, so a project timeline needs a `quoteId` join.
+
+**Decisions Jeff needs to make:**
+- **A. Customer timeline first?** It's much cheaper (read-time aggregation over existing docs, no
+  schema change) and covers quote status changes, comms, site visits, job approvals/completions and
+  project notes. **Recommend starting there.**
+- **B. Add project stage history now?** Independent of the timeline, and it stops ongoing data loss.
+  **Recommend yes.**
+- **C. Does the timeline need true field-level change tracking** ("who changed what when"), or is
+  event-level enough? Field-level is a much bigger commitment.
+- **D. Do notes and attachments become real records?** Both are prerequisites for the "note added"
+  / "file attached" rows Daylite shows.
+
+**Status:** OPEN — A and B are independently useful and cheap; C and D are the expensive half
+
+---
+
+## 22. Navigation / module parity with Daylite's sidebar — OPEN
+
+**Area:** `src/components/nav/nav-data.ts`, list screens across the app
+
+**Reported:** 2026-07-19 (Daylite sidebar screenshot). **Jeff's note: "I believe we have
+accomplished all of these."**
+
+**Code-verified 2026-07-19 — parity is NOT achieved. Honest gap list below.**
+
+| Daylite entry | Peak | Status |
+|---|---|---|
+| Home | `/` | **Equivalent** |
+| My Mail | `/inbox` — richer (personal + shared mailboxes) | **Equivalent** |
+| Team | Exists **inside Settings** only, no nav route | Partial |
+| Learn | No help/docs/training screen anywhere | **Missing** |
+| My Calendar | `/calendar`, strictly personal | **Equivalent** |
+| All Calendars | No teammate/all-user calendar view | **Missing** |
+| Peak Calendar (shared org) | Nothing (`/schedule` is crew scheduling, not a calendar feed) | **Missing** |
+| People | No `/people` route, no person record — see item 20 | **Missing** |
+| Companies | No company entity distinct from customers — see item 20 | **Missing** |
+| Added in last 7 days | No recently-added view on any list | **Missing** |
+| Opportunities Board | See item 18 | Partial |
+| My Opportunities | **No owner filter on leads at all** | **Missing** |
+| All / All Open Opportunities | `/leads?seg=all` / `?seg=open` — in-page pills, not nav | Partial |
+| Jason's Open Opportunities | No per-person lead filter | **Missing** |
+| My Lost Opportunities | `?seg=closed` bundles **won and lost together**, unsplittable, not owner-scoped | Partial |
+| Projects Board | See item 19 | Partial |
+| My Projects | **No owner scoping on `/projects` at all** | **Missing** |
+| All / All Open Projects | `/projects?filter=` variants | Equivalent (as pills) |
+| Worklist / My Tasks / Delegated / Done / All Tasks | See item 17 — tasks barely exist | **Missing** |
+| Jason's / Chris' / Mark's / Mike's Task List | No tasks, no per-person views. **The fuller sidebar screenshot shows four of these** — per-person task views are a standard pattern in their workflow, not a one-off | **Missing** |
+
+**The pattern behind most of these gaps: Peak has no scoped or saved views.** Every Peak nav entry
+is a *module*, never a *filter*. The "My X vs All X" capability exists in exactly two places, both
+buried in dropdowns rather than nav:
+- **Quotes** is genuinely full-featured — `?who=mine|all|<Name>` × `?status=` × `?type=`, with the
+  owner list built from the live roster. `/quotes?who=Jason%20Keagy&status=lost` is a real
+  "Jason's Lost Quotes" today. It just isn't discoverable.
+- **Customers** has `?scope=mine|all|<owner>`, where owner is *derived* from the newest
+  quote/project rather than stored.
+
+Leads, Projects, Flame Tests, Inspections and Repairs have **no owner scoping at all**.
+
+**No saved views, custom filters, or per-user list config exist** — zero grep hits. All filter
+state is ephemeral URL params, and **there is no per-user settings row** to persist them in
+(`appSettings` is a single global row), so this needs a schema addition — the same `notifPrefs`
+pattern flagged in item 7.
+
+**Cheapest high-value fixes, in order:**
+1. **Surface the scoping that already works** — promote the Quotes owner/status filters into nav
+   entries ("My Quotes", "My Lost Quotes"). Nearly free.
+2. **Add owner scoping to Leads and Projects** — the roster lookup pattern already exists in Quotes.
+3. **Split won from lost** on the leads `closed` segment.
+4. Then: saved views (needs per-user persistence), People/Companies (item 20), tasks (item 17),
+   shared calendars.
+
+**Decisions Jeff needs to make:**
+- **A. Does Peak want nav-level scoped views, or are in-page filters fine?** Daylite's sidebar is
+  essentially a saved-view list. Peak's is a module list. **This is a navigation philosophy choice**
+  and it interacts with item 7 (per-section dashboards).
+- **B. Are per-person views ("Jason's Task List") wanted,** or just "mine vs all"? Per-person is
+  what forces real saved views.
+- **C. Is "Learn" wanted** — an in-app help/docs screen?
+- **D. Shared/team calendars** — item 2 shipped a personal calendar; is an all-calendars or shared
+  Peak calendar view wanted next?
+
+**Status:** OPEN — needs A–D. Items 17, 18, 19 and 20 close most of the Missing rows
+
+---
+
+## 23. Customer / company record field parity — OPEN
+
+**Area:** `src/lib/stores/customers.ts`, `src/app/(app)/customers/`
+
+**Reported:** 2026-07-19 (Daylite company module — "Portage Center for the Arts")
+
+**Ask:** Match the Daylite company record's shape.
+
+**What the screenshot shows, field by field, vs. Peak today:**
+
+| Daylite field | Example value | Peak equivalent |
+|---|---|---|
+| **keywords** | `Non-profit` (chip) | **Missing** — no tagging system anywhere |
+| **category** | `Prospect` (colored dot) | **Different meaning** — Peak's `type` is a *venue* category (Performing arts / Education / Worship / Civic / Commercial), used only for a colour chip. Daylite's is a **lifecycle stage** |
+| Work address | 301 E. Cook St, PO Box 866, Portage WI | Partial — `CustomerLocation` has `address`/`city`/`state` (added D76), no PO box line |
+| **Billing** (a URL) | portagecenterforthearts.com | **Missing** — no website or billing field |
+| **"Untitled Label"** (an email) | portagecenterforthearts@frontier.com | **Missing** — this is a **user-defined custom field**; Peak has no custom fields |
+| **people** | Craig Radi (linked chip) | Partial — `contacts[]` embedded, not linked records (item 20) |
+| **opportunities** | Audio System Upgrades · **Participant** | **Missing** — no opportunity link, and no role on a link (item 20) |
+| **Referred by** | Patrick Strain | **Missing** — no referral field. Note leads have a `source` picklist, but it's not a person link |
+| **"Legrand Changed"** (a date) | 3/2/2009 | **Missing** — another user-defined custom field |
+| permissions | Public | **Missing** — no per-record permissions |
+| **owner** | Jason Keagy | **Weaker** — Peak has no stored owner on a customer; it's *derived* from the newest quote/project |
+| created / modified | Mar 2 2009 / May 26 2019 | **Missing** — `CustomerDoc` has **no `createdAt` or `updatedAt` at all** |
+
+**Three findings worth calling out:**
+
+1. **`CustomerDoc` has no timestamps.** `{id, name, type, location, locations[], contacts[]}` —
+   that's the whole record. No created, no modified, no owner, no notes. The Daylite record is
+   showing a 17-year history (created 2009, modified 2019). **Peak cannot answer "when did this
+   customer come on" or "who owns this account" from the record itself.** This is also why item 22
+   has no "Added in last 7 days" view — there is no created date to filter on.
+2. **"Category" means something different in each app.** Daylite's `Prospect` is a **lifecycle**
+   (prospect → customer → …). Peak's `type` is a **venue segment**. These are orthogonal and Peak
+   is missing the lifecycle one entirely — which matters, because a "Prospect" company with an
+   opportunity but no quote is exactly what Peak's leads pipeline half-models today.
+3. **Two of the visible fields are user-defined** ("Untitled Label", "Legrand Changed"). Daylite
+   supports custom fields per record type. **Peak has none, and adding them is a real feature**, not
+   a field addition — it needs definition storage, per-type schemas, and rendering.
+
+**Also visible in the timeline** (relevant to item 21): the entries are heavily **manual notes** —
+"left message for Patrick @ Portage Performing Arts Center", "Proposal presented/sent", "Creating
+design/estimate", "First contact complete". So Daylite's activity feed is substantially a
+**note-taking surface**, not just an automatic event log. That strengthens item 21's decision D
+(notes as real records) — without it, a Peak timeline would only ever show system events.
+
+**Decisions Jeff needs to make:**
+- **A. Add a lifecycle category** (Prospect / Customer / Past / …) alongside the existing venue
+  type? Cheap and probably high value — it's how the company screenshot is actually organised.
+- **B. Keywords/tags** — wanted? They also drive the board's "All Keywords" filter (item 18).
+- **C. Custom fields** — genuinely wanted, or were "Untitled Label" and "Legrand Changed" just
+  legacy cruft in their data? **Worth Jeff confirming before anyone scopes this** — custom fields
+  are a large feature and these two look like artifacts of a 2009-era record.
+- **D. Store `owner` on the customer** instead of deriving it? Recommend yes — derived ownership
+  breaks as soon as a customer has no quotes.
+- **E. Add `createdAt`/`updatedAt` to customers?** Recommend yes regardless; it's near-free and
+  unblocks "Added in last 7 days".
+- **F. Referral tracking** — a "Referred by" person link, or is the existing lead `source`
+  picklist enough?
+
+**Status:** OPEN — A, D and E are cheap and independently useful; C needs Jeff's read before scoping
+
+---
+
 ## IDEA (not a punch-list item) — Consulting as a project type
 
 **Raised:** 2026-07-19. Jeff was explicit this is *"more of an idea than punch list"*.
