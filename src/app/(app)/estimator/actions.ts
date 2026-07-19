@@ -123,7 +123,7 @@ export async function saveQuoteAction(
   return {
     ok: !!q,
     id: q?.id ?? null,
-    revNum: Math.max(1, q?.history?.length || 1),
+    revNum: Math.max(1, q?.revisions?.length || 1),
     updatedAt: q?.updatedAt ?? Date.now(),
     review: q?.review ?? null,
     status: q?.status ?? null,

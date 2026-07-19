@@ -14,7 +14,7 @@ import { allUsers, reviewers } from "@/lib/users";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { money } from "@/lib/format";
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
-import { NewQuoteMenu, OwnerSelect } from "./controls";
+import { NewQuoteMenu, OwnerSelect, QuoteRevisions } from "./controls";
 import { setQuoteStatus, submitQuoteForReview } from "./actions";
 
 export const metadata = { title: "Quotes — Peak Backend" };
@@ -845,6 +845,19 @@ function SelectedPanel({
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>
           {money(q.value || 0)} quoted{marginPct > 0 ? ` · ${marginPct}% margin` : ""}
         </span>
+        {/* punch item 24 — snapshot / recall this quote's pricing */}
+        <QuoteRevisions
+          id={q.id}
+          revisions={(q.revisions || []).map((r) => ({
+            rev: r.rev,
+            at: r.at,
+            by: r.by,
+            reason: r.reason,
+            note: r.note,
+            value: r.value,
+          }))}
+          canRestore={q.status !== "won"}
+        />
         <div
           style={{
             marginLeft: "auto",

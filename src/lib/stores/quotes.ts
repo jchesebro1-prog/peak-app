@@ -27,6 +27,9 @@ import { quotesSeed } from "@/db/seeds/quotes";
  */
 
 export const STAGES = ["draft", "sent", "won", "lost"] as const;
+
+/** Same literal fallback the prototype used when no session actor is passed. */
+const DEFAULT_ACTOR = "Jeff Chesebro";
 export type QuoteStatus = (typeof STAGES)[number];
 
 export const STAGE_LABEL: Record<QuoteStatus, string> = {
@@ -93,6 +96,45 @@ export type Quote = {
   createdAt: number;
   updatedAt: number;
   history: QuoteHistoryEntry[];
+  /** Append-only priced snapshots (punch item 24). Absent on pre-D84 quotes. */
+  revisions?: QuoteRevision[];
+};
+
+/**
+ * An immutable snapshot of a quote's priced state (punch item 24). Modelled on
+ * `DesignRevision` — append-only, never rewritten, `rev` is 1-based.
+ *
+ * **Why the payload is stored and not recomputed.** Flame-test / repair /
+ * inspection quotes re-price from the *live* rate blobs whenever their builder
+ * screen is opened (`stores/pricing.ts`: "the engines read the same blobs, so
+ * every flame-test / repair quote reprices immediately"). Recomputing a
+ * revision on recall would therefore return today's price, not the price that
+ * was sent. The engine subdocs already hold a fully resolved breakdown at save
+ * time — rates, trip, per-venue charges, totals — and the customer letters
+ * already read exactly that, so snapshotting them captures what the customer
+ * actually saw. Estimator quotes bake absolute per-line prices into `spec`, so
+ * that copies faithfully too.
+ *
+ * `reason` distinguishes a deliberate save from the automatic snapshot taken on
+ * send; the "sent" one is the version with contractual weight.
+ */
+export type QuoteRevision = {
+  rev: number;
+  at: number;
+  by: string;
+  reason: "manual" | "sent";
+  note: string;
+  /** Resolved figures as they stood when the snapshot was cut. */
+  name: string;
+  value: number;
+  margin: number;
+  status: QuoteStatus;
+  quoteType?: string;
+  /** Whichever priced payload this quote type carries — all already resolved. */
+  spec?: unknown;
+  flameTest?: unknown;
+  repair?: unknown;
+  inspection?: unknown;
 };
 
 export type ReviewOpts = {
@@ -178,10 +220,127 @@ export async function update(
   });
 }
 
-/** Move through the pipeline; stamps history [{at, from, to}]. No-op write when unchanged. */
+/* ---- revisions (punch item 24) ---- */
+
+/** Build a snapshot of a quote's current priced state. Pure. */
+function snapshotOf(
+  doc: Quote,
+  rev: number,
+  by: string,
+  reason: QuoteRevision["reason"],
+  note: string
+): QuoteRevision {
+  return {
+    rev,
+    at: Date.now(),
+    by,
+    reason,
+    note,
+    name: doc.name,
+    value: doc.value,
+    margin: doc.margin,
+    status: doc.status,
+    quoteType: doc.quoteType,
+    spec: doc.spec ?? null,
+    flameTest: doc.flameTest ?? null,
+    repair: doc.repair ?? null,
+    inspection: doc.inspection ?? null,
+  };
+}
+
+/** Append a snapshot inside an existing patch callback. Returns the new revision. */
+function pushRevision(
+  doc: Quote,
+  by: string,
+  reason: QuoteRevision["reason"],
+  note: string
+): QuoteRevision {
+  const revs = Array.isArray(doc.revisions) ? doc.revisions : [];
+  const r = snapshotOf(doc, revs.length + 1, by, reason, note);
+  doc.revisions = [...revs, r];
+  return r;
+}
+
+export async function quoteRevisions(id: string): Promise<QuoteRevision[]> {
+  const q = await getDoc<Quote>("quotes", id);
+  return (q && Array.isArray(q.revisions) ? q.revisions : []) || [];
+}
+
+/**
+ * Snapshot the quote as it stands. The caller saves first, then snapshots —
+ * same order as `saveRevisionAction` on designs.
+ */
+export async function addQuoteRevision(
+  id: string,
+  opts: { by?: string | null; reason?: QuoteRevision["reason"]; note?: string } = {}
+): Promise<QuoteRevision | null> {
+  let out: QuoteRevision | null = null;
+  const res = await patchDoc<Quote>("quotes", id, (doc) => {
+    out = pushRevision(
+      doc,
+      opts.by || DEFAULT_ACTOR,
+      opts.reason || "manual",
+      opts.note || ""
+    );
+    doc.updatedAt = Date.now();
+  });
+  return res ? out : null;
+}
+
+/**
+ * Recall an earlier revision onto the live quote.
+ *
+ * Non-destructive by construction: the current state is snapshotted FIRST, so
+ * walking back never discards the direction that was walked away from — it just
+ * becomes the newest revision. The recall itself is then recorded as another
+ * revision, so the history reads as a continuous line rather than a jump.
+ *
+ * Refuses on `won` quotes. A won quote has already spawned a project, and the
+ * project copies `value`/`margin` (and derives every procurement line cost from
+ * `value`) once at conversion and never re-reads the quote — so rewriting the
+ * numbers afterwards would silently desync the two with no way to repair it
+ * (`projects.ts` bails early when a project already exists).
+ */
+export async function restoreQuoteRevision(
+  id: string,
+  rev: number,
+  by?: string | null
+): Promise<{ ok: false; reason: "not-found" | "no-such-rev" | "won" } | { ok: true; quote: Quote }> {
+  const q = await getDoc<Quote>("quotes", id);
+  if (!q) return { ok: false, reason: "not-found" };
+  if (q.status === "won") return { ok: false, reason: "won" };
+  const target = (q.revisions || []).find((r) => r.rev === rev);
+  if (!target) return { ok: false, reason: "no-such-rev" };
+
+  const actor = by || DEFAULT_ACTOR;
+  const updated = await patchDoc<Quote>("quotes", id, (doc) => {
+    // 1. preserve where we are now, 2. apply the old payload, 3. record the recall.
+    pushRevision(doc, actor, "manual", `Auto-saved before recalling v${rev}`);
+    doc.name = target.name;
+    doc.value = Math.round(target.value);
+    doc.margin = target.margin;
+    doc.spec = target.spec ?? null;
+    doc.flameTest = target.flameTest ?? null;
+    doc.repair = target.repair ?? null;
+    doc.inspection = target.inspection ?? null;
+    pushRevision(doc, actor, "manual", `Recalled v${rev}`);
+    doc.updatedAt = Date.now();
+  });
+  return updated ? { ok: true, quote: updated } : { ok: false, reason: "not-found" };
+}
+
+/**
+ * Move through the pipeline; stamps history [{at, from, to}]. No-op write when unchanged.
+ *
+ * Sending also cuts an automatic revision (item 24 decision A) — that snapshot
+ * is the record of what the customer was actually quoted, so it is taken here
+ * rather than at any one call site: every legitimate transition funnels through
+ * this function.
+ */
 export async function setStatus(
   id: string,
-  status: QuoteStatus
+  status: QuoteStatus,
+  by?: string | null
 ): Promise<Quote | null> {
   if (!STAGES.includes(status)) return null;
   const q = await getDoc<Quote>("quotes", id);
@@ -191,6 +350,9 @@ export async function setStatus(
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
     doc.status = status;
+    if (status === "sent") {
+      pushRevision(doc, by || DEFAULT_ACTOR, "sent", "Sent to customer");
+    }
     doc.updatedAt = t;
   });
 }

@@ -119,7 +119,10 @@ async function initialFrom(
     contactName: contactName || "",
     quoteNote: q.quoteNote != null ? q.quoteNote : FALLBACK.quoteNote,
     owner: q.owner || userName,
-    revNum: Math.max(1, q.history?.length || 1),
+    // Real priced revisions (item 24). This used to count `history`, which is
+    // the status pipeline — so the printed "Rev N" climbed every time a quote
+    // moved draft → sent → won, with no revision having been taken.
+    revNum: Math.max(1, q.revisions?.length || 1),
     revDateMs: q.updatedAt || Date.now(),
     sections,
   };

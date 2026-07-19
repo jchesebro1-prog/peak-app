@@ -6,6 +6,8 @@ import {
   get,
   setStatus,
   submitForReview,
+  addQuoteRevision,
+  restoreQuoteRevision,
   STAGES,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
@@ -23,11 +25,13 @@ import { syncProjectsFromQuotes } from "@/lib/stores/projects";
  */
 
 export async function setQuoteStatus(formData: FormData): Promise<void> {
-  await requireUser();
+  const user = await requireUser();
   const id = String(formData.get("id") || "");
   const status = String(formData.get("status") || "");
   if (!id || !(STAGES as readonly string[]).includes(status)) return;
-  const q = await setStatus(id, status as QuoteStatus);
+  // The actor is passed through so the automatic on-send revision is
+  // attributed to whoever sent it (item 24).
+  const q = await setStatus(id, status as QuoteStatus, user.name);
   if (!q) return;
   if (status === "won") {
     // Acceptance auto-spawns downstream work exactly like the prototype:
@@ -40,6 +44,32 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
     await syncInspectionsFromQuotes();
     await syncProjectsFromQuotes();
   }
+  revalidatePath("/", "layout");
+}
+
+/* ---- revisions (punch item 24) ---- */
+
+/** Snapshot the quote as it stands right now. */
+export async function saveQuoteRevisionAction(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const id = String(formData.get("id") || "");
+  const note = String(formData.get("note") || "").trim();
+  if (!id) return;
+  await addQuoteRevision(id, { by: user.name, reason: "manual", note });
+  revalidatePath("/", "layout");
+}
+
+/**
+ * Recall an earlier revision. The store snapshots the current state before
+ * applying, so this never discards work; it refuses outright on won quotes,
+ * whose numbers are already baked into a project.
+ */
+export async function restoreQuoteRevisionAction(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const id = String(formData.get("id") || "");
+  const rev = Number(formData.get("rev") || 0);
+  if (!id || !Number.isFinite(rev) || rev < 1) return;
+  await restoreQuoteRevision(id, rev, user.name);
   revalidatePath("/", "layout");
 }
 
