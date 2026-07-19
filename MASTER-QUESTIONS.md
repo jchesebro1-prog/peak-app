@@ -10,10 +10,27 @@ Legend: ✦ = the default that's already built · ☐ = your answer
 
 ---
 
-## ⚡ THE SHORT LIST — refreshed 2026-07-19 (answer this, ignore the rest)
+## ⚡ THE SHORT LIST — refreshed 2026-07-19 · ANSWERED same day (Jeff)
 
-Everything below this section is the original long form; most of it is
-answered or superseded. This is what actually moves things now.
+Answers recorded inline. Everything below this section is the original long
+form; most of it is answered or superseded.
+
+**S1–S5: skipped for now** (no dashboard clicks yet — commits stay local,
+scopes/CRON wait). **S6:** Jeff starts importing real data THIS WEEK.
+**S7:** Blank V.01.xlsx was placeholder — removed; real data shapes coming.
+**S8:** history starts August with the new divisions — no backfill import,
+but inspections/surveys must accept HISTORICAL entries as they complete
+them (backdating). **S9:** price lists arrive with the imports, including an
+internal Peak COST list — import must carry costs. **S10:** roster will be
+imported — needs an import option. **S11:** logos coming; check whether one
+was already provided. **S12:** intake generation = ESTIMATE SCOPES ONLY,
+items stay manual. **S13:** YES — full-page calendar module under Home.
+**S14:** YES — archived threads stop counting as needs-reply. **S15:** no
+in-app notification; the calendar entry is enough (F12 dropped). **S16:** no
+log@ habit — forward-parsing dropped for good (C9 closed: no). **S17:** BOTH
+— keep the popover form AND add drag-and-drop + time-off lanes. **S18:**
+service-line defaults confirmed as-is (F1–F5 closed). **S19:** portal parked
+until the backend is fully working — revisit before customer-facing deploy.
 
 ### 1. Fifteen minutes of clicks — ships everything built today (no decisions)
 - **S1.** Push to GitHub via GitHub Desktop (nine local commits → Vercel auto-deploys).

@@ -154,6 +154,7 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "name", header: "Full Name", label: "Full name", required: true, aliases: ["name", "full name", "employee", "person", "user"], example: "Alex Morgan" },
       { key: "email", header: "Email", label: "Email", kind: "email", aliases: ["email", "e-mail", "work email"], example: "amorgan@peaksystemsgroup.com" },
       { key: "roles", header: "Roles", label: "Roles", aliases: ["roles", "role", "title", "permissions", "access"], example: "Estimator, Reviewer" },
+      { key: "googleEmail", header: "Google Email", label: "Google sign-in email", kind: "email", aliases: ["google email", "googleemail", "gmail", "sign-in email", "signin email", "google account", "personal email"], example: "amorgan@gmail.com" },
     ],
   },
   {

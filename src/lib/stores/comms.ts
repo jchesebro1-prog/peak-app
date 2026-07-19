@@ -546,11 +546,12 @@ export async function threadsIn(
   if (boxId === "needs")
     // gmailInboxed===false = the user already disposed of it on the Gmail
     // side — exactly the flow PUNCHLIST #1 reconciles, so don't keep nagging.
-    // (Locally-archived threads still show here — pre-existing semantics.)
+    // Archived threads (Peak-side too) also stop counting (S14, Jeff 7/19).
     base = all.filter(
       (t) =>
         visibleTo(t, user) &&
         t.status === "waiting_us" &&
+        !t.archived &&
         t.gmailInboxed !== false
     );
   else if (boxId === "calls")
@@ -653,6 +654,7 @@ export async function needsReplyCount(me?: string): Promise<number> {
     (t) =>
       visibleTo(t, user) &&
       t.status === "waiting_us" &&
+      !t.archived &&
       t.gmailInboxed !== false
   ).length;
 }

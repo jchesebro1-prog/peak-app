@@ -90,7 +90,14 @@ export async function navData(me: string): Promise<{
     (s) => (s.stage || "requested") === "requested"
   );
   const waitingComms = comms
-    .filter((t) => t.status === "waiting_us" && t.assignedTo === me)
+    // archived (Peak or Gmail side) stops nagging the bell too (S14)
+    .filter(
+      (t) =>
+        t.status === "waiting_us" &&
+        t.assignedTo === me &&
+        !t.archived &&
+        t.gmailInboxed !== false
+    )
     .sort((a, b) => waitHours(b) - waitHours(a));
 
   const counts: NavCounts = {

@@ -326,7 +326,12 @@ const WRITERS: Record<string, Writer> = {
       cache.find((u) => (v.email && ci(u.email, v.email)) || ci(u.name, v.name)) || null,
     create: async (v, cache) => {
       const roles = rolesFrom(str(v.roles));
-      await addUser({ name: str(v.name), email: str(v.email), roles });
+      await addUser({
+        name: str(v.name),
+        email: str(v.email),
+        googleEmail: str(v.googleEmail),
+        roles,
+      });
       cache.push({ name: str(v.name), email: str(v.email) });
     },
     update: async (ex, v) => {
