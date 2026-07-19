@@ -160,4 +160,9 @@ export async function seedIfEmpty(db: Db) {
   if (data.seedDemo === true) {
     await seedDemoCollections();
   }
+  // Identity core (D85): bootstrap companies/sites/contacts from the customer
+  // directory when the identity tables are empty. The converter no-ops
+  // otherwise, so this is safe on every startup.
+  const { convertCustomersToIdentity } = await import("@/lib/identity/convert");
+  await convertCustomersToIdentity();
 }
