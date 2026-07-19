@@ -242,55 +242,115 @@ beat a rules-based approach. Cost when revisited: ~$6–225/mo.
 
 **Area:** global interface / design system (app-wide)
 
-**Reported:** 2026-07-19 (collected off-machine; logged here 2026-07-19)
+**Reported:** 2026-07-19
 
-**Ask:** Make the interface feel like Monday.com (the team's current PM tool) so adoption
-is seamless — the team should feel it's the same interface they know, with Peak's
+**Ask:** Make the interface feel like Monday.com — the team's current PM tool — so adoption is
+seamless. The team should feel it's the same interface they already know, just with Peak's
 customizations.
 
-**Decisions Jeff needs to make before this gets built:**
-- Which Monday paradigms matter most: boards, timeline, kanban, table with colored
-  status pills, left-nav workspace structure?
-- Visual reskin only (colors, type, status chips, board layouts) or interaction
-  patterns too (drag-to-update status, inline editing, group/collapse)?
-- Any specific Monday screens to mirror?
+**Decisions Jeff needs to make before this gets scoped:**
+- **A. Which Monday paradigms actually matter?** Boards, timeline/Gantt, kanban, table view
+  with colored status pills, left-nav workspace structure. Picking 2–3 makes this buildable;
+  "all of it" makes it a rewrite.
+- **B. Reskin or interaction patterns too?** A visual reskin (colors, type, status chips,
+  board layouts) is a contained job. Interaction patterns (drag-to-update status, inline
+  editing, group/collapse) are a much larger one and touch every data screen.
+- **C. Any specific Monday screens to mirror?** Screenshots would settle most of A and B.
 
-**Notes:** this is a large, cross-cutting item — likely phased (visual language first,
-interaction patterns per-screen after). Current design tokens live in
-`docs/specs/*.json` + `src/app/globals.css`; nav structure in
-`src/components/nav/nav-data.ts`. Worth a dedicated scoping conversation before any code.
+**Where the styling actually lives (verified 2026-07-19):**
+- **Global tokens exist** — 23 CSS custom properties in `src/app/globals.css` (`--accent` and
+  friends are used throughout, incl. both Design Studio tools). Colors and the like are
+  themeable from one place already.
+- **Nav structure:** `src/components/nav/nav-data.ts`. Screen specs: `docs/specs/*.json`
+  (`nav-shell.json`, `settings-team.json`, …).
+- **But component-level styling is duplicated inline.** `card`, `label`, `field`, `th`, `td`
+  are re-declared as local `React.CSSProperties` objects per file — they differ slightly
+  between `lineset-builder.tsx` and `weights-tool.tsx` (font sizes 13.5 vs 12.5, radii 8 vs 7).
+  **So a token-level reskin is cheap; anything touching cards, tables, chips, or spacing is a
+  find-and-replace across every screen** until those are extracted into shared components.
 
-**Status:** OPEN — blocked on the scoping decisions above
+**Suggested first phase:** extract the duplicated component styles into shared primitives.
+It's worth doing regardless of Monday, and it's what makes B affordable.
+
+**Status:** OPEN — needs A/B/C before scoping
 
 ---
 
 ## 6. Merge Lineset Weights into Lineset Builder — OPEN
 
-**Area:** `/design-studio/lineset` (`lineset-builder.tsx`) + `/design-studio/weights`
-(`weights-tool.tsx`) — currently separate tools/tabs
+**Area:** `src/app/(app)/design-studio/lineset/lineset-builder.tsx` +
+`src/app/(app)/design-studio/weights/weights-tool.tsx`; engines at
+`src/lib/design/lineset.ts` and `src/lib/design/steel.ts`
 
-**Reported:** 2026-07-19 (collected off-machine; logged here 2026-07-19)
+**Reported:** 2026-07-19
 
-**Ask:** Combine into one screen. The team bounces between the two tabs to build a
-lineset then check its weight. Everything from both can live together.
+**Ask:** Combine the two tabs into one screen. The team bounces between them to build a
+lineset and then check its weight. Jeff's read: everything from both can live together.
 
-**Approach (proposed with Jeff):** one lineset detail view; weight / arbor total /
-brick count as a live-calculated panel updating as hung items are edited, with the
-out-of-weight warning inline.
+**Proposed approach (discussed with Jeff):** one lineset detail view, with weight / arbor
+total / brick count as a **live-calculated panel** that updates as hung items are edited, and
+out-of-weight warnings shown inline.
 
-**Watch-outs (from the intake conversation):** (a) inputs visually distinct from
-calculated fields; (b) don't lose the show-wide weight rollup; (c) units/weight config
-(brick weight, pipe wt/ft, safety factor) in one clear place; (d) recalc timing so the
-OVER-LIMIT warning doesn't flicker mid-edit; (e) screen density — master list + detail
-pane, or collapsible panel.
+**Code-verified 2026-07-19 (answers the open questions from intake):**
 
-**Light code look (2026-07-19):** the tools are separate files with separate state:
-`weights-tool.tsx` keeps its own `lines` array (name/fab/w/h/gear/pipe/mode/hoist) with
-CW brick combos (25/10 lb) + motor limits and its own SaveBar (`kind: "weights"`,
-per-venue save) — weight is entered/derived there, NOT read from Builder data. The
-Builder saves its own kind. A merge therefore needs a shared lineset data model first
-(one saved design carrying both layout and load fields), then the weights panel becomes
-derived UI. Check `save-bar.tsx` kinds and the D71-era save format before designing.
+- **Weight is entered separately today — fully duplicated by hand.** The two tools share no
+  data and no types. Builder input is `LinesetInputs` (stage width/depth + layout toggles);
+  it *generates* a schedule of slots with `slot`, `dsPositionLabel`, `type`, `name`,
+  `warning`. Weights input is a hand-keyed `WeightLine[]` (name, fabric, w, h, fullness, qty,
+  gear, chain, track, batten, mode, hoist). **The only overlapping field is `name`.**
+- **The demo data proves the duplication.** The Weights demo rows ("1st Border", "1st Legs
+  (pair)", "1st Electric", "Cyclorama") map almost 1:1 onto the line types the Builder
+  generates (`Electric`, `Shell`, `Border`, `Draw`, `Legs`, `CYC`, `Rear`, `Midstage Draw`,
+  `General Purpose`). The team is retyping Builder output into the Weights tool. That *is*
+  the inefficiency Jeff described.
+- **Therefore the merge is clean in principle:** the Builder's generated schedule supplies the
+  **rows**; weights become **additional per-row fields**. This is not two views of one dataset —
+  it's one dataset that currently gets typed twice.
+- **A show-wide rollup already exists** (watch-out (b) is satisfied): four KPI tiles — Total on
+  batten, Peak load / support beam, With powerheads, Counterweight. These survive the merge
+  unchanged.
+- **Recalc flicker (watch-out (d)) is a non-issue.** Both tools are pure synchronous `useMemo`
+  over local state, no debounce, no async. Warnings already compute inline per row. Strike (d).
 
-**Status:** OPEN — approach agreed in principle; needs Jeff's go-ahead plus the shared
-data-model design
+**New problems found in code — these are the real work:**
+
+- **P1 (biggest). Regeneration destroys hand-entered weight data.** The Builder re-runs
+  `generateLineset(inp)` on *every* input change, and rows are keyed by `s.slot`. Nudge the
+  stage depth by six inches and the whole schedule regenerates with shifted slots — hand-keyed
+  fabric/dimension/hoist data would have nothing stable to reattach to. **The merge needs a
+  stable line identity plus a reconcile strategy** (match on slot? on name? on type+ordinal?)
+  and a visible answer for orphaned data. Nothing in the current code supports this.
+- **P2. Blank reads as zero, and would silently understate the total.** Weights coerces with
+  `w ?? 0` / `qty ?? 1`. Fine when six rows are typed deliberately; dangerous when the Builder
+  auto-generates 40+ rows that all default to 0 lb and roll up into a confident-looking total.
+  **Need an explicit "not yet specified" state** distinct from a real zero, and the rollup
+  should refuse to present a total (or flag it) while any line is unspecified.
+- **P3. Two saved-design records, two load URLs.** `SaveBar kind="lineset"` and
+  `kind="weights"` save separately (`StudioDesignKind` in `save-bar.tsx`) and load via
+  `?design=` on different routes. Merging forces a decision: new combined kind, and what
+  happens to designs already saved under the old two. **Migration path needed — read
+  `save-bar.tsx` kinds and the D71-era save format before designing this.**
+- **P4. Two separate config panels would land on one screen.** Builder has "Advanced rule
+  parameters" (8 fields); Weights has "Schedule defaults" (12 fields, incl. brick/pipe/safety
+  config). Merged naively that's two collapsible panels of knobs. Watch-out (c) — one clear
+  place for units/weight config — means **consolidating into a single settings drawer**, not
+  stacking both.
+- **P5. Layout is tighter than it looks.** Builder uses a 300px input rail + flexible pane.
+  The Weights table is 12 columns with a 900px minimum and already scrolls horizontally on its
+  own full-width screen. It will not fit into Builder's right pane. **Likely resolution:** the
+  master list stays narrow (slot / type / name / weight / status), and fabric-and-dimensions
+  editing moves into a detail pane or expanding row. This is watch-out (e), and it's more
+  binding than intake assumed.
+
+**Revised framing for watch-out (a):** merged rows have **three** field classes, not two —
+*generated by rules* (slot, downstage position, type, default name), *hand-entered* (fabric,
+W/H, fullness, qty, gear, mode, hoist), and *calculated* (weight on batten, check, brick
+combo). The visual treatment should distinguish all three, and should make clear that editing
+a generated field may be overwritten on the next regeneration (see P1).
+
+**Suggested phasing:** (1) settle P1 — line identity and reconcile — since every other
+decision depends on it; (2) unify the data model behind one saved record (P3); (3) build the
+merged screen with the narrow-list + detail-pane layout (P5) and one settings drawer (P4);
+(4) add the unspecified-vs-zero state and rollup guard (P2).
+
+**Status:** OPEN — approach agreed, P1 needs a decision before build
