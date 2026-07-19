@@ -701,10 +701,18 @@ export async function convert(
       travelMiles: null,
       travelMin: null,
     };
-    // CustomerStore.normalizeRecord kept {name, role, email, primary} only
-    // (the contact phone was dropped), and ensured a primary contact.
+    // normalizeRecord keeps phone since D76 — pass it through (the old
+    // comment claiming it was dropped went stale; PUNCHLIST #12 bug).
     const contacts = l.contact
-      ? [{ name: l.contact, role: opts.role || "", email: l.email || "", primary: true }]
+      ? [
+          {
+            name: l.contact,
+            role: opts.role || "",
+            email: l.email || "",
+            phone: l.phone || "",
+            primary: true,
+          },
+        ]
       : [];
     await upsertDoc("customers", {
       id: customerId,

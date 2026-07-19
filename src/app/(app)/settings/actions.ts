@@ -65,6 +65,24 @@ export async function addUserAction(input: {
   return { ok: true as const };
 }
 
+/** Edit an existing member's identity fields (PUNCHLIST #9 defect fix —
+ *  wrong seeded emails were a sign-in LOCKOUT with no remedy: auth matches
+ *  on email/googleEmail and nothing could correct them). */
+export async function updateMemberAction(
+  id: string,
+  patch: { name?: string; email?: string; googleEmail?: string }
+) {
+  await requirePerm("manage_users");
+  const clean: { name?: string; email?: string; googleEmail?: string } = {};
+  if (patch.name !== undefined && patch.name.trim()) clean.name = patch.name.trim();
+  if (patch.email !== undefined) clean.email = patch.email.trim();
+  if (patch.googleEmail !== undefined) clean.googleEmail = patch.googleEmail.trim();
+  const { updateUser } = await import("@/lib/users");
+  await updateUser(id, clean);
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
 export async function setRolesAction(id: string, roles: string[]) {
   const me = await requirePerm("manage_users");
   const next = cleanRoles(roles || []);

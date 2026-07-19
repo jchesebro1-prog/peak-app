@@ -57,7 +57,7 @@ export function aiTimeoutMs(): number {
   return Number.isFinite(n) && n > 0 ? n : 60_000;
 }
 
-/** The five AI features, each independently described for the Settings card
+/** The AI features, each independently described for the Settings card
  *  (MASTER-QUESTIONS D1–D5). They all share the single gate above — there's no
  *  per-feature toggle yet; the whole layer is on or off with the key. */
 export type AiFeature = {

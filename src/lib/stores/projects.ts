@@ -528,7 +528,17 @@ export async function syncProjectsFromQuotes(): Promise<number> {
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   let made = 0;
   for (const q of quotes) {
-    if (q.status !== "won" || q.quoteType === "flame_test") continue;
+    // Only install/system quotes become Projects. Repair and inspection wins
+    // spawn their OWN records (repair-jobs / inspections syncs) — before this
+    // filter they ALSO minted phantom Projects that polluted the Projects
+    // list, Schedule, and Field Work (PUNCHLIST #13 bug).
+    if (
+      q.status !== "won" ||
+      q.quoteType === "flame_test" ||
+      q.quoteType === "repair" ||
+      q.quoteType === "inspection"
+    )
+      continue;
     if (haveQ.has(q.id) || skip.includes(q.id)) continue;
     const body = fromQuote(q);
     const id = await nextPrefixedId(

@@ -39,6 +39,7 @@ import {
 import HomeMyDesigns, { type DesignCard } from "./home-my-designs";
 import HomeCalendar from "./home-calendar";
 import { loadHomeAgenda } from "@/lib/agenda";
+import { list as catalogList } from "@/lib/stores/catalog";
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 
@@ -68,13 +69,30 @@ const STATUS_META: Record<
   lost: { label: "Lost", ink: "#8c919c", soft: "#f1f2f5", bd: "#e4e7ec" },
 };
 
-/** Price-book glance — the prototype Home's component-local book list. */
-const BOOKS = [
-  { mono: "JC", name: "JR Clancy", count: 214, ageDays: 92 },
-  { mono: "RB", name: "Rose Brand", count: 168, ageDays: 21 },
-  { mono: "ET", name: "ETC", count: 63, ageDays: 12 },
-  { mono: "WN", name: "Wenger", count: 84, ageDays: 40 },
-];
+/** Price-book glance (PUNCHLIST #14): derived from the REAL catalog store,
+ *  grouped by manufacturer — the prototype shipped a hardcoded list here
+ *  that said "529 parts" forever. Age pills dropped: CatalogPart has no
+ *  updatedAt to derive them from (decision A on the punch item). */
+function priceBooks(parts: { mfr?: string }[]): { mono: string; name: string; count: number }[] {
+  const by = new Map<string, number>();
+  for (const pt of parts) {
+    const name = (pt.mfr || "").trim() || "Unbranded";
+    by.set(name, (by.get(name) || 0) + 1);
+  }
+  return [...by.entries()]
+    .map(([name, count]) => ({
+      mono: name
+        .split(/\s+/)
+        .map((w) => w[0] || "")
+        .join("")
+        .slice(0, 2)
+        .toUpperCase(),
+      name,
+      count,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6);
+}
 
 /* ---- helpers (ports of the prototype component's) ---- */
 
@@ -206,6 +224,7 @@ export default async function HomePage({
     inboxUnread,
     roster,
     boxCountsArr,
+    catalogParts,
   ] = await Promise.all([
     getQuotes(),
     getAllDesigns(),
@@ -216,7 +235,9 @@ export default async function HomePage({
     unreadCount(me),
     activeUsers(),
     Promise.all(boxes.map((b) => folderCounts(b.id, me))),
+    catalogList(),
   ]);
+  const books = priceBooks(catalogParts);
 
   const ident = new Map(roster.map((u) => [u.name, { initials: u.initials, color: u.color }]));
   const initialsOf = (n: string) => ident.get(n)?.initials || deriveInitials(n);
@@ -1382,15 +1403,13 @@ export default async function HomePage({
             </div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 23, fontWeight: 600 }}>
-                {BOOKS.reduce((a, b) => a + b.count, 0)}
+                {catalogParts.length}
               </span>
               <span style={{ fontSize: 12.5, color: "#8c919c" }}>
-                parts · {BOOKS.length} price books
+                parts · {books.length} price book{books.length === 1 ? "" : "s"}
               </span>
             </div>
-            {BOOKS.map((b) => {
-              const stale = b.ageDays >= 90;
-              const warn = b.ageDays >= 45;
+            {books.map((b) => {
               return (
                 <div
                   key={b.mono}
@@ -1428,23 +1447,14 @@ export default async function HomePage({
                       {b.count} parts
                     </div>
                   </div>
-                  <span
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 10.5,
-                      fontWeight: 600,
-                      color: stale ? "#b4543a" : warn ? "#9a7d1f" : "#1f8a5b",
-                      background: stale ? "#f7e9e5" : warn ? "#fbf3dd" : "#eaf6ef",
-                      padding: "3px 8px",
-                      borderRadius: 6,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {b.ageDays}d ago
-                  </span>
                 </div>
               );
             })}
+            {books.length === 0 && (
+              <div style={{ padding: "14px 0 4px", fontSize: 12, color: "#9aa0ab" }}>
+                No parts yet — import a price book from the Catalog screen.
+              </div>
+            )}
           </div>
         </div>
 

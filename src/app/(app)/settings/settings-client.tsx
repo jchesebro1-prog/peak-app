@@ -24,6 +24,7 @@ import {
   searchAddressAction,
   setActiveAction,
   setRolesAction,
+  updateMemberAction,
 } from "./actions";
 import type { GeoSearchHit } from "@/lib/geo";
 
@@ -46,6 +47,7 @@ type UserVM = {
   id: string;
   name: string;
   email: string;
+  googleEmail?: string;
   roles: string[];
   color: string;
   initials: string;
@@ -109,7 +111,6 @@ export default function SettingsClient({
   meId,
   meName,
   gmail,
-  ai,
   settings,
   intakeCatalog,
   visitReasons,
@@ -119,11 +120,6 @@ export default function SettingsClient({
   meId: string;
   meName: string;
   gmail: { enabled: boolean; mailboxes: MailboxVM[] };
-  ai: {
-    enabled: boolean;
-    model: string;
-    features: { label: string; desc: string; where: string }[];
-  };
   settings: {
     companyName: string;
     accent: string;
@@ -147,9 +143,10 @@ export default function SettingsClient({
 
   // modal: null | 'new' | userId
   const [modal, setModal] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{ name: string; email: string; roles: string[] }>({
+  const [draft, setDraft] = useState<{ name: string; email: string; googleEmail: string; roles: string[] }>({
     name: "",
     email: "",
+    googleEmail: "",
     roles: ["Estimator"],
   });
   const nameTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -348,11 +345,16 @@ export default function SettingsClient({
   const officeIsNew = officeModal === "__new__";
 
   const openNew = () => {
-    setDraft({ name: "", email: "", roles: ["Estimator"] });
+    setDraft({ name: "", email: "", googleEmail: "", roles: ["Estimator"] });
     setModal("new");
   };
   const openEdit = (u: UserVM) => {
-    setDraft({ name: u.name, email: u.email, roles: u.roles.slice() });
+    setDraft({
+      name: u.name,
+      email: u.email,
+      googleEmail: u.googleEmail || "",
+      roles: u.roles.slice(),
+    });
     setModal(u.id);
   };
   const toggleDraftRole = (r: string) =>
@@ -369,7 +371,17 @@ export default function SettingsClient({
       if (!draft.name.trim()) return;
       run(() => addUserAction(draft));
     } else if (modal) {
-      run(() => setRolesAction(modal, draft.roles));
+      const id = modal;
+      // identity edits ride along with roles (PUNCHLIST #9 — email was
+      // uneditable anywhere, and a wrong email means the member can't sign in)
+      run(async () => {
+        await updateMemberAction(id, {
+          name: draft.name,
+          email: draft.email,
+          googleEmail: draft.googleEmail,
+        });
+        return setRolesAction(id, draft.roles);
+      });
     }
     setModal(null);
   };
@@ -958,112 +970,6 @@ export default function SettingsClient({
                   Connect
                 </button>
               )}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ---- AI Assistant (Phase 8) ---- */}
-      <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-          <div>
-            <div style={{ fontSize: 14.5, fontWeight: 600 }}>AI Assistant</div>
-            <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
-              Anthropic-powered drafting and summaries across the app. Everything
-              stays a draft — a person always reviews and sends.
-            </div>
-          </div>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              padding: "3px 10px",
-              borderRadius: 20,
-              flexShrink: 0,
-              whiteSpace: "nowrap",
-              color: ai.enabled ? "#1f7a52" : "#8c919c",
-              background: ai.enabled ? "#e8f3ee" : "#f1f2f5",
-              border: `1px solid ${ai.enabled ? "#cfe6db" : "#e4e7ec"}`,
-            }}
-          >
-            {ai.enabled ? "AI enabled" : "Not enabled"}
-          </span>
-        </div>
-
-        {!ai.enabled ? (
-          <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 12, lineHeight: 1.5 }}>
-            AI features are off on this deployment. Turn them on by setting{" "}
-            <b style={{ color: "#5b616e", fontFamily: "var(--font-mono)" }}>ANTHROPIC_API_KEY</b>{" "}
-            — the step-by-step is in <b style={{ color: "#5b616e" }}>MASTER-HOWTO §AI</b>. Until then
-            these features stay hidden and the rest of the app is unchanged.
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 12, lineHeight: 1.5 }}>
-            Model:{" "}
-            <b style={{ color: "#5b616e", fontFamily: "var(--font-mono)" }}>{ai.model}</b>
-            . Override with{" "}
-            <b style={{ color: "#5b616e", fontFamily: "var(--font-mono)" }}>ANTHROPIC_MODEL</b>{" "}
-            or pause everything with{" "}
-            <b style={{ color: "#5b616e", fontFamily: "var(--font-mono)" }}>AI_DISABLED=true</b>.
-          </div>
-        )}
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
-          {ai.features.map((f) => (
-            <div
-              key={f.label}
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 13,
-                border: "1px solid #eef0f3",
-                borderRadius: 11,
-                padding: "12px 14px",
-                background: "#fafbfc",
-                opacity: ai.enabled ? 1 : 0.72,
-              }}
-            >
-              <span
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 9,
-                  background: "var(--accent-soft)",
-                  color: "color-mix(in srgb, var(--accent) 70%, #16181d)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 15,
-                  flexShrink: 0,
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9L12 3z" />
-                </svg>
-              </span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{f.label}</span>
-                  <span
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      padding: "2px 9px",
-                      borderRadius: 20,
-                      flexShrink: 0,
-                      whiteSpace: "nowrap",
-                      color: "#8c919c",
-                      background: "#f1f2f5",
-                      border: "1px solid #e4e7ec",
-                    }}
-                  >
-                    {f.where}
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, color: "#8c919c", marginTop: 3, lineHeight: 1.45 }}>
-                  {f.desc}
-                </div>
-              </div>
             </div>
           ))}
         </div>
@@ -1799,29 +1705,38 @@ export default function SettingsClient({
             </div>
 
             <div style={{ padding: "20px 22px" }}>
-              {isNew && (
-                <>
-                  <label style={{ ...labelStyle, marginBottom: 6 }}>Full name</label>
-                  <input
-                    style={{ ...inputStyle, marginBottom: 14 }}
-                    placeholder="e.g. Dana Reyes"
-                    value={draft.name}
-                    onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                    autoFocus
-                  />
-                  <label style={{ ...labelStyle, marginBottom: 6 }}>Email</label>
-                  <input
-                    style={{
-                      ...inputStyle,
-                      marginBottom: 16,
-                      fontFamily: "var(--font-mono)",
-                    }}
-                    placeholder="name@peaksystemsgroup.com"
-                    value={draft.email}
-                    onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-                  />
-                </>
-              )}
+              <label style={{ ...labelStyle, marginBottom: 6 }}>Full name</label>
+              <input
+                style={{ ...inputStyle, marginBottom: 14 }}
+                placeholder="e.g. Dana Reyes"
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                autoFocus={isNew}
+              />
+              <label style={{ ...labelStyle, marginBottom: 6 }}>Email (sign-in & roster)</label>
+              <input
+                style={{
+                  ...inputStyle,
+                  marginBottom: 14,
+                  fontFamily: "var(--font-mono)",
+                }}
+                placeholder="name@peaksystemsgroup.com"
+                value={draft.email}
+                onChange={(e) => setDraft({ ...draft, email: e.target.value })}
+              />
+              <label style={{ ...labelStyle, marginBottom: 6 }}>
+                Google sign-in email (if different)
+              </label>
+              <input
+                style={{
+                  ...inputStyle,
+                  marginBottom: 16,
+                  fontFamily: "var(--font-mono)",
+                }}
+                placeholder="optional — e.g. their @gmail.com"
+                value={draft.googleEmail}
+                onChange={(e) => setDraft({ ...draft, googleEmail: e.target.value })}
+              />
 
               <label style={{ ...labelStyle, marginBottom: 6 }}>Roles</label>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

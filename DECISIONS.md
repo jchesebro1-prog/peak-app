@@ -788,3 +788,25 @@ Anything you want changed, just say so — none of these are hard to reverse.
   fallback copy otherwise). Google chips link out to Google Calendar;
   visit chips link to the customer record; +N-more overflow per day. The
   dashboard card gained an "Open calendar →" link.
+- **D82. Punch 7–23 triage — the five pre-scoped standalone fixes shipped**
+  (2026-07-19 evening; the collecting session flagged each as safe ahead of
+  its parent item's decisions). (1) Punch #13 bug: the projects sync only
+  excluded flame tests, so won REPAIR and INSPECTION quotes minted phantom
+  Projects alongside their real records, polluting Projects/Schedule/Field
+  Work — filter now excludes repair + inspection too (existing phantoms in a
+  DB are untouched; delete manually if any). (2) Punch #12 bug: lead
+  convert() dropped the contact phone on customer creation (stale comment
+  claimed normalizeRecord discarded it — false since D76) — phone passes
+  through now. (3) Punch #9 defect: member emails were uneditable ANYWHERE
+  while auth refuses unmatched emails — a wrong seeded address was a
+  lockout with no remedy. The Settings edit modal now edits name, email,
+  and google sign-in email (new updateMemberAction over the existing
+  updateUser); the rest of #9 (contact card, archived/removed) still needs
+  its A–D. (4) Punch #8: the read-only AI status card is gone from Settings
+  (Jeff: "take it out and see what happens" = option (i); feature gating
+  untouched, (ii) remains item-4 territory). (5) Punch #14: the dashboard
+  Catalog card was a hardcoded prototype literal ("529 parts · JR Clancy…"
+  forever) — now derived from the real store grouped by mfr, which
+  immediately revealed the actual imported catalog (10,729 parts across 6
+  books). Age pills dropped pending decision A (no updatedAt on parts);
+  SUGGEST divergence remains open under #14 B.
