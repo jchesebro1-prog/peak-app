@@ -13,19 +13,13 @@ import { all as allCustomers } from "@/lib/stores/customers";
 import { allUsers, reviewers } from "@/lib/users";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { money } from "@/lib/format";
+import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import { NewQuoteMenu, OwnerSelect } from "./controls";
 import { setQuoteStatus, submitQuoteForReview } from "./actions";
 
 export const metadata = { title: "Quotes — Peak Backend" };
 
 /* ---- prototype token maps (Quotes.dc.html statusMeta / rMeta, Estimator rbMeta) ---- */
-
-const STATUS_META: Record<QuoteStatus, { ink: string; soft: string; bd: string }> = {
-  draft: { ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" },
-  sent: { ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" },
-  won: { ink: "#2f7d52", soft: "#e6f4ec", bd: "#cce7d6" },
-  lost: { ink: "#b4543a", soft: "#f7e9e5", bd: "#f0d6cd" },
-};
 
 const REVIEW_CHIP: Record<string, { label: string; ink: string; soft: string; bd: string }> = {
   in_review: { label: "In review", ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" },
@@ -483,7 +477,6 @@ export default async function QuotesPage({
         </div>
 
         {filtered.map((q) => {
-          const m = STATUS_META[q.status] || STATUS_META.draft;
           const rState = q.review?.state || "none";
           const rMeta = REVIEW_CHIP[rState];
           const selected = q.id === selectedId;
@@ -616,20 +609,9 @@ export default async function QuotesPage({
                 <div
                   style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}
                 >
-                  <span
-                    style={{
-                      display: "inline-block",
-                      fontSize: 10.5,
-                      fontWeight: 600,
-                      color: m.ink,
-                      background: m.soft,
-                      border: `1px solid ${m.bd}`,
-                      padding: "2px 9px",
-                      borderRadius: 20,
-                    }}
-                  >
+                  <StatusPill tone={QUOTE_STATUS_TONE[q.status] || "gray"} minWidth={64}>
                     {STAGE_LABEL[q.status] || STAGE_LABEL.draft}
-                  </span>
+                  </StatusPill>
                   {rMeta && (
                     <span
                       style={{
@@ -887,21 +869,11 @@ function SelectedPanel({
             <input type="hidden" name="id" value={q.id} />
             {STAGES.map((s) => {
               const cur = s === q.status;
-              const sm = STATUS_META[s];
               return cur ? (
-                <span
-                  key={s}
-                  style={{
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                    color: sm.ink,
-                    background: sm.soft,
-                    border: `1px solid ${sm.bd}`,
-                    borderRadius: 7,
-                    padding: "7px 11px",
-                  }}
-                >
-                  {STAGE_LABEL[s]}
+                <span key={s} style={{ display: "inline-flex" }}>
+                  <StatusPill tone={QUOTE_STATUS_TONE[s] || "gray"} minWidth={72}>
+                    {STAGE_LABEL[s]}
+                  </StatusPill>
                 </span>
               ) : (
                 <button key={s} type="submit" name="status" value={s} className="pk-btn-outline">

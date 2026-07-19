@@ -38,6 +38,7 @@ import {
 } from "@/lib/stores/comms";
 import HomeMyDesigns, { type DesignCard } from "./home-my-designs";
 import HomeCalendar, { type AgendaItem } from "./home-calendar";
+import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import { gmailEnabled, hasCalendarScope, personalKey } from "@/lib/gmail/config";
 import { allVisits } from "@/lib/stores/site-visits";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
@@ -1382,20 +1383,9 @@ export default async function HomePage({
                     >
                       {money(q.value)}
                     </span>
-                    <span
-                      style={{
-                        display: "inline-block",
-                        fontSize: 10.5,
-                        fontWeight: 600,
-                        color: m.ink,
-                        background: m.soft,
-                        border: `1px solid ${m.bd}`,
-                        padding: "2px 9px",
-                        borderRadius: 20,
-                      }}
-                    >
+                    <StatusPill tone={QUOTE_STATUS_TONE[q.status] || "gray"} minWidth={64}>
                       {m.label}
-                    </span>
+                    </StatusPill>
                   </div>
                   <span style={{ color: "#c4c9d2", fontSize: 18, flexShrink: 0 }}>›</span>
                 </Link>

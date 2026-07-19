@@ -165,6 +165,72 @@ export function Pill({
   );
 }
 
+/* ---- Monday-style status treatment (PUNCHLIST #5 phase 1, D79) ----------- */
+
+/** Monday.com's status palette — the exact hues the team already knows:
+ *  done-green, working-orange, stuck-red, plus blue/purple/gray accents. */
+export const MONDAY_TONE: Record<string, string> = {
+  green: "#00c875",
+  orange: "#fdab3d",
+  red: "#e2445c",
+  blue: "#579bfc",
+  darkblue: "#0086c0",
+  purple: "#a25ddc",
+  gray: "#c4c4c4",
+};
+
+/** Solid Monday-style status pill: saturated fill, white text, centered with
+ *  a consistent width — the instantly recognizable status cell. Use for
+ *  primary status/stage columns; keep the soft `Pill` for secondary metadata
+ *  chips. `tone` is a MONDAY_TONE key or any CSS color. */
+export function StatusPill({
+  tone = "gray",
+  children,
+  minWidth = 84,
+}: {
+  tone?: string;
+  children: ReactNode;
+  minWidth?: number;
+}) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth,
+        fontSize: 11.5,
+        fontWeight: 600,
+        color: "#fff",
+        background: MONDAY_TONE[tone] || tone,
+        borderRadius: 5,
+        padding: "5px 11px",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** Canonical status→tone maps so every screen colors a given status the same
+ *  way (quotes today; extend per record type as screens adopt StatusPill). */
+export const QUOTE_STATUS_TONE: Record<string, string> = {
+  draft: "orange",
+  sent: "blue",
+  won: "green",
+  lost: "gray",
+};
+
+export const LEAD_STAGE_TONE: Record<string, string> = {
+  new: "red",
+  contacted: "orange",
+  qualified: "blue",
+  quoted: "purple",
+  won: "green",
+  lost: "gray",
+};
+
 export const STATUS_COLORS: Record<string, string> = {
   draft: "#5b616e",
   sent: "#3d8bf2",

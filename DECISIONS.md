@@ -756,3 +756,20 @@ Anything you want changed, just say so — none of these are hard to reverse.
   (preserving ?design= deep links), the landing tile and nav entry are gone,
   and the Design Studio saved-designs list opens legacy weights records
   through the Builder's adapter.
+- **D79. Monday-style UI — phase 1 shipped, scope questions pending**
+  (PUNCHLIST #5; Jeff: make it feel like Monday.com so adoption is seamless;
+  "go ahead and start"). What shipped as the visible, low-risk first slice:
+  components/ui.tsx gains MONDAY_TONE (Monday's actual status palette —
+  done-green #00c875, working-orange #fdab3d, stuck-red #e2445c, blue,
+  purple, gray) and a solid StatusPill (saturated fill, white text, fixed
+  min-width — the signature Monday status cell), plus canonical per-record
+  tone maps (QUOTE_STATUS_TONE, LEAD_STAGE_TONE) so every screen colors a
+  status identically. Adopted on the three highest-traffic status surfaces:
+  the Quotes table status column + detail-pane status switcher, the Home
+  "My pipeline" chips, and the Leads table Stage column. The soft-tint
+  Pill stays for secondary metadata (sources, follow-ups, review chips).
+  Phase 2+ awaits Jeff's scoping answers (which Monday paradigms, reskin vs
+  interaction patterns, reference screens) — recorded on the punch item;
+  the extraction path (shared card/label/field/th/td primitives already
+  exist in ui.tsx; per-screen inline copies converge as screens are
+  touched) is the standing rule going forward.

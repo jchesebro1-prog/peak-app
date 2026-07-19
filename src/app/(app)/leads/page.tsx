@@ -3,7 +3,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
 import { firstName } from "@/lib/team";
-import { SegmentedToggle } from "@/components/ui";
+import { LEAD_STAGE_TONE, SegmentedToggle, StatusPill } from "@/components/ui";
 import {
   dateLabel,
   followUps,
@@ -159,6 +159,7 @@ type TableRowVM = {
   scope: string;
   src: ChipVM;
   stage: ChipVM;
+  stageKey: string;
   owner: AvatarVM;
   ownerTitle: string;
   ownerName: string;
@@ -317,6 +318,7 @@ export default async function LeadsPage({
       scope: l.interest || "—",
       src: srcChip(l),
       stage: stageChip(l),
+      stageKey: l.stage,
       owner: avatarFor(roster, l.owner),
       ownerTitle: l.owner || "Unassigned",
       ownerName: l.owner ? firstName(l.owner) : "Unassigned",
@@ -483,21 +485,9 @@ export default async function LeadsPage({
                   {r.src.label}
                 </span>
                 <div className="lv-stage">
-                  <span
-                    style={{
-                      display: "inline-block",
-                      fontSize: 9.5,
-                      fontWeight: 600,
-                      color: r.stage.ink,
-                      background: r.stage.soft,
-                      border: `1px solid ${r.stage.bd}`,
-                      padding: "2px 8px",
-                      borderRadius: 20,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
+                  <StatusPill tone={LEAD_STAGE_TONE[r.stageKey] || "gray"} minWidth={78}>
                     {r.stage.label}
-                  </span>
+                  </StatusPill>
                 </div>
                 <div className="lv-own" style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
                   <OwnerDot owner={r.owner} title={r.ownerTitle} size={22} />
