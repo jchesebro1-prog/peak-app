@@ -30,7 +30,6 @@ export const NAV: NavEntry[] = [
       { key: "dsoverview", label: "Overview", href: "/design-studio" },
       { key: "dssteel", label: "Steel Calculator", href: "/design-studio/steel" },
       { key: "dslineset", label: "Lineset Builder", href: "/design-studio/lineset" },
-      { key: "dsweights", label: "Lineset Weights", href: "/design-studio/weights" },
       { key: "dsmotors", label: "Motor Library", href: "/design-studio/motors" },
       { key: "design", label: "Design Estimator", href: "/design" },
     ],

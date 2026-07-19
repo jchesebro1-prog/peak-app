@@ -6,7 +6,8 @@ export const metadata = { title: "Design Studio — Peak Backend" };
 
 const KIND_META: Record<string, { label: string; base: string }> = {
   lineset: { label: "Lineset Builder", base: "/design-studio/lineset?design=" },
-  weights: { label: "Lineset Weights", base: "/design-studio/weights?design=" },
+  // legacy weights saves open in the merged Builder (D78)
+  weights: { label: "Lineset Weights (legacy)", base: "/design-studio/lineset?design=" },
 };
 
 function fmtWhen(at: number): string {
@@ -75,24 +76,8 @@ const CARDS: Card[] = [
       </CardIcon>
     ),
     title: "Lineset Builder",
-    desc: "Auto-place a full lineset schedule on the 8-inch grid from stage width & depth — electrics, shells, CYC/rear, midstage, borders, legs, and general-purpose lines using the built-in rules.",
-    tag: "8-inch grid auto-layout",
-    ready: true,
-  },
-  {
-    href: "/design-studio/weights",
-    icon: (
-      <CardIcon>
-        <path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" />
-        <path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" />
-        <path d="M7 21h10" />
-        <path d="M12 3v18" />
-        <path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2" />
-      </CardIcon>
-    ),
-    title: "Lineset Weights",
-    desc: "Build a line schedule and get goods weight, per-line & hoist checks, counterweight brick combos, and load per support beam.",
-    tag: "Weights → counterweight",
+    desc: "Auto-place a full lineset schedule on the 8-inch grid from stage width & depth, then enter each line's goods — weight, hoist checks, counterweight bricks, and beam loads calculate live on the same screen.",
+    tag: "Auto-layout + weights in one",
     ready: true,
   },
   {

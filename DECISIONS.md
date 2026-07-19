@@ -728,3 +728,31 @@ Anything you want changed, just say so — none of these are hard to reverse.
   the assignee's calendar silently (no email); an in-app notification could
   accompany it later. The full-page in-app calendar (month/week view) stays
   open as the remaining slice of PUNCHLIST #2 item 5.
+- **D78. Lineset Weights merged into the Lineset Builder** (PUNCHLIST #6,
+  Jeff: "combine into one screen … everything from both can live together";
+  approach agreed at intake, P1–P5 from the code review resolved). One screen
+  at /design-studio/lineset: the generated schedule supplies the rows; each
+  row expands (click) into a weight editor (fabric/dims/fullness/qty/gear/
+  chain/track/mode/hoist — chain and track are newly editable, the old table
+  never exposed them); weight, hoist/batten checks and brick combos calculate
+  live; the four KPI tiles survive. P1 line identity: loads key off
+  `type#ordinal` ("Electric#2"), so regenerating the layout reattaches
+  weights to what a line IS, not its slot; keys that stop matching surface an
+  inline orphan notice (reattach-on-return or one-click clear) — verified in
+  the browser through the full lifecycle. P2: a line is "specified" only once
+  its entry exists; unspecified lines show — /amber and are EXCLUDED from
+  totals, and the Total tile says "M of N specified — partial total" instead
+  of presenting a confident wrong number. P3 migration-on-load, no DB
+  rewrite: v2 combined saves {v:2, inputs, defaults, loads, extras} under
+  kind "lineset"; legacy Builder saves load as inputs; legacy Weights saves
+  open with their rows as CUSTOM lines + a banner, and saving creates a NEW
+  combined design (the old record stays until deleted). Both kinds appear in
+  "Open saved…" (legacy marked). P4: one settings drawer, two labeled groups
+  (Layout rules / Weight defaults, incl. a default-mode picker the old tools
+  split). P5: the master table stays 8 narrow columns; editing happens in the
+  expanding row, so nothing scrolls horizontally. Custom lines (the old
+  tool's arbitrary rows — orchestra shells, screens) live on as an "extras"
+  section after the generated schedule. /design-studio/weights redirects
+  (preserving ?design= deep links), the landing tile and nav entry are gone,
+  and the Design Studio saved-designs list opens legacy weights records
+  through the Builder's adapter.
