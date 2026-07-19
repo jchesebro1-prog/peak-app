@@ -10,6 +10,65 @@ Legend: ✦ = the default that's already built · ☐ = your answer
 
 ---
 
+## ⚡ THE SHORT LIST — refreshed 2026-07-19 (answer this, ignore the rest)
+
+Everything below this section is the original long form; most of it is
+answered or superseded. This is what actually moves things now.
+
+### 1. Fifteen minutes of clicks — ships everything built today (no decisions)
+- **S1.** Push to GitHub via GitHub Desktop (nine local commits → Vercel auto-deploys).
+- **S2.** Vercel → Settings → Environment Variables: add `CRON_SECRET`
+  (any long random string) → server-side inbox sync goes live.
+- **S3.** Google Cloud console → OAuth consent screen → Scopes: add
+  `gmail.modify` + `calendar.events`; APIs & Services → Library: enable the
+  **Google Calendar API**. Then in the app: Settings → Mailboxes →
+  **Reconnect** each box (two-way archive) and **Enable calendar** on yours
+  (dashboard calendar + direct site-visit events).
+- **S4.** Deploy-day leftovers: confirm the old Google client secret was
+  deleted after rotation; optionally reset the Neon DB password.
+- **S5.** Optional: sign in `gh` (or add a GitHub PAT) on the mini so future
+  sessions can push commits themselves.
+
+### 2. Go-live data — the app is feature-complete; demo data is the blocker
+- **S6.** Where does each data type live today (files/exports)? customers ·
+  active projects · quote history · flame/inspection compliance history ·
+  catalog + price book. (= old **I1**)
+- **S7.** Is `Blank V.01.xlsx` the real template your data fits? (= **I2**)
+- **S8.** History depth — default: active + last 3 years compliance. (= **I3**)
+- **S9.** Real pricing numbers, or bless the defaults (Settings → Estimating
+  Rules is live-editable): flame mileage/labor/base/margin, repairs call-out/
+  parts margin/emergency multiplier, catalog price book. (= **E1–E5**)
+- **S10.** Real roster (names, sign-in emails, roles) — and are the
+  `@peaksystemsgroup.com` addresses Google Workspace accounts? (= **B4/B5**)
+- **S11.** Logo files → Settings → Branding uploads (light + dark). (= **G1**)
+
+### 3. One-line decisions that unlock parked builds
+- **S12. Site-intake rules-based generation** (your 7/19 call): what should it
+  produce — a draft quote skeleton from the intake fields? Which sections
+  drive it (lighting/AV inventories → line items?)? A sentence or two is
+  enough to scope it.
+- **S13. Full-page in-app calendar** (punch #2's last slice): still wanted now
+  that the dashboard card exists? If yes: month grid, week view, or both?
+- **S14. Needs-reply bell:** should threads you archived (in Peak or Gmail)
+  stop counting as "needs reply"? Today they nag forever. Recommend: yes.
+- **S15. Site-visit heads-up:** when a visit lands directly on a teammate's
+  calendar, want an in-app notification too, or is the calendar entry enough?
+- **S16.** Do you actually forward mail to a `log@` address? yes → we parse
+  it; no → dropped from the list. (= **C9**)
+- **S17.** Crew board: is the popover-form booking enough, or do you want true
+  drag-and-drop + time-off lanes? (= **H2**)
+- **S18.** Service-line defaults — confirm or tweak: L1 annual / L2 five-year
+  inspections w/ 60-day lead, soft quote gate, current repairs-intake fields,
+  service contracts parked. (= **F1–F5**)
+- **S19. Customer portal** (parked as unsolved, your call that AI wasn't the
+  answer): worth a 15-minute conversation — what is the customer actually
+  looking for when they open it?
+
+Not on the list on purpose: AI/API (deferred until rules hit their ceiling —
+your standing rule) and Monday-style UI (tabled 7/19).
+
+---
+
 ## A. Getting the live URL (the only section that gates anything)
 
 These need accounts only you can create. DEPLOY.md is the click-by-click
