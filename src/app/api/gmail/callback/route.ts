@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { getUser } from "@/lib/users";
+import { can } from "@/lib/team";
 import { gmailEnabled, isPersonalKey, userIdOfKey } from "@/lib/gmail/config";
 import { exchangeCode, fetchAccountEmail, verifyState } from "@/lib/gmail/oauth";
 import { saveConnection } from "@/lib/gmail/connections";
@@ -27,23 +28,29 @@ export async function GET(req: NextRequest) {
   const me = await getUser(uid);
   if (!me || !me.active) return NextResponse.redirect(new URL("/login", origin));
 
+  // Teammates without the admin Settings page land on their own Account page
+  // instead of the admin-lock card (C7 — self-serve mailbox connect).
+  const dest = can("manage_users", me.roles)
+    ? settings
+    : new URL("/account", origin);
+
   const sp = req.nextUrl.searchParams;
   const error = sp.get("error");
   if (error) {
-    settings.searchParams.set("gmail", "denied");
-    return NextResponse.redirect(settings);
+    dest.searchParams.set("gmail", "denied");
+    return NextResponse.redirect(dest);
   }
 
   const code = sp.get("code") || "";
   const state = verifyState(sp.get("state") || "");
   if (!code || !state) {
-    settings.searchParams.set("gmail", "badstate");
-    return NextResponse.redirect(settings);
+    dest.searchParams.set("gmail", "badstate");
+    return NextResponse.redirect(dest);
   }
   // the connect-flow initiator must match the current session (anti-CSRF)
   if (state.userId !== me.id) {
-    settings.searchParams.set("gmail", "badstate");
-    return NextResponse.redirect(settings);
+    dest.searchParams.set("gmail", "badstate");
+    return NextResponse.redirect(dest);
   }
 
   try {
@@ -57,11 +64,11 @@ export async function GET(req: NextRequest) {
       connectedBy: me.name,
       tokens,
     });
-    settings.searchParams.set("gmail", "connected");
-    settings.searchParams.set("mailbox", key);
+    dest.searchParams.set("gmail", "connected");
+    dest.searchParams.set("mailbox", key);
   } catch (err) {
     console.error("[gmail] callback failed:", err);
-    settings.searchParams.set("gmail", "error");
+    dest.searchParams.set("gmail", "error");
   }
-  return NextResponse.redirect(settings);
+  return NextResponse.redirect(dest);
 }
