@@ -135,7 +135,7 @@ export function PortalAccessCard({
             whiteSpace: "nowrap",
           }}
         >
-          👁 Preview portal
+          Preview portal
         </a>
       </div>
       <div style={{ fontSize: 11.5, color: "#9aa0ab", lineHeight: 1.5, marginBottom: 12 }}>

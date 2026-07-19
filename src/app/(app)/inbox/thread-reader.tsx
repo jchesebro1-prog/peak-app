@@ -42,7 +42,7 @@ export default function ThreadReader({
   onClose?: () => void;
   /** keeps the replied thread selected (prototype kept selectedId) */
   onAfterSend?: (id: string) => void;
-  /** D2 — when true, render the read-only "Summary ✨" affordance */
+  /** D2 — when true, render the read-only AI Summary affordance */
   aiEnabled?: boolean;
 }) {
   const router = useRouter();
@@ -588,7 +588,6 @@ export default function ThreadReader({
                   opacity: summarizing ? 0.6 : 1,
                 }}
               >
-                <span aria-hidden>✨</span>
                 Summary
               </button>
               {vm.resolvedCustomerId && (
@@ -611,7 +610,6 @@ export default function ThreadReader({
                     opacity: summarizing ? 0.6 : 1,
                   }}
                 >
-                  <span aria-hidden>✨</span>
                   Summarize customer history
                 </button>
               )}
@@ -681,7 +679,6 @@ export default function ThreadReader({
                     marginBottom: 6,
                   }}
                 >
-                  <span aria-hidden>✨</span>
                   {summaryKind === "customer" ? "Customer briefing" : "Thread summary"}
                 </div>
                 <div
@@ -1135,7 +1132,7 @@ export default function ThreadReader({
                 <div
                   style={{ padding: "0 12px 10px", fontSize: 11, color: "#9aa0ab", background: "#fafbfc" }}
                 >
-                  📎 {attachNote}{" "}
+                  {attachNote}{" "}
                   <span style={{ color: "#c0c5cd" }}>
                     (attachments are illustrative in this preview)
                   </span>

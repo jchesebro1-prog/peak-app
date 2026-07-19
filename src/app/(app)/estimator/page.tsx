@@ -137,7 +137,7 @@ export default async function EstimatorPage({
 
   /* ---- AI scope draft (Phase 8, D4): resolve the linked survey/inspection ----
      Only when the AI gate is on. ?surveyId= / ?inspectionId= links the source;
-     we resolve a friendly label here so the client can render the ✨ affordance
+     we resolve a friendly label here so the client can render the AI Draft affordance
      (the drafting itself happens server-side in draftQuoteScopeAction). */
   const ai = aiEnabled();
   let aiSource: AiSource | null = null;

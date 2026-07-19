@@ -46,8 +46,21 @@ export default function AiScopeModal({
   return (
     <ConfigModal
       width={640}
-      icon="✨"
-      iconSize={16}
+      icon={
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9L12 3z" />
+        </svg>
+      }
       title="Draft from survey/inspection"
       sub={<>From {sourceLabel} · review before adding</>}
       onClose={onClose}
@@ -78,7 +91,7 @@ export default function AiScopeModal({
     >
       {busy && (
         <div style={{ padding: "28px 4px", textAlign: "center", color: "#8c919c", fontSize: 13 }}>
-          Drafting scope and line items… ✨
+          Drafting scope and line items…
         </div>
       )}
 

@@ -1231,7 +1231,12 @@ export default function SurveyEditor({
                         </span>
                       )}
                       {locked && (
-                        <span style={{ fontSize: 13, color: "#aab0bb" }} title="Complete the kill questions to unlock">🔒</span>
+                        <span style={{ display: "inline-flex", color: "#aab0bb" }} title="Complete the kill questions to unlock">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <rect x="3" y="11" width="18" height="11" rx="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                          </svg>
+                        </span>
                       )}
                       {collapsible && !locked && (
                         <span style={{ fontSize: 11, color: "#aab0bb", display: "inline-block", transition: "transform .15s ease", transform: open ? "rotate(180deg)" : "none" }}>▾</span>
@@ -1353,7 +1358,7 @@ export default function SurveyEditor({
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
                             <span style={{ fontSize: 12, color: "#9aa0ab" }}>{draft.photos.length} of 8</span>
                             <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER_LT}`, borderRadius: 9, padding: "9px 13px", cursor: "pointer", minHeight: 40 }}>
-                              <span style={{ fontSize: 15, lineHeight: 1 }}>📷</span> Add photo
+                              Add photo
                               <input type="file" accept="image/*" capture="environment" multiple onChange={onPhotos} style={{ display: "none" }} />
                             </label>
                           </div>

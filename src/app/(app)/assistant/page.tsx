@@ -34,7 +34,19 @@ export default async function AssistantPage() {
               margin: "0 auto 14px",
             }}
           >
-            ✨
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9L12 3z" />
+            </svg>
           </div>
           <div style={{ fontSize: 16, fontWeight: 600 }}>
             The Assistant isn&#39;t enabled yet

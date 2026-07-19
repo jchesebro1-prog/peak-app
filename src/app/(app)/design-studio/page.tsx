@@ -25,17 +25,42 @@ function fmtWhen(at: number): string {
 
 type Card = {
   href: string;
-  emoji: string;
+  icon: React.ReactNode;
   title: string;
   desc: string;
   tag: string;
   ready: boolean;
 };
 
+/** Shared wrapper so the five tile icons render as one family. */
+function CardIcon({ children }: { children: React.ReactNode }) {
+  return (
+    <svg
+      width="26"
+      height="26"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ display: "block" }}
+    >
+      {children}
+    </svg>
+  );
+}
+
 const CARDS: Card[] = [
   {
     href: "/design-studio/steel",
-    emoji: "📐",
+    icon: (
+      <CardIcon>
+        <path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0Z" />
+        <path d="m14.5 12.5 2-2M11.5 9.5l2-2M8.5 6.5l2-2M17.5 15.5l2-2" />
+      </CardIcon>
+    ),
     title: "Steel Calculator",
     desc: "AISC beam capacity & member sizing, batten/bridle rigging loads, lineset weights → counterweight, motorized-hoist checks, and a section-property database + steel takeoff.",
     tag: "6 tools · 848-section database",
@@ -43,7 +68,12 @@ const CARDS: Card[] = [
   },
   {
     href: "/design-studio/lineset",
-    emoji: "🎭",
+    icon: (
+      <CardIcon>
+        <path d="M5 6h14M3 12h18M6 18h12" />
+        <path d="M5 4.5v3M19 4.5v3M3 10.5v3M21 10.5v3M6 16.5v3M18 16.5v3" />
+      </CardIcon>
+    ),
     title: "Lineset Builder",
     desc: "Auto-place a full lineset schedule on the 8-inch grid from stage width & depth — electrics, shells, CYC/rear, midstage, borders, legs, and general-purpose lines using the built-in rules.",
     tag: "8-inch grid auto-layout",
@@ -51,7 +81,15 @@ const CARDS: Card[] = [
   },
   {
     href: "/design-studio/weights",
-    emoji: "⚖️",
+    icon: (
+      <CardIcon>
+        <path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" />
+        <path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" />
+        <path d="M7 21h10" />
+        <path d="M12 3v18" />
+        <path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2" />
+      </CardIcon>
+    ),
     title: "Lineset Weights",
     desc: "Build a line schedule and get goods weight, per-line & hoist checks, counterweight brick combos, and load per support beam.",
     tag: "Weights → counterweight",
@@ -59,7 +97,12 @@ const CARDS: Card[] = [
   },
   {
     href: "/design-studio/motors",
-    emoji: "⚙️",
+    icon: (
+      <CardIcon>
+        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+        <circle cx="12" cy="12" r="3" />
+      </CardIcon>
+    ),
     title: "Motor Library",
     desc: "The ETC Prodigy motorized-hoist breakdown — P1 / P2 / P75 families with capacities, powerhead weights, per-line limits, and speeds. A quick reference while designing.",
     tag: "ETC Prodigy P1 · P2 · P75",
@@ -67,7 +110,12 @@ const CARDS: Card[] = [
   },
   {
     href: "/design",
-    emoji: "✏️",
+    icon: (
+      <CardIcon>
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+      </CardIcon>
+    ),
     title: "Design Estimator",
     desc: "Budgetary drapery & equipment designs — build a sandbox estimate that lands as a draft quote. Separate from the priced Quotes pipeline until you add it.",
     tag: "Budgetary designs → draft quote",
@@ -110,7 +158,7 @@ export default async function DesignStudioPage() {
               boxShadow: "0 1px 2px rgba(0,0,0,.04)",
             }}
           >
-            <div style={{ fontSize: 26, marginBottom: 8 }}>{c.emoji}</div>
+            <div style={{ marginBottom: 8 }}>{c.icon}</div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 5 }}>{c.title}</div>
             <div style={{ fontSize: 13, color: "#5b616e", lineHeight: 1.5, marginBottom: 12 }}>
               {c.desc}

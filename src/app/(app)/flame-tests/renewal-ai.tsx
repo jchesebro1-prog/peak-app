@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { draftRenewalEmailAction } from "./renewal-ai-actions";
 
 /**
- * D1 client control — the "Draft ✨" affordance in the Renewals-due card. Calls
+ * D1 client control — the "AI draft" affordance in the Renewals-due card. Calls
  * the server action, which drafts personalized copy with AI and lands it on
  * the SAME renewal draft the ✉ one-click flow uses (IDEAS #36: quote minted at
  * last year's price, proposal PDF attached). Shows a spinner while it runs,
@@ -79,7 +79,7 @@ export function RenewalDraftButton({ jobId }: { jobId: string }) {
           opacity: pending ? 0.7 : 1,
         }}
       >
-        {pending ? "Drafting…" : "Draft ✨"}
+        {pending ? "Drafting…" : "AI draft"}
       </button>
       {error && (
         <span

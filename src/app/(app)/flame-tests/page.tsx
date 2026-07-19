@@ -92,7 +92,7 @@ export default async function FlameTestsPage({
   const nameFor = (id: string | null) => (id ? custById.get(id) || "" : "");
 
   // AI env gate — process.env is server-only, so read it here and pass the
-  // boolean down; the Draft ✨ affordance renders only when true.
+  // boolean down; the AI draft affordance renders only when true.
   const aiOn = aiEnabled();
 
   /* ---- URL state: status filter + renewal window + map status visibility ---- */

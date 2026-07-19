@@ -1136,7 +1136,7 @@ export default function InspectionEditor({
                             </div>
                           ) : (
                             <label style={photoDrop}>
-                              <span style={{ fontSize: 16 }}>📷</span> Add photo
+                              Add photo
                               <input type="file" accept="image/*" capture="environment" onChange={(e) => onPickFile(e, (f) => setRubricPhoto(sec.s.key, f))} style={{ display: "none" }} />
                             </label>
                           )}
@@ -1269,7 +1269,7 @@ export default function InspectionEditor({
                             </div>
                           ) : (
                             <label style={{ ...photoDrop, height: 130 }}>
-                              <span style={{ fontSize: 16 }}>📷</span> Add before
+                              Add before
                               <input type="file" accept="image/*" capture="environment" onChange={(e) => onPickFile(e, (f) => setLogPhoto(l._uid, "beforePhoto", f))} style={{ display: "none" }} />
                             </label>
                           )}
@@ -1285,7 +1285,7 @@ export default function InspectionEditor({
                               </div>
                             ) : (
                               <label style={{ ...photoDrop, height: 130 }}>
-                                <span style={{ fontSize: 16 }}>📷</span> Add after
+                                Add after
                                 <input type="file" accept="image/*" capture="environment" onChange={(e) => onPickFile(e, (f) => setLogPhoto(l._uid, "afterPhoto", f))} style={{ display: "none" }} />
                               </label>
                             )}

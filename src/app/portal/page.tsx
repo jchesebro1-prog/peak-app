@@ -256,7 +256,7 @@ export default async function PortalPage({
           }}
         >
           <div style={{ fontSize: 12.5, color: "#8a6d1f", fontWeight: 600 }}>
-            👁 Team preview — this is exactly what {custName} sees in their portal. Actions here
+            Team preview — this is exactly what {custName} sees in their portal. Actions here
             still affect real data.
           </div>
           <Link

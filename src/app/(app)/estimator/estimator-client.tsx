@@ -1131,7 +1131,7 @@ export default function EstimatorClient({
                     color: ACCENT_INK,
                   }}
                 >
-                  Draft from survey/inspection ✨
+                  Draft from survey/inspection
                 </button>
               )}
               <button

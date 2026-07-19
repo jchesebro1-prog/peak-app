@@ -151,7 +151,7 @@ export function PastePreview({
                 opacity: aiBusy ? 0.7 : 1,
               }}
             >
-              {aiBusy ? (
+              {aiBusy && (
                 <span
                   aria-hidden
                   style={{
@@ -164,8 +164,6 @@ export function PastePreview({
                     animation: "pk-spin 0.7s linear infinite",
                   }}
                 />
-              ) : (
-                <span aria-hidden>✨</span>
               )}
               {aiBusy ? "Extracting…" : "Extract with AI"}
             </button>

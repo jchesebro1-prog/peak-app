@@ -27,7 +27,7 @@ export const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
 ];
 
-/** History-import depth on first connect (MASTER-QUESTIONS C3 ✦ last 90 days). */
+/** History-import depth on first connect (MASTER-QUESTIONS C3 — last 90 days). */
 export const IMPORT_WINDOW_DAYS = 90;
 
 /** Google OAuth / API endpoints. */

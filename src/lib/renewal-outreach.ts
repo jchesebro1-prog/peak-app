@@ -62,7 +62,7 @@ import { renderField } from "@/lib/templates";
  *
  * Idempotent by design: the quote is keyed on `renewalOf` and the draft on
  * the thread link, so clicking ✉ twice re-opens the same draft — and an
- * AI-drafted renewal (the ✨ button, D1/D40) for the same job is upgraded in
+ * AI-drafted renewal (the AI Draft button, D1/D40) for the same job is upgraded in
  * place (PDF attached, link flagged) instead of duplicated.
  */
 
@@ -830,7 +830,7 @@ async function upsertRenewalDraft(opts: {
   const existing = await findDraftByLink(opts.linkType, opts.linkId);
   if (existing) {
     // one renewal, one draft: refresh the quote PDF; adopt the copy only when
-    // the caller supplied it (the ✨ AI path) — hand-edits are never clobbered
+    // the caller supplied it (the AI draft path) — hand-edits are never clobbered
     await setDraftAttachments(existing.id, [opts.attachment]);
     if (opts.copyIsOverride)
       await updateDraft(existing.id, {
@@ -869,7 +869,7 @@ async function upsertRenewalDraft(opts: {
 /**
  * ✉ one-click flame-test renewal outreach (IDEAS #36). Returns the draft
  * thread + quote ids, or null when the job isn't a completed renewal anchor.
- * `copy` overrides the built-in template (used by the ✨ AI draft path).
+ * `copy` overrides the built-in template (used by the AI draft path).
  */
 export async function flameRenewalOutreach(
   jobId: string,

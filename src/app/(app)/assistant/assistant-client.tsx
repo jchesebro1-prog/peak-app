@@ -72,7 +72,19 @@ export default function AssistantClient({ meName }: { meName: string }) {
             flexShrink: 0,
           }}
         >
-          ✨
+          <svg
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9L12 3z" />
+          </svg>
         </span>
         <div>
           <div style={{ fontSize: 21, fontWeight: 600, letterSpacing: "-0.015em" }}>
@@ -162,7 +174,19 @@ export default function AssistantClient({ meName }: { meName: string }) {
                   marginTop: 2,
                 }}
               >
-                ✨
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9L12 3z" />
+                </svg>
               </span>
               <div style={{ minWidth: 0, flex: 1 }}>
                 {t.a != null ? (
