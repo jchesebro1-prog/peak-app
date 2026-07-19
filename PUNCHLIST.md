@@ -285,9 +285,11 @@ Leads Stage column, with canonical per-record tone maps so statuses color the sa
 everywhere. The shared-primitives layer (`components/ui.tsx`) already existed —
 convergence onto it is the standing rule as screens get touched.
 
-**Status:** PHASE 1 DONE — phases 2+ still need A/B/C above (which Monday paradigms;
-reskin vs interaction patterns like drag-to-update/inline edit; reference screens —
-screenshots would settle most of it)
+**Status:** TABLED (Jeff, 2026-07-19) — phase 1 (Monday-palette status pills on
+Quotes / Home pipeline / Leads, commit `a204da8`) stays in; everything further is
+parked. When revisited, the A/B/C questions above are still the starting point —
+screenshots of the team's actual Monday boards would settle most of it. If the
+phase-1 pills aren't wanted either, reverting `a204da8` is a one-commit undo.
 
 ---
 
