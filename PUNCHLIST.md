@@ -278,7 +278,16 @@ customizations.
 **Suggested first phase:** extract the duplicated component styles into shared primitives.
 It's worth doing regardless of Monday, and it's what makes B affordable.
 
-**Status:** OPEN — needs A/B/C before scoping
+**PHASE 1 SHIPPED 2026-07-19** (commit `a204da8`, D79): a shared Monday-style
+StatusPill (Monday's exact status palette — done-green, working-orange, stuck-red)
+now renders the Quotes status column + switcher, the Home pipeline chips, and the
+Leads Stage column, with canonical per-record tone maps so statuses color the same
+everywhere. The shared-primitives layer (`components/ui.tsx`) already existed —
+convergence onto it is the standing rule as screens get touched.
+
+**Status:** PHASE 1 DONE — phases 2+ still need A/B/C above (which Monday paradigms;
+reskin vs interaction patterns like drag-to-update/inline edit; reference screens —
+screenshots would settle most of it)
 
 ---
 
@@ -354,9 +363,17 @@ W/H, fullness, qty, gear, mode, hoist), and *calculated* (weight on batten, chec
 combo). The visual treatment should distinguish all three, and should make clear that editing
 a generated field may be overwritten on the next regeneration (see P1).
 
-**Suggested phasing:** (1) settle P1 — line identity and reconcile — since every other
-decision depends on it; (2) unify the data model behind one saved record (P3); (3) build the
-merged screen with the narrow-list + detail-pane layout (P5) and one settings drawer (P4);
+**Suggested phasing:** superseded — see status below.
+
+**Status:** DONE — implemented 2026-07-19 (commit `366fdce`, decision **D78**). One
+screen at /design-studio/lineset: generated schedule supplies rows, per-row weight
+editor (chain/track newly editable), live checks + KPI tiles. P1 solved with
+type#ordinal line identity (verified: regenerate keeps data, orphan notice +
+one-click clear, reattach-on-return); P2 unspecified lines excluded from totals and
+flagged ("M of N specified"); P3 v2 combined save + legacy adapter (old weights
+designs open as custom lines, saving creates a new combined record); P4 one settings
+drawer; P5 narrow 8-column master table with expanding-row editing. The weights
+route redirects; landing tile and nav entry removed.
 (4) add the unspecified-vs-zero state and rollup guard (P2).
 
 **Status:** OPEN — approach agreed, P1 needs a decision before build
