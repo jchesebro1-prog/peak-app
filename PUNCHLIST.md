@@ -861,6 +861,236 @@ the same store with cost/margin stripped.
 
 ---
 
+## 15. Suggested install timeframe on the estimate → auto-fills the project goal — OPEN
+
+**Area:** `src/app/(app)/estimator/estimator-client.tsx` (header rows), `estimator/actions.ts`
+(meta allowlist), `src/lib/stores/quotes.ts`, **`src/lib/stores/projects.ts:488-490`** (the handoff)
+
+**Reported:** 2026-07-19
+
+**Ask:** The estimate screen needs a suggested install timeframe — a "when does the customer
+need this" line — that tracks through so when an install project is opened it auto-fills that
+timeline as a goal. The line should default to a number of weeks depending on project scope
+(the specific defaults to be defined later).
+
+**Code-verified 2026-07-19 — this fills a real gap, and it's bigger than a new input box:**
+
+- **A quote has no forward-looking date field of any kind.** Every timestamp on a quote is a
+  *system event stamp* (`createdAt`, `updatedAt`, review dates, history entries). There is no
+  needed-by, lead time, or install window. Net-new field.
+- **The project dates it would feed are currently blind guesses.** `fromQuote()` sets:
+  ```js
+  targetDate   = ahead(labor ? 42 : 21)   // projects.ts:488  HARDCODED
+  installStart = labor ? ahead(38) : null  // :489             HARDCODED
+  installEnd   = labor ? ahead(44) : null  // :490             HARDCODED
+  ```
+  So **every converted project's target is `now + 42 days`, ignoring the quote entirely.** The
+  shape already encodes a crude scope default (42 for labor, 21 for materials-only) — it's just
+  not derived from anything anyone can set. Lines 488-490 are the exact insertion point.
+- **`targetDate` is load-bearing far beyond the Gantt.** It drives procurement order-by dates and
+  the "Order overdue" risk flag, the "No crew scheduled, install in Nd" flag, the field-work queue
+  sort, the target diamond on the schedule, and — **most consequentially — the billing forecast in
+  Reports** (`reports/page.tsx:892` bills full value at target and collects net-30 after). Today
+  that entire forecast is anchored on a hardcoded 42-day guess.
+- **There is no write path for project dates at all.** `updateProject()` exists and has **zero
+  callers app-wide**; there is no `type="date"` input anywhere under `projects/` or `estimator/`.
+  The only non-conversion ingest is the CSV importer. **So a PM cannot correct a date today** —
+  which means shipping this without an edit control pipes an estimator's guess straight into the
+  revenue forecast with no way to fix it.
+- **The meta save path is a strict allowlist.** `updateQuoteMetaAction` (`actions.ts:146-157`)
+  silently drops unknown fields by design. A new field must be threaded through it plus
+  `SavePayload`, `saveQuoteAction`, `InitialQuote`, and `initialFrom()`.
+- **UI slot:** the estimator header already has three stacked rows — top bar, customer/venue
+  context bar, and a full-width "Quote note" row. **A fourth row modeled on the quote-note row is
+  the natural home.** Note the customer select's existing tooltip already says *"flows to the
+  project when this quote is won"* — same conceptual slot.
+
+**Scope signals actually available at quote time, best to worst:**
+1. **`spec.mobs[]` — `{type, days, crew, discipline}`.** The richest by far: `days` and `crew` are
+   literally install duration and headcount, already carried onto the project at conversion. Only
+   present when the labor modal was used.
+2. `spec.sections[]` labor-item count / section count.
+3. `q.value` bands — always populated, the most reliable fallback.
+4. `quoteHasLabor(q)` — the current 42/21 split.
+
+**Trap to avoid:** `deriveProcurement()` branches on `q.spec.systems`, but **nothing anywhere
+writes `spec.systems`** — the estimator saves only `{sections, mobs}`. It is always `[]` and the
+fallback always fires. **Do not build scope defaults on `spec.systems`.**
+
+**Decisions Jeff needs to make:**
+- **A. Relative weeks or an absolute date?** "Defaults to a number of weeks" implies relative —
+  but a quote can be won *months* after it's written, and `targetDate` is absolute everywhere
+  downstream. **Weeks-from-what: quote date, or win date?** Recommend storing weeks *and*
+  resolving from the win date at conversion, so a stale estimate doesn't produce a past-due
+  project.
+- **B. Does the timeframe set `targetDate` only, or the whole triplet?** Today install is
+  hardcoded as target−4 → target+2. If "when they need this" means *install complete by*, the
+  triplet shifts together; if it means *install begins*, the relationship inverts.
+- **C. Customer-facing or internal?** A "needed by" line is arguably content for the quote PDF,
+  not just internal metadata. Product call.
+- **D. Back-fill.** Quotes won before this ships have no timeframe, and `syncProjectsFromQuotes`
+  re-runs on every Projects page load — so the 42-day fallback stays hot. Silent default, or
+  surface "no timeframe set"?
+- **E. Should a PM be able to edit the date afterward?** Strongly recommend yes, given it feeds
+  the billing forecast. That's a net-new write path either way.
+
+**Status:** OPEN — needs A–E. The scope-default *rules* can be defined later (Jeff's note); A and
+B gate the build regardless.
+
+---
+
+## 16. Notify the company when a project is sold and when it's completed — OPEN
+
+**Area:** `src/app/(app)/quotes/actions.ts:25-43` (won), `src/app/(app)/projects/actions.ts:100-111`
+(signoff), `src/lib/gmail/bridge.ts`, `src/lib/stores/comms.ts`, `src/lib/stores/notif-prefs.ts`
+
+**Reported:** 2026-07-19
+
+**Ask:** An automated email batch sent when a project is **sold** and when it's **completed**, so
+the rest of the company can track them. **Or** it becomes a task/lead for an employee to follow up
+— for an install sale the PM reaches out; for a project close, the salesperson follows up on how
+it went.
+
+**Code-verified 2026-07-19 — read this before choosing the email route.**
+
+**What fires today:** nothing. A quote going **won** runs four record syncs and a
+`revalidatePath` — **no email, no notification, no log**. A project reaching **complete** writes
+the signoff and bumps the stage — **zero side effects**. So both hook points are clean.
+
+**Five findings that argue against automated email as the first implementation:**
+
+1. **Unattended sending already exists and is unaudited.** The Gmail cron (`vercel.json`, every
+   5 min) and the boot timer both call `checkMailIfStale()`, which calls **`flushOutbox()`
+   (`comms.ts:1136`) → `dispatchOutbound` → `sendRaw`**. This is not a read-only sync — it can put
+   mail on the wire. Blast radius is small today (only threads with a `queued` message), but the
+   machinery is live on a 5-minute cron and nobody has reviewed it. **Adding a batch would widen a
+   channel that's already open, not open a new one.**
+2. **The recipients are guessed addresses that cannot be corrected.** Roster emails are derived
+   `firstInitial+lastName@peaksystemsgroup.com` (`team.ts:44-52`) and there is **no UI to edit an
+   existing member's email** (this is punch item 9). A company-wide batch would fan out to
+   addresses nobody has ever confirmed. **Note: site-visit invites have already been quietly
+   mailing these guessed addresses** (`site-visit-actions.ts:92`).
+3. **No dedupe on the failure path, and the triggers are re-runnable by design.**
+   `syncProjectsFromQuotes()` runs on **every Projects page load**, so "sold" is detected by
+   re-running a sync, not by an event. The only idempotency mechanism anywhere is the `!m.gmailId`
+   filter — and on a send failure the message keeps no id and is **explicitly retried later**
+   (`bridge.ts:145-148`). There is no send-attempt counter, no idempotency key, no rate limit, no
+   cooldown. **Any hook here needs its own persisted "already notified" marker, which does not
+   exist.**
+4. **No email log or audit trail exists.** No `email_log` table, no audit table. If a batch
+   double-fires or misfires, there is nothing to inspect afterward.
+5. **Failures are silent.** A disconnected mailbox or revoked refresh token throws, gets caught,
+   and is `console.error`'d on a serverless function. No UI surface, no alert. Also, the sending
+   mailbox fallback is **non-deterministic** — "the first shared mailbox in arbitrary DB order"
+   (`bridge.ts:376-381`).
+
+**And there's no in-app channel to route to instead.** `notif-prefs` is **only a mute list** over
+a bell that is recomputed from live stores on every page render (`nav-counts.ts:33`). Nothing is
+persisted, nothing is marked read, there are no notification rows. **There is no notification feed
+to post to — it would have to be built.**
+
+**Recommendation: take Jeff's own alternative first — make it a task, not an email.**
+It needs no send infrastructure, no verified addresses, no dedupe worries, and it produces exactly
+the accountability described ("PM reaches out", "salesperson follows up"). It also composes
+directly with item 17, which is being asked for anyway: **a sold project auto-creates a
+"PM: reach out to customer" task; a completed project auto-creates a "Sales: follow up on how it
+went" task.** Email can layer on later once item 9 fixes the addresses and a send log exists.
+
+**Decisions Jeff needs to make:**
+- **A. Task-first or email-first?** Recommend task-first, per above. If email is genuinely
+  required for company-wide visibility, it should wait on item 9 (real addresses) plus a send log
+  and an idempotency marker — **that's a prerequisite, not a nice-to-have.**
+- **B. If email: who receives it?** Everyone, or role-based (PMs, sales, leadership)? Which
+  mailbox does it send *from* — the fallback is currently arbitrary.
+- **C. Batch or per-event?** "Batch" suggests a digest (e.g. daily roll-up of sold/completed),
+  which is far safer than per-event sends: one scheduled job, one dedupe window, far less
+  double-fire exposure. **Recommend a digest over per-event if email happens at all.**
+- **D. "Completed" has two definitions.** A project can reach `complete` via signoff **or** via a
+  direct stage change with no signoff. Which one triggers?
+- **E. Who is "the PM"?** There is no PM role or field on a project — only `owner` (a name string,
+  the estimator). Assigning a follow-up task needs someone to assign *to*.
+
+**Status:** OPEN — needs A–E. **Do not build the email path before item 9 and a send log.**
+
+---
+
+## 17. Tasks on install projects and quotes (review / communication checklist) — OPEN
+
+**Area:** `src/lib/stores/projects.ts:161-168` (`ProjectTask`), `src/app/(app)/projects/view.tsx`,
+`src/app/(app)/field-work/`, `src/lib/stores/quotes.ts`
+
+**Reported:** 2026-07-19
+
+**Ask:** Implement tasks in general for install projects and quotes, so we can review quicker
+whether the quote and project were done properly and everything was communicated.
+
+**Code-verified 2026-07-19 — roughly 15% of this exists.**
+
+**What's real today:**
+```ts
+type ProjectTask = { id, title, section, assignee, done, doneAt? }   // projects.ts:161-168
+```
+An array embedded on the project doc. **No due date. No status beyond a `done` boolean. No
+priority, no notes, no createdBy.** `assignee` is a free-text display name, `section` a free-text
+grouping (seeds use "Mobilize"/"Install"/"Closeout", nothing enforces them).
+
+- **Only two mutators exist:** `addTask` and `toggleTask`. **No delete, no edit, no reassign.**
+- **The office Projects view has no Tasks tab at all** — the tab set is
+  `overview/procurement/deliveries/crew/timeline/signoff`. Tasks appear only as a derived
+  "N / M tasks" progress bar. `addTaskAction` and `toggleTaskAction` exist in
+  `projects/actions.ts` and are **dead code — zero callers app-wide.**
+- **The only working task UI is mobile Field Work**, and it hardcodes section `"Install"` and
+  assignee = the signed-in user. You cannot set an assignee, section, or due date anywhere.
+- **Quotes have no tasks whatsoever.** The closest thing is `QuoteReview` — a single approval
+  state (`none → in_review → approved/changes`) on the whole record, not a list of checkable
+  items. Designs have the identical pattern.
+- **Task creation is 100% manual.** Nothing auto-generates from stage or template; the only
+  non-empty task arrays in the repo are hand-written seed fixtures.
+
+**No generic to-do abstraction exists.** There is no tasks table, no shared `Task` type, no
+assignments table. The only shared *convention* is a field named `assignedTo` holding a display
+name (comms, inspections, surveys, repairs, flame jobs, site visits) — and `ProjectTask` doesn't
+even use that name, it uses `assignee`.
+
+**The template pattern to copy already exists:** `blankRubric()` (`inspections.ts:381-401`)
+expands a static template constant into per-record instances with stable synthetic keys. And
+`findingsFromRubricRating()` uses a **coverage-key de-dup trick** (`inspections.ts:882-886`) to
+avoid re-creating items on re-runs — **directly reusable if review tasks are auto-generated**,
+which matters because the sync that would trigger them re-runs on every page load (see item 16).
+
+**Reliability note:** every assignment in the app is a **display-name string**, and several stores
+hardcode `DEFAULT_ACTOR = "Jeff Chesebro"`. A proper user identity exists and is unused for
+assignment (`users.id`, carried on the session). Renaming a member silently breaks name-matched
+lookups — the same fragility flagged in item 9.
+
+**Decisions Jeff needs to make:**
+- **A. Embedded or promoted?** Keeping tasks embedded on the parent doc is consistent with every
+  other list in this app and is cheap — **but it makes "all my open tasks across projects and
+  quotes" a full scan of two collections, and gives a task no independent identity** for
+  notifications or assignment queries. If the goal is "review quicker", a cross-record task list
+  is probably the point. **This is the load-bearing decision.**
+- **B. Auto-generated checklist, manual, or both?** "Review whether the quote and project were
+  done properly and everything communicated" reads like a **standard template per stage** —
+  which is the `blankRubric()` pattern. **Jeff would need to define the actual checklist items.**
+- **C. Assignee: name string (app convention) or user id (reliable)?** Recommend user id with a
+  denormalized name for display, accepting the inconsistency — anything gating a review shouldn't
+  break on a rename.
+- **D. Do tasks need due dates and a status beyond done?** For a review checklist, due dates may
+  be unnecessary; for the item 16 follow-ups ("PM reaches out"), they're essential.
+- **E. Should overdue/open tasks surface in the bell?** `nav-counts.ts` currently aggregates only
+  derived state and has **no write side** — it's the right shape to plug real tasks into.
+
+**Net-new work:** due date + richer status on the task type; edit/delete/reassign mutators; a task
+concept on quotes (currently zero); template definition + expansion + de-dup; an office-side Tasks
+tab; wiring the two dead server actions; and the assignee-identity decision.
+
+**Related:** item 16 depends on this — the recommended task-first implementation of "notify when
+sold/completed" is exactly an auto-generated task with an assignee.
+
+**Status:** OPEN — needs A–E. A is the decision that shapes everything else.
+
+---
+
 ## IDEA (not a punch-list item) — Consulting as a project type
 
 **Raised:** 2026-07-19. Jeff was explicit this is *"more of an idea than punch list"*.
