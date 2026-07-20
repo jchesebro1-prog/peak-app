@@ -23,7 +23,7 @@ import type { QueueItem, QueueSource } from "@/lib/queue-types";
  * client view can import them; re-exported so server callers have one
  * import site. */
 export type { QueueItem, QueueSource } from "@/lib/queue-types";
-export { SOURCE_LABEL } from "@/lib/queue-types";
+export { SOURCE_LABEL, queueCardCounts } from "@/lib/queue-types";
 
 const DAY = 86_400_000;
 

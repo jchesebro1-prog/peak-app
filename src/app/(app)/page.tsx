@@ -36,8 +36,10 @@ import {
 } from "@/lib/stores/comms";
 import HomeMyDesigns, { type DesignCard } from "./home-my-designs";
 import HomeCalendar from "./home-calendar";
+import HomeQueue, { type QueueRow } from "./home-queue";
 import HomeTabs from "./home-tabs";
 import { loadHomeAgenda } from "@/lib/agenda";
+import { loadQueue, queueNow, queueCardCounts } from "@/lib/queue";
 import { list as catalogList } from "@/lib/stores/catalog";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 import HomeGreeting from "./home-greeting";
@@ -110,6 +112,19 @@ function shortTitle(n?: string | null): string {
   return (n || "").split(" — ")[0];
 }
 
+/** Home queue card row label — same day-bucket text as QueueView's dueLabel
+ *  (queue/view.tsx), minus the tone: this card doesn't color individual
+ *  rows, only the header's overdue badge. `ts === 0` (undated) renders "". */
+function queueRowDueLabel(ts: number, now: number): string {
+  if (!ts) return "";
+  const days = Math.round((ts - now) / DAY);
+  if (days < 0) return `${Math.abs(days)}d overdue`;
+  if (days === 0) return "Today";
+  if (days === 1) return "Tomorrow";
+  if (days <= 7) return `${days}d`;
+  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 function first(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
 }
@@ -179,6 +194,7 @@ export default async function HomePage({
     roster,
     boxCountsArr,
     catalogParts,
+    queueItems,
   ] = await Promise.all([
     getQuotes(),
     getAllDesigns(),
@@ -190,6 +206,7 @@ export default async function HomePage({
     activeUsers(),
     Promise.all(boxes.map((b) => folderCounts(b.id, me))),
     catalogList(),
+    loadQueue(me),
   ]);
   const books = priceBooks(catalogParts);
 
@@ -200,6 +217,18 @@ export default async function HomePage({
   /* ---- dashboard calendar (D77) — next 14 days via the shared loader ---- */
   const { gmailOn, calendarOn, items: agenda } = await loadHomeAgenda(user.id, me);
 
+  /* ---- my queue (D98) — the queue had no dashboard presence before this
+   *  card; `now` is read once here (queueNow(), impure by design) so the
+   *  count and every row's label measure against the same instant. */
+  const queueClockNow = queueNow();
+  const { open: queueOpen, overdue: queueOverdue } = queueCardCounts(queueItems, queueClockNow);
+  const queueRows: QueueRow[] = queueItems.slice(0, 5).map((it) => ({
+    key: it.key,
+    title: it.title,
+    context: it.context,
+    dueLabel: queueRowDueLabel(it.due, queueClockNow),
+    href: it.href,
+  }));
 
   /* ---- my pipeline + stat tiles ---- */
 
@@ -526,6 +555,11 @@ export default async function HomePage({
 
       {/* stat tiles */}
       <HomeStats stats={stats} />
+
+      {/* ===== My Queue (D98) — placed first among the content cards so
+          urgency is visible without scrolling; the queue previously had no
+          dashboard presence at all. ===== */}
+      <HomeQueue open={queueOpen} overdue={queueOverdue} rows={queueRows} />
 
       {/* ===== Inbox dashboard ===== */}
       <HomeInbox

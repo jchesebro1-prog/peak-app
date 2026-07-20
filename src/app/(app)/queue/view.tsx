@@ -4,7 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, EmptyState, PageHeader, Pill } from "@/components/ui";
-import { SOURCE_LABEL, type QueueItem, type QueueSource } from "@/lib/queue-types";
+import {
+  SOURCE_LABEL,
+  queueCardCounts,
+  type QueueItem,
+  type QueueSource,
+} from "@/lib/queue-types";
 import { createAssignmentAction, setAssignmentDoneAction } from "./actions";
 
 /**
@@ -84,7 +89,7 @@ export default function QueueView({
   const [dueStr, setDueStr] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
-  const overdue = items.filter((i) => i.due && i.due < now).length;
+  const overdue = queueCardCounts(items, now).overdue;
   const isMe = who === me;
 
   async function add() {

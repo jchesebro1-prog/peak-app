@@ -197,5 +197,19 @@ ok(activeKeyFor("/calendar") === "home", "calendar lights Home — this path had
 ok(activeKeyFor("/inbox") === "home", "inbox lights Home");
 ok(activeKeyFor("/reports") === "reports", "reports still lights its own key until General is dissolved");
 
+/* --- home queue card (D98) --- */
+import { queueCardCounts } from "@/lib/queue";
+
+const NOW = 1_800_000_000_000;
+const qi = (due: number) => ({ key: "k" + due, source: "assignment", title: "t", context: "c", due, href: "/queue", writable: true }) as any;
+
+ok(queueCardCounts([], NOW).open === 0, "empty queue reports zero open");
+ok(queueCardCounts([], NOW).overdue === 0, "empty queue reports zero overdue");
+ok(queueCardCounts([qi(NOW - 1000), qi(NOW + 1000)], NOW).open === 2, "open counts every item loadQueue returned");
+ok(queueCardCounts([qi(NOW - 1000), qi(NOW + 1000)], NOW).overdue === 1, "overdue counts only items due before now");
+ok(queueCardCounts([qi(0)], NOW).overdue === 0, "undated items (due === 0) are never overdue");
+ok(queueCardCounts([qi(0)], NOW).open === 1, "undated items still count as open");
+ok(queueCardCounts([qi(NOW)], NOW).overdue === 0, "an item due exactly now is not yet overdue");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
