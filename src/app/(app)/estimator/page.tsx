@@ -11,7 +11,6 @@ import {
 } from "@/lib/stores/customers";
 import { reviewers as reviewerUsers } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
-import { aiEnabled } from "@/lib/ai/config";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
 import EstimatorClient from "./estimator-client";
@@ -138,13 +137,12 @@ export default async function EstimatorPage({
   const rawId = Array.isArray(sp.id) ? sp.id[0] : sp.id;
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
-  /* ---- AI scope draft (Phase 8, D4): resolve the linked survey/inspection ----
-     Only when the AI gate is on. ?surveyId= / ?inspectionId= links the source;
-     we resolve a friendly label here so the client can render the AI Draft affordance
-     (the drafting itself happens server-side in draftQuoteScopeAction). */
-  const ai = aiEnabled();
+  /* ---- Scope draft source (S12/D83 — rules-based): resolve the linked
+     survey/inspection. ?surveyId= / ?inspectionId= links the source; we
+     resolve a friendly label so the client can render the Draft-scope
+     affordance (assembly happens server-side in draftQuoteScopeAction). */
   let aiSource: AiSource | null = null;
-  if (ai) {
+  {
     const surveyId = one(sp.surveyId);
     const inspectionId = one(sp.inspectionId);
     if (surveyId) {
@@ -230,7 +228,6 @@ export default async function EstimatorPage({
       reviewers={reviewerRows.map((u) => u.name)}
       me={user.name}
       canApprove={can("approve", user.roles)}
-      aiEnabled={ai}
       aiSource={aiSource}
     />
   );

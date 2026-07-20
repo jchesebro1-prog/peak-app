@@ -82,12 +82,8 @@ export const AI_FEATURES: AiFeature[] = [
     desc: "Turn messy pasted text (a price list, an emailed spec, a copied table) into clean import rows.",
     where: "Import → paste step",
   },
-  {
-    key: "scope",
-    label: "Quote scope & line drafting",
-    desc: "Draft quote scope text and suggested line items from a field survey or inspection's findings.",
-    where: "Estimator → new quote",
-  },
+  // "scope" retired (S12/D83, 2026-07-19): estimate-scope drafting is
+  // rules-based now — assembled from the survey/inspection record, no model.
   {
     key: "assistant",
     label: "Ask about your business data",

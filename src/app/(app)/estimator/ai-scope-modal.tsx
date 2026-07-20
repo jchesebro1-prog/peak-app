@@ -4,14 +4,12 @@ import type { DraftedLine } from "@/lib/ai/features";
 import { ACCENT_INK, ACCENT_SOFT, ConfigModal, LBL } from "./est-ui";
 
 /**
- * AI scope review panel (Phase 8, D4). Renders the AI-drafted scope paragraph
- * and suggested line items (description / qty / unit — NO price) for the
- * estimator to review. Modeled on the configurator modals (curtain-modal.tsx).
- *
- * GUARDRAIL (D6): the AI never sets a price. "Insert scope" drops the paragraph
- * into the quote note; each "Add" routes the line through the estimator's own
- * add-line path with the price left blank/zero for the estimator to fill in.
- * Nothing here writes to the quote directly.
+ * Scope review panel (S12/D83 — rules-based). Shows the scope paragraph
+ * assembled deterministically from the linked survey/inspection's captured
+ * fields, for the estimator to review and insert into the quote note. Line
+ * items are always added manually (Jeff's call); the legacy suggested-lines
+ * list renders only if a caller ever supplies lines. Nothing here writes to
+ * the quote directly. Modeled on the configurator modals (curtain-modal.tsx).
  */
 
 export default function AiScopeModal({
@@ -66,7 +64,8 @@ export default function AiScopeModal({
       onClose={onClose}
       footerLeft={
         <span style={{ fontSize: 11.5, color: "#8c919c" }}>
-          AI drafts scope &amp; items only — you set every price.
+          Assembled from the record&apos;s captured fields — edit it like any
+          note. You add the items and set every price.
         </span>
       }
       footerRight={
@@ -91,7 +90,7 @@ export default function AiScopeModal({
     >
       {busy && (
         <div style={{ padding: "28px 4px", textAlign: "center", color: "#8c919c", fontSize: 13 }}>
-          Drafting scope and line items…
+          Assembling the scope of work…
         </div>
       )}
 
@@ -179,7 +178,8 @@ export default function AiScopeModal({
             </div>
           </div>
 
-          {/* suggested lines */}
+          {/* suggested lines (legacy — the rules path sends none) */}
+          {lines != null && lines.length > 0 && (
           <div>
             <label style={LBL}>
               Suggested line items{" "}
@@ -194,11 +194,7 @@ export default function AiScopeModal({
                 · price blank — added to {targetSection || "the first system"}
               </span>
             </label>
-            {!lines || lines.length === 0 ? (
-              <div style={{ fontSize: 13, color: "#8c919c", padding: "8px 0" }}>
-                No line items were suggested.
-              </div>
-            ) : (
+            {(
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                 {lines.map((ln, i) => {
                   const added = !!addedLines[i];
@@ -253,6 +249,7 @@ export default function AiScopeModal({
               </div>
             )}
           </div>
+          )}
         </>
       )}
     </ConfigModal>

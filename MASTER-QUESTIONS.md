@@ -60,10 +60,11 @@ until the backend is fully working — revisit before customer-facing deploy.
 - **S11.** Logo files → Settings → Branding uploads (light + dark). (= **G1**)
 
 ### 3. One-line decisions that unlock parked builds
-- **S12. Site-intake rules-based generation** (your 7/19 call): what should it
-  produce — a draft quote skeleton from the intake fields? Which sections
-  drive it (lighting/AV inventories → line items?)? A sentence or two is
-  enough to scope it.
+- ~~**S12. Site-intake rules-based generation**~~ **ANSWERED + BUILT (D86,
+  2026-07-19):** estimate scopes only, items stay manual. The estimator's
+  draft-scope button now assembles the scope deterministically from the
+  linked survey/inspection's captured fields — the AI "scope" feature is
+  retired.
 - **S13. Full-page in-app calendar** (punch #2's last slice): still wanted now
   that the dashboard card exists? If yes: month grid, week view, or both?
 - **S14. Needs-reply bell:** should threads you archived (in Peak or Gmail)

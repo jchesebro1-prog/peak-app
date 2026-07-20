@@ -227,7 +227,6 @@ export default function EstimatorClient({
   reviewers,
   me,
   canApprove,
-  aiEnabled,
   aiSource,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
@@ -552,10 +551,10 @@ export default function EstimatorClient({
     setOpenCatalog(null);
   };
 
-  /* ---- AI scope draft (Phase 8, D4) ----
-     The AI drafts a scope paragraph + suggested lines (no price). "Insert
-     scope" appends the paragraph to the quote note; each "Add" routes a line
-     through pushItems() with cost/price 0 for the estimator to fill in. */
+  /* ---- Scope draft from survey/inspection (S12/D83 — rules-based) ----
+     Deterministic: the linked record's captured fields are assembled into a
+     scope paragraph (no model call, no line items — Jeff adds items
+     manually). "Insert scope" appends the paragraph to the quote note. */
   const aiTargetSection = (): SpecSection | null =>
     sections.find((s) => s.id === activeId) || sections[0] || null;
 
@@ -1114,11 +1113,11 @@ export default function EstimatorClient({
                   <option value="lost">Lost</option>
                 </select>
               </div>
-              {aiEnabled && aiSource && (
+              {aiSource && (
                 <button
                   type="button"
                   onClick={openAiDraft}
-                  title={"Draft scope & line items from " + aiSource.label}
+                  title={"Assemble the scope of work from " + aiSource.label}
                   style={{
                     fontFamily: "var(--font-ui)",
                     fontSize: 13,
@@ -1878,7 +1877,7 @@ export default function EstimatorClient({
               onClose={() => setLaborFor(null)}
             />
           )}
-          {aiEnabled && aiSource && aiOpen && (
+          {aiSource && aiOpen && (
             <AiScopeModal
               sourceLabel={
                 (aiSource.kind === "survey" ? "field survey" : "inspection") +

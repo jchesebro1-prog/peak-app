@@ -143,65 +143,13 @@ export async function extractRows(input: {
 }
 
 /* ============================================================
-   D4 — Quote scope & line drafting (from survey / inspection)
-   ============================================================ */
+   D4 — Quote scope drafting: RETIRED (S12, 2026-07-19)
+   ============================================================
+   Scope drafting is rules-based now (estimator/actions.ts
+   draftQuoteScopeAction assembles the record's own fields — no model).
+   DraftedLine survives as the modal's legacy line shape. */
 
 export type DraftedLine = { description: string; qty: number; unit: string };
-export type QuoteDraft = { scope: string; lines: DraftedLine[] };
-
-export async function draftQuoteScope(input: {
-  sourceLabel: string; // "field survey" | "inspection"
-  customerName?: string;
-  venue?: string;
-  findings: string; // pre-formatted survey/inspection findings + measurements
-}): Promise<QuoteDraft> {
-  const system =
-    COMPANY_CONTEXT +
-    "\n\nYou help an estimator turn a field survey or inspection's findings into the " +
-    "starting point of a quote. From the findings, write (1) a short scope-of-work " +
-    "paragraph in the company's voice, and (2) a list of suggested line items describing " +
-    "the work/materials, each with a quantity and unit (e.g. 'ea', 'lf', 'hr', 'set'). " +
-    "Base every line on the findings — do NOT invent prices (leave pricing to the " +
-    "estimator), do NOT invent measurements not given, and keep line descriptions " +
-    "specific and buildable. If a quantity is unknown, use 1.";
-  const schema = {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      scope: { type: "string" },
-      lines: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            description: { type: "string" },
-            qty: { type: "number" },
-            unit: { type: "string" },
-          },
-          required: ["description", "qty", "unit"],
-        },
-      },
-    },
-    required: ["scope", "lines"],
-  };
-  const facts = [
-    input.customerName ? `Customer: ${input.customerName}` : "",
-    input.venue ? `Venue: ${input.venue}` : "",
-    `Source: ${input.sourceLabel}`,
-    "",
-    "Findings:",
-    input.findings,
-  ]
-    .filter((s) => s !== undefined)
-    .join("\n");
-  return generateJson<QuoteDraft>({
-    system,
-    prompt: "Draft the scope and line items from these findings:\n\n" + facts,
-    maxTokens: 1500,
-    schema,
-  });
-}
 
 /* ============================================================
    D5 — Ask about your business data

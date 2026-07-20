@@ -17,8 +17,7 @@ import {
   type QuoteReview,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
-import { aiEnabled } from "@/lib/ai/config";
-import { draftQuoteScope, type DraftedLine } from "@/lib/ai/features";
+import type { DraftedLine } from "@/lib/ai/features";
 import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
 import {
   get as getInspection,
@@ -305,7 +304,6 @@ export async function draftQuoteScopeAction(input: {
   inspectionId?: string;
 }): Promise<DraftScopeResult> {
   await requireUser();
-  if (!aiEnabled()) return { ok: false, error: "AI features are not enabled." };
 
   try {
     let sourceLabel: string;
@@ -338,13 +336,19 @@ export async function draftQuoteScopeAction(input: {
       };
     }
 
-    const { scope, lines } = await draftQuoteScope({
-      sourceLabel,
-      customerName,
-      venue,
-      findings,
-    });
-    return { ok: true, scope, lines };
+    // Rules-based scope assembly (S12/D83 — Jeff: "it should just generate
+    // estimate scopes, that is it"; items stay manual, no model call). The
+    // scope is the record's own captured fields, standard-labeled: the
+    // field-captured scope/narrative first, then the context an estimator
+    // needs while pricing. Deterministic — same record, same text.
+    const header =
+      "Scope of work — from " +
+      sourceLabel +
+      (venue ? " at " + venue : "") +
+      (customerName ? " (" + customerName + ")" : "") +
+      ":";
+    const scope = header + "\n\n" + findings;
+    return { ok: true, scope, lines: [] };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }

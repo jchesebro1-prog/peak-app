@@ -190,8 +190,7 @@ export type EstimatorProps = {
   reviewers: string[];
   me: string;
   canApprove: boolean;
-  /** AI env gate (server-computed). When false, no AI affordance renders. */
-  aiEnabled: boolean;
-  /** Linked survey/inspection to draft from, or null. Only set when aiEnabled. */
+  /** Linked survey/inspection to assemble the scope from, or null
+   *  (S12/D83 — rules-based, no AI gate). */
   aiSource: AiSource | null;
 };

@@ -849,3 +849,16 @@ Anything you want changed, just say so — none of these are hard to reverse.
   `.data-corrupt-20260719/`; demo data reseeded. D80/D83/D84 still have no
   entries here — their detail lives in PUNCHLIST statuses and commits
   901965f / 156fe8d / 210a43b.
+- **D86. Estimate-scope drafting went rules-based; the AI "scope" feature is
+  retired** (S12, Jeff 2026-07-19: intake generation = "estimate scopes only,
+  items stay manual"; code written by the 7/19 punch-list session, committed
+  here after verification). `draftQuoteScopeAction` no longer calls a model:
+  it assembles the scope-of-work paragraph deterministically from the linked
+  survey/inspection's own captured fields (same record → same text) and
+  returns no suggested lines. The `aiEnabled` gate is gone from the whole
+  scope path (page → props → client → action), so the draft-scope affordance
+  works with or without an ANTHROPIC_API_KEY; "scope" was removed from
+  AI_FEATURES and the unused `draftQuoteScope` model call was deleted
+  (`DraftedLine` survives as the modal's legacy line shape). Verified:
+  typecheck clean; /estimator?surveyId=FS-1042 renders the assemble-scope
+  affordance against the running dev server.
