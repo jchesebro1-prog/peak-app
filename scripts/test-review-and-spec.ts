@@ -198,7 +198,7 @@ ok(activeKeyFor("/inbox") === "home", "inbox lights Home");
 ok(activeKeyFor("/reports") === "reports", "reports still lights its own key until General is dissolved");
 
 /* --- home queue card (D98) --- */
-import { queueCardCounts } from "@/lib/queue";
+import { queueCardCounts, queueDueLabel } from "@/lib/queue";
 
 const NOW = 1_800_000_000_000;
 const qi = (due: number) => ({ key: "k" + due, source: "assignment", title: "t", context: "c", due, href: "/queue", writable: true }) as any;
@@ -210,6 +210,34 @@ ok(queueCardCounts([qi(NOW - 1000), qi(NOW + 1000)], NOW).overdue === 1, "overdu
 ok(queueCardCounts([qi(0)], NOW).overdue === 0, "undated items (due === 0) are never overdue");
 ok(queueCardCounts([qi(0)], NOW).open === 1, "undated items still count as open");
 ok(queueCardCounts([qi(NOW)], NOW).overdue === 0, "an item due exactly now is not yet overdue");
+
+/* --- shared queue due-label (D98) — one implementation for the Home queue
+ *  card and the queue view, asserted against literal expected strings so a
+ *  regression in either branch is caught even if the other call site were
+ *  broken the same way. --- */
+const DAY = 86_400_000;
+ok(queueDueLabel(0, NOW).text === "", "undated (due === 0) renders no text");
+ok(queueDueLabel(0, NOW).tone === "#9aa0ab", "undated tone matches the neutral/beyond tone");
+
+const overdueLabel = queueDueLabel(NOW - 3 * DAY, NOW);
+ok(overdueLabel.text === "3d overdue", "overdue renders 'Nd overdue'");
+ok(overdueLabel.tone === "#c4553a", "overdue tone is the overdue red");
+
+const todayLabel = queueDueLabel(NOW, NOW);
+ok(todayLabel.text === "Today", "due today renders 'Today'");
+ok(todayLabel.tone === "#c07f28", "today tone is the amber warning tone");
+
+const tomorrowLabel = queueDueLabel(NOW + DAY, NOW);
+ok(tomorrowLabel.text === "Tomorrow", "due tomorrow renders 'Tomorrow'");
+ok(tomorrowLabel.tone === "#c07f28", "tomorrow tone matches today's amber tone");
+
+const withinWeekLabel = queueDueLabel(NOW + 5 * DAY, NOW);
+ok(withinWeekLabel.text === "5d", "within a week renders 'Nd'");
+ok(withinWeekLabel.tone === "#5b616e", "within-a-week tone is neutral gray");
+
+const beyondLabel = queueDueLabel(NOW + 20 * DAY, NOW);
+ok(beyondLabel.text === "Feb 4", "beyond a week renders a short date");
+ok(beyondLabel.tone === "#9aa0ab", "beyond-a-week tone matches the undated tone");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

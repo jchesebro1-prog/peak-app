@@ -39,7 +39,7 @@ import HomeCalendar from "./home-calendar";
 import HomeQueue, { type QueueRow } from "./home-queue";
 import HomeTabs from "./home-tabs";
 import { loadHomeAgenda } from "@/lib/agenda";
-import { loadQueue, queueNow, queueCardCounts } from "@/lib/queue";
+import { loadQueue, queueNow, queueCardCounts, queueDueLabel } from "@/lib/queue";
 import { list as catalogList } from "@/lib/stores/catalog";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 import HomeGreeting from "./home-greeting";
@@ -110,19 +110,6 @@ function daysSince(ts?: number | null): number {
 
 function shortTitle(n?: string | null): string {
   return (n || "").split(" — ")[0];
-}
-
-/** Home queue card row label — same day-bucket text as QueueView's dueLabel
- *  (queue/view.tsx), minus the tone: this card doesn't color individual
- *  rows, only the header's overdue badge. `ts === 0` (undated) renders "". */
-function queueRowDueLabel(ts: number, now: number): string {
-  if (!ts) return "";
-  const days = Math.round((ts - now) / DAY);
-  if (days < 0) return `${Math.abs(days)}d overdue`;
-  if (days === 0) return "Today";
-  if (days === 1) return "Tomorrow";
-  if (days <= 7) return `${days}d`;
-  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function first(v: string | string[] | undefined): string | undefined {
@@ -226,7 +213,7 @@ export default async function HomePage({
     key: it.key,
     title: it.title,
     context: it.context,
-    dueLabel: queueRowDueLabel(it.due, queueClockNow),
+    dueLabel: queueDueLabel(it.due, queueClockNow).text,
     href: it.href,
   }));
 

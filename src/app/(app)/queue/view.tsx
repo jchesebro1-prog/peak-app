@@ -7,6 +7,7 @@ import { Card, EmptyState, PageHeader, Pill } from "@/components/ui";
 import {
   SOURCE_LABEL,
   queueCardCounts,
+  queueDueLabel,
   type QueueItem,
   type QueueSource,
 } from "@/lib/queue-types";
@@ -50,23 +51,6 @@ const SOURCE_COLOR: Record<QueueSource, string> = {
   "flame-renewal": "#c4553a",
   "inspection-renewal": "#c4553a",
 };
-
-const DAY = 86_400_000;
-
-/** `now` is passed in from the server render — computing it here would make
- *  the component impure and the label drift between renders. */
-function dueLabel(ts: number, now: number): { text: string; tone: string } {
-  if (!ts) return { text: "", tone: "#9aa0ab" };
-  const days = Math.round((ts - now) / DAY);
-  if (days < 0) return { text: `${Math.abs(days)}d overdue`, tone: "#c4553a" };
-  if (days === 0) return { text: "Today", tone: "#c07f28" };
-  if (days === 1) return { text: "Tomorrow", tone: "#c07f28" };
-  if (days <= 7) return { text: `${days}d`, tone: "#5b616e" };
-  return {
-    text: new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-    tone: "#9aa0ab",
-  };
-}
 
 export default function QueueView({
   me,
@@ -165,7 +149,7 @@ export default function QueueView({
         )}
         <div style={{ display: "grid" }}>
           {items.map((it) => {
-            const d = dueLabel(it.due, now);
+            const d = queueDueLabel(it.due, now);
             return (
               <div
                 key={it.key}

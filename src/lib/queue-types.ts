@@ -55,3 +55,24 @@ export function queueCardCounts(
   for (const i of items) if (i.due && i.due < now) overdue++;
   return { open: items.length, overdue };
 }
+
+const DAY = 86_400_000;
+
+/** Day-bucket label for a single queue row's due date, shared by QueueView
+ *  (queue/view.tsx, which also uses `tone` to color the row) and the Home
+ *  queue card (page.tsx, which uses only `.text`). `ts === 0` (undated)
+ *  renders "". Lives here (dependency-free), not in `lib/queue.ts`, for the
+ *  same reason as `queueCardCounts` above; re-exported from `lib/queue.ts`
+ *  for server callers. */
+export function queueDueLabel(ts: number, now: number): { text: string; tone: string } {
+  if (!ts) return { text: "", tone: "#9aa0ab" };
+  const days = Math.round((ts - now) / DAY);
+  if (days < 0) return { text: `${Math.abs(days)}d overdue`, tone: "#c4553a" };
+  if (days === 0) return { text: "Today", tone: "#c07f28" };
+  if (days === 1) return { text: "Tomorrow", tone: "#c07f28" };
+  if (days <= 7) return { text: `${days}d`, tone: "#5b616e" };
+  return {
+    text: new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    tone: "#9aa0ab",
+  };
+}
