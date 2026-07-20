@@ -152,8 +152,10 @@ import { activeKeyFor, NAV } from "@/components/nav/nav-data";
 
 ok(activeKeyFor("/design") === "designoverview",
   "the Design overview resolves to the designoverview key");
-ok(activeKeyFor("/design/engagements") === activeKeyFor("/design/steel"),
-  "every /design/* path resolves to the same key (segment-1 matching)");
+ok(activeKeyFor("/design/engagements") === "designoverview",
+  "/design/engagements resolves to the designoverview key");
+ok(activeKeyFor("/design/steel") === "designoverview",
+  "/design/steel resolves to the designoverview key (segment-1 matching)");
 ok(NAV.some((e) => e.kind === "group" && e.key === "design"),
   "Design exists as a nav group");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "consulting"),
