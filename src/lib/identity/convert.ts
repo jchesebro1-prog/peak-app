@@ -76,10 +76,15 @@ export async function convertCustomersToIdentity(opts?: {
     }
   }
 
+  type RefDoc = Record<string, unknown> & {
+    id: string;
+    customerId?: string | null;
+    customer?: string;
+  };
   const [docs, quoteDocs, projectDocs, userRows] = await Promise.all([
     listDocs<CustomerDoc>("customers"),
-    listDocs<{ customerId?: string | null; customer?: string }>("quotes"),
-    listDocs<{ customerId?: string | null; customer?: string }>("projects"),
+    listDocs<RefDoc>("quotes"),
+    listDocs<RefDoc>("projects"),
     allUsers(),
   ]);
   report.customersIn = docs.length;

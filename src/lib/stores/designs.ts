@@ -286,22 +286,17 @@ export async function requestDesignChanges(
 
 /* ---------- promotion to the pipeline ---------- */
 
-type CustomerDocLike = Record<string, unknown> & { id: string; name?: string };
-
-/** Port of CustomerStore.resolveId — exact id match, else case-insensitive name match. */
+/** Identity core (D85): delegate to the CustomerStore seam — the inline
+ *  doc-store ports read a collection that is no longer written. */
 async function resolveCustomerId(idOrName: string | null | undefined): Promise<string | null> {
-  if (!idOrName) return null;
-  const list = await listDocs<CustomerDocLike>("customers");
-  if (list.some((c) => c.id === idOrName)) return idOrName;
-  const s = String(idOrName).toLowerCase();
-  const m = list.find((c) => String(c.name || "").toLowerCase() === s);
-  return m ? m.id : null;
+  const { resolveId } = await import("./customers");
+  return resolveId(idOrName);
 }
 
-/** Port of CustomerStore.nameFor — rename-safe display name for a customer id. */
+/** Rename-safe display name for a customer id (via the store seam). */
 async function customerNameFor(id: string): Promise<string> {
-  const c = await getDoc<CustomerDocLike>("customers", id);
-  return c ? String(c.name || "") : "";
+  const { nameFor } = await import("./customers");
+  return nameFor(id);
 }
 
 /**

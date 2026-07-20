@@ -1242,8 +1242,8 @@ export async function remove(threadId: string): Promise<void> {
 }
 
 /** Resolve the customer a thread belongs to by contact email against the
- *  "customers" collection docs (port of the Comm Thread screen's
- *  _resolveCustomerId; cross-store access via doc-store only). */
+ *  directory (port of the Comm Thread screen's _resolveCustomerId; since
+ *  D85 the directory composes from the identity core's contact emails). */
 export async function resolveCustomerId(
   t: CommThread | null | undefined
 ): Promise<string | null> {
@@ -1251,10 +1251,9 @@ export async function resolveCustomerId(
   if (t.customerId) return t.customerId;
   const email = (t.contactEmail || "").trim().toLowerCase();
   if (!email) return null;
-  const all = await listDocs("customers");
-  for (const c of all) {
-    const contacts =
-      (c.contacts as Array<{ email?: string }> | undefined) || [];
+  const { all: allCustomerDocs } = await import("./customers");
+  for (const c of await allCustomerDocs()) {
+    const contacts = c.contacts || [];
     if (
       contacts.some((ct) => (ct.email || "").trim().toLowerCase() === email)
     )

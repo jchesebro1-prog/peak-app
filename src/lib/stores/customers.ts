@@ -1,36 +1,68 @@
-import {
-  getBlob,
-  getDoc,
-  listDocs,
-  setBlob,
-  softDeleteDoc,
-  upsertDoc,
-} from "@/db/doc-store";
+import { getBlob, setBlob } from "@/db/doc-store";
 import { getSettings, type Office } from "@/lib/settings";
 import { coordsOf, estimate, type TravelEstimate } from "@/lib/geo";
 import { customersSeed } from "@/db/seeds/customers";
+import {
+  allCompanies,
+  getCompany,
+  saveCompany,
+  softDeleteCompany,
+} from "@/lib/identity/companies";
+import {
+  sitesForCompany,
+  sitesForCompanies,
+  saveSite,
+  softDeleteSite,
+  docLocId,
+} from "@/lib/identity/sites";
+import {
+  contactsForCompany,
+  contactsForCompanies,
+  emailsFor,
+  emailsForContacts,
+  phonesFor,
+  phonesForContacts,
+  saveContact,
+  softDeleteContact,
+  setEmails,
+  setPhones,
+  displayName,
+} from "@/lib/identity/contacts";
+import { splitName } from "@/lib/identity/convert";
+import { mintId } from "@/lib/identity/ids";
+import { allUsers } from "@/lib/users";
+import type {
+  CompanyRow,
+  ContactEmailRow,
+  ContactPhoneRow,
+  ContactRow,
+  SiteRow,
+} from "@/db/schema";
+import { getDb } from "@/db";
+import { contactEmails, contactPhones } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 /**
- * CustomerStore — the SHARED, canonical customer directory. Server port of
- * app/customers.js (window.CustomerStore) over the "customers" collection.
+ * CustomerStore — the directory seam, re-backed by the IDENTITY CORE
+ * (Daylite parity Phase 1, D85). The public API and record shapes are the
+ * prototype's (window.CustomerStore) and are preserved byte-compatibly, but
+ * the data now lives in the relational companies/sites/contacts tables —
+ * the "customers" doc collection is no longer written (its history remains
+ * for rollback; the converter in lib/identity/convert.ts was its last
+ * reader).
  *
- * This is the single customer list every screen links against: Designs,
- * Quotes and Projects reference a customer by its stable `id` here and
- * resolve the display name, venues and travel from that id (so a rename
- * never breaks a link).
+ * Composition rules (D85):
+ * - CustomerDoc.id            = companies.id (the old slugs, unchanged)
+ * - CustomerLocation.id       = sites.legacyLocId ?? sites.id — so stored doc
+ *   `locationId` values ('loc1', …) keep matching byte-for-byte
+ * - CustomerContact           = contact row + its primary email/phone
+ * - CustomerDoc.owner         = the owner user's display name
  *
- * - Keyed by stable `id` ('lakefront', 'northridge', …) — the prototype's
- *   localStorage key was rss_customer_dir_v1.
- * - Each customer carries structured `locations[]` (each one a venue), used
- *   to resolve a primary venue and compute travel from the nearest office
- *   (E3/E4). Offices come from app settings.
- * - The prototype's derived name -> locations[] cache (rss_customer_locs_v2)
- *   survives only as the setLocations() escape hatch for out-of-directory
- *   names, stored in the "customer_locs" blob; directory names resolve
- *   straight through resolveId (a superset of the old exact-name map hit).
+ * Writes decompose through the same rules in reverse. The identity core is
+ * server-authoritative — `customers` left the sync-push allowlists (§3.2).
  */
 
-/* ---------------- record shapes ---------------- */
+/* ---------------- record shapes (unchanged — the seam contract) ---------------- */
 
 export type CustomerLocation = {
   id?: string;
@@ -69,9 +101,8 @@ export type CustomerDoc = {
    * before this change have none, and there is no way to reconstruct them.
    * `createdAt` is set once and never rewritten; `updatedAt` only moves when
    * the record's content actually changes, so it stays meaningful as a
-   * "modified" date. `owner` is the stored account owner — the Customers
-   * screen still falls back to deriving one from the newest quote/project
-   * when this is unset.
+   * "modified" date. `owner` is the stored account owner — screens still
+   * fall back to deriving one from the newest quote/project when unset.
    */
   createdAt?: number;
   updatedAt?: number;
@@ -81,7 +112,7 @@ export type CustomerDoc = {
 /** The metadata keys stamped by the store, not by the edit form. */
 const META_KEYS = ["createdAt", "updatedAt"] as const;
 
-/** Loose authoring shapes (what Customers screen edit forms produce). */
+/** Loose authoring shapes (what edit forms + the CSV importer produce). */
 export type CustomerLocationInput = {
   id?: string;
   label?: string;
@@ -114,8 +145,6 @@ export type CustomerRecordInput = {
   owner?: string;
 };
 
-const COLL = "customers" as const;
-
 /** Legacy name -> locations[] cache blob (prototype rss_customer_locs_v2). */
 const LEGACY_LOCS_BLOB = "customer_locs";
 
@@ -129,12 +158,12 @@ async function offices(): Promise<Office[]> {
   return Array.isArray(s.offices) ? s.offices : [];
 }
 
-/* ---------------- normalization ---------------- */
+/* ---------------- normalization (unchanged pure port) ---------------- */
 
 /**
- * Normalize an authoring record (from the Customers screen) down to the
- * directory shape — enough to link against and resolve venues/travel.
- * Exact port of the prototype's normalizeRecord.
+ * Normalize an authoring record down to the directory shape — enough to
+ * link against and resolve venues/travel. Exact port of the prototype's
+ * normalizeRecord.
  */
 export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
   const locs: CustomerLocation[] = (c.locations || []).map((l) => ({
@@ -180,41 +209,137 @@ export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
   return doc;
 }
 
-/**
- * Carry record metadata across a write. `normalizeRecord` rebuilds the doc from
- * form input, so without this every save would reset createdAt and drop a
- * stored owner the form didn't submit.
- *
- * `updatedAt` advances only when the content changed — the directory is written
- * on full-replace, and stamping unconditionally would make "modified" mean
- * "last time anything saved" for every customer at once.
- */
-function stampMeta(next: CustomerDoc, prev: CustomerDoc | null, t: number): CustomerDoc {
-  if (!prev) return { ...next, createdAt: t, updatedAt: t };
-  const out: CustomerDoc = {
-    ...next,
-    createdAt: prev.createdAt ?? t,
-    owner: next.owner ?? prev.owner,
+/* ---------------- composition (identity rows -> CustomerDoc) ---------------- */
+
+function numOrStr(v: string | null): number | string | undefined {
+  if (v == null) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) && v.trim() !== "" ? n : v;
+}
+
+function numOrNull(v: string | null): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function composeLocation(s: SiteRow): CustomerLocation {
+  return {
+    id: docLocId(s),
+    label: s.name || undefined,
+    primary: s.isPrimary,
+    address: s.address ?? undefined,
+    city: s.city ?? undefined,
+    state: s.state ?? undefined,
+    lat: numOrStr(s.lat),
+    lng: numOrStr(s.lng),
+    venueKind: s.venueKind || "proscenium",
+    travelMiles: numOrNull(s.travelMiles),
+    travelMin: numOrNull(s.travelMin),
   };
-  const content = (d: CustomerDoc) => {
-    const rest: Partial<CustomerDoc> = { ...d };
-    for (const k of META_KEYS) delete rest[k];
-    return JSON.stringify(rest);
+}
+
+function composeContact(
+  c: ContactRow,
+  emails: ContactEmailRow[] | undefined,
+  phones: ContactPhoneRow[] | undefined
+): CustomerContact {
+  const email = (emails ?? [])[0]?.email ?? "";
+  const phone = (phones ?? [])[0]?.phone;
+  return {
+    name: displayName(c),
+    role: c.title || "",
+    email,
+    phone: phone || undefined,
+    primary: c.isPrimary,
   };
-  out.updatedAt = content(out) === content(prev) ? (prev.updatedAt ?? t) : t;
-  return out;
+}
+
+function composeDoc(
+  co: CompanyRow,
+  siteRows: SiteRow[],
+  contactRows: ContactRow[],
+  emailsBy: Map<string, ContactEmailRow[]>,
+  phonesBy: Map<string, ContactPhoneRow[]>,
+  ownerName: string | undefined
+): CustomerDoc {
+  const locations = siteRows.map(composeLocation);
+  const contacts = contactRows.map((c) =>
+    composeContact(c, emailsBy.get(c.id), phonesBy.get(c.id))
+  );
+  const prim = locations.find((l) => l.primary) || locations[0] || null;
+  const location = prim
+    ? [prim.city, prim.state].filter(Boolean).join(", ")
+    : [co.city, co.state].filter(Boolean).join(", ");
+  const doc: CustomerDoc = {
+    id: co.id,
+    name: co.name,
+    type: co.type,
+    location,
+    locations,
+    contacts,
+    createdAt: co.createdAt,
+    updatedAt: co.updatedAt,
+  };
+  if (ownerName) doc.owner = ownerName;
+  return doc;
+}
+
+async function ownerNames(): Promise<Map<string, string>> {
+  const users = await allUsers();
+  return new Map(users.map((u) => [u.id, u.name]));
 }
 
 /* ---------------- canonical directory (id-keyed) ---------------- */
 
 /** All customers, sorted by name (prototype's all()). */
 export async function all(): Promise<CustomerDoc[]> {
-  const list = await listDocs<CustomerDoc>(COLL);
-  return list.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const companies = await allCompanies();
+  const ids = companies.map((c) => c.id);
+  const [siteMap, contactMap, owners] = await Promise.all([
+    sitesForCompanies(ids),
+    contactsForCompanies(ids),
+    ownerNames(),
+  ]);
+  const contactIds = [...contactMap.values()].flat().map((c) => c.id);
+  const [emailsBy, phonesBy] = await Promise.all([
+    emailsForContacts(contactIds),
+    phonesForContacts(contactIds),
+  ]);
+  return companies.map((co) =>
+    composeDoc(
+      co,
+      siteMap.get(co.id) ?? [],
+      contactMap.get(co.id) ?? [],
+      emailsBy,
+      phonesBy,
+      co.ownerUserId ? owners.get(co.ownerUserId) : undefined
+    )
+  );
 }
 
 export async function get(id: string | null | undefined): Promise<CustomerDoc | null> {
-  return id ? getDoc<CustomerDoc>(COLL, id) : null;
+  if (!id) return null;
+  const co = await getCompany(id);
+  if (!co) return null;
+  const [siteRows, contactRows, owners] = await Promise.all([
+    sitesForCompany(co.id),
+    contactsForCompany(co.id),
+    ownerNames(),
+  ]);
+  const contactIds = contactRows.map((c) => c.id);
+  const [emailsBy, phonesBy] = await Promise.all([
+    emailsForContacts(contactIds),
+    phonesForContacts(contactIds),
+  ]);
+  return composeDoc(
+    co,
+    siteRows,
+    contactRows,
+    emailsBy,
+    phonesBy,
+    co.ownerUserId ? owners.get(co.ownerUserId) : undefined
+  );
 }
 
 /** Resolve an id OR a name down to the canonical id (null if unknown). */
@@ -222,7 +347,7 @@ export async function resolveId(
   idOrName: string | null | undefined
 ): Promise<string | null> {
   if (!idOrName) return null;
-  const list = await listDocs<CustomerDoc>(COLL);
+  const list = await allCompanies();
   if (list.some((c) => c.id === idOrName)) return idOrName;
   const s = String(idOrName).toLowerCase();
   const m = list.find((c) => (c.name || "").toLowerCase() === s);
@@ -231,8 +356,9 @@ export async function resolveId(
 
 /** Rename-safe display name for a customer id (''/null tolerant). */
 export async function nameFor(id: string | null | undefined): Promise<string> {
-  const c = await get(id);
-  return c ? c.name : "";
+  if (!id) return "";
+  const co = await getCompany(id);
+  return co ? co.name : "";
 }
 
 export async function byName(
@@ -240,8 +366,9 @@ export async function byName(
 ): Promise<CustomerDoc | null> {
   if (!name) return null;
   const s = String(name).toLowerCase();
-  const list = await listDocs<CustomerDoc>(COLL);
-  return list.find((c) => (c.name || "").toLowerCase() === s) || null;
+  const list = await allCompanies();
+  const m = list.find((c) => (c.name || "").toLowerCase() === s);
+  return m ? get(m.id) : null;
 }
 
 /**
@@ -261,25 +388,172 @@ export async function resolve(
   };
 }
 
+/* ---------------- writes (decompose CustomerRecordInput -> identity rows) ---------------- */
+
+function contentKey(d: CustomerDoc): string {
+  const rest: Partial<CustomerDoc> = { ...d };
+  for (const k of META_KEYS) delete rest[k];
+  return JSON.stringify(rest);
+}
+
+async function userIdForName(name: string | undefined): Promise<string | null> {
+  const n = (name || "").trim().toLowerCase();
+  if (!n) return null;
+  const users = await allUsers();
+  return users.find((u) => u.name.toLowerCase() === n)?.id ?? null;
+}
+
 /**
- * Replace the whole directory (the Customers screen pushes its live
- * authoring list here on mount + every save). Full-replace semantics:
- * records not in the new list are soft-deleted.
+ * Write one normalized record through to the identity tables.
+ * Site matching: incoming location id against legacyLocId THEN site id;
+ * unmatched incoming ids are treated as legacy ids so existing doc
+ * references keep resolving. Contact matching: exact display name (the same
+ * key the composition emits, and the only contact key legacy docs have).
+ */
+async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<void> {
+  const t = Date.now();
+  const existingCo = await getCompany(rec.id);
+
+  // D83 semantics: updatedAt only advances when content actually changed.
+  if (prev && existingCo && contentKey(rec) === contentKey(prev)) return;
+
+  const ownerUserId = rec.owner
+    ? await userIdForName(rec.owner)
+    : (existingCo?.ownerUserId ?? null);
+
+  await saveCompany({
+    id: rec.id,
+    name: rec.name,
+    type: rec.type,
+    lifecycle: existingCo?.lifecycle ?? "none",
+    keywords: existingCo?.keywords ?? [],
+    website: existingCo?.website ?? null,
+    mainPhone: existingCo?.mainPhone ?? null,
+    address: existingCo?.address ?? null,
+    city: existingCo?.city ?? null,
+    state: existingCo?.state ?? null,
+    zip: existingCo?.zip ?? null,
+    pricingTier: existingCo?.pricingTier ?? null,
+    ownerUserId,
+    referredByContactId: existingCo?.referredByContactId ?? null,
+    createdAt: existingCo?.createdAt ?? t,
+    updatedAt: t,
+  });
+
+  // ----- sites (full-replace within this record) -----
+  const existingSites = await sitesForCompany(rec.id);
+  const bySiteKey = new Map<string, SiteRow>();
+  for (const s of existingSites) {
+    if (s.legacyLocId) bySiteKey.set(s.legacyLocId, s);
+    bySiteKey.set(s.id, s);
+  }
+  const keptSiteIds = new Set<string>();
+  for (const loc of rec.locations) {
+    const match = loc.id ? bySiteKey.get(loc.id) : undefined;
+    const id = match?.id ?? mintId("st");
+    keptSiteIds.add(id);
+    await saveSite({
+      id,
+      companyId: rec.id,
+      name: loc.label || "",
+      // Unmatched incoming ids are legacy ids by definition — preserve them
+      // so quotes/projects that stored them keep resolving.
+      legacyLocId: match ? match.legacyLocId : (loc.id ?? null),
+      isPrimary: !!loc.primary,
+      address: loc.address ?? null,
+      city: loc.city ?? null,
+      state: loc.state ?? null,
+      lat: loc.lat == null ? null : String(loc.lat),
+      lng: loc.lng == null ? null : String(loc.lng),
+      venueKind: loc.venueKind || "proscenium",
+      travelMiles: loc.travelMiles == null ? null : String(loc.travelMiles),
+      travelMin: loc.travelMin == null ? null : String(loc.travelMin),
+      driveFolderId: match?.driveFolderId ?? null,
+      createdAt: match?.createdAt ?? t,
+      updatedAt: t,
+    });
+  }
+  for (const s of existingSites) {
+    if (!keptSiteIds.has(s.id)) await softDeleteSite(s.id);
+  }
+
+  // ----- contacts (full-replace within this record, matched by name) -----
+  const existingContacts = await contactsForCompany(rec.id);
+  const byContactName = new Map(existingContacts.map((c) => [displayName(c), c]));
+  const keptContactIds = new Set<string>();
+  for (const ct of rec.contacts) {
+    const match = byContactName.get(ct.name);
+    const id = match?.id ?? mintId("ct");
+    keptContactIds.add(id);
+    const { first, last } = match
+      ? { first: match.firstName, last: match.lastName }
+      : splitName(ct.name);
+    await saveContact({
+      id,
+      firstName: first,
+      lastName: last,
+      homeCompanyId: rec.id,
+      title: ct.role || "",
+      pricingTier: match?.pricingTier ?? null,
+      status: match?.status ?? "active",
+      userId: match?.userId ?? null,
+      ownerUserId: match?.ownerUserId ?? ownerUserId,
+      isPrimary: !!ct.primary,
+      createdAt: match?.createdAt ?? t,
+      updatedAt: t,
+    });
+    // Email/phone carry the ONE value the legacy shape holds: upsert it as
+    // the primary channel without disturbing extra channels added via the
+    // People screens; blank means "not provided", never "clear".
+    if ((ct.email || "").trim()) {
+      const current = await emailsFor(id);
+      if (!current.length) {
+        await setEmails(id, [{ value: ct.email, label: "work", isPrimary: true }]);
+      } else if (current[0].email !== ct.email.trim()) {
+        const db = await getDb();
+        await db
+          .update(contactEmails)
+          .set({ email: ct.email.trim() })
+          .where(eq(contactEmails.id, current[0].id));
+      }
+    }
+    const phone = (ct.phone || "").trim();
+    if (phone) {
+      const current = await phonesFor(id);
+      if (!current.length) {
+        await setPhones(id, [{ value: phone, label: "work", isPrimary: true }]);
+      } else if (current[0].phone !== phone) {
+        const db = await getDb();
+        await db
+          .update(contactPhones)
+          .set({ phone })
+          .where(eq(contactPhones.id, current[0].id));
+      }
+    }
+  }
+  for (const c of existingContacts) {
+    if (!keptContactIds.has(c.id)) await softDeleteContact(c.id);
+  }
+}
+
+/**
+ * Replace the whole directory (legacy full-replace semantics — records not
+ * in the new list are soft-deleted). Still used by resetToSeed and the CSV
+ * import path.
  */
 export async function setDirectory(
   records: CustomerRecordInput[] | null | undefined
 ): Promise<void> {
   if (!Array.isArray(records)) return;
   const next = records.map(normalizeRecord).filter((c) => c.id);
-  const existing = await listDocs<CustomerDoc>(COLL);
+  const existing = await all();
   const prevById = new Map(existing.map((c) => [c.id, c]));
   const keep = new Set(next.map((c) => c.id));
-  const t = Date.now();
   for (const rec of next) {
-    await upsertDoc(COLL, stampMeta(rec, prevById.get(rec.id) ?? null, t));
+    await writeRecord(rec, prevById.get(rec.id) ?? null);
   }
   for (const old of existing) {
-    if (!keep.has(old.id)) await softDeleteDoc(COLL, old.id);
+    if (!keep.has(old.id)) await softDeleteCompany(old.id);
   }
 }
 
@@ -287,18 +561,17 @@ export async function upsert(
   record: CustomerRecordInput | null | undefined
 ): Promise<void> {
   if (!record || !record.id) return;
-  const prev = await getDoc<CustomerDoc>(COLL, record.id);
-  await upsertDoc(COLL, stampMeta(normalizeRecord(record), prev, Date.now()));
+  const prev = await get(record.id);
+  await writeRecord(normalizeRecord(record), prev);
 }
 
 /**
- * Soft-delete a customer. (The prototype had no explicit remove — deletion
- * happened via setDirectory full replace; this is the direct equivalent for
- * a single record.)
+ * Soft-delete a customer (company + its sites; contacts keep the historical
+ * home-company link but stop composing once the company is gone).
  */
 export async function remove(id: string | null | undefined): Promise<void> {
   if (!id) return;
-  await softDeleteDoc(COLL, id);
+  await softDeleteCompany(id);
 }
 
 /* ---------------- locations / venues ---------------- */
@@ -306,8 +579,11 @@ export async function remove(id: string | null | undefined): Promise<void> {
 export async function locationsForId(
   id: string | null | undefined
 ): Promise<CustomerLocation[] | null> {
-  const c = await get(id);
-  return c ? c.locations || [] : null;
+  if (!id) return null;
+  const co = await getCompany(id);
+  if (!co) return null;
+  const siteRows = await sitesForCompany(id);
+  return siteRows.map(composeLocation);
 }
 
 /** Back-compat: accepts an id OR a name. */
@@ -325,9 +601,13 @@ export async function locationById(
   id: string | null | undefined,
   locId?: string | null
 ): Promise<CustomerLocation | null> {
-  const locs = (await locationsForId(id)) || [];
-  const hit = locId ? locs.find((l) => l.id === locId) : undefined;
-  return hit || primaryLoc(locs);
+  if (!id) return null;
+  const siteRows = await sitesForCompany(id);
+  const hit = locId
+    ? siteRows.find((s) => s.legacyLocId === locId || s.id === locId)
+    : undefined;
+  if (hit) return composeLocation(hit);
+  return primaryLoc(siteRows.map(composeLocation));
 }
 
 export function primaryLoc(
@@ -342,8 +622,16 @@ export function primaryLoc(
 export async function contactsForId(
   id: string | null | undefined
 ): Promise<CustomerContact[] | null> {
-  const c = await get(id);
-  return c ? c.contacts || [] : null;
+  if (!id) return null;
+  const co = await getCompany(id);
+  if (!co) return null;
+  const rows = await contactsForCompany(id);
+  const ids = rows.map((c) => c.id);
+  const [emailsBy, phonesBy] = await Promise.all([
+    emailsForContacts(ids),
+    phonesForContacts(ids),
+  ]);
+  return rows.map((c) => composeContact(c, emailsBy.get(c.id), phonesBy.get(c.id)));
 }
 
 export async function primaryContact(

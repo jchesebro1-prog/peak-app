@@ -6,6 +6,7 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { get as getCustomerDoc } from "./customers";
 import { flameJobsSeed } from "@/db/seeds/flame-jobs";
 
 /**
@@ -329,8 +330,10 @@ async function fromQuote(
   q: QuoteDoc
 ): Promise<Omit<FlameJob, "id" | "createdAt" | "updatedAt">> {
   const ft: QuoteFlameTest = q.flameTest || {};
+  // Identity core (D85): the directory now composes from relational rows;
+  // the minimal local type stays as this store's structural contract.
   const cust = q.customerId
-    ? await getDoc<CustomerDoc>("customers", q.customerId)
+    ? ((await getCustomerDoc(q.customerId)) as CustomerDoc | null)
     : null;
   const venues: FlameJobVenue[] = (ft.venues || []).map((v) => {
     let city = "";

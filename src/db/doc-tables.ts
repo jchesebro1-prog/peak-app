@@ -94,6 +94,11 @@ export type CollectionName = keyof typeof DOC_TABLES;
  * pushable, any signed-in user could self-approve a quote or rewrite prices
  * by POSTing a crafted document. Keeping the endpoint scoped to genuinely
  * offline-synced, non-approval collections is the guardrail.
+ *
+ * "customers" left this list with the identity core (D85, spec §3.2): the
+ * directory is now relational (companies/sites/contacts) and
+ * server-authoritative — field staff don't create contacts offline. The
+ * customers doc table remains registered read-only as rollback history.
  */
 export const SYNCABLE_COLLECTIONS: CollectionName[] = [
   "surveys",
@@ -101,7 +106,6 @@ export const SYNCABLE_COLLECTIONS: CollectionName[] = [
   "flame_jobs",
   "repair_jobs",
   "projects",
-  "customers",
 ];
 export const SYNCABLE_SET: ReadonlySet<string> = new Set(SYNCABLE_COLLECTIONS);
 

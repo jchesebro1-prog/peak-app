@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { searchDocs } from "@/db/doc-store";
+import { allCompanies, getCompanies } from "@/lib/identity/companies";
+import { allContacts, displayName, emailsForContacts } from "@/lib/identity/contacts";
 
 /**
  * Global nav search (⌘K) — port of Nav.dc.html's search sources:
- * quotes, designs, surveys, inspections, comm threads, customers, and
- * catalog parts. Simple case-insensitive substring match over the fields
- * the prototype searched; small data volumes make this instant.
+ * quotes, designs, surveys, inspections, comm threads, companies + people
+ * (the identity core, D85), and catalog parts. Simple case-insensitive
+ * substring match over the fields the prototype searched; small data
+ * volumes make this instant.
  */
 
 type Result = {
@@ -41,14 +44,15 @@ export async function GET(req: Request) {
   // the doc), then apply the precise per-field filter below. Avoids
   // materializing whole tables — the catalog alone is ~10.7k rows.
   const CANDIDATES = 100;
-  const [quotes, designs, surveys, inspections, comms, customers, parts] =
+  const [quotes, designs, surveys, inspections, comms, companies, people, parts] =
     await Promise.all([
       searchDocs("quotes", q, CANDIDATES),
       searchDocs("designs", q, CANDIDATES),
       searchDocs("surveys", q, CANDIDATES),
       searchDocs("inspections", q, CANDIDATES),
       searchDocs("comms", q, CANDIDATES),
-      searchDocs("customers", q, CANDIDATES),
+      allCompanies(),
+      allContacts(),
       searchDocs("catalog_parts", q, CANDIDATES),
     ]);
 
@@ -122,19 +126,49 @@ export async function GET(req: Request) {
         color: "#b4543a",
       }))
   );
+  // Companies + People search the identity tables directly (D85); volumes
+  // are small, and matching in JS mirrors the per-field precision above.
   add(
-    "Customers",
-    customers
-      .filter((d) => matches(q, d.id, d.name, d.location))
-      .map((d) => ({
-        id: d.id,
-        title: String(d.name || d.id),
-        sub: String(d.location || ""),
-        href: `/customers`,
+    "Companies",
+    companies
+      .filter((c) => matches(q, c.id, c.name, c.city, c.state, c.type))
+      .map((c) => ({
+        id: c.id,
+        title: c.name || c.id,
+        sub: [c.city, c.state].filter(Boolean).join(", ") || c.type || "",
+        href: `/companies/${encodeURIComponent(c.id)}`,
         letter: "C",
         color: "#8a6d1f",
       }))
   );
+  {
+    const hits = people.filter((p) => matches(q, displayName(p), p.title));
+    // Also match on email address — the identity core keeps them as rows.
+    const emailsBy = await emailsForContacts(people.map((p) => p.id));
+    const emailHits = people.filter(
+      (p) =>
+        !hits.includes(p) &&
+        (emailsBy.get(p.id) ?? []).some((e) => e.email.toLowerCase().includes(q))
+    );
+    const all = [...hits, ...emailHits].slice(0, LIMIT_PER_GROUP);
+    const companiesBy = await getCompanies(
+      all.map((p) => p.homeCompanyId).filter((v): v is string => !!v)
+    );
+    add(
+      "People",
+      all.map((p) => ({
+        id: p.id,
+        title: displayName(p),
+        sub:
+          [p.title, p.homeCompanyId ? companiesBy.get(p.homeCompanyId)?.name : null]
+            .filter(Boolean)
+            .join(" · ") || (emailsBy.get(p.id) ?? [])[0]?.email || "",
+        href: `/people/${encodeURIComponent(p.id)}`,
+        letter: "P",
+        color: "#1f7a52",
+      }))
+    );
+  }
   add(
     "Catalog",
     parts

@@ -6,6 +6,7 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { get as getCustomerDoc } from "./customers";
 import {
   fieldValue,
   renderTemplate,
@@ -1241,8 +1242,9 @@ export async function createFromQuote(
   if (!q || q.quoteType !== "inspection") return null;
   const insp = q.inspection || {};
   const level = levelMeta(insp.level).key;
+  // Identity core (D85): composed from relational rows via the store seam.
   const cust = q.customerId
-    ? await getDoc<CustomerDocLike>("customers", q.customerId)
+    ? ((await getCustomerDoc(q.customerId)) as CustomerDocLike | null)
     : null;
   const venues =
     insp.venues && insp.venues.length

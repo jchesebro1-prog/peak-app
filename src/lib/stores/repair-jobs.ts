@@ -6,6 +6,7 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { get as getCustomerDoc } from "./customers";
 
 /**
  * RepairStore — server port of app/repairjobs.js (rss_repairjobs_v1).
@@ -467,8 +468,9 @@ export type InspectionRecordLike = {
  *  to embed venue city/state/coords, like the prototype did via CustomerStore). */
 async function fromQuote(q: RepairQuoteLike): Promise<Omit<RepairJobRecord, "id">> {
   const rp = q.repair || {};
+  // Identity core (D85): composed from relational rows via the store seam.
   const cust = q.customerId
-    ? await getDoc<CustomerDocLike>("customers", q.customerId)
+    ? ((await getCustomerDoc(q.customerId)) as CustomerDocLike | null)
     : null;
   const venues: RepairVenue[] = (rp.venues || []).map((v) => {
     let city = "";

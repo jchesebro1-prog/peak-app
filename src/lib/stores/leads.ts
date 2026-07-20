@@ -679,10 +679,13 @@ export async function convert(
   if (!l) return null;
   let customerId = l.customerId || l.convertedCustomerId || null;
 
-  // 1) ensure a customer exists
+  // 1) ensure a customer exists — written through the identity core (D85):
+  // company + site + contact rows via CustomerStore.upsert, replacing the
+  // old raw doc write that bypassed normalizeRecord and hardcoded "loc1".
   if (!customerId) {
-    // slug collision check against live customer ids (prototype: CS.get)
-    const taken = new Set((await listDocs("customers")).map((c) => c.id));
+    // slug collision check against live company ids (identity core)
+    const { all: allCustomers, upsert: upsertCustomer } = await import("./customers");
+    const taken = new Set((await allCustomers()).map((c) => c.id));
     const base = slugBase(l.org);
     let s = base;
     let i = 2;
@@ -714,7 +717,7 @@ export async function convert(
           },
         ]
       : [];
-    await upsertDoc("customers", {
+    await upsertCustomer({
       id: customerId,
       name: l.org,
       type: opts.type || "",
