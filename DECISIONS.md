@@ -1001,3 +1001,118 @@ Anything you want changed, just say so — none of these are hard to reverse.
   server before `npm run build` or any db script. Jeff recovered it same
   evening: corrupt copy preserved at `.data-corrupt-20260719b/`, demo data
   reseeded — same playbook as the D85 ops note.
+
+## D91 — Per-phase review checklists + meeting notes (2026-07-19)
+
+Spec: `docs/superpowers/specs/2026-07-19-design-review-checklists-design.md`.
+
+- **Checklist templates live in `appSettings`, not their own collection.**
+  The spec called for a `review_checklist_templates` collection; they are the
+  same kind of small admin-edited picklist as `consultingPhases`,
+  `visitReasons`, and `intakeCatalog`, all of which already sit in settings.
+  Keeping them together avoids a collection + migration for a config list and
+  puts every consulting picklist in one place. `DEFAULT_REVIEW_CHECKLISTS` in
+  `stores/engagements.ts` ships defaults for the six standard phases; a phase
+  mapped to `[]` deliberately has no checklist.
+- **Stamped at submit, then frozen.** `submitPhaseReview` copies the template
+  onto the phase only when it has no checklist yet, so a resubmission after
+  changes keeps the reviewers' progress. Editing a template never rewrites a
+  stamped checklist — a review is a point-in-time record.
+- **The caller resolves the template.** `submitPhaseReviewAction` reads
+  settings and passes the strings in; the store stays free of settings so its
+  gate logic can be reasoned about (and tested) on its own.
+- **Meetings gained `title`, `recordingUrl`, `phaseId`** — all optional, so
+  pre-D91 meeting records still parse. Video is a LINK, never an upload:
+  Zoom/Meet/Teams already host it, and an in-app recording module was
+  explicitly rejected (Jeff, 2026-07-19).
+
+## D92 — Review accountability: comments, gating, version pinning (2026-07-19)
+
+Spec: `docs/superpowers/specs/2026-07-19-review-markup-accountability-design.md`.
+Jeff's framing: *"the review screen is how we hold accountability and right now
+it is the most underutilized."* It was — `QuoteReview` carried one free-text
+`note` as the entire substance of a review.
+
+- **Comments are append-only.** Resolving or waiving adds fields; the body is
+  never rewritten, so history stays readable after the fact. Anchors cover
+  review / document / checklist item / line item, plus an `annotation` variant
+  that parses today so comments survive the markup canvas landing later.
+- **Approval is gated in the STORE, not the UI** (same principle as D90's
+  phase gate): every checklist item and comment must be checked/resolved or
+  waived-with-reason first. Request-changes flips open comments to
+  `required: true`, which is what turns a send-back into a specific list of
+  edits rather than a paragraph to interpret.
+- **Frozen copies live in their own `review_snapshots` collection**, not
+  inline on the engagement. Attachments are data-URLs; copying them into the
+  engagement document on every approval would bloat a hot record. The
+  engagement keeps lightweight pointers (`ApprovalPin.docs`) and the snapshot
+  id. Snapshots are written BEFORE state flips — an approval that cannot
+  record what it approved should not happen.
+- **Staleness is derived, not stored.** `approvalIsStale()` compares the
+  phase's current attachment set (id + addedAt) against the pin; a re-upload
+  produces a new id/stamp, so a swapped drawing surfaces immediately and
+  blocks phase completion until re-review.
+- **NOT built: the annotation canvas** (shapes, clouds, arrows, text boxes,
+  highlight over PDFs). Jeff chose the full toolset and one combined spec; the
+  spec stages accountability first deliberately, and only stage 1 shipped
+  tonight. The canvas needs a PDF renderer plus an annotation layer and is
+  sized comparably to the whole D90 module — it is the next real chunk of work.
+
+## D93 — My Queue + assignments + Reminders sync API (2026-07-19)
+
+Spec: `docs/superpowers/specs/2026-07-19-work-queue-reminders-sync-design.md`.
+
+- **The app is a task SOURCE, not a to-do app.** Every queue row except
+  assignments is DERIVED from existing records (quote + phase reviews, open
+  standards items, milestones, `ProjectTask`, flame/inspection renewals), so
+  there is no second copy of the truth to drift, and closing the real record
+  closes the queue item. Jeff's stated worry was that a to-do module would be
+  overwhelming next to the million that exist; deriving is what avoids that.
+- **`assignments` is the one new record**, deliberately minimal — no subtasks,
+  priorities, recurrence, or tags. Competing with Apple Reminders is the
+  failure mode.
+- **Apple publishes no cloud API for Reminders.** Access is local-device only
+  (AppleScript/osascript, EventKit, Shortcuts), so a hosted app can never
+  write reminders itself. `/api/queue` is therefore a contract for a Mac-side
+  agent: GET a person's queue, POST back completions. Subscribed `.ics` feeds
+  (read-only, poor VTODO support) and iCloud CalDAV (undocumented) were
+  evaluated and rejected.
+- **Write-back is refused for non-assignment items at the API layer**, not
+  just in the agent: a phone checkbox must never approve a review or close a
+  milestone, and a buggy client must not be able to try.
+- Auth is a session OR an `x-queue-token` header matched against
+  `QUEUE_API_TOKEN`. The token belongs in the Mac keychain / env — never in
+  the repo or the memory files.
+- The Mac-side agent itself is NOT in this repo (it is memory-system work).
+
+## D94 — Bid specification generator (2026-07-19)
+
+Spec: `docs/superpowers/specs/2026-07-19-bid-spec-generator-design.md`.
+
+- **BOM-driven, not a dropdown picker.** Jeff weighed a category/dropdown
+  selector and named its flaw: you still have to verify you selected
+  everything. Starting from the equipment list moves that burden onto the
+  machine — every row lands in exactly one bucket and the document cannot be
+  saved while any row is unresolved.
+- **Similarity only SUGGESTS.** Description matching (Jaccard over tokens,
+  floor 0.34) offers up to four candidates for a human to confirm; it never
+  auto-assigns. A wrong silent match would put the wrong product in a public
+  bid document.
+- **Part 2 paragraphs live on the catalog part**, not a parallel collection,
+  so a product and its spec language cannot drift apart or orphan each other.
+  They can be authored inline mid-match, which is how the library grows from
+  the parts on real bids rather than a pre-authoring project.
+- **No AI at generation time** (consistent with D89). All spec language is
+  data a human wrote. Jeff may draft wording with Claude outside the app; the
+  app only assembles approved text. That is what lets anyone at Peak produce a
+  spec without Jeff and without an AI subscription.
+- **Output is Word-openable HTML (`.doc`), not a binary `.docx`.** The spec
+  asked for `.docx`; the app has no docx library and adding a dependency on
+  the eve of a deploy is avoidable risk. Word opens this HTML as a fully
+  editable document, which satisfies the actual need (architects paste
+  sections into a project manual), and the same markup is the print/PDF view.
+  **Upgrade path:** `npm i docx` and swap `renderSpecHtml` for a real
+  document builder — the assembled `AssembledSpec` structure is already
+  format-agnostic. Flagged for Jeff.
+- Saved specs are frozen; regenerating writes a new record so what went to an
+  architect stays retrievable after catalog language moves on.

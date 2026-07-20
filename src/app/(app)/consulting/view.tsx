@@ -35,7 +35,7 @@ import {
   setChecklistItemAction,
   setCommentStateAction,
 } from "./actions";
-import { approvalIsStale } from "@/lib/stores/engagements";
+import { approvalIsStale } from "@/lib/consulting-review";
 import { Card, EmptyState, KpiTile, Mono, PageHeader, Pill, StatusPill } from "@/components/ui";
 import { money } from "@/lib/format";
 

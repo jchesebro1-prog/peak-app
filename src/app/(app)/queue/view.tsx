@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, EmptyState, PageHeader, Pill } from "@/components/ui";
-import { SOURCE_LABEL, type QueueItem, type QueueSource } from "@/lib/queue";
+import { SOURCE_LABEL, type QueueItem, type QueueSource } from "@/lib/queue-types";
 import { createAssignmentAction, setAssignmentDoneAction } from "./actions";
 
 /**

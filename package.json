@@ -14,7 +14,8 @@
     "db:export": "tsx scripts/export.ts",
     "db:reset-local": "rm -rf .data && npm run db:seed",
     "db:convert-identity": "tsx scripts/convert-identity.ts",
-    "audit:daylite": "tsx scripts/audit-daylite-export.ts"
+    "audit:daylite": "tsx scripts/audit-daylite-export.ts",
+    "test:specs": "tsx scripts/test-review-and-spec.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

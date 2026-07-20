@@ -1,5 +1,10 @@
 import { getDoc, listDocs, nextPrefixedId, patchDoc, upsertDoc } from "@/db/doc-store";
 import type { QuoteReview } from "@/lib/stores/quotes";
+import {
+  approvalIsStale,
+  openChecklistItems,
+  openComments,
+} from "@/lib/consulting-review";
 
 /* ------------------------------------------------------------------ *
  * Consulting engagements (D90).
@@ -309,26 +314,11 @@ export function makeChecklist(texts: string[]): ChecklistItem[] {
   }));
 }
 
-/** Items still blocking approval — open items only. Waived and checked both
- *  clear the gate; waiving just demands a reason. */
-export function openChecklistItems(ph: EngagementPhase): ChecklistItem[] {
-  return (ph.checklist || []).filter((c) => c.state === "open");
-}
-
-/** Comments still blocking approval. */
-export function openComments(ph: EngagementPhase): ReviewComment[] {
-  return (ph.comments || []).filter((c) => c.state === "open");
-}
-
-/** An approval goes stale when the phase's attachment set no longer matches
- *  what was pinned — a revised drawing uploaded after sign-off. */
-export function approvalIsStale(ph: EngagementPhase): boolean {
-  const pin = ph.approvalPin;
-  if (!pin) return false;
-  const now = ph.attachments.map((a) => `${a.id}:${a.addedAt}`).sort();
-  const then = pin.docs.map((d) => `${d.docId}:${d.version}`).sort();
-  return now.join("|") !== then.join("|");
-}
+/* The pure status helpers live in `lib/consulting-review.ts` so the
+ * "use client" view can import them without pulling the doc-store — and
+ * therefore PGlite — into the browser bundle. Re-exported here so server
+ * callers can keep importing everything engagement-shaped from one module. */
+export { approvalIsStale, openChecklistItems, openComments };
 
 export async function allEngagements(): Promise<ConsultingEngagement[]> {
   const list = await listDocs<ConsultingEngagement>("consulting_engagements");

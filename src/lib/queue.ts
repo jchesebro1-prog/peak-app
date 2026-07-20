@@ -4,6 +4,7 @@ import { getAllProjects } from "@/lib/stores/projects";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { renewals as flameRenewals } from "@/lib/stores/flame-jobs";
 import { renewals as inspectionRenewals } from "@/lib/stores/inspections";
+import type { QueueItem, QueueSource } from "@/lib/queue-types";
 
 /* ------------------------------------------------------------------ *
  * My Queue (D93) — one person's open commitments, DERIVED.
@@ -18,30 +19,11 @@ import { renewals as inspectionRenewals } from "@/lib/stores/inspections";
  * see the api route.
  * ------------------------------------------------------------------ */
 
-export type QueueSource =
-  | "assignment"
-  | "quote-review"
-  | "phase-review"
-  | "checklist"
-  | "milestone"
-  | "project-task"
-  | "flame-renewal"
-  | "inspection-renewal";
-
-export type QueueItem = {
-  /** Stable across runs — the Reminders agent's dedupe key. */
-  key: string;
-  source: QueueSource;
-  title: string;
-  /** What it hangs off, for display: customer / project / engagement. */
-  context: string;
-  /** epoch-ms; 0 = undated. */
-  due: number;
-  /** In-app link to where the work actually happens. */
-  href: string;
-  /** Only assignment items can be completed from outside the app. */
-  writable: boolean;
-};
+/* Shapes and labels live in `lib/queue-types.ts` (dependency-free) so the
+ * client view can import them; re-exported so server callers have one
+ * import site. */
+export type { QueueItem, QueueSource } from "@/lib/queue-types";
+export { SOURCE_LABEL } from "@/lib/queue-types";
 
 const DAY = 86_400_000;
 
@@ -207,13 +189,3 @@ export function queueNow(): number {
   return Date.now();
 }
 
-export const SOURCE_LABEL: Record<QueueSource, string> = {
-  assignment: "Assigned",
-  "quote-review": "Quote review",
-  "phase-review": "Phase review",
-  checklist: "Standards",
-  milestone: "Milestone",
-  "project-task": "Project task",
-  "flame-renewal": "Flame renewal",
-  "inspection-renewal": "Inspection renewal",
-};
