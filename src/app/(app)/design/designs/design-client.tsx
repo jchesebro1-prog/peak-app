@@ -86,7 +86,7 @@ export default function DesignClient({
   roster,
   fabrics,
   reviewerNames,
-  engagementForDesign,
+  engagementsForDesign,
 }: {
   me: string;
   canApprove: boolean;
@@ -95,8 +95,8 @@ export default function DesignClient({
   roster: RosterEntry[];
   fabrics: FabricOption[];
   reviewerNames: string[];
-  /** Reverse lookup (derived server-side, not stored) — which engagement, if any, this design feeds. */
-  engagementForDesign: Record<string, { id: string; name: string }>;
+  /** Reverse lookup (derived server-side, not stored) — every engagement, if any, this design feeds. */
+  engagementsForDesign: Record<string, Array<{ id: string; name: string }>>;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -291,13 +291,28 @@ export default function DesignClient({
                 <div style={{ fontFamily: MONO, fontSize: 10.5, color: "#aab0bb", marginTop: 5 }}>
                   {sel.id} · {sel.width || "?"}&apos; × {sel.depth || "?"}&apos; × {sel.grid || "?"}&apos; · {(sel.size || "medium").replace(/^./, (c) => c.toUpperCase())}
                 </div>
-                {engagementForDesign[sel.id] && (
+                {engagementsForDesign[sel.id] && engagementsForDesign[sel.id].length === 1 && (
                   <Link
-                    href={`/design/engagements/${encodeURIComponent(engagementForDesign[sel.id].id)}`}
+                    href={`/design/engagements/${encodeURIComponent(engagementsForDesign[sel.id][0].id)}`}
                     style={{ display: "inline-block", marginTop: 7, fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
                   >
-                    Part of {engagementForDesign[sel.id].name} →
+                    Part of {engagementsForDesign[sel.id][0].name} →
                   </Link>
+                )}
+                {engagementsForDesign[sel.id] && engagementsForDesign[sel.id].length > 1 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 7 }}>
+                    {engagementsForDesign[sel.id].map((eng, i) => (
+                      <span key={eng.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        {i > 0 && <span style={{ fontSize: 11.5, color: "#aab0bb" }}>·</span>}
+                        <Link
+                          href={`/design/engagements/${encodeURIComponent(eng.id)}`}
+                          style={{ display: "inline-block", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+                        >
+                          Part of {eng.name} →
+                        </Link>
+                      </span>
+                    ))}
+                  </div>
                 )}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 11 }}>
                   <span title={sel.owner} style={{ width: 24, height: 24, borderRadius: "50%", background: colorOf(sel.owner), color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9.5, fontWeight: 600, flexShrink: 0 }}>

@@ -33,11 +33,14 @@ export default async function Page({
 
   // Derived, not stored: the design record carries no back-pointer, so the
   // reverse lookup is built here by scanning engagements each load — the two
-  // sides of the link can never disagree (task 8 / D97).
-  const engagementForDesign: Record<string, { id: string; name: string }> = {};
+  // sides of the link can never disagree (task 8 / D97). A design can be
+  // referenced by more than one engagement (e.g. a design engagement and a
+  // later bid-support engagement), so this holds all of them, in
+  // allEngagements() order.
+  const engagementsForDesign: Record<string, Array<{ id: string; name: string }>> = {};
   for (const e of engagements) {
     for (const did of e.designIds) {
-      engagementForDesign[did] = { id: e.id, name: e.name };
+      (engagementsForDesign[did] ||= []).push({ id: e.id, name: e.name });
     }
   }
 
@@ -54,7 +57,7 @@ export default async function Page({
         costPerSqft: p.costPerSqft != null ? p.costPerSqft : null,
       }))}
       reviewerNames={reviewerRows.map((u) => u.name)}
-      engagementForDesign={engagementForDesign}
+      engagementsForDesign={engagementsForDesign}
     />
   );
 }
