@@ -1,0 +1,219 @@
+import { allAssignments, type Assignment } from "@/lib/stores/assignments";
+import { allEngagements, openChecklistItems } from "@/lib/stores/engagements";
+import { getAllProjects } from "@/lib/stores/projects";
+import { getAll as getAllQuotes } from "@/lib/stores/quotes";
+import { renewals as flameRenewals } from "@/lib/stores/flame-jobs";
+import { renewals as inspectionRenewals } from "@/lib/stores/inspections";
+
+/* ------------------------------------------------------------------ *
+ * My Queue (D93) — one person's open commitments, DERIVED.
+ * Design: docs/superpowers/specs/2026-07-19-work-queue-reminders-sync-design.md
+ *
+ * Everything here except `assignment` items is computed from records that
+ * already exist. That is the whole design: no second copy of the truth, so
+ * the queue cannot drift, and closing the real record closes the queue item.
+ *
+ * Consumed by /queue (the screen) and /api/queue (the Mac-side Reminders
+ * sync agent). Only `assignment` items are writable from outside the app —
+ * see the api route.
+ * ------------------------------------------------------------------ */
+
+export type QueueSource =
+  | "assignment"
+  | "quote-review"
+  | "phase-review"
+  | "checklist"
+  | "milestone"
+  | "project-task"
+  | "flame-renewal"
+  | "inspection-renewal";
+
+export type QueueItem = {
+  /** Stable across runs — the Reminders agent's dedupe key. */
+  key: string;
+  source: QueueSource;
+  title: string;
+  /** What it hangs off, for display: customer / project / engagement. */
+  context: string;
+  /** epoch-ms; 0 = undated. */
+  due: number;
+  /** In-app link to where the work actually happens. */
+  href: string;
+  /** Only assignment items can be completed from outside the app. */
+  writable: boolean;
+};
+
+const DAY = 86_400_000;
+
+/** Milestones and renewals this far out are "coming due" and worth surfacing.
+ *  Beyond it they are noise; the record still exists on its own screen. */
+const HORIZON = 30 * DAY;
+
+function due(ts: number | null | undefined): number {
+  const n = Number(ts) || 0;
+  return n > 0 ? n : 0;
+}
+
+/**
+ * Assemble one person's open queue. `me` is a team-member NAME (the app's
+ * convention for ownership across quotes, projects, and engagements).
+ */
+export async function loadQueue(me: string): Promise<QueueItem[]> {
+  const [assignments, engagements, projects, quotes, flames, inspections] =
+    await Promise.all([
+      allAssignments(),
+      allEngagements(),
+      getAllProjects(),
+      getAllQuotes(),
+      flameRenewals({ dueOnly: true }),
+      inspectionRenewals({ dueOnly: true }),
+    ]);
+
+  const items: QueueItem[] = [];
+  const horizon = Date.now() + HORIZON;
+
+  /* --- delegated asks (the one non-derived source) --- */
+  for (const a of assignments as Assignment[]) {
+    if (a.done || a.assignee !== me) continue;
+    items.push({
+      key: `assignment:${a.id}`,
+      source: "assignment",
+      title: a.title,
+      context: a.link?.label || (a.createdBy === me ? "Self" : `from ${a.createdBy}`),
+      due: a.dueDate,
+      href: a.link?.kind === "engagement" ? `/consulting/${a.link.id}` : "/queue",
+      writable: true,
+    });
+  }
+
+  /* --- quote reviews waiting on me --- */
+  for (const q of quotes) {
+    const r = q.review;
+    if (!r || r.state !== "in_review") continue;
+    // Unclaimed reviews are everyone's problem; claimed ones are the
+    // reviewer's alone.
+    if (r.reviewer && r.reviewer !== me) continue;
+    items.push({
+      key: `quote-review:${q.id}`,
+      source: "quote-review",
+      title: r.reviewer ? `Review quote ${q.id}` : `Unclaimed review: quote ${q.id}`,
+      context: q.customer || q.name || "",
+      due: due(r.submittedAt),
+      href: "/reviews",
+      writable: false,
+    });
+  }
+
+  /* --- consulting: phase reviews, open standards items, milestones --- */
+  for (const e of engagements) {
+    const mine = e.people?.some((p) => p.person === me);
+    for (const ph of e.phases) {
+      if (ph.review.state === "in_review" && (!ph.review.reviewer || ph.review.reviewer === me)) {
+        items.push({
+          key: `phase-review:${e.id}:${ph.id}`,
+          source: "phase-review",
+          title: `Review ${ph.name} — ${e.name}`,
+          context: e.customer,
+          due: due(ph.review.submittedAt),
+          href: "/reviews",
+          writable: false,
+        });
+        // Standards items only matter to the person holding the review.
+        if (ph.review.reviewer === me) {
+          for (const c of openChecklistItems(ph)) {
+            items.push({
+              key: `checklist:${e.id}:${ph.id}:${c.id}`,
+              source: "checklist",
+              title: `Standards: ${c.text}`,
+              context: `${e.name} · ${ph.name}`,
+              due: 0,
+              href: `/consulting/${e.id}?tab=phases`,
+              writable: false,
+            });
+          }
+        }
+      }
+    }
+    if (!mine) continue;
+    for (const ms of e.milestones) {
+      if (ms.completedAt) continue;
+      const t = due(ms.targetDate);
+      if (!t || t > horizon) continue;
+      items.push({
+        key: `milestone:${e.id}:${ms.id}`,
+        source: "milestone",
+        title: `Milestone due: ${ms.name}`,
+        context: e.name,
+        due: t,
+        href: `/consulting/${e.id}?tab=milestones`,
+        writable: false,
+      });
+    }
+  }
+
+  /* --- project tasks assigned to me --- */
+  for (const p of projects) {
+    for (const t of p.tasks || []) {
+      if (t.done || t.assignee !== me) continue;
+      items.push({
+        key: `project-task:${p.id}:${t.id}`,
+        source: "project-task",
+        title: t.title,
+        context: `${p.name}${t.section ? ` · ${t.section}` : ""}`,
+        due: due(p.targetDate),
+        href: `/projects/${p.id}`,
+        writable: false,
+      });
+    }
+  }
+
+  /* --- service renewals coming due (whole-team visibility) --- */
+  for (const j of flames) {
+    items.push({
+      key: `flame-renewal:${j.id}`,
+      source: "flame-renewal",
+      title: `Flame test renewal: ${j.customer || j.id}`,
+      context: j.venue || "",
+      due: due(j._renewal?.dueAt),
+      href: "/flame-tests",
+      writable: false,
+    });
+  }
+  for (const r of inspections) {
+    items.push({
+      key: `inspection-renewal:${r.id}`,
+      source: "inspection-renewal",
+      title: `Inspection renewal: ${r.customer || r.id}`,
+      context: r.venue || "",
+      due: due(r._renewal?.dueAt),
+      href: "/inspections",
+      writable: false,
+    });
+  }
+
+  // Dated work first, oldest due date at the top; undated trails behind.
+  return items.sort((a, b) => {
+    const ad = a.due || Number.MAX_SAFE_INTEGER;
+    const bd = b.due || Number.MAX_SAFE_INTEGER;
+    if (ad !== bd) return ad - bd;
+    return a.title.localeCompare(b.title);
+  });
+}
+
+/** One clock for the whole screen, read outside component render so the
+ *  purity rule holds and every row measures its due date against the same
+ *  instant. */
+export function queueNow(): number {
+  return Date.now();
+}
+
+export const SOURCE_LABEL: Record<QueueSource, string> = {
+  assignment: "Assigned",
+  "quote-review": "Quote review",
+  "phase-review": "Phase review",
+  checklist: "Standards",
+  milestone: "Milestone",
+  "project-task": "Project task",
+  "flame-renewal": "Flame renewal",
+  "inspection-renewal": "Inspection renewal",
+};

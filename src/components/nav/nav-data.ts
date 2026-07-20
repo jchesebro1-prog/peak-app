@@ -11,6 +11,9 @@ export type NavEntry =
 
 export const NAV: NavEntry[] = [
   { kind: "link", key: "home", label: "Home", href: "/" },
+  /* My Queue (D93) — top-level beside Home: it is the "what do I owe anyone"
+   * screen, and burying it in a group would defeat that. */
+  { kind: "link", key: "queue", label: "My Queue", href: "/queue" },
   { kind: "link", key: "calendar", label: "Calendar", href: "/calendar" },
   { kind: "link", key: "inbox", label: "Inbox", href: "/inbox" },
   /* Consulting is its own top-level module (D90, spec §Module UI) — a
@@ -81,6 +84,7 @@ export function activeKeyFor(pathname: string): string {
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
     "/inbox": "inbox",
+    "/queue": "queue",
     "/consulting": "consulting",
     "/leads": "leads",
     "/quotes": "quotes",
