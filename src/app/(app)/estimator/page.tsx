@@ -80,6 +80,8 @@ async function initialFrom(
       owner: userName,
       revNum: 1,
       revDateMs: Date.now(),
+      pricingTier: null,
+      tierMargin: null,
       sections: null,
     };
   }
@@ -123,6 +125,9 @@ async function initialFrom(
     // moved draft → sent → won, with no revision having been taken.
     revNum: Math.max(1, q.revisions?.length || 1),
     revDateMs: q.updatedAt || Date.now(),
+    // Item 11 (D87): stamped tier seeds labor/curtain margins client-side.
+    pricingTier: q.pricingTier ?? null,
+    tierMargin: q.tierMargin ?? null,
     sections,
   };
 }

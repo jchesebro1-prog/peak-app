@@ -11,6 +11,7 @@ import {
 } from "@/lib/stores/quotes";
 import { syncFromQuotes } from "@/lib/stores/flame-jobs";
 import { getRates, setRates, compute, type FlameTestVenueInput } from "@/lib/flametest-engine";
+import { resolveTier } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
 import { coordsOf, nearest } from "@/lib/geo";
 
@@ -44,16 +45,23 @@ async function persist(formData: FormData): Promise<string | null> {
   }
   if (!customerId || !venues.length) return null;
 
-  // knobs → global rates (prototype FlameTest.setRates)
+  // Mileage/labor knobs stay global rates (prototype FlameTest.setRates).
+  // MARGIN went per-quote with customer tiers (item 11, D87): the customer's
+  // tier seeds it, the builder knob overrides it for THIS quote only — one
+  // quote's margin no longer reprices every future flame quote.
   const marginPts = Number(formData.get("margin"));
   const mileageRate = Number(formData.get("mileageRate"));
   const laborRate = Number(formData.get("laborRate"));
   const patch: Record<string, number> = {};
-  if (Number.isFinite(marginPts)) patch.margin = Math.max(10, Math.min(50, marginPts)) / 100;
   if (Number.isFinite(mileageRate) && mileageRate >= 0) patch.mileageRate = mileageRate;
   if (Number.isFinite(laborRate) && laborRate >= 0) patch.laborRate = laborRate;
   if (Object.keys(patch).length) await setRates(patch);
-  const rates = await getRates();
+  const baseRates = await getRates();
+  const tier = await resolveTier(customerId, contactName);
+  const quoteMargin = Number.isFinite(marginPts)
+    ? Math.max(5, Math.min(50, marginPts)) / 100
+    : tier.margin;
+  const rates = { ...baseRates, margin: quoteMargin };
 
   // resolve venue coords from the customer directory + nearest office
   const cust = await getCustomer(customerId);
@@ -99,6 +107,8 @@ async function persist(formData: FormData): Promise<string | null> {
     locationId: venueInputs[0].id ?? null,
     value: Math.round(r.total),
     margin: r.margin,
+    pricingTier: tier.tier,
+    tierMargin: tier.margin,
     source: "flametest",
     quoteType: "flame_test",
     owner: user.name,

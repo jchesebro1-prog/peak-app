@@ -121,7 +121,13 @@ export type CurtainCalc = {
 };
 
 /** CURTAIN PRICING — the prototype's placeholder equations, ported as-is. */
-export function computeCurtain(d: CurtainDraft, fabrics: FabricOpt[]): CurtainCalc {
+export function computeCurtain(
+  d: CurtainDraft,
+  fabrics: FabricOpt[],
+  /** Margin-on-price fraction; the customer tier stamp seeds this (item 11,
+   *  D87) — 0.38 remains the no-tier default the prototype shipped with. */
+  margin: number = 0.38
+): CurtainCalc {
   const fab =
     fabrics.find((f) => f.sku === d.fabric) ||
     fabrics[0] ||
@@ -137,7 +143,8 @@ export function computeCurtain(d: CurtainDraft, fabrics: FabricOpt[]): CurtainCa
   const hangCost =
     d.hang === "Pipe" ? w * 3.0 : d.hang === "Track" ? w * 12.0 : d.hang === "Other" ? w * 5.0 : 0;
   const costEach = fabricCost + sewLabor + bottomCost + hangCost;
-  const priceEach = costEach > 0 ? costEach / (1 - 0.38) : 0; // 38% target margin
+  const m = margin > 0 && margin < 1 ? margin : 0.38;
+  const priceEach = costEach > 0 ? costEach / (1 - m) : 0; // tier-seeded target margin
   return { fab, faceArea, fabricArea, costEach: round2(costEach), priceEach: round2(priceEach) };
 }
 

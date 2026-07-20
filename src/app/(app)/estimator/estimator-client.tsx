@@ -158,9 +158,16 @@ function freshMob(t: TravelLite | null): MobDraft {
   };
 }
 
-const freshLabor = (t: TravelLite | null): LaborDraft => ({
+const freshLabor = (
+  t: TravelLite | null,
+  /** Tier-seeded margin fraction (item 11, D87); null → the legacy 30. */
+  tierMargin?: number | null
+): LaborDraft => ({
   discipline: "RIG",
-  margin: "30",
+  margin:
+    tierMargin != null && tierMargin > 0 && tierMargin < 1
+      ? String(Math.round(tierMargin * 100))
+      : "30",
   mobs: [freshMob(t)],
   pmHrs: "",
   pmAuto: true,
@@ -278,7 +285,12 @@ export default function EstimatorClient({
   const [fixtureFor, setFixtureFor] = useState<string | null>(null);
   const [fixtureDraft, setFixtureDraft] = useState<FixtureDraft>(freshFixture);
   const [laborFor, setLaborFor] = useState<string | null>(null);
-  const [laborDraft, setLaborDraft] = useState<LaborDraft>(() => freshLabor(null));
+  // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
+  // curtain configurator; refreshed when the meta action re-stamps.
+  const [tierMargin, setTierMargin] = useState<number | null>(initial.tierMargin);
+  const [laborDraft, setLaborDraft] = useState<LaborDraft>(() =>
+    freshLabor(null, initial.tierMargin)
+  );
   const [, startTransition] = useTransition();
 
   /* ---- AI scope draft (Phase 8, D4) — drafts only, estimator sets prices ---- */
@@ -324,7 +336,9 @@ export default function EstimatorClient({
     if (!loadedId) return;
     const id = loadedId;
     startTransition(async () => {
-      await updateQuoteMetaAction(id, meta);
+      const r = await updateQuoteMetaAction(id, meta);
+      // Customer/contact changes re-stamp the tier server-side (item 11).
+      if (r && typeof r.tierMargin === "number") setTierMargin(r.tierMargin);
     });
   };
 
@@ -662,7 +676,7 @@ export default function EstimatorClient({
     setCustomFor(null);
     setCurtainFor(null);
     setFixtureFor(null);
-    setLaborDraft(freshLabor(travelEstNow()));
+    setLaborDraft(freshLabor(travelEstNow(), tierMargin));
   };
 
   const addCustomPart = (secId: string) => {
@@ -693,7 +707,7 @@ export default function EstimatorClient({
   const addCurtain = (secId: string) => {
     const d = curtainDraft;
     const name = (d.name || "").trim();
-    const c = computeCurtain(d, fabrics);
+    const c = computeCurtain(d, fabrics, tierMargin ?? undefined);
     if (!name || c.priceEach <= 0) return;
     let qty = parseInt(d.qty, 10);
     if (isNaN(qty) || qty < 1) qty = 1;
@@ -925,7 +939,7 @@ export default function EstimatorClient({
     }
     if (items.length) pushItems(secId, items);
     setLaborFor(null);
-    setLaborDraft(freshLabor(travelEstNow()));
+    setLaborDraft(freshLabor(travelEstNow(), tierMargin));
   };
 
   /* ---------------- review banner view-model ---------------- */
@@ -1838,6 +1852,7 @@ export default function EstimatorClient({
               secName={curtainSec ? curtainSec.name : ""}
               draft={curtainDraft}
               fabrics={fabrics}
+              margin={tierMargin ?? undefined}
               onSet={(field, val) => setCurtainDraft((d) => ({ ...d, [field]: val }))}
               onAdd={() => addCurtain(curtainFor)}
               onClose={() => setCurtainFor(null)}

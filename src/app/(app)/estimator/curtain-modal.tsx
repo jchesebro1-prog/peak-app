@@ -23,6 +23,7 @@ export default function CurtainModal({
   secName,
   draft,
   fabrics,
+  margin,
   onSet,
   onAdd,
   onClose,
@@ -30,11 +31,13 @@ export default function CurtainModal({
   secName: string;
   draft: CurtainDraft;
   fabrics: FabricOpt[];
+  /** Tier-seeded margin fraction (item 11, D87); undefined → legacy 38%. */
+  margin?: number;
   onSet: (field: keyof CurtainDraft, val: string) => void;
   onAdd: () => void;
   onClose: () => void;
 }) {
-  const cc = computeCurtain(draft, fabrics);
+  const cc = computeCurtain(draft, fabrics, margin);
   const qty = Math.max(1, parseInt(draft.qty, 10) || 0);
   const valid = (draft.name || "").trim().length > 0 && cc.priceEach > 0;
 

@@ -30,6 +30,9 @@ export type SaveCustomerInput = {
   id?: string;
   name: string;
   type: string;
+  /** Company-level pricing tier — the fallback (item 11/D87); a person's own
+   *  tier wins. Empty/undefined = Base. */
+  pricingTier?: string | null;
   locations: LocationInput[];
   contacts: ContactInput[];
 };

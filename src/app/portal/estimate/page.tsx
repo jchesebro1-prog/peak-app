@@ -7,6 +7,7 @@ import { byCategory } from "@/lib/stores/catalog";
 import { fabricSellPerSqft, sellCoeffs } from "@/lib/curtain-pricing";
 import type { FabricSell } from "@/lib/curtain-geom";
 import { customerCatalog } from "@/lib/portal-catalog";
+import { resolveTier } from "@/lib/pricing-tiers";
 import { PortalShell } from "../shell";
 import { EstimateBuilder } from "./estimate-builder";
 
@@ -35,6 +36,10 @@ export default async function PortalEstimatePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [sp, settings, session] = await Promise.all([searchParams, getSettings(), portalSession()]);
+  // Tier pricing (item 11 D, D88): the grant's customer sets the margin the
+  // preview AND the authoritative recompute both use. Contact-level tier is
+  // resolved by the grant name so a person's own tier follows them here too.
+  const tier = await resolveTier(session?.customerId ?? null, session?.name ?? null);
   const companyName = settings.companyName || "Peak Systems Group";
   const tabParam = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
   const initialTab: "drapery" | "equipment" = tabParam === "equipment" ? "equipment" : "drapery";
@@ -66,7 +71,7 @@ export default async function PortalEstimatePage({
   const [cust, fabricRows, equipment] = await Promise.all([
     getCustomer(session.customerId),
     byCategory("Fabric"),
-    customerCatalog(),
+    customerCatalog(tier.margin),
   ]);
 
   const venues = (cust?.locations || []).map((l) => ({
@@ -85,9 +90,9 @@ export default async function PortalEstimatePage({
     .map((p) => ({
       sku: p.sku,
       name: p.desc,
-      pricePerSqft: fabricSellPerSqft(p.costPerSqft ?? 0),
+      pricePerSqft: fabricSellPerSqft(p.costPerSqft ?? 0, tier.margin),
     }));
-  const coeffs = sellCoeffs();
+  const coeffs = sellCoeffs(tier.margin);
 
   return (
     <PortalShell

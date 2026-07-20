@@ -27,12 +27,16 @@ export type BuilderLocation = {
   oneWayMiles: number | null;
   oneWayMin: number | null;
 };
-export type BuilderContact = { name: string; role: string; email: string; primary: boolean };
+export type BuilderContact = { name: string; role: string; email: string; primary: boolean   /** Personal tier margin when the contact has their own tier (item 11). */
+  tierMargin?: number | null;
+};
 export type BuilderCustomer = {
   id: string;
   name: string;
   locations: BuilderLocation[];
   contacts: BuilderContact[];
+  /** Company-level tier margin fraction (item 11, D88); null → Base/global. */
+  tierMargin?: number | null;
 };
 export type BuilderOffice = { name: string; lat: number | null; lng: number | null };
 export type BuilderRates = {
@@ -308,6 +312,13 @@ export function QuoteBuilder({
     if (locs.length && !locs.some((l) => sel[l.id].on)) sel[locs[0].id].on = true;
     const primary = c?.contacts.find((x) => x.primary) || c?.contacts[0] || null;
     setCustomerId(id);
+    // Seed the margin knob from the customer's tier (contact's own tier
+    // wins; item 11, D88). Still just a seed — the knob stays editable.
+    {
+      const seeded = primary?.tierMargin ?? c?.tierMargin;
+      if (seeded != null && seeded > 0 && seeded < 1)
+        setMarginPts(Math.round(seeded * 100));
+    }
     setVenueSel(sel);
     setQuoteName(c ? c.name + " — Rigging inspection" : "");
     setContactSel(primary ? primary.name : "");

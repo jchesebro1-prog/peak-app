@@ -90,6 +90,7 @@ export default async function PersonDetailPage({
     title: person.title,
     homeCompanyId: person.homeCompanyId,
     status: person.status,
+    pricingTier: person.pricingTier,
     isPrimary: person.isPrimary,
     emails: emails.map((e) => ({ value: e.email, label: e.label, isPrimary: e.isPrimary })),
     phones: phones.map((p) => ({ value: p.phone, label: p.label, isPrimary: p.isPrimary })),
@@ -202,6 +203,14 @@ export default async function PersonDetailPage({
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
             <span style={{ color: "#8c919c" }}>Last updated</span>
             <span style={{ fontFamily: "var(--font-mono)" }}>{shortDate(person.updatedAt)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+            <span style={{ color: "#8c919c" }} title="Internal only — never shown to the customer (item 11)">Pricing tier</span>
+            <span style={{ fontFamily: "var(--font-mono)" }}>
+              {person.pricingTier
+                ? person.pricingTier.charAt(0).toUpperCase() + person.pricingTier.slice(1)
+                : "Company / Base"}
+            </span>
           </div>
           {owner && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>

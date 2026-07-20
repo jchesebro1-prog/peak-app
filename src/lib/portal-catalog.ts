@@ -58,9 +58,15 @@ function buyable(p: CatalogPart): boolean {
   );
 }
 
-/** The curated, client-safe catalog for the portal picker. */
-export async function customerCatalog(): Promise<CustomerPart[]> {
+/**
+ * The curated, client-safe catalog for the portal picker.
+ * With a tier margin (item 11 D, D88) the customer price is RE-DERIVED from
+ * cost at that margin (cost ÷ (1 − m)); parts without a cost keep list.
+ * Still list-only fields client-side — no cost or margin crosses over.
+ */
+export async function customerCatalog(margin?: number | null): Promise<CustomerPart[]> {
   const parts = await allParts();
+  const m = margin != null && margin > 0 && margin < 1 ? margin : null;
   return parts
     .filter(buyable)
     .map((p) => ({
@@ -68,7 +74,10 @@ export async function customerCatalog(): Promise<CustomerPart[]> {
       desc: p.desc,
       category: p.category,
       unit: p.unit || "ea",
-      list: p.list,
+      list:
+        m != null && typeof p.cost === "number" && p.cost > 0
+          ? Math.round((p.cost / (1 - m)) * 100) / 100
+          : p.list,
     }))
     .sort((a, b) => a.category.localeCompare(b.category) || a.desc.localeCompare(b.desc));
 }

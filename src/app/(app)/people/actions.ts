@@ -9,7 +9,7 @@ import {
   setPhones,
   softDeleteContact,
 } from "@/lib/identity/contacts";
-import { CONTACT_STATUSES } from "@/lib/identity/config";
+import { CONTACT_STATUSES, PRICING_TIERS } from "@/lib/identity/config";
 import { mintId } from "@/lib/identity/ids";
 import type { SavePersonInput } from "./types";
 
@@ -38,7 +38,11 @@ export async function savePersonAction(
     lastName,
     homeCompanyId: input.homeCompanyId || null,
     title: (input.title || "").trim(),
-    pricingTier: existing?.pricingTier ?? null,
+    pricingTier: (PRICING_TIERS as readonly string[]).includes(
+      input.pricingTier || ""
+    )
+      ? input.pricingTier
+      : null,
     status,
     userId: existing?.userId ?? null,
     ownerUserId: existing?.ownerUserId ?? me.id,

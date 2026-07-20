@@ -728,6 +728,10 @@ export async function convert(
   }
 
   // 2) create a draft quote linked to that customer (QuoteStore.create shape)
+  // Tier stamp (item 11, D88): a fresh conversion is normally a new company
+  // on the Base tier; existing-customer leads pick up their real tier.
+  const { resolveTier } = await import("@/lib/pricing-tiers");
+  const tier = await resolveTier(customerId, l.contact || null);
   const quoteId = await nextPrefixedId("quotes", "Q", 2041);
   const t = now();
   await upsertDoc("quotes", {
@@ -738,6 +742,8 @@ export async function convert(
     locationId: customerId ? "loc1" : null,
     value: Math.round(l.value || 0),
     margin: 0,
+    pricingTier: tier.tier,
+    tierMargin: tier.margin,
     status: "draft",
     source: "lead",
     quoteType: "system",

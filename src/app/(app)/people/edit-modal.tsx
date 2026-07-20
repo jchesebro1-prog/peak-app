@@ -19,6 +19,18 @@ const STATUSES = [
   { value: "former", label: "Former" },
   { value: "do_not_contact", label: "Do not contact" },
 ];
+// Item 11 (D87): the person's tier is authoritative; blank falls back to
+// the company's tier, then Base. Margins are set in /estimating-rules.
+const TIERS = [
+  { value: "", label: "— Company / Base —" },
+  { value: "base", label: "Base" },
+  { value: "copper", label: "Copper" },
+  { value: "silver", label: "Silver" },
+  { value: "gold", label: "Gold" },
+  { value: "platinum", label: "Platinum" },
+  { value: "reseller", label: "Reseller" },
+  { value: "employee", label: "Employee" },
+];
 
 const field: CSSProperties = {
   width: "100%",
@@ -67,6 +79,7 @@ export default function EditPersonModal({
   const [title, setTitle] = useState(initial?.title || "");
   const [companyId, setCompanyId] = useState(initial?.homeCompanyId || "");
   const [status, setStatus] = useState(initial?.status || "active");
+  const [pricingTier, setPricingTier] = useState(initial?.pricingTier || "");
   const [isPrimary, setIsPrimary] = useState(!!initial?.isPrimary);
   const [emails, setEmails] = useState<ChannelRow[]>(() => rowsFrom(initial?.emails, "e"));
   const [phones, setPhones] = useState<ChannelRow[]>(() => rowsFrom(initial?.phones, "p"));
@@ -84,6 +97,7 @@ export default function EditPersonModal({
         title,
         homeCompanyId: companyId || null,
         status,
+        pricingTier: pricingTier || null,
         isPrimary,
         emails: emails.map(({ value, label: l, isPrimary: p }) => ({ value, label: l, isPrimary: p })),
         phones: phones.map(({ value, label: l, isPrimary: p }) => ({ value, label: l, isPrimary: p })),
@@ -232,16 +246,30 @@ export default function EditPersonModal({
               </select>
             </div>
           </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <span style={label}>Company</span>
+              <select value={companyId} onChange={(e) => setCompanyId(e.target.value)} style={field}>
+                <option value="">— No company —</option>
+                {companyOptions.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <span style={label}>Pricing tier</span>
+              <select value={pricingTier} onChange={(e) => setPricingTier(e.target.value)} style={field} title="Follows the person everywhere (design §4.7); margins set in Estimating Rules">
+                {TIERS.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           <div>
-            <span style={label}>Company</span>
-            <select value={companyId} onChange={(e) => setCompanyId(e.target.value)} style={field}>
-              <option value="">— No company —</option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
             <label style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 9, fontSize: 12.5, color: "#5b616e", cursor: "pointer" }}>
               <input type="checkbox" checked={isPrimary} onChange={(e) => setIsPrimary(e.target.checked)} />
               Primary contact for this company

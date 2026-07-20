@@ -118,6 +118,7 @@ export default function EditCustomerModal({
 
   const [name, setName] = useState(initial?.name || "");
   const [type, setType] = useState(initial?.type || "Performing arts");
+  const [pricingTier, setPricingTier] = useState(initial?.pricingTier || "");
   const [locations, setLocations] = useState<LocRow[]>(() => {
     const src = initial?.locations || [];
     if (!src.length) return [newLoc(true)];
@@ -243,6 +244,7 @@ export default function EditCustomerModal({
         id: initial?.id,
         name: name.trim(),
         type,
+        pricingTier: pricingTier || null,
         locations: locations.map((l) => ({
           id: l.id,
           label: l.label,
@@ -387,6 +389,27 @@ export default function EditCustomerModal({
                   {t}
                 </option>
               ))}
+            </select>
+          </div>
+
+          {/* pricing tier — company fallback; a person's own tier wins (item 11) */}
+          <div style={{ marginTop: 14 }}>
+            <label className="cu-m-lbl">Pricing tier (company fallback)</label>
+            <select
+              className="cu-m-in"
+              value={pricingTier}
+              onChange={(e) => setPricingTier(e.target.value)}
+              style={selStyle}
+              title="Seeds margins for this company's quotes when the contact has no tier of their own. Internal only — customers never see it. Margins live in Estimating Rules."
+            >
+              <option value="">— Base (default) —</option>
+              <option value="base">Base</option>
+              <option value="copper">Copper</option>
+              <option value="silver">Silver</option>
+              <option value="gold">Gold</option>
+              <option value="platinum">Platinum</option>
+              <option value="reseller">Reseller</option>
+              <option value="employee">Employee</option>
             </select>
           </div>
 

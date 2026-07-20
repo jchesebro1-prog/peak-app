@@ -37,6 +37,36 @@ export const CONTACT_STATUS_LABEL: Record<ContactStatus, string> = {
 /** Labels for contact emails/phones (Daylite has Mobile / Work / untitled). */
 export const CHANNEL_LABELS = ["work", "mobile", "home", "other"] as const;
 
+/**
+ * Customer pricing tiers (punch item 11, D87). Keys match the
+ * "Customer tiers" rates in the estimating-rules registry (tiers.<key>);
+ * the margins themselves are admin-editable there. Jeff 2026-07-19:
+ * Base 30 · Copper 27 · Silver 22 · Gold 20 · Platinum 15 · Reseller 10 ·
+ * Employee 5. Default is Base; never shown to customers.
+ */
+export const PRICING_TIERS = [
+  "base",
+  "copper",
+  "silver",
+  "gold",
+  "platinum",
+  "reseller",
+  "employee",
+] as const;
+export type PricingTier = (typeof PRICING_TIERS)[number];
+
+export const PRICING_TIER_LABEL: Record<PricingTier, string> = {
+  base: "Base",
+  copper: "Copper",
+  silver: "Silver",
+  gold: "Gold",
+  platinum: "Platinum",
+  reseller: "Reseller",
+  employee: "Employee",
+};
+
+export const DEFAULT_PRICING_TIER: PricingTier = "base";
+
 export const LIFECYCLE_LABEL: Record<Lifecycle, string> = {
   prospect: "Prospect",
   customer: "Customer",

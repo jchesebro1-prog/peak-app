@@ -169,6 +169,7 @@ export default async function CustomerDetailPage({
     id: cust.id,
     name: cust.name,
     type: cust.type,
+    pricingTier: cust.pricingTier || null,
     locations: (cust.locations || []).map((l) => ({
       id: l.id,
       label: l.label || "",

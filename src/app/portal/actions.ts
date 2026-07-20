@@ -14,6 +14,7 @@ import {
 import { byCategory, get as getCatalogPart } from "@/lib/stores/catalog";
 import { isCustomerBuyable } from "@/lib/portal-catalog";
 import { curtainCost } from "@/lib/curtain-pricing";
+import { resolveTier } from "@/lib/pricing-tiers";
 import { curtainQty, type CurtainSpec } from "@/lib/curtain-geom";
 
 /**
@@ -129,6 +130,10 @@ export async function submitPortalEstimate(formData: FormData): Promise<void> {
   const cust = await getCustomer(session.customerId);
   if (!cust) redirect("/portal?denied=1");
 
+  // Tier pricing (item 11 D, D88) — must resolve exactly as the preview page
+  // did so the customer's live numbers equal the quote they receive.
+  const tier = await resolveTier(session.customerId, session.name);
+
   const project = String(formData.get("project") || "").trim().slice(0, 120);
   const venueId = String(formData.get("venue") || "");
   const venue = (cust.locations || []).find((l) => l.id === venueId) || null;
@@ -180,7 +185,7 @@ export async function submitPortalEstimate(formData: FormData): Promise<void> {
   for (const spec of specs) {
     const fab = fabricById.get(spec.fabric);
     if (!fab) continue; // unknown fabric — drop the line
-    const { costEach, priceEach } = curtainCost(spec, fab.costPerSqft ?? 0);
+    const { costEach, priceEach } = curtainCost(spec, fab.costPerSqft ?? 0, tier.margin);
     if (priceEach <= 0) continue; // no dimensions — skip
     const qty = curtainQty(spec);
     const h = parseFloat(spec.height) || 0;
@@ -225,6 +230,12 @@ export async function submitPortalEstimate(formData: FormData): Promise<void> {
     if (!sku || qty < 1) continue;
     const part = await getCatalogPart(sku);
     if (!isCustomerBuyable(part)) continue; // unknown / internal / flagged part
+    // Tier pricing (item 11 D, D88): customer price re-derived from cost at
+    // the tier margin; parts without a cost keep list — mirrors customerCatalog.
+    const sell =
+      typeof part.cost === "number" && part.cost > 0 && tier.margin > 0 && tier.margin < 1
+        ? Math.round((part.cost / (1 - tier.margin)) * 100) / 100
+        : part.list;
     equipItems.push({
       id: nextId++,
       sku: part.sku,
@@ -232,10 +243,10 @@ export async function submitPortalEstimate(formData: FormData): Promise<void> {
       qty,
       unit: part.unit || "ea",
       cost: part.cost || 0,
-      price: part.list,
+      price: sell,
       ...(part.mfr ? { comment: part.mfr } : {}),
     });
-    rev += qty * part.list;
+    rev += qty * sell;
     cost += qty * (part.cost || 0);
   }
   if (equipItems.length > 0) {
@@ -256,6 +267,8 @@ export async function submitPortalEstimate(formData: FormData): Promise<void> {
     locationId: venue?.id || null,
     value: Math.round(rev),
     margin,
+    pricingTier: tier.tier,
+    tierMargin: tier.margin,
     source: "portal-self-serve",
     spec: { sections, mobs: [] },
   });

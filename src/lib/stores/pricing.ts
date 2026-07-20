@@ -266,6 +266,21 @@ export const GROUPS: PricingGroup[] = [
     ],
   },
   {
+    key: "tiers", label: "Customer tiers", live: true,
+    sub: "Per-customer margin — punch item 11 (D87). Tier lives on the PERSON, company is fallback.",
+    note: "The resolved tier's margin SEEDS pricing everywhere (estimator labor & curtains, flame/repair/inspection quotes, Quick Design promotion, the portal) and is stamped onto each quote at creation — estimators can still override per quote. Not visible to customers. Resolution: quote's attn contact → their company → Base.",
+    items: [
+      rate("tiers.base", "Base margin", 30, "%", { min: 0, max: 60, step: 1, help: "The default tier — every customer without an assigned tier prices here.  sell = cost ÷ (1 − margin)" }),
+      rate("tiers.copper", "Copper margin", 27, "%", { min: 0, max: 60, step: 1 }),
+      rate("tiers.silver", "Silver margin", 22, "%", { min: 0, max: 60, step: 1 }),
+      rate("tiers.gold", "Gold margin", 20, "%", { min: 0, max: 60, step: 1 }),
+      rate("tiers.platinum", "Platinum margin", 15, "%", { min: 0, max: 60, step: 1 }),
+      rate("tiers.reseller", "Reseller margin", 10, "%", { min: 0, max: 60, step: 1 }),
+      rate("tiers.employee", "Employee margin", 5, "%", { min: 0, max: 60, step: 1 }),
+      formula("tiers.resolution", "Tier resolution (design §4.7)", "quote's designated contact's tier  →  else their company's tier  →  else Base   ·   stamped on the quote at creation; each revision re-stamps at cut time"),
+    ],
+  },
+  {
     key: "sizing", label: "Auto BOM & sizing", live: false,
     sub: "How Quick Design turns venue size into quantities — the equations built into the estimator",
     note: "Read-only reference (these live in the estimating code, not wired to the fields above). W = stage width, D = depth, G = grid height, PH = proscenium height (ft). clamp(x, lo, hi) keeps x within range.",

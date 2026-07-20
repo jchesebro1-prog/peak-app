@@ -69,6 +69,13 @@ export type Quote = {
   locationId: string | null;
   value: number;
   margin: number;
+  /** Customer pricing tier stamped at creation (item 11, D87) — resolved
+   *  contact → company → base, re-stamped when the customer/contact changes
+   *  and when a revision is cut. Never shown to the customer. */
+  pricingTier?: string | null;
+  /** The tier's margin fraction as it stood at stamp time (0.30 = 30%) —
+   *  the SEED for pricing tools; `margin` above stays the blended actual. */
+  tierMargin?: number | null;
   status: QuoteStatus;
   /** 'estimator' | 'quick' */
   source: string;
@@ -128,6 +135,9 @@ export type QuoteRevision = {
   name: string;
   value: number;
   margin: number;
+  /** Tier stamp frozen with the snapshot (item 11 B: per-revision). */
+  pricingTier?: string | null;
+  tierMargin?: number | null;
   status: QuoteStatus;
   quoteType?: string;
   /** Whichever priced payload this quote type carries — all already resolved. */
@@ -190,6 +200,8 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     locationId: partial.locationId || null,
     value: Math.round(partial.value || 0),
     margin: partial.margin || 0,
+    pricingTier: partial.pricingTier ?? null,
+    tierMargin: partial.tierMargin ?? null,
     status: "draft",
     source: partial.source || "quick",
     quoteType: partial.quoteType || "system",
@@ -239,6 +251,8 @@ function snapshotOf(
     name: doc.name,
     value: doc.value,
     margin: doc.margin,
+    pricingTier: doc.pricingTier ?? null,
+    tierMargin: doc.tierMargin ?? null,
     status: doc.status,
     quoteType: doc.quoteType,
     spec: doc.spec ?? null,
@@ -319,6 +333,8 @@ export async function restoreQuoteRevision(
     doc.name = target.name;
     doc.value = Math.round(target.value);
     doc.margin = target.margin;
+    doc.pricingTier = target.pricingTier ?? doc.pricingTier ?? null;
+    doc.tierMargin = target.tierMargin ?? doc.tierMargin ?? null;
     doc.spec = target.spec ?? null;
     doc.flameTest = target.flameTest ?? null;
     doc.repair = target.repair ?? null;

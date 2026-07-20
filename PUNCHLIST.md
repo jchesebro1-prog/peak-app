@@ -623,7 +623,7 @@ search box and a "only modified" chip** — that alone likely resolves the compl
 
 ---
 
-## 11. Customer pricing tiers → default margin (incl. customer portal) — IN PROGRESS (all of A–G answered)
+## 11. Customer pricing tiers → default margin (incl. customer portal) — DONE (D88)
 
 **Area:** `src/lib/stores/customers.ts`, `src/app/(app)/estimator/*`, `src/lib/stores/pricing.ts`,
 `src/lib/curtain-pricing.ts`, `src/app/portal/*`
@@ -739,12 +739,12 @@ from "hand-set".
 table; (2) seed the estimator section margin from it and stamp it on the quote; (3) portal last,
 since it carries the client/server coupling risk.
 
-**Status:** IN PROGRESS 2026-07-19 — every decision is answered: A seeds; B stamps per
-revision (item 24); C all five margin systems; D cost-plus-margin in the portal; E invisible
-to the customer; F seven tiers Base 30 / Copper 27 / Silver 22 / Gold 20 / Platinum 15 /
-Reseller 10 / Employee 5; G default Base. Identity core (D85) already provides
-contacts.pricingTier + companies.pricingTier per design §4.7: contact tier wins, company is
-fallback, stamped onto the quote at creation.
+**Status:** DONE 2026-07-19 (**D88**) — shipped across all five margin systems per the
+answered A–G. Tier set on People (authoritative) and Companies (fallback); margins
+admin-editable in /estimating-rules → Customer tiers; resolved tier stamped on quotes at
+creation and per revision; service-quote margin knobs are per-quote now (no more global
+blob mutation from a quote builder). Portal prices at the grant customer's tier
+(cost ÷ (1 − m), list fallback). See D88 for verification notes + two honest gaps.
 
 ---
 

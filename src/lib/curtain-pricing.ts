@@ -15,7 +15,8 @@ import { curtainAreas, round2, type CurtainSpec, type SellCoeffs } from "./curta
  */
 
 export const CURTAIN_MARGIN = 0.38;
-const M = 1 - CURTAIN_MARGIN; // 0.62
+// (The old shared `M = 1 - CURTAIN_MARGIN` divisor moved into each function —
+// margin is a parameter since customer tiers, item 11/D88.)
 
 /** Sew labor per sq ft of sewn fabric. */
 const SEW_COST_PER_SQFT = 0.6;
@@ -41,11 +42,15 @@ function assemblyCost(d: CurtainSpec): number {
  */
 export function curtainCost(
   d: CurtainSpec,
-  costPerSqft: number
+  costPerSqft: number,
+  /** Margin-on-price fraction; the customer's tier seeds this (item 11,
+   *  D88). Default stays the legacy CURTAIN_MARGIN. */
+  margin: number = CURTAIN_MARGIN
 ): { costEach: number; priceEach: number } {
+  const m = 1 - (margin > 0 && margin < 1 ? margin : CURTAIN_MARGIN);
   const { fabricArea } = curtainAreas(d);
   const costEach = fabricArea * (costPerSqft || 0) + assemblyCost(d);
-  const priceEach = costEach > 0 ? costEach / M : 0;
+  const priceEach = costEach > 0 ? costEach / m : 0;
   return { costEach: round2(costEach), priceEach: round2(priceEach) };
 }
 
@@ -54,15 +59,20 @@ export function curtainCost(
  * preview — each cost coefficient divided by (1 − margin). No margin or cost
  * value crosses to the browser, only these already-marked-up sell numbers.
  */
-export function sellCoeffs(): SellCoeffs {
+export function sellCoeffs(margin: number = CURTAIN_MARGIN): SellCoeffs {
+  const m = 1 - (margin > 0 && margin < 1 ? margin : CURTAIN_MARGIN);
   return {
-    sewPerSqft: SEW_COST_PER_SQFT / M,
-    bottomPerFt: { Chain: 2.5 / M, Pocket: 1.8 / M, None: 0 },
-    hangPerFt: { Pipe: 3.0 / M, Track: 12.0 / M, Other: 5.0 / M, None: 0 },
+    sewPerSqft: SEW_COST_PER_SQFT / m,
+    bottomPerFt: { Chain: 2.5 / m, Pocket: 1.8 / m, None: 0 },
+    hangPerFt: { Pipe: 3.0 / m, Track: 12.0 / m, Other: 5.0 / m, None: 0 },
   };
 }
 
 /** A fabric's customer-facing sell price/sq ft (cost basis ÷ (1 − margin)). */
-export function fabricSellPerSqft(costPerSqft: number): number {
-  return (costPerSqft || 0) / M;
+export function fabricSellPerSqft(
+  costPerSqft: number,
+  margin: number = CURTAIN_MARGIN
+): number {
+  const m = 1 - (margin > 0 && margin < 1 ? margin : CURTAIN_MARGIN);
+  return (costPerSqft || 0) / m;
 }

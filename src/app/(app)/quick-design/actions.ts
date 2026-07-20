@@ -103,7 +103,17 @@ export async function addToQuotesAction(
   if (!qp) throw new Error("Design not found");
   // DesignQuotePartial carries requote/spec/source beyond the Quote hot
   // columns — the doc store keeps them on the document (prototype parity).
-  const q = await createQuote({ ...(qp as unknown as Partial<Quote>), owner: user.name });
+  // Tier stamp at promotion (item 11, D88): Quick Design stays a sandbox at
+  // its own engine margins; the customer's tier takes over when the design
+  // becomes a quote (it's flagged requote and re-priced in the Estimator).
+  const { resolveTier } = await import("@/lib/pricing-tiers");
+  const tier = await resolveTier(qp.customerId);
+  const q = await createQuote({
+    ...(qp as unknown as Partial<Quote>),
+    pricingTier: tier.tier,
+    tierMargin: tier.margin,
+    owner: user.name,
+  });
   await updateQuote(q.id, { requote: true } as unknown as Partial<Quote>);
   await removeDesign(saved.id);
   revalidatePath("/design");

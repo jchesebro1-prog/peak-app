@@ -903,3 +903,32 @@ Anything you want changed, just say so — none of these are hard to reverse.
     (D83 shape is final); the four AI features **stay reachable for now** —
     Jeff wants a session to design rules-based ways around them (D75/D86
     mold), queued with the Consulting talk for the next brainstorm.
+- **D88. Customer pricing tiers shipped** (punch item 11 — decisions in D87 +
+  Jeff's follow-ups; built 2026-07-19). The tier lives on the PERSON
+  (`contacts.pricingTier`, D85 schema), company is fallback, Base is default;
+  margins are admin-editable rates in /estimating-rules → "Customer tiers"
+  (Base 30 · Copper 27 · Silver 22 · Gold 20 · Platinum 15 · Reseller 10 ·
+  Employee 5). `lib/pricing-tiers.ts` resolves contact → company → Base
+  (design §4.7) and the resolved {tier, margin} is STAMPED onto quotes at
+  creation, re-resolved when the estimator's customer/contact changes, and
+  frozen into every revision snapshot (item 24/B). It SEEDS, never enforces:
+  estimator labor drafts + curtain configurator default to it; the three
+  service builders (flame/repair/inspection) seed their margin knob from the
+  picked customer (contact's own tier wins) — and their knob is now
+  PER-QUOTE: it no longer mutates the global rate blob, so one quote's
+  margin stops repricing every future service quote (deliberate behavior
+  change; global rates stay editable in /estimating-rules). Quick Design
+  keeps its sandbox engine margins; the tier takes over at Add-to-Quotes
+  promotion (requote path). Lead conversion stamps the new company at Base.
+  Portal (11-D, cost + margin): the drapery preview coefficients AND the
+  authoritative recompute both price at the grant customer's tier margin
+  (contact-level via the grant name), and equipment prices re-derive from
+  cost ÷ (1 − m), falling back to list when a part has no cost. Invisible to
+  customers everywhere (E) — no tier name or discount line renders. Verified:
+  scripted resolution-chain/stamp/revision/curtain tests all green; registry
+  group + both tier selects + builders render against the dev server.
+  **Honest gaps:** the portal catalog re-derive ran against an empty
+  customer-buyable set (the reseeded 27-part seed catalog has none — the
+  real price-book import repopulates it); service-builder knob seeding uses
+  the picked customer's primary contact, and switching the attn contact
+  after picking does not re-seed the knob (cheap follow-up if wanted).

@@ -107,6 +107,10 @@ export type CustomerDoc = {
   createdAt?: number;
   updatedAt?: number;
   owner?: string;
+  /** Company-level pricing tier — the FALLBACK (item 11/D87, §4.7); the
+   *  authoritative tier lives on the person. Part of doc content so
+   *  tier-only edits register as changes. */
+  pricingTier?: string;
 };
 
 /** The metadata keys stamped by the store, not by the edit form. */
@@ -143,6 +147,7 @@ export type CustomerRecordInput = {
   locations?: CustomerLocationInput[];
   contacts?: CustomerContactInput[];
   owner?: string;
+  pricingTier?: string | null;
 };
 
 /** Legacy name -> locations[] cache blob (prototype rss_customer_locs_v2). */
@@ -206,6 +211,8 @@ export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
   };
   const owner = (c.owner || "").trim();
   if (owner) doc.owner = owner;
+  const tier = (c.pricingTier || "").trim();
+  if (tier) doc.pricingTier = tier;
   return doc;
 }
 
@@ -282,6 +289,7 @@ function composeDoc(
     updatedAt: co.updatedAt,
   };
   if (ownerName) doc.owner = ownerName;
+  if (co.pricingTier) doc.pricingTier = co.pricingTier;
   return doc;
 }
 
@@ -433,7 +441,7 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
     city: existingCo?.city ?? null,
     state: existingCo?.state ?? null,
     zip: existingCo?.zip ?? null,
-    pricingTier: existingCo?.pricingTier ?? null,
+    pricingTier: rec.pricingTier ?? existingCo?.pricingTier ?? null,
     ownerUserId,
     referredByContactId: existingCo?.referredByContactId ?? null,
     createdAt: existingCo?.createdAt ?? t,

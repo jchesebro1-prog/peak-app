@@ -6,6 +6,7 @@ import { getRates } from "@/lib/flametest-engine";
 import { getSettings } from "@/lib/settings";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
+import { builderTiers } from "@/lib/pricing-tiers";
 
 export const metadata = { title: "Flame test quote — Peak Backend" };
 
@@ -49,6 +50,8 @@ export default async function FlameTestQuotePage({
   const approved = one(sp.approved) === "1";
 
   /* ---- serializable customer directory with per-venue coords + travel ---- */
+  // Customer tier margins seed the builder's margin knob (item 11, D88).
+  const tierInfo = await builderTiers(customerDocs.map((c: CustomerDoc) => c.id));
   const customers: BuilderCustomer[] = await Promise.all(
     customerDocs.map(async (c: CustomerDoc) => ({
       id: c.id,
@@ -74,7 +77,9 @@ export default async function FlameTestQuotePage({
         role: ct.role || "",
         email: ct.email || "",
         primary: !!ct.primary,
+        tierMargin: tierInfo[c.id]?.byContact[ct.name] ?? null,
       })),
+      tierMargin: tierInfo[c.id]?.margin ?? null,
     }))
   );
 

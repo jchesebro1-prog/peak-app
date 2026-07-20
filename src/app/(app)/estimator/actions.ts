@@ -139,7 +139,7 @@ export async function updateQuoteMetaAction(
     contactName?: string;
     quoteNote?: string;
   }
-): Promise<{ ok: boolean }> {
+): Promise<{ ok: boolean; pricingTier?: string; tierMargin?: number }> {
   await requireUser();
   if (!id) return { ok: false };
   // Allowlist the header fields only — never forward the raw client object.
@@ -153,9 +153,30 @@ export async function updateQuoteMetaAction(
   if (typeof meta.customer === "string") patch.customer = meta.customer;
   if (typeof meta.contactName === "string") patch.contactName = meta.contactName;
   if (typeof meta.quoteNote === "string") patch.quoteNote = meta.quoteNote;
+
+  // Item 11 (D87): a customer/contact change re-resolves the pricing tier
+  // SERVER-side (never trusted from the client) and re-stamps the quote.
+  // The stamp SEEDS pricing tools; it never rewrites existing line prices.
+  let stamped: { pricingTier: string; tierMargin: number } | null = null;
+  if ("customerId" in meta || typeof meta.contactName === "string") {
+    const { get: getQuote } = await import("@/lib/stores/quotes");
+    const cur = await getQuote(id);
+    const effCustomerId =
+      "customerId" in meta ? (meta.customerId ?? null) : (cur?.customerId ?? null);
+    const effContact =
+      typeof meta.contactName === "string"
+        ? meta.contactName
+        : ((cur as { contactName?: string } | null)?.contactName ?? "");
+    const { resolveTier } = await import("@/lib/pricing-tiers");
+    const r = await resolveTier(effCustomerId, effContact);
+    patch.pricingTier = r.tier;
+    patch.tierMargin = r.margin;
+    stamped = { pricingTier: r.tier, tierMargin: r.margin };
+  }
+
   const q = await update(id, patch);
   refresh();
-  return { ok: !!q };
+  return { ok: !!q, ...(stamped ?? {}) };
 }
 
 export async function setStatusAction(

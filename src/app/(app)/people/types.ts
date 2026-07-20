@@ -14,6 +14,9 @@ export type SavePersonInput = {
   title: string;
   homeCompanyId: string | null;
   status: string;
+  /** Customer pricing tier — THE authoritative one (§4.7, item 11/D87).
+   *  null = no personal tier (falls back to company, then Base). */
+  pricingTier: string | null;
   /** Transitional "primary contact of the home company" flag (D85). */
   isPrimary: boolean;
   emails: ChannelInputVM[];
