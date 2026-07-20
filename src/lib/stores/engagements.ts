@@ -297,6 +297,23 @@ export async function syncEngagementsFromQuotes(): Promise<number> {
   return made;
 }
 
+/** Attach a document to the engagement (phaseId null) or to one phase's
+ *  deliverables list. */
+export async function addPhaseDocTo(
+  engId: string,
+  phaseId: string | null,
+  doc: EngagementDoc
+): Promise<void> {
+  await patchEngagement(engId, (d) => {
+    if (phaseId) {
+      const ph = d.phases.find((p) => p.id === phaseId);
+      if (ph) ph.attachments.push(doc);
+    } else {
+      d.documents.push(doc);
+    }
+  });
+}
+
 /* ---------- phase reviews (mirror quotes.ts submitForReview/claim/
  * approve/requestChanges, operating on phases[].review) ---------- */
 

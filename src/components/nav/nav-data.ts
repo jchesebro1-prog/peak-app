@@ -13,6 +13,9 @@ export const NAV: NavEntry[] = [
   { kind: "link", key: "home", label: "Home", href: "/" },
   { kind: "link", key: "calendar", label: "Calendar", href: "/calendar" },
   { kind: "link", key: "inbox", label: "Inbox", href: "/inbox" },
+  /* Consulting is its own top-level module (D90, spec §Module UI) — a
+   * standalone entry like Home/Inbox, not inside the five groups. */
+  { kind: "link", key: "consulting", label: "Consulting", href: "/consulting" },
   {
     kind: "group",
     key: "sales",
@@ -78,6 +81,7 @@ export function activeKeyFor(pathname: string): string {
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
     "/inbox": "inbox",
+    "/consulting": "consulting",
     "/leads": "leads",
     "/quotes": "quotes",
     "/estimator": "quotes",
