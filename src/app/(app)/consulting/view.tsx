@@ -29,7 +29,13 @@ import {
   setSubmittalStatusAction,
   submitPhaseReviewAction,
   updateMilestoneAction,
+  addChecklistItemAction,
+  addReviewCommentAction,
+  deleteMeetingAction,
+  setChecklistItemAction,
+  setCommentStateAction,
 } from "./actions";
+import { approvalIsStale } from "@/lib/stores/engagements";
 import { Card, EmptyState, KpiTile, Mono, PageHeader, Pill, StatusPill } from "@/components/ui";
 import { money } from "@/lib/format";
 
@@ -563,7 +569,8 @@ function PhasesTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngagem
       )}
       {eng.phases.length === 0 && <Card><EmptyState title="No phases yet" sub="Add phases from the menu below — progress gates on internal Peak review only." /></Card>}
       {eng.phases.map((ph) => {
-        const canComplete = ph.review.state === "approved";
+        const stale = approvalIsStale(ph);
+        const canComplete = ph.review.state === "approved" && !stale;
         return (
           <Card key={ph.id}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -578,6 +585,13 @@ function PhasesTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngagem
             </div>
             {ph.review.state === "changes" && ph.review.note && (
               <div style={{ fontSize: 12, color: "#a0442b", marginTop: 6 }}>“{ph.review.note}”</div>
+            )}
+            {stale && (
+              <div style={{ background: "#fdf4e7", border: "1px solid #f0dcbb", borderRadius: 9, padding: "8px 11px", fontSize: 12, color: "#8a5a1c", marginTop: 8 }}>
+                <strong>Approval is stale.</strong> The documents changed after{" "}
+                {ph.approvalPin?.by} approved this on {fmtDate(ph.approvalPin?.at)} — it needs re-review
+                before the phase can complete.
+              </div>
             )}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
               {ph.status === "pending" && (
@@ -622,6 +636,8 @@ function PhasesTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngagem
               </button>
             </div>
             <PhaseDocs eng={eng} phase={ph} />
+            <StandardsChecklist eng={eng} phase={ph} />
+            <ReviewComments eng={eng} phase={ph} />
           </Card>
         );
       })}
@@ -646,6 +662,198 @@ function PhasesTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngagem
           </button>
         </div>
       </Card>
+    </div>
+  );
+}
+
+/* ------------------- standards checklist (D91) ------------------- */
+
+function StandardsChecklist({ eng, phase }: { eng: ConsultingEngagement; phase: EngagementPhase }) {
+  const router = useRouter();
+  const [adding, setAdding] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const items = phase.checklist || [];
+  const open = items.filter((i) => i.state === "open").length;
+  const waived = items.filter((i) => i.state === "waived").length;
+
+  async function set(itemId: string, state: "open" | "checked" | "waived") {
+    setErr(null);
+    let reason = "";
+    if (state === "waived") {
+      reason = window.prompt("Why is this item being waived?") || "";
+      if (!reason.trim()) return;
+    }
+    const r = await setChecklistItemAction(eng.id, phase.id, itemId, state, reason);
+    if (!r.ok) setErr(r.error);
+    router.refresh();
+  }
+
+  return (
+    <div style={{ marginTop: 12, borderTop: "1px solid #edeff3", paddingTop: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#16181d" }}>Peak standards</div>
+        {items.length > 0 && (
+          <Pill color={open ? "#c07f28" : "#2e9e6b"}>
+            {items.length - open}/{items.length} cleared{waived ? ` · ${waived} waived` : ""}
+          </Pill>
+        )}
+      </div>
+      {err && <div style={{ fontSize: 12, color: "#a0442b", marginBottom: 6 }}>{err}</div>}
+      {items.length === 0 && (
+        <div style={{ fontSize: 12, color: "#8c919c", marginBottom: 6 }}>
+          No checklist yet — it stamps from the template for “{phase.name}” when the phase is
+          submitted for review. Add items below to build one now.
+        </div>
+      )}
+      <div style={{ display: "grid", gap: 5 }}>
+        {items.map((it) => (
+          <div key={it.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5 }}>
+            <input
+              type="checkbox"
+              checked={it.state === "checked"}
+              onChange={() => set(it.id, it.state === "checked" ? "open" : "checked")}
+              style={{ marginTop: 2 }}
+            />
+            <div style={{ flex: 1 }}>
+              <span
+                style={{
+                  color: it.state === "open" ? "#16181d" : "#5b616e",
+                  textDecoration: it.state === "waived" ? "line-through" : "none",
+                }}
+              >
+                {it.text}
+              </span>
+              {it.state !== "open" && (
+                <span style={{ color: "#8c919c", fontSize: 11.5 }}>
+                  {" "}
+                  — {it.state === "waived" ? "waived" : "checked"} by {it.by} {fmtDate(it.at)}
+                  {it.reason ? ` · ${it.reason}` : ""}
+                </span>
+              )}
+            </div>
+            {it.state !== "waived" && (
+              <button style={{ ...SMALL_BTN, padding: "2px 7px", fontSize: 11 }} onClick={() => set(it.id, "waived")}>
+                Waive
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+        <input
+          value={adding}
+          onChange={(e) => setAdding(e.target.value)}
+          placeholder="Add a standards item…"
+          style={{ ...INPUT, flex: 1, fontSize: 12 }}
+        />
+        <button
+          style={SMALL_BTN}
+          onClick={async () => {
+            if (!adding.trim()) return;
+            await addChecklistItemAction(eng.id, phase.id, adding.trim());
+            setAdding("");
+            router.refresh();
+          }}
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------- review comments (D92) -------------------- */
+
+function ReviewComments({ eng, phase }: { eng: ConsultingEngagement; phase: EngagementPhase }) {
+  const router = useRouter();
+  const [body, setBody] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const comments = phase.comments || [];
+  const open = comments.filter((c) => c.state === "open");
+
+  async function setState(id: string, state: "open" | "resolved" | "waived") {
+    setErr(null);
+    let reason = "";
+    if (state === "waived") {
+      reason = window.prompt("Why is this comment being waived?") || "";
+      if (!reason.trim()) return;
+    }
+    const r = await setCommentStateAction(eng.id, phase.id, id, state, reason);
+    if (!r.ok) setErr(r.error);
+    router.refresh();
+  }
+
+  return (
+    <div style={{ marginTop: 12, borderTop: "1px solid #edeff3", paddingTop: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#16181d" }}>Review comments</div>
+        {comments.length > 0 && (
+          <Pill color={open.length ? "#c07f28" : "#2e9e6b"}>
+            {open.length ? `${open.length} open` : "all resolved"}
+          </Pill>
+        )}
+      </div>
+      {err && <div style={{ fontSize: 12, color: "#a0442b", marginBottom: 6 }}>{err}</div>}
+      <div style={{ display: "grid", gap: 7 }}>
+        {comments.map((c) => (
+          <div
+            key={c.id}
+            style={{
+              background: c.state === "open" ? "#fbfbfc" : "#f6f7f9",
+              border: "1px solid #edeff3",
+              borderLeft: `3px solid ${c.state === "open" ? (c.required ? "#c4553a" : "#c07f28") : "#2e9e6b"}`,
+              borderRadius: 7,
+              padding: "7px 10px",
+              fontSize: 12.5,
+            }}
+          >
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <strong style={{ color: "#16181d" }}>{c.author}</strong>
+              <span style={{ color: "#8c919c", fontSize: 11.5 }}>{fmtDate(c.at)}</span>
+              {c.required && c.state === "open" && <Pill color="#c4553a">Required edit</Pill>}
+              {c.state !== "open" && (
+                <Pill color="#2e9e6b">
+                  {c.state === "waived" ? "Waived" : "Resolved"} · {c.resolvedBy}
+                </Pill>
+              )}
+            </div>
+            <div style={{ marginTop: 3, color: "#3d424e", whiteSpace: "pre-wrap" }}>{c.body}</div>
+            {c.waiveReason && (
+              <div style={{ marginTop: 3, color: "#8c919c", fontSize: 11.5 }}>Waived: {c.waiveReason}</div>
+            )}
+            {c.state === "open" && (
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                <button style={{ ...SMALL_BTN, padding: "2px 7px", fontSize: 11 }} onClick={() => setState(c.id, "resolved")}>
+                  Resolve
+                </button>
+                <button style={{ ...SMALL_BTN, padding: "2px 7px", fontSize: 11 }} onClick={() => setState(c.id, "waived")}>
+                  Waive
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+        <input
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Add a review comment…"
+          style={{ ...INPUT, flex: 1, fontSize: 12 }}
+        />
+        <button
+          style={SMALL_BTN}
+          onClick={async () => {
+            if (!body.trim()) return;
+            const r = await addReviewCommentAction(eng.id, phase.id, body.trim());
+            if (!r.ok) setErr(r.error);
+            setBody("");
+            router.refresh();
+          }}
+        >
+          Comment
+        </button>
+      </div>
     </div>
   );
 }
@@ -758,6 +966,9 @@ function MeetingsTab({ eng }: { eng: ConsultingEngagement }) {
   const [context, setContext] = useState("");
   const [mtAttendees, setMtAttendees] = useState("");
   const [mtMinutes, setMtMinutes] = useState("");
+  const [mtTitle, setMtTitle] = useState("");
+  const [mtRecording, setMtRecording] = useState("");
+  const [mtPhase, setMtPhase] = useState("");
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, alignItems: "start" }}>
@@ -794,14 +1005,30 @@ function MeetingsTab({ eng }: { eng: ConsultingEngagement }) {
           Review meetings
         </div>
         <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+          <input value={mtTitle} onChange={(e) => setMtTitle(e.target.value)} placeholder="Meeting title (e.g. DD design review)" style={INPUT} />
           <input value={mtAttendees} onChange={(e) => setMtAttendees(e.target.value)} placeholder="Attendees" style={INPUT} />
-          <textarea value={mtMinutes} onChange={(e) => setMtMinutes(e.target.value)} rows={3} placeholder="Minutes…" style={{ ...INPUT, resize: "vertical" }} />
+          <textarea value={mtMinutes} onChange={(e) => setMtMinutes(e.target.value)} rows={3} placeholder="Minutes… (paste from the note taker)" style={{ ...INPUT, resize: "vertical" }} />
+          <input value={mtRecording} onChange={(e) => setMtRecording(e.target.value)} placeholder="Recording link (Zoom / Meet / Teams)" style={INPUT} />
+          <select value={mtPhase} onChange={(e) => setMtPhase(e.target.value)} style={INPUT}>
+            <option value="">Not tied to a phase review</option>
+            {eng.phases.map((p) => (
+              <option key={p.id} value={p.id}>Covers: {p.name}</option>
+            ))}
+          </select>
           <button
             style={{ ...SMALL_BTN, justifySelf: "start" }}
             onClick={async () => {
-              if (!mtMinutes.trim() && !mtAttendees.trim()) return;
-              await addMeetingAction(eng.id, { at: Date.now(), attendees: mtAttendees.trim(), minutes: mtMinutes.trim(), decisionIds: [] });
-              setMtAttendees(""); setMtMinutes("");
+              if (!mtMinutes.trim() && !mtAttendees.trim() && !mtTitle.trim()) return;
+              await addMeetingAction(eng.id, {
+                at: Date.now(),
+                attendees: mtAttendees.trim(),
+                minutes: mtMinutes.trim(),
+                decisionIds: [],
+                title: mtTitle.trim(),
+                recordingUrl: mtRecording.trim(),
+                phaseId: mtPhase || null,
+              });
+              setMtAttendees(""); setMtMinutes(""); setMtTitle(""); setMtRecording(""); setMtPhase("");
               router.refresh();
             }}
           >
@@ -809,12 +1036,30 @@ function MeetingsTab({ eng }: { eng: ConsultingEngagement }) {
           </button>
         </div>
         {eng.meetings.length === 0 && <EmptyState title="No meetings recorded" sub="Minutes are recorded, not generated (spec)." />}
-        {eng.meetings.map((m) => (
-          <div key={m.id} style={{ padding: "8px 0", borderTop: "1px solid #f4f5f7", fontSize: 12.5 }}>
-            <div style={{ color: "#9aa0ab", fontSize: 11 }}>{fmtDate(m.at)}{m.attendees ? ` · ${m.attendees}` : ""}</div>
-            {m.minutes && <div style={{ color: "#3a3f4a", marginTop: 3, whiteSpace: "pre-wrap" }}>{m.minutes}</div>}
-          </div>
-        ))}
+        {eng.meetings.map((m) => {
+          const phase = m.phaseId ? eng.phases.find((p) => p.id === m.phaseId) : null;
+          return (
+            <div key={m.id} style={{ padding: "8px 0", borderTop: "1px solid #f4f5f7", fontSize: 12.5 }}>
+              {m.title && <div style={{ color: "#16181d", fontWeight: 600 }}>{m.title}</div>}
+              <div style={{ color: "#9aa0ab", fontSize: 11 }}>{fmtDate(m.at)}{m.attendees ? ` · ${m.attendees}` : ""}</div>
+              {m.minutes && <div style={{ color: "#3a3f4a", marginTop: 3, whiteSpace: "pre-wrap" }}>{m.minutes}</div>}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
+                {phase && <Pill color="#3155a8">{phase.name} review</Pill>}
+                {m.recordingUrl && (
+                  <a href={m.recordingUrl} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: "#3155a8" }}>
+                    ▶ Watch recording
+                  </a>
+                )}
+                <button
+                  style={{ ...SMALL_BTN, padding: "2px 7px", fontSize: 11, color: "#a0442b" }}
+                  onClick={async () => { await deleteMeetingAction(eng.id, m.id); router.refresh(); }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </Card>
     </div>
   );

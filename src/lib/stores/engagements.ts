@@ -40,6 +40,74 @@ export type EngagementDoc = {
   addedAt: number;
 };
 
+/** Anchor — what a review comment is about (D92). Keeps the trail itemized
+ *  instead of the single free-text `review.note` that carried every review
+ *  before this. `annotation` is reserved for the markup canvas (spec §B,
+ *  not built yet); it parses today so stored comments survive that landing. */
+export type CommentAnchor =
+  | { kind: "review" }
+  | { kind: "document"; docId: string }
+  | { kind: "checklist"; itemId: string }
+  | { kind: "lineItem"; lineId: string }
+  | { kind: "annotation"; annotationId: string };
+
+/** One itemized comment on a review (D92). Append-only: resolving adds
+ *  fields, it never rewrites or removes the original body. */
+export type ReviewComment = {
+  id: string; // uid('rc-')
+  author: string;
+  at: number;
+  body: string;
+  anchor: CommentAnchor;
+  /** Threading — replies point at their parent comment id. */
+  parentId: string | null;
+  state: "open" | "resolved" | "waived";
+  /** Marks this comment as one of the edits required to clear a send-back. */
+  required: boolean;
+  resolvedBy: string | null;
+  resolvedAt: number | null;
+  /** Required when state is 'waived'. */
+  waiveReason: string;
+};
+
+/** A frozen record of one artifact as it stood at approval (D92). The file
+ *  bytes live in a `review_snapshots` doc, not here — this keeps the
+ *  engagement document small (see snapshotId). */
+export type PinnedDoc = {
+  docId: string;
+  name: string;
+  size: number;
+  /** The attachment's addedAt — our version marker. A re-upload produces a
+   *  new doc id and a new stamp, which is what makes staleness detectable. */
+  version: number;
+};
+
+/** What an approval attests to (D92). If the phase's attachment set no
+ *  longer matches `docs`, the approval is stale and the phase wants
+ *  re-review — see approvalIsStale(). */
+export type ApprovalPin = {
+  at: number;
+  by: string;
+  docs: PinnedDoc[];
+  /** Doc-store id in `review_snapshots` holding the frozen file copies. */
+  snapshotId: string | null;
+};
+
+/** One Peak-standards line on a phase review (D91). Stamped from the
+ *  per-phase template at submission and then frozen — editing a template
+ *  never rewrites checklists already stamped, because a review is a
+ *  point-in-time record. */
+export type ChecklistItem = {
+  id: string; // uid('ck-')
+  text: string;
+  state: "open" | "checked" | "waived";
+  /** Who checked/waived it, and when. Null while open. */
+  by: string | null;
+  at: number | null;
+  /** Required when state is 'waived' — a waive with no reason is not a waive. */
+  reason: string;
+};
+
 export type EngagementPhase = {
   id: string; // uid('ph-')
   name: string; // from the phase menu; free rename allowed
@@ -50,6 +118,15 @@ export type EngagementPhase = {
    *  surface in the existing Reviews queue. */
   review: QuoteReview;
   attachments: EngagementDoc[];
+  /** Peak-standards checklist (D91). Optional on read: engagements created
+   *  before D91 have no checklist — treat absent as empty everywhere. */
+  checklist?: ChecklistItem[];
+  /** Itemized review comments (D92) — the accountability trail. Optional
+   *  for the same back-compat reason. */
+  comments?: ReviewComment[];
+  /** What an approval actually approved (D92): the artifacts + versions
+   *  frozen at the moment of approval. Absent until first approval. */
+  approvalPin?: ApprovalPin | null;
 };
 
 export type EngagementMilestone = {
@@ -74,6 +151,13 @@ export type EngagementMeeting = {
   attendees: string;
   minutes: string;
   decisionIds: string[];
+  /** Link to the recording of a virtual meeting (D91). Deliberately a link,
+   *  not an upload: Zoom/Meet/Teams already host the video. */
+  recordingUrl?: string;
+  /** The phase review this meeting covered, when it was a design review. */
+  phaseId?: string | null;
+  /** Title for the meetings list; falls back to the date when empty. */
+  title?: string;
 };
 
 export type EngagementSubmittal = {
@@ -159,7 +243,91 @@ export function makePhase(name: string): EngagementPhase {
     status: "pending",
     review: { ...NO_REVIEW },
     attachments: [],
+    checklist: [],
+    comments: [],
+    approvalPin: null,
   };
+}
+
+/* ---------- Peak-standards checklists (D91) ---------- */
+
+/** Default per-phase checklist templates, keyed by phase name. Overridden in
+ *  Settings (`AppSettingsData.reviewChecklistTemplates`). A phase with no
+ *  template stamps an empty checklist and says so in the UI — better than
+ *  inventing standards nobody agreed to. */
+export const DEFAULT_REVIEW_CHECKLISTS: Record<string, string[]> = {
+  "Schematic Design": [
+    "Scope matches the signed consulting quote",
+    "Venue dimensions verified against the site survey",
+    "Existing infrastructure documented (power, rigging, structure)",
+    "Budget range communicated to the customer",
+  ],
+  "Design Development": [
+    "Fixture/equipment selections match Peak's vendor lanes",
+    "Circuiting and load calculations complete",
+    "Rigging capacities confirmed against structural limits",
+    "Control system topology documented",
+    "Sightlines and mounting positions checked",
+  ],
+  "Final Documents": [
+    "Drawings coordinated with architectural and electrical sets",
+    "Equipment schedule matches the drawings",
+    "Specifications complete for every specified product",
+    "Owner training and closeout requirements stated",
+    "Peak contact information current on every sheet",
+  ],
+  "Bid Support": [
+    "Bid documents match the approved final design",
+    "Substitution criteria stated",
+    "Addenda log current",
+  ],
+  "Construction Oversight": [
+    "Punch list captured and dated",
+    "Field deviations documented against the design",
+    "Owner sign-off obtained",
+  ],
+};
+
+/** Stored overrides win when the phase has one; otherwise the defaults. */
+export function checklistTemplateFor(
+  phaseName: string,
+  stored?: Record<string, string[]> | null
+): string[] {
+  const override = (stored || {})[phaseName];
+  if (override) return override.map((s) => s.trim()).filter(Boolean);
+  return DEFAULT_REVIEW_CHECKLISTS[phaseName] || [];
+}
+
+export function makeChecklist(texts: string[]): ChecklistItem[] {
+  return texts.map((text) => ({
+    id: uid("ck-"),
+    text,
+    state: "open" as const,
+    by: null,
+    at: null,
+    reason: "",
+  }));
+}
+
+/** Items still blocking approval — open items only. Waived and checked both
+ *  clear the gate; waiving just demands a reason. */
+export function openChecklistItems(ph: EngagementPhase): ChecklistItem[] {
+  return (ph.checklist || []).filter((c) => c.state === "open");
+}
+
+/** Comments still blocking approval. */
+export function openComments(ph: EngagementPhase): ReviewComment[] {
+  return (ph.comments || []).filter((c) => c.state === "open");
+}
+
+/** An approval goes stale when the phase's attachment set no longer matches
+ *  what was pinned — a revised drawing uploaded after sign-off. */
+export function approvalIsStale(ph: EngagementPhase): boolean {
+  const pin = ph.approvalPin;
+  if (!pin) return false;
+  const now = ph.attachments.map((a) => `${a.id}:${a.addedAt}`).sort();
+  const then = pin.docs.map((d) => `${d.docId}:${d.version}`).sort();
+  return now.join("|") !== then.join("|");
 }
 
 export async function allEngagements(): Promise<ConsultingEngagement[]> {
@@ -321,10 +489,15 @@ function phaseOf(d: ConsultingEngagement, phaseId: string): EngagementPhase | nu
   return d.phases.find((p) => p.id === phaseId) || null;
 }
 
+/** Submit for internal review. `template` is the phase's standards checklist
+ *  (resolved by the caller from settings) — stamped only when the phase has
+ *  no checklist yet, so a resubmission after changes keeps the progress the
+ *  reviewers already made. */
 export async function submitPhaseReview(
   engId: string,
   phaseId: string,
-  by: string
+  by: string,
+  template: string[] = []
 ): Promise<void> {
   await patchEngagement(engId, (d) => {
     const ph = phaseOf(d, phaseId);
@@ -335,6 +508,9 @@ export async function submitPhaseReview(
       submittedBy: by,
       submittedAt: Date.now(),
     };
+    if (!ph.checklist?.length && template.length) {
+      ph.checklist = makeChecklist(template);
+    }
   });
 }
 
@@ -350,20 +526,54 @@ export async function claimPhaseReview(
   });
 }
 
+/** Approve — gated (D91/D92). Every standards item must be checked or
+ *  waived and every comment resolved or waived first, so an approval can
+ *  never outrun the objections raised against it. On success the approval is
+ *  pinned to the exact artifacts reviewed; frozen copies are written by the
+ *  caller (server action) into `review_snapshots` and passed as snapshotId. */
 export async function approvePhaseReview(
   engId: string,
   phaseId: string,
-  by: string
-): Promise<void> {
+  by: string,
+  snapshotId: string | null = null
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  let error = "";
   await patchEngagement(engId, (d) => {
     const ph = phaseOf(d, phaseId);
-    if (!ph || ph.review.state !== "in_review") return;
+    if (!ph || ph.review.state !== "in_review") {
+      error = "This phase is not awaiting review.";
+      return;
+    }
+    const openItems = openChecklistItems(ph).length;
+    const openCs = openComments(ph).length;
+    if (openItems || openCs) {
+      const parts: string[] = [];
+      if (openItems) parts.push(`${openItems} standards item${openItems === 1 ? "" : "s"}`);
+      if (openCs) parts.push(`${openCs} comment${openCs === 1 ? "" : "s"}`);
+      error = `Resolve or waive ${parts.join(" and ")} before approving.`;
+      return;
+    }
     ph.review.state = "approved";
     ph.review.decidedBy = by;
     ph.review.decidedAt = Date.now();
+    ph.approvalPin = {
+      at: Date.now(),
+      by,
+      docs: ph.attachments.map((a) => ({
+        docId: a.id,
+        name: a.name,
+        size: a.size,
+        version: a.addedAt,
+      })),
+      snapshotId,
+    };
   });
+  return error ? { ok: false, error } : { ok: true };
 }
 
+/** Send back with edits (D92). Every open comment becomes a required edit —
+ *  the submitter gets a specific list, not a paragraph to interpret. `note`
+ *  is kept for the summary line and back-compat with the Reviews queue. */
 export async function requestPhaseChanges(
   engId: string,
   phaseId: string,
@@ -377,6 +587,115 @@ export async function requestPhaseChanges(
     ph.review.decidedBy = by;
     ph.review.decidedAt = Date.now();
     ph.review.note = note;
+    for (const c of ph.comments || []) {
+      if (c.state === "open") c.required = true;
+    }
+  });
+}
+
+/* ---------- checklist + comment mutations (D91/D92) ---------- */
+
+export async function setChecklistItem(
+  engId: string,
+  phaseId: string,
+  itemId: string,
+  state: ChecklistItem["state"],
+  by: string,
+  reason = ""
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (state === "waived" && !reason.trim()) {
+    return { ok: false, error: "A waived item needs a reason." };
+  }
+  await patchEngagement(engId, (d) => {
+    const ph = phaseOf(d, phaseId);
+    const item = (ph?.checklist || []).find((c) => c.id === itemId);
+    if (!item) return;
+    item.state = state;
+    item.by = state === "open" ? null : by;
+    item.at = state === "open" ? null : Date.now();
+    item.reason = state === "waived" ? reason.trim() : "";
+  });
+  return { ok: true };
+}
+
+export async function addReviewComment(
+  engId: string,
+  phaseId: string,
+  author: string,
+  body: string,
+  anchor: CommentAnchor = { kind: "review" },
+  parentId: string | null = null
+): Promise<void> {
+  await patchEngagement(engId, (d) => {
+    const ph = phaseOf(d, phaseId);
+    if (!ph) return;
+    if (!ph.comments) ph.comments = [];
+    ph.comments.push({
+      id: uid("rc-"),
+      author,
+      at: Date.now(),
+      body: body.trim(),
+      anchor,
+      parentId,
+      state: "open",
+      required: false,
+      resolvedBy: null,
+      resolvedAt: null,
+      waiveReason: "",
+    });
+  });
+}
+
+/** Resolve or waive a comment. The body is never rewritten — the trail is
+ *  append-only, so history stays readable after the fact. */
+export async function setCommentState(
+  engId: string,
+  phaseId: string,
+  commentId: string,
+  state: ReviewComment["state"],
+  by: string,
+  waiveReason = ""
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (state === "waived" && !waiveReason.trim()) {
+    return { ok: false, error: "A waived comment needs a reason." };
+  }
+  await patchEngagement(engId, (d) => {
+    const ph = phaseOf(d, phaseId);
+    const c = (ph?.comments || []).find((x) => x.id === commentId);
+    if (!c) return;
+    c.state = state;
+    c.resolvedBy = state === "open" ? null : by;
+    c.resolvedAt = state === "open" ? null : Date.now();
+    c.waiveReason = state === "waived" ? waiveReason.trim() : "";
+  });
+  return { ok: true };
+}
+
+/* ---------- meetings (D91) ---------- */
+
+export async function addMeeting(
+  engId: string,
+  m: Omit<EngagementMeeting, "id">
+): Promise<void> {
+  await patchEngagement(engId, (d) => {
+    d.meetings.push({ ...m, id: uid("mt-") });
+  });
+}
+
+export async function updateMeeting(
+  engId: string,
+  meetingId: string,
+  patch: Partial<Omit<EngagementMeeting, "id">>
+): Promise<void> {
+  await patchEngagement(engId, (d) => {
+    const m = d.meetings.find((x) => x.id === meetingId);
+    if (m) Object.assign(m, patch);
+  });
+}
+
+export async function deleteMeeting(engId: string, meetingId: string): Promise<void> {
+  await patchEngagement(engId, (d) => {
+    d.meetings = d.meetings.filter((m) => m.id !== meetingId);
   });
 }
 
@@ -387,17 +706,22 @@ export async function setPhaseStatus(
   phaseId: string,
   status: EngagementPhase["status"]
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  let blocked = false;
+  let error = "";
   await patchEngagement(engId, (d) => {
     const ph = phaseOf(d, phaseId);
     if (!ph) return;
-    if (status === "complete" && ph.review.state !== "approved") {
-      blocked = true;
-      return;
+    if (status === "complete") {
+      if (ph.review.state !== "approved") {
+        error = "This phase needs an approved internal review before it can complete.";
+        return;
+      }
+      if (approvalIsStale(ph)) {
+        error =
+          "The documents changed after approval — this phase needs re-review before it can complete.";
+        return;
+      }
     }
     ph.status = status;
   });
-  return blocked
-    ? { ok: false, error: "This phase needs an approved internal review before it can complete." }
-    : { ok: true };
+  return error ? { ok: false, error } : { ok: true };
 }

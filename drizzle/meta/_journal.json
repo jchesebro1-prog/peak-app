@@ -50,6 +50,13 @@
       "when": 1784512813413,
       "tag": "0006_tan_norman_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784519759046,
+      "tag": "0007_fast_jack_power",
+      "breakpoints": true
     }
   ]
 }

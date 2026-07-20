@@ -4,17 +4,26 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import {
   addPhaseDocTo,
+  addReviewComment,
+  checklistTemplateFor,
+  type CommentAnchor,
+  deleteMeeting,
   type EngagementDoc,
   type EngagementMilestone,
   type EngagementPerson,
   type EngagementStatus,
   type EngagementSubmittal,
   getEngagement,
+  makeChecklist,
   makePhase,
   patchEngagement,
+  setChecklistItem,
+  setCommentState,
   setPhaseStatus,
   submitPhaseReview,
+  updateMeeting,
 } from "@/lib/stores/engagements";
+import { getSettings } from "@/lib/settings";
 import { linkVisitToEngagement } from "@/lib/stores/site-visits";
 
 /**
@@ -137,7 +146,120 @@ export async function setPhaseStatusAction(
 
 export async function submitPhaseReviewAction(engId: string, phaseId: string) {
   const user = await requireUser();
-  await submitPhaseReview(engId, phaseId, user.name);
+  // Resolve the phase's standards template here (D91) — the store stays free
+  // of settings so it can be reasoned about and tested on its own.
+  const eng = await getEngagement(engId);
+  const phase = eng?.phases.find((p) => p.id === phaseId);
+  const settings = await getSettings();
+  const template = phase
+    ? checklistTemplateFor(phase.name, settings.reviewChecklistTemplates)
+    : [];
+  await submitPhaseReview(engId, phaseId, user.name, template);
+  return done();
+}
+
+/* ---------- standards checklist (D91) ---------- */
+
+export async function setChecklistItemAction(
+  engId: string,
+  phaseId: string,
+  itemId: string,
+  state: "open" | "checked" | "waived",
+  reason = ""
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const r = await setChecklistItem(engId, phaseId, itemId, state, user.name, reason);
+  if (!r.ok) return r;
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/** Add an ad-hoc line to a stamped checklist — reviews turn up standards the
+ *  template missed, and losing them until someone edits Settings would mean
+ *  losing them entirely. */
+export async function addChecklistItemAction(
+  engId: string,
+  phaseId: string,
+  text: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  const clean = String(text || "").trim();
+  if (!clean) return { ok: false, error: "The item needs text." };
+  await patchEngagement(engId, (d) => {
+    const ph = d.phases.find((p) => p.id === phaseId);
+    if (!ph) return;
+    if (!ph.checklist) ph.checklist = [];
+    ph.checklist.push(...makeChecklist([clean]));
+  });
+  return done();
+}
+
+/* ---------- review comments (D92) ---------- */
+
+export async function addReviewCommentAction(
+  engId: string,
+  phaseId: string,
+  body: string,
+  anchor?: CommentAnchor,
+  parentId?: string | null
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const clean = String(body || "").trim();
+  if (!clean) return { ok: false, error: "The comment is empty." };
+  await addReviewComment(
+    engId,
+    phaseId,
+    user.name,
+    clean,
+    anchor || { kind: "review" },
+    parentId ?? null
+  );
+  return done();
+}
+
+export async function setCommentStateAction(
+  engId: string,
+  phaseId: string,
+  commentId: string,
+  state: "open" | "resolved" | "waived",
+  waiveReason = ""
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const r = await setCommentState(
+    engId,
+    phaseId,
+    commentId,
+    state,
+    user.name,
+    waiveReason
+  );
+  if (!r.ok) return r;
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/* ---------- meetings (D91) ---------- */
+
+export async function updateMeetingAction(
+  engId: string,
+  meetingId: string,
+  patch: {
+    title?: string;
+    at?: number;
+    attendees?: string;
+    minutes?: string;
+    recordingUrl?: string;
+    phaseId?: string | null;
+  }
+) {
+  await requireUser();
+  await updateMeeting(engId, meetingId, patch);
+  return done();
+}
+
+export async function deleteMeetingAction(engId: string, meetingId: string) {
+  await requireUser();
+  await deleteMeeting(engId, meetingId);
   return done();
 }
 
@@ -230,9 +352,19 @@ export async function addDecisionAction(
   return done();
 }
 
+/** D91 extends this with title, a recording link, and the phase review the
+ *  meeting covered. All three are optional so existing callers still work. */
 export async function addMeetingAction(
   engId: string,
-  input: { at: number; attendees: string; minutes: string; decisionIds: string[] }
+  input: {
+    at: number;
+    attendees: string;
+    minutes: string;
+    decisionIds: string[];
+    title?: string;
+    recordingUrl?: string;
+    phaseId?: string | null;
+  }
 ) {
   await requireUser();
   await patchEngagement(engId, (d) => {
@@ -244,6 +376,9 @@ export async function addMeetingAction(
       decisionIds: (Array.isArray(input?.decisionIds) ? input.decisionIds : [])
         .map(String)
         .slice(0, 40),
+      title: String(input?.title || "").trim(),
+      recordingUrl: String(input?.recordingUrl || "").trim(),
+      phaseId: input?.phaseId || null,
     });
   });
   return done();

@@ -39,6 +39,12 @@ export type AppSettingsData = {
   /** Consulting phase-menu overrides (D90) — see DEFAULT_CONSULTING_PHASES
    *  in stores/engagements.ts; empty/absent means use the defaults. */
   consultingPhases?: string[];
+  /** Peak-standards review checklists (D91), keyed by phase name — see
+   *  DEFAULT_REVIEW_CHECKLISTS in stores/engagements.ts. Kept here beside
+   *  consultingPhases rather than in its own collection: same kind of small
+   *  admin-edited config list. A phase absent from this map falls back to
+   *  the defaults; a phase mapped to [] deliberately has no checklist. */
+  reviewChecklistTemplates?: Record<string, string[]>;
   /** Brand marks (IDEAS #32) — small data-URL images uploaded in Settings →
    *  Branding. `logoLight` sits on the dark nav bar; `logoDark` heads white
    *  documents (letters + reports) in place of the baked-in letterhead. */

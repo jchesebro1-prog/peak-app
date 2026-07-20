@@ -12,8 +12,10 @@ import {
 import {
   approvePhaseReview,
   claimPhaseReview,
+  getEngagement,
   requestPhaseChanges,
 } from "@/lib/stores/engagements";
+import { freezeApprovalSnapshot } from "@/lib/stores/review-snapshots";
 
 /**
  * Review-queue decisions over quotes AND designs (Reviews.dc.html routes
@@ -56,7 +58,14 @@ export async function approveReviewAction(
   if (kind === "Quote") await approve(id, { by: user.name });
   else if (kind === "Engagement") {
     const [engId, phaseId] = id.split(":");
-    await approvePhaseReview(engId, phaseId, user.name);
+    // Freeze the artifacts BEFORE flipping state: an approval that cannot
+    // record what it approved should not happen at all (D92).
+    const eng = await getEngagement(engId);
+    const phase = eng?.phases.find((p) => p.id === phaseId);
+    if (!eng || !phase) return { ok: false, error: "Phase not found." };
+    const snapshotId = await freezeApprovalSnapshot(eng.id, phase, user.name);
+    const res = await approvePhaseReview(engId, phaseId, user.name, snapshotId);
+    if (!res.ok) return res;
   } else await approveDesign(id, { by: user.name });
   revalidatePath("/", "layout");
   return { ok: true };

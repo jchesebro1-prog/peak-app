@@ -65,6 +65,10 @@ export const designs = docTable("designs"); // rss_sandbox_v2 (SandboxStore)
 export const catalogParts = docTable("catalog_parts"); // catalog-data.js MASTER_CATALOG
 export const siteVisits = docTable("site_visits"); // site visits + .ics invites (D76, no prototype ancestor)
 export const consultingEngagements = docTable("consulting_engagements"); // ConsultingEngagement records (D90, no prototype ancestor)
+export const reviewSnapshots = docTable("review_snapshots"); // frozen copies of what an approval approved (D92)
+export const assignments = docTable("assignments"); // ad-hoc delegated tasks feeding My Queue (D93)
+export const specSections = docTable("spec_sections"); // CSI bid-spec section templates (D94)
+export const generatedSpecs = docTable("generated_specs"); // assembled bid specs per engagement (D94)
 
 export const DOC_TABLES = {
   quotes,
@@ -80,6 +84,10 @@ export const DOC_TABLES = {
   catalog_parts: catalogParts,
   site_visits: siteVisits,
   consulting_engagements: consultingEngagements,
+  review_snapshots: reviewSnapshots,
+  assignments,
+  spec_sections: specSections,
+  generated_specs: generatedSpecs,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;
