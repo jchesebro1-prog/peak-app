@@ -52,7 +52,12 @@ export async function getCompanies(
 }
 
 /** Upsert. Stamps updatedAt; createdAt only on insert. */
-export async function saveCompany(row: NewCompanyRow): Promise<void> {
+export async function saveCompany(
+  row: Omit<NewCompanyRow, "createdAt" | "updatedAt"> & {
+    createdAt?: number;
+    updatedAt?: number;
+  }
+): Promise<void> {
   const db = await getDb();
   const t = Date.now();
   const rest: Partial<NewCompanyRow> = { ...row };

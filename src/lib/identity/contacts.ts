@@ -98,7 +98,12 @@ export async function getContact(
   return rows[0] ?? null;
 }
 
-export async function saveContact(row: NewContactRow): Promise<void> {
+export async function saveContact(
+  row: Omit<NewContactRow, "createdAt" | "updatedAt"> & {
+    createdAt?: number;
+    updatedAt?: number;
+  }
+): Promise<void> {
   const db = await getDb();
   const t = Date.now();
   const rest: Partial<NewContactRow> = { ...row };

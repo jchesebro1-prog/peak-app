@@ -58,7 +58,12 @@ export async function getSite(
   return rows[0] ?? null;
 }
 
-export async function saveSite(row: NewSiteRow): Promise<void> {
+export async function saveSite(
+  row: Omit<NewSiteRow, "createdAt" | "updatedAt"> & {
+    createdAt?: number;
+    updatedAt?: number;
+  }
+): Promise<void> {
   const db = await getDb();
   const t = Date.now();
   const rest: Partial<NewSiteRow> = { ...row };

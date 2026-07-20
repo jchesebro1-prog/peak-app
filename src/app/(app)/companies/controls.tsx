@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { MapPin } from "@/components/map/LeafletMap";
 import { ACCENT_INK, ACCENT_SOFT } from "./lib";
@@ -68,9 +68,16 @@ export function FilterBar({
 }) {
   const router = useRouter();
   const [text, setText] = useState(q);
+  const [prevQ, setPrevQ] = useState(q);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => setText(q), [q]);
+  // Reset the draft text when the URL's q changes (derived-state reset
+  // during render — avoids the set-state-in-effect cascade the repo lint
+  // flags; behavior-identical to the old effect).
+  if (prevQ !== q) {
+    setPrevQ(q);
+    setText(q);
+  }
 
   const pushWith = (patch: { q?: string; type?: string; scope?: string }) => {
     const p = new URLSearchParams();
@@ -112,7 +119,7 @@ export function FilterBar({
         <input
           value={text}
           onChange={(e) => onSearch(e.target.value)}
-          placeholder="Search customers…"
+          placeholder="Search companies…"
           style={{ flex: 1, border: "none", background: "transparent", fontSize: 13.5, fontFamily: "var(--font-ui)", color: "#16181d", outline: "none" }}
         />
       </div>
