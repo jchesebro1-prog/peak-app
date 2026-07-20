@@ -19,7 +19,13 @@ export type AnnotationTool =
   | "freehand"
   | "cloud"
   | "text"
-  | "highlight";
+  | "highlight"
+  /** Two-point dimension line, labelled with real-world length once the
+   *  page is calibrated. */
+  | "measure"
+  /** Single-point tally marker, grouped by label and totalled in the
+   *  sidebar — counting fixtures off a plan is the whole job some days. */
+  | "count";
 
 export type Point = { x: number; y: number };
 
@@ -52,6 +58,21 @@ export const TOOL_LABEL: Record<AnnotationTool, string> = {
   cloud: "Revision cloud",
   text: "Text",
   highlight: "Highlight",
+  measure: "Measure",
+  count: "Count",
+};
+
+/** Compact glyphs for the sidebar buttons. */
+export const TOOL_ICON: Record<AnnotationTool, string> = {
+  rect: "▭",
+  ellipse: "◯",
+  arrow: "↗",
+  freehand: "✎",
+  cloud: "☁",
+  text: "T",
+  highlight: "▬",
+  measure: "↔",
+  count: "①",
 };
 
 /** Bluebeam-ish defaults: red reads as "change this" to every architect. */
@@ -61,7 +82,94 @@ export const DEFAULT_COLOR = ANNOTATION_COLORS[0];
 
 /** Tools defined by a simple drag from corner to corner. */
 export function isDragTool(t: AnnotationTool): boolean {
-  return t === "rect" || t === "ellipse" || t === "arrow" || t === "highlight";
+  return (
+    t === "rect" || t === "ellipse" || t === "arrow" || t === "highlight" || t === "measure"
+  );
+}
+
+/** Tools placed with a single click rather than a drag. */
+export function isPointTool(t: AnnotationTool): boolean {
+  return t === "text" || t === "count";
+}
+
+/* ------------------------- scale & measurement ------------------------- */
+
+export const MEASURE_UNITS = ["ft", "in", "m", "mm"] as const;
+export type MeasureUnit = (typeof MEASURE_UNITS)[number];
+
+/**
+ * Real-world scale for one page of one document. `scale` is real units per
+ * ONE PAGE WIDTH of normalized distance — see pageDistance() for why that
+ * unit choice makes the whole thing zoom-independent.
+ */
+export type Calibration = {
+  docId: string;
+  page: number;
+  scale: number;
+  unit: MeasureUnit;
+  /** The reference length the user typed, kept so the basis is auditable. */
+  refLength: number;
+  by: string;
+  at: number;
+};
+
+/**
+ * Distance between two normalized points, expressed in page widths.
+ *
+ * x and y are independent fractions of width and height, so a naive hypot on
+ * them is wrong on any non-square page — a 45° line would measure differently
+ * than it should. Scaling y by the page's aspect ratio (height/width) puts
+ * both axes in the same unit. Aspect is itself zoom-independent (it is a
+ * property of the page, not the canvas), which is what lets a measurement
+ * taken at 50% read identically at 300%.
+ */
+export function pageDistance(a: Point, b: Point, aspect: number): number {
+  const dx = b.x - a.x;
+  const dy = (b.y - a.y) * aspect;
+  return Math.hypot(dx, dy);
+}
+
+/** Derive the scale factor from a drawn reference of known real length. */
+export function calibrationScale(
+  a: Point,
+  b: Point,
+  aspect: number,
+  realLength: number
+): number | null {
+  const d = pageDistance(a, b, aspect);
+  if (!(d > 0) || !(realLength > 0)) return null;
+  return realLength / d;
+}
+
+/** Measured length of a two-point annotation, or null when uncalibrated. */
+export function measureLength(
+  points: Point[],
+  aspect: number,
+  cal: Calibration | null
+): number | null {
+  if (!cal || points.length < 2) return null;
+  return pageDistance(points[0], points[points.length - 1], aspect) * cal.scale;
+}
+
+/** Feet render as 12'-6" — the form every drawing and shop order uses. */
+export function formatMeasure(value: number, unit: MeasureUnit): string {
+  if (!Number.isFinite(value)) return "";
+  if (unit === "ft") {
+    const whole = Math.floor(value);
+    const inches = Math.round((value - whole) * 12);
+    if (inches === 12) return `${whole + 1}'-0"`;
+    return `${whole}'-${inches}"`;
+  }
+  const decimals = unit === "mm" ? 0 : 2;
+  return `${value.toFixed(decimals)} ${unit}`;
+}
+
+export function findCalibration(
+  cals: Calibration[],
+  docId: string,
+  page: number
+): Calibration | null {
+  return cals.find((c) => c.docId === docId && c.page === page) || null;
 }
 
 export function clamp01(n: number): number {

@@ -53,6 +53,7 @@ export default async function MarkupPage({
       docs={docs}
       activeDocId={activeDocId}
       annotations={phase.annotations || []}
+      calibrations={phase.calibrations || []}
       comments={(phase.comments || []).map((c) => ({
         id: c.id,
         body: c.body,

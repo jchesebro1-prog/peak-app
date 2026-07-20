@@ -1174,3 +1174,53 @@ same code paint immediately (25,722 ink pixels, "painted 918x1188").
 Lesson for future automated verification in this repo: **a hidden preview tab
 cannot verify anything that depends on rAF** — canvas rendering, animation,
 transitions. Patch rAF before concluding a paint bug is real.
+
+## D96 — Markup sidebar, scale calibration, measure + count tools (2026-07-20)
+
+Jeff's testing feedback: text boxes couldn't be added, the toolbar belonged in
+a sidebar, and the viewer needed calibration, measurement, and a counter.
+
+### The text-tool bug: `window.prompt()` is unavailable
+
+Root cause, confirmed in the running app: **`prompt() is not supported`** in
+this app's browser context — it throws rather than returning. The text tool
+called `window.prompt` for its content, so clicking did nothing at all, with
+no error. The same call silently broke three other flows shipped the day
+before: raising a review comment from markup, waiving a standards checklist
+item, and waiving a BOM row in the spec generator.
+
+All four are now inline UI. **Rule for this codebase: never use
+`window.prompt`/`confirm` — build the input into the page.** (One
+pre-existing `window.confirm` remains in `estimating-rules/controls.tsx`; it
+predates this work and is likely broken for the same reason — flagged, not
+fixed here.)
+
+### Scale + measurement
+
+- `Calibration` is stored per **document + page** on the phase; one per page,
+  replaced in place, because a second calibration would silently change every
+  existing measurement on that page.
+- **`scale` is real-world units per ONE PAGE WIDTH of normalized distance.**
+  That unit choice is what keeps measurement zoom-independent, since stored
+  coordinates are already normalized.
+- **`pageDistance()` scales y by the page aspect ratio (height/width).**
+  Normalized x and y are fractions of *different* physical dimensions, so a
+  naive hypot measures a 45° line wrongly on any non-square page. Aspect is a
+  property of the page, not the canvas, so it holds at every zoom level.
+  Verified: a horizontal and a vertical line of equal real length measure
+  equal, and a line half the reference reads exactly half (20'-0" against a
+  40' reference).
+- Feet render as `12'-6"` — the form drawings and shop orders actually use.
+
+### Count tool
+
+Single-click tally markers grouped by a label typed in the sidebar, with
+running per-label totals and a grand total. Counting fixtures off a plan is a
+real part of this job; the totals live beside the drawing rather than on a
+separate scratch pad.
+
+### Layout
+
+Tools, colour, scale, counts, and the selected-mark inspector moved into a
+216px sticky sidebar; the document gets the rest of the width. Zoom and page
+navigation stay in the header, where they act on the whole view.

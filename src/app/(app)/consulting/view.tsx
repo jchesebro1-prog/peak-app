@@ -675,19 +675,23 @@ function StandardsChecklist({ eng, phase }: { eng: ConsultingEngagement; phase: 
   const router = useRouter();
   const [adding, setAdding] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  // Inline waive entry — window.prompt() throws in this app's browser
+  // context ("prompt() is not supported"), so it silently did nothing.
+  const [waivingId, setWaivingId] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
   const items = phase.checklist || [];
   const open = items.filter((i) => i.state === "open").length;
   const waived = items.filter((i) => i.state === "waived").length;
 
-  async function set(itemId: string, state: "open" | "checked" | "waived") {
+  async function set(itemId: string, state: "open" | "checked" | "waived", why = "") {
     setErr(null);
-    let reason = "";
-    if (state === "waived") {
-      reason = window.prompt("Why is this item being waived?") || "";
-      if (!reason.trim()) return;
+    const r = await setChecklistItemAction(eng.id, phase.id, itemId, state, why);
+    if (!r.ok) {
+      setErr(r.error);
+      return;
     }
-    const r = await setChecklistItemAction(eng.id, phase.id, itemId, state, reason);
-    if (!r.ok) setErr(r.error);
+    setWaivingId(null);
+    setReason("");
     router.refresh();
   }
 
@@ -734,13 +738,36 @@ function StandardsChecklist({ eng, phase }: { eng: ConsultingEngagement; phase: 
                 </span>
               )}
             </div>
-            {it.state !== "waived" && (
-              <button style={{ ...SMALL_BTN, padding: "2px 7px", fontSize: 11 }} onClick={() => set(it.id, "waived")}>
+            {it.state !== "waived" && waivingId !== it.id && (
+              <button
+                style={{ ...SMALL_BTN, padding: "2px 7px", fontSize: 11 }}
+                onClick={() => { setWaivingId(it.id); setReason(""); }}
+              >
                 Waive
               </button>
             )}
           </div>
         ))}
+        {waivingId && (
+          <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && reason.trim()) set(waivingId, "waived", reason.trim()); }}
+              placeholder="Why is this being waived?"
+              style={{ ...INPUT, flex: 1, fontSize: 12 }}
+              autoFocus
+            />
+            <button
+              style={SMALL_BTN}
+              disabled={!reason.trim()}
+              onClick={() => set(waivingId, "waived", reason.trim())}
+            >
+              Waive
+            </button>
+            <button style={SMALL_BTN} onClick={() => setWaivingId(null)}>Cancel</button>
+          </div>
+        )}
       </div>
       <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
         <input
@@ -771,18 +798,22 @@ function ReviewComments({ eng, phase }: { eng: ConsultingEngagement; phase: Enga
   const router = useRouter();
   const [body, setBody] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  // Inline waive entry — see the note on StandardsChecklist: prompt() is
+  // unavailable in this app's browser context.
+  const [waivingId, setWaivingId] = useState<string | null>(null);
+  const [waiveReason, setWaiveReason] = useState("");
   const comments = phase.comments || [];
   const open = comments.filter((c) => c.state === "open");
 
-  async function setState(id: string, state: "open" | "resolved" | "waived") {
+  async function setState(id: string, state: "open" | "resolved" | "waived", why = "") {
     setErr(null);
-    let reason = "";
-    if (state === "waived") {
-      reason = window.prompt("Why is this comment being waived?") || "";
-      if (!reason.trim()) return;
+    const r = await setCommentStateAction(eng.id, phase.id, id, state, why);
+    if (!r.ok) {
+      setErr(r.error);
+      return;
     }
-    const r = await setCommentStateAction(eng.id, phase.id, id, state, reason);
-    if (!r.ok) setErr(r.error);
+    setWaivingId(null);
+    setWaiveReason("");
     router.refresh();
   }
 
@@ -824,14 +855,33 @@ function ReviewComments({ eng, phase }: { eng: ConsultingEngagement; phase: Enga
             {c.waiveReason && (
               <div style={{ marginTop: 3, color: "#8c919c", fontSize: 11.5 }}>Waived: {c.waiveReason}</div>
             )}
-            {c.state === "open" && (
+            {c.state === "open" && waivingId !== c.id && (
               <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                 <button style={{ ...SMALL_BTN, padding: "2px 7px", fontSize: 11 }} onClick={() => setState(c.id, "resolved")}>
                   Resolve
                 </button>
-                <button style={{ ...SMALL_BTN, padding: "2px 7px", fontSize: 11 }} onClick={() => setState(c.id, "waived")}>
+                <button
+                  style={{ ...SMALL_BTN, padding: "2px 7px", fontSize: 11 }}
+                  onClick={() => { setWaivingId(c.id); setWaiveReason(""); }}
+                >
                   Waive
                 </button>
+              </div>
+            )}
+            {waivingId === c.id && (
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                <input
+                  value={waiveReason}
+                  onChange={(e) => setWaiveReason(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && waiveReason.trim()) setState(c.id, "waived", waiveReason.trim()); }}
+                  placeholder="Why is this being waived?"
+                  style={{ ...INPUT, flex: 1, fontSize: 12 }}
+                  autoFocus
+                />
+                <button style={SMALL_BTN} disabled={!waiveReason.trim()} onClick={() => setState(c.id, "waived", waiveReason.trim())}>
+                  Waive
+                </button>
+                <button style={SMALL_BTN} onClick={() => setWaivingId(null)}>Cancel</button>
               </div>
             )}
           </div>

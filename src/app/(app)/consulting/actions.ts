@@ -6,8 +6,10 @@ import {
   addAnnotation,
   addPhaseDocTo,
   addReviewComment,
+  clearCalibration,
   commentOnAnnotation,
   deleteAnnotation,
+  setCalibration,
   checklistTemplateFor,
   type CommentAnchor,
   deleteMeeting,
@@ -27,7 +29,7 @@ import {
   updateMeeting,
 } from "@/lib/stores/engagements";
 import { getSettings } from "@/lib/settings";
-import type { Annotation } from "@/lib/annotations";
+import type { Annotation, MeasureUnit } from "@/lib/annotations";
 import { linkVisitToEngagement } from "@/lib/stores/site-visits";
 
 /**
@@ -285,6 +287,45 @@ export async function deleteAnnotationAction(
 ) {
   await requireUser();
   await deleteAnnotation(engId, phaseId, annotationId);
+  return done();
+}
+
+export async function setCalibrationAction(
+  engId: string,
+  phaseId: string,
+  input: {
+    docId: string;
+    page: number;
+    scale: number;
+    unit: MeasureUnit;
+    refLength: number;
+  }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!(Number(input?.scale) > 0)) {
+    return { ok: false, error: "That reference length doesn't give a usable scale." };
+  }
+  await setCalibration(engId, phaseId, {
+    docId: String(input.docId),
+    page: Number(input.page) || 1,
+    scale: Number(input.scale),
+    unit: input.unit,
+    refLength: Number(input.refLength) || 0,
+    by: user.name,
+    at: Date.now(),
+  });
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+export async function clearCalibrationAction(
+  engId: string,
+  phaseId: string,
+  docId: string,
+  page: number
+) {
+  await requireUser();
+  await clearCalibration(engId, phaseId, docId, page);
   return done();
 }
 

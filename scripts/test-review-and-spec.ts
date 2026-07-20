@@ -90,5 +90,34 @@ ok(cloudPath([{x:.1,y:.1},{x:.1005,y:.1005}], 900, 1200) === "", "degenerate clo
 
 ok(isDragTool("rect") && isDragTool("arrow") && !isDragTool("freehand"), "drag tools classified");
 
+
+/* --- calibration & measurement (D96) --- */
+import { pageDistance, calibrationScale, measureLength, formatMeasure } from "@/lib/annotations";
+import type { Calibration } from "@/lib/annotations";
+
+// A letter page: 612x792 => aspect 1.294
+const ASPECT = 792 / 612;
+
+// Horizontal and vertical lines of the SAME real length must measure the same.
+const dH = pageDistance({x:.1,y:.5}, {x:.6,y:.5}, ASPECT);          // half the width
+const dV = pageDistance({x:.5,y:.1}, {x:.5,y:.1 + .5/ASPECT}, ASPECT); // same real span vertically
+ok(Math.abs(dH - dV) < 1e-9, "aspect correction makes x and y measure equally");
+
+const scale = calibrationScale({x:.1,y:.5}, {x:.6,y:.5}, ASPECT, 40)!;
+ok(Math.abs(scale - 80) < 1e-9, "scale = real length per page width (40ft over half a page => 80)");
+
+const cal: Calibration = { docId:"d", page:1, scale, unit:"ft", refLength:40, by:"J", at:0 };
+const half = measureLength([{x:.1,y:.5},{x:.6,y:.5}], ASPECT, cal)!;
+ok(Math.abs(half - 40) < 1e-9, "measuring the calibration line returns its real length");
+const quarter = measureLength([{x:.1,y:.5},{x:.35,y:.5}], ASPECT, cal)!;
+ok(Math.abs(quarter - 20) < 1e-9, "half the reference measures half the length");
+const diag = measureLength([{x:0,y:0},{x:.6,y:.5}], ASPECT, cal)!;
+ok(diag > 40, "diagonal accounts for both axes");
+ok(measureLength([{x:0,y:0},{x:1,y:0}], ASPECT, null) === null, "uncalibrated pages report no measurement");
+
+ok(formatMeasure(12.5, "ft") === `12'-6"`, "feet render as feet-inches");
+ok(formatMeasure(11.999, "ft") === `12'-0"`, "rounding up 12in carries to the next foot");
+ok(formatMeasure(2.5, "m") === "2.50 m", "metric renders with units");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

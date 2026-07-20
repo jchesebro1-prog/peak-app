@@ -5,7 +5,7 @@ import {
   openChecklistItems,
   openComments,
 } from "@/lib/consulting-review";
-import type { Annotation } from "@/lib/annotations";
+import type { Annotation, Calibration } from "@/lib/annotations";
 
 /* ------------------------------------------------------------------ *
  * Consulting engagements (D90).
@@ -136,6 +136,9 @@ export type EngagementPhase = {
   /** Document markup (D95), across all of this phase's attachments.
    *  Optional for the same back-compat reason as the fields above. */
   annotations?: Annotation[];
+  /** Real-world scale per document+page (D96), set by calibrating against a
+   *  known dimension on the drawing. */
+  calibrations?: Calibration[];
 };
 
 export type EngagementMilestone = {
@@ -691,6 +694,40 @@ export async function deleteAnnotation(
     const ph = phaseOf(d, phaseId);
     if (!ph?.annotations) return;
     ph.annotations = ph.annotations.filter((x) => x.id !== annotationId);
+  });
+}
+
+/** Set (or replace) the scale for one document page. One calibration per
+ *  page: a second one would silently change every existing measurement on
+ *  that page, so replacing in place keeps the page internally consistent. */
+export async function setCalibration(
+  engId: string,
+  phaseId: string,
+  cal: Calibration
+): Promise<void> {
+  await patchEngagement(engId, (d) => {
+    const ph = phaseOf(d, phaseId);
+    if (!ph) return;
+    if (!ph.calibrations) ph.calibrations = [];
+    ph.calibrations = ph.calibrations.filter(
+      (c) => !(c.docId === cal.docId && c.page === cal.page)
+    );
+    ph.calibrations.push(cal);
+  });
+}
+
+export async function clearCalibration(
+  engId: string,
+  phaseId: string,
+  docId: string,
+  page: number
+): Promise<void> {
+  await patchEngagement(engId, (d) => {
+    const ph = phaseOf(d, phaseId);
+    if (!ph?.calibrations) return;
+    ph.calibrations = ph.calibrations.filter(
+      (c) => !(c.docId === docId && c.page === page)
+    );
   });
 }
 

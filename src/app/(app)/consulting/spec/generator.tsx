@@ -125,9 +125,9 @@ export default function SpecGenerator({
     runMatch(parsed.rows, "upload");
   }
 
-  function waive(index: number) {
-    const reason = window.prompt("Why does this item need no specification?") || "";
-    if (!reason.trim()) return;
+  /** Inline, not window.prompt(): prompt() throws in this app's browser
+   *  context ("prompt() is not supported") and the waive silently no-oped. */
+  function waive(index: number, reason: string) {
     setRows((prev) =>
       prev
         ? prev.map((r, i) => (i === index ? { ...r, waived: true, waiveReason: reason.trim() } : r))
@@ -294,7 +294,7 @@ export default function SpecGenerator({
                 row={r}
                 sections={sections}
                 busy={busy}
-                onWaive={() => waive(i)}
+                onWaive={(reason) => waive(i, reason)}
                 onRemap={(sku) => remap(i, sku)}
                 onWrote={async () => {
                   // Re-run the match so the row flips to 'ready'.
@@ -320,7 +320,7 @@ function MatchRow({
   row: MatchedRow;
   sections: SectionLite[];
   busy: boolean;
-  onWaive: () => void;
+  onWaive: (reason: string) => void;
   onRemap: (sku: string) => void;
   onWrote: () => void;
 }) {
@@ -329,6 +329,9 @@ function MatchRow({
   const [sectionId, setSectionId] = useState(sections[0]?.id || "");
   const [manualSku, setManualSku] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  // Inline waive entry — prompt() is unavailable in this browser context.
+  const [waiving, setWaiving] = useState(false);
+  const [waiveReason, setWaiveReason] = useState("");
 
   const tone = row.waived
     ? "#8c919c"
@@ -366,8 +369,11 @@ function MatchRow({
                 ? "No spec text"
                 : "Unmatched"}
         </Pill>
-        {!row.waived && row.bucket !== "ready" && (
-          <button style={{ ...BTN, padding: "3px 9px", fontSize: 11.5 }} onClick={onWaive}>
+        {!row.waived && row.bucket !== "ready" && !waiving && (
+          <button
+            style={{ ...BTN, padding: "3px 9px", fontSize: 11.5 }}
+            onClick={() => { setWaiving(true); setWaiveReason(""); }}
+          >
             No spec needed
           </button>
         )}
@@ -383,6 +389,29 @@ function MatchRow({
           </button>
         )}
       </div>
+
+      {waiving && (
+        <div style={{ display: "flex", gap: 6, marginTop: 8, paddingLeft: 14 }}>
+          <input
+            value={waiveReason}
+            onChange={(e) => setWaiveReason(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && waiveReason.trim()) { onWaive(waiveReason.trim()); setWaiving(false); } }}
+            placeholder="Why does this item need no specification?"
+            style={{ ...INPUT, flex: 1, fontSize: 12, padding: "4px 8px" }}
+            autoFocus
+          />
+          <button
+            style={{ ...BTN, padding: "3px 9px", fontSize: 11.5 }}
+            disabled={!waiveReason.trim()}
+            onClick={() => { onWaive(waiveReason.trim()); setWaiving(false); }}
+          >
+            Waive
+          </button>
+          <button style={{ ...BTN, padding: "3px 9px", fontSize: 11.5 }} onClick={() => setWaiving(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
 
       {row.bucket === "no-match" && !row.waived && (
         <div style={{ marginTop: 8, paddingLeft: 14 }}>
