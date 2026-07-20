@@ -949,3 +949,41 @@ Anything you want changed, just say so — none of these are hard to reverse.
   pass — nav has no Assistant and `/assistant` 404s, inbox reader intact with
   no Summary buttons, import paste→preview→confirm intact with no
   Extract-with-AI, estimator renders clean.
+- **D90. Consulting module built** (spec
+  `docs/superpowers/specs/2026-07-19-consulting-module-design.md`; closes the
+  PUNCHLIST Consulting IDEA and item 13-D; built 2026-07-19). Quote-first:
+  new `consulting` quote type + lightweight builder (`/consulting/quote` —
+  scope, fixed fee OR milestone schedule, terms, phase selection; NO pricing
+  tiers, fee-based on purpose), riding the ordinary quote machinery (review
+  gate, status pipeline, D84 revisions — `consulting` payload frozen into
+  snapshots). Won consulting quotes spawn `ConsultingEngagement` records
+  (new `consulting_engagements` doc collection, migration 0006, NOT
+  sync-pushable) via a fifth idempotent on-win sync; the projects sync now
+  excludes `consulting` in all three spots exactly like `flame_test`.
+  **Id prefix deviation:** engagements are `CE-####` (base 1000), not the
+  spec's `C-1001` — `C-` is the live comm-thread prefix and a second `C-`
+  line would be ambiguous in search and letters. Module: top-level nav entry;
+  list (KPIs + roll-up timeline + cards) and detail tabs Overview (links,
+  people-with-roles editor — the item-16-E shape, built here first —
+  per-engagement milestone/visit timeline) / Phases & Reviews (per-phase
+  QuoteReview, store-enforced "no complete without approved review", surfaced
+  in the Reviews queue as kind "Engagement" with composite ids) / Milestones
+  & Billing (feeds the Reports billing forecast, billed at targetDate +
+  net-30, forecast-only) / Meetings & Decisions / Oversight (submittals +
+  RFIs, site-visit links via `siteVisits.engagementId`) / Documents (2 MB
+  data-URL attachments, CommAttachment pattern). Admin phase menu in
+  Settings (`consultingPhases`, defaults Assessment → Construction
+  Oversight). Templates: `consulting_proposal` + `consulting_spec` letters
+  at `/consulting/letter`. Nothing consulting renders on the main Gantt.
+  Verified: tsc + `next build` clean (all four /consulting routes register);
+  hub filter/menu/badges + nav verified statically. **Interactive browser
+  pass pending the dev-db recovery below.**
+  **Ops note (repeat incident):** the dev PGlite db corrupted AGAIN on
+  2026-07-19 — `npm run build` (which runs `scripts/migrate.mjs` + prerender
+  workers that open PGlite) was run while a dev server from another session
+  held the same `.data/pglite`. PGlite is SINGLE-process: stop every dev
+  server before `npm run build` or any db script. Corrupt copy should be
+  preserved (e.g. `.data-corrupt-20260719b/`) and demo data reseeded
+  (`npm run db:seed` after moving the corrupt dir away) — same playbook as
+  the D85 ops note. The permission classifier blocked the automated
+  move+reseed, so this recovery is Jeff's (or an approved session's) step.

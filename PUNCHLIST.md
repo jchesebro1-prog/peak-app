@@ -888,7 +888,10 @@ can reason about what "in the installs window" means, because the data is wrong.
 - **C. Does the unified scheduler mean one screen, or the main Gantt reading all four sources?**
   **ANSWERED 2026-07-19 (Jeff): one Gantt for all four sources** — the main Gantt reads projects,
   inspections, repairs, and flame jobs; no separate unified screen.
-- **D. What is Consulting?** No representation exists at all — needs defining before it can be
+- **D. What is Consulting? — RESOLVED (D90):** defined in the 2026-07-19 brainstorm and built —
+  see `docs/superpowers/specs/2026-07-19-consulting-module-design.md`. Consulting quotes are now
+  excluded from the projects/installs sync exactly like flame tests. Original note kept below.
+- **D (original note). What is Consulting?** No representation exists at all — needs defining before it can be
   excluded from anything.
   **ANSWERED 2026-07-19 (Jeff): TABLED.** His working definition: consulting is **design work we
   get paid to commit to** — it requires more paperwork and much more review, but ultimately has a
@@ -1801,7 +1804,17 @@ recalled numbers straight onto the quote.
 
 ---
 
-## IDEA (not a punch-list item) — Consulting as a project type
+## IDEA (not a punch-list item) — Consulting as a project type — BUILT (D90)
+
+**Status: BUILT 2026-07-19 (D90).** Jeff defined Consulting in the 2026-07-19 brainstorming
+session; the approved design is `docs/superpowers/specs/2026-07-19-consulting-module-design.md`
+and the build is D90: own top-level module (NOT Design Studio), `consulting` quote type +
+lightweight builder, `ConsultingEngagement` records (`CE-####`), phases with internal review
+gates in the Reviews queue, milestones feeding the Reports billing forecast, meeting/decision/
+submittal tracking, document attachments, site-visit links, own timeline (never the main Gantt),
+and proposal + spec-package generators in /templates. This also closes item 13-D: consulting
+quotes are excluded from the projects sync alongside flame tests. The original idea text is
+kept below for history.
 
 **Raised:** 2026-07-19. Jeff was explicit this is *"more of an idea than punch list"*.
 
