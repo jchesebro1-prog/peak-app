@@ -277,7 +277,7 @@ export default async function ConsultingLetterPage({
               </table>
             ) : (
               <p style={{ ...BODY, color: "#8c919c" }}>
-                No Design Studio designs are linked to this engagement yet — link them on the engagement Overview to populate the schedule.
+                No designs are linked to this engagement yet — link them on the engagement Overview to populate the schedule.
               </p>
             )}
 

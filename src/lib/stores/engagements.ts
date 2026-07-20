@@ -215,7 +215,7 @@ export type ConsultingEngagement = {
   people: EngagementPerson[];
   /** Source consulting quote — the paid commitment. */
   quoteId: string;
-  /** Optional Design Studio saved-design links (spec-gen source). */
+  /** Linked budgetary designs (D-### records in stores/designs). Spec-gen source. */
   designIds: string[];
   /** If Peak bids the resulting install: an ordinary system quote id.
    *  A reference, never a conversion (spec §Lifecycle). */

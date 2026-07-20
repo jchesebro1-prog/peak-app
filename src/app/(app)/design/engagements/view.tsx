@@ -428,6 +428,26 @@ function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngag
         </Card>
         <PeopleCard eng={eng} roster={data.roster} />
       </div>
+      {eng.designIds.length > 0 && (
+        <Card>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab", marginBottom: 10 }}>
+            Linked designs
+          </div>
+          {eng.designIds.map((did) => {
+            const d = data.designsById[did];
+            return (
+              <Link
+                key={did}
+                href={`/design/designs?id=${encodeURIComponent(did)}`}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 0", borderTop: "1px solid #f4f5f7", fontSize: 12.5, textDecoration: "none", color: "inherit" }}
+              >
+                <span style={{ fontWeight: 600, color: "var(--accent)" }}>{d ? d.name : did}</span>
+                {d && <span style={{ color: "#9aa0ab", fontSize: 11.5 }}>{d.venue || "—"}</span>}
+              </Link>
+            );
+          })}
+        </Card>
+      )}
       {eng.decisions.length > 0 && (
         <Card>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab", marginBottom: 8 }}>

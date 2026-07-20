@@ -86,6 +86,7 @@ export default function DesignClient({
   roster,
   fabrics,
   reviewerNames,
+  engagementForDesign,
 }: {
   me: string;
   canApprove: boolean;
@@ -94,6 +95,8 @@ export default function DesignClient({
   roster: RosterEntry[];
   fabrics: FabricOption[];
   reviewerNames: string[];
+  /** Reverse lookup (derived server-side, not stored) — which engagement, if any, this design feeds. */
+  engagementForDesign: Record<string, { id: string; name: string }>;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -288,6 +291,14 @@ export default function DesignClient({
                 <div style={{ fontFamily: MONO, fontSize: 10.5, color: "#aab0bb", marginTop: 5 }}>
                   {sel.id} · {sel.width || "?"}&apos; × {sel.depth || "?"}&apos; × {sel.grid || "?"}&apos; · {(sel.size || "medium").replace(/^./, (c) => c.toUpperCase())}
                 </div>
+                {engagementForDesign[sel.id] && (
+                  <Link
+                    href={`/design/engagements/${encodeURIComponent(engagementForDesign[sel.id].id)}`}
+                    style={{ display: "inline-block", marginTop: 7, fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+                  >
+                    Part of {engagementForDesign[sel.id].name} →
+                  </Link>
+                )}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 11 }}>
                   <span title={sel.owner} style={{ width: 24, height: 24, borderRadius: "50%", background: colorOf(sel.owner), color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9.5, fontWeight: 600, flexShrink: 0 }}>
                     {initialsOf(sel.owner)}
