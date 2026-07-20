@@ -57,7 +57,7 @@ export async function saveDesignAction(
 ): Promise<{ ok: true; record: DesignRecord }> {
   const user = await requireUser();
   const record = await persistDesign(id, partial, user.name);
-  revalidatePath("/design");
+  revalidatePath("/design/designs");
   return { ok: true, record };
 }
 
@@ -84,7 +84,7 @@ export async function saveRevisionAction(
   };
   const r = await addDesignRevision(saved.id, snap);
   const record = (await getDesign(saved.id)) || saved;
-  revalidatePath("/design");
+  revalidatePath("/design/designs");
   return { ok: true, record, rev: r ? r.rev : 0 };
 }
 
@@ -116,7 +116,7 @@ export async function addToQuotesAction(
   });
   await updateQuote(q.id, { requote: true } as unknown as Partial<Quote>);
   await removeDesign(saved.id);
-  revalidatePath("/design");
+  revalidatePath("/design/designs");
   revalidatePath("/quotes");
   return { ok: true, quoteId: q.id };
 }

@@ -34,7 +34,7 @@ export async function promoteDesignAction(
   const q = await createQuote({ ...(partial as unknown as Partial<Quote>), owner: user.name });
   if (partial.requote) await updateQuote(q.id, { requote: true } as unknown as Partial<Quote>);
   await removeDesign(id);
-  revalidatePath("/design");
+  revalidatePath("/design/designs");
   revalidatePath("/quotes");
   return { ok: true, quoteId: q.id };
 }
@@ -48,7 +48,7 @@ export async function submitDesignReviewAction(
   const user = await requireUser();
   const d = await submitDesignForReview(id, { by: user.name, reviewer: reviewer || null });
   if (!d) return { ok: false, error: "Design not found." };
-  revalidatePath("/design");
+  revalidatePath("/design/designs");
   return { ok: true, record: d };
 }
 
@@ -59,7 +59,7 @@ export async function claimDesignReviewAction(
   if (!can("approve", user.roles)) return { ok: false, error: "You can't review designs." };
   const d = await claimDesignReview(id, user.name);
   if (!d) return { ok: false, error: "Design not found." };
-  revalidatePath("/design");
+  revalidatePath("/design/designs");
   return { ok: true, record: d };
 }
 
@@ -70,7 +70,7 @@ export async function approveDesignAction(
   if (!can("approve", user.roles)) return { ok: false, error: "You can't approve designs." };
   const d = await approveDesign(id, { by: user.name });
   if (!d) return { ok: false, error: "Design not found." };
-  revalidatePath("/design");
+  revalidatePath("/design/designs");
   return { ok: true, record: d };
 }
 
@@ -83,7 +83,7 @@ export async function requestDesignChangesAction(
   if (!note.trim()) return { ok: false, error: "A note is required." };
   const d = await requestDesignChanges(id, { by: user.name, note: note.trim() });
   if (!d) return { ok: false, error: "Design not found." };
-  revalidatePath("/design");
+  revalidatePath("/design/designs");
   return { ok: true, record: d };
 }
 

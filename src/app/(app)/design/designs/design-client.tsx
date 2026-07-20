@@ -21,8 +21,8 @@ import {
   type FabricOption,
   type SysKey,
   type TierKey,
-} from "../quick-design/engine";
-import { PlanSvg, buildPlan } from "../quick-design/plan-svg";
+} from "../quick/engine";
+import { PlanSvg, buildPlan } from "../quick/plan-svg";
 import {
   getAccentHex,
   getAccentHexServer,
@@ -30,7 +30,7 @@ import {
   getTierDefsServer,
   subscribeAccent,
   subscribeTierDefs,
-} from "../quick-design/tierdefs-store";
+} from "../quick/tierdefs-store";
 import {
   approveDesignAction,
   claimDesignReviewAction,
@@ -156,7 +156,7 @@ export default function DesignClient({
       setRemovedIds((m) => ({ ...m, [id]: true }));
       setPromotedId(res.quoteId);
       setPromoteToast(true);
-      if (selectedId === id) router.replace("/design", { scroll: false });
+      if (selectedId === id) router.replace("/design/designs", { scroll: false });
       else router.refresh();
     });
   };
@@ -253,7 +253,7 @@ export default function DesignClient({
             Budgetary system designs — explored freely, separate from Quotes until you promote them.
           </div>
         </div>
-        <Link href="/quick-design" className="dd-accent-btn" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "#fff", background: ACCENT, padding: "12px 17px", borderRadius: 9, textDecoration: "none", boxShadow: `0 1px 3px ${ACCENT_SOFT}`, flexShrink: 0 }}>
+        <Link href="/design/quick" className="dd-accent-btn" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "#fff", background: ACCENT, padding: "12px 17px", borderRadius: 9, textDecoration: "none", boxShadow: `0 1px 3px ${ACCENT_SOFT}`, flexShrink: 0 }}>
           <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> New design
         </Link>
       </div>
@@ -278,7 +278,7 @@ export default function DesignClient({
               <span style={budgetaryChip}>BUDGETARY</span>
               {reviewPill(review.state) && <span style={reviewPill(review.state)!}>{REVIEW_PILL[review.state].label}</span>}
               <span style={{ flex: 1 }} />
-              <Link href="/design" title="Close details" style={{ width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid #e4e7ec", background: "#fff", borderRadius: 7, color: "#5b616e", fontSize: 14, lineHeight: 1, textDecoration: "none" }}>
+              <Link href="/design/designs" title="Close details" style={{ width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid #e4e7ec", background: "#fff", borderRadius: 7, color: "#5b616e", fontSize: 14, lineHeight: 1, textDecoration: "none" }}>
                 ×
               </Link>
             </div>
@@ -304,7 +304,7 @@ export default function DesignClient({
                   <span style={{ fontSize: 11, color: "#9aa0ab" }}>est. · {(sel.tier || "better").replace(/^./, (c) => c.toUpperCase())}</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
-                  <Link href={`/quick-design?design=${encodeURIComponent(sel.id)}`} className="dd-accent-btn" style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: ACCENT, padding: "9px 14px", borderRadius: 8, textDecoration: "none" }}>
+                  <Link href={`/design/quick?design=${encodeURIComponent(sel.id)}`} className="dd-accent-btn" style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: ACCENT, padding: "9px 14px", borderRadius: 8, textDecoration: "none" }}>
                     Open in Quick Design
                   </Link>
                   <button onClick={() => promoteDesign(sel.id)} className="dd-accent-btn" style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", padding: "9px 14px", borderRadius: 8, cursor: "pointer" }}>
@@ -452,7 +452,7 @@ export default function DesignClient({
           <div style={{ fontSize: 13, color: "#9aa0ab", marginTop: 6, lineHeight: 1.5, maxWidth: 340, marginLeft: "auto", marginRight: "auto" }}>
             Start a budgetary design in the sandbox — explore systems and pricing without touching your quote pipeline.
           </div>
-          <Link href="/quick-design" className="dd-accent-btn" style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 18, fontSize: 13, fontWeight: 600, color: "#fff", background: ACCENT, padding: "11px 18px", borderRadius: 9, textDecoration: "none" }}>
+          <Link href="/design/quick" className="dd-accent-btn" style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 18, fontSize: 13, fontWeight: 600, color: "#fff", background: ACCENT, padding: "11px 18px", borderRadius: 9, textDecoration: "none" }}>
             <span style={{ fontSize: 14, lineHeight: 1 }}>+</span> New design
           </Link>
         </div>
@@ -467,7 +467,7 @@ export default function DesignClient({
                     <span style={venueChip}>{d.venue || "—"}</span>
                     <span style={budgetaryChip}>BUDGETARY</span>
                   </div>
-                  <Link href={`/design?id=${encodeURIComponent(d.id)}`} style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 38, fontSize: 14.5, fontWeight: 600, lineHeight: 1.3, marginTop: 12, color: "#16181d", textDecoration: "none" }}>
+                  <Link href={`/design/designs?id=${encodeURIComponent(d.id)}`} style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 38, fontSize: 14.5, fontWeight: 600, lineHeight: 1.3, marginTop: 12, color: "#16181d", textDecoration: "none" }}>
                     {d.name}
                   </Link>
                   <div style={{ fontFamily: MONO, fontSize: 10.5, color: "#aab0bb", marginTop: 5 }}>
@@ -491,7 +491,7 @@ export default function DesignClient({
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "13px 16px" }}>
-                  <Link href={`/quick-design?design=${encodeURIComponent(d.id)}`} className="dd-open-link" style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", textDecoration: "none", padding: "9px 14px", borderRadius: 8, border: "1px solid #e4e7ec", background: "#fff" }}>
+                  <Link href={`/design/quick?design=${encodeURIComponent(d.id)}`} className="dd-open-link" style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", textDecoration: "none", padding: "9px 14px", borderRadius: 8, border: "1px solid #e4e7ec", background: "#fff" }}>
                     Open
                   </Link>
                   <button onClick={() => promoteDesign(d.id)} className="dd-accent-btn" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", padding: "10px 12px", borderRadius: 8, cursor: "pointer" }}>
@@ -502,7 +502,7 @@ export default function DesignClient({
             );
           })}
 
-          <Link href="/quick-design" className="dd-newtile" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 9, background: "transparent", border: "1.5px dashed #d6d9e0", borderRadius: 12, textDecoration: "none", color: "#9aa0ab", minHeight: 210 }}>
+          <Link href="/design/quick" className="dd-newtile" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 9, background: "transparent", border: "1.5px dashed #d6d9e0", borderRadius: 12, textDecoration: "none", color: "#9aa0ab", minHeight: 210 }}>
             <span style={{ width: 38, height: 38, borderRadius: 10, background: "#f1f2f5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 21, lineHeight: 1 }}>+</span>
             <span style={{ fontSize: 13.5, fontWeight: 600 }}>New design</span>
             <span style={{ fontSize: 11.5, textAlign: "center", lineHeight: 1.4, maxWidth: 150 }}>Build &amp; price freely in the sandbox</span>

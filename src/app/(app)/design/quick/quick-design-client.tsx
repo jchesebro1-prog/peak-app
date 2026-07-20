@@ -54,7 +54,7 @@ import {
   claimDesignReviewAction,
   requestDesignChangesAction,
   submitDesignReviewAction,
-} from "../design/actions";
+} from "../designs/actions";
 
 /* ------------------------------ shared tokens ------------------------------ */
 
@@ -258,7 +258,7 @@ export default function QuickDesignClient({
     setDesignRec(record);
     setSavedId(record.id);
     toast(msg);
-    if (isNew) router.replace(`/quick-design?design=${encodeURIComponent(record.id)}`, { scroll: false });
+    if (isNew) router.replace(`/design/quick?design=${encodeURIComponent(record.id)}`, { scroll: false });
   };
 
   const onSaveDesign = () => {
