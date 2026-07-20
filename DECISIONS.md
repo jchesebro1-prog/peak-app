@@ -976,14 +976,28 @@ Anything you want changed, just say so — none of these are hard to reverse.
   Oversight). Templates: `consulting_proposal` + `consulting_spec` letters
   at `/consulting/letter`. Nothing consulting renders on the main Gantt.
   Verified: tsc + `next build` clean (all four /consulting routes register);
-  hub filter/menu/badges + nav verified statically. **Interactive browser
-  pass pending the dev-db recovery below.**
+  full interactive pass 2026-07-19 evening against the reseeded dev db —
+  Q-2043 built in the new builder ($16,500 milestone schedule), Consulting
+  hub filter/badge, submit-for-review (submitter correctly gets no
+  self-approve), approve as Jack, Sent (auto-revision 1 cut), Won →
+  **CE-1001 spawned** with the six phases; phase complete BLOCKED until the
+  phase review was approved through the Reviews queue (kind "Engagement",
+  composite id), then completed; milestones (Aug 15 / Oct 1 2026) landed in
+  the Reports forecast ("installs + consulting milestones": to-be-billed =
+  backlog + $16,500, $9k Sep bucket); /projects shows NO phantom project and
+  awaiting-start 0; both letters render (proposal with milestone fee table;
+  spec package with no-designs fallback).
+  **Three bugs found & fixed by that pass:** (1) `TABS` exported from the
+  "use client" view became a client-reference proxy in the server route —
+  moved to `consulting/tabs.ts` (e846a40); (2) a `export type` re-export in
+  the "use server" actions module broke ALL consulting server actions —
+  removed, only async fns may be exported there (680aa63); (3) quotes
+  `create()` enumerates payload fields and silently dropped `consulting` —
+  added to the copy list (3eb3dbf; Q-2043's payload restored by re-save).
   **Ops note (repeat incident):** the dev PGlite db corrupted AGAIN on
   2026-07-19 — `npm run build` (which runs `scripts/migrate.mjs` + prerender
   workers that open PGlite) was run while a dev server from another session
   held the same `.data/pglite`. PGlite is SINGLE-process: stop every dev
-  server before `npm run build` or any db script. Corrupt copy should be
-  preserved (e.g. `.data-corrupt-20260719b/`) and demo data reseeded
-  (`npm run db:seed` after moving the corrupt dir away) — same playbook as
-  the D85 ops note. The permission classifier blocked the automated
-  move+reseed, so this recovery is Jeff's (or an approved session's) step.
+  server before `npm run build` or any db script. Jeff recovered it same
+  evening: corrupt copy preserved at `.data-corrupt-20260719b/`, demo data
+  reseeded — same playbook as the D85 ops note.
