@@ -16,7 +16,7 @@ import {
   updateQuoteMetaAction,
   type ReviewSync,
 } from "./actions";
-import type { DraftedLine } from "@/lib/ai/features";
+import type { DraftedLine } from "./ai-scope-modal";
 import {
   demoSections,
   DISC_LABEL,

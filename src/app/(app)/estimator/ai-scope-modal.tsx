@@ -1,7 +1,11 @@
 "use client";
 
-import type { DraftedLine } from "@/lib/ai/features";
 import { ACCENT_INK, ACCENT_SOFT, ConfigModal, LBL } from "./est-ui";
+
+/** A drafted quote line (description / qty / unit — never a price, D6 guardrail).
+ *  Lived in lib/ai/features until D89 removed the AI layer; the rules-based
+ *  scope flow (S12/D86) is the only producer now. */
+export type DraftedLine = { description: string; qty: number; unit: string };
 
 /**
  * Scope review panel (S12/D83 — rules-based). Shows the scope paragraph

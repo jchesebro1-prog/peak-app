@@ -17,7 +17,7 @@ import {
   type QuoteReview,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
-import type { DraftedLine } from "@/lib/ai/features";
+import type { DraftedLine } from "./ai-scope-modal";
 import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
 import {
   get as getInspection,
