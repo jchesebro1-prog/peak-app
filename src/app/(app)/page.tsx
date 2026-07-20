@@ -38,6 +38,7 @@ import {
 } from "@/lib/stores/comms";
 import HomeMyDesigns, { type DesignCard } from "./home-my-designs";
 import HomeCalendar from "./home-calendar";
+import HomeTabs from "./home-tabs";
 import { loadHomeAgenda } from "@/lib/agenda";
 import { list as catalogList } from "@/lib/stores/catalog";
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
@@ -547,6 +548,8 @@ export default async function HomePage({
   return (
     <div className="pk-content pkh-content">
       <style dangerouslySetInnerHTML={{ __html: HOME_CSS }} />
+
+      <HomeTabs active="dashboard" />
 
       {/* greeting + quick actions */}
       <div

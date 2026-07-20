@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/session";
 import { loadAgendaRange } from "@/lib/agenda";
 import CalendarClient from "./calendar-client";
+import HomeTabs from "../home-tabs";
 
 export const metadata = { title: "Calendar — Peak Backend" };
 
@@ -35,6 +36,7 @@ export default async function CalendarPage({
 
   return (
     <div className="pk-content" style={{ maxWidth: 1120, padding: "26px 30px 64px" }}>
+      <HomeTabs active="calendar" />
       <CalendarClient
         year={year}
         month={month}

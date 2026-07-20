@@ -50,6 +50,7 @@ import type {
   ThreadRowVM,
 } from "./types";
 import InboxShell from "./inbox-shell";
+import HomeTabs from "../home-tabs";
 
 export const metadata = { title: "Inbox — Peak Backend" };
 
@@ -611,21 +612,32 @@ export default async function InboxPage({
           .ib-sheet input, .ib-sheet select, .ib-sheet textarea { font-size:16px !important; }
         }
       `}</style>
-      <InboxShell
-        box={view ? view : box}
-        folder={folder}
-        isView={isView}
-        isDrafts={isDrafts}
-        sidebar={sidebar}
-        list={list}
-        reader={reader}
-        explicitSelected={!!explicitThread}
-        rosterOptions={rosterOptions}
-        customers={customerVMs}
-        contactEmails={contactEmails}
-        fromOptions={fromOptions}
-        initialCompose={initialCompose}
-      />
+      {/* D98: InboxShell (below) is a fixed height:"100%" three-pane shell
+          with no pk-content wrapper of its own. A flex column here gives the
+          bar its own row so InboxShell's height:100% resolves against the
+          remaining space instead of overflowing past the viewport. */}
+      <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+        <div className="pk-content" style={{ padding: "18px 28px 0", flex: "0 0 auto" }}>
+          <HomeTabs active="inbox" />
+        </div>
+        <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+          <InboxShell
+            box={view ? view : box}
+            folder={folder}
+            isView={isView}
+            isDrafts={isDrafts}
+            sidebar={sidebar}
+            list={list}
+            reader={reader}
+            explicitSelected={!!explicitThread}
+            rosterOptions={rosterOptions}
+            customers={customerVMs}
+            contactEmails={contactEmails}
+            fromOptions={fromOptions}
+            initialCompose={initialCompose}
+          />
+        </div>
+      </div>
     </>
   );
 }
