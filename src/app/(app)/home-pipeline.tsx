@@ -6,15 +6,18 @@ import { CardHeadTitle } from "./home-shared";
 
 /**
  * My pipeline card — the filter strip + quote rows, port of Home.dc.html's
- * pipeline widget. `pipeHref`/`sheetHref` are recomputed here from the
- * `pipe` prop (mirroring the identical helpers still kept in page.tsx for
- * building the Needs-attention alerts) rather than crossing as functions.
+ * pipeline widget. `pipeHref` is recomputed here from the `pipe` prop (it
+ * only drives the active-tab styling, which is local to this card); the
+ * per-row `sheetHref` is resolved in page.tsx and carried on PipelineRow
+ * since functions must not cross into this server component as props.
  */
 
 const ACCENT_SOFT = "var(--accent-soft)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 70%, #000)";
 
 type QuoteX = Quote & { requote?: boolean };
+
+export type PipelineRow = QuoteX & { href: string };
 
 /** Quote status pill colors (Home.dc.html statusMeta). Sole consumer: this card. */
 export const STATUS_META: Record<
@@ -36,13 +39,9 @@ export default function HomePipeline({
   pipe: "all" | QuoteStatus;
   filterDefs: Array<["all" | QuoteStatus, string]>;
   pipeCounts: Record<"all" | QuoteStatus, number>;
-  filteredQuotes: QuoteX[];
+  filteredQuotes: PipelineRow[];
 }) {
   const pipeHref = (key: "all" | QuoteStatus) => (key === "all" ? "/" : `/?pipe=${key}`);
-  const sheetHref = (id: string) =>
-    pipe === "all"
-      ? `/?sheet=${encodeURIComponent(id)}`
-      : `/?pipe=${pipe}&sheet=${encodeURIComponent(id)}`;
 
   return (
     <div className="pk-card" style={{ overflow: "hidden" }}>
@@ -120,7 +119,7 @@ export default function HomePipeline({
         return (
           <Link
             key={q.id}
-            href={sheetHref(q.id)}
+            href={q.href}
             scroll={false}
             className="pkh-hover"
             style={{

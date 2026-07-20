@@ -45,8 +45,8 @@ import HomeStats from "./home-stats";
 import HomeCatalog from "./home-catalog";
 import HomeInbox from "./home-inbox";
 import HomeMyLeads, { type LeadGroup, type LeadRow } from "./home-my-leads";
-import HomePipeline from "./home-pipeline";
-import HomeFieldSurveys from "./home-field-surveys";
+import HomePipeline, { type PipelineRow } from "./home-pipeline";
+import HomeFieldSurveys, { type SurveyCard } from "./home-field-surveys";
 import HomeTeamActivity, { type TeamActivityRow } from "./home-team-activity";
 import HomeNeedsAttention, { type AlertRow } from "./home-needs-attention";
 
@@ -236,13 +236,17 @@ export default async function HomePage({
     ["won", "Won"],
     ["lost", "Lost"],
   ];
-  const filteredQuotes = myQuotes.filter((q) => pipe === "all" || q.status === pipe);
-
   const closeHref = pipe === "all" ? "/" : `/?pipe=${pipe}`;
   const sheetHref = (id: string) =>
     pipe === "all"
       ? `/?sheet=${encodeURIComponent(id)}`
       : `/?pipe=${pipe}&sheet=${encodeURIComponent(id)}`;
+
+  /** Pipeline row VM — sheetHref() is resolved here since functions must not
+   *  cross into HomePipeline as props (same pattern as toLeadRow below). */
+  const filteredQuotes: PipelineRow[] = myQuotes
+    .filter((q) => pipe === "all" || q.status === pipe)
+    .map((q) => ({ ...q, href: sheetHref(q.id) }));
 
   /* ---- needs attention (derived from live pipeline) ---- */
 
@@ -448,7 +452,7 @@ export default async function HomePage({
 
   /* ---- field surveys ---- */
 
-  const surveyCards = surveysAll.slice(0, 3).map((s) => {
+  const surveyCards: SurveyCard[] = surveysAll.slice(0, 3).map((s) => {
     const m = surveyStageMeta(s.stage || "requested");
     return {
       id: s.id,
