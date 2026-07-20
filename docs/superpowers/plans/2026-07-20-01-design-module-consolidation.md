@@ -252,15 +252,18 @@ git commit -m "Design module: move consulting routes under /design/engagements (
 
 ---
 
-### Task 3: Move the calculators and quick-design
+### Task 3: Move the calculators
 
 **Files:**
 - Move: `src/app/(app)/design-studio/{steel,lineset,motors}` → `src/app/(app)/design/{steel,lineset,motors}`
-- Move: `src/app/(app)/quick-design` → `src/app/(app)/design/quick`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `/design/steel`, `/design/lineset`, `/design/motors`, `/design/quick`.
+- Produces: `/design/steel`, `/design/lineset`, `/design/motors`.
+
+> `/quick-design` moves in **Task 4**, not here. Its client imports
+> `../design/actions`, which only becomes `../designs/actions` once the sandbox
+> list moves — moving it here would leave this task's commit failing typecheck.
 
 - [ ] **Step 1: Move**
 
@@ -269,7 +272,6 @@ cd ~/Downloads/peak-app
 git mv "src/app/(app)/design-studio/steel"   "src/app/(app)/design/steel"
 git mv "src/app/(app)/design-studio/lineset" "src/app/(app)/design/lineset"
 git mv "src/app/(app)/design-studio/motors"  "src/app/(app)/design/motors"
-git mv "src/app/(app)/quick-design"          "src/app/(app)/design/quick"
 ```
 
 `src/app/(app)/design-studio/save-bar.tsx` is imported by the lineset builder — move it too:
@@ -283,53 +285,47 @@ git mv "src/app/(app)/design-studio/export.ts"    "src/app/(app)/design/export.t
 
 ```bash
 cd ~/Downloads/peak-app
-grep -rl 'design-studio\|quick-design' "src/app/(app)/design" \
+grep -rl 'design-studio' "src/app/(app)/design" \
   | xargs sed -i '' -e 's|/design-studio/|/design/|g' \
-                    -e 's|"/design-studio"|"/design"|g' \
-                    -e 's|/quick-design|/design/quick|g'
+                    -e 's|"/design-studio"|"/design"|g'
 ```
 
-Then fix the relative import in `src/app/(app)/design/quick/quick-design-client.tsx:57` — it imported `../design/actions`, which is now `../designs/actions` (the sandbox actions move in Task 4). Set it to:
-
-```ts
-import { promoteDesignAction } from "../designs/actions";
-```
-
-`revalidatePath("/design")` calls in `design/quick/actions.ts` (lines 60, 87, 119) must become `revalidatePath("/design/designs")` — they revalidate the sandbox list, not the Overview.
-
-- [ ] **Step 3: Verify**
+- [ ] **Step 3: Verify no stale tool paths remain in the moved tree**
 
 ```bash
-cd ~/Downloads/peak-app && grep -rn "design-studio\|quick-design" src/app src/lib src/components || echo "CLEAN (except nav-data, fixed in Task 6)"
+cd ~/Downloads/peak-app && grep -rn "design-studio" "src/app/(app)/design" || echo "CLEAN"
 ```
+Expected: `CLEAN`. (`src/app/(app)/design-studio/` itself still exists and still
+references its own paths — it becomes redirect stubs in Task 5.)
 
 - [ ] **Step 4: Typecheck**
 
 ```bash
 cd ~/Downloads/peak-app && npx tsc --noEmit
 ```
-Expected: errors only where the sandbox list has not moved yet (Task 4).
+Expected: **clean**. This task must not leave the tree failing typecheck.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add -A "src/app/(app)"
-git commit -m "Design module: move calculators and quick-design under /design (D97)"
+git commit -m "Design module: move calculators under /design (D97)"
 ```
 
 ---
 
-### Task 4: Move the sandbox list and build the Overview
+### Task 4: Move the sandbox list and quick-design, and build the Overview
 
 **Files:**
 - Move: `src/app/(app)/design/{page.tsx,design-client.tsx,actions.ts,design.css}` → `src/app/(app)/design/designs/`
+- Move: `src/app/(app)/quick-design` → `src/app/(app)/design/quick`
 - Create: `src/app/(app)/design/page.tsx` (the new Overview)
 
 **Interfaces:**
 - Consumes: `designRedirect` from Task 1.
-- Produces: `/design` (Overview), `/design/designs` (sandbox list).
+- Produces: `/design` (Overview), `/design/designs` (sandbox list), `/design/quick`.
 
-- [ ] **Step 1: Move the sandbox list into its own segment**
+- [ ] **Step 1: Move the sandbox list into its own segment, and quick-design in beside it**
 
 ```bash
 cd ~/Downloads/peak-app
@@ -338,6 +334,25 @@ git mv "src/app/(app)/design/page.tsx"          "src/app/(app)/design/designs/pa
 git mv "src/app/(app)/design/design-client.tsx" "src/app/(app)/design/designs/design-client.tsx"
 git mv "src/app/(app)/design/actions.ts"        "src/app/(app)/design/designs/actions.ts"
 git mv "src/app/(app)/design/design.css"        "src/app/(app)/design/designs/design.css"
+git mv "src/app/(app)/quick-design"             "src/app/(app)/design/quick"
+```
+
+- [ ] **Step 1b: Retarget quick-design**
+
+`src/app/(app)/design/quick/quick-design-client.tsx:57` imported `../design/actions`. The sandbox actions now live one segment over — set it to:
+
+```ts
+import { promoteDesignAction } from "../designs/actions";
+```
+
+`revalidatePath("/design")` in `design/quick/actions.ts` (lines 60, 87, 119) becomes `revalidatePath("/design/designs")` — those calls revalidate the sandbox list, not the Overview.
+
+Any `/quick-design` string inside the moved tree becomes `/design/quick`:
+
+```bash
+cd ~/Downloads/peak-app
+grep -rl '/quick-design' "src/app/(app)/design" \
+  | xargs sed -i '' 's|/quick-design|/design/quick|g' 2>/dev/null || true
 ```
 
 - [ ] **Step 2: Retarget the sandbox's own links**
@@ -476,7 +491,7 @@ Expected: clean.
 
 ```bash
 git add -A "src/app/(app)/design"
-git commit -m "Design module: sandbox list moves to /design/designs, add Overview (D97)"
+git commit -m "Design module: sandbox list to /design/designs, quick-design to /design/quick, add Overview (D97)"
 ```
 
 ---
@@ -612,8 +627,8 @@ Append to `scripts/test-review-and-spec.ts`:
 /* --- design module nav (D97) --- */
 import { activeKeyFor, NAV } from "@/components/nav/nav-data";
 
-ok(activeKeyFor("/design") === "designs" || activeKeyFor("/design") !== "",
-  "the Design overview resolves to a key");
+ok(activeKeyFor("/design") === "designoverview",
+  "the Design overview resolves to the designoverview key");
 ok(activeKeyFor("/design/engagements") === activeKeyFor("/design/steel"),
   "every /design/* path resolves to the same key (segment-1 matching)");
 ok(NAV.some((e) => e.kind === "group" && e.key === "design"),
@@ -695,9 +710,12 @@ These are the links that would otherwise silently bounce through a redirect on e
 ```bash
 cd ~/Downloads/peak-app
 grep -rn '"/consulting\|`/consulting\|"/design"\|`/design?\|/design-studio\|/quick-design' \
-  src/lib src/components "src/app/api" \
+  src \
   --include=*.ts --include=*.tsx \
-  | grep -v "design-routes.ts"
+  | grep -v "design-routes.ts" \
+  | grep -v "src/app/(app)/design/" \
+  | grep -v "src/app/(app)/consulting/" \
+  | grep -v "src/app/(app)/design-studio/"
 ```
 
 - [ ] **Step 2: Apply the edits**
@@ -713,6 +731,7 @@ grep -rn '"/consulting\|`/consulting\|"/design"\|`/design?\|/design-studio\|/qui
 | `src/app/(app)/quotes/page.tsx:59` | `` `/consulting/quote?id=${…}` `` | `` `/design/engagements/quote?id=${…}` `` |
 | `src/app/(app)/reviews/page.tsx:95` | `"/consulting/quote?id="` | `"/design/engagements/quote?id="` |
 | `src/app/(app)/reviews/page.tsx:122` | `"/consulting/" + … + "?tab=phases"` | `"/design/engagements/" + … + "?tab=phases"` |
+| `src/app/(app)/page.tsx` (greeting card, ~line 551–629) | `href="/quick-design"` | `href="/design/quick"` |
 
 - [ ] **Step 3: Confirm nothing outside the stubs still points at a legacy path**
 

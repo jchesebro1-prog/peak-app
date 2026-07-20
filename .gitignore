@@ -49,3 +49,4 @@ next-env.d.ts
 
 # preserved copy of the corrupted 2026-07-19 dev db (safe to delete later)
 .data-corrupt*/
+.superpowers/
