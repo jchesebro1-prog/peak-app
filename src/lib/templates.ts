@@ -436,7 +436,7 @@ export const TEMPLATES: TemplateDef[] = [
     label: "Consulting Spec Package (boilerplate)",
     group: "Reports",
     description:
-      "Standard specification-package sections (D90) filled from the engagement and any linked Design Studio designs — the bid document other contractors price against.",
+      "Standard specification-package sections (D90) filled from the engagement and any linked designs — the bid document other contractors price against.",
     placeholders: [
       { token: "company", desc: "Your company name" },
       { token: "customer", desc: "Customer / organization name" },

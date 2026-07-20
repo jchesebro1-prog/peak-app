@@ -138,6 +138,8 @@ ok(designRedirect("/design-studio/steel", {}) === "/design/steel",
   "calculators keep their leaf name");
 ok(designRedirect("/design-studio/lineset", { design: "DS-abc" }) === "/design/lineset?design=DS-abc",
   "lineset preserves its ?design= deep link");
+ok(designRedirect("/design-studio/weights", { design: "DS-abc" }) === "/design/lineset?design=DS-abc",
+  "weights was folded into lineset — it must not land on a nonexistent /design/weights page");
 ok(designRedirect("/design", { id: "D-101" }) === "/design/designs?id=D-101",
   "old sandbox deep link lands on the designs list");
 ok(designRedirect("/design", {}) === null,

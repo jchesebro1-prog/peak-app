@@ -43,6 +43,13 @@ export function designRedirect(
 
   if (pathname === "/design-studio") return "/design";
 
+  // Weights was folded into the lineset builder — it has no standalone
+  // /design/weights page, so it needs an explicit mapping instead of
+  // falling through to the generic leaf-name branch below.
+  if (pathname === "/design-studio/weights") {
+    return "/design/lineset" + qs("/design-studio/lineset", query);
+  }
+
   if (pathname.startsWith("/design-studio/")) {
     const leaf = pathname.slice("/design-studio/".length);
     return "/design/" + leaf + qs(pathname, query);

@@ -103,7 +103,7 @@ export default async function ConsultingLetterPage({
             : "That id isn't a saved consulting quote."}
         </div>
         <Link href="/design/engagements" style={{ color: accent, fontSize: 12.5 }}>
-          ← Consulting
+          ← Engagements
         </Link>
       </div>
     );
@@ -277,7 +277,7 @@ export default async function ConsultingLetterPage({
               </table>
             ) : (
               <p style={{ ...BODY, color: "#8c919c" }}>
-                No designs are linked to this engagement yet — link them on the engagement Overview to populate the schedule.
+                No designs are linked to this engagement yet.
               </p>
             )}
 

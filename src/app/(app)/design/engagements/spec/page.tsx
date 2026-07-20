@@ -29,7 +29,7 @@ export default async function SpecPage({
       <div style={{ padding: 24, fontSize: 13.5 }}>
         <p style={{ marginBottom: 10 }}>No engagement selected.</p>
         <Link href="/design/engagements" style={{ color: "#3155a8" }}>
-          ← Back to Consulting
+          ← Back to Engagements
         </Link>
       </div>
     );

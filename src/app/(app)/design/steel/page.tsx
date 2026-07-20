@@ -10,7 +10,7 @@ export default async function SteelCalculatorPage() {
     <div className="pk-content" style={{ maxWidth: 1000 }}>
       <div style={{ marginBottom: 14 }}>
         <Link href="/design" style={{ fontSize: 12.5, fontWeight: 600, color: "#8c919c", textDecoration: "none" }}>
-          ← Design Studio
+          ← Design
         </Link>
         <h1 style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>Steel Calculator</h1>
         <p style={{ color: "#6b7079", fontSize: 13.5, marginTop: 3 }}>
