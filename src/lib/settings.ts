@@ -36,6 +36,9 @@ export type AppSettingsData = {
   /** Site-visit reason picklist overrides (D76) — see DEFAULT_VISIT_REASONS
    *  in stores/site-visits.ts; empty/absent means use the defaults. */
   visitReasons?: string[];
+  /** Consulting phase-menu overrides (D90) — see DEFAULT_CONSULTING_PHASES
+   *  in stores/engagements.ts; empty/absent means use the defaults. */
+  consultingPhases?: string[];
   /** Brand marks (IDEAS #32) — small data-URL images uploaded in Settings →
    *  Branding. `logoLight` sits on the dark nav bar; `logoDark` heads white
    *  documents (letters + reports) in place of the baked-in letterhead. */
