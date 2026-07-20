@@ -604,7 +604,7 @@ search box and a "only modified" chip** — that alone likely resolves the compl
 
 ---
 
-## 11. Customer pricing tiers → default margin (incl. customer portal) — READY TO BUILD (A–C, E–G answered; D + per-tier margins open)
+## 11. Customer pricing tiers → default margin (incl. customer portal) — IN PROGRESS (all of A–G answered)
 
 **Area:** `src/lib/stores/customers.ts`, `src/app/(app)/estimator/*`, `src/lib/stores/pricing.ts`,
 `src/lib/curtain-pricing.ts`, `src/app/portal/*`
@@ -701,14 +701,17 @@ from "hand-set".
 - **D. Portal equipment prices.** Catalog `list` is a per-SKU absolute with no percentage hook.
   Does a tier discount off list, or re-derive list from cost? These expose different pricing
   philosophies to the customer.
+  **ANSWERED 2026-07-19 (Jeff): cost plus margin** — the customer price is re-derived from cost
+  at the tier margin (fall back to list when a part has no cost).
 - **E. Should the customer *see* they're on a tier** (a named discount line), or is it invisible?
   **ANSWERED 2026-07-19 (Jeff): NOT visible to the customer** — the tier only shapes pricing;
   no discount line, no tier name on quotes or in the portal.
 - **F. Tier definition.** Fixed enum, or an admin-editable list with per-tier margins? The rules
   registry has `defineGroup`/`addRate` that could host per-tier margins cleanly.
-  **ANSWERED 2026-07-19 (Jeff): the tiers are Base, Cooper, Silver, Gold, Platinum, Employee**
-  (verbatim — confirm "Cooper" vs "Copper" before shipping copy). Per-tier MARGIN PERCENTAGES
-  still need Jeff's numbers; plan is an admin-editable tier→margin table seeded with these six.
+  **ANSWERED 2026-07-19 (Jeff), margins included — seven tiers:** Base 30 · Copper 27 ·
+  Silver 22 · Gold 20 · Platinum 15 · Reseller 10 · Employee 5 (percent margin; spelling
+  confirmed "Copper", and Reseller added in the follow-up). Admin-editable tier→margin table
+  seeded with these.
 - **G. Existing customers with no tier** — default to a "Standard" tier at today's 30% so nothing
   reprices silently.
   **ANSWERED 2026-07-19 (Jeff): default is the BASE tier.**
@@ -717,7 +720,12 @@ from "hand-set".
 table; (2) seed the estimator section margin from it and stamp it on the quote; (3) portal last,
 since it carries the client/server coupling risk.
 
-**Status:** READY TO BUILD — A (seeds), B (stamp per revision, via item 24), C (all five margin systems), E (invisible to customer), F (tiers: Base/Cooper/Silver/Gold/Platinum/Employee) and G (default Base) are answered. Still needed before/at build: **D** (portal catalog list prices: discount off list, or re-derive from cost?), the **per-tier margin percentages** (can land in the admin table), and the Cooper/Copper spelling. Identity core (D85) already provides contacts.pricingTier + companies.pricingTier per design §4.7: contact tier wins, company is fallback, stamped onto the quote at creation.
+**Status:** IN PROGRESS 2026-07-19 — every decision is answered: A seeds; B stamps per
+revision (item 24); C all five margin systems; D cost-plus-margin in the portal; E invisible
+to the customer; F seven tiers Base 30 / Copper 27 / Silver 22 / Gold 20 / Platinum 15 /
+Reseller 10 / Employee 5; G default Base. Identity core (D85) already provides
+contacts.pricingTier + companies.pricingTier per design §4.7: contact tier wins, company is
+fallback, stamped onto the quote at creation.
 
 ---
 
