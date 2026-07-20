@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/session";
 import { money } from "@/lib/format";
 import { KpiTile } from "@/components/ui";
 import { getAll as getQuotes, type Quote } from "@/lib/stores/quotes";
+import { allEngagements, type ConsultingEngagement } from "@/lib/stores/engagements";
 import {
   getAllProjects,
   type ProjectRecord,
@@ -115,10 +116,11 @@ export default async function ReportsPage({
     ? (one(sp.ir) as string)
     : "12m";
 
-  const [quotes, projects, customers] = await Promise.all([
+  const [quotes, projects, customers, engagements] = await Promise.all([
     getQuotes(),
     getAllProjects(),
     getCustomers(),
+    allEngagements(),
   ]);
 
   const modeHref = (v: string) =>
@@ -178,7 +180,7 @@ export default async function ReportsPage({
       {view === "sales" ? (
         <SalesView quotes={quotes} range={range} />
       ) : (
-        <InstallsView projects={projects} customers={customers} ir={ir} />
+        <InstallsView projects={projects} customers={customers} engagements={engagements} ir={ir} />
       )}
     </div>
   );
@@ -869,10 +871,12 @@ function coordsOf(
 function InstallsView({
   projects,
   customers,
+  engagements,
   ir,
 }: {
   projects: ProjectRecord[];
   customers: Awaited<ReturnType<typeof getCustomers>>;
+  engagements: ConsultingEngagement[];
   ir: string;
 }) {
   const now = Date.now();
@@ -889,7 +893,12 @@ function InstallsView({
   const blended = totalValue ? book.reduce((a, p) => a + (p.value || 0) * (p.margin || 0), 0) / totalValue : 0;
   const cost = Math.round(totalValue * (1 - blended));
 
-  // billing forecast — full value billed at landing (targetDate), collected net-30 after
+  // billing forecast — full value billed at landing (targetDate), collected net-30 after.
+  // Consulting milestone fees (D90) land the same way: billed at the
+  // milestone's targetDate, collected net-30 — forecast-only, no invoicing.
+  const msPoints = engagements
+    .flatMap((e) => e.milestones)
+    .filter((m) => !m.completedAt && (m.amount || 0) > 0 && m.targetDate > 0 && m.targetDate <= horizonEnd);
   const bC = 6;
   const bucketMs = (H * 30 * DAY) / bC;
   const buckets: Array<{ start: number; billed: number; collected: number }> = [];
@@ -904,6 +913,11 @@ function InstallsView({
       const coll = land + 30 * DAY;
       if (coll >= lo && coll < hi) collected += p.value || 0;
     });
+    msPoints.forEach((m) => {
+      if (m.targetDate >= lo && m.targetDate < hi) billed += m.amount || 0;
+      const coll = m.targetDate + 30 * DAY;
+      if (coll >= lo && coll < hi) collected += m.amount || 0;
+    });
     buckets.push({ start: lo, billed, collected });
   }
   const billMax = Math.max(1, ...buckets.map((b) => Math.max(b.billed, b.collected)));
@@ -914,12 +928,20 @@ function InstallsView({
     frontPct: Math.round((b.collected / billMax) * 100),
   }));
 
-  const toBill = book
-    .filter((p) => (p.targetDate || 0) >= now && (p.targetDate || 0) <= horizonEnd)
-    .reduce((a, p) => a + (p.value || 0), 0);
-  const collected = book
-    .filter((p) => (p.targetDate || 0) + 30 * DAY >= now && (p.targetDate || 0) + 30 * DAY <= horizonEnd)
-    .reduce((a, p) => a + (p.value || 0), 0);
+  const toBill =
+    book
+      .filter((p) => (p.targetDate || 0) >= now && (p.targetDate || 0) <= horizonEnd)
+      .reduce((a, p) => a + (p.value || 0), 0) +
+    msPoints
+      .filter((m) => m.targetDate >= now)
+      .reduce((a, m) => a + (m.amount || 0), 0);
+  const collected =
+    book
+      .filter((p) => (p.targetDate || 0) + 30 * DAY >= now && (p.targetDate || 0) + 30 * DAY <= horizonEnd)
+      .reduce((a, p) => a + (p.value || 0), 0) +
+    msPoints
+      .filter((m) => m.targetDate + 30 * DAY >= now && m.targetDate + 30 * DAY <= horizonEnd)
+      .reduce((a, m) => a + (m.amount || 0), 0);
 
   // backlog by stage
   const byStage = new Map<string, { value: number; count: number }>();
@@ -978,7 +1000,7 @@ function InstallsView({
         {/* LEFT */}
         <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
           <ChartCard
-            title="Billing forecast"
+            title="Billing forecast — installs + consulting milestones"
             right={
               <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#8c919c" }}>
