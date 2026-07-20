@@ -810,3 +810,42 @@ Anything you want changed, just say so — none of these are hard to reverse.
   immediately revealed the actual imported catalog (10,729 parts across 6
   books). Age pills dropped pending decision A (no updatedAt on parts);
   SUGGEST divergence remains open under #14 B.
+
+## Daylite parity Phase 1 — identity core (2026-07-19)
+
+- **D85. The identity core landed** (Daylite parity Phase 1; design
+  `docs/superpowers/specs/2026-07-19-daylite-parity-design.md` §4, plan
+  `docs/superpowers/plans/2026-07-19-daylite-parity-phase0-1.md`). Five
+  relational tables — companies, contacts, contact_emails, contact_phones,
+  sites (migration 0005) — now back the directory. `src/lib/stores/customers.ts`
+  keeps its public API byte-compatible but composes from the new tables, so
+  its ~120 consumers were untouched; `customers` left BOTH sync-push
+  allowlists (identity is server-authoritative, spec §3.2 — field staff don't
+  create contacts offline). Companies + People replaced Customers in the nav;
+  `/customers[/:id]` redirect. Lead convert, the five raw doc-store customer
+  readers (flame/repair/inspection/design/comm stores) and ⌘K search were
+  rewired. Recorded deviations: (1) **no DB-level FKs yet** — referenced ids
+  also live inside jsonb docs where constraints can't reach; the converter's
+  reconciliation report is the integrity gate (6 customers → 6 companies,
+  8 sites, 8 contacts, 8 emails, 0 skipped, 0 warnings). (2) **`customerId`
+  keeps its name on doc records** — it now means "company id" (same slug
+  values); renames land with the screens that rebuild in Phases 2/3/6.
+  (3) **Composed `CustomerLocation.id` = `sites.legacyLocId ?? sites.id`**
+  so stored `locationId` values ('loc1', 'lf1', …) keep matching. (4)
+  **`contacts.isPrimary` is transitional** until quotes designate their own
+  primary contact (§4.7 / item 11). (5) Owner names that match no team
+  member are dropped on write (owner is now a users FK). Conversion runs
+  automatically at seed time when identity is empty; `npm run
+  db:convert-identity [--force]` reruns it. Phase 0's export audit tool
+  shipped (`npm run audit:daylite`) with its §5.1 checklist — **the audit
+  itself waits on Jeff's Daylite CSV, and no import code exists until it
+  runs.** Verified: build clean; browser pass over Companies (list/map/
+  detail/portal), People (list/detail), redirects, search deep links,
+  estimator, reports; scripted write-path test (upsert round-trip with
+  stable site ids, D83 updatedAt semantics, two live lead conversions).
+  Ops notes: the dev PGlite db was found corrupted by two concurrent
+  processes (dev server + a stale tsx script) — PGlite is single-process;
+  stop the dev server before running db scripts. Old data preserved at
+  `.data-corrupt-20260719/`; demo data reseeded. D80/D83/D84 still have no
+  entries here — their detail lives in PUNCHLIST statuses and commits
+  901965f / 156fe8d / 210a43b.

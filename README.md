@@ -10,6 +10,14 @@ roles, the app shell, and Settings are live. See `AGENTS.md` for the full
 phase plan and conventions, `DECISIONS.md` for choices made along the way,
 and `QUESTIONS.md` for the things that need Jeff.
 
+**Daylite parity: identity core landed (2026-07-19, D85)** — the customer
+directory is now relational (companies / contacts / emails / phones /
+sites); **Companies** and **People** replaced Customers in the nav. Design:
+`docs/superpowers/specs/2026-07-19-daylite-parity-design.md`. Next step is
+Jeff's Daylite CSV export → `npm run audit:daylite -- <folder>`; no import
+code gets written before that audit. ⚠️ The dev database is single-process:
+**stop `npm run dev` before running any `db:*` script.**
+
 ## See it (one command)
 
 ```bash

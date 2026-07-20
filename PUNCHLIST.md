@@ -1263,7 +1263,7 @@ reorder) probably wouldn't.
 
 ---
 
-## 20. People and companies as first-class records + multi-linking — JEFF (self-assigned 2026-07-19)
+## 20. People and companies as first-class records + multi-linking — PHASE 1 LANDED (D85)
 
 **Area:** `src/lib/stores/customers.ts`, `src/db/doc-tables.ts`, and every screen that renders
 "the customer"
@@ -1355,7 +1355,7 @@ feature bolt-on.
 **Related:** item 12 (lead→contact linkage) is a subset of this. Item 18's "linked people on
 cards" and the contact-detail view both **depend on step 1**.
 
-**Status:** OPEN — needs **A** before anything else. Largest architectural item on the list.
+**Status:** PHASE 1 LANDED 2026-07-19 (D85) — A was answered by the approved Daylite-parity design (full graph, phased): companies/contacts/emails/phones/sites are real relational tables; People + Companies are in the nav; every contact is openable at /people/<id>. Junction tables + shared picker (steps 2-3 here) are Phase 2 of the design; multi-link chips on quotes/projects follow there. Item 12 remains absorbed by Phase 3.
 
 ---
 
@@ -1505,7 +1505,7 @@ pattern flagged in item 7.
 - **D. Shared/team calendars** — item 2 shipped a personal calendar; is an all-calendars or shared
   Peak calendar view wanted next?
 
-**Status:** OPEN — needs A–D. Items 17, 18, 19 and 20 close most of the Missing rows
+**Status:** OPEN — needs A–D. Items 17, 18, 19 and 20 close most of the Missing rows. **People and Companies nav entries exist since D85** (General group); the scoped-views/per-person-lists question (A/B) still stands for Phase 6.
 
 ---
 
@@ -1588,7 +1588,7 @@ has no owner field), and nothing renders created/modified dates. **"Added in las
 - **F. Referral tracking** — a "Referred by" person link, or is the existing lead `source`
   picklist enough?
 
-**Status:** OPEN — A, D and E are cheap and independently useful; C needs Jeff's read before scoping
+**Status:** LARGELY LANDED via D85 — companies now carry type, lifecycle (Daylite category), keywords, website, mainPhone, HQ address, pricingTier (fallback), ownerUserId, referredByContactId and real timestamps as columns; contacts carry title, status (active/former/do_not_contact) and pricingTier. Remaining: UI for keywords/lifecycle editing, "added in last 7 days" view (F), and C (custom fields) still waits on the export audit.
 
 ---
 
