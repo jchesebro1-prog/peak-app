@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { getAll as getQuotes, timeAgo, type QuoteReview } from "@/lib/stores/quotes";
 import { getAllDesigns } from "@/lib/stores/designs";
+import { allEngagements } from "@/lib/stores/engagements";
 import { allUsers } from "@/lib/users";
 import { can, deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import ReviewList, { type ReviewItem } from "./review-list";
@@ -55,12 +56,13 @@ export default async function ReviewsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, quotes, designs, users] = await Promise.all([
+  const [user, sp, quotes, designs, users, engagements] = await Promise.all([
     requireUser(),
     searchParams,
     getQuotes(),
     getAllDesigns(),
     allUsers(),
+    allEngagements(),
   ]);
   const me = user.name;
   const canApprove = can("approve", user.roles);
@@ -88,7 +90,10 @@ export default async function ReviewsPage({
       value: q.value || 0,
       review: q.review || NONE,
       ts: q.updatedAt || 0,
-      openHref: "/estimator?id=" + encodeURIComponent(q.id),
+      openHref:
+        q.quoteType === "consulting"
+          ? "/consulting/quote?id=" + encodeURIComponent(q.id)
+          : "/estimator?id=" + encodeURIComponent(q.id),
     })),
     ...designs.map((d) => ({
       kind: "Design" as const,
@@ -100,6 +105,23 @@ export default async function ReviewsPage({
       ts: d.updatedAt || 0,
       openHref: "/quick-design?design=" + encodeURIComponent(d.id),
     })),
+    /* Consulting phase reviews (D90) — each phase carries its own
+     * QuoteReview; the composite id "<engId>:<phaseId>" routes the
+     * approver actions back to the right phase. */
+    ...engagements.flatMap((e) =>
+      e.phases
+        .filter((ph) => ph.review.state !== "none")
+        .map((ph) => ({
+          kind: "Engagement" as const,
+          id: e.id + ":" + ph.id,
+          name: e.name + " — " + ph.name,
+          owner: e.people.find((p) => p.role === "Engagement Lead")?.person || "",
+          value: 0,
+          review: ph.review,
+          ts: e.updatedAt || 0,
+          openHref: "/consulting/" + encodeURIComponent(e.id) + "?tab=phases",
+        }))
+    ),
   ];
 
   const inReview = all.filter((x) => x.review.state === "in_review");

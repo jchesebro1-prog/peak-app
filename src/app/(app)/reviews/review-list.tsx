@@ -41,6 +41,7 @@ const STATE_META: Record<string, { label: string; ink: string; soft: string; bd:
 const KIND_META: Record<ReviewKind, { ink: string; soft: string; bd: string; bar: string }> = {
   Quote: { ink: "#5b4b8a", soft: "#f0ecf5", bd: "#e0d6ea", bar: "#7b3f8a" },
   Design: { ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd", bar: "#b5683a" },
+  Engagement: { ink: "#6b4fa1", soft: "#f0ebf9", bd: "#ddd2f0", bar: "#6b4fa1" },
 };
 
 export default function ReviewList({

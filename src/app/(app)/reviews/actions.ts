@@ -9,6 +9,11 @@ import {
   claimDesignReview,
   requestDesignChanges,
 } from "@/lib/stores/designs";
+import {
+  approvePhaseReview,
+  claimPhaseReview,
+  requestPhaseChanges,
+} from "@/lib/stores/engagements";
 
 /**
  * Review-queue decisions over quotes AND designs (Reviews.dc.html routes
@@ -17,7 +22,7 @@ import {
  * Users.canApprove() UI gate, enforced.
  */
 
-export type ReviewKind = "Quote" | "Design";
+export type ReviewKind = "Quote" | "Design" | "Engagement";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -34,7 +39,10 @@ export async function claimReviewAction(
   const user = await requireApprover();
   if (!user) return { ok: false, error: "You need review permission to claim." };
   if (kind === "Quote") await claimReview(id, user.name);
-  else await claimDesignReview(id, user.name);
+  else if (kind === "Engagement") {
+    const [engId, phaseId] = id.split(":");
+    await claimPhaseReview(engId, phaseId, user.name);
+  } else await claimDesignReview(id, user.name);
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -46,7 +54,10 @@ export async function approveReviewAction(
   const user = await requireApprover();
   if (!user) return { ok: false, error: "You need review permission to approve." };
   if (kind === "Quote") await approve(id, { by: user.name });
-  else await approveDesign(id, { by: user.name });
+  else if (kind === "Engagement") {
+    const [engId, phaseId] = id.split(":");
+    await approvePhaseReview(engId, phaseId, user.name);
+  } else await approveDesign(id, { by: user.name });
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -62,7 +73,10 @@ export async function requestChangesAction(
   const clean = (note || "").trim();
   if (!clean) return { ok: false, error: "A note is required." };
   if (kind === "Quote") await requestChanges(id, { by: user.name, note: clean });
-  else await requestDesignChanges(id, { by: user.name, note: clean });
+  else if (kind === "Engagement") {
+    const [engId, phaseId] = id.split(":");
+    await requestPhaseChanges(engId, phaseId, user.name, clean);
+  } else await requestDesignChanges(id, { by: user.name, note: clean });
   revalidatePath("/", "layout");
   return { ok: true };
 }
