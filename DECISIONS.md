@@ -1116,3 +1116,61 @@ Spec: `docs/superpowers/specs/2026-07-19-bid-spec-generator-design.md`.
   format-agnostic. Flagged for Jeff.
 - Saved specs are frozen; regenerating writes a new record so what went to an
   architect stays retrievable after catalog language moves on.
+
+## D94a — Real .docx output (2026-07-20)
+
+Supersedes the D94 shipping-day decision to emit Word-openable HTML. Jeff
+asked for the real thing once he clarified the deploy is a personal beta.
+
+- Added the `docx` package; `lib/bid-spec-docx.ts` builds genuine OOXML from
+  the same `AssembledSpec`, which was deliberately kept format-agnostic — the
+  HTML renderer is untouched and still backs the print/PDF view.
+- Download is a **route handler** (`/api/spec/[id]/docx`), not a client blob:
+  the Packer is a Node builder and keeping it server-side keeps the OOXML
+  machinery out of the browser bundle.
+- **Numbering is literal text ("2.01\ttitle") with a hanging indent, not
+  Word list numbering.** Architects paste these sections into a project
+  manual; Word's automatic lists renumber themselves against the destination
+  document's lists, which would silently corrupt the spec numbering. Literal
+  numbers survive the paste.
+- The `.doc` HTML export is kept as a secondary button.
+- Verified: output is a valid ZIP (PK signature) containing word/document.xml
+  + styles.xml, with the CSI headings, 2.01 numbering, product text, and the
+  ITEMS NOT SPECIFIED section all present.
+
+## D95 — PDF viewer + annotation canvas (2026-07-20)
+
+Stage 2 of the D92 spec, previously deferred. Route: `/consulting/markup`.
+
+- **Coordinates are normalized 0..1 against the page box.** This single
+  choice makes zoom, window size, DPI, and PDF page dimensions irrelevant to
+  storage — markup drawn at 50% on a laptop lands identically at 200% on a
+  4K display. Pixel conversion happens only at paint time.
+- **SVG overlay, not a second canvas**: crisp at any zoom, cheap hit-testing,
+  and every mark is a real keyed element.
+- Tools: box, ellipse, arrow, revision cloud, freehand, highlight, text.
+  Clouds are their own tool because architects read a cloud as "this
+  changed" — a dashed rectangle does not carry that meaning.
+- **Markup joins the accountability trail**: an annotation can raise a review
+  comment (`anchor: {kind:'annotation'}`), so the D92 approval gate counts
+  it. Markup that cannot block an approval is decoration.
+- Annotations live on the phase (`EngagementPhase.annotations`), optional for
+  back-compat like the other D91/D92 fields.
+- **pdf.js worker is served from `/pdf.worker.min.mjs`** (copied out of
+  pdfjs-dist into `public/` at install), avoiding bundler worker-resolution
+  problems.
+- **`disableFontFace: true`** — pdf.js otherwise awaits `document.fonts`,
+  which can stall in embedded browsers; glyphs render as paths instead.
+
+### Verification note (worth keeping)
+
+The canvas rendered blank during automated checks with **no error**, which
+looked like a bug for a long stretch. Root cause was the automation harness,
+not the code: **the browser pane's tab is `document.hidden`, so
+`requestAnimationFrame` never fires, and pdf.js steps its paint loop with
+rAF.** Patching `requestAnimationFrame` to `setTimeout` in the page made the
+same code paint immediately (25,722 ink pixels, "painted 918x1188").
+
+Lesson for future automated verification in this repo: **a hidden preview tab
+cannot verify anything that depends on rAF** — canvas rendering, animation,
+transitions. Patch rAF before concluding a paint bug is real.

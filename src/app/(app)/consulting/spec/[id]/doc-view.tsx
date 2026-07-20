@@ -13,6 +13,7 @@ import { Card, PageHeader, Pill } from "@/components/ui";
  * this rather than a binary .docx on day one.
  */
 export default function SpecDocView({
+  specId,
   engagementId,
   projectName,
   createdBy,
@@ -22,6 +23,7 @@ export default function SpecDocView({
   html,
   filename,
 }: {
+  specId: string;
   engagementId: string;
   projectName: string;
   createdBy: string;
@@ -44,7 +46,10 @@ export default function SpecDocView({
     textDecoration: "none",
   };
 
-  function download() {
+  /** Fallback only — Word opens this HTML, but the real .docx below carries
+   *  proper styles and outline structure through a paste into a project
+   *  manual, which is what architects actually do with these sections. */
+  function downloadHtml() {
     const blob = new Blob([html], { type: "application/msword" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -78,9 +83,15 @@ export default function SpecDocView({
             <button style={BTN} onClick={print}>
               Print / PDF
             </button>
-            <button style={{ ...BTN, background: "#16181d", borderColor: "#16181d", color: "#fff" }} onClick={download}>
-              Download for Word
+            <button style={BTN} onClick={downloadHtml} title="HTML fallback Word can open">
+              .doc
             </button>
+            <a
+              href={`/api/spec/${specId}/docx`}
+              style={{ ...BTN, background: "#16181d", borderColor: "#16181d", color: "#fff", display: "inline-block" }}
+            >
+              Download .docx
+            </a>
           </div>
         }
       />

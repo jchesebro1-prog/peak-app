@@ -30,6 +30,7 @@ export default async function GeneratedSpecPage({
 
   return (
     <SpecDocView
+      specId={rec.id}
       engagementId={rec.engagementId}
       projectName={rec.spec.projectName}
       createdBy={rec.createdBy}

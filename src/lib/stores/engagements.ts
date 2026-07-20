@@ -5,6 +5,7 @@ import {
   openChecklistItems,
   openComments,
 } from "@/lib/consulting-review";
+import type { Annotation } from "@/lib/annotations";
 
 /* ------------------------------------------------------------------ *
  * Consulting engagements (D90).
@@ -132,6 +133,9 @@ export type EngagementPhase = {
   /** What an approval actually approved (D92): the artifacts + versions
    *  frozen at the moment of approval. Absent until first approval. */
   approvalPin?: ApprovalPin | null;
+  /** Document markup (D95), across all of this phase's attachments.
+   *  Optional for the same back-compat reason as the fields above. */
+  annotations?: Annotation[];
 };
 
 export type EngagementMilestone = {
@@ -659,6 +663,69 @@ export async function setCommentState(
     c.waiveReason = state === "waived" ? waiveReason.trim() : "";
   });
   return { ok: true };
+}
+
+/* ---------- document markup (D95) ---------- */
+
+export async function addAnnotation(
+  engId: string,
+  phaseId: string,
+  a: Omit<Annotation, "id">
+): Promise<string> {
+  const id = uid("an-");
+  await patchEngagement(engId, (d) => {
+    const ph = phaseOf(d, phaseId);
+    if (!ph) return;
+    if (!ph.annotations) ph.annotations = [];
+    ph.annotations.push({ ...a, id });
+  });
+  return id;
+}
+
+export async function deleteAnnotation(
+  engId: string,
+  phaseId: string,
+  annotationId: string
+): Promise<void> {
+  await patchEngagement(engId, (d) => {
+    const ph = phaseOf(d, phaseId);
+    if (!ph?.annotations) return;
+    ph.annotations = ph.annotations.filter((x) => x.id !== annotationId);
+  });
+}
+
+/** Raise a review comment FROM a piece of markup — the link that puts the
+ *  drawing markup into the same accountability trail as everything else, so
+ *  the approval gate counts it. */
+export async function commentOnAnnotation(
+  engId: string,
+  phaseId: string,
+  annotationId: string,
+  author: string,
+  body: string
+): Promise<void> {
+  await patchEngagement(engId, (d) => {
+    const ph = phaseOf(d, phaseId);
+    if (!ph) return;
+    const ann = (ph.annotations || []).find((x) => x.id === annotationId);
+    if (!ann) return;
+    if (!ph.comments) ph.comments = [];
+    const commentId = uid("rc-");
+    ph.comments.push({
+      id: commentId,
+      author,
+      at: Date.now(),
+      body: body.trim(),
+      anchor: { kind: "annotation", annotationId },
+      parentId: null,
+      state: "open",
+      required: false,
+      resolvedBy: null,
+      resolvedAt: null,
+      waiveReason: "",
+    });
+    ann.commentId = commentId;
+  });
 }
 
 /* ---------- meetings (D91) ---------- */

@@ -862,6 +862,7 @@ function ReviewComments({ eng, phase }: { eng: ConsultingEngagement; phase: Enga
 }
 
 function PhaseDocs({ eng, phase }: { eng: ConsultingEngagement; phase: EngagementPhase }) {
+  const marks = (phase.annotations || []).length;
   return (
     <div style={{ marginTop: 10 }}>
       <DocList
@@ -871,6 +872,21 @@ function PhaseDocs({ eng, phase }: { eng: ConsultingEngagement; phase: Engagemen
         onUpload={(doc) => addDocumentAction(eng.id, doc, phase.id)}
         compact
       />
+      {phase.attachments.length > 0 && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+          <Link
+            href={`/consulting/markup?eng=${encodeURIComponent(eng.id)}&phase=${encodeURIComponent(phase.id)}`}
+            style={{ ...SMALL_BTN, textDecoration: "none", display: "inline-block" }}
+          >
+            ✏️ Mark up drawings
+          </Link>
+          {marks > 0 && (
+            <span style={{ fontSize: 11.5, color: "#8c919c" }}>
+              {marks} mark{marks === 1 ? "" : "s"} on this phase
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

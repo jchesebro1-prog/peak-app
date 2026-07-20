@@ -3,8 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import {
+  addAnnotation,
   addPhaseDocTo,
   addReviewComment,
+  commentOnAnnotation,
+  deleteAnnotation,
   checklistTemplateFor,
   type CommentAnchor,
   deleteMeeting,
@@ -24,6 +27,7 @@ import {
   updateMeeting,
 } from "@/lib/stores/engagements";
 import { getSettings } from "@/lib/settings";
+import type { Annotation } from "@/lib/annotations";
 import { linkVisitToEngagement } from "@/lib/stores/site-visits";
 
 /**
@@ -234,6 +238,66 @@ export async function setCommentStateAction(
     waiveReason
   );
   if (!r.ok) return r;
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/* ---------- document markup (D95) ---------- */
+
+export async function addAnnotationAction(
+  engId: string,
+  phaseId: string,
+  input: {
+    docId: string;
+    page: number;
+    tool: Annotation["tool"];
+    color: string;
+    points: Array<{ x: number; y: number }>;
+    text?: string;
+  }
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!input?.points?.length) return { ok: false, error: "Nothing was drawn." };
+  const id = await addAnnotation(engId, phaseId, {
+    docId: String(input.docId),
+    page: Number(input.page) || 1,
+    tool: input.tool,
+    color: String(input.color || "#d5342a"),
+    // Clamp on the way in: a drag that leaves the page must not store
+    // out-of-range coordinates that render off-canvas later.
+    points: input.points.map((p) => ({
+      x: Math.min(1, Math.max(0, Number(p.x) || 0)),
+      y: Math.min(1, Math.max(0, Number(p.y) || 0)),
+    })),
+    text: String(input.text || ""),
+    author: user.name,
+    at: Date.now(),
+    commentId: null,
+  });
+  revalidatePath("/", "layout");
+  return { ok: true, id };
+}
+
+export async function deleteAnnotationAction(
+  engId: string,
+  phaseId: string,
+  annotationId: string
+) {
+  await requireUser();
+  await deleteAnnotation(engId, phaseId, annotationId);
+  return done();
+}
+
+export async function commentOnAnnotationAction(
+  engId: string,
+  phaseId: string,
+  annotationId: string,
+  body: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const clean = String(body || "").trim();
+  if (!clean) return { ok: false, error: "The comment is empty." };
+  await commentOnAnnotation(engId, phaseId, annotationId, user.name, clean);
   revalidatePath("/", "layout");
   return { ok: true };
 }

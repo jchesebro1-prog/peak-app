@@ -61,5 +61,34 @@ ok(approvalIsStale(phase([{ ...d1, id: "ed-2", addedAt: 200 }], pin)), "approval
 ok(approvalIsStale(phase([], pin)), "approval goes stale when a document is removed");
 ok(openChecklistItems(phase([d1], pin)).length === 1, "open checklist items are detected");
 
+
+/* --- annotation geometry (D95) --- */
+import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
+import type { Annotation } from "@/lib/annotations";
+
+const ann = (pts: Array<{x:number;y:number}>, tool: any = "rect"): Annotation =>
+  ({ id:"a1", docId:"d1", page:1, tool, color:"#d5342a", points:pts, text:"", author:"J", at:0, commentId:null });
+
+const b = bounds([{x:.2,y:.3},{x:.5,y:.1}]);
+ok(Math.abs(b.x-.2)<1e-9 && Math.abs(b.y-.1)<1e-9, "bounds takes min corner regardless of drag direction");
+ok(Math.abs(b.w-.3)<1e-9 && Math.abs(b.h-.2)<1e-9, "bounds computes width/height");
+
+const boxAnn = ann([{x:.2,y:.2},{x:.4,y:.4}]);
+ok(hitTest(boxAnn, {x:.3,y:.3}), "hit inside the mark");
+ok(hitTest(boxAnn, {x:.205,y:.205}), "hit near the edge (generous target)");
+ok(!hitTest(boxAnn, {x:.8,y:.8}), "miss far away");
+
+// Normalized coords must be zoom-independent: same fractions, different page px.
+const small = polyPath([{x:0,y:0},{x:1,y:1}], 100, 100);
+const large = polyPath([{x:0,y:0},{x:1,y:1}], 1000, 1000);
+ok(small === "M 0 0 L 100 100", "polyline scales to page pixels (small)");
+ok(large === "M 0 0 L 1000 1000", "same normalized points scale up (zoom independence)");
+
+const cp = cloudPath([{x:.1,y:.1},{x:.5,y:.4}], 900, 1200);
+ok(cp.startsWith("M ") && cp.includes("a ") && cp.endsWith("z"), "cloud path is a closed run of arcs");
+ok(cloudPath([{x:.1,y:.1},{x:.1005,y:.1005}], 900, 1200) === "", "degenerate cloud produces no path");
+
+ok(isDragTool("rect") && isDragTool("arrow") && !isDragTool("freehand"), "drag tools classified");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
