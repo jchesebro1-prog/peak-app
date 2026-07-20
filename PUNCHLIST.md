@@ -235,6 +235,12 @@ beat a rules-based approach. Cost when revisited: ~$6–225/mo.
 
 **Revisit only when** a rules-based approach has demonstrably hit its ceiling.
 
+**2026-07-19 (Jeff, answering the item-8 leftover):** the four remaining AI features stay
+reachable where they exist for now — no app-wide removal. But he wants a working session to
+**"design ways around them"** — i.e. rules-based replacements in the D75/D86 mold (standard
+language + editable templates instead of model calls), one feature at a time. A note is filed
+to raise this at the next brainstorming session, alongside the Consulting definition.
+
 **Related decisions made 2026-07-19:**
 - **Site Intake generation = rules-based for now.** Build deterministic generation off the
   existing structured intake fields instead of D7's LLM scope skeleton. Not yet scoped.
@@ -533,6 +539,8 @@ worth deciding before any team-member work.
   `title` (replacing the `roles[0]` hack), direct phone, mobile, office assignment, plus
   certifications/license numbers if those belong on inspection paperwork. **Jeff should confirm
   the list — especially whether certification numbers need to print on service documents.**
+  **ANSWERED 2026-07-19 (Jeff): "that is a good list" — the proposed field set is confirmed as-is**
+  (title, direct phone, mobile, office assignment, certification/license numbers).
 - **B. First-sign-in email correction — which direction?** If a member signs in with a Google
   address that doesn't match their roster row, do we (i) let them confirm/correct their own
   address, or (ii) have an admin fix it in Settings, or (iii) both? Note (i) alone can't work
@@ -541,9 +549,20 @@ worth deciding before any team-member work.
 - **C. Archived vs removed — what's the difference operationally?** Suggested: *archived* = keeps
   history, can't sign in, hidden from pickers; *removed* = same but also hidden from the
   Settings list. Given finding 6, **recommend that neither ever hard-deletes the row.**
+  **ANSWERED 2026-07-19 (Jeff): correct as suggested** — archived vs removed works exactly per the
+  Settings distinction above; neither ever hard-deletes the row.
 - **D. Should the signature phone be the member's direct line** instead of `offices[0].phone`?
+  **ANSWERED 2026-07-19 (Jeff): NO — signatures carry the standard office numbers,** not the
+  member's direct line. Implementation note: that keeps `offices[].phone` as the source, which
+  finding 2 shows is currently unmanaged (the Locations modal never edits it) and always reads
+  `offices[0]` regardless of the signer. So the build is: make office phones editable, give each
+  member an office assignment (part of A), and resolve the signature phone from the *signer's*
+  office rather than `offices[0]`.
 
-**Status:** PART 2 FIXED (`01310aa`, D82) — name/email/google-email now editable in the Settings edit modal, ending the wrong-email lockout. Contact card (A/D) and archived-vs-removed (C) still need answers; B's first step (admin-editable email) is done.
+**Status:** ALL ANSWERED 2026-07-19 — ready to build. Part 2 was already fixed (`01310aa`, D82:
+name/email/google-email editable, wrong-email lockout ended). Remaining build: contact-card
+fields (A), archived/removed states replacing the lone `active` boolean (C), and office-number
+signature resolution (D). Jeff's framing: store to run later — queued, not started.
 
 ---
 
@@ -851,18 +870,39 @@ can reason about what "in the installs window" means, because the data is wrong.
 - **A. Dual-write or convert?** When an inspection is signed off, does it *stay* an inspection and
   gain a linked project (two rows — cheaper, and mirrors how quotes→projects already works), or
   *become* a project (one row, migrated)? **Recommend dual-write.**
+  **ANSWERED 2026-07-19 (Jeff): dual-write / linked, as recommended** — the inspection stays an
+  inspection and gains a linked project.
 - **B. What is "signed off" on an inspection?** Projects have a signoff object to copy. Does the
   customer sign, or does the tech? What happens on un-signoff?
+  **ANSWERED 2026-07-19 (Jeff): customer sign-off is purely approval of the inspection QUOTE —
+  it authorizes doing the inspection.** It is not a completion signature. The inspection's output
+  is a **report with a repair estimate tied to it** — an estimate for the repair that solves the
+  problem the inspection found (this rides the existing `source: "inspection"` + `refId` link on
+  repairs). Implication for the spawn trigger: the linked project comes into being at quote
+  approval (when the inspection is authorized), not at inspection completion. Un-signoff wasn't
+  addressed — settle that detail at implementation time.
 - **C. Does the unified scheduler mean one screen, or the main Gantt reading all four sources?**
+  **ANSWERED 2026-07-19 (Jeff): one Gantt for all four sources** — the main Gantt reads projects,
+  inspections, repairs, and flame jobs; no separate unified screen.
 - **D. What is Consulting?** No representation exists at all — needs defining before it can be
   excluded from anything.
+  **ANSWERED 2026-07-19 (Jeff): TABLED.** His working definition: consulting is **design work we
+  get paid to commit to** — it requires more paperwork and much more review, but ultimately has a
+  real path moving forward. He wants to explain it properly before anyone models it. **A note is
+  filed to raise it at the next brainstorming session** (with the Consulting IDEA at the bottom of
+  this file). Until then item 13 builds without Consulting; only flame tests are excluded from
+  the installs window.
 
 **Honest scale note:** this is a data-model change, not a screen change — four schedulers, four
 stage vocabularies, four tables, no shared discriminator. **Suggest sequencing: (1) fix the sync
 filter bug; (2) carry `quoteType` onto projects as `projectType`; (3) add `projectId` to the three
 service records; (4) sign-off → spawn on inspections; (5) scheduler unification last.**
 
-**Status:** OPEN — needs A–D. The phantom-projects sync bug is FIXED (`01310aa`, D82): won repair/inspection quotes no longer mint Projects. (Any phantoms already in a DB remain — delete from Projects manually.) The record-unification questions stand.
+**Status:** ANSWERED 2026-07-19 (A dual-write; B sign-off = quote approval, report carries a
+repair estimate; C one Gantt over all four sources; D Consulting tabled → brainstorming note
+filed). The phantom-projects sync bug is FIXED (`01310aa`, D82): won repair/inspection quotes no
+longer mint Projects. (Any phantoms already in a DB remain — delete from Projects manually.)
+Queued to build later per Jeff — follow the sequencing above.
 
 ---
 
@@ -914,10 +954,17 @@ the same store with cost/margin stripped.
 
 **Decisions Jeff needs to make:**
 - **A. Book-age pills** — drop them, or add an `updatedAt` to catalog parts to make them real?
+  **ANSWERED 2026-07-19 (Jeff): add the `updatedAt`** — so we know when a price list was last
+  updated. The age pills come back as real data.
 - **B. `SUGGEST`** — retire it in favour of catalog-backed suggestions (e.g. most-used SKUs per
   section type), or curate it properly as a real, validated quick-pick list?
+  **ANSWERED 2026-07-19 (Jeff): retire it in favour of the catalog** — catalog-backed suggestions
+  replace the hardcoded strip.
 
-**Status:** DASHBOARD CARD FIXED (`01310aa`, D82) — derived from the real store (revealed the actual 10,729-part catalog the fake card hid). Age pills dropped pending A; `SUGGEST` still needs B.
+**Status:** ANSWERED 2026-07-19 (A add `updatedAt` to catalog parts; B retire `SUGGEST` for
+catalog-backed suggestions) — queued to build later per Jeff. Dashboard card already FIXED
+(`01310aa`, D82) — derived from the real store (revealed the actual 10,729-part catalog the fake
+card hid).
 
 ---
 
@@ -983,19 +1030,33 @@ fallback always fires. **Do not build scope defaults on `spec.systems`.**
   downstream. **Weeks-from-what: quote date, or win date?** Recommend storing weeks *and*
   resolving from the win date at conversion, so a stale estimate doesn't produce a past-due
   project.
+  **ANSWERED 2026-07-19 (Jeff): as recommended** — store weeks, resolve from the win date.
 - **B. Does the timeframe set `targetDate` only, or the whole triplet?** Today install is
   hardcoded as target−4 → target+2. If "when they need this" means *install complete by*, the
   triplet shifts together; if it means *install begins*, the relationship inverts.
+  **ANSWERED 2026-07-19 (Jeff): "when they need it" is the target date for COMPLETION** —
+  install complete by. The triplet shifts together off `targetDate`.
 - **C. Customer-facing or internal?** A "needed by" line is arguably content for the quote PDF,
   not just internal metadata. Product call.
+  **ANSWERED 2026-07-19 (Jeff): internal** — no needed-by line on the quote PDF. **But lead time
+  should be listed in the quote's terms & assumptions** section, so the customer sees the lead
+  time as a stated assumption rather than a promised date. (Templates/terms wording lives in
+  `/templates` — add a lead-time line there as part of this build.)
 - **D. Back-fill.** Quotes won before this ships have no timeframe, and `syncProjectsFromQuotes`
   re-runs on every Projects page load — so the 42-day fallback stays hot. Silent default, or
   surface "no timeframe set"?
+  **ANSWERED 2026-07-19 (Jeff): keep the silent default rule, and the default is 12 WEEKS
+  (84 days) MINIMUM.** (He said "keep the 84 day rule" — note the code's current fallback is
+  actually 42 days at `projects.ts:488`; per this answer it moves to 84. "Minimum" means
+  scope-based defaults may push it longer, never shorter than 12 weeks.)
 - **E. Should a PM be able to edit the date afterward?** Strongly recommend yes, given it feeds
   the billing forecast. That's a net-new write path either way.
+  **ANSWERED 2026-07-19 (Jeff): yes, they can.**
 
-**Status:** OPEN — needs A–E. The scope-default *rules* can be defined later (Jeff's note); A and
-B gate the build regardless.
+**Status:** ALL ANSWERED 2026-07-19 (A weeks-from-win-date; B completion date; C internal +
+lead time in terms & assumptions; D silent default at 84 days / 12 weeks minimum; E PM-editable) —
+queued to build later per Jeff. The per-scope default *rules* are still to be defined; the
+84-day minimum stands until they are.
 
 ---
 
@@ -1060,17 +1121,34 @@ went" task.** Email can layer on later once item 9 fixes the addresses and a sen
 - **A. Task-first or email-first?** Recommend task-first, per above. If email is genuinely
   required for company-wide visibility, it should wait on item 9 (real addresses) plus a send log
   and an idempotency marker — **that's a prerequisite, not a nice-to-have.**
+  **ANSWERED 2026-07-19 (Jeff): task-first, as recommended.**
 - **B. If email: who receives it?** Everyone, or role-based (PMs, sales, leadership)? Which
   mailbox does it send *from* — the fallback is currently arbitrary.
+  **MOOT for now (2026-07-19):** task-first was chosen; email can layer on later once item 9's
+  addresses and a send log exist. Revisit B and C then.
 - **C. Batch or per-event?** "Batch" suggests a digest (e.g. daily roll-up of sold/completed),
   which is far safer than per-event sends: one scheduled job, one dedupe window, far less
   double-fire exposure. **Recommend a digest over per-event if email happens at all.**
+  **MOOT for now (2026-07-19)** — see B.
 - **D. "Completed" has two definitions.** A project can reach `complete` via signoff **or** via a
   direct stage change with no signoff. Which one triggers?
+  **ANSWERED 2026-07-19 (Jeff): the two definitions collapse into one.** The PM completes a job
+  via the direct stage change, **but sign-off is required to complete** — a project must not be
+  able to reach `complete` without a signoff. So the build is: gate the direct stage change on a
+  signoff existing, and the trigger fires on that (now single) completion path.
 - **E. Who is "the PM"?** There is no PM role or field on a project — only `owner` (a name string,
   the estimator). Assigning a follow-up task needs someone to assign *to*.
+  **ANSWERED 2026-07-19 (Jeff) — and it's bigger than a PM field: projects need MULTIPLE people
+  tied to them, each in a role** — Project Manager, Project Coordinator, Estimator, Lead Sales,
+  Installer Lead, Installers, etc. That's a project-roles model (a role-tagged people list on
+  the project), which slots naturally into the Daylite-parity junction work (item 20 Phase 2)
+  and item 17's assignee-identity decision (use user ids, not name strings). The item-16 tasks
+  then assign by role: sold → the project's Project Manager; completed → its Lead Sales.
 
-**Status:** OPEN — needs A–E. **Do not build the email path before item 9 and a send log.**
+**Status:** ANSWERED 2026-07-19 (A task-first; B/C moot until email layers on; D sign-off gates
+completion, single trigger path; E project-roles model — the new prerequisite). Queued to build
+later per Jeff. **Build order note:** E's roles model + item 17's task table are the
+prerequisites; do not build the email path before item 9 and a send log.
 
 ---
 
@@ -1208,6 +1286,9 @@ worklist, and that's Jeff's call, not a bug fix. **Not observable in the current
 reached) — verified by inspection, not by browser.
 **Open follow-up for Jeff:** should "nothing scheduled" count as needing follow-up (i.e.
 change `followUpInfo`), or stay a passive display state? Daylite treats it as a warning.
+**ANSWERED 2026-07-19 (Jeff): stays a passive display state** — "Nothing scheduled" does not
+count as a real follow-up need; worklist counts and urgency sort are unchanged. D83's
+display-only chip is the final shape.
 
 **Also:** a true "Nothing Scheduled" badge is **not currently computable** — there is no
 appointments or tasks store to query (see items 17 and 21).
@@ -1719,6 +1800,12 @@ recalled numbers straight onto the quote.
 ## IDEA (not a punch-list item) — Consulting as a project type
 
 **Raised:** 2026-07-19. Jeff was explicit this is *"more of an idea than punch list"*.
+
+**Jeff's definition sketch (2026-07-19, answering item 13 D):** consulting is **design work the
+company gets paid to commit to**. Compared with ordinary design/estimating it requires more
+paperwork and much more review, but it ultimately has a real path moving forward. **Tabled until
+he can explain it in full — queued as a topic for the next brainstorming session** (together with
+the design-around plan for the four AI features, see item 4).
 
 Build out a consulting portion of a project: design build-out, tracked reviews and meetings,
 spec generators and other document generation. Likely lives in the **Design Studio**.

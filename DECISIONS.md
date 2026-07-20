@@ -862,3 +862,44 @@ Anything you want changed, just say so — none of these are hard to reverse.
   (`DraftedLine` survives as the modal's legacy line shape). Verified:
   typecheck clean; /estimator?surveyId=FS-1042 renders the assemble-scope
   affordance against the running dev server.
+
+## Punch-list answer batch — items 9, 13–16 + stragglers (2026-07-19)
+
+- **D87. Jeff answered the whole OPEN-DECISIONS.md sheet** (recorded verbatim
+  under each PUNCHLIST item; his framing: **store to run later** — recorded
+  decisions queued for build, not a start order). The batch:
+  - **9 (team members):** contact-card field list confirmed as proposed
+    (title, direct phone, mobile, office assignment, cert/license numbers);
+    archived-vs-removed exactly as suggested (neither hard-deletes);
+    **signature phone = standard office numbers**, not the member's direct
+    line (so office phones must become editable and resolve from the
+    signer's office).
+  - **13 (service records → projects):** dual-write/linked (inspection stays,
+    gains a linked project); **customer sign-off = approval of the inspection
+    QUOTE** (authorizes the inspection; the report carries a tied repair
+    estimate for the found problem — spawn happens at quote approval, not
+    completion); **one Gantt reads all four sources**; **Consulting tabled** —
+    Jeff's sketch: design work we get paid to commit to (more paperwork, much
+    more review, real path forward); brainstorming-session note filed.
+  - **14 (catalog):** add `updatedAt` to catalog parts (age pills become
+    real — "so we know when we last updated a price list"); retire the
+    estimator's hardcoded SUGGEST strip in favour of catalog-backed
+    suggestions.
+  - **15 (install timeframe):** store weeks, resolve from win date; "when
+    they need it" = **completion** target (triplet shifts off targetDate);
+    internal-only on the PDF **but lead time gets stated in the quote's
+    terms & assumptions**; silent default stays but becomes **84 days /
+    12 weeks minimum** (code currently hardcodes 42); PMs can edit the date
+    afterward.
+  - **16 (sold/completed notifications):** task-first; email B/C moot until
+    item 9 + a send log exist; **sign-off is required to complete** — the
+    PM's direct stage change is gated on a signoff, giving one trigger path;
+    and the big one: **projects need multiple people in roles** (Project
+    Manager, Project Coordinator, Estimator, Lead Sales, Installer Lead,
+    Installers, …) — a project-roles model, feeding item 20 Phase 2
+    junctions and item 17's user-id assignee call; item-16 tasks assign by
+    role (sold → PM, completed → Lead Sales).
+  - **Stragglers:** the leads "Nothing scheduled" chip **stays display-only**
+    (D83 shape is final); the four AI features **stay reachable for now** —
+    Jeff wants a session to design rules-based ways around them (D75/D86
+    mold), queued with the Consulting talk for the next brainstorm.
