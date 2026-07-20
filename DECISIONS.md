@@ -1296,3 +1296,65 @@ tradeoff, observed in Task 9: opening the dropdown from a leaf page (e.g.
 page you're actually on. Cosmetic, not a routing defect, and covered by the
 existing segment-1-matching tests — flagged here in case it's worth a
 follow-up.
+
+## D98 — Home as a tabbed hub (2026-07-20)
+
+My Queue, Calendar, and Inbox were three more top-level nav entries pointing
+at "things I need to look at today" — the same shape of problem D97 solved
+for Design. Folded into a shared **Home** tab bar (`app/(app)/home-tabs.tsx`,
+keys in `app/(app)/home-tabs-keys.ts`) rendered on all four routes: Dashboard,
+My Queue, Calendar, Inbox. `nav-data.ts` drops the three standalone links;
+`activeKeyFor()` maps `/`, `/queue`, `/calendar`, and `/inbox` to `"home"` so
+the top-level pill lights correctly regardless of which tab is open. No
+redirect map was needed — all three paths already worked, they just weren't
+wired to a shared tab affordance.
+
+### Four tabs, not five
+Reports was in scope for a "General dissolves, its children get promoted"
+rewrite, but that dissolution hasn't happened yet — Reports still lives
+under General (`nav-data.ts`) with its own top-level pill. Adding it as a
+fifth Home tab now would mean two different nav elements both claiming to
+represent `/reports`, so it waits for that dissolution instead of shipping
+half-migrated.
+
+### The pre-existing `/calendar` gap, closed here
+`activeKeyFor()` never had a `/calendar` entry before this task — the
+Calendar page existed but nothing in the top-level nav lit for it (a
+pre-existing bug, not something this plan introduced). Fixed here rather
+than deferred: the fix is the same one-line map entry as the other two
+tabs, and shipping it separately would leave a known-bad nav state live for
+however long a follow-up took. Verified in Task 7: `/calendar` now lights
+**Home**, where before it lit nothing.
+
+### The Inbox badge's lost render surface
+`lib/nav-counts.ts`'s `navData()` still computes `counts.inbox = inboxUnread`
+— that aggregation wasn't touched by this plan. But `NAV` no longer has an
+entry keyed `"inbox"` (folded into Home), so nothing in `Nav.tsx` reads
+`counts.inbox` anymore; the unread count is now dead weight computed on
+every page load with no UI consumer. Left as-is here — Task 7 is
+verify-only — but flagged for whoever next touches `nav-counts.ts`.
+
+### `page.tsx` decomposition
+The Dashboard was one unreadable file before Tasks 3–4; it's now
+composition plus data-fetching (~600 lines) wired to home-scoped sibling
+components — `home-greeting.tsx`, `home-stats.tsx`, `home-queue.tsx`,
+`home-calendar.tsx`, `home-inbox.tsx`, `home-pipeline.tsx`,
+`home-catalog.tsx`, `home-my-designs.tsx`, `home-my-leads.tsx`,
+`home-field-surveys.tsx`, `home-team-activity.tsx`,
+`home-needs-attention.tsx`, `home-stage-sheet.tsx`. Required, not optional —
+the file was already too large before this branch touched it, and burying a
+new My Queue card and a tab bar in it would have made a bad file worse.
+
+### The queue-card / queue-tab count agreement
+`queueNow()` (`lib/queue.ts`, a thin `Date.now()` wrapper) is called once on
+the server in `page.tsx` and the result threaded through to both
+`queueCardCounts()` (the Dashboard card) and every row's `queueDueLabel()`,
+so the Dashboard's own card is internally consistent. `queue/page.tsx` makes
+its own separate `queueNow()` call for the Queue tab — a different request,
+necessarily a different call — so the two screens agree only because both
+land within the same instant, not because they share one value across
+requests. Verified live in Task 7: the Dashboard's My Queue card and the
+`/queue` page both read **7 open · 4 overdue** for Jeff Chesebro. No drift
+observed; flagging the two-call shape here in case a future change (caching,
+streaming, a slower render path on either screen) reopens the gap this task
+was built to catch.
