@@ -119,5 +119,33 @@ ok(formatMeasure(12.5, "ft") === `12'-6"`, "feet render as feet-inches");
 ok(formatMeasure(11.999, "ft") === `12'-0"`, "rounding up 12in carries to the next foot");
 ok(formatMeasure(2.5, "m") === "2.50 m", "metric renders with units");
 
+
+/* --- design module route map (D97) --- */
+import { designRedirect } from "@/lib/design-routes";
+
+ok(designRedirect("/consulting", {}) === "/design/engagements",
+  "consulting list redirects to engagements");
+ok(designRedirect("/consulting/CE-1001", {}) === "/design/engagements/CE-1001",
+  "engagement detail keeps its id");
+ok(designRedirect("/consulting/CE-1001", { tab: "phases" }) === "/design/engagements/CE-1001?tab=phases",
+  "engagement detail preserves ?tab=");
+ok(designRedirect("/consulting/markup", { eng: "CE-1001", phase: "ph-2", doc: "ed-3" })
+     === "/design/engagements/markup?eng=CE-1001&phase=ph-2&doc=ed-3",
+  "markup preserves all three params in order");
+ok(designRedirect("/design-studio", {}) === "/design",
+  "design-studio overview redirects to the new Design overview");
+ok(designRedirect("/design-studio/steel", {}) === "/design/steel",
+  "calculators keep their leaf name");
+ok(designRedirect("/design-studio/lineset", { design: "DS-abc" }) === "/design/lineset?design=DS-abc",
+  "lineset preserves its ?design= deep link");
+ok(designRedirect("/design", { id: "D-101" }) === "/design/designs?id=D-101",
+  "old sandbox deep link lands on the designs list");
+ok(designRedirect("/design", {}) === null,
+  "bare /design is the Overview and must NOT redirect");
+ok(designRedirect("/quotes", {}) === null,
+  "unrelated paths are not redirected");
+ok(designRedirect("/consulting/CE-1001", { tab: "bogus" }) === "/design/engagements/CE-1001?tab=bogus",
+  "unknown tab values pass through — the destination validates, not the redirect");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
