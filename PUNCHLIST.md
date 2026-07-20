@@ -5,7 +5,7 @@ implemented until he says so. Statuses: `OPEN` → `IN PROGRESS` → `DONE`.
 
 ---
 
-## 1. Inbox must actively sync with Gmail state — OPEN
+## 1. Inbox must actively sync with Gmail state — DONE (D73/D74)
 
 **Area:** `/inbox` — `src/app/(app)/inbox/` (likely `page.tsx`, `actions.ts`, `thread-list.tsx`)
 plus `src/lib/gmail/api.ts`
@@ -54,7 +54,7 @@ plus `src/lib/gmail/api.ts`
 
 ---
 
-## 2. Site visits: schedule → customer link → calendar invite → in-app calendar — OPEN
+## 2. Site visits: schedule → customer link → calendar invite → in-app calendar — DONE (D76/D77/D81)
 
 **Area:** new feature. Touches `/inbox`, `/customers`, `/schedule`, `src/lib/gmail/*`
 (OAuth), and a new `src/lib/google/calendar.ts` + likely a new `/calendar` route.
@@ -163,7 +163,7 @@ day-click quick-add. Nothing left on this item.
 
 ---
 
-## 3. Remove all emoji — the software should read as professional — OPEN
+## 3. Remove all emoji — the software should read as professional — DONE (719812a + D75)
 
 **Area:** app-wide (UI strings, and check generated documents/emails too)
 
@@ -295,7 +295,7 @@ phase-1 pills aren't wanted either, reverting `a204da8` is a one-commit undo.
 
 ---
 
-## 6. Merge Lineset Weights into Lineset Builder — OPEN
+## 6. Merge Lineset Weights into Lineset Builder — DONE (D78)
 
 **Area:** `src/app/(app)/design-studio/lineset/lineset-builder.tsx` +
 `src/app/(app)/design-studio/weights/weights-tool.tsx`; engines at
@@ -435,7 +435,7 @@ which delivers the navigation win immediately and defers C/D.
 
 ---
 
-## 8. Remove the AI panel from General Settings — OPEN
+## 8. Remove the AI panel from General Settings — DONE (D82; (ii) folded into item 4)
 
 **Area:** `src/app/(app)/settings/settings-client.tsx:966-1070`, `src/app/(app)/settings/page.tsx:130-138`
 
