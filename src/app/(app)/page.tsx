@@ -43,6 +43,10 @@ import { loadHomeAgenda } from "@/lib/agenda";
 import { list as catalogList } from "@/lib/stores/catalog";
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
+import { CardHeadTitle } from "./home-shared";
+import HomeGreeting from "./home-greeting";
+import HomeStats from "./home-stats";
+import HomeCatalog from "./home-catalog";
 
 /**
  * Home dashboard — faithful port of app/Home.dc.html.
@@ -187,10 +191,6 @@ function ChanIcon({ channel }: { channel: string }) {
       <path d="m2 7 10 6 10-6" />
     </svg>
   );
-}
-
-function CardHeadTitle({ children }: { children: React.ReactNode }) {
-  return <span style={{ fontSize: 15, fontWeight: 600 }}>{children}</span>;
 }
 
 /* ======================================================================= */
@@ -552,124 +552,15 @@ export default async function HomePage({
       <HomeTabs active="dashboard" />
 
       {/* greeting + quick actions */}
-      <div
-        className="pkh-greet"
-        style={{
-          display: "flex",
-          alignItems: "flex-end",
-          justifyContent: "space-between",
-          gap: 16,
-          flexWrap: "wrap",
-          rowGap: 14,
-          marginBottom: 20,
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>
-            {greeting}, {firstName(me)}
-          </div>
-          <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 4 }}>{standfirst}</div>
-        </div>
-        <div className="pkh-actions" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Link
-            href="/reviews"
-            className="pkh-outbtn"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              fontSize: 13,
-              fontWeight: 600,
-              color: "#3a3f4a",
-              background: "#fff",
-              border: "1px solid #e4e7ec",
-              padding: "11px 16px",
-              borderRadius: 9,
-              textDecoration: "none",
-            }}
-          >
-            Open Reviews
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                minWidth: 18,
-                height: 18,
-                padding: "0 5px",
-                borderRadius: 9,
-                fontFamily: "var(--font-mono)",
-                fontSize: 10.5,
-                fontWeight: 700,
-                color: "#fff",
-                background: openReviewCount > 0 ? "var(--accent)" : "#c4c9d2",
-              }}
-            >
-              {openReviewCount}
-            </span>
-          </Link>
-          <Link
-            href="/design/quick"
-            className="pkh-accbtn"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              fontSize: 13,
-              fontWeight: 600,
-              color: "#fff",
-              background: "var(--accent)",
-              padding: "12px 17px",
-              borderRadius: 9,
-              textDecoration: "none",
-              boxShadow: `0 1px 3px ${ACCENT_SOFT}`,
-            }}
-          >
-            <span style={{ fontSize: 15, lineHeight: 1 }}>+</span>
-            New estimate
-          </Link>
-        </div>
-      </div>
+      <HomeGreeting
+        greeting={greeting}
+        firstName={firstName(me)}
+        standfirst={standfirst}
+        openReviewCount={openReviewCount}
+      />
 
       {/* stat tiles */}
-      <div className="pkh-stats">
-        {stats.map((s) => (
-          <div
-            key={s.label}
-            style={{
-              background: "#fff",
-              border: "1px solid #ececf0",
-              borderRadius: 12,
-              padding: "16px 17px",
-              boxShadow: "0 1px 2px rgba(0,0,0,.04)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "#9aa0ab",
-                letterSpacing: ".05em",
-                textTransform: "uppercase",
-              }}
-            >
-              {s.label}
-            </div>
-            <div
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 24,
-                fontWeight: 600,
-                letterSpacing: "-.01em",
-                marginTop: 10,
-              }}
-            >
-              {s.value}
-            </div>
-            <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 7 }}>{s.sub}</div>
-          </div>
-        ))}
-      </div>
+      <HomeStats stats={stats} />
 
       {/* ===== Inbox dashboard ===== */}
       <div className="pk-card" style={{ overflow: "hidden", marginBottom: 22 }}>
@@ -1382,83 +1273,7 @@ export default async function HomePage({
           </div>
 
           {/* catalog (moved under pipeline to balance the grid) */}
-          <div className="pk-card" style={{ padding: "16px 17px" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 13,
-              }}
-            >
-              <CardHeadTitle>Catalog</CardHeadTitle>
-              <Link
-                href="/catalog"
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "var(--accent)",
-                  textDecoration: "none",
-                }}
-              >
-                Manage →
-              </Link>
-            </div>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 }}>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 23, fontWeight: 600 }}>
-                {catalogParts.length}
-              </span>
-              <span style={{ fontSize: 12.5, color: "#8c919c" }}>
-                parts · {books.length} price book{books.length === 1 ? "" : "s"}
-              </span>
-            </div>
-            {books.map((b) => {
-              return (
-                <div
-                  key={b.mono}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "8px 0",
-                    borderTop: "1px solid #f3f4f7",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 7,
-                      background: "#f1f2f5",
-                      color: "#3a3f4a",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 700,
-                      fontSize: 11,
-                      fontFamily: "var(--font-mono)",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {b.mono}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600 }}>{b.name}</div>
-                    <div
-                      style={{ fontSize: 11, color: "#9aa0ab", fontFamily: "var(--font-mono)" }}
-                    >
-                      {b.count} parts
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {books.length === 0 && (
-              <div style={{ padding: "14px 0 4px", fontSize: 12, color: "#9aa0ab" }}>
-                No parts yet — import a price book from the Catalog screen.
-              </div>
-            )}
-          </div>
+          <HomeCatalog books={books} partCount={catalogParts.length} />
         </div>
 
         {/* RIGHT: calendar + surveys + team activity + needs attention */}
