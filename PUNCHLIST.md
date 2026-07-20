@@ -219,7 +219,7 @@ Templates/letters were scanned: clean.
 
 ---
 
-## 4. Claude API integration — OPEN (long-term / deferred)
+## 4. Claude API integration — RESOLVED by removal (D89)
 
 **Area:** `src/lib/ai/*` (built but inert, gated on `ANTHROPIC_API_KEY`), Site Intake Phase 2
 
@@ -248,7 +248,11 @@ to raise this at the next brainstorming session, alongside the Consulting defini
   customer what they're looking for. Problem acknowledged as unsolved and explicitly parked
   rather than force-fit to AI.
 
-**Status:** OPEN (long-term)
+**Status:** RESOLVED by removal 2026-07-19 (**D89**) — the four remaining AI features and
+the whole `src/lib/ai/` layer were deleted per
+`docs/superpowers/specs/2026-07-19-ai-removal-design.md`. Supersedes the "revisit when
+rules hit their ceiling" posture above; a future return would be a fresh build, not a
+re-enable. Recover via git history.
 
 ---
 

@@ -150,9 +150,10 @@ guide; I do all terminal work.
 > - **C9.** Do you actually use a forward-to-`log@` habit? If so we'll parse
 >   the forwarded headers to attribute to the original customer (C6). ☐ yes ☐ no
 
-## D. AI features (Phase 8 — built, awaits Anthropic API key)
+## D. AI features (removed 2026-07-19, D89 — historical)
 
-Rank or tick the ones you want first; each is independently switchable.
+Removed per `docs/superpowers/specs/2026-07-19-ai-removal-design.md`; the
+questions below are historical.
 
 - **D1.** ☐ Draft renewal-outreach emails (the ✉ one-click flow, quote attached)
   *(Jul 12: the ✉ one-click flow itself shipped WITHOUT needing AI — IDEAS

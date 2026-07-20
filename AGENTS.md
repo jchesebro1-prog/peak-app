@@ -134,9 +134,9 @@ See `.env.example`.
    C7–C9.
 8. ✅ AI features — env-gated Anthropic layer (renewal drafts, thread/customer
    summaries, import extraction, quote scope/line drafting, an "ask your
-   business data" assistant). Inert unless `ANTHROPIC_API_KEY` is set; AI
-   drafts, humans always send. Decisions D38–D42; follow-ups MASTER-QUESTIONS
-   D1–D8.
+   business data" assistant). Decisions D38–D42. **Removed 2026-07-19 (D89) —
+   the app is fully deterministic, no `ANTHROPIC_API_KEY` anywhere; renewal
+   drafts and scope assembly are rules-based (D75/D86).**
 9. ✅ Data migration + go-live (tooling) — the Import/Export hub (per-type
    templates, dedupe, paste + AI extraction, preview→confirm), a
    `Clear demo data (go-live)` reset (Settings → Beta) that wipes demo records

@@ -932,3 +932,20 @@ Anything you want changed, just say so — none of these are hard to reverse.
   real price-book import repopulates it); service-builder knob seeding uses
   the picked customer's primary contact, and switching the attn contact
   after picking does not re-seed the knob (cheap follow-up if wanted).
+- **D89. Full AI layer removal** (spec
+  `docs/superpowers/specs/2026-07-19-ai-removal-design.md`; closes punch item 4,
+  built 2026-07-19). The four inert model-backed features — thread summary,
+  customer summary, import extraction, assistant Q&A — plus `src/lib/ai/` and
+  the Assistant nav entry are deleted; `DraftedLine` now lives in
+  `estimator/ai-scope-modal.tsx`. Zero model calls remain; no
+  `ANTHROPIC_API_KEY` is needed anywhere. Supersedes D87's "the four AI
+  features stay reachable for now" and item 4's revisit posture — Jeff's call
+  in the 2026-07-19 brainstorm: none of the four jobs are needed day-to-day,
+  strip them all out; a future return would be a fresh build, not a re-enable.
+  Untouched: renewal outreach (D75), rules-based scope drafting (D86),
+  `/templates`, the DB (the layer never persisted anything). Rollback =
+  revert the D89 commit series. Verified: zero-hit greps (`lib/ai`,
+  `aiEnabled`, `ANTHROPIC`, the four feature fns), tsc + build clean, browser
+  pass — nav has no Assistant and `/assistant` 404s, inbox reader intact with
+  no Summary buttons, import paste→preview→confirm intact with no
+  Extract-with-AI, estimator renders clean.
