@@ -20,7 +20,7 @@ type QuoteX = Quote & { requote?: boolean };
 export type PipelineRow = QuoteX & { href: string };
 
 /** Quote status pill colors (Home.dc.html statusMeta). Sole consumer: this card. */
-export const STATUS_META: Record<
+const STATUS_META: Record<
   QuoteStatus,
   { label: string; ink: string; soft: string; bd: string }
 > = {

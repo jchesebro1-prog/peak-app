@@ -167,24 +167,18 @@ ok(!NAV.some((e) => e.kind === "group" && e.key === "designstudio"),
 const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
 ok(!!(designGroup && designGroup.kind === "group" && designGroup.children.length === 6),
   "Design has six children: Overview, Engagements, Designs, Steel, Lineset, Motors");
-ok(NAV.length === 6, "the header is down to 6 top-level items (D97 count of 9 superseded by D98 below — Queue/Calendar/Inbox fold into Home)");
 
-/* --- home tabbed hub (D98) --- */
-import { HOME_TABS, homeTabFor } from "@/app/(app)/home-tabs-keys";
+/* --- home tabbed hub (D98) ---
+ * homeTabFor() was deleted (final-review Fix 2): every hub route is a
+ * server component that already knows which tab it is, so the four call
+ * sites pass a hardcoded `active="…"` literal instead of resolving one from
+ * a pathname — a literal cannot mis-resolve the way a lookup function could,
+ * and nothing in src/scripts ever called the resolver. HOME_TABS itself is
+ * still live (HomeTabs renders it), so it stays covered here. */
+import { HOME_TABS } from "@/app/(app)/home-tabs-keys";
 
 ok(HOME_TABS.length === 4, "four tabs ship in this plan (Reports joins with the General dissolution)");
 ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab");
-ok(homeTabFor("/") === "dashboard", "root resolves to Dashboard");
-ok(homeTabFor("/queue") === "queue", "queue resolves");
-ok(homeTabFor("/queue?who=Jack") === "queue", "queue resolves with a query string");
-ok(homeTabFor("/calendar") === "calendar", "calendar resolves");
-ok(homeTabFor("/calendar?month=2026-07") === "calendar", "calendar resolves with ?month=");
-ok(homeTabFor("/inbox") === "inbox", "inbox resolves");
-ok(homeTabFor("/inbox?thread=abc") === "inbox", "inbox resolves on a deep link");
-ok(homeTabFor("/inbox?box=sales&folder=sent") === "inbox", "inbox resolves with mailbox params");
-ok(homeTabFor("/reports") === null, "reports is not a tab yet — it joins in the next plan");
-ok(homeTabFor("/leads") === null, "unrelated paths are not tabs");
-ok(homeTabFor("/queue/extra") === null, "only exact tab paths resolve, not nested ones");
 
 /* --- home hub nav (D98) --- */
 ok(NAV.length === 6, "the header is down to 6 top-level items");
@@ -198,7 +192,7 @@ ok(activeKeyFor("/inbox") === "home", "inbox lights Home");
 ok(activeKeyFor("/reports") === "reports", "reports still lights its own key until General is dissolved");
 
 /* --- home queue card (D98) --- */
-import { queueCardCounts, queueDueLabel } from "@/lib/queue";
+import { queueCardCounts, queueDueLabel } from "@/lib/queue-types";
 
 const NOW = 1_800_000_000_000;
 const qi = (due: number) => ({ key: "k" + due, source: "assignment", title: "t", context: "c", due, href: "/queue", writable: true }) as any;
@@ -235,8 +229,11 @@ const withinWeekLabel = queueDueLabel(NOW + 5 * DAY, NOW);
 ok(withinWeekLabel.text === "5d", "within a week renders 'Nd'");
 ok(withinWeekLabel.tone === "#5b616e", "within-a-week tone is neutral gray");
 
+// The rendered date string itself is deliberately not asserted here: it's
+// built via toLocaleDateString(undefined, …), so it depends on both the
+// runner's timezone (NOW + 20d can land on Feb 3 or Feb 4 depending on UTC
+// offset) and its locale — not a stable literal to pin in this test.
 const beyondLabel = queueDueLabel(NOW + 20 * DAY, NOW);
-ok(beyondLabel.text === "Feb 4", "beyond a week renders a short date");
 ok(beyondLabel.tone === "#9aa0ab", "beyond-a-week tone matches the undated tone");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");

@@ -31,14 +31,7 @@ export default async function QueuePage({
     .slice(0, 8);
 
   return (
-    <>
-      {/* D98: no pk-content wrapper exists on this route (QueueView renders
-          edge-to-edge below) — the bar gets its own so it lines up with the
-          padded tab bars on the other three hub routes. QueueView is
-          untouched. */}
-      <div className="pk-content" style={{ paddingBottom: 0 }}>
-        <HomeTabs active="queue" />
-      </div>
+    <HomeTabs active="queue">
       <QueueView
         me={user.name}
         who={who}
@@ -52,6 +45,6 @@ export default async function QueuePage({
         }))}
         now={queueNow()}
       />
-    </>
+    </HomeTabs>
   );
 }

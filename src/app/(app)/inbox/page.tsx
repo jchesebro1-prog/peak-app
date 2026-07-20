@@ -613,13 +613,23 @@ export default async function InboxPage({
         }
       `}</style>
       {/* D98: InboxShell (below) is a fixed height:"100%" three-pane shell
-          with no pk-content wrapper of its own. A flex column here gives the
-          bar its own row so InboxShell's height:100% resolves against the
-          remaining space instead of overflowing past the viewport. */}
+          with no pk-content wrapper of its own — it must stay edge-to-edge,
+          so it cannot be passed as HomeTabs children (that would cap it at
+          HomeTabs' max-width). A flex column here gives the bar its own row
+          so InboxShell's height:100% resolves against the remaining space
+          instead of overflowing past the viewport.
+          Final-review fix: the bar-only wrapper used to shrink-wrap to the
+          tab bar's own content width (338px) — inside a column flex
+          container, `.pk-content`'s `margin:0 auto` cross-axis auto-margins
+          suppress `align-self:stretch`, so it never picked up the parent's
+          full width. `width:"100%"` (now passed through HomeTabs' `style`)
+          fixes it; top padding is normalized to 24px to match the other
+          three hub routes. */}
       <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-        <div className="pk-content" style={{ padding: "18px 28px 0", flex: "0 0 auto" }}>
-          <HomeTabs active="inbox" />
-        </div>
+        <HomeTabs
+          active="inbox"
+          style={{ padding: "24px 28px 0", flex: "0 0 auto", width: "100%" }}
+        />
         <div style={{ flex: "1 1 auto", minHeight: 0 }}>
           <InboxShell
             box={view ? view : box}

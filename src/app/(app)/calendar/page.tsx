@@ -35,8 +35,7 @@ export default async function CalendarPage({
   );
 
   return (
-    <div className="pk-content" style={{ maxWidth: 1120, padding: "26px 30px 64px" }}>
-      <HomeTabs active="calendar" />
+    <HomeTabs active="calendar" maxWidth={1120} style={{ padding: "24px 30px 64px" }}>
       <CalendarClient
         year={year}
         month={month}
@@ -44,6 +43,6 @@ export default async function CalendarPage({
         calendarOn={calendarOn}
         gmailOn={gmailOn}
       />
-    </div>
+    </HomeTabs>
   );
 }

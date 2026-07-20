@@ -19,10 +19,3 @@ export const HOME_TABS = [
 ] as const;
 
 export type HomeTabKey = (typeof HOME_TABS)[number]["key"];
-
-/** Resolve a pathname (query string tolerated) to its tab, or null. */
-export function homeTabFor(pathname: string): HomeTabKey | null {
-  const path = pathname.split("?")[0];
-  const hit = HOME_TABS.find((t) => t.href === path);
-  return hit ? hit.key : null;
-}

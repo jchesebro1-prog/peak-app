@@ -527,10 +527,8 @@ export default async function HomePage({
   /* ===================================================================== */
 
   return (
-    <div className="pk-content pkh-content">
+    <HomeTabs active="dashboard" className="pkh-content">
       <style dangerouslySetInnerHTML={{ __html: HOME_CSS }} />
-
-      <HomeTabs active="dashboard" />
 
       {/* greeting + quick actions */}
       <HomeGreeting
@@ -595,6 +593,6 @@ export default async function HomePage({
 
       {/* ===== stage sheet ===== */}
       {sheetQuote && <HomeStageSheet quote={sheetQuote} closeHref={closeHref} />}
-    </div>
+    </HomeTabs>
   );
 }

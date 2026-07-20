@@ -1326,13 +1326,20 @@ tabs, and shipping it separately would leave a known-bad nav state live for
 however long a follow-up took. Verified in Task 7: `/calendar` now lights
 **Home**, where before it lit nothing.
 
-### The Inbox badge's lost render surface
+### The Inbox badge's lost render surface (corrected — see final review)
 `lib/nav-counts.ts`'s `navData()` still computes `counts.inbox = inboxUnread`
-— that aggregation wasn't touched by this plan. But `NAV` no longer has an
-entry keyed `"inbox"` (folded into Home), so nothing in `Nav.tsx` reads
-`counts.inbox` anymore; the unread count is now dead weight computed on
-every page load with no UI consumer. Left as-is here — Task 7 is
-verify-only — but flagged for whoever next touches `nav-counts.ts`.
+— that aggregation wasn't touched by this plan. An earlier version of this
+entry said the Inbox badge "lost a visible surface," without saying which
+one — that overstated it. `Nav.tsx:198-205` renders every top-level entry as
+a bare `<Link>` with no badge, before and after this plan; the desktop top
+nav never showed `counts.inbox` at all. The **only** surface that count ever
+fed was the mobile drawer (`Nav.tsx:706`, `badge={counts[entry.key] ?? 0}`
+on `DrawerLink`). Since `NAV` no longer has an entry keyed `"inbox"` (folded
+into Home), that drawer badge is what's gone — there was never a desktop
+badge to lose. `inboxUnread` is now dead weight computed on every page load
+with no UI consumer. Left as-is here — Task 7 is verify-only — but flagged
+for whoever next touches `nav-counts.ts`: restore the drawer surface only;
+don't add a desktop badge that never existed.
 
 ### `page.tsx` decomposition
 The Dashboard was one unreadable file before Tasks 3–4; it's now
