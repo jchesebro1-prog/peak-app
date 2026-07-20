@@ -52,7 +52,7 @@ export default async function MotorLibraryPage() {
   return (
     <div className="pk-content" style={{ maxWidth: 900 }}>
       <div style={{ marginBottom: 14 }}>
-        <Link href="/design-studio" style={{ fontSize: 12.5, fontWeight: 600, color: "#8c919c", textDecoration: "none" }}>
+        <Link href="/design" style={{ fontSize: 12.5, fontWeight: 600, color: "#8c919c", textDecoration: "none" }}>
           ← Design Studio
         </Link>
         <h1 style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>Motor Library</h1>

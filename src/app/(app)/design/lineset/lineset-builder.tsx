@@ -289,7 +289,7 @@ export function LinesetBuilder({
 
   return (
     <div>
-      <SaveBar kind="lineset" getData={getData} customers={customers} saved={saved} loaded={loaded} loadBase="/design-studio/lineset?design=" />
+      <SaveBar kind="lineset" getData={getData} customers={customers} saved={saved} loaded={loaded} loadBase="/design/lineset?design=" />
       {initial?.legacyWeights && (
         <div style={{ background: "#fbf3dd", border: "1px solid #eadfc0", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, color: "#7a6420", marginBottom: 14 }}>
           Opened from the old Lineset Weights tool — its rows came in as custom lines below.

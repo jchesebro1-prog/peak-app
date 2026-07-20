@@ -30,13 +30,13 @@ export async function saveDesignAction(input: {
     data: input.data,
     by: user.name,
   });
-  revalidatePath("/design-studio");
+  revalidatePath("/design");
   return { ok: true, id: d.id, name: d.name };
 }
 
 export async function deleteDesignAction(id: string): Promise<{ ok: true }> {
   await requireUser();
   await removeDesign(String(id || ""));
-  revalidatePath("/design-studio");
+  revalidatePath("/design");
   return { ok: true };
 }

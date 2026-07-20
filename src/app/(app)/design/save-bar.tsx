@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { saveDesignAction, deleteDesignAction } from "./actions";
+import { saveDesignAction, deleteDesignAction } from "./studio-actions";
 import type { StudioDesignKind } from "@/lib/stores/studio-designs";
 
 export type SavedRef = { id: string; name: string; customer: string };
@@ -13,7 +13,7 @@ const btn = (primary?: boolean): React.CSSProperties => ({ fontSize: 13, fontWei
 /**
  * Shared save/load bar for the Design Studio tools. `getData` returns the
  * tool's current state at save time; `loadBase` is the route to reopen a
- * design (e.g. "/design-studio/lineset?design=").
+ * design (e.g. "/design/lineset?design=").
  */
 export function SaveBar({
   kind,
