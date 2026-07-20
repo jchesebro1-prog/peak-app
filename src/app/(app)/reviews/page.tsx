@@ -92,7 +92,7 @@ export default async function ReviewsPage({
       ts: q.updatedAt || 0,
       openHref:
         q.quoteType === "consulting"
-          ? "/consulting/quote?id=" + encodeURIComponent(q.id)
+          ? "/design/engagements/quote?id=" + encodeURIComponent(q.id)
           : "/estimator?id=" + encodeURIComponent(q.id),
     })),
     ...designs.map((d) => ({
@@ -103,7 +103,7 @@ export default async function ReviewsPage({
       value: d.budget || 0,
       review: (d.review as QuoteReview) || NONE,
       ts: d.updatedAt || 0,
-      openHref: "/quick-design?design=" + encodeURIComponent(d.id),
+      openHref: "/design/quick?design=" + encodeURIComponent(d.id),
     })),
     /* Consulting phase reviews (D90) — each phase carries its own
      * QuoteReview; the composite id "<engId>:<phaseId>" routes the
@@ -119,7 +119,7 @@ export default async function ReviewsPage({
           value: 0,
           review: ph.review,
           ts: e.updatedAt || 0,
-          openHref: "/consulting/" + encodeURIComponent(e.id) + "?tab=phases",
+          openHref: "/design/engagements/" + encodeURIComponent(e.id) + "?tab=phases",
         }))
     ),
   ];

@@ -143,7 +143,7 @@ export async function navData(me: string): Promise<{
       id: d.id,
       title: d.name,
       sub: `${d.customer || ""} · design`,
-      href: "/design",
+      href: "/design/designs",
       letter: "D",
       color: "#3155a8",
     })),

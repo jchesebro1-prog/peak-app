@@ -63,7 +63,7 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
       title: a.title,
       context: a.link?.label || (a.createdBy === me ? "Self" : `from ${a.createdBy}`),
       due: a.dueDate,
-      href: a.link?.kind === "engagement" ? `/consulting/${a.link.id}` : "/queue",
+      href: a.link?.kind === "engagement" ? `/design/engagements/${a.link.id}` : "/queue",
       writable: true,
     });
   }
@@ -109,7 +109,7 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
               title: `Standards: ${c.text}`,
               context: `${e.name} · ${ph.name}`,
               due: 0,
-              href: `/consulting/${e.id}?tab=phases`,
+              href: `/design/engagements/${e.id}?tab=phases`,
               writable: false,
             });
           }
@@ -127,7 +127,7 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
         title: `Milestone due: ${ms.name}`,
         context: e.name,
         due: t,
-        href: `/consulting/${e.id}?tab=milestones`,
+        href: `/design/engagements/${e.id}?tab=milestones`,
         writable: false,
       });
     }

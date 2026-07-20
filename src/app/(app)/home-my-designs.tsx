@@ -93,7 +93,7 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
           </span>
         </div>
         <Link
-          href="/quick-design"
+          href="/design/quick"
           className="pkh-actions pkh-softbtn"
           style={{
             display: "flex",
@@ -267,7 +267,7 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
         ))}
 
         <Link
-          href="/quick-design"
+          href="/design/quick"
           className="pkh-newdesign"
           style={{
             flex: "0 0 188px",

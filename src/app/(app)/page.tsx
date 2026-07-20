@@ -468,7 +468,7 @@ export default async function HomePage({
       meta: `${d.id} · ${d.width || "?"}' × ${d.depth || "?"}' × ${d.grid || "?"}'`,
       systemsLabel: `${(d.systems || []).length} systems`,
       edited: designTimeAgo(d.updatedAt),
-      openHref: `/quick-design?design=${encodeURIComponent(d.id)}`,
+      openHref: `/design/quick?design=${encodeURIComponent(d.id)}`,
     }));
 
   /* ---- team activity glance (everyone else's recent work) ---- */
@@ -606,7 +606,7 @@ export default async function HomePage({
             </span>
           </Link>
           <Link
-            href="/quick-design"
+            href="/design/quick"
             className="pkh-accbtn"
             style={{
               display: "flex",
@@ -1355,7 +1355,7 @@ export default async function HomePage({
                 No quotes in this stage.
                 <br />
                 <Link
-                  href="/quick-design"
+                  href="/design/quick"
                   style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}
                 >
                   Start a rough estimate →
@@ -1365,7 +1365,7 @@ export default async function HomePage({
 
             <div style={{ padding: "13px 18px" }}>
               <Link
-                href="/quick-design"
+                href="/design/quick"
                 style={{
                   fontSize: 13,
                   fontWeight: 600,

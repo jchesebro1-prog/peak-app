@@ -56,7 +56,7 @@ function editHrefFor(q: Quote): { href: string; label: string } {
   if (q.quoteType === "inspection")
     return { href: `/inspections/quote?id=${encodeURIComponent(q.id)}`, label: "Open inspection quote →" };
   if (q.quoteType === "consulting")
-    return { href: `/consulting/quote?id=${encodeURIComponent(q.id)}`, label: "Open consulting quote →" };
+    return { href: `/design/engagements/quote?id=${encodeURIComponent(q.id)}`, label: "Open consulting quote →" };
   return { href: `/estimator?id=${encodeURIComponent(q.id)}`, label: "Open in Estimator →" };
 }
 

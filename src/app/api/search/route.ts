@@ -82,7 +82,7 @@ export async function GET(req: Request) {
         id: d.id,
         title: String(d.name || d.id),
         sub: `${d.id} · ${String(d.customer || "")}`,
-        href: `/design?id=${encodeURIComponent(d.id)}`,
+        href: `/design/designs?id=${encodeURIComponent(d.id)}`,
         letter: "D",
         color: "#3155a8",
       }))

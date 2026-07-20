@@ -882,7 +882,7 @@ export default function FieldWorkDetail({
             </span>
           </div>
           <Link
-            href="/quick-design"
+            href="/design/quick"
             className="fw-card-link"
             style={{
               display: "flex",

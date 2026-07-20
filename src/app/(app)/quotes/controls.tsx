@@ -193,7 +193,7 @@ export function NewQuoteMenu() {
               </div>
             </Link>
             <Link
-              href="/consulting/quote"
+              href="/design/engagements/quote"
               className="qt-menuitem"
               style={{
                 display: "block",
