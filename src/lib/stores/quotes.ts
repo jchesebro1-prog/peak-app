@@ -211,6 +211,7 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     flameTest: partial.flameTest || null,
     repair: partial.repair || null,
     inspection: partial.inspection || null,
+    consulting: partial.consulting || null,
     contact: partial.contact || null,
     owner: partial.owner || "Jeff Chesebro",
     spec: partial.spec || null,
