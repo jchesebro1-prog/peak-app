@@ -1,14 +1,8 @@
 import { redirect } from "next/navigation";
 import { designRedirect } from "@/lib/design-routes";
 
-/**
- * Lineset Weights merged into the Lineset Builder (PUNCHLIST #6, D78) —
- * this route now just forwards, preserving saved-design deep links
- * (?design= loads legacy weights records via the Builder's adapter).
- * Retargeted straight to /design/lineset (D97) rather than chaining
- * through /design-studio/lineset.
- */
-export default async function WeightsRedirect({
+/** Moved to /design/lineset (D97). Kept for bookmarks and deep links. */
+export default async function LegacyLinesetPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
