@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import {
   addPhaseDocTo,
-  type ConsultingEngagement,
   type EngagementDoc,
   type EngagementMilestone,
   type EngagementPerson,
@@ -349,5 +348,3 @@ export async function linkVisitAction(
   revalidatePath("/", "layout");
   return { ok: true };
 }
-
-export type { ConsultingEngagement };
