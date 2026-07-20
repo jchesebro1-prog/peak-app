@@ -11,11 +11,9 @@ export type NavEntry =
 
 export const NAV: NavEntry[] = [
   { kind: "link", key: "home", label: "Home", href: "/" },
-  /* My Queue (D93) — top-level beside Home: it is the "what do I owe anyone"
-   * screen, and burying it in a group would defeat that. */
-  { kind: "link", key: "queue", label: "My Queue", href: "/queue" },
-  { kind: "link", key: "calendar", label: "Calendar", href: "/calendar" },
-  { kind: "link", key: "inbox", label: "Inbox", href: "/inbox" },
+  /* My Queue, Calendar, and Inbox folded into Home as tabs (D98) — see
+   * app/(app)/home-tabs-keys.ts. They no longer have their own top-level
+   * nav links; activeKeyFor maps their routes to "home" below. */
   /* Design is the merged Consulting + Design Studio module (D97): one
    * top-level group covering engagements, sandbox designs, and the three
    * calculators, replacing the standalone Consulting link and the
@@ -86,8 +84,9 @@ export function activeKeyFor(pathname: string): string {
   if (pathname === "/") return "home";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
-    "/inbox": "inbox",
-    "/queue": "queue",
+    "/queue": "home",
+    "/calendar": "home",
+    "/inbox": "home",
     "/leads": "leads",
     "/quotes": "quotes",
     "/estimator": "quotes",

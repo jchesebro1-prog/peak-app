@@ -167,7 +167,7 @@ ok(!NAV.some((e) => e.kind === "group" && e.key === "designstudio"),
 const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
 ok(!!(designGroup && designGroup.kind === "group" && designGroup.children.length === 6),
   "Design has six children: Overview, Engagements, Designs, Steel, Lineset, Motors");
-ok(NAV.length === 9, "the header is down to 9 top-level items");
+ok(NAV.length === 6, "the header is down to 6 top-level items (D97 count of 9 superseded by D98 below — Queue/Calendar/Inbox fold into Home)");
 
 /* --- home tabbed hub (D98) --- */
 import { HOME_TABS, homeTabFor } from "@/app/(app)/home-tabs-keys";
@@ -185,6 +185,17 @@ ok(homeTabFor("/inbox?box=sales&folder=sent") === "inbox", "inbox resolves with 
 ok(homeTabFor("/reports") === null, "reports is not a tab yet — it joins in the next plan");
 ok(homeTabFor("/leads") === null, "unrelated paths are not tabs");
 ok(homeTabFor("/queue/extra") === null, "only exact tab paths resolve, not nested ones");
+
+/* --- home hub nav (D98) --- */
+ok(NAV.length === 6, "the header is down to 6 top-level items");
+ok(!NAV.some((e) => e.kind === "link" && e.key === "queue"), "My Queue is no longer top-level");
+ok(!NAV.some((e) => e.kind === "link" && e.key === "calendar"), "Calendar is no longer top-level");
+ok(!NAV.some((e) => e.kind === "link" && e.key === "inbox"), "Inbox is no longer top-level");
+ok(activeKeyFor("/") === "home", "root lights Home");
+ok(activeKeyFor("/queue") === "home", "queue lights Home");
+ok(activeKeyFor("/calendar") === "home", "calendar lights Home — this path had NO map entry before");
+ok(activeKeyFor("/inbox") === "home", "inbox lights Home");
+ok(activeKeyFor("/reports") === "reports", "reports still lights its own key until General is dissolved");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
