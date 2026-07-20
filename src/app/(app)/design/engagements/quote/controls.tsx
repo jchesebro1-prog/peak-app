@@ -367,7 +367,7 @@ export function ConsultingQuoteBuilder({
           </button>
           {initial && (
             <Link
-              href={`/consulting/letter?id=${encodeURIComponent(initial.id)}&kind=proposal`}
+              href={`/design/engagements/letter?id=${encodeURIComponent(initial.id)}&kind=proposal`}
               style={{ fontSize: 12.5, color: "var(--accent)" }}
             >
               Proposal / agreement →

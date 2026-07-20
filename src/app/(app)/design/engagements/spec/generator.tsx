@@ -157,7 +157,7 @@ export default function SpecGenerator({
       setErr(r.error);
       return;
     }
-    router.push(`/consulting/spec/${r.id}`);
+    router.push(`/design/engagements/spec/${r.id}`);
   }
 
   return (
@@ -166,7 +166,7 @@ export default function SpecGenerator({
         title="Bid specification"
         sub={`${engagement.name}${engagement.customer ? ` · ${engagement.customer}` : ""}`}
         actions={
-          <Link href={`/consulting/${engagement.id}`} style={{ ...BTN, textDecoration: "none" }}>
+          <Link href={`/design/engagements/${engagement.id}`} style={{ ...BTN, textDecoration: "none" }}>
             ← Engagement
           </Link>
         }
@@ -247,7 +247,7 @@ export default function SpecGenerator({
               </div>
               {saved.map((s) => (
                 <div key={s.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 0", borderTop: "1px solid #f4f5f7", fontSize: 12.5 }}>
-                  <Link href={`/consulting/spec/${s.id}`} style={{ flex: 1, color: "#16181d", textDecoration: "none" }}>
+                  <Link href={`/design/engagements/spec/${s.id}`} style={{ flex: 1, color: "#16181d", textDecoration: "none" }}>
                     {new Date(s.createdAt).toLocaleDateString()} · {s.sectionCount} section
                     {s.sectionCount === 1 ? "" : "s"}
                     {s.waivedCount ? ` · ${s.waivedCount} not specified` : ""}

@@ -7,7 +7,7 @@ export const metadata = { title: "Consulting — Peak Backend" };
 
 /**
  * Consulting engagements — list route (D90). Same split as Projects:
- * this renders the roll-up + engagement cards; /consulting/[id] renders the
+ * this renders the roll-up + engagement cards; /design/engagements/[id] renders the
  * detail over the same loader + client view.
  */
 
@@ -26,6 +26,6 @@ export default async function ConsultingPage({
     loadConsultingData(),
   ]);
   const id = one(sp.id);
-  if (id) redirect("/consulting/" + encodeURIComponent(id));
+  if (id) redirect("/design/engagements/" + encodeURIComponent(id));
   return <ConsultingView data={data} sel={null} tab="overview" />;
 }

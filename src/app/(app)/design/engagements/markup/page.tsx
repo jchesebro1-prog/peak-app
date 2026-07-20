@@ -7,7 +7,7 @@ export const metadata = { title: "Markup — Peak Backend" };
 export const dynamic = "force-dynamic";
 
 /**
- * Document markup (D95) — /consulting/markup?eng=CE-1001&phase=ph-x&doc=ed-y
+ * Document markup (D95) — /design/engagements/markup?eng=CE-1001&phase=ph-x&doc=ed-y
  * Its own full-width route rather than a panel: marking up a drawing needs
  * the whole screen.
  */
@@ -29,7 +29,7 @@ export default async function MarkupPage({
     return (
       <div style={{ padding: 24, fontSize: 13.5 }}>
         <p style={{ marginBottom: 10 }}>That phase no longer exists.</p>
-        <Link href="/consulting" style={{ color: "#3155a8" }}>
+        <Link href="/design/engagements" style={{ color: "#3155a8" }}>
           ← Back to Consulting
         </Link>
       </div>

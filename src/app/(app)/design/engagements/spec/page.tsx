@@ -10,8 +10,8 @@ export const metadata = { title: "Bid Specification — Peak Backend" };
 export const dynamic = "force-dynamic";
 
 /**
- * Bid-spec generator (D94) — /consulting/spec?id=<engagementId>.
- * Own route rather than an engagement tab, matching /consulting/letter:
+ * Bid-spec generator (D94) — /design/engagements/spec?id=<engagementId>.
+ * Own route rather than an engagement tab, matching /design/engagements/letter:
  * it is a multi-step working screen, not a panel.
  */
 export default async function SpecPage({
@@ -28,7 +28,7 @@ export default async function SpecPage({
     return (
       <div style={{ padding: 24, fontSize: 13.5 }}>
         <p style={{ marginBottom: 10 }}>No engagement selected.</p>
-        <Link href="/consulting" style={{ color: "#3155a8" }}>
+        <Link href="/design/engagements" style={{ color: "#3155a8" }}>
           ← Back to Consulting
         </Link>
       </div>

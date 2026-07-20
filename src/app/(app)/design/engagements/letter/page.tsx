@@ -16,9 +16,9 @@ export const metadata = { title: "Consulting document — Peak Backend" };
 
 /**
  * Consulting document generators (D90, spec §Document generation):
- *   /consulting/letter?id=<quoteId>&kind=proposal — proposal + professional-
+ *   /design/engagements/letter?id=<quoteId>&kind=proposal — proposal + professional-
  *     services agreement, filled from the consulting quote (+ engagement).
- *   /consulting/letter?id=<engagementId>&kind=spec — spec-package boilerplate
+ *   /design/engagements/letter?id=<engagementId>&kind=spec — spec-package boilerplate
  *     filled from the engagement + linked Design Studio designs.
  * Wording is editable in /templates (consulting_proposal / consulting_spec)
  * like every other letter. Printable on the .pk-doc-page foundation.
@@ -102,7 +102,7 @@ export default async function ConsultingLetterPage({
             ? "That engagement id doesn't resolve."
             : "That id isn't a saved consulting quote."}
         </div>
-        <Link href="/consulting" style={{ color: accent, fontSize: 12.5 }}>
+        <Link href="/design/engagements" style={{ color: accent, fontSize: 12.5 }}>
           ← Consulting
         </Link>
       </div>
@@ -143,8 +143,8 @@ export default async function ConsultingLetterPage({
 
   const backHref =
     kind === "spec"
-      ? `/consulting/${encodeURIComponent(eng!.id)}`
-      : `/consulting/quote?id=${encodeURIComponent(quoteId)}`;
+      ? `/design/engagements/${encodeURIComponent(eng!.id)}`
+      : `/design/engagements/quote?id=${encodeURIComponent(quoteId)}`;
 
   return (
     <div style={{ minHeight: "100%", background: "#f1f2f5" }}>

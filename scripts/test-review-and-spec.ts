@@ -1,5 +1,5 @@
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
-import { parseCsv } from "@/app/(app)/consulting/spec/parse-bom";
+import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 

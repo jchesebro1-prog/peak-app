@@ -21,7 +21,7 @@ export default async function GeneratedSpecPage({
     return (
       <div style={{ padding: 24, fontSize: 13.5 }}>
         <p style={{ marginBottom: 10 }}>That specification no longer exists.</p>
-        <Link href="/consulting" style={{ color: "#3155a8" }}>
+        <Link href="/design/engagements" style={{ color: "#3155a8" }}>
           ← Back to Consulting
         </Link>
       </div>

@@ -289,7 +289,7 @@ export default function MarkupViewer({
     <div style={{ display: "grid", gap: 10 }}>
       {/* header */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <Link href={`/consulting/${engagementId}?tab=phases`} style={{ ...BTN, textDecoration: "none" }}>
+        <Link href={`/design/engagements/${engagementId}?tab=phases`} style={{ ...BTN, textDecoration: "none" }}>
           ← {engagementName}
         </Link>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#16181d" }}>{phaseName} · markup</div>
@@ -299,7 +299,7 @@ export default function MarkupViewer({
             setPage(1);
             setSelected(null);
             setPending(null);
-            router.push(`/consulting/markup?eng=${engagementId}&phase=${phaseId}&doc=${e.target.value}`);
+            router.push(`/design/engagements/markup?eng=${engagementId}&phase=${phaseId}&doc=${e.target.value}`);
           }}
           style={{ ...BTN, fontWeight: 500 }}
         >

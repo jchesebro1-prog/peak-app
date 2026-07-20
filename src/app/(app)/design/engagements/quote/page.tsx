@@ -20,7 +20,7 @@ export const metadata = { title: "Consulting quote — Peak Backend" };
  * + the admin-editable phase menu and hands them to the client form;
  * Save re-validates and persists in actions.ts. Review / send / won live in
  * the Quotes hub (ordinary quote machinery). Deep-linked as
- * /consulting/quote?id=<quoteId> to edit, ?customer=<customerId> to start.
+ * /design/engagements/quote?id=<quoteId> to edit, ?customer=<customerId> to start.
  */
 
 function one(v: string | string[] | undefined): string {

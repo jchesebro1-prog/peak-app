@@ -196,7 +196,7 @@ function ConsultingList({ data }: { data: ConsultingData }) {
             title="No engagements yet"
             sub={
               <>
-                Start with a <Link href="/consulting/quote" style={{ color: "var(--accent)" }}>consulting quote</Link> — customer
+                Start with a <Link href="/design/engagements/quote" style={{ color: "var(--accent)" }}>consulting quote</Link> — customer
                 acceptance is the paid commitment, and the won quote opens the engagement here.
               </>
             }
@@ -210,7 +210,7 @@ function ConsultingList({ data }: { data: ConsultingData }) {
             const ph = activePhase(e);
             const ms = nextMilestone(e);
             return (
-              <Link key={e.id} href={`/consulting/${encodeURIComponent(e.id)}`} style={{ textDecoration: "none", color: "inherit" }}>
+              <Link key={e.id} href={`/design/engagements/${encodeURIComponent(e.id)}`} style={{ textDecoration: "none", color: "inherit" }}>
                 <Card style={{ height: "100%" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                     <Mono>{e.id}</Mono>
@@ -301,7 +301,7 @@ function EngagementDetail({
 }) {
   const router = useRouter();
   const q = data.quotesById[eng.quoteId];
-  const tabHref = (t: TabKey) => `/consulting/${encodeURIComponent(eng.id)}?tab=${t}`;
+  const tabHref = (t: TabKey) => `/design/engagements/${encodeURIComponent(eng.id)}?tab=${t}`;
   const counts: Partial<Record<TabKey, number>> = {
     phases: eng.phases.length,
     milestones: eng.milestones.length,
@@ -312,7 +312,7 @@ function EngagementDetail({
 
   return (
     <div style={{ maxWidth: 1060, margin: "0 auto", padding: "26px 22px 60px", fontFamily: "var(--font-ui)" }}>
-      <Link href="/consulting" style={{ fontSize: 12.5, color: "var(--accent)", textDecoration: "none" }}>
+      <Link href="/design/engagements" style={{ fontSize: 12.5, color: "var(--accent)", textDecoration: "none" }}>
         ← All engagements
       </Link>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "8px 0 2px" }}>
@@ -335,17 +335,17 @@ function EngagementDetail({
       <div style={{ fontSize: 12.5, color: "#5b616e", display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
         <span>{eng.customer}</span>
         {q && (
-          <Link href={`/consulting/quote?id=${encodeURIComponent(q.id)}`} style={{ color: "var(--accent)" }}>
+          <Link href={`/design/engagements/quote?id=${encodeURIComponent(q.id)}`} style={{ color: "var(--accent)" }}>
             Quote {q.id} · {money(q.value)} ({q.status})
           </Link>
         )}
-        <Link href={`/consulting/letter?id=${encodeURIComponent(eng.quoteId)}&kind=proposal`} style={{ color: "var(--accent)" }}>
+        <Link href={`/design/engagements/letter?id=${encodeURIComponent(eng.quoteId)}&kind=proposal`} style={{ color: "var(--accent)" }}>
           Proposal / agreement
         </Link>
-        <Link href={`/consulting/letter?id=${encodeURIComponent(eng.id)}&kind=spec`} style={{ color: "var(--accent)" }}>
+        <Link href={`/design/engagements/letter?id=${encodeURIComponent(eng.id)}&kind=spec`} style={{ color: "var(--accent)" }}>
           Spec package
         </Link>
-        <Link href={`/consulting/spec?id=${encodeURIComponent(eng.id)}`} style={{ color: "var(--accent)" }}>
+        <Link href={`/design/engagements/spec?id=${encodeURIComponent(eng.id)}`} style={{ color: "var(--accent)" }}>
           Bid specification →
         </Link>
       </div>
@@ -399,7 +399,7 @@ function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngag
             <div>Site{eng.siteIds.length === 1 ? "" : "s"}: <b>{eng.siteIds.length ? eng.siteIds.join(", ") : "—"}</b></div>
             <div>
               Source quote:{" "}
-              <Link href={`/consulting/quote?id=${encodeURIComponent(eng.quoteId)}`} style={{ color: "var(--accent)" }}>
+              <Link href={`/design/engagements/quote?id=${encodeURIComponent(eng.quoteId)}`} style={{ color: "var(--accent)" }}>
                 {eng.quoteId}
               </Link>
             </div>
@@ -925,7 +925,7 @@ function PhaseDocs({ eng, phase }: { eng: ConsultingEngagement; phase: Engagemen
       {phase.attachments.length > 0 && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
           <Link
-            href={`/consulting/markup?eng=${encodeURIComponent(eng.id)}&phase=${encodeURIComponent(phase.id)}`}
+            href={`/design/engagements/markup?eng=${encodeURIComponent(eng.id)}&phase=${encodeURIComponent(phase.id)}`}
             style={{ ...SMALL_BTN, textDecoration: "none", display: "inline-block" }}
           >
             ✏️ Mark up drawings

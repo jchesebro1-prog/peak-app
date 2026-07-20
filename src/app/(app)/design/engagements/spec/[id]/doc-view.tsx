@@ -77,7 +77,7 @@ export default function SpecDocView({
         sub={`Specification · ${sectionCount} section${sectionCount === 1 ? "" : "s"} · prepared by ${createdBy} on ${new Date(createdAt).toLocaleDateString()}`}
         actions={
           <div style={{ display: "flex", gap: 8 }}>
-            <Link href={`/consulting/spec?id=${engagementId}`} style={BTN}>
+            <Link href={`/design/engagements/spec?id=${engagementId}`} style={BTN}>
               ← Generator
             </Link>
             <button style={BTN} onClick={print}>
