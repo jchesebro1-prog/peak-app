@@ -39,6 +39,8 @@ export type CreateSiteVisitInput = {
   endAt: number;
   notes: string;
   assignedTo: string; // team-member name
+  /** Optional consulting-engagement link (D90). */
+  engagementId?: string | null;
 };
 
 export type InviteStatus =
@@ -88,6 +90,7 @@ export async function createSiteVisitAction(
     notes: input.notes,
     assignedTo: input.assignedTo,
     createdBy: me.name,
+    engagementId: input.engagementId || null,
   });
 
   let inviteStatus: InviteStatus;

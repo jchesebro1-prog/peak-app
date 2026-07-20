@@ -38,6 +38,9 @@ export type SiteVisit = {
   updatedAt: number;
   invite?: SiteVisitInvite | null;
   googleEventId?: string; // phase 2
+  /** Optional consulting-engagement link (D90) — oversight visits list
+   *  under the engagement's Oversight tab. */
+  engagementId?: string | null;
 };
 
 /** Default reason picklist (Jeff: picklist, not free text). Editable in
@@ -66,6 +69,21 @@ export async function allVisits(): Promise<SiteVisit[]> {
 
 export async function visitsForCustomer(customerId: string): Promise<SiteVisit[]> {
   return (await allVisits()).filter((v) => v.customerId === customerId);
+}
+
+export async function visitsForEngagement(engagementId: string): Promise<SiteVisit[]> {
+  return (await allVisits()).filter((v) => v.engagementId === engagementId);
+}
+
+/** Link/unlink a visit to a consulting engagement (D90). */
+export async function linkVisitToEngagement(
+  id: string,
+  engagementId: string | null
+): Promise<void> {
+  await patchDoc<SiteVisit>("site_visits", id, (d) => {
+    d.engagementId = engagementId;
+    d.updatedAt = Date.now();
+  });
 }
 
 export type SiteVisitInput = Omit<
