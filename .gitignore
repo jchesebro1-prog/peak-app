@@ -46,3 +46,6 @@ next-env.d.ts
 
 # database backups (npm run db:export) — contain encrypted tokens, keep private
 /backups/
+
+# preserved copy of the corrupted 2026-07-19 dev db (safe to delete later)
+.data-corrupt*/
