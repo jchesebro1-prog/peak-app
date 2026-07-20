@@ -5,8 +5,9 @@
 **Scope:** Fold My Queue, Calendar, and Inbox under Home as tabs. Navigation
 and one shared component. No route changes, no data changes, no redirects.
 
-**Companion spec:** `2026-07-20-design-module-consolidation-design.md`. The two
-are independent and can land in either order.
+**Companion specs:** `2026-07-20-design-module-consolidation-design.md` (independent,
+either order) and `2026-07-20-general-dissolution-design.md`, which **amends this
+spec** to add a Reports tab.
 
 ## Problem
 
@@ -26,6 +27,7 @@ nav just doesn't reflect it.
 | Today | 10 — Home, My Queue, Calendar, Inbox, Consulting, Sales, Design Studio, Installs, Service, General |
 | After this spec | **7** |
 | After the Design consolidation too | **6** — Home, Design, Sales, Installs, Service, General |
+| After General is dissolved as well | **5** — Home, Design, Sales, Installs, Service |
 
 ## Decisions made in this session
 
@@ -33,7 +35,7 @@ nav just doesn't reflect it.
 |----------|--------|
 | Shape | **Home with tabs** — full working surfaces survive, dashboard stays primary |
 | Default tab | **Dashboard**, with a My Queue card added to it |
-| Implementation | Routes stay put; a shared tab bar renders on all four |
+| Implementation | Routes stay put; a shared tab bar renders on all five |
 
 **Rejected:** dashboard-only with card links (discoverability rests on a small
 "Open inbox →" link), and folding the screens into cards entirely (would cost
@@ -42,7 +44,7 @@ real capability — email triage and the calendar month view).
 ## Structure
 
 One nav entry, **Home**. A shared `HomeTabs` component renders at the top of
-four existing routes:
+five existing routes:
 
 | Tab | Route |
 |-----|-------|
@@ -50,6 +52,12 @@ four existing routes:
 | My Queue | `/queue` |
 | Calendar | `/calendar` |
 | Inbox | `/inbox` |
+| Reports | `/reports` |
+
+> **Amended 2026-07-20** by `2026-07-20-general-dissolution-design.md`:
+> Reports joins as a fifth tab. It is two business dashboards driven by URL
+> state (`?view=sales|installs`), which is the same kind of thing as the
+> Dashboard tab — not admin configuration, and so not a Settings item.
 
 **Routes do not move and the screens do not merge.** Each keeps its own file
 and its own data loading; they gain a tab bar. Consequences:
@@ -59,8 +67,9 @@ and its own data loading; they gain a tab bar. Consequences:
 - **No redirect map is needed at all** — unlike the Design consolidation.
 - No file balloons, because no code moves into `page.tsx`.
 
-`nav-data.ts` drops the `queue`, `calendar`, and `inbox` entries; `activeKeyFor()`
-maps all four paths to `home` so the Home pill stays lit.
+`nav-data.ts` drops the `queue`, `calendar`, and `inbox` entries (and, per the
+General-dissolution spec, `reports` leaves the General group); `activeKeyFor()`
+maps all five paths to `home` so the Home pill stays lit.
 
 ## The Dashboard tab
 
@@ -106,9 +115,9 @@ Low. No data changes, no route changes, no redirects, no migrations.
 
 ## Testing
 
-- Active-tab resolution for all four paths, including `/inbox?thread=X`,
-  `/inbox?box=Y`, and `/queue?who=Z`.
-- `activeKeyFor()` returns `home` for all four.
+- Active-tab resolution for all five paths, including `/inbox?thread=X`,
+  `/inbox?box=Y`, `/queue?who=Z`, and `/reports?view=installs`.
+- `activeKeyFor()` returns `home` for all five.
 - The new My Queue card: counts (open, overdue) match `loadQueue`, empty state
   renders, link targets the Queue tab.
 - Each screen still renders standalone and its existing behaviour is intact.
@@ -116,5 +125,7 @@ Low. No data changes, no route changes, no redirects, no migrations.
 
 ## Out of scope
 
-The Sales + Installs merge and thinning General (each its own discussion), and
-any change to what Inbox, Calendar, or My Queue actually do.
+Any change to what Inbox, Calendar, My Queue, or Reports actually do.
+Thinning General is now specced separately
+(`2026-07-20-general-dissolution-design.md`); a Sales + Installs merge is not
+currently planned.
