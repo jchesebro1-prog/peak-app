@@ -72,30 +72,12 @@ export const NAV: NavEntry[] = [
   },
 ];
 
-/** Assistant (Phase 8) is a top-level link inserted after Inbox, but only when
- *  the AI layer is enabled — the whole entry is absent when the ANTHROPIC_API_KEY
- *  gate is off, so there's no dead nav item pointing at an inert feature. */
-export const ASSISTANT_NAV: NavEntry = {
-  kind: "link",
-  key: "assistant",
-  label: "Assistant",
-  href: "/assistant",
-};
-
-export function navEntries(aiEnabled: boolean): NavEntry[] {
-  if (!aiEnabled) return NAV;
-  const out = NAV.slice();
-  out.splice(2, 0, ASSISTANT_NAV); // after Home + Inbox
-  return out;
-}
-
 /** pathname → active key (child keys map to their parent group for the tab pill) */
 export function activeKeyFor(pathname: string): string {
   if (pathname === "/") return "home";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
     "/inbox": "inbox",
-    "/assistant": "assistant",
     "/leads": "leads",
     "/quotes": "quotes",
     "/estimator": "quotes",

@@ -4,7 +4,6 @@ import { activeUsers } from "@/lib/users";
 import { devLoginEnabled } from "@/auth";
 import { can } from "@/lib/team";
 import { navData } from "@/lib/nav-counts";
-import { aiEnabled } from "@/lib/ai/config";
 import Nav, { type RosterEntry } from "@/components/nav/Nav";
 import { SyncProvider } from "@/lib/sync/SyncProvider";
 
@@ -45,7 +44,6 @@ export default async function AppLayout({
           feedbackEmail={settings.feedbackEmail}
           devLogin={devLogin}
           roster={roster}
-          aiEnabled={aiEnabled()}
         />
         <main className="pk-main">{children}</main>
       </div>

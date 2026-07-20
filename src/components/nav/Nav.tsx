@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signIn, signOut } from "next-auth/react";
 import {
-  navEntries,
+  NAV,
   activeKeyFor,
   parentGroupOf,
   type NavCounts,
@@ -50,7 +50,6 @@ export default function Nav({
   roster,
   counts = {},
   bell = [],
-  aiEnabled = false,
 }: {
   user: NavUser;
   companyName: string;
@@ -61,11 +60,9 @@ export default function Nav({
   roster: RosterEntry[];
   counts?: NavCounts;
   bell?: BellGroup[];
-  aiEnabled?: boolean;
 }) {
   const pathname = usePathname();
   const activeKey = activeKeyFor(pathname);
-  const NAV = navEntries(aiEnabled);
   const activeParent = parentGroupOf(activeKey);
 
   const [openGroup, setOpenGroup] = useState<string | null>(null);
