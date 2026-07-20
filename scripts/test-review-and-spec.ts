@@ -147,5 +147,23 @@ ok(designRedirect("/quotes", {}) === null,
 ok(designRedirect("/consulting/CE-1001", { tab: "bogus" }) === "/design/engagements/CE-1001?tab=bogus",
   "unknown tab values pass through — the destination validates, not the redirect");
 
+/* --- design module nav (D97) --- */
+import { activeKeyFor, NAV } from "@/components/nav/nav-data";
+
+ok(activeKeyFor("/design") === "designoverview",
+  "the Design overview resolves to the designoverview key");
+ok(activeKeyFor("/design/engagements") === activeKeyFor("/design/steel"),
+  "every /design/* path resolves to the same key (segment-1 matching)");
+ok(NAV.some((e) => e.kind === "group" && e.key === "design"),
+  "Design exists as a nav group");
+ok(!NAV.some((e) => e.kind === "link" && e.key === "consulting"),
+  "the standalone Consulting link is gone");
+ok(!NAV.some((e) => e.kind === "group" && e.key === "designstudio"),
+  "the Design Studio group is gone");
+const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
+ok(!!(designGroup && designGroup.kind === "group" && designGroup.children.length === 6),
+  "Design has six children: Overview, Engagements, Designs, Steel, Lineset, Motors");
+ok(NAV.length === 9, "the header is down to 9 top-level items");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

@@ -16,9 +16,24 @@ export const NAV: NavEntry[] = [
   { kind: "link", key: "queue", label: "My Queue", href: "/queue" },
   { kind: "link", key: "calendar", label: "Calendar", href: "/calendar" },
   { kind: "link", key: "inbox", label: "Inbox", href: "/inbox" },
-  /* Consulting is its own top-level module (D90, spec §Module UI) — a
-   * standalone entry like Home/Inbox, not inside the five groups. */
-  { kind: "link", key: "consulting", label: "Consulting", href: "/consulting" },
+  /* Design is the merged Consulting + Design Studio module (D97): one
+   * top-level group covering engagements, sandbox designs, and the three
+   * calculators, replacing the standalone Consulting link and the
+   * separate Design Studio group. Positioned where the Consulting link
+   * held its place, beside Home/Inbox. */
+  {
+    kind: "group",
+    key: "design",
+    label: "Design",
+    children: [
+      { key: "designoverview", label: "Overview", href: "/design" },
+      { key: "engagements", label: "Engagements", href: "/design/engagements" },
+      { key: "designs", label: "Designs", href: "/design/designs" },
+      { key: "steel", label: "Steel Calculator", href: "/design/steel" },
+      { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
+      { key: "motors", label: "Motor Library", href: "/design/motors" },
+    ],
+  },
   {
     kind: "group",
     key: "sales",
@@ -27,18 +42,6 @@ export const NAV: NavEntry[] = [
       { key: "leads", label: "Leads", href: "/leads" },
       { key: "quotes", label: "Quotes", href: "/quotes" },
       { key: "reviews", label: "Reviews", href: "/reviews" },
-    ],
-  },
-  {
-    kind: "group",
-    key: "designstudio",
-    label: "Design Studio",
-    children: [
-      { key: "dsoverview", label: "Overview", href: "/design-studio" },
-      { key: "dssteel", label: "Steel Calculator", href: "/design-studio/steel" },
-      { key: "dslineset", label: "Lineset Builder", href: "/design-studio/lineset" },
-      { key: "dsmotors", label: "Motor Library", href: "/design-studio/motors" },
-      { key: "design", label: "Design Estimator", href: "/design" },
     ],
   },
   {
@@ -85,13 +88,10 @@ export function activeKeyFor(pathname: string): string {
   const map: Record<string, string> = {
     "/inbox": "inbox",
     "/queue": "queue",
-    "/consulting": "consulting",
     "/leads": "leads",
     "/quotes": "quotes",
     "/estimator": "quotes",
-    "/design": "design",
-    "/quick-design": "design",
-    "/design-studio": "dsoverview",
+    "/design": "designoverview",
     "/reviews": "reviews",
     "/projects": "projects",
     "/schedule": "schedule",
