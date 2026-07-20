@@ -19,6 +19,7 @@ import {
   disconnectMailboxAction,
   saveIntakeCatalogAction,
   saveVisitReasonsAction,
+  saveConsultingPhasesAction,
   saveLogoAction,
   saveSettingsAction,
   searchAddressAction,
@@ -114,6 +115,7 @@ export default function SettingsClient({
   settings,
   intakeCatalog,
   visitReasons,
+  consultingPhases,
   offices,
   users,
 }: {
@@ -131,6 +133,7 @@ export default function SettingsClient({
   };
   intakeCatalog: Record<string, string[]>;
   visitReasons: string[];
+  consultingPhases: string[];
   offices: OfficeVM[];
   users: UserVM[];
 }) {
@@ -213,6 +216,24 @@ export default function SettingsClient({
       if (res.ok) {
         setReasonsDirty(false);
         setReasonsSaved(true);
+      }
+      return res;
+    });
+  /* ---- consulting phase menu (D90, one phase per line) ---- */
+  const [phasesDraft, setPhasesDraft] = useState(consultingPhases.join("\n"));
+  const [phasesDirty, setPhasesDirty] = useState(false);
+  const [phasesSaved, setPhasesSaved] = useState(false);
+  const savePhases = () =>
+    run(async () => {
+      const res = await saveConsultingPhasesAction(
+        phasesDraft
+          .split("\n")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      );
+      if (res.ok) {
+        setPhasesDirty(false);
+        setPhasesSaved(true);
       }
       return res;
     });
@@ -658,6 +679,52 @@ export default function SettingsClient({
             setReasonsDraft(e.target.value);
             setReasonsDirty(true);
             setReasonsSaved(false);
+          }}
+          spellCheck={false}
+          style={{
+            ...inputStyle,
+            marginTop: 14,
+            minHeight: 130,
+            maxWidth: 420,
+            resize: "vertical",
+            lineHeight: 1.6,
+            fontFamily: "var(--font-mono)",
+            fontSize: 12.5,
+          }}
+        />
+      </section>
+
+      {/* ---- Consulting phase menu (D90) ---- */}
+      <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 14.5, fontWeight: 600 }}>Consulting — phase menu</div>
+            <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
+              The phases offered when building a consulting quote and on the
+              engagement's Phases tab. One per line — engagements pick any
+              mix, so keep these generic.
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {phasesSaved && !phasesDirty && (
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#1f7a52" }}>Saved</span>
+            )}
+            <button
+              className="pk-btn-accent"
+              onClick={savePhases}
+              disabled={!phasesDirty}
+              style={{ opacity: phasesDirty ? 1 : 0.5, cursor: phasesDirty ? "pointer" : "default" }}
+            >
+              Save phases
+            </button>
+          </div>
+        </div>
+        <textarea
+          value={phasesDraft}
+          onChange={(e) => {
+            setPhasesDraft(e.target.value);
+            setPhasesDirty(true);
+            setPhasesSaved(false);
           }}
           spellCheck={false}
           style={{

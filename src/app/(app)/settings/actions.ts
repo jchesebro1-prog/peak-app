@@ -215,6 +215,19 @@ export async function saveVisitReasonsAction(reasons: string[]) {
   return { ok: true as const };
 }
 
+/** Consulting phase menu (D90 — DEFAULT_CONSULTING_PHASES overrides).
+ *  Trimmed, de-blanked, capped; an empty list falls back to the defaults. */
+export async function saveConsultingPhasesAction(phases: string[]) {
+  await requirePerm("manage_users");
+  const clean = (Array.isArray(phases) ? phases : [])
+    .map((t) => String(t ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  await setSettings({ consultingPhases: clean });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
 /**
  * Go-live reset — permanently removes all demo records so real data can be
  * imported into a clean database. Admin-only, and guarded by a typed
