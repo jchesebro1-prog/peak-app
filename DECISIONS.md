@@ -1224,3 +1224,75 @@ separate scratch pad.
 Tools, colour, scale, counts, and the selected-mark inspector moved into a
 216px sticky sidebar; the document gets the rest of the width. Zoom and page
 navigation stay in the header, where they act on the whole view.
+
+## D97 — Design module consolidation (2026-07-20)
+
+Consulting and Design Studio were two separate top-level nav entries for the
+same underlying job (a paid engagement and its budgetary designs, at
+different stages). Merged into one **Design** group — Overview, Engagements,
+Designs, Steel Calculator, Lineset Builder, Motor Library — with every old
+path kept alive as a redirect stub (`src/lib/design-routes.ts`,
+`designRedirect(pathname, query)`).
+
+### `/design` — Overview vs. deep link
+
+`/design` itself collides two different pasts: it's the natural URL for the
+new module's landing page, but it was also Design Studio's old
+`?id=`-keyed deep link into a specific sandbox design. Both had to keep
+working, so the rule is param-gated, not path-gated:
+
+- **Bare `/design`** renders the new Overview (two columns — active
+  engagements, recent designs). It does **not** redirect.
+- **`/design?id=D-###`** is treated as the legacy deep link and redirects to
+  `/design/designs?id=D-###`, where the sandbox grid opens that design's
+  detail panel.
+
+Same function, same file, both directions covered:
+`designRedirect("/design", {id}) → "/design/designs?id=..."` when `id` is
+present, `null` (render normally) when it's absent. Tested both ways
+(`bare /design is the Overview and must NOT redirect` /
+`old sandbox deep link lands on the designs list`) and confirmed live in
+Task 9.
+
+### `/quick-design` move
+
+Moved to `/design/quick`; the old path is kept as a stub for bookmarks. The
+original task table listed this stub as taking no params — wrong. The
+destination reads `?design=` to reload a saved sandbox estimate, so the stub
+forwards it: `/quick-design?design=X` → `/design/quick?design=X`. Caught
+while building the stub, not by the spec.
+
+### Two-store aliasing convention
+
+"Design" already named two unrelated record types before this task:
+
+- `lib/stores/designs.ts` — the budgetary **sandbox** (`DesignRecord`,
+  `D-###` ids), what `/design/designs` lists and what an engagement links to.
+- `lib/stores/studio-designs.ts` — saved **Design Studio tool state**
+  (`StudioDesign`, `DS-###` ids), what the Lineset Builder and Weights tool
+  save/reload via `?design=`.
+
+Both stores export functions that would collide under the same import name
+in any file that touches both. Convention going forward: `stores/designs.ts`'s
+`getAllDesigns` is imported plainly wherever only the sandbox store is in
+scope (`design/designs/page.tsx`, `design/engagements/data.ts`, etc.), and
+aliased to **`getSandboxDesigns`** the one place the module's Overview page
+sits conceptually between both stores (`design/page.tsx`) — so a reader never
+has to guess which "design" a bare `getAllDesigns()` call means.
+`stores/studio-designs.ts` keeps its own names (`listDesigns`, `getDesign`)
+unchanged, since its callers never import the sandbox store in the same file.
+
+### Nav
+
+One `design` nav group replaces the standalone Consulting link and the
+Design Studio group (`components/nav/nav-data.ts`). `activeKeyFor()` maps
+every `/design/*` path to the group's `designoverview` child key by
+matching on path segment 1 only — it doesn't distinguish `/design/steel`
+from `/design/engagements` from bare `/design`. That's deliberate (spec
+`activeKeyFor()` rewrite): it's enough to light the **Design** pill correctly
+on every child route, which is what matters for the top-level tab. The
+tradeoff, observed in Task 9: opening the dropdown from a leaf page (e.g.
+`/design/engagements`) highlights "Overview" as the active child, not the
+page you're actually on. Cosmetic, not a routing defect, and covered by the
+existing segment-1-matching tests — flagged here in case it's worth a
+follow-up.
