@@ -1,11 +1,9 @@
-import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { money } from "@/lib/format";
 import {
   getAll as getQuotes,
-  timeAgo as quoteTimeAgo,
   type Quote,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
@@ -41,12 +39,16 @@ import HomeCalendar from "./home-calendar";
 import HomeTabs from "./home-tabs";
 import { loadHomeAgenda } from "@/lib/agenda";
 import { list as catalogList } from "@/lib/stores/catalog";
-import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
-import { CardHeadTitle } from "./home-shared";
 import HomeGreeting from "./home-greeting";
 import HomeStats from "./home-stats";
 import HomeCatalog from "./home-catalog";
+import HomeInbox from "./home-inbox";
+import HomeMyLeads, { type LeadGroup, type LeadRow } from "./home-my-leads";
+import HomePipeline from "./home-pipeline";
+import HomeFieldSurveys from "./home-field-surveys";
+import HomeTeamActivity, { type TeamActivityRow } from "./home-team-activity";
+import HomeNeedsAttention, { type AlertRow } from "./home-needs-attention";
 
 /**
  * Home dashboard — faithful port of app/Home.dc.html.
@@ -57,22 +59,7 @@ import HomeCatalog from "./home-catalog";
 
 const DAY = 86400000;
 
-const ACCENT_SOFT = "var(--accent-soft)";
-const ACCENT_INK = "color-mix(in srgb, var(--accent) 70%, #000)";
-const ACCENT_BORDER_LT = "color-mix(in srgb, var(--accent) 30%, #fff)";
-
 type QuoteX = Quote & { requote?: boolean };
-
-/** Quote status pill colors (Home.dc.html statusMeta). */
-const STATUS_META: Record<
-  QuoteStatus,
-  { label: string; ink: string; soft: string; bd: string }
-> = {
-  draft: { label: "Draft", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" },
-  sent: { label: "Sent", ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" },
-  won: { label: "Won", ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da" },
-  lost: { label: "Lost", ink: "#8c919c", soft: "#f1f2f5", bd: "#e4e7ec" },
-};
 
 /** Price-book glance (PUNCHLIST #14): derived from the REAL catalog store,
  *  grouped by manufacturer — the prototype shipped a hardcoded list here
@@ -158,40 +145,6 @@ const HOME_CSS = `
   .pkh-sheet{width:100% !important;max-width:100% !important;border-radius:18px 18px 0 0 !important}
 }
 `;
-
-/* ---- small presentational bits ---- */
-
-function ChanIcon({ channel }: { channel: string }) {
-  const common = {
-    width: 13,
-    height: 13,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "#b4543a",
-    strokeWidth: 2,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-  };
-  if (channel === "call")
-    return (
-      <svg {...common}>
-        <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2Z" />
-      </svg>
-    );
-  if (channel === "meeting")
-    return (
-      <svg {...common}>
-        <rect x="3" y="4" width="18" height="18" rx="2" />
-        <path d="M16 2v4M8 2v4M3 10h18" />
-      </svg>
-    );
-  return (
-    <svg {...common}>
-      <rect x="2" y="4" width="20" height="16" rx="2" />
-      <path d="m2 7 10 6 10-6" />
-    </svg>
-  );
-}
 
 /* ======================================================================= */
 
@@ -285,7 +238,6 @@ export default async function HomePage({
   ];
   const filteredQuotes = myQuotes.filter((q) => pipe === "all" || q.status === pipe);
 
-  const pipeHref = (key: "all" | QuoteStatus) => (key === "all" ? "/" : `/?pipe=${key}`);
   const closeHref = pipe === "all" ? "/" : `/?pipe=${pipe}`;
   const sheetHref = (id: string) =>
     pipe === "all"
@@ -293,18 +245,6 @@ export default async function HomePage({
       : `/?pipe=${pipe}&sheet=${encodeURIComponent(id)}`;
 
   /* ---- needs attention (derived from live pipeline) ---- */
-
-  type AlertRow = {
-    key: string;
-    title: string;
-    detail: string;
-    tag: string;
-    dot: string;
-    tagColor: string;
-    tagBg: string;
-    href: string;
-    keepScroll?: boolean;
-  };
 
   const pipelineRaw: Array<{
     id: string;
@@ -424,13 +364,6 @@ export default async function HomePage({
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   const myFollowCount = myFollowUps.length;
 
-  const leadGroups = [
-    { key: "overdue", label: "Overdue — reach out now", dot: "#c85a3c", ink: "#b4543a", items: overdue },
-    { key: "cold", label: "Going cold", dot: "#c8a53c", ink: "#8a6d1f", items: cold },
-    { key: "awaiting", label: "Awaiting first response", dot: "#3d6fd0", ink: "#3155a8", items: awaiting },
-    { key: "progress", label: "In progress", dot: "#7b5fb0", ink: "#5b4b8a", items: inProgress },
-  ].filter((g) => g.items.length > 0);
-
   const leadChip = (l: LeadRecord): { label: string; ink: string; soft: string; bd: string } => {
     const info = followUpInfo(l);
     const s = leadSla(l);
@@ -456,6 +389,31 @@ export default async function HomePage({
     return `${l.interest || "Open lead"} · last touch ${leadTimeAgo(l.lastActivityAt)}`;
   };
 
+  /** My leads row VM — leadChip()/leadSub() closures and the sourceMeta/
+   *  stageMeta/shortMoney lookups the JSX used to call inline are all
+   *  resolved here; none of those may cross into HomeMyLeads as functions. */
+  const toLeadRow = (l: LeadRecord): LeadRow => {
+    const src = sourceMeta(l.source);
+    const stg = leadStageMeta(l.stage);
+    return {
+      id: l.id,
+      href: `/leads?lead=${encodeURIComponent(l.id)}`,
+      org: l.org || "Lead",
+      src: { color: src.color, short: src.short },
+      stage: { ink: stg.ink, soft: stg.soft, bd: stg.bd, short: stg.short },
+      sub: leadSub(l),
+      chip: leadChip(l),
+      value: shortMoney(l.value),
+    };
+  };
+
+  const leadGroups: LeadGroup[] = [
+    { key: "overdue", label: "Overdue — reach out now", dot: "#c85a3c", ink: "#b4543a", items: overdue.map(toLeadRow) },
+    { key: "cold", label: "Going cold", dot: "#c8a53c", ink: "#8a6d1f", items: cold.map(toLeadRow) },
+    { key: "awaiting", label: "Awaiting first response", dot: "#3d6fd0", ink: "#3155a8", items: awaiting.map(toLeadRow) },
+    { key: "progress", label: "In progress", dot: "#7b5fb0", ink: "#5b4b8a", items: inProgress.map(toLeadRow) },
+  ].filter((g) => g.items.length > 0);
+
   /* ---- my designs (sandbox) ---- */
 
   const designCards: DesignCard[] = designsAll
@@ -474,7 +432,7 @@ export default async function HomePage({
 
   /* ---- team activity glance (everyone else's recent work) ---- */
 
-  const teamActivity = [
+  const teamActivity: TeamActivityRow[] = [
     ...quotesAll
       .filter((q) => q.owner !== me)
       .map((q) => ({ ts: q.updatedAt, who: q.owner, kind: "Quote", verb: "updated", name: q.name })),
@@ -483,7 +441,10 @@ export default async function HomePage({
       .map((d) => ({ ts: d.updatedAt, who: d.owner, kind: "Design", verb: "designed", name: d.name })),
   ]
     .sort((a, b) => (b.ts || 0) - (a.ts || 0))
-    .slice(0, 5);
+    .slice(0, 5)
+    // initialsOf/colorOf are closures over `ident` (the roster map) — resolved
+    // here since functions must not cross into HomeTeamActivity as props.
+    .map((t) => ({ ...t, initials: initialsOf(t.who), color: colorOf(t.who) }));
 
   /* ---- field surveys ---- */
 
@@ -563,525 +524,15 @@ export default async function HomePage({
       <HomeStats stats={stats} />
 
       {/* ===== Inbox dashboard ===== */}
-      <div className="pk-card" style={{ overflow: "hidden", marginBottom: 22 }}>
-        <div
-          className="pkh-greet"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            padding: "15px 18px 13px",
-            borderBottom: "1px solid #f0f1f4",
-            flexWrap: "wrap",
-            rowGap: 10,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 11, minWidth: 0 }}>
-            <CardHeadTitle>Inbox</CardHeadTitle>
-            {inboxNeedsCount > 0 && (
-              <span
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "#b4543a",
-                  background: "#f8ece7",
-                  border: "1px solid #eccfc4",
-                  padding: "2px 8px",
-                  borderRadius: 20,
-                }}
-              >
-                {inboxNeedsCount} need reply
-              </span>
-            )}
-            <span style={{ fontSize: 12.5, color: "#9aa0ab" }}>
-              Customer messages waiting on a reply
-            </span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 9, flexShrink: 0 }}>
-            <Link
-              href="/inbox?compose=1"
-              className="pkh-softbtn"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 6,
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: ACCENT_INK,
-                background: ACCENT_SOFT,
-                border: `1px solid ${ACCENT_BORDER_LT}`,
-                padding: "8px 13px",
-                borderRadius: 8,
-                textDecoration: "none",
-              }}
-            >
-              <span style={{ fontSize: 14, lineHeight: 1 }}>+</span> Compose
-            </Link>
-            <Link
-              href="/inbox"
-              style={{
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: "var(--accent)",
-                textDecoration: "none",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Open inbox →
-            </Link>
-          </div>
-        </div>
-
-        <div className="pkh-inbox">
-          <div style={{ minWidth: 0 }}>
-            {inboxItems.map((m) => (
-              <Link
-                key={m.id}
-                href={m.href}
-                className="pkh-hover"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "12px 18px",
-                  borderBottom: "1px solid #f5f6f8",
-                  textDecoration: "none",
-                  color: "inherit",
-                  position: "relative",
-                }}
-              >
-                {m.unread && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      left: 6,
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: "var(--accent)",
-                    }}
-                  />
-                )}
-                <span
-                  style={{
-                    width: 30,
-                    height: 30,
-                    flexShrink: 0,
-                    borderRadius: 9,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: "#f8ece7",
-                  }}
-                >
-                  <ChanIcon channel={m.channel} />
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 600,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        color: "#16181d",
-                      }}
-                    >
-                      {m.customer}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 9.5,
-                        fontWeight: 600,
-                        color: m.boxColor,
-                        background: `color-mix(in srgb, ${m.boxColor} 12%, #fff)`,
-                        border: `1px solid color-mix(in srgb, ${m.boxColor} 24%, #fff)`,
-                        padding: "1px 7px",
-                        borderRadius: 20,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {m.boxTag}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: "#5b616e",
-                      marginTop: 2,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {m.subject}
-                  </div>
-                </div>
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 10.5,
-                    fontWeight: 600,
-                    color: "#b4543a",
-                    flexShrink: 0,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {m.wait} waiting
-                </span>
-                <span style={{ color: "#c4c9d2", fontSize: 18, flexShrink: 0 }}>›</span>
-              </Link>
-            ))}
-            {inboxItems.length === 0 && (
-              <div
-                style={{
-                  padding: "30px 18px",
-                  textAlign: "center",
-                  color: "#9aa0ab",
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                }}
-              >
-                Inbox zero — no customers are waiting on a reply.
-              </div>
-            )}
-          </div>
-
-          <div className="pkh-inbox-aside">
-            <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-              <div
-                style={{
-                  flex: 1,
-                  background: "#fff",
-                  border: "1px solid #ececf0",
-                  borderRadius: 10,
-                  padding: "9px 11px",
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 20,
-                    fontWeight: 600,
-                    color: "#b4543a",
-                    letterSpacing: "-.01em",
-                  }}
-                >
-                  {inboxNeedsCount}
-                </div>
-                <div style={{ fontSize: 10.5, color: "#8c919c", marginTop: 2 }}>Need reply</div>
-              </div>
-              <div
-                style={{
-                  flex: 1,
-                  background: "#fff",
-                  border: "1px solid #ececf0",
-                  borderRadius: 10,
-                  padding: "9px 11px",
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 20,
-                    fontWeight: 600,
-                    letterSpacing: "-.01em",
-                  }}
-                >
-                  {inboxUnread}
-                </div>
-                <div style={{ fontSize: 10.5, color: "#8c919c", marginTop: 2 }}>Unread</div>
-              </div>
-            </div>
-            <div
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: ".06em",
-                textTransform: "uppercase",
-                color: "#aab0bb",
-                marginBottom: 6,
-              }}
-            >
-              By mailbox
-            </div>
-            {inboxBoxes.map((b) => (
-              <Link
-                key={b.id}
-                href={b.href}
-                className="pkh-hoverbox"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 9,
-                  padding: "7px 6px",
-                  borderRadius: 8,
-                  textDecoration: "none",
-                  color: "inherit",
-                }}
-              >
-                <span
-                  style={{
-                    width: 9,
-                    height: 9,
-                    borderRadius: "50%",
-                    flexShrink: 0,
-                    background: b.color,
-                  }}
-                />
-                <span
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontSize: 12.5,
-                    fontWeight: 500,
-                    color: "#3a3f4a",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {b.label}
-                </span>
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 11,
-                    fontWeight: 700,
-                    flexShrink: 0,
-                    color: b.waiting > 0 ? "#b4543a" : "#c4c9d2",
-                  }}
-                >
-                  {b.waiting}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </div>
+      <HomeInbox
+        inboxNeedsCount={inboxNeedsCount}
+        inboxUnread={inboxUnread}
+        inboxItems={inboxItems}
+        inboxBoxes={inboxBoxes}
+      />
 
       {/* ===== My leads (follow-up worklist) ===== */}
-      <div className="pk-card" style={{ overflow: "hidden", marginBottom: 22 }}>
-        <div
-          className="pkh-greet"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            padding: "15px 18px 13px",
-            borderBottom: "1px solid #f0f1f4",
-            flexWrap: "wrap",
-            rowGap: 10,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-            <CardHeadTitle>My leads</CardHeadTitle>
-            {myFollowCount > 0 && (
-              <span
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "#b4543a",
-                  background: "#f8ece7",
-                  border: "1px solid #eccfc4",
-                  padding: "2px 8px",
-                  borderRadius: 20,
-                }}
-              >
-                {myFollowCount} to chase
-              </span>
-            )}
-            <span style={{ fontSize: 12.5, color: "#9aa0ab" }}>assigned to you</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
-            <Link
-              href="/lead-intake"
-              target="_blank"
-              style={{ fontSize: 12.5, fontWeight: 600, color: "#8c919c", textDecoration: "none" }}
-            >
-              Public form ↗
-            </Link>
-            <Link
-              href="/leads"
-              style={{
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: "var(--accent)",
-                textDecoration: "none",
-              }}
-            >
-              Open Leads →
-            </Link>
-          </div>
-        </div>
-        <div style={{ padding: "14px 18px 6px" }}>
-          {leadGroups.map((g) => (
-            <div key={g.key} style={{ marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
-                <span
-                  style={{
-                    width: 9,
-                    height: 9,
-                    borderRadius: "50%",
-                    background: g.dot,
-                    flexShrink: 0,
-                  }}
-                />
-                <span
-                  style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".01em", color: g.ink }}
-                >
-                  {g.label}
-                </span>
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 10.5,
-                    fontWeight: 600,
-                    color: "#fff",
-                    background: g.dot,
-                    padding: "1px 8px",
-                    borderRadius: 20,
-                  }}
-                >
-                  {g.items.length}
-                </span>
-              </div>
-              <div style={{ border: "1px solid #ececf0", borderRadius: 11, overflow: "hidden" }}>
-                {g.items.slice(0, 4).map((l) => {
-                  const c = leadChip(l);
-                  const src = sourceMeta(l.source);
-                  const stg = leadStageMeta(l.stage);
-                  return (
-                    <Link
-                      key={l.id}
-                      href={`/leads?lead=${encodeURIComponent(l.id)}`}
-                      className="pkh-hover"
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 12,
-                        padding: "11px 14px",
-                        borderBottom: "1px solid #f4f5f8",
-                        textDecoration: "none",
-                        color: "inherit",
-                      }}
-                    >
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div
-                          style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}
-                        >
-                          <span
-                            style={{
-                              fontSize: 13,
-                              fontWeight: 600,
-                              color: "#16181d",
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                            }}
-                          >
-                            {l.org || "Lead"}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 9.5,
-                              fontWeight: 600,
-                              color: src.color,
-                              background: `color-mix(in srgb, ${src.color} 12%, #fff)`,
-                              border: `1px solid color-mix(in srgb, ${src.color} 24%, #fff)`,
-                              padding: "1px 7px",
-                              borderRadius: 20,
-                              whiteSpace: "nowrap",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {src.short}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 9.5,
-                              fontWeight: 600,
-                              color: stg.ink,
-                              background: stg.soft,
-                              border: `1px solid ${stg.bd}`,
-                              padding: "2px 8px",
-                              borderRadius: 20,
-                              whiteSpace: "nowrap",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {stg.short}
-                          </span>
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 11.5,
-                            color: "#8c919c",
-                            marginTop: 2,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {leadSub(l)}
-                        </div>
-                      </div>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 600,
-                          color: c.ink,
-                          background: c.soft,
-                          border: `1px solid ${c.bd}`,
-                          padding: "2px 8px",
-                          borderRadius: 20,
-                          whiteSpace: "nowrap",
-                          flexShrink: 0,
-                        }}
-                      >
-                        {c.label}
-                      </span>
-                      <span
-                        style={{
-                          fontFamily: "var(--font-mono)",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: "#3a3f4a",
-                          flexShrink: 0,
-                          width: 58,
-                          textAlign: "right",
-                        }}
-                      >
-                        {shortMoney(l.value)}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-          {leadGroups.length === 0 && (
-            <div
-              style={{
-                padding: "20px 14px 26px",
-                textAlign: "center",
-                color: "#9aa0ab",
-                fontSize: 13,
-              }}
-            >
-              Nothing needs chasing — your assigned leads are all on track.
-            </div>
-          )}
-        </div>
-      </div>
+      <HomeMyLeads myFollowCount={myFollowCount} leadGroups={leadGroups} />
 
       {/* ===== My designs (sandbox) ===== */}
       <HomeMyDesigns cards={designCards} />
@@ -1090,187 +541,12 @@ export default async function HomePage({
       <div className="pkh-main">
         {/* LEFT: pipeline + catalog */}
         <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
-          <div className="pk-card" style={{ overflow: "hidden" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "15px 18px 13px",
-                borderBottom: "1px solid #f0f1f4",
-                flexWrap: "wrap",
-                rowGap: 10,
-              }}
-            >
-              <CardHeadTitle>My pipeline</CardHeadTitle>
-              <div
-                className="pkh-rowscroll"
-                style={{
-                  display: "flex",
-                  background: "#f1f2f5",
-                  borderRadius: 8,
-                  padding: 2,
-                  maxWidth: "100%",
-                  overflowX: "auto",
-                }}
-              >
-                {filterDefs.map(([key, label]) => {
-                  const active = pipe === key;
-                  return (
-                    <Link
-                      key={key}
-                      href={pipeHref(key)}
-                      scroll={false}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        fontSize: 12,
-                        fontWeight: active ? 600 : 500,
-                        padding: "5px 11px",
-                        borderRadius: 6,
-                        whiteSpace: "nowrap",
-                        textDecoration: "none",
-                        background: active ? "#fff" : "transparent",
-                        color: active ? "#16181d" : "#9aa0ab",
-                        boxShadow: active ? "0 1px 2px rgba(0,0,0,.1)" : undefined,
-                      }}
-                    >
-                      {label}
-                      <span
-                        style={{
-                          fontFamily: "var(--font-mono)",
-                          fontSize: 10,
-                          fontWeight: 600,
-                          color: active ? ACCENT_INK : "#aab0bb",
-                          background: active ? ACCENT_SOFT : "#e9ebef",
-                          padding: "0 5px",
-                          borderRadius: 10,
-                        }}
-                      >
-                        {pipeCounts[key]}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-
-            {filteredQuotes.map((q) => {
-              const m = STATUS_META[q.status] || STATUS_META.draft;
-              const meta = `${q.id} · ${q.customer || "—"} · ${quoteTimeAgo(q.updatedAt)}${
-                q.requote ? " · needs requote" : ""
-              }`;
-              return (
-                <Link
-                  key={q.id}
-                  href={sheetHref(q.id)}
-                  scroll={false}
-                  className="pkh-hover"
-                  style={{
-                    width: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "14px 18px",
-                    borderBottom: "1px solid #f5f6f8",
-                    textDecoration: "none",
-                    color: "inherit",
-                    textAlign: "left",
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 13.5,
-                        fontWeight: 600,
-                        lineHeight: 1.3,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        color: "#16181d",
-                      }}
-                    >
-                      {q.name}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 10.5,
-                        color: "#aab0bb",
-                        marginTop: 3,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {meta}
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "flex-end",
-                      gap: 5,
-                      flexShrink: 0,
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: "#16181d",
-                      }}
-                    >
-                      {money(q.value)}
-                    </span>
-                    <StatusPill tone={QUOTE_STATUS_TONE[q.status] || "gray"} minWidth={64}>
-                      {m.label}
-                    </StatusPill>
-                  </div>
-                  <span style={{ color: "#c4c9d2", fontSize: 18, flexShrink: 0 }}>›</span>
-                </Link>
-              );
-            })}
-
-            {filteredQuotes.length === 0 && (
-              <div
-                style={{
-                  padding: "34px 18px",
-                  textAlign: "center",
-                  color: "#9aa0ab",
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                }}
-              >
-                No quotes in this stage.
-                <br />
-                <Link
-                  href="/design/quick"
-                  style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}
-                >
-                  Start a rough estimate →
-                </Link>
-              </div>
-            )}
-
-            <div style={{ padding: "13px 18px" }}>
-              <Link
-                href="/design/quick"
-                style={{
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "var(--accent)",
-                  textDecoration: "none",
-                }}
-              >
-                + New rough estimate
-              </Link>
-            </div>
-          </div>
+          <HomePipeline
+            pipe={pipe}
+            filterDefs={filterDefs}
+            pipeCounts={pipeCounts}
+            filteredQuotes={filteredQuotes}
+          />
 
           {/* catalog (moved under pipeline to balance the grid) */}
           <HomeCatalog books={books} partCount={catalogParts.length} />
@@ -1282,332 +558,13 @@ export default async function HomePage({
           <HomeCalendar items={agenda} calendarOn={calendarOn} gmailOn={gmailOn} />
 
           {/* field surveys */}
-          <div className="pk-card" style={{ overflow: "hidden" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-                padding: "15px 17px 12px",
-                borderBottom: "1px solid #f0f1f4",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
-                <CardHeadTitle>Field surveys</CardHeadTitle>
-                {surveyPendingCount > 0 && (
-                  <span
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 10,
-                      fontWeight: 600,
-                      color: "#9a6a1f",
-                      background: "#fbf3dd",
-                      border: "1px solid #f0e2bd",
-                      padding: "2px 8px",
-                      borderRadius: 20,
-                    }}
-                  >
-                    {surveyPendingCount} to sync
-                  </span>
-                )}
-              </div>
-              <Link
-                href="/field-survey"
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "var(--accent)",
-                  textDecoration: "none",
-                }}
-              >
-                Open →
-              </Link>
-            </div>
-            {surveyCards.map((s) => (
-              <Link
-                key={s.id}
-                href={s.href}
-                className="pkh-hover"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 11,
-                  padding: "12px 17px",
-                  borderBottom: "1px solid #f5f6f8",
-                  textDecoration: "none",
-                  color: "inherit",
-                }}
-              >
-                <span
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 8,
-                    background: "#eef3f0",
-                    color: "#1f7a52",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 11,
-                    fontWeight: 700,
-                    fontFamily: "var(--font-mono)",
-                    flexShrink: 0,
-                  }}
-                >
-                  {s.mono}
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      lineHeight: 1.3,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {s.customer}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "#9aa0ab",
-                      marginTop: 2,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {s.sub}
-                  </div>
-                </div>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: s.stage.ink,
-                    background: s.stage.soft,
-                    border: `1px solid ${s.stage.bd}`,
-                    padding: "2px 9px",
-                    borderRadius: 20,
-                    flexShrink: 0,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {s.stage.label}
-                </span>
-              </Link>
-            ))}
-            {surveyCards.length === 0 && (
-              <div
-                style={{
-                  padding: "20px 17px",
-                  textAlign: "center",
-                  color: "#9aa0ab",
-                  fontSize: 12.5,
-                }}
-              >
-                No field surveys yet.
-              </div>
-            )}
-            <div style={{ padding: "11px 17px" }}>
-              <Link
-                href="/field-survey?new=1"
-                style={{
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "var(--accent)",
-                  textDecoration: "none",
-                }}
-              >
-                + Request survey
-              </Link>
-            </div>
-          </div>
+          <HomeFieldSurveys surveyCards={surveyCards} surveyPendingCount={surveyPendingCount} />
 
           {/* team activity glance */}
-          <div className="pk-card" style={{ overflow: "hidden" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "15px 17px 12px",
-                borderBottom: "1px solid #f0f1f4",
-              }}
-            >
-              <CardHeadTitle>Team activity</CardHeadTitle>
-              <Link
-                href="/quotes"
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "var(--accent)",
-                  textDecoration: "none",
-                }}
-              >
-                View all →
-              </Link>
-            </div>
-            {teamActivity.map((t, i) => (
-              <div
-                key={`${t.kind}-${i}`}
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 11,
-                  padding: "11px 17px",
-                  borderBottom: "1px solid #f5f6f8",
-                }}
-              >
-                <span
-                  title={t.who}
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: "50%",
-                    background: colorOf(t.who),
-                    color: "#fff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    flexShrink: 0,
-                  }}
-                >
-                  {initialsOf(t.who)}
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, lineHeight: 1.35 }}>
-                    <b style={{ fontWeight: 600, color: "#16181d" }}>{t.who}</b>{" "}
-                    <span style={{ color: "#5b616e" }}>
-                      {t.verb} {t.name}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 2 }}>
-                    {t.kind} · {quoteTimeAgo(t.ts)}
-                  </div>
-                </div>
-              </div>
-            ))}
-            {teamActivity.length === 0 && (
-              <div
-                style={{
-                  padding: "22px 17px",
-                  textAlign: "center",
-                  color: "#9aa0ab",
-                  fontSize: 12.5,
-                }}
-              >
-                No recent team activity.
-              </div>
-            )}
-          </div>
+          <HomeTeamActivity teamActivity={teamActivity} />
 
           {/* needs attention */}
-          <div className="pk-card" style={{ overflow: "hidden" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "15px 17px 12px",
-                borderBottom: "1px solid #f0f1f4",
-              }}
-            >
-              <CardHeadTitle>Needs attention</CardHeadTitle>
-              <span
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: "#b4543a",
-                  background: "#f7e9e5",
-                  padding: "2px 8px",
-                  borderRadius: 20,
-                }}
-              >
-                {alerts.length}
-              </span>
-            </div>
-            {alerts.map((a) => (
-              <Link
-                key={a.key}
-                href={a.href}
-                scroll={a.keepScroll ? false : undefined}
-                className="pkh-hover"
-                style={{
-                  width: "100%",
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 11,
-                  padding: "13px 17px",
-                  borderBottom: "1px solid #f5f6f8",
-                  textDecoration: "none",
-                  color: "inherit",
-                  textAlign: "left",
-                }}
-              >
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: a.dot,
-                    marginTop: 5,
-                    flexShrink: 0,
-                  }}
-                />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      lineHeight: 1.35,
-                      color: "#16181d",
-                    }}
-                  >
-                    {a.title}
-                  </div>
-                  <div
-                    style={{ fontSize: 11.5, color: "#8c919c", marginTop: 2, lineHeight: 1.4 }}
-                  >
-                    {a.detail}
-                  </div>
-                </div>
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 10.5,
-                    fontWeight: 600,
-                    color: a.tagColor,
-                    background: a.tagBg,
-                    padding: "3px 8px",
-                    borderRadius: 6,
-                    flexShrink: 0,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {a.tag}
-                </span>
-              </Link>
-            ))}
-            {alerts.length === 0 && (
-              <div
-                style={{
-                  padding: "22px 17px",
-                  textAlign: "center",
-                  color: "#9aa0ab",
-                  fontSize: 12.5,
-                }}
-              >
-                All clear — nothing needs chasing.
-              </div>
-            )}
-          </div>
+          <HomeNeedsAttention alerts={alerts} />
         </div>
       </div>
 
