@@ -79,7 +79,7 @@ export type Quote = {
   status: QuoteStatus;
   /** 'estimator' | 'quick' */
   source: string;
-  /** 'system' (default) | 'flame_test' | 'repair' | 'inspection' — absent on seed rows. */
+  /** 'system' (default) | 'flame_test' | 'repair' | 'inspection' | 'consulting' — absent on seed rows. */
   quoteType?: string;
   /** Flame-test engine subdoc (owned by the flame-test module). */
   flameTest?: unknown;
@@ -87,6 +87,8 @@ export type Quote = {
   repair?: unknown;
   /** Inspection engine subdoc (owned by the inspections module). */
   inspection?: unknown;
+  /** Consulting engagement subdoc (owned by the consulting module, D90). */
+  consulting?: unknown;
   contact?: unknown;
   owner: string;
   /** Estimator/Quick Design spec subdoc. */
@@ -145,6 +147,7 @@ export type QuoteRevision = {
   flameTest?: unknown;
   repair?: unknown;
   inspection?: unknown;
+  consulting?: unknown;
 };
 
 export type ReviewOpts = {
@@ -259,6 +262,7 @@ function snapshotOf(
     flameTest: doc.flameTest ?? null,
     repair: doc.repair ?? null,
     inspection: doc.inspection ?? null,
+    consulting: doc.consulting ?? null,
   };
 }
 

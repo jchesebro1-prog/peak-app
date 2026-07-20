@@ -192,6 +192,41 @@ export function NewQuoteMenu() {
                 Auto-priced by line sets + level + travel
               </div>
             </Link>
+            <Link
+              href="/consulting/quote"
+              className="qt-menuitem"
+              style={{
+                display: "block",
+                textDecoration: "none",
+                color: "#16181d",
+                borderRadius: 8,
+                padding: "10px 12px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>
+                  Consulting quote
+                </span>
+                <span
+                  style={{
+                    fontSize: 8.5,
+                    fontWeight: 700,
+                    letterSpacing: ".04em",
+                    textTransform: "uppercase",
+                    color: "#6b4fa1",
+                    background: "#f0ebf9",
+                    border: "1px solid #ddd2f0",
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                  }}
+                >
+                  Fee
+                </span>
+              </div>
+              <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
+                Fee-based design &amp; advisory work
+              </div>
+            </Link>
           </div>
         </>
       )}

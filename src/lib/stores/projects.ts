@@ -537,7 +537,7 @@ export async function createProjectFromQuote(quoteId: string): Promise<ProjectRe
   const existing = await getProjectByQuote(quoteId);
   if (existing) return existing;
   const q = await getDoc<QuoteLike>("quotes", quoteId);
-  if (!q || q.quoteType === "flame_test") return null;
+  if (!q || q.quoteType === "flame_test" || q.quoteType === "consulting") return null;
   return createProject(fromQuote(q));
 }
 
@@ -562,12 +562,14 @@ export async function syncProjectsFromQuotes(): Promise<number> {
     // Only install/system quotes become Projects. Repair and inspection wins
     // spawn their OWN records (repair-jobs / inspections syncs) — before this
     // filter they ALSO minted phantom Projects that polluted the Projects
-    // list, Schedule, and Field Work (PUNCHLIST #13 bug).
+    // list, Schedule, and Field Work (PUNCHLIST #13 bug). Consulting wins
+    // spawn ConsultingEngagements (engagements sync, D90) — same rule.
     if (
       q.status !== "won" ||
       q.quoteType === "flame_test" ||
       q.quoteType === "repair" ||
-      q.quoteType === "inspection"
+      q.quoteType === "inspection" ||
+      q.quoteType === "consulting"
     )
       continue;
     if (haveQ.has(q.id) || skip.includes(q.id)) continue;
@@ -594,6 +596,7 @@ export async function pendingConversions(): Promise<QuoteLike[]> {
       (q) =>
         q.status === "won" &&
         q.quoteType !== "flame_test" &&
+        q.quoteType !== "consulting" &&
         !have.has(q.id) &&
         !skip.includes(q.id)
     )
