@@ -62,7 +62,6 @@ export default function InboxShell({
   contactEmails,
   fromOptions,
   initialCompose,
-  aiEnabled,
 }: {
   box: string;
   folder: string;
@@ -77,7 +76,6 @@ export default function InboxShell({
   contactEmails: Opt[];
   fromOptions: Opt[];
   initialCompose: ComposeInit | null;
-  aiEnabled: boolean;
 }) {
   const router = useRouter();
 
@@ -572,7 +570,6 @@ export default function InboxShell({
           variant="pane"
           rosterOptions={rosterOptions}
           onAfterSend={selectThread}
-          aiEnabled={aiEnabled}
         />
       </div>
 
@@ -612,7 +609,6 @@ export default function InboxShell({
               rosterOptions={rosterOptions}
               onClose={closeOverlay}
               onAfterSend={selectThread}
-              aiEnabled={aiEnabled}
             />
           </div>
         </>
