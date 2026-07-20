@@ -169,5 +169,22 @@ ok(!!(designGroup && designGroup.kind === "group" && designGroup.children.length
   "Design has six children: Overview, Engagements, Designs, Steel, Lineset, Motors");
 ok(NAV.length === 9, "the header is down to 9 top-level items");
 
+/* --- home tabbed hub (D98) --- */
+import { HOME_TABS, homeTabFor } from "@/app/(app)/home-tabs-keys";
+
+ok(HOME_TABS.length === 4, "four tabs ship in this plan (Reports joins with the General dissolution)");
+ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab");
+ok(homeTabFor("/") === "dashboard", "root resolves to Dashboard");
+ok(homeTabFor("/queue") === "queue", "queue resolves");
+ok(homeTabFor("/queue?who=Jack") === "queue", "queue resolves with a query string");
+ok(homeTabFor("/calendar") === "calendar", "calendar resolves");
+ok(homeTabFor("/calendar?month=2026-07") === "calendar", "calendar resolves with ?month=");
+ok(homeTabFor("/inbox") === "inbox", "inbox resolves");
+ok(homeTabFor("/inbox?thread=abc") === "inbox", "inbox resolves on a deep link");
+ok(homeTabFor("/inbox?box=sales&folder=sent") === "inbox", "inbox resolves with mailbox params");
+ok(homeTabFor("/reports") === null, "reports is not a tab yet — it joins in the next plan");
+ok(homeTabFor("/leads") === null, "unrelated paths are not tabs");
+ok(homeTabFor("/queue/extra") === null, "only exact tab paths resolve, not nested ones");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
