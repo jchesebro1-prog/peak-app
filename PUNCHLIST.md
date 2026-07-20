@@ -604,7 +604,7 @@ search box and a "only modified" chip** — that alone likely resolves the compl
 
 ---
 
-## 11. Customer pricing tiers → default margin (incl. customer portal) — OPEN (B answered; 24 done, unblocked)
+## 11. Customer pricing tiers → default margin (incl. customer portal) — READY TO BUILD (A–C, E–G answered; D + per-tier margins open)
 
 **Area:** `src/lib/stores/customers.ts`, `src/app/(app)/estimator/*`, `src/lib/stores/pricing.ts`,
 `src/lib/curtain-pricing.ts`, `src/app/portal/*`
@@ -666,6 +666,7 @@ from "hand-set".
 - **A. Precedence.** Does the tier margin *seed* the section slider (overridable, one-time) or
   *enforce* it (recomputed on every change)? Seeding is far simpler and matches how estimators
   actually work.
+  **ANSWERED 2026-07-19 (Jeff): it SEEDS, not enforces.**
 - **B. Retroactivity.** When a customer moves tiers, do open drafts reprice? Sent quotes? Today
   the answer differs by quote type (finding 2). **Recommend stamping the tier margin onto the
   quote at creation** so history is stable and auditable.
@@ -694,20 +695,29 @@ from "hand-set".
   > resolved prices at cut time is the mechanism described here.
 - **C. Scope.** Which of the five margin systems does the tier touch? Estimator lines only is a
   contained change; all five (incl. curtains' 38% and the portal coupling) is a much bigger job.
+  **ANSWERED 2026-07-19 (Jeff): ALL FIVE** — estimator lines, rules-registry engine rates,
+  labor configurator, curtains (retiring the duplicated hardcoded 38%), and Quick Design's 30%;
+  includes the portal coupling (coefficient generator + authoritative recompute together).
 - **D. Portal equipment prices.** Catalog `list` is a per-SKU absolute with no percentage hook.
   Does a tier discount off list, or re-derive list from cost? These expose different pricing
   philosophies to the customer.
 - **E. Should the customer *see* they're on a tier** (a named discount line), or is it invisible?
+  **ANSWERED 2026-07-19 (Jeff): NOT visible to the customer** — the tier only shapes pricing;
+  no discount line, no tier name on quotes or in the portal.
 - **F. Tier definition.** Fixed enum, or an admin-editable list with per-tier margins? The rules
   registry has `defineGroup`/`addRate` that could host per-tier margins cleanly.
+  **ANSWERED 2026-07-19 (Jeff): the tiers are Base, Cooper, Silver, Gold, Platinum, Employee**
+  (verbatim — confirm "Cooper" vs "Copper" before shipping copy). Per-tier MARGIN PERCENTAGES
+  still need Jeff's numbers; plan is an admin-editable tier→margin table seeded with these six.
 - **G. Existing customers with no tier** — default to a "Standard" tier at today's 30% so nothing
   reprices silently.
+  **ANSWERED 2026-07-19 (Jeff): default is the BASE tier.**
 
 **Suggested phasing:** (1) add `pricingTier` to the customer + an admin-editable tier→margin
 table; (2) seed the estimator section margin from it and stamp it on the quote; (3) portal last,
 since it carries the client/server coupling risk.
 
-**Status:** OPEN — needs A–G. Largest item on the list; do not start without B answered.
+**Status:** READY TO BUILD — A (seeds), B (stamp per revision, via item 24), C (all five margin systems), E (invisible to customer), F (tiers: Base/Cooper/Silver/Gold/Platinum/Employee) and G (default Base) are answered. Still needed before/at build: **D** (portal catalog list prices: discount off list, or re-derive from cost?), the **per-tier margin percentages** (can land in the admin table), and the Cooper/Copper spelling. Identity core (D85) already provides contacts.pricingTier + companies.pricingTier per design §4.7: contact tier wins, company is fallback, stamped onto the quote at creation.
 
 ---
 
