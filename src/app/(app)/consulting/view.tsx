@@ -39,15 +39,7 @@ import { money } from "@/lib/format";
  * are the per-engagement strip on Overview and the roll-up on the list page.
  */
 
-export const TABS = [
-  "overview",
-  "phases",
-  "milestones",
-  "meetings",
-  "oversight",
-  "documents",
-] as const;
-export type TabKey = (typeof TABS)[number];
+import { TABS, type TabKey } from "./tabs";
 
 const TAB_LABEL: Record<TabKey, string> = {
   overview: "Overview",

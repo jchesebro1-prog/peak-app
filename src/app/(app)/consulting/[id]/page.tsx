@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { loadConsultingData } from "../data";
-import { ConsultingView, TABS, type TabKey } from "../view";
+import { ConsultingView } from "../view";
+import { TABS, type TabKey } from "../tabs";
 
 export const metadata = { title: "Consulting — Peak Backend" };
 
