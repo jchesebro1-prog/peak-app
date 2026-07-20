@@ -81,7 +81,7 @@ export function FilterBar({
     if (nt && nt !== "all") p.set("type", nt);
     if (ns && ns !== "all") p.set("scope", ns);
     const s = p.toString();
-    router.push("/customers" + (s ? "?" + s : ""));
+    router.push("/companies" + (s ? "?" + s : ""));
   };
 
   const onSearch = (v: string) => {

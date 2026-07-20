@@ -36,7 +36,7 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     blurb: "Venues & accounts with their primary contact, address and venue.",
     sources: ["Daylight CRM", "QuickBooks", "Google Sheets"],
     dedupeLabel: "customer name",
-    viewHref: "/customers",
+    viewHref: "/companies",
     viewLabel: "View in Customers",
     fields: [
       { key: "name", header: "Customer Name", label: "Customer name", required: true, aliases: ["customer", "company", "organization", "org", "account", "client", "name", "venue name"], example: "Riverside Playhouse" },

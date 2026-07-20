@@ -120,7 +120,7 @@ export async function createPortalGrantAction(input: {
     email,
     createdBy: user.name,
   });
-  revalidatePath("/customers/" + encodeURIComponent(cust.id));
+  revalidatePath("/companies/" + encodeURIComponent(cust.id));
   return { ok: true as const, path: grantPath(grant) };
 }
 
@@ -131,6 +131,6 @@ export async function revokePortalGrantAction(input: {
   await requireUser();
   const { revokeGrant } = await import("@/lib/portal");
   await revokeGrant(String(input.grantId || ""));
-  revalidatePath("/customers/" + encodeURIComponent(String(input.customerId || "")));
+  revalidatePath("/companies/" + encodeURIComponent(String(input.customerId || "")));
   return { ok: true as const };
 }

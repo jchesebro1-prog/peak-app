@@ -83,7 +83,7 @@ export async function loadAgendaRange(
       endMs: v.endAt,
       allDay: false,
       location: v.address,
-      href: "/customers/" + encodeURIComponent(v.customerId),
+      href: "/companies/" + encodeURIComponent(v.customerId),
       source: "visit",
     });
   }

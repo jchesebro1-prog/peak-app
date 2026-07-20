@@ -265,7 +265,7 @@ export default function EditCustomerModal({
         })),
       });
       if (res.ok) {
-        router.push(`/customers/${encodeURIComponent(res.id)}`);
+        router.push(`/companies/${encodeURIComponent(res.id)}`);
         router.refresh();
       }
     });
@@ -275,7 +275,7 @@ export default function EditCustomerModal({
     if (!initial?.id) return;
     startTransition(async () => {
       await deleteCustomerAction(initial.id!);
-      router.push("/customers");
+      router.push("/companies");
       router.refresh();
     });
   };
@@ -337,12 +337,12 @@ export default function EditCustomerModal({
         >
           <div>
             <div style={{ fontSize: 16.5, fontWeight: 600 }}>
-              {mode === "new" ? "New customer" : "Edit customer"}
+              {mode === "new" ? "New company" : "Edit company"}
             </div>
             <div style={{ fontSize: 12, color: "#8c919c", marginTop: 2 }}>
               {mode === "new"
-                ? "Add a customer your quotes can reference"
-                : "Update details across every quote that references this customer"}
+                ? "Add a company your quotes can reference"
+                : "Update details across every quote that references this company"}
             </div>
           </div>
           <button
