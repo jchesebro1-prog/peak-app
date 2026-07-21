@@ -47,19 +47,12 @@ export const NAV: NavEntry[] = [
   },
   {
     kind: "group",
-    key: "installs",
-    label: "Installs",
+    key: "operations",
+    label: "Operations",
     children: [
       { key: "projects", label: "Projects", href: "/projects" },
       { key: "schedule", label: "Schedule", href: "/schedule" },
       { key: "fieldwork", label: "Field Work", href: "/field-work" },
-    ],
-  },
-  {
-    kind: "group",
-    key: "service",
-    label: "Service",
-    children: [
       { key: "flametests", label: "Flame Tests", href: "/flame-tests" },
       { key: "inspections", label: "Rigging Inspections", href: "/inspections" },
       { key: "repairs", label: "Repairs", href: "/repairs" },

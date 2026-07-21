@@ -186,7 +186,7 @@ ok(HOME_TABS.length === 5, "five Home tabs after Reports joins (D99)");
 ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab");
 
 /* --- home hub nav (D98) --- */
-ok(NAV.length === 5, "the header is down to 5 top-level items (General dissolved, D99)");
+ok(NAV.length === 4, "the header is down to 4 top-level items (Operations merge, D100)");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "queue"), "My Queue is no longer top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "calendar"), "Calendar is no longer top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "inbox"), "Inbox is no longer top-level");
@@ -252,8 +252,8 @@ ok(
 // ---- General dissolution (D99): the group is gone ----
 ok(!NAV.some((e) => e.kind === "group" && e.key === "general"), "the General group is gone");
 ok(
-  NAV.map((e) => e.key).join(",") === "home,design,sales,installs,service",
-  "the five top-level items are Home, Design, Sales, Installs, Service in order",
+  NAV.map((e) => e.key).join(",") === "home,design,sales,operations",
+  "the four top-level items are Home, Design, Sales, Operations in order",
 );
 ok(
   activeKeyFor("/catalog") === "settings" &&
@@ -261,6 +261,33 @@ ok(
     activeKeyFor("/estimating-rules") === "settings" &&
     activeKeyFor("/import") === "settings",
   "catalog, templates, estimating-rules, import all light Settings",
+);
+
+// ---- Operations merge (D100): Installs + Service → Operations ----
+const d100Ops = NAV.find((e) => e.kind === "group" && e.key === "operations");
+ok(
+  !!(d100Ops && d100Ops.kind === "group" && d100Ops.children.length === 6),
+  "Operations has six children",
+);
+ok(
+  !!(
+    d100Ops &&
+    d100Ops.kind === "group" &&
+    d100Ops.children.map((c) => c.key).join(",") ===
+      "projects,schedule,fieldwork,flametests,inspections,repairs"
+  ),
+  "Operations children are projects, schedule, fieldwork, flametests, inspections, repairs in order",
+);
+ok(!NAV.some((e) => e.kind === "group" && e.key === "installs"), "the Installs group is gone");
+ok(!NAV.some((e) => e.kind === "group" && e.key === "service"), "the Service group is gone");
+ok(
+  parentGroupOf("projects") === "operations" &&
+    parentGroupOf("schedule") === "operations" &&
+    parentGroupOf("fieldwork") === "operations" &&
+    parentGroupOf("flametests") === "operations" &&
+    parentGroupOf("inspections") === "operations" &&
+    parentGroupOf("repairs") === "operations",
+  "all six work children report Operations as their parent group",
 );
 
 /* --- home queue card (D98) --- */
