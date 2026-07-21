@@ -1433,3 +1433,30 @@ fan out over `crew` — a one-line change in the assembler.
 
 No data model changes, no migrations. Service and install revenue stay separate
 in Reports — this merges how work is *found*, not how it is *accounted*.
+
+## D101 — Venues directory (2026-07-20)
+
+The D85 identity core had screens for `companies` and `contacts` but not
+`sites` — yet venues are how this business thinks (work attaches to the venue,
+not the district). `/venues` (directory) and `/venues/[id]` (detail) close that
+gap: a venue detail aggregates one reverse-chronological history of everything
+attached to it — quotes, projects, engagements, flame tests, inspections,
+repairs, surveys, and site visits — with open work pulled to the top and the
+owning company's contacts alongside. Venues joins the Sales nav beside
+Companies and People; Field Survey now sits next to it (seven Sales children —
+a watch item; if the dropdown gets hard to scan, the fix is a Directory group).
+
+**The matching gotcha, and how it's contained.** Documents store `locationId`
+as the venue's *doc-loc id* = `sites.legacyLocId ?? sites.id` — a legacy `loc1`
+for every migrated venue, never the synthetic `st-…` primary key. A lookup that
+matched on `sites.id` alone would silently show empty history for every migrated
+venue. All matching is isolated in the dependency-free `src/lib/venue-match.ts`,
+which resolves through `venueDocLocId` exactly as the stores' own `docLocId`/
+`locationById` do; a regression assertion pins that a migrated venue
+(`legacyLocId: "loc1"`) matches a doc with `locationId: "loc1"` and that matching
+on `sites.id` alone would miss it. Engagements match on `companyId` + `siteIds`
+(which also hold legacy loc ids). Leads carry no venue and are excluded.
+
+Read-only: no new tables, no migrations, no writes; venue create/edit stays on
+the company record (out of scope). The `[id]` URL is the stable `sites.id`,
+resolved to the doc-loc id internally so `loc1` never appears in a URL.
