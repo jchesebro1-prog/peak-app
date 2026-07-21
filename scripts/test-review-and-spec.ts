@@ -205,18 +205,17 @@ ok(activeKeyFor("/reports") === "home", "Reports lights Home now that it is a Ho
 // ---- General dissolution (D99): Companies/People/Field Survey → Sales ----
 const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "sales");
 ok(
-  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 6),
-  "Sales has six children after the move",
+  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 7),
+  "Sales has seven children after Venues joins (D101)",
 );
 ok(
   !!(
     d99Sales &&
     d99Sales.kind === "group" &&
-    ["leads", "quotes", "reviews", "companies", "people", "field"].every((k) =>
-      d99Sales.children.some((c) => c.key === k),
-    )
+    d99Sales.children.map((c) => c.key).join(",") ===
+      "leads,quotes,reviews,companies,people,venues,field"
   ),
-  "Sales contains leads, quotes, reviews, companies, people, field",
+  "Sales children are leads, quotes, reviews, companies, people, venues, field in order",
 );
 ok(
   parentGroupOf("companies") === "sales" &&
@@ -231,6 +230,11 @@ ok(
   d99Keys.length === new Set(d99Keys).size,
   "all nav keys (groups + children) are globally unique — no duplicate left behind",
 );
+
+// ---- Venues directory (D101): the venues child + route ----
+ok(activeKeyFor("/venues") === "venues", "/venues lights the venues key");
+ok(activeKeyFor("/venues/st-lakefront-1") === "venues", "/venues/[id] resolves to venues (segment-1)");
+ok(parentGroupOf("venues") === "sales", "venues reports Sales as its parent group");
 
 // ---- General dissolution (D99): Reports is a Home tab ----
 ok(
