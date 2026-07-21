@@ -186,7 +186,7 @@ ok(HOME_TABS.length === 5, "five Home tabs after Reports joins (D99)");
 ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab");
 
 /* --- home hub nav (D98) --- */
-ok(NAV.length === 6, "the header is down to 6 top-level items");
+ok(NAV.length === 5, "the header is down to 5 top-level items (General dissolved, D99)");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "queue"), "My Queue is no longer top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "calendar"), "Calendar is no longer top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "inbox"), "Inbox is no longer top-level");
@@ -212,17 +212,6 @@ ok(
   ),
   "Sales contains leads, quotes, reviews, companies, people, field",
 );
-const d99Gen1 = NAV.find((e) => e.kind === "group" && e.key === "general");
-ok(
-  !!(
-    d99Gen1 &&
-    d99Gen1.kind === "group" &&
-    !["companies", "people", "field"].some((k) =>
-      d99Gen1.children.some((c) => c.key === k),
-    )
-  ),
-  "General no longer contains companies, people, or field",
-);
 ok(
   parentGroupOf("companies") === "sales" &&
     parentGroupOf("people") === "sales" &&
@@ -242,15 +231,6 @@ ok(
   HOME_TABS.some((t) => t.key === "reports" && t.href === "/reports"),
   "Reports is present in HOME_TABS with its own route",
 );
-const d99Gen2 = NAV.find((e) => e.kind === "group" && e.key === "general");
-ok(
-  !!(
-    d99Gen2 &&
-    d99Gen2.kind === "group" &&
-    !d99Gen2.children.some((c) => c.key === "reports")
-  ),
-  "General no longer contains Reports",
-);
 
 // ---- General dissolution (D99): Settings sections + Admin ----
 ok(resolveSettingsSection(undefined) === "general", "no ?section= defaults to general");
@@ -267,6 +247,20 @@ ok(
   ADMIN_SCREENS.map((s) => s.href).join(",") ===
     "/catalog,/templates,/estimating-rules,/import",
   "Admin links Catalog, Templates, Estimating Rules, Import — by their own routes",
+);
+
+// ---- General dissolution (D99): the group is gone ----
+ok(!NAV.some((e) => e.kind === "group" && e.key === "general"), "the General group is gone");
+ok(
+  NAV.map((e) => e.key).join(",") === "home,design,sales,installs,service",
+  "the five top-level items are Home, Design, Sales, Installs, Service in order",
+);
+ok(
+  activeKeyFor("/catalog") === "settings" &&
+    activeKeyFor("/templates") === "settings" &&
+    activeKeyFor("/estimating-rules") === "settings" &&
+    activeKeyFor("/import") === "settings",
+  "catalog, templates, estimating-rules, import all light Settings",
 );
 
 /* --- home queue card (D98) --- */

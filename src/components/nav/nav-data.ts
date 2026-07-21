@@ -65,17 +65,6 @@ export const NAV: NavEntry[] = [
       { key: "repairs", label: "Repairs", href: "/repairs" },
     ],
   },
-  {
-    kind: "group",
-    key: "general",
-    label: "General",
-    children: [
-      { key: "catalog", label: "Catalog", href: "/catalog" },
-      { key: "templates", label: "Templates", href: "/templates" },
-      { key: "rules", label: "Estimating Rules", href: "/estimating-rules" },
-      { key: "import", label: "Import / Export", href: "/import" },
-    ],
-  },
 ];
 
 /** pathname → active key (child keys map to their parent group for the tab pill) */
@@ -101,11 +90,11 @@ export function activeKeyFor(pathname: string): string {
     "/people": "people",
     "/customers": "companies", // legacy route redirects to /companies (D85)
     "/field-survey": "field",
-    "/catalog": "catalog",
+    "/catalog": "settings",
     "/reports": "home",
-    "/templates": "templates",
-    "/estimating-rules": "rules",
-    "/import": "import",
+    "/templates": "settings",
+    "/estimating-rules": "settings",
+    "/import": "settings",
     "/settings": "settings",
     "/account": "account",
   };
