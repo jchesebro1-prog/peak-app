@@ -1365,3 +1365,34 @@ requests. Verified live in Task 7: the Dashboard's My Queue card and the
 observed; flagging the two-call shape here in case a future change (caching,
 streaming, a slower render path on either screen) reopens the gap this task
 was built to catch.
+
+## D99 — Dissolving the General group (2026-07-20)
+
+The catch-all **General** nav group is gone; the header drops from six
+top-level items to five (Home, Design, Sales, Installs, Service). Its eight
+children were redistributed by ownership, not hidden:
+
+- **Companies, People, Field Survey → Sales.** Sales owns the customer
+  relationship, and Field Survey feeds quoting today. The nav keys
+  (`companies`, `people`, `field`) are preserved — this was a MOVE inside
+  `nav-data.ts`, not a rename, so badge counts and the `/customers → companies`
+  legacy alias keep working. Sales' dropdown grows from three to six; accepted
+  over widening the header (revisit if the dropdown gets hard to scan).
+- **Reports → a fifth Home tab.** Reports is two business dashboards driven by
+  `?view=sales|installs`, not configuration, so it belongs beside the other
+  Home views rather than behind the gear. `HOME_TABS` gains a `reports` entry
+  and `activeKeyFor("/reports")` now returns `home`. Reports keeps its own
+  Sales|Installs pill — an orthogonal within-Reports selector — below the shared
+  tab bar. This **amends** D98's four-tab Home hub to five.
+- **Catalog, Templates, Estimating Rules, Import/Export → Settings → Admin.**
+  These are data administration. Settings gained a three-way section nav
+  (General · Team & Roles · Admin) via a new `?section=` param (not `?tab=`,
+  which `/import` already uses). The four screens keep their own routes; the
+  Admin area only links to them, so no working screen was rewritten.
+  `activeKeyFor` maps their paths to `settings`.
+
+Risk stayed in pure modules: the move and the key repointing live in the
+already-pure `nav-data.ts`, and Settings' section logic in a new
+dependency-free `settings-sections.ts`, both covered by `test:specs`. The
+Settings and Reports client wiring was verified by driving the app. No routes
+moved, no data changed, no migrations.
