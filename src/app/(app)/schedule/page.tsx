@@ -15,6 +15,8 @@ import {
   type ProjectRecord,
   type ProjectStage,
 } from "@/lib/stores/projects";
+import { loadServiceWork } from "@/lib/operations-work-server";
+import { WORK_TYPE_META, type WorkType } from "@/lib/operations-work";
 
 export const metadata = { title: "Schedule — Peak Backend" };
 
@@ -84,6 +86,10 @@ type Booking = {
   start: number;
   end: number;
   color: string;
+  /** Set on service (flame/inspection/repair) bars: links to the record instead of the booking editor. */
+  recordHref?: string;
+  /** Set on service bars: source work type, for reference/debugging. */
+  workType?: WorkType;
 };
 
 /* greedy track packing so overlapping bars don't collide */
@@ -113,6 +119,7 @@ export default async function SchedulePage({
   const [, sp] = await Promise.all([requireUser(), searchParams]);
   await syncProjectsFromQuotes();
   const [projects, users] = await Promise.all([getAllProjects(), activeUsers()]);
+  const serviceWork = await loadServiceWork();
 
   /* ---- URL state ---- */
   const view = one(sp.view) === "timeline" ? "timeline" : "crew";
@@ -167,6 +174,31 @@ export default async function SchedulePage({
         " active project" +
         (activeProjects.length === 1 ? "" : "s") +
         (onSiteNow ? " · " + onSiteNow + " on site today" : "");
+
+  /* ---- service work (flame/inspection/repair) overlaid as single-day bars ----
+     Synthesized as Booking-shaped entries so the crew board's roster building,
+     track packing and row rendering (below) handle them for free. Appended
+     after onSiteNow/standfirst are computed so those project-only stats are
+     unaffected. */
+  const UNASSIGNED_LANE = "Unassigned";
+  serviceWork.forEach((w) => {
+    bookings.push({
+      projectId: w.id,
+      projectName: w.title,
+      customer: w.subtitle,
+      stage: "scheduled",
+      completed: false,
+      crewId: w.id,
+      mobId: null,
+      person: w.assignee || UNASSIGNED_LANE,
+      role: WORK_TYPE_META[w.type].label,
+      start: w.startMs,
+      end: w.endMs, // inclusive single day — do not add a day
+      color: WORK_TYPE_META[w.type].color,
+      recordHref: w.href,
+      workType: w.type,
+    });
+  });
 
   /* ---- roster (booked first) ---- */
   const roster = users.map((u) => ({ name: u.name, initials: u.initials, color: u.color }));
@@ -977,7 +1009,10 @@ export default async function SchedulePage({
                               return (
                                 <Link
                                   key={b.crewId}
-                                  href={boardParams({ edit: b.projectId + "~" + b.crewId })}
+                                  href={
+                                    b.recordHref ??
+                                    boardParams({ edit: b.projectId + "~" + b.crewId })
+                                  }
                                   className="sch-bar-link"
                                   title={b.projectName + " · " + b.role}
                                   style={{
