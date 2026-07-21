@@ -26,6 +26,12 @@ export async function sitesForCompany(
   return primaryFirst(rows);
 }
 
+/** All non-deleted sites across every company (for the Venues directory). */
+export async function getAllSites(): Promise<SiteRow[]> {
+  const db = await getDb();
+  return db.select().from(sites).where(eq(sites.deleted, false));
+}
+
 export async function sitesForCompanies(
   ids: string[]
 ): Promise<Map<string, SiteRow[]>> {
