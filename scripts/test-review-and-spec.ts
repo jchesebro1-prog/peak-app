@@ -344,6 +344,13 @@ ok(
 
 /* --- home queue card (D98) --- */
 import { queueCardCounts, queueDueLabel } from "@/lib/queue-types";
+import {
+  venueDocLocId,
+  docMatchesVenue,
+  engagementMatchesVenue,
+  quoteDeepLink,
+  isOpenStage,
+} from "@/lib/venue-match";
 
 const NOW = 1_800_000_000_000;
 const qi = (due: number) => ({ key: "k" + due, source: "assignment", title: "t", context: "c", due, href: "/queue", writable: true }) as any;
@@ -386,6 +393,42 @@ ok(withinWeekLabel.tone === "#5b616e", "within-a-week tone is neutral gray");
 // offset) and its locale — not a stable literal to pin in this test.
 const beyondLabel = queueDueLabel(NOW + 20 * DAY, NOW);
 ok(beyondLabel.tone === "#9aa0ab", "beyond-a-week tone matches the undated tone");
+
+// ---- Venues directory (D101): the matching gotcha ----
+const migVenue = { id: "st-lakefront-1", legacyLocId: "loc1" };
+const freshVenue = { id: "st-new-2", legacyLocId: null };
+ok(venueDocLocId(migVenue) === "loc1", "a migrated venue resolves to its legacyLocId (loc1), not sites.id");
+ok(venueDocLocId(freshVenue) === "st-new-2", "a fresh venue with no legacy id resolves to sites.id");
+
+const doc = { customerId: "lakefront", locationId: "loc1" };
+ok(
+  docMatchesVenue(doc, "lakefront", venueDocLocId(migVenue)) === true,
+  "a doc stored with locationId 'loc1' MATCHES the migrated venue — history is not empty",
+);
+// The anti-regression: matching on sites.id alone silently MISSES the migrated doc.
+ok(
+  docMatchesVenue(doc, "lakefront", migVenue.id) === false,
+  "matching on sites.id alone misses the migrated venue's doc (the bug this feature must avoid)",
+);
+ok(docMatchesVenue({ customerId: "other", locationId: "loc1" }, "lakefront", "loc1") === false, "a doc for a different company does not match");
+ok(docMatchesVenue({ customerId: "lakefront", locationId: null }, "lakefront", "loc1") === false, "a doc with no locationId does not match a specific venue");
+
+ok(
+  engagementMatchesVenue({ companyId: "lakefront", siteIds: ["loc1", "loc9"] }, "lakefront", "loc1") === true,
+  "an engagement whose siteIds hold the legacy loc id matches",
+);
+ok(
+  engagementMatchesVenue({ companyId: "lakefront", siteIds: ["st-lakefront-1"] }, "lakefront", "loc1") === false,
+  "an engagement matched against sites.id would miss (siteIds hold legacy ids)",
+);
+
+ok(quoteDeepLink("flame_test", "Q-1") === "/flame-tests/quote?id=Q-1", "flame quote deep-links to the flame quote builder");
+ok(quoteDeepLink("consulting", "Q-2") === "/design/engagements/quote?id=Q-2", "consulting quote deep-links to the engagements quote builder");
+ok(quoteDeepLink("system", "Q-3") === "/estimator?id=Q-3", "a system quote deep-links to the estimator");
+
+ok(isOpenStage("project", "install") === true && isOpenStage("project", "complete") === false, "project open = any stage but complete");
+ok(isOpenStage("inspection", "onsite") === true, "inspection onsite counts as open work (the 4th stage)");
+ok(isOpenStage("quote", "won") === false && isOpenStage("quote", "sent") === true, "quote open = draft or sent");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
