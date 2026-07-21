@@ -176,6 +176,11 @@ ok(!!(designGroup && designGroup.kind === "group" && designGroup.children.length
  * and nothing in src/scripts ever called the resolver. HOME_TABS itself is
  * still live (HomeTabs renders it), so it stays covered here. */
 import { HOME_TABS } from "@/app/(app)/home-tabs-keys";
+import {
+  resolveSettingsSection,
+  ADMIN_SCREENS,
+  SETTINGS_SECTIONS,
+} from "@/app/(app)/settings/settings-sections";
 
 ok(HOME_TABS.length === 5, "five Home tabs after Reports joins (D99)");
 ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab");
@@ -245,6 +250,23 @@ ok(
     !d99Gen2.children.some((c) => c.key === "reports")
   ),
   "General no longer contains Reports",
+);
+
+// ---- General dissolution (D99): Settings sections + Admin ----
+ok(resolveSettingsSection(undefined) === "general", "no ?section= defaults to general");
+ok(resolveSettingsSection("nope") === "general", "an unknown ?section= falls back to general");
+ok(resolveSettingsSection("team") === "team", "?section=team is honored");
+ok(resolveSettingsSection("admin") === "admin", "?section=admin is honored");
+ok(resolveSettingsSection(["admin", "team"]) === "admin", "an array ?section= takes the first value");
+ok(
+  SETTINGS_SECTIONS.map((s) => s.key).join(",") === "general,team,admin",
+  "Settings exposes general, team, admin sections in order",
+);
+ok(ADMIN_SCREENS.length === 4, "Admin lists exactly four screens");
+ok(
+  ADMIN_SCREENS.map((s) => s.href).join(",") ===
+    "/catalog,/templates,/estimating-rules,/import",
+  "Admin links Catalog, Templates, Estimating Rules, Import — by their own routes",
 );
 
 /* --- home queue card (D98) --- */
