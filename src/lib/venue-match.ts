@@ -9,8 +9,8 @@
  * this module makes that mistake impossible by resolving through the same
  * doc-loc id the stores use, and the spec test pins it with a regression guard.
  *
- * Imports store record TYPES with `import type` only (erased at build); imports
- * no store value and nothing from @/db, so it stays client-safe and testable.
+ * Fully self-contained: this module has zero imports (not even `import type`)
+ * and nothing from @/db, so it stays client-safe and testable.
  */
 
 export type VenueHistoryKind =

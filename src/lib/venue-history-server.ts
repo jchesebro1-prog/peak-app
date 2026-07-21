@@ -54,6 +54,7 @@ export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
     ]);
 
   // Bucket the latest activity ts per `${customerId}|${locationId}`.
+  const dirNow = Date.now();
   const latest = new Map<string, number>();
   const bump = (customerId: string | null | undefined, locationId: string | null | undefined, ts: number) => {
     if (!customerId || !locationId || !ts) return;
@@ -67,7 +68,10 @@ export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
   for (const r of inspections) bump(r.customerId, r.locationId, r.updatedAt);
   for (const r of repairs) bump(r.customerId, r.locationId, r.updatedAt);
   for (const s of surveys) bump(s.customerId, s.locationId, s.updatedAt);
-  for (const v of visits) bump(v.customerId, v.locationId, v.startAt);
+  // Site visits can be scheduled in the future; clamp to now so a scheduled
+  // visit doesn't sort the venue to the top of "most recently active" (and
+  // so timeAgo doesn't render a future ts as "just now").
+  for (const v of visits) bump(v.customerId, v.locationId, Math.min(v.startAt, dirNow));
   // Engagements use companyId + siteIds (docLocId values), not customerId/locationId.
   for (const e of engagements) {
     if (!e.companyId) continue;

@@ -165,10 +165,17 @@ export default async function VenuePage({
       .filter(Boolean)
       .join(" · ") || "—";
 
-  const travelMiles = site.travelMiles && site.travelMiles !== "" ? Number(site.travelMiles) : null;
-  const travelMin = site.travelMin && site.travelMin !== "" ? Number(site.travelMin) : null;
-  const hasTravel =
-    (travelMiles != null && !Number.isNaN(travelMiles)) || (travelMin != null && !Number.isNaN(travelMin));
+  // Corrupt/non-numeric travel data (Number(...) -> NaN) is treated as absent
+  // per-field, rather than rendering "NaN mi" / "NaNh" for that field.
+  const tMiles =
+    site.travelMiles && site.travelMiles !== "" && !Number.isNaN(Number(site.travelMiles))
+      ? Number(site.travelMiles)
+      : null;
+  const tMin =
+    site.travelMin && site.travelMin !== "" && !Number.isNaN(Number(site.travelMin))
+      ? Number(site.travelMin)
+      : null;
+  const hasTravel = tMiles != null || tMin != null;
 
   const openHistory = history.filter((r) => r.open);
 
@@ -253,9 +260,19 @@ export default async function VenuePage({
           </div>
           {hasTravel && (
             <div style={{ fontSize: 12, color: "#5b616e", marginTop: 6 }}>
-              Travel · <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "#16181d" }}>{fmtMiles(travelMiles)}</span>
-              {" · "}
-              {fmtTime(travelMin)}
+              Travel
+              {tMiles != null && (
+                <>
+                  {" · "}
+                  <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "#16181d" }}>{fmtMiles(tMiles)}</span>
+                </>
+              )}
+              {tMin != null && (
+                <>
+                  {" · "}
+                  {fmtTime(tMin)}
+                </>
+              )}
             </div>
           )}
         </div>
