@@ -2,6 +2,12 @@ import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/l
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
 import type { EngagementPhase } from "@/lib/stores/engagements";
+import {
+  msOf as opMsOf,
+  serviceToWorkItems,
+  WORK_TYPE_META,
+  startOfDay as opStartOfDay,
+} from "@/lib/operations-work";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -288,6 +294,48 @@ ok(
     parentGroupOf("inspections") === "operations" &&
     parentGroupOf("repairs") === "operations",
   "all six work children report Operations as their parent group",
+);
+
+// ---- Operations merge (D100): pure work normalization ----
+// msOf: strict local midnight; '' and malformed -> null (never epoch 0, never UTC-shifted)
+ok(opMsOf("") === null, "msOf('') is null (unset is excluded, not epoch 0)");
+ok(opMsOf(undefined) === null, "msOf(undefined) is null");
+ok(opMsOf("not-a-date") === null, "msOf of a non-ISO string is null (no UTC fallback)");
+ok(
+  opMsOf("2026-07-20") === new Date(2026, 6, 20).getTime(),
+  "msOf parses YYYY-MM-DD as LOCAL midnight (agrees with the job's own screen)",
+);
+// A date that naive `new Date('2026-01-01')` would render as Dec 31 west of UTC:
+ok(
+  opMsOf("2026-01-01") === new Date(2026, 0, 1).getTime(),
+  "msOf('2026-01-01') is local Jan 1, not UTC (no day shift)",
+);
+
+const svc = [
+  { id: "A", customer: "Alpha HS", venue: "Auditorium", assignedTo: "Nic", scheduledDate: "2026-07-20", stage: "scheduled" },
+  { id: "B", customer: "Beta MS", venue: "Gym", assignedTo: "", scheduledDate: "2026-07-21", stage: "onsite" },
+  { id: "C", customer: "Gamma HS", venue: "Theater", assignedTo: "Nic", scheduledDate: "", stage: "scheduled" }, // unset date -> excluded
+  { id: "D", customer: "Delta HS", venue: "PAC", assignedTo: "Jena", scheduledDate: "2026-07-22", stage: "completed" }, // done -> excluded
+];
+const svcItems = serviceToWorkItems(svc, "inspection", (id) => "/inspections/" + id);
+ok(svcItems.length === 2, "serviceToWorkItems drops the unset-date and the completed job");
+ok(svcItems.every((w) => w.startMs === w.endMs), "a service item is a single day (start === end, inclusive)");
+ok(
+  svcItems.some((w) => w.id === "B" && w.assignee === "" && w.startMs != null),
+  "an unassigned in-progress (onsite) job is KEPT with assignee '' (unassigned lane)",
+);
+ok(
+  svcItems.find((w) => w.id === "A")?.href === "/inspections/A",
+  "serviceToWorkItems uses the provided hrefFor for the deep link",
+);
+ok(
+  svcItems.find((w) => w.id === "A")?.type === "inspection" &&
+    WORK_TYPE_META.inspection.color.length > 0,
+  "each item carries its work type and the type has a color",
+);
+ok(
+  opStartOfDay(new Date(2026, 6, 20, 15, 30).getTime()) === new Date(2026, 6, 20).getTime(),
+  "startOfDay truncates to local midnight",
 );
 
 /* --- home queue card (D98) --- */
