@@ -28,6 +28,13 @@ import {
   updateMemberAction,
 } from "./actions";
 import type { GeoSearchHit } from "@/lib/geo";
+import Link from "next/link";
+import { SegmentedToggle } from "@/components/ui";
+import {
+  SETTINGS_SECTIONS,
+  ADMIN_SCREENS,
+  resolveSettingsSection,
+} from "./settings-sections";
 
 /**
  * Settings — admin surface, ported from Settings.dc.html
@@ -141,6 +148,7 @@ export default function SettingsClient({
   const searchParams = useSearchParams();
   const gmailStatus = searchParams.get("gmail");
   const banner = gmailStatus ? GMAIL_BANNER[gmailStatus] : null;
+  const section = resolveSettingsSection(searchParams.get("section") ?? undefined);
   const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -466,8 +474,18 @@ export default function SettingsClient({
         </div>
       )}
 
-      {/* ---- Branding ---- */}
-      <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
+      <div style={{ marginBottom: 20 }}>
+        <SegmentedToggle
+          options={SETTINGS_SECTIONS.map((s) => ({ key: s.key, label: s.label }))}
+          active={section}
+          hrefFor={(k) => (k === "general" ? "/settings" : `/settings?section=${k}`)}
+        />
+      </div>
+
+      {section === "general" && (
+        <>
+          {/* ---- Branding ---- */}
+          <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
         <div style={{ fontSize: 14.5, fontWeight: 600 }}>Branding</div>
         <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
           Company name and accent color — applied across every screen.
@@ -1156,17 +1174,20 @@ export default function SettingsClient({
           />
         </div>
       </section>
+        </>
+      )}
 
-      {/* ---- Team + Roles ---- */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0,1fr) 320px",
-          gap: 20,
-          alignItems: "start",
-        }}
-        className="st-grid"
-      >
+      {section === "team" && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0,1fr) 320px",
+            gap: 20,
+            alignItems: "start",
+          }}
+          className="st-grid"
+        >
+        {/* ---- Team + Roles ---- */}
         <section className="pk-card" style={{ padding: 0, overflow: "hidden" }}>
           <div
             style={{
@@ -1354,7 +1375,44 @@ export default function SettingsClient({
             </div>
           ))}
         </section>
-      </div>
+        </div>
+      )}
+
+      {section === "admin" && (
+        <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 600 }}>Admin</div>
+          <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 4, marginBottom: 14 }}>
+            Data administration. Each screen keeps its own page.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {ADMIN_SCREENS.map((s) => (
+              <Link
+                key={s.href}
+                href={s.href}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "12px 14px",
+                  border: "1px solid #eef0f3",
+                  borderRadius: 10,
+                  textDecoration: "none",
+                  color: "inherit",
+                }}
+              >
+                <span>
+                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{s.label}</span>
+                  <span style={{ display: "block", fontSize: 12, color: "#8c919c", marginTop: 2 }}>
+                    {s.desc}
+                  </span>
+                </span>
+                <span aria-hidden style={{ color: "#b7bcc6", fontSize: 16 }}>→</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ---- Add / edit location modal ---- */}
       {officeModal && officeDraft && (
