@@ -386,7 +386,7 @@ export default async function FlameTestsPage({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
           <Link
-            href="/flame-tests/today"
+            href="/field-work"
             style={{
               display: "inline-flex",
               alignItems: "center",

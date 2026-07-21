@@ -9,6 +9,8 @@ import {
   type ProjectRecord,
   type ProjectStage,
 } from "@/lib/stores/projects";
+import { loadServiceWork } from "@/lib/operations-work-server";
+import { WORK_TYPE_META, startOfDay, type WorkItem } from "@/lib/operations-work";
 import FieldWorkDetail, { type FieldIdentity } from "./controls";
 
 export const metadata = { title: "Field work — Peak Backend" };
@@ -50,6 +52,45 @@ function chip(stage: ProjectStage): React.CSSProperties {
   };
 }
 
+/** Shared card wrapper for both project and service rows (D100 unified day-view). */
+const CARD_LINK_STYLE: React.CSSProperties = {
+  display: "block",
+  background: "#fff",
+  border: "1px solid #e7e9ee",
+  borderRadius: 14,
+  padding: "15px 16px",
+  marginBottom: 11,
+  textDecoration: "none",
+  color: "inherit",
+  boxShadow: "0 1px 2px rgba(0,0,0,.04)",
+};
+
+/** Work-type chip for service rows — same shape/size as chip(), sourced from WORK_TYPE_META. */
+function svcChip(type: WorkItem["type"]): React.CSSProperties {
+  const m = WORK_TYPE_META[type];
+  return {
+    display: "inline-block",
+    fontSize: 10,
+    fontWeight: 600,
+    color: m.color,
+    background: m.soft,
+    border: `1px solid ${m.color}33`,
+    padding: "2px 9px",
+    borderRadius: 20,
+  };
+}
+
+/**
+ * A project counts as "mine today" when the signed-in person is on a crew
+ * booking whose inclusive span covers today (and the project isn't complete).
+ */
+function myProjectToday(p: ProjectRecord, meName: string, todayMs: number): boolean {
+  if (p.stage === "complete") return false;
+  return p.crew.some(
+    (c) => c.person === meName && startOfDay(c.start) <= todayMs && startOfDay(c.end) >= todayMs,
+  );
+}
+
 export default async function FieldWorkPage({
   searchParams,
 }: {
@@ -57,7 +98,11 @@ export default async function FieldWorkPage({
 }) {
   const [me, sp] = await Promise.all([requireUser(), searchParams]);
   await syncProjectsFromQuotes();
-  const [all, users] = await Promise.all([getAllProjects(), activeUsers()]);
+  const [all, users, serviceWork] = await Promise.all([
+    getAllProjects(),
+    activeUsers(),
+    loadServiceWork(),
+  ]);
 
   const selId = one(sp.id);
   const selObj: ProjectRecord | null = selId
@@ -66,16 +111,162 @@ export default async function FieldWorkPage({
 
   /* ---------------- LIST VIEW ---------------- */
   if (!selObj) {
+    const today = startOfDay(Date.now());
+
+    /** Mine + due now: today or overdue-and-still-live (unset dates excluded upstream). */
+    const myService = serviceWork.filter(
+      (w) => w.assignee === me.name && startOfDay(w.startMs) <= today,
+    );
+
     const fieldJobs = all
-      .filter((p) => p.kind === "project" && p.stage !== "complete")
+      .filter((p) => myProjectToday(p, me.name, today))
       .sort((a, b) => (a.targetDate || 0) - (b.targetDate || 0));
     const onSiteCount = fieldJobs.filter(
       (p) => p.stage === "install" || p.stage === "training"
     ).length;
+
+    type DayRow = { day: number; node: React.ReactNode };
+
+    const projectRows: DayRow[] = fieldJobs.map((p) => {
+      const done = (p.tasks || []).filter((t) => t.done).length;
+      const onSite = p.stage === "install" || p.stage === "training";
+      return {
+        day: p.installStart || p.targetDate || today,
+        node: (
+          <Link
+            key={"project:" + p.id}
+            href={"/field-work?id=" + encodeURIComponent(p.id)}
+            className="fw-card-link"
+            style={CARD_LINK_STYLE}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>
+              <span style={chip(p.stage)}>{STAGE_META[p.stage]?.label || p.stage}</span>
+              {onSite && (
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 9,
+                    fontWeight: 700,
+                    letterSpacing: ".06em",
+                    color: "#9a5a1f",
+                    background: "#fbeede",
+                    border: "1px solid #f0dcc0",
+                    padding: "2px 7px",
+                    borderRadius: 5,
+                  }}
+                >
+                  ON SITE
+                </span>
+              )}
+              <span
+                style={{
+                  marginLeft: "auto",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10.5,
+                  color: "#aab0bb",
+                }}
+              >
+                {p.id}
+              </span>
+            </div>
+            <div style={{ fontSize: 15.5, fontWeight: 600, lineHeight: 1.3 }}>{p.name}</div>
+            <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 3 }}>
+              {p.customer || "—"}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 8,
+                    background: "#f1f2f5",
+                    color: "#5b616e",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 13,
+                  }}
+                >
+                  ✓
+                </span>
+                <div>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600 }}>
+                    {done + "/" + (p.tasks || []).length}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#aab0bb" }}>tasks</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 8,
+                    background: "#f1f2f5",
+                    color: "#5b616e",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 13,
+                  }}
+                >
+                  ◷
+                </span>
+                <div>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600 }}>
+                    {p.installStart ? fmtDate(p.installStart) : "TBD"}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#aab0bb" }}>install</div>
+                </div>
+              </div>
+              <span style={{ marginLeft: "auto", color: "#c4c9d2", fontSize: 20 }}>›</span>
+            </div>
+          </Link>
+        ),
+      };
+    });
+
+    const serviceRows: DayRow[] = myService.map((w) => ({
+      day: w.startMs,
+      node: (
+        <Link
+          key={"service:" + w.type + ":" + w.id}
+          href={w.href}
+          className="fw-card-link"
+          style={CARD_LINK_STYLE}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>
+            <span style={svcChip(w.type)}>{WORK_TYPE_META[w.type].label}</span>
+            <span
+              style={{
+                marginLeft: "auto",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10.5,
+                color: "#aab0bb",
+              }}
+            >
+              {w.id}
+            </span>
+          </div>
+          <div style={{ fontSize: 15.5, fontWeight: 600, lineHeight: 1.3 }}>{w.title}</div>
+          <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 3 }}>
+            {w.subtitle || "—"}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", marginTop: 12 }}>
+            <span style={{ marginLeft: "auto", color: "#c4c9d2", fontSize: 20 }}>›</span>
+          </div>
+        </Link>
+      ),
+    }));
+
+    const rows = [...projectRows, ...serviceRows].sort((a, b) => a.day - b.day);
+
     const standfirst =
-      fieldJobs.length +
-      " active " +
-      (fieldJobs.length === 1 ? "job" : "jobs") +
+      rows.length +
+      " " +
+      (rows.length === 1 ? "job" : "jobs") +
+      " today" +
       (onSiteCount ? " · " + onSiteCount + " on site now" : "");
 
     return (
@@ -88,114 +279,9 @@ export default async function FieldWorkPage({
           <div style={{ fontSize: 13, color: "#8c919c", marginTop: 4 }}>{standfirst}</div>
         </div>
 
-        {fieldJobs.map((p) => {
-          const done = (p.tasks || []).filter((t) => t.done).length;
-          const onSite = p.stage === "install" || p.stage === "training";
-          return (
-            <Link
-              key={p.id}
-              href={"/field-work?id=" + encodeURIComponent(p.id)}
-              className="fw-card-link"
-              style={{
-                display: "block",
-                background: "#fff",
-                border: "1px solid #e7e9ee",
-                borderRadius: 14,
-                padding: "15px 16px",
-                marginBottom: 11,
-                textDecoration: "none",
-                color: "inherit",
-                boxShadow: "0 1px 2px rgba(0,0,0,.04)",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>
-                <span style={chip(p.stage)}>{STAGE_META[p.stage]?.label || p.stage}</span>
-                {onSite && (
-                  <span
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 9,
-                      fontWeight: 700,
-                      letterSpacing: ".06em",
-                      color: "#9a5a1f",
-                      background: "#fbeede",
-                      border: "1px solid #f0dcc0",
-                      padding: "2px 7px",
-                      borderRadius: 5,
-                    }}
-                  >
-                    ON SITE
-                  </span>
-                )}
-                <span
-                  style={{
-                    marginLeft: "auto",
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 10.5,
-                    color: "#aab0bb",
-                  }}
-                >
-                  {p.id}
-                </span>
-              </div>
-              <div style={{ fontSize: 15.5, fontWeight: 600, lineHeight: 1.3 }}>{p.name}</div>
-              <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 3 }}>
-                {p.customer || "—"}
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <span
-                    style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: 8,
-                      background: "#f1f2f5",
-                      color: "#5b616e",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 13,
-                    }}
-                  >
-                    ✓
-                  </span>
-                  <div>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600 }}>
-                      {done + "/" + (p.tasks || []).length}
-                    </div>
-                    <div style={{ fontSize: 10, color: "#aab0bb" }}>tasks</div>
-                  </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <span
-                    style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: 8,
-                      background: "#f1f2f5",
-                      color: "#5b616e",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 13,
-                    }}
-                  >
-                    ◷
-                  </span>
-                  <div>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600 }}>
-                      {p.installStart ? fmtDate(p.installStart) : "TBD"}
-                    </div>
-                    <div style={{ fontSize: 10, color: "#aab0bb" }}>install</div>
-                  </div>
-                </div>
-                <span style={{ marginLeft: "auto", color: "#c4c9d2", fontSize: 20 }}>›</span>
-              </div>
-            </Link>
-          );
-        })}
+        {rows.map((r) => r.node)}
 
-        {fieldJobs.length === 0 && (
+        {rows.length === 0 && (
           <div
             style={{
               background: "#fff",
@@ -208,7 +294,7 @@ export default async function FieldWorkPage({
               lineHeight: 1.6,
             }}
           >
-            No field jobs scheduled.
+            Nothing due today.
             <br />
             <Link
               href="/projects"
