@@ -1396,3 +1396,40 @@ already-pure `nav-data.ts`, and Settings' section logic in a new
 dependency-free `settings-sections.ts`, both covered by `test:specs`. The
 Settings and Reports client wiring was verified by driving the app. No routes
 moved, no data changed, no migrations.
+
+## D100 — Operations: merging Installs and Service (2026-07-20)
+
+The **Installs** and **Service** nav groups merged into one **Operations** group
+(Projects, Schedule, Field Work, Flame Tests, Rigging Inspections, Repairs); the
+header dropped from five top-level items to four (Home, Design, Sales,
+Operations). Child keys were preserved, so badge counts and active-pill
+highlighting followed automatically.
+
+The nav merge was only honest with an aggregation behind it: `/schedule` and
+`/field-work` had read **only** from the projects store, so a scheduled flame
+test would never have appeared on the schedule. Both now aggregate all four work
+types, **read-only** — scheduling still happens on each type's own screen.
+
+- **Unified Schedule.** The crew board overlays single-day bars for live flame,
+  inspection, and repair jobs on their assignee's lane (or an Unassigned lane),
+  colour-coded by work type, each linking to its own record. Projects keep their
+  crew bookings and the booking editor unchanged.
+- **Unified Field Work.** Now the signed-in person's work due today (or overdue)
+  across all four types, each row deep-linking to its capture screen.
+  `/flame-tests/today` redirects here.
+
+The risk was date normalization, isolated in a dependency-free
+`src/lib/operations-work.ts`: a strict `msOf` parses `'YYYY-MM-DD'` as **local**
+midnight, and `''`/malformed dates return `null` and are **excluded** (never
+epoch 0, never a UTC day-shift). We deliberately did NOT use inspections'
+`parseISO`, whose non-ISO fallback is UTC-prone. Inspections' fourth stage
+(`onsite`) is included via a `stage !== "completed"` predicate, so in-progress
+inspections still appear.
+
+**Decision to revisit:** a repair carries both `assignedTo` and `crew: string[]`.
+It renders as **one** row keyed by `assignedTo` (matching flame/inspections and
+the existing repairs UI). If Jeff wants a repair on every crew member's lane,
+fan out over `crew` — a one-line change in the assembler.
+
+No data model changes, no migrations. Service and install revenue stay separate
+in Reports — this merges how work is *found*, not how it is *accounted*.
