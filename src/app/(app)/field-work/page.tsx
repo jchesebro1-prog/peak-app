@@ -85,7 +85,7 @@ function svcChip(type: WorkItem["type"]): React.CSSProperties {
  * booking whose inclusive span covers today (and the project isn't complete).
  */
 function myProjectToday(p: ProjectRecord, meName: string, todayMs: number): boolean {
-  if (p.stage === "complete") return false;
+  if (p.kind !== "project" || p.stage === "complete") return false;
   return p.crew.some(
     (c) => c.person === meName && startOfDay(c.start) <= todayMs && startOfDay(c.end) >= todayMs,
   );
