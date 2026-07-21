@@ -40,11 +40,12 @@ export type VenueDirRow = {
  * so the directory is a single pass over the data.
  */
 export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
-  const [sites, quotes, projects, flame, inspections, repairs, surveys, visits] =
+  const [sites, quotes, projects, engagements, flame, inspections, repairs, surveys, visits] =
     await Promise.all([
       getAllSites(),
       getAllQuotes(),
       getAllProjects(),
+      allEngagements(),
       getAllFlame(),
       getAllInspections(),
       getAllRepairs(),
@@ -67,6 +68,11 @@ export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
   for (const r of repairs) bump(r.customerId, r.locationId, r.updatedAt);
   for (const s of surveys) bump(s.customerId, s.locationId, s.updatedAt);
   for (const v of visits) bump(v.customerId, v.locationId, v.startAt);
+  // Engagements use companyId + siteIds (docLocId values), not customerId/locationId.
+  for (const e of engagements) {
+    if (!e.companyId) continue;
+    for (const sid of e.siteIds ?? []) bump(e.companyId, sid, e.updatedAt);
+  }
 
   const companyName = new Map<string, string>();
   const rows: VenueDirRow[] = [];
