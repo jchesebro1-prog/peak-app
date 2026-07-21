@@ -40,6 +40,9 @@ export const NAV: NavEntry[] = [
       { key: "leads", label: "Leads", href: "/leads" },
       { key: "quotes", label: "Quotes", href: "/quotes" },
       { key: "reviews", label: "Reviews", href: "/reviews" },
+      { key: "companies", label: "Companies", href: "/companies" },
+      { key: "people", label: "People", href: "/people" },
+      { key: "field", label: "Field Survey", href: "/field-survey" },
     ],
   },
   {
@@ -67,9 +70,6 @@ export const NAV: NavEntry[] = [
     key: "general",
     label: "General",
     children: [
-      { key: "companies", label: "Companies", href: "/companies" },
-      { key: "people", label: "People", href: "/people" },
-      { key: "field", label: "Field Survey", href: "/field-survey" },
       { key: "catalog", label: "Catalog", href: "/catalog" },
       { key: "reports", label: "Reports", href: "/reports" },
       { key: "templates", label: "Templates", href: "/templates" },

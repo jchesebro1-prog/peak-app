@@ -150,7 +150,7 @@ ok(designRedirect("/consulting/CE-1001", { tab: "bogus" }) === "/design/engageme
   "unknown tab values pass through — the destination validates, not the redirect");
 
 /* --- design module nav (D97) --- */
-import { activeKeyFor, NAV } from "@/components/nav/nav-data";
+import { activeKeyFor, NAV, parentGroupOf } from "@/components/nav/nav-data";
 
 ok(activeKeyFor("/design") === "designoverview",
   "the Design overview resolves to the designoverview key");
@@ -190,6 +190,47 @@ ok(activeKeyFor("/queue") === "home", "queue lights Home");
 ok(activeKeyFor("/calendar") === "home", "calendar lights Home — this path had NO map entry before");
 ok(activeKeyFor("/inbox") === "home", "inbox lights Home");
 ok(activeKeyFor("/reports") === "reports", "reports still lights its own key until General is dissolved");
+
+// ---- General dissolution (D99): Companies/People/Field Survey → Sales ----
+const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "sales");
+ok(
+  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 6),
+  "Sales has six children after the move",
+);
+ok(
+  !!(
+    d99Sales &&
+    d99Sales.kind === "group" &&
+    ["leads", "quotes", "reviews", "companies", "people", "field"].every((k) =>
+      d99Sales.children.some((c) => c.key === k),
+    )
+  ),
+  "Sales contains leads, quotes, reviews, companies, people, field",
+);
+const d99Gen1 = NAV.find((e) => e.kind === "group" && e.key === "general");
+ok(
+  !!(
+    d99Gen1 &&
+    d99Gen1.kind === "group" &&
+    !["companies", "people", "field"].some((k) =>
+      d99Gen1.children.some((c) => c.key === k),
+    )
+  ),
+  "General no longer contains companies, people, or field",
+);
+ok(
+  parentGroupOf("companies") === "sales" &&
+    parentGroupOf("people") === "sales" &&
+    parentGroupOf("field") === "sales",
+  "companies, people, field now report Sales as their parent group",
+);
+const d99Keys = NAV.flatMap((e) =>
+  e.kind === "group" ? [e.key, ...e.children.map((c) => c.key)] : [e.key],
+);
+ok(
+  d99Keys.length === new Set(d99Keys).size,
+  "all nav keys (groups + children) are globally unique — no duplicate left behind",
+);
 
 /* --- home queue card (D98) --- */
 import { queueCardCounts, queueDueLabel } from "@/lib/queue-types";
