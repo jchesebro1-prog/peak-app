@@ -71,7 +71,6 @@ export const NAV: NavEntry[] = [
     label: "General",
     children: [
       { key: "catalog", label: "Catalog", href: "/catalog" },
-      { key: "reports", label: "Reports", href: "/reports" },
       { key: "templates", label: "Templates", href: "/templates" },
       { key: "rules", label: "Estimating Rules", href: "/estimating-rules" },
       { key: "import", label: "Import / Export", href: "/import" },
@@ -103,7 +102,7 @@ export function activeKeyFor(pathname: string): string {
     "/customers": "companies", // legacy route redirects to /companies (D85)
     "/field-survey": "field",
     "/catalog": "catalog",
-    "/reports": "reports",
+    "/reports": "home",
     "/templates": "templates",
     "/estimating-rules": "rules",
     "/import": "import",

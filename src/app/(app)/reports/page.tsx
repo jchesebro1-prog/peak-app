@@ -12,6 +12,7 @@ import {
 import { all as getCustomers } from "@/lib/stores/customers";
 import { ReportsMap } from "./controls";
 import type { MapPin } from "@/components/map/LeafletMap";
+import HomeTabs from "../home-tabs";
 
 export const metadata = { title: "Reports — Peak Backend" };
 
@@ -127,7 +128,7 @@ export default async function ReportsPage({
     v === "installs" ? `/reports?view=installs&ir=${ir}` : `/reports?view=sales&range=${range}`;
 
   return (
-    <div className="pk-content" style={{ maxWidth: 1180 }}>
+    <HomeTabs active="reports" maxWidth={1180}>
       {/* header: title + mode toggle + range */}
       <div
         style={{
@@ -182,7 +183,7 @@ export default async function ReportsPage({
       ) : (
         <InstallsView projects={projects} customers={customers} engagements={engagements} ir={ir} />
       )}
-    </div>
+    </HomeTabs>
   );
 }
 

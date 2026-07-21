@@ -7,8 +7,7 @@
  * client-reference proxy and `.map`/`.find` stop being functions — the same
  * bug class as D90's TABS.
  *
- * Reports joins this list when the General group is dissolved; until then it
- * still lives in that nav group and must not render a tab.
+ * Reports joined this list when the General group was dissolved (D99).
  */
 
 export const HOME_TABS = [
@@ -16,6 +15,7 @@ export const HOME_TABS = [
   { key: "queue", label: "My Queue", href: "/queue" },
   { key: "calendar", label: "Calendar", href: "/calendar" },
   { key: "inbox", label: "Inbox", href: "/inbox" },
+  { key: "reports", label: "Reports", href: "/reports" },
 ] as const;
 
 export type HomeTabKey = (typeof HOME_TABS)[number]["key"];

@@ -177,7 +177,7 @@ ok(!!(designGroup && designGroup.kind === "group" && designGroup.children.length
  * still live (HomeTabs renders it), so it stays covered here. */
 import { HOME_TABS } from "@/app/(app)/home-tabs-keys";
 
-ok(HOME_TABS.length === 4, "four tabs ship in this plan (Reports joins with the General dissolution)");
+ok(HOME_TABS.length === 5, "five Home tabs after Reports joins (D99)");
 ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab");
 
 /* --- home hub nav (D98) --- */
@@ -189,7 +189,7 @@ ok(activeKeyFor("/") === "home", "root lights Home");
 ok(activeKeyFor("/queue") === "home", "queue lights Home");
 ok(activeKeyFor("/calendar") === "home", "calendar lights Home — this path had NO map entry before");
 ok(activeKeyFor("/inbox") === "home", "inbox lights Home");
-ok(activeKeyFor("/reports") === "reports", "reports still lights its own key until General is dissolved");
+ok(activeKeyFor("/reports") === "home", "Reports lights Home now that it is a Home tab (D99)");
 
 // ---- General dissolution (D99): Companies/People/Field Survey → Sales ----
 const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "sales");
@@ -230,6 +230,21 @@ const d99Keys = NAV.flatMap((e) =>
 ok(
   d99Keys.length === new Set(d99Keys).size,
   "all nav keys (groups + children) are globally unique — no duplicate left behind",
+);
+
+// ---- General dissolution (D99): Reports is a Home tab ----
+ok(
+  HOME_TABS.some((t) => t.key === "reports" && t.href === "/reports"),
+  "Reports is present in HOME_TABS with its own route",
+);
+const d99Gen2 = NAV.find((e) => e.kind === "group" && e.key === "general");
+ok(
+  !!(
+    d99Gen2 &&
+    d99Gen2.kind === "group" &&
+    !d99Gen2.children.some((c) => c.key === "reports")
+  ),
+  "General no longer contains Reports",
 );
 
 /* --- home queue card (D98) --- */
