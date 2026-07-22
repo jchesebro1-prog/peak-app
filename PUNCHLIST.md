@@ -5,6 +5,22 @@ implemented until he says so. Statuses: `OPEN` → `IN PROGRESS` → `DONE`.
 
 ---
 
+## Build log — 2026-07-22 (working tree, UNCOMMITTED; UI items need a visual check)
+Built this session, all typecheck-clean: **#25** consulting rename (route kept) · **#28** lineset
+default 50×30 · **#32** venue street-autofill fix · **#37** sell-price→margin (per-section margin now
+fractional) · **#35** `consulting_proposal` template → Peak's Fall Creek voice · **#36** client BOM
+"Prices" toggle (qty-only, all renders) + `allowance` line type (creatable via a toggle) + per-line
+note (`comment`) · **#26** Fixture Cross-Reference screen under Design (`/design/fixtures`, 7 matrices,
+imported to `src/lib/design/fixture-crossref.json`) · **#33** mobile foundation (fluid `--pk-h*` scale
++ `.pk-content` mobile padding + overflow guards + `useBreakpoint` hook).
+**Still open (need Jeff's calls):** #36 narrative estimate proposal + T&C/warranty (Jeff: BOM-first,
+deferred) · #35 structured scopes / checkable assumptions / lead+estimate logging / architect link
+(ties to #20) · #29 lineset weights (A–E) · #30 laser (device) · #34 pipeline (daylite foundation
+first). #27 folded into Design via #26. Session detail:
+`sessions/2026-07-22-daylite-import-and-punchlist-buildout.md`.
+
+---
+
 ## 1. Inbox must actively sync with Gmail state — DONE (D73/D74)
 
 **Area:** `/inbox` — `src/app/(app)/inbox/` (likely `page.tsx`, `actions.ts`, `thread-list.tsx`)
@@ -1801,6 +1817,598 @@ v3 + v4 with nothing lost. Q-2035 (won) showed the banner and no Recall control.
 **Not built / deferred:** no revision UI inside the estimator itself (only on the Quotes detail
 panel), no diff between revisions, and recall does not re-open the estimator — it writes the
 recalled numbers straight onto the quote.
+
+---
+
+## 25. Rename the "Engagements" nav item to "Consulting" — OPEN
+
+**Area:** `src/components/nav/nav-data.ts:28` (the nav label — the actual ask). Other
+user-facing "Engagements" strings if the rename should be consistent: page titles
+`src/app/(app)/design/engagements/page.tsx:6` + `.../[id]/page.tsx:7`; breadcrumbs
+`.../spec/page.tsx:32`, `.../spec/[id]/page.tsx:25`, `.../markup/page.tsx:33`,
+`.../letter/page.tsx:106`; and the Design Overview card `src/app/(app)/design/page.tsx`.
+
+**Reported:** 2026-07-21 (screenshot of the Design submenu)
+
+**Ask:** In the Design group's nav, switch the **"Engagements"** item to read **"Consulting."**
+
+**Light recon 2026-07-21 — small, and "Consulting" matches the data:**
+
+- **The nav label is one line.** `nav-data.ts:28` is
+  `{ key: "engagements", label: "Engagements", href: "/design/engagements" }`. Changing
+  `label` → `"Consulting"` is the entire visible-nav change. `key` and `href` do **not**
+  need to change (they're internal).
+- **This is a rename back to what the domain already calls it.** Per the nav comment
+  (`nav-data.ts:17-21`), D97 merged the old standalone **Consulting** link into the Design
+  group and named the child "Engagements." The records behind it are `ConsultingEngagement`
+  (`src/lib/stores/engagements.ts`), statuses are `ENGAGEMENT_STATUS_LABEL` — so "Consulting"
+  is the more accurate label, not a new concept.
+- **No collision.** The old `/consulting` route still exists but is now only a legacy
+  redirect to `/design/engagements` (`src/app/(app)/consulting/page.tsx` — "Kept for
+  bookmarks and deep links," D97). Relabeling to "Consulting" won't clash with a live page.
+- **"Engagements" shows up in a handful of other user-facing spots** (listed under Area).
+  A label-only change leaves those still saying "Engagements" — page title in the browser
+  tab, "← Back to Engagements" breadcrumbs, and the Overview card heading.
+
+**ANSWERED 2026-07-21 (Jeff): "just the name change."** No route/URL rename — keep
+`/design/engagements` (B). Treat as a plain relabel. Build-time default: swap every visible
+"Engagements" string for consistency (nav label + page titles + breadcrumbs + Overview card —
+all display text, still trivial) unless Jeff narrows it to the nav label only.
+
+**Status:** OPEN — queued, **not building yet.** Jeff is keeping a running list and will batch
+these. Logged 2026-07-21, no code touched.
+
+---
+
+## 26. Fixture cross-reference in the app — OPEN
+
+**Area:** new screen, home TBD — under Design or the proposed Knowledge tab (item 27). Closest
+existing analog: `src/app/(app)/design/motors/page.tsx` (Motor Library — a curated ETC-reference
+page). **Source data is not in the app repo** — it lives in Peak Knowledge memory
+(`memory/knowledge/peak/*-cross-reference-2026-07.md` + the 7 `.xlsx` originals; project
+`fixture-cross-reference`).
+
+**Reported:** 2026-07-21
+
+**Ask:** Surface the fixture cross-reference inside the app. Jeff first said "on the Design tab,"
+then broadened to wanting a dedicated Knowledge tab for it (item 27).
+
+**Light recon 2026-07-21 — the data already exists, curated:**
+
+- **What it is:** 7 ETC-anchored competitive matrices — a **sales tool** mapping ETC/Eos products to
+  competitor equivalents (Chauvet Pro, Elation, Vari-Lite/Strand, Altman, ADJ): LED Ellipsoidal (34
+  fixtures), Console (44), LED PAR (34), LED Cyc, LED Fresnel (24), Spot Mover, Wash Mover — ~5–6
+  brands each. Each workbook has **Read Me / Spec Matrix / Equivalents (class map A–E) / Sources**
+  tabs, incl. street pricing ("verify before bidding"). Memory status: **all 7 built, awaiting
+  Jeff's review.**
+- **Internal-only.** This is competitive intelligence — do **not** expose it in the customer portal.
+- **Motor Library is the build pattern.** `design/motors/page.tsx` is a hardcoded curated-reference
+  page (ETC Prodigy hoist specs, card + table layout) under Design. The fixture matrices are the same
+  *kind* of thing, just bigger and multi-category.
+- **Getting the data in is the real work.** It's 7 spreadsheets in the Dropbox memory tree, not the
+  repo — porting/parsing them is the bulk of the effort, not the screen.
+
+**Open questions (Jeff's call):**
+- **A. Home** — under Design (sibling of Motor Library) or in the new Knowledge tab (item 27)? Jeff
+  is leaning Knowledge.
+- **B. Static vs data-backed** — hardcode the tables like Motor Library (fast, but 7 big matrices are
+  painful to update), or import the xlsx into a store/table (like the parts catalog) so it's
+  searchable and Jeff can refresh pricing/brands? The matrices are explicitly expected to change
+  (pricing refresh, add brands) — that argues data-backed.
+- **C. Presentation** — one screen with the 7 categories as tabs/sections, or a page per category?
+  Each matrix is 24–44 rows, so in-screen search/filter is likely wanted.
+- **D. Start small or all 7** — ship one category first (Ellipsoidals are the flagship) or all seven?
+  Pricing columns included, or equivalence-only to start?
+
+**Status:** OPEN — logged 2026-07-21, no code touched. Home depends on item 27.
+
+---
+
+## 27. A dedicated "Knowledge" tab — OPEN
+
+**Area:** `src/components/nav/nav-data.ts` (a new top-level group, or a Design child). Existing
+in-app content of this kind: `src/app/(app)/design/motors/page.tsx` (Motor Library).
+
+**Reported:** 2026-07-21
+
+**Ask:** "A separate tab that just has useful information in it — basically a knowledge tab." A home
+in the app for reference material, starting with the fixture cross-reference (item 26).
+
+**Light recon 2026-07-21:**
+
+- **Peak already has the reference-page pattern.** Motor Library (curated ETC hoist specs) is exactly
+  "useful information" — it just lives as a Design child today. A Knowledge tab is the natural home
+  for that class of content, and Motor Library is a candidate to move (or link) there.
+- **There's a deep well of curated Peak reference material** already written up in Peak Knowledge
+  memory that could feed this tab over time: the fixture cross-references (item 26), hoist/motor
+  specs, the Design Doctrine (venue-class lighting/rigging standards), school reference sheets. None
+  of it is in the app yet — it's all in the Dropbox memory tree.
+- **It's a nav change.** A new top-level group sits alongside Design / Sales / Operations (see the
+  D97 nav notes in `nav-data.ts`). A Design child is the lighter-weight alternative.
+
+**Open questions (Jeff's call):**
+- **A. Placement** — a new **top-level** nav group (his "separate tab" wording suggests this) or a
+  child under Design?
+- **B. Contents / vision** — beyond the fixture cross-reference, what does Jeff picture living here?
+  Move Motor Library in? Add the Design Doctrine, school reference sheets, other spec docs? This
+  shapes whether it's one page or a mini-section.
+- **C. Static vs living** — curated static pages (Motor Library style), or a knowledge store Jeff can
+  add to / edit in-app without a code change?
+- **D. Audience** — internal-only, staff-wide, or is any of it customer-facing? (The fixture
+  cross-reference itself is internal competitive intel.)
+
+**Status:** OPEN — logged 2026-07-21, no code touched. Item 26 is its first intended resident.
+
+---
+
+## 28. Lineset Builder: default the layout to 50′ × 30′ (was 80′ × 30′) — OPEN
+
+**Area:** `src/lib/design/lineset.ts:48` (`DEFAULT_LINESET_INPUTS.stageWidthFt`) + the reset-button
+label `src/app/(app)/design/lineset/lineset-builder.tsx:367`.
+
+**Reported:** 2026-07-21
+
+**Ask:** Make the Lineset Builder default to **50′ wide × 30′ deep** instead of 80′ × 30′.
+
+**Light recon 2026-07-21 — trivial, two edit points:**
+- `DEFAULT_LINESET_INPUTS` is `stageWidthFt: 80, stageDepthFt: 30, …` (`lineset.ts:47-48`). Only the
+  width changes: **80 → 50.** Depth is already 30.
+- The reset button hardcodes the label **"Reset layout to 80′ × 30′ defaults"** (`:367`) and calls
+  `setInp(DEFAULT_LINESET_INPUTS)` (`:366`). Update the label to "50′ × 30′" so it matches.
+- No decision needed; no downstream math cares (auto-layout reads the live inputs, not the constant).
+
+**Status:** OPEN — logged 2026-07-21, no code touched. Same request as item 29.
+
+---
+
+## 29. Lineset Builder: auto-fill line weights from venue dimensions + a shared curtain model — OPEN
+
+**Area:** `src/lib/design/steel.ts` (`computeSetWeight`, the `FABRICS` table, `ozPerFt2`),
+`src/lib/design/lineset.ts` (`LinesetInputs`), the estimator's curtain rules
+(`src/app/(app)/estimator/pricing.ts` `computeCurtain`, `src/lib/curtain-geom.ts` `curtainAreas`,
+`src/lib/curtain-pricing.ts`), catalog fabrics `src/db/seeds/catalog.ts`, and the two UIs
+(`lineset/lineset-builder.tsx`, `estimator/curtain-modal.tsx`).
+
+**Reported:** 2026-07-21
+
+**Ask:** Pull in "the same information and rules we set for curtains from the design estimator tool"
+so the venue **width / height / depth** help auto-fill the lineset weights — instead of hand-keying
+every line (the screenshot shows all 16 lines with `—` weights, "click a row to enter them").
+
+**Light recon 2026-07-21 — this flips the framing; read before building:**
+
+- **The Lineset Builder ALREADY turns dimensions into weight.** `computeSetWeight` (`steel.ts:476`)
+  does `flatW = w × (1+fullness)`, `cutH = h + cut`, `goods = flatW × cutH × ozPerFt2(fabric) ÷ 16`,
+  plus chain weight and hardware/ft. It has its **own structured fabric table** (`steel.ts:365-376`:
+  velours in oz/linear-yд @ 54″, muslin/scrim in oz/sq-yд) with a real areal-weight conversion. This
+  is the more complete weight model of the two.
+- **The estimator's curtain rules do NOT compute weight.** `curtainAreas`/`computeCurtain` produce
+  **area + cost only**; their fabrics are the catalog seeds where the oz is just text in the
+  description ("25 oz Memorable Velour") and only `costPerSqft` is structured. So "pull the weight
+  rules from the estimator" isn't the shape of it — the estimator has no weight rules to pull.
+- **The real gap is that curtains are modeled TWICE and never linked.** Two fabric lists (steel.ts
+  `FABRICS` carrying oz vs catalog fabrics carrying cost — same fabrics, e.g. "Memorable Velour 25
+  oz" ≈ "25 oz Memorable Velour", stored separately), and two spec shapes (`WeightLine` w/h/full/fab
+  vs `CurtainDraft`). A curtain configured in the estimator has **no path** to a lineset weight, and
+  every lineset line's fabric + dimensions are typed by hand.
+- **There is no venue HEIGHT input.** `LinesetInputs` (and the screenshot) have only Width + Depth.
+  Curtain vertical drop (leg/border height) can't come from depth — it needs a proscenium/trim height
+  the builder doesn't capture today.
+
+**What would actually deliver the intent (Jeff's call):**
+- **A. Auto-fill source** — derive default soft-goods sizes from the venue envelope (borders ≈ width
+  + overlap, legs/travelers ≈ proscenium height, full-stage ≈ W × H), OR pull the curtains already
+  spec'd in the estimator/quote for that venue, OR both?
+- **B. Unify the fabric list** — one fabric record carrying **both** `costPerSqft` (estimator) and
+  areal `oz` (lineset), so picking a fabric anywhere yields both price and weight. Requires
+  reconciling the two name sets and the two `oz`-vs-text representations.
+- **C. Add a venue height / trim input** — needed to size vertical drop. Where does it come from
+  (proscenium height field? per-line as today?).
+- **D. Direction of truth** — does the estimator quote drive the lineset, does the lineset feed the
+  estimator, or does a single shared curtain spec feed both cost and weight?
+- **E. Keep overrides** — auto-filled weights must stay per-line editable; the builder already has
+  per-line overrides + orphan/reattach handling (item 6), so preserve that.
+
+**Status:** OPEN — logged 2026-07-21, no code touched. **Bigger than "copy the estimator's rules"** —
+the weight rules already live in the lineset; the work is unifying the two curtain/fabric models and
+auto-sizing from the venue envelope. Same request as item 28.
+
+---
+
+## 30. Site survey: quick-measure + Bluetooth laser sync — OPEN
+
+**Area:** the Field Survey measure system — `src/lib/stores/surveys.ts:213` (`measureFields`) +
+`:289` (`MEASURE_GROUPS`, `MeasureField`), the on-site client editor
+`src/app/(app)/field-survey/[id]/controls.tsx` + `page.tsx`. No Bluetooth code exists anywhere in
+the app today.
+
+**Reported:** 2026-07-21
+
+**Ask:** Add a "quick measure" to the site (field) survey. Jeff's ideal: a **Bluetooth laser** that
+syncs to the app so a surveyor just points, then the reading drops into a field (type-in or select).
+
+**Light recon 2026-07-21 — the target already exists; the laser is the new part:**
+
+- **The survey already has a structured quick-measurement system.** `measureFields(venueType)` returns
+  a venue-type-driven set of named measurement fields, grouped by `MEASURE_GROUPS`; the client editor
+  already does "measurement entry, condition tags, photo capture" and the field set swaps as
+  `venueType` changes. So a laser reading has a home — it fills the focused `MeasureField`. **No new
+  data model is needed for the measurements themselves.**
+- **The survey is already an offline-first client editor** (service worker + `SyncProvider`,
+  `syncState` pending/syncing) — the right shape for a field tool, and it already runs in the browser
+  on-site.
+- **Feasibility (the real question) — possible, but platform-gated.** A web app talks to a BLE device
+  via the **Web Bluetooth API**, which works in **Android Chrome and desktop Chrome/Edge** but is
+  **NOT supported in Safari (iOS/iPadOS) or Firefox** (Apple declined to implement it — and every iOS
+  browser is WebKit underneath, so iOS Chrome can't either). So whether the *current web app* can do
+  point-and-sync depends entirely on the field device:
+  - **Android phone/tablet or a laptop:** doable directly in the existing web app, no native app.
+  - **iPhone/iPad:** the web app can't use Bluetooth as-is — needs a WebBLE browser (e.g. Bluefy) or
+    wrapping Peak in a native shell (Capacitor + a BLE plugin) / a small companion app.
+- **Hardware matters.** Leica DISTO is the most integration-friendly (official iOS/Android SDK + a
+  documented/reverse-engineered BLE profile; open-source Web-Bluetooth examples exist). Bosch GLM
+  (Blaze) pairs with its own app; direct third-party sync is more DIY.
+- **Always-works fallback:** the manual quick-measure UI (big numeric entry, unit toggle,
+  point→confirm→fill, running list) is platform-agnostic and is the *same* UI a laser would populate.
+  Build that first; the laser is an enhancement layered on where the platform allows BLE.
+
+**Open questions (Jeff's call):**
+- **A. Field device** — what do surveyors carry, iPhone/iPad or Android/laptop? This decides whether a
+  pure-web BLE path even exists. **Most important.**
+- **B. Which laser** — Leica DISTO (easiest) vs Bosch vs other? Drives integration effort.
+- **C. Scope** — ship the manual quick-measure UI first (works everywhere), laser as phase 2?
+- **D. Native shell** — if iOS is required for live sync, is Peak willing to wrap the app (Capacitor)
+  or build a companion app? Bigger architectural step.
+
+**Status:** OPEN — logged 2026-07-21, no code touched. Feasible; the laser half is gated on device
+platform (Web Bluetooth ≠ iOS Safari). Manual quick-measure is unblocked and platform-agnostic.
+
+---
+
+## 31. Native app feasibility — "make it a real app someday" (strategic note, not a change) — OPEN
+
+**Reported:** 2026-07-21 (Jeff's question, prompted by item 30's iOS-Bluetooth gap)
+
+**Question:** Can Peak become an actual (store-installable, native) app rather than just a web app —
+or is that prohibitively expensive/complicated?
+
+**Answer — feasible, and NOT prohibitive, because the app is already a PWA:**
+
+- **Current state (verified 2026-07-21):** Next.js 16 / React 19, deployed on Vercel, with a web
+  manifest (`public/manifest.webmanifest`, linked at `src/app/layout.tsx:22`), a service worker
+  (`public/sw.js`), an app icon, and an existing **offline sync engine** (`src/lib/sync/`). This is
+  ~80% of "an app" already. No Capacitor/Expo/React-Native present yet.
+
+- **The three realistic paths, cheap → expensive:**
+  1. **Installable PWA (≈ free, basically already here).** "Add to Home Screen" gives an icon +
+     full-screen, no browser chrome. Gap: iOS PWAs still can't do Bluetooth, limited push, no store
+     listing. Worth confirming the manifest is clean and promoting install.
+  2. **Capacitor native shell (the pragmatic "real app").** Wraps the *existing* codebase in an
+     iOS/Android binary → App Store + Play Store presence **and native plugin access: Bluetooth
+     (solves item 30 on iOS), camera, push, GPS.** Reuses ~all the web code. Moderate effort (weeks,
+     not months). Costs: Apple Developer **$99/yr**, Google Play **$25 one-time**, a Mac for iOS
+     builds, some setup/maintenance eng. **Recommended path when the time comes.**
+  3. **Full native rewrite (React Native / Swift-Kotlin).** Months, a parallel codebase to maintain
+     forever. Overkill for a business/field CRM. **The "prohibitively expensive" path — avoid.**
+
+- **The one real complication:** Next.js runs on a server (server components/actions on Vercel);
+  Capacitor prefers static assets. Standard pattern = the shell loads the hosted app URL and the
+  existing offline sync engine covers field use. Navigable, and it's the main design question if we go
+  Capacitor.
+- **Ties to item 30:** the Bluetooth laser is the single most compelling reason to go native (it's the
+  thing iOS Safari can't do). Building genuine native features also clears Apple's "not just a
+  website" review bar (guideline 4.2).
+
+**Status:** OPEN — strategic note, no code, no decision required now. **Recommendation: stay a clean
+installable PWA today; go Capacitor when a native capability (Bluetooth laser, camera, push) justifies
+it — likely alongside item 30.** Not a full rewrite.
+
+---
+
+## 32. Adding a venue: address search doesn't autofill the street on select — OPEN (bug)
+
+**Area:** `src/app/(app)/companies/edit-modal.tsx:209-212` (`pickAddress`) +
+`src/app/(app)/companies/actions.ts:69-80` (`searchAddressAction` → `AddressHitVM`). The address
+parsing itself is fine in `src/lib/geo.ts:314-341` (`normalizeHit` builds `street = house_number +
+road`).
+
+**Reported:** 2026-07-21
+
+**Ask:** When adding a venue, the address search works great, but selecting a hit doesn't autofill the
+exact street.
+
+**Root cause — confirmed 2026-07-21:**
+- Venues are locations on a company; the address picker is the company edit modal's **per-location**
+  search (`pickAddress(i, h)`). On select it runs `setLoc(i, { city, state, lat, lng })` — it
+  **never sets the location's `address`/street field.** City, state and coords fill in; the street
+  line stays as whatever was typed.
+- Compounding: `searchAddressAction` (`companies/actions.ts`) maps the geo hit to `AddressHitVM` as
+  `{title, sub, city, state, lat, lng}` — it **drops `street` entirely**, even though `geo.ts`
+  already parses a clean `street` onto `GeoSearchHit`. So the street never even reaches the modal.
+- Why offices work but venues don't: the Settings/office picker *does* set street
+  (`settings-client.tsx:335` — `street: r.street || r.title`). The company/venue modal is the one
+  that omits it.
+
+**The fix (small, two edits):**
+1. `companies/actions.ts` — add `street` to `AddressHitVM` and include `street: h.street` in the map.
+2. `companies/edit-modal.tsx` `pickAddress` — set it: `setLoc(i, { address: h.street, city, state,
+   lat, lng })`.
+
+**Open question:** POI/venue hits with no house number yield a road-only or empty `street` (an OSM
+data gap). Acceptable (city/state/coords still fill), or add a fallback to the road / display name?
+Minor — the primary defect is that street is dropped entirely.
+
+**Status:** OPEN — logged 2026-07-21, no code touched. Small and well-isolated; ready to fix on your
+go.
+
+---
+
+## 33. Mobile readability + per-device progressive disclosure — OPEN (program, not a one-screen fix)
+
+**Area:** app-wide. Foundations: `src/app/globals.css` (680 lines — the place for a shared type
+scale + breakpoints), `src/components/nav/Nav.tsx` (already has the hamburger/drawer pattern). The
+per-screen `<style>`/`@media` blocks and inline styles across ~20+ screens.
+
+**Reported:** 2026-07-21
+
+**Ask:** A lot of views and titles are clunky and hard to read on iPhone. Direction Jeff floated:
+**limit what's shown per device — less on mobile, more on tablet, full on computer** (progressive
+disclosure by breakpoint).
+
+**Light recon 2026-07-21 — responsive exists, but it's inconsistent and has no backbone:**
+
+- **No shared breakpoint system.** Viewport detection is hand-rolled per screen at **three different
+  thresholds**: `700px` (estimator, `estimator-client.tsx:311`), `860px` (nav → hamburger,
+  `Nav.tsx:103`), `960px` (inbox, `inbox-shell.tsx:85`). "Mobile vs tablet vs desktop" is defined
+  nowhere and differently everywhere.
+- **Responsive CSS is scattered.** ~41 `@media` blocks across ~20 files (`page.tsx`, `quotes`,
+  `leads`, `catalog`, `projects`, …), each screen solving it locally. No shared responsive utilities.
+- **Inline styles dominate**, and inline styles **can't hold media queries** — so today responsive
+  behaviour needs either a JS viewport hook (the 3 ad-hoc ones), a per-screen `<style>` block, or
+  `globals.css`. This is the architectural constraint on any mobile pass.
+- **Titles are fixed px**, so they don't scale down gracefully — the direct cause of "titles hard to
+  read." Dense tables (e.g. the lineset schedule, quotes/leads grids) don't reflow on a phone.
+- **The app shell is already responsive** (nav hamburger/drawer ≤860px) — a pattern to build on, not
+  replace.
+
+**Recommended shape (Jeff's call on scope/priorities):**
+- **A. One shared breakpoint system** — replace the 700/860/960 sprawl with a single mobile/tablet/
+  desktop definition (a `useBreakpoint()` hook + matching CSS breakpoints). **Foundational** —
+  everything else builds on it.
+- **B. A responsive type scale in `globals.css`** — fluid title/heading sizes (`clamp()`) so titles
+  stop being fixed px. Cheap, high-impact, directly targets "hard to read."
+- **C. Progressive disclosure per tier** (Jeff's idea) — decide what collapses/hides on mobile:
+  dense tables → stacked cards, secondary columns hidden, fewer KPIs. This is per-view design work
+  and needs Jeff's priorities — *which* views hurt most.
+- **D. A responsive pattern that fits inline styles** — standardize on the `useBreakpoint()` hook +
+  a small set of `globals.css` utilities, and CSS-ify the worst offenders, rather than more one-off
+  `<style>` blocks.
+- **E. Sequence as a program** — global foundation (A+B) first, then triage the worst screens
+  (C) in priority order. **Will likely spawn per-screen sub-items** once targets are named.
+
+**Ties in:** doubly worth it if Peak goes native for field use (Capacitor spec + items 30/31) — the
+field survey on a phone is exactly where readability matters most.
+
+**Status:** OPEN — logged 2026-07-21, no code touched. Program-level; needs Jeff's target list. **I
+can turn this from vague to concrete by running the app at iPhone width and cataloguing the worst
+views + titles as named sub-items — say the word.**
+
+---
+
+## 34. Leads → site visit → survey → estimate: wire the pipeline + a request/claim flow — OPEN (program)
+
+**Area:** `src/app/(app)/leads/actions.ts` (lead actions), `src/lib/stores/site-visits.ts`
+(`SiteVisit`), `src/app/(app)/inbox/site-visit-actions.ts` + `site-visit-modal.tsx` (current
+create path), `src/lib/stores/surveys.ts` (`SurveyStage`), `src/app/(app)/field-survey/actions.ts`
+(`createSurvey`, `quoteFromSurvey`). Reusable claim pattern: `leads/actions.ts:claimLeadAction`,
+`design/designs/actions.ts:claimDesignReview` ("Claim review").
+
+**Reported:** 2026-07-21
+
+**Ask:** A **"Site visit requested" button on Leads** to send someone out; site visits ultimately
+lead to site surveys → estimates/designs. Schedule the visit and **assign to a person, or leave it
+open for others to pick up.** And refine the whole process so it's **quicker and information flows the
+right direction.**
+
+**Light recon 2026-07-21 — the pieces mostly exist but the chain isn't connected:**
+
+- **Site visits already exist** (`SiteVisit`, D76/#2) with `assignedTo`, `customerId`, `locationId`,
+  `engagementId`, a reason picklist that already includes **"Site survey / measure"**, and .ics
+  invites — **but they're born in the Inbox only, have no `leadId`, and have no open/claimable
+  status** (just an assignee name). There's no place open visits surface for pickup (they show on the
+  company page + home calendar).
+- **Leads already have the right verbs** — `assign`, **`claim`** (`claimLeadAction`), stage, convert —
+  **but no "request site visit" action.** `convertLeadAction` jumps straight lead → customer + draft
+  quote, **bypassing the visit/survey middle entirely.**
+- **The "assign or leave open to claim" model already exists** — leads claim, and design reviews have
+  the full pattern (unassigned → "Claim review" from an open pool), plus the portal's "unassigned →
+  SLA response queue." **Reuse it for site visits;** don't invent it.
+- **Surveys have a real lifecycle** — `SurveyStage = requested | scheduled | onsite | completed` — and
+  **survey → estimate already works** (`quoteFromSurvey`). **But `createSurvey()` makes a blank
+  standalone survey** (no `leadId`, no `siteVisitId`), so a survey isn't tied to the lead or the visit
+  that prompted it.
+- **Net:** the intended flow (intake copy even says "we schedule a site visit to measure and scope")
+  is **three disconnected hops**: lead→visit (missing), visit→survey (missing — even though a visit
+  reason can be "Site survey / measure"), survey→estimate (exists). "Information flowing the right
+  direction" = threading `leadId` through visit → survey → quote and surfacing status back on the lead.
+
+**Decisions Jeff needs to make (this is a design item, not a single button):**
+- **A. One model or two** — is "site visit requested" the existing `SiteVisit` extended with a
+  **status lifecycle (requested/open/claimed/scheduled/done) + `leadId`**, or a separate request
+  object? *Recommend: extend `SiteVisit`.*
+- **B. Open pool + where it lives** — reuse the claim pattern so a request can be assigned or left
+  open; **needs a site-visits queue/board** for pickup (none today).
+- **C. Auto-seed the survey** — does requesting a visit create the linked `Survey` at stage
+  `requested` (the stages already line up), or does the surveyor create it on-site?
+- **D. Lead stage integration** — should the lead's stage reflect visit requested/scheduled/done, and
+  should **convert be gated on the survey** instead of bypassing it?
+- **E. The button** — where on the lead, and what it captures (default reason "Site survey / measure",
+  preferred timing, assign-or-open).
+
+**Ties in:** overlaps item **2** (site visits from Inbox — extend, don't duplicate), item **30**
+(survey quick-measure/laser is the on-site tool this feeds), and the **Daylite-parity design** (items
+18–23: opportunities pipeline + per-record activity timeline — the same CRM flow). **Strong candidate
+for a brainstorm + design spec** (like the Daylite parity work), given it spans four stores and
+changes the lead lifecycle.
+
+**Status:** OPEN — logged 2026-07-21, no code touched. Program-level; the plumbing largely exists, the
+work is connecting it + a request/claim flow + a design decision on the lead lifecycle.
+
+---
+
+## 35. Consulting proposal builder — structured scopes, checked assumptions, auto lead+estimate, architect + venue links — OPEN (program)
+
+**Area:** `src/app/(app)/design/engagements/quote/controls.tsx` + `quote/actions.ts` (the consulting
+quote form), `src/app/(app)/design/engagements/letter/page.tsx` (`kind=proposal` generator),
+`consulting_proposal` template in `/templates`, `src/lib/stores/engagements.ts`
+(`ConsultingQuotePayload`, `ConsultingEngagement`). Checklist pattern to reuse: inspections
+`blankRubric()` (per item 17). Architect modeling ties to **item 20** (people/companies + roles).
+
+**Reported:** 2026-07-21
+
+**Ask:** Use **Peak's consulting letter** as the guide to create consulting proposals. Add a **form**
+to assist in creating that document. The form needs **scopes**, then **assumptions that are checked**.
+Creation should **log an estimate and a lead**, and **link back to both the architect and the
+venue/company.**
+
+**Light recon 2026-07-21 — D90 built the skeleton; this is the structured layer + the CRM wiring:**
+
+- **Already exists:** a consulting **proposal + professional-services agreement** generator
+  (`letter?id=<quoteId>&kind=proposal`, wording in `/templates` → `consulting_proposal`) and a
+  consulting **quote form** capturing customer, location/venue, contact, fees/phases. The consulting
+  quote **is the estimate** (`source: "consulting"`, flows through the Quotes hub, review gate,
+  revisions, letters). **Venue/company linking already works** (`companyId` + `siteIds`).
+- **Scope is one free-text field** (`scope`) — Jeff wants **structured scopes** (line items). The
+  **spec side already has scope lines with an optional flag** (`engagements/spec/actions.ts:39`,
+  "Optional-scope lines are not part of the base bid") — a model to reuse.
+- **Assumptions are one free-text blob** (the "Terms & assumptions" textarea → `terms`) — Jeff wants
+  **checkable assumptions** (tick the standard ones that apply). No structured assumptions today;
+  `blankRubric()` (inspections) is the template-expansion + checklist pattern to copy, and they could
+  be Settings-editable like the visit-reason picklist.
+- **No lead is created.** `persist()` in `quote/actions.ts` creates the quote only — **it never logs a
+  lead.** Jeff wants creation to log a lead too (pipeline entry). Ties to item **34** ("information
+  flowing the right direction").
+- **No architect model.** Every "architect" hit in the code is incidental ("architectural controls",
+  doc comments) — there is **no architect party/role.** Linking a proposal to an architect is net-new
+  and is squarely **item 20 territory** (a person/company carrying an "architect" role on the
+  engagement).
+- **The actual Peak consulting letter is NOT in memory** (checked Peak Knowledge). **Dependency: Jeff
+  must supply the real letter** (docx/PDF) as the format guide; the current `consulting_proposal`
+  template is generic boilerplate, not Peak's letter.
+
+**Decisions Jeff needs to make (design item, not a single form):**
+- **A. Scopes** — structured scope line items; reuse the spec's `{scope line, optional?}` shape? What
+  fields (title, description, included/optional)?
+- **B. Assumptions** — a checklist of standard assumptions (checked), Settings-editable; what's the
+  default set (from Peak's letter)?
+- **C. The document** — **provide Peak's consulting letter**, then map form → `consulting_proposal`
+  template so the output matches it.
+- **D. Auto-log a lead** — what stage/owner; dedupe against an existing lead for that company?
+- **E. Architect link** — build a minimal architect link now, or wait for item 20's people model
+  (which Jeff took himself)? An architect is a role-linked party.
+
+**Ties in:** item **20** (people/companies + roles → the architect party), item **34** (auto-log a
+lead + pipeline flow), the Consulting module (D90). Converging with 20/34 on one theme: everything
+links to people/companies with roles and flows into the pipeline. **Strong brainstorm + design-spec
+candidate.**
+
+**Status:** OPEN — logged 2026-07-21, no code touched. **Blocked on Jeff supplying the actual Peak
+consulting letter** (needed as the format guide) and coupled to item 20 for the architect party.
+
+---
+
+## 36. Estimator: assumptions/exceptions, BOM vs narrative quotes, and document attachments — OPEN
+
+**Area:** `src/lib/stores/quotes.ts` (`Quote` — the target for new fields), the estimator
+(`src/app/(app)/estimator/estimator-client.tsx`, `preview-doc.tsx`, `actions.ts`). Reusable
+attachment infra: `src/app/(app)/design/engagements/view.tsx:1258` ("Attach document" component) +
+`phase.attachments`, and the inbox `AttachmentVM` (`inbox/types.ts`).
+
+**Reported:** 2026-07-21
+
+**Ask (three parts):**
+1. **Assumptions + exceptions** added inside the estimation portion.
+2. **Both BOM quotes and narrative quotes** — either output is fine, and both will be needed.
+3. **Documents attached to estimates** (vendor quotes and other items) useful for the **PM if the
+   quote moves forward.**
+
+**Light recon 2026-07-21 — all three are net-new on the quote, each with a pattern to reuse:**
+
+- **A. Assumptions/exceptions — net-new.** The estimator has only a **hardcoded standing "terms"
+  line** (`preview-doc.tsx:87-88`, the four fixed sentences, toggled via `pdfTerms`). There is **no
+  per-quote editable assumptions or exceptions.** This is the **same need as item 35's consulting
+  "checked assumptions"** — build it once as a shared checkable-assumptions/exceptions model usable by
+  both the estimator and consulting, not twice.
+- **B. BOM vs narrative — narrative is net-new.** Today the estimator is **BOM/itemized only**
+  (sections → line items in `spec` → `preview-doc.tsx`). "Narrative" exists only as a *site-intake
+  input* (`actions.ts:303` `kv("Narrative", …)`), **not as a quote output style.** A prose/narrative
+  quote is a new render mode. (The AI-scope path already turns intake into prose, so it could draft
+  the narrative from the BOM/spec.)
+- **C. Attachments — net-new on quotes, but the infra exists.** The `Quote` type has **no
+  `attachments`** field, but consulting phases and the inbox already use an attachments pattern
+  (`phase.attachments` + the "Attach document" upload component + the doc/blob store). **Reuse it** on
+  the estimate. Driver = **vendor quotes**; must **carry forward to the project on Won** (the spawn
+  machinery in `stores/projects.ts`) so the PM has them. Internal-only — vendor quotes never show to
+  the customer.
+
+**Decisions Jeff needs to make:**
+- **A.** One shared assumptions/exceptions model across estimator + consulting (#35)? A checkable
+  standard list + free-text override? What's the default set, and are exceptions separate from
+  assumptions?
+- **B.** Narrative = an alternate *render* of the same BOM, a separate free-form prose field, or
+  both? Per-quote toggle for which the customer receives? Should the AI draft it from the spec?
+- **C.** Which file types; attachments stored on the quote doc vs a blob store; confirm carry-forward
+  to the project on Won; internal-only.
+
+**Ties in:** item **35** (consulting checked assumptions — share the model with A), item **34 / 20**
+(the quote→project→PM handoff and where attachments live), item **24** (revisions — decide whether
+assumptions/narrative/attachments are snapshotted per revision).
+
+**Status:** OPEN — logged 2026-07-21, no code touched. Three separable parts (A/B/C); A and C are
+smaller (patterns exist), B (narrative mode) is the larger design piece.
+
+---
+
+## 37. Estimator: enter a category sell price, back-calculate the margin — OPEN
+
+**Area:** `src/app/(app)/estimator/section-card.tsx` (per-section margin input `onSetMargin`),
+`src/app/(app)/estimator/pricing.ts` (`totals()` and the `sell = cost/(1−margin)` model),
+`src/app/(app)/estimator/types.ts` (`SpecSection`).
+
+**Reported:** 2026-07-21
+
+**Ask:** Manually enter the **sell price on categories** (sections) and have the **margin update**
+based on that.
+
+**Light recon 2026-07-21 — this inverts an input that already exists:**
+
+- **The estimator uses margin-on-price:** `sell = cost / (1 − margin)` (`pricing.ts:24,147,317`), so
+  margin is the fraction of the *sell* that is profit (0.38 = 38%).
+- **Each section already has a margin % input** (`section-card.tsx` `onSetMargin`, "per-system
+  margin") that drives the price forward. Jeff wants the **reverse** field: type the **sell price**,
+  solve `margin = (price − cost) / price`.
+- **The reverse math already exists** — `totals()` computes the blended `margin = (rev − cost) / rev`
+  (`pricing.ts:109`) and each line already displays `(price − cost) / price` (`section-card.tsx:356`).
+  So it's wiring a new input to existing math, not new pricing logic.
+- **Likely the real goal:** quote a **round number per category** ("sell this section for $10k") and
+  read the implied margin — which the forward margin-% field can't do cleanly.
+
+**Decisions Jeff needs to make:**
+- **A. Distribution** — entering a section sell price should **solve for the uniform section margin
+  that hits it** (mirrors the existing per-section margin field, *recommended*), **scale** existing
+  line prices proportionally, or store a **section-level override** without touching line prices? This
+  is the one real design choice — a section holds many lines with individual costs.
+- **B. Reconcile with pricing tiers (item 11).** A manual sell price is an **override** on top of the
+  tier-seeded margin; confirm it **persists across revisions (item 24)** rather than being recomputed
+  from `tierMargin` when a revision is cut.
+- **C. Guardrails** — warn when the entered price implies a margin below the tier/floor?
+  `marginColor()` already exists to flag thin margins.
+
+**Ties in:** item **11** (pricing tiers → default margin — this is the manual override path), item
+**24** (revisions — the entered price must snapshot, not recompute).
+
+**Status:** OPEN — logged 2026-07-21, no code touched. Contained — the math and the per-section margin
+field already exist; the work is a sell-price input + deciding A (line distribution).
 
 ---
 

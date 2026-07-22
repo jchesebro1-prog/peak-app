@@ -31,6 +31,8 @@ export type SpecItem = {
   labor?: boolean;
   /** optional-scope item — excluded from totals (prototype carried the flag) */
   option?: boolean;
+  /** budget allowance — a priced line with no committed SKU (BOM allowance pattern, punch #36) */
+  allowance?: boolean;
   /** customer-facing note (shows under the line + on the PDF) */
   comment?: string;
   /** internal-only note (never shown to the customer) */
@@ -58,6 +60,8 @@ export type CustomDraft = {
   qty: string;
   cost: string;
   price: string;
+  /** budget allowance — priced line, no SKU (punch #36) */
+  allowance: string;
 };
 
 export type CurtainDraft = {

@@ -364,7 +364,7 @@ export function LinesetBuilder({
             </>
           )}
           <button onClick={() => setInp(DEFAULT_LINESET_INPUTS)} style={{ marginTop: 14, width: "100%", background: "#f6f7f9", border: "1px solid #e4e7ec", borderRadius: 8, padding: "8px", fontSize: 12.5, fontWeight: 600, color: "#5b616e", cursor: "pointer" }}>
-            Reset layout to 80′ × 30′ defaults
+            Reset layout to 50′ × 30′ defaults
           </button>
         </div>
 

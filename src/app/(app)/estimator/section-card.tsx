@@ -270,6 +270,26 @@ export default function SectionCard(p: SectionCardProps) {
                 </span>
               </div>
             )}
+            {isInternal && (
+              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".04em", textTransform: "uppercase" }}>
+                  Sell
+                </span>
+                <input
+                  type="number"
+                  key={"sell-" + Math.round(itemsRev)}
+                  defaultValue={Math.round(itemsRev)}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                  onBlur={(e) => {
+                    const target = parseFloat(e.target.value) || 0;
+                    const m = target > itemsCost ? Math.min(95, ((target - itemsCost) / target) * 100) : 0;
+                    p.onSetMargin(String(m));
+                  }}
+                  title="Type a target sell price for this category; the margin updates to match"
+                  style={{ width: 92, fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600, color: ACCENT_INK, border: "1px solid #dfe2e8", borderRadius: 7, padding: "5px 8px", textAlign: "right" }}
+                />
+              </div>
+            )}
             <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
               <span
                 style={{
@@ -830,6 +850,10 @@ export default function SectionCard(p: SectionCardProps) {
                     >
                       Cancel
                     </button>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#6b7079", cursor: "pointer" }}>
+                      <input type="checkbox" checked={!!cd.allowance} onChange={(e) => p.onSetCustomDraft("allowance", e.target.checked ? "1" : "")} />
+                      Budget allowance
+                    </label>
                     <button
                       type="button"
                       onClick={p.onAddCustomPart}

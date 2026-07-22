@@ -41,6 +41,7 @@ export type SaveCustomerInput = {
 export type AddressHitVM = {
   title: string;
   sub: string;
+  street: string;
   city: string;
   state: string;
   lat: number;

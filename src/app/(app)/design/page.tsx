@@ -50,19 +50,19 @@ export default async function DesignOverviewPage({
         Design
       </h1>
       <p style={{ color: "#8c919c", fontSize: 13, marginBottom: 22 }}>
-        Paid engagements and budgetary designs — the same job at different stages.
+        Paid consulting and budgetary designs — the same job at different stages.
       </p>
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 18 }}>
         <section className="pk-card" style={card}>
           <div style={head}>
-            <strong style={{ fontSize: 14 }}>Active engagements</strong>
+            <strong style={{ fontSize: 14 }}>Active consulting</strong>
             <Link href="/design/engagements" style={{ color: "var(--accent)", fontSize: 12.5 }}>
-              All engagements →
+              All consulting →
             </Link>
           </div>
           {activeEngagements.length === 0 ? (
-            <p style={{ color: "#9aa0ab", fontSize: 13 }}>No active engagements.</p>
+            <p style={{ color: "#9aa0ab", fontSize: 13 }}>No active consulting.</p>
           ) : (
             activeEngagements.slice(0, 8).map((e) => (
               <Link

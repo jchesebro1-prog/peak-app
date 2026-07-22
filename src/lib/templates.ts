@@ -169,14 +169,15 @@ export const TEMPLATES: TemplateDef[] = [
         multiline: true,
         help: "Frames the engagement as independently paid design work.",
         default:
-          "{{company}} proposes to provide professional consulting services to {{customer}} for {{engagement}}. This work is performed as an independent, fee-based engagement: deliverables, review cadence, and fees are defined below, and the engagement never converts into an installation contract — any future installation work would be quoted separately.",
+          "Thank you for the opportunity to provide a design-fee proposal for {{engagement}}. {{company}} is pleased to submit the following scope and professional fees. The following services were requested: design, layout, construction drawings, and specifications for the audio-video and theatrical lighting, rigging, and curtain systems, including coordination with the architect, engineering consultants, and other project team members. This is an independent, fee-based design engagement; any resulting installation work would be quoted separately.",
       },
       {
         id: "scopeLead",
         label: "Scope lead-in",
         multiline: true,
+        help: "Count every recurring obligation (meetings, drawing sets, site visits) so the fixed fee doesn't bleed.",
         default:
-          "The scope of services for this engagement is as follows:",
+          "Additionally, the scope of work shall include the following:",
       },
       {
         id: "feeLineFixed",
@@ -184,7 +185,7 @@ export const TEMPLATES: TemplateDef[] = [
         multiline: true,
         help: "Used when the engagement is a single fixed fee.",
         default:
-          "The professional fee for the services described above is {{fee}}, fixed. This fee is independent of any future construction or installation pricing.",
+          "The professional design fee for the services described above is {{fee}}, fixed, split by discipline as shown below. A discipline may be retained or removed without renegotiating the others. This fee is independent of any future construction or installation pricing.",
       },
       {
         id: "feeLineMilestones",
@@ -199,7 +200,7 @@ export const TEMPLATES: TemplateDef[] = [
         label: "Standard terms",
         multiline: true,
         default:
-          "Progress gates on internal review by {{company}}'s senior staff. Certificates of insurance are available on request. Reimbursable expenses, sales tax where applicable, and third-party fees (plan review, permitting) are billed separately when required. Either party may terminate with written notice; fees for work performed to date remain due.",
+          "Backgrounds are to be provided by others in AutoCAD .dwg format; Revit modeling is not supported. Reimbursable expenses, applicable sales tax, and third-party fees (plan review, permitting) are billed separately when required. Certificates of insurance are available on request. This proposal is valid for thirty (30) days. Either party may terminate with written notice; fees for work performed to date remain due.",
       },
       {
         id: "signoff",

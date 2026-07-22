@@ -25,11 +25,12 @@ export const NAV: NavEntry[] = [
     label: "Design",
     children: [
       { key: "designoverview", label: "Overview", href: "/design" },
-      { key: "engagements", label: "Engagements", href: "/design/engagements" },
+      { key: "engagements", label: "Consulting", href: "/design/engagements" },
       { key: "designs", label: "Designs", href: "/design/designs" },
       { key: "steel", label: "Steel Calculator", href: "/design/steel" },
       { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
       { key: "motors", label: "Motor Library", href: "/design/motors" },
+      { key: "fixtures", label: "Fixture Cross-Ref", href: "/design/fixtures" },
     ],
   },
   {

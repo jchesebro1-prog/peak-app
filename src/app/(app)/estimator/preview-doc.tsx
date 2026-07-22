@@ -76,10 +76,11 @@ export type PreviewProps = {
   setDetail: (d: "itemized" | "sectioned") => void;
   pdfQty: boolean;
   pdfNotes: boolean;
+  pdfPrices: boolean;
   pdfCover: boolean;
   pdfTerms: boolean;
   pdfOptions: boolean;
-  togglePdf: (flag: "pdfQty" | "pdfNotes" | "pdfCover" | "pdfTerms" | "pdfOptions") => void;
+  togglePdf: (flag: "pdfQty" | "pdfNotes" | "pdfPrices" | "pdfCover" | "pdfTerms" | "pdfOptions") => void;
 };
 
 const DAY_MS = 86400000;
@@ -102,7 +103,9 @@ function longDate(ms: number): string {
 
 export default function PreviewDoc(p: PreviewProps) {
   const isItemized = p.detail === "itemized";
-  const lineCols = p.pdfQty ? "1fr 70px 104px" : "1fr 104px";
+  const lineCols = p.pdfPrices
+    ? (p.pdfQty ? "1fr 70px 104px" : "1fr 104px")
+    : (p.pdfQty ? "1fr 70px" : "1fr");
   const showCover = !!(p.pdfCover && p.quoteNote && p.quoteNote.trim());
   const revDateLabel = longDate(p.revDateMs);
   const validThruLabel = longDate(p.revDateMs + 30 * DAY_MS);
@@ -134,7 +137,7 @@ export default function PreviewDoc(p: PreviewProps) {
               ]
             : visible.map((it) => ({
                 key: String(it.id),
-                desc: it.desc,
+                desc: it.allowance ? "Budget allowance — " + it.desc : it.desc,
                 comment: (it.comment || "").trim(),
                 showComment: !!(p.pdfNotes && it.comment && it.comment.trim()),
                 qty: it.qty as string | number,
@@ -261,6 +264,9 @@ export default function PreviewDoc(p: PreviewProps) {
           </button>
           <button type="button" onClick={() => p.togglePdf("pdfNotes")} style={p.pdfNotes ? segOn : segOff}>
             {(p.pdfNotes ? "✓ " : "") + "Line notes"}
+          </button>
+          <button type="button" onClick={() => p.togglePdf("pdfPrices")} style={p.pdfPrices ? segOn : segOff} title="Off = client BOM: quantities only, no per-line pricing">
+            {(p.pdfPrices ? "✓ " : "") + "Prices"}
           </button>
           <button type="button" onClick={() => p.togglePdf("pdfCover")} style={p.pdfCover ? segOn : segOff}>
             {(p.pdfCover ? "✓ " : "") + "Cover note"}
@@ -534,11 +540,13 @@ export default function PreviewDoc(p: PreviewProps) {
                           {ln.qty} {ln.unit}
                         </span>
                       )}
-                      <span
-                        style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
-                      >
-                        {ln.ext}
-                      </span>
+                      {p.pdfPrices && (
+                        <span
+                          style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
+                        >
+                          {ln.ext}
+                        </span>
+                      )}
                     </div>
                   ))}
                   {ps.hasFreight && (
@@ -556,11 +564,13 @@ export default function PreviewDoc(p: PreviewProps) {
                     >
                       <span>Freight &amp; delivery</span>
                       {p.pdfQty && <span></span>}
-                      <span
-                        style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
-                      >
-                        {ps.freightLabel}
-                      </span>
+                      {p.pdfPrices && (
+                        <span
+                          style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
+                        >
+                          {ps.freightLabel}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -631,9 +641,11 @@ export default function PreviewDoc(p: PreviewProps) {
                       {it.qty} {it.unit}
                     </span>
                   )}
-                  <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}>
-                    {fmt(it.qty * it.price)}
-                  </span>
+                  {p.pdfPrices && (
+                    <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}>
+                      {fmt(it.qty * it.price)}
+                    </span>
+                  )}
                 </div>
               ))}
               <div style={{ fontSize: 11, color: "#8c919c", marginTop: 8, lineHeight: 1.5 }}>

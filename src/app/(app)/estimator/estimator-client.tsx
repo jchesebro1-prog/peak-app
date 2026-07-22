@@ -103,6 +103,7 @@ const CSS = `
 
 const freshCustom = (): CustomDraft => ({
   desc: "",
+  allowance: "",
   sku: "",
   unit: "ea",
   qty: "1",
@@ -270,6 +271,7 @@ export default function EstimatorClient({
   const [pdfCover, setPdfCover] = useState(true);
   const [pdfTerms, setPdfTerms] = useState(true);
   const [pdfOptions, setPdfOptions] = useState(true);
+  const [pdfPrices, setPdfPrices] = useState(true);
   const [detail, setDetail] = useState<"itemized" | "sectioned">("itemized");
   const [activeId, setActiveId] = useState<string | null>(
     () => (initial.sections ?? demoSections())[0]?.id ?? null
@@ -510,7 +512,7 @@ export default function EstimatorClient({
     );
   };
   const setSystemMargin = (secId: string, v: string) => {
-    const m = parseInt(v, 10) / 100;
+    const m = parseFloat(v) / 100; // fractional so a typed sell price hits exactly (punch #37)
     setSections((ss) =>
       ss.map((s) =>
         s.id === secId
@@ -691,13 +693,14 @@ export default function EstimatorClient({
     pushItems(secId, [
       {
         id: nextId(),
-        sku: (d.sku || "").trim() || "CUSTOM",
+        sku: d.allowance ? "" : ((d.sku || "").trim() || "CUSTOM"),
         desc,
         qty,
         unit: (d.unit || "").trim() || "ea",
         cost,
         price,
         custom: true,
+        allowance: d.allowance ? true : undefined,
       },
     ]);
     setCustomFor(null);
@@ -1946,12 +1949,14 @@ export default function EstimatorClient({
           setDetail={setDetail}
           pdfQty={pdfQty}
           pdfNotes={pdfNotes}
+          pdfPrices={pdfPrices}
           pdfCover={pdfCover}
           pdfTerms={pdfTerms}
           pdfOptions={pdfOptions}
           togglePdf={(flag) => {
             if (flag === "pdfQty") setPdfQty((v) => !v);
             else if (flag === "pdfNotes") setPdfNotes((v) => !v);
+            else if (flag === "pdfPrices") setPdfPrices((v) => !v);
             else if (flag === "pdfCover") setPdfCover((v) => !v);
             else if (flag === "pdfOptions") setPdfOptions((v) => !v);
             else setPdfTerms((v) => !v);

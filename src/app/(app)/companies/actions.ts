@@ -74,6 +74,7 @@ export async function searchAddressAction(query: string): Promise<AddressHitVM[]
   return hits.map((h) => ({
     title: h.title,
     sub: h.sub,
+    street: h.street,
     city: h.city,
     state: h.state,
     lat: h.lat,

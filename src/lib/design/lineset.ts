@@ -45,7 +45,7 @@ export type LinesetInputs = {
 
 /** v13 defaults: 80'×30', 8/10/0/12/5/16/3/4, gp 0, all toggles on. */
 export const DEFAULT_LINESET_INPUTS: LinesetInputs = {
-  stageWidthFt: 80,
+  stageWidthFt: 50,
   stageWidthIn: 0,
   stageDepthFt: 30,
   stageDepthIn: 0,

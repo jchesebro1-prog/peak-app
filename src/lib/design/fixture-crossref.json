@@ -1,0 +1,3969 @@
+{
+ "compiled": "2026-07-14",
+ "categories": [
+  {
+   "key": "led_ellipsoidal",
+   "name": "LED Ellipsoidal",
+   "spec": {
+    "header": [
+     "Mfr",
+     "Model",
+     "Status",
+     "Class",
+     "Color Engine",
+     "Watts",
+     "Output (lm)",
+     "Output Condition",
+     "CRI"
+    ],
+    "rows": [
+     [
+      "ETC",
+      "Source Four LED Series 3 \u2014 Lustr X8",
+      "Current (flagship)",
+      "A",
+      "8-color Lustr X8 (deep red, red, amber, lime, green, cyan, blue, indigo)",
+      "307",
+      "10,889 (to 13,000 w/ XDLT claim)",
+      "25-50 zoom tube, narrow; datasheet",
+      "Ra 93-98 by CCT; TLCI 97 @5600K"
+     ],
+     [
+      "ETC",
+      "Source Four LED Series 3 \u2014 Daylight HDR",
+      "Current",
+      "A",
+      "6-color tunable white (deep red, red, mint, cyan, blue, indigo)",
+      "340",
+      "14,214",
+      "25-50 zoom tube, narrow; datasheet",
+      "Ra 86-95 by CCT; TLCI 98 @5600K"
+     ],
+     [
+      "ETC",
+      "ColorSource Spot V",
+      "Current",
+      "B",
+      "5-color RGBIL (red, green, blue, indigo, lime)",
+      "199",
+      "5,906-9,498",
+      "Peak 9,498 w/ 70-deg tube; per-tube table",
+      "TM-30 Rf 88-106 by preset (Ra not published)"
+     ],
+     [
+      "ETC",
+      "ColorSource Spot jr",
+      "Current (2023)",
+      "C",
+      "4-color RGBL (Original) or RGIL 'Deep Blue'",
+      "166",
+      "5,708 (Orig) / 5,426 (DB)",
+      "Full, built-in zoom; datasheet",
+      "Ra 82 @3200K / 64 @5600K (Orig); 79-80 (DB)"
+     ],
+     [
+      "ETC",
+      "Source 4WRD II (retrofit)",
+      "Current",
+      "D",
+      "Fixed white: 3200K Std (81 CRI) / 3200K Gallery (92) / 5900K Daylight Gallery (93)",
+      "150",
+      "9,716-11,430",
+      "w/ 26-deg EDLT; datasheet",
+      "81 / 92 / 93 by variant"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation Reve E-3",
+      "Current (flagship)",
+      "A",
+      "6-color (red, green, blue, royal blue, amber, mint); 2800-8000K",
+      "367",
+      "13,300",
+      "w/ 26-deg tube; mfr",
+      "95.4 @3200K"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation Reve E-3 IP",
+      "Current (2023)",
+      "A",
+      "Same 6-color engine as Reve E-3",
+      "354",
+      "12,178",
+      "w/ 26-deg tube; mfr",
+      "93.5"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation E-910FC (-2)",
+      "Current",
+      "B",
+      "RGBA + lime, 91 LEDs",
+      "215",
+      "4,316",
+      "w/ 26-deg tube; mfr",
+      "86 @3200K"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation E-910FC IP",
+      "Current",
+      "B",
+      "RGBA + lime",
+      "225",
+      "4,316 (26 deg); 7,263 (25-50 wide)",
+      "Per-lens; mfr",
+      "86 @3200K"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation E-260WW / E-260CW (-2)",
+      "Current",
+      "D",
+      "Single white COB: WW 3149K / CW 5452K",
+      "230",
+      "WW 10,284 / CW 13,368",
+      "w/ 26-deg tube; mfr",
+      "96"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation E-260WW IP",
+      "Current",
+      "D",
+      "Warm white 3149K",
+      "221",
+      "12,455",
+      "w/ 26-deg tube; mfr",
+      "96"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation E-160WW (-2)",
+      "Current (US only)",
+      "D",
+      "Warm white 3031K",
+      "101",
+      "unknown (lux only: 3,189 lx @5m, 26 deg)",
+      "Illuminance only published",
+      "90"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation E-2 FC",
+      "Current (2023)",
+      "C",
+      "6-color RGBA-lime + cyan, 72 LEDs",
+      "208",
+      "3,708 spot / 5,608 flood",
+      "Integrated zoom; mfr",
+      "93 @3200K"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation Reve E2",
+      "Pre-order (2026)",
+      "B",
+      "RGBACM (red, green, blue, amber, cyan, mint)",
+      "251",
+      "unknown (specs being finalized)",
+      "n/a",
+      "unknown"
+     ],
+     [
+      "Elation",
+      "KL Profile FC",
+      "Current (flagship)",
+      "A",
+      "RGBMA (red, green, blue, mint, amber); 2400-8500K",
+      "305",
+      "10,600",
+      "Total fixture output; mfr",
+      "93.5 (FC lists 92)"
+     ],
+     [
+      "Elation",
+      "KL Profile Compact",
+      "Current (2025)",
+      "C",
+      "RGBMA; 2400-8500K",
+      "225",
+      "5,880",
+      "Integrating sphere; mfr",
+      "94.9; TLCI 95"
+     ],
+     [
+      "Vari-Lite",
+      "VL600 Acclaim PLE RGBL",
+      "Current (2024)",
+      "B",
+      "RGBL; 3200-7100K",
+      "150",
+      "8,500",
+      "ENGINE ONLY (no tube \u2014 reads high)",
+      "Ra 84-85; TM-30 Rf 77-78"
+     ],
+     [
+      "Vari-Lite",
+      "VL600 Acclaim PLE WW",
+      "Current (2024)",
+      "D",
+      "Fixed warm white 3200K",
+      "165",
+      "8,500",
+      "ENGINE ONLY",
+      "95; TM-30 Rf 91; TLCI 95"
+     ],
+     [
+      "Vari-Lite",
+      "VL600 Acclaim PLE+",
+      "Current (Dec 2024)",
+      "A",
+      "RGBL; 3200/5600/7100K presets",
+      "305",
+      "15,500",
+      "ENGINE ONLY (no tube \u2014 reads high)",
+      "Ra 84-85; TM-30 Rf 77-78"
+     ],
+     [
+      "Vari-Lite",
+      "VL600 Acclaim ZoomSpot",
+      "Current",
+      "C",
+      "RGBL; 3200-7100K",
+      "150",
+      "6,500 beam / 8,500 field",
+      "Integrated optics; datasheet",
+      "Ra 74-84"
+     ],
+     [
+      "Altman",
+      "PHX1.5 (fixed lens)",
+      "Current \u2014 verify availability",
+      "B",
+      "RGBL; whites 2700-10,000K",
+      "150",
+      "unknown (not published)",
+      "n/a",
+      "94 @3000K; TM-30 Rf 91"
+     ],
+     [
+      "Altman",
+      "PHX1.5 Zoom (15-35 / 30-55)",
+      "Current \u2014 verify availability",
+      "B",
+      "RGBL",
+      "150",
+      "unknown",
+      "n/a",
+      "94 @3000K (engine)"
+     ],
+     [
+      "Altman",
+      "PHX3.5 (fixed lens)",
+      "Current flagship \u2014 verify availability",
+      "A",
+      "RGBL; whites 2700-10,000K",
+      "340",
+      "~10,000-12,800",
+      "Config-dependent; mfr/dealer",
+      "unknown (PHX3 measured 89 @3200K)"
+     ],
+     [
+      "Altman",
+      "PHX3.5 Zoom (15-35 / 30-55)",
+      "Current \u2014 verify availability",
+      "A",
+      "RGBL",
+      "340",
+      "10,272-12,800",
+      "Zoom config; datasheet",
+      "unknown"
+     ],
+     [
+      "Altman",
+      "PHX LVD (3000K / 5000K)",
+      "Current \u2014 verify availability",
+      "D",
+      "Fixed white 3000K or 5000K",
+      "200",
+      "unknown",
+      "n/a",
+      ">93"
+     ],
+     [
+      "ADJ",
+      "Encore Profile Pro Color (ENC251)",
+      "Current",
+      "B",
+      "6-in-1 RGBWAL; 2400-9000K macros",
+      "250",
+      "6,000",
+      "w/ 26-deg tube; mfr",
+      ">90"
+     ],
+     [
+      "ADJ",
+      "Encore Profile Pro WW (ENC273)",
+      "Current",
+      "D",
+      "Warm white 3200K",
+      "260",
+      "10,000+",
+      "w/ 26-deg tube; mfr",
+      ">97"
+     ],
+     [
+      "ADJ",
+      "Encore Profile 1000 Color (ENC132)",
+      "Current",
+      "E",
+      "RGBW COB (not RGBAL)",
+      "144",
+      "unknown (lux only: 4,940 lx @2m, 12 deg)",
+      "Own zoom optics",
+      "unknown"
+     ],
+     [
+      "ADJ",
+      "Encore Profile 1000 WW (ENC264)",
+      "Current",
+      "E",
+      "Warm white COB 3200K",
+      "144",
+      "unknown (lux only: 5,970 lx @2m, 12 deg)",
+      "Own zoom optics",
+      "98"
+     ],
+     [
+      "ADJ",
+      "Encore Profile Mini Color",
+      "Current (~2023)",
+      "E",
+      "16x 3.5W RGBWAL; 2700-6500K presets",
+      "55",
+      "300 (mfr figure \u2014 probable typo, treat as unverified)",
+      "Bare fixture, lens extra",
+      ">86"
+     ],
+     [
+      "ADJ",
+      "Encore Profile Mini WW",
+      "Current",
+      "E",
+      "Warm white 3000K",
+      "46",
+      "900",
+      "Bare fixture; mfr",
+      ">98"
+     ],
+     [
+      "LEGACY / DISCONTINUED REFERENCE (still in the field \u2014 useful for retrofit conversations)",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ETC",
+      "Source Four LED Series 2 (Lustr/Daylight HD/Tungsten HD)",
+      "LEGACY \u2014 discontinued",
+      "-",
+      "Series 2 arrays",
+      "-",
+      "-",
+      "-",
+      "-"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation E-930VW",
+      "LEGACY \u2014 discontinued",
+      "-",
+      "6-color variable white 2800-8000K",
+      "226",
+      "5,485 (26 deg)",
+      "mfr",
+      "88-92"
+     ],
+     [
+      "Strand",
+      "Leko LED Profile FC / TWW / TCW",
+      "DISCONTINUED",
+      "-",
+      "FC: 6-color RGBALC; tunable whites",
+      "<300",
+      "8,000-9,300",
+      "Full output; spec sheet",
+      "FC >92; TWW 97; TCW 96"
+     ],
+     [
+      "Altman",
+      "PHX1 / PHX2 (Gen 1, all engines)",
+      "DISCONTINUED",
+      "-",
+      "RGBA / RGBW / 3K / 5600K / var. white",
+      "150 / 250",
+      "unknown (fc tables only)",
+      "-",
+      "92 (white engines)"
+     ]
+    ]
+   },
+   "equivalents": {
+    "header": [
+     "Class / ETC Anchor",
+     "Competitor Fixture",
+     "Street $ vs ETC",
+     "How close is it?",
+     "Where the competitor wins",
+     "Where ETC wins",
+     "One-line talking point"
+    ],
+    "rows": [
+     [
+      "CLASS A \u2014 PREMIUM FULL-COLOR, TUBE-BASED, HIGH OUTPUT | ETC anchor: Source Four LED Series 3 Lustr X8 (~$2,340 engine+barrel, 307W, ~11k lm, 8-color)",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "S4 LED S3 Lustr X8",
+      "Chauvet Ovation Reve E-3",
+      "~$2,211 \u2014 roughly even",
+      "Closest cross-brand match in the industry. Same job, same form factor, similar money.",
+      "Higher published per-lens output (13,300 lm @26 vs ~10,900); 18-bit dimming; CRI 95.4 headline; often undercuts ETC by $300-500 in package bids; 6-color engine with mint reads very well on skin",
+      "8-color array with deep red + indigo = wider gamut and better deep saturates; XDLT optics (crisper shutter cuts, less halation); native S4 tube ecosystem the school already owns; Multiverse wireless + NFC config; 10-yr array warranty; ETC dealer/service network",
+      "A Reve E-3 is an S3 Lustr X8 with two fewer colors and no S4-tube/Multiverse/NFC ecosystem \u2014 it wins on brochure lumens, ETC wins on color depth, optics, and everything around the fixture."
+     ],
+     [
+      "S4 LED S3 Lustr X8",
+      "Vari-Lite VL600 Acclaim PLE+",
+      "$2,887 \u2014 ~$550 more",
+      "Output rival, not a color rival.",
+      "15,500 engine lumens (biggest raw number in class, but measured without a tube); native Art-Net/sACN + Ethercon; dual gobo/iris slot; lighter (17.9 lb)",
+      "Color quality is a different league: Ra 93-98 vs 84-85, 8 colors vs RGBL; ETC tube ecosystem; NFC/Multiverse; established school-market pedigree",
+      "PLE+ is a brightness play with console-grade networking \u2014 but at CRI 84 it can't touch S3 color; if the spec says 'full spectrum,' it's disqualified."
+     ],
+     [
+      "S4 LED S3 Lustr X8",
+      "Elation KL Profile FC",
+      "$3,196 \u2014 ~$850 more",
+      "Different concept: all-in-one (no tubes) with motorized-feature ambitions.",
+      "Integrated 6-50 zoom, rotating/indexing gobo slot, and built-in E-FLY wireless \u2014 one SKU does what an S4 needs tubes + accessories for; 10,600 lm total",
+      "Less than half the weight (14.9 vs 34.6 lb \u2014 big deal on old pipe grids); tube ecosystem = cheaper long-term flexibility; crisper imaging optics; cheaper; Elation has no lens-tube path if needs change",
+      "KL Profile FC is a Swiss-army ellipsoidal \u2014 great where one fixture must do everything, but it's 35 lbs and $850 more; a school rep plot is better served by S3 + tubes."
+     ],
+     [
+      "S4 LED S3 Lustr X8",
+      "Altman PHX3.5",
+      "$2,690-3,267 \u2014 even to more",
+      "Output-class peer, color-class below.",
+      "Similar output class (~10-12.8k lm); RDM-selectable fan modes",
+      "8-color vs RGBL; published CRI; lighter; Multiverse/NFC; and the big one: Altman availability/viability is in question (dealer delistings + plant-closing report)",
+      "PHX3.5 matches S3 brightness but not its color engine \u2014 and with Altman's factory status uncertain, spec'ing it is a support risk."
+     ],
+     [
+      "CLASS B \u2014 MID-POWER FULL-COLOR | ETC anchor: ColorSource Spot V (~$1,600-1,712, 199W, RGBIL, up to ~9.5k lm)",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ColorSource Spot V",
+      "Chauvet Ovation E-910FC",
+      "~$1,498 \u2014 ~$150 less",
+      "The classic head-to-head in this tier.",
+      "Slightly cheaper; convection-cooled 'silent' claim; RGBA+lime mixes warm pastels well",
+      "Notably brighter (up to 9,498 lm vs 4,316 @26); indigo emitter deepens blues; native S4 tubes (E-910FC tube fit is unofficial); Multiverse + NFC options; CRI on E-910FC is only 86",
+      "E-910FC saves ~$150 but gives up roughly half the punch and the indigo end of the gamut \u2014 Spot V is the stronger mid-tier buy."
+     ],
+     [
+      "ColorSource Spot V",
+      "ADJ Encore Profile Pro Color",
+      "$1,550 \u2014 roughly even",
+      "Value challenger with a 6-color engine.",
+      "6-in-1 RGBWAL engine (adds white+amber); 25kHz camera mode; B-size gobos; strong HoW dealer presence",
+      "Brighter; native S4 tube ecosystem vs ADJ's proprietary EP mount (locks the school into ADJ glass); RDM+Multiverse/NFC; theatrical pedigree and spare-parts path",
+      "Pro Color looks even on paper until the lens bill: its proprietary tubes lock the house into ADJ, while Spot V runs the S4 tubes they already own."
+     ],
+     [
+      "ColorSource Spot V",
+      "Vari-Lite VL600 Acclaim PLE RGBL",
+      "$1,999 \u2014 ~$350 more",
+      "Brightness up, color down.",
+      "8,500 engine lumens from only 150W; selectable fan acoustics; PLT/SPX tube options",
+      "Cheaper; RGBIL gamut and TM-30 up to 106 vs Ra 84; S4 tubes; Multiverse/NFC",
+      "PLE RGBL buys raw output per watt; Spot V buys color fidelity per dollar \u2014 for theater, fidelity usually wins."
+     ],
+     [
+      "ColorSource Spot V",
+      "Altman PHX1.5",
+      "$2,630-3,277 \u2014 $1,000+ more",
+      "Niche: the silent room.",
+      "Dead-silent convection cooling (no fan at all); CRI 94",
+      "Roughly $1,000-1,600 cheaper; brighter; S4 ecosystem; availability confidence",
+      "PHX1.5 exists for rooms where zero fan noise is the spec (recital halls, broadcast) \u2014 everywhere else Spot V does more for far less."
+     ],
+     [
+      "ColorSource Spot V",
+      "Chauvet Ovation Reve E2 (pre-order)",
+      "unknown",
+      "Incoming threat to watch.",
+      "RGBACM engine, 13.6 lb, NFC \u2014 Reve color science at mid power",
+      "Shipping today with known photometrics; Reve E2 specs still preliminary",
+      "When Reve E2 ships it likely becomes the Spot V's nearest rival \u2014 track pricing."
+     ],
+     [
+      "CLASS C \u2014 COMPACT ALL-IN-ONE ZOOM | ETC anchor: ColorSource Spot jr ($1,140-1,285, 166W, 4-color, built-in 25-50 zoom)",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ColorSource Spot jr",
+      "Chauvet Ovation E-2 FC",
+      "$1,412 \u2014 ~$250 more",
+      "Same form factor, richer engine.",
+      "6-color full-spectrum (jr is 4-color); CRI 93 vs 82; ~5.6k lm flood ~= jr's output with better color; 18-bit dimming",
+      "Cheaper; lighter (12 vs 14.8 lb); ETC ecosystem/warranty (10-yr array)",
+      "E-2 FC is a jr with two more colors and camera-grade CRI for ~$250 \u2014 the honest answer is E-2 FC wins on light, jr wins on price and brand."
+     ],
+     [
+      "ColorSource Spot jr",
+      "Elation KL Profile Compact",
+      "$1,695 \u2014 ~$500 more",
+      "Premium compact.",
+      "CRI 94.9 + TLCI 95 (best in class); RGBMA; NFC + Aria x2 wireless mgmt; dim-to-warm",
+      "~$500 cheaper; simpler for volunteer operators; ETC dealer network",
+      "KL Compact is the broadcast-grade pick; jr is the budget-grade pick \u2014 different customers."
+     ],
+     [
+      "ColorSource Spot jr",
+      "Vari-Lite VL600 ZoomSpot",
+      "$1,999 \u2014 ~$800 more",
+      "Overpriced for what it adds.",
+      "8,500 lm field (engine-basis figure); RGBL CCT presets",
+      "Much cheaper; ZoomSpot CRI dips to 74 at some CCTs \u2014 worst color fidelity in class",
+      "Hard to justify ZoomSpot at ~1.7x the jr's price with weaker color \u2014 only the Vari-Lite house standard buys it."
+     ],
+     [
+      "ColorSource Spot jr",
+      "ADJ Encore Profile 1000 Color",
+      "$930 \u2014 ~$250 less",
+      "The low-bid line item.",
+      "Cheapest full fixture in class; 12-30 zoom; glass gobos included",
+      "RGBW COB only (no lime/indigo); no published CRI or lumens; no RDM listed; 12-30 zoom narrower than 25-50; build/support tier below",
+      "When a low bid swaps in Encore 1000s for jrs, the counter is: unpublished photometrics, RGBW-only color, and no RDM \u2014 you're not comparing like for like."
+     ],
+     [
+      "CLASS D \u2014 WHITE-LIGHT / TUNGSTEN REPLACEMENT | ETC anchor: Source 4WRD II retrofit ($692-784 into an existing S4 body). Note: ETC's only NEW white-only path is 4WRD; for new white fixtures ETC sells Series 3 Daylight HDR (tunable) instead \u2014 a gap competitors price into.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "Source 4WRD II",
+      "Chauvet Ovation E-260WW/CW",
+      "~$1,310 \u2014 ~$550 more (but no S4 body needed)",
+      "The default new-fixture white ellipsoidal.",
+      "New complete fixture (no donor body); CRI 96; 10-13k lm @26; CW option",
+      "If the school owns S4s (most do), 4WRD II converts each for ~$700 and keeps every tube/accessory \u2014 half the price, zero re-rigging; dual-mode works on existing wall dimmers",
+      "'You already own the best part of the fixture' \u2014 4WRD II turns their S4 inventory into LED for less than any new fixture; E-260WW is the answer only when there's no donor body."
+     ],
+     [
+      "Source 4WRD II",
+      "ADJ Encore Profile Pro WW",
+      "$1,200 \u2014 ~$450 more",
+      "Value new-fixture white.",
+      "CRI >97; 10k+ lm; new fixture",
+      "Same 4WRD retrofit math as above; ADJ proprietary lens mount adds tube cost",
+      "Same story: retrofit beats replace when S4 bodies exist."
+     ],
+     [
+      "Source 4WRD II",
+      "Vari-Lite VL600 PLE WW",
+      "$1,999 \u2014 ~$1,200 more",
+      "Premium white body.",
+      "CRI 95, TM-30 Rf 91; 8.5k engine lm",
+      "Price; retrofit math; S4 tubes native",
+      "Only competitive in a Vari-Lite-standardized house."
+     ],
+     [
+      "Source 4WRD II",
+      "Altman PHX LVD",
+      "from $2,674 \u2014 ~3.5x more",
+      "The other 'works on your dimmers' product.",
+      "Whole new fixture that phase-dims like an incandescent (4 per 20A dimmer); 3000K or 5000K",
+      "4WRD II does the same dual-mode trick (phase-dim OR DMX) inside the S4 they own for a quarter of the price",
+      "PHX LVD's headline feature is one ETC already ships at $700 \u2014 lead with that."
+     ],
+     [
+      "(no ETC equiv.)",
+      "Chauvet E-160WW / ADJ Encore 1000 WW",
+      "$890-1,177",
+      "Budget white tier below ETC's line.",
+      "Price points ETC doesn't reach with a new fixture ($890-1,177 complete)",
+      "ColorSource Spot jr (color-capable, $1,140) or 4WRD retrofit are the ETC counters; E-160WW publishes no lumen figure",
+      "If the bid is pure price-per-white-fixture, position jr's color flexibility or the 4WRD retrofit path instead of matching the number."
+     ],
+     [
+      "CLASS E \u2014 MINI / MICRO | No ETC entry. ADJ Encore Profile Mini Color/WW ($350-400 + lens) own this niche (galleries, ultra-low trims). Nearest ETC play is ColorSource Spot jr or an Irideon architectural fixture. Know the gap \u2014 don't fight it head-on.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    ]
+   },
+   "specCount": 36,
+   "equivCount": 18
+  },
+  {
+   "key": "console",
+   "name": "Console",
+   "spec": {
+    "header": [
+     "Brand",
+     "Model",
+     "Status",
+     "Tier",
+     "Capacity (native / max, licensing)",
+     "Faders / Playbacks",
+     "Encoders",
+     "Displays",
+     "DMX Ports"
+    ],
+    "rows": [
+     [
+      "ETC",
+      "Eos Apex 5",
+      "Current (2022)",
+      "A",
+      "24,576 outputs (48 univ) fully unlocked; 32,768 channels; no license tiers",
+      "5 motorized 60mm + motorized main playback; 5 scroll faders; 100 pages; 20 OLED target keys",
+      "6 force-feedback + 8 mini",
+      "23.8in 4K multi-touch articulating + encoder/fader/keypad screens; 3 ext DisplayPort to 4K touch",
+      "Via I/O Garage (Gadget II modules)"
+     ],
+     [
+      "ETC",
+      "Eos Apex 10",
+      "Current",
+      "A",
+      "24,576 outputs unlocked; 32,768 channels",
+      "10 motorized + motorized mains; 10 scroll faders; 40 target keys",
+      "6 FF + 8 mini",
+      "2x 23.8in 4K multi-touch; 3 ext monitors",
+      "Via I/O Garage"
+     ],
+     [
+      "ETC",
+      "Eos Apex 20",
+      "Current",
+      "A",
+      "24,576 outputs unlocked; 32,768 channels",
+      "20 motorized + motorized mains; 20 scroll faders; 50 target keys",
+      "6 FF + 8 mini",
+      "2x 27in 4K multi-touch; 3 ext monitors",
+      "Via I/O Garage"
+     ],
+     [
+      "ETC",
+      "Eos Apex Processor",
+      "Current",
+      "A",
+      "24,576 outputs; headless engine",
+      "None (drive via wings/touchscreens)",
+      "-",
+      "5in front panel; 3 ext 4K multi-touch",
+      "Via gateways/Gadget"
+     ],
+     [
+      "ETC",
+      "Gio @5",
+      "Current (NOT discontinued)",
+      "B",
+      "4K or 24K output versions; 20K upgrade path; 32,768 channels",
+      "5 motorized 60mm + 2 motorized mains; 100 pages",
+      "4 FF + level wheel",
+      "18.5in multi-touch built-in; 2 ext to 4K",
+      "4x DMX/RDM 5-pin"
+     ],
+     [
+      "ETC",
+      "Ion Xe",
+      "Current (2016)",
+      "B",
+      "2K or 12K outputs; 10K upgrade; 32,768 channels",
+      "2x 100mm mains (non-motorized); up to 3 USB fader wings",
+      "4 + intensity wheel",
+      "No built-in; 2 ext DisplayPort to 4K (touch opt)",
+      "4x DMX/RDM 5-pin"
+     ],
+     [
+      "ETC",
+      "Ion Xe 20",
+      "Current",
+      "B",
+      "2K or 12K outputs; 10K upgrade",
+      "20x 45mm faders (100 pages) + 2x 100mm mains",
+      "4 + wheel",
+      "2 fader-label LCDs; 2 ext monitors",
+      "4x DMX/RDM"
+     ],
+     [
+      "ETC",
+      "Element 2",
+      "Current (2018)",
+      "C",
+      "1K or 6K outputs (upgrade SKU 1K-to-6K); 32,768 channels",
+      "40x 45mm faders (100 pages) + mains + wheel",
+      "None physical (on-screen)",
+      "No built-in; 2 ext monitors (touch opt)",
+      "4x DMX/RDM"
+     ],
+     [
+      "ETC",
+      "ColorSource 20 / 40",
+      "Current",
+      "D",
+      "80 channels/devices; 1 DMX universe (fixed, no upgrades)",
+      "20 or 40 channel/playback faders + 4 masters; 10 pages; single 999-cue list",
+      "None (touchscreen)",
+      "7in multi-touch; no ext monitor",
+      "1x DMX/RDM 5-pin"
+     ],
+     [
+      "ETC",
+      "ColorSource 20 AV / 40 AV",
+      "Current",
+      "D",
+      "80 channels; 2 DMX ports + 5 network universes (sACN/Art-Net)",
+      "Same as CS20/40 + 2 USB",
+      "None (touchscreen)",
+      "7in multi-touch + HDMI out (media to 720p)",
+      "2x DMX/RDM"
+     ],
+     [
+      "ETC",
+      "ETCnomad (key)",
+      "Current",
+      "E",
+      "1,024 base / 6,144 unlocked outputs; upgrade available; full Eos software (free download, key unlocks output)",
+      "None \u2014 pairs w/ Eos programming/fader/motorized wings",
+      "Via wings",
+      "Host Mac/PC monitors (multi-touch per host)",
+      "Via Gadget II / gateways"
+     ],
+     [
+      "ETC",
+      "ETC Puck (Gen 6)",
+      "Current (2024 hw)",
+      "E",
+      "1,024 or 6,144 outputs; upgrade available",
+      "None (fanless mini-PC; add wings/touchscreens)",
+      "Via wings",
+      "2 displays to 4K multi-touch",
+      "Via Gadget II / gateways"
+     ],
+     [
+      "ETC",
+      "Eos wings (ref.)",
+      "Current",
+      "E",
+      "Programming Wing has 4x DMX/RDM out; fader wings no processing",
+      "Fader Wing 20/40 (1,988/3,308); Motorized FW 10/20 (5,408/8,340); Programming Wing (5,460); TK 10 target keys",
+      "PGW: 4 + wheels",
+      "-",
+      "PGW: 4x DMX/RDM"
+     ],
+     [
+      "ETC (HES)",
+      "Hog v5 line: Tour / Stage / Flex Hog + Gig Hog wing",
+      "NEW \u2014 shipping since mid-2025",
+      "A/B",
+      "Tour/Stage/Flex: 64 universes; Gig Hog wing: 12 univ w/ free Hog PC; HPU processor",
+      "Motorized-fader surfaces (tiering across line)",
+      "Yes",
+      "Multi-touch (per model)",
+      "Per model"
+     ],
+     [
+      "MA",
+      "grandMA3 full-size",
+      "Current (flagship)",
+      "A",
+      "20,480 parameters built-in; expand ONLY via MA processing units to 262,144; 1,024-universe pool; Mode2 (MA2) 8,192",
+      "30 motorized 60mm + 2 motorized 100mm; 120 playbacks; 16 x-keys",
+      "71 RGB encoders + 5 dual + 2 wheels",
+      "3 fold-up + 3 letterbox + 2 command multi-touch; 2 ext DP",
+      "6 out + 1 in (5-pin)"
+     ],
+     [
+      "MA",
+      "grandMA3 light",
+      "Current",
+      "A",
+      "16,384 parameters; expandable via PUs; Mode2 4,096",
+      "15 motorized + 2 motorized mains; 60 playbacks; 16 x-keys",
+      "41 + 5 dual",
+      "2 fold-up + 2 letterbox + 2 command; 2 ext DP",
+      "6 out + 1 in"
+     ],
+     [
+      "MA",
+      "grandMA3 compact XT",
+      "Current",
+      "B",
+      "8,192 parameters; expandable via PUs; Mode2 4,096",
+      "15 motorized + 2 motorized mains; 60 playbacks",
+      "39 + 5 dual",
+      "2 fold-up multi-touch; 1 ext DP",
+      "6 out + 1 in"
+     ],
+     [
+      "MA",
+      "grandMA3 compact",
+      "Current",
+      "B",
+      "8,192 parameters (raised from 2,048 in v2 era)",
+      "10 motorized + 2 motorized mains; 40 playbacks",
+      "29 + 5 dual",
+      "1 fold-up; 1 ext DP",
+      "6 out + 1 in"
+     ],
+     [
+      "MA",
+      "grandMA3 onPC command wing XT",
+      "Current",
+      "E",
+      "4,096 parameters (onPC max); built-in MA motherboard (no ext PC needed)",
+      "10 motorized + 2 motorized mains; 40 playbacks",
+      "29 + 5 dual",
+      "None built-in; 4x DP ext",
+      "2 out + 1 in"
+     ],
+     [
+      "MA",
+      "grandMA3 onPC command wing",
+      "Current",
+      "E",
+      "Unlocks 4,096 params for onPC on user's Mac/PC",
+      "10 motorized + 2 motorized mains; 40 playbacks",
+      "29 + 5 dual",
+      "Uses computer displays",
+      "2 out + 1 in"
+     ],
+     [
+      "MA",
+      "grandMA3 onPC rack-unit",
+      "Current",
+      "E",
+      "4,096 params; onPC pre-installed",
+      "None (2 ext touchscreen ports)",
+      "-",
+      "2x DP",
+      "2 out + 1 in"
+     ],
+     [
+      "MA",
+      "grandMA3 processing units M / L / XL",
+      "Current",
+      "A",
+      "+4,096 / +8,192 / +16,384 parameters per unit (the ONLY expansion path; ~0.74-1.48 USD/param)",
+      "None (2U rack)",
+      "-",
+      "-",
+      "8x DMX out each"
+     ],
+     [
+      "MA",
+      "grandMA3 onPC DMX-key / starter",
+      "NEW 2025-26",
+      "E",
+      "4,096 / 1,024 params for free onPC software; USB-C dongle w/ 2 DMX outs",
+      "None (software control)",
+      "-",
+      "Host displays",
+      "2 out"
+     ],
+     [
+      "ChamSys",
+      "MagicQ MQ500M+ Stadium",
+      "Current (flagship)",
+      "A",
+      "400 universes / 204,800 ch \u2014 ALL included, no licensing",
+      "15 motorized + dual motorized 100mm crossfaders; 42 playbacks; 12 macro keys",
+      "8 + wheel",
+      "2x 15in multi-touch; 2 ext DP; up to 8 displays",
+      "4x DMX out"
+     ],
+     [
+      "ChamSys",
+      "MagicQ MQ250M Stadium",
+      "Current",
+      "B",
+      "64 universes native, 128 via license; 32,768 ch",
+      "10 motorized RGB + 10 encoder playbacks (202 total); dual 100mm crossfaders",
+      "8 + wheel",
+      "15in multi-touch + 5in encoder screen; 1 ext DP",
+      "4x DMX"
+     ],
+     [
+      "ChamSys",
+      "MagicQ MQ70",
+      "Current",
+      "B",
+      "24 universes native, 48 via license; 12,288 ch",
+      "10 illuminated playbacks (non-motorized)",
+      "8",
+      "10.1in multi-touch; HDMI ext",
+      "4x DMX/RDM"
+     ],
+     [
+      "ChamSys",
+      "MagicQ MQ50",
+      "Current",
+      "C",
+      "8 universes / 4,096 ch (all included)",
+      "10 playbacks (non-motorized)",
+      "8",
+      "10.1in multi-touch; HDMI ext",
+      "4x DMX/RDM"
+     ],
+     [
+      "ChamSys",
+      "MagicQ Rack / DIN",
+      "Current",
+      "E",
+      "24 universes (48 via license); no faders",
+      "10 playback/execute buttons; 4x 10Scene ports (40 wall plates)",
+      "-",
+      "HDMI out",
+      "2x DMX/RDM"
+     ],
+     [
+      "ChamSys",
+      "MagicQ Connects (Stadium / Compact / Mini)",
+      "Current",
+      "E",
+      "Unlock 64 universes on free MagicQ PC/Mac (Stadium Connect: motorized faders, LTC I/O)",
+      "Stadium: 10 motorized; Compact: 10 faders; Mini: 10 faders",
+      "4-8",
+      "Uses computer displays",
+      "4x / 2x / 1x DMX"
+     ],
+     [
+      "ChamSys",
+      "QuickQ 10 / 20 / 30",
+      "Current",
+      "D",
+      "1 / 2 / 4 universes \u2014 FIXED, never expandable (the tier boundary vs MagicQ)",
+      "Q10: 20 fixture faders + 3 playbacks; Q20: +10 playbacks; Q30: 40 fixture faders + 10 playbacks",
+      "Hue/Sat (+4 attr on 20/30)",
+      "9.7in multi-touch; HDMI ext",
+      "1 / 2 / 3x DMX"
+     ],
+     [
+      "ChamSys",
+      "QuickQ Rack",
+      "Current",
+      "D",
+      "4 universes / 2,048 ch",
+      "10 playback buttons; 4x 10Scene ports",
+      "-",
+      "HDMI out",
+      "2x DMX/RDM"
+     ],
+     [
+      "ChamSys",
+      "MagicQ PC/Mac software",
+      "Current",
+      "E",
+      "FREE: 64 output universes in demo mode (2025 licensing change); 'Unlocked mode' via any Connect/wing/GN5/GN10 node adds sessions, TC, MIDI, OSC",
+      "On-screen (or add wings)",
+      "-",
+      "Host displays",
+      "Via nodes/interfaces"
+     ],
+     [
+      "Obsidian",
+      "ONYX NX4",
+      "Current (flagship)",
+      "B",
+      "64 universes integrated",
+      "10 motorized 60mm + 12x 45mm subs + 22 executors (44 playbacks)",
+      "8 + intensity",
+      "15.6in FHD touch + 3.5in; 2 ext DP to 4K",
+      "4x DMX/RDM"
+     ],
+     [
+      "Obsidian",
+      "ONYX NX3",
+      "NEW 2026",
+      "B",
+      "64 universes embedded; 32,768 ch/fixtures",
+      "10 motorized RGB faders; 50 RGB playback buttons; 10 F-keys",
+      "5 (1 intensity)",
+      "17.3in FHD multi-touch + 4.5in; 3 ext 4K touch",
+      "4x DMX/RDM"
+     ],
+     [
+      "Obsidian",
+      "ONYX NX2",
+      "Current",
+      "B",
+      "64 universes",
+      "10 playback faders (non-motorized)",
+      "8 + 4 screen",
+      "15.6in FHD touch + 3.5in; 2 ext 4K DP",
+      "4x DMX/RDM"
+     ],
+     [
+      "Obsidian",
+      "ONYX NX1-16",
+      "Current",
+      "C",
+      "16 universes embedded",
+      "10 motorized 60mm faders; 10 multi-function keys",
+      "4",
+      "10.1in FHD multi-touch; 1 ext HDMI touch",
+      "4x DMX/RDM"
+     ],
+     [
+      "Obsidian",
+      "NX W / NX P / NX K (PC surfaces)",
+      "Current",
+      "E",
+      "NX W: 16 univ incl (to 128 via KEY); NX P: NOVA+ 4U; NX K: NOVA+ 4U keypad",
+      "NX W: 10 motorized; NX P: 10 motorized; NX K: keypad only",
+      "4 / - / 4",
+      "Use PC monitor",
+      "4x / 4x / none"
+     ],
+     [
+      "Obsidian",
+      "ONYX software + ONYX KEY",
+      "Current",
+      "E",
+      "Free = 1 universe; NOVA 4U; then 8U ($599) / 16U ($999) / 32U / 64U / 128U ($2,999) via movable USB key",
+      "On-screen or NX surfaces",
+      "-",
+      "Host displays",
+      "Via NX/Netron nodes"
+     ],
+     [
+      "Avolites",
+      "D9-330 / D9-215",
+      "Current (flagship)",
+      "A",
+      "32 universes from console; TitanNet processors expand to 64+",
+      "D9-330: 30+2 motorized P&G faders, 70 optical rotary playbacks; D9-215: 15+2 motorized, 40 rotaries; T-Bar",
+      "5 attr",
+      "3x (330) / 2x (215) 15.6in FHD touch + preview screens; 2 ext HDMI touch; QWERTY drawer",
+      "8x DMX 5-pin"
+     ],
+     [
+      "Avolites",
+      "Diamond 7 (D7-215 / D7-330)",
+      "Current",
+      "B",
+      "32 universes (16,384 ch); TitanNet expandable",
+      "15 motorized touch faders + 15 touch playbacks (215)",
+      "5 optical",
+      "2x 14in 1920x1200 folding touch; 2 ext DP touch",
+      "4x DMX"
+     ],
+     [
+      "Avolites",
+      "D3 series (D3-010 / D3-110 / Core / Wing / Touch)",
+      "NEW Aug 2025",
+      "B/C",
+      "D3-010: 8 univ; D3-110: 24 univ; Core (1U rack): 16 univ",
+      "010/110: 10 faders + macro keys; Wing: 20 faders",
+      "3 wheels",
+      "110: 12.1in multi-touch; 010: ext only; Touch: 10in PoE wall panel",
+      "4x DMX"
+     ],
+     [
+      "Avolites",
+      "T3 (+ T3 Wing)",
+      "Current",
+      "C",
+      "16 universes (to 32/64 upgrade); 4 DMX ports",
+      "10 faders + 96 Cherry MX keys + 12 macro; Wing adds 20 faders",
+      "3 wheels",
+      "None built-in (USB-C to host/touchscreen)",
+      "4x DMX"
+     ],
+     [
+      "Avolites",
+      "T1 / T2 / T2+ (dongles)",
+      "Current",
+      "E",
+      "T1: 1 univ; T2: 2 univ; T2+: 4 univ \u2014 unlock free Titan PC Suite (AvoKey incl.)",
+      "None (PC control)",
+      "-",
+      "Host displays",
+      "1-2 DMX"
+     ],
+     [
+      "LEGACY / DISCONTINUED REFERENCE (installed base you'll meet in the field)",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ETC (HES)",
+      "Hog 4 family (Hog 4-18, Full Boar 4, Road Hog 4-21, HedgeHog 4X, Hog 4 PC)",
+      "LEGACY since mid-2025",
+      "-",
+      "6-16 universes local + DP8000 processors",
+      "Motorized-fader desks (most)",
+      "-",
+      "-",
+      "-"
+     ],
+     [
+      "MA",
+      "grandMA2 (all hardware) + dot2",
+      "ARCHIVED/legacy",
+      "-",
+      "grandMA2 platform",
+      "-",
+      "-",
+      "-",
+      "-"
+     ],
+     [
+      "ETC",
+      "Eos Ti / Gio (full-size) / Ion Classic / Element Classic / RPU3 / RVI",
+      "Discontinued",
+      "-",
+      "-",
+      "-",
+      "-",
+      "-",
+      "-"
+     ],
+     [
+      "ChamSys",
+      "MQ80 / MQ500 / MQ500M",
+      "Legacy",
+      "-",
+      "MQ80: 48 univ",
+      "-",
+      "-",
+      "-",
+      "-"
+     ],
+     [
+      "Obsidian",
+      "NX Wing / NX Touch / NX1 (8U)",
+      "Discontinued",
+      "-",
+      "-",
+      "-",
+      "-",
+      "-",
+      "-"
+     ],
+     [
+      "Avolites",
+      "Quartz / Titan Mobile / Tiger Touch II / Sapphire Touch / Arena",
+      "Legacy/EOL",
+      "-",
+      "Quartz & TT2: 16 univ",
+      "-",
+      "-",
+      "-",
+      "-"
+     ]
+    ]
+   },
+   "equivalents": {
+    "header": [
+     "Tier / ETC Anchor",
+     "Competitor",
+     "Street $ vs ETC",
+     "How close is it?",
+     "Where the competitor wins",
+     "Where ETC wins",
+     "One-line talking point"
+    ],
+    "rows": [
+     [
+      "TIER A \u2014 FLAGSHIP / ARENA | ETC anchor: Eos Apex 5/10/20 (24K outputs unlocked, quote-only; used Apex 5 ~$44k). Reality check: this tier is rider-driven \u2014 theater riders say Eos, concert riders say MA.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "Eos Apex",
+      "grandMA3 full-size / light",
+      "~$71-92k published \u2014 likely more than Apex",
+      "The other flagship \u2014 but a different world.",
+      "Absolute standard for arena/stadium touring and broadcast spectacle (Super Bowl-class); MA-Net3 session ecosystem; motorized everything; huge rental inventory worldwide; operator pool in concerts",
+      "US theater/opera/education standard; cueing/tracking philosophy built for theater; Augment3d previz included; outputs fully unlocked (MA needs $12-33k processing units to grow past built-in parameters); ETC dealer/service network; far cheaper at equivalent capability",
+      "Eos vs MA isn't a spec fight, it's a genre fight: theater/PAC = Eos, concert touring = MA. In a school or PAC bid, Eos wins on operator availability alone \u2014 every theater student learns it."
+     ],
+     [
+      "Eos Apex",
+      "ChamSys MQ500M+ Stadium",
+      "$41,825 \u2014 well under Apex",
+      "The value flagship.",
+      "400 universes included with zero licensing; motorized faders; built-in 3D visualizer; UPS; roughly half the money of the big two",
+      "Ecosystem and pedigree: Eos operator pool, theater feature depth, US service; ChamSys US presence is growing but thinner; rider acceptance below MA/Eos",
+      "MQ500M+ is honest capability-per-dollar, but nobody's theater rider asks for it \u2014 in Jeff's market it appears as a value alternative, counter with operator familiarity and support."
+     ],
+     [
+      "Eos Apex",
+      "Avolites D9-330 / D9-215",
+      "$73-90k \u2014 MA money",
+      "Flagship spec, minimal US footprint.",
+      "Gorgeous hardware (motorized P&G faders, optical rotaries); Synergy video integration; Robe now owns and distributes (Robe NA)",
+      "Almost no US school/theater installed base or operator pool; support network still being built via Robe NA",
+      "In WI schools an Avolites bid is exotic \u2014 flag the operator/support question and it usually self-resolves."
+     ],
+     [
+      "TIER B \u2014 MID PROFESSIONAL | ETC anchor: Ion Xe / Ion Xe 20 ($11.9k/$13.7k at 2K outputs) and Gio @5 (quote). This is the PAC/college/roadhouse tier \u2014 Jeff's core console battleground.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "Ion Xe (20)",
+      "grandMA3 compact / compact XT",
+      "$34.5-46.4k \u2014 3x the money",
+      "Capability overlap, price mismatch.",
+      "True MA3 (8,192 params); motorized faders; touring rider compliance; session networking",
+      "A third the price; theater cueing workflow; the operator pool in every US theater department; free offline software for training; MA3's 4,096-param onPC ceiling means the cheap MA route can't grow \u2014 the console route is $34k+",
+      "If a venue hosts national concert tours, an MA3 compact makes sense; for a PAC doing theater, dance, and rentals, Ion Xe does the job at a third the cost with operators everywhere."
+     ],
+     [
+      "Ion Xe (20)",
+      "ChamSys MQ70 / MQ250M",
+      "$9.9k / $24.5k \u2014 MQ70 undercuts",
+      "The serious value threat in this tier.",
+      "MQ70: 24 universes for less than an Ion Xe 2K; LTC standard; built-in UPS + WiFi + visualizer; MQ250M adds motorized faders at $24.5k",
+      "Eos ecosystem/training/operator familiarity; ETC service; Ion upgrade path into the same software family from Element to Apex (one skillset building-wide); ChamSys learning curve is real for volunteer/student ops",
+      "MQ70 wins the spreadsheet, Ion wins the room: whoever runs the board \u2014 students, volunteers, guest LDs \u2014 already knows Eos. Standardization value beats $2k."
+     ],
+     [
+      "Ion Xe (20)",
+      "Obsidian NX2 / NX3",
+      "$9.6k / TBD \u2014 undercuts",
+      "Value mid-size from the Elation family.",
+      "64 universes at $9.6k; NX3 (2026) adds motorized faders + NDI/CITP; often bundled when Elation fixtures win the rig",
+      "Same ecosystem argument; ONYX operator pool is small in theater; NX3 pricing unannounced",
+      "Watch for NX consoles riding in on Elation fixture packages \u2014 separate the fixture decision from the console decision in the spec."
+     ],
+     [
+      "Ion Xe (20)",
+      "Avolites D7 / D3-110",
+      "~$26.8k / TBD",
+      "Mid-tier hardware, US-thin ecosystem.",
+      "D7 motorized faders + dual touchscreens; D3-110 is fresh 2025 hardware",
+      "Price (D7 is 2x Ion Xe); operator pool; support depth",
+      "Same story as D9 one tier down \u2014 spec-sheet strong, ecosystem weak in the US school market."
+     ],
+     [
+      "TIER C \u2014 ENTRY PROFESSIONAL / EDUCATION | ETC anchor: Element 2 ($8,420 @1K / $11,740 @6K). The high-school auditorium default \u2014 and where Peak will quote most often.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "Element 2",
+      "ChamSys MQ50",
+      "$7,165 \u2014 ~$1,250 less",
+      "Most direct cross-brand rival.",
+      "8 universes vs Element's 1K-output base tier; 8 encoders (Element 2 has none physical); WiFi + remote app included; built-in visualizer",
+      "Eos software = students learn the industry-standard; upgrade continuity to Ion/Apex; 40 physical faders (MQ50 has 10); free ETCnomad training at home; no timecode on MQ50 anyway; ETC dealer support",
+      "MQ50 gives more universes; Element 2 gives more faders and the Eos skillset colleges expect \u2014 for education that's usually decisive."
+     ],
+     [
+      "Element 2",
+      "Obsidian NX1-16",
+      "$4,490 \u2014 nearly half",
+      "The aggressive value play.",
+      "Motorized faders + 16 universes + touchscreen at $4.5k \u2014 remarkable hardware value; magnetic modular expansion",
+      "Fader count (40 vs 10); Eos pedagogy/ecosystem; ONYX is Windows-IoT-based with a smaller support bench; theater feature depth",
+      "NX1-16 is half the price and it shows up in low bids \u2014 counter on operator training, fader count for busking a musical, and long-term platform continuity."
+     ],
+     [
+      "Element 2",
+      "Avolites T3 / D3-010",
+      "$4,199 / TBD",
+      "Compact Titan tier.",
+      "T3 + free Titan PC is cheap and capable (16 univ)",
+      "T3 needs a host PC/touchscreen; ecosystem gap; Element is turnkey",
+      "Rare in US schools; if quoted, the 'what happens when the one person who knows Titan graduates' question lands."
+     ],
+     [
+      "TIER D \u2014 SIMPLE ONE-ROOM CONSOLES | ETC anchor: ColorSource 20/40 (+AV) ($1,992-4,476). Cafeteria/black-box/middle-school tier.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ColorSource 20/40",
+      "ChamSys QuickQ 10/20/30",
+      "$2,930-4,930 \u2014 overlaps CS range",
+      "The head-to-head rival at this tier.",
+      "More universes (Q30 = 4 vs CS 1-2); WiFi + remote app standard; OSC; audio triggering; arguably slicker touchscreen workflow; MTC on Q30",
+      "CS AV models add HDMI media playback + sound-to-light (unique one-box trick for cafetoriums); RDM autopatch both ways; ETC dealer/service; Eos-family upgrade story for the district; CS20 undercuts Q10",
+      "QuickQ wins on universes and WiFi, ColorSource AV wins when the room also needs simple AV playback \u2014 ask what else the room does before quoting."
+     ],
+     [
+      "ColorSource 20/40",
+      "Obsidian / Avolites (this tier)",
+      "-",
+      "No true current rival.",
+      "Obsidian's NX Touch is discontinued; Avolites D3 Touch is a wall panel, not a console",
+      "CS + QuickQ effectively split this tier",
+      "Two-horse race at the bottom: ETC vs ChamSys/Chauvet."
+     ],
+     [
+      "TIER E \u2014 PC/SOFTWARE + WINGS | ETC anchor: ETCnomad ($584/1K, $1,800/6K) + Puck ($3,256/$4,532) + wings. Capacity-per-dollar comparison, and each brand's training funnel.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ETCnomad/Puck",
+      "MA onPC command wing / DMX-key",
+      "$8,698 wing / $956-2,056 key",
+      "MA's education/budget path.",
+      "Free onPC software; DMX-key at $956 is a cheap MA3 classroom seat; motorized wing hardware",
+      "onPC systems hard-cap at 4,096 parameters \u2014 no growth without a $34k+ console; Nomad 6K ($1,800) outguns it on capacity per dollar; Nomad key also unlocks Hog 4 PC",
+      "MA's cheap seats teach MA, but the ceiling is real; Nomad's ceiling is 6,144 outputs at $1,800 and full Eos parity."
+     ],
+     [
+      "ETCnomad/Puck",
+      "MagicQ PC (free 64U) + Connects",
+      "$0 software; $1,565-8,500 surfaces",
+      "The most generous free tier anywhere.",
+      "64 free output universes with zero hardware (2025 change) \u2014 unbeatable for a lab or previz room; Connect surfaces cheap; built-in visualizer/pixelmap/media",
+      "Eos skillset transfer to the consoles schools actually own; Nomad+wings builds a real Eos rig incrementally; MagicQ's depth comes with a steeper UI learning curve",
+      "For pure free-capacity, ChamSys wins; for teaching the console the auditorium runs, Nomad wins. Know which question the customer is asking."
+     ],
+     [
+      "ETCnomad/Puck",
+      "ONYX Free/KEY + NX W/P/K",
+      "$0-2,999 licenses; $490-3,249 surfaces",
+      "Cheapest licensed universes in the industry.",
+      "8U for $599, 128U for $2,999, movable USB key; NX P motorized wing $1,999",
+      "Ecosystem/training transfer; ONYX theater feature depth thinner; 1 free universe vs MagicQ's 64",
+      "ONYX is the budget-rig champion for clubs/HoW; in schools it's a niche pick."
+     ],
+     [
+      "ETCnomad/Puck",
+      "Avolites T1/T2 + Titan PC",
+      "$489-1,139",
+      "Titan's dongle tier.",
+      "T1 at $489 is the cheapest name-brand PC unlock",
+      "Capacity (1-2 universes); US ecosystem",
+      "Rarely relevant in Jeff's market."
+     ],
+     [
+      "FAMILY NOTE \u2014 Hog (ETC-owned High End Systems): new Hog OS v5 line (Tour Hog, Stage Hog, Flex Hog 64U; Gig Hog wing 12U) shipped mid-2025; Hog 4 family is legacy but runs Hog OS 5. Relevance: if a club/HoW/concert-leaning customer asks for 'a Hog,' an ETC dealer can stay in the family instead of ceding to MA/ChamSys. Same ETCnomad key unlocks Hog 4 PC.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    ]
+   },
+   "specCount": 50,
+   "equivCount": 16
+  },
+  {
+   "key": "par",
+   "name": "LED PAR",
+   "spec": {
+    "header": [
+     "Brand",
+     "Model",
+     "Status",
+     "Class",
+     "Color Engine",
+     "Watts",
+     "Output",
+     "CRI",
+     "Beam / Zoom"
+    ],
+    "rows": [
+     [
+      "ETC",
+      "ColorSource PAR",
+      "Current",
+      "B",
+      "RGB-L (red, green, blue, lime); 40 Luxeon Z",
+      "90",
+      "3,039 lm max",
+      "Not published",
+      "14.5 deg native; secondary lenses (no zoom)"
+     ],
+     [
+      "ETC",
+      "ColorSource PAR Deep Blue",
+      "Current",
+      "B",
+      "RGB-I-L (indigo replaces blue) for deeper blues/lavender",
+      "90",
+      "2,429 lm max",
+      "Not published",
+      "14.5 deg native; secondary lenses"
+     ],
+     [
+      "ETC",
+      "ColorSource PAR jr",
+      "Current (~2023)",
+      "C",
+      "RGB-L or RGI-L 'Deep Blue jr'; 16 Luxeon C",
+      "72",
+      "2,290 lm (2,061 DB jr)",
+      "Not published",
+      "~15 deg beam / 27 deg field; secondary lenses"
+     ],
+     [
+      "ETC",
+      "Selador Desire D22",
+      "Current (mature)",
+      "A",
+      "Selador x7 7-color (Lustr+/Vivid arrays); 22 Rebel",
+      "unknown",
+      "unknown",
+      "~86-93 (array-dep.)",
+      "Secondary-lens system; no zoom"
+     ],
+     [
+      "ETC",
+      "Selador Desire D40",
+      "Current (mature)",
+      "A",
+      "Selador x7 7-color; arrays Lustr+/Vivid/Fire/Ice/Studio; 40 Rebel",
+      "103",
+      "Lustr+ 2,593 / Vivid 2,252 lm",
+      "86-93 by array/CCT",
+      "10.5 deg beam / 21.7 field; lenses; no zoom (D40XT longer throw)"
+     ],
+     [
+      "ETC",
+      "Selador Desire D60",
+      "Current (mature)",
+      "A",
+      "Selador x7 7-color; arrays Vivid/Lustr+/Fire/Ice/Studio; 60 Rebel",
+      "161",
+      "Lustr+ 4,320 / Vivid 3,280 lm",
+      "86-93 by array",
+      "8 deg beam / 17 field; ships very-narrow lens; no zoom"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation Reve P-3 IP",
+      "Current (2023+)",
+      "A",
+      "RGBAM full-spectrum (mint); 80 LEDs; 2800-8000K",
+      "274",
+      "~10,000 lm (per-beam)",
+      "High CRI (value not published)",
+      "Interchangeable 11.9/25.6/29.3/43.5 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation P-56FC",
+      "Current (-2 rev)",
+      "B",
+      "RGBAL full-spectrum; 62 LEDs",
+      "161",
+      "unknown (not published)",
+      "87.9 @3200K",
+      "Interchangeable 12.8 / 23.2 / 73.2 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation P-56UV",
+      "Current",
+      "U",
+      "Single-source true 365nm UV; 1 LED",
+      "114",
+      "N/A (UV)",
+      "N/A",
+      "56 deg wide; interchangeable lenses"
+     ],
+     [
+      "Chauvet Pro",
+      "COLORado 1 Solo",
+      "Current",
+      "D",
+      "RGBW quad; 1x 60W; 3200-10,000K",
+      "65",
+      "unknown",
+      "unknown",
+      "Motorized zoom 4-40 deg beam / 4-55 field"
+     ],
+     [
+      "Chauvet Pro",
+      "COLORado 2 Solo",
+      "Current",
+      "D",
+      "RGBW quad; 3x 40W; 2800-10,000K",
+      "130",
+      "unknown",
+      "unknown",
+      "Motorized zoom 5-27 deg beam / 5-42 field"
+     ],
+     [
+      "Chauvet Pro",
+      "COLORado 1-Quad Zoom",
+      "Current",
+      "D",
+      "RGBW quad; 7x 15W; 2800-10,000K",
+      "101",
+      "unknown",
+      "unknown",
+      "Motorized zoom 7-45 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "COLORado 2-Quad Zoom",
+      "Current",
+      "D",
+      "RGBW quad; 14x 15W",
+      "201",
+      "unknown",
+      "unknown",
+      "Motorized zoom 7-45 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "COLORdash PAR H18X",
+      "Current",
+      "C",
+      "RGBWA+UV hex; 18 LEDs; 2800-10,000K",
+      "150",
+      "5,736 lm",
+      "unknown",
+      "Fixed 23.6 deg beam / 38.6 field"
+     ],
+     [
+      "Chauvet Pro",
+      "COLORdash PAR H12X IP",
+      "Current",
+      "C",
+      "RGBWA+UV hex; 12x 10W",
+      "126",
+      "4,532 lm",
+      "unknown",
+      "Fixed 22.2 deg beam / 36.9 field"
+     ],
+     [
+      "Chauvet Pro",
+      "COLORdash PAR H7X",
+      "Current",
+      "C",
+      "RGBAW+UV hex; 7x 12W",
+      "70",
+      "2,738 lm",
+      "unknown",
+      "Fixed 22.7 deg beam / 37.6 field"
+     ],
+     [
+      "Chauvet Pro",
+      "COLORado 2 Solo VW / Expo W",
+      "Current",
+      "E",
+      "Variable/tunable white (quad-white)",
+      "unknown",
+      "unknown",
+      "unknown",
+      "Zoom (Solo VW) / fixed (Expo W)"
+     ],
+     [
+      "Elation",
+      "KL PAR FC",
+      "Current",
+      "A",
+      "RGBMA 5-in-1 full-spectrum; 2400-8500K",
+      "280",
+      "11,000 lm total",
+      "92 (TLCI 95)",
+      "Interchangeable 11/22/30/52 deg (+90 opt); no zoom"
+     ],
+     [
+      "Elation",
+      "KL PAR FC IP",
+      "Current",
+      "A",
+      "RGBMA 5-in-1; 2400-8500K",
+      "360",
+      "unknown (higher-output IP)",
+      "unknown (KL high-CRI)",
+      "Interchangeable lenses"
+     ],
+     [
+      "Elation",
+      "KL PAR IP Compact",
+      "Current (~2025)",
+      "B",
+      "RGBMA 5-in-1; 2400-8500K",
+      "200",
+      "5,474 lm",
+      "94.9 (TLCI 95)",
+      "4 included lenses 11/22/30/52; no zoom"
+     ],
+     [
+      "Elation",
+      "SIX+ PAR S / L",
+      "Current",
+      "C",
+      "RGBLA+UV 6-in-1; 2400-8500K; S=7 L=14 x20W",
+      "unknown",
+      "unknown",
+      "unknown",
+      "~12 deg fixed beam"
+     ],
+     [
+      "Elation",
+      "Limelight PAR L",
+      "Current",
+      "D",
+      "RGBL + CMY emulation; 12x 60W; 2400-8500K",
+      "570",
+      "8,213 lm total",
+      "83.4",
+      "Motorized zoom 5-40 deg"
+     ],
+     [
+      "Elation",
+      "Limelight PAR S",
+      "Current",
+      "D",
+      "RGBL; 7x 60W; 2400-8500K",
+      "unknown",
+      "unknown",
+      "~83 (RGBL)",
+      "Motorized zoom 5-42 deg"
+     ],
+     [
+      "Vari-Lite",
+      "VL800 PROPAR",
+      "Current",
+      "D",
+      "RGBW quad; 7x 30W; 32 presets",
+      "230",
+      "~6,700 lux @5m narrow",
+      ">90 (TM-30 Rf 60 / Rg 123)",
+      "Motorized zoom 6-40 deg"
+     ],
+     [
+      "Vari-Lite",
+      "VL800 EventPAR RGBA",
+      "Current",
+      "B",
+      "RGBA + extended blue; 2700-10,000K; 44 colors",
+      "300",
+      "3,200 lm (color-mix)",
+      "N/A (color-mix)",
+      "Manual zoom 10-30 deg (5-pos)"
+     ],
+     [
+      "Vari-Lite",
+      "VL800 EventPAR WW",
+      "Current",
+      "E",
+      "Fixed 3000K warm white",
+      "200",
+      "10,251 lm",
+      ">97",
+      "Manual zoom 9-30 deg (5-pos)"
+     ],
+     [
+      "ADJ",
+      "Encore LP18 IP",
+      "Current",
+      "D",
+      "RGBL quad; 18x 20W",
+      "365",
+      "7,300 lm",
+      "86.2 (R9 82.8)",
+      "10 deg fixed (+25 frost incl.)"
+     ],
+     [
+      "ADJ",
+      "Encore LP12Z IP",
+      "Current",
+      "D",
+      "RGBL quad; 12x 20W",
+      "227",
+      "4,400 lm",
+      "84.4 (R9 77)",
+      "Motorized zoom 5-30 beam / 9-50 field"
+     ],
+     [
+      "ADJ",
+      "Encore LP12 IP",
+      "Current",
+      "D",
+      "RGBL quad; 12x 20W",
+      "192",
+      "4,700 lm",
+      "84.4 (R9 67.9)",
+      "10 deg fixed (+25 frost); optional filters"
+     ],
+     [
+      "ADJ",
+      "18P HEX",
+      "Current",
+      "C",
+      "RGBAW+UV hex; 18x 12W",
+      "~216",
+      "unknown",
+      "unknown",
+      "25 deg fixed"
+     ],
+     [
+      "ADJ",
+      "12PX HEX",
+      "Current",
+      "C",
+      "RGBAW+UV hex; 12x 12W",
+      "unknown",
+      "unknown",
+      "unknown",
+      "25 deg fixed"
+     ],
+     [
+      "ADJ",
+      "7P HEX IP",
+      "Current",
+      "C",
+      "RGBAW+UV hex; 7x 12W",
+      "63",
+      "2,500 lm",
+      "unknown",
+      "25 deg fixed"
+     ],
+     [
+      "ADJ",
+      "5PX HEX",
+      "Current",
+      "C",
+      "RGBAW+UV hex; 5x 12W",
+      "~60",
+      "unknown",
+      "unknown",
+      "25 deg fixed (FC lists 30)"
+     ],
+     [
+      "ADJ",
+      "Par Z100 3K2 / 5K2",
+      "Current (mkII)",
+      "E",
+      "100W COB single white (3000K or 5700K)",
+      "115",
+      "unknown (lux only)",
+      ">90",
+      "Manual zoom 9/15/20/25/30 deg (5-pos)"
+     ],
+     [
+      "LEGACY / DISCONTINUED / AVAILABILITY-FLAGGED REFERENCE",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "Altman",
+      "Spectra PAR 100 / Star PAR (RGBA/RGBW/white)",
+      "Delisted \u2014 verify",
+      "-",
+      "RGBA / RGBW / white; Luxeon Rebel",
+      "100",
+      "unknown",
+      "unknown",
+      "PAR64 glass lenses VNSP-XWFL (no zoom)"
+     ],
+     [
+      "Altman",
+      "AP-150 / AP-150 Hydra RGBW",
+      "Discontinued / sold out",
+      "-",
+      "RGBW",
+      "135",
+      "unknown",
+      "unknown",
+      "Motorized zoom 12-65 deg"
+     ],
+     [
+      "Altman",
+      "AIP-200 Hydra RGBL",
+      "Current but sold out \u2014 verify",
+      "-",
+      "RGBL; 12x 20W",
+      "200",
+      "5,792 lm",
+      "unknown",
+      "Motorized zoom 6.5-50 deg"
+     ],
+     [
+      "Elation",
+      "SixPar 200IP",
+      "Discontinued",
+      "-",
+      "RGBAW+UV hex; 12x 12W",
+      "150",
+      "22,250 lux @1m",
+      "unknown",
+      "15 beam / 25 field fixed"
+     ],
+     [
+      "Elation",
+      "SixPar 300 / 300IP",
+      "Legacy (end-of-life)",
+      "-",
+      "RGBAW+UV hex; 18x 12W",
+      "~220",
+      "unknown",
+      "unknown",
+      "15 beam / 25 field fixed"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation P-4FC / P-4IP",
+      "Discontinued",
+      "-",
+      "Full-color small par",
+      "unknown",
+      "unknown",
+      "unknown",
+      "unknown"
+     ],
+     [
+      "* ETC ColorSource/Selador PARs are indoor/dry-location (no published IP rating); treated as IP20-class. ETC makes no IP-rated PAR.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    ]
+   },
+   "equivalents": {
+    "header": [
+     "Class / ETC Anchor",
+     "Competitor",
+     "Street $ vs ETC",
+     "How close is it?",
+     "Where the competitor wins",
+     "Where ETC wins",
+     "One-line talking point"
+    ],
+    "rows": [
+     [
+      "CLASS A \u2014 PREMIUM THEATRICAL COLOR PAR | ETC anchor: Selador Desire D40/D60 (7-color x7, ~$2,080+, static, fanless, deepest gamut + high CRI). This is ETC's color-rendering flagship wash.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "Selador Desire D40/D60",
+      "Elation KL PAR FC",
+      "$1,429 \u2014 under Desire",
+      "The closest cross-brand rival on color quality.",
+      "Cheaper; 11,000 lm (much brighter than Desire's ~2,600-4,300); CRI 92 + TLCI 95; interchangeable lenses; onboard OLED",
+      "7-color x7 gamut goes deeper on saturates than KL's 5-color RGBMA; fanless-silent (KL runs a fan); ETC theatrical pedigree, rep-plot familiarity, and the Selador color-matching designers know",
+      "KL PAR FC wins brightness and price; Desire wins gamut depth and silence. For a color-critical theatrical wash where designers spec Selador by name, Desire holds; for punch-per-dollar, KL is hard to beat."
+     ],
+     [
+      "Selador Desire D40/D60",
+      "Chauvet Ovation Reve P-3 IP",
+      "unknown (premium tier)",
+      "Brighter, IP, but a different mission.",
+      "~10,000 lm and IP65 (Desire is neither bright nor weatherproof); RGBAM full-spectrum mint engine reads white/skin well",
+      "Deeper theatrical gamut; fanless silence; lighter; the Selador name; ETC ecosystem",
+      "Reve P-3 IP is the answer when the wash goes outdoors or needs big output; indoors, for color depth and silence, Desire still wins its niche."
+     ],
+     [
+      "Selador Desire D40/D60",
+      "Vari-Lite VL800 PROPAR",
+      "unknown",
+      "Not a real color-quality rival.",
+      "Motorized zoom (Desire is fixed-lens); RGBW; event-friendly",
+      "RGBW at TM-30 Rf 60 is nowhere near Selador color rendering; Desire is a theatrical instrument, PROPAR is an event par",
+      "Different tools \u2014 if someone cross-shops these, they've mis-scoped the job."
+     ],
+     [
+      "CLASS B \u2014 MID FULL-COLOR WASH PAR | ETC anchor: ColorSource PAR / PAR Deep Blue (RGB-L, $876, static, interchangeable-lens). The school/HoW/small-theater workhorse \u2014 Peak's most-quoted PAR.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ColorSource PAR",
+      "Chauvet Ovation P-56FC",
+      "unknown (dealer-blocked)",
+      "The most direct head-to-head.",
+      "RGBAL (5-color, adds amber) with published CRI 87.9; more lens options (12.8/23.2/73.2); silent convection",
+      "Native ETC ecosystem (matches Eos rigs & ColorSource consoles); indigo Deep Blue variant for cyc color; simpler for volunteer ops; strong ETC dealer support and the ColorSource family story from console to fixture",
+      "P-56FC has a richer engine on paper; ColorSource PAR wins on ETC-system fit, the Deep Blue option, and support \u2014 for an ETC-standardized building it's the coherent choice."
+     ],
+     [
+      "ColorSource PAR",
+      "Elation KL PAR IP Compact",
+      "unknown",
+      "More capable, at a price/complexity step up.",
+      "IP65 (ColorSource PAR is indoor-only); CRI 94.9; RGBMA; Aria wireless; tunable-white presets",
+      "Cheaper; lighter; simpler; ETC ecosystem; ColorSource is the known quantity for school TDs",
+      "If the wash ever goes outside or needs high CRI, KL PAR IP Compact earns the premium; for a dry stage on an ETC rig, ColorSource PAR is the value pick."
+     ],
+     [
+      "ColorSource PAR",
+      "ADJ Encore LP12 IP / Vari-Lite EventPAR RGBA",
+      "$690 / $1,899",
+      "Bracket it on price.",
+      "Encore LP12 IP is cheaper AND IP65 with lime engine; EventPAR RGBA adds manual zoom + finishes",
+      "ColorSource sits between them on price with the ETC-system coherence and Deep Blue option; Encore's proprietary nature and ADJ support tier are the trade; EventPAR is an event/install look, not a rep-plot wash",
+      "Encore LP12 IP is the low-bid threat (cheaper and IP) \u2014 counter with ETC ecosystem and the fact that a dry stage doesn't need IP65; you're paying for weatherproofing you won't use."
+     ],
+     [
+      "CLASS C \u2014 COMPACT / BUDGET COLOR PAR | ETC anchor: ColorSource PAR jr (RGB-L, $540, fanless, small). Cafeteria/black-box/uplight-on-a-budget.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ColorSource PAR jr",
+      "ADJ 12PX / 18P HEX",
+      "$400 / $500",
+      "The uplight-package rival.",
+      "6-color RGBAW+UV hex (adds amber + UV for saturated uplight & effects); cheaper (12PX) or similar (18P); RF remote option",
+      "ETC color calibration & no-red-shift dimming; RGB-L renders theatrical color better than hex saturation does; ETC support and the Deep Blue jr option; fanless silence",
+      "For pure saturated uplight on a tight budget, HEX pars win the spreadsheet; for a wash that has to render stage color and match an ETC rig, PAR jr is the right tool even at a small premium."
+     ],
+     [
+      "ColorSource PAR jr",
+      "Chauvet COLORdash PAR H7X / Elation SIX+ PAR S",
+      "unknown",
+      "Compact color, more colors.",
+      "Hex / 6-color+UV engines with published lumens (H7X 2,738 lm); IP options in the family",
+      "ETC ecosystem, calibrated color, silence, price at the bottom of the range",
+      "Same story as ADJ hex \u2014 engine count isn't the same as color quality; match to whether it's uplight punch or stage rendering."
+     ],
+     [
+      "CLASS D \u2014 IP MOTORIZED-ZOOM EVENT / TOURING PAR | *** ETC HAS NO ENTRY *** This whole class (Chauvet COLORado Solo/Quad zoom, Elation Limelight, ADJ Encore LP12Z IP, Vari-Lite PROPAR, Altman AIP-200) is a category ETC does not build. Know the gap and don't try to force a ColorSource PAR into a rental/event/architainment zoom-wash spec.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "(no ETC equivalent)",
+      "Chauvet COLORado 2 Solo (~$1,197), Elation Limelight, ADJ Encore LP12Z IP ($1,150), VL800 PROPAR",
+      "n/a",
+      "ETC simply doesn't play here.",
+      "IP65 + motorized zoom + event durability \u2014 the standard for rental, touring, architainment, and outdoor uplight. ADJ Encore LP12Z IP is the value leader; Chauvet Solo/Quad is the rental default; Limelight is the punch option",
+      "Nothing \u2014 ETC's answer is 'we don't make this; here's a Desire/ColorSource for the theatrical wash, and we'd partner or spec a Chauvet/Elation for the event-zoom-par need'",
+      "When a bid needs IP zoom pars, don't fake it with ETC \u2014 either concede the line item or, since Peak carries multiple lines, quote the right event par (Chauvet/Elation/ADJ) alongside the ETC theatrical package. Honesty here protects the ETC pull-through everywhere else."
+     ],
+     [
+      "CLASS E \u2014 WHITE / TUNABLE-WHITE PAR | ETC anchor: none purpose-built (ETC's white-PAR answer is a Selador Desire Studio array or a ColorSource PAR run at white). Competitors sell dedicated white pars.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "(Desire Studio array / CS PAR at white)",
+      "Vari-Lite EventPAR WW ($1,899, CRI>97, 10,251 lm), ADJ Par Z100 ($430), Chauvet COLORado VW",
+      "varies",
+      "ETC covers this with color fixtures, not a dedicated white par.",
+      "Dedicated high-CRI white output: EventPAR WW is 97 CRI and very bright; Par Z100 is a cheap single-color zoom; Chauvet VW is tunable",
+      "A Desire Studio or ColorSource PAR gives white AND color from one inventory (buy once, use for wash or white); dedicated white pars are single-purpose",
+      "If the customer only needs white, a dedicated white par is cheaper per lumen; if they want flexibility, ETC's color fixtures double as white and simplify inventory."
+     ],
+     [
+      "CLASS U \u2014 UV / EFFECT | *** ETC HAS NO ENTRY *** Chauvet Ovation P-56UV (true 365nm) owns this. If a bid needs blacklight, quote the Chauvet \u2014 ETC doesn't make one.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    ]
+   },
+   "specCount": 42,
+   "equivCount": 10
+  },
+  {
+   "key": "cyc",
+   "name": "LED Cyc",
+   "spec": {
+    "header": [
+     "Brand",
+     "Model",
+     "Status",
+     "Class",
+     "Type",
+     "Color Engine",
+     "Watts",
+     "Output",
+     "CRI"
+    ],
+    "rows": [
+     [
+      "ETC",
+      "ColorSource CYC",
+      "Current",
+      "B",
+      "Dedicated cyc/wash (no asym. reflector; wide even optics)",
+      "RGBI-L (adds indigo + lime); 42 Luxeon C",
+      "133",
+      "4,117 lm",
+      "Not published"
+     ],
+     [
+      "ETC",
+      "Source Four LED CYC adapter",
+      "Current",
+      "C",
+      "Cyc lens ADAPTER \u2014 converts an S4 LED engine into a cyc",
+      "Host engine (x7 / Lustr X8 / Daylight HDR)",
+      "(host)",
+      "~2,400-2,700 lm (host-dep.)",
+      "(host engine)"
+     ],
+     [
+      "ETC",
+      "ColorSource Linear 1/2/4",
+      "Current",
+      "E",
+      "Linear wash/striplight (cyc grazing, borderlight, scenic)",
+      "RGB-L (Deep Blue variant); 0.5/1/2m",
+      "115-438",
+      "L1: 2,481 field lm",
+      "TM-30 Rf 71"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation CYC 1 FC",
+      "Current (v2)",
+      "B",
+      "Dedicated cyc/footlight (low-profile, kickstand + glare shield)",
+      "RGBAL full-spectrum; 60 LEDs",
+      "139",
+      "8,966 lm",
+      "90.6 @3200K"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation CYC 3 FC",
+      "Current",
+      "B",
+      "Dedicated cyc/footlight (3-cell, larger)",
+      "RGBAL full-spectrum; 180 LEDs",
+      "345",
+      "19,575 lm",
+      "90 @3200K"
+     ],
+     [
+      "Chauvet Pro",
+      "COLORado Solo Bar 1",
+      "Current",
+      "D",
+      "IP batten \u2014 cyc / footlight / downlight (CYC diffusion filter)",
+      "RGBWWL full-spectrum; 4-cell",
+      "110",
+      "4,285 lm (3,795 w/ cyc filter)",
+      "95"
+     ],
+     [
+      "Chauvet Pro",
+      "COLORado Solo Bar 4 / 6",
+      "Current",
+      "D",
+      "IP batten \u2014 cyc / footlight / batten (16 / 24-cell)",
+      "RGBWWL full-spectrum",
+      "up to 600",
+      "Bar 6: 25,198 lm (32,913 w/ cyc filter)",
+      "95"
+     ],
+     [
+      "Elation",
+      "KL Cyc L",
+      "Current (flagship)",
+      "A",
+      "Dedicated cyc/footlight \u2014 TRUE asymmetric reflector",
+      "RGBMA; 2400-8500K",
+      "196",
+      "9,249 lm",
+      "96.5 (TLCI 88)"
+     ],
+     [
+      "Elation",
+      "KL Cyc S",
+      "Current",
+      "A",
+      "Dedicated cyc/footlight \u2014 asymmetric reflector (0.5m)",
+      "RGBMA; 2400-8500K",
+      "100",
+      "5,645 lm",
+      "96.5 (TLCI 88)"
+     ],
+     [
+      "Elation",
+      "Six+ Bar L / S",
+      "Current",
+      "D",
+      "IP batten \u2014 uplight / wall-cyc wash (glare shield incl.)",
+      "RGBLA+UV; 12x 20W",
+      "210",
+      "9,325 lm",
+      "unknown"
+     ],
+     [
+      "Vari-Lite",
+      "VL1200 Coda Cyc",
+      "Current (flagship)",
+      "A",
+      "Dedicated cyc \u2014 asymmetric reflector; fanless (silent)",
+      "RGBALC 6-color SmartColor; 1800-10,000K",
+      "205",
+      "~13,000 lm",
+      "94 (R9 96; TM-30 Rf 88)"
+     ],
+     [
+      "Vari-Lite",
+      "VL600 Acclaim Cyc",
+      "Current",
+      "B",
+      "Dedicated cyc \u2014 patented asymmetric reflector; top/floor",
+      "RGBL; 3200-7100K",
+      "140",
+      "5,800 lm",
+      "86 (TM-30 Rf 80)"
+     ],
+     [
+      "Altman",
+      "Spectra Cyc 200",
+      "Current but delisted \u2014 verify",
+      "B",
+      "Dedicated cyc \u2014 specular-aluminum asymmetric reflector",
+      "RGBA / RGBW / 3K / var. white; 2 banks",
+      "200",
+      "2,680 lm max",
+      "unknown"
+     ],
+     [
+      "Altman",
+      "Spectra Cyc 100",
+      "Current but special-order \u2014 verify",
+      "B",
+      "Dedicated cyc \u2014 asymmetric reflector",
+      "RGBA / RGBW / white",
+      "100",
+      "4,727 lm (RGBA)",
+      "unknown"
+     ],
+     [
+      "Altman",
+      "Spectra Cyc 50",
+      "Current (in stock at FC)",
+      "B",
+      "Dedicated cyc \u2014 asymmetric reflector (single-cell short-throw)",
+      "RGBA / RGBW / 3K / var. white",
+      "50",
+      "unknown",
+      "unknown"
+     ],
+     [
+      "ADJ",
+      "Ultra Hex Bar 12",
+      "Current",
+      "E",
+      "Batten used for cyc/backdrop (symmetric, NOT dedicated cyc)",
+      "RGBWA+UV hex; 12x 10W",
+      "55",
+      "1,680 lux @2m",
+      "unknown"
+     ],
+     [
+      "LEGACY / DISCONTINUED / AVAILABILITY-FLAGGED REFERENCE",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ETC",
+      "Selador Vivid-R (x7 linear cyc/stagewash)",
+      "Discontinued",
+      "-",
+      "Linear cyc/stagewash",
+      "x7 7-color",
+      "125-864",
+      "1,750 field lm",
+      "unknown"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation C-640FC",
+      "Legacy",
+      "-",
+      "Dual-head cyc wash",
+      "RGBWA; 64 LEDs",
+      "175",
+      "141 lux @5m",
+      "unknown"
+     ],
+     [
+      "Chauvet Pro",
+      "COLORado Solo Batten (144x3W)",
+      "Legacy",
+      "-",
+      "IP batten (cyc via filter)",
+      "RGBWA; 144x3W",
+      "331",
+      "unknown",
+      "unknown"
+     ],
+     [
+      "Elation",
+      "Colour Chorus 72",
+      "Discontinued",
+      "-",
+      "RGBA batten for backdrop/cyc",
+      "RGBA; 288 LEDs",
+      "630",
+      "unknown",
+      "unknown"
+     ],
+     [
+      "Altman",
+      "Spectra Strip (LED borderlight)",
+      "Delisted \u2014 verify",
+      "-",
+      "Multi-cell striplight/borderlight",
+      "RGBA / RGBW / 3K; 12 cells",
+      "up to 600",
+      "unknown",
+      "high-CRI (white)"
+     ],
+     [
+      "ADJ",
+      "Ultra Bar 12 (RGB)",
+      "Discontinued",
+      "-",
+      "RGB wash batten",
+      "RGB; 12x 3W",
+      "43",
+      "1,794 lux @2m",
+      "unknown"
+     ],
+     [
+      "* ETC ColorSource CYC / Linear / S4 LED CYC adapter are indoor/dry-location (no published IP rating); treated as IP20-class.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    ]
+   },
+   "equivalents": {
+    "header": [
+     "Class / ETC Anchor",
+     "Competitor",
+     "Street $ vs ETC",
+     "How close is it?",
+     "Where the competitor wins",
+     "Where ETC wins",
+     "One-line talking point"
+    ],
+    "rows": [
+     [
+      "CLASS A \u2014 PREMIUM HIGH-CRI DEDICATED CYC | *** ETC HAS NO DIRECT MATCH *** ETC's ColorSource CYC is a mid-tier unit; there's no premium high-CRI ETC cyc to answer Elation KL Cyc L (CRI 96.5) or Vari-Lite Coda (CRI 94). For color-critical broadcast/theatre cyc, ETC's honest play is a Selador/S4 LED wash into the cyc, not a dedicated unit.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "(no premium ETC cyc)",
+      "Elation KL Cyc L (~$2,140)",
+      "n/a (ETC absent)",
+      "Best-in-class color, no ETC equivalent.",
+      "CRI 96.5, true asymmetric reflector, 9,249 lm, RGBMA 2400-8500K tunable \u2014 the color-critical studio/theatre cyc standard",
+      "Nothing dedicated \u2014 ETC would answer with S4 LED (Lustr X8) + CYC adapter to get high-CRI x8 color into the cyc, leveraging existing inventory and console family",
+      "When the spec demands broadcast-grade cyc color, don't force a ColorSource CYC \u2014 either concede to KL Cyc, or pitch S4 LED engines + CYC adapters if the house owns them (x8 color, one family)."
+     ],
+     [
+      "(no premium ETC cyc)",
+      "Vari-Lite VL1200 Coda Cyc (~$4,289)",
+      "n/a",
+      "Brightest/broadest-gamut cyc; no ETC peer.",
+      "~13,000 lm, RGBALC 6-color, CRI 94, fanless silent, 1800-10,000K \u2014 flagship broadcast cyc",
+      "No ETC dedicated equal; S4 LED + CYC adapter is the ecosystem answer for ETC houses",
+      "Coda is the premium ceiling of the category \u2014 ETC competes on ecosystem/retrofit, not head-to-head cyc hardware."
+     ],
+     [
+      "CLASS B \u2014 MID DEDICATED CYC | ETC anchor: ColorSource CYC (~$1,760, 4,117 lm, RGBI-L). This is where the real fight is \u2014 and where ETC is genuinely outgunned on paper. Sell the two ETC plays (retrofit adapter, ecosystem+indigo), not the spec sheet.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ColorSource CYC",
+      "Chauvet Ovation CYC 1 FC (~$1,088)",
+      "~$670 LESS",
+      "The uncomfortable one: cheaper and brighter.",
+      "~$670 cheaper AND 2x the output (8,966 vs 4,117 lm) AND published CRI 90.6 AND RGBAL full-spectrum \u2014 on paper it wins outright",
+      "ETC ecosystem/console-calibration match; the indigo primary for deep-blue/lavender cyc color that Chauvet's amber-lime engine renders differently; Deep-Blue-capable RGBI-L; ETC dealer support and warranty",
+      "You will lose a pure spec/price battle here \u2014 so don't have one. If the house is ETC-standardized, sell calibration coherence + indigo blue depth; if they own S4 LEDs, pivot to the CYC adapter and the Ovation looks expensive."
+     ],
+     [
+      "ColorSource CYC",
+      "Vari-Lite VL600 Acclaim Cyc (quote ~$1,600-1,900)",
+      "~even to more",
+      "True asymmetric reflector, Acclaim-family match.",
+      "Patented asymmetric reflector (more even coverage claim); covers cycs to 5m; matches a Vari-Lite Acclaim console house",
+      "ETC ecosystem; indigo color; cheaper if street prices land where ColorSource sits; ETC support depth vs Signify",
+      "Acclaim Cyc is the pick in a Vari-Lite-standardized house; in an ETC house, ColorSource CYC keeps the family together."
+     ],
+     [
+      "ColorSource CYC",
+      "Altman Spectra Cyc 50/100/200",
+      "~$1,080-4,200 (verify stock)",
+      "The legacy benchmark \u2014 now an availability question.",
+      "Classic specular-aluminum asymmetric reflector, made-in-USA, multiple white/color engines; long-trusted in schools",
+      "ETC is buyable and supported TODAY; Altman Spectra Cyc reads discontinued/no-stock at BMI, delisted/special-order elsewhere \u2014 a real supply risk on a bid with a deadline",
+      "If a spec calls out 'Altman cyc' from an old standard, flag the availability problem and offer ColorSource CYC (or the S4 adapter) as the in-stock, supported substitute."
+     ],
+     [
+      "CLASS C \u2014 RETROFIT / ADAPTER CYC | *** ETC'S STRONGEST CARD *** Source Four LED CYC adapter (~$444). No competitor has an answer to 'use the S4 LED you already own as a cyc light.'",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "Source Four LED CYC adapter",
+      "(no competitor equivalent)",
+      "$444 + engine owned",
+      "Unique to ETC \u2014 a structural advantage.",
+      "Nothing \u2014 Chauvet/Elation/Vari-Lite/ADJ all require buying a whole new fixture for cyc",
+      "If the building owns Source Four LED engines (many ETC houses do), ~$444/unit converts them to cyc lights \u2014 cheapest good cyc in the room, same engine/console family, x7/x8 color quality from the host array",
+      "'You already own the expensive part.' In any ETC-standardized house with S4 LED inventory, this beats every dedicated cyc on total cost \u2014 lead with it."
+     ],
+     [
+      "CLASS D \u2014 CYC-CAPABLE IP BATTENS | ETC anchor: ColorSource Linear (as a wash/graze tool; ETC has no IP cyc batten). Competitors' IP battens do cyc + wash + pixel in one fixture.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ColorSource Linear",
+      "Chauvet COLORado Solo Bar 1/4/6, Elation Six+ Bar",
+      "~$1,862+ (Solo Bar 1)",
+      "More capable multi-use IP battens.",
+      "IP65, CRI 95 (Chauvet), full wireless/Art-Net/sACN, swappable CYC diffusion filter \u2014 one fixture for cyc, footlight, downlight, and pixel effects; far more control than ColorSource Linear",
+      "ColorSource Linear is cheaper and keeps ETC-family calibration/console fit for scenic graze and simple cyc; ETC houses buying wash strips stay coherent",
+      "For a do-everything IP batten (outdoor cyc + pixel + wash), the Chauvet/Elation bars win; for an indoor ETC-rig scenic/cyc graze on budget, ColorSource Linear fits."
+     ],
+     [
+      "CLASS E \u2014 BUDGET BATTEN FOR CYC | ADJ Ultra Hex Bar 12 (~$550) is the low-bid backdrop tool \u2014 symmetric beam, no asymmetric reflector, so evenness suffers on tall cycs. Counter: a real cyc needs a real cyc fixture; on short backdrops it's fine, on a 16ft cyc it streaks.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    ]
+   },
+   "specCount": 24,
+   "equivCount": 7
+  },
+  {
+   "key": "fresnel",
+   "name": "LED Fresnel",
+   "spec": {
+    "header": [
+     "Brand",
+     "Model",
+     "Status",
+     "Class",
+     "Lens",
+     "Color Engine",
+     "Watts",
+     "Output (lm)",
+     "CRI"
+    ],
+    "rows": [
+     [
+      "ETC",
+      "fos/4 Fresnel (7in/10in)",
+      "Current (flagship)",
+      "A",
+      "5/7/10in",
+      "Lustr X8 (8-color) or Daylight HDR",
+      "173-304",
+      "7in X8 7,406 / 10in HDR 12,331",
+      "97-98 (X8)"
+     ],
+     [
+      "ETC",
+      "Desire Fresnel (5in/7in)",
+      "Current",
+      "B",
+      "5/7in",
+      "Lustr X8 (8-color)",
+      "138",
+      ">6,100",
+      "93-98 (TLCI 96-98)"
+     ],
+     [
+      "ETC",
+      "ColorSource Fresnel V MAX",
+      "NEW (Oct 2025)",
+      "B",
+      "7.5in",
+      "RGBIL (adds indigo + lime)",
+      "208",
+      "9,293 field / 10,100 sphere",
+      "Not published"
+     ],
+     [
+      "ETC",
+      "ColorSource Fresnel V",
+      "Current",
+      "C",
+      "7.5in",
+      "RGBIL (adds indigo + lime)",
+      "148",
+      "5,330 max",
+      "Not published"
+     ],
+     [
+      "ETC",
+      "Source Four LED Fresnel adapter",
+      "Current",
+      "E",
+      "adapter",
+      "Host engine (x7 / Lustr X8 / Daylight HDR)",
+      "(host)",
+      "(host, soft optics reduce)",
+      "(host)"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation Reve F-3",
+      "Current (2023+)",
+      "A",
+      "motor.",
+      "RGBAM full-spectrum; 2800-8000K",
+      "528",
+      "narrow 6,179 / wide 14,302",
+      "96"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation Reve F-3 IP",
+      "Current (2023+)",
+      "A",
+      "motor.",
+      "RGBAM full-spectrum; 2800-8000K",
+      "532",
+      "narrow 5,232 / wide 13,374",
+      "96"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation F-915FC",
+      "Current (-2)",
+      "A",
+      "6in",
+      "RGBAL full-spectrum; 2800-6500K",
+      "304",
+      "4,294-6,661 (by zoom)",
+      "90 @3200K"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation F-415FC",
+      "Current (-2)",
+      "B",
+      "6in",
+      "RGBAL full-spectrum; 2800-6500K",
+      "130",
+      "1,877-2,815 (by zoom)",
+      "91 @3200K"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation F-55FC",
+      "Legacy (still sold)",
+      "C",
+      "mini",
+      "RGBAL full-spectrum; 15 LEDs",
+      "28",
+      "114-462 (by zoom)",
+      "91 @3200K"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation F-265WW",
+      "Current (-2)",
+      "D",
+      "6in",
+      "Warm white single-source ~3142K",
+      "222",
+      "9,283-12,802 (by zoom)",
+      "96"
+     ],
+     [
+      "Chauvet Pro",
+      "Ovation F-415VW / F-915VW",
+      "Current (-2)",
+      "D",
+      "6in",
+      "6-color variable white; 2800-8000K",
+      "125 / 271",
+      "F-915VW 4,143-6,792",
+      "88-93"
+     ],
+     [
+      "Elation",
+      "KL Fresnel 8 FC",
+      "Current (flagship)",
+      "A",
+      "8in",
+      "RGBMA 5-in-1; 2400-8500K",
+      "514",
+      "18,000 total",
+      "94.5 (TLCI 94)"
+     ],
+     [
+      "Elation",
+      "KL Fresnel 6 FC",
+      "Current",
+      "B",
+      "6in",
+      "RGBMA 5-in-1; 2400-8500K",
+      "220",
+      "7,200 total",
+      "92.5"
+     ],
+     [
+      "Elation",
+      "KL Fresnel 4 FC",
+      "Current",
+      "C",
+      "4in",
+      "RGBMA 5-in-1; 2400-8500K",
+      "80",
+      "2,226",
+      "94.2 (TLCI 87)"
+     ],
+     [
+      "Elation",
+      "KL Fresnel 8 (CW) / 6 (WW) / 4 (CW/WW)",
+      "Current",
+      "D",
+      "4/6/8in",
+      "Single-CCT white (3000K/5600K); 97 CRI",
+      "50-350",
+      "6,500-14,000",
+      "95-97"
+     ],
+     [
+      "Vari-Lite",
+      "VL600 Acclaim Fresnel+",
+      "Current",
+      "A",
+      "motor.",
+      "RGBL; 3200-7100K",
+      "305",
+      "15,500",
+      "~85 (low for FC)"
+     ],
+     [
+      "Vari-Lite",
+      "VL600 Acclaim Fresnel",
+      "Current",
+      "B",
+      "5in",
+      "RGBL; 3200-7100K",
+      "150",
+      "4,500 beam / 8,500 field",
+      "80-85"
+     ],
+     [
+      "ADJ",
+      "Encore FR Pro Color",
+      "Current",
+      "B",
+      "7in",
+      "RGBACL 6-in-1; full-spectrum",
+      "400",
+      "9,028 total",
+      "97.8"
+     ],
+     [
+      "ADJ",
+      "Encore FR Pro WW",
+      "Current (EU-led)",
+      "D",
+      "7in",
+      "Warm white 3000K",
+      "200",
+      "12,312 total",
+      "97.2 (R9 86)"
+     ],
+     [
+      "ADJ",
+      "Encore FR150Z",
+      "Current",
+      "D",
+      "8in",
+      "Warm white 3000K",
+      "130",
+      "unknown",
+      "95"
+     ],
+     [
+      "Altman",
+      "Pegasus 8",
+      "Current but thin \u2014 verify",
+      "D",
+      "8in",
+      "White CCT only (2700/3000/4000/5000K)",
+      "140",
+      ">11,620",
+      ">90"
+     ],
+     [
+      "Altman",
+      "Pegasus 6",
+      "Current but thin \u2014 verify",
+      "D",
+      "6in",
+      "White CCT only (2700/3000/4000/5000K)",
+      "130",
+      "10,758",
+      ">90"
+     ],
+     [
+      "LEGACY / DISCONTINUED / SUPERSEDED REFERENCE",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "Vari-Lite",
+      "Cantata / Fresnel FC / TCW / TWW",
+      "Discontinued",
+      "-",
+      "5-7in",
+      "RGBALC / tunable white",
+      "unknown",
+      "unknown",
+      ">94 (TCW)"
+     ],
+     [
+      "Strand",
+      "Selecon RAMA 7in LED Fresnel",
+      "Legacy",
+      "-",
+      "7in",
+      "3100K custom white",
+      "unknown",
+      "unknown",
+      "unknown"
+     ],
+     [
+      "ETC",
+      "Selador Desire (x7) Fresnel",
+      "Superseded",
+      "-",
+      "5/7in",
+      "x7 7-color (old array)",
+      "unknown",
+      "unknown",
+      "86-93"
+     ]
+    ]
+   },
+   "equivalents": {
+    "header": [
+     "Class / ETC Anchor",
+     "Competitor",
+     "Street $ vs ETC",
+     "How close is it?",
+     "Where the competitor wins",
+     "Where ETC wins",
+     "One-line talking point"
+    ],
+    "rows": [
+     [
+      "CLASS A \u2014 PREMIUM FULL-COLOR FRESNEL | ETC anchor: fos/4 Fresnel (Lustr X8, CRI 97-98, ~$3,272 7in). The color-critical studio/broadcast Fresnel \u2014 best color rendering in the category.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "fos/4 Fresnel",
+      "Elation KL Fresnel 8 FC",
+      "~$2,610 \u2014 under fos/4",
+      "The brightness rival.",
+      "18,000 lm (much brighter than fos/4 7in's ~7,400); cheaper; motorized zoom; RGBMA reads well",
+      "8-color Lustr X8 = CRI 97-98 vs KL's 94.5 \u2014 the color-fidelity edge broadcast/film buyers pay for; Multiverse wireless + NFC; ETC studio pedigree and Set Light app; matches an ETC-controlled studio",
+      "KL Fresnel 8 FC wins lumens and price; fos/4 wins color fidelity (x8, CRI 98) and ETC studio-ecosystem fit \u2014 for color-critical broadcast, fos/4 holds; for raw output, KL is the value."
+     ],
+     [
+      "fos/4 Fresnel",
+      "Chauvet Ovation Reve F-3 / F-3 IP",
+      "~$2,673 / $3,260",
+      "Bright, high-CRI, and IP-capable.",
+      "Reve F-3 is ~14,300 lm at CRI 96 for less than fos/4; the F-3 IP is IP65 outdoor \u2014 a capability ETC's Fresnel line entirely lacks",
+      "fos/4 x8 array edges CRI (97-98 vs 96); Multiverse/NFC; ETC ecosystem; but on output-per-dollar and outdoor use, ETC concedes",
+      "For indoor color-critical, fos/4 and Reve F-3 are close (Chauvet brighter/cheaper, ETC slightly better color + ecosystem); for OUTDOOR Fresnel, only Chauvet plays \u2014 flag the gap and quote the Reve F-3 IP if the job needs it."
+     ],
+     [
+      "CLASS B \u2014 MID FULL-COLOR FRESNEL | ETC anchor: Desire Fresnel (Lustr X8) and ColorSource Fresnel V MAX (RGBIL, ~$1,596, ~10,100 lm). The V MAX is your value-tier hammer here.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ColorSource Fresnel V MAX",
+      "Chauvet Ovation F-415FC",
+      "~$1,558 \u2014 about even",
+      "Direct value-color head-to-head.",
+      "Slightly cheaper; RGBAL full-spectrum with published CRI 91; -2 revision; established Ovation line",
+      "V MAX is much brighter (~10,100 vs ~2,800 lm \u2014 different output class); indigo (RGBIL) for deep blue; Multiverse wireless + NFC (Chauvet has neither); ETC ecosystem/console-calibration match",
+      "The V MAX badly out-punches the F-415FC on lumens at the same price \u2014 where the F-415FC's smaller size fits, it competes, but for output-per-dollar the V MAX wins its own class."
+     ],
+     [
+      "ColorSource Fresnel V MAX",
+      "ADJ Encore FR Pro Color",
+      "~$1,580 \u2014 about even",
+      "The value-CRI challenger.",
+      "CRI 97.8 (beats ETC's unpublished ColorSource CRI); RGBACL 6-color; 9,028 lm; motorized zoom; cheap for the color quality",
+      "Indigo primary for deep-blue cyc-adjacent color; Multiverse + NFC; ETC ecosystem and support; the V MAX matches on output (~10k lm)",
+      "FR Pro Color is a legitimately strong value Fresnel with excellent CRI \u2014 counter with ETC ecosystem fit, Multiverse/NFC, and (if the house is ETC-standard) console-calibration coherence, not a CRI-number contest you may lose."
+     ],
+     [
+      "ColorSource Fresnel V MAX",
+      "Elation KL Fresnel 6 FC / Vari-Lite Acclaim Fresnel",
+      "~$1,840 / quote",
+      "Mid full-color peers.",
+      "KL 6 FC has higher CRI (92.5) and tunable CCT; Acclaim matches a Vari-Lite console house",
+      "V MAX brighter than KL 6 FC (~10,100 vs 7,200 lm) and cheaper; far better CRI than Acclaim's ~85; Multiverse/NFC; ETC ecosystem",
+      "The V MAX is brighter and cheaper than the KL 6 FC and out-renders the Acclaim \u2014 it's a genuinely strong mid-tier card, lead with it."
+     ],
+     [
+      "CLASS C \u2014 VALUE / COMPACT FULL-COLOR | ETC anchor: ColorSource Fresnel V (~$1,356), and compact end vs KL Fresnel 4 FC / Chauvet F-55FC.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "ColorSource Fresnel V",
+      "Chauvet F-55FC / Elation KL Fresnel 4 FC",
+      "~$550 / unknown",
+      "Compact-color bracket.",
+      "F-55FC ($550) and KL 4 FC are smaller and cheaper for tight-throw/accent work; higher published CRI (91/94)",
+      "ColorSource Fresnel V is a full-size 7.5in Fresnel (much more output/coverage than a mini); indigo engine; Multiverse/NFC; ETC ecosystem",
+      "For a stage-front Fresnel wash, the V is the right size; for a mini accent/monitor Fresnel, the F-55FC or KL 4 FC are the compact tools \u2014 match to throw distance."
+     ],
+     [
+      "CLASS D \u2014 WHITE / TUNABLE-WHITE FRESNEL | ETC's white answer is fos/4 Daylight HDR (premium) or a ColorSource Fresnel at white \u2014 ETC has NO budget white-only Fresnel. Competitors sell dedicated cheap white units.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "(fos/4 Daylight HDR / CS Fresnel at white)",
+      "ADJ Encore FR150Z ($690), Altman Pegasus 6/8, Chauvet F-265WW ($1,620, 12,802 lm)",
+      "$690-1,620",
+      "Dedicated white Fresnels ETC doesn't match on price.",
+      "FR150Z is a $690 white 8in tungsten-replacement; Altman Pegasus adds mains-phase dimming (works on old house dimmers); Chauvet F-265WW is a punchy CRI-96 white; all cheaper per white-lumen than an ETC color fixture run at white",
+      "ETC's color fixtures double as white AND color from one inventory (buy once); fos/4 Daylight HDR is premium tunable white with x-array quality; Multiverse/NFC",
+      "If the customer ONLY needs cheap white Fresnels, ADJ/Altman/Chauvet win per-dollar \u2014 flag it honestly; if they want color+white flexibility from one fixture, an ETC color Fresnel is the smarter inventory. (Altman's mains-dimming is a real edge in a room with legacy dimmers \u2014 but verify Altman stock.)"
+     ],
+     [
+      "CLASS E \u2014 RETROFIT ADAPTER | *** ETC ONLY *** Source Four LED Fresnel adapter (~$612) converts an existing S4 LED engine into a Fresnel (barn doors included). No competitor has an answer \u2014 in an ETC house with S4 LED inventory this is the cheapest way to add Fresnels and keeps one engine/console family.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    ]
+   },
+   "specCount": 27,
+   "equivCount": 7
+  },
+  {
+   "key": "spot_mover",
+   "name": "Spot Mover",
+   "spec": {
+    "header": [
+     "Brand",
+     "Model",
+     "Status",
+     "Class",
+     "Type",
+     "Source (W)",
+     "Output (lm)",
+     "CRI",
+     "Zoom"
+    ],
+    "rows": [
+     [
+      "High End (ETC)",
+      "SolaFrame Theatre",
+      "Current",
+      "S",
+      "Profile",
+      "~300 (est)",
+      "unknown",
+      "High-CRI engine option",
+      "unknown"
+     ],
+     [
+      "High End (ETC)",
+      "SolaFrame Studio",
+      "Current",
+      "S",
+      "Profile",
+      "300",
+      "unknown",
+      "High-CRI",
+      "zoom (range unk)"
+     ],
+     [
+      "High End (ETC)",
+      "Lonestar Prime",
+      "Current (flagship)",
+      "B",
+      "Profile",
+      "unknown (>290)",
+      "unknown (>15,400)",
+      "unknown",
+      "unknown"
+     ],
+     [
+      "High End (ETC)",
+      "Lonestar",
+      "Current",
+      "C",
+      "Profile",
+      "290",
+      "15,400",
+      "unknown",
+      "3.5-55 deg"
+     ],
+     [
+      "Martin",
+      "MAC Ultra Performance",
+      "Current",
+      "A",
+      "Profile",
+      "1150",
+      "46,500",
+      "66 (Rf 66)",
+      "8-54 deg"
+     ],
+     [
+      "Martin",
+      "MAC Encore Two",
+      "NEW (Dec 2025)",
+      "S",
+      "Profile",
+      "760",
+      "21,000",
+      "90 (95 w/ filter)",
+      "5-54 deg"
+     ],
+     [
+      "Martin",
+      "MAC Encore Performance CLD/WRM",
+      "Current",
+      "S",
+      "Profile",
+      "468",
+      "11,600 (CLD)",
+      ">80 (CLD); WRM warm-tuned",
+      "12-48 deg"
+     ],
+     [
+      "Martin",
+      "MAC Viper XIP",
+      "Current (2024)",
+      "B",
+      "Spot",
+      "760",
+      "28,000",
+      "68 (90 w/ filter)",
+      "5.7-54 deg"
+     ],
+     [
+      "Robe",
+      "iFORTE / iFORTE LTX",
+      "Current",
+      "A",
+      "Spot/hybrid",
+      "1000",
+      "50,000-55,000",
+      "70 (HP; 80/90 filters); 96 (HCF)",
+      "3.5-55 deg"
+     ],
+     [
+      "Robe",
+      "FORTE",
+      "Current",
+      "A",
+      "Spot",
+      "1000",
+      "50,000 (HP) / 35,000 (HCF)",
+      "70 (HP) / 96 (HCF)",
+      "5-55 deg"
+     ],
+     [
+      "Robe",
+      "ESPRITE",
+      "Current",
+      "B",
+      "Profile",
+      "650",
+      "27,000",
+      "70/80/90 selectable",
+      "5.5-50 deg"
+     ],
+     [
+      "Robe",
+      "T11 Profile",
+      "Current",
+      "S",
+      "Profile",
+      "350",
+      "9,500-11,850",
+      "95 (R9 96)",
+      "5-50 deg"
+     ],
+     [
+      "Robe",
+      "T2 / T3 Profile",
+      "Current (new)",
+      "B",
+      "Profile",
+      "850 (T2)",
+      ">22,000 (T2)",
+      "unknown (multispectral)",
+      "5-55 deg"
+     ],
+     [
+      "Ayrton",
+      "Huracan Profile",
+      "Current",
+      "A",
+      "Profile",
+      "1000",
+      "51,000 (-S) / 33,900 (-TC)",
+      "70 (-S) / >95 (-TC)",
+      "6-60 deg"
+     ],
+     [
+      "Ayrton",
+      "Domino Profile",
+      "Current",
+      "A",
+      "Profile",
+      "1000",
+      "51,000 (-S) / 36,400 (-TC)",
+      "70 (-S) / >90 (-TC)",
+      "6-60 deg"
+     ],
+     [
+      "Ayrton",
+      "Eurus Profile",
+      "Current",
+      "B",
+      "Profile",
+      "650",
+      "36,000 (-S)",
+      "70 (-S) / higher (-TC)",
+      "4.5-50 deg"
+     ],
+     [
+      "Ayrton",
+      "Perseo Profile",
+      "Current",
+      "B",
+      "Profile",
+      "500",
+      "30,000",
+      "70 (-S) / >90 (-TC)",
+      "7-58 deg"
+     ],
+     [
+      "Ayrton",
+      "Ghibli",
+      "Current",
+      "B",
+      "Spot",
+      "600",
+      "23,000 (-S) / 17,000 (-TC)",
+      "70 (-S) / >90 (-TC)",
+      "7-56 deg"
+     ],
+     [
+      "Ayrton",
+      "Diablo (S/TC)",
+      "Current",
+      "C",
+      "Profile",
+      "300",
+      "19,400 (-S)",
+      "70 (-S) / >90 (-TC)",
+      "7-53 deg"
+     ],
+     [
+      "Ayrton",
+      "Mistral (S/TC)",
+      "Current",
+      "X",
+      "Spot",
+      "300",
+      "18,000 (-S)",
+      "70 (-S) / higher (-TC)",
+      "7-53 deg"
+     ],
+     [
+      "Elation",
+      "Proteus Maximus",
+      "Current",
+      "A",
+      "Profile",
+      "950",
+      "50,000",
+      "70+ (82+ HCRI filter)",
+      "5.5-55 deg"
+     ],
+     [
+      "Elation",
+      "Proteus Lucius",
+      "Current",
+      "B",
+      "Profile",
+      "580",
+      "33,500",
+      "71+ (85+ HCRI filter)",
+      "5.5-50 deg"
+     ],
+     [
+      "Elation",
+      "Fuze Max Profile",
+      "Current",
+      "B",
+      "Profile",
+      "800",
+      "21,000",
+      "92 (RGBMA)",
+      "7-53 deg"
+     ],
+     [
+      "Elation",
+      "Fuze Profile",
+      "Current",
+      "C",
+      "Profile",
+      "305",
+      "10,100",
+      "92 (RGBMA)",
+      "7-42 deg"
+     ],
+     [
+      "Elation",
+      "Artiste Monet",
+      "Current",
+      "A",
+      "Profile",
+      "950",
+      "45,000",
+      "72+ (84 HCRI filter)",
+      "6.8-55 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Maverick Silens 2X Profile",
+      "Current (flagship silent)",
+      "S",
+      "Profile",
+      "760",
+      "11,227-12,748",
+      "94.8-95.6 (Rf 93)",
+      "5.5-58.5 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Maverick Silens 1X Profile",
+      "Current",
+      "S",
+      "Profile",
+      "430",
+      "6,081",
+      "97.1",
+      "6-56 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Maverick Force 3 Profile",
+      "Current (flagship Force)",
+      "A",
+      "Profile",
+      "915",
+      "40,906",
+      "70.9 (89.4 w/ filter)",
+      "4.9-53.9 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Maverick Force 2 Profile",
+      "Current",
+      "B",
+      "Profile",
+      "580",
+      "20,856",
+      "70.8 (89.3 w/ filter)",
+      "6.8-55.9 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Maverick Storm 4 Profile",
+      "Current",
+      "A",
+      "Profile",
+      "1250",
+      "60,756",
+      "71.5 (91 w/ filter)",
+      "6.4-58.3 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Maverick Storm 2 Profile",
+      "Current",
+      "B",
+      "Profile",
+      "580",
+      "28,000",
+      "CRI/CTB filters avail",
+      "5.5-58.6 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Rogue R3E Spot",
+      "Current",
+      "X",
+      "Spot",
+      "350",
+      "unknown",
+      "unknown",
+      "8.4-42.8 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Rogue Outcast 3 Spot",
+      "Current (IP65)",
+      "X",
+      "Spot",
+      "300",
+      "14,989",
+      "70",
+      "4.9-38.7 deg"
+     ],
+     [
+      "LEGACY / DISCONTINUED REFERENCE (huge installed base in touring & rental inventory)",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "High End (ETC)",
+      "SolaFrame 3000",
+      "LEGACY",
+      "-",
+      "Profile",
+      "1000",
+      "37,000",
+      "85+ (TM-30 filter)",
+      "7-55 deg"
+     ],
+     [
+      "High End (ETC)",
+      "SolaFrame 750/1000/2000",
+      "LEGACY",
+      "-",
+      "Profile",
+      "270-600",
+      "11,300-26,000",
+      "varies (HC options)",
+      "6-50 deg"
+     ],
+     [
+      "High End (ETC)",
+      "SolaSpot 1000/2000/3000 / Pro",
+      "LEGACY",
+      "-",
+      "Spot",
+      "440-1000",
+      "unknown",
+      "HC variants",
+      "unknown"
+     ],
+     [
+      "Martin",
+      "MAC Viper Performance / Quantum Profile",
+      "Legacy/disc.",
+      "-",
+      "Profile",
+      "475-1000",
+      "12,700-26,000",
+      ">85 (Viper)",
+      "10-44 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Maverick Force 1/S Spot, Force 2 Profile predecessors",
+      "Legacy",
+      "-",
+      "Spot",
+      "350-470",
+      "14,407-21,172",
+      "68-69 (89 w/ filter)",
+      "3.8-54 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Rogue R1/R2/R3 Spot, R1X/R2X Spot",
+      "Disc./Legacy",
+      "-",
+      "Spot",
+      "140-300",
+      "5,479-14,789",
+      "71-75",
+      "fixed 14-18 deg"
+     ]
+    ]
+   },
+   "equivalents": {
+    "header": [
+     "Tier / High-End Anchor",
+     "Competitor",
+     "Street $ vs HES",
+     "How close is it?",
+     "Where the competitor wins",
+     "Where High End / ETC-family wins",
+     "One-line talking point"
+    ],
+    "rows": [
+     [
+      "THE SILENT/THEATRICAL TIER \u2014 PEAK'S SWEET SPOT | High-End anchor: SolaFrame Theatre (silent, high-CRI framing profile). This is the tier that matters most for schools/PACs/HoW, and the ONE place the ETC family has a genuinely strong mover. The fight here is against Chauvet's fanless Silens and Robe's T11.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "SolaFrame Theatre",
+      "Chauvet Maverick Silens 2X / 1X Profile",
+      "~$7,270-9,780 (HES quote)",
+      "The strongest cross-brand rival \u2014 and it's beatable.",
+      "PUBLISHED specs and street pricing (SolaFrame Theatre is quote-only/spec-thin); fanless-silent like the Theatre; CRI 95-97 (1X hits 97.1); Art-Net/sACN/CRMX built in; often cheaper",
+      "Keeps the mover in the ETC/High End family \u2014 one dealer, one control philosophy, matches an ETC-standardized house; High End theatrical service network; ETC dealer (Peak) sells + supports it directly",
+      "Honest read: the Silens is a superb fixture that matches or beats SolaFrame Theatre on published CRI and price. Sell SolaFrame Theatre on ETC-family coherence and Peak's direct HES support; if the customer is brand-agnostic and price-driven, the Silens is a legitimate \u2014 and in-house-for-Peak-anyway \u2014 recommendation."
+     ],
+     [
+      "SolaFrame Theatre",
+      "Robe T11 Profile",
+      "quote vs quote",
+      "Premium multispectral high-CRI compact.",
+      "Multispectral engine CRI 95 (R9 96), only 34.6 lbs (very light for old grids), modular (becomes Fresnel/PC), Robe's touring pedigree",
+      "ETC-family coherence; High End's theatrical positioning; T11 is premium-priced and Robe US support is dealer-dependent",
+      "T11 is the premium boutique pick (light, high-CRI, modular); SolaFrame Theatre is the keep-it-ETC pick. Weight-sensitive rooms may favor the T11."
+     ],
+     [
+      "SolaFrame Theatre",
+      "Martin MAC Encore Two / Performance",
+      "~$12,200+ (quote)",
+      "High-CRI theatrical framing, heavier/pricier.",
+      "CRI 90-95, established broadcast pedigree, Martin P3 ecosystem, brighter (21,000 lm)",
+      "SolaFrame Theatre is lighter and keeps ETC family; Martin Encore is a bigger, costlier fixture",
+      "Encore is the broadcast-grade heavyweight; SolaFrame Theatre is the right-sized in-family theatrical choice for most PAC/school rooms."
+     ],
+     [
+      "FLAGSHIP HIGH-OUTPUT FRAMING (900W+) | High-End anchor: (none current \u2014 SolaFrame 3000 is DISCONTINUED). ETC family has NO current flagship touring-class framing profile. This whole tier is a category gap for the ETC family.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "(no current HES flagship)",
+      "Martin MAC Ultra Perf. (~$21.6k), Robe iFORTE/FORTE, Ayrton Huracan/Domino, Elation Proteus Maximus, Chauvet Force 3 / Storm 4 (~$10.8-13k)",
+      "n/a (HES absent)",
+      "ETC family doesn't currently play at the top.",
+      "40,000-60,000+ lm, IP65 options, full touring feature sets \u2014 everything a big touring/stadium rig needs; Chauvet Force 3 / Storm 4 are the value entries, Martin/Robe/Ayrton the premium",
+      "Nothing current from High End \u2014 the SolaFrame 3000 that competed here is discontinued and not replaced at this tier",
+      "If a bid needs a flagship touring framing profile, the ETC family has no current answer \u2014 quote Chauvet (value) or Martin/Robe/Ayrton (premium). Don't pretend a Lonestar competes with a MAC Ultra."
+     ],
+     [
+      "MID FRAMING PROFILE (500-760W) | High-End anchor: Lonestar Prime / SolaFrame Studio. The workhorse tier \u2014 PAC main rigs, mid touring.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "Lonestar Prime / SolaFrame Studio",
+      "Robe ESPRITE, Ayrton Ghibli/Eurus/Perseo, Elation Proteus Lucius / Fuze Max Profile, Chauvet Force 2 Profile",
+      "quote vs $7-12k",
+      "Crowded, competitive tier.",
+      "Published specs + pricing; deep feature sets; Elation Proteus Lucius (IP65, ~34k lm) and Chauvet Force 2 (~$7k) are strong value; Robe/Ayrton bring touring pedigree and selectable/high CRI (-TC)",
+      "In-family ETC coherence and Peak's direct HES support; SolaFrame Studio's quiet + high-CRI leaning suits broadcast/theatre",
+      "This is a genuine fight \u2014 lead with SolaFrame Studio when ETC-family + quiet + CRI matter; concede to Chauvet Force 2 / Elation Lucius on pure value, or Robe/Ayrton for touring riders."
+     ],
+     [
+      "COMPACT / VALUE FRAMING (300-470W) | High-End anchor: Lonestar. Entry framing for smaller stages/budgets.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "Lonestar",
+      "Ayrton Diablo, Elation Fuze Profile (~$6.6k), Chauvet (Force S legacy)",
+      "quote vs $6.6k",
+      "Entry framing bracket.",
+      "Fuze Profile is RGBMA full-spectrum CRI 92 at a published ~$6.6k; Diablo is a compact -TC-high-CRI option; both well-documented",
+      "Lonestar keeps ETC family and is the most compact HES framing fixture; ETC dealer support",
+      "Fuze Profile's full-spectrum color + published price make it the value benchmark; Lonestar competes on ETC-family coherence for an ETC house."
+     ],
+     [
+      "SPOTS WITHOUT FRAMING / EFFECTS | High-End anchor: (none current \u2014 all SolaSpot discontinued). For round-beam gobo/effect spots, the ETC family again has no current fixture. Quote Chauvet Rogue (value), Ayrton Mistral, or beam/hybrid fixtures per the effect needed.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    ]
+   },
+   "specCount": 40,
+   "equivCount": 6
+  },
+  {
+   "key": "wash_mover",
+   "name": "Wash Mover",
+   "spec": {
+    "header": [
+     "Brand",
+     "Model",
+     "Status",
+     "Class",
+     "Type",
+     "Source",
+     "Output (lm)",
+     "CRI",
+     "Zoom"
+    ],
+    "rows": [
+     [
+      "High End (ETC)",
+      "SolaWash 2000",
+      "Current",
+      "W",
+      "Single-source CMY white",
+      "600W white LED",
+      "26,000",
+      ">75 (std); >90 (HC)",
+      "5-50 deg"
+     ],
+     [
+      "High End (ETC)",
+      "SolaPix 37",
+      "Current (flagged legacy)",
+      "P",
+      "RGBW pixel wash",
+      "37x 40W RGBW",
+      "29,000",
+      "~78",
+      "4.5-60 deg"
+     ],
+     [
+      "High End (ETC)",
+      "SolaPix 19 / 19 XT",
+      "Current (flagged legacy)",
+      "P",
+      "RGBW pixel wash",
+      "19x 40W RGBW",
+      "14,500 / 13,800 (XT)",
+      "~78",
+      "4.5-60 deg"
+     ],
+     [
+      "High End (ETC)",
+      "SolaPix 7 / Fan 8",
+      "Current (flagged legacy)",
+      "P",
+      "RGBW pixel wash",
+      "7-8x 40W RGBW",
+      "5,500 / 5,800",
+      "~76",
+      "4.5-60 deg"
+     ],
+     [
+      "High End (ETC)",
+      "SolaWash 19 / 37 (mature)",
+      "Current (mature)",
+      "P",
+      "RGBW pixel wash",
+      "19-37x 15W RGBW",
+      "9,000-18,000",
+      "unknown",
+      "12-65 deg"
+     ],
+     [
+      "Martin",
+      "MAC Ultra Wash",
+      "Current (flagship)",
+      "W",
+      "Single-source CMY white",
+      "1150W white LED",
+      "63,500",
+      "66 (80-91 w/ filters)",
+      "7-47 deg"
+     ],
+     [
+      "Martin",
+      "MAC Aura Raven XIP",
+      "NEW (2025)",
+      "P",
+      "RGBL pixel wash + Aura",
+      "37x 40W RGBL + 234 Aura",
+      "27,000",
+      ">82 (Rf 84)",
+      "6-51 deg"
+     ],
+     [
+      "Martin",
+      "MAC Aura PXL",
+      "Current",
+      "P",
+      "RGBW pixel wash + Aura",
+      "19x 40W RGBW + 141 Aura",
+      "10,500",
+      ">=73",
+      "6-59 deg"
+     ],
+     [
+      "Martin",
+      "MAC Aura XIP",
+      "Current",
+      "P",
+      "RGBW pixel wash + Aura",
+      "7x 60W RGBW + 12 Aura",
+      "6,000",
+      ">=71",
+      "6.3-50 deg"
+     ],
+     [
+      "Martin",
+      "MAC Aura XB",
+      "Current",
+      "P",
+      "RGBW wash + Aura",
+      "19x 15W RGBW + 30 Aura",
+      "6,000",
+      ">=67",
+      "9-59 deg"
+     ],
+     [
+      "Martin",
+      "MAC Encore Wash WRM / CLD",
+      "Current",
+      "W",
+      "Single-source CMY white",
+      "468W white LED",
+      "8,500-9,500",
+      ">90 (WRM); >80 (CLD)",
+      "14-60 deg"
+     ],
+     [
+      "Robe",
+      "iSpiiderX",
+      "Current (2024, IP65)",
+      "P",
+      "RGBW multisource wash-beam",
+      "1x 60W + 18x 40W RGBW",
+      "unknown",
+      "unknown",
+      "4-50 deg"
+     ],
+     [
+      "Robe",
+      "Spiider",
+      "Current",
+      "P",
+      "RGBW multisource wash-beam",
+      "1x 60W + 18x 30W RGBW",
+      "11,000",
+      "unknown",
+      "4-50 deg"
+     ],
+     [
+      "Robe",
+      "Tarrantula",
+      "Current",
+      "P",
+      "RGBW multisource wash-beam",
+      "1x 60W + 36x 40W RGBW",
+      "20,150",
+      "unknown",
+      "4-50 deg"
+     ],
+     [
+      "Robe",
+      "LEDBeam 150 / 350",
+      "Current",
+      "B",
+      "RGBW beam-wash",
+      "7-12x 40W RGBW",
+      "2,842-8,200",
+      "unknown",
+      "3.8-60 deg"
+     ],
+     [
+      "Ayrton",
+      "Huracan Wash",
+      "Current",
+      "W",
+      "Single-source CMY white (Fresnel)",
+      "1000W white LED",
+      "52,100 (-S) / 33,900 (-TC)",
+      "70 (-S) / >95 (-TC)",
+      "6.2-75 deg"
+     ],
+     [
+      "Ayrton",
+      "Domino Wash",
+      "Current (IP65)",
+      "W",
+      "Single-source CMY white (Fresnel)",
+      "1600W max LED",
+      "52,000 (-S) / 33,900 (-TC)",
+      "70 (-S) / >95 (-TC)",
+      "6.2-75 deg"
+     ],
+     [
+      "Ayrton",
+      "Zonda 9 Wash",
+      "Current",
+      "P",
+      "RGBW pixel wash",
+      "37x 40W RGBW",
+      "25,000",
+      "up to 86",
+      "4-56 deg"
+     ],
+     [
+      "Ayrton",
+      "Zonda 3 Wash",
+      "Current",
+      "P",
+      "RGBW pixel wash",
+      "7x 40W RGBW",
+      "5,200",
+      "up to 86",
+      "4-56 deg"
+     ],
+     [
+      "Elation",
+      "Fuze Wash FR",
+      "Current",
+      "W",
+      "Single-source RGBMA Fresnel wash",
+      "480W RGBMA LED",
+      "14,000",
+      "92 (RGBMA)",
+      "9-60 deg"
+     ],
+     [
+      "Elation",
+      "Proteus Rayzor 760",
+      "Current (IP65)",
+      "P",
+      "RGBW wash/FX",
+      "7x 60W RGBW + 28 SparkLED",
+      "7,200",
+      "80",
+      "5-77 deg"
+     ],
+     [
+      "Elation",
+      "Artiste Van Gogh",
+      "Current",
+      "W",
+      "CMY wash with framing",
+      "380W LED",
+      "unknown",
+      "unknown",
+      "unknown"
+     ],
+     [
+      "Chauvet Pro",
+      "Rogue R3X Wash",
+      "Current",
+      "P",
+      "RGBW pixel wash",
+      "37x 25W RGBW",
+      "11,500",
+      "unknown",
+      "12-49 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Rogue R2X Wash",
+      "Current",
+      "P",
+      "RGBW pixel wash",
+      "19x 25W RGBW",
+      "7,300",
+      "unknown",
+      "12-49 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Rogue R1X Wash",
+      "Current",
+      "P",
+      "RGBW wash",
+      "7x 25W RGBW",
+      "2,900",
+      "69",
+      "11-48 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Rogue Outcast 3X / 2X Wash",
+      "Current (IP65)",
+      "P",
+      "RGBW pixel wash",
+      "19-37x 25W RGBW",
+      "6,258-13,440",
+      "unknown",
+      "8-66 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Maverick Force 2 BeamWash",
+      "Current",
+      "B",
+      "RGBW beam-wash hybrid",
+      "12x 45W RGBW",
+      "9,183",
+      "unknown",
+      "3.7-44 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Maverick Storm 1 Wash",
+      "Current (IP65, EOL)",
+      "P",
+      "RGBW pixel wash",
+      "19x 20W RGBW",
+      "6,000",
+      "unknown",
+      "6.7-56 deg"
+     ],
+     [
+      "LEGACY / DISCONTINUED REFERENCE (common in rental/touring inventory)",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "High End (ETC)",
+      "SolaWash 1000",
+      "LEGACY",
+      "-",
+      "Single-source CMY white",
+      "440W white LED",
+      "20,000",
+      "70+ (HC opt)",
+      "12-55 deg"
+     ],
+     [
+      "Martin",
+      "MAC Allure Wash PC",
+      "Discontinued",
+      "-",
+      "RGBW pixel wash + beamshaper",
+      "7x 60W RGBW",
+      "6,000",
+      ">80",
+      "12-36 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Maverick MK2 / MK3 Wash",
+      "Disc./Legacy",
+      "-",
+      "RGBW pixel wash",
+      "12-27x 40W RGBW",
+      "5,900-13,300",
+      "unknown",
+      "4.7-65 deg"
+     ],
+     [
+      "Chauvet Pro",
+      "Rogue R1/R2/R3 Wash",
+      "Discontinued",
+      "-",
+      "RGBW pixel wash",
+      "7-37x 15W RGBW",
+      "2,300-11,500",
+      "unknown",
+      "11-63 deg"
+     ]
+    ]
+   },
+   "equivalents": {
+    "header": [
+     "Type / High-End Anchor",
+     "Competitor",
+     "Street $ vs HES",
+     "How close is it?",
+     "Where the competitor wins",
+     "Where High End / ETC-family wins",
+     "One-line talking point"
+    ],
+    "rows": [
+     [
+      "SINGLE-SOURCE CMY WHITE WASH (theatrical/broadcast) | High-End anchor: SolaWash 2000 (600W white CMY, 26,000 lm, HC high-CRI option). The ETC family's competitive wash card \u2014 high-output white for touring/broadcast in an ETC-standardized rig.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "SolaWash 2000",
+      "Martin MAC Ultra Wash (~$16,834)",
+      "quote vs ~$16.8k",
+      "Bigger, brighter, pricier.",
+      "63,500 lm (2.4x SolaWash 2000), Martin P3 video-mapping ecosystem, established arena/broadcast standard",
+      "Keeps the ETC family together; SolaWash 2000 is a more modest-cost high-output white wash; ETC dealer support",
+      "MAC Ultra Wash is the arena heavyweight; SolaWash 2000 is the right-sized in-family white wash for a mid/large ETC house."
+     ],
+     [
+      "SolaWash 2000",
+      "Ayrton Huracan/Domino Wash",
+      "quote vs quote",
+      "Premium 1000W+ white wash.",
+      "52,000 lm, -TC engine CRI >95 (beats SolaWash HC), IP65 (Domino), premium touring build",
+      "In-family ETC coherence; SolaWash 2000 is simpler and likely lower-cost",
+      "For premium high-CRI white wash, Ayrton -TC leads on color; SolaWash 2000 competes on ETC-family fit and cost."
+     ],
+     [
+      "SolaWash 2000",
+      "Martin MAC Encore Wash WRM (~$10,206)",
+      "quote vs ~$10.2k",
+      "The QUIET high-CRI theatrical wash \u2014 different mission.",
+      "CRI >90, super-SILENT cooling, tungsten-warm \u2014 purpose-built for quiet drama/broadcast; much lower output (8,500 lm) but that's the point",
+      "SolaWash 2000 is far brighter for big washes; but for a quiet theatrical color-critical wash the Encore is the specialist and SolaWash 2000 is overkill/noisier",
+      "If the room is a quiet drama/TV studio, the Encore Wash (or Elation Fuze Wash FR) beats a big SolaWash on noise + CRI; if you need to flood a big cyc/stage with white, SolaWash 2000 wins."
+     ],
+     [
+      "(no compact quiet ETC wash)",
+      "Elation Fuze Wash FR (~$5,564-6,500)",
+      "n/a (HES absent)",
+      "Full-spectrum theatrical wash the ETC family lacks.",
+      "RGBMA CRI 92, soft Fresnel, matches Fuze spot/profile color science, published ~$5.5-6.5k \u2014 a compact color+white theatrical wash",
+      "Nothing directly \u2014 HES has no compact RGBMA theatrical wash; SolaWash 2000 is white-CMY and much larger/costlier",
+      "For a compact full-spectrum theatrical wash on a PAC rig, the ETC family has no answer \u2014 Fuze Wash FR is the honest recommendation (and it color-matches Fuze spots if those are in the rig)."
+     ],
+     [
+      "RGBW PIXEL WASH (concert/event/HoW color) | High-End anchor: SolaPix family (7/19/37/Fan 8; flagged legacy but sold new). Competitive in this space, but priced above the value field.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "SolaPix 19 (~$7,400)",
+      "Chauvet Rogue R2X/R3X Wash ($2,177-3,506)",
+      "~$7,400 vs $2-3.5k",
+      "The value gap is large.",
+      "Chauvet Rogue washes are HALF to a THIRD the price for similar pixel-wash duty; huge installed base in schools/HoW/production; published pricing",
+      "SolaPix has HaloGraphic pixel face + FleX FX engine + built-in Art-Net/sACN and a more premium build; keeps ETC family",
+      "For a school/HoW spring-concert color wash on a budget, Rogue R2X/R3X is the sensible buy \u2014 SolaPix is premium eye-candy you spec when budget and family coherence both allow."
+     ],
+     [
+      "SolaPix 19 (~$7,400)",
+      "Martin MAC Aura PXL (~$8,590) / Robe Spiider (~$6,823)",
+      "~even",
+      "Peer premium pixel washes.",
+      "MAC Aura's Aura backlight is the iconic concert look + P3 mapping; Robe Spiider's Flower Effect is a touring staple; both have deep rental pedigree",
+      "SolaPix HaloGraphic face + ETC family; but Aura/Spiider have bigger touring mindshare and rider acceptance",
+      "On a concert/touring rider, Aura PXL and Spiider have the name recognition; SolaPix competes on ETC-family fit and its HaloGraphic front-face look."
+     ],
+     [
+      "SolaPix 19 XT / 37",
+      "Martin Aura Raven XIP, Robe iSpiiderX, Ayrton Zonda 9, Elation Rayzor, Chauvet Outcast",
+      "varies",
+      "IP65 outdoor pixel-wash field.",
+      "Each brings IP65 + big output + signature effects (Raven's 234-px Aura, iSpiiderX Flower, Zonda 3D FX); Chauvet Outcast is the value IP option",
+      "SolaPix 19 XT is the ETC-family IP65 pixel wash; competitive but premium-priced",
+      "Deep field here \u2014 pick by effect signature and budget; the ETC-family option (SolaPix 19 XT) is valid but rarely the cheapest."
+     ],
+     [
+      "BEAM-WASH HYBRIDS | Compact aerial-beam + wash fixtures (Robe LEDBeam 150/350, Chauvet Force 2 BeamWash, Rogue Outcast 1 BeamWash). High End has no direct compact beam-wash; for this popular effect fixture, quote Robe (premium) or Chauvet (value). Robe LEDBeam 150 (~$2,615) is a theatre/TV/corporate staple worth knowing.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    ]
+   },
+   "specCount": 33,
+   "equivCount": 7
+  }
+ ]
+}
