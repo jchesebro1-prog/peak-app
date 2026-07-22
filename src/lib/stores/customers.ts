@@ -30,6 +30,7 @@ import {
 } from "@/lib/identity/contacts";
 import { splitName } from "@/lib/identity/convert";
 import { mintId } from "@/lib/identity/ids";
+import { baseVenueKind } from "@/lib/identity/venue-defaults";
 import { allUsers } from "@/lib/users";
 import type {
   CompanyRow,
@@ -483,6 +484,13 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
   }
   for (const s of existingSites) {
     if (!keptSiteIds.has(s.id)) await softDeleteSite(s.id);
+  }
+
+  // Base venue for a brand-new customer created without a location (Jeff 2026-07-21):
+  // partners get none; kind is inferred from the name. Deterministic id → re-run safe.
+  if (!existingCo && keptSiteIds.size === 0) {
+    const kind = baseVenueKind(rec.type, rec.name);
+    if (kind) await saveSite({ id: `st-${rec.id}-1`, companyId: rec.id, name: "", isPrimary: true, venueKind: kind });
   }
 
   // ----- contacts (full-replace within this record, matched by name) -----
