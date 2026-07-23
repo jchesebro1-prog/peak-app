@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
+  CategoryOpt,
   ComposeInit,
   CustomerVM,
   DraftPayload,
@@ -13,9 +14,27 @@ import type {
   ReaderVM,
   SidebarVM,
 } from "./types";
-import { autoSyncAction, markReadAction, sendReceiveAction } from "./actions";
+import {
+  archiveAction,
+  autoSyncAction,
+  bulkArchiveAction,
+  bulkCategoryAction,
+  bulkDeleteAction,
+  bulkFlagAction,
+  bulkMarkReadAction,
+  bulkMoveAction,
+  bulkRestoreAction,
+  flagAction,
+  markReadAction,
+  pinAction,
+  searchInboxAction,
+  sendReceiveAction,
+  type SearchRow,
+} from "./actions";
 import { FolderGlyph, PencilIcon, PhoneIcon, RefreshIcon } from "./icons";
-import ThreadList from "./thread-list";
+import ThreadList, { type HeaderCheck, type RowActions } from "./thread-list";
+import CommandBar, { type BulkHandlers } from "./command-bar";
+import type { FolderId, MailboxId } from "@/lib/stores/comms";
 import ThreadReader from "./thread-reader";
 import ComposeModal from "./compose-modal";
 import LogModal from "./log-modal";
@@ -62,6 +81,7 @@ export default function InboxShell({
   contactEmails,
   fromOptions,
   initialCompose,
+  categoryOptions,
 }: {
   box: string;
   folder: string;
@@ -76,6 +96,7 @@ export default function InboxShell({
   contactEmails: Opt[];
   fromOptions: Opt[];
   initialCompose: ComposeInit | null;
+  categoryOptions: CategoryOpt[];
 }) {
   const router = useRouter();
 
@@ -112,9 +133,17 @@ export default function InboxShell({
     return readIds;
   }, [explicitSelected, reader, readIds]);
 
-  const baseQuery = isView
-    ? `view=${box}`
-    : `box=${box}&folder=${folder}`;
+  // Keep the active filter/sort on the URL while reading a thread, so opening
+  // a message doesn't drop the list's refinement.
+  const refineQuery = [
+    list.filter ? `filter=${list.filter}` : "",
+    list.sort && list.sort !== "date" ? `sort=${list.sort}` : "",
+  ]
+    .filter(Boolean)
+    .join("&");
+  const baseQuery =
+    (isView ? `view=${box}` : `box=${box}&folder=${folder}`) +
+    (refineQuery ? `&${refineQuery}` : "");
 
   const selectThread = useCallback(
     (id: string) => {
@@ -143,6 +172,168 @@ export default function InboxShell({
   const closeOverlay = useCallback(() => {
     router.push(`/inbox?${baseQuery}`);
   }, [router, baseQuery]);
+
+  /* ---- filter / sort (server-driven via the URL) ---- */
+  const setRefinement = useCallback(
+    (key: "filter" | "sort", value: string) => {
+      const params = new URLSearchParams();
+      if (isView) params.set("view", box);
+      else {
+        params.set("box", box);
+        params.set("folder", folder);
+      }
+      const nextFilter = key === "filter" ? value : list.filter;
+      const nextSort = key === "sort" ? value : list.sort;
+      if (nextFilter) params.set("filter", nextFilter);
+      if (nextSort && nextSort !== "date") params.set("sort", nextSort);
+      router.push(`/inbox?${params.toString()}`);
+    },
+    [router, isView, box, folder, list.filter, list.sort]
+  );
+
+  /* ---- multi-select ---- */
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  // Shift-range anchor, kept as an ID and only touched inside the click
+  // handler (never during render). Stale anchors self-heal: an id no longer in
+  // the current list resolves to indexOf === -1 and falls back to a plain toggle.
+  const anchorIdRef = useRef<string | null>(null);
+  const rowIds = useMemo(() => list.rows.map((r) => r.id), [list.rows]);
+
+  // Clear the selection whenever the listing changes (nav / filter / sort).
+  // React's sanctioned "adjust state during render" pattern (prev-value in
+  // useState), so no effect and no cascading render.
+  const listKey = `${isView ? "view" : "box"}:${box}/${folder}/${list.filter}/${list.sort}`;
+  const [prevListKey, setPrevListKey] = useState(listKey);
+  if (prevListKey !== listKey) {
+    setPrevListKey(listKey);
+    if (selectedIds.size) setSelectedIds(new Set());
+  }
+
+  const onToggleSelect = useCallback(
+    (id: string, shift: boolean) => {
+      const idx = rowIds.indexOf(id);
+      const anchorIdx = anchorIdRef.current ? rowIds.indexOf(anchorIdRef.current) : -1;
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (shift && anchorIdx !== -1 && idx !== -1) {
+          const a = Math.min(anchorIdx, idx);
+          const b = Math.max(anchorIdx, idx);
+          for (let i = a; i <= b; i++) next.add(rowIds[i]); // range-select (Outlook)
+        } else if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+      anchorIdRef.current = id;
+    },
+    [rowIds]
+  );
+
+  const onToggleAll = useCallback(() => {
+    setSelectedIds((prev) =>
+      rowIds.length > 0 && rowIds.every((id) => prev.has(id))
+        ? new Set()
+        : new Set(rowIds)
+    );
+  }, [rowIds]);
+
+  const allSelected = rowIds.length > 0 && rowIds.every((id) => selectedIds.has(id));
+  const headerCheck: HeaderCheck = allSelected
+    ? "all"
+    : selectedIds.size > 0
+      ? "some"
+      : "none";
+
+  /* ---- bulk actions ---- */
+  const runBulk = useCallback(
+    async (fn: (ids: string[]) => Promise<unknown>) => {
+      const picked = Array.from(selectedIds);
+      if (!picked.length) return;
+      setSelectedIds(new Set());
+      await fn(picked);
+      router.refresh();
+    },
+    [selectedIds, router]
+  );
+
+  const bulk: BulkHandlers = {
+    onArchive: () => void runBulk((ids) => bulkArchiveAction(ids)),
+    onDelete: () => void runBulk((ids) => bulkDeleteAction(ids)),
+    onRestore: () => void runBulk((ids) => bulkRestoreAction(ids)),
+    onMarkRead: (read) => void runBulk((ids) => bulkMarkReadAction(ids, read)),
+    onFlag: (on) => void runBulk((ids) => bulkFlagAction(ids, on)),
+    onCategory: (key) => void runBulk((ids) => bulkCategoryAction(ids, key)),
+    onMove: (mb) => void runBulk((ids) => bulkMoveAction(ids, mb)),
+  };
+
+  /* ---- per-row hover quick actions ---- */
+  const rowActions: RowActions = useMemo(
+    () => ({
+      onArchive: async (id) => {
+        await archiveAction(id);
+        router.refresh();
+      },
+      onFlag: async (id, on) => {
+        await flagAction(id, on);
+        router.refresh();
+      },
+      onPin: async (id, on) => {
+        await pinAction(id, on);
+        router.refresh();
+      },
+    }),
+    [router]
+  );
+
+  /* ---- global search (server-side, debounced) ---- */
+  const [query, setQuery] = useState("");
+  const [scope, setScope] = useState<"all" | "folder">("all");
+  // Results tagged with the query they answer, so a stale set never shows for
+  // a newer query (and no setState runs synchronously in the effect body).
+  const [search, setSearch] = useState<{ q: string; rows: SearchRow[] } | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  const trimmedQuery = query.trim();
+  const isSearch = trimmedQuery.length >= 2;
+  const searchRows =
+    search && search.q === trimmedQuery ? search.rows : null; // null = loading
+
+  useEffect(() => {
+    if (trimmedQuery.length < 2) return;
+    let cancelled = false;
+    const h = setTimeout(async () => {
+      setSearching(true);
+      try {
+        // "This folder" only applies to a real mailbox folder; smart views
+        // span mailboxes, so they fall back to searching everything.
+        const scopeArg =
+          scope === "folder" && !isView
+            ? {
+                kind: "box" as const,
+                box: box as MailboxId,
+                folder: folder as FolderId,
+              }
+            : { kind: "all" as const };
+        const { rows } = await searchInboxAction(trimmedQuery, scopeArg);
+        if (!cancelled) setSearch({ q: trimmedQuery, rows });
+      } catch {
+        if (!cancelled) setSearch({ q: trimmedQuery, rows: [] });
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(h);
+    };
+  }, [trimmedQuery, scope, box, folder, isView]);
+
+  const openSearchResult = useCallback(
+    (id: string) => {
+      void markReadAction(id);
+      router.push(`/inbox?thread=${encodeURIComponent(id)}`);
+    },
+    [router]
+  );
 
   // PUNCHLIST #1 — "actively sync": a silent background send/receive on mount
   // and every few minutes while the tab is visible. The server action claims
@@ -560,6 +751,32 @@ export default function InboxShell({
         onOpenDraft={openDraft}
         onBoxSel={onBoxSel}
         boxSelOptions={BOX_SEL_OPTIONS}
+        commandBar={
+          <CommandBar
+            selectedCount={selectedIds.size}
+            isDeleted={list.isDeleted}
+            filter={list.filter}
+            sort={list.sort}
+            categoryOptions={categoryOptions}
+            onClear={() => setSelectedIds(new Set())}
+            onFilter={(v) => setRefinement("filter", v)}
+            onSort={(v) => setRefinement("sort", v)}
+            bulk={bulk}
+          />
+        }
+        selectedIds={selectedIds}
+        onToggleSelect={onToggleSelect}
+        onToggleAll={onToggleAll}
+        headerCheck={headerCheck}
+        query={query}
+        onQueryChange={setQuery}
+        scope={scope}
+        onScopeChange={setScope}
+        isSearch={isSearch}
+        searchRows={searchRows}
+        searching={searching}
+        onOpenResult={openSearchResult}
+        rowActions={rowActions}
       />
 
       {/* ===== reading pane (desktop) ===== */}

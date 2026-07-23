@@ -3,6 +3,7 @@ import {
   listDocs,
   nextPrefixedId,
   patchDoc,
+  searchDocs,
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
@@ -129,8 +130,38 @@ function asChannel(x: string | undefined, fallback: Channel): Channel {
 /* ---- records ------------------------------------------------------------ */
 
 export type MailboxId = "personal" | "sales" | "installs" | "info";
-export type SmartView = "needs" | "calls";
-export type FolderId = "inbox" | "sent" | "drafts" | "outbox" | "archived";
+export type SmartView = "needs" | "calls" | "flagged";
+export type FolderId =
+  | "inbox"
+  | "sent"
+  | "drafts"
+  | "outbox"
+  | "archived"
+  | "deleted";
+
+/* ---- categories (Outlook-style color tags) -------------------------------
+ * One category per thread (Peak doesn't need multi-tag). A fixed preset
+ * palette keeps colors consistent and the picker simple. `key` is stored on
+ * the thread; label/color are looked up for display. */
+export type CategoryMeta = { key: string; label: string; color: string };
+
+export const CATEGORIES: CategoryMeta[] = [
+  { key: "red", label: "Red", color: "#d85a30" },
+  { key: "orange", label: "Orange", color: "#ba7517" },
+  { key: "yellow", label: "Yellow", color: "#c9a227" },
+  { key: "green", label: "Green", color: "#1d9e75" },
+  { key: "blue", label: "Blue", color: "#378add" },
+  { key: "purple", label: "Purple", color: "#7f77dd" },
+];
+
+export function categoryMeta(key?: string | null): CategoryMeta | null {
+  if (!key) return null;
+  return CATEGORIES.find((c) => c.key === key) || null;
+}
+
+/** Filter + sort options for a folder/view listing (new Outlook parity). */
+export type FilterKey = "unread" | "flagged" | "attachments" | "tome" | "needs";
+export type SortKey = "date" | "from" | "subject";
 
 export type CommLink = {
   type: string;
@@ -183,6 +214,15 @@ export type CommThread = {
   mailboxUser?: string | null; // set when mailbox === 'personal'
   unread: boolean;
   archived?: boolean;
+  /** Follow-up flag (Outlook flag). */
+  flagged?: boolean;
+  /** Pinned to the top of its list. */
+  pinned?: boolean;
+  /** Category preset key (see CATEGORIES); one per thread. */
+  category?: string | null;
+  /** In the Deleted folder — recoverable, distinct from the doc-store's
+   *  row-level soft delete. Excluded from every folder/view but Deleted. */
+  deleted?: boolean;
   customerId: string | null;
   customer: string;
   contactName: string;
@@ -533,12 +573,64 @@ export async function pending(): Promise<CommThread[]> {
 
 /* ---- folder queries -------------------------------------------------------- */
 
-/** Threads in a mailbox+folder (boxId may be a smart view: 'needs' | 'calls'). */
+/** "To me": assigned to the user, or in the user's own personal mailbox. */
+function toMe(t: CommThread, user: string): boolean {
+  return (
+    t.assignedTo === user || (t.mailbox === "personal" && t.mailboxUser === user)
+  );
+}
+
+function hasAttachment(t: CommThread): boolean {
+  return (t.messages || []).some((m) => (m.attachments || []).length > 0);
+}
+
+/** Predicate for a command-bar filter chip (new Outlook parity). */
+function filterPred(filter: FilterKey, user: string): (t: CommThread) => boolean {
+  switch (filter) {
+    case "unread":
+      return (t) => t.unread;
+    case "flagged":
+      return (t) => !!t.flagged;
+    case "attachments":
+      return hasAttachment;
+    case "tome":
+      return (t) => toMe(t, user);
+    case "needs":
+      return (t) => t.status === "waiting_us";
+  }
+}
+
+function sortComparator(sort: SortKey): (a: CommThread, b: CommThread) => number {
+  if (sort === "from")
+    return (a, b) =>
+      (a.contactName || a.customer || "").localeCompare(
+        b.contactName || b.customer || "",
+        undefined,
+        { sensitivity: "base" }
+      );
+  if (sort === "subject")
+    return (a, b) =>
+      (a.subject || "").localeCompare(b.subject || "", undefined, {
+        sensitivity: "base",
+      });
+  return (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0); // date desc
+}
+
+/** Float pinned threads to the top, preserving the order within each group. */
+function pinnedFirst(list: CommThread[]): CommThread[] {
+  const pinned = list.filter((t) => t.pinned);
+  const rest = list.filter((t) => !t.pinned);
+  return pinned.concat(rest);
+}
+
+/** Threads in a mailbox+folder. boxId may be a smart view
+ *  ('needs' | 'calls' | 'flagged'). opts adds text query, a filter chip, and
+ *  an explicit sort (which overrides the default waiting-first ordering). */
 export async function threadsIn(
   boxId: MailboxId | SmartView,
   folder?: FolderId | null,
   me?: string,
-  opts: { query?: string } = {}
+  opts: { query?: string; filter?: FilterKey | null; sort?: SortKey | null } = {}
 ): Promise<CommThread[]> {
   const user = me || DEFAULT_USER;
   const all = await listDocs<CommThread>("comms");
@@ -552,30 +644,42 @@ export async function threadsIn(
         visibleTo(t, user) &&
         t.status === "waiting_us" &&
         !t.archived &&
+        !t.deleted &&
         t.gmailInboxed !== false
     );
   else if (boxId === "calls")
     base = all.filter(
-      (t) => visibleTo(t, user) && t.status !== "draft" && t.channel !== "email"
+      (t) =>
+        visibleTo(t, user) &&
+        t.status !== "draft" &&
+        t.channel !== "email" &&
+        !t.deleted
     );
+  else if (boxId === "flagged")
+    base = all.filter((t) => visibleTo(t, user) && !!t.flagged && !t.deleted);
   else {
     base = all.filter((t) => inBox(t, boxId, user));
-    if (folder === "inbox")
-      base = base.filter(
-        (t) => t.status !== "draft" && !t.archived && t.gmailInboxed !== false
-      );
-    else if (folder === "sent")
-      base = base.filter(
-        (t) =>
-          t.status !== "draft" &&
-          (t.messages || []).some((m) => m.direction === "out")
-      );
-    else if (folder === "drafts") base = base.filter((t) => t.status === "draft");
-    else if (folder === "outbox") base = base.filter((t) => hasQueued(t));
-    else if (folder === "archived")
-      // Locally archived OR archived/filed on the Gmail side — either way the
-      // thread left the inbox, and this is where it stays findable.
-      base = base.filter((t) => !!t.archived || t.gmailInboxed === false);
+    if (folder === "deleted") base = base.filter((t) => !!t.deleted);
+    else {
+      // Every non-Deleted folder hides deleted threads.
+      base = base.filter((t) => !t.deleted);
+      if (folder === "inbox")
+        base = base.filter(
+          (t) => t.status !== "draft" && !t.archived && t.gmailInboxed !== false
+        );
+      else if (folder === "sent")
+        base = base.filter(
+          (t) =>
+            t.status !== "draft" &&
+            (t.messages || []).some((m) => m.direction === "out")
+        );
+      else if (folder === "drafts") base = base.filter((t) => t.status === "draft");
+      else if (folder === "outbox") base = base.filter((t) => hasQueued(t));
+      else if (folder === "archived")
+        // Locally archived OR archived/filed on the Gmail side — either way the
+        // thread left the inbox, and this is where it stays findable.
+        base = base.filter((t) => !!t.archived || t.gmailInboxed === false);
+    }
   }
   const ql = (opts.query || "").trim().toLowerCase();
   if (ql)
@@ -584,6 +688,12 @@ export async function threadsIn(
         (s) => (s || "").toLowerCase().includes(ql)
       )
     );
+  if (opts.filter) base = base.filter(filterPred(opts.filter, user));
+
+  // Explicit sort overrides the default waiting-first ordering. Pinned always
+  // floats to the top regardless of order (Outlook parity).
+  if (opts.sort) return pinnedFirst(base.sort(sortComparator(opts.sort)));
+
   const waitFirst = boxId === "needs" || folder === "inbox";
   if (waitFirst) {
     const w = base
@@ -592,9 +702,62 @@ export async function threadsIn(
     const rest = base
       .filter((t) => t.status !== "waiting_us")
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    return w.concat(rest);
+    return pinnedFirst(w.concat(rest));
   }
-  return base.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return pinnedFirst(base.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+}
+
+/** Which folder a thread currently lives in — for labeling global-search hits
+ *  ("in Sales · Archived"). Mirrors the folder predicates in threadsIn. */
+export function folderOf(t: CommThread): FolderId {
+  if (t.deleted) return "deleted";
+  if (t.status === "draft") return "drafts";
+  if (hasQueued(t)) return "outbox";
+  if (t.archived || t.gmailInboxed === false) return "archived";
+  return "inbox";
+}
+
+export type CommSearchScope =
+  | { kind: "all" }
+  | { kind: "box"; box: MailboxId; folder?: FolderId | null };
+
+/** Global inbox search — every mailbox + folder the user can see (or scoped to
+ *  one box/folder). Matches sender name, email, customer, subject, message
+ *  BODY, and attachment filenames. Server-side via the SQL candidate pattern
+ *  (searchDocs) so it finds mail that isn't currently loaded. Deleted threads
+ *  are excluded (Outlook keeps Deleted Items out of default search). */
+export async function searchThreads(
+  query: string,
+  scope: CommSearchScope,
+  me?: string
+): Promise<CommThread[]> {
+  const user = me || DEFAULT_USER;
+  const q = (query || "").trim().toLowerCase();
+  if (q.length < 2) return [];
+  const CANDIDATES = 200;
+  const candidates = await searchDocs<CommThread>("comms", q, CANDIDATES);
+  const hit = (t: CommThread): boolean => {
+    const fields = [t.customer, t.subject, t.contactName, t.contactEmail];
+    if (fields.some((s) => (s || "").toLowerCase().includes(q))) return true;
+    for (const m of t.messages || []) {
+      if ((m.body || "").toLowerCase().includes(q)) return true;
+      for (const a of m.attachments || [])
+        if ((a.name || "").toLowerCase().includes(q)) return true;
+    }
+    return false;
+  };
+  const inScope = (t: CommThread): boolean => {
+    if (t.deleted) return false;
+    if (scope.kind === "box") {
+      if (!inBox(t, scope.box, user)) return false;
+      if (scope.folder && folderOf(t) !== scope.folder) return false;
+      return true;
+    }
+    return visibleTo(t, user);
+  };
+  return candidates
+    .filter((t) => inScope(t) && hit(t))
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
 export type FolderCounts = {
@@ -605,6 +768,7 @@ export type FolderCounts = {
   drafts: number;
   outbox: number;
   archived: number;
+  deleted: number;
 };
 
 export async function folderCounts(
@@ -612,9 +776,11 @@ export async function folderCounts(
   me?: string
 ): Promise<FolderCounts> {
   const user = me || DEFAULT_USER;
-  const all = (await listDocs<CommThread>("comms")).filter((t) =>
+  const inBoxAll = (await listDocs<CommThread>("comms")).filter((t) =>
     inBox(t, boxId, user)
   );
+  // Every folder but Deleted hides deleted threads.
+  const all = inBoxAll.filter((t) => !t.deleted);
   const inbox = all.filter(
     (t) => t.status !== "draft" && !t.archived && t.gmailInboxed !== false
   );
@@ -630,7 +796,17 @@ export async function folderCounts(
     drafts: all.filter((t) => t.status === "draft").length,
     outbox: all.filter((t) => hasQueued(t)).length,
     archived: all.filter((t) => !!t.archived || t.gmailInboxed === false).length,
+    deleted: inBoxAll.filter((t) => !!t.deleted).length,
   };
+}
+
+/** Flagged threads visible to the user (Flagged smart view badge). */
+export async function flaggedCount(me?: string): Promise<number> {
+  const user = me || DEFAULT_USER;
+  const list = await listDocs<CommThread>("comms");
+  return list.filter(
+    (t) => visibleTo(t, user) && !!t.flagged && !t.deleted
+  ).length;
 }
 
 /** Unread count from an already-loaded thread list — lets callers that have
@@ -639,7 +815,11 @@ export function unreadCountFrom(list: CommThread[], me?: string): number {
   const user = me || DEFAULT_USER;
   return list.filter(
     (t) =>
-      t.unread && visibleTo(t, user) && !t.archived && t.gmailInboxed !== false
+      t.unread &&
+      visibleTo(t, user) &&
+      !t.archived &&
+      !t.deleted &&
+      t.gmailInboxed !== false
   ).length;
 }
 
@@ -655,6 +835,7 @@ export async function needsReplyCount(me?: string): Promise<number> {
       visibleTo(t, user) &&
       t.status === "waiting_us" &&
       !t.archived &&
+      !t.deleted &&
       t.gmailInboxed !== false
   ).length;
 }
@@ -663,7 +844,11 @@ export async function callsCount(me?: string): Promise<number> {
   const user = me || DEFAULT_USER;
   const list = await listDocs<CommThread>("comms");
   return list.filter(
-    (t) => visibleTo(t, user) && t.status !== "draft" && t.channel !== "email"
+    (t) =>
+      visibleTo(t, user) &&
+      t.status !== "draft" &&
+      t.channel !== "email" &&
+      !t.deleted
   ).length;
 }
 
@@ -733,6 +918,56 @@ export async function unarchive(id: string): Promise<CommThread | null> {
     touch(d);
   });
   await dispatchInboxState(id, true); // two-way archive (D74)
+  return t;
+}
+
+/* ---- flag / pin / category (Outlook parity) ------------------------------- */
+
+export async function setFlag(id: string, on: boolean): Promise<CommThread | null> {
+  return patchDoc<CommThread>("comms", id, (d) => {
+    d.flagged = on;
+    touch(d);
+  });
+}
+
+export async function setPin(id: string, on: boolean): Promise<CommThread | null> {
+  return patchDoc<CommThread>("comms", id, (d) => {
+    d.pinned = on;
+    touch(d);
+  });
+}
+
+/** Set (or clear, with null/"") the thread's category preset key. */
+export async function setCategory(
+  id: string,
+  key: string | null
+): Promise<CommThread | null> {
+  const valid = key && CATEGORIES.some((c) => c.key === key) ? key : null;
+  return patchDoc<CommThread>("comms", id, (d) => {
+    d.category = valid;
+    touch(d);
+  });
+}
+
+/* ---- delete / restore (recoverable — the Deleted folder) ------------------
+ * Moves the thread to Deleted (a local flag), NOT a hard delete. Also drops it
+ * from the Gmail inbox two-way (like archive) so it stops nagging there too. */
+
+export async function softDelete(id: string): Promise<CommThread | null> {
+  const t = await patchDoc<CommThread>("comms", id, (d) => {
+    d.deleted = true;
+    touch(d);
+  });
+  await dispatchInboxState(id, false);
+  return t;
+}
+
+export async function restore(id: string): Promise<CommThread | null> {
+  const t = await patchDoc<CommThread>("comms", id, (d) => {
+    d.deleted = false;
+    touch(d);
+  });
+  await dispatchInboxState(id, true);
   return t;
 }
 

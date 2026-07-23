@@ -12,8 +12,11 @@ import { getAllProjects } from "@/lib/stores/projects";
 import {
   boxMeta,
   callsCount,
+  CATEGORIES,
+  categoryMeta,
   channelMeta,
   companyDomain,
+  flaggedCount,
   folderCounts,
   forwardAddress,
   get as getThread,
@@ -32,9 +35,11 @@ import {
   waitLabel,
   type CommMessage,
   type CommThread,
+  type FilterKey,
   type FolderId,
   type MailboxId,
   type SmartView,
+  type SortKey,
 } from "@/lib/stores/comms";
 import type {
   ChanIcon,
@@ -55,14 +60,30 @@ import HomeTabs from "../home-tabs";
 export const metadata = { title: "Inbox — Peak Backend" };
 
 const BOX_IDS = ["personal", "sales", "installs", "info"] as const;
-const FOLDER_IDS = ["inbox", "sent", "drafts", "outbox", "archived"] as const;
+const FOLDER_IDS = [
+  "inbox",
+  "sent",
+  "drafts",
+  "outbox",
+  "archived",
+  "deleted",
+] as const;
 const FOLDERS: Array<[FolderId, string]> = [
   ["inbox", "Inbox"],
   ["sent", "Sent"],
   ["drafts", "Drafts"],
   ["outbox", "Outbox"],
   ["archived", "Archived"],
+  ["deleted", "Deleted"],
 ];
+const FILTER_KEYS: readonly string[] = [
+  "unread",
+  "flagged",
+  "attachments",
+  "tome",
+  "needs",
+];
+const SORT_KEYS: readonly string[] = ["date", "from", "subject"];
 
 function str(v: string | string[] | undefined): string {
   return typeof v === "string" ? v : "";
@@ -114,7 +135,17 @@ export default async function InboxPage({
   /* ---- resolve nav state from the URL (the URL drives everything) ---- */
   const viewParam = str(params.view);
   const view: SmartView | null =
-    viewParam === "needs" || viewParam === "calls" ? viewParam : null;
+    viewParam === "needs" || viewParam === "calls" || viewParam === "flagged"
+      ? viewParam
+      : null;
+
+  const filter: FilterKey | null = FILTER_KEYS.includes(str(params.filter))
+    ? (str(params.filter) as FilterKey)
+    : null;
+  // An explicit ?sort= from the Sort dropdown overrides the inbox's default
+  // waiting-first ordering; with no param we keep that default (sort="date").
+  const sortExplicit = SORT_KEYS.includes(str(params.sort));
+  const sort: SortKey = sortExplicit ? (str(params.sort) as SortKey) : "date";
   let box: MailboxId = (BOX_IDS as readonly string[]).includes(str(params.box))
     ? (str(params.box) as MailboxId)
     : "personal";
@@ -151,6 +182,7 @@ export default async function InboxPage({
     infoCounts,
     needsCount,
     callsCnt,
+    flaggedCnt,
     leadFollow,
     threads,
     roster,
@@ -163,8 +195,12 @@ export default async function InboxPage({
     folderCounts("info", me),
     needsReplyCount(me),
     callsCount(me),
+    flaggedCount(me),
     followUpCount({ unownedOrMine: true, me }),
-    threadsIn(view ?? box, view ? "inbox" : folder, me),
+    threadsIn(view ?? box, view ? "inbox" : folder, me, {
+      filter,
+      sort: sortExplicit ? sort : null,
+    }),
     activeUsers(),
     allCustomers(),
   ]);
@@ -201,8 +237,13 @@ export default async function InboxPage({
       } else if (key === "drafts") count = counts.drafts;
       else if (key === "outbox") count = counts.outbox;
       else if (key === "archived") count = counts.archived;
-      // hide empty archived/outbox rows to reduce noise (prototype rule)
-      if ((key === "archived" || key === "outbox") && count === 0 && !active)
+      else if (key === "deleted") count = counts.deleted;
+      // hide empty archived/outbox/deleted rows to reduce noise (prototype rule)
+      if (
+        (key === "archived" || key === "outbox" || key === "deleted") &&
+        count === 0 &&
+        !active
+      )
         continue;
       rows.push({
         key,
@@ -252,6 +293,15 @@ export default async function InboxPage({
         icon: "needs",
       },
       {
+        key: "flagged",
+        label: "Flagged",
+        active: view === "flagged",
+        count: flaggedCnt,
+        badge: "plain",
+        href: viewHref("flagged"),
+        icon: "flagged",
+      },
+      {
         key: "calls",
         label: "Calls & meetings",
         active: view === "calls",
@@ -277,10 +327,15 @@ export default async function InboxPage({
       userColor: t.mailboxUser === me ? user.color : undefined,
     });
     const snip = snippet(t);
+    const cat = categoryMeta(t.category);
     return {
       id: t.id,
       unread,
       isDraft: t.status === "draft",
+      flagged: !!t.flagged,
+      pinned: !!t.pinned,
+      categoryColor: cat?.color || "",
+      categoryLabel: cat?.label || "",
       name: nm,
       subject: t.subject || "(no subject)",
       snippet: snip,
@@ -333,6 +388,9 @@ export default async function InboxPage({
   if (view === "needs") {
     listTitle = "Needs reply";
     listSub = "Customers waiting on us — across every mailbox";
+  } else if (view === "flagged") {
+    listTitle = "Flagged";
+    listSub = "Flagged for follow-up — across every mailbox";
   } else if (view === "calls") {
     listTitle = "Calls & meetings";
     listSub = "Logged phone calls and meetings";
@@ -343,18 +401,26 @@ export default async function InboxPage({
     listSub = (fl ? fl[1] : "Inbox") + " · " + (bm?.address || "");
   }
 
+  const isDeleted = !isView && folder === "deleted";
   const list: ListVM = {
     title: listTitle,
     sub: listSub,
     rows: threads.map(rowFor),
     emptyKind: isDrafts
       ? "drafts"
-      : !isView && folder === "outbox"
-        ? "outbox"
-        : view === "needs"
-          ? "needs"
-          : "",
+      : isDeleted
+        ? "deleted"
+        : !isView && folder === "outbox"
+          ? "outbox"
+          : view === "needs"
+            ? "needs"
+            : view === "flagged"
+              ? "flagged"
+              : "",
     boxSelValue: view ? view : `${box}:${folder}`,
+    filter: filter || "",
+    sort,
+    isDeleted,
   };
 
   /* ---- reader (explicit ?thread= or desktop auto-select) ---- */
@@ -601,6 +667,12 @@ export default async function InboxPage({
         .ib-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
         .ib-scroll::-webkit-scrollbar-thumb { background: #d6d9e0; border-radius: 8px; border: 3px solid #f7f8fa; }
         .ib-clamp { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+        .ib-check { opacity:0; }
+        .ib-row:hover .ib-check { opacity:1; }
+        .ib-row:hover .ib-unread-dot { opacity:0; }
+        .ib-quick { opacity:0; transition:opacity .1s ease; }
+        .ib-row:hover .ib-quick { opacity:1; }
+        @media (hover: none) { .ib-check { opacity:1; } .ib-quick { opacity:1; } }
         @keyframes ib-scrim { from { opacity:0 } to { opacity:1 } }
         @keyframes ib-slide { from { transform:translateX(24px); opacity:.6 } to { transform:translateX(0); opacity:1 } }
         .ib-boxsel { display:none; }
@@ -645,6 +717,7 @@ export default async function InboxPage({
             contactEmails={contactEmails}
             fromOptions={fromOptions}
             initialCompose={initialCompose}
+            categoryOptions={CATEGORIES}
           />
         </div>
       </div>

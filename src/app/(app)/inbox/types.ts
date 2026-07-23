@@ -74,6 +74,11 @@ export type ThreadRowVM = {
   id: string;
   unread: boolean;
   isDraft: boolean;
+  flagged: boolean;
+  pinned: boolean;
+  /** category preset color, "" when none */
+  categoryColor: string;
+  categoryLabel: string;
   name: string;
   subject: string;
   snippet: string;
@@ -193,12 +198,21 @@ export type ComposeInit = {
   attachments?: AttachmentMetaVM[];
 };
 
+/** A category preset (client-safe copy of CATEGORIES for the pickers). */
+export type CategoryOpt = { key: string; label: string; color: string };
+
 export type ListVM = {
   title: string;
   sub: string;
   rows: ThreadRowVM[];
-  /** 'drafts' | 'outbox' | 'needs' | '' — drives the empty state copy */
+  /** 'drafts' | 'outbox' | 'needs' | 'deleted' | '' — drives empty-state copy */
   emptyKind: string;
   /** narrow-screen mailbox switcher */
   boxSelValue: string;
+  /** active command-bar filter key ('' = none) */
+  filter: string;
+  /** active sort key ('date' default) */
+  sort: string;
+  /** true in the Deleted folder — bulk actions offer Restore, not Delete */
+  isDeleted: boolean;
 };

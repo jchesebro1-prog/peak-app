@@ -46,6 +46,19 @@ const FOLDER_PATHS: Record<string, React.ReactNode> = {
   calls: (
     <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2Z" />
   ),
+  deleted: (
+    <>
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M10 11v6M14 11v6" />
+    </>
+  ),
+  flagged: (
+    <>
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+      <path d="M4 22v-7" />
+    </>
+  ),
 };
 
 export function FolderGlyph({ kind, active }: { kind: string; active: boolean }) {
@@ -164,6 +177,168 @@ export function MailEmptyIcon() {
       <rect x="2" y="4" width="20" height="16" rx="2" />
       <path d="m2 7 10 6 10-6" />
     </svg>
+  );
+}
+
+/* ---- command bar + row action glyphs (Outlook parity) -------------------- */
+
+function Ico({
+  size = 15,
+  sw = 1.9,
+  children,
+}: {
+  size?: number;
+  sw?: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={sw}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
+    >
+      {children}
+    </svg>
+  );
+}
+
+export function ArchiveIcon({ size = 15 }: { size?: number }) {
+  return (
+    <Ico size={size}>
+      <rect x="2" y="4" width="20" height="5" rx="1" />
+      <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
+      <path d="M10 13h4" />
+    </Ico>
+  );
+}
+
+export function TrashIcon({ size = 15 }: { size?: number }) {
+  return (
+    <Ico size={size}>
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </Ico>
+  );
+}
+
+export function RestoreIcon({ size = 15 }: { size?: number }) {
+  return (
+    <Ico size={size}>
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+      <path d="M3 3v5h5" />
+    </Ico>
+  );
+}
+
+export function FlagIcon({ size = 15, fill }: { size?: number; fill?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={fill || "none"}
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
+    >
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+      <path d="M4 22v-7" />
+    </svg>
+  );
+}
+
+export function PinIcon({ size = 15, fill }: { size?: number; fill?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={fill || "none"}
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
+    >
+      <path d="M12 17v5" />
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+    </svg>
+  );
+}
+
+export function TagIcon({ size = 15 }: { size?: number }) {
+  return (
+    <Ico size={size}>
+      <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" />
+      <circle cx="7.5" cy="7.5" r=".5" fill="currentColor" />
+    </Ico>
+  );
+}
+
+export function MailOpenIcon({ size = 15 }: { size?: number }) {
+  return (
+    <Ico size={size}>
+      <path d="M21.2 8.4c.5.38.8.97.8 1.6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V10a2 2 0 0 1 .8-1.6l8-6a2 2 0 0 1 2.4 0z" />
+      <path d="m22 10-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 10" />
+    </Ico>
+  );
+}
+
+export function FilterIcon({ size = 15 }: { size?: number }) {
+  return (
+    <Ico size={size}>
+      <path d="M22 3H2l8 9.46V19l4 2v-8.54z" />
+    </Ico>
+  );
+}
+
+export function SortIcon({ size = 15 }: { size?: number }) {
+  return (
+    <Ico size={size}>
+      <path d="M11 5h10M11 9h7M11 13h4" />
+      <path d="M3 6l3-3 3 3M6 3v13" />
+    </Ico>
+  );
+}
+
+export function MoveIcon({ size = 15 }: { size?: number }) {
+  return (
+    <Ico size={size}>
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+      <path d="M12 10v6M9 13l3 3 3-3" />
+    </Ico>
+  );
+}
+
+export function ChevronDown({ size = 13 }: { size?: number }) {
+  return (
+    <Ico size={size} sw={2.1}>
+      <path d="m6 9 6 6 6-6" />
+    </Ico>
+  );
+}
+
+export function CheckIcon({ size = 12 }: { size?: number }) {
+  return (
+    <Ico size={size} sw={2.6}>
+      <path d="M20 6 9 17l-5-5" />
+    </Ico>
+  );
+}
+
+export function XIcon({ size = 14 }: { size?: number }) {
+  return (
+    <Ico size={size} sw={2.2}>
+      <path d="M18 6 6 18M6 6l12 12" />
+    </Ico>
   );
 }
 

@@ -14,18 +14,31 @@ import {
   create,
   flushOutbox,
   get as getThread,
+  folderOf,
+  mailboxLabelFor,
   markRead,
+  markUnread,
   reopen,
   reply,
+  restore,
   saveDraft,
+  searchThreads,
   sendDraft,
+  setCategory,
+  setFlag,
   setLink,
+  setPin,
   setStatus,
+  snippet,
+  softDelete,
+  timeAgo,
   unarchive,
   update,
   updateDraft,
   type CommLink,
+  type CommSearchScope,
   type Direction,
+  type FolderId,
   type MailboxId,
 } from "@/lib/stores/comms";
 import { nameFor } from "@/lib/stores/customers";
@@ -77,6 +90,155 @@ export async function unarchiveAction(id: string) {
   await requireUser();
   await unarchive(id);
   revalidate();
+}
+
+export async function markUnreadAction(id: string) {
+  await requireUser();
+  await markUnread(id);
+  revalidate();
+}
+
+/* ---- flag / pin / category (Outlook parity) ---- */
+
+export async function flagAction(id: string, on: boolean) {
+  await requireUser();
+  await setFlag(id, on);
+  revalidate();
+}
+
+export async function pinAction(id: string, on: boolean) {
+  await requireUser();
+  await setPin(id, on);
+  revalidate();
+}
+
+export async function categoryAction(id: string, key: string | null) {
+  await requireUser();
+  await setCategory(id, key);
+  revalidate();
+}
+
+/* ---- delete / restore (recoverable — the Deleted folder) ---- */
+
+export async function deleteAction(id: string) {
+  await requireUser();
+  await softDelete(id);
+  revalidate();
+}
+
+export async function restoreAction(id: string) {
+  await requireUser();
+  await restore(id);
+  revalidate();
+}
+
+/* ---- bulk actions (command bar) ------------------------------------------
+ * Each loops the per-thread store mutator, then revalidates once. Volumes are
+ * small (a selection is a handful of threads), so a simple sequential loop is
+ * fine and keeps the store's per-write invariants intact. */
+
+function ids(list: string[]): string[] {
+  return Array.isArray(list) ? list.filter((s) => typeof s === "string" && s) : [];
+}
+
+export async function bulkArchiveAction(list: string[]) {
+  await requireUser();
+  for (const id of ids(list)) await archive(id);
+  revalidate();
+}
+
+export async function bulkDeleteAction(list: string[]) {
+  await requireUser();
+  for (const id of ids(list)) await softDelete(id);
+  revalidate();
+}
+
+export async function bulkRestoreAction(list: string[]) {
+  await requireUser();
+  for (const id of ids(list)) await restore(id);
+  revalidate();
+}
+
+export async function bulkMarkReadAction(list: string[], read: boolean) {
+  await requireUser();
+  for (const id of ids(list)) await (read ? markRead(id) : markUnread(id));
+  revalidate();
+}
+
+export async function bulkFlagAction(list: string[], on: boolean) {
+  await requireUser();
+  for (const id of ids(list)) await setFlag(id, on);
+  revalidate();
+}
+
+export async function bulkCategoryAction(list: string[], key: string | null) {
+  await requireUser();
+  for (const id of ids(list)) await setCategory(id, key);
+  revalidate();
+}
+
+export async function bulkMoveAction(list: string[], mailbox: string) {
+  const user = await requireUser();
+  const mb = asMailbox(mailbox);
+  for (const id of ids(list)) {
+    // Personal moves re-own the thread to the current user's personal box;
+    // shared moves just set the mailbox and clear the personal owner.
+    await update(
+      id,
+      mb === "personal"
+        ? { mailbox: mb, mailboxUser: user.name }
+        : { mailbox: mb, mailboxUser: null }
+    );
+  }
+  revalidate();
+}
+
+/* ---- global search (all mailboxes + folders) ------------------------------
+ * Returns lightweight rows the list pane renders in "search results" mode.
+ * Server-side so it finds mail not currently loaded. */
+
+export type SearchRow = {
+  id: string;
+  name: string;
+  subject: string;
+  snippet: string;
+  time: string;
+  unread: boolean;
+  flagged: boolean;
+  chan: "mail" | "phone" | "calendar";
+  where: string; // "Sales · Archived"
+};
+
+const FOLDER_LABEL: Record<FolderId, string> = {
+  inbox: "Inbox",
+  sent: "Sent",
+  drafts: "Drafts",
+  outbox: "Outbox",
+  archived: "Archived",
+  deleted: "Deleted",
+};
+
+export async function searchInboxAction(
+  query: string,
+  scope: CommSearchScope
+): Promise<{ rows: SearchRow[] }> {
+  const user = await requireUser();
+  const hits = await searchThreads(query, scope, user.name);
+  const rows: SearchRow[] = hits.slice(0, 100).map((t) => {
+    const icon = channelMeta(t.channel).icon;
+    return {
+      id: t.id,
+      name: t.contactName || t.customer || t.contactEmail || "(unknown)",
+      subject: t.subject || "(no subject)",
+      snippet: snippet(t),
+      time: timeAgo(t.updatedAt || 0),
+      unread: !!t.unread,
+      flagged: !!t.flagged,
+      chan: icon === "phone" ? "phone" : icon === "calendar" ? "calendar" : "mail",
+      where: `${mailboxLabelFor(t)} · ${FOLDER_LABEL[folderOf(t)]}`,
+    };
+  });
+  return { rows };
 }
 
 export async function setStatusAction(id: string, status: string) {
