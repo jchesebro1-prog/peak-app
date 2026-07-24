@@ -1,7 +1,8 @@
 # Lineset builder — PRO dimensions + automatic weights (design)
 
 Date: 2026-07-24
-Status: draft — awaiting Jeff's review
+Status: approved (Jeff, 2026-07-24 — "I am good on the spec, and run with the
+ceiling being 2.5lbs per square foot")
 Area: `src/lib/design/goods.ts` (new), `src/lib/design/lineset.ts`,
 `src/lib/design/steel.ts`, `src/app/(app)/design/lineset/lineset-builder.tsx`,
 `src/db/seeds/catalog.ts`
@@ -294,21 +295,23 @@ floor-supported and put no load on a batten. A Shell line carries ceiling units
 only. Loading tower weight onto a Shell line would materially overstate it, and
 that is the kind of error that propagates into a capacity check.
 
-**Shell ceiling weight is area-based, not per-unit.** Jeff recalls a figure of
-**≈ 2 lb per ft² of shell** from prior research he described as *"really good
-information"*:
+**Shell ceiling weight is area-based, not per-unit:**
 
 ```
 shellCeilingLb = shellPsf × (PW × shellIntervalFt)
 ```
 
 `shellIntervalFt` already exists in `LinesetInputs` (default 12 ft), so the area
-each Shell line carries is the pro width times the shell spacing. On a 36 ft pro
-at 12 ft spacing that is 432 ft², or **864 lb** at 2 lb/ft² — heavy, and heavy
-enough that getting the constant right matters.
+each Shell line carries is the pro width times the shell spacing.
 
-`shellPsf` ships as an editable default of **2.0**, alongside the fixture
-weights. **The source is not yet recovered** — see §7.1.
+**`shellPsf` = 2.5 lb/ft², set directly by Jeff (2026-07-24).** This supersedes
+the ≈2 lb/ft² he recalled from prior research; that source was never recovered
+(§7.1) and is now moot. Editable alongside the fixture weights.
+
+On a 36 ft pro at 12 ft spacing that is 432 ft², or **1,080 lb** on a single
+Shell line. Worth stating plainly because it will often be the heaviest line on
+the grid — heavier than the grand drape — and any capacity check that omits it
+would be badly wrong.
 
 ## 5. The fabric join
 
@@ -357,15 +360,16 @@ muslin uses.
 
 ## 7. Open questions
 
-**Resolved 2026-07-24 (Jeff):** fixture pounds approved as listed, including
-`Automated` at 45 lb. Shell towers confirmed floor-supported and excluded from
-batten load. Distribution stays a single combined 1.5 lb/ft allowance.
+**None block implementation.** All resolved 2026-07-24 by Jeff: fixture pounds
+approved as listed including `Automated` at 45 lb; shell towers confirmed
+floor-supported and excluded from batten load; distribution stays a single
+combined 1.5 lb/ft allowance; **`shellPsf` set to 2.5**.
 
-### 7.1 The shell psf source is not recovered — the one real open item
+### 7.1 The shell psf source was never recovered (closed — superseded)
 
-Jeff recalls **≈ 2 lb per ft² of shell** from prior research he described as
-*"really good information."* That source has not been found. Searched, all
-negative:
+Recorded so nobody repeats the search. Jeff originally recalled **≈ 2 lb per ft²
+of shell** from prior research he described as *"really good information."* That
+source was never found. Searched, all negative:
 
 - `memory/` tree — no shell weight in any note, session or knowledge record
 - `Peak-Design-Doctrine-v1.0.docx` — **zero** occurrences of "shell"
@@ -379,17 +383,13 @@ negative:
 The claude-mem index, which is the one store that might cover desktop/Cowork
 sessions, was returning `fetch failed` throughout and could not be queried.
 
-**Likely homes:** a Cowork or claude.ai chat rather than Claude Code, or a Wenger
-/ StageRight cut sheet.
+**Likely homes, if it is ever wanted:** a Cowork or claude.ai chat rather than
+Claude Code, or a Wenger / StageRight cut sheet.
 
-**Plausibility check, not a substitute for the source:** 2 lb/ft² is light for a
-rigid panel — ¾″ MDF alone runs ~3.5 lb/ft² — which is consistent with a
-purpose-built lightweight flying shell ceiling but *not* with a solid-panel
-assembly. Worth confirming before anyone rigs to it, because §4 shows the figure
-producing **864 lb** on a single Shell line at a 36 ft pro.
-
-`shellPsf` ships editable at 2.0. This does not block implementation, but it is
-the number in this spec least entitled to trust.
+**Superseded — Jeff set `shellPsf` to 2.5 directly**, so the recalled figure no
+longer matters. Worth noting the direction of the change: 2 lb/ft² was light for
+a rigid panel (¾″ MDF alone runs ~3.5 lb/ft²), and 2.5 sits closer to a real
+assembly.
 
 ## 8. Follow-on: recreate the curtain pricing structure
 
