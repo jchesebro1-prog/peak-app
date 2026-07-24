@@ -459,5 +459,35 @@ ok(gGhost.length === 1 && gGhost[0].ext === 0 && /removed/i.test(gGhost[0].desc)
   "a placement whose part left the catalog stays visible at $0, flagged removed");
 ok(bomTotals([], gridParts).margin === 0, "empty project has margin 0, not NaN");
 
+/* --- The Grid geometry (D109) --- */
+import { pointInPolygon, polygonArea, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
+
+const square = [
+  { x: 0.2, y: 0.2 }, { x: 0.6, y: 0.2 }, { x: 0.6, y: 0.6 }, { x: 0.2, y: 0.6 },
+];
+ok(pointInPolygon({ x: 0.4, y: 0.4 }, square), "point inside a square is in");
+ok(!pointInPolygon({ x: 0.7, y: 0.4 }, square), "point right of the square is out");
+ok(!pointInPolygon({ x: 0.4, y: 0.4 }, square.slice(0, 2)), "a 2-vertex 'polygon' contains nothing");
+// Concave L: the notch (upper-right quadrant of the bounding box) is OUTSIDE.
+const ell = [
+  { x: 0, y: 0 }, { x: 0.4, y: 0 }, { x: 0.4, y: 0.2 },
+  { x: 0.2, y: 0.2 }, { x: 0.2, y: 0.4 }, { x: 0, y: 0.4 },
+];
+ok(pointInPolygon({ x: 0.1, y: 0.3 }, ell), "L-shape: point in the lower arm is in");
+ok(!pointInPolygon({ x: 0.3, y: 0.3 }, ell), "L-shape: point in the notch is out");
+ok(Math.abs(polygonArea(square) - 0.16) < 1e-9, `shoelace area of the square (${polygonArea(square)})`);
+const cen = polygonCentroid(square);
+ok(Math.abs(cen.x - 0.4) < 1e-9 && Math.abs(cen.y - 0.4) < 1e-9, "centroid of the square is its middle");
+// Nested spaces: the smallest containing polygon wins (booth inside a hall).
+const hall = { id: "sp-hall", sheetId: "s1", page: 1, points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }] };
+const booth = { id: "sp-booth", sheetId: "s1", page: 1, points: square };
+const otherSheet = { id: "sp-other", sheetId: "s2", page: 1, points: square };
+ok(spaceOf({ sheetId: "s1", page: 1, x: 0.4, y: 0.4 }, [hall, booth])?.id === "sp-booth",
+  "nested spaces: smallest containing polygon wins");
+ok(spaceOf({ sheetId: "s1", page: 1, x: 0.9, y: 0.9 }, [hall, booth])?.id === "sp-hall",
+  "outside the booth but inside the hall → the hall");
+ok(spaceOf({ sheetId: "s2", page: 2, x: 0.4, y: 0.4 }, [hall, booth, otherSheet]) === null,
+  "wrong sheet/page matches nothing");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
