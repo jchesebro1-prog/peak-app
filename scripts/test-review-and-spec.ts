@@ -476,5 +476,43 @@ const wLine = computeSetWeight({ name: "t", fabResolved: marvel, w: 20, h: 19, f
 ok(wLine.goods > 0, "a catalog-only fabric (Marvel is NOT in FABLIB) still produces goods weight");
 ok(computeSetWeight({ name: "t", fab: "21 oz Marvel Velour", w: 20, h: 19, full: 50, qty: 2 }, DEFAULT_WEIGHTS).goods === 0, "name-only lookup of a catalog desc weighs ZERO — the bug this join fixes");
 
+/* --- drape rule table (task 3) --- */
+import { drapeRule, TRACK_TRAVELER } from "@/lib/design/goods";
+
+const DIMS36 = { proWidthFt: 36, proHeightFt: 18, stageWidthFt: 50, stageDepthFt: 30 };
+
+const rDraw = drapeRule("Draw", DIMS36, "better")!;
+ok(rDraw.w === 20, `draw panel = PW/2+2 (got ${rDraw.w})`);
+ok(rDraw.h === 19, `draw height = PH+1 (got ${rDraw.h})`);
+ok(rDraw.qty === 2 && rDraw.fullness === 50, "draw is a pair at 50% fullness");
+ok(rDraw.track === TRACK_TRAVELER, "draw travels on standard traveler track");
+
+const rRear = drapeRule("Rear", DIMS36, "better")!;
+ok(rRear.w === rDraw.w && rRear.h === rDraw.h && rRear.qty === rDraw.qty, "rear is a draw curtain — same geometry as the main");
+ok(rRear.fabricSku !== undefined, "rear still carries its own fabric key for later differentiation");
+
+const rMid = drapeRule("Midstage Draw", DIMS36, "better")!;
+ok(rMid.w === rDraw.w && rMid.h === rDraw.h, "midstage matches the main's geometry");
+
+const rLegs = drapeRule("Legs", DIMS36, "better")!;
+ok(rLegs.w === 6 && rLegs.h === 19 && rLegs.qty === 2, "legs are 6ft x PH+1, one pair");
+ok(rLegs.track === null, "legs tie to pipe, no track");
+
+const rBorder = drapeRule("Border", DIMS36, "better")!;
+ok(rBorder.w === 36 && rBorder.h === 5 && rBorder.qty === 1, "border is PW wide x 5ft drop");
+
+const rCyc = drapeRule("CYC", DIMS36, "better")!;
+ok(rCyc.w === 36 && rCyc.h === 18, "cyc is PW x PH EXACTLY — no +1 trim allowance");
+ok(rCyc.fullness === 0, "cyc hangs FLAT — 0% fullness, else it runs ~50% heavy");
+ok(rCyc.track === null && rCyc.chain === "None", "cyc has no track and no bottom chain (pocket)");
+
+ok(drapeRule("Electric", DIMS36, "better") === null, "electrics carry no goods");
+ok(drapeRule("Shell", DIMS36, "better") === null, "shell lines carry no goods");
+ok(drapeRule("General Purpose", DIMS36, "better") === null, "general purpose lines are empty");
+
+ok(drapeRule("Draw", DIMS36, "good")!.fabricSku === "RB-EN-16", "good tier uses 16oz Encore");
+ok(drapeRule("Draw", DIMS36, "best")!.fabricSku === "RB-MV-MN", "best tier uses 25oz Memorable");
+ok(drapeRule("CYC", DIMS36, "good")!.fabricSku === "RB-MUS", "cyc is muslin at every tier");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
