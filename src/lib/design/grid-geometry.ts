@@ -121,11 +121,11 @@ export function distToPolyline(p: Point, points: Point[], aspect: number): numbe
  * same sheet+page, or null. Smallest-wins is what makes nesting work —
  * a control booth drawn inside the house claims its own devices.
  */
-export function spaceOf(
+export function spaceOf<T extends SpaceLite>(
   pl: { sheetId: string; page: number; x: number; y: number },
-  spaces: SpaceLite[]
-): SpaceLite | null {
-  let best: SpaceLite | null = null;
+  spaces: T[]
+): T | null {
+  let best: T | null = null;
   let bestArea = Infinity;
   for (const s of spaces) {
     if (s.sheetId !== pl.sheetId || s.page !== pl.page) continue;

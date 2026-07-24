@@ -455,6 +455,9 @@ export default function GridEditor({
         <button style={BTN} disabled={busy} onClick={() => fileRef.current?.click()}>
           + Plan sheet
         </button>
+        <Link href={`/design/grid/${encodeURIComponent(project.id)}/riser`} style={{ ...BTN, textDecoration: "none" }}>
+          Riser →
+        </Link>
         <input
           ref={fileRef}
           type="file"
