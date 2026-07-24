@@ -1528,3 +1528,69 @@ What deliberately did NOT change: the company name "Peak Systems Group"
 (documents, descriptions, copyright), the repo/package name `peak-app`, the
 `pk-*` CSS token prefix, id formats, and the Apple Reminders list literally
 named "Peak" that the queue agent reconciles against (external data).
+
+## D108 — The Grid: the DaVinci-style system designer, slice 1 (2026-07-24)
+
+Jeff's instruction (2026-07-24): "start the DaVinci implementation and just
+name it The Grid." The Grid is the Design-tab module recreating what ETC
+DaVinci does for dealers — plan-view system layout feeding a priced BOM and a
+quote — scoped by the four decisions recorded in the planning session
+(memory: projects/peak-system-designer.md, DEC-PSD-1…4): multi-brand
+Peak-native, first slice = plan layout + live BOM → draft quote, extend the
+D95/D96 markup canvas, PDF/image backgrounds only.
+
+**Naming note.** The 2026-07-24 naming exploration had proposed "The Grid"
+for the *lineset builder* (the theatrical rigging grid). Jeff assigned the
+name to the DaVinci module instead — his call supersedes the proposal; the
+lineset builder keeps its plain name.
+
+**What shipped (route `/design/grid`, nav child of Design between Designs
+and Steel Calculator):**
+- `grid_projects` + `grid_sheets` doc collections (migration 0008). Two
+  collections deliberately: the project doc is patched on every device
+  placement, so the heavy sheet dataUrls live one-doc-per-sheet in
+  `grid_sheets`, written once — the D95 amplification lesson (a 1.2 MB
+  background inline would make every placement rewrite megabytes). Neither
+  is sync-pushable: placements feed quotes, so writes are server-action-only
+  (same guardrail as quotes/catalog_parts).
+- `stores/grid-projects.ts` — projects are `GRD-####` (nextPrefixedId base
+  5001). Placements are normalized 0..1 points carrying a catalog SKU;
+  calibrations reuse `lib/annotations.Calibration` with `docId` = sheet id.
+- `lib/design/grid-bom.ts` — dependency-free BOM math (client sidebar and
+  server quote action share it, so they can never disagree). A placement
+  whose part left the catalog stays visible at $0 flagged "removed part"
+  rather than silently shrinking the quote. Covered in test:specs.
+- Editor: sheet upload (PDF/image, 8 MB cap, DWGs get printed to PDF —
+  DEC-PSD-4), pdf.js render via the markup screen's PdfCanvas (moved to
+  `src/components/design/pdf-canvas.tsx`), page-scale calibration with the
+  markup screen's inline-entry idiom, device palette over the live catalog
+  (search + category filter), click-to-paint markers (category-colored, SKU
+  chip), marker select/remove, live grouped BOM.
+- "Create draft quote" mints a `source: "grid"`, `quoteType: "system"` draft
+  (value = list total, margin = blended (list−cost)/list) with
+  `spec: { kind: "grid", gridProjectId, lines }`, and stores `quoteId` on
+  the project. Re-running refreshes the same quote while it is still a
+  draft; once the quote has moved past draft the action refuses — rewriting
+  numbers a customer may have seen is the quote screen's revision machinery's
+  job, not a side effect of moving markers.
+
+**Bugs caught while verifying in the browser (worth remembering):**
+- An `<img>` sheet's `onLoad` can fire before layout (and not at all for
+  cached images), leaving the size state 0×0 → aspect NaN → calibration
+  failed with a misleading "enter a positive number". Fix: read
+  naturalWidth/naturalHeight via callback ref + onLoad. The markup viewer
+  has the same latent pattern (its size state also starts 900×1200 and is
+  set from clientWidth onLoad) — flagged as a follow-up.
+- The callback-ref fix originally called setSize unconditionally — an inline
+  ref runs on every commit, so that was an infinite render loop that hung
+  the tab. Functional update returning the same reference when unchanged.
+- `toNorm` now guards a zero-size rect (sheet still loading) — the division
+  was NaN and poisoned draft geometry with no visible error.
+
+**Deliberately NOT in slice 1** (roadmap in memory:
+projects/peak-system-designer.md): wire routing, riser/one-line generation,
+accessories/port rules, datasheet/submittal packages, spaces, per-part
+symbol metadata (markers show the SKU chip), venue/site link on the project,
+pricing-tier stamping on the minted quote, and blob storage for attachments
+(grid_sheets-as-docs is the interim; real blob storage is still the Phase-0
+item for backgrounds at production scale).

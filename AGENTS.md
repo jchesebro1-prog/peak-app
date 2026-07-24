@@ -164,5 +164,12 @@ See `.env.example`.
    Jeff-gated: real source files (MASTER-QUESTIONS §I) + hosting accounts
    (item A / DEPLOY.md), then a real-data dry run.
 
+10. 🚧 **The Grid** (D108) — the DaVinci-style system designer under Design
+   (`/design/grid`): plan-sheet upload (PDF/image), scale calibration,
+   click-to-paint catalog devices, live BOM → draft quote (`source: "grid"`).
+   Slice 1 of the roadmap in memory `projects/peak-system-designer.md`;
+   routing/risers/submittals are later phases. Suite renamed **Quartzite**
+   (D107) in the same change.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

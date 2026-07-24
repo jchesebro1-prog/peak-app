@@ -135,7 +135,9 @@ export default function GridEditor({
   const onLoaded = useCallback((n: number) => setPages(n), []);
   const onSize = useCallback((w: number, h: number) => setSize({ w, h }), []);
 
-  const aspect = size.h / size.w;
+  /** Guarded: an image that reports no size yet must not poison the math
+   *  with NaN — calibration would silently fail with a misleading error. */
+  const aspect = size.w > 0 && size.h > 0 ? size.h / size.w : 1;
   const cal = sheet ? findCalibration(project.calibrations, sheet.id, page) : null;
 
   const partById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
@@ -163,7 +165,9 @@ export default function GridEditor({
 
   function toNorm(e: React.PointerEvent): Point {
     const r = wrapRef.current?.getBoundingClientRect();
-    if (!r) return { x: 0, y: 0 };
+    // A zero-size rect (sheet still loading) would turn the division into
+    // NaN and poison every downstream computation with no visible error.
+    if (!r || r.width < 1 || r.height < 1) return { x: 0, y: 0 };
     return {
       x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
       y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
@@ -589,7 +593,27 @@ export default function GridEditor({
                 <img
                   src={sheet.dataUrl}
                   alt={sheet.name}
-                  onLoad={(e) => setSize({ w: e.currentTarget.clientWidth, h: e.currentTarget.clientHeight })}
+                  // Intrinsic dimensions, not clientWidth: onLoad can fire
+                  // before layout (and never fires for cached images), which
+                  // left size at 0×0 and broke the calibration math. The
+                  // callback ref covers already-complete images; aspect only
+                  // needs the ratio, so natural units are exactly right.
+                  // The functional update MUST return the same object when
+                  // nothing changed — an inline ref runs on every commit, and
+                  // unconditionally setting fresh state here is a render loop.
+                  ref={(el) => {
+                    if (el && el.complete && el.naturalWidth) {
+                      const w = el.naturalWidth;
+                      const h = el.naturalHeight;
+                      setSize((s) => (s.w === w && s.h === h ? s : { w, h }));
+                    }
+                  }}
+                  onLoad={(e) =>
+                    setSize({
+                      w: e.currentTarget.naturalWidth || e.currentTarget.clientWidth,
+                      h: e.currentTarget.naturalHeight || e.currentTarget.clientHeight,
+                    })
+                  }
                   style={{ width: `${Math.round(900 * zoom)}px`, height: "auto", display: "block" }}
                 />
               )}
