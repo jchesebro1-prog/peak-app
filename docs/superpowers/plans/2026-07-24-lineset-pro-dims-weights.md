@@ -253,7 +253,7 @@ Then add the same three weight fields to the **existing** `RB-MUS` row further d
     { id: "RB-MUS", sku: "RB-MUS", desc: "Seamless Muslin", category: "Fabric", unit: "sq ft", list: 1.70, cost: 1.10, mfr: "Rose Brand", costPerSqft: 1.10, oz: 6, ozBasis: "sq-yd", boltWidthIn: 120 },
 ```
 
-**Corrected 2026-07-24:** an earlier draft of this plan claimed the catalog held three velours and no muslin, and had this step *create* a new `RB-MUS-SL` row. Both were wrong. The catalog has **nine** Fabric rows and `RB-MUS` "Seamless Muslin" already existed. Creating a second muslin produced two rows with near-inverted descriptions and different prices ($0.80 vs $1.10) in a catalog people browse to build real quotes. `RB-MUS` is the canonical muslin SKU — later tasks reference it for the cyc.
+**Corrected 2026-07-24:** an earlier draft of this plan claimed the catalog held three velours and no muslin, and had this step *create* a new `RB-MUS-SL` row. Both were wrong. The catalog has **eight** Fabric rows and `RB-MUS` "Seamless Muslin" already existed. Creating a second muslin produced two rows with near-inverted descriptions and different prices ($0.80 vs $1.10) in a catalog people browse to build real quotes. `RB-MUS` is the canonical muslin SKU — later tasks reference it for the cyc.
 
 **Known gap, deliberately unfixed:** four Fabric rows still carry no weight — `RB-COM-16`, `RB-SCRIM`, `RB-BOBNET`, `RB-POLY`. None states a bolt width, and a guessed bolt width yields confidently wrong weights, which is worse than none. Open item for Jeff.
 
