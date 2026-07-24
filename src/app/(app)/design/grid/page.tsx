@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/session";
 import { listProjects } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { allCompanies } from "@/lib/identity/companies";
-import { bomTotals } from "@/lib/design/grid-bom";
+import { bomTotals, routeLines } from "@/lib/design/grid-bom";
 import { money, timeAgo } from "@/lib/format";
 import { createProjectAction } from "./actions";
 import DeleteProjectButton from "./delete-button";
@@ -90,6 +90,7 @@ export default async function GridIndexPage() {
         ) : (
           projects.map((p) => {
             const totals = bomTotals(p.placements || [], parts);
+            const wireValue = routeLines(p.routes || [], parts, p.calibrations || []).value;
             return (
               <div
                 key={p.id}
@@ -117,7 +118,7 @@ export default async function GridIndexPage() {
                   </div>
                 </Link>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#16181d" }}>
-                  {money(totals.value)}
+                  {money(totals.value + wireValue)}
                 </div>
                 {p.quoteId && (
                   <Link

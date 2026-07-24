@@ -13,10 +13,19 @@ import {
   type MeasureUnit,
   type Point,
 } from "@/lib/annotations";
-import { bomBySpace, bomLines, bomTotals, type PartLite } from "@/lib/design/grid-bom";
-import { polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
-import type { GridPlacement, GridRevision, GridSpace } from "@/lib/stores/grid-projects";
 import {
+  bomBySpace,
+  bomLines,
+  bomTotals,
+  isPerLengthUnit,
+  routeLengthFt,
+  routeLines,
+  type PartLite,
+} from "@/lib/design/grid-bom";
+import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
+import type { GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
+import {
+  addRouteAction,
   addSheetAction,
   addSpaceAction,
   calibrateAction,
@@ -27,6 +36,7 @@ import {
 } from "./actions";
 import SpacesPanel from "./spaces-panel";
 import RevisionsPanel from "./revisions-panel";
+import WiresPanel from "./wires-panel";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -99,6 +109,7 @@ export type ProjectLite = {
   placements: GridPlacement[];
   calibrations: Calibration[];
   spaces: GridSpace[];
+  routes: GridRoute[];
   revisions: GridRevision[];
 };
 
@@ -145,6 +156,13 @@ export default function GridEditor({
   const [spaceDraft, setSpaceDraft] = useState<Point[]>([]);
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
 
+  // Wire routing (D110): waypoints accumulate; clicking the last one again
+  // finishes the run (the part was picked up front, so no popover).
+  const [wireDrawing, setWireDrawing] = useState(false);
+  const [wireDraft, setWireDraft] = useState<Point[]>([]);
+  const [wirePartId, setWirePartId] = useState<string | null>(null);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const onLoaded = useCallback((n: number) => setPages(n), []);
@@ -176,8 +194,19 @@ export default function GridEditor({
     [project.spaces, sheet?.id, page]
   );
 
+  const pageRoutes = useMemo(
+    () => (project.routes || []).filter((r) => r.sheetId === sheet?.id && r.page === page),
+    [project.routes, sheet?.id, page]
+  );
+  const wireParts = useMemo(() => parts.filter((p) => isPerLengthUnit(p.unit)), [parts]);
+
   const lines = useMemo(() => bomLines(project.placements, parts), [project.placements, parts]);
   const totals = useMemo(() => bomTotals(project.placements, parts), [project.placements, parts]);
+  const wires = useMemo(
+    () => routeLines(project.routes || [], parts, project.calibrations),
+    [project.routes, parts, project.calibrations]
+  );
+  const grandValue = totals.value + wires.value;
   const spaceRollups = useMemo(
     () => bomBySpace(project.placements, parts, project.spaces || []),
     [project.placements, parts, project.spaces]
@@ -250,6 +279,31 @@ export default function GridEditor({
       return;
     }
 
+    if (wireDrawing) {
+      // Clicking the last waypoint again (with ≥2 laid down) finishes the run.
+      const last = wireDraft[wireDraft.length - 1];
+      const finishes =
+        last &&
+        wireDraft.length >= 2 &&
+        Math.abs(last.x - p.x) < 0.015 &&
+        Math.abs(last.y - p.y) < 0.015 / (aspect || 1);
+      if (finishes && wirePartId) {
+        const points = wireDraft;
+        setWireDrawing(false);
+        setWireDraft([]);
+        setErr(null);
+        setBusy(true);
+        addRouteAction(project.id, { sheetId: sheet.id, page, partId: wirePartId, points, aspect }).then((r) => {
+          setBusy(false);
+          if (!r.ok) setErr(r.error);
+          else router.refresh();
+        });
+        return;
+      }
+      setWireDraft((prev) => [...prev, p]);
+      return;
+    }
+
     // Select an existing marker when the click lands on one.
     // Same on-screen radius on both axes: y is a fraction of height, so the
     // x-tolerance divides by the aspect to stay circular on tall pages.
@@ -259,6 +313,7 @@ export default function GridEditor({
     if (hit) {
       setSelected(hit.id === selected ? null : hit.id);
       setSelectedSpaceId(null);
+      setSelectedRouteId(null);
       return;
     }
     setSelected(null);
@@ -280,7 +335,17 @@ export default function GridEditor({
       return;
     }
 
-    // Nothing armed: clicking inside a room selects it (smallest wins).
+    // Nothing armed: a wire is a finer target than a room, so routes first…
+    const nearRoute = [...pageRoutes]
+      .reverse()
+      .find((r) => distToPolyline(p, r.points, aspect) < 0.012);
+    if (nearRoute) {
+      setSelectedRouteId(nearRoute.id === selectedRouteId ? null : nearRoute.id);
+      setSelectedSpaceId(null);
+      return;
+    }
+    setSelectedRouteId(null);
+    // …then clicking inside a room selects it (smallest wins).
     const room = spaceOf({ sheetId: sheet.id, page, x: p.x, y: p.y }, pageSpaces);
     setSelectedSpaceId(room ? room.id : null);
   }
@@ -371,6 +436,9 @@ export default function GridEditor({
               setSpaceDrawing(false);
               setSpaceDraft([]);
               setSelectedSpaceId(null);
+              setWireDrawing(false);
+              setWireDraft([]);
+              setSelectedRouteId(null);
             }}
             style={{ ...BTN, fontWeight: 500 }}
           >
@@ -403,9 +471,9 @@ export default function GridEditor({
         <button style={BTN} onClick={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))}>+</button>
         {isPdf && pages > 1 && (
           <>
-            <button style={BTN} disabled={page <= 1} onClick={() => { setPage((p) => p - 1); setSelected(null); setSelectedSpaceId(null); setSpaceDrawing(false); setSpaceDraft([]); }}>‹</button>
+            <button style={BTN} disabled={page <= 1} onClick={() => { setPage((p) => p - 1); setSelected(null); setSelectedSpaceId(null); setSpaceDrawing(false); setSpaceDraft([]); setWireDrawing(false); setWireDraft([]); setSelectedRouteId(null); }}>‹</button>
             <span style={{ fontSize: 12, color: "#5b616e" }}>{page} / {pages}</span>
-            <button style={BTN} disabled={page >= pages} onClick={() => { setPage((p) => p + 1); setSelected(null); setSelectedSpaceId(null); setSpaceDrawing(false); setSpaceDraft([]); }}>›</button>
+            <button style={BTN} disabled={page >= pages} onClick={() => { setPage((p) => p + 1); setSelected(null); setSelectedSpaceId(null); setSpaceDrawing(false); setSpaceDraft([]); setWireDrawing(false); setWireDraft([]); setSelectedRouteId(null); }}>›</button>
           </>
         )}
       </div>
@@ -465,6 +533,9 @@ export default function GridEditor({
                       setSpaceDrawing(false);
                       setSpaceDraft([]);
                       setSelectedSpaceId(null);
+                      setWireDrawing(false);
+                      setWireDraft([]);
+                      setSelectedRouteId(null);
                     }}
                     title={p.desc}
                     style={{
@@ -522,7 +593,7 @@ export default function GridEditor({
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
                   <button
                     style={{ ...BTN, padding: "4px 8px", fontSize: 11 }}
-                    onClick={() => { setCalibrating(true); setArmedPartId(null); setSelected(null); setSpaceDrawing(false); setSpaceDraft([]); }}
+                    onClick={() => { setCalibrating(true); setArmedPartId(null); setSelected(null); setSpaceDrawing(false); setSpaceDraft([]); setWireDrawing(false); setWireDraft([]); }}
                   >
                     Recalibrate
                   </button>
@@ -545,7 +616,7 @@ export default function GridEditor({
                 </div>
                 <button
                   style={{ ...BTN, width: "100%", background: calibrating ? "#16181d" : "#fff", color: calibrating ? "#fff" : "#3d424e", borderColor: calibrating ? "#16181d" : "#dfe2e8" }}
-                  onClick={() => { setCalibrating(true); setArmedPartId(null); setSelected(null); setSpaceDrawing(false); setSpaceDraft([]); }}
+                  onClick={() => { setCalibrating(true); setArmedPartId(null); setSelected(null); setSpaceDrawing(false); setSpaceDraft([]); setWireDrawing(false); setWireDraft([]); }}
                 >
                   {calibrating ? "Draw the reference…" : "Calibrate this page"}
                 </button>
@@ -568,6 +639,9 @@ export default function GridEditor({
               setCalibrating(false);
               setSelected(null);
               setSelectedSpaceId(null);
+              setWireDrawing(false);
+              setWireDraft([]);
+              setSelectedRouteId(null);
               setPending(null);
             }}
             onCancelDraw={() => {
@@ -577,6 +651,44 @@ export default function GridEditor({
             onSelect={(id) => {
               setSelectedSpaceId(id);
               setSelected(null);
+            }}
+            onChanged={() => router.refresh()}
+            onError={(m) => setErr(m)}
+          />
+
+          {/* wires (D110) */}
+          <WiresPanel
+            projectId={project.id}
+            wireParts={wireParts}
+            pageRoutes={pageRoutes}
+            calibrations={project.calibrations}
+            calibrated={Boolean(cal)}
+            wiring={wireDrawing}
+            wirePartId={wirePartId}
+            selectedRouteId={selectedRouteId}
+            unmeasured={wires.unmeasured}
+            busy={busy}
+            onPickPart={(id) => setWirePartId(id)}
+            onStartDraw={() => {
+              setWireDrawing(true);
+              setWireDraft([]);
+              setArmedPartId(null);
+              setCalibrating(false);
+              setSpaceDrawing(false);
+              setSpaceDraft([]);
+              setSelected(null);
+              setSelectedSpaceId(null);
+              setSelectedRouteId(null);
+              setPending(null);
+            }}
+            onCancelDraw={() => {
+              setWireDrawing(false);
+              setWireDraft([]);
+            }}
+            onSelect={(id) => {
+              setSelectedRouteId(id);
+              setSelected(null);
+              setSelectedSpaceId(null);
             }}
             onChanged={() => router.refresh()}
             onError={(m) => setErr(m)}
@@ -615,7 +727,7 @@ export default function GridEditor({
           {/* BOM */}
           <div style={PANEL}>
             <div style={PANEL_LABEL}>Bill of materials</div>
-            {lines.length === 0 ? (
+            {lines.length === 0 && wires.lines.length === 0 ? (
               <div style={{ fontSize: 11.5, color: "#8c919c" }}>
                 Paint devices onto the plan to build the BOM.
               </div>
@@ -633,9 +745,26 @@ export default function GridEditor({
                     <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
                   </div>
                 ))}
+                {wires.lines.map((l) => (
+                  <div key={`w-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
+                    <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty} {l.unit}</strong>
+                    <span
+                      style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                      title={`${l.partId} — ${l.desc}`}
+                    >
+                      {l.partId}
+                    </span>
+                    <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
+                  </div>
+                ))}
+                {wires.unmeasured > 0 && (
+                  <div style={{ fontSize: 10.5, color: "#a0442b" }}>
+                    {wires.unmeasured} unmeasured wire run{wires.unmeasured === 1 ? "" : "s"} excluded.
+                  </div>
+                )}
                 <div style={{ borderTop: "1px solid #edeff3", marginTop: 3, paddingTop: 5, display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
                   <span style={{ color: "#8c919c" }}>Total</span>
-                  <strong>{moneyFmt(totals.value)}</strong>
+                  <strong>{moneyFmt(grandValue)}</strong>
                 </div>
               </div>
             )}
@@ -648,7 +777,7 @@ export default function GridEditor({
                 color: "#fff",
                 borderColor: "#16181d",
               }}
-              disabled={busy || lines.length === 0}
+              disabled={busy || (lines.length === 0 && wires.lines.length === 0)}
               onClick={async () => {
                 setErr(null);
                 setBusy(true);
@@ -699,7 +828,7 @@ export default function GridEditor({
               style={{
                 position: "relative",
                 lineHeight: 0,
-                cursor: pending ? "default" : calibrating || armedPart || spaceDrawing ? "crosshair" : "default",
+                cursor: pending ? "default" : calibrating || armedPart || spaceDrawing || wireDrawing ? "crosshair" : "default",
                 touchAction: "none",
                 background: "#fff",
                 boxShadow: "0 2px 14px rgba(0,0,0,.28)",
@@ -817,6 +946,67 @@ export default function GridEditor({
                     stroke="#8a6d3b"
                     strokeWidth={2}
                   />
+                )}
+                {/* wire routes (D110) — dashed polylines with a length chip */}
+                {pageRoutes.map((r) => {
+                  const part = partById.get(r.partId);
+                  const c = markerColor(part?.category || "Wire");
+                  const on = r.id === selectedRouteId;
+                  const pts = r.points.map((q) => `${q.x * size.w},${q.y * size.h}`).join(" ");
+                  const midIdx = Math.floor((r.points.length - 1) / 2);
+                  const mA = r.points[midIdx];
+                  const mB = r.points[Math.min(midIdx + 1, r.points.length - 1)];
+                  const mx = ((mA.x + mB.x) / 2) * size.w;
+                  const my = ((mA.y + mB.y) / 2) * size.h;
+                  const ft = routeLengthFt(r, project.calibrations);
+                  const calHere = project.calibrations.find(
+                    (cc) => cc.docId === r.sheetId && cc.page === r.page
+                  );
+                  const label = ft !== null && calHere ? formatMeasure(ft, calHere.unit) : "unmeasured";
+                  return (
+                    <g key={r.id}>
+                      <polyline
+                        points={pts}
+                        fill="none"
+                        stroke={c}
+                        strokeWidth={on ? 4 : 2.5}
+                        strokeDasharray="8 5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      {r.points.map((q, i) => (
+                        <circle key={i} cx={q.x * size.w} cy={q.y * size.h} r={3} fill={c} />
+                      ))}
+                      <g>
+                        <rect x={mx - 30} y={my - 20} width={60} height={16} rx={4} fill="#fff" stroke={c} strokeWidth={1} opacity={0.95} />
+                        <text x={mx} y={my - 8} fill={c} fontSize={10.5} fontWeight={700} textAnchor="middle" style={{ fontFamily: "inherit" }}>
+                          {label}
+                        </text>
+                      </g>
+                    </g>
+                  );
+                })}
+                {wireDraft.length > 0 && (
+                  <g>
+                    <polyline
+                      points={wireDraft.map((q) => `${q.x * size.w},${q.y * size.h}`).join(" ")}
+                      fill="none"
+                      stroke="#3155a8"
+                      strokeWidth={2.5}
+                      strokeDasharray="8 5"
+                    />
+                    {wireDraft.map((q, i) => (
+                      <circle
+                        key={i}
+                        cx={q.x * size.w}
+                        cy={q.y * size.h}
+                        r={i === wireDraft.length - 1 ? 6 : 3}
+                        fill={i === wireDraft.length - 1 ? "#fff" : "#3155a8"}
+                        stroke="#3155a8"
+                        strokeWidth={2}
+                      />
+                    ))}
+                  </g>
                 )}
                 {sheetPlacements.map((pl) => {
                   const part = partById.get(pl.partId);
