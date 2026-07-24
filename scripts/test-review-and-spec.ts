@@ -549,5 +549,17 @@ ok(lb === 5 * 12 + 3 * 18 + 1.5 * 44, `gear = fixtures + 1.5 lb/ft distribution 
 ok(electricGearLb({ front: 10 }, 0) === 0, "an explicit front count still contributes nothing — FOH is off-batten");
 ok(electricGearLb({}, 44) === 66, "a bare electric still carries its distribution allowance");
 
+/* --- PRO dims on lineset inputs + v3 save format (task 5) --- */
+import { generateLineset, DEFAULT_LINESET_INPUTS } from "@/lib/design/lineset";
+
+ok(DEFAULT_LINESET_INPUTS.proWidthFt === 40 && DEFAULT_LINESET_INPUTS.proHeightFt === 20, "lineset defaults carry PRO dims");
+ok(DEFAULT_LINESET_INPUTS.stageWidthFt === 50, "stage width default is unchanged at 50ft");
+ok(DEFAULT_LINESET_INPUTS.proWidthFt !== DEFAULT_LINESET_INPUTS.stageWidthFt, "PRO width and stage width are distinct values");
+
+const baseOut = generateLineset(DEFAULT_LINESET_INPUTS);
+const wideProOut = generateLineset({ ...DEFAULT_LINESET_INPUTS, proWidthFt: 44, proHeightFt: 26 });
+ok(baseOut.schedule.length === wideProOut.schedule.length, "changing PRO dims does NOT change line placement");
+ok(baseOut.summary.activeSlotCount === wideProOut.summary.activeSlotCount, "PRO dims do not affect the 8in grid");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

@@ -28,6 +28,11 @@ export type LinesetInputs = {
   stageWidthIn: number; // Inputs!C6
   stageDepthFt: number; // Inputs!B7
   stageDepthIn: number; // Inputs!C7
+  /** Proscenium opening width (ft). Drives drape WIDTHS. Distinct from
+   *  stageWidthFt, which is wall-to-wall and drives placement. */
+  proWidthFt: number;
+  /** Proscenium opening height (ft), floor to header. Drives drape HEIGHTS. */
+  proHeightFt: number;
   slotSpacingIn: number; // Inputs!B11  (8" grid centers)
   electricIntervalFt: number; // Inputs!B12 (10')
   electricOffsetIn: number; // Inputs!B13 (0")
@@ -49,6 +54,8 @@ export const DEFAULT_LINESET_INPUTS: LinesetInputs = {
   stageWidthIn: 0,
   stageDepthFt: 30,
   stageDepthIn: 0,
+  proWidthFt: 40,
+  proHeightFt: 20,
   slotSpacingIn: 8,
   electricIntervalFt: 10,
   electricOffsetIn: 0,

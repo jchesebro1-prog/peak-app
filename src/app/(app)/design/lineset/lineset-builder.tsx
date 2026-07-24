@@ -27,6 +27,7 @@ import {
   type WeightLine,
   type LinesetMode,
 } from "@/lib/design/steel";
+import { DEFAULT_GEAR, type GoodsTier, type GearDefaults } from "@/lib/design/goods";
 import { SaveBar, type SavedRef } from "../save-bar";
 import { downloadCsv } from "../export";
 
@@ -38,15 +39,18 @@ export type LineLoad = Partial<Omit<WeightLine, "name">> & {
   nameOverride?: string;
 };
 
-/** v2 combined save format. Legacy shapes (bare LinesetInputs from the old
- *  Builder, {defaults,lines} from the old Weights tool) are adapted on load
- *  by the route page — see resolveInitial() in page.tsx. */
+/** v3 combined save format. Adds the PRO dimensions (carried inside `inputs`),
+ *  the goods tier and the gear defaults. Legacy shapes (v2, bare LinesetInputs
+ *  from the old Builder, {defaults,lines} from the old Weights tool) are
+ *  adapted on load by the route page — see resolveInitial() in page.tsx. */
 export type CombinedLinesetData = {
-  v: 2;
+  v: 3;
   inputs: LinesetInputs;
   defaults: WeightDefaults;
   loads: Record<string, LineLoad>;
   extras: (WeightLine & { xid: string })[];
+  tier: GoodsTier;
+  gear: GearDefaults;
 };
 
 export type CombinedInitial = {
@@ -54,6 +58,8 @@ export type CombinedInitial = {
   defaults?: WeightDefaults;
   loads?: Record<string, LineLoad>;
   extras?: (WeightLine & { xid: string })[];
+  tier?: GoodsTier;
+  gear?: GearDefaults;
   /** set when the opened design was a legacy Weights record — saving creates
    *  a new combined design instead of overwriting the old one */
   legacyWeights?: boolean;
@@ -115,6 +121,11 @@ export function LinesetBuilder({
   const [def, setDef] = useState<WeightDefaults>(initial?.defaults || DEFAULT_WEIGHTS);
   const [loads, setLoads] = useState<Record<string, LineLoad>>(initial?.loads || {});
   const [extras, setExtras] = useState<(WeightLine & { xid: string })[]>(initial?.extras || []);
+  // No editor for these yet (a later task wires controls) — carried through so
+  // opening and re-saving a design round-trips its tier/gear instead of
+  // silently resetting them to the defaults below.
+  const [tier] = useState<GoodsTier>(initial?.tier || "better");
+  const [gear] = useState<GearDefaults>(initial?.gear || DEFAULT_GEAR);
   const [showGrid, setShowGrid] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -206,7 +217,7 @@ export function LinesetBuilder({
     downloadCsv(`lineset-${inp.stageWidthFt}x${inp.stageDepthFt}`, header, csvRows);
   }
 
-  const getData = (): CombinedLinesetData => ({ v: 2, inputs: inp, defaults: def, loads, extras });
+  const getData = (): CombinedLinesetData => ({ v: 3, inputs: inp, defaults: def, loads, extras, tier, gear });
 
   /* ---- the per-line load editor (expands under the selected row, P5) ---- */
   function LoadEditor({ value, onChange, onClear, isExtra, onRemove }: {
