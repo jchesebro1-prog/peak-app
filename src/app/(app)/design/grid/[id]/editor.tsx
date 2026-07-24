@@ -458,6 +458,9 @@ export default function GridEditor({
         <Link href={`/design/grid/${encodeURIComponent(project.id)}/riser`} style={{ ...BTN, textDecoration: "none" }}>
           Riser →
         </Link>
+        <Link href={`/design/grid/${encodeURIComponent(project.id)}/schedule`} style={{ ...BTN, textDecoration: "none" }}>
+          Schedule →
+        </Link>
         <input
           ref={fileRef}
           type="file"
