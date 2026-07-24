@@ -191,7 +191,7 @@ git commit -m "feat(design): canonical VenueDims shared by lineset builder and e
 
 **Interfaces:**
 - Consumes: `Fabric`, `ozPerFt2` from `steel.ts`.
-- Produces: `fabricFromPart(part): Fabric | null`; catalog SKU `RB-MUS-SL`; `CatalogPart.oz`, `.ozBasis`, `.boltWidthIn`.
+- Produces: `fabricFromPart(part): Fabric | null`; catalog SKU `RB-MUS`; `CatalogPart.oz`, `.ozBasis`, `.boltWidthIn`.
 
 Background: fabric weight lives in `FABLIB` (`steel.ts:366`) keyed by display name; fabric *choice* lives in the catalog keyed by SKU. The oz value exists in the catalog only inside the `desc` **string**. This task makes it numeric.
 
@@ -202,7 +202,7 @@ Insert above the final `console.log` line:
 ```ts
 /* --- fabric catalog weight join (task 2) --- */
 const velourPart = { id: "RB-MV-MN", sku: "RB-MV-MN", desc: "25 oz Memorable Velour", category: "Fabric", unit: "sq ft", list: 6.4, cost: 4.2, oz: 25, ozBasis: "lin-yd" as const, boltWidthIn: 54 };
-const muslinPart = { id: "RB-MUS-SL", sku: "RB-MUS-SL", desc: "Muslin, seamless", category: "Fabric", unit: "sq ft", list: 1.2, cost: 0.8, oz: 6, ozBasis: "sq-yd" as const, boltWidthIn: 120 };
+const muslinPart = { id: "RB-MUS", sku: "RB-MUS", desc: "Seamless Muslin", category: "Fabric", unit: "sq ft", list: 1.2, cost: 0.8, oz: 6, ozBasis: "sq-yd" as const, boltWidthIn: 120 };
 
 const fV = fabricFromPart(velourPart);
 ok(fV !== null && Math.abs(ozPerFt2(fV) - 25 / 13.5) < 1e-9, "54in lin-yd velour resolves to oz/13.5 per sqft");
@@ -245,10 +245,17 @@ In `src/db/seeds/catalog.ts`, replace the three Fabric rows (lines 12-14) with t
     { id: "RB-MV-MN", sku: "RB-MV-MN", desc: "25 oz Memorable Velour", category: "Fabric", unit: "sq ft", list: 6.40, cost: 4.20, mfr: "Rose Brand", costPerSqft: 4.20, oz: 25, ozBasis: "lin-yd", boltWidthIn: 54 },
     { id: "RB-MARVEL", sku: "RB-MARVEL", desc: "21 oz Marvel Velour", category: "Fabric", unit: "sq ft", list: 5.30, cost: 3.45, mfr: "Rose Brand", costPerSqft: 3.45, oz: 21, ozBasis: "lin-yd", boltWidthIn: 54 },
     { id: "RB-EN-16", sku: "RB-EN-16", desc: "16 oz Encore Velour", category: "Fabric", unit: "sq ft", list: 3.95, cost: 2.60, mfr: "Rose Brand", costPerSqft: 2.60, oz: 16, ozBasis: "lin-yd", boltWidthIn: 54 },
-    { id: "RB-MUS-SL", sku: "RB-MUS-SL", desc: "Muslin, seamless", category: "Fabric", unit: "sq ft", list: 1.20, cost: 0.80, mfr: "Rose Brand", costPerSqft: 0.80, oz: 6, ozBasis: "sq-yd", boltWidthIn: 120 },
 ```
 
-The muslin row is new — the catalog had three velours and no muslin, and the cyc requires one.
+Then add the same three weight fields to the **existing** `RB-MUS` row further down the Fabric block, leaving its `list`, `cost`, `costPerSqft` and `desc` untouched:
+
+```ts
+    { id: "RB-MUS", sku: "RB-MUS", desc: "Seamless Muslin", category: "Fabric", unit: "sq ft", list: 1.70, cost: 1.10, mfr: "Rose Brand", costPerSqft: 1.10, oz: 6, ozBasis: "sq-yd", boltWidthIn: 120 },
+```
+
+**Corrected 2026-07-24:** an earlier draft of this plan claimed the catalog held three velours and no muslin, and had this step *create* a new `RB-MUS-SL` row. Both were wrong. The catalog has **nine** Fabric rows and `RB-MUS` "Seamless Muslin" already existed. Creating a second muslin produced two rows with near-inverted descriptions and different prices ($0.80 vs $1.10) in a catalog people browse to build real quotes. `RB-MUS` is the canonical muslin SKU — later tasks reference it for the cyc.
+
+**Known gap, deliberately unfixed:** four Fabric rows still carry no weight — `RB-COM-16`, `RB-SCRIM`, `RB-BOBNET`, `RB-POLY`. None states a bolt width, and a guessed bolt width yields confidently wrong weights, which is worse than none. Open item for Jeff.
 
 - [ ] **Step 5: Add the resolver**
 
@@ -388,7 +395,7 @@ ok(drapeRule("General Purpose", DIMS36, "better") === null, "general purpose lin
 
 ok(drapeRule("Draw", DIMS36, "good")!.fabricSku === "RB-EN-16", "good tier uses 16oz Encore");
 ok(drapeRule("Draw", DIMS36, "best")!.fabricSku === "RB-MV-MN", "best tier uses 25oz Memorable");
-ok(drapeRule("CYC", DIMS36, "good")!.fabricSku === "RB-MUS-SL", "cyc is muslin at every tier");
+ok(drapeRule("CYC", DIMS36, "good")!.fabricSku === "RB-MUS", "cyc is muslin at every tier");
 ```
 
 Add the import for `drapeRule`, `TRACK_TRAVELER` from `@/lib/design/goods` at the top of the file.
@@ -448,9 +455,9 @@ export const CHAIN_NONE = "None";
  *  velour roles point at the same SKU per tier today; the separate keys exist
  *  so a cheaper rear blackout can be specced later without touching the main. */
 const TIER_FABRIC: Record<GoodsTier, Record<string, string>> = {
-  good: { draw: "RB-EN-16", legs: "RB-EN-16", border: "RB-EN-16", fullstage: "RB-EN-16", cyc: "RB-MUS-SL" },
-  better: { draw: "RB-MARVEL", legs: "RB-MARVEL", border: "RB-MARVEL", fullstage: "RB-MARVEL", cyc: "RB-MUS-SL" },
-  best: { draw: "RB-MV-MN", legs: "RB-MV-MN", border: "RB-MV-MN", fullstage: "RB-MV-MN", cyc: "RB-MUS-SL" },
+  good: { draw: "RB-EN-16", legs: "RB-EN-16", border: "RB-EN-16", fullstage: "RB-EN-16", cyc: "RB-MUS" },
+  better: { draw: "RB-MARVEL", legs: "RB-MARVEL", border: "RB-MARVEL", fullstage: "RB-MARVEL", cyc: "RB-MUS" },
+  best: { draw: "RB-MV-MN", legs: "RB-MV-MN", border: "RB-MV-MN", fullstage: "RB-MV-MN", cyc: "RB-MUS" },
 };
 
 /**
@@ -862,7 +869,7 @@ const merged = { ...wlDraw, h: 24 };
 ok(merged.h === 24 && merged.w === 20, "a hand-entered height overrides the rule; untouched fields keep it");
 
 const wlCyc = ruleToWeightLine(drapeRule("CYC", DIMS36, "better")!, [
-  { sku: "RB-MUS-SL", desc: "Muslin, seamless", oz: 6, ozBasis: "sq-yd" as const, boltWidthIn: 120 },
+  { sku: "RB-MUS", desc: "Seamless Muslin", oz: 6, ozBasis: "sq-yd" as const, boltWidthIn: 120 },
 ]);
 ok(wlCyc.full === 0, "the cyc reaches computeSetWeight at 0% fullness, not the 50% default");
 ```
