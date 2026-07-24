@@ -1,5 +1,5 @@
 import type { VenueDims } from "./venue-dims";
-import { fabricFromPart, type Fabric } from "./steel";
+import { fabricFromPart, type Fabric, type WeightLine } from "./steel";
 
 /**
  * Peak's soft-goods geometry, as one table (spec §1).
@@ -232,4 +232,40 @@ export function ruleToWeightLine(
     track: rule.track || undefined,
     chain: rule.chain,
   };
+}
+
+/**
+ * Effective `fab` / `fabResolved` for one schedule line, merging the
+ * rule-derived base (ruleToWeightLine's output, or a gear-only base for
+ * Electric/Shell lines) with the user's hand-entered load override.
+ *
+ * computeSetWeight() (steel.ts) prefers `fabResolved` over a `fab` name
+ * lookup. A rule-derived line's `fabResolved` comes from the CATALOG
+ * (ruleToWeightLine), so a naive `{ ...base, ...load }` spread lets that
+ * catalog `fabResolved` ride through untouched even when `load.fab`
+ * overrides the label — the override becomes a silent no-op on weight (F1).
+ * When the line is rule-derived and `fab` was overridden, re-resolve
+ * `fabResolved` from the CATALOG list against the new value so the weight
+ * tracks what the dropdown shows. A catalog miss clears `fabResolved`
+ * (never keeps the stale rule value) so `fabByName(fab)` can govern
+ * instead, same as any non-catalog line. Non-drape lines (no `rule`) and
+ * lines with no override just carry the ordinary merge precedence through
+ * unchanged.
+ *
+ * Pure — both the lineset-builder `rows` memo and its regression test call
+ * this directly, so a broken/reverted merge fails the test, not just a
+ * hand-copied reimplementation of it.
+ */
+export function mergeLineFabric(
+  base: Partial<WeightLine>,
+  load: Partial<WeightLine> | undefined,
+  rule: DrapeRule | null,
+  fabrics: GoodsFabric[]
+): Pick<WeightLine, "fab" | "fabResolved"> {
+  const fab = load?.fab !== undefined ? load.fab : base.fab;
+  if (rule && load?.fab !== undefined) {
+    const part = fabrics.find((f) => f.desc === load.fab);
+    return { fab, fabResolved: (part && fabricFromPart(part)) || undefined };
+  }
+  return { fab, fabResolved: load?.fabResolved !== undefined ? load.fabResolved : base.fabResolved };
 }

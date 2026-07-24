@@ -477,7 +477,7 @@ ok(wLine.goods > 0, "a catalog-only fabric (Marvel is NOT in FABLIB) still produ
 ok(computeSetWeight({ name: "t", fab: "21 oz Marvel Velour", w: 20, h: 19, full: 50, qty: 2 }, DEFAULT_WEIGHTS).goods === 0, "name-only lookup of a catalog desc weighs ZERO — the bug this join fixes");
 
 /* --- drape rule table (task 3) --- */
-import { drapeRule, TRACK_TRAVELER, DEFAULT_GEAR, shellGearLb, electricCounts, electricGearLb, ruleToWeightLine } from "@/lib/design/goods";
+import { drapeRule, TRACK_TRAVELER, DEFAULT_GEAR, shellGearLb, electricCounts, electricGearLb, ruleToWeightLine, mergeLineFabric } from "@/lib/design/goods";
 
 const DIMS36 = { proWidthFt: 36, proHeightFt: 18, stageWidthFt: 50, stageDepthFt: 30 };
 
@@ -585,38 +585,43 @@ ok(wlCyc.full === 0, "the cyc reaches computeSetWeight at 0% fullness, not the 5
  * the catalog too — otherwise the rule's stale fabResolved silently wins and
  * the override never touches the weight (this was the bug: Task 2's catalog
  * join and Task 7's override UI were each reviewed alone and never wired
- * together). This is a pure-function replay of the lineset-builder.tsx
- * `rows` memo's fix. The dropdown-vocabulary swap (F2 — listing catalog
- * fabrics instead of FABLIB on rule lines) is a rendering-only concern with
- * no separate pure seam; it's verified live in the dev server instead. */
+ * together). These assertions call mergeLineFabric() (goods.ts) directly —
+ * the SAME function the lineset-builder.tsx `rows` memo calls to build
+ * `line` — so a reverted or broken extraction fails HERE, not just in a
+ * hand-copied reimplementation of the merge (task 7). The dropdown-vocabulary
+ * swap (F2 — listing catalog fabrics instead of FABLIB on rule lines) is a
+ * rendering-only concern with no separate pure seam; it's verified live in
+ * the dev server instead. */
 const OVERRIDE_FABRICS = [
   { sku: "RB-MARVEL", desc: "21 oz Marvel Velour", oz: 21, ozBasis: "lin-yd" as const, boltWidthIn: 54 },
   { sku: "RB-MV-MN", desc: "25 oz Memorable Velour", oz: 25, ozBasis: "lin-yd" as const, boltWidthIn: 54 },
 ];
-const ruleLine = ruleToWeightLine(drapeRule("Draw", DIMS36, "better")!, OVERRIDE_FABRICS);
+const drawRule = drapeRule("Draw", DIMS36, "better")!;
+const ruleLine = ruleToWeightLine(drawRule, OVERRIDE_FABRICS);
 ok(ruleLine.fabResolved?.oz === 21, "unoverridden draw line carries the tier's 21oz Marvel");
 const ruleWeight = computeSetWeight({ name: "t", ...ruleLine }, DEFAULT_WEIGHTS);
 
+// (c) no override at all — mergeLineFabric passes the rule's fab/fabResolved straight through
+const kept = mergeLineFabric(ruleLine, undefined, drawRule, OVERRIDE_FABRICS);
+ok(kept.fab === ruleLine.fab && kept.fabResolved?.oz === 21, "no override: mergeLineFabric leaves the rule's fabResolved intact");
+
+// (a) an overridden catalog fabric — fabResolved must track the OVERRIDE, not the rule
 const overrideDesc = "25 oz Memorable Velour";
-const overridePart = OVERRIDE_FABRICS.find((f) => f.desc === overrideDesc);
-const fixedLine = {
-  name: "t",
-  ...ruleLine,
-  fab: overrideDesc,
-  fabResolved: (overridePart && fabricFromPart(overridePart)) || undefined,
-};
-ok(fixedLine.fabResolved?.oz === 25, "the fix: overriding fab on a rule line re-resolves fabResolved to the OVERRIDE fabric, not the rule's");
-const fixedWeight = computeSetWeight(fixedLine, DEFAULT_WEIGHTS);
-ok(fixedWeight.goods > ruleWeight.goods, `heavier override raises goods weight (rule ${ruleWeight.goods.toFixed(1)} -> override ${fixedWeight.goods.toFixed(1)})`);
+const overridden = mergeLineFabric(ruleLine, { fab: overrideDesc }, drawRule, OVERRIDE_FABRICS);
+ok(overridden.fab === overrideDesc, "mergeLineFabric carries the override label through as fab");
+ok(overridden.fabResolved?.oz === 25, "the fix: overriding fab on a rule line re-resolves fabResolved to the OVERRIDE fabric, not the rule's — via the real production function, not a copy of it");
+const overriddenWeight = computeSetWeight({ name: "t", ...ruleLine, ...overridden }, DEFAULT_WEIGHTS);
+ok(overriddenWeight.goods > ruleWeight.goods, `heavier override raises goods weight end-to-end through mergeLineFabric (rule ${ruleWeight.goods.toFixed(1)} -> override ${overriddenWeight.goods.toFixed(1)})`);
 
-const buggyLine = { name: "t", ...ruleLine, fab: overrideDesc }; // fabResolved NOT re-resolved — the bug
-const buggyWeight = computeSetWeight(buggyLine, DEFAULT_WEIGHTS);
-ok(buggyWeight.goods === ruleWeight.goods, "regression guard: the naive {...base, fab: override} merge (no re-resolve) reproduces the exact silent no-op F1 closes");
-
+// (b) an override that misses the catalog — fabResolved must clear, not keep the stale rule value
 const missDesc = "Not in catalog";
-const missPart = OVERRIDE_FABRICS.find((f) => f.desc === missDesc);
-const missLine = { name: "t", ...ruleLine, fab: missDesc, fabResolved: (missPart && fabricFromPart(missPart)) || undefined };
-ok(missLine.fabResolved === undefined, "an override that misses the catalog clears fabResolved rather than keeping the stale rule value, so fabByName(fab) can govern instead");
+const missed = mergeLineFabric(ruleLine, { fab: missDesc }, drawRule, OVERRIDE_FABRICS);
+ok(missed.fab === missDesc && missed.fabResolved === undefined, "a catalog-miss override clears fabResolved rather than keeping the stale rule value, so fabByName(fab) can govern instead");
+
+// non-drape lines (no rule) never had this bug — mergeLineFabric must not invent catalog re-resolution for them
+const gearBase = { gear: 120 };
+const gearMerge = mergeLineFabric(gearBase, { fab: overrideDesc }, null, OVERRIDE_FABRICS);
+ok(gearMerge.fab === overrideDesc && gearMerge.fabResolved === undefined, "a non-rule (Electric/Shell) line's fab override is passed through, never re-resolved from the catalog — there is no rule behind it to protect");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

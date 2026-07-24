@@ -23,7 +23,6 @@ import {
   PRODIGY_HOISTS,
   BATTENS,
   fmt,
-  fabricFromPart,
   type WeightDefaults,
   type WeightLine,
   type LinesetMode,
@@ -35,6 +34,7 @@ import {
   electricGearLb,
   shellGearLb,
   ruleToWeightLine,
+  mergeLineFabric,
   type GoodsTier,
   type GearDefaults,
   type GoodsFabric,
@@ -196,22 +196,20 @@ export function LinesetBuilder({
         }
 
         const ruled = !!rule || s.type === "Electric" || s.type === "Shell";
-        const line: WeightLine = { name: load?.nameOverride || s.name, ...base, ...load };
 
-        // F1 fix: on a rule-derived drape line, `base.fabResolved` (from the
-        // catalog SKU) rides through the `...load` spread untouched — the
-        // editor only ever patches `fab` (a label), never `fabResolved`. Since
-        // computeSetWeight prefers `fabResolved` over a `fab` name lookup, a
-        // user's fabric override was a silent no-op on weight. When `fab` has
-        // been overridden, re-resolve `fabResolved` from the CATALOG list
-        // against the new value so the weight tracks what the dropdown shows.
-        // A catalog miss clears fabResolved (never keeps the stale rule
-        // value) so `fabByName(fab)` can govern instead, same as any
-        // non-catalog line.
-        if (rule && load?.fab !== undefined) {
-          const part = fabrics.find((f) => f.desc === load.fab);
-          line.fabResolved = (part && fabricFromPart(part)) || undefined;
-        }
+        // F1 fix: `fab`/`fabResolved` need to travel together (computeSetWeight
+        // prefers fabResolved over a fab name lookup — steel.ts), so their
+        // merge is pulled out into mergeLineFabric() (goods.ts) rather than
+        // left to a plain `{...base, ...load}` spread, which would let a
+        // rule-derived line's catalog fabResolved silently outlive a fab
+        // override. Shared with scripts/test-review-and-spec.ts so the
+        // regression guard exercises this exact function, not a copy of it.
+        const line: WeightLine = {
+          name: load?.nameOverride || s.name,
+          ...base,
+          ...load,
+          ...mergeLineFabric(base, load, rule, fabrics),
+        };
 
         const specified = ruled || !!load;
         const c = specified ? computeSetWeight(line, def) : null;
