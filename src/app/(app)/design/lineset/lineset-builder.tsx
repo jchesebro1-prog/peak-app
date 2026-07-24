@@ -134,9 +134,10 @@ export function LinesetBuilder({
   const [def, setDef] = useState<WeightDefaults>(initial?.defaults || DEFAULT_WEIGHTS);
   const [loads, setLoads] = useState<Record<string, LineLoad>>(initial?.loads || {});
   const [extras, setExtras] = useState<(WeightLine & { xid: string })[]>(initial?.extras || []);
-  // No editor for these yet (a later task wires controls) — carried through so
-  // opening and re-saving a design round-trips its tier/gear instead of
-  // silently resetting them to the defaults below.
+  // Editable via the "Soft goods" / "Gear weights" subsections of the settings
+  // drawer below. Falling back to these defaults (rather than something else)
+  // is what makes opening and re-saving a design round-trip its tier/gear
+  // instead of silently resetting them.
   const [tier, setTier] = useState<GoodsTier>(initial?.tier || "better");
   const [gear, setGear] = useState<GearDefaults>(initial?.gear || DEFAULT_GEAR);
   const [showGrid, setShowGrid] = useState(false);
@@ -145,6 +146,10 @@ export function LinesetBuilder({
 
   const set = <K extends keyof LinesetInputs>(k: K, v: LinesetInputs[K]) => setInp((s) => ({ ...s, [k]: v }));
   const setD = <K extends keyof WeightDefaults>(k: K, v: WeightDefaults[K]) => setDef((s) => ({ ...s, [k]: v }));
+  const setFix = (k: keyof GearDefaults["fixtureLb"], n: number) =>
+    setGear((g) => ({ ...g, fixtureLb: { ...g.fixtureLb, [k]: n } }));
+  const setGearTop = <K extends "distributionLbPerFt" | "shellPsf">(k: K, n: number) =>
+    setGear((g) => ({ ...g, [k]: n }));
   const patchLoad = (key: string, patch: LineLoad) =>
     setLoads((m) => ({ ...m, [key]: { ...(m[key] || {}), ...patch } }));
   const clearLoad = (key: string) =>
@@ -466,6 +471,29 @@ export function LinesetBuilder({
                   <select value={def.cableMgmt ? "y" : "n"} onChange={(e) => setD("cableMgmt", e.target.value === "y")} style={field}>
                     <option value="n">No (8 lines)</option><option value="y">Yes (7 lines)</option>
                   </select></div>
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", margin: "14px 0 6px" }}>Soft goods</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div style={{ gridColumn: "1 / -1" }}><span style={label}>Fabric tier</span>
+                  <select value={tier} onChange={(e) => setTier(e.target.value as GoodsTier)} style={field}>
+                    <option value="good">Good — 16 oz Encore</option>
+                    <option value="better">Better — 21 oz Marvel</option>
+                    <option value="best">Best — 25 oz Memorable</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", margin: "14px 0 6px" }}>Gear weights (lb)</div>
+              {/* `front` (FOH fixtures) is intentionally not editable here: electricGearLb()
+                  (goods.ts) never reads fixtureLb.front — front-of-house fixtures hang on a
+                  house position, not a lineset batten — so an editable Front field here would
+                  change nothing. */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div><span style={label}>Par</span><NumF v={gear.fixtureLb.par} set={(n) => setFix("par", n)} /></div>
+                <div><span style={label}>Cyc</span><NumF v={gear.fixtureLb.cyc} set={(n) => setFix("cyc", n)} /></div>
+                <div><span style={label}>Side</span><NumF v={gear.fixtureLb.side} set={(n) => setFix("side", n)} /></div>
+                <div><span style={label}>Automated</span><NumF v={gear.fixtureLb.automated} set={(n) => setFix("automated", n)} /></div>
+                <div><span style={label}>Distribution lb/ft</span><NumF v={gear.distributionLbPerFt} set={(n) => setGearTop("distributionLbPerFt", n)} /></div>
+                <div><span style={label}>Shell lb/ft²</span><NumF v={gear.shellPsf} set={(n) => setGearTop("shellPsf", n)} /></div>
               </div>
             </>
           )}
