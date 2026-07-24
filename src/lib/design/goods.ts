@@ -91,3 +91,96 @@ export function drapeRule(
       return null;
   }
 }
+
+/* ------------------------------ gear weights ------------------------------ */
+
+export type GoodsSize = "small" | "medium" | "large";
+
+export type FixtureCounts = {
+  par: number;
+  /** Front-of-house. ALWAYS contributes 0 lb to a batten — see electricGearLb. */
+  front: number;
+  cyc: number;
+  side: number;
+  automated: number;
+};
+
+export type GearDefaults = {
+  /** Pounds per fixture, including clamp, cable and safety. */
+  fixtureLb: FixtureCounts;
+  /** One combined allowance covering cable, raceway and anything else on the
+   *  pipe. Jeff wants a single distribution figure, not separate entries. */
+  distributionLbPerFt: number;
+  /** Acoustic shell CEILING weight per square foot. Towers are floor-supported
+   *  and load no batten. */
+  shellPsf: number;
+};
+
+export const DEFAULT_GEAR: GearDefaults = {
+  fixtureLb: { par: 12, front: 18, cyc: 14, side: 18, automated: 45 },
+  distributionLbPerFt: 1.5,
+  shellPsf: 2.5,
+};
+
+/** Per-electric multipliers, mirroring quick/engine.ts compute(). */
+const FIX_MUL: Record<GoodsSize, { par: number; side: number; automated: number; cyc: number }> = {
+  small: { par: 0.7, side: 0, automated: 0, cyc: 1 },
+  medium: { par: 1, side: 0.5, automated: 0.5, cyc: 1.25 },
+  large: { par: 1.2, side: 0.75, automated: 0.9, cyc: 1.5 },
+};
+
+/**
+ * Default fixture counts for ONE electric line.
+ *
+ * Derived by mirroring the estimator's count math (wUnit = round(PW / 8) times
+ * a per-electric multiplier). Counts are safe to reuse in a way the estimator's
+ * CURTAIN equations were not, because a count carries no fullness assumption.
+ *
+ * `front` is always 0: the estimator's own comment reads "Front/Cyc are
+ * width-only (FOH / cyc row)". Front-of-house fixtures hang on an FOH position,
+ * not on a lineset batten.
+ */
+export function electricCounts(
+  d: VenueDims,
+  size: GoodsSize = "medium",
+  kind: "regular" | "cyc" = "regular"
+): FixtureCounts {
+  const wUnit = Math.max(1, Math.round(d.proWidthFt / 8));
+  const m = FIX_MUL[size] || FIX_MUL.medium;
+  if (kind === "cyc") {
+    return { par: 0, front: 0, cyc: Math.round(wUnit * m.cyc), side: 0, automated: 0 };
+  }
+  return {
+    par: Math.round(wUnit * m.par),
+    front: 0,
+    cyc: 0,
+    side: Math.round(wUnit * m.side),
+    automated: Math.round(wUnit * m.automated),
+  };
+}
+
+/** Gear pounds on one electric: fixtures plus the distribution allowance.
+ *  `front` is skipped unconditionally — FOH positions are not lineset battens. */
+export function electricGearLb(
+  counts: Partial<FixtureCounts>,
+  battenLenFt: number,
+  gear: GearDefaults = DEFAULT_GEAR
+): number {
+  const f = gear.fixtureLb;
+  const fixtures =
+    (counts.par || 0) * f.par +
+    (counts.cyc || 0) * f.cyc +
+    (counts.side || 0) * f.side +
+    (counts.automated || 0) * f.automated;
+  return fixtures + gear.distributionLbPerFt * Math.max(0, battenLenFt);
+}
+
+/** Gear pounds on one Shell line — the flown CEILING only.
+ *  Acoustic shell TOWERS are floor-supported and load no batten (Jeff). */
+export function shellGearLb(
+  d: VenueDims,
+  shellIntervalFt: number,
+  gear: GearDefaults = DEFAULT_GEAR
+): number {
+  return gear.shellPsf * (d.proWidthFt * Math.max(0, shellIntervalFt));
+}

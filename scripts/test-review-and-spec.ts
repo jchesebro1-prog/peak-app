@@ -477,7 +477,7 @@ ok(wLine.goods > 0, "a catalog-only fabric (Marvel is NOT in FABLIB) still produ
 ok(computeSetWeight({ name: "t", fab: "21 oz Marvel Velour", w: 20, h: 19, full: 50, qty: 2 }, DEFAULT_WEIGHTS).goods === 0, "name-only lookup of a catalog desc weighs ZERO — the bug this join fixes");
 
 /* --- drape rule table (task 3) --- */
-import { drapeRule, TRACK_TRAVELER } from "@/lib/design/goods";
+import { drapeRule, TRACK_TRAVELER, DEFAULT_GEAR, shellGearLb, electricCounts, electricGearLb } from "@/lib/design/goods";
 
 const DIMS36 = { proWidthFt: 36, proHeightFt: 18, stageWidthFt: 50, stageDepthFt: 30 };
 
@@ -519,6 +519,23 @@ ok(drapeRule("Draw", DIMS36, "best")!.fabricSku === "RB-MV-MN", "best tier uses 
 ok(drapeRule("CYC", DIMS36, "good")!.fabricSku === "RB-MUS", "cyc is muslin at every tier");
 ok(rCyc.fabricSku === "RB-MUS", "cyc is muslin at the better tier too — the tier the lineset builder defaults to");
 ok(drapeRule("CYC", DIMS36, "best")!.fabricSku === "RB-MUS", "cyc is muslin at the best tier too — good, better, and best all confirmed, matching the 'every tier' claim above");
+
+/* --- gear weights: fixtures, distribution, shell (task 4) --- */
+ok(DEFAULT_GEAR.shellPsf === 2.5, "shell ceiling is 2.5 lb per sqft (Jeff, 2026-07-24)");
+ok(shellGearLb(DIMS36, 12) === 1080, `36ft pro x 12ft shell spacing x 2.5psf = 1080 lb (got ${shellGearLb(DIMS36, 12)})`);
+
+const cReg = electricCounts(DIMS36, "medium", "regular");
+ok(cReg.front === 0, "FOH fixtures NEVER load a lineset batten — front count is always 0");
+ok(cReg.cyc === 0, "cyc fixtures belong to the cyc electric, not a regular one");
+ok(cReg.par === 5, `par count = round(PW/8) x 1.0 at medium (got ${cReg.par})`);
+
+const cCyc = electricCounts(DIMS36, "medium", "cyc");
+ok(cCyc.cyc > 0 && cCyc.par === 0, "the cyc electric carries cyc fixtures only");
+
+const lb = electricGearLb({ par: 5, side: 3 }, 44);
+ok(lb === 5 * 12 + 3 * 18 + 1.5 * 44, `gear = fixtures + 1.5 lb/ft distribution (got ${lb})`);
+ok(electricGearLb({ front: 10 }, 0) === 0, "an explicit front count still contributes nothing — FOH is off-batten");
+ok(electricGearLb({}, 44) === 66, "a bare electric still carries its distribution allowance");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
