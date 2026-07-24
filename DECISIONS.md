@@ -1710,3 +1710,38 @@ makes it safe to show a customer today; hand-editing comes later, if ever.
 symbol/accessory/datasheet metadata (authoring), first-seeded brands for the
 palette, real blob storage for sheets (hosting account), per-space schedule
 report format, DXF export. Phases 1–5 all have a working slice.
+
+## D113 — Jeff's decision batch: The Grid + standing product questions (2026-07-24)
+
+Twelve open items put to Jeff directly; all answered. Logged here so nothing
+re-litigates them.
+
+**The Grid**
+1. Branch `quartzite-the-grid` → **merged to main** (this merge).
+2. Sheet storage → **Vercel Blob at deploy time**; JSONB-per-sheet stays for
+   the beta. Spec the migration before go-live.
+3. **Printable per-space equipment schedule: yes** — letters-style document
+   per room (the thing you hand an electrician). Next build item.
+4. Device-metadata authoring starts with **ETC lighting + rigging**.
+5. Labor in Grid BOMs → **auto-suggest from painted devices** (BomServices-
+   style rules, editable before the quote mints). Painting labor markers
+   stays possible meanwhile.
+6. Grid quotes get **venue link + pricing-tier stamping** next work session
+   (closes the D108 deferral; same tier resolution as estimator quotes, D87).
+7. Riser sketch gets **print/PDF output** (zero-dep lib/pdf.ts path);
+   editable riser stays future.
+
+**Standing product questions**
+8. Cut allowance (Decision B) → **6 inches, fix the unit** — confirmed;
+   the fix had just landed on main as `fd2f768`.
+9. **Repairs appear on the unified Schedule board** like flame-test visits.
+10. `/flame-tests/today` → **add a team toggle**, default stays personal.
+11. A **"delivered" engagement stays open** through bid support until
+    oversight ends — dashboards should count delivered/bid_supported as
+    active (today some filters count only `status === "active"`; sweep them
+    when this is implemented).
+12. Apple Reminders queue sync stays **Jeff-only** for now; Jeff sets
+    `QUEUE_API_TOKEN` when ready.
+
+Items 3, 5, 6, 7, 9, 10, 11 are the agreed build backlog, in that rough
+priority order.
