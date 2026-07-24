@@ -1,4 +1,5 @@
 import type { VenueDims } from "./venue-dims";
+import { fabricFromPart, type Fabric } from "./steel";
 
 /**
  * Peak's soft-goods geometry, as one table (spec §1).
@@ -184,4 +185,51 @@ export function shellGearLb(
   gear: GearDefaults = DEFAULT_GEAR
 ): number {
   return gear.shellPsf * (d.proWidthFt * Math.max(0, shellIntervalFt));
+}
+
+/* -------------------------- rule -> WeightLine join -------------------------- */
+
+/** Shape of a catalog fabric row, narrowed to what goods geometry needs. */
+export type GoodsFabric = {
+  sku: string;
+  desc: string;
+  oz?: number;
+  ozBasis?: "lin-yd" | "sq-yd";
+  boltWidthIn?: number;
+};
+
+/**
+ * Convert a DrapeRule into the field subset computeSetWeight() consumes.
+ *
+ * `full` is set explicitly on every line rather than left to inherit the
+ * schedule default — the cyc MUST arrive at 0 and inheriting 50 would run it
+ * roughly 50% heavy.
+ */
+export function ruleToWeightLine(
+  rule: DrapeRule,
+  fabrics: GoodsFabric[]
+): {
+  fab?: string;
+  fabResolved?: Fabric;
+  w: number;
+  h: number;
+  full: number;
+  qty: number;
+  track?: string;
+  chain: string;
+} {
+  const part = fabrics.find((f) => f.sku === rule.fabricSku);
+  return {
+    // `fab` is the human-readable label only. The WEIGHT comes from
+    // fabResolved — catalog descriptions do not match FABLIB names, so a
+    // name-only lookup silently weighs zero (see task 2 step 6).
+    fab: part ? part.desc : undefined,
+    fabResolved: part ? fabricFromPart(part) || undefined : undefined,
+    w: rule.w,
+    h: rule.h,
+    full: rule.fullness,
+    qty: rule.qty,
+    track: rule.track || undefined,
+    chain: rule.chain,
+  };
 }

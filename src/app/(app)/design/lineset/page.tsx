@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { all as allCustomers } from "@/lib/stores/customers";
+import { byCategory } from "@/lib/stores/catalog";
 import { listDesigns, getDesign } from "@/lib/stores/studio-designs";
 import { DEFAULT_LINESET_INPUTS, type LinesetInputs } from "@/lib/design/lineset";
 import type { WeightDefaults, WeightLine } from "@/lib/design/steel";
@@ -96,12 +97,13 @@ export default async function LinesetBuilderPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, custs, savedLineset, savedWeights] = await Promise.all([
+  const [, sp, custs, savedLineset, savedWeights, fabricParts] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
     listDesigns({ kind: "lineset" }),
     listDesigns({ kind: "weights" }), // legacy records stay openable here
+    byCategory("Fabric"),
   ]);
   const customers = custs.map((c) => ({ id: c.id, name: c.name })).sort((a, b) => a.name.localeCompare(b.name));
   const designId = Array.isArray(sp.design) ? sp.design[0] : sp.design;
@@ -128,7 +130,7 @@ export default async function LinesetBuilderPage({
           weight, hoist checks, counterweight and beam loads calculate live on the same screen.
         </p>
       </div>
-      <LinesetBuilder initial={initial} customers={customers} saved={saved} loaded={loaded} />
+      <LinesetBuilder initial={initial} customers={customers} saved={saved} loaded={loaded} fabrics={fabricParts} />
     </div>
   );
 }

@@ -477,7 +477,7 @@ ok(wLine.goods > 0, "a catalog-only fabric (Marvel is NOT in FABLIB) still produ
 ok(computeSetWeight({ name: "t", fab: "21 oz Marvel Velour", w: 20, h: 19, full: 50, qty: 2 }, DEFAULT_WEIGHTS).goods === 0, "name-only lookup of a catalog desc weighs ZERO — the bug this join fixes");
 
 /* --- drape rule table (task 3) --- */
-import { drapeRule, TRACK_TRAVELER, DEFAULT_GEAR, shellGearLb, electricCounts, electricGearLb } from "@/lib/design/goods";
+import { drapeRule, TRACK_TRAVELER, DEFAULT_GEAR, shellGearLb, electricCounts, electricGearLb, ruleToWeightLine } from "@/lib/design/goods";
 
 const DIMS36 = { proWidthFt: 36, proHeightFt: 18, stageWidthFt: 50, stageDepthFt: 30 };
 
@@ -560,6 +560,23 @@ const baseOut = generateLineset(DEFAULT_LINESET_INPUTS);
 const wideProOut = generateLineset({ ...DEFAULT_LINESET_INPUTS, proWidthFt: 44, proHeightFt: 26 });
 ok(baseOut.schedule.length === wideProOut.schedule.length, "changing PRO dims does NOT change line placement");
 ok(baseOut.summary.activeSlotCount === wideProOut.summary.activeSlotCount, "PRO dims do not affect the 8in grid");
+
+/* --- rule -> WeightLine, override precedence (task 6) --- */
+const wlDraw = ruleToWeightLine(drapeRule("Draw", DIMS36, "better")!, [
+  { sku: "RB-MARVEL", desc: "21 oz Marvel Velour", oz: 21, ozBasis: "lin-yd" as const, boltWidthIn: 54 },
+]);
+ok(wlDraw.w === 20 && wlDraw.h === 19, "rule dimensions carry into the WeightLine unchanged");
+ok(wlDraw.full === 50, "fullness rides on the line, not the schedule default");
+ok(wlDraw.fabResolved !== undefined && wlDraw.fabResolved.oz === 21, "the SKU resolves to a weighable fabric, not just a name");
+ok(computeSetWeight({ name: "t", ...wlDraw }, DEFAULT_WEIGHTS).goods > 0, "a rule-built line actually weighs something — the end-to-end join");
+
+const merged = { ...wlDraw, h: 24 };
+ok(merged.h === 24 && merged.w === 20, "a hand-entered height overrides the rule; untouched fields keep it");
+
+const wlCyc = ruleToWeightLine(drapeRule("CYC", DIMS36, "better")!, [
+  { sku: "RB-MUS", desc: "Seamless Muslin", oz: 6, ozBasis: "sq-yd" as const, boltWidthIn: 120 },
+]);
+ok(wlCyc.full === 0, "the cyc reaches computeSetWeight at 0% fullness, not the 50% default");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

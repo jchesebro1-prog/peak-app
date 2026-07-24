@@ -27,7 +27,17 @@ import {
   type WeightLine,
   type LinesetMode,
 } from "@/lib/design/steel";
-import { DEFAULT_GEAR, type GoodsTier, type GearDefaults } from "@/lib/design/goods";
+import {
+  DEFAULT_GEAR,
+  drapeRule,
+  electricCounts,
+  electricGearLb,
+  shellGearLb,
+  ruleToWeightLine,
+  type GoodsTier,
+  type GearDefaults,
+  type GoodsFabric,
+} from "@/lib/design/goods";
 import { SaveBar, type SavedRef } from "../save-bar";
 import { downloadCsv } from "../export";
 
@@ -111,11 +121,13 @@ export function LinesetBuilder({
   customers = [],
   saved = [],
   loaded = null,
+  fabrics = [],
 }: {
   initial?: CombinedInitial;
   customers?: { id: string; name: string }[];
   saved?: SavedRef[];
   loaded?: { id: string; name: string; customerId: string | null } | null;
+  fabrics?: GoodsFabric[];
 } = {}) {
   const [inp, setInp] = useState<LinesetInputs>(initial?.inputs || DEFAULT_LINESET_INPUTS);
   const [def, setDef] = useState<WeightDefaults>(initial?.defaults || DEFAULT_WEIGHTS);
@@ -124,8 +136,8 @@ export function LinesetBuilder({
   // No editor for these yet (a later task wires controls) — carried through so
   // opening and re-saving a design round-trips its tier/gear instead of
   // silently resetting them to the defaults below.
-  const [tier] = useState<GoodsTier>(initial?.tier || "better");
-  const [gear] = useState<GearDefaults>(initial?.gear || DEFAULT_GEAR);
+  const [tier, setTier] = useState<GoodsTier>(initial?.tier || "better");
+  const [gear, setGear] = useState<GearDefaults>(initial?.gear || DEFAULT_GEAR);
   const [showGrid, setShowGrid] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -146,18 +158,44 @@ export function LinesetBuilder({
   const out = useMemo(() => generateLineset(inp), [inp]);
   const keys = useMemo(() => lineKeys(out.schedule), [out.schedule]);
 
-  /* merged rows: generated line + its load (if specified) + computed weight */
+  const dims = useMemo(
+    () => ({
+      proWidthFt: inp.proWidthFt,
+      proHeightFt: inp.proHeightFt,
+      stageWidthFt: inp.stageWidthFt,
+      stageDepthFt: inp.stageDepthFt,
+    }),
+    [inp.proWidthFt, inp.proHeightFt, inp.stageWidthFt, inp.stageDepthFt]
+  );
+
+  /* merged rows: generated line + its rule + any hand-entered override.
+     Ordering matters — the rule supplies defaults, `...load` spreads AFTER so
+     anything Jeff typed wins. */
   const rows = useMemo(
     () =>
       out.schedule.map((s, i) => {
         const key = keys[i];
         const load = loads[key];
-        const specified = !!load;
-        const line: WeightLine = { name: load?.nameOverride || s.name, ...load };
+        const rule = drapeRule(s.type, dims, tier);
+        const battenLen = load?.batten ?? def.battenlen;
+
+        let base: Partial<WeightLine> = {};
+        if (rule) {
+          base = ruleToWeightLine(rule, fabrics);
+        } else if (s.type === "Electric") {
+          const kind = s.name === "CYC Electric" ? "cyc" : "regular";
+          base = { gear: electricGearLb(electricCounts(dims, "medium", kind), battenLen, gear) };
+        } else if (s.type === "Shell") {
+          base = { gear: shellGearLb(dims, inp.shellIntervalFt, gear) };
+        }
+
+        const ruled = !!rule || s.type === "Electric" || s.type === "Shell";
+        const line: WeightLine = { name: load?.nameOverride || s.name, ...base, ...load };
+        const specified = ruled || !!load;
         const c = specified ? computeSetWeight(line, def) : null;
-        return { s, key, load, specified, line, c };
+        return { s, key, load, rule, ruled, specified, line, c };
       }),
-    [out.schedule, keys, loads, def]
+    [out.schedule, keys, loads, def, dims, tier, gear, fabrics, inp.shellIntervalFt]
   );
   const extraRows = useMemo(
     () => extras.map((x) => ({ x, c: computeSetWeight(x, def) })),
@@ -316,6 +354,8 @@ export function LinesetBuilder({
             <div><span style={label}>Width (in)</span><NumF v={inp.stageWidthIn} set={(n) => set("stageWidthIn", n)} /></div>
             <div><span style={label}>Depth (ft)</span><NumF v={inp.stageDepthFt} set={(n) => set("stageDepthFt", n)} /></div>
             <div><span style={label}>Depth (in)</span><NumF v={inp.stageDepthIn} set={(n) => set("stageDepthIn", n)} /></div>
+            <div><span style={label}>PRO width (ft)</span><NumF v={inp.proWidthFt} set={(n) => set("proWidthFt", n)} /></div>
+            <div><span style={label}>PRO height (ft)</span><NumF v={inp.proHeightFt} set={(n) => set("proHeightFt", n)} /></div>
           </div>
 
           <div style={{ fontSize: 13.5, fontWeight: 700, margin: "16px 0 8px" }}>Auto-layout</div>
