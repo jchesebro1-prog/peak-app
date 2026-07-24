@@ -274,15 +274,53 @@ export function fabricFromPart(p: {
 }
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [ ] **Step 6: Teach `computeSetWeight` to use a resolved fabric**
+
+**This step is what makes the join real.** Without it `fabricFromPart` has no caller and every drape weighs zero goods.
+
+`computeSetWeight` currently resolves fabric by display name at `steel.ts:479`:
+
+```ts
+  const f = L.fab ? fabByName(L.fab) : undefined;
+```
+
+`fabByName` searches `FABLIB`, whose names **do not match** the catalog descriptions — `FABLIB` has `Memorable Velour 25 oz`, the catalog has `25 oz Memorable Velour`; `FABLIB` has no Marvel at all. A name-only lookup silently returns `undefined`, leaving `goods = 0`.
+
+Add the resolved-fabric field to `WeightLine` (after `fab`):
+
+```ts
+  /** A fabric resolved from the parts catalog, which wins over the `fab`
+   *  name lookup. Catalog descriptions do not match FABLIB display names, so
+   *  a name-only lookup silently weighs zero — this is the join. */
+  fabResolved?: Fabric;
+```
+
+And change line 479 to prefer it:
+
+```ts
+  const f = L.fabResolved || (L.fab ? fabByName(L.fab) : undefined);
+```
+
+- [ ] **Step 7: Run test to verify it passes**
+
+Add one more assertion proving a catalog-only fabric works — Marvel exists in the catalog but **not** in `FABLIB`, so it is the sharpest possible test of the join:
+
+```ts
+const marvel = fabricFromPart({ desc: "21 oz Marvel Velour", oz: 21, ozBasis: "lin-yd", boltWidthIn: 54 })!;
+const wLine = computeSetWeight({ name: "t", fabResolved: marvel, w: 20, h: 19, full: 50, qty: 2 }, DEFAULT_WEIGHTS);
+ok(wLine.goods > 0, "a catalog-only fabric (Marvel is NOT in FABLIB) still produces goods weight");
+ok(computeSetWeight({ name: "t", fab: "21 oz Marvel Velour", w: 20, h: 19, full: 50, qty: 2 }, DEFAULT_WEIGHTS).goods === 0, "name-only lookup of a catalog desc weighs ZERO — the bug this join fixes");
+```
+
+Add `computeSetWeight` and `DEFAULT_WEIGHTS` to the `@/lib/design/steel` import.
 
 ```bash
 npm run test:specs
 ```
 
-Expected: PASS on all 3 new lines.
+Expected: PASS on all 5 new lines.
 
-- [ ] **Step 7: Reseed and confirm the muslin row lands**
+- [ ] **Step 8: Reseed and confirm the muslin row lands**
 
 ```bash
 npm run db:reset-local
@@ -290,11 +328,11 @@ npm run db:reset-local
 
 Expected: completes without error. This wipes `.data` and reseeds — safe, it is the local dev DB.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/lib/stores/catalog.ts src/db/seeds/catalog.ts src/lib/design/steel.ts scripts/test-review-and-spec.ts
-git commit -m "feat(catalog): numeric fabric weight + seamless muslin SKU"
+git commit -m "feat(catalog): numeric fabric weight, muslin SKU, catalog->weight join"
 ```
 
 ---
@@ -817,7 +855,8 @@ const wlDraw = ruleToWeightLine(drapeRule("Draw", DIMS36, "better")!, [
 ]);
 ok(wlDraw.w === 20 && wlDraw.h === 19, "rule dimensions carry into the WeightLine unchanged");
 ok(wlDraw.full === 50, "fullness rides on the line, not the schedule default");
-ok(wlDraw.fab === "21 oz Marvel Velour", "the SKU resolves to a fabric the weight math recognises");
+ok(wlDraw.fabResolved !== undefined && wlDraw.fabResolved.oz === 21, "the SKU resolves to a weighable fabric, not just a name");
+ok(computeSetWeight({ name: "t", ...wlDraw }, DEFAULT_WEIGHTS).goods > 0, "a rule-built line actually weighs something — the end-to-end join");
 
 const merged = { ...wlDraw, h: 24 };
 ok(merged.h === 24 && merged.w === 20, "a hand-entered height overrides the rule; untouched fields keep it");
@@ -862,10 +901,23 @@ export type GoodsFabric = {
 export function ruleToWeightLine(
   rule: DrapeRule,
   fabrics: GoodsFabric[]
-): { fab?: string; w: number; h: number; full: number; qty: number; track?: string; chain: string } {
+): {
+  fab?: string;
+  fabResolved?: Fabric;
+  w: number;
+  h: number;
+  full: number;
+  qty: number;
+  track?: string;
+  chain: string;
+} {
   const part = fabrics.find((f) => f.sku === rule.fabricSku);
   return {
+    // `fab` is the human-readable label only. The WEIGHT comes from
+    // fabResolved — catalog descriptions do not match FABLIB names, so a
+    // name-only lookup silently weighs zero (see task 2 step 6).
     fab: part ? part.desc : undefined,
+    fabResolved: part ? fabricFromPart(part) || undefined : undefined,
     w: rule.w,
     h: rule.h,
     full: rule.fullness,
@@ -876,7 +928,11 @@ export function ruleToWeightLine(
 }
 ```
 
-Note: `fab` is the fabric **display name**, because `computeSetWeight` looks fabric up by name via `fabByName()`. Task 2's `fabricFromPart` is what teaches that lookup the catalog weights; wiring `computeSetWeight` to prefer the catalog over `FABLIB` is out of scope for this task and is covered by the fabric-join assertions already written.
+Add to the top of `goods.ts`:
+
+```ts
+import { fabricFromPart, type Fabric } from "./steel";
+```
 
 - [ ] **Step 4: Wire the memo**
 
