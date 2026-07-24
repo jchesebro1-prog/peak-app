@@ -439,5 +439,25 @@ ok(isOpenStage("project", "install") === true && isOpenStage("project", "complet
 ok(isOpenStage("inspection", "onsite") === true, "inspection onsite counts as open work (the 4th stage)");
 ok(isOpenStage("quote", "won") === false && isOpenStage("quote", "sent") === true, "quote open = draft or sent");
 
+/* --- The Grid BOM math (D108) --- */
+import { bomLines, bomTotals, type PartLite } from "@/lib/design/grid-bom";
+
+const gridParts: PartLite[] = [
+  { id: "S4LED", sku: "S4LED", desc: "ETC Source Four LED", category: "Lighting", unit: "ea", list: 1200, cost: 800 },
+  { id: "CYC1", sku: "CYC1", desc: "Cyc fixture", category: "Lighting", unit: "ea", list: 900, cost: 600 },
+];
+const place = (partId: string) => ({ partId });
+const gLines = bomLines([place("S4LED"), place("CYC1"), place("S4LED"), place("S4LED")], gridParts);
+ok(gLines.length === 2, `BOM groups placements by part (${gLines.length} lines)`);
+ok(gLines[0].partId === "S4LED" && gLines[0].qty === 3, "biggest line first: 3× S4LED");
+ok(gLines[0].ext === 3600, `extended price = qty × list (${gLines[0].ext})`);
+const gTot = bomTotals([place("S4LED"), place("CYC1")], gridParts);
+ok(gTot.value === 2100 && gTot.cost === 1400, `totals sum value/cost (${gTot.value}/${gTot.cost})`);
+ok(Math.abs(gTot.margin - (2100 - 1400) / 2100) < 1e-9, "margin = (value-cost)/value");
+const gGhost = bomLines([place("GONE")], gridParts);
+ok(gGhost.length === 1 && gGhost[0].ext === 0 && /removed/i.test(gGhost[0].desc),
+  "a placement whose part left the catalog stays visible at $0, flagged removed");
+ok(bomTotals([], gridParts).margin === 0, "empty project has margin 0, not NaN");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

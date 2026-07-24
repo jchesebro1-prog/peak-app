@@ -57,6 +57,13 @@
       "when": 1784519759046,
       "tag": "0007_fast_jack_power",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784918493537,
+      "tag": "0008_sticky_black_panther",
+      "breakpoints": true
     }
   ]
 }

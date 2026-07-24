@@ -69,6 +69,8 @@ export const reviewSnapshots = docTable("review_snapshots"); // frozen copies of
 export const assignments = docTable("assignments"); // ad-hoc delegated tasks feeding My Queue (D93)
 export const specSections = docTable("spec_sections"); // CSI bid-spec section templates (D94)
 export const generatedSpecs = docTable("generated_specs"); // assembled bid specs per engagement (D94)
+export const gridProjects = docTable("grid_projects"); // The Grid system-design projects (D108, no prototype ancestor)
+export const gridSheets = docTable("grid_sheets"); // The Grid plan-sheet backgrounds — heavy dataUrls kept out of the placement-patched project doc (D108)
 
 export const DOC_TABLES = {
   quotes,
@@ -88,6 +90,8 @@ export const DOC_TABLES = {
   assignments,
   spec_sections: specSections,
   generated_specs: generatedSpecs,
+  grid_projects: gridProjects,
+  grid_sheets: gridSheets,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;
