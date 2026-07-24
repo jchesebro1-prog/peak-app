@@ -54,6 +54,7 @@ export default async function GridEditorPage({
         quoteId: project.quoteId,
         placements: project.placements || [],
         calibrations: project.calibrations || [],
+        spaces: project.spaces || [],
       }}
       sheets={sheets.map((s) => ({ id: s.id, name: s.name, mime: s.mime, dataUrl: s.dataUrl }))}
       parts={parts}

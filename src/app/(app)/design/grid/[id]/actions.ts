@@ -2,18 +2,22 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import type { Calibration, MeasureUnit } from "@/lib/annotations";
+import type { Calibration, MeasureUnit, Point } from "@/lib/annotations";
 import {
   addPlacement,
   addSheet,
+  addSpace,
   clearSheetCalibration,
   getProject,
   removePlacement,
+  removeSpace,
+  renameSpace,
   setQuote,
   setSheetCalibration,
 } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { bomLines, bomTotals } from "@/lib/design/grid-bom";
+import { polygonArea } from "@/lib/design/grid-geometry";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
 
 /** The Grid editor server actions (D108). */
@@ -95,6 +99,50 @@ export async function clearCalAction(
 ): Promise<Result> {
   await requireUser();
   const p = await clearSheetCalibration(projectId, sheetId, page);
+  if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/* ------------------------------ spaces (D109) ------------------------------ */
+
+export async function addSpaceAction(
+  projectId: string,
+  input: { sheetId: string; page: number; name: string; points: Point[] }
+): Promise<Result> {
+  const user = await requireUser();
+  if (!input.name.trim()) return { ok: false, error: "Name the space." };
+  if ((input.points || []).length < 3)
+    return { ok: false, error: "A space needs at least three corners." };
+  // Degenerate polygons (all corners coincident/collinear) contain nothing
+  // and would sit invisibly in the list forever — refuse them outright.
+  if (polygonArea(input.points) < 1e-6)
+    return { ok: false, error: "That outline has no area — draw the room's corners again." };
+  const p = await addSpace(projectId, { ...input, by: user.name });
+  if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+export async function renameSpaceAction(
+  projectId: string,
+  spaceId: string,
+  name: string
+): Promise<Result> {
+  await requireUser();
+  if (!name.trim()) return { ok: false, error: "Name the space." };
+  const p = await renameSpace(projectId, spaceId, name);
+  if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+export async function removeSpaceAction(
+  projectId: string,
+  spaceId: string
+): Promise<Result> {
+  await requireUser();
+  const p = await removeSpace(projectId, spaceId);
   if (!p) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
   return { ok: true };

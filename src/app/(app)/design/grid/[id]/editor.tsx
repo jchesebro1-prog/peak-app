@@ -13,16 +13,19 @@ import {
   type MeasureUnit,
   type Point,
 } from "@/lib/annotations";
-import { bomLines, bomTotals, type PartLite } from "@/lib/design/grid-bom";
-import type { GridPlacement } from "@/lib/stores/grid-projects";
+import { bomBySpace, bomLines, bomTotals, type PartLite } from "@/lib/design/grid-bom";
+import { polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
+import type { GridPlacement, GridSpace } from "@/lib/stores/grid-projects";
 import {
   addSheetAction,
+  addSpaceAction,
   calibrateAction,
   clearCalAction,
   createDraftQuoteAction,
   placeDeviceAction,
   removePlacementAction,
 } from "./actions";
+import SpacesPanel from "./spaces-panel";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -94,9 +97,13 @@ export type ProjectLite = {
   quoteId: string | null;
   placements: GridPlacement[];
   calibrations: Calibration[];
+  spaces: GridSpace[];
 };
 
-type Pending = { kind: "calibrate"; a: Point; b: Point } | null;
+type Pending =
+  | { kind: "calibrate"; a: Point; b: Point }
+  | { kind: "space"; points: Point[] }
+  | null;
 
 export default function GridEditor({
   project,
@@ -130,6 +137,12 @@ export default function GridEditor({
   const [entry, setEntry] = useState("");
   const [calUnit, setCalUnit] = useState<MeasureUnit>("ft");
 
+  // Space drawing (D109): vertices accumulate on click; closing the loop
+  // (click near the first corner) opens the inline name entry.
+  const [spaceDrawing, setSpaceDrawing] = useState(false);
+  const [spaceDraft, setSpaceDraft] = useState<Point[]>([]);
+  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
+
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const onLoaded = useCallback((n: number) => setPages(n), []);
@@ -156,18 +169,27 @@ export default function GridEditor({
     () => project.placements.filter((pl) => pl.sheetId === sheet?.id && pl.page === page),
     [project.placements, sheet?.id, page]
   );
+  const pageSpaces = useMemo(
+    () => (project.spaces || []).filter((s) => s.sheetId === sheet?.id && s.page === page),
+    [project.spaces, sheet?.id, page]
+  );
 
   const lines = useMemo(() => bomLines(project.placements, parts), [project.placements, parts]);
   const totals = useMemo(() => bomTotals(project.placements, parts), [project.placements, parts]);
+  const spaceRollups = useMemo(
+    () => bomBySpace(project.placements, parts, project.spaces || []),
+    [project.placements, parts, project.spaces]
+  );
 
   const armedPart = armedPartId ? partById.get(armedPartId) : null;
   const selectedPlacement = project.placements.find((pl) => pl.id === selected) || null;
 
-  function toNorm(e: React.PointerEvent): Point {
+  /** Null when the wrapper has no measurable size (sheet still loading, or
+   *  the window is hidden): fabricating (0,0) instead would drop devices and
+   *  space corners at the top-left, so callers must bail on null. */
+  function toNorm(e: React.PointerEvent): Point | null {
     const r = wrapRef.current?.getBoundingClientRect();
-    // A zero-size rect (sheet still loading) would turn the division into
-    // NaN and poison every downstream computation with no visible error.
-    if (!r || r.width < 1 || r.height < 1) return { x: 0, y: 0 };
+    if (!r || r.width < 1 || r.height < 1) return null;
     return {
       x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
       y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
@@ -201,9 +223,28 @@ export default function GridEditor({
   function onDown(e: React.PointerEvent) {
     if (busy || pending || !sheet) return;
     const p = toNorm(e);
+    if (!p) return;
 
     if (calibrating) {
       setCalDraft([p, p]);
+      return;
+    }
+
+    if (spaceDrawing) {
+      // Clicking back on the first corner (with ≥3 laid down) closes the loop.
+      const first = spaceDraft[0];
+      const closes =
+        first &&
+        spaceDraft.length >= 3 &&
+        Math.abs(first.x - p.x) < 0.015 &&
+        Math.abs(first.y - p.y) < 0.015 / (aspect || 1);
+      if (closes) {
+        setSpaceDrawing(false);
+        setEntry("");
+        setPending({ kind: "space", points: spaceDraft });
+        return;
+      }
+      setSpaceDraft((prev) => [...prev, p]);
       return;
     }
 
@@ -215,6 +256,7 @@ export default function GridEditor({
       .find((pl) => Math.abs(pl.x - p.x) < 0.012 && Math.abs(pl.y - p.y) < 0.012 / (aspect || 1));
     if (hit) {
       setSelected(hit.id === selected ? null : hit.id);
+      setSelectedSpaceId(null);
       return;
     }
     setSelected(null);
@@ -233,12 +275,18 @@ export default function GridEditor({
         if (!r.ok) setErr(r.error);
         else router.refresh();
       });
+      return;
     }
+
+    // Nothing armed: clicking inside a room selects it (smallest wins).
+    const room = spaceOf({ sheetId: sheet.id, page, x: p.x, y: p.y }, pageSpaces);
+    setSelectedSpaceId(room ? room.id : null);
   }
 
   function onMove(e: React.PointerEvent) {
     if (!calDraft) return;
     const p = toNorm(e);
+    if (!p) return;
     setCalDraft((prev) => (prev ? [prev[0], p] : prev));
   }
 
@@ -252,8 +300,30 @@ export default function GridEditor({
     setPending({ kind: "calibrate", a, b });
   }
 
+  async function confirmSpace() {
+    if (!pending || pending.kind !== "space" || !sheet) return;
+    const name = entry.trim();
+    if (!name) {
+      setErr("Name the space — 'Stage', 'House', 'Booth'…");
+      return;
+    }
+    setBusy(true);
+    const r = await addSpaceAction(project.id, {
+      sheetId: sheet.id,
+      page,
+      name,
+      points: pending.points,
+    });
+    setBusy(false);
+    setPending(null);
+    setSpaceDraft([]);
+    setEntry("");
+    if (!r.ok) setErr(r.error);
+    else router.refresh();
+  }
+
   async function confirmCalibration() {
-    if (!pending || !sheet) return;
+    if (!pending || pending.kind !== "calibrate" || !sheet) return;
     const real = Number(entry);
     const scale = calibrationScale(pending.a, pending.b, aspect, real);
     if (!scale) {
@@ -296,6 +366,9 @@ export default function GridEditor({
               setPage(1);
               setSelected(null);
               setPending(null);
+              setSpaceDrawing(false);
+              setSpaceDraft([]);
+              setSelectedSpaceId(null);
             }}
             style={{ ...BTN, fontWeight: 500 }}
           >
@@ -328,9 +401,9 @@ export default function GridEditor({
         <button style={BTN} onClick={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))}>+</button>
         {isPdf && pages > 1 && (
           <>
-            <button style={BTN} disabled={page <= 1} onClick={() => { setPage((p) => p - 1); setSelected(null); }}>‹</button>
+            <button style={BTN} disabled={page <= 1} onClick={() => { setPage((p) => p - 1); setSelected(null); setSelectedSpaceId(null); setSpaceDrawing(false); setSpaceDraft([]); }}>‹</button>
             <span style={{ fontSize: 12, color: "#5b616e" }}>{page} / {pages}</span>
-            <button style={BTN} disabled={page >= pages} onClick={() => { setPage((p) => p + 1); setSelected(null); }}>›</button>
+            <button style={BTN} disabled={page >= pages} onClick={() => { setPage((p) => p + 1); setSelected(null); setSelectedSpaceId(null); setSpaceDrawing(false); setSpaceDraft([]); }}>›</button>
           </>
         )}
       </div>
@@ -384,7 +457,13 @@ export default function GridEditor({
                 return (
                   <button
                     key={p.id}
-                    onClick={() => { setArmedPartId(on ? null : p.id); setSelected(null); }}
+                    onClick={() => {
+                      setArmedPartId(on ? null : p.id);
+                      setSelected(null);
+                      setSpaceDrawing(false);
+                      setSpaceDraft([]);
+                      setSelectedSpaceId(null);
+                    }}
                     title={p.desc}
                     style={{
                       ...BTN,
@@ -441,7 +520,7 @@ export default function GridEditor({
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
                   <button
                     style={{ ...BTN, padding: "4px 8px", fontSize: 11 }}
-                    onClick={() => { setCalibrating(true); setArmedPartId(null); setSelected(null); }}
+                    onClick={() => { setCalibrating(true); setArmedPartId(null); setSelected(null); setSpaceDrawing(false); setSpaceDraft([]); }}
                   >
                     Recalibrate
                   </button>
@@ -464,13 +543,42 @@ export default function GridEditor({
                 </div>
                 <button
                   style={{ ...BTN, width: "100%", background: calibrating ? "#16181d" : "#fff", color: calibrating ? "#fff" : "#3d424e", borderColor: calibrating ? "#16181d" : "#dfe2e8" }}
-                  onClick={() => { setCalibrating(true); setArmedPartId(null); setSelected(null); }}
+                  onClick={() => { setCalibrating(true); setArmedPartId(null); setSelected(null); setSpaceDrawing(false); setSpaceDraft([]); }}
                 >
                   {calibrating ? "Draw the reference…" : "Calibrate this page"}
                 </button>
               </>
             )}
           </div>
+
+          {/* spaces (D109) */}
+          <SpacesPanel
+            projectId={project.id}
+            pageSpaces={pageSpaces}
+            rollups={spaceRollups}
+            drawing={spaceDrawing}
+            selectedSpaceId={selectedSpaceId}
+            busy={busy}
+            onStartDraw={() => {
+              setSpaceDrawing(true);
+              setSpaceDraft([]);
+              setArmedPartId(null);
+              setCalibrating(false);
+              setSelected(null);
+              setSelectedSpaceId(null);
+              setPending(null);
+            }}
+            onCancelDraw={() => {
+              setSpaceDrawing(false);
+              setSpaceDraft([]);
+            }}
+            onSelect={(id) => {
+              setSelectedSpaceId(id);
+              setSelected(null);
+            }}
+            onChanged={() => router.refresh()}
+            onError={(m) => setErr(m)}
+          />
 
           {/* selected placement */}
           {selectedPlacement && (
@@ -580,7 +688,7 @@ export default function GridEditor({
               style={{
                 position: "relative",
                 lineHeight: 0,
-                cursor: pending ? "default" : calibrating || armedPart ? "crosshair" : "default",
+                cursor: pending ? "default" : calibrating || armedPart || spaceDrawing ? "crosshair" : "default",
                 touchAction: "none",
                 background: "#fff",
                 boxShadow: "0 2px 14px rgba(0,0,0,.28)",
@@ -624,6 +732,81 @@ export default function GridEditor({
                 viewBox={`0 0 ${size.w} ${size.h}`}
                 style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
               >
+                {/* spaces render UNDER the device markers */}
+                {pageSpaces.map((s) => {
+                  const pts = s.points.map((p) => `${p.x * size.w},${p.y * size.h}`).join(" ");
+                  const c = polygonCentroid(s.points);
+                  const on = s.id === selectedSpaceId;
+                  return (
+                    <g key={s.id}>
+                      <polygon
+                        points={pts}
+                        fill={s.color}
+                        opacity={on ? 0.22 : 0.13}
+                        stroke={s.color}
+                        strokeWidth={on ? 2.5 : 1.5}
+                        strokeOpacity={0.55}
+                        strokeDasharray={on ? "6 4" : undefined}
+                      />
+                      <g>
+                        <rect
+                          x={c.x * size.w - s.name.length * 3.6 - 6}
+                          y={c.y * size.h - 9}
+                          width={s.name.length * 7.2 + 12}
+                          height={18}
+                          rx={5}
+                          fill="#fff"
+                          stroke={s.color}
+                          strokeWidth={1}
+                          opacity={0.92}
+                        />
+                        <text
+                          x={c.x * size.w}
+                          y={c.y * size.h + 4}
+                          fill={s.color}
+                          fontSize={11}
+                          fontWeight={700}
+                          textAnchor="middle"
+                          style={{ fontFamily: "inherit" }}
+                        >
+                          {s.name}
+                        </text>
+                      </g>
+                    </g>
+                  );
+                })}
+                {/* space being drawn: open polyline + corner dots */}
+                {spaceDraft.length > 0 && (
+                  <g>
+                    <polyline
+                      points={spaceDraft.map((p) => `${p.x * size.w},${p.y * size.h}`).join(" ")}
+                      fill="none"
+                      stroke="#8a6d3b"
+                      strokeWidth={2}
+                      strokeDasharray="5 4"
+                    />
+                    {spaceDraft.map((p, i) => (
+                      <circle
+                        key={i}
+                        cx={p.x * size.w}
+                        cy={p.y * size.h}
+                        r={i === 0 ? 7 : 4}
+                        fill={i === 0 ? "#fff" : "#8a6d3b"}
+                        stroke="#8a6d3b"
+                        strokeWidth={2}
+                      />
+                    ))}
+                  </g>
+                )}
+                {pending?.kind === "space" && (
+                  <polygon
+                    points={pending.points.map((p) => `${p.x * size.w},${p.y * size.h}`).join(" ")}
+                    fill="#8a6d3b"
+                    opacity={0.15}
+                    stroke="#8a6d3b"
+                    strokeWidth={2}
+                  />
+                )}
                 {sheetPlacements.map((pl) => {
                   const part = partById.get(pl.partId);
                   const c = markerColor(part?.category || "");
@@ -657,53 +840,73 @@ export default function GridEditor({
                 )}
               </svg>
 
-              {/* inline calibration entry — window.prompt is unavailable here */}
-              {pending && (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: `${pending.b.x * 100}%`,
-                    top: `${pending.b.y * 100}%`,
-                    transform: "translate(6px, 6px)",
-                    background: "#fff",
-                    border: "1px solid #c4c9d2",
-                    borderRadius: 9,
-                    padding: 10,
-                    boxShadow: "0 6px 20px rgba(0,0,0,.22)",
-                    width: 232,
-                    lineHeight: 1.4,
-                    zIndex: 5,
-                  }}
-                  onPointerDown={(e) => e.stopPropagation()}
-                >
-                  <div style={{ ...PANEL_LABEL, marginBottom: 6 }}>Reference length</div>
-                  <div style={{ display: "flex", gap: 5 }}>
-                    <input
-                      value={entry}
-                      onChange={(e) => setEntry(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") confirmCalibration();
-                        if (e.key === "Escape") setPending(null);
-                      }}
-                      placeholder="e.g. 40"
-                      inputMode="decimal"
-                      style={INPUT}
-                      autoFocus
-                    />
-                    <select value={calUnit} onChange={(e) => setCalUnit(e.target.value as MeasureUnit)} style={{ ...INPUT, width: 66 }}>
-                      {MEASURE_UNITS.map((u) => (
-                        <option key={u} value={u}>{u}</option>
-                      ))}
-                    </select>
+              {/* inline entry — window.prompt is unavailable here */}
+              {pending && (() => {
+                const anchor =
+                  pending.kind === "calibrate" ? pending.b : pending.points[pending.points.length - 1];
+                const cancel = () => {
+                  setPending(null);
+                  setEntry("");
+                  setSpaceDraft([]);
+                };
+                return (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: `${anchor.x * 100}%`,
+                      top: `${anchor.y * 100}%`,
+                      transform: "translate(6px, 6px)",
+                      background: "#fff",
+                      border: "1px solid #c4c9d2",
+                      borderRadius: 9,
+                      padding: 10,
+                      boxShadow: "0 6px 20px rgba(0,0,0,.22)",
+                      width: 232,
+                      lineHeight: 1.4,
+                      zIndex: 5,
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ ...PANEL_LABEL, marginBottom: 6 }}>
+                      {pending.kind === "calibrate" ? "Reference length" : "Name this space"}
+                    </div>
+                    <div style={{ display: "flex", gap: 5 }}>
+                      <input
+                        value={entry}
+                        onChange={(e) => setEntry(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            if (pending.kind === "calibrate") confirmCalibration();
+                            else confirmSpace();
+                          }
+                          if (e.key === "Escape") cancel();
+                        }}
+                        placeholder={pending.kind === "calibrate" ? "e.g. 40" : "Stage, House, Booth…"}
+                        inputMode={pending.kind === "calibrate" ? "decimal" : "text"}
+                        style={INPUT}
+                        autoFocus
+                      />
+                      {pending.kind === "calibrate" && (
+                        <select value={calUnit} onChange={(e) => setCalUnit(e.target.value as MeasureUnit)} style={{ ...INPUT, width: 66 }}>
+                          {MEASURE_UNITS.map((u) => (
+                            <option key={u} value={u}>{u}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                      <button
+                        style={{ ...BTN, flex: 1 }}
+                        disabled={busy}
+                        onClick={pending.kind === "calibrate" ? confirmCalibration : confirmSpace}
+                      >
+                        {pending.kind === "calibrate" ? "Set scale" : "Create space"}
+                      </button>
+                      <button style={BTN} onClick={cancel}>Cancel</button>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                    <button style={{ ...BTN, flex: 1 }} disabled={busy} onClick={confirmCalibration}>
-                      Set scale
-                    </button>
-                    <button style={BTN} onClick={() => { setPending(null); setEntry(""); }}>Cancel</button>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
           )}
         </div>
@@ -711,7 +914,8 @@ export default function GridEditor({
 
       <div style={{ fontSize: 11.5, color: "#8c919c" }}>
         Arm a device and click the plan to place each unit · click a marker to select it ·
-        the BOM prices every sheet in this design, not just the visible page.
+        click inside a space to select the room · the BOM prices every sheet in this
+        design, not just the visible page.
       </div>
     </div>
   );
