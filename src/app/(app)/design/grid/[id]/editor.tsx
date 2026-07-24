@@ -40,7 +40,7 @@ const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr:
  */
 
 const BTN: React.CSSProperties = {
-  border: "1px solid #dfe2e8",
+  borderWidth: 1, borderStyle: "solid", borderColor: "#dfe2e8",
   background: "#fff",
   borderRadius: 7,
   padding: "5px 10px",
@@ -52,7 +52,7 @@ const BTN: React.CSSProperties = {
 };
 
 const INPUT: React.CSSProperties = {
-  border: "1px solid #dfe2e8",
+  borderWidth: 1, borderStyle: "solid", borderColor: "#dfe2e8",
   borderRadius: 7,
   padding: "5px 8px",
   fontSize: 12,

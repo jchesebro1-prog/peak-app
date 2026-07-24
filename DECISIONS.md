@@ -1594,3 +1594,45 @@ symbol metadata (markers show the SKU chip), venue/site link on the project,
 pricing-tier stamping on the minted quote, and blob storage for attachments
 (grid_sheets-as-docs is the interim; real blob storage is still the Phase-0
 item for backgrounds at production scale).
+
+## D109 — The Grid Phase 2: Spaces + project revisions (2026-07-24)
+
+Jeff: "move forward with the next phase of the grid." Phase 2 per the
+roadmap (memory: projects/peak-system-designer.md): **Spaces** — room
+polygons with per-space BOM rollups — and **project revisions**.
+
+**Spaces.**
+- Polygons (normalized 0..1, per sheet+page like calibrations) stored on the
+  project doc. No new collections, no migration — pre-D109 docs read
+  `spaces || []`.
+- **Assignment is computed, never stored:** a device belongs to the smallest
+  space polygon containing it (`lib/design/grid-geometry.spaceOf`, ray
+  casting + shoelace, covered in test:specs). Redrawing a room reassigns
+  every device instantly; deleting one can't strand stale ids; nesting works
+  (a booth inside the house claims its own devices). The alternative —
+  stamping a spaceId on each placement — would have needed reconciliation on
+  every polygon edit.
+- Editor: corner-click drawing that closes on the first corner, inline name
+  entry, translucent fills under the markers, centroid label chips,
+  smallest-wins click-select, rename/two-step delete in the panel. Rollups
+  (count · value) per space, plus Unassigned; the geometry and pricing run
+  through the same dependency-free libs on client and server.
+- addSpaceAction refuses <3 corners and zero-area polygons.
+
+**Revisions.** The QuoteRevision idiom, applied to the design: append-only
+`revisions[]` snapshots (name, sheetIds, placements, calibrations, spaces),
+reasons `manual | quote | restore`. Quoting auto-cuts one ("Quoted as
+Q-####") so what-was-quoted is always recoverable. Restore is
+non-destructive: auto-save current → apply target → record the recall.
+**sheetIds are snapshotted but never applied on restore** — sheets are
+write-once uploads, and restoring an old layout must not orphan a
+since-added sheet.
+
+**Input hardening found while verifying:** pointer events are now ignored
+outright when the canvas rect is unmeasurable (a hidden window/mid-load
+click previously normalized to (0,0) — it dropped a device or space corner
+at the top-left of the sheet).
+
+**Verified live** on GRD-5002: Stage 3 · $2,250 / House 2 · $220 rollups,
+delete/redraw, manual save → device removal → restore v1 (auto-save + recall
+entries) → quote update cutting v4. test:specs 15 new assertions; build green.

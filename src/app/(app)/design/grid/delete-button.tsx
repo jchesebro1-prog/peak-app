@@ -10,7 +10,7 @@ export default function DeleteProjectButton({ id }: { id: string }) {
   const [arm, setArm] = useState(false);
   const [busy, setBusy] = useState(false);
   const base: React.CSSProperties = {
-    border: "1px solid #dfe2e8",
+    borderWidth: 1, borderStyle: "solid", borderColor: "#dfe2e8",
     background: "#fff",
     borderRadius: 7,
     padding: "3px 9px",
