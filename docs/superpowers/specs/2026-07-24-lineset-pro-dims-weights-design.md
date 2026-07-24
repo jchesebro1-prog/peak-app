@@ -28,8 +28,13 @@ Nothing joins the two. This spec builds that join.
 
 ## Decisions (locked)
 
-1. **Self-contained, not an import.** The lineset builder computes from its own
-   dimension inputs. It does **not** read a saved design record. (Jeff, Q1.)
+1. **Self-contained *behaviour*, shared *storage*.** The lineset builder computes
+   from its own dimension inputs and does **not** read a saved design record in
+   this release (Jeff, Q1). But it must persist those dimensions in a shape the
+   estimator can consume and vice versa — Jeff, 2026-07-24: *"the lineset builder
+   and the design estimator really need to be very similar so we should store and
+   be ready so both can work off of each other as needed."* No import UI now; no
+   migration needed later. See §3.1.
 2. **Fixture weight is a per-type pound figure** — an editable default per
    fixture category times the quantity, not a per-model lookup. (Jeff, Q2.)
 3. **The cyc gets a real rule**, defined here rather than left manual. *(Partially
@@ -180,6 +185,56 @@ One table, and it is deliberately shaped so the pricing rebuild consumes the sam
 finished dimensions rather than re-deriving them. That is the whole point of
 putting it in `lib` rather than inside the lineset screen.
 
+### 3.1 Shared storage — built now, wired later
+
+Per decision 1, the two tools must end up able to feed each other. Nothing about
+that is built in this release, but the **stored shape** is settled now so it never
+needs migrating.
+
+**The blocker is a naming collision, and it is a real trap.** Both tools have a
+field called *width* and they mean different things:
+
+| | Field | Means |
+|---|---|---|
+| Estimator | `AState.width` | **Proscenium** opening width (`DIMSCHEMA.proscenium` labels it "Proscenium width, opening edge to edge") |
+| Lineset builder | `LinesetInputs.stageWidthFt` | **Stage** width, wall to wall |
+
+Feeding one into the other today would silently size drapes off the wrong number.
+Adding `proWidthFt` to `LinesetInputs` (§2) means the builder will hold *both*,
+which is what makes a clean join possible.
+
+**Change:** define one canonical dimension block in `src/lib/design/venue-dims.ts`
+and have both tools store it:
+
+```ts
+export type VenueDims = {
+  proWidthFt: number;    // proscenium opening, edge to edge
+  proHeightFt: number;   // proscenium opening, floor to header
+  stageWidthFt: number;  // wall to wall
+  stageDepthFt: number;  // plaster line to back wall
+  gridHeightFt?: number; // floor to grid steel — estimator only today
+};
+```
+
+Both stores carry it: `designs` (estimator records) and `studio_designs` (lineset
+saves). Names are unambiguous by construction — there is no bare `width`.
+
+Once both persist `VenueDims`, each direction becomes a small, additive feature:
+
+- **Lineset ← estimator**: pull PW/PH plus the drape selections, tier and fixture
+  counts to seed a schedule from a design that was already quoted.
+- **Estimator ← lineset**: pull the *real* line count. The estimator currently
+  guesses quantities from 10-ft depth blocks (`dBlk`); an actual 8″-grid layout is
+  ground truth and strictly better input.
+
+That second direction is the more valuable one and is easy to miss, since the
+obvious framing is estimator-feeds-lineset.
+
+**Reconciling counts.** When the two are wired together, the **lineset builder's
+line count always wins for weight** — it is the physical hang. The estimator
+contributes the per-line recipe (fabric, finished dimensions, fullness), never the
+count.
+
 ### Applying a rule to a line
 
 In `lineset-builder.tsx`, the merged-row `useMemo` currently produces
@@ -226,7 +281,7 @@ editable on the schedule-defaults panel alongside the existing `WeightDefaults`:
 | Cyc | 14 | ColorSource CYC ≈ 12 lb, Altman Spectra ≈ 13 lb |
 | Side light | 18 | Same basis as Front |
 | Automated | 45 | Rogue R2 ≈ 48 lb, MAC Aura XB ≈ 17 lb — wide spread, see risk below |
-| Cable / raceway | 1.5 lb per ft of batten | Multicable plus raceway allowance |
+| Distribution | 1.5 lb per ft of batten | **One combined allowance** covering cable, raceway and anything else on the pipe (Jeff: *"a single distribution line that handles cable raceway and other weight, and that weight is fine for now"*) |
 
 **These numbers need Jeff's sign-off.** They are drawn from published fixture
 weights, not from Peak practice. The `Automated` figure is the weakest: movers
@@ -234,12 +289,26 @@ range from ~17 lb to ~50 lb and 45 lb is deliberately conservative.
 
 ### Shell lines
 
-**Only the ceiling flies.** Acoustic shell *towers* are floor-supported and put no
-load on a batten; a Shell line in the lineset carries ceiling units only. Loading
-tower weight onto a Shell line would materially overstate that line and is the
-kind of error that propagates into a capacity check.
+**Only the ceiling flies — confirmed by Jeff.** Acoustic shell *towers* are
+floor-supported and put no load on a batten. A Shell line carries ceiling units
+only. Loading tower weight onto a Shell line would materially overstate it, and
+that is the kind of error that propagates into a capacity check.
 
-This needs confirming — see §7.
+**Shell ceiling weight is area-based, not per-unit.** Jeff recalls a figure of
+**≈ 2 lb per ft² of shell** from prior research he described as *"really good
+information"*:
+
+```
+shellCeilingLb = shellPsf × (PW × shellIntervalFt)
+```
+
+`shellIntervalFt` already exists in `LinesetInputs` (default 12 ft), so the area
+each Shell line carries is the pro width times the shell spacing. On a 36 ft pro
+at 12 ft spacing that is 432 ft², or **864 lb** at 2 lb/ft² — heavy, and heavy
+enough that getting the constant right matters.
+
+`shellPsf` ships as an editable default of **2.0**, alongside the fixture
+weights. **The source is not yet recovered** — see §7.1.
 
 ## 5. The fabric join
 
@@ -280,21 +349,47 @@ muslin uses.
   **rule** lands here in `goods.ts` and serves the weight path immediately; the
   estimator's cyc option rides along with the pricing rebuild that will set its
   price. This avoids authoring a rate that gets discarded weeks later.
-- **No import from saved design records** (decision 1).
+- **No import UI in either direction** (decision 1). The *storage* both directions
+  need is built here (§3.1) — the wiring is not. Deliberate: the shared
+  `VenueDims` shape is cheap now and expensive to retrofit, whereas the import
+  flows are additive and can wait until it is clear which direction gets used.
 - **No per-model fixture weights** (decision 2).
 
 ## 7. Open questions
 
-1. **Fixture pound figures (§4)** — need Jeff's sign-off, particularly
-   `Automated` at 45 lb.
-2. **Shell towers excluded from batten load** — asserted in §4 on the grounds that
-   towers are floor-supported. Needs confirming, along with a per-ceiling-unit
-   weight, which no source in the app provides.
-3. **Cable/raceway at 1.5 lb/ft** — a guess. A real raceway is heavier than loose
-   multicable, and Peak's practice may differ by venue.
+**Resolved 2026-07-24 (Jeff):** fixture pounds approved as listed, including
+`Automated` at 45 lb. Shell towers confirmed floor-supported and excluded from
+batten load. Distribution stays a single combined 1.5 lb/ft allowance.
 
-None block starting; all three are editable defaults, so wrong values are cheap
-to correct once real weights come back.
+### 7.1 The shell psf source is not recovered — the one real open item
+
+Jeff recalls **≈ 2 lb per ft² of shell** from prior research he described as
+*"really good information."* That source has not been found. Searched, all
+negative:
+
+- `memory/` tree — no shell weight in any note, session or knowledge record
+- `Peak-Design-Doctrine-v1.0.docx` — **zero** occurrences of "shell"
+- `peak-steel-calculator-sources-2026-07.md` — has drape-weight math and fabric
+  citations, nothing on shells
+- `tools/Peak-Steel-Calculator.html` — no shell data
+- The app: `fixture-crossref.json`, `FIXTURES`, `catalog_parts` — price only
+- All **308** local Claude Code transcripts — no hit for "acoustic shell",
+  "acoustical shell" or "shell ceiling"
+
+The claude-mem index, which is the one store that might cover desktop/Cowork
+sessions, was returning `fetch failed` throughout and could not be queried.
+
+**Likely homes:** a Cowork or claude.ai chat rather than Claude Code, or a Wenger
+/ StageRight cut sheet.
+
+**Plausibility check, not a substitute for the source:** 2 lb/ft² is light for a
+rigid panel — ¾″ MDF alone runs ~3.5 lb/ft² — which is consistent with a
+purpose-built lightweight flying shell ceiling but *not* with a solid-panel
+assembly. Worth confirming before anyone rigs to it, because §4 shows the figure
+producing **864 lb** on a single Shell line at a 36 ft pro.
+
+`shellPsf` ships editable at 2.0. This does not block implementation, but it is
+the number in this spec least entitled to trust.
 
 ## 8. Follow-on: recreate the curtain pricing structure
 
@@ -328,6 +423,10 @@ derive from one geometry.
   intact and its totals unchanged from before this feature.
 - **Fabric join**: `computeSetWeight` resolves a catalog SKU to the same weight
   the equivalent `FABLIB` entry produces, where both exist.
+- **`VenueDims` round-trip**: a lineset save and an estimator design both persist
+  the block and read it back identically. Specifically assert that `proWidthFt`
+  and `stageWidthFt` stay distinct through a save/load cycle — that collision
+  (§3.1) is the failure this shape exists to prevent.
 - **End-to-end**: a known venue seeded with PRO dimensions produces a schedule
   whose per-line and total weights are hand-checkable, with the grand drape
   reconciled by hand once against the §1 geometry.
