@@ -6,7 +6,7 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
-import type { Calibration } from "@/lib/annotations";
+import type { Calibration, Point } from "@/lib/annotations";
 
 /**
  * The Grid (D108) — system-design projects: plan sheets, painted catalog
@@ -43,6 +43,44 @@ export type GridPlacement = {
   at: number;
 };
 
+/**
+ * A room polygon on one page of one sheet (Phase 2, D109). Which devices
+ * belong to it is COMPUTED (grid-geometry.spaceOf, smallest-wins), never
+ * stored — redrawing a space reassigns instantly and deletion can't strand
+ * stale ids on placements.
+ */
+export type GridSpace = {
+  id: string; // 'sp-' + random
+  sheetId: string;
+  page: number;
+  name: string;
+  color: string;
+  /** Normalized 0..1 polygon vertices, ≥3. */
+  points: Point[];
+  by: string;
+  at: number;
+};
+
+/**
+ * Append-only snapshot of the design's mutable state (Phase 2, D109) —
+ * the QuoteRevision idiom. Sheets are referenced, not copied: sheet docs
+ * are immutable once uploaded, and restore deliberately does NOT touch
+ * sheetIds so recalling an old layout can never orphan a since-added sheet.
+ */
+export type GridRevision = {
+  rev: number; // 1-based
+  at: number;
+  by: string;
+  /** manual save · auto-cut when a quote is minted/updated · restore bookkeeping. */
+  reason: "manual" | "quote" | "restore";
+  note: string;
+  name: string;
+  sheetIds: string[];
+  placements: GridPlacement[];
+  calibrations: Calibration[];
+  spaces: GridSpace[];
+};
+
 export type GridProject = {
   id: string; // GRD-#### from base 5001
   name: string;
@@ -52,6 +90,10 @@ export type GridProject = {
   sheetIds: string[];
   placements: GridPlacement[];
   calibrations: Calibration[];
+  /** Room polygons (Phase 2) — absent on pre-D109 docs, read as []. */
+  spaces?: GridSpace[];
+  /** Append-only snapshots (Phase 2) — absent on pre-D109 docs. */
+  revisions?: GridRevision[];
   /** Draft quote minted from this design, when one exists. */
   quoteId: string | null;
   createdBy: string;
@@ -101,6 +143,7 @@ export async function createProject(input: {
     sheetIds: [],
     placements: [],
     calibrations: [],
+    spaces: [],
     quoteId: null,
     createdBy: input.by,
     createdAt: t,
@@ -219,4 +262,133 @@ export async function removeProject(id: string): Promise<void> {
   const sheets = await listSheets(id);
   for (const s of sheets) await softDeleteDoc("grid_sheets", s.id);
   await softDeleteDoc("grid_projects", id);
+}
+
+/* ------------------------------ spaces ------------------------------ */
+
+/** Space fills — deliberately NOT the marker palette so a space never
+ *  camouflages the devices inside it. */
+export const SPACE_COLORS = ["#8a6d3b", "#3b7a8a", "#7a3b8a", "#5f8a3b", "#8a3b55", "#3b508a"];
+
+export async function addSpace(
+  projectId: string,
+  input: { sheetId: string; page: number; name: string; points: Point[]; by: string }
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const spaces = p.spaces || [];
+    p.spaces = [
+      ...spaces,
+      {
+        id: rid("sp-"),
+        sheetId: input.sheetId,
+        page: input.page,
+        name: input.name.trim() || "Unnamed space",
+        color: SPACE_COLORS[spaces.length % SPACE_COLORS.length],
+        points: input.points,
+        by: input.by,
+        at: Date.now(),
+      },
+    ];
+    p.updatedAt = Date.now();
+  });
+}
+
+export async function renameSpace(
+  projectId: string,
+  spaceId: string,
+  name: string
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.spaces = (p.spaces || []).map((s) =>
+      s.id === spaceId ? { ...s, name: name.trim() || s.name } : s
+    );
+    p.updatedAt = Date.now();
+  });
+}
+
+export async function removeSpace(
+  projectId: string,
+  spaceId: string
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.spaces = (p.spaces || []).filter((s) => s.id !== spaceId);
+    p.updatedAt = Date.now();
+  });
+}
+
+/* ----------------------------- revisions ----------------------------- */
+
+/** Snapshot of the doc's mutable state as it stands. Pure. */
+function snapshotOf(
+  p: GridProject,
+  rev: number,
+  by: string,
+  reason: GridRevision["reason"],
+  note: string
+): GridRevision {
+  return {
+    rev,
+    at: Date.now(),
+    by,
+    reason,
+    note,
+    name: p.name,
+    sheetIds: [...(p.sheetIds || [])],
+    placements: [...(p.placements || [])],
+    calibrations: [...(p.calibrations || [])],
+    spaces: [...(p.spaces || [])],
+  };
+}
+
+/** Append a snapshot inside an existing patch callback. */
+function pushRevision(
+  p: GridProject,
+  by: string,
+  reason: GridRevision["reason"],
+  note: string
+): GridRevision {
+  const revs = Array.isArray(p.revisions) ? p.revisions : [];
+  const r = snapshotOf(p, revs.length + 1, by, reason, note);
+  p.revisions = [...revs, r];
+  return r;
+}
+
+/** Snapshot the design as it stands. Returns the new revision. */
+export async function addRevision(
+  projectId: string,
+  opts: { by: string; reason?: GridRevision["reason"]; note?: string }
+): Promise<GridRevision | null> {
+  let out: GridRevision | null = null;
+  const res = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    out = pushRevision(p, opts.by, opts.reason || "manual", opts.note || "");
+    p.updatedAt = Date.now();
+  });
+  return res ? out : null;
+}
+
+/**
+ * Recall an earlier revision onto the live design. Non-destructive by
+ * construction (the quotes idiom): the current state is snapshotted FIRST,
+ * so walking back never discards the direction walked away from. sheetIds
+ * are NOT applied — sheets are never orphaned by a restore.
+ */
+export async function restoreRevision(
+  projectId: string,
+  rev: number,
+  by: string
+): Promise<{ ok: false; reason: "not-found" | "no-such-rev" } | { ok: true }> {
+  const p = await getProject(projectId);
+  if (!p) return { ok: false, reason: "not-found" };
+  const target = (p.revisions || []).find((r) => r.rev === rev);
+  if (!target) return { ok: false, reason: "no-such-rev" };
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (doc) => {
+    pushRevision(doc, by, "restore", `Auto-saved before recalling v${rev}`);
+    doc.name = target.name;
+    doc.placements = [...target.placements];
+    doc.calibrations = [...target.calibrations];
+    doc.spaces = [...target.spaces];
+    pushRevision(doc, by, "restore", `Recalled v${rev}`);
+    doc.updatedAt = Date.now();
+  });
+  return updated ? { ok: true } : { ok: false, reason: "not-found" };
 }
