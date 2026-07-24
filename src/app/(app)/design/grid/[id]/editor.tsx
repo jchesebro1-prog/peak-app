@@ -15,7 +15,7 @@ import {
 } from "@/lib/annotations";
 import { bomBySpace, bomLines, bomTotals, type PartLite } from "@/lib/design/grid-bom";
 import { polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
-import type { GridPlacement, GridSpace } from "@/lib/stores/grid-projects";
+import type { GridPlacement, GridRevision, GridSpace } from "@/lib/stores/grid-projects";
 import {
   addSheetAction,
   addSpaceAction,
@@ -26,6 +26,7 @@ import {
   removePlacementAction,
 } from "./actions";
 import SpacesPanel from "./spaces-panel";
+import RevisionsPanel from "./revisions-panel";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -98,6 +99,7 @@ export type ProjectLite = {
   placements: GridPlacement[];
   calibrations: Calibration[];
   spaces: GridSpace[];
+  revisions: GridRevision[];
 };
 
 type Pending =
@@ -667,6 +669,15 @@ export default function GridEditor({
               </Link>
             )}
           </div>
+
+          {/* revisions (D109) */}
+          <RevisionsPanel
+            projectId={project.id}
+            revisions={project.revisions}
+            busy={busy}
+            onChanged={() => router.refresh()}
+            onError={(m) => setErr(m)}
+          />
         </div>
 
         {/* document */}

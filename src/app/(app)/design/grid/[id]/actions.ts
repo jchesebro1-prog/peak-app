@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/session";
 import type { Calibration, MeasureUnit, Point } from "@/lib/annotations";
 import {
   addPlacement,
+  addRevision,
   addSheet,
   addSpace,
   clearSheetCalibration,
@@ -12,6 +13,7 @@ import {
   removePlacement,
   removeSpace,
   renameSpace,
+  restoreRevision,
   setQuote,
   setSheetCalibration,
 } from "@/lib/stores/grid-projects";
@@ -148,6 +150,31 @@ export async function removeSpaceAction(
   return { ok: true };
 }
 
+/* ----------------------------- revisions (D109) ----------------------------- */
+
+export async function saveRevisionAction(
+  projectId: string,
+  note: string
+): Promise<Result> {
+  const user = await requireUser();
+  const r = await addRevision(projectId, { by: user.name, reason: "manual", note: note.trim() });
+  if (!r) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+export async function restoreRevisionAction(
+  projectId: string,
+  rev: number
+): Promise<Result> {
+  const user = await requireUser();
+  const r = await restoreRevision(projectId, rev, user.name);
+  if (!r.ok)
+    return { ok: false, error: r.reason === "no-such-rev" ? "That revision no longer exists." : "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
 /**
  * Turn the design's BOM into a draft quote — or refresh the one it already
  * minted, as long as that quote is still a draft. Once the quote moves past
@@ -193,6 +220,8 @@ export async function createDraftQuoteAction(
       margin: totals.margin,
       spec,
     });
+    // The revision records exactly what was quoted (D109).
+    await addRevision(projectId, { by: user.name, reason: "quote", note: `Quoted as ${existing.id}` });
     revalidatePath(editorPath(projectId));
     revalidatePath("/quotes");
     return { ok: true, quoteId: existing.id, updated: true };
@@ -210,6 +239,7 @@ export async function createDraftQuoteAction(
     spec,
   });
   await setQuote(project.id, q.id);
+  await addRevision(projectId, { by: user.name, reason: "quote", note: `Quoted as ${q.id}` });
   revalidatePath(editorPath(projectId));
   revalidatePath("/quotes");
   revalidatePath("/design/grid");
