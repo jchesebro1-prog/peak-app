@@ -8,7 +8,7 @@ import {
   WORK_TYPE_META,
   startOfDay as opStartOfDay,
 } from "@/lib/operations-work";
-import { venueDimsFromEstimator, venueDimsFromLineset } from "@/lib/design/venue-dims";
+import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS } from "@/lib/design/venue-dims";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -446,9 +446,18 @@ ok(vdEst.proWidthFt === 36, "estimator `width` maps to PRO width, not stage widt
 ok(vdEst.proHeightFt === 18, "estimator `ph` maps to PRO height");
 ok(vdEst.stageWidthFt === 60, `stage width = pro + 2 wings (got ${vdEst.stageWidthFt})`);
 ok(vdEst.proWidthFt !== vdEst.stageWidthFt, "pro and stage width stay distinct — the collision guard");
+ok(vdEst.stageDepthFt === 26, `estimator depth maps straight through to stage depth (got ${vdEst.stageDepthFt})`);
+ok(vdEst.gridHeightFt === 24, `estimator grid maps straight through to grid height (got ${vdEst.gridHeightFt})`);
 
 const vdLine = venueDimsFromLineset({ proWidthFt: 40, proHeightFt: 20, stageWidthFt: 50, stageDepthFt: 30 });
 ok(vdLine.proWidthFt === 40 && vdLine.stageWidthFt === 50, "lineset inputs keep pro and stage width separate");
+ok(vdLine.proHeightFt === 20, `lineset proHeightFt lands on its own value, not swapped with stage depth (got ${vdLine.proHeightFt})`);
+ok(vdLine.stageDepthFt === 30, `lineset stageDepthFt lands on its own value, not swapped with pro height (got ${vdLine.stageDepthFt})`);
+
+ok(DEFAULT_VENUE_DIMS.proWidthFt === 40, `DEFAULT_VENUE_DIMS proWidthFt is 40 (got ${DEFAULT_VENUE_DIMS.proWidthFt})`);
+ok(DEFAULT_VENUE_DIMS.proHeightFt === 20, `DEFAULT_VENUE_DIMS proHeightFt is 20 (got ${DEFAULT_VENUE_DIMS.proHeightFt})`);
+ok(DEFAULT_VENUE_DIMS.stageWidthFt === 50, `DEFAULT_VENUE_DIMS stageWidthFt is 50 (got ${DEFAULT_VENUE_DIMS.stageWidthFt})`);
+ok(DEFAULT_VENUE_DIMS.stageDepthFt === 30, `DEFAULT_VENUE_DIMS stageDepthFt is 30 (got ${DEFAULT_VENUE_DIMS.stageDepthFt})`);
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
