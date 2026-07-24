@@ -489,5 +489,28 @@ ok(spaceOf({ sheetId: "s1", page: 1, x: 0.9, y: 0.9 }, [hall, booth])?.id === "s
 ok(spaceOf({ sheetId: "s2", page: 2, x: 0.4, y: 0.4 }, [hall, booth, otherSheet]) === null,
   "wrong sheet/page matches nothing");
 
+/* --- The Grid per-space rollups (D109) --- */
+import { bomBySpace } from "@/lib/design/grid-bom";
+
+const stageSp = { id: "sp-stage", sheetId: "s1", page: 1, name: "Stage", points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 0.4 }, { x: 0, y: 0.4 }] };
+const houseSp = { id: "sp-house", sheetId: "s1", page: 1, name: "House", points: [{ x: 0, y: 0.4 }, { x: 1, y: 0.4 }, { x: 1, y: 0.9 }, { x: 0, y: 0.9 }] };
+const gp = (x: number, y: number, partId: string) => ({ sheetId: "s1", page: 1, x, y, partId });
+const roll = bomBySpace(
+  [gp(0.5, 0.2, "S4LED"), gp(0.6, 0.2, "S4LED"), gp(0.5, 0.6, "CYC1"), gp(0.5, 0.95, "S4LED")],
+  gridParts,
+  [stageSp, houseSp]
+);
+ok(roll.length === 3, `rollups: Stage, House, Unassigned (${roll.length})`);
+ok(roll[0].name === "Stage" && roll[0].count === 2 && roll[0].value === 2400,
+  `Stage rolls up 2× S4LED = $2400 (${roll[0].count}, ${roll[0].value})`);
+ok(roll[1].name === "House" && roll[1].count === 1 && roll[1].value === 900,
+  "House rolls up the CYC1");
+ok(roll[2].spaceId === null && roll[2].count === 1, "the stray device lands in Unassigned");
+ok(bomBySpace([gp(0.5, 0.2, "S4LED")], gridParts, []).length === 1
+  && bomBySpace([gp(0.5, 0.2, "S4LED")], gridParts, [])[0].spaceId === null,
+  "no spaces → a single Unassigned rollup");
+ok(bomBySpace([gp(0.5, 0.2, "S4LED")], gridParts, [stageSp, houseSp]).length === 1,
+  "spaces with no devices are omitted");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

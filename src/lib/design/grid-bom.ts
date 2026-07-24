@@ -58,6 +58,45 @@ export function bomLines(
   return lines.sort((a, b) => b.ext - a.ext || a.partId.localeCompare(b.partId));
 }
 
+/* --------------------------- per-space rollups --------------------------- */
+
+import { spaceOf, type SpaceLite } from "./grid-geometry";
+
+export type SpaceRollup = {
+  /** null = devices outside every space. */
+  spaceId: string | null;
+  name: string;
+  count: number;
+  value: number;
+};
+
+/**
+ * Devices grouped by the space containing them (smallest-wins, computed —
+ * see grid-geometry). One rollup per space that has devices, in the
+ * project's space order, plus a trailing "Unassigned" bucket when any
+ * placement falls in no space. Value is the same list-price basis as
+ * bomLines; parts missing from the catalog contribute $0 but still count.
+ */
+export function bomBySpace(
+  placements: Array<{ sheetId: string; page: number; x: number; y: number; partId: string }>,
+  parts: PartLite[],
+  spaces: Array<SpaceLite & { name: string }>
+): SpaceRollup[] {
+  const byId = new Map(parts.map((p) => [p.id, p]));
+  const buckets = new Map<string | null, SpaceRollup>();
+  for (const s of spaces) buckets.set(s.id, { spaceId: s.id, name: s.name, count: 0, value: 0 });
+  const unassigned: SpaceRollup = { spaceId: null, name: "Unassigned", count: 0, value: 0 };
+  for (const pl of placements) {
+    const home = spaceOf(pl, spaces);
+    const bucket = home ? buckets.get(home.id)! : unassigned;
+    bucket.count += 1;
+    bucket.value += byId.get(pl.partId)?.list || 0;
+  }
+  const out = [...buckets.values()].filter((b) => b.count > 0);
+  if (unassigned.count > 0) out.push(unassigned);
+  return out;
+}
+
 /** Sell value, internal cost, and blended margin for a set of placements. */
 export function bomTotals(
   placements: Array<{ partId: string }>,
