@@ -8,6 +8,7 @@ import {
   WORK_TYPE_META,
   startOfDay as opStartOfDay,
 } from "@/lib/operations-work";
+import { venueDimsFromEstimator, venueDimsFromLineset } from "@/lib/design/venue-dims";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -438,6 +439,16 @@ ok(quoteDeepLink("system", "Q-3") === "/estimator?id=Q-3", "a system quote deep-
 ok(isOpenStage("project", "install") === true && isOpenStage("project", "complete") === false, "project open = any stage but complete");
 ok(isOpenStage("inspection", "onsite") === true, "inspection onsite counts as open work (the 4th stage)");
 ok(isOpenStage("quote", "won") === false && isOpenStage("quote", "sent") === true, "quote open = draft or sent");
+
+/* --- venue dimensions (lineset PRO dims, task 1) --- */
+const vdEst = venueDimsFromEstimator({ width: 36, ph: 18, depth: 26, grid: 24, wing: 12 });
+ok(vdEst.proWidthFt === 36, "estimator `width` maps to PRO width, not stage width");
+ok(vdEst.proHeightFt === 18, "estimator `ph` maps to PRO height");
+ok(vdEst.stageWidthFt === 60, `stage width = pro + 2 wings (got ${vdEst.stageWidthFt})`);
+ok(vdEst.proWidthFt !== vdEst.stageWidthFt, "pro and stage width stay distinct — the collision guard");
+
+const vdLine = venueDimsFromLineset({ proWidthFt: 40, proHeightFt: 20, stageWidthFt: 50, stageDepthFt: 30 });
+ok(vdLine.proWidthFt === 40 && vdLine.stageWidthFt === 50, "lineset inputs keep pro and stage width separate");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
