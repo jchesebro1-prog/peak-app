@@ -27,6 +27,9 @@ export const NAV: NavEntry[] = [
       { key: "designoverview", label: "Overview", href: "/design" },
       { key: "engagements", label: "Consulting", href: "/design/engagements" },
       { key: "designs", label: "Designs", href: "/design/designs" },
+      /* The Grid (D108) — the DaVinci-style system designer: plan sheets,
+       * painted catalog devices, live BOM → draft quote. */
+      { key: "grid", label: "The Grid", href: "/design/grid" },
       { key: "steel", label: "Steel Calculator", href: "/design/steel" },
       { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
       { key: "motors", label: "Motor Library", href: "/design/motors" },
