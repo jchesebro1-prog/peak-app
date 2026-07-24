@@ -136,9 +136,10 @@ const FIX_MUL: Record<GoodsSize, { par: number; side: number; automated: number;
  * a per-electric multiplier). Counts are safe to reuse in a way the estimator's
  * CURTAIN equations were not, because a count carries no fullness assumption.
  *
- * `front` is always 0: the estimator's own comment reads "Front/Cyc are
- * width-only (FOH / cyc row)". Front-of-house fixtures hang on an FOH position,
- * not on a lineset batten.
+ * `front` is always 0: in the estimator, `Front` and `Cyc` are scaled by `wUnit`
+ * alone, while `Par`, `Side light` and `Automated` are scaled by `E × wUnit`
+ * (src/app/(app)/design/quick/engine.ts:486-490) — Front-of-house fixtures hang
+ * on an FOH position, not on a lineset batten.
  */
 export function electricCounts(
   d: VenueDims,

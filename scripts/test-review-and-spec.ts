@@ -528,9 +528,21 @@ const cReg = electricCounts(DIMS36, "medium", "regular");
 ok(cReg.front === 0, "FOH fixtures NEVER load a lineset batten — front count is always 0");
 ok(cReg.cyc === 0, "cyc fixtures belong to the cyc electric, not a regular one");
 ok(cReg.par === 5, `par count = round(PW/8) x 1.0 at medium (got ${cReg.par})`);
+ok(cReg.side === 3, `side count = round(wUnit x 0.5) = round(5 x 0.5) = round(2.5) = 3 at medium — JS's Math.round breaks halves toward +Infinity, so a FIX_MUL slip that lands here wouldn't round the other way unnoticed (got ${cReg.side})`);
+ok(cReg.automated === 3, `automated count = round(wUnit x 0.5) = round(2.5) = 3 at medium — same half-value rounding case as side (got ${cReg.automated})`);
+
+const cSmall = electricCounts(DIMS36, "small", "regular");
+ok(cSmall.par === 4, `par count = round(wUnit x 0.7) = round(3.5) = 4 at small (got ${cSmall.par})`);
+ok(cSmall.side === 0, `side count = round(wUnit x 0) = 0 at small — small carries no side light, pinned so the zero can't quietly grow back (got ${cSmall.side})`);
+ok(cSmall.automated === 0, `automated count = round(wUnit x 0) = 0 at small — small carries no movers either (got ${cSmall.automated})`);
+
+const cLarge = electricCounts(DIMS36, "large", "regular");
+ok(cLarge.par === 6, `par count = round(wUnit x 1.2) = round(6) = 6 at large (got ${cLarge.par})`);
+ok(cLarge.side === 4, `side count = round(wUnit x 0.75) = round(3.75) = 4 at large (got ${cLarge.side})`);
+ok(cLarge.automated === 5, `automated count = round(wUnit x 0.9) = round(4.5) = 5 at large — another half-value rounding case (got ${cLarge.automated})`);
 
 const cCyc = electricCounts(DIMS36, "medium", "cyc");
-ok(cCyc.cyc > 0 && cCyc.par === 0, "the cyc electric carries cyc fixtures only");
+ok(cCyc.cyc === 6 && cCyc.par === 0, `the cyc electric carries cyc fixtures only — cyc count = round(wUnit x 1.25) = round(6.25) = 6 (got ${cCyc.cyc})`);
 
 const lb = electricGearLb({ par: 5, side: 3 }, 44);
 ok(lb === 5 * 12 + 3 * 18 + 1.5 * 44, `gear = fixtures + 1.5 lb/ft distribution (got ${lb})`);
