@@ -12,7 +12,7 @@ import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
 import { PrintButton } from "./controls";
 
-export const metadata = { title: "Consulting document — Peak Backend" };
+export const metadata = { title: "Consulting document — Quartzite" };
 
 /**
  * Consulting document generators (D90, spec §Document generation):

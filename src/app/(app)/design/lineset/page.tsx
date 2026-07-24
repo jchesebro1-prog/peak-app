@@ -10,7 +10,7 @@ import {
   type CombinedLinesetData,
 } from "./lineset-builder";
 
-export const metadata = { title: "Lineset Builder — Peak Backend" };
+export const metadata = { title: "Lineset Builder — Quartzite" };
 
 /**
  * Adapt a saved design of ANY vintage into the merged tool's initial state

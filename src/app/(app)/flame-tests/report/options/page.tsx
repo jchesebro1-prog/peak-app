@@ -10,7 +10,7 @@ import {
   type OrgCtx,
 } from "../report-doc";
 
-export const metadata = { title: "Field Flame Inspection report — options — Peak Backend" };
+export const metadata = { title: "Field Flame Inspection report — options — Quartzite" };
 
 /**
  * Field Flame Inspection report OPTIONS — the "three directions to compare"

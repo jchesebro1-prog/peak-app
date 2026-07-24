@@ -23,7 +23,7 @@ import {
 } from "@/lib/stores/repair-jobs";
 import { RepairsMap } from "./controls";
 
-export const metadata = { title: "Repairs — Peak Backend" };
+export const metadata = { title: "Repairs — Quartzite" };
 
 const YEAR_MS = 365 * 86400000;
 

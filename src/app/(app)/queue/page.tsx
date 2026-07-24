@@ -5,7 +5,7 @@ import { activeUsers } from "@/lib/users";
 import QueueView from "./view";
 import HomeTabs from "../home-tabs";
 
-export const metadata = { title: "My Queue — Peak Backend" };
+export const metadata = { title: "My Queue — Quartzite" };
 export const dynamic = "force-dynamic";
 
 /**

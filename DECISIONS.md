@@ -1509,3 +1509,22 @@ sequence corrupted it every time.
 `scripts/tmp-seed-markup.ts` processes holding the dev DB open for four days;
 the running dev server could not open it, so the app 500'd on every page. Stray
 `tsx` scripts are now called out in AGENTS.md.
+
+## D107 — The software is named Quartzite (2026-07-24)
+
+Jeff's direct instruction (2026-07-24): "change the name of the software to
+Quartzite." Quartzite was the Wisconsin wildcard in the 2026-07-24 naming
+exploration — the Baraboo Range bedrock under Peak's Reedsburg HQ: the rock
+too hard to be worn down, in the place the ice couldn't flatten.
+
+What changed: every user-facing software-name surface — the ~65 page metadata
+titles (`— Peak Backend` → `— Quartzite`), the root layout title + PWA
+`appleWebApp` title, `manifest.webmanifest` name/short_name, the nav's beta-
+feedback subject, the service-worker cache name (`peak-shell-v1` →
+`quartzite-shell-v1`, which also invalidates stale shells on next activate),
+and the README/AGENTS headings.
+
+What deliberately did NOT change: the company name "Peak Systems Group"
+(documents, descriptions, copyright), the repo/package name `peak-app`, the
+`pk-*` CSS token prefix, id formats, and the Apple Reminders list literally
+named "Peak" that the queue agent reconciles against (external data).

@@ -6,7 +6,7 @@ import { getSettings } from "@/lib/settings";
 import { PrintButton, RenovationQuoteButton } from "./controls";
 import { InspectionReportSheets, type ReportLayout } from "./report-doc";
 
-export const metadata = { title: "Inspection report — Peak Backend" };
+export const metadata = { title: "Inspection report — Quartzite" };
 
 const LAYOUTS: ReportLayout[] = ["report", "dossier", "compact"];
 const LAYOUT_LABEL: Record<ReportLayout, string> = {

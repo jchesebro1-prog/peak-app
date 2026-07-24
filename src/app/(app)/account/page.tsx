@@ -8,7 +8,7 @@ import {
 import NotifControls from "./notif-controls";
 import InviteToggle from "./invite-toggle";
 
-export const metadata = { title: "Account settings — Peak Backend" };
+export const metadata = { title: "Account settings — Quartzite" };
 
 export default async function AccountPage() {
   const user = await requireUser();

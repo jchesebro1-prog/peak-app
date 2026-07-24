@@ -13,7 +13,7 @@ import { loadServiceWork } from "@/lib/operations-work-server";
 import { WORK_TYPE_META, startOfDay, type WorkItem } from "@/lib/operations-work";
 import FieldWorkDetail, { type FieldIdentity } from "./controls";
 
-export const metadata = { title: "Field work — Peak Backend" };
+export const metadata = { title: "Field work — Quartzite" };
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";

@@ -14,7 +14,7 @@ import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
 
-export const metadata = { title: "Repair quote — Peak Backend" };
+export const metadata = { title: "Repair quote — Quartzite" };
 
 /**
  * Repair QUOTE builder — the auto-priced repair estimator (repair twin of the

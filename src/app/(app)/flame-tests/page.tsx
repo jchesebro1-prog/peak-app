@@ -27,7 +27,7 @@ import {
 } from "./actions";
 import type { MapPin } from "@/components/map/LeafletMap";
 
-export const metadata = { title: "Flame tests — Peak Backend" };
+export const metadata = { title: "Flame tests — Quartzite" };
 
 const DAY = 86400000;
 const YEAR = 365 * DAY;

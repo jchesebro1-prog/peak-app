@@ -1,5 +1,5 @@
 /**
- * Peak Backend service worker — Phase 6 offline shell.
+ * Quartzite service worker — Phase 6 offline shell.
  *
  * Faithful port of the prototype's app/sw.js caching policy:
  *  - NETWORK-FIRST for same-origin GETs, cached under origin+pathname (query
@@ -17,7 +17,7 @@
  * open clients.
  */
 
-const CACHE_NAME = "peak-shell-v1";
+const CACHE_NAME = "quartzite-shell-v1";
 
 // Small, individually-added precache so one 404 can't abort install.
 const SHELL = ["/", "/manifest.webmanifest", "/icon.svg"];

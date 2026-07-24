@@ -12,7 +12,7 @@ import { CustomersMap, FilterBar } from "./controls";
 import EditCustomerModal from "./edit-modal";
 import { cityState, custLocation, mono, moneyK, typeColor } from "./lib";
 
-export const metadata = { title: "Companies — Peak Backend" };
+export const metadata = { title: "Companies — Quartzite" };
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";

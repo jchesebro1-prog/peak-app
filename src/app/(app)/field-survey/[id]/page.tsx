@@ -21,7 +21,7 @@ import { activeUsers } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
 import SurveyEditor, { type EditorMeta, type EditorCustomer } from "./controls";
 
-export const metadata = { title: "Site survey — Peak Backend" };
+export const metadata = { title: "Site survey — Quartzite" };
 
 export default async function SurveyEditorPage({
   params,

@@ -23,7 +23,7 @@ import { ACCENT_INK, ACCENT_SOFT, cityState, mono, venueKindLabel } from "../../
  * company's contacts.
  */
 
-export const metadata = { title: "Venue — Peak Backend" };
+export const metadata = { title: "Venue — Quartzite" };
 
 const card: CSSProperties = {
   background: "#fff",

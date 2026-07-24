@@ -12,7 +12,7 @@ import {
   type BuilderInitial,
 } from "./controls";
 
-export const metadata = { title: "Consulting quote — Peak Backend" };
+export const metadata = { title: "Consulting quote — Quartzite" };
 
 /**
  * Consulting QUOTE builder (D90) — the lightweight fee-based sibling of the

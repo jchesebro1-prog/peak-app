@@ -3,7 +3,7 @@ import { loadAgendaRange } from "@/lib/agenda";
 import CalendarClient from "./calendar-client";
 import HomeTabs from "../home-tabs";
 
-export const metadata = { title: "Calendar — Peak Backend" };
+export const metadata = { title: "Calendar — Quartzite" };
 
 /**
  * Full-page calendar (S13 / D81) — month grid over the same merged sources

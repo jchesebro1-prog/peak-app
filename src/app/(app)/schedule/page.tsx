@@ -18,7 +18,7 @@ import {
 import { loadServiceWork } from "@/lib/operations-work-server";
 import { WORK_TYPE_META, type WorkType } from "@/lib/operations-work";
 
-export const metadata = { title: "Schedule — Peak Backend" };
+export const metadata = { title: "Schedule — Quartzite" };
 
 const DAY = 86400000;
 

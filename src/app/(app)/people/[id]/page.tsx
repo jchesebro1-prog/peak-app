@@ -19,7 +19,7 @@ import { Avatar } from "@/components/ui";
 import EditPersonModal from "../edit-modal";
 import type { SavePersonInput } from "../types";
 
-export const metadata = { title: "Person — Peak Backend" };
+export const metadata = { title: "Person — Quartzite" };
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";

@@ -22,7 +22,7 @@ import { all as allCustomers } from "@/lib/stores/customers";
 import { activeUsers } from "@/lib/users";
 import InspectionEditor, { type EditorMeta, type EditorCustomer } from "./controls";
 
-export const metadata = { title: "Inspection — Peak Backend" };
+export const metadata = { title: "Inspection — Quartzite" };
 
 export default async function InspectionEditorPage({
   params,

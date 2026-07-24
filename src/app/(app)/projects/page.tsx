@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/session";
 import { ProjectsView } from "./view";
 import { loadProjectsData, one, normFilter } from "./data";
 
-export const metadata = { title: "Projects — Peak Backend" };
+export const metadata = { title: "Projects — Quartzite" };
 
 export default async function ProjectsPage({
   searchParams,

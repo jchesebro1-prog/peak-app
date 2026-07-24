@@ -6,7 +6,7 @@ import { allEngagements, ENGAGEMENT_STATUS_LABEL } from "@/lib/stores/engagement
 import { getAllDesigns as getSandboxDesigns } from "@/lib/stores/designs";
 import { shortDate } from "@/lib/format";
 
-export const metadata = { title: "Design — Peak Backend" };
+export const metadata = { title: "Design — Quartzite" };
 export const dynamic = "force-dynamic";
 
 function one(v: string | string[] | undefined): string {
