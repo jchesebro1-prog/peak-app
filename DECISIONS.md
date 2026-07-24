@@ -1673,3 +1673,40 @@ page-widths × ~70 ft/pw ≈ 39.5 ft — exact), DMX run 19'-4"; BOM gained
 40 ft × $2.10 = $84 and 20 ft × $0.85 = $17 (total $2,571); quote update
 cut its revision; restoring pre-wire v1 dropped the wires and restoring the
 auto-save brought both back. test:specs +13 assertions; build green.
+
+## D111 — The Grid Phase 4: bid-spec bridge into D94 (2026-07-24)
+
+The D94 generator's "Start from a quote" only understood the estimator's
+nested `spec.sections[].items[]`. `bomFromQuoteAction` now also reads the
+flat `spec.lines[]` shape The Grid mints, so a Grid design flows into the
+CSI submittal pipeline with no new machinery: paint → BOM → draft quote →
+bid spec. The Grid editor links straight in ("Bid spec from this design →")
+when the customer has a live consulting engagement — the generator stays
+engagement-scoped (D94's anchor), The Grid just finds the door.
+
+Verified live: created consulting quote Q-2044 for North Ridge, won it (the
+engagement CE-1001 opened per the standard flow), generator offered Q-2043,
+and its four lines (3× EQP-LIFT, 2× LIG-SUP, 40 ft WIRE-SO123, 20 ft
+WIRE-DMX) loaded into the matcher with the normal write-spec/waive workflow.
+Datasheet packages remain deferred — that is per-part file authoring, data
+work not code.
+
+## D112 — The Grid Phase 5 (v1): derived riser sketch (2026-07-24)
+
+`/design/grid/<id>/riser` — a READ-ONLY one-line diagram derived on every
+load: spaces are nodes (device counts grouped inside), and each wire run is
+an edge between the spaces its endpoints land in (smallest-wins, same
+`spaceOf` as everything else), labelled with the part and measured length.
+Devices/endpoints outside every space share an "Unassigned" node — nothing
+silently disappears. Derivation is pure (`lib/design/grid-riser.ts`, covered
+in test:specs); layout is deliberately simple (columns + arc rail).
+
+**Why derived-not-drawn:** DaVinci's riser is an editable document with a
+real auto-layout engine — that remains the "hardest single piece" of the
+roadmap and is NOT this. The sketch can never drift from the plan, which
+makes it safe to show a customer today; hand-editing comes later, if ever.
+
+**The Grid's remaining roadmap is now Jeff-gated, not code-gated:** catalog
+symbol/accessory/datasheet metadata (authoring), first-seeded brands for the
+palette, real blob storage for sheets (hosting account), per-space schedule
+report format, DXF export. Phases 1–5 all have a working slice.

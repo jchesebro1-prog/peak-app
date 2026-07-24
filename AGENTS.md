@@ -172,9 +172,13 @@ See `.env.example`.
    auto-cut on quote, non-destructive restore). Phase 3 (D110): **wire
    routing** — per-length catalog parts routed as measured polylines
    (calibration-gated, aspect stamped per route, footage ceiling-rounded
-   per part into BOM + quote). Roadmap in memory
-   `projects/peak-system-designer.md`; risers/submittals are later phases.
-   Suite renamed **Quartzite** (D107) alongside slice 1.
+   per part into BOM + quote). Phase 4 (D111): grid quotes feed the **D94
+   bid-spec generator** (flat `spec.lines` support + editor link via the
+   customer's engagement). Phase 5 v1 (D112): **derived riser sketch** at
+   `/design/grid/<id>/riser`. Roadmap in memory
+   `projects/peak-system-designer.md`; what remains is Jeff-gated data/infra
+   (symbol+datasheet metadata, palette seeding, blob storage). Suite renamed
+   **Quartzite** (D107) alongside slice 1.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
