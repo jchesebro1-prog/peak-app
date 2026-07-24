@@ -98,8 +98,8 @@ const TYPE_COLOR: Record<string, string> = {
 
 const MODE_LABEL: Record<LinesetMode, string> = { motor: "Motor", dead: "Dead-hung", cw: "Counterweight" };
 
-function NumF({ v, set, w }: { v: number; set: (n: number) => void; w?: number }) {
-  return <input type="number" value={v} onChange={(e) => set(parseFloat(e.target.value) || 0)} style={{ ...field, ...(w ? { width: w } : {}) }} />;
+function NumF({ v, set, w, style }: { v: number; set: (n: number) => void; w?: number; style?: React.CSSProperties }) {
+  return <input type="number" value={v} onChange={(e) => set(parseFloat(e.target.value) || 0)} style={{ ...field, ...(w ? { width: w } : {}), ...style }} />;
 }
 
 /** Stable identity for a generated line: its type + ordinal within the type
@@ -154,6 +154,11 @@ export function LinesetBuilder({
     });
   const patchExtra = (xid: string, patch: Partial<WeightLine>) =>
     setExtras((a) => a.map((x) => (x.xid === xid ? { ...x, ...patch } : x)));
+
+  /** True when `field` was hand-typed for line `key` (present in loads[key]),
+   *  as opposed to arriving from the drape rule / gear default (P6/P7). */
+  const isOverride = (key: string, field: keyof WeightLine) =>
+    loads[key] !== undefined && loads[key]![field as keyof LineLoad] !== undefined;
 
   const out = useMemo(() => generateLineset(inp), [inp]);
   const keys = useMemo(() => lineKeys(out.schedule), [out.schedule]);
@@ -232,15 +237,16 @@ export function LinesetBuilder({
   const unspecified = totals.generated - totals.specified;
 
   function exportCsv() {
-    const header = ["#", "Slot", "Downstage", "Type", "Name", "Fabric", "W(ft)", "H(ft)", "Full%", "Qty", "Gear(lb)", "Mode", "Hoist", "Weight on batten(lb)", "Check"];
+    const header = ["#", "Slot", "Downstage", "Type", "Name", "Fabric", "W(ft)", "H(ft)", "Full%", "Qty", "Gear(lb)", "Mode", "Hoist", "Weight on batten(lb)", "Check", "Source"];
     const csvRows: (string | number)[][] = rows.map((r, i) => {
       const mode = r.line.mode || def.mode;
       const check = !r.c ? "NOT SPECIFIED" : mode === "cw" ? `${r.c.combo.big}x25+${r.c.combo.small}x10 brick` : r.c.over ? "OVER LIMIT" : "OK";
+      const source = r.load ? "overridden" : r.ruled ? "rule" : "manual";
       return [
         i + 1, r.s.slot, r.s.dsPositionLabel, r.s.type, r.line.name,
-        r.load?.fab || "", r.load?.w ?? "", r.load?.h ?? "", r.load?.full ?? (r.load ? def.full : ""), r.load?.qty ?? (r.load ? 1 : ""), r.load?.gear ?? "",
+        r.line.fab || "", r.line.w ?? "", r.line.h ?? "", r.line.full ?? def.full, r.line.qty ?? 1, r.line.gear ?? "",
         r.c ? MODE_LABEL[mode] : "", r.c && mode === "motor" ? r.line.hoist || def.hoist : "",
-        r.c ? Math.round(r.c.onBatten) : "", check,
+        r.c ? Math.round(r.c.onBatten) : "", check, source,
       ];
     });
     extraRows.forEach(({ x, c }, i) => {
@@ -249,23 +255,33 @@ export function LinesetBuilder({
         rows.length + i + 1, "", "custom", "Custom", x.name, x.fab || "", x.w ?? "", x.h ?? "", x.full ?? def.full, x.qty ?? 1, x.gear ?? "",
         MODE_LABEL[mode], mode === "motor" ? x.hoist || def.hoist : "", Math.round(c.onBatten),
         mode === "cw" ? `${c.combo.big}x25+${c.combo.small}x10 brick` : c.over ? "OVER LIMIT" : "OK",
+        "overridden",
       ]);
     });
-    csvRows.push(["", "", "", "", "TOTAL", "", "", "", "", "", "", "", "", Math.round(totals.onBatten), unspecified ? `${unspecified} lines not specified — excluded` : `peak/beam ${Math.round(totals.beamMax)} lb`]);
+    csvRows.push(["", "", "", "", "TOTAL", "", "", "", "", "", "", "", "", Math.round(totals.onBatten), unspecified ? `${unspecified} lines not specified — excluded` : `peak/beam ${Math.round(totals.beamMax)} lb`, ""]);
     downloadCsv(`lineset-${inp.stageWidthFt}x${inp.stageDepthFt}`, header, csvRows);
   }
 
   const getData = (): CombinedLinesetData => ({ v: 3, inputs: inp, defaults: def, loads, extras, tier, gear });
 
-  /* ---- the per-line load editor (expands under the selected row, P5) ---- */
-  function LoadEditor({ value, onChange, onClear, isExtra, onRemove }: {
+  /* ---- the per-line load editor (expands under the selected row, P5) ----
+   *  A fourth field class lives here alongside generated / hand-entered /
+   *  calculated (see file header): rule-derived. `lineKey` (schedule rows
+   *  only — extras have no rule) drives isOverride() so a field the rule
+   *  filled in renders muted until Jeff actually types over it (P7). */
+  function LoadEditor({ value, onChange, onClear, isExtra, onRemove, lineKey }: {
     value: LineLoad & { name?: string };
     onChange: (patch: LineLoad & Partial<WeightLine>) => void;
     onClear?: () => void;
     isExtra?: boolean;
     onRemove?: () => void;
+    lineKey?: string;
   }) {
     const mode = value.mode || def.mode;
+    const genStyle = (f: keyof WeightLine): React.CSSProperties | undefined =>
+      lineKey && !isOverride(lineKey, f) ? { color: "#9aa0ab", background: "#fafbfc" } : undefined;
+    const genLabel = (f: keyof WeightLine): React.CSSProperties =>
+      lineKey && !isOverride(lineKey, f) ? { ...label, color: "#9aa0ab" } : label;
     return (
       <div style={{ background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "12px 14px", margin: "2px 0 6px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10 }}>
@@ -273,35 +289,48 @@ export function LinesetBuilder({
             <div style={{ gridColumn: "1 / -1" }}><span style={label}>Line name</span>
               <input value={value.name || ""} onChange={(e) => onChange({ name: e.target.value } as Partial<WeightLine>)} style={field} /></div>
           )}
-          <div style={{ gridColumn: "span 2" }}><span style={label}>Fabric / goods</span>
-            <select value={value.fab || "— none —"} onChange={(e) => onChange({ fab: e.target.value })} style={field}>
+          <div style={{ gridColumn: "span 2" }}><span style={genLabel("fab")}>Fabric / goods</span>
+            <select value={value.fab || "— none —"} onChange={(e) => onChange({ fab: e.target.value })} style={{ ...field, ...genStyle("fab") }}>
               <option>— none —</option>
               {FABLIB.map((f) => <option key={f.name}>{f.name}</option>)}
             </select></div>
-          <div><span style={label}>Width (ft)</span><NumF v={value.w ?? 0} set={(n) => onChange({ w: n })} /></div>
-          <div><span style={label}>Height (ft)</span><NumF v={value.h ?? 0} set={(n) => onChange({ h: n })} /></div>
-          <div><span style={label}>Fullness %</span><NumF v={value.full ?? def.full} set={(n) => onChange({ full: n })} /></div>
-          <div><span style={label}>Qty</span><NumF v={value.qty ?? 1} set={(n) => onChange({ qty: n })} /></div>
-          <div><span style={label}>Gear (lb)</span><NumF v={value.gear ?? 0} set={(n) => onChange({ gear: n })} /></div>
-          <div><span style={label}>Chain</span>
-            <select value={value.chain || "None"} onChange={(e) => onChange({ chain: e.target.value })} style={field}>
+          <div><span style={genLabel("w")}>Width (ft)</span><NumF v={value.w ?? 0} set={(n) => onChange({ w: n })} style={genStyle("w")} /></div>
+          <div><span style={genLabel("h")}>Height (ft)</span><NumF v={value.h ?? 0} set={(n) => onChange({ h: n })} style={genStyle("h")} /></div>
+          <div><span style={genLabel("full")}>Fullness %</span><NumF v={value.full ?? def.full} set={(n) => onChange({ full: n })} style={genStyle("full")} /></div>
+          <div><span style={genLabel("qty")}>Qty</span><NumF v={value.qty ?? 1} set={(n) => onChange({ qty: n })} style={genStyle("qty")} /></div>
+          <div><span style={genLabel("gear")}>Gear (lb)</span><NumF v={value.gear ?? 0} set={(n) => onChange({ gear: n })} style={genStyle("gear")} /></div>
+          <div><span style={genLabel("chain")}>Chain</span>
+            <select value={value.chain || "None"} onChange={(e) => onChange({ chain: e.target.value })} style={{ ...field, ...genStyle("chain") }}>
               {CHAINS.map((c) => <option key={c.name}>{c.name}</option>)}
             </select></div>
-          <div><span style={label}>Track</span>
-            <select value={value.track || "None"} onChange={(e) => onChange({ track: e.target.value })} style={field}>
+          <div><span style={genLabel("track")}>Track</span>
+            <select value={value.track || "None"} onChange={(e) => onChange({ track: e.target.value })} style={{ ...field, ...genStyle("track") }}>
               {TRACKS.map((t) => <option key={t.name}>{t.name}</option>)}
             </select></div>
-          <div><span style={label}>Mode</span>
-            <select value={mode} onChange={(e) => onChange({ mode: e.target.value as LinesetMode })} style={field}>
+          <div><span style={genLabel("mode")}>Mode</span>
+            <select value={mode} onChange={(e) => onChange({ mode: e.target.value as LinesetMode })} style={{ ...field, ...genStyle("mode") }}>
               <option value="motor">Motor</option><option value="dead">Dead-hung</option><option value="cw">Counterweight</option>
             </select></div>
           {mode === "motor" && (
-            <div><span style={label}>Hoist</span>
-              <select value={value.hoist || def.hoist} onChange={(e) => onChange({ hoist: e.target.value })} style={field}>
+            <div><span style={genLabel("hoist")}>Hoist</span>
+              <select value={value.hoist || def.hoist} onChange={(e) => onChange({ hoist: e.target.value })} style={{ ...field, ...genStyle("hoist") }}>
                 {PRODIGY_HOISTS.map((h) => <option key={h.id} value={h.id}>{h.id}</option>)}
               </select></div>
           )}
         </div>
+        {lineKey && loads[lineKey] && rows.find((r) => r.key === lineKey)?.rule && (
+          <button
+            type="button"
+            onClick={() => clearLoad(lineKey)}
+            style={{
+              marginTop: 8, fontSize: 11.5, fontWeight: 600, color: "#5b616e",
+              background: "#fff", border: "1px solid #d5d8de", borderRadius: 5,
+              padding: "4px 9px", cursor: "pointer",
+            }}
+          >
+            ↺ Reset to rule
+          </button>
+        )}
         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
           {onClear && (
             <button onClick={onClear} style={{ ...field, width: "auto", cursor: "pointer", fontSize: 12, color: "#b4543a", padding: "5px 10px" }}>
@@ -500,9 +529,10 @@ export function LinesetBuilder({
                         <tr>
                           <td colSpan={8} style={{ padding: "0 6px", borderBottom: "1px solid #f4f5f7" }}>
                             <LoadEditor
-                              value={{ ...(r.load || {}), name: r.line.name }}
+                              value={{ ...r.line }}
                               onChange={(patch) => patchLoad(r.key, patch)}
                               onClear={r.specified ? () => { clearLoad(r.key); setOpenKey(null); } : undefined}
+                              lineKey={r.key}
                             />
                           </td>
                         </tr>
