@@ -1636,3 +1636,40 @@ at the top-left of the sheet).
 **Verified live** on GRD-5002: Stage 3 · $2,250 / House 2 · $220 rollups,
 delete/redraw, manual save → device removal → restore v1 (auto-save + recall
 entries) → quote update cutting v4. test:specs 15 new assertions; build green.
+
+## D110 — The Grid Phase 3: wire routing with measured lengths (2026-07-24)
+
+Phase 3 per the roadmap: draw wire runs on the plan, measure them from the
+page's stored scale calibration, and roll the footage into the BOM and the
+draft quote.
+
+**Model.** A route is a polyline (normalized 0..1 waypoints) on one
+sheet+page carrying a per-length catalog part and the page's **aspect ratio
+stamped at draw time**. Aspect is a property of the page, not the viewport,
+so real length — `polylineLength(points, aspect) × calibration.scale` — is
+recomputable anywhere (client sidebar, server quote action) without opening
+the sheet. Nothing is denormalized: **recalibrating a page reprices every
+wire on it instantly.**
+
+**Rules.**
+- **Wire types are catalog parts with a per-length unit** (`ft`, `lin ft`,
+  `linear ft`, `lf`, leading-slash variants) — DEC-PSD-1: the catalog is the
+  library, no special wire table. The two demo parts (WIRE-SO123, WIRE-DMX)
+  went in through the Catalog screen's own add-part form.
+- **Routing requires the page to be calibrated** (refused server-side with a
+  clear message): an unmeasurable wire is a lie in a BOM. If a calibration
+  is cleared later, affected routes surface as "unmeasured" counts in the
+  Wires and BOM panels — excluded from pricing, never silently guessed.
+- **Footage is ceiling-rounded per part** across the whole design (cable is
+  bought whole): qty = ⌈Σ measured ft⌉, ext = qty × list.
+- Routes ride in revisions like everything else; restore round-trips them.
+- Editor: waypoint clicks, **click the last waypoint again to finish** (the
+  part is picked up front, so no popover); dashed polylines in the part's
+  category color with a mid-run length chip; route click-select takes
+  precedence over space select (a wire is the finer target).
+
+**Verified live** on GRD-5002: SO run measured **39'-6"** (hand-check: 0.564
+page-widths × ~70 ft/pw ≈ 39.5 ft — exact), DMX run 19'-4"; BOM gained
+40 ft × $2.10 = $84 and 20 ft × $0.85 = $17 (total $2,571); quote update
+cut its revision; restoring pre-wire v1 dropped the wires and restoring the
+auto-save brought both back. test:specs +13 assertions; build green.

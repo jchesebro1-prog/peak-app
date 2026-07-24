@@ -169,9 +169,12 @@ See `.env.example`.
    click-to-paint catalog devices, live BOM → draft quote (`source: "grid"`).
    Phase 2 (D109): **Spaces** (room polygons; per-space BOM rollups with
    computed smallest-wins assignment) + **project revisions** (append-only,
-   auto-cut on quote, non-destructive restore). Roadmap in memory
-   `projects/peak-system-designer.md`; routing/risers/submittals are later
-   phases. Suite renamed **Quartzite** (D107) alongside slice 1.
+   auto-cut on quote, non-destructive restore). Phase 3 (D110): **wire
+   routing** — per-length catalog parts routed as measured polylines
+   (calibration-gated, aspect stamped per route, footage ceiling-rounded
+   per part into BOM + quote). Roadmap in memory
+   `projects/peak-system-designer.md`; risers/submittals are later phases.
+   Suite renamed **Quartzite** (D107) alongside slice 1.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
