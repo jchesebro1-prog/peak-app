@@ -387,6 +387,24 @@ export function ozPerFt2(f: Fabric): number {
   return f.basis === "sq-yd" ? f.oz / 9 : f.oz / ((f.width / 12) * 3);
 }
 
+/** Resolve a catalog Fabric row into the `Fabric` shape the weight math uses.
+ *  Returns null when the row carries no numeric weight, so a missing oz fails
+ *  loudly at the call site instead of silently weighing zero. */
+export function fabricFromPart(p: {
+  desc: string;
+  oz?: number;
+  ozBasis?: "lin-yd" | "sq-yd";
+  boltWidthIn?: number;
+}): Fabric | null {
+  if (typeof p.oz !== "number" || p.oz <= 0) return null;
+  return {
+    name: p.desc,
+    oz: p.oz,
+    basis: p.ozBasis || "lin-yd",
+    width: p.boltWidthIn || 54,
+  };
+}
+
 export const BRICK_LG = 25;
 export const BRICK_SM = 10;
 
@@ -458,6 +476,10 @@ export const DEFAULT_WEIGHTS: WeightDefaults = {
 export type WeightLine = {
   name: string;
   fab?: string; // fabric name (— none — for gear-only lines)
+  /** A fabric resolved from the parts catalog, which wins over the `fab`
+   *  name lookup. Catalog descriptions do not match FABLIB display names, so
+   *  a name-only lookup silently weighs zero — this is the join. */
+  fabResolved?: Fabric;
   w?: number; // finished width (ft)
   h?: number; // finished height (ft)
   full?: number | null;
@@ -476,7 +498,7 @@ export type WeightLine = {
 export function computeSetWeight(L: WeightLine, def: WeightDefaults) {
   const pipe = battenById(L.pipe || def.pipe);
   const full = (L.full == null ? def.full : L.full) / 100;
-  const f = L.fab ? fabByName(L.fab) : undefined;
+  const f = L.fabResolved || (L.fab ? fabByName(L.fab) : undefined);
   const qty = L.qty || 1;
   let goods = 0;
   if (f && (L.w || 0) > 0 && (L.h || 0) > 0) {

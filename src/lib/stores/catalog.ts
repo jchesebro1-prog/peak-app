@@ -31,6 +31,15 @@ export type CatalogPart = {
   mfr?: string;
   /** Fabric rows only — curtain configurator material cost basis. */
   costPerSqft?: number;
+  /** Fabric rows only — weight basis, so one fabric choice drives both price
+   *  and rigging weight. The oz also appears in `desc` for humans; this is the
+   *  machine-readable copy. */
+  oz?: number;
+  /** How `oz` is measured. Velour bolts are sold by linear yard at a given
+   *  bolt width; muslin and scrim by square yard. */
+  ozBasis?: "lin-yd" | "sq-yd";
+  /** Bolt width in inches — only meaningful when ozBasis is "lin-yd". */
+  boltWidthIn?: number;
   /** Labor rows — 'RIG' | 'LIG' | 'AUD' | 'VID' picks the rate set. */
   discipline?: string;
   /** Labor rows — 'labor' | 'ot' | 'sup' | 'shop' | 'travel' | 'equip'. */
