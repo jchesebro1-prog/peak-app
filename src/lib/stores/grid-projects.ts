@@ -79,6 +79,28 @@ export type GridRevision = {
   placements: GridPlacement[];
   calibrations: Calibration[];
   spaces: GridSpace[];
+  /** Absent on pre-D110 snapshots — read as []. */
+  routes?: GridRoute[];
+};
+
+/**
+ * A wire run (Phase 3, D110): a polyline on one page carrying a per-length
+ * catalog part. `aspect` (page height/width) is stamped at draw time so the
+ * real length — polylineLength(points, aspect) × calibration.scale — is
+ * recomputable anywhere without reopening the sheet. Recalibrating the page
+ * reprices every wire on it instantly; nothing is denormalized.
+ */
+export type GridRoute = {
+  id: string; // 'wr-' + random
+  sheetId: string;
+  page: number;
+  /** Per-length catalog part (unit ft / lin ft / …). */
+  partId: string;
+  /** Normalized 0..1 waypoints, ≥2. */
+  points: Point[];
+  aspect: number;
+  by: string;
+  at: number;
 };
 
 export type GridProject = {
@@ -92,6 +114,8 @@ export type GridProject = {
   calibrations: Calibration[];
   /** Room polygons (Phase 2) — absent on pre-D109 docs, read as []. */
   spaces?: GridSpace[];
+  /** Wire runs (Phase 3) — absent on pre-D110 docs, read as []. */
+  routes?: GridRoute[];
   /** Append-only snapshots (Phase 2) — absent on pre-D109 docs. */
   revisions?: GridRevision[];
   /** Draft quote minted from this design, when one exists. */
@@ -144,6 +168,7 @@ export async function createProject(input: {
     placements: [],
     calibrations: [],
     spaces: [],
+    routes: [],
     quoteId: null,
     createdBy: input.by,
     createdAt: t,
@@ -316,6 +341,40 @@ export async function removeSpace(
   });
 }
 
+/* ------------------------------ routes ------------------------------ */
+
+export async function addRoute(
+  projectId: string,
+  input: { sheetId: string; page: number; partId: string; points: Point[]; aspect: number; by: string }
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.routes = [
+      ...(p.routes || []),
+      {
+        id: rid("wr-"),
+        sheetId: input.sheetId,
+        page: input.page,
+        partId: input.partId,
+        points: input.points,
+        aspect: input.aspect,
+        by: input.by,
+        at: Date.now(),
+      },
+    ];
+    p.updatedAt = Date.now();
+  });
+}
+
+export async function removeRoute(
+  projectId: string,
+  routeId: string
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.routes = (p.routes || []).filter((r) => r.id !== routeId);
+    p.updatedAt = Date.now();
+  });
+}
+
 /* ----------------------------- revisions ----------------------------- */
 
 /** Snapshot of the doc's mutable state as it stands. Pure. */
@@ -337,6 +396,7 @@ function snapshotOf(
     placements: [...(p.placements || [])],
     calibrations: [...(p.calibrations || [])],
     spaces: [...(p.spaces || [])],
+    routes: [...(p.routes || [])],
   };
 }
 
@@ -387,6 +447,7 @@ export async function restoreRevision(
     doc.placements = [...target.placements];
     doc.calibrations = [...target.calibrations];
     doc.spaces = [...target.spaces];
+    doc.routes = [...(target.routes || [])];
     pushRevision(doc, by, "restore", `Recalled v${rev}`);
     doc.updatedAt = Date.now();
   });

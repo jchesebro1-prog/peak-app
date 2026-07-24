@@ -2,23 +2,25 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import type { Calibration, MeasureUnit, Point } from "@/lib/annotations";
+import { findCalibration, type Calibration, type MeasureUnit, type Point } from "@/lib/annotations";
 import {
   addPlacement,
   addRevision,
+  addRoute,
   addSheet,
   addSpace,
   clearSheetCalibration,
   getProject,
   removePlacement,
+  removeRoute,
   removeSpace,
   renameSpace,
   restoreRevision,
   setQuote,
   setSheetCalibration,
 } from "@/lib/stores/grid-projects";
-import { list as listCatalog } from "@/lib/stores/catalog";
-import { bomLines, bomTotals } from "@/lib/design/grid-bom";
+import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
+import { bomLines, bomTotals, isPerLengthUnit, routeLines } from "@/lib/design/grid-bom";
 import { polygonArea } from "@/lib/design/grid-geometry";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
 
@@ -150,6 +152,42 @@ export async function removeSpaceAction(
   return { ok: true };
 }
 
+/* ------------------------------ routes (D110) ------------------------------ */
+
+export async function addRouteAction(
+  projectId: string,
+  input: { sheetId: string; page: number; partId: string; points: Point[]; aspect: number }
+): Promise<Result> {
+  const user = await requireUser();
+  if ((input.points || []).length < 2)
+    return { ok: false, error: "A wire run needs at least two points." };
+  if (!(input.aspect > 0) || !Number.isFinite(input.aspect))
+    return { ok: false, error: "The sheet hasn't finished loading — try again." };
+  const part = await getPart(input.partId);
+  if (!part) return { ok: false, error: "Pick a wire type from the catalog first." };
+  if (!isPerLengthUnit(part.unit))
+    return { ok: false, error: `${part.sku} is priced per ${part.unit}, not per length — wires need a per-foot part.` };
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  if (!findCalibration(project.calibrations || [], input.sheetId, input.page))
+    return { ok: false, error: "Calibrate this page before routing wire — lengths need a scale." };
+  const p = await addRoute(projectId, { ...input, by: user.name });
+  if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+export async function removeRouteAction(
+  projectId: string,
+  routeId: string
+): Promise<Result> {
+  await requireUser();
+  const p = await removeRoute(projectId, routeId);
+  if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
 /* ----------------------------- revisions (D109) ----------------------------- */
 
 export async function saveRevisionAction(
@@ -189,11 +227,18 @@ export async function createDraftQuoteAction(
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
   const placements = project.placements || [];
-  if (!placements.length) return { ok: false, error: "Place at least one device first." };
+  const routes = project.routes || [];
+  if (!placements.length && !routes.length)
+    return { ok: false, error: "Place a device or route a wire first." };
 
   const catalog = await listCatalog();
-  const lines = bomLines(placements, catalog);
-  const totals = bomTotals(placements, catalog);
+  const devLines = bomLines(placements, catalog);
+  const devTotals = bomTotals(placements, catalog);
+  const wires = routeLines(routes, catalog, project.calibrations || []);
+  const lines = [...devLines, ...wires.lines];
+  const value = devTotals.value + wires.value;
+  const cost = devTotals.cost + wires.cost;
+  const totals = { value, margin: value > 0 ? (value - cost) / value : 0 };
   const spec = {
     kind: "grid",
     gridProjectId: project.id,
