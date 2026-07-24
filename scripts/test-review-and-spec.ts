@@ -623,5 +623,19 @@ const gearBase = { gear: 120 };
 const gearMerge = mergeLineFabric(gearBase, { fab: overrideDesc }, null, OVERRIDE_FABRICS);
 ok(gearMerge.fab === overrideDesc && gearMerge.fabResolved === undefined, "a non-rule (Electric/Shell) line's fab override is passed through, never re-resolved from the catalog — there is no rule behind it to protect");
 
+/* --- cut allowance is inches, not feet (Decision B, Jeff approved 2026-07-24) ---
+ * computeSetWeight's cut allowance (def.cut) is documented and labelled "(in)".
+ * The goods math adds it to a height in FEET, so it must be divided by 12. The
+ * test is value-independent: 12 inches of cut IS one foot, so bumping def.cut by
+ * 12 must move the weight exactly as much as adding 1 ft of finished height.
+ * Under the old bug (cut added as feet) those two diverge by a factor of 12. */
+const cutFab = fabricFromPart({ desc: "21 oz Marvel Velour", oz: 21, ozBasis: "lin-yd", boltWidthIn: 54 })!;
+const cutLine = { name: "t", fabResolved: cutFab, w: 10, full: 50, qty: 1 };
+const cutBase = computeSetWeight({ ...cutLine, h: 20 }, { ...DEFAULT_WEIGHTS, cut: 6 });
+const cutViaCut = computeSetWeight({ ...cutLine, h: 20 }, { ...DEFAULT_WEIGHTS, cut: 18 }); // +12 in
+const cutViaHeight = computeSetWeight({ ...cutLine, h: 21 }, { ...DEFAULT_WEIGHTS, cut: 6 }); // +1 ft
+ok(Math.abs(cutViaCut.goods - cutViaHeight.goods) < 1e-6, `+12in of cut == +1ft of height — cut is inches (got ${cutViaCut.goods.toFixed(2)} vs ${cutViaHeight.goods.toFixed(2)})`);
+ok(cutViaCut.goods > cutBase.goods, "more cut allowance still adds weight (sanity: fix didn't invert the sign)");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

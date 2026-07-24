@@ -503,7 +503,7 @@ export function computeSetWeight(L: WeightLine, def: WeightDefaults) {
   let goods = 0;
   if (f && (L.w || 0) > 0 && (L.h || 0) > 0) {
     const flatW = (L.w || 0) * (1 + full);
-    const cutH = (L.h || 0) + def.cut;
+    const cutH = (L.h || 0) + def.cut / 12; // def.cut is inches; L.h is feet
     const fab = (flatW * cutH * ozPerFt2(f)) / 16;
     const chain = (CHAINS.find((c) => c.name === L.chain) || CHAINS[0]).lb * (L.w || 0);
     const hw = def.hwPerFt * (L.w || 0);
