@@ -486,20 +486,24 @@ ok(rDraw.w === 20, `draw panel = PW/2+2 (got ${rDraw.w})`);
 ok(rDraw.h === 19, `draw height = PH+1 (got ${rDraw.h})`);
 ok(rDraw.qty === 2 && rDraw.fullness === 50, "draw is a pair at 50% fullness");
 ok(rDraw.track === TRACK_TRAVELER, "draw travels on standard traveler track");
+ok(rDraw.fabricSku === "RB-MARVEL", "better tier draw resolves to 21oz Marvel — the tier the lineset builder defaults to when none is picked");
 
 const rRear = drapeRule("Rear", DIMS36, "better")!;
 ok(rRear.w === rDraw.w && rRear.h === rDraw.h && rRear.qty === rDraw.qty, "rear is a draw curtain — same geometry as the main");
-ok(rRear.fabricSku !== undefined, "rear still carries its own fabric key for later differentiation");
+ok(rRear.fabricSku === "RB-MARVEL", "rear resolves its own fullstage fabric role to 21oz Marvel — the same SKU as draw today, but the role is kept independently specifiable so a cheaper rear blackout can be swapped in later without touching the main drape");
 
 const rMid = drapeRule("Midstage Draw", DIMS36, "better")!;
 ok(rMid.w === rDraw.w && rMid.h === rDraw.h, "midstage matches the main's geometry");
+ok(rMid.fabricSku === "RB-MARVEL", "better tier midstage draw resolves to 21oz Marvel");
 
 const rLegs = drapeRule("Legs", DIMS36, "better")!;
 ok(rLegs.w === 6 && rLegs.h === 19 && rLegs.qty === 2, "legs are 6ft x PH+1, one pair");
 ok(rLegs.track === null, "legs tie to pipe, no track");
+ok(rLegs.fabricSku === "RB-MARVEL", "better tier legs resolve to 21oz Marvel");
 
 const rBorder = drapeRule("Border", DIMS36, "better")!;
 ok(rBorder.w === 36 && rBorder.h === 5 && rBorder.qty === 1, "border is PW wide x 5ft drop");
+ok(rBorder.fabricSku === "RB-MARVEL", "better tier border resolves to 21oz Marvel");
 
 const rCyc = drapeRule("CYC", DIMS36, "better")!;
 ok(rCyc.w === 36 && rCyc.h === 18, "cyc is PW x PH EXACTLY — no +1 trim allowance");
@@ -513,6 +517,8 @@ ok(drapeRule("General Purpose", DIMS36, "better") === null, "general purpose lin
 ok(drapeRule("Draw", DIMS36, "good")!.fabricSku === "RB-EN-16", "good tier uses 16oz Encore");
 ok(drapeRule("Draw", DIMS36, "best")!.fabricSku === "RB-MV-MN", "best tier uses 25oz Memorable");
 ok(drapeRule("CYC", DIMS36, "good")!.fabricSku === "RB-MUS", "cyc is muslin at every tier");
+ok(rCyc.fabricSku === "RB-MUS", "cyc is muslin at the better tier too — the tier the lineset builder defaults to");
+ok(drapeRule("CYC", DIMS36, "best")!.fabricSku === "RB-MUS", "cyc is muslin at the best tier too — good, better, and best all confirmed, matching the 'every tier' claim above");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
