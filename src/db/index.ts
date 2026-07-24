@@ -17,6 +17,19 @@ export type Db = PgDatabase<any, typeof schema>;
 
 const globalForDb = globalThis as unknown as { __peakDb?: Promise<Db> };
 
+/**
+ * True while `next build` is running. The build fans out across ~7 worker
+ * PROCESSES to collect page data and generate static pages, and each one that
+ * touches this module would open the same PGlite directory. PGlite is
+ * single-process (and createDb() *writes* — migrate() creates the drizzle
+ * schema), so concurrent workers corrupt `.data/pglite`. That is what produced
+ * `.data-corrupt-20260719`, `-20260719b`, and `-20260724`.
+ *
+ * Only local builds are affected: hosted builds set DATABASE_URL and take the
+ * postgres-js path above, never reaching this branch.
+ */
+const isBuild = process.env.NEXT_PHASE === "phase-production-build";
+
 async function createDb(): Promise<Db> {
   const url = process.env.DATABASE_URL;
   if (url) {
@@ -31,7 +44,15 @@ async function createDb(): Promise<Db> {
   const { migrate } = await import("drizzle-orm/pglite/migrator");
   const path = await import("node:path");
   const fs = await import("node:fs");
-  const dataDir = path.join(process.cwd(), ".data", "pglite");
+  const os = await import("node:os");
+  // During a build, give every worker its OWN throwaway datadir so the real
+  // dev database is never opened concurrently (and never touched at all).
+  const dataDir = isBuild
+    ? path.join(os.tmpdir(), `peak-build-db-${process.pid}`, "pglite")
+    : path.join(process.cwd(), ".data", "pglite");
+  if (isBuild) {
+    console.log(`[db] build phase — using throwaway datadir ${dataDir} (dev DB untouched)`);
+  }
   fs.mkdirSync(dataDir, { recursive: true });
   const client = new PGlite(dataDir);
   const db = drizzle(client, { schema }) as unknown as Db;
@@ -44,8 +65,9 @@ export function getDb(): Promise<Db> {
     globalForDb.__peakDb = createDb();
     // Dev auto-seed runs AFTER the db promise resolves — never inside
     // createDb(), because seeding uses doc-store helpers that call getDb()
-    // (awaiting the same promise → deadlock).
-    if (!process.env.DATABASE_URL) {
+    // (awaiting the same promise → deadlock). Skipped during a build: those
+    // datadirs are throwaway, so seeding them is wasted work per worker.
+    if (!process.env.DATABASE_URL && !isBuild) {
       void globalForDb.__peakDb
         .then(async (db) => {
           const { seedIfEmpty } = await import("./seed-data");

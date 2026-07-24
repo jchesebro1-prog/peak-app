@@ -34,6 +34,25 @@ npm run db:reset-local  # wipe local PGlite + reseed
 
 Node lives at `~/.local/node/bin` on this machine (in `~/.zprofile` PATH).
 
+### The dev database is single-process — never open it twice
+
+PGlite is **one process at a time**, and opening it *writes* (`migrate()` runs
+on every open). Two processes on `.data/pglite` corrupt it. This destroyed the
+dev DB three times: `.data-corrupt-20260719`, `-20260719b`, `-20260724`.
+
+- **Never leave a `tsx` script (seed/import/audit) running.** A hung
+  `tmp-seed-*.ts` holding the DB is what made the app return
+  `500 — A server error occurred` on every page on 2026-07-24. Check with
+  `ps aux | grep tsx` and stop strays before starting the dev server.
+- **Never run a db script while another may still be alive** — retrying a slow
+  seed once spawned nine concurrent PGlite processes.
+- `npm run build` is **safe as of 2026-07-24**: `next build` fans out over ~7
+  worker processes, and each one used to open the dev DB. `src/db/index.ts` now
+  gives every worker a throwaway datadir during `phase-production-build`. Hosted
+  builds set `DATABASE_URL` and never take that path.
+- Before any recovery, **copy `.data` aside first** (`.data-backup-<date>/`) —
+  that snapshot is what made 2026-07-24 a restore instead of a reseed.
+
 ## Conventions
 
 - **Port faithfully.** Keep the prototype's field names, id formats

@@ -171,8 +171,17 @@ ok(!NAV.some((e) => e.kind === "link" && e.key === "consulting"),
 ok(!NAV.some((e) => e.kind === "group" && e.key === "designstudio"),
   "the Design Studio group is gone");
 const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
-ok(!!(designGroup && designGroup.kind === "group" && designGroup.children.length === 6),
-  "Design has six children: Overview, Engagements, Designs, Steel, Lineset, Motors");
+/* Assert the exact keys, not just the count: when a screen is added or moved
+ * this reports WHICH child changed. The Fixture Cross-Ref screen joined the
+ * group after D97 shipped, which is why a bare `length === 6` went stale. */
+const DESIGN_CHILDREN = [
+  "designoverview", "engagements", "designs",
+  "steel", "lineset", "motors", "fixtures",
+];
+ok(
+  !!designGroup && designGroup.kind === "group" &&
+    JSON.stringify(designGroup.children.map((c) => c.key)) === JSON.stringify(DESIGN_CHILDREN),
+  `Design's children are exactly [${DESIGN_CHILDREN.join(", ")}]`);
 
 /* --- home tabbed hub (D98) ---
  * homeTabFor() was deleted (final-review Fix 2): every hub route is a

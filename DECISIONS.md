@@ -1460,3 +1460,52 @@ on `sites.id` alone would miss it. Engagements match on `companyId` + `siteIds`
 Read-only: no new tables, no migrations, no writes; venue create/edit stays on
 the company record (out of scope). The `[id]` URL is the stable `sites.id`,
 resolved to the doc-loc id internally so `loc1` never appears in a URL.
+
+## D106 — `next build` no longer corrupts the dev database (2026-07-24)
+
+**The bug.** `npm run build` destroyed the local PGlite dev DB. Every page then
+returned `500 — A server error occurred`, because `createDb()` aborts on open:
+
+```
+Failed query: CREATE SCHEMA IF NOT EXISTS "drizzle"
+[cause]: RuntimeError: Aborted()
+```
+
+**Root cause.** `next build` fans out over **~7 worker processes**
+("Collecting page data using 7 workers", "Generating static pages using 7
+workers"). Every worker that reached `src/db/index.ts` opened the *same*
+`.data/pglite` directory, and opening is not read-only — `createDb()` runs
+`migrate()`, which writes. PGlite is single-process, so concurrent writers
+corrupted it. Reproduced twice from a verified-healthy DB with **no dev server
+running**, which is why the previous standing rule ("never build with a dev
+server running") was not enough: the build alone was sufficient.
+
+This is the same failure behind `.data-corrupt-20260719` and `-20260719b`.
+
+**Fix.** During `NEXT_PHASE === "phase-production-build"` with no
+`DATABASE_URL`, each worker gets its own throwaway datadir under `os.tmpdir()`
+keyed by pid, and the dev auto-seed is skipped (those DBs are disposable).
+The real `.data/pglite` is never opened by a build.
+
+**Blast radius: local builds only.** Hosted builds (Vercel) set `DATABASE_URL`
+and take the postgres-js path, which never reaches this branch. Production
+behaviour is unchanged.
+
+**Verified.** Healthy DB → `npm run build` → 80/80 static pages green, worker
+logs show four distinct pids each on their own datadir → DB still opens clean
+(PostgreSQL 18.3, `drizzle` + 28 public tables). Before the fix the identical
+sequence corrupted it every time.
+
+**Also in this change**
+- The failing `test:specs` assertion `Design has six children` was **stale**,
+  not a bug: the Fixture Cross-Ref screen (`/design/fixtures`, a real shipped
+  route) is a legitimate 7th child added after D97. It now asserts the exact
+  child keys, so a future change names what moved instead of failing on a count.
+  Suite is back to ALL PASSED.
+- `.data-backup*/` added to `.gitignore` — recovery snapshots carry the same
+  encrypted tokens as `/backups/` and must not be committed.
+
+**Operational note.** The incident that started this was two hung
+`scripts/tmp-seed-markup.ts` processes holding the dev DB open for four days;
+the running dev server could not open it, so the app 500'd on every page. Stray
+`tsx` scripts are now called out in AGENTS.md.
