@@ -23,6 +23,7 @@ import {
   PRODIGY_HOISTS,
   BATTENS,
   fmt,
+  fabricFromPart,
   type WeightDefaults,
   type WeightLine,
   type LinesetMode,
@@ -196,6 +197,22 @@ export function LinesetBuilder({
 
         const ruled = !!rule || s.type === "Electric" || s.type === "Shell";
         const line: WeightLine = { name: load?.nameOverride || s.name, ...base, ...load };
+
+        // F1 fix: on a rule-derived drape line, `base.fabResolved` (from the
+        // catalog SKU) rides through the `...load` spread untouched — the
+        // editor only ever patches `fab` (a label), never `fabResolved`. Since
+        // computeSetWeight prefers `fabResolved` over a `fab` name lookup, a
+        // user's fabric override was a silent no-op on weight. When `fab` has
+        // been overridden, re-resolve `fabResolved` from the CATALOG list
+        // against the new value so the weight tracks what the dropdown shows.
+        // A catalog miss clears fabResolved (never keeps the stale rule
+        // value) so `fabByName(fab)` can govern instead, same as any
+        // non-catalog line.
+        if (rule && load?.fab !== undefined) {
+          const part = fabrics.find((f) => f.desc === load.fab);
+          line.fabResolved = (part && fabricFromPart(part)) || undefined;
+        }
+
         const specified = ruled || !!load;
         const c = specified ? computeSetWeight(line, def) : null;
         return { s, key, load, rule, ruled, specified, line, c };
@@ -282,6 +299,15 @@ export function LinesetBuilder({
       lineKey && !isOverride(lineKey, f) ? { color: "#9aa0ab", background: "#fafbfc" } : undefined;
     const genLabel = (f: keyof WeightLine): React.CSSProperties =>
       lineKey && !isOverride(lineKey, f) ? { ...label, color: "#9aa0ab" } : label;
+    // Rule-derived drape lines carry a CATALOG fabric (their `fab` is a
+    // catalog `desc`, e.g. "21 oz Marvel Velour"), which never matches a
+    // FABLIB name — listing FABLIB here made the select fall back to
+    // "— none —" even though the line weighs correctly via fabResolved (F2).
+    // List the catalog instead so the real fabric shows selected, and an
+    // override lands as a `desc` the rows memo above can re-resolve (F1).
+    // Extras and non-rule lines (Electric/Shell/General Purpose) have no
+    // catalog rule behind them and keep picking from FABLIB, unchanged.
+    const catalogRule = lineKey ? rows.find((r) => r.key === lineKey)?.rule : undefined;
     return (
       <div style={{ background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "12px 14px", margin: "2px 0 6px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10 }}>
@@ -292,7 +318,9 @@ export function LinesetBuilder({
           <div style={{ gridColumn: "span 2" }}><span style={genLabel("fab")}>Fabric / goods</span>
             <select value={value.fab || "— none —"} onChange={(e) => onChange({ fab: e.target.value })} style={{ ...field, ...genStyle("fab") }}>
               <option>— none —</option>
-              {FABLIB.map((f) => <option key={f.name}>{f.name}</option>)}
+              {catalogRule
+                ? fabrics.map((f) => <option key={f.sku} value={f.desc}>{f.desc}</option>)
+                : FABLIB.map((f) => <option key={f.name}>{f.name}</option>)}
             </select></div>
           <div><span style={genLabel("w")}>Width (ft)</span><NumF v={value.w ?? 0} set={(n) => onChange({ w: n })} style={genStyle("w")} /></div>
           <div><span style={genLabel("h")}>Height (ft)</span><NumF v={value.h ?? 0} set={(n) => onChange({ h: n })} style={genStyle("h")} /></div>
