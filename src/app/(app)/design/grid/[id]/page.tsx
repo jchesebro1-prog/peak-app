@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
+import { allEngagements } from "@/lib/stores/engagements";
 import type { PartLite } from "@/lib/design/grid-bom";
 import GridEditor from "./editor";
 
@@ -32,7 +33,21 @@ export default async function GridEditorPage({
     );
   }
 
-  const [sheets, catalog] = await Promise.all([listSheets(project.id), listCatalog()]);
+  const [sheets, catalog, engagements] = await Promise.all([
+    listSheets(project.id),
+    listCatalog(),
+    allEngagements(),
+  ]);
+
+  // The D94 bid-spec generator is engagement-scoped; when the customer has a
+  // live engagement, the editor links straight into it (the generator's
+  // "Start from a quote" list matches this design's quote by customer).
+  const eng = project.customerId
+    ? engagements.find(
+        (e) => e.companyId === project.customerId && e.status !== "oversight_complete"
+      )
+    : undefined;
+  const specHref = eng ? `/design/engagements/spec?id=${encodeURIComponent(eng.id)}` : null;
 
   /** Client payload: sheets without re-serialization surprises + PartLite slice. */
   const parts: PartLite[] = catalog.map((p) => ({
@@ -60,6 +75,7 @@ export default async function GridEditorPage({
       }}
       sheets={sheets.map((s) => ({ id: s.id, name: s.name, mime: s.mime, dataUrl: s.dataUrl }))}
       parts={parts}
+      specHref={specHref}
     />
   );
 }

@@ -23,10 +23,14 @@ import { saveGeneratedSpec } from "@/lib/stores/generated-specs";
 
 type Result<T = unknown> = ({ ok: true } & T) | { ok: false; error: string };
 
-/** Pull an equipment list out of a quote's estimator spec subdoc. */
+/** Pull an equipment list out of a quote's spec subdoc — the estimator's
+ *  nested sections, or the flat `lines` shape The Grid mints (D111). */
 type QuoteSpecDoc = {
   id: string;
-  spec?: { sections?: Array<{ items?: Array<{ sku?: string; desc?: string; qty?: number; option?: boolean }> }> };
+  spec?: {
+    sections?: Array<{ items?: Array<{ sku?: string; desc?: string; qty?: number; option?: boolean }> }>;
+    lines?: Array<{ sku?: string; desc?: string; qty?: number }>;
+  };
 };
 
 export async function bomFromQuoteAction(quoteId: string): Promise<Result<{ bom: BomRow[] }>> {
@@ -34,16 +38,20 @@ export async function bomFromQuoteAction(quoteId: string): Promise<Result<{ bom:
   const q = await getDoc<QuoteSpecDoc>("quotes", quoteId);
   if (!q) return { ok: false, error: `Quote ${quoteId} not found.` };
   const rows: BomRow[] = [];
+  const push = (sku: unknown, desc: unknown, qty: unknown) => {
+    const s = String(sku || "").trim();
+    const d = String(desc || "").trim();
+    if (!s && !d) return;
+    rows.push({ sku: s, desc: d, qty: Number(qty) || 0 });
+  };
   for (const sec of q.spec?.sections || []) {
     for (const it of sec.items || []) {
       // Optional-scope lines are not part of the base bid.
       if (it.option) continue;
-      const sku = String(it.sku || "").trim();
-      const desc = String(it.desc || "").trim();
-      if (!sku && !desc) continue;
-      rows.push({ sku, desc, qty: Number(it.qty) || 0 });
+      push(it.sku, it.desc, it.qty);
     }
   }
+  for (const it of q.spec?.lines || []) push(it.sku, it.desc, it.qty);
   if (!rows.length) {
     return { ok: false, error: `Quote ${quoteId} has no equipment lines to specify.` };
   }

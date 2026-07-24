@@ -122,10 +122,13 @@ export default function GridEditor({
   project,
   sheets,
   parts,
+  specHref,
 }: {
   project: ProjectLite;
   sheets: SheetLite[];
   parts: PartLite[];
+  /** D94 bid-spec generator for this customer's engagement, when one exists. */
+  specHref: string | null;
 }) {
   const router = useRouter();
   const [activeSheetId, setActiveSheetId] = useState(sheets[0]?.id || "");
@@ -795,6 +798,14 @@ export default function GridEditor({
                 style={{ display: "block", marginTop: 6, fontSize: 11.5, color: "var(--accent)", textAlign: "center" }}
               >
                 View in Quotes →
+              </Link>
+            )}
+            {project.quoteId && specHref && (
+              <Link
+                href={specHref}
+                style={{ display: "block", marginTop: 3, fontSize: 11.5, color: "var(--accent)", textAlign: "center" }}
+              >
+                Bid spec from this design →
               </Link>
             )}
           </div>
