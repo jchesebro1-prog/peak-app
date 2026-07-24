@@ -512,5 +512,33 @@ ok(bomBySpace([gp(0.5, 0.2, "S4LED")], gridParts, []).length === 1
 ok(bomBySpace([gp(0.5, 0.2, "S4LED")], gridParts, [stageSp, houseSp]).length === 1,
   "spaces with no devices are omitted");
 
+/* --- The Grid wire routing (D110) --- */
+import { distToPolyline, polylineLength } from "@/lib/design/grid-geometry";
+import { isPerLengthUnit, routeLengthFt, routeLines } from "@/lib/design/grid-bom";
+
+// Aspect 2 (page twice as tall as wide): a vertical hop of 0.25 in y is
+// 0.5 page-widths of real distance.
+const zig = [{ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.1 }, { x: 0.4, y: 0.35 }];
+ok(Math.abs(polylineLength(zig, 2) - 0.8) < 1e-9, `polyline length sums segments with aspect (${polylineLength(zig, 2)})`);
+ok(polylineLength([zig[0]], 2) === 0, "a single point has no length");
+ok(Math.abs(distToPolyline({ x: 0.25, y: 0.2 }, zig, 1) - 0.1) < 1e-9, "distance to the nearest segment (perpendicular)");
+ok(Math.abs(distToPolyline({ x: 0.5, y: 0.35 }, zig, 1) - 0.1) < 1e-9, "distance past a segment end clamps to the endpoint");
+ok(isPerLengthUnit("ft") && isPerLengthUnit("Lin Ft") && isPerLengthUnit("/ft") && isPerLengthUnit("linear ft"), "per-length units accepted");
+ok(!isPerLengthUnit("ea") && !isPerLengthUnit("sq ft") && !isPerLengthUnit("hr"), "per-each/area/time units are not wire units");
+
+const wireCal = { docId: "s1", page: 1, scale: 100, unit: "ft" as const, refLength: 60, by: "t", at: 0 };
+const soRoute = { id: "wr-1", sheetId: "s1", page: 1, points: zig, aspect: 2, partId: "WIRE-SO" };
+const dmxRoute = { id: "wr-2", sheetId: "s1", page: 1, points: [zig[0], zig[1]], aspect: 2, partId: "WIRE-SO" };
+const coldRoute = { id: "wr-3", sheetId: "s2", page: 1, points: zig, aspect: 2, partId: "WIRE-SO" };
+ok(Math.abs((routeLengthFt(soRoute, [wireCal]) || 0) - 80) < 1e-9, `route length = polyline × scale (${routeLengthFt(soRoute, [wireCal])})`);
+ok(routeLengthFt(coldRoute, [wireCal]) === null, "uncalibrated page → null length");
+const wireParts = [
+  { id: "WIRE-SO", sku: "WIRE-SO", desc: "12/3 SO cable", category: "Wire", unit: "ft", list: 2, cost: 1 },
+] as PartLite[];
+const wl = routeLines([soRoute, dmxRoute, coldRoute], wireParts, [wireCal]);
+ok(wl.lines.length === 1 && wl.lines[0].qty === 110, `routes of one part sum then ceil (80 + 30 = ${wl.lines[0]?.qty})`);
+ok(wl.lines[0].ext === 220 && wl.value === 220 && wl.cost === 110, "wire ext/value/cost from qty × list|cost");
+ok(wl.unmeasured === 1, "the uncalibrated route is counted, not silently dropped");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

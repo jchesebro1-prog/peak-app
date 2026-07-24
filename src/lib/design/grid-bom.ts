@@ -97,6 +97,83 @@ export function bomBySpace(
   return out;
 }
 
+/* ------------------------------ wire routes ------------------------------ */
+
+import { polylineLength } from "./grid-geometry";
+import type { Calibration } from "@/lib/annotations";
+
+/** Units that price by run length — the wire-part predicate (D110). */
+export function isPerLengthUnit(unit: string): boolean {
+  const u = unit.trim().toLowerCase().replace(/^\//, "");
+  return u === "ft" || u === "lin ft" || u === "linear ft" || u === "lf";
+}
+
+export type RouteLite = {
+  id: string;
+  sheetId: string;
+  page: number;
+  points: Point[];
+  /** Page height/width, stamped at draw time — a property of the page, so
+   *  the length is recomputable without re-opening the sheet. */
+  aspect: number;
+  partId: string;
+};
+
+// grid-geometry's Point is annotations' Point; re-declare structurally to
+// keep this file dependency-light for the client bundle.
+type Point = { x: number; y: number };
+
+/** Real length in the calibration's unit, or null when the page has no
+ *  scale — an unmeasured wire must be surfaced, never guessed. */
+export function routeLengthFt(route: RouteLite, cals: Calibration[]): number | null {
+  const cal = cals.find((c) => c.docId === route.sheetId && c.page === route.page) || null;
+  if (!cal || !(route.aspect > 0)) return null;
+  return polylineLength(route.points, route.aspect) * cal.scale;
+}
+
+/**
+ * Wire BOM: measured routes grouped by part, total feet rounded UP per part
+ * (cable is bought whole, not prorated). Routes on pages whose calibration
+ * has gone missing are counted in `unmeasured` rather than silently dropped.
+ */
+export function routeLines(
+  routes: RouteLite[],
+  parts: PartLite[],
+  cals: Calibration[]
+): { lines: BomLine[]; value: number; cost: number; unmeasured: number } {
+  const byId = new Map(parts.map((p) => [p.id, p]));
+  const feet = new Map<string, number>();
+  let unmeasured = 0;
+  for (const r of routes) {
+    const ft = routeLengthFt(r, cals);
+    if (ft === null) {
+      unmeasured++;
+      continue;
+    }
+    feet.set(r.partId, (feet.get(r.partId) || 0) + ft);
+  }
+  const lines: BomLine[] = [];
+  let value = 0;
+  let cost = 0;
+  for (const [partId, ft] of feet) {
+    const part = byId.get(partId);
+    const qty = Math.ceil(ft);
+    const line: BomLine = {
+      partId,
+      desc: part ? part.desc : `${partId} (removed part — no longer in the catalog)`,
+      unit: part ? part.unit : "ft",
+      qty,
+      list: part ? part.list : 0,
+      ext: qty * (part ? part.list : 0),
+    };
+    lines.push(line);
+    value += line.ext;
+    cost += qty * (part ? part.cost : 0);
+  }
+  lines.sort((a, b) => b.ext - a.ext || a.partId.localeCompare(b.partId));
+  return { lines, value, cost, unmeasured };
+}
+
 /** Sell value, internal cost, and blended margin for a set of placements. */
 export function bomTotals(
   placements: Array<{ partId: string }>,

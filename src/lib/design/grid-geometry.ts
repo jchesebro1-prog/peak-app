@@ -74,6 +74,48 @@ export function polygonCentroid(poly: Point[]): Point {
   return { x: cx / (3 * s), y: cy / (3 * s) };
 }
 
+/* ----------------------------- polylines ----------------------------- */
+
+/**
+ * Total length of a polyline in PAGE-WIDTH units (the calibration basis —
+ * see lib/annotations.pageDistance): each segment's y-span is scaled by the
+ * page aspect so diagonal runs measure true on non-square pages.
+ */
+export function polylineLength(points: Point[], aspect: number): number {
+  let sum = 0;
+  for (let i = 1; i < points.length; i++) {
+    const dx = points[i].x - points[i - 1].x;
+    const dy = (points[i].y - points[i - 1].y) * aspect;
+    sum += Math.hypot(dx, dy);
+  }
+  return sum;
+}
+
+/**
+ * Minimum distance from a point to any segment of a polyline, in the same
+ * aspect-corrected page-width units — the wire hit-test. Projection is
+ * clamped to the segment so clicks past an endpoint measure to the endpoint.
+ */
+export function distToPolyline(p: Point, points: Point[], aspect: number): number {
+  if (!points.length) return Infinity;
+  const px = p.x;
+  const py = p.y * aspect;
+  let best = Infinity;
+  for (let i = 1; i < points.length; i++) {
+    const ax = points[i - 1].x;
+    const ay = points[i - 1].y * aspect;
+    const bx = points[i].x;
+    const by = points[i].y * aspect;
+    const vx = bx - ax;
+    const vy = by - ay;
+    const len2 = vx * vx + vy * vy;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / len2)) : 0;
+    best = Math.min(best, Math.hypot(px - (ax + t * vx), py - (ay + t * vy)));
+  }
+  if (points.length === 1) best = Math.hypot(px - points[0].x, py - points[0].y * aspect);
+  return best;
+}
+
 /**
  * The space a placement belongs to: smallest containing polygon on the
  * same sheet+page, or null. Smallest-wins is what makes nesting work —
