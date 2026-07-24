@@ -12,7 +12,7 @@ import {
   type CombinedLinesetData,
 } from "./lineset-builder";
 
-export const metadata = { title: "Lineset Builder — Peak Backend" };
+export const metadata = { title: "Lineset Builder — Quartzite" };
 
 /** v2 records predate the PRO dimensions. Backfill them from the defaults so an
  *  old saved design opens with working goods geometry rather than zero-size

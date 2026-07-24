@@ -1509,3 +1509,204 @@ sequence corrupted it every time.
 `scripts/tmp-seed-markup.ts` processes holding the dev DB open for four days;
 the running dev server could not open it, so the app 500'd on every page. Stray
 `tsx` scripts are now called out in AGENTS.md.
+
+## D107 — The software is named Quartzite (2026-07-24)
+
+Jeff's direct instruction (2026-07-24): "change the name of the software to
+Quartzite." Quartzite was the Wisconsin wildcard in the 2026-07-24 naming
+exploration — the Baraboo Range bedrock under Peak's Reedsburg HQ: the rock
+too hard to be worn down, in the place the ice couldn't flatten.
+
+What changed: every user-facing software-name surface — the ~65 page metadata
+titles (`— Peak Backend` → `— Quartzite`), the root layout title + PWA
+`appleWebApp` title, `manifest.webmanifest` name/short_name, the nav's beta-
+feedback subject, the service-worker cache name (`peak-shell-v1` →
+`quartzite-shell-v1`, which also invalidates stale shells on next activate),
+and the README/AGENTS headings.
+
+What deliberately did NOT change: the company name "Peak Systems Group"
+(documents, descriptions, copyright), the repo/package name `peak-app`, the
+`pk-*` CSS token prefix, id formats, and the Apple Reminders list literally
+named "Peak" that the queue agent reconciles against (external data).
+
+## D108 — The Grid: the DaVinci-style system designer, slice 1 (2026-07-24)
+
+Jeff's instruction (2026-07-24): "start the DaVinci implementation and just
+name it The Grid." The Grid is the Design-tab module recreating what ETC
+DaVinci does for dealers — plan-view system layout feeding a priced BOM and a
+quote — scoped by the four decisions recorded in the planning session
+(memory: projects/peak-system-designer.md, DEC-PSD-1…4): multi-brand
+Peak-native, first slice = plan layout + live BOM → draft quote, extend the
+D95/D96 markup canvas, PDF/image backgrounds only.
+
+**Naming note.** The 2026-07-24 naming exploration had proposed "The Grid"
+for the *lineset builder* (the theatrical rigging grid). Jeff assigned the
+name to the DaVinci module instead — his call supersedes the proposal; the
+lineset builder keeps its plain name.
+
+**What shipped (route `/design/grid`, nav child of Design between Designs
+and Steel Calculator):**
+- `grid_projects` + `grid_sheets` doc collections (migration 0008). Two
+  collections deliberately: the project doc is patched on every device
+  placement, so the heavy sheet dataUrls live one-doc-per-sheet in
+  `grid_sheets`, written once — the D95 amplification lesson (a 1.2 MB
+  background inline would make every placement rewrite megabytes). Neither
+  is sync-pushable: placements feed quotes, so writes are server-action-only
+  (same guardrail as quotes/catalog_parts).
+- `stores/grid-projects.ts` — projects are `GRD-####` (nextPrefixedId base
+  5001). Placements are normalized 0..1 points carrying a catalog SKU;
+  calibrations reuse `lib/annotations.Calibration` with `docId` = sheet id.
+- `lib/design/grid-bom.ts` — dependency-free BOM math (client sidebar and
+  server quote action share it, so they can never disagree). A placement
+  whose part left the catalog stays visible at $0 flagged "removed part"
+  rather than silently shrinking the quote. Covered in test:specs.
+- Editor: sheet upload (PDF/image, 8 MB cap, DWGs get printed to PDF —
+  DEC-PSD-4), pdf.js render via the markup screen's PdfCanvas (moved to
+  `src/components/design/pdf-canvas.tsx`), page-scale calibration with the
+  markup screen's inline-entry idiom, device palette over the live catalog
+  (search + category filter), click-to-paint markers (category-colored, SKU
+  chip), marker select/remove, live grouped BOM.
+- "Create draft quote" mints a `source: "grid"`, `quoteType: "system"` draft
+  (value = list total, margin = blended (list−cost)/list) with
+  `spec: { kind: "grid", gridProjectId, lines }`, and stores `quoteId` on
+  the project. Re-running refreshes the same quote while it is still a
+  draft; once the quote has moved past draft the action refuses — rewriting
+  numbers a customer may have seen is the quote screen's revision machinery's
+  job, not a side effect of moving markers.
+
+**Bugs caught while verifying in the browser (worth remembering):**
+- An `<img>` sheet's `onLoad` can fire before layout (and not at all for
+  cached images), leaving the size state 0×0 → aspect NaN → calibration
+  failed with a misleading "enter a positive number". Fix: read
+  naturalWidth/naturalHeight via callback ref + onLoad. The markup viewer
+  has the same latent pattern (its size state also starts 900×1200 and is
+  set from clientWidth onLoad) — flagged as a follow-up.
+- The callback-ref fix originally called setSize unconditionally — an inline
+  ref runs on every commit, so that was an infinite render loop that hung
+  the tab. Functional update returning the same reference when unchanged.
+- `toNorm` now guards a zero-size rect (sheet still loading) — the division
+  was NaN and poisoned draft geometry with no visible error.
+
+**Deliberately NOT in slice 1** (roadmap in memory:
+projects/peak-system-designer.md): wire routing, riser/one-line generation,
+accessories/port rules, datasheet/submittal packages, spaces, per-part
+symbol metadata (markers show the SKU chip), venue/site link on the project,
+pricing-tier stamping on the minted quote, and blob storage for attachments
+(grid_sheets-as-docs is the interim; real blob storage is still the Phase-0
+item for backgrounds at production scale).
+
+## D109 — The Grid Phase 2: Spaces + project revisions (2026-07-24)
+
+Jeff: "move forward with the next phase of the grid." Phase 2 per the
+roadmap (memory: projects/peak-system-designer.md): **Spaces** — room
+polygons with per-space BOM rollups — and **project revisions**.
+
+**Spaces.**
+- Polygons (normalized 0..1, per sheet+page like calibrations) stored on the
+  project doc. No new collections, no migration — pre-D109 docs read
+  `spaces || []`.
+- **Assignment is computed, never stored:** a device belongs to the smallest
+  space polygon containing it (`lib/design/grid-geometry.spaceOf`, ray
+  casting + shoelace, covered in test:specs). Redrawing a room reassigns
+  every device instantly; deleting one can't strand stale ids; nesting works
+  (a booth inside the house claims its own devices). The alternative —
+  stamping a spaceId on each placement — would have needed reconciliation on
+  every polygon edit.
+- Editor: corner-click drawing that closes on the first corner, inline name
+  entry, translucent fills under the markers, centroid label chips,
+  smallest-wins click-select, rename/two-step delete in the panel. Rollups
+  (count · value) per space, plus Unassigned; the geometry and pricing run
+  through the same dependency-free libs on client and server.
+- addSpaceAction refuses <3 corners and zero-area polygons.
+
+**Revisions.** The QuoteRevision idiom, applied to the design: append-only
+`revisions[]` snapshots (name, sheetIds, placements, calibrations, spaces),
+reasons `manual | quote | restore`. Quoting auto-cuts one ("Quoted as
+Q-####") so what-was-quoted is always recoverable. Restore is
+non-destructive: auto-save current → apply target → record the recall.
+**sheetIds are snapshotted but never applied on restore** — sheets are
+write-once uploads, and restoring an old layout must not orphan a
+since-added sheet.
+
+**Input hardening found while verifying:** pointer events are now ignored
+outright when the canvas rect is unmeasurable (a hidden window/mid-load
+click previously normalized to (0,0) — it dropped a device or space corner
+at the top-left of the sheet).
+
+**Verified live** on GRD-5002: Stage 3 · $2,250 / House 2 · $220 rollups,
+delete/redraw, manual save → device removal → restore v1 (auto-save + recall
+entries) → quote update cutting v4. test:specs 15 new assertions; build green.
+
+## D110 — The Grid Phase 3: wire routing with measured lengths (2026-07-24)
+
+Phase 3 per the roadmap: draw wire runs on the plan, measure them from the
+page's stored scale calibration, and roll the footage into the BOM and the
+draft quote.
+
+**Model.** A route is a polyline (normalized 0..1 waypoints) on one
+sheet+page carrying a per-length catalog part and the page's **aspect ratio
+stamped at draw time**. Aspect is a property of the page, not the viewport,
+so real length — `polylineLength(points, aspect) × calibration.scale` — is
+recomputable anywhere (client sidebar, server quote action) without opening
+the sheet. Nothing is denormalized: **recalibrating a page reprices every
+wire on it instantly.**
+
+**Rules.**
+- **Wire types are catalog parts with a per-length unit** (`ft`, `lin ft`,
+  `linear ft`, `lf`, leading-slash variants) — DEC-PSD-1: the catalog is the
+  library, no special wire table. The two demo parts (WIRE-SO123, WIRE-DMX)
+  went in through the Catalog screen's own add-part form.
+- **Routing requires the page to be calibrated** (refused server-side with a
+  clear message): an unmeasurable wire is a lie in a BOM. If a calibration
+  is cleared later, affected routes surface as "unmeasured" counts in the
+  Wires and BOM panels — excluded from pricing, never silently guessed.
+- **Footage is ceiling-rounded per part** across the whole design (cable is
+  bought whole): qty = ⌈Σ measured ft⌉, ext = qty × list.
+- Routes ride in revisions like everything else; restore round-trips them.
+- Editor: waypoint clicks, **click the last waypoint again to finish** (the
+  part is picked up front, so no popover); dashed polylines in the part's
+  category color with a mid-run length chip; route click-select takes
+  precedence over space select (a wire is the finer target).
+
+**Verified live** on GRD-5002: SO run measured **39'-6"** (hand-check: 0.564
+page-widths × ~70 ft/pw ≈ 39.5 ft — exact), DMX run 19'-4"; BOM gained
+40 ft × $2.10 = $84 and 20 ft × $0.85 = $17 (total $2,571); quote update
+cut its revision; restoring pre-wire v1 dropped the wires and restoring the
+auto-save brought both back. test:specs +13 assertions; build green.
+
+## D111 — The Grid Phase 4: bid-spec bridge into D94 (2026-07-24)
+
+The D94 generator's "Start from a quote" only understood the estimator's
+nested `spec.sections[].items[]`. `bomFromQuoteAction` now also reads the
+flat `spec.lines[]` shape The Grid mints, so a Grid design flows into the
+CSI submittal pipeline with no new machinery: paint → BOM → draft quote →
+bid spec. The Grid editor links straight in ("Bid spec from this design →")
+when the customer has a live consulting engagement — the generator stays
+engagement-scoped (D94's anchor), The Grid just finds the door.
+
+Verified live: created consulting quote Q-2044 for North Ridge, won it (the
+engagement CE-1001 opened per the standard flow), generator offered Q-2043,
+and its four lines (3× EQP-LIFT, 2× LIG-SUP, 40 ft WIRE-SO123, 20 ft
+WIRE-DMX) loaded into the matcher with the normal write-spec/waive workflow.
+Datasheet packages remain deferred — that is per-part file authoring, data
+work not code.
+
+## D112 — The Grid Phase 5 (v1): derived riser sketch (2026-07-24)
+
+`/design/grid/<id>/riser` — a READ-ONLY one-line diagram derived on every
+load: spaces are nodes (device counts grouped inside), and each wire run is
+an edge between the spaces its endpoints land in (smallest-wins, same
+`spaceOf` as everything else), labelled with the part and measured length.
+Devices/endpoints outside every space share an "Unassigned" node — nothing
+silently disappears. Derivation is pure (`lib/design/grid-riser.ts`, covered
+in test:specs); layout is deliberately simple (columns + arc rail).
+
+**Why derived-not-drawn:** DaVinci's riser is an editable document with a
+real auto-layout engine — that remains the "hardest single piece" of the
+roadmap and is NOT this. The sketch can never drift from the plan, which
+makes it safe to show a customer today; hand-editing comes later, if ever.
+
+**The Grid's remaining roadmap is now Jeff-gated, not code-gated:** catalog
+symbol/accessory/datasheet metadata (authoring), first-seeded brands for the
+palette, real blob storage for sheets (hosting account), per-space schedule
+report format, DXF export. Phases 1–5 all have a working slice.

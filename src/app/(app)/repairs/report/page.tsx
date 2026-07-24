@@ -11,7 +11,7 @@ import {
   type OrgCtx,
 } from "./report-doc";
 
-export const metadata = { title: "Repair report — Peak Backend" };
+export const metadata = { title: "Repair report — Quartzite" };
 
 /**
  * Repair SERVICE REPORT — printable completion document for a completed

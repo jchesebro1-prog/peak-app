@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { PRODIGY_HOISTS, FAM_NOTES, fmt } from "@/lib/design/steel";
 
-export const metadata = { title: "Motor Library — Peak Backend" };
+export const metadata = { title: "Motor Library — Quartzite" };
 
 /**
  * Motor Library — the ETC Prodigy motorized-hoist breakdown ported from the

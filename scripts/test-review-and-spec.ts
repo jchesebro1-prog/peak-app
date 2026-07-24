@@ -176,7 +176,7 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
  * this reports WHICH child changed. The Fixture Cross-Ref screen joined the
  * group after D97 shipped, which is why a bare `length === 6` went stale. */
 const DESIGN_CHILDREN = [
-  "designoverview", "engagements", "designs",
+  "designoverview", "engagements", "designs", "grid",
   "steel", "lineset", "motors", "fixtures",
 ];
 ok(
@@ -636,6 +636,127 @@ const cutViaCut = computeSetWeight({ ...cutLine, h: 20 }, { ...DEFAULT_WEIGHTS, 
 const cutViaHeight = computeSetWeight({ ...cutLine, h: 21 }, { ...DEFAULT_WEIGHTS, cut: 6 }); // +1 ft
 ok(Math.abs(cutViaCut.goods - cutViaHeight.goods) < 1e-6, `+12in of cut == +1ft of height — cut is inches (got ${cutViaCut.goods.toFixed(2)} vs ${cutViaHeight.goods.toFixed(2)})`);
 ok(cutViaCut.goods > cutBase.goods, "more cut allowance still adds weight (sanity: fix didn't invert the sign)");
+
+/* --- The Grid BOM math (D108) --- */
+import { bomLines, bomTotals, type PartLite } from "@/lib/design/grid-bom";
+
+const gridParts: PartLite[] = [
+  { id: "S4LED", sku: "S4LED", desc: "ETC Source Four LED", category: "Lighting", unit: "ea", list: 1200, cost: 800 },
+  { id: "CYC1", sku: "CYC1", desc: "Cyc fixture", category: "Lighting", unit: "ea", list: 900, cost: 600 },
+];
+const place = (partId: string) => ({ partId });
+const gLines = bomLines([place("S4LED"), place("CYC1"), place("S4LED"), place("S4LED")], gridParts);
+ok(gLines.length === 2, `BOM groups placements by part (${gLines.length} lines)`);
+ok(gLines[0].partId === "S4LED" && gLines[0].qty === 3, "biggest line first: 3× S4LED");
+ok(gLines[0].ext === 3600, `extended price = qty × list (${gLines[0].ext})`);
+const gTot = bomTotals([place("S4LED"), place("CYC1")], gridParts);
+ok(gTot.value === 2100 && gTot.cost === 1400, `totals sum value/cost (${gTot.value}/${gTot.cost})`);
+ok(Math.abs(gTot.margin - (2100 - 1400) / 2100) < 1e-9, "margin = (value-cost)/value");
+const gGhost = bomLines([place("GONE")], gridParts);
+ok(gGhost.length === 1 && gGhost[0].ext === 0 && /removed/i.test(gGhost[0].desc),
+  "a placement whose part left the catalog stays visible at $0, flagged removed");
+ok(bomTotals([], gridParts).margin === 0, "empty project has margin 0, not NaN");
+
+/* --- The Grid geometry (D109) --- */
+import { pointInPolygon, polygonArea, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
+
+const square = [
+  { x: 0.2, y: 0.2 }, { x: 0.6, y: 0.2 }, { x: 0.6, y: 0.6 }, { x: 0.2, y: 0.6 },
+];
+ok(pointInPolygon({ x: 0.4, y: 0.4 }, square), "point inside a square is in");
+ok(!pointInPolygon({ x: 0.7, y: 0.4 }, square), "point right of the square is out");
+ok(!pointInPolygon({ x: 0.4, y: 0.4 }, square.slice(0, 2)), "a 2-vertex 'polygon' contains nothing");
+// Concave L: the notch (upper-right quadrant of the bounding box) is OUTSIDE.
+const ell = [
+  { x: 0, y: 0 }, { x: 0.4, y: 0 }, { x: 0.4, y: 0.2 },
+  { x: 0.2, y: 0.2 }, { x: 0.2, y: 0.4 }, { x: 0, y: 0.4 },
+];
+ok(pointInPolygon({ x: 0.1, y: 0.3 }, ell), "L-shape: point in the lower arm is in");
+ok(!pointInPolygon({ x: 0.3, y: 0.3 }, ell), "L-shape: point in the notch is out");
+ok(Math.abs(polygonArea(square) - 0.16) < 1e-9, `shoelace area of the square (${polygonArea(square)})`);
+const cen = polygonCentroid(square);
+ok(Math.abs(cen.x - 0.4) < 1e-9 && Math.abs(cen.y - 0.4) < 1e-9, "centroid of the square is its middle");
+// Nested spaces: the smallest containing polygon wins (booth inside a hall).
+const hall = { id: "sp-hall", sheetId: "s1", page: 1, points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }] };
+const booth = { id: "sp-booth", sheetId: "s1", page: 1, points: square };
+const otherSheet = { id: "sp-other", sheetId: "s2", page: 1, points: square };
+ok(spaceOf({ sheetId: "s1", page: 1, x: 0.4, y: 0.4 }, [hall, booth])?.id === "sp-booth",
+  "nested spaces: smallest containing polygon wins");
+ok(spaceOf({ sheetId: "s1", page: 1, x: 0.9, y: 0.9 }, [hall, booth])?.id === "sp-hall",
+  "outside the booth but inside the hall → the hall");
+ok(spaceOf({ sheetId: "s2", page: 2, x: 0.4, y: 0.4 }, [hall, booth, otherSheet]) === null,
+  "wrong sheet/page matches nothing");
+
+/* --- The Grid per-space rollups (D109) --- */
+import { bomBySpace } from "@/lib/design/grid-bom";
+
+const stageSp = { id: "sp-stage", sheetId: "s1", page: 1, name: "Stage", points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 0.4 }, { x: 0, y: 0.4 }] };
+const houseSp = { id: "sp-house", sheetId: "s1", page: 1, name: "House", points: [{ x: 0, y: 0.4 }, { x: 1, y: 0.4 }, { x: 1, y: 0.9 }, { x: 0, y: 0.9 }] };
+const gp = (x: number, y: number, partId: string) => ({ sheetId: "s1", page: 1, x, y, partId });
+const roll = bomBySpace(
+  [gp(0.5, 0.2, "S4LED"), gp(0.6, 0.2, "S4LED"), gp(0.5, 0.6, "CYC1"), gp(0.5, 0.95, "S4LED")],
+  gridParts,
+  [stageSp, houseSp]
+);
+ok(roll.length === 3, `rollups: Stage, House, Unassigned (${roll.length})`);
+ok(roll[0].name === "Stage" && roll[0].count === 2 && roll[0].value === 2400,
+  `Stage rolls up 2× S4LED = $2400 (${roll[0].count}, ${roll[0].value})`);
+ok(roll[1].name === "House" && roll[1].count === 1 && roll[1].value === 900,
+  "House rolls up the CYC1");
+ok(roll[2].spaceId === null && roll[2].count === 1, "the stray device lands in Unassigned");
+ok(bomBySpace([gp(0.5, 0.2, "S4LED")], gridParts, []).length === 1
+  && bomBySpace([gp(0.5, 0.2, "S4LED")], gridParts, [])[0].spaceId === null,
+  "no spaces → a single Unassigned rollup");
+ok(bomBySpace([gp(0.5, 0.2, "S4LED")], gridParts, [stageSp, houseSp]).length === 1,
+  "spaces with no devices are omitted");
+
+/* --- The Grid wire routing (D110) --- */
+import { distToPolyline, polylineLength } from "@/lib/design/grid-geometry";
+import { isPerLengthUnit, routeLengthFt, routeLines } from "@/lib/design/grid-bom";
+
+// Aspect 2 (page twice as tall as wide): a vertical hop of 0.25 in y is
+// 0.5 page-widths of real distance.
+const zig = [{ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.1 }, { x: 0.4, y: 0.35 }];
+ok(Math.abs(polylineLength(zig, 2) - 0.8) < 1e-9, `polyline length sums segments with aspect (${polylineLength(zig, 2)})`);
+ok(polylineLength([zig[0]], 2) === 0, "a single point has no length");
+ok(Math.abs(distToPolyline({ x: 0.25, y: 0.2 }, zig, 1) - 0.1) < 1e-9, "distance to the nearest segment (perpendicular)");
+ok(Math.abs(distToPolyline({ x: 0.5, y: 0.35 }, zig, 1) - 0.1) < 1e-9, "distance past a segment end clamps to the endpoint");
+ok(isPerLengthUnit("ft") && isPerLengthUnit("Lin Ft") && isPerLengthUnit("/ft") && isPerLengthUnit("linear ft"), "per-length units accepted");
+ok(!isPerLengthUnit("ea") && !isPerLengthUnit("sq ft") && !isPerLengthUnit("hr"), "per-each/area/time units are not wire units");
+
+const wireCal = { docId: "s1", page: 1, scale: 100, unit: "ft" as const, refLength: 60, by: "t", at: 0 };
+const soRoute = { id: "wr-1", sheetId: "s1", page: 1, points: zig, aspect: 2, partId: "WIRE-SO" };
+const dmxRoute = { id: "wr-2", sheetId: "s1", page: 1, points: [zig[0], zig[1]], aspect: 2, partId: "WIRE-SO" };
+const coldRoute = { id: "wr-3", sheetId: "s2", page: 1, points: zig, aspect: 2, partId: "WIRE-SO" };
+ok(Math.abs((routeLengthFt(soRoute, [wireCal]) || 0) - 80) < 1e-9, `route length = polyline × scale (${routeLengthFt(soRoute, [wireCal])})`);
+ok(routeLengthFt(coldRoute, [wireCal]) === null, "uncalibrated page → null length");
+const wireParts = [
+  { id: "WIRE-SO", sku: "WIRE-SO", desc: "12/3 SO cable", category: "Wire", unit: "ft", list: 2, cost: 1 },
+] as PartLite[];
+const wl = routeLines([soRoute, dmxRoute, coldRoute], wireParts, [wireCal]);
+ok(wl.lines.length === 1 && wl.lines[0].qty === 110, `routes of one part sum then ceil (80 + 30 = ${wl.lines[0]?.qty})`);
+ok(wl.lines[0].ext === 220 && wl.value === 220 && wl.cost === 110, "wire ext/value/cost from qty × list|cost");
+ok(wl.unmeasured === 1, "the uncalibrated route is counted, not silently dropped");
+
+/* --- The Grid riser sketch (D112) --- */
+import { riserGraph } from "@/lib/design/grid-riser";
+
+const rSpaces = [stageSp, houseSp]; // from the rollup tests above (s1/page 1)
+const rPlacements = [gp(0.5, 0.2, "S4LED"), gp(0.6, 0.2, "S4LED"), gp(0.5, 0.6, "CYC1"), gp(0.5, 0.95, "S4LED")];
+const rRoutes = [
+  { id: "wr-a", sheetId: "s1", page: 1, partId: "WIRE-SO", aspect: 1, points: [{ x: 0.5, y: 0.2 }, { x: 0.5, y: 0.6 }] }, // stage → house
+  { id: "wr-b", sheetId: "s1", page: 1, partId: "WIRE-SO", aspect: 1, points: [{ x: 0.5, y: 0.6 }, { x: 0.5, y: 0.95 }] }, // house → outside
+];
+const rg = riserGraph(rPlacements, rRoutes, rSpaces, [...gridParts, ...wireParts], [wireCal]);
+ok(rg.nodes.length === 3, `riser: Stage, House, Unassigned nodes (${rg.nodes.length})`);
+ok(rg.nodes[0].name === "Stage" && rg.nodes[0].groups[0].qty === 2 && rg.nodes[0].groups[0].partId === "S4LED",
+  "riser: Stage groups its 2× S4LED");
+ok(rg.nodes[2].spaceId === null && rg.nodes[2].groups.length === 1, "riser: stray device lands in the Unassigned node");
+ok(rg.edges.length === 2, `riser: two wire edges (${rg.edges.length})`);
+ok(rg.edges[0].fromName === "Stage" && rg.edges[0].toName === "House", "riser: edge endpoints resolve to spaces");
+ok(rg.edges[1].fromName === "House" && rg.edges[1].toName === "Unassigned", "riser: an endpoint outside every space maps to Unassigned");
+ok(rg.edges[0].lengthFt !== null && Math.abs((rg.edges[0].lengthFt || 0) - 40) < 1e-9,
+  `riser: edge carries the measured length (${rg.edges[0].lengthFt})`);
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

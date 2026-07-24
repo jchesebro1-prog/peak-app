@@ -35,7 +35,7 @@ import {
   setCalibrationAction,
 } from "../actions";
 
-const PdfCanvas = dynamic(() => import("./pdf-canvas"), { ssr: false });
+const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
 /**
  * Markup viewer (D95, reworked D96) — document on the right, tools in a

@@ -4,7 +4,7 @@ import { getGeneratedSpec } from "@/lib/stores/generated-specs";
 import { renderSpecHtml } from "@/lib/bid-spec";
 import SpecDocView from "./doc-view";
 
-export const metadata = { title: "Specification — Peak Backend" };
+export const metadata = { title: "Specification — Quartzite" };
 export const dynamic = "force-dynamic";
 
 /** A saved bid spec (D94) — frozen output, print view + Word download. */

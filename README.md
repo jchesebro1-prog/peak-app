@@ -1,4 +1,4 @@
-# Peak Backend
+# Quartzite
 
 The production rebuild of the Peak Systems Group business app — sales,
 service (flame tests / inspections / repairs), installs, CRM, and admin —

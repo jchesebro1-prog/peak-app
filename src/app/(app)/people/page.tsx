@@ -16,7 +16,7 @@ import EditPersonModal from "./edit-modal";
 import { PeopleFilterBar } from "./controls";
 import type { SavePersonInput } from "./types";
 
-export const metadata = { title: "People — Peak Backend" };
+export const metadata = { title: "People — Quartzite" };
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";

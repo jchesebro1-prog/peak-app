@@ -4,7 +4,7 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
-# Peak Backend — production rebuild
+# Quartzite — production rebuild
 
 Production rebuild of the Peak Systems Group business app. The design +
 data-model spec is the HTML prototype in
@@ -163,6 +163,22 @@ See `.env.example`.
    cutover checklist in MASTER-HOWTO §7. Decisions D43–D46. Remaining is
    Jeff-gated: real source files (MASTER-QUESTIONS §I) + hosting accounts
    (item A / DEPLOY.md), then a real-data dry run.
+
+10. 🚧 **The Grid** (D108, D109) — the DaVinci-style system designer under
+   Design (`/design/grid`): plan-sheet upload (PDF/image), scale calibration,
+   click-to-paint catalog devices, live BOM → draft quote (`source: "grid"`).
+   Phase 2 (D109): **Spaces** (room polygons; per-space BOM rollups with
+   computed smallest-wins assignment) + **project revisions** (append-only,
+   auto-cut on quote, non-destructive restore). Phase 3 (D110): **wire
+   routing** — per-length catalog parts routed as measured polylines
+   (calibration-gated, aspect stamped per route, footage ceiling-rounded
+   per part into BOM + quote). Phase 4 (D111): grid quotes feed the **D94
+   bid-spec generator** (flat `spec.lines` support + editor link via the
+   customer's engagement). Phase 5 v1 (D112): **derived riser sketch** at
+   `/design/grid/<id>/riser`. Roadmap in memory
+   `projects/peak-system-designer.md`; what remains is Jeff-gated data/infra
+   (symbol+datasheet metadata, palette seeding, blob storage). Suite renamed
+   **Quartzite** (D107) alongside slice 1.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

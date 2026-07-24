@@ -10,7 +10,7 @@ import { AVG_MPH } from "@/lib/geo";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
-export const metadata = { title: "Rigging Inspection — Peak Backend" };
+export const metadata = { title: "Rigging Inspection — Quartzite" };
 
 /**
  * Rigging Inspection PROPOSAL — printable work order for a saved

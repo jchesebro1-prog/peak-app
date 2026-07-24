@@ -57,7 +57,7 @@ import type {
 import InboxShell from "./inbox-shell";
 import HomeTabs from "../home-tabs";
 
-export const metadata = { title: "Inbox — Peak Backend" };
+export const metadata = { title: "Inbox — Quartzite" };
 
 const BOX_IDS = ["personal", "sales", "installs", "info"] as const;
 const FOLDER_IDS = [

@@ -4,9 +4,10 @@ import { requireUser } from "@/lib/session";
 import { designRedirect } from "@/lib/design-routes";
 import { allEngagements, ENGAGEMENT_STATUS_LABEL } from "@/lib/stores/engagements";
 import { getAllDesigns as getSandboxDesigns } from "@/lib/stores/designs";
+import { listProjects as listGridProjects } from "@/lib/stores/grid-projects";
 import { shortDate } from "@/lib/format";
 
-export const metadata = { title: "Design — Peak Backend" };
+export const metadata = { title: "Design — Quartzite" };
 export const dynamic = "force-dynamic";
 
 function one(v: string | string[] | undefined): string {
@@ -24,9 +25,10 @@ export default async function DesignOverviewPage({
   const hop = designRedirect("/design", { id: one(sp.id) });
   if (hop) redirect(hop);
 
-  const [engagements, designs] = await Promise.all([
+  const [engagements, designs, gridProjects] = await Promise.all([
     allEngagements(),
     getSandboxDesigns(),
+    listGridProjects(),
   ]);
 
   const activeEngagements = engagements
@@ -98,6 +100,33 @@ export default async function DesignOverviewPage({
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{d.name}</div>
                 <div style={{ fontSize: 12, color: "#8c919c" }}>
                   {d.customer} · {d.venue} · {shortDate(d.updatedAt)}
+                </div>
+              </Link>
+            ))
+          )}
+        </section>
+
+        <section className="pk-card" style={card}>
+          <div style={head}>
+            <strong style={{ fontSize: 14 }}>The Grid</strong>
+            <Link href="/design/grid" style={{ color: "var(--accent)", fontSize: 12.5 }}>
+              Open The Grid →
+            </Link>
+          </div>
+          {gridProjects.length === 0 ? (
+            <p style={{ color: "#9aa0ab", fontSize: 13 }}>
+              No system designs yet — paint devices onto a plan and quote it.
+            </p>
+          ) : (
+            gridProjects.slice(0, 8).map((p) => (
+              <Link
+                key={p.id}
+                href={`/design/grid/${encodeURIComponent(p.id)}`}
+                style={{ display: "block", padding: "9px 0", borderTop: "1px solid #eef0f3", textDecoration: "none", color: "inherit" }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
+                <div style={{ fontSize: 12, color: "#8c919c" }}>
+                  {p.customer || "No customer"} · {(p.placements || []).length} device{(p.placements || []).length === 1 ? "" : "s"} · {shortDate(p.updatedAt)}
                 </div>
               </Link>
             ))

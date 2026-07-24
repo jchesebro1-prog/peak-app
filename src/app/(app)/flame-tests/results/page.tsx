@@ -4,7 +4,7 @@ import { get, stageMeta, iso, msOf, fmtShort, fmtLong } from "@/lib/stores/flame
 import { activeUsers } from "@/lib/users";
 import { ResultsEditor, type VenueInit } from "./controls";
 
-export const metadata = { title: "Flame test results — Peak Backend" };
+export const metadata = { title: "Flame test results — Quartzite" };
 
 const YEAR = 365 * 86400000;
 

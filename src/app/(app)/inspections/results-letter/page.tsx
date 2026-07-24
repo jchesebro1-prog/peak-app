@@ -15,7 +15,7 @@ import {
 } from "@/components/letter/SinglePageLetter";
 import { DocNotFound, oneParam, conditionWord, officePhone } from "../../_letters/util";
 
-export const metadata = { title: "Rigging inspection results — Peak Backend" };
+export const metadata = { title: "Rigging inspection results — Quartzite" };
 
 /**
  * Rigging Inspection Results Letter — the single-page client confirmation of

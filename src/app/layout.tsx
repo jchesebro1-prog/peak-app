@@ -17,11 +17,11 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Peak Backend",
+  title: "Quartzite",
   description: "Peak Systems Group — business management",
   manifest: "/manifest.webmanifest",
   icons: { icon: "/icon.svg", apple: "/icon.svg" },
-  appleWebApp: { capable: true, title: "Peak", statusBarStyle: "black-translucent" },
+  appleWebApp: { capable: true, title: "Quartzite", statusBarStyle: "black-translucent" },
 };
 
 export const viewport = {

@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/session";
 import { getEngagement } from "@/lib/stores/engagements";
 import MarkupViewer from "./viewer";
 
-export const metadata = { title: "Markup — Peak Backend" };
+export const metadata = { title: "Markup — Quartzite" };
 export const dynamic = "force-dynamic";
 
 /**

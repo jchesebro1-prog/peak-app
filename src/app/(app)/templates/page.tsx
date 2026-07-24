@@ -3,7 +3,7 @@ import { getSettings } from "@/lib/settings";
 import { TEMPLATES } from "@/lib/templates";
 import { TemplatesEditor } from "./templates-editor";
 
-export const metadata = { title: "Templates — Peak Backend" };
+export const metadata = { title: "Templates — Quartzite" };
 
 /**
  * Templates screen (IDEAS — centralized templates). The one place to edit the
