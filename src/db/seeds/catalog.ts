@@ -12,11 +12,10 @@ export function catalogSeed(): CatalogPart[] {
     { id: "RB-MV-MN", sku: "RB-MV-MN", desc: "25 oz Memorable Velour", category: "Fabric", unit: "sq ft", list: 6.40, cost: 4.20, mfr: "Rose Brand", costPerSqft: 4.20, oz: 25, ozBasis: "lin-yd", boltWidthIn: 54 },
     { id: "RB-MARVEL", sku: "RB-MARVEL", desc: "21 oz Marvel Velour", category: "Fabric", unit: "sq ft", list: 5.30, cost: 3.45, mfr: "Rose Brand", costPerSqft: 3.45, oz: 21, ozBasis: "lin-yd", boltWidthIn: 54 },
     { id: "RB-EN-16", sku: "RB-EN-16", desc: "16 oz Encore Velour", category: "Fabric", unit: "sq ft", list: 3.95, cost: 2.60, mfr: "Rose Brand", costPerSqft: 2.60, oz: 16, ozBasis: "lin-yd", boltWidthIn: 54 },
-    { id: "RB-MUS-SL", sku: "RB-MUS-SL", desc: "Muslin, seamless", category: "Fabric", unit: "sq ft", list: 1.20, cost: 0.80, mfr: "Rose Brand", costPerSqft: 0.80, oz: 6, ozBasis: "sq-yd", boltWidthIn: 120 },
     { id: "RB-COM-16", sku: "RB-COM-16", desc: "16 oz Commando Cloth", category: "Fabric", unit: "sq ft", list: 3.20, cost: 2.10, mfr: "Rose Brand", costPerSqft: 2.10 },
     { id: "RB-SCRIM", sku: "RB-SCRIM", desc: "Sharkstooth Scrim", category: "Fabric", unit: "sq ft", list: 2.75, cost: 1.80, mfr: "Rose Brand", costPerSqft: 1.80 },
     { id: "RB-BOBNET", sku: "RB-BOBNET", desc: "Bobbinet, 30′ wide", category: "Fabric", unit: "sq ft", list: 3.60, cost: 2.35, mfr: "Rose Brand", costPerSqft: 2.35 },
-    { id: "RB-MUS", sku: "RB-MUS", desc: "Seamless Muslin", category: "Fabric", unit: "sq ft", list: 1.70, cost: 1.10, mfr: "Rose Brand", costPerSqft: 1.10 },
+    { id: "RB-MUS", sku: "RB-MUS", desc: "Seamless Muslin", category: "Fabric", unit: "sq ft", list: 1.70, cost: 1.10, mfr: "Rose Brand", costPerSqft: 1.10, oz: 6, ozBasis: "sq-yd", boltWidthIn: 120 },
     { id: "RB-POLY", sku: "RB-POLY", desc: "12 oz Poly Pop", category: "Fabric", unit: "sq ft", list: 2.10, cost: 1.35, mfr: "Rose Brand", costPerSqft: 1.35 },
 
     // ---- Labor & travel rates (the Labor configurator reads `cost` by SKU) ----

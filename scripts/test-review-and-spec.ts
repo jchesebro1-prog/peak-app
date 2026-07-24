@@ -463,7 +463,7 @@ ok(DEFAULT_VENUE_DIMS.stageDepthFt === 30, `DEFAULT_VENUE_DIMS stageDepthFt is 3
 import { fabricFromPart, ozPerFt2, computeSetWeight, DEFAULT_WEIGHTS } from "@/lib/design/steel";
 
 const velourPart = { id: "RB-MV-MN", sku: "RB-MV-MN", desc: "25 oz Memorable Velour", category: "Fabric", unit: "sq ft", list: 6.4, cost: 4.2, oz: 25, ozBasis: "lin-yd" as const, boltWidthIn: 54 };
-const muslinPart = { id: "RB-MUS-SL", sku: "RB-MUS-SL", desc: "Muslin, seamless", category: "Fabric", unit: "sq ft", list: 1.2, cost: 0.8, oz: 6, ozBasis: "sq-yd" as const, boltWidthIn: 120 };
+const muslinPart = { id: "RB-MUS", sku: "RB-MUS", desc: "Seamless Muslin", category: "Fabric", unit: "sq ft", list: 1.7, cost: 1.1, oz: 6, ozBasis: "sq-yd" as const, boltWidthIn: 120 };
 
 const fV = fabricFromPart(velourPart);
 ok(fV !== null && Math.abs(ozPerFt2(fV) - 25 / 13.5) < 1e-9, "54in lin-yd velour resolves to oz/13.5 per sqft");
