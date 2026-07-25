@@ -532,7 +532,7 @@ export default function SettingsClient({
                       border: "none",
                       background: hex,
                       cursor: "pointer",
-                      color: "#fff",
+                      color: "var(--ink)",
                       fontSize: 14,
                       fontWeight: 700,
                       lineHeight: 1,
@@ -1757,7 +1757,7 @@ export default function SettingsClient({
                   style={{
                     fontSize: 13,
                     fontWeight: 600,
-                    color: "#fff",
+                    color: "var(--ink)",
                     background: "var(--accent)",
                     border: "none",
                     borderRadius: 9,
@@ -1901,7 +1901,7 @@ export default function SettingsClient({
                             border: on
                               ? "1.5px solid var(--accent)"
                               : "1.5px solid #d6d9e0",
-                            color: "#fff",
+                            color: on ? "var(--ink)" : "#fff",
                             fontSize: 12,
                             fontWeight: 700,
                           }}
@@ -1972,7 +1972,7 @@ export default function SettingsClient({
                 <button
                   onClick={saveModal}
                   style={{
-                    color: "#fff",
+                    color: "var(--ink)",
                     background: "var(--accent)",
                     border: "none",
                     borderRadius: 9,

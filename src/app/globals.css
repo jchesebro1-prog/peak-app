@@ -353,7 +353,7 @@ body {
   height: 34px;
   border-radius: 50%;
   background: var(--accent);
-  color: var(--ink);
+  color: #fff;
   font-size: 12px;
   font-weight: 600;
   display: flex;
@@ -389,7 +389,7 @@ body {
   height: 34px;
   border-radius: 50%;
   background: var(--accent);
-  color: var(--ink);
+  color: #fff;
   font-size: 12px;
   font-weight: 600;
   display: flex;
