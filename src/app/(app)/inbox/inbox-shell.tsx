@@ -220,7 +220,19 @@ export default function InboxShell({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
       const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      // SELECT isn't in the brief's guard list, but the reading pane (Owner,
+      // link-type/link-record pickers in thread-reader.tsx) and the list's
+      // scope dropdown are native <select>s — arrow keys are how you cycle
+      // their options, and without this guard preventDefault() below would
+      // swap the open thread instead of changing the dropdown.
+      if (
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable)
+      )
+        return;
       const ids = list.rows.filter((r) => !r.isDraft).map((r) => r.id);
       if (!ids.length) return;
       const cur = ids.indexOf(currentThreadId ?? "");
