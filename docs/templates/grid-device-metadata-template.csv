@@ -1,6 +1,6 @@
 sku,description,manufacturer,symbol,weight_lb,datasheet_url,accessories
-S4LED-S2,ETC Source Four LED Series 2 Lustr,ETC,ellipsoidal,17.5,https://www.etcconnect.com/example-s4led.pdf,S4-TOPHAT:1;S4-IRIS:1
-CS-PAR-DB,ETC ColorSource PAR Deep Blue,ETC,wash,7.4,,
-QS-1T-500,Quick-Silver 500 lb chain hoist,ETC Rigging,hoist,62,,QS-CHAINBAG:1
+S4LED-S2,EXAMPLE ROW (delete) — ETC Source Four LED Series 2 Lustr,ETC,ellipsoidal,17.5,https://www.etcconnect.com/example-s4led.pdf,S4-TOPHAT:1;S4-IRIS:1
+CS-PAR-DB,EXAMPLE ROW (delete) — ETC ColorSource PAR Deep Blue,ETC,wash,7.4,,
+QS-1T-500,EXAMPLE ROW (delete) — Quick-Silver 500 lb chain hoist,ETC Rigging,hoist,62,,QS-CHAINBAG:1
 ,,,,,,
 "(add rows — symbol keys: ellipsoidal wash cyc strip mover followspot practical speaker sub mic dimmer relay panel rack hoist winch lineset track projector screen other)",,,,,,
