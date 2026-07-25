@@ -904,5 +904,25 @@ import { computeCurtain as computeCurtainQuote } from "@/app/(app)/estimator/pri
   ok(ov.costEach === 2080, "a Rose Brand cost override replaces the make cost in the quote");
 }
 
+/* --- Quick Design budget curtain block on the shared model (task 6) --- */
+import { compute as computeQuick, defaultAState } from "@/app/(app)/design/quick/engine";
+import { drapeRule as drapeRuleQ } from "@/lib/design/goods";
+import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFor as makingForQ } from "@/lib/design/curtain-pricing";
+{
+  const base = defaultAState(0);
+  const s = { ...base, venue: "school", width: 40, ph: 20, depth: 30, tier: "better" as const, sys: { ...base.sys, curtains: true }, drape: { draw: true, legs: false, border: false, scenerytrack: false, fullstage: false } };
+  const res = computeQuick(s);
+  const curtains = res.systems.find((x) => x.key === "curtains")!;
+  const drawItem = curtains.items.find((it) => it.desc === "Draw")!;
+  // Expected unit cost = one Draw (a pair) priced through the shared model at the venue geometry.
+  const dims = { proWidthFt: 40, proHeightFt: 20, stageWidthFt: 64, stageDepthFt: 30 };
+  const rule = drapeRuleQ("Draw", dims, "better")!;
+  const expected = curtainCostQ(
+    { finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty },
+    { fabricRate: RATES_Q[rule.fabricSku], makingRate: makingForQ(rule.fullness) }
+  ).costTotal;
+  ok(Math.abs(drawItem.cost - Math.round(expected)) < 1, `Quick Design Draw cost = shared model make cost (got ${drawItem.cost}, expected ${Math.round(expected)})`);
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

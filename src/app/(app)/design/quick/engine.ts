@@ -9,6 +9,10 @@
  * NOT ported (plan-drawing editor deferred with the spatial-estimating work).
  */
 
+import { drapeRule } from "@/lib/design/goods";
+import { curtainCost, SEED_FABRIC_RATES, makingRateFor } from "@/lib/design/curtain-pricing";
+import { venueDimsFromEstimator } from "@/lib/design/venue-dims";
+
 /* ---------------------------------- types ---------------------------------- */
 
 export type SysKey =
@@ -412,12 +416,9 @@ export function compute(s: AState): ComputeResult {
 
   // ---- Refined BOM equations (feet; floor blocks; flat 30% margin) ----
   const fl = Math.floor;
-  const _venue = venueOf(s);
-  const _uses = (DIMSCHEMA[_venue.kind] || DIMSCHEMA.proscenium).map((d) => d.field);
   const W = s.width;
   const D = s.depth;
   const G = s.grid;
-  const PH = _uses.includes("ph") ? s.ph : s.grid; // open rooms: drop height = ceiling height
   const size = s.size || "medium";
   const pick = <T,>(sm: T, md: T, lg: T): T => (size === "small" ? sm : size === "large" ? lg : md);
   const dBlk = fl(D / 10); // 10-ft depth blocks
@@ -463,17 +464,32 @@ export function compute(s: AState): ComputeResult {
     ];
   }
 
-  // Curtains — multi. Per-unit cost = area (sqft) × rate; qty per 10-ft depth block.
+  // Curtains — multi. The four fabric drapes (Draw/Legs/Border/Rear) price
+  // through the shared two-term make-it model, from the same goods.ts drape
+  // geometry the quote side and the lineset weights use; qty per 10-ft depth
+  // block. Scenery track is hardware, not soft goods, and keeps its lump
+  // per-ft price via addCurtain.
   const drape = s.drape || {};
   const curtainItems: Array<{ desc: string; unit: string; qty: number; cost: number; area?: number; fabricKey?: string | null }> = [];
   const addCurtain = (on: boolean | undefined, desc: string, count: number, area: number, rate: number, fabricKey: string | null) => {
     if (on && count > 0) curtainItems.push({ desc, unit: "ea", qty: count, cost: Math.round(area * rate), area, fabricKey });
   };
-  addCurtain(drape.draw, "Draw", dBlk * 1, (2 * W + 2) * PH, 9, "draw");
-  addCurtain(drape.legs, "Leg", dBlk * 2, 6 * PH, 7, "legs");
-  addCurtain(drape.border, "Border", dBlk * 1, W * 5, 7, "border");
-  addCurtain(drape.scenerytrack, "Scenery track", dBlk * 1, W * 1, 3, null);
-  addCurtain(drape.fullstage, "Full stage", dBlk * 1, W * PH, 6, "fullstage");
+  const gdims = venueDimsFromEstimator(s);
+  const priceDrape = (on: boolean | undefined, desc: string, type: string, count: number, fabricKey: string) => {
+    if (!on || count <= 0) return;
+    const rule = drapeRule(type, gdims, s.tier);
+    if (!rule) return;
+    const cc = curtainCost(
+      { finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty },
+      { fabricRate: SEED_FABRIC_RATES[rule.fabricSku] ?? 0, makingRate: makingRateFor(rule.fullness) }
+    );
+    curtainItems.push({ desc, unit: "ea", qty: count, cost: Math.round(cc.costTotal), area: Math.round(cc.sewnAreaSqft), fabricKey });
+  };
+  priceDrape(drape.draw, "Draw", "Draw", dBlk * 1, "draw");
+  priceDrape(drape.legs, "Leg", "Legs", dBlk * 2, "legs");
+  priceDrape(drape.border, "Border", "Border", dBlk * 1, "border");
+  priceDrape(drape.fullstage, "Full stage", "Rear", dBlk * 1, "fullstage");
+  addCurtain(drape.scenerytrack, "Scenery track", dBlk * 1, W * 1, 3, null); // track hardware, not soft goods — unchanged
 
   // Fixtures — multi. E = unified electric count; wUnit ≈ 1 per 8 ft of width.
   const fx = s.fixtures || {};
