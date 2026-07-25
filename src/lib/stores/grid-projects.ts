@@ -108,6 +108,9 @@ export type GridProject = {
   name: string;
   customer: string;
   customerId: string | null;
+  /** Venue link (D113 item 6) — identity sites.id + display name. */
+  siteId?: string | null;
+  siteName?: string;
   /** Sheet display order; the docs live in grid_sheets. */
   sheetIds: string[];
   placements: GridPlacement[];
@@ -278,6 +281,18 @@ export async function setQuote(
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.quoteId = quoteId;
+    p.updatedAt = Date.now();
+  });
+}
+
+export async function setVenue(
+  projectId: string,
+  siteId: string | null,
+  siteName: string
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.siteId = siteId;
+    p.siteName = siteName;
     p.updatedAt = Date.now();
   });
 }

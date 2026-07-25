@@ -34,6 +34,7 @@ import {
   createDraftQuoteAction,
   placeDeviceAction,
   removePlacementAction,
+  setVenueAction,
 } from "./actions";
 import SpacesPanel from "./spaces-panel";
 import RevisionsPanel from "./revisions-panel";
@@ -106,6 +107,8 @@ export type ProjectLite = {
   id: string;
   name: string;
   customer: string;
+  siteId: string | null;
+  siteName: string;
   quoteId: string | null;
   placements: GridPlacement[];
   calibrations: Calibration[];
@@ -126,6 +129,7 @@ export default function GridEditor({
   laborParts,
   laborHoursPerDevice,
   specHref,
+  venues,
 }: {
   project: ProjectLite;
   sheets: SheetLite[];
@@ -136,6 +140,8 @@ export default function GridEditor({
   laborHoursPerDevice: number;
   /** D94 bid-spec generator for this customer's engagement, when one exists. */
   specHref: string | null;
+  /** The customer's venues, for the picker (D113.6). */
+  venues: Array<{ id: string; name: string }>;
 }) {
   const router = useRouter();
   const [activeSheetId, setActiveSheetId] = useState(sheets[0]?.id || "");
@@ -453,6 +459,27 @@ export default function GridEditor({
             <span style={{ color: "#8c919c", fontWeight: 500 }}> · {project.customer}</span>
           ) : null}
         </div>
+        {venues.length > 0 && (
+          <select
+            value={project.siteId || ""}
+            onChange={async (e) => {
+              setBusy(true);
+              const r = await setVenueAction(project.id, e.target.value);
+              setBusy(false);
+              if (!r.ok) setErr(r.error);
+              else router.refresh();
+            }}
+            title="Venue — stamped onto the quote"
+            style={{ ...BTN, fontWeight: 500, maxWidth: 190 }}
+          >
+            <option value="">No venue</option>
+            {venues.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        )}
         {sheets.length > 0 && (
           <select
             value={sheet?.id || ""}

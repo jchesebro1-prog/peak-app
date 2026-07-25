@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/session";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { allEngagements } from "@/lib/stores/engagements";
+import { sitesForCompany } from "@/lib/identity/sites";
 import { frac } from "@/lib/stores/pricing";
 import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
@@ -53,6 +54,10 @@ export default async function GridEditorPage({
     : undefined;
   const specHref = eng ? `/design/engagements/spec?id=${encodeURIComponent(eng.id)}` : null;
 
+  // Venue picker options (D113.6) — the customer's sites.
+  const sites = project.customerId ? await sitesForCompany(project.customerId) : [];
+  const venues = sites.map((s) => ({ id: s.id, name: s.name || "Unnamed venue" }));
+
   /** Client payload: sheets without re-serialization surprises + PartLite slice. */
   const parts: PartLite[] = catalog.map((p) => ({
     id: p.id,
@@ -83,6 +88,8 @@ export default async function GridEditorPage({
         id: project.id,
         name: project.name,
         customer: project.customer,
+        siteId: project.siteId || null,
+        siteName: project.siteName || "",
         quoteId: project.quoteId,
         placements: project.placements || [],
         calibrations: project.calibrations || [],
@@ -95,6 +102,7 @@ export default async function GridEditorPage({
       laborParts={laborParts}
       laborHoursPerDevice={laborHoursPerDevice}
       specHref={specHref}
+      venues={venues}
     />
   );
 }

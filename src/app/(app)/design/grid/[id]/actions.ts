@@ -18,7 +18,10 @@ import {
   restoreRevision,
   setQuote,
   setSheetCalibration,
+  setVenue,
 } from "@/lib/stores/grid-projects";
+import { docLocId, getSite } from "@/lib/identity/sites";
+import { resolveTier } from "@/lib/pricing-tiers";
 import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
 import { bomLines, bomTotals, isPerLengthUnit, routeLines } from "@/lib/design/grid-bom";
 import { polygonArea } from "@/lib/design/grid-geometry";
@@ -188,6 +191,27 @@ export async function removeRouteAction(
   return { ok: true };
 }
 
+/* ------------------------------ venue (D113.6) ------------------------------ */
+
+export async function setVenueAction(
+  projectId: string,
+  siteId: string
+): Promise<Result> {
+  await requireUser();
+  if (!siteId) {
+    const p = await setVenue(projectId, null, "");
+    if (!p) return { ok: false, error: "Design not found." };
+    revalidatePath(editorPath(projectId));
+    return { ok: true };
+  }
+  const site = await getSite(siteId);
+  if (!site) return { ok: false, error: "That venue no longer exists." };
+  const p = await setVenue(projectId, site.id, site.name || "Unnamed venue");
+  if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
 /* ----------------------------- revisions (D109) ----------------------------- */
 
 export async function saveRevisionAction(
@@ -264,6 +288,12 @@ export async function createDraftQuoteAction(
   const value = devTotals.value + wires.value + labor.reduce((a, l) => a + l.ext, 0);
   const cost = devTotals.cost + wires.cost + labor.reduce((a, l) => a + l.cost, 0);
   const totals = { value, margin: value > 0 ? (value - cost) / value : 0 };
+
+  // Venue + tier stamp (D113.6): same resolution as estimator quotes (D87);
+  // re-stamped on every mint/update while the quote is still a draft.
+  const tier = await resolveTier(project.customerId);
+  const site = project.siteId ? await getSite(project.siteId) : null;
+  const locationId = site ? docLocId(site) : null;
   const spec = {
     kind: "grid",
     gridProjectId: project.id,
@@ -288,6 +318,9 @@ export async function createDraftQuoteAction(
       name: `${project.name} — The Grid design`,
       value: totals.value,
       margin: totals.margin,
+      locationId,
+      pricingTier: tier.tier,
+      tierMargin: tier.margin,
       spec,
     });
     // The revision records exactly what was quoted (D109).
@@ -301,8 +334,11 @@ export async function createDraftQuoteAction(
     name: `${project.name} — The Grid design`,
     customer: project.customer,
     customerId: project.customerId,
+    locationId,
     value: totals.value,
     margin: totals.margin,
+    pricingTier: tier.tier,
+    tierMargin: tier.margin,
     source: "grid",
     quoteType: "system",
     owner: user.name,
