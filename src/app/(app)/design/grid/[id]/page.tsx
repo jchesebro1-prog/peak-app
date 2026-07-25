@@ -3,7 +3,9 @@ import { requireUser } from "@/lib/session";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { allEngagements } from "@/lib/stores/engagements";
+import { frac } from "@/lib/stores/pricing";
 import type { PartLite } from "@/lib/design/grid-bom";
+import type { LaborPartLite } from "@/lib/design/grid-labor";
 import GridEditor from "./editor";
 
 export const metadata = { title: "The Grid — Quartzite" };
@@ -33,10 +35,12 @@ export default async function GridEditorPage({
     );
   }
 
-  const [sheets, catalog, engagements] = await Promise.all([
+  const [sheets, catalog, engagements, laborHoursPerDevice] = await Promise.all([
     listSheets(project.id),
     listCatalog(),
     allEngagements(),
+    // Install-hours-per-device knob (D114) — admin-tunable like every rate.
+    frac("grid.laborHoursPerDevice", 0.5),
   ]);
 
   // The D94 bid-spec generator is engagement-scoped; when the customer has a
@@ -59,6 +63,19 @@ export default async function GridEditorPage({
     list: p.list,
     cost: p.cost,
   }));
+  const laborParts: LaborPartLite[] = catalog
+    .filter((p) => (p.role || "").toLowerCase() === "labor")
+    .map((p) => ({
+      id: p.id,
+      sku: p.sku,
+      desc: p.desc,
+      category: p.category,
+      unit: p.unit,
+      list: p.list,
+      cost: p.cost,
+      role: p.role,
+      discipline: p.discipline,
+    }));
 
   return (
     <GridEditor
@@ -75,6 +92,8 @@ export default async function GridEditorPage({
       }}
       sheets={sheets.map((s) => ({ id: s.id, name: s.name, mime: s.mime, dataUrl: s.dataUrl }))}
       parts={parts}
+      laborParts={laborParts}
+      laborHoursPerDevice={laborHoursPerDevice}
       specHref={specHref}
     />
   );

@@ -23,6 +23,7 @@ import {
   type PartLite,
 } from "@/lib/design/grid-bom";
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
+import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
 import type { GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
   addRouteAction,
@@ -122,11 +123,17 @@ export default function GridEditor({
   project,
   sheets,
   parts,
+  laborParts,
+  laborHoursPerDevice,
   specHref,
 }: {
   project: ProjectLite;
   sheets: SheetLite[];
   parts: PartLite[];
+  /** Catalog labor rows (role "labor") for the auto-suggest (D114). */
+  laborParts: LaborPartLite[];
+  /** Install-hours-per-device knob from the pricing rules. */
+  laborHoursPerDevice: number;
   /** D94 bid-spec generator for this customer's engagement, when one exists. */
   specHref: string | null;
 }) {
@@ -209,7 +216,25 @@ export default function GridEditor({
     () => routeLines(project.routes || [], parts, project.calibrations),
     [project.routes, parts, project.calibrations]
   );
-  const grandValue = totals.value + wires.value;
+
+  // Labor suggestions (D114): the rule proposes; overrides let the human
+  // adjust hours or exclude a line before the quote mints.
+  const laborSuggestions = useMemo(
+    () => suggestLabor(project.placements, parts, laborParts, laborHoursPerDevice),
+    [project.placements, parts, laborParts, laborHoursPerDevice]
+  );
+  const [laborOverrides, setLaborOverrides] = useState<
+    Record<string, { hours?: number; included: boolean }>
+  >({});
+  const laborRows = laborSuggestions.map((s) => {
+    const o = laborOverrides[s.partId];
+    const hours = o?.hours !== undefined && o.hours >= 0 ? o.hours : s.hours;
+    return { ...s, hours, included: o ? o.included : true, ext: hours * s.rate };
+  });
+  const includedLabor = laborRows.filter((l) => l.included && l.hours > 0);
+  const laborValue = includedLabor.reduce((a, l) => a + l.ext, 0);
+
+  const grandValue = totals.value + wires.value + laborValue;
   const spaceRollups = useMemo(
     () => bomBySpace(project.placements, parts, project.spaces || []),
     [project.placements, parts, project.spaces]
@@ -771,6 +796,53 @@ export default function GridEditor({
                     {wires.unmeasured} unmeasured wire run{wires.unmeasured === 1 ? "" : "s"} excluded.
                   </div>
                 )}
+                {laborRows.length > 0 && (
+                  <div style={{ borderTop: "1px dashed #e3e5ea", marginTop: 4, paddingTop: 5, display: "grid", gap: 4 }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab" }}>
+                      Labor (suggested)
+                    </div>
+                    {laborRows.map((l) => (
+                      <div key={l.partId} style={{ display: "flex", gap: 5, fontSize: 12, alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={l.included}
+                          onChange={(e) =>
+                            setLaborOverrides((prev) => ({
+                              ...prev,
+                              [l.partId]: { ...prev[l.partId], included: e.target.checked },
+                            }))
+                          }
+                          style={{ margin: 0 }}
+                        />
+                        <span
+                          style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                          title={`${l.desc} @ ${moneyFmt(l.rate)}/hr`}
+                        >
+                          {l.partId}
+                        </span>
+                        <input
+                          value={String(l.hours)}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            setLaborOverrides((prev) => ({
+                              ...prev,
+                              [l.partId]: {
+                                included: prev[l.partId]?.included ?? true,
+                                hours: Number.isFinite(v) && v >= 0 ? v : 0,
+                              },
+                            }));
+                          }}
+                          inputMode="decimal"
+                          style={{ ...INPUT, width: 44, padding: "2px 5px", fontSize: 11.5, textAlign: "right" }}
+                        />
+                        <span style={{ fontSize: 10.5, color: "#8c919c" }}>hr</span>
+                        <span style={{ color: "#16181d", fontWeight: 600, opacity: l.included ? 1 : 0.4 }}>
+                          {moneyFmt(l.ext)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div style={{ borderTop: "1px solid #edeff3", marginTop: 3, paddingTop: 5, display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
                   <span style={{ color: "#8c919c" }}>Total</span>
                   <strong>{moneyFmt(grandValue)}</strong>
@@ -790,7 +862,10 @@ export default function GridEditor({
               onClick={async () => {
                 setErr(null);
                 setBusy(true);
-                const r = await createDraftQuoteAction(project.id);
+                const r = await createDraftQuoteAction(
+                  project.id,
+                  includedLabor.map((l) => ({ partId: l.partId, hours: l.hours }))
+                );
                 setBusy(false);
                 if (!r.ok) setErr(r.error);
                 else router.refresh();

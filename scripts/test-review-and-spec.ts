@@ -758,5 +758,40 @@ ok(rg.edges[1].fromName === "House" && rg.edges[1].toName === "Unassigned", "ris
 ok(rg.edges[0].lengthFt !== null && Math.abs((rg.edges[0].lengthFt || 0) - 40) < 1e-9,
   `riser: edge carries the measured length (${rg.edges[0].lengthFt})`);
 
+/* --- The Grid labor auto-suggest (D114) --- */
+import { suggestLabor } from "@/lib/design/grid-labor";
+
+const laborCat = [
+  { id: "LIG-LBR", sku: "LIG-LBR", desc: "Lighting — install labor", category: "Labor", unit: "hr", list: 68, cost: 45, role: "labor", discipline: "LIG" },
+  { id: "RIG-LBR", sku: "RIG-LBR", desc: "Rigging — install labor", category: "Labor", unit: "hr", list: 75, cost: 50, role: "labor", discipline: "RIG" },
+  { id: "AUD-LBR", sku: "AUD-LBR", desc: "Audio — install labor", category: "Labor", unit: "hr", list: 72, cost: 48, role: "labor", discipline: "AUD" },
+];
+const deviceCat = [
+  { id: "S4LED", sku: "S4LED", desc: "Source Four LED", category: "Lighting", unit: "ea", list: 1200, cost: 800 },
+  { id: "SPKR", sku: "SPKR", desc: "Loudspeaker", category: "Audio", unit: "ea", list: 900, cost: 600 },
+  { id: "HOIST", sku: "HOIST", desc: "Chain hoist", category: "Rigging Hardware", unit: "ea", list: 2000, cost: 1400 },
+  { id: "WIRE-X", sku: "WIRE-X", desc: "Cable", category: "Wire & Cable", unit: "ft", list: 2, cost: 1 },
+];
+const sug = suggestLabor(
+  [{ partId: "S4LED" }, { partId: "S4LED" }, { partId: "S4LED" }, { partId: "SPKR" }, { partId: "HOIST" }, { partId: "WIRE-X" }],
+  deviceCat as PartLite[],
+  laborCat as any[],
+  0.5
+);
+ok(sug.length === 3, `one suggestion per discipline present (${sug.length})`);
+const ligSug = sug.find((s) => s.partId === "LIG-LBR");
+ok(!!ligSug && ligSug.hours === 1.5, `3 lighting devices × 0.5h = 1.5h (${ligSug?.hours})`);
+const rigSug = sug.find((s) => s.partId === "RIG-LBR");
+ok(!!rigSug && rigSug.hours === 0.5, "the hoist maps to rigging labor");
+ok(sug.find((s) => s.partId === "AUD-LBR")?.hours === 0.5, "the speaker maps to audio labor");
+ok(!sug.some((s) => s.hours === 0), "no zero-hour suggestions");
+// Wire parts don't count as devices; hours round UP to the half hour.
+const sugOdd = suggestLabor([{ partId: "S4LED" }], deviceCat as PartLite[], laborCat as any[], 0.34);
+ok(sugOdd[0].hours === 0.5, `hours round up to the half hour (${sugOdd[0].hours})`);
+ok(suggestLabor([{ partId: "WIRE-X" }], deviceCat as PartLite[], laborCat as any[], 0.5).length === 0,
+  "wire-only placements suggest no labor");
+ok(suggestLabor([{ partId: "S4LED" }], deviceCat as PartLite[], [], 0.5).length === 0,
+  "no labor parts in the catalog → no suggestions (never invent rates)");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

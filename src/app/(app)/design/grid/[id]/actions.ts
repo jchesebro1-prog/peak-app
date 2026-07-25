@@ -221,7 +221,8 @@ export async function restoreRevisionAction(
  * job, where that act carries its own audit trail.
  */
 export async function createDraftQuoteAction(
-  projectId: string
+  projectId: string,
+  laborLines?: Array<{ partId: string; hours: number }>
 ): Promise<{ ok: true; quoteId: string; updated: boolean } | { ok: false; error: string }> {
   const user = await requireUser();
   const project = await getProject(projectId);
@@ -235,9 +236,33 @@ export async function createDraftQuoteAction(
   const devLines = bomLines(placements, catalog);
   const devTotals = bomTotals(placements, catalog);
   const wires = routeLines(routes, catalog, project.calibrations || []);
-  const lines = [...devLines, ...wires.lines];
-  const value = devTotals.value + wires.value;
-  const cost = devTotals.cost + wires.cost;
+
+  // Labor rides in only as hours against real catalog labor rows — the
+  // client proposes, the server prices (D114).
+  const labor: Array<{ sku: string; desc: string; qty: number; unit: string; price: number; ext: number; cost: number }> = [];
+  for (const l of laborLines || []) {
+    const part = catalog.find((p) => p.id === l.partId);
+    const hours = Number(l.hours);
+    if (!part || (part.role || "").toLowerCase() !== "labor") continue;
+    if (!(hours > 0) || hours > 10000) continue;
+    labor.push({
+      sku: part.sku,
+      desc: part.desc,
+      qty: hours,
+      unit: part.unit || "hr",
+      price: part.list,
+      ext: hours * part.list,
+      cost: hours * part.cost,
+    });
+  }
+
+  const lines = [
+    ...devLines,
+    ...wires.lines,
+    ...labor.map((l) => ({ partId: l.sku, desc: l.desc, unit: l.unit, qty: l.qty, list: l.price, ext: l.ext })),
+  ];
+  const value = devTotals.value + wires.value + labor.reduce((a, l) => a + l.ext, 0);
+  const cost = devTotals.cost + wires.cost + labor.reduce((a, l) => a + l.cost, 0);
   const totals = { value, margin: value > 0 ? (value - cost) / value : 0 };
   const spec = {
     kind: "grid",

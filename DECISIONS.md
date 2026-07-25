@@ -1745,3 +1745,18 @@ re-litigates them.
 
 Items 3, 5, 6, 7, 9, 10, 11 are the agreed build backlog, in that rough
 priority order.
+
+## D114 — The Grid: labor auto-suggest v1 (2026-07-24)
+
+Per D113 item 5 ("auto-suggest from devices"). The rule is deliberately
+small: every painted device earns `grid.laborHoursPerDevice` install hours
+(pricing-rules knob, default 0.5), bucketed by discipline guessed from the
+part's category (light→LIG, audio/sound→AUD, video/projection→VID, else
+RIG — Peak's home discipline), priced at the catalog's own labor rows
+(role "labor", matching discipline; rates are never invented — no labor
+rows, no suggestions). Hours round up to the half hour. Suggestions appear
+in the BOM panel default-included with a checkbox + editable hours; the
+quote action re-validates and re-prices server-side (client proposes hours,
+server prices). Wire, labor, and per-length rows don't count as devices.
+Refine the mapping to real per-class rules when actual usage shows where
+the heuristic is wrong.
