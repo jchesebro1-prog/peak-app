@@ -35,6 +35,7 @@ export const FIELD_COLLECTIONS = [
   "flame_jobs",
   "repair_jobs",
   "projects",
+  "tasks",
 ] as const;
 
 const PAUSED_KEY = "rss_sync_paused_v1";

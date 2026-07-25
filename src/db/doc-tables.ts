@@ -71,6 +71,7 @@ export const specSections = docTable("spec_sections"); // CSI bid-spec section t
 export const generatedSpecs = docTable("generated_specs"); // assembled bid specs per engagement (D94)
 export const gridProjects = docTable("grid_projects"); // The Grid system-design projects (D108, no prototype ancestor)
 export const gridSheets = docTable("grid_sheets"); // The Grid plan-sheet backgrounds — heavy dataUrls kept out of the placement-patched project doc (D108)
+export const tasks = docTable("tasks"); // cross-record task rows, promoted from embedded ProjectTask[] (#17)
 
 export const DOC_TABLES = {
   quotes,
@@ -92,6 +93,7 @@ export const DOC_TABLES = {
   generated_specs: generatedSpecs,
   grid_projects: gridProjects,
   grid_sheets: gridSheets,
+  tasks,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;
@@ -120,6 +122,7 @@ export const SYNCABLE_COLLECTIONS: CollectionName[] = [
   "flame_jobs",
   "repair_jobs",
   "projects",
+  "tasks",
 ];
 export const SYNCABLE_SET: ReadonlySet<string> = new Set(SYNCABLE_COLLECTIONS);
 

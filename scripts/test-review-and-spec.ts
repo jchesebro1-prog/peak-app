@@ -1043,5 +1043,53 @@ ok(emailFor("Isaac Mittlesteadt") === "isaacm@peaksystemsgroup.com", "long last 
 ok(emailFor("Cher") === "cher@peaksystemsgroup.com", "single-word names keep the whole-name fallback");
 ok(legacyEmailFor("Jeff Chesebro") === "jchesebro@peaksystemsgroup.com", "legacy derivation preserved for the migration + collision fallback");
 
+/* ============ TASKS (#17) — store pure logic ============ */
+import {
+  isOverdue, taskFromLegacy, expandTemplate, taskBellItems,
+  STATUSES, type TaskRecord, type TaskTemplateItem,
+} from "@/lib/stores/tasks";
+
+{
+  const NOW = 1_800_000_000_000;
+  const DAY = 86400000;
+  ok(STATUSES.length === 4 && STATUSES.includes("blocked"), "tasks: 4-state status includes blocked");
+
+  ok(isOverdue({ dueAt: NOW - DAY, status: "open" }, NOW) === true, "tasks: past-due open task is overdue");
+  ok(isOverdue({ dueAt: NOW - DAY, status: "done" }, NOW) === false, "tasks: done task is never overdue");
+  ok(isOverdue({ dueAt: null, status: "open" }, NOW) === false, "tasks: no due date, never overdue");
+  ok(isOverdue({ dueAt: NOW + DAY, status: "blocked" }, NOW) === false, "tasks: future due date not overdue");
+
+  const legacy = taskFromLegacy("P-3001", { id: "tk-abc", title: "Hang truss", section: "Install", assignee: "Sam Rivera", done: true, doneAt: NOW - DAY }, NOW);
+  ok(legacy.id === "tk-abc", "tasks: migration preserves legacy tk- id");
+  ok(legacy.projectId === "P-3001" && legacy.quoteId === null, "tasks: migration sets project parent pointer");
+  ok(legacy.status === "done" && legacy.doneAt === NOW - DAY, "tasks: legacy done maps to status done with doneAt kept");
+  ok(legacy.assigneeName === "Sam Rivera" && legacy.assigneeUserId === null, "tasks: legacy name kept, no user id");
+  const legacyOpen = taskFromLegacy("P-3001", { id: "tk-def", title: "Pull cable", section: "Install", assignee: "", done: false }, NOW);
+  ok(legacyOpen.status === "open" && legacyOpen.doneAt === null, "tasks: legacy undone maps to open");
+
+  const tmpl: TaskTemplateItem[] = [
+    { key: "walkthrough", title: "Walk the room with the customer" },
+    { key: "punch", title: "Write the punch list", section: "Closeout" },
+  ];
+  const fresh = expandTemplate(tmpl, "signoff", new Set());
+  ok(fresh.length === 2 && fresh[0].coverageKey === "signoff:walkthrough", "tasks: template expands with stage-scoped coverage keys");
+  ok(fresh[1].section === "Closeout" && fresh[0].section === "Install", "tasks: template section defaults to Install");
+  const rerun = expandTemplate(tmpl, "signoff", new Set(["signoff:walkthrough"]));
+  ok(rerun.length === 1 && rerun[0].coverageKey === "signoff:punch", "tasks: coverage-key de-dup skips existing on re-entry");
+
+  const mk = (o: Partial<TaskRecord>): TaskRecord => ({
+    id: "T-6000", title: "t", section: "Install", projectId: null, quoteId: null,
+    coverageKey: null, assigneeUserId: null, assigneeName: "", dueAt: null,
+    status: "open", notes: "", createdBy: "x", createdAt: NOW, updatedAt: NOW, doneAt: null, ...o,
+  });
+  const bell = taskBellItems([
+    mk({ id: "a", assigneeName: "Jeff Chesebro" }),                       // mine, open
+    mk({ id: "b", assigneeName: "Someone Else", dueAt: NOW - DAY }),      // overdue, not mine
+    mk({ id: "c", assigneeName: "Someone Else" }),                        // not mine, not overdue
+    mk({ id: "d", assigneeName: "Jeff Chesebro", status: "done" }),       // mine but done
+  ], "Jeff Chesebro", NOW);
+  ok(bell.map(t => t.id).join(",") === "a,b", "tasks: bell = open assigned-to-me + overdue, done excluded");
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

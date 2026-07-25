@@ -64,6 +64,13 @@
       "when": 1784918493537,
       "tag": "0008_sticky_black_panther",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784993158916,
+      "tag": "0009_silly_tigra",
+      "breakpoints": true
     }
   ]
 }
