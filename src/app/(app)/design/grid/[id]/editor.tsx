@@ -22,6 +22,7 @@ import {
   routeLines,
   type PartLite,
 } from "@/lib/design/grid-bom";
+import { GROUPS } from "@/lib/catalog-taxonomy";
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
@@ -98,6 +99,10 @@ function markerColor(category: string): string {
   for (let i = 0; i < category.length; i++) h = (h * 31 + category.charCodeAt(i)) | 0;
   return MARK_COLORS[Math.abs(h) % MARK_COLORS.length];
 }
+
+/** Palette group-filter sentinel (Task 6, punch #39) — parts whose resolved
+ *  `group` is null (legacy/unmapped categories). Distinct from "" (All). */
+const OTHER_GROUP = "Other";
 
 /** Device marker hit-test radius (normalized 0..1 x-units; the existing
  *  selection test below divides by aspect for y, keeping the on-screen
@@ -186,7 +191,11 @@ export default function GridEditor({
   const [err, setErr] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("");
+  // Palette group filter (Task 6, punch #39): "" = All (today's exact
+  // behavior, every device part); one of the six beta GROUPS; or OTHER for
+  // parts whose category has no group mapping (legacy taxonomy — never
+  // hidden, just bucketed).
+  const [groupFilter, setGroupFilter] = useState("");
   const [armedPartId, setArmedPartId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -220,16 +229,20 @@ export default function GridEditor({
   const cal = sheet ? findCalibration(project.calibrations, sheet.id, page) : null;
 
   const partById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
-  const categories = useMemo(
-    () => [...new Set(parts.map((p) => p.category))].sort(),
-    [parts]
-  );
   const filteredParts = useMemo(() => {
     const q = search.trim().toLowerCase();
     return parts
-      .filter((p) => (category ? p.category === category : true))
+      .filter((p) => {
+        if (!groupFilter) return true; // All — identical to pre-Task-6 behavior.
+        // Fabric/Labor rows aren't placeable devices. "All" already showed
+        // them before this task (verified: no prior exclusion existed), so
+        // that legacy behavior stays untouched above; every specific bucket
+        // (a named group, or Other) excludes them.
+        if (p.category === "Fabric" || p.category === "Labor") return false;
+        return groupFilter === OTHER_GROUP ? !p.group : p.group === groupFilter;
+      })
       .filter((p) => (q ? (p.sku + " " + p.desc).toLowerCase().includes(q) : true));
-  }, [parts, search, category]);
+  }, [parts, search, groupFilter]);
 
   const sheetPlacements = useMemo(
     () => project.placements.filter((pl) => pl.sheetId === sheet?.id && pl.page === page),
@@ -625,14 +638,15 @@ export default function GridEditor({
               style={INPUT}
             />
             <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
+              value={groupFilter}
+              onChange={(e) => setGroupFilter(e.target.value)}
               style={{ ...INPUT, marginTop: 6 }}
             >
-              <option value="">All categories</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>{c}</option>
+              <option value="">All</option>
+              {GROUPS.map((g) => (
+                <option key={g} value={g}>{g}</option>
               ))}
+              <option value={OTHER_GROUP}>Other</option>
             </select>
             {armedPart ? (
               <div style={{ marginTop: 8, fontSize: 11.5, color: "#2e7d55", fontWeight: 600 }}>

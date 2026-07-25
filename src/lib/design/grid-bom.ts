@@ -29,6 +29,17 @@ export type PartLite = {
    *  boolean (not the blob key): the editor only needs to know whether to
    *  render a link to the authenticated /api/part-datasheet/<sku> proxy. */
   hasDatasheet?: boolean;
+  /** Resolved beta group (Task 6, punch #39) — `groupOf(part, map)` run
+   *  server-side against the admin-editable category map; null when the
+   *  part's category has no group mapping (legacy taxonomy, surfaced in the
+   *  palette as "Other"). Optional (like `hasDatasheet`) because the other
+   *  server routes that build PartLite-shaped BOM inputs (riser/schedule
+   *  pages, quote actions, the projects list) pass raw CatalogPart rows
+   *  straight through and never resolve a group — only the Grid editor's
+   *  palette needs it, and it treats a missing value the same as null. The
+   *  editor never re-derives this — it's dumb by design; the map lives only
+   *  on the server. */
+  group?: string | null;
 };
 
 export type BomLine = {

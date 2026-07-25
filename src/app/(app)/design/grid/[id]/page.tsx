@@ -5,6 +5,8 @@ import { list as listCatalog } from "@/lib/stores/catalog";
 import { allEngagements } from "@/lib/stores/engagements";
 import { sitesForCompany } from "@/lib/identity/sites";
 import { frac } from "@/lib/stores/pricing";
+import { getSettings } from "@/lib/settings";
+import { groupOf, resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
 import GridEditor from "./editor";
@@ -36,13 +38,18 @@ export default async function GridEditorPage({
     );
   }
 
-  const [sheets, catalog, engagements, laborHoursPerDevice] = await Promise.all([
+  const [sheets, catalog, engagements, laborHoursPerDevice, settings] = await Promise.all([
     listSheets(project.id),
     listCatalog(),
     allEngagements(),
     // Install-hours-per-device knob (D114) — admin-tunable like every rate.
     frac("grid.laborHoursPerDevice", 0.5),
+    getSettings(),
   ]);
+  // Beta group resolution (Task 6, punch #39) — server-side only; the
+  // editor receives each part's already-resolved `group` and never sees
+  // the map itself.
+  const categoryMap = resolveCategoryMap(settings.catalogCategoryMap);
 
   // The D94 bid-spec generator is engagement-scoped; when the customer has a
   // live engagement, the editor links straight into it (the generator's
@@ -69,6 +76,7 @@ export default async function GridEditorPage({
     cost: p.cost,
     ...(p.ports && p.ports.length > 0 ? { ports: p.ports } : {}),
     ...(p.datasheetBlobKey ? { hasDatasheet: true } : {}),
+    group: groupOf(p, categoryMap),
   }));
   const laborParts: LaborPartLite[] = catalog
     .filter((p) => (p.role || "").toLowerCase() === "labor")
