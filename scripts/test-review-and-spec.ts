@@ -81,6 +81,8 @@ ok(groupOf({ category: "Some Unmapped Category" }, DEFAULT_CATEGORY_MAP) === nul
 
 ok(tradeOf({ category: "Fixtures", trade: "Rigging" }, DEFAULT_CATEGORY_MAP) === "Rigging", "taxonomy: tradeOf honors the part-level trade override");
 ok(tradeOf({ category: "Video Controls" }, DEFAULT_CATEGORY_MAP) === GROUP_TRADES["Video Controls"], "taxonomy: tradeOf falls back group->trade via GROUP_TRADES");
+ok(tradeOf({ category: "Fixtures", trade: "Bogus" }, DEFAULT_CATEGORY_MAP) === "Lighting", "taxonomy: tradeOf ignores an invalid part-level trade and falls through to the map");
+ok(tradeOf({ category: "Nonexistent" }, DEFAULT_CATEGORY_MAP) === null, "taxonomy: tradeOf returns null for a genuinely unmapped category");
 
 const storedMap = resolveCategoryMap({
   Fixtures: { group: "Curtains", trade: "Rigging" },

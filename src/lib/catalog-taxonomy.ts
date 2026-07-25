@@ -92,9 +92,11 @@ export const DEFAULT_CATEGORY_MAP: CategoryMap = {
   // Fabric and Labor: NO entry (excluded domains — see file header).
 };
 
-/** Defaults ⊕ stored (stored wins per key). */
+/** Defaults ⊕ stored (stored wins per key). Always returns a fresh object —
+ *  even with no stored map — so a mutating caller can never corrupt the
+ *  shared DEFAULT_CATEGORY_MAP singleton. */
 export function resolveCategoryMap(stored?: CategoryMap): CategoryMap {
-  if (!stored) return DEFAULT_CATEGORY_MAP;
+  if (!stored) return { ...DEFAULT_CATEGORY_MAP };
   return { ...DEFAULT_CATEGORY_MAP, ...stored };
 }
 
