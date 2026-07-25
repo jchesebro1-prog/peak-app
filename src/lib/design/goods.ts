@@ -36,14 +36,15 @@ export const TRACK_TRAVELER = "Standard traveler track (~1.75 lb/ft)";
 export const CHAIN_JACK = "Jack chain ~0.14 lb/ft";
 export const CHAIN_NONE = "None";
 
-/** Per-tier fabric SKU by drape role. Mirrors tierDefsDefault().fabrics in
- *  quick/engine.ts, plus a cyc role the estimator does not have. All three
- *  velour roles point at the same SKU per tier today; the separate keys exist
- *  so a cheaper rear blackout can be specced later without touching the main. */
-const TIER_FABRIC: Record<GoodsTier, Record<string, string>> = {
-  good: { draw: "RB-EN-16", legs: "RB-EN-16", border: "RB-EN-16", fullstage: "RB-EN-16", cyc: "RB-MUS" },
-  better: { draw: "RB-MARVEL", legs: "RB-MARVEL", border: "RB-MARVEL", fullstage: "RB-MARVEL", cyc: "RB-MUS" },
-  best: { draw: "RB-MV-MN", legs: "RB-MV-MN", border: "RB-MV-MN", fullstage: "RB-MV-MN", cyc: "RB-MUS" },
+/** Fabric per drape TYPE, with the tier as a grade shifter. The `better` row is
+ *  Peak's real spec (Rose Brand quote 423939). Drives both weight and price. */
+const FABRIC_BY_TYPE_TIER: Record<string, Record<GoodsTier, string>> = {
+  Draw: { good: "RB-EN-22", better: "RB-CHAR-25", best: "RB-MV-MN" },
+  "Midstage Draw": { good: "RB-EN-22", better: "RB-CHAR-25", best: "RB-MV-MN" },
+  Rear: { good: "RB-EN-22", better: "RB-CHAR-25", best: "RB-MV-MN" },
+  Border: { good: "RB-EN-22", better: "RB-CHAR-25", best: "RB-MV-MN" },
+  Legs: { good: "RB-EN-16", better: "RB-EN-22", best: "RB-CHAR-25" },
+  CYC: { good: "RB-MUS", better: "RB-MUS", best: "RB-MUS" },
 };
 
 /**
@@ -58,7 +59,14 @@ export function drapeRule(
 ): DrapeRule | null {
   const PW = d.proWidthFt;
   const PH = d.proHeightFt;
-  const fab = TIER_FABRIC[tier] || TIER_FABRIC.better;
+
+  // Fabric for a given drape TYPE at the requested tier, falling back to that
+  // type's `better` row (Peak's real spec) if an unrecognized tier ever
+  // arrives — e.g. an unchecked `as GoodsTier` cast from a form value.
+  const fabricFor = (type: string): string => {
+    const row = FABRIC_BY_TYPE_TIER[type];
+    return row[tier] || row.better;
+  };
 
   // A travelling pair: each panel covers half the opening plus 2 ft of centre
   // overlap, so the pair finishes at PW + 4.
@@ -75,19 +83,19 @@ export function drapeRule(
   switch (lineType) {
     case "Draw":
     case "Midstage Draw":
-      return pair(fab.draw);
+      return pair(fabricFor(lineType));
     // Jeff: "Rear is a draw curtain typically. Same as the mid."
     case "Rear":
-      return pair(fab.fullstage);
+      return pair(fabricFor("Rear"));
     case "Legs":
-      return { fabricSku: fab.legs, w: 6, h: PH + 1, fullness: 50, qty: 2, track: null, chain: CHAIN_JACK };
+      return { fabricSku: fabricFor("Legs"), w: 6, h: PH + 1, fullness: 50, qty: 2, track: null, chain: CHAIN_JACK };
     case "Border":
-      return { fabricSku: fab.border, w: PW, h: 5, fullness: 50, qty: 1, track: null, chain: CHAIN_JACK };
+      return { fabricSku: fabricFor("Border"), w: PW, h: 5, fullness: 50, qty: 1, track: null, chain: CHAIN_JACK };
     // The cyc is the ONLY line at PH exactly (no header overlap) and the ONLY
     // one at 0% fullness — it hangs flat. Inheriting the schedule's 50%
     // default would run it roughly 50% heavy.
     case "CYC":
-      return { fabricSku: fab.cyc, w: PW, h: PH, fullness: 0, qty: 1, track: null, chain: CHAIN_NONE };
+      return { fabricSku: fabricFor("CYC"), w: PW, h: PH, fullness: 0, qty: 1, track: null, chain: CHAIN_NONE };
     default:
       return null;
   }

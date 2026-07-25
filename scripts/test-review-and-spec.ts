@@ -487,24 +487,24 @@ ok(rDraw.w === 20, `draw panel = PW/2+2 (got ${rDraw.w})`);
 ok(rDraw.h === 19, `draw height = PH+1 (got ${rDraw.h})`);
 ok(rDraw.qty === 2 && rDraw.fullness === 50, "draw is a pair at 50% fullness");
 ok(rDraw.track === TRACK_TRAVELER, "draw travels on standard traveler track");
-ok(rDraw.fabricSku === "RB-MARVEL", "better tier draw resolves to 21oz Marvel — the tier the lineset builder defaults to when none is picked");
+ok(rDraw.fabricSku === "RB-CHAR-25", "better tier draw resolves to 25oz Charisma — the tier the lineset builder defaults to when none is picked");
 
 const rRear = drapeRule("Rear", DIMS36, "better")!;
 ok(rRear.w === rDraw.w && rRear.h === rDraw.h && rRear.qty === rDraw.qty, "rear is a draw curtain — same geometry as the main");
-ok(rRear.fabricSku === "RB-MARVEL", "rear resolves its own fullstage fabric role to 21oz Marvel — the same SKU as draw today, but the role is kept independently specifiable so a cheaper rear blackout can be swapped in later without touching the main drape");
+ok(rRear.fabricSku === "RB-CHAR-25", "rear resolves to 25oz Charisma — the same SKU as draw today, but Rear is kept as its own row in the type table so a cheaper rear blackout can be swapped in later without touching the main drape");
 
 const rMid = drapeRule("Midstage Draw", DIMS36, "better")!;
 ok(rMid.w === rDraw.w && rMid.h === rDraw.h, "midstage matches the main's geometry");
-ok(rMid.fabricSku === "RB-MARVEL", "better tier midstage draw resolves to 21oz Marvel");
+ok(rMid.fabricSku === "RB-CHAR-25", "better tier midstage draw resolves to 25oz Charisma");
 
 const rLegs = drapeRule("Legs", DIMS36, "better")!;
 ok(rLegs.w === 6 && rLegs.h === 19 && rLegs.qty === 2, "legs are 6ft x PH+1, one pair");
 ok(rLegs.track === null, "legs tie to pipe, no track");
-ok(rLegs.fabricSku === "RB-MARVEL", "better tier legs resolve to 21oz Marvel");
+ok(rLegs.fabricSku === "RB-EN-22", "better tier legs resolve to 22oz Encore");
 
 const rBorder = drapeRule("Border", DIMS36, "better")!;
 ok(rBorder.w === 36 && rBorder.h === 5 && rBorder.qty === 1, "border is PW wide x 5ft drop");
-ok(rBorder.fabricSku === "RB-MARVEL", "better tier border resolves to 21oz Marvel");
+ok(rBorder.fabricSku === "RB-CHAR-25", "better tier border resolves to 25oz Charisma");
 
 const rCyc = drapeRule("CYC", DIMS36, "better")!;
 ok(rCyc.w === 36 && rCyc.h === 18, "cyc is PW x PH EXACTLY — no +1 trim allowance");
@@ -515,8 +515,10 @@ ok(drapeRule("Electric", DIMS36, "better") === null, "electrics carry no goods")
 ok(drapeRule("Shell", DIMS36, "better") === null, "shell lines carry no goods");
 ok(drapeRule("General Purpose", DIMS36, "better") === null, "general purpose lines are empty");
 
-ok(drapeRule("Draw", DIMS36, "good")!.fabricSku === "RB-EN-16", "good tier uses 16oz Encore");
+ok(drapeRule("Draw", DIMS36, "good")!.fabricSku === "RB-EN-22", "good mains = Encore 22oz");
 ok(drapeRule("Draw", DIMS36, "best")!.fabricSku === "RB-MV-MN", "best tier uses 25oz Memorable");
+ok(drapeRule("Legs", DIMS36, "good")!.fabricSku === "RB-EN-16", "good legs = Encore 16oz");
+ok(drapeRule("Legs", DIMS36, "best")!.fabricSku === "RB-CHAR-25", "best legs = Charisma 25oz");
 ok(drapeRule("CYC", DIMS36, "good")!.fabricSku === "RB-MUS", "cyc is muslin at every tier");
 ok(rCyc.fabricSku === "RB-MUS", "cyc is muslin at the better tier too — the tier the lineset builder defaults to");
 ok(drapeRule("CYC", DIMS36, "best")!.fabricSku === "RB-MUS", "cyc is muslin at the best tier too — good, better, and best all confirmed, matching the 'every tier' claim above");
@@ -564,11 +566,11 @@ ok(baseOut.summary.activeSlotCount === wideProOut.summary.activeSlotCount, "PRO 
 
 /* --- rule -> WeightLine, override precedence (task 6) --- */
 const wlDraw = ruleToWeightLine(drapeRule("Draw", DIMS36, "better")!, [
-  { sku: "RB-MARVEL", desc: "21 oz Marvel Velour", oz: 21, ozBasis: "lin-yd" as const, boltWidthIn: 54 },
+  { sku: "RB-CHAR-25", desc: "25 oz Charisma Velour", oz: 25, ozBasis: "lin-yd" as const, boltWidthIn: 54 },
 ]);
 ok(wlDraw.w === 20 && wlDraw.h === 19, "rule dimensions carry into the WeightLine unchanged");
 ok(wlDraw.full === 50, "fullness rides on the line, not the schedule default");
-ok(wlDraw.fabResolved !== undefined && wlDraw.fabResolved.oz === 21, "the SKU resolves to a weighable fabric, not just a name");
+ok(wlDraw.fabResolved !== undefined && wlDraw.fabResolved.oz === 25, "the SKU resolves to a weighable fabric, not just a name");
 ok(computeSetWeight({ name: "t", ...wlDraw }, DEFAULT_WEIGHTS).goods > 0, "a rule-built line actually weighs something — the end-to-end join");
 
 const merged = { ...wlDraw, h: 24 };
@@ -594,25 +596,25 @@ ok(wlCyc.full === 0, "the cyc reaches computeSetWeight at 0% fullness, not the 5
  * rendering-only concern with no separate pure seam; it's verified live in
  * the dev server instead. */
 const OVERRIDE_FABRICS = [
+  { sku: "RB-CHAR-25", desc: "25 oz Charisma Velour", oz: 25, ozBasis: "lin-yd" as const, boltWidthIn: 54 },
   { sku: "RB-MARVEL", desc: "21 oz Marvel Velour", oz: 21, ozBasis: "lin-yd" as const, boltWidthIn: 54 },
-  { sku: "RB-MV-MN", desc: "25 oz Memorable Velour", oz: 25, ozBasis: "lin-yd" as const, boltWidthIn: 54 },
 ];
 const drawRule = drapeRule("Draw", DIMS36, "better")!;
 const ruleLine = ruleToWeightLine(drawRule, OVERRIDE_FABRICS);
-ok(ruleLine.fabResolved?.oz === 21, "unoverridden draw line carries the tier's 21oz Marvel");
+ok(ruleLine.fabResolved?.oz === 25, "unoverridden draw line carries the tier's 25oz Charisma");
 const ruleWeight = computeSetWeight({ name: "t", ...ruleLine }, DEFAULT_WEIGHTS);
 
 // (c) no override at all — mergeLineFabric passes the rule's fab/fabResolved straight through
 const kept = mergeLineFabric(ruleLine, undefined, drawRule, OVERRIDE_FABRICS);
-ok(kept.fab === ruleLine.fab && kept.fabResolved?.oz === 21, "no override: mergeLineFabric leaves the rule's fabResolved intact");
+ok(kept.fab === ruleLine.fab && kept.fabResolved?.oz === 25, "no override: mergeLineFabric leaves the rule's fabResolved intact");
 
 // (a) an overridden catalog fabric — fabResolved must track the OVERRIDE, not the rule
-const overrideDesc = "25 oz Memorable Velour";
+const overrideDesc = "21 oz Marvel Velour";
 const overridden = mergeLineFabric(ruleLine, { fab: overrideDesc }, drawRule, OVERRIDE_FABRICS);
 ok(overridden.fab === overrideDesc, "mergeLineFabric carries the override label through as fab");
-ok(overridden.fabResolved?.oz === 25, "the fix: overriding fab on a rule line re-resolves fabResolved to the OVERRIDE fabric, not the rule's — via the real production function, not a copy of it");
+ok(overridden.fabResolved?.oz === 21, "the fix: overriding fab on a rule line re-resolves fabResolved to the OVERRIDE fabric, not the rule's — via the real production function, not a copy of it");
 const overriddenWeight = computeSetWeight({ name: "t", ...ruleLine, ...overridden }, DEFAULT_WEIGHTS);
-ok(overriddenWeight.goods > ruleWeight.goods, `heavier override raises goods weight end-to-end through mergeLineFabric (rule ${ruleWeight.goods.toFixed(1)} -> override ${overriddenWeight.goods.toFixed(1)})`);
+ok(overriddenWeight.goods < ruleWeight.goods, `lighter override lowers goods weight end-to-end through mergeLineFabric (rule ${ruleWeight.goods.toFixed(1)} -> override ${overriddenWeight.goods.toFixed(1)})`);
 
 // (b) an override that misses the catalog — fabResolved must clear, not keep the stale rule value
 const missDesc = "Not in catalog";
