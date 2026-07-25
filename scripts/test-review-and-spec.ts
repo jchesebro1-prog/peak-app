@@ -12,6 +12,7 @@ import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS } from
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
 import { DEFAULT_SETTINGS } from "@/db/seed-data";
 import { accentContrast } from "@/lib/color";
+import { emailFor, legacyEmailFor } from "@/lib/team";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -1035,6 +1036,12 @@ ok(
   "relationship children report CRM as parent",
 );
 ok(NAV.every((e) => e.kind === "group"), "every top-level entry is a group — the mark handles Home");
+
+/* --- Sign-on email pattern (D118): firstname + last initial --- */
+ok(emailFor("Jeff Chesebro") === "jeffc@peaksystemsgroup.com", "emailFor is firstname+lastinitial (D118)");
+ok(emailFor("Isaac Mittlesteadt") === "isaacm@peaksystemsgroup.com", "long last names contribute just their initial");
+ok(emailFor("Cher") === "cher@peaksystemsgroup.com", "single-word names keep the whole-name fallback");
+ok(legacyEmailFor("Jeff Chesebro") === "jchesebro@peaksystemsgroup.com", "legacy derivation preserved for the migration + collision fallback");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

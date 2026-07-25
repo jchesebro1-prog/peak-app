@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { users, type UserRow } from "@/db/schema";
-import { deriveInitials, emailFor, fallbackColor, permsFor, type Perm } from "./team";
+import { deriveInitials, emailFor, fallbackColor, legacyEmailFor, permsFor, type Perm } from "./team";
 
 /**
  * Server-side team store — port of the prototype's window.Users (team.js).
@@ -60,10 +60,15 @@ export async function addUser(partial: {
   const db = await getDb();
   const list = await allUsers();
   const name = (partial.name || "").trim() || "New user";
+  // D118: derived addresses are firstname+lastinitial; if that address is
+  // already on the roster (two Jeff C.s), fall back to the legacy form so
+  // the unique(email) constraint can't fire on an auto-derived value.
+  const derived = emailFor(name);
+  const derivedTaken = list.some((u) => u.email.toLowerCase() === derived);
   const row = {
     id: nextId(list),
     name,
-    email: (partial.email || "").trim() || emailFor(name),
+    email: (partial.email || "").trim() || (derivedTaken ? legacyEmailFor(name) : derived),
     googleEmail: (partial.googleEmail || "").trim() || null,
     roles: partial.roles && partial.roles.length ? partial.roles : ["Estimator"],
     color: fallbackColor(name),
