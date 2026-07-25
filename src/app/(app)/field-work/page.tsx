@@ -11,6 +11,7 @@ import {
 } from "@/lib/stores/projects";
 import { loadServiceWork } from "@/lib/operations-work-server";
 import { WORK_TYPE_META, startOfDay, type WorkItem } from "@/lib/operations-work";
+import { ensureProjectTasksMigrated, allTasks, type TaskRecord } from "@/lib/stores/tasks";
 import FieldWorkDetail, { type FieldIdentity } from "./controls";
 
 export const metadata = { title: "Field work — Quartzite-6" };
@@ -119,6 +120,8 @@ export default async function FieldWorkPage({
     activeUsers(),
     loadServiceWork(),
   ]);
+  await ensureProjectTasksMigrated(all);
+  const taskRows = await allTasks();
 
   const selId = one(sp.id);
   const selObj: ProjectRecord | null = selId
@@ -146,7 +149,8 @@ export default async function FieldWorkPage({
     type DayRow = { day: number; node: React.ReactNode };
 
     const projectRows: DayRow[] = fieldJobs.map((p) => {
-      const done = (p.tasks || []).filter((t) => t.done).length;
+      const jobTasks = taskRows.filter((t) => t.projectId === p.id);
+      const done = jobTasks.filter((t) => t.status === "done").length;
       const onSite = p.stage === "install" || p.stage === "training";
       return {
         day: p.installStart || p.targetDate || today,
@@ -213,7 +217,7 @@ export default async function FieldWorkPage({
                 </span>
                 <div>
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600 }}>
-                    {done + "/" + (p.tasks || []).length}
+                    {done + "/" + jobTasks.length}
                   </div>
                   <div style={{ fontSize: 10, color: "#aab0bb" }}>tasks</div>
                 </div>
@@ -361,6 +365,7 @@ export default async function FieldWorkPage({
   // here since the DB-backed users store can't ship in the client bundle.
   const p = selObj;
   const tab = one(sp.tab);
+  const jobTasks: TaskRecord[] = taskRows.filter((t) => t.projectId === p.id);
 
   const identity: Record<string, FieldIdentity> = {};
   const addIdentity = (name: string) => {
@@ -376,6 +381,12 @@ export default async function FieldWorkPage({
   (p.timeLogs || []).forEach((l) => addIdentity(l.person));
 
   return (
-    <FieldWorkDetail project={p} meName={me.name} identity={identity} initialTab={tab} />
+    <FieldWorkDetail
+      project={p}
+      tasks={jobTasks}
+      meName={me.name}
+      identity={identity}
+      initialTab={tab}
+    />
   );
 }

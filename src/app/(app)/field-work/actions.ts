@@ -4,41 +4,42 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import {
   getProject,
-  toggleTask,
-  addTask,
   addNote,
   addTime,
 } from "@/lib/stores/projects";
+import { createTask, setTaskStatus } from "@/lib/stores/tasks";
 
 /**
  * Field Work mutations — the ProjectStore calls the prototype's Field Work
- * screen makes (project.js toggleTask / addTask / addNote / addTime).
- * FormData-shaped so the on-site forms work without client JS; invalid input
- * is a silent no-op (the UI only renders legal actions). The signed-in user
- * is the field actor (`me` in the prototype: window.Team.CURRENT).
+ * screen makes (project.js toggleTask / addTask / addNote / addTime). Tasks
+ * (#17) now live in the tasks collection rather than embedded on the project
+ * doc. FormData-shaped so the on-site forms work without client JS; invalid
+ * input is a silent no-op (the UI only renders legal actions). The signed-in
+ * user is the field actor (`me` in the prototype: window.Team.CURRENT).
  */
 
 /** Check / uncheck an install task. */
 export async function toggleFieldTask(formData: FormData): Promise<void> {
   await requireUser();
-  const id = String(formData.get("id") || "");
   const taskId = String(formData.get("taskId") || "");
-  if (!id || !taskId) return;
-  const p = await getProject(id);
-  if (!p) return;
-  await toggleTask(id, taskId);
+  const done = String(formData.get("done") || "") === "1";
+  if (!taskId) return;
+  await setTaskStatus(taskId, done ? "done" : "open");
   revalidatePath("/", "layout");
 }
 
 /** Add a punch-list task (Install section, assigned to the signed-in user). */
 export async function addFieldTask(formData: FormData): Promise<void> {
   const me = await requireUser();
-  const id = String(formData.get("id") || "");
+  const projectId = String(formData.get("id") || "");
   const title = String(formData.get("title") || "").trim();
-  if (!id || !title) return;
-  const p = await getProject(id);
-  if (!p) return;
-  await addTask(id, title, "Install", me.name);
+  const clientId = String(formData.get("taskId") || "");
+  if (!projectId || !title) return;
+  await createTask(
+    { id: clientId || undefined, title, section: "Install", projectId,
+      assigneeUserId: me.id, assigneeName: me.name },
+    me,
+  );
   revalidatePath("/", "layout");
 }
 

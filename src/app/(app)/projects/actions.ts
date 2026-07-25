@@ -10,8 +10,6 @@ import {
   setDeliveryStatus,
   addCrew,
   removeCrew,
-  addTask,
-  toggleTask,
   addNote,
   addTime,
   setSignoff,
@@ -26,10 +24,10 @@ import {
  * Project & sales-order mutations — the ProjectStore calls the prototype makes
  * from the Projects screen (project.js setStage / setLineStatus /
  * setDeliveryStatus / addCrew / removeCrew / setSignoff / createFromQuote, plus
- * the field-side addTask / toggleTask / addNote / addTime). FormData-shaped so
- * the forms submit without client JS; invalid input is a silent no-op (the UI
- * only renders legal actions, mirroring the prototype's gates). Every mutation
- * revalidates the layout so the list + detail re-render.
+ * the field-side addNote / addTime). FormData-shaped so the forms submit
+ * without client JS; invalid input is a silent no-op (the UI only renders
+ * legal actions, mirroring the prototype's gates). Every mutation revalidates
+ * the layout so the list + detail re-render.
  */
 
 const LINE_STATUSES: LineStatus[] = ["pending", "ordered", "shipped", "received"];
@@ -122,26 +120,6 @@ export async function startConversionAction(formData: FormData): Promise<void> {
 }
 
 /* ---- field-side mutations (Field Work reuses these; provided per contract) ---- */
-
-export async function addTaskAction(formData: FormData): Promise<void> {
-  await requireUser();
-  const id = str(formData, "id");
-  if (!id) return;
-  const title = str(formData, "title").trim();
-  const section = str(formData, "section").trim();
-  const assignee = str(formData, "assignee").trim();
-  await addTask(id, title || undefined, section || undefined, assignee || undefined);
-  revalidatePath("/", "layout");
-}
-
-export async function toggleTaskAction(formData: FormData): Promise<void> {
-  await requireUser();
-  const id = str(formData, "id");
-  const taskId = str(formData, "taskId");
-  if (!id || !taskId) return;
-  await toggleTask(id, taskId);
-  revalidatePath("/", "layout");
-}
 
 export async function addNoteAction(formData: FormData): Promise<void> {
   const user = await requireUser();

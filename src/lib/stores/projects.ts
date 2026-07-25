@@ -695,41 +695,11 @@ export async function updateCrew(
   });
 }
 
-/* ---------- field: tasks, notes, time ---------- */
-
-export async function addTask(
-  id: string,
-  title?: string,
-  section?: string,
-  assignee?: string
-): Promise<ProjectRecord | null> {
-  return patchDoc<ProjectRecord>("projects", id, (p) => {
-    p.tasks = Array.isArray(p.tasks) ? p.tasks : [];
-    p.tasks.push({
-      id: uid("tk-"),
-      title: title || "New task",
-      section: section || "Install",
-      assignee: assignee || "",
-      done: false,
-    });
-    p.updatedAt = now();
-    return p;
-  });
-}
-
-export async function toggleTask(id: string, taskId: string): Promise<ProjectRecord | null> {
-  const p = await getProject(id);
-  if (!p) return null;
-  if (!(p.tasks || []).some((t) => t.id === taskId)) return null;
-  return patchDoc<ProjectRecord>("projects", id, (doc) => {
-    const t = (doc.tasks || []).find((x) => x.id === taskId);
-    if (!t) return doc;
-    t.done = !t.done;
-    t.doneAt = t.done ? now() : null;
-    doc.updatedAt = now();
-    return doc;
-  });
-}
+/* ---------- field: notes, time ---------- */
+// addTask / toggleTask (embedded ProjectTask[] writers) removed — tasks (#17)
+// now live in the tasks collection (src/lib/stores/tasks.ts). The `tasks`
+// field + ProjectTask type stay for legacy docs and the lazy migration
+// (ensureProjectTasksMigrated) that reads them.
 
 export async function addNote(
   id: string,

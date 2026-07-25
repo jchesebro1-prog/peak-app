@@ -1,7 +1,7 @@
 import {
   listDocs, getDoc, upsertDoc, patchDoc, softDeleteDoc, nextPrefixedId, insertDocIfAbsent,
 } from "@/db/doc-store";
-import type { ProjectTask, ProjectStage } from "@/lib/stores/projects";
+import type { ProjectTask, ProjectStage, ProjectRecord } from "@/lib/stores/projects";
 
 /* ============================================================
    Tasks (#17) — the app's first cross-record task collection,
@@ -179,4 +179,24 @@ export async function updateTask(
 
 export async function removeTask(id: string): Promise<void> {
   await softDeleteDoc("tasks", id);
+}
+
+/** One-way, idempotent: copy any project's embedded tasks[] into the tasks
+    collection (preserving tk- ids), then blank the embedded array. Runs on
+    read from the pages that render tasks, so dev seeds, prod data, and field
+    mirrors all migrate without a manual step. */
+export async function ensureProjectTasksMigrated(projects: ProjectRecord[]): Promise<void> {
+  for (const p of projects) {
+    const legacy = Array.isArray(p.tasks) ? p.tasks : [];
+    if (!legacy.length) continue;
+    for (const pt of legacy) {
+      const hit = await getDoc<TaskRecord>("tasks", pt.id);
+      if (!hit) await upsertDoc("tasks", taskFromLegacy(p.id, pt, now()));
+    }
+    await patchDoc<ProjectRecord>("projects", p.id, (doc) => {
+      doc.tasks = [];
+      doc.updatedAt = now();
+      return doc;
+    });
+  }
 }

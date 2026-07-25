@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { firstName } from "@/lib/team";
 import type { ProjectRecord, ProjectStage } from "@/lib/stores/projects";
+import type { TaskRecord } from "@/lib/stores/tasks";
 import {
   toggleFieldTask,
   addFieldTask,
@@ -33,6 +34,7 @@ export type FieldIdentity = { initials: string; color: string };
 
 export type FieldWorkDetailProps = {
   project: ProjectRecord;
+  tasks: TaskRecord[];
   meName: string;
   identity: Record<string, FieldIdentity>;
   initialTab: string;
@@ -126,6 +128,7 @@ const uppLabel: React.CSSProperties = {
 
 export default function FieldWorkDetail({
   project,
+  tasks,
   meName,
   identity,
   initialTab,
@@ -134,6 +137,10 @@ export default function FieldWorkDetail({
   // Latest record for building the whole-doc offline payload, synchronously —
   // rapid checkbox taps must each mutate from the freshest state.
   const pRef = useRef<ProjectRecord>(project);
+  // Tasks (#17) are their own collection now — the same freshest-ref pattern,
+  // scoped to the task rows instead of the whole project doc.
+  const [taskRows, setTaskRows] = useState<TaskRecord[]>(tasks);
+  const tasksRef = useRef<TaskRecord[]>(tasks);
   const [tab, setTab] = useState(
     TABS.some((t) => t[0] === initialTab) ? initialTab : "tasks"
   );
@@ -156,14 +163,15 @@ export default function FieldWorkDetail({
   }
 
   /**
-   * The WHOLE resulting project document for the offline outbox
-   * (/api/sync/push does a whole-doc upsert by id). Stamp it the way the store
-   * would when the write reaches the cloud — projects carry updatedAt only
-   * (no syncState on the record), and rev bumps for the outbox version hint.
+   * The WHOLE resulting document for the offline outbox (/api/sync/push does
+   * a whole-doc upsert by id) — shared by both the project doc and the
+   * individual task docs below. Stamp it the way the store would when the
+   * write reaches the cloud — records carry updatedAt only (no syncState on
+   * the record), and rev bumps for the outbox version hint.
    */
-  function stampDoc(next: ProjectRecord): Record<string, unknown> {
-    const rev = Number((pRef.current as Record<string, unknown>).rev) || 1;
-    return { ...(next as Record<string, unknown>), updatedAt: Date.now(), rev: rev + 1 };
+  function stampDoc<T extends { id: string }>(next: T): Record<string, unknown> {
+    const rev = Number((next as unknown as Record<string, unknown>).rev) || 1;
+    return { ...(next as unknown as Record<string, unknown>), updatedAt: Date.now(), rev: rev + 1 };
   }
 
   /**
@@ -196,23 +204,55 @@ export default function FieldWorkDetail({
     }
   }
 
+  /**
+   * Same seam as persist() above, scoped to one task doc — tasks (#17) live
+   * in their own collection now, so a task edit no longer rides the whole
+   * project doc.
+   */
+  async function persistTask(
+    next: TaskRecord,
+    action: () => Promise<void>
+  ): Promise<void> {
+    const prev = tasksRef.current;
+    const nextRows = prev.some((t) => t.id === next.id)
+      ? prev.map((t) => (t.id === next.id ? next : t))
+      : [...prev, next];
+    tasksRef.current = nextRows;
+    setTaskRows(nextRows);
+    setBusy(true);
+    try {
+      const { queued } = await saveThroughOutbox({
+        collection: "tasks",
+        id: next.id,
+        doc: stampDoc(next),
+        action,
+      });
+      if (queued) flash("Saved on this device — will sync when you're back online");
+    } catch {
+      tasksRef.current = prev;
+      setTaskRows(prev);
+      flash("Couldn't save — please try again");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   /* ---------- capture handlers ---------- */
 
   function onToggleTask(taskId: string) {
-    const cur = pRef.current;
-    if (!(cur.tasks || []).some((t) => t.id === taskId)) return;
-    const next: ProjectRecord = {
+    const cur = tasksRef.current.find((t) => t.id === taskId);
+    if (!cur) return;
+    const done = cur.status !== "done";
+    const next: TaskRecord = {
       ...cur,
-      tasks: (cur.tasks || []).map((t) =>
-        t.id === taskId
-          ? { ...t, done: !t.done, doneAt: !t.done ? Date.now() : null }
-          : t
-      ),
+      status: done ? "done" : "open",
+      doneAt: done ? Date.now() : null,
+      updatedAt: Date.now(),
     };
     const fd = new FormData();
-    fd.set("id", cur.id);
     fd.set("taskId", taskId);
-    void persist(next, () => toggleFieldTask(fd));
+    fd.set("done", done ? "1" : "0");
+    void persistTask(next, () => toggleFieldTask(fd));
   }
 
   function onAddTask(e: React.FormEvent) {
@@ -221,18 +261,19 @@ export default function FieldWorkDetail({
     const cur = pRef.current;
     const title = taskTitle.trim();
     if (!title) return;
-    const next: ProjectRecord = {
-      ...cur,
-      tasks: [
-        ...(cur.tasks || []),
-        { id: uid("tk-"), title, section: "Install", assignee: meName, done: false },
-      ],
+    const id = uid("tk-");
+    const at = Date.now();
+    const next: TaskRecord = {
+      id, title, section: "Install", projectId: cur.id, quoteId: null, coverageKey: null,
+      assigneeUserId: null, assigneeName: meName, dueAt: null, status: "open", notes: "",
+      createdBy: meName, createdAt: at, updatedAt: at, doneAt: null,
     };
     setTaskTitle("");
     const fd = new FormData();
     fd.set("id", cur.id);
     fd.set("title", title);
-    void persist(next, () => addFieldTask(fd));
+    fd.set("taskId", id);
+    void persistTask(next, () => addFieldTask(fd));
   }
 
   function onPostNote(e: React.FormEvent) {
@@ -286,9 +327,9 @@ export default function FieldWorkDetail({
   const crewHours = (p.timeLogs || []).reduce((a, l) => a + (l.hours || 0), 0);
 
   // tasks grouped by section (insertion order preserved)
-  const groupsMap: Record<string, typeof p.tasks> = {};
+  const groupsMap: Record<string, TaskRecord[]> = {};
   const order: string[] = [];
-  (p.tasks || []).forEach((t) => {
+  taskRows.forEach((t) => {
     if (!groupsMap[t.section]) {
       groupsMap[t.section] = [];
       order.push(t.section);
@@ -475,12 +516,12 @@ export default function FieldWorkDetail({
                         fontWeight: 700,
                         flexShrink: 0,
                         marginTop: 1,
-                        border: `2px solid ${t.done ? "var(--accent)" : "#cdd2da"}`,
-                        background: t.done ? "var(--accent)" : "#fff",
+                        border: `2px solid ${t.status === "done" ? "var(--accent)" : "#cdd2da"}`,
+                        background: t.status === "done" ? "var(--accent)" : "#fff",
                         color: "#fff",
                       }}
                     >
-                      {t.done ? "✓" : ""}
+                      {t.status === "done" ? "✓" : ""}
                     </span>
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <span
@@ -489,7 +530,7 @@ export default function FieldWorkDetail({
                           fontSize: 14,
                           fontWeight: 500,
                           lineHeight: 1.35,
-                          ...(t.done
+                          ...(t.status === "done"
                             ? { textDecoration: "line-through", color: "#aab0bb" }
                             : { color: "#16181d" }),
                         }}
@@ -504,8 +545,8 @@ export default function FieldWorkDetail({
                           marginTop: 3,
                         }}
                       >
-                        {(t.assignee ? firstName(t.assignee) : "Unassigned") +
-                          (t.done && t.doneAt ? " · done " + timeAgo(t.doneAt) : "")}
+                        {(t.assigneeName ? firstName(t.assigneeName) : "Unassigned") +
+                          (t.status === "done" && t.doneAt ? " · done " + timeAgo(t.doneAt) : "")}
                       </span>
                     </span>
                   </button>
