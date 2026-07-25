@@ -905,7 +905,7 @@ import { computeCurtain as computeCurtainQuote } from "@/app/(app)/estimator/pri
 }
 
 /* --- Quick Design budget curtain block on the shared model (task 6) --- */
-import { compute as computeQuick, defaultAState } from "@/app/(app)/design/quick/engine";
+import { compute as computeQuick, defaultAState, tierSystems, curtainMakeCost, tierDefsDefault } from "@/app/(app)/design/quick/engine";
 import { drapeRule as drapeRuleQ } from "@/lib/design/goods";
 import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFor as makingForQ } from "@/lib/design/curtain-pricing";
 {
@@ -922,6 +922,25 @@ import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFo
     { fabricRate: RATES_Q[rule.fabricSku], makingRate: makingForQ(rule.fullness) }
   ).costTotal;
   ok(Math.abs(drawItem.cost - Math.round(expected)) < 1, `Quick Design Draw cost = shared model make cost (got ${drawItem.cost}, expected ${Math.round(expected)})`);
+}
+
+/* --- the tier pipeline (what the screen renders) uses the two-term curtain
+ * cost, not tierDefs.fabrics + area × costPerSqft (task 6 integration fix) ---
+ * The assertion above only inspects compute()'s raw output. The Quick Design
+ * SCREEN never reads that directly — it renders tierSystems/tierSystemsBase,
+ * which run compute()'s systems through applyFabrics per tier column. Before
+ * this fix, applyFabrics silently overwrote every curtain item's cost with
+ * the old one-term formula, so the budget and the rendered tier grid priced
+ * curtains two different ways. This drives the SAME "Draw" item through the
+ * full tier pipeline and checks it against curtainMakeCost directly. */
+{
+  const base2 = defaultAState(0);
+  const s2 = { ...base2, venue: "school", width: 40, ph: 20, depth: 30, tier: "better" as const, sys: { ...base2.sys, curtains: true }, drape: { draw: true, legs: false, border: false, scenerytrack: false, fullstage: false } };
+  const tiered = tierSystems(computeQuick(s2), s2, "better", tierDefsDefault(), []);
+  const dims2 = { proWidthFt: 40, proHeightFt: 20, stageWidthFt: 60, stageDepthFt: 30 };
+  const expected2 = curtainMakeCost("draw", dims2, "better")!.cost;
+  const cur = tiered.find((x) => x.key === "curtains")!.items.find((it) => it.desc === "Draw")!;
+  ok(Math.abs(cur.cost - expected2) < 1, `tier-pipeline Draw cost = two-term make cost, not the old area×costPerSqft (got ${cur.cost}, expected ${expected2})`);
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");

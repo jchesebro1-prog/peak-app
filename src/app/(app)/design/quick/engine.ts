@@ -11,7 +11,7 @@
 
 import { drapeRule } from "@/lib/design/goods";
 import { curtainCost, SEED_FABRIC_RATES, makingRateFor } from "@/lib/design/curtain-pricing";
-import { venueDimsFromEstimator } from "@/lib/design/venue-dims";
+import { venueDimsFromEstimator, type VenueDims } from "@/lib/design/venue-dims";
 
 /* ---------------------------------- types ---------------------------------- */
 
@@ -400,6 +400,29 @@ export function gridSets(s: AState, tierDefs: TierDefs): number {
   return Math.max(1, Math.round(td && td.sets != null ? td.sets : base));
 }
 
+/** Quick Design's curtain toggle keys (`drape.draw` etc.), mapped to the
+ *  drape TYPE goods.ts's FABRIC_BY_TYPE_TIER / drapeRule key on. */
+const CURTAIN_KEY_TO_TYPE: Record<string, string> = { draw: "Draw", legs: "Legs", border: "Border", fullstage: "Rear" };
+
+/**
+ * One curtain drape's two-term make cost + sewn area at a given tier, keyed
+ * by Quick Design's fabricKey. Shared by compute() (at s.tier) and
+ * applyFabrics (per tier column) so the budget and the tier grid price
+ * curtains identically — the tier column is no longer allowed to fall back
+ * to the old area × costPerSqft formula.
+ */
+export function curtainMakeCost(fabricKey: string, dims: VenueDims, tierKey: TierKey): { cost: number; area: number } | null {
+  const type = CURTAIN_KEY_TO_TYPE[fabricKey];
+  if (!type) return null;
+  const rule = drapeRule(type, dims, tierKey);
+  if (!rule) return null;
+  const cc = curtainCost(
+    { finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty },
+    { fabricRate: SEED_FABRIC_RATES[rule.fabricSku] ?? 0, makingRate: makingRateFor(rule.fullness) }
+  );
+  return { cost: Math.round(cc.costTotal), area: Math.round(cc.sewnAreaSqft) };
+}
+
 /* --------------------------------- compute --------------------------------- */
 
 /** Pure function of the designer state — the refined BOM equations. */
@@ -475,20 +498,16 @@ export function compute(s: AState): ComputeResult {
     if (on && count > 0) curtainItems.push({ desc, unit: "ea", qty: count, cost: Math.round(area * rate), area, fabricKey });
   };
   const gdims = venueDimsFromEstimator(s);
-  const priceDrape = (on: boolean | undefined, desc: string, type: string, count: number, fabricKey: string) => {
+  const priceDrape = (on: boolean | undefined, desc: string, count: number, fabricKey: string) => {
     if (!on || count <= 0) return;
-    const rule = drapeRule(type, gdims, s.tier);
-    if (!rule) return;
-    const cc = curtainCost(
-      { finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty },
-      { fabricRate: SEED_FABRIC_RATES[rule.fabricSku] ?? 0, makingRate: makingRateFor(rule.fullness) }
-    );
-    curtainItems.push({ desc, unit: "ea", qty: count, cost: Math.round(cc.costTotal), area: Math.round(cc.sewnAreaSqft), fabricKey });
+    const r = curtainMakeCost(fabricKey, gdims, s.tier);
+    if (!r) return;
+    curtainItems.push({ desc, unit: "ea", qty: count, cost: r.cost, area: r.area, fabricKey });
   };
-  priceDrape(drape.draw, "Draw", "Draw", dBlk * 1, "draw");
-  priceDrape(drape.legs, "Leg", "Legs", dBlk * 2, "legs");
-  priceDrape(drape.border, "Border", "Border", dBlk * 1, "border");
-  priceDrape(drape.fullstage, "Full stage", "Rear", dBlk * 1, "fullstage");
+  priceDrape(drape.draw, "Draw", dBlk * 1, "draw");
+  priceDrape(drape.legs, "Leg", dBlk * 2, "legs");
+  priceDrape(drape.border, "Border", dBlk * 1, "border");
+  priceDrape(drape.fullstage, "Full stage", dBlk * 1, "fullstage");
   addCurtain(drape.scenerytrack, "Scenery track", dBlk * 1, W * 1, 3, null); // track hardware, not soft goods — unchanged
 
   // Fixtures — multi. E = unified electric count; wUnit ≈ 1 per 8 ft of width.
@@ -647,10 +666,21 @@ export function fabricRate(fabrics: FabricOption[], sku: string | undefined): nu
   return f && f.costPerSqft != null ? f.costPerSqft : 3.0;
 }
 
-/** recompute the curtains system's fabric items from the tier's chosen fabrics */
-export function applyFabrics(systems: SystemBlock[], tierKey: TierKey, tierDefs: TierDefs, fabrics: FabricOption[]): SystemBlock[] {
-  const tf = (tierDefs[tierKey] && tierDefs[tierKey].fabrics) || {};
+/**
+ * Recompute the curtains system's fabric items for the active tier.
+ *
+ * Curtains price through the SAME two-term make-it model compute() uses,
+ * keyed by FABRIC_BY_TYPE_TIER[type][tierKey] (goods.ts) via curtainMakeCost
+ * — NOT tierDefs[tierKey].fabrics + area × costPerSqft. That old path is what
+ * the Quick Design SCREEN rendered through tierSystems/tierSystemsBase even
+ * after compute() moved to the shared model (task 6 integration defect): the
+ * budget priced curtains one way and the rendered tier grid another. tierDefs
+ * and fabrics are kept as parameters (other systems / callers still pass
+ * them) but are no longer consulted for curtains.
+ */
+export function applyFabrics(systems: SystemBlock[], tierKey: TierKey, tierDefs: TierDefs, fabrics: FabricOption[], s: AState): SystemBlock[] {
   const margin = 0.3;
+  const dims = venueDimsFromEstimator(s);
   return systems.map((sys) => {
     if (sys.key !== "curtains") return sys;
     let rev = 0;
@@ -661,11 +691,13 @@ export function applyFabrics(systems: SystemBlock[], tierKey: TierKey, tierDefs:
         cost += it.qty * it.cost;
         return it;
       }
-      const c = Math.round(it.area * fabricRate(fabrics, tf[it.fabricKey]));
+      const r = curtainMakeCost(it.fabricKey, dims, tierKey);
+      const c = r ? r.cost : it.cost;
+      const area = r ? r.area : it.area;
       const price = c / (1 - margin);
       rev += it.qty * price;
       cost += it.qty * c;
-      return { ...it, cost: c, price };
+      return { ...it, cost: c, price, area };
     });
     return { ...sys, items, rev, cost, tierFixed: true };
   });
@@ -731,7 +763,7 @@ export function tierSystems(
   tierDefs: TierDefs,
   fabrics: FabricOption[]
 ): SystemBlock[] {
-  return applyOverrides(applySkus(applyFabrics(scaleSets(C.systems, C, tierKey, tierDefs), tierKey, tierDefs, fabrics), tierKey), s, tierKey);
+  return applyOverrides(applySkus(applyFabrics(scaleSets(C.systems, C, tierKey, tierDefs), tierKey, tierDefs, fabrics, s), tierKey), s, tierKey);
 }
 
 /** same pipeline without overrides (the BOM's base rows). */
@@ -742,7 +774,7 @@ export function tierSystemsBase(
   tierDefs: TierDefs,
   fabrics: FabricOption[]
 ): SystemBlock[] {
-  return applySkus(applyFabrics(scaleSets(C.systems, C, tierKey, tierDefs), tierKey, tierDefs, fabrics), tierKey);
+  return applySkus(applyFabrics(scaleSets(C.systems, C, tierKey, tierDefs), tierKey, tierDefs, fabrics, s), tierKey);
 }
 
 /* --------------------------------- riser --------------------------------- */
