@@ -281,7 +281,7 @@ export const TIER_SKUS: Record<TierKey, Partial<Record<SysKey, Record<string, nu
 /** Authored Good / Better / Best spec descriptions per system: [good, better, best]. */
 const SPEC_DEFAULTS: Record<SysKey, [string, string, string]> = {
   rigging: ["Manual counterweight, basic line sets", "Counterweight / motor-assist, T-track guides", "Fully automated hoists, variable-speed control & monitoring"],
-  curtains: ["16 oz Encore velour, fixed track", "21 oz Marvel velour, walkalong / draw track", "25 oz Memorable velour, motorized track & added fullness"],
+  curtains: ["22 oz Encore velour, fixed track", "25 oz Charisma velour, walkalong / draw track", "25 oz Memorable velour, motorized track & added fullness"],
   lighting: ["LED Pars & basic ellipsoidals, manual focus", "Pro RGBA LED wash + profile spots, DMX movers on key positions", "Full moving-light rig, color-mixing profiles, networked sACN + spares"],
   controls: ["Entry console, single universe, basic distro", "Pro console + touchscreen, multi-universe sACN, managed distro", "Flagship console + tracking backup, redundant network & architectural integration"],
   audio: ["Compact line array, single sub, digital mixer", "Pro line array + subs, networked digital console & DSP", "Premium array, cardioid subs, redundant Dante DSP"],

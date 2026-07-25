@@ -366,12 +366,6 @@ export default function QuickDesignClient({
     td[tk].sets = v;
     setTierDefsPersist(td);
   };
-  const setTierFabric = (tk: TierKey, fk: string, sku: string) => {
-    const td = JSON.parse(JSON.stringify(tierDefs)) as TierDefs;
-    td[tk].fabrics = td[tk].fabrics || {};
-    td[tk].fabrics[fk] = sku;
-    setTierDefsPersist(td);
-  };
 
   /* ---- designer edits ---- */
 
@@ -1130,7 +1124,6 @@ export default function QuickDesignClient({
                 const loBound = Math.max(2, Math.round(baseSets * 0.4));
                 const setsMin = Math.min(setsVal, loBound);
                 const setsMax = Math.max(setsVal, loBound + 6, Math.round(baseSets * 2.5));
-                const fabricDefs: Array<[string, string]> = [["draw", "Draw"], ["legs", "Legs"], ["border", "Border"], ["fullstage", "Full Stage"]];
                 return (
                   <div key={key}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
@@ -1159,30 +1152,6 @@ export default function QuickDesignClient({
                         <input type="range" min={setsMin} max={setsMax} step={1} value={setsVal} onChange={(e) => setTierSets(selKey, e.target.value)} style={{ width: "100%", accentColor: accentHex, cursor: "pointer" }} />
                         <div style={{ fontSize: 10.5, color: "#aab0bb", marginTop: 6, lineHeight: 1.4 }}>
                           Base {baseSets} sets from the rigging equation (size × depth). Scales the {selTd.label} rigging BOM and rolls up to the totals.
-                        </div>
-                      </div>
-                    )}
-                    {key === "curtains" && (
-                      <div style={{ marginTop: 9, padding: "10px 11px", background: "#fff", border: "1px solid #e8eaee", borderRadius: 9, display: "flex", flexDirection: "column", gap: 9 }}>
-                        <div style={{ fontSize: 10.5, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".04em", textTransform: "uppercase" }}>Fabric type · from catalog</div>
-                        {fabricDefs.map(([fk, label]) => (
-                          <div key={fk} style={{ display: "grid", gridTemplateColumns: "62px 1fr", gap: 9, alignItems: "center" }}>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: "#5b616e" }}>{label}</span>
-                            <select
-                              value={(tierDefs[selKey].fabrics || {})[fk] || ""}
-                              onChange={(e) => setTierFabric(selKey, fk, e.target.value)}
-                              style={{ width: "100%", fontFamily: UI, fontSize: 11.5, color: "#16181d", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 7, padding: "6px 8px", outline: "none", cursor: "pointer" }}
-                            >
-                              {fabrics.map((f) => (
-                                <option key={f.sku} value={f.sku}>
-                                  {f.desc + " · $" + (f.costPerSqft != null ? f.costPerSqft.toFixed(2) : "?") + "/ft²"}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        ))}
-                        <div style={{ fontSize: 10.5, color: "#aab0bb", lineHeight: 1.4 }}>
-                          {selTd.label} curtain fabric drives material cost per ft² for Draw, Legs, Border &amp; Full Stage.
                         </div>
                       </div>
                     )}

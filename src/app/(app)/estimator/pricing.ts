@@ -141,7 +141,7 @@ export function computeCurtain(
   const h = parseFloat(d.height) || 0; // finished height (ft)
   const w = parseFloat(d.width) || 0; // finished width (ft)
   const fullness = parseFloat(d.fullness) || 0; // percent, e.g. 50
-  const fabricRate = fab.curtainAreaRate ?? SEED_FABRIC_RATES[fab.sku] ?? 0;
+  const fabricRate = fab.curtainAreaRate ?? SEED_FABRIC_RATES[fab.sku] ?? fab.costPerSqft ?? 0;
   const override =
     d.vendorCostOverride != null && d.vendorCostOverride !== "" ? parseFloat(d.vendorCostOverride) : null;
   const cc = curtainCost(
