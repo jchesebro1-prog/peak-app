@@ -2412,6 +2412,154 @@ field already exist; the work is a sell-price input + deciding A (line distribut
 
 ---
 
+## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — OPEN
+
+**Area:** The Grid (`/design/grid`), sheet handling; shared `VenueDims`.
+**Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
+**Spec:** `docs/superpowers/specs/2026-07-25-grid-base-sheet-and-estimator-split-design.md` (wave 2)
+
+**Ask (Jeff):** *"we need to have a base plan sheet be default, so the user doesn't need to
+upload something right away, they can just start dropping items in"* — refined same day:
+*"the base sheet follows the same logic as the plan view on the design estimator."* A new Grid
+project opens with a venue plan generated from dimensions (shared `VenueDims`), NOT a blank
+canvas; uploading a real plan stays optional. Scale is implicit from known geometry — **no
+calibration step on the base sheet**.
+
+**Notes:** Dims trap — estimator `width` = PROSCENIUM width; lineset `stageWidthFt` =
+wall-to-wall; the generated sheet must be explicit about which drives it. Open: when a real
+plan uploads later, do base-sheet markers carry over or arrive as a separate sheet?
+
+**Status:** OPEN — spec written, rides wave 2 (part of #41's architecture).
+
+---
+
+## 39. Catalog build-out for beta + Grid connection logic + wire types — OPEN (WAVE 1, beta-blocking)
+
+**Area:** catalog (`catalog_parts`), The Grid device palette (`/design/grid`).
+**Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
+**Spec:** `docs/superpowers/specs/2026-07-25-catalog-beta-buildout-design.md` (wave 1)
+
+**Ask (Jeff):** *"it is becoming a problem for beta testing to not have more items."* Four
+parts, one initiative: **(a)** seed real items from multiple manufacturers across six
+categories — Lighting Controls · Fixtures · Video Controls · Speakers · Audio Controls ·
+Curtains (**NOT Fabric** — separate discussion pending); **(b)** those items appear in The
+Grid's palette (answers the slice-1 seed question); **(c)** connection metadata (ports) so
+The Grid only wires compatible devices — extends the ETC metadata worksheet to all six
+categories; **(d)** wire TYPES per connection ("wire times" was a typo) — DMX, Cat6, speaker
+etc., one schema with (c); routed runs gain a real cable BOM line.
+
+**Locked calls:** starter set (Claude drafts from the 52-sheet manifest in
+`~/Downloads/Dealer Price Sheets/Peak Import/`, **Jeff reviews before import**); trades =
+Lighting / Rigging / AV, category→trade mapping stored as admin-editable data;
+Tannoy = Music Tribe, Ape Riggers dropped, Draper base-only.
+
+**Status:** OPEN — wave 1, in progress this session.
+
+---
+
+## 40. Catalog-anchored datasheets + specs → one-click client package — OPEN
+
+**Area:** catalog (`catalog_parts`), The Grid, estimator, designs, D94 spec engine, D116 blob store.
+**Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
+**Spec:** `docs/superpowers/specs/2026-07-25-client-package-generator-design.md` (wave 2)
+
+**Ask (Jeff, verbatim goal):** *"if we prepare a BOM we can easily generate a datasheet, spec,
+and rough drawings for the client without too much effort or work."* **(a)** datasheet
+attachments anchored on the CATALOG part (attach once → every Grid drop / estimate / design
+inherits; home = private Vercel Blob + authenticated proxy, D116); **(b)** spec attachment per
+product — same anchor, extends the D94/D89 "locked CSI language on catalog parts" population
+across the six beta categories; **(c)** the generator: one action walks a BOM and emits
+datasheet package + spec + rough drawings. Much exists (Grid→D94 bridge, derived riser, .docx
+output) — the missing piece is assembly; completeness depends on (a)+(b) population.
+
+**Status:** OPEN — wave 2 (depends on #39 attachments being populated).
+
+---
+
+## 41. DIRECTION: split the design estimator; merge design-artifact logic into The Grid — OPEN
+
+**Area:** design estimator, The Grid, Designs.
+**Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
+**Spec:** `docs/superpowers/specs/2026-07-25-grid-base-sheet-and-estimator-split-design.md` (wave 2)
+
+**Direction (Jeff-confirmed):** estimation side (dims/assumptions → budget) moves under
+Estimating; **Plan + equipment/lineset schedules + Control Riser logic merges into The Grid**
+(one design workspace; "Schedules" = equipment/lineset schedules, NOT the Operations board).
+**Architecture confirmed:** two dims-driven paths off shared `VenueDims` — estimator keeps
+measurements for equation-based quick estimates (numbers only); The Grid uses the same
+variables to generate the plan view when no drawings exist (#38 fully grown). Artifacts derive
+from Grid instances ONLY. Estimating consumes a Grid BOM when one exists, else prices
+parametrically. **Equipment scoping:** per-item optional "categories toggle" with user-defined
+labels (trade packages, alternates — open-ended by design). **Naming/nav TABLED** (tabs/UI
+rebuild in flight). **NO data migration** (beta, sample data only). Sequencing: #39 lands
+first; this rides on top. Pricing math mostly does NOT move (budget + quote share `goods.ts`).
+
+**Status:** OPEN — wave 2.
+
+---
+
+## 42. Inbox round 2: threading + Outlook three-pane + Inbox/CRM mode toggle — OPEN (WAVE 1)
+
+**Area:** Inbox (Gmail-backed, D105 rebuild 2026-07-22).
+**Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
+**Spec:** `docs/superpowers/specs/2026-07-25-inbox-round-2-design.md` (wave 1)
+
+**Ask (Jeff):** *"The inbox still seems very clunky and rough… I thought I asked for it to
+look more like outlook with threads."* First recon: verify whether D105 shipped conversation
+threading at all (its record never mentions it; Gmail supplies `threadId`, so grouping is
+list-rendering work). Locked: one row per conversation (count badge, latest snippet);
+three-pane layout (folder rail · list · persistent reading pane, arrow-key nav); density pass
+(bold-unread, hover quick actions); selection-aware command bar; **Inbox/CRM mode toggle** —
+default = plain date-sorted email, CRM mode = follow-up/waiting filters, persisted per user.
+
+**Status:** OPEN — wave 1, in progress this session.
+
+---
+
+## 43. Reports + Home rebuilt as BUILD-YOUR-OWN widget system — OPEN (supersedes #7)
+
+**Area:** Reports, Home.
+**Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
+**Spec:** `docs/superpowers/specs/2026-07-25-dashboard-widget-system-design.md` (wave 2);
+full brief in memory: `knowledge/peak/quartzite-dashboard-widget-brief-2026-07.md`
+
+**Design (converged 2026-07-25, all decisions Jeff-confirmed):** curated widget REGISTRY
+(5 primitives), NOT a query builder; one system powers Home AND Reports (Home cards become
+widgets); role-gated widgets; Owner/Installer/Admin presets as starting layouts; pick+reorder
+auto-layout v1; global timeframe selector (forward-looking widgets exempt).
+**Pipeline/capacity widget:** capacity = $ bands per TRADE per MONTH, effective-dated; trade
+mix AUTO from catalog categories (+ override) — consumes #39's trade mapping; **#15 is a
+PREREQUISITE** (expected install window per quote); stage-default weights + per-deal override
++ "sits awhile" timing push; utilization v1 = scheduled load. Riskiest assumption:
+category→trade mapping (no explicit Rigging category — resolved by #39's mapping table).
+**Supersedes #7** — reconcile in the Daylite-parity design.
+
+**Status:** OPEN — wave 2 (needs #39 categories + #15).
+
+---
+
+## 44. Projects lifecycle: delivery-driven stages + Install module + phone signoff + walkthrough task — OPEN
+
+**Area:** Projects, Install/Field Work, Schedule, tasks.
+**Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
+**Spec:** `docs/superpowers/specs/2026-07-25-projects-lifecycle-design.md` (wave 2)
+
+**Decisions (Jeff pop-in-confirmed 2026-07-25):** **(a)** per-shipment delivery lines
+(what's coming · expected ship date · received checkbox); ALL received → auto-advance to
+Scheduled with undo; scheduling never blocked by stage — expected ship dates surface on the
+schedule for crew pre-booking. Full PO/procurement module explicitly NOT chosen. **(b)**
+Install module: installer opens *"basically a report of everything up to that point"* —
+scope/BOM by scope category · schedule + crew · site/venue + contacts · drawings/datasheets
+(reuses #40) · prior notes · signoff checklist; mobile-first on Field Work. **(c)** signoff =
+checkbox per SCOPE + phone-drawn signature (rework D83's silent `setSignoff()` stage write
+into an explicit signoff record). **(d)** Complete → auto-task to the project's Lead Sales
+role (falls back to quote owner), due ~7 days: walk the site with the end user. Depends on
+#17 tasks table (plan 01 LANDED 2026-07-25) + #16E roles model.
+
+**Status:** OPEN — wave 2.
+
+---
+
 ## IDEA (not a punch-list item) — Consulting as a project type — BUILT (D90)
 
 **Status: BUILT 2026-07-19 (D90).** Jeff defined Consulting in the 2026-07-19 brainstorming
