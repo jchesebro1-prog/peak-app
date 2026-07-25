@@ -36,7 +36,7 @@ export default async function SchedulePage({
   }
 
   const [catalog, settings] = await Promise.all([listCatalog(), getSettings()]);
-  const accent = settings.accent || "#7b3f8a";
+  const accent = settings.accent || "#b08d4a";
   const partById = new Map(catalog.map((p) => [p.id, p]));
   const placements = project.placements || [];
   const spaces = project.spaces || [];

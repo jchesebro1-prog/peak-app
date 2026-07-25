@@ -1835,3 +1835,19 @@ its numbers), Polar Focus (13), Visionary (37), Cloud (80).
 **Local dev only so far.** Production is the same two commands with
 `DATABASE_URL` set, after the main push. Converter + importer are committed;
 the generated JSON is not (regenerate from the folder).
+
+## Sign-on email pattern (2026-07-25)
+
+- **D118. Roster emails derive as firstname + last initial**
+  (`jeffc@peaksystemsgroup.com`), matching the real Google Workspace
+  addresses, so Google SSO's invite-list check matches without editing each
+  user. `emailFor()` flipped in `src/lib/team.ts`; the old derivation lives
+  on as `legacyEmailFor()` — it is the one-time migration's "was this
+  auto-derived?" test and the deterministic fallback when two people share
+  a firstname+lastinitial address (also guarded in `addUser`). One-time
+  rewrite: `npx tsx scripts/migrate-email-pattern.ts` — touches only rows
+  still equal to the legacy derivation; custom emails/googleEmail untouched.
+  **Run it once locally when the dev DB is free, and once against prod
+  (DATABASE_URL) at deploy.** Note: the Google `redirect_uri_mismatch`
+  error is separate — the OAuth client in Google Cloud Console must list
+  the current domain's callback (`https://quartzite-six.vercel.app/api/auth/callback/google`).

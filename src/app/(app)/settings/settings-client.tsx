@@ -35,6 +35,7 @@ import {
   ADMIN_SCREENS,
   resolveSettingsSection,
 } from "./settings-sections";
+import { accentContrast } from "@/lib/color";
 
 /**
  * Settings — admin surface, ported from Settings.dc.html
@@ -43,7 +44,7 @@ import {
  * (address search + geocoding) arrives with geo in Phase 5.
  */
 
-const ACCENTS = ["#7b3f8a", "#1f8a5b", "#3d4eb0", "#b4543a"];
+const ACCENTS = ["#b08d4a", "#7b3f8a", "#1f8a5b", "#3d4eb0", "#b4543a"];
 const ROLE_COLORS: Record<string, string> = {
   Admin: "#5b4b8a",
   Manager: "#3155a8",
@@ -532,7 +533,7 @@ export default function SettingsClient({
                       border: "none",
                       background: hex,
                       cursor: "pointer",
-                      color: "#fff",
+                      color: accentContrast(hex), // D117: adapts to swatch's own hex
                       fontSize: 14,
                       fontWeight: 700,
                       lineHeight: 1,
@@ -1757,7 +1758,7 @@ export default function SettingsClient({
                   style={{
                     fontSize: 13,
                     fontWeight: 600,
-                    color: "#fff",
+                    color: "var(--accent-contrast)", // D117: adapts to active accent
                     background: "var(--accent)",
                     border: "none",
                     borderRadius: 9,
@@ -1901,7 +1902,7 @@ export default function SettingsClient({
                             border: on
                               ? "1.5px solid var(--accent)"
                               : "1.5px solid #d6d9e0",
-                            color: "#fff",
+                            color: on ? "var(--accent-contrast)" : "#fff", // D117: adapts to active accent
                             fontSize: 12,
                             fontWeight: 700,
                           }}
@@ -1972,7 +1973,7 @@ export default function SettingsClient({
                 <button
                   onClick={saveModal}
                   style={{
-                    color: "#fff",
+                    color: "var(--accent-contrast)", // D117: adapts to active accent
                     background: "var(--accent)",
                     border: "none",
                     borderRadius: 9,

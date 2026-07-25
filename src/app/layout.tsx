@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Public_Sans, IBM_Plex_Mono } from "next/font/google";
 import type { CSSProperties } from "react";
 import { getSettings } from "@/lib/settings";
+import { accentContrast } from "@/lib/color";
 import "./globals.css";
 
 const publicSans = Public_Sans({
@@ -25,7 +26,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport = {
-  themeColor: "#16181d",
+  themeColor: "#0e0f12",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover" as const,
@@ -36,7 +37,15 @@ export default async function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   const settings = await getSettings();
   return (
-    <html lang="en" style={{ "--accent": settings.accent } as CSSProperties}>
+    <html
+      lang="en"
+      style={
+        {
+          "--accent": settings.accent,
+          "--accent-contrast": accentContrast(settings.accent),
+        } as CSSProperties
+      }
+    >
       <body className={`${publicSans.variable} ${plexMono.variable}`}>
         {children}
       </body>

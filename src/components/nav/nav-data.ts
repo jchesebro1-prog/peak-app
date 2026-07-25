@@ -10,19 +10,50 @@ export type NavEntry =
   | { kind: "group"; key: string; label: string; children: NavChild[] };
 
 export const NAV: NavEntry[] = [
-  { kind: "link", key: "home", label: "Home", href: "/" },
-  /* My Queue, Calendar, and Inbox folded into Home as tabs (D98) — see
-   * app/(app)/home-tabs-keys.ts. They no longer have their own top-level
-   * nav links; activeKeyFor maps their routes to "home" below. */
-  /* Design is the merged Consulting + Design Studio module (D97): one
-   * top-level group covering engagements, sandbox designs, and the three
-   * calculators, replacing the standalone Consulting link and the
-   * separate Design Studio group. Positioned where the Consulting link
-   * held its place, beside Home/Inbox. */
+  /* Q-6 rebrand (D117): the header reads like the brand lockup —
+   * [Q6 mark = Home] EST · PM · CRM · DESIGN. Home left the tab row (the
+   * mark is the link); Quotes/Estimator/Reviews split out of Sales into
+   * EST; the rest of Sales became CRM; Operations became PM. Routes are
+   * untouched — only group keys/labels moved. */
+  {
+    kind: "group",
+    key: "est",
+    label: "EST",
+    children: [
+      { key: "quotes", label: "Quotes", href: "/quotes" },
+      { key: "estimator", label: "Estimator", href: "/estimator" },
+      { key: "reviews", label: "Reviews", href: "/reviews" },
+    ],
+  },
+  {
+    kind: "group",
+    key: "pm",
+    label: "PM",
+    children: [
+      { key: "projects", label: "Projects", href: "/projects" },
+      { key: "schedule", label: "Schedule", href: "/schedule" },
+      { key: "fieldwork", label: "Field Work", href: "/field-work" },
+      { key: "flametests", label: "Flame Tests", href: "/flame-tests" },
+      { key: "inspections", label: "Rigging Inspections", href: "/inspections" },
+      { key: "repairs", label: "Repairs", href: "/repairs" },
+    ],
+  },
+  {
+    kind: "group",
+    key: "crm",
+    label: "CRM",
+    children: [
+      { key: "leads", label: "Leads", href: "/leads" },
+      { key: "companies", label: "Companies", href: "/companies" },
+      { key: "people", label: "People", href: "/people" },
+      { key: "venues", label: "Venues", href: "/venues" },
+      { key: "field", label: "Field Survey", href: "/field-survey" },
+    ],
+  },
   {
     kind: "group",
     key: "design",
-    label: "Design",
+    label: "DESIGN",
     children: [
       { key: "designoverview", label: "Overview", href: "/design" },
       { key: "engagements", label: "Consulting", href: "/design/engagements" },
@@ -34,33 +65,6 @@ export const NAV: NavEntry[] = [
       { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
       { key: "motors", label: "Motor Library", href: "/design/motors" },
       { key: "fixtures", label: "Fixture Cross-Ref", href: "/design/fixtures" },
-    ],
-  },
-  {
-    kind: "group",
-    key: "sales",
-    label: "Sales",
-    children: [
-      { key: "leads", label: "Leads", href: "/leads" },
-      { key: "quotes", label: "Quotes", href: "/quotes" },
-      { key: "reviews", label: "Reviews", href: "/reviews" },
-      { key: "companies", label: "Companies", href: "/companies" },
-      { key: "people", label: "People", href: "/people" },
-      { key: "venues", label: "Venues", href: "/venues" },
-      { key: "field", label: "Field Survey", href: "/field-survey" },
-    ],
-  },
-  {
-    kind: "group",
-    key: "operations",
-    label: "Operations",
-    children: [
-      { key: "projects", label: "Projects", href: "/projects" },
-      { key: "schedule", label: "Schedule", href: "/schedule" },
-      { key: "fieldwork", label: "Field Work", href: "/field-work" },
-      { key: "flametests", label: "Flame Tests", href: "/flame-tests" },
-      { key: "inspections", label: "Rigging Inspections", href: "/inspections" },
-      { key: "repairs", label: "Repairs", href: "/repairs" },
     ],
   },
 ];
@@ -75,7 +79,7 @@ export function activeKeyFor(pathname: string): string {
     "/inbox": "home",
     "/leads": "leads",
     "/quotes": "quotes",
-    "/estimator": "quotes",
+    "/estimator": "estimator",
     "/design": "designoverview",
     "/reviews": "reviews",
     "/projects": "projects",

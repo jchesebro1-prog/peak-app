@@ -43,7 +43,7 @@ export function putTierDefs(next: TierDefs): void {
 
 /* ---- resolved accent (concrete hex for SVG fills) ---- */
 
-const ACCENT_FALLBACK = "#7b3f8a";
+const ACCENT_FALLBACK = "#b08d4a";
 
 export function subscribeAccent(): () => void {
   return () => {};

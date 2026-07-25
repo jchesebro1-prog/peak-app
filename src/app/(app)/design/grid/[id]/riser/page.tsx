@@ -36,7 +36,7 @@ export default async function RiserPage({
   }
 
   const [catalog, settings] = await Promise.all([listCatalog(), getSettings()]);
-  const accent = settings.accent || "#7b3f8a";
+  const accent = settings.accent || "#b08d4a";
   const graph = riserGraph(
     project.placements || [],
     project.routes || [],

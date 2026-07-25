@@ -41,7 +41,23 @@ export const IDENTITY: Record<string, { initials: string; color: string }> = {
   "Isaac Mittlesteadt": { initials: "IM", color: "#b4543a" },
 };
 
+/** Company address pattern (D118): firstname + last initial — "Jeff
+ * Chesebro" → jeffc@. Matches the real Google Workspace addresses so the
+ * roster's derived emails line up with sign-in without per-user edits. */
 export function emailFor(name: string): string {
+  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2)
+    return (parts[0] || "user").toLowerCase() + "@peaksystemsgroup.com";
+  return (
+    (parts[0] + parts[parts.length - 1][0]).toLowerCase() +
+    "@peaksystemsgroup.com"
+  );
+}
+
+/** Pre-D118 derivation (first initial + last name). Kept for the one-time
+ * migration's "was this auto-derived?" check and as the deterministic
+ * fallback when two people share a firstname+lastinitial address. */
+export function legacyEmailFor(name: string): string {
   const parts = (name || "").trim().split(/\s+/).filter(Boolean);
   if (parts.length < 2)
     return (parts[0] || "user").toLowerCase() + "@peaksystemsgroup.com";
