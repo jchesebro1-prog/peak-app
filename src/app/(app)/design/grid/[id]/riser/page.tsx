@@ -2,8 +2,10 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { getProject } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
+import { getSettings } from "@/lib/settings";
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { riserGraph } from "@/lib/design/grid-riser";
+import { PrintButton } from "@/components/letter/print-button";
 
 export const metadata = { title: "Riser sketch — Quartzite" };
 export const dynamic = "force-dynamic";
@@ -33,7 +35,8 @@ export default async function RiserPage({
     );
   }
 
-  const catalog = await listCatalog();
+  const [catalog, settings] = await Promise.all([listCatalog(), getSettings()]);
+  const accent = settings.accent || "#7b3f8a";
   const graph = riserGraph(
     project.placements || [],
     project.routes || [],
@@ -57,16 +60,26 @@ export default async function RiserPage({
 
   return (
     <div className="pk-content" style={{ maxWidth: 1160, padding: "26px 30px 64px" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
-        <h1 style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Riser sketch</h1>
+      {/* print (D113.7): chrome hides via .pk-doc-toolbar/.pk-no-print rules */}
+      <style>{`@media print { .grid-riser-card { border: none !important; box-shadow: none !important; padding: 0 !important; } }`}</style>
+      <div className="pk-doc-toolbar" style={{ maxWidth: "none", justifyContent: "flex-start" }}>
         <Link
           href={`/design/grid/${encodeURIComponent(project.id)}`}
-          style={{ color: "var(--accent)", fontSize: 12.5 }}
+          style={{ fontFamily: "var(--font-ui)", fontSize: 12.5, color: "var(--accent)", textDecoration: "none", marginRight: "auto" }}
         >
           ← {project.name}
         </Link>
+        <PrintButton accent={accent} />
       </div>
-      <p style={{ color: "#8c919c", fontSize: 13, marginBottom: 22 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
+        <h1 style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Riser sketch</h1>
+        <span style={{ color: "#8c919c", fontSize: 13 }}>
+          {project.name}
+          {project.customer ? ` · ${project.customer}` : ""} ·{" "}
+          {new Date(project.updatedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })} · {project.id}
+        </span>
+      </div>
+      <p className="pk-no-print" style={{ color: "#8c919c", fontSize: 13, marginBottom: 22 }}>
         Derived live from the plan — devices grouped by space, wire runs as
         connections. Nothing here is drawn by hand, so it can never drift from
         the layout.
@@ -77,7 +90,7 @@ export default async function RiserPage({
           Nothing to sketch yet — paint devices and draw spaces on the plan first.
         </div>
       ) : (
-        <div className="pk-card" style={{ padding: 18, overflowX: "auto" }}>
+        <div className="pk-card grid-riser-card" style={{ padding: 18, overflowX: "auto" }}>
           <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: "block" }}>
             {graph.nodes.map((n) => {
               const x = xOf.get(n.spaceId)!;
