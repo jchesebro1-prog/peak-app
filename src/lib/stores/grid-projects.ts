@@ -101,6 +101,13 @@ export type GridRoute = {
   aspect: number;
   by: string;
   at: number;
+  /** Device-wire endpoints (Task 4, punch #39) — set when both waypoints
+   *  snapped onto a placed device at draw time. Absent on a free route. */
+  fromPlacementId?: string;
+  toPlacementId?: string;
+  /** Validated shared connectionType (catalog-connect.validateDeviceWire),
+   *  stamped only when both endpoint devices carry `ports`. */
+  connectionType?: string;
 };
 
 export type GridProject = {
@@ -377,7 +384,17 @@ export async function removeSpace(
 
 export async function addRoute(
   projectId: string,
-  input: { sheetId: string; page: number; partId: string; points: Point[]; aspect: number; by: string }
+  input: {
+    sheetId: string;
+    page: number;
+    partId: string;
+    points: Point[];
+    aspect: number;
+    by: string;
+    fromPlacementId?: string;
+    toPlacementId?: string;
+    connectionType?: string;
+  }
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.routes = [
@@ -391,6 +408,9 @@ export async function addRoute(
         aspect: input.aspect,
         by: input.by,
         at: Date.now(),
+        ...(input.fromPlacementId ? { fromPlacementId: input.fromPlacementId } : {}),
+        ...(input.toPlacementId ? { toPlacementId: input.toPlacementId } : {}),
+        ...(input.connectionType ? { connectionType: input.connectionType } : {}),
       },
     ];
     p.updatedAt = Date.now();

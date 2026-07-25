@@ -6,6 +6,10 @@
  * same functions so the sidebar and the quote can never disagree.
  * ------------------------------------------------------------------ */
 
+// Type-only — catalog-connect is itself pure/dependency-free, so this never
+// drags anything heavier into the client bundle (erased at compile time).
+import type { Port } from "@/lib/catalog-connect";
+
 /** The slice of a catalog part the BOM needs — structurally satisfied by
  *  stores/catalog.CatalogPart, mapped server-side and passed to the client. */
 export type PartLite = {
@@ -16,6 +20,10 @@ export type PartLite = {
   unit: string;
   list: number;
   cost: number;
+  /** Device connectors (Task 4, punch #39) — present only when the catalog
+   *  part has been migrated to declare ports; the Grid editor uses this to
+   *  decide whether a device-wire route can be validated at all. */
+  ports?: Port[];
 };
 
 export type BomLine = {
@@ -27,6 +35,10 @@ export type BomLine = {
   list: number;
   /** qty × list. */
   ext: number;
+  /** Present only on route lines (Task 4) where every contributing route
+   *  agreed on the same validated connectionType — an ambiguous group
+   *  (mixed types) is left unset rather than guessing. */
+  connectionType?: string;
 };
 
 /**
@@ -117,6 +129,8 @@ export type RouteLite = {
    *  the length is recomputable without re-opening the sheet. */
   aspect: number;
   partId: string;
+  /** Validated device-wire connectionType (Task 4), when stamped. */
+  connectionType?: string;
 };
 
 // grid-geometry's Point is annotations' Point; re-declare structurally to
@@ -143,6 +157,10 @@ export function routeLines(
 ): { lines: BomLine[]; value: number; cost: number; unmeasured: number } {
   const byId = new Map(parts.map((p) => [p.id, p]));
   const feet = new Map<string, number>();
+  // Per-part-group connectionTypes seen (Task 4) — a line is annotated only
+  // when every contributing route agrees; a mixed group stays unset rather
+  // than guessing which cable's connector actually applies.
+  const connTypes = new Map<string, Set<string>>();
   let unmeasured = 0;
   for (const r of routes) {
     const ft = routeLengthFt(r, cals);
@@ -151,6 +169,11 @@ export function routeLines(
       continue;
     }
     feet.set(r.partId, (feet.get(r.partId) || 0) + ft);
+    if (r.connectionType) {
+      const set = connTypes.get(r.partId) || new Set<string>();
+      set.add(r.connectionType);
+      connTypes.set(r.partId, set);
+    }
   }
   const lines: BomLine[] = [];
   let value = 0;
@@ -158,6 +181,8 @@ export function routeLines(
   for (const [partId, ft] of feet) {
     const part = byId.get(partId);
     const qty = Math.ceil(ft);
+    const types = connTypes.get(partId);
+    const connectionType = types && types.size === 1 ? [...types][0] : undefined;
     const line: BomLine = {
       partId,
       desc: part ? part.desc : `${partId} (removed part — no longer in the catalog)`,
@@ -165,6 +190,7 @@ export function routeLines(
       qty,
       list: part ? part.list : 0,
       ext: qty * (part ? part.list : 0),
+      ...(connectionType ? { connectionType } : {}),
     };
     lines.push(line);
     value += line.ext;

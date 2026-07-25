@@ -118,3 +118,33 @@ export function canConnect(a: Port, b: Port): boolean {
 export function compatibleWireTypes(conn: string, types: WireType[]): WireType[] {
   return types.filter((wt) => wt.connectionTypes.includes(conn));
 }
+
+/**
+ * Grid wiring validation (Task 4): may a route drawn from `fromPart` to
+ * `toPart` be treated as a validated device-to-device wire?
+ *
+ * Scans `fromPart.ports` × `toPart.ports` in order and returns the first
+ * `canConnect`-satisfying pair's connectionType. When either side has no
+ * ports at all, that's reported with the same `{ ok: false }` shape but the
+ * "no connection metadata" reason — callers (the Grid editor / addRoute)
+ * treat THAT specific reason as an allowed case (the catalog isn't fully
+ * migrated to ports yet, and an un-migrated device must never block a
+ * route). Only a refusal where both sides HAD ports and still found no
+ * compatible pair is a real validation failure.
+ */
+export function validateDeviceWire(
+  fromPart: { ports?: Port[] },
+  toPart: { ports?: Port[] }
+): { ok: true; connectionType: string } | { ok: false; reason: string } {
+  const fromPorts = fromPart.ports || [];
+  const toPorts = toPart.ports || [];
+  if (fromPorts.length === 0 || toPorts.length === 0) {
+    return { ok: false, reason: "no connection metadata" };
+  }
+  for (const a of fromPorts) {
+    for (const b of toPorts) {
+      if (canConnect(a, b)) return { ok: true, connectionType: a.connectionType };
+    }
+  }
+  return { ok: false, reason: "no compatible port pair" };
+}

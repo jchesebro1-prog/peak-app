@@ -23,6 +23,7 @@ import {
   type PartLite,
 } from "@/lib/design/grid-bom";
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
+import { validateDeviceWire } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
 import type { GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
@@ -96,6 +97,31 @@ function markerColor(category: string): string {
   let h = 0;
   for (let i = 0; i < category.length; i++) h = (h * 31 + category.charCodeAt(i)) | 0;
   return MARK_COLORS[Math.abs(h) % MARK_COLORS.length];
+}
+
+/** Device marker hit-test radius (normalized 0..1 x-units; the existing
+ *  selection test below divides by aspect for y, keeping the on-screen
+ *  target circular on tall pages) — same value the click-to-select test
+ *  under `onDown` uses. Route-endpoint snapping (Task 4) uses a wider,
+ *  ~1.5x radius: a waypoint should count as "on the device" even when it
+ *  isn't pixel-perfect on the marker center. */
+const DEVICE_HIT_RADIUS = 0.012;
+const DEVICE_SNAP_RADIUS = DEVICE_HIT_RADIUS * 1.5;
+
+/** Placement (if any) on `placements` whose marker the point `p` snaps to,
+ *  using the same circular-tolerance shape as the existing hit-test. */
+function snappedPlacement(
+  p: Point,
+  placements: GridPlacement[],
+  aspect: number
+): GridPlacement | null {
+  return (
+    placements.find(
+      (pl) =>
+        Math.abs(pl.x - p.x) < DEVICE_SNAP_RADIUS &&
+        Math.abs(pl.y - p.y) < DEVICE_SNAP_RADIUS / (aspect || 1)
+    ) || null
+  );
 }
 
 function moneyFmt(n: number): string {
@@ -325,9 +351,46 @@ export default function GridEditor({
         const points = wireDraft;
         setWireDrawing(false);
         setWireDraft([]);
+
+        // Device-wire detection (Task 4, punch #39): a route counts as a
+        // device wire only when BOTH its first and last waypoint snap onto
+        // a placed device on this same sheet/page — free routes (either
+        // end off a device) behave exactly as before.
+        const fromPlacement = snappedPlacement(points[0], sheetPlacements, aspect);
+        const toPlacement = snappedPlacement(points[points.length - 1], sheetPlacements, aspect);
+        let fromPlacementId: string | undefined;
+        let toPlacementId: string | undefined;
+        if (fromPlacement && toPlacement) {
+          fromPlacementId = fromPlacement.id;
+          toPlacementId = toPlacement.id;
+          const fromPart = partById.get(fromPlacement.partId);
+          const toPart = partById.get(toPlacement.partId);
+          const bothHavePorts = Boolean(fromPart?.ports?.length && toPart?.ports?.length);
+          if (bothHavePorts) {
+            // Both devices declare ports — this pair is validated here for
+            // immediate feedback, and the server (the authority) re-checks
+            // the same thing against the live catalog before persisting. A
+            // device missing ports never reaches this branch, so the
+            // un-migrated catalog is never blocked (Task 4 binding behavior).
+            const result = validateDeviceWire(fromPart!, toPart!);
+            if (!result.ok) {
+              setErr(`Wire refused — ${result.reason}: ${fromPlacement.partId} → ${toPlacement.partId} share no compatible port.`);
+              return;
+            }
+          }
+        }
+
         setErr(null);
         setBusy(true);
-        addRouteAction(project.id, { sheetId: sheet.id, page, partId: wirePartId, points, aspect }).then((r) => {
+        addRouteAction(project.id, {
+          sheetId: sheet.id,
+          page,
+          partId: wirePartId,
+          points,
+          aspect,
+          fromPlacementId,
+          toPlacementId,
+        }).then((r) => {
           setBusy(false);
           if (!r.ok) setErr(r.error);
           else router.refresh();
@@ -815,6 +878,11 @@ export default function GridEditor({
                     >
                       {l.partId}
                     </span>
+                    {l.connectionType && (
+                      <span style={{ color: "#9aa0ab", fontSize: 10.5, whiteSpace: "nowrap" }}>
+                        {l.connectionType}
+                      </span>
+                    )}
                     <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
                   </div>
                 ))}

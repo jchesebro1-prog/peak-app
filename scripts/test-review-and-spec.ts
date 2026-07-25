@@ -133,6 +133,45 @@ const storedWireTypes = [{ id: "custom", label: "Custom", connectionTypes: ["Edi
 ok(resolveWireTypes(storedWireTypes) === storedWireTypes, "connect: resolveWireTypes returns the stored array when provided");
 
 
+/* --- Task 4: validateDeviceWire — grid device-wire compatibility gate (#39) --- */
+import { validateDeviceWire } from "@/lib/catalog-connect";
+
+const okPair = validateDeviceWire(
+  { ports: [portOut("DMX512 (5-pin XLR)")] },
+  { ports: [portIn("DMX512 (5-pin XLR)")] }
+);
+ok(okPair.ok === true, "wire: a compatible port pair validates ok");
+if (okPair.ok) ok(okPair.connectionType === "DMX512 (5-pin XLR)", "wire: ok result stamps the shared connectionType");
+
+const refusedPair = validateDeviceWire(
+  { ports: [portOut("HDMI")] },
+  { ports: [portOut("DMX512 (5-pin XLR)")] }
+);
+ok(refusedPair.ok === false, "wire: both parts have ports but no compatible pair -> refused");
+if (!refusedPair.ok) ok(refusedPair.reason.length > 0, "wire: a refusal always carries a non-empty reason");
+
+const missingBoth = validateDeviceWire({}, {});
+ok(
+  missingBoth.ok === false && missingBoth.reason === "no connection metadata",
+  "wire: neither part has ports -> 'no connection metadata' (the caller's allowed-case, not a hard error)"
+);
+
+const missingOne = validateDeviceWire({ ports: [] }, { ports: [portIn("HDMI")] });
+ok(
+  missingOne.ok === false && missingOne.reason === "no connection metadata",
+  "wire: one part has no ports -> same 'no connection metadata' reason"
+);
+
+const multiFrom = validateDeviceWire(
+  { ports: [portOut("HDMI"), portOut("XLR line/mic")] },
+  { ports: [portIn("XLR line/mic"), portIn("HDMI")] }
+);
+ok(
+  multiFrom.ok === true && multiFrom.ok && multiFrom.connectionType === "HDMI",
+  "wire: first canConnect-satisfying port pair (fromPart order, then toPart order) wins"
+);
+
+
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
 import type { Annotation } from "@/lib/annotations";

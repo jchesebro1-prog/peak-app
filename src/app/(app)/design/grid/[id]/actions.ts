@@ -26,6 +26,7 @@ import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
 import { bomLines, bomTotals, isPerLengthUnit, routeLines } from "@/lib/design/grid-bom";
 import { polygonArea } from "@/lib/design/grid-geometry";
+import { validateDeviceWire } from "@/lib/catalog-connect";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
 
 /** The Grid editor server actions (D108). */
@@ -187,7 +188,17 @@ export async function removeSpaceAction(
 
 export async function addRouteAction(
   projectId: string,
-  input: { sheetId: string; page: number; partId: string; points: Point[]; aspect: number }
+  input: {
+    sheetId: string;
+    page: number;
+    partId: string;
+    points: Point[];
+    aspect: number;
+    /** Device-wire endpoints (Task 4) — the client's hit-test result.
+     *  Re-verified below; never trusted blindly. */
+    fromPlacementId?: string;
+    toPlacementId?: string;
+  }
 ): Promise<Result> {
   const user = await requireUser();
   if ((input.points || []).length < 2)
@@ -202,7 +213,36 @@ export async function addRouteAction(
   if (!project) return { ok: false, error: "Design not found." };
   if (!findCalibration(project.calibrations || [], input.sheetId, input.page))
     return { ok: false, error: "Calibrate this page before routing wire — lengths need a scale." };
-  const p = await addRoute(projectId, { ...input, by: user.name });
+
+  // Device-wire re-validation (Task 4, punch #39): the client's hit-test and
+  // canConnect check are UX only — this is the authority. Re-derive
+  // connectionType from the LIVE catalog (never trust a client-supplied
+  // value) so neither a stale palette nor a tampered request can plant a
+  // connectionType the current parts don't actually support.
+  let connectionType: string | undefined;
+  if (input.fromPlacementId && input.toPlacementId) {
+    const fromPlacement = (project.placements || []).find((p) => p.id === input.fromPlacementId);
+    const toPlacement = (project.placements || []).find((p) => p.id === input.toPlacementId);
+    if (fromPlacement && toPlacement) {
+      const [fromPart, toPart] = await Promise.all([
+        getPart(fromPlacement.partId),
+        getPart(toPlacement.partId),
+      ]);
+      const bothHavePorts = Boolean(fromPart?.ports?.length && toPart?.ports?.length);
+      if (bothHavePorts) {
+        const result = validateDeviceWire(fromPart!, toPart!);
+        if (!result.ok)
+          return { ok: false, error: `Wire refused — ${result.reason}: ${fromPlacement.partId} → ${toPlacement.partId} share no compatible port.` };
+        connectionType = result.connectionType;
+      }
+    }
+  }
+
+  const p = await addRoute(projectId, {
+    ...input,
+    connectionType,
+    by: user.name,
+  });
   if (!p) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
   return { ok: true };
