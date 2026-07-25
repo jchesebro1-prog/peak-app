@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
+import { getSettings } from "@/lib/settings";
 import { list, get, type CatalogPart } from "@/lib/stores/catalog";
 import { money } from "@/lib/format";
+import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { CatalogControls, CatalogImportPanel } from "./controls";
+import { TaxonomyCard } from "./taxonomy-card";
 import { upsertPart } from "./actions";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
@@ -30,7 +34,13 @@ export default async function CatalogPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, parts] = await Promise.all([requireUser(), searchParams, list()]);
+  const [user, sp, parts, settings] = await Promise.all([
+    requireUser(),
+    searchParams,
+    list(),
+    getSettings(),
+  ]);
+  const isAdmin = can("manage_users", user.roles);
 
   const mfrParam = one(sp.mfr) || "all";
   const catParam = one(sp.cat) || "all";
@@ -155,6 +165,10 @@ export default async function CatalogPage({
           </Link>
         </div>
       </div>
+
+      {isAdmin && (
+        <TaxonomyCard categories={categories} initialMap={resolveCategoryMap(settings.catalogCategoryMap)} />
+      )}
 
       {importedN && (
         <div
