@@ -1799,3 +1799,39 @@ will use the same store under `datasheets/`.
 Upload failures fail the action loudly rather than silently falling back —
 a design half-in-DB, half-in-Blob because the token expired mid-week would
 be worse than an error message.
+
+## D117 — Dealer price sheets imported to the catalog (2026-07-24)
+
+The 52-brand dealer folder (prepped by the Cowork session, mounted at
+`/Volumes/Claude/Peak Import`) is now in the LOCAL catalog: **14,674 parts
+across ~60 brands** (catalog total 14,704 with the dev demo rows), imported
+via `scripts/convert-dealer-sheets.py` → `scripts/import-dealer-sheets.ts`
+(idempotent upserts, `Brand:Model` SKUs — same contract as the original
+price-book import).
+
+**Parsing model** (the sheets are heterogeneous, 20 of 52 PDF-derived):
+stateful header walking (headers re-detected mid-sheet), prioritized fuzzy
+aliases (Part Number > Item; MSRP > MAP), a generic headerless parser
+(sku = first short text cell, desc = longest, prices = whole-cell money
+values only — digits embedded in model names are never prices), fused-cell
+splitting ("LR-ASC48 desc…" / "$3,850 $2,310"), and price-sanity gates
+(sub-$10 lists rejected, implausible costs dropped-with-flag, inverted
+columns swapped-with-flag, bare years rejected).
+
+**5,206 rows carry a "verify" note** — deliberate honesty, not failure:
+tier-priced sheets (Symetrix/Danley/Listen — Peak's tier per vendor is
+unrecorded), Shure "+3%"/EAW "+8%" off-dealer footnotes (NOT applied —
+noted instead), Chauvet list-only (its dealer discount lives in the
+unconverted tiers PDF), and everything parsed headerless.
+
+**Held out, needs Jeff:** ① Tannoy June 2023 (Music Tribe Nov 2025 carries
+newer Tannoy — overrule if the dedicated sheet should win); ② Ape Riggers
+2014 (OCR garbage — request a current sheet); ③ Draper (configurator size
+matrices, tens of thousands of permutation rows — its own import decision).
+**Weak parses to revisit or re-source:** Apex (21/244), Linea Research (3),
+NETGEAR (21/144), Renkus-Heinz (33/247), LynTec (5 — amp ratings polluted
+its numbers), Polar Focus (13), Visionary (37), Cloud (80).
+
+**Local dev only so far.** Production is the same two commands with
+`DATABASE_URL` set, after the main push. Converter + importer are committed;
+the generated JSON is not (regenerate from the folder).
