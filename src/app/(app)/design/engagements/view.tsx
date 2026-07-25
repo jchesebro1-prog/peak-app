@@ -10,6 +10,7 @@ import type {
   EngagementPhase,
 } from "@/lib/stores/engagements";
 import type { ConsultingData, VisitLite } from "./data";
+import { isOpenEngagement } from "@/lib/consulting-review";
 import {
   addDecisionAction,
   addDocumentAction,
@@ -167,7 +168,7 @@ export function ConsultingView({
 /* ============================ list ================================ */
 
 function ConsultingList({ data }: { data: ConsultingData }) {
-  const active = data.engagements.filter((e) => e.status === "active");
+  const active = data.engagements.filter(isOpenEngagement);
   const feeBook = data.engagements.reduce(
     (a, e) => a + feeTotals(e, data.quotesById[e.quoteId]?.value || 0).total,
     0

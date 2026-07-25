@@ -813,5 +813,11 @@ const rj2 = fan.filter((w) => w.href.includes("RJ-2"));
 ok(rj2.length === 1 && rj2[0].assignee === "" && rj2[0].id === "RJ-2",
   "no lead + no crew stays a single unassigned bar with the stable id");
 
+/* --- delivered engagements stay open (D113.11) --- */
+import { isOpenEngagement } from "@/lib/consulting-review";
+ok(isOpenEngagement({ status: "active" }) && isOpenEngagement({ status: "delivered" }) && isOpenEngagement({ status: "bid_supported" }),
+  "active, delivered, and bid_supported all count as open");
+ok(!isOpenEngagement({ status: "oversight_complete" }), "only oversight_complete closes an engagement");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { designRedirect } from "@/lib/design-routes";
 import { allEngagements, ENGAGEMENT_STATUS_LABEL } from "@/lib/stores/engagements";
+import { isOpenEngagement } from "@/lib/consulting-review";
 import { getAllDesigns as getSandboxDesigns } from "@/lib/stores/designs";
 import { listProjects as listGridProjects } from "@/lib/stores/grid-projects";
 import { shortDate } from "@/lib/format";
@@ -32,7 +33,7 @@ export default async function DesignOverviewPage({
   ]);
 
   const activeEngagements = engagements
-    .filter((e) => e.status === "active")
+    .filter(isOpenEngagement)
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
   const recentDesigns = designs

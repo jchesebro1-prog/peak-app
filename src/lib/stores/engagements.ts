@@ -203,6 +203,10 @@ export const ENGAGEMENT_STATUS_LABEL: Record<EngagementStatus, string> = {
   oversight_complete: "Oversight complete",
 };
 
+/* The open-until-oversight-ends rule (D113 item 11) lives in
+ * lib/consulting-review.ts with the other pure status helpers — client
+ * components must be able to import it without dragging in the doc-store. */
+
 export type ConsultingEngagement = {
   id: string; // 'CE-####'
   name: string;

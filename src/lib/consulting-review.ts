@@ -1,6 +1,7 @@
 import type {
   ChecklistItem,
   EngagementPhase,
+  EngagementStatus,
   ReviewComment,
 } from "@/lib/stores/engagements";
 
@@ -34,4 +35,15 @@ export function approvalIsStale(ph: EngagementPhase): boolean {
   const now = ph.attachments.map((a) => `${a.id}:${a.addedAt}`).sort();
   const then = pin.docs.map((d) => `${d.docId}:${d.version}`).sort();
   return now.join("|") !== then.join("|");
+}
+
+/**
+ * An engagement stays OPEN until construction oversight ends (D113 item 11,
+ * Jeff 2026-07-24): "delivered" means the design shipped, not that the
+ * relationship is over — bid support and oversight still count as live work.
+ * Every dashboard/list that means "still ours to carry" filters through
+ * this, so the definition can't drift per screen.
+ */
+export function isOpenEngagement(e: { status: EngagementStatus }): boolean {
+  return e.status !== "oversight_complete";
 }
