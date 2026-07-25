@@ -417,6 +417,17 @@ export default function InboxShell({
   // rows are excluded — selecting one opens the composer, not the reading
   // pane, so they're not part of the "selection" sequence arrows walk.
   const currentThreadId = reader ? reader.id : null;
+  // Punch #42 finding 2: the selected row can vanish from `ids` the moment
+  // it's acted on — e.g. with filter=unread active, selecting a thread marks
+  // it read, and the next server refresh drops it from the filtered list.
+  // ids.indexOf(currentThreadId) then returns -1, which used to resolve to
+  // index 0 for both ArrowDown and ArrowUp (jump-to-top), breaking keyboard
+  // triage. lastIndexRef remembers the last index we *did* find the
+  // selection at (updated below whenever indexOf succeeds); when it can't be
+  // found, we resume from that remembered spot instead, clamped to the
+  // current (possibly shorter) list so ArrowDown/ArrowUp continue from where
+  // the vanished row was.
+  const lastIndexRef = useRef(0);
   useEffect(() => {
     if (narrow || isSearch || !!compose || logging) return;
     const onKey = (e: KeyboardEvent) => {
@@ -437,7 +448,10 @@ export default function InboxShell({
         return;
       const ids = list.rows.filter((r) => !r.isDraft).map((r) => r.id);
       if (!ids.length) return;
-      const cur = ids.indexOf(currentThreadId ?? "");
+      const found = ids.indexOf(currentThreadId ?? "");
+      const cur =
+        found !== -1 ? found : Math.min(lastIndexRef.current, ids.length - 1);
+      if (found !== -1) lastIndexRef.current = found;
       const next =
         e.key === "ArrowDown"
           ? ids[Math.min(cur + 1, ids.length - 1)]
