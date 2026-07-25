@@ -429,7 +429,7 @@ export async function setProjectStage(
   if (result) {
     const { TASK_TEMPLATE, expandTemplate, tasksForProject, createAutoTask } = await import("@/lib/stores/tasks");
     const existing = new Set((await tasksForProject(id)).map((t) => t.coverageKey).filter(Boolean) as string[]);
-    for (const item of expandTemplate(TASK_TEMPLATE[stage] || [], stage, existing)) {
+    for (const item of expandTemplate(TASK_TEMPLATE[stage] || [], id + ":" + stage, existing)) {
       await createAutoTask({ ...item, projectId: id, title: item.title });
     }
 

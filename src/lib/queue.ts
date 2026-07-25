@@ -1,6 +1,7 @@
 import { allAssignments, type Assignment } from "@/lib/stores/assignments";
 import { allEngagements, openChecklistItems } from "@/lib/stores/engagements";
 import { getAllProjects } from "@/lib/stores/projects";
+import { allTasks } from "@/lib/stores/tasks";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { renewals as flameRenewals } from "@/lib/stores/flame-jobs";
 import { renewals as inspectionRenewals } from "@/lib/stores/inspections";
@@ -41,11 +42,12 @@ function due(ts: number | null | undefined): number {
  * convention for ownership across quotes, projects, and engagements).
  */
 export async function loadQueue(me: string): Promise<QueueItem[]> {
-  const [assignments, engagements, projects, quotes, flames, inspections] =
+  const [assignments, engagements, projects, tasks, quotes, flames, inspections] =
     await Promise.all([
       allAssignments(),
       allEngagements(),
       getAllProjects(),
+      allTasks(),
       getAllQuotes(),
       flameRenewals({ dueOnly: true }),
       inspectionRenewals({ dueOnly: true }),
@@ -133,20 +135,21 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
     }
   }
 
-  /* --- project tasks assigned to me --- */
-  for (const p of projects) {
-    for (const t of p.tasks || []) {
-      if (t.done || t.assignee !== me) continue;
-      items.push({
-        key: `project-task:${p.id}:${t.id}`,
-        source: "project-task",
-        title: t.title,
-        context: `${p.name}${t.section ? ` · ${t.section}` : ""}`,
-        due: due(p.targetDate),
-        href: `/projects/${p.id}`,
-        writable: false,
-      });
-    }
+  /* --- project tasks assigned to me (tasks collection, #17) --- */
+  const projectsById = new Map(projects.map((p) => [p.id, p]));
+  for (const t of tasks) {
+    if (t.status === "done" || t.assigneeName !== me || !t.projectId) continue;
+    const p = projectsById.get(t.projectId);
+    if (!p) continue;
+    items.push({
+      key: `project-task:${p.id}:${t.id}`,
+      source: "project-task",
+      title: t.title,
+      context: `${p.name}${t.section ? ` · ${t.section}` : ""}`,
+      due: t.dueAt ?? due(p.targetDate),
+      href: `/projects/${p.id}`,
+      writable: false,
+    });
   }
 
   /* --- service renewals coming due (whole-team visibility) --- */

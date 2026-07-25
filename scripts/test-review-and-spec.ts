@@ -1072,11 +1072,11 @@ import { CATEGORIES } from "@/lib/stores/notif-prefs";
     { key: "walkthrough", title: "Walk the room with the customer" },
     { key: "punch", title: "Write the punch list", section: "Closeout" },
   ];
-  const fresh = expandTemplate(tmpl, "signoff", new Set());
-  ok(fresh.length === 2 && fresh[0].coverageKey === "signoff:walkthrough", "tasks: template expands with stage-scoped coverage keys");
+  const fresh = expandTemplate(tmpl, "P-3001:signoff", new Set());
+  ok(fresh.length === 2 && fresh[0].coverageKey === "P-3001:signoff:walkthrough", "tasks: template expands with record-scoped coverage keys");
   ok(fresh[1].section === "Closeout" && fresh[0].section === "Install", "tasks: template section defaults to Install");
-  const rerun = expandTemplate(tmpl, "signoff", new Set(["signoff:walkthrough"]));
-  ok(rerun.length === 1 && rerun[0].coverageKey === "signoff:punch", "tasks: coverage-key de-dup skips existing on re-entry");
+  const rerun = expandTemplate(tmpl, "P-3001:signoff", new Set(["P-3001:signoff:walkthrough"]));
+  ok(rerun.length === 1 && rerun[0].coverageKey === "P-3001:signoff:punch", "tasks: coverage-key de-dup skips existing on re-entry");
 
   const mk = (o: Partial<TaskRecord>): TaskRecord => ({
     id: "T-6000", title: "t", section: "Install", projectId: null, quoteId: null,

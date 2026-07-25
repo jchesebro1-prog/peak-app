@@ -25,7 +25,7 @@ export const STATUS_META: Record<TaskStatus, { label: string; short: string }> =
 };
 
 export type TaskRecord = {
-  id: string;                    // "T-####" (office-created) or "tk-…" (field-created / migrated)
+  id: string;                    // "T-####" (office-created), "tk-…" (field-created / migrated), or "T-auto-<slug>" (system-created via autoTaskId)
   title: string;
   section: string;               // Field Work grouping; "Install" default, "" for non-project tasks
   projectId: string | null;      // parent pointers — nullable, no FK (D85 convention)
@@ -70,7 +70,11 @@ export function taskFromLegacy(projectId: string, pt: ProjectTask, at: number): 
 }
 
 /** blankRubric-style expansion with coverage-key de-dup (inspections.ts idiom):
-    emit only template items whose stage-scoped key is not already present. */
+    emit only template items whose key is not already present. `stage` must be
+    record-scoped (e.g. "<projectId>:<stage>", not just "<stage>") — createAutoTask's
+    dedup and autoTaskId are collection-global, so an unscoped stage string means
+    only the first record to ever enter that stage gets the checklist; every
+    later record silently gets none. */
 export function expandTemplate(
   items: TaskTemplateItem[], stage: string, existingKeys: ReadonlySet<string>,
 ): { coverageKey: string; title: string; section: string }[] {
