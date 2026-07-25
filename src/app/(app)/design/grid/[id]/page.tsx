@@ -97,7 +97,14 @@ export default async function GridEditorPage({
         routes: project.routes || [],
         revisions: project.revisions || [],
       }}
-      sheets={sheets.map((s) => ({ id: s.id, name: s.name, mime: s.mime, dataUrl: s.dataUrl }))}
+      sheets={sheets.map((s) => ({
+        id: s.id,
+        name: s.name,
+        mime: s.mime,
+        // Blob-stored sheets stream through the authenticated proxy (the
+        // store is private, D116); in-database sheets pass their data-URL.
+        dataUrl: s.blobPath ? `/api/grid-sheets/${encodeURIComponent(s.id)}` : s.dataUrl,
+      }))}
       parts={parts}
       laborParts={laborParts}
       laborHoursPerDevice={laborHoursPerDevice}

@@ -22,6 +22,7 @@ import {
 } from "@/lib/stores/grid-projects";
 import { docLocId, getSite } from "@/lib/identity/sites";
 import { resolveTier } from "@/lib/pricing-tiers";
+import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
 import { bomLines, bomTotals, isPerLengthUnit, routeLines } from "@/lib/design/grid-bom";
 import { polygonArea } from "@/lib/design/grid-geometry";
@@ -51,7 +52,34 @@ export async function addSheetAction(
     };
   const okMime = input.mime === "application/pdf" || input.mime.startsWith("image/");
   if (!okMime) return { ok: false, error: "PDF or image files only — print DWGs to PDF first." };
-  const sheet = await addSheet(projectId, { ...input, by: user.name });
+
+  // Blob storage when the token exists (D116); in-database data-URL otherwise.
+  let stored: { dataUrl?: string; url?: string; blobPath?: string } = {
+    dataUrl: input.dataUrl,
+  };
+  if (blobEnabled()) {
+    try {
+      const { bytes } = dataUrlToBytes(input.dataUrl);
+      const up = await putBlob(
+        `grid-sheets/${projectId}/${safeName(input.name)}`,
+        bytes,
+        input.mime
+      );
+      stored = { url: up.url, blobPath: up.pathname };
+    } catch (e) {
+      console.error("[grid] blob upload failed:", e);
+      return {
+        ok: false,
+        error: "Upload to file storage failed — check the Blob token, or try again.",
+      };
+    }
+  }
+  const sheet = await addSheet(projectId, {
+    name: input.name,
+    mime: input.mime,
+    ...stored,
+    by: user.name,
+  });
   if (!sheet) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
   return { ok: true, sheetId: sheet.id };

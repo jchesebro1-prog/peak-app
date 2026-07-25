@@ -1772,3 +1772,30 @@ they're on a repair. Fanned bars share the record's href with suffixed ids
 (unique lanes/keys); lone-assignee and unassigned records keep their stable
 id. Flame/inspection records carry no crew field and are unchanged. Covered
 in test:specs.
+
+## D116 — Vercel Blob for Grid plan sheets (2026-07-24)
+
+D113 item 2, built the day Jeff created the store (`quartzite-files`,
+connected to Production+Preview; token in `.env.local` locally — Vercel
+marks store tokens *sensitive*, so the CLI can't pull the plaintext and the
+dashboard copy is the one manual step).
+
+**Seam (`src/lib/blob.ts`):** env-gated like Gmail — no
+`BLOB_READ_WRITE_TOKEN`, no behavior change (sheets stay as in-database
+data-URLs). With it, `addSheetAction` uploads to
+`grid-sheets/<projectId>/<name>` and the sheet doc stores the blob URL +
+pathname, `dataUrl` empty. **The store is PRIVATE** (Jeff created it that
+way — the right call: customer venue drawings must not sit behind
+world-readable URLs). Browsers therefore never fetch Blob directly: the
+authenticated proxy `/api/grid-sheets/<sheetId>` (requireUser → private
+`get()` stream, `cache-control: private`) serves the bytes, and the editor
+points sheets at it. The transport is unchanged (browser → action as a
+≤8 MB data-URL; only STORAGE moved); PdfCanvas branches data-URL vs URL,
+`<img>` is native.
+`scripts/backfill-blob-sheets.ts` moves pre-existing sheets (PGlite
+discipline applies: server stopped, `.data` copied aside). Datasheets (§10)
+will use the same store under `datasheets/`.
+
+Upload failures fail the action loudly rather than silently falling back —
+a design half-in-DB, half-in-Blob because the token expired mid-week would
+be worse than an error message.

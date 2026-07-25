@@ -294,12 +294,13 @@ deploy time.** The app already deploys on Vercel, so this adds no new vendor.
    (`.env.local` is gitignored — the token never goes in the repo).
 5. Tell Claude "the Blob token is in" — that's the whole hand-off.
 
-**What Claude builds once the token exists** (spec'd, not yet built):
+**What's built (2026-07-24, D116) — active the moment the token exists:**
 
-- `addSheet` uploads to Blob (`@vercel/blob` `put()`, public access,
-  pathname `grid-sheets/<projectId>/<sheetId>-<name>`) and stores the URL
-  instead of the base64 payload; the viewer takes URLs and data-URLs
-  interchangeably, so nothing else changes.
+- `addSheet` uploads to Blob (`@vercel/blob` `put()`, **private access** —
+  the store you created is private, which is right for customer drawings)
+  and stores the blob pathname instead of the base64 payload; browsers read
+  sheets through the signed-in-only proxy `/api/grid-sheets/<sheetId>`,
+  so files are never world-readable.
 - **No token → exactly today's behavior** (data-URLs in the DB). The
   feature is env-gated like Gmail (§5); dev machines without the token
   keep working.
