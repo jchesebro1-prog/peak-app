@@ -1783,10 +1783,15 @@ dashboard copy is the one manual step).
 **Seam (`src/lib/blob.ts`):** env-gated like Gmail — no
 `BLOB_READ_WRITE_TOKEN`, no behavior change (sheets stay as in-database
 data-URLs). With it, `addSheetAction` uploads to
-`grid-sheets/<projectId>/<name>` (public, random-suffixed) and stores the
-URL; the sheet doc's `dataUrl` stays empty. The transport is unchanged
-(browser → action as a ≤8 MB data-URL; only STORAGE moved), and the viewer
-takes both forms — PdfCanvas branches data-URL vs URL, `<img>` is native.
+`grid-sheets/<projectId>/<name>` and the sheet doc stores the blob URL +
+pathname, `dataUrl` empty. **The store is PRIVATE** (Jeff created it that
+way — the right call: customer venue drawings must not sit behind
+world-readable URLs). Browsers therefore never fetch Blob directly: the
+authenticated proxy `/api/grid-sheets/<sheetId>` (requireUser → private
+`get()` stream, `cache-control: private`) serves the bytes, and the editor
+points sheets at it. The transport is unchanged (browser → action as a
+≤8 MB data-URL; only STORAGE moved); PdfCanvas branches data-URL vs URL,
+`<img>` is native.
 `scripts/backfill-blob-sheets.ts` moves pre-existing sheets (PGlite
 discipline applies: server stopped, `.data` copied aside). Datasheets (§10)
 will use the same store under `datasheets/`.

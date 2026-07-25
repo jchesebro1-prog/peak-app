@@ -37,17 +37,18 @@ async function main() {
   let moved = 0;
   for (const s of pending) {
     const { bytes } = dataUrlToBytes(s.dataUrl);
-    const url = await putBlob(
+    const up = await putBlob(
       `grid-sheets/${s.projectId}/${safeName(s.name)}`,
       bytes,
       s.mime
     );
     await patchDoc<GridSheet>("grid_sheets", s.id, (doc) => {
-      doc.url = url;
+      doc.url = up.url;
+      doc.blobPath = up.pathname;
       doc.dataUrl = "";
     });
     moved++;
-    console.log(`  ${s.id} (${s.name}, ${Math.round(bytes.length / 1024)} KB) → ${url}`);
+    console.log(`  ${s.id} (${s.name}, ${Math.round(bytes.length / 1024)} KB) → ${up.pathname}`);
   }
   console.log(`Done — ${moved} sheet${moved === 1 ? "" : "s"} moved to Blob.`);
   process.exit(0);

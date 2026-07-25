@@ -135,8 +135,11 @@ export type GridSheet = {
   mime: string;
   /** Base64 payload — empty when the file lives in Blob storage (D116). */
   dataUrl: string;
-  /** Public Blob URL (D116) — preferred over dataUrl when present. */
+  /** Blob URL — provenance only; the store is private, reads go through
+   *  the authenticated /api/grid-sheets/<id> proxy (D116). */
   url?: string;
+  /** Blob pathname the proxy streams by (set together with url). */
+  blobPath?: string;
   addedBy: string;
   at: number;
 };
@@ -189,7 +192,14 @@ export async function createProject(input: {
  *  Blob when the token exists, in-database otherwise). */
 export async function addSheet(
   projectId: string,
-  input: { name: string; mime: string; dataUrl?: string; url?: string; by: string }
+  input: {
+    name: string;
+    mime: string;
+    dataUrl?: string;
+    url?: string;
+    blobPath?: string;
+    by: string;
+  }
 ): Promise<GridSheet | null> {
   const project = await getProject(projectId);
   if (!project) return null;
@@ -200,6 +210,7 @@ export async function addSheet(
     mime: input.mime,
     dataUrl: input.dataUrl || "",
     ...(input.url ? { url: input.url } : {}),
+    ...(input.blobPath ? { blobPath: input.blobPath } : {}),
     addedBy: input.by,
     at: Date.now(),
   };

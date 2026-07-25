@@ -1,10 +1,15 @@
-import { put } from "@vercel/blob";
+import { get, put } from "@vercel/blob";
 
 /**
  * Vercel Blob seam (D116, MASTER-HOWTO §9) — file bytes out of the
  * database. Env-gated exactly like Gmail: no BLOB_READ_WRITE_TOKEN, no
  * behavior change (callers fall back to in-database data-URLs), so dev
  * machines without the token keep working untouched.
+ *
+ * The store is PRIVATE (deliberately — customer venue drawings must not
+ * live behind world-readable URLs): uploads carry access "private", and
+ * browsers read files only through the app's authenticated proxy route,
+ * which streams via `getBlobStream` server-side.
  *
  * Server-only: the token must never reach a client bundle.
  */
@@ -14,21 +19,29 @@ export function blobEnabled(): boolean {
 }
 
 /**
- * Upload one file and return its public URL. `pathname` is the full key
- * (e.g. "grid-sheets/GRD-5002/gs-abc-plan.pdf"); addRandomSuffix guards
- * against overwriting on name collisions.
+ * Upload one file. Returns the blob's URL (provenance only — not fetchable
+ * without auth) and the stored pathname (what the proxy streams by).
+ * addRandomSuffix guards against overwriting on name collisions.
  */
 export async function putBlob(
   pathname: string,
   bytes: Buffer,
   contentType: string
-): Promise<string> {
+): Promise<{ url: string; pathname: string }> {
   const res = await put(pathname, bytes, {
-    access: "public",
+    access: "private",
     contentType,
     addRandomSuffix: true,
   });
-  return res.url;
+  return { url: res.url, pathname: res.pathname };
+}
+
+/** Stream a private blob's bytes (server-side; the proxy route's engine). */
+export async function getBlobStream(
+  pathname: string
+): Promise<ReadableStream | null> {
+  const res = await get(pathname, { access: "private" });
+  return (res && (res.stream as unknown as ReadableStream)) || null;
 }
 
 /** Decode a data-URL's payload to bytes (the upload transport is still the

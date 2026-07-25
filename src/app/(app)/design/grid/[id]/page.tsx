@@ -101,8 +101,9 @@ export default async function GridEditorPage({
         id: s.id,
         name: s.name,
         mime: s.mime,
-        // Blob URL when the file lives in storage (D116); the viewer takes both.
-        dataUrl: s.url || s.dataUrl,
+        // Blob-stored sheets stream through the authenticated proxy (the
+        // store is private, D116); in-database sheets pass their data-URL.
+        dataUrl: s.blobPath ? `/api/grid-sheets/${encodeURIComponent(s.id)}` : s.dataUrl,
       }))}
       parts={parts}
       laborParts={laborParts}

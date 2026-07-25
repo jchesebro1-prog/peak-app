@@ -54,17 +54,20 @@ export async function addSheetAction(
   if (!okMime) return { ok: false, error: "PDF or image files only — print DWGs to PDF first." };
 
   // Blob storage when the token exists (D116); in-database data-URL otherwise.
-  let stored: { dataUrl?: string; url?: string } = { dataUrl: input.dataUrl };
+  let stored: { dataUrl?: string; url?: string; blobPath?: string } = {
+    dataUrl: input.dataUrl,
+  };
   if (blobEnabled()) {
     try {
       const { bytes } = dataUrlToBytes(input.dataUrl);
-      const url = await putBlob(
+      const up = await putBlob(
         `grid-sheets/${projectId}/${safeName(input.name)}`,
         bytes,
         input.mime
       );
-      stored = { url };
-    } catch {
+      stored = { url: up.url, blobPath: up.pathname };
+    } catch (e) {
+      console.error("[grid] blob upload failed:", e);
       return {
         ok: false,
         error: "Upload to file storage failed — check the Blob token, or try again.",
