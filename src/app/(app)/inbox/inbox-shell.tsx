@@ -24,9 +24,11 @@ import {
   bulkMarkReadAction,
   bulkMoveAction,
   bulkRestoreAction,
+  deleteAction,
   flagAction,
   markReadAction,
   pinAction,
+  restoreAction,
   searchInboxAction,
   sendReceiveAction,
   setInboxModeAction,
@@ -309,6 +311,20 @@ export default function InboxShell({
       },
       onPin: async (id, on) => {
         await pinAction(id, on);
+        router.refresh();
+      },
+      // Task 4 (#42): single-row Delete/Restore in the hover quick-actions
+      // pill. deleteAction/restoreAction already exist as single-id actions
+      // (same shape as archiveAction/flagAction/pinAction above) — reusing
+      // those instead of bulkDeleteAction([id]) keeps this handler
+      // consistent with its siblings rather than routing through the bulk
+      // path for a single row.
+      onDelete: async (id) => {
+        await deleteAction(id);
+        router.refresh();
+      },
+      onRestore: async (id) => {
+        await restoreAction(id);
         router.refresh();
       },
     }),

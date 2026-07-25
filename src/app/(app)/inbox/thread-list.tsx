@@ -2,7 +2,7 @@
 
 import type { DraftPayload, ListVM, Opt, ThreadRowVM } from "./types";
 import type { SearchRow } from "./actions";
-import { ChanGlyph, CheckIcon, FlagIcon, Magnifier, PinIcon } from "./icons";
+import { ChanGlyph, CheckIcon, FlagIcon, Magnifier, PinIcon, RestoreIcon, TrashIcon } from "./icons";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 
@@ -10,6 +10,8 @@ export type RowActions = {
   onArchive: (id: string) => void;
   onFlag: (id: string, on: boolean) => void;
   onPin: (id: string, on: boolean) => void;
+  onDelete: (id: string) => void;
+  onRestore: (id: string) => void;
 };
 
 export type HeaderCheck = "none" | "some" | "all";
@@ -286,6 +288,7 @@ export default function ThreadList({
                 active={r.id === selectedId}
                 unread={r.unread && !readIds.has(r.id)}
                 selected={selectedIds.has(r.id)}
+                isDeleted={list.isDeleted}
                 onToggle={(shift) => onToggleSelect(r.id, shift)}
                 actions={rowActions}
                 onClick={() => {
@@ -499,6 +502,7 @@ function Row({
   active,
   unread,
   selected,
+  isDeleted,
   onToggle,
   onClick,
   actions,
@@ -507,12 +511,18 @@ function Row({
   active: boolean;
   unread: boolean;
   selected: boolean;
+  isDeleted: boolean;
   onToggle: (shift: boolean) => void;
   onClick: () => void;
   actions: RowActions;
 }) {
   const chColor = r.waitingUs ? "#b4543a" : "#5b616e";
   const wrapBg = r.waitingUs ? "#f8ece7" : r.isDraft ? "#fbf3dd" : "#f1f2f5";
+  // Task 4 (#42): line 4 (status pill / waiting / Outbox / boxTag / assignee)
+  // only takes up space when it actually has content — a plain read thread
+  // with none of these renders as a clean 3-line row.
+  const hasMetaChips =
+    r.showBoxTag || r.showStatus || r.showWait || r.showQueued || r.showAssignee;
   return (
     <div
       className="ib-row"
@@ -523,7 +533,7 @@ function Row({
         display: "flex",
         alignItems: "flex-start",
         gap: 11,
-        padding: "13px 15px 13px 18px",
+        padding: "9px 15px 9px 18px",
         borderBottom: "1px solid #f5f6f8",
         cursor: "pointer",
         textAlign: "left",
@@ -575,8 +585,8 @@ function Row({
 
       <span
         style={{
-          width: 30,
-          height: 30,
+          width: 26,
+          height: 26,
           flexShrink: 0,
           borderRadius: 9,
           display: "flex",
@@ -657,6 +667,7 @@ function Row({
         >
           {r.snippet}
         </span>
+        {hasMetaChips && (
         <span style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8 }}>
           {r.showBoxTag && (
             <span
@@ -741,6 +752,7 @@ function Row({
             </span>
           )}
         </span>
+        )}
       </span>
 
       {/* hover quick-actions */}
@@ -761,23 +773,36 @@ function Row({
             boxShadow: "0 2px 8px rgba(16,22,30,.08)",
           }}
         >
-          <QuickBtn title="Archive" onClick={() => actions.onArchive(r.id)}>
-            <ArchiveMini />
-          </QuickBtn>
-          <QuickBtn
-            title={r.flagged ? "Unflag" : "Flag"}
-            active={r.flagged}
-            onClick={() => actions.onFlag(r.id, !r.flagged)}
-          >
-            <FlagIcon size={13} fill={r.flagged ? "#d85a30" : "none"} />
-          </QuickBtn>
-          <QuickBtn
-            title={r.pinned ? "Unpin" : "Pin"}
-            active={r.pinned}
-            onClick={() => actions.onPin(r.id, !r.pinned)}
-          >
-            <PinIcon size={13} fill={r.pinned ? "#5b616e" : "none"} />
-          </QuickBtn>
+          {isDeleted ? (
+            // Task 4 (#42): mirrors the command bar's isDeleted branch —
+            // in the Deleted folder the only relevant quick action is Restore.
+            <QuickBtn title="Restore" onClick={() => actions.onRestore(r.id)}>
+              <RestoreIcon size={13} />
+            </QuickBtn>
+          ) : (
+            <>
+              <QuickBtn title="Archive" onClick={() => actions.onArchive(r.id)}>
+                <ArchiveMini />
+              </QuickBtn>
+              <QuickBtn
+                title={r.flagged ? "Unflag" : "Flag"}
+                active={r.flagged}
+                onClick={() => actions.onFlag(r.id, !r.flagged)}
+              >
+                <FlagIcon size={13} fill={r.flagged ? "#d85a30" : "none"} />
+              </QuickBtn>
+              <QuickBtn
+                title={r.pinned ? "Unpin" : "Pin"}
+                active={r.pinned}
+                onClick={() => actions.onPin(r.id, !r.pinned)}
+              >
+                <PinIcon size={13} fill={r.pinned ? "#5b616e" : "none"} />
+              </QuickBtn>
+              <QuickBtn title="Delete" onClick={() => actions.onDelete(r.id)}>
+                <TrashIcon size={13} />
+              </QuickBtn>
+            </>
+          )}
         </span>
       )}
     </div>
