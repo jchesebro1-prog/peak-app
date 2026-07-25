@@ -973,5 +973,27 @@ import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFo
   ok(Math.abs(cc.costEach - 4711.8) < 1, `unrated fabric prices via costPerSqft, not $0 (got ${cc.costEach})`);
 }
 
+import { curtainCost as portalCurtainCost, sellCoeffs as portalSellCoeffs, fabricSellPerSqft as portalFabricSell } from "@/lib/curtain-pricing";
+import { curtainPriceEach as portalPriceEach } from "@/lib/curtain-geom";
+/* --- portal curtain pricing unified onto the two-term model + cent-match invariant --- */
+{
+  const spec = (fab: string, w: string, h: string, full: string) => ({ name: "d", hang: "Pipe", fabric: fab, qty: "1", width: w, height: h, fullness: full, bottom: "Chain" });
+  const AREA_RATE = 3.64; // Charisma
+  const margin = 0.30;
+  // server two-term cost: sewnW = 20×1.5=30, sewnA=30×19=570, cost=570×3.64+30×9.53=2360.7
+  const sv = portalCurtainCost(spec("RB-CHAR-25", "20", "19", "50"), AREA_RATE, margin);
+  ok(Math.abs(sv.costEach - 2360.7) < 0.01, `portal server cost = two-term make cost (got ${sv.costEach})`);
+  ok(Math.abs(sv.priceEach - 2360.7 / 0.7) < 0.02, "portal price = cost / (1 − 0.30)");
+  // CENT-MATCH: client preview equals server priceEach exactly
+  const coeffs = portalSellCoeffs(margin);
+  const px = portalFabricSell(AREA_RATE, margin);
+  const clientPrice = portalPriceEach(spec("RB-CHAR-25", "20", "19", "50"), px, coeffs);
+  ok(Math.abs(clientPrice - sv.priceEach) < 0.01, `client preview == server price to the cent (client ${clientPrice}, server ${sv.priceEach})`);
+  // flat cyc uses the lower making rate on both sides
+  const svFlat = portalCurtainCost(spec("RB-MUS", "40", "20", "0"), 0.9, margin);
+  const clientFlat = portalPriceEach(spec("RB-MUS", "40", "20", "0"), portalFabricSell(0.9, margin), coeffs);
+  ok(Math.abs(clientFlat - svFlat.priceEach) < 0.01, "flat cyc: client == server (uses cyc making rate both sides)");
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

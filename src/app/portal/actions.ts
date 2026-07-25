@@ -14,6 +14,7 @@ import {
 import { byCategory, get as getCatalogPart } from "@/lib/stores/catalog";
 import { isCustomerBuyable } from "@/lib/portal-catalog";
 import { curtainCost } from "@/lib/curtain-pricing";
+import { SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { curtainQty, type CurtainSpec } from "@/lib/curtain-geom";
 
@@ -185,7 +186,8 @@ export async function submitPortalEstimate(formData: FormData): Promise<void> {
   for (const spec of specs) {
     const fab = fabricById.get(spec.fabric);
     if (!fab) continue; // unknown fabric — drop the line
-    const { costEach, priceEach } = curtainCost(spec, fab.costPerSqft ?? 0, tier.margin);
+    const rate = fab.curtainAreaRate ?? SEED_FABRIC_RATES[fab.sku] ?? fab.costPerSqft ?? 0;
+    const { costEach, priceEach } = curtainCost(spec, rate, tier.margin);
     if (priceEach <= 0) continue; // no dimensions — skip
     const qty = curtainQty(spec);
     const h = parseFloat(spec.height) || 0;

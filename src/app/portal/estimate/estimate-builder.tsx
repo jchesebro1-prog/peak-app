@@ -36,9 +36,7 @@ const GROUPS: { label: string; cats: string[] }[] = [
   { label: "Hardware", cats: ["Hardware"] },
 ];
 
-const HANGS = ["Pipe", "Track", "Other", "None"];
 const FULLNESS: [string, string][] = [["Flat", "0"], ["50%", "50"], ["75%", "75"], ["100%", "100"]];
-const BOTTOMS = ["Chain", "Pocket", "None"];
 const EQUIP_LIMIT = 60;
 
 const LABEL: CSSProperties = {
@@ -247,16 +245,6 @@ export function EstimateBuilder({
                     <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
                       {FULLNESS.map(([label, v]) => <button key={v} type="button" onClick={() => setLine(i, { fullness: v })} style={seg(l.fullness === v)}>{label}</button>)}
                     </div>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                    <div><label style={LABEL}>Hang type</label>
-                      <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-                        {HANGS.map((v) => <button key={v} type="button" onClick={() => setLine(i, { hang: v })} style={seg(l.hang === v)}>{v}</button>)}
-                      </div></div>
-                    <div><label style={LABEL}>Bottom finish</label>
-                      <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-                        {BOTTOMS.map((v) => <button key={v} type="button" onClick={() => setLine(i, { bottom: v })} style={seg(l.bottom === v)}>{v}</button>)}
-                      </div></div>
                   </div>
                   <div style={{ display: "flex", alignItems: "baseline", justifyContent: "flex-end", gap: 10, borderTop: "1px solid #f0f1f4", paddingTop: 12 }}>
                     {each > 0 ? (

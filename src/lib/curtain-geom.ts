@@ -29,14 +29,12 @@ export type CurtainSpec = {
 /** A fabric option as the customer sees it — a SELL price/sq ft, never cost. */
 export type FabricSell = { sku: string; name: string; pricePerSqft: number };
 
-/** Sell-side assembly coefficients, precomputed server-side (no margin here). */
+/** Sell-side making coefficients, precomputed server-side (no margin here). */
 export type SellCoeffs = {
-  /** Sew, per sq ft of sewn fabric. */
-  sewPerSqft: number;
-  /** Bottom finish, per ft of finished width, keyed by finish. */
-  bottomPerFt: Record<string, number>;
-  /** Hang hardware, per ft of finished width, keyed by hang type. */
-  hangPerFt: Record<string, number>;
+  /** Making sell, per ft of SEWN width — pleated velour. */
+  makingPerFt: number;
+  /** Making sell, per ft of sewn width — flat goods (fullness 0). */
+  cycMakingPerFt: number;
 };
 
 /** Finished face + sewn fabric area (sq ft) and finished width (ft). */
@@ -61,19 +59,28 @@ export function curtainQty(d: CurtainSpec): number {
 /**
  * Customer-facing price for ONE curtain, from sell numbers only. Equals the
  * server's authoritative curtainCost().priceEach exactly when `pricePerSqft`
- * and `coeffs` are passed at full precision (they are — see the estimate page).
+ * and `coeffs` are passed at full precision (they are — see the estimate
+ * page). Computes its own sewn geometry — the shared two-term model
+ * (sewnWidth = width × (1 + fullness/100), sewnArea = sewnWidth × height) —
+ * so it needs no bottom/hang coefficients.
+ *
+ * sewnArea × pricePerSqft + sewnWidth × makingSell
+ *   = (sewnArea × fabricRate + sewnWidth × makingRate) / (1 − m)
+ *   = rawCost / (1 − m)
+ * — identical to the server's priceEach, rounded once. That is the
+ * cent-match.
  */
 export function curtainPriceEach(
   d: CurtainSpec,
   pricePerSqft: number,
   coeffs: SellCoeffs
 ): number {
-  const { fabricArea, width } = curtainAreas(d);
-  if (fabricArea <= 0) return 0;
-  const price =
-    fabricArea * (pricePerSqft || 0) +
-    fabricArea * coeffs.sewPerSqft +
-    width * (coeffs.bottomPerFt[d.bottom] ?? 0) +
-    width * (coeffs.hangPerFt[d.hang] ?? 0);
-  return round2(price);
+  const h = parseFloat(d.height) || 0;
+  const w = parseFloat(d.width) || 0;
+  const fullness = parseFloat(d.fullness) || 0;
+  const sewnWidth = w * (1 + fullness / 100);
+  const sewnArea = sewnWidth * h;
+  if (sewnArea <= 0) return 0;
+  const makingSell = fullness > 0 ? coeffs.makingPerFt : coeffs.cycMakingPerFt;
+  return round2(sewnArea * (pricePerSqft || 0) + sewnWidth * makingSell);
 }

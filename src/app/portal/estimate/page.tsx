@@ -5,6 +5,7 @@ import { portalSession } from "@/lib/portal";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { byCategory } from "@/lib/stores/catalog";
 import { fabricSellPerSqft, sellCoeffs } from "@/lib/curtain-pricing";
+import { SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
 import type { FabricSell } from "@/lib/curtain-geom";
 import { customerCatalog } from "@/lib/portal-catalog";
 import { resolveTier } from "@/lib/pricing-tiers";
@@ -90,7 +91,7 @@ export default async function PortalEstimatePage({
     .map((p) => ({
       sku: p.sku,
       name: p.desc,
-      pricePerSqft: fabricSellPerSqft(p.costPerSqft ?? 0, tier.margin),
+      pricePerSqft: fabricSellPerSqft(p.curtainAreaRate ?? SEED_FABRIC_RATES[p.sku] ?? p.costPerSqft ?? 0, tier.margin),
     }));
   const coeffs = sellCoeffs(tier.margin);
 
