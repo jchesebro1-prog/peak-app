@@ -844,6 +844,25 @@ ok(wl.lines.length === 1 && wl.lines[0].qty === 110, `routes of one part sum the
 ok(wl.lines[0].ext === 220 && wl.value === 220 && wl.cost === 110, "wire ext/value/cost from qty × list|cost");
 ok(wl.unmeasured === 1, "the uncalibrated route is counted, not silently dropped");
 
+// Review fix (#39): the connectionType suffix requires EVERY contributing
+// route to carry a matching stamp — a part-group with one unstamped
+// (free-drawn) route must suppress the suffix exactly like a disagreeing
+// one would, rather than letting the stamped routes' type leak onto the
+// whole combined quantity.
+const dmxA = { id: "wr-4", sheetId: "s1", page: 1, points: [zig[0], zig[1]], aspect: 2, partId: "WIRE-DMX", connectionType: "DMX512 (5-pin XLR)" };
+const dmxB = { id: "wr-5", sheetId: "s1", page: 1, points: [zig[1], zig[2]], aspect: 2, partId: "WIRE-DMX", connectionType: "DMX512 (5-pin XLR)" };
+const dmxParts = [{ id: "WIRE-DMX", sku: "WIRE-DMX", desc: "5-pin DMX cable", category: "Wire", unit: "ft", list: 3, cost: 1.5 }] as PartLite[];
+const wlAgree = routeLines([dmxA, dmxB], dmxParts, [wireCal]);
+ok(wlAgree.lines[0]?.connectionType === "DMX512 (5-pin XLR)",
+  "connectionType suffix applies when every route in the group is stamped and agrees");
+
+const mixA = { id: "wr-6", sheetId: "s1", page: 1, points: [zig[0], zig[1]], aspect: 2, partId: "WIRE-MIX", connectionType: "HDMI" };
+const mixB = { id: "wr-7", sheetId: "s1", page: 1, points: [zig[1], zig[2]], aspect: 2, partId: "WIRE-MIX" }; // untyped free route, same part
+const mixParts = [{ id: "WIRE-MIX", sku: "WIRE-MIX", desc: "HDMI cable", category: "Wire", unit: "ft", list: 4, cost: 2 }] as PartLite[];
+const wlMixed = routeLines([mixA, mixB], mixParts, [wireCal]);
+ok(wlMixed.lines[0]?.connectionType === undefined,
+  "review fix: a part-group mixing a stamped device-wire route with an untyped free route gets no connectionType suffix");
+
 /* --- The Grid riser sketch (D112) --- */
 import { riserGraph } from "@/lib/design/grid-riser";
 

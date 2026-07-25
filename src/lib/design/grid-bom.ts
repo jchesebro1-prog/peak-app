@@ -37,7 +37,8 @@ export type BomLine = {
   ext: number;
   /** Present only on route lines (Task 4) where every contributing route
    *  agreed on the same validated connectionType — an ambiguous group
-   *  (mixed types) is left unset rather than guessing. */
+   *  (mixed types, or any route with no connectionType at all) is left
+   *  unset rather than guessing. */
   connectionType?: string;
 };
 
@@ -158,9 +159,13 @@ export function routeLines(
   const byId = new Map(parts.map((p) => [p.id, p]));
   const feet = new Map<string, number>();
   // Per-part-group connectionTypes seen (Task 4) — a line is annotated only
-  // when every contributing route agrees; a mixed group stays unset rather
-  // than guessing which cable's connector actually applies.
+  // when EVERY contributing route carries a connectionType and they all
+  // agree; an unstamped route (no connectionType at all) makes the group
+  // just as ambiguous as a disagreeing one, so it also suppresses the
+  // suffix rather than letting the stamped routes' type leak onto footage
+  // that was never validated.
   const connTypes = new Map<string, Set<string>>();
+  const hasUnstamped = new Set<string>();
   let unmeasured = 0;
   for (const r of routes) {
     const ft = routeLengthFt(r, cals);
@@ -173,6 +178,8 @@ export function routeLines(
       const set = connTypes.get(r.partId) || new Set<string>();
       set.add(r.connectionType);
       connTypes.set(r.partId, set);
+    } else {
+      hasUnstamped.add(r.partId);
     }
   }
   const lines: BomLine[] = [];
@@ -182,7 +189,8 @@ export function routeLines(
     const part = byId.get(partId);
     const qty = Math.ceil(ft);
     const types = connTypes.get(partId);
-    const connectionType = types && types.size === 1 ? [...types][0] : undefined;
+    const connectionType =
+      types && types.size === 1 && !hasUnstamped.has(partId) ? [...types][0] : undefined;
     const line: BomLine = {
       partId,
       desc: part ? part.desc : `${partId} (removed part — no longer in the catalog)`,

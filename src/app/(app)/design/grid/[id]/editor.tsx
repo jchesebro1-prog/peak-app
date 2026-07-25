@@ -109,18 +109,22 @@ const DEVICE_HIT_RADIUS = 0.012;
 const DEVICE_SNAP_RADIUS = DEVICE_HIT_RADIUS * 1.5;
 
 /** Placement (if any) on `placements` whose marker the point `p` snaps to,
- *  using the same circular-tolerance shape as the existing hit-test. */
+ *  using the same circular-tolerance shape as the existing hit-test. Scans
+ *  in the same reversed order as the marker-select hit-test below (`onDown`)
+ *  so overlapping devices prefer the topmost/most-recent placement. */
 function snappedPlacement(
   p: Point,
   placements: GridPlacement[],
   aspect: number
 ): GridPlacement | null {
   return (
-    placements.find(
-      (pl) =>
-        Math.abs(pl.x - p.x) < DEVICE_SNAP_RADIUS &&
-        Math.abs(pl.y - p.y) < DEVICE_SNAP_RADIUS / (aspect || 1)
-    ) || null
+    [...placements]
+      .reverse()
+      .find(
+        (pl) =>
+          Math.abs(pl.x - p.x) < DEVICE_SNAP_RADIUS &&
+          Math.abs(pl.y - p.y) < DEVICE_SNAP_RADIUS / (aspect || 1)
+      ) || null
   );
 }
 
