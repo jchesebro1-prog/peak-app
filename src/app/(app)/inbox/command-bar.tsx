@@ -62,6 +62,7 @@ export default function CommandBar({
   categoryOptions,
   crmMode,
   onToggleMode,
+  modePending,
   onClear,
   onFilter,
   onSort,
@@ -75,6 +76,9 @@ export default function CommandBar({
   /** Punch #42: Inbox/CRM mode — segmented control lives here, left of Filter▾. */
   crmMode: boolean;
   onToggleMode: (on: boolean) => void;
+  /** true while a toggle is persisting server-side — disables both buttons
+   *  so a rapid second click can't race the first one's result. */
+  modePending: boolean;
   onClear: () => void;
   onFilter: (key: string) => void;
   onSort: (key: string) => void;
@@ -201,10 +205,18 @@ export default function CommandBar({
           flexShrink: 0,
         }}
       >
-        <button onClick={() => onToggleMode(false)} style={modeBtn(!crmMode)}>
+        <button
+          onClick={() => onToggleMode(false)}
+          disabled={modePending}
+          style={modeBtn(!crmMode, modePending)}
+        >
           Inbox
         </button>
-        <button onClick={() => onToggleMode(true)} style={modeBtn(crmMode)}>
+        <button
+          onClick={() => onToggleMode(true)}
+          disabled={modePending}
+          style={modeBtn(crmMode, modePending)}
+        >
           CRM
         </button>
       </div>
@@ -322,7 +334,7 @@ const refineActive: React.CSSProperties = {
   borderColor: "color-mix(in srgb, var(--accent) 30%, #fff)",
 };
 
-function modeBtn(active: boolean): React.CSSProperties {
+function modeBtn(active: boolean, pending: boolean): React.CSSProperties {
   return {
     fontFamily: "var(--font-ui)",
     fontSize: 12.5,
@@ -332,7 +344,8 @@ function modeBtn(active: boolean): React.CSSProperties {
     border: active ? "1px solid var(--hairline, #e8eaee)" : "1px solid transparent",
     background: active ? "#fff" : "transparent",
     color: active ? "var(--ink, #16181b)" : "#5b616e",
-    cursor: "pointer",
+    cursor: pending ? "default" : "pointer",
+    opacity: pending ? 0.6 : 1,
     whiteSpace: "nowrap",
   };
 }

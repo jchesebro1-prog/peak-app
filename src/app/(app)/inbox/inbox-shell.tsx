@@ -121,13 +121,22 @@ export default function InboxShell({
   // Punch #42: Inbox/CRM mode toggle. Optimistic — flips the local copy
   // immediately, then persists via the server action and refreshes so the
   // waiting-first sort (and anything else gated on crmMode) catches up.
+  // If the server action throws, revert to the pre-toggle value (no toast
+  // infra exists, so the revert is silent). modePending disables both
+  // segmented buttons while a flip is in flight, so a rapid second click
+  // can't race the first one's persist and land out of order.
   const [crmMode, setCrmModeState] = useState(initialCrmMode);
-  const [, startTransition] = useTransition();
+  const [modePending, startTransition] = useTransition();
   const onToggleMode = (on: boolean) => {
+    const previous = crmMode;
     setCrmModeState(on);
     startTransition(async () => {
-      await setInboxModeAction(on);
-      router.refresh();
+      try {
+        await setInboxModeAction(on);
+        router.refresh();
+      } catch {
+        setCrmModeState(previous);
+      }
     });
   };
 
@@ -783,6 +792,7 @@ export default function InboxShell({
               categoryOptions={categoryOptions}
               crmMode={crmMode}
               onToggleMode={onToggleMode}
+              modePending={modePending}
               onClear={() => setSelectedIds(new Set())}
               onFilter={(v) => setRefinement("filter", v)}
               onSort={(v) => setRefinement("sort", v)}
