@@ -206,57 +206,6 @@ export default function InboxShell({
     router.push(`/inbox?${baseQuery}`);
   }, [router, baseQuery]);
 
-  // Task 5 (#42): arrow-key navigation across the inbox conversation list.
-  // Desktop pane mode only — `narrow` is the same breakpoint state that
-  // hides .ib-pane / shows the mobile overlay (see page.tsx's
-  // `@media (max-width: 960px)` rule), so keyboard nav skips entirely on
-  // mobile where the list and reader don't share the screen. Never
-  // intercepts while the search box or composer holds focus. Draft rows
-  // are excluded — selecting one opens the composer, not the reading pane,
-  // so they're not part of the "selection" sequence arrows walk.
-  const currentThreadId = reader ? reader.id : null;
-  useEffect(() => {
-    if (narrow) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-      const el = e.target as HTMLElement | null;
-      // SELECT isn't in the brief's guard list, but the reading pane (Owner,
-      // link-type/link-record pickers in thread-reader.tsx) and the list's
-      // scope dropdown are native <select>s — arrow keys are how you cycle
-      // their options, and without this guard preventDefault() below would
-      // swap the open thread instead of changing the dropdown.
-      if (
-        el &&
-        (el.tagName === "INPUT" ||
-          el.tagName === "TEXTAREA" ||
-          el.tagName === "SELECT" ||
-          el.isContentEditable)
-      )
-        return;
-      const ids = list.rows.filter((r) => !r.isDraft).map((r) => r.id);
-      if (!ids.length) return;
-      const cur = ids.indexOf(currentThreadId ?? "");
-      const next =
-        e.key === "ArrowDown"
-          ? ids[Math.min(cur + 1, ids.length - 1)]
-          : ids[Math.max(cur - 1, 0)];
-      if (next && next !== currentThreadId) {
-        e.preventDefault();
-        selectThread(next);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [narrow, list.rows, currentThreadId, selectThread]);
-
-  // Selected row stays in view as the selection moves (keyboard or click).
-  useEffect(() => {
-    if (!currentThreadId) return;
-    document
-      .querySelector(`[data-thread-id="${currentThreadId}"]`)
-      ?.scrollIntoView({ block: "nearest" });
-  }, [currentThreadId]);
-
   /* ---- filter / sort (server-driven via the URL) ---- */
   const setRefinement = useCallback(
     (key: "filter" | "sort", value: string | null) => {
@@ -432,6 +381,73 @@ export default function InboxShell({
     },
     [router]
   );
+
+  // Task 5 (#42): arrow-key navigation across the inbox conversation list.
+  // Desktop pane mode only — `narrow` is the same breakpoint state that
+  // hides .ib-pane / shows the mobile overlay (see page.tsx's
+  // `@media (max-width: 960px)` rule), so keyboard nav skips entirely on
+  // mobile where the list and reader don't share the screen. Also inert
+  // while:
+  //   - a search is active (`isSearch`) — the rendered rows are
+  //     SearchResults' plain <button>s, not ThreadList's Row, so there's no
+  //     data-thread-id/highlight to walk; without this guard, opening a
+  //     result (openSearchResult doesn't clear the query, so the clicked
+  //     button keeps focus) and pressing an arrow would silently reselect
+  //     from the invisible unfiltered list.rows instead.
+  //   - the compose or log-call/meeting modal is open (`compose`/
+  //     `logging`) — neither modal's buttons stopPropagation on keydown, so
+  //     without this the window listener still fires underneath them.
+  // Note: the schedule-site-visit modal (SiteVisitModal, opened from inside
+  // thread-reader.tsx) has the same unguarded-button gap, but its open
+  // state (`visitOpen`) is local to ThreadReader and isn't lifted up to
+  // this shell, so it can't be added to this condition without plumbing
+  // new state through — left out of this fix as out of scope (see task-5
+  // report).
+  // Never intercepts while the search box or composer holds focus. Draft
+  // rows are excluded — selecting one opens the composer, not the reading
+  // pane, so they're not part of the "selection" sequence arrows walk.
+  const currentThreadId = reader ? reader.id : null;
+  useEffect(() => {
+    if (narrow || isSearch || !!compose || logging) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const el = e.target as HTMLElement | null;
+      // SELECT isn't in the brief's guard list, but the reading pane (Owner,
+      // link-type/link-record pickers in thread-reader.tsx) and the list's
+      // scope dropdown are native <select>s — arrow keys are how you cycle
+      // their options, and without this guard preventDefault() below would
+      // swap the open thread instead of changing the dropdown.
+      if (
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable)
+      )
+        return;
+      const ids = list.rows.filter((r) => !r.isDraft).map((r) => r.id);
+      if (!ids.length) return;
+      const cur = ids.indexOf(currentThreadId ?? "");
+      const next =
+        e.key === "ArrowDown"
+          ? ids[Math.min(cur + 1, ids.length - 1)]
+          : ids[Math.max(cur - 1, 0)];
+      if (next && next !== currentThreadId) {
+        e.preventDefault();
+        selectThread(next);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [narrow, isSearch, compose, logging, list.rows, currentThreadId, selectThread]);
+
+  // Selected row stays in view as the selection moves (keyboard or click).
+  useEffect(() => {
+    if (!currentThreadId) return;
+    document
+      .querySelector(`[data-thread-id="${currentThreadId}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [currentThreadId]);
 
   // PUNCHLIST #1 — "actively sync": a silent background send/receive on mount
   // and every few minutes while the tab is visible. The server action claims
