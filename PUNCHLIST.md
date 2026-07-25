@@ -2498,7 +2498,7 @@ first; this rides on top. Pricing math mostly does NOT move (budget + quote shar
 
 ---
 
-## 42. Inbox round 2: threading + Outlook three-pane + Inbox/CRM mode toggle — OPEN (WAVE 1)
+## 42. Inbox round 2: threading + Outlook three-pane + Inbox/CRM mode toggle — DONE (2026-07-25)
 
 **Area:** Inbox (Gmail-backed, D105 rebuild 2026-07-22).
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
@@ -2512,7 +2512,22 @@ three-pane layout (folder rail · list · persistent reading pane, arrow-key nav
 (bold-unread, hover quick actions); selection-aware command bar; **Inbox/CRM mode toggle** —
 default = plain date-sorted email, CRM mode = follow-up/waiting filters, persisted per user.
 
-**Status:** OPEN — wave 1, in progress this session.
+**Status:** DONE 2026-07-25 (branch `punch-42-inbox-round-2`, plan
+`docs/superpowers/plans/2026-07-25-inbox-round-2.md`). **Recon found threading, the
+three-pane layout, and the selection-aware command bar were ALREADY BUILT** (one
+`CommThread` = one Gmail conversation since the Phase-7 bridge; the reader has been an
+inline pane all along) — the D105-era record just never said so. What this round actually
+added: **(1) per-user Inbox/CRM mode toggle** (server-side pref, notif_prefs row; default =
+plain date-sorted inbox — the old always-on waiting-first sort is now CRM-mode-only; "Needs
+reply" view keeps waiting-first in both modes; CRM mode adds a Needs reply · Flagged ·
+Unread chip row), **(2) conversation count badge + combined participants** on list rows,
+**(3) tighter density** (9px rows, 26px channel tile, chip row only when it has content) **+
+Delete/Restore in the hover quick actions**, **(4) arrow-key navigation** (clamped, guarded
+against inputs/selects/search mode/compose+log modals, scroll-into-view). Verified live:
+mode flip is optimistic + survives reload; date-desc default confirmed; CRM flip re-sorts
+waiting-first. Carried minors: site-visit modal's open state can't gate the key handler
+without a state-lift (edge case, logged); calls/flagged smart views now follow the mode's
+sort (was always waiting-first) — flag to Jeff if unwanted.
 
 ---
 
