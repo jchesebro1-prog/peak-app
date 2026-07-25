@@ -2560,6 +2560,24 @@ role (falls back to quote owner), due ~7 days: walk the site with the end user. 
 
 ---
 
+## 45. Header/nav fixes for the in-flight tabs rebuild — OPEN (TIME-SENSITIVE, route to the rebuild session)
+
+**Area:** header/nav (tabs rebuild in flight).
+**Reported:** 2026-07-25 (staged off-mini late, flushed 2026-07-25)
+
+**Ask (Jeff):**
+- **(a) Home is MISSING entirely — on both web and mobile.** *"there is also no home on the
+  web or mobile and that needs to be fixed."* Restore Home as a main tab on both form factors.
+- **(b) Tab-label abbreviations are MOBILE-ONLY.** On web/desktop the main tabs read full
+  words: **Home · Sales · Installs · Customers · Design** (Jeff's current preferred set).
+  Implementation shape: responsive label switch (full label at desktop breakpoint, short label
+  below) — ONE nav build, not two.
+
+**Status:** OPEN — belongs to the tabs/UI rebuild session, not the punch-list build stream.
+Do not pick up standalone; the rebuild session owns the nav.
+
+---
+
 ## IDEA (not a punch-list item) — Consulting as a project type — BUILT (D90)
 
 **Status: BUILT 2026-07-19 (D90).** Jeff defined Consulting in the 2026-07-19 brainstorming
