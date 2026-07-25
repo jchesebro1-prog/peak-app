@@ -5,19 +5,19 @@ import type { CurtainDraft, FabricOpt } from "./types";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./est-ui";
 
 /**
- * Curtain configurator — name / hang type / fabric (catalog category
- * 'Fabric', priced by costPerSqft × sewn area) / qty / W / H / fullness /
- * bottom finish, with live fabric-area + cost + ext pricing in the footer.
+ * Curtain configurator — name / fabric (catalog category 'Fabric', priced by
+ * the make-it area rate × sewn area) / qty / W / H / fullness / optional
+ * Rose Brand cost override, with live fabric-area + cost + ext pricing in
+ * the footer. Hang type and bottom finish no longer affect price (curtain
+ * pricing rebuild) and have been dropped from this UI.
  */
 
-const HANGS = ["Pipe", "Track", "Other", "None"];
 const FULLNESS: [string, string][] = [
   ["Flat", "0"],
   ["50%", "50"],
   ["75%", "75"],
   ["100%", "100"],
 ];
-const BOTTOMS = ["Chain", "Pocket", "None"];
 
 export default function CurtainModal({
   secName,
@@ -79,18 +79,6 @@ export default function CurtainModal({
         />
       </div>
 
-      {/* hang type */}
-      <div style={{ marginBottom: 16 }}>
-        <label style={LBL}>Hang type</label>
-        <div style={{ display: "flex", gap: 7 }}>
-          {HANGS.map((v) => (
-            <button type="button" key={v} onClick={() => onSet("hang", v)} style={segBtn(draft.hang === v)}>
-              {v}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* fabric */}
       <div style={{ marginBottom: 16 }}>
         <label style={LBL}>
@@ -107,7 +95,7 @@ export default function CurtainModal({
         >
           {fabrics.map((f) => (
             <option key={f.sku} value={f.sku}>
-              {f.name + "  ·  $" + f.costPerSqft.toFixed(2) + "/sq ft"}
+              {f.name + (f.curtainAreaRate ? "  ·  $" + f.curtainAreaRate.toFixed(2) + "/sq ft sewn" : "")}
             </option>
           ))}
         </select>
@@ -166,21 +154,21 @@ export default function CurtainModal({
         </div>
       </div>
 
-      {/* bottom finish */}
+      {/* Rose Brand cost override */}
       <div style={{ marginBottom: 4 }}>
-        <label style={LBL}>Bottom finish</label>
-        <div style={{ display: "flex", gap: 7 }}>
-          {BOTTOMS.map((v) => (
-            <button
-              type="button"
-              key={v}
-              onClick={() => onSet("bottom", v)}
-              style={segBtn(draft.bottom === v)}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
+        <label style={LBL}>
+          Rose Brand cost{" "}
+          <span style={{ color: "#c4c9d2", textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>
+            · optional — replaces the make-it cost
+          </span>
+        </label>
+        <input
+          className="est-input est-field"
+          value={draft.vendorCostOverride ?? ""}
+          onChange={(e) => onSet("vendorCostOverride", e.target.value)}
+          placeholder="e.g. 2080"
+          style={NUMFIELD}
+        />
       </div>
     </ConfigModal>
   );
