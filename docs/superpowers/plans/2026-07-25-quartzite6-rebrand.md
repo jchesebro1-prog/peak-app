@@ -110,7 +110,7 @@ Then the gold-carries-dark-text rule (spec §1). In `globals.css` change **text 
 - `.pk-btn-accent` → `color: var(--ink);`
 - `.pk-badge` → `color: var(--ink);`
 - `.pk-bell-badge` → `color: var(--ink);`
-- `.pk-avatar-btn` → `color: #fff;` **stays** (avatar bg is the user's color, not the accent — verify: `background: var(--accent)` on `.pk-avatar-btn` and `.pk-menu-avatar` DOES use accent → change both to `color: var(--ink)`).
+- `.pk-avatar-btn` and `.pk-menu-avatar` → `color: #fff;` **stays** (their CSS declares an accent background, but every real call site overrides it inline to the user's identity color — they are never gold surfaces at runtime, so the gold-carries-dark-text rule does not apply).
 - `.pk-mark` → `color: var(--ink);` (still used by login until Task 5 swaps it out).
 
 And accent-on-white becomes bronze: in `.pk-open-chip` change `color: var(--accent)` → `color: var(--accent-ink)`; in `.pk-input:focus` keep the accent border (border is fine at 3:1); leave `--accent-soft` usages as-is.
