@@ -624,13 +624,19 @@ function pinnedFirst(list: CommThread[]): CommThread[] {
 }
 
 /** Threads in a mailbox+folder. boxId may be a smart view
- *  ('needs' | 'calls' | 'flagged'). opts adds text query, a filter chip, and
- *  an explicit sort (which overrides the default waiting-first ordering). */
+ *  ('needs' | 'calls' | 'flagged'). opts adds text query, a filter chip, an
+ *  explicit sort (which overrides the default ordering), and crmMode (opt-in
+ *  "waiting on us" first ordering for the plain inbox folder — punch #42). */
 export async function threadsIn(
   boxId: MailboxId | SmartView,
   folder?: FolderId | null,
   me?: string,
-  opts: { query?: string; filter?: FilterKey | null; sort?: SortKey | null } = {}
+  opts: {
+    query?: string;
+    filter?: FilterKey | null;
+    sort?: SortKey | null;
+    crmMode?: boolean;
+  } = {}
 ): Promise<CommThread[]> {
   const user = me || DEFAULT_USER;
   const all = await listDocs<CommThread>("comms");
@@ -694,7 +700,10 @@ export async function threadsIn(
   // floats to the top regardless of order (Outlook parity).
   if (opts.sort) return pinnedFirst(base.sort(sortComparator(opts.sort)));
 
-  const waitFirst = boxId === "needs" || folder === "inbox";
+  // Punch #42: waiting-first is now opt-in "CRM mode" per user for the plain
+  // inbox folder — the Needs-reply smart view always keeps it. Missing pref
+  // (opts.crmMode undefined/false) = plain date-desc inbox.
+  const waitFirst = boxId === "needs" || (folder === "inbox" && opts?.crmMode === true);
   if (waitFirst) {
     const w = base
       .filter((t) => t.status === "waiting_us")

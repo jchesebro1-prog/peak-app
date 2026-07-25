@@ -152,6 +152,26 @@ export async function setInvitesOn(on: boolean, user: string): Promise<void> {
   await writeRow(user, mine);
 }
 
+/* ---- Inbox/CRM mode (punch #42) — same sparse row, non-category key ---- */
+
+/** Punch #42: per-user toggle for the inbox's "waiting on us" smart sort
+ *  (waitFirst in comms.ts threadsIn). Lives in the same per-user prefs row
+ *  as the site-visit-invite flag above — deliberately NOT a bell category.
+ *  CRM mode is OPT-IN: missing key = plain date-sorted inbox (false), the
+ *  opposite default of the category mutes above. */
+export const CRM_MODE_KEY = "inbox_crm_mode";
+
+export async function crmModeOn(user: string): Promise<boolean> {
+  const stored = await readRow(user);
+  return stored[CRM_MODE_KEY] === true;
+}
+
+export async function setCrmMode(on: boolean, user: string): Promise<void> {
+  const mine = { ...(await readRow(user)) };
+  mine[CRM_MODE_KEY] = !!on;
+  await writeRow(user, mine);
+}
+
 /** How many categories are on for this user. */
 export async function countOn(user?: string): Promise<number> {
   const g = await getPrefs(user);

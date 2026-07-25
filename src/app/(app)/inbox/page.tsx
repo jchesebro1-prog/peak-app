@@ -4,6 +4,7 @@ import { mergedVisitReasons } from "@/lib/stores/site-visits";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { followUpCount } from "@/lib/stores/leads";
+import { crmModeOn } from "@/lib/stores/notif-prefs";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
@@ -173,6 +174,10 @@ export default async function InboxPage({
   const isView = !!view;
   const isDrafts = !isView && folder === "drafts";
 
+  // Read up front (punch #42): threadsIn's opts.crmMode needs the resolved
+  // value, so it can't sit in the Promise.all below alongside threadsIn itself.
+  const crmMode = await crmModeOn(me);
+
   /* ---- parallel loads ---- */
   const [
     boxes,
@@ -200,6 +205,7 @@ export default async function InboxPage({
     threadsIn(view ?? box, view ? "inbox" : folder, me, {
       filter,
       sort: sortExplicit ? sort : null,
+      crmMode,
     }),
     activeUsers(),
     allCustomers(),
@@ -718,6 +724,7 @@ export default async function InboxPage({
             fromOptions={fromOptions}
             initialCompose={initialCompose}
             categoryOptions={CATEGORIES}
+            crmMode={crmMode}
           />
         </div>
       </div>

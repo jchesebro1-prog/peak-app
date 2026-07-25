@@ -42,6 +42,7 @@ import {
   type MailboxId,
 } from "@/lib/stores/comms";
 import { nameFor } from "@/lib/stores/customers";
+import { setCrmMode } from "@/lib/stores/notif-prefs";
 import {
   byRenewalOf,
   setStatus as setQuoteStatus,
@@ -256,6 +257,16 @@ export async function reopenAction(id: string) {
 export async function assignAction(id: string, name: string) {
   await requireUser();
   await assign(id, name || "");
+  revalidate();
+}
+
+/* ---- inbox display prefs (punch #42) ---- */
+
+/** Per-user toggle for CRM mode (the waiting-first inbox sort). Task 2 wires
+ *  up the UI control that calls this. */
+export async function setInboxModeAction(on: boolean): Promise<void> {
+  const user = await requireUser();
+  await setCrmMode(on, user.name);
   revalidate();
 }
 

@@ -82,6 +82,11 @@ export default function InboxShell({
   fromOptions,
   initialCompose,
   categoryOptions,
+  // Punch #42: plumbed through but not yet consumed — Task 2 adds the toggle
+  // UI that reads it. Do not remove: this is intentional, forward-looking
+  // wiring for the CRM-mode pref, not dead code.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  crmMode,
 }: {
   box: string;
   folder: string;
@@ -97,6 +102,9 @@ export default function InboxShell({
   fromOptions: Opt[];
   initialCompose: ComposeInit | null;
   categoryOptions: CategoryOpt[];
+  // Punch #42: per-user Inbox/CRM mode pref (waiting-first sort opt-in).
+  // Read-only plumbing for now — Task 2 adds the toggle UI that consumes it.
+  crmMode: boolean;
 }) {
   const router = useRouter();
 
