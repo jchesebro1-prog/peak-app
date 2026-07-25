@@ -216,8 +216,8 @@ export default function Q6Mark({
     >
       <circle cx="20" cy="22" r="16" fill="none" stroke={c.q} strokeWidth="7" />
       <path d="M23 25 L39 41" stroke={c.q} strokeWidth="7" fill="none" />
-      <path d="M58 3 C 50 10, 45 17, 43.5 26" stroke={c.six} strokeWidth="7" fill="none" />
-      <circle cx="50" cy="31" r="9.5" fill="none" stroke={c.six} strokeWidth="7" />
+      <path d="M58 3 C 50 10, 45 17, 43.5 25.5" stroke={c.six} strokeWidth="7" fill="none" />
+      <circle cx="50" cy="30.5" r="9.5" fill="none" stroke={c.six} strokeWidth="7" />
     </svg>
   );
 }
@@ -267,7 +267,7 @@ export function PmIcon({ size }: { size?: number }) {
   return (
     <Base size={size}>
       <rect x="3" y="2.5" width="10" height="12" rx="1.5" />
-      <path d="M6 2.5V2a1.2 1.2 0 0 1 1.2-1.2h1.6A1.2 1.2 0 0 1 10 2v.5" />
+      <path d="M6 2.5v-.4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v.4" />
       <path d="M5.6 7.4l1.5 1.5 3.2-3.2" />
       <path d="M5.6 11.5h4.8" />
     </Base>
@@ -281,9 +281,9 @@ export function CrmIcon({ size }: { size?: number }) {
       <circle cx="8" cy="5.4" r="2.1" />
       <path d="M4.6 14c0-2.1 1.5-3.6 3.4-3.6s3.4 1.5 3.4 3.6" />
       <circle cx="2.9" cy="6.8" r="1.5" />
-      <path d="M.8 12.9c0-1.6 1-2.7 2.4-2.7" />
+      <path d="M1 12.9c0-1.6 1-2.7 2.4-2.7" />
       <circle cx="13.1" cy="6.8" r="1.5" />
-      <path d="M15.2 12.9c0-1.6-1-2.7-2.4-2.7" />
+      <path d="M15 12.9c0-1.6-1-2.7-2.4-2.7" />
     </Base>
   );
 }

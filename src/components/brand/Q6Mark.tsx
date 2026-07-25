@@ -31,8 +31,8 @@ export default function Q6Mark({
     >
       <circle cx="20" cy="22" r="16" fill="none" stroke={c.q} strokeWidth="7" />
       <path d="M23 25 L39 41" stroke={c.q} strokeWidth="7" fill="none" />
-      <path d="M58 3 C 50 10, 45 17, 43.5 26" stroke={c.six} strokeWidth="7" fill="none" />
-      <circle cx="50" cy="31" r="9.5" fill="none" stroke={c.six} strokeWidth="7" />
+      <path d="M58 3 C 50 10, 45 17, 43.5 25.5" stroke={c.six} strokeWidth="7" fill="none" />
+      <circle cx="50" cy="30.5" r="9.5" fill="none" stroke={c.six} strokeWidth="7" />
     </svg>
   );
 }

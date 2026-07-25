@@ -4,7 +4,7 @@
   <g transform="translate(58,124) scale(6)" fill="none">
     <circle cx="20" cy="22" r="16" stroke="#9aa0ab" stroke-width="7"/>
     <path d="M23 25 L39 41" stroke="#9aa0ab" stroke-width="7"/>
-    <path d="M58 3 C 50 10, 45 17, 43.5 26" stroke="#b08d4a" stroke-width="7"/>
-    <circle cx="50" cy="31" r="9.5" stroke="#b08d4a" stroke-width="7"/>
+    <path d="M58 3 C 50 10, 45 17, 43.5 25.5" stroke="#b08d4a" stroke-width="7"/>
+    <circle cx="50" cy="30.5" r="9.5" stroke="#b08d4a" stroke-width="7"/>
   </g>
 </svg>
