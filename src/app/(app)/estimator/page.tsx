@@ -180,6 +180,7 @@ export default async function EstimatorPage({
       sku: p.sku,
       name: p.desc,
       costPerSqft: p.costPerSqft ?? 0,
+      curtainAreaRate: p.curtainAreaRate,
     }));
   const laborRates: Record<string, number> = {};
   laborRows.forEach((p) => {

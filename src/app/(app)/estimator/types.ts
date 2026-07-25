@@ -73,6 +73,8 @@ export type CurtainDraft = {
   width: string;
   fullness: string;
   bottom: string;
+  /** Real vendor (Rose Brand) unit cost; when set, overrides the make-it cost. */
+  vendorCostOverride?: string;
 };
 
 export type FixtureDraft = {
@@ -119,7 +121,7 @@ export type LaborDraft = {
 
 /* ---------------- server → client props ---------------- */
 
-export type FabricOpt = { sku: string; name: string; costPerSqft: number };
+export type FabricOpt = { sku: string; name: string; costPerSqft: number; curtainAreaRate?: number };
 
 /** One catalog search hit for the estimator's "Add part from catalog" picker. */
 export type CatalogHit = {

@@ -1,3 +1,4 @@
+import { curtainCost, curtainPrice, makingRateFor, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
 import {
   DISC_LABEL,
   FIX_ACC,
@@ -120,13 +121,18 @@ export type CurtainCalc = {
   priceEach: number;
 };
 
-/** CURTAIN PRICING — the prototype's placeholder equations, ported as-is. */
+/**
+ * CURTAIN PRICING — two-term make-it model (area × fabricRate + sewn width ×
+ * makingRate), shared with the budget side (src/lib/design/curtain-pricing.ts,
+ * spec 2026-07-24-curtain-pricing-rebuild). A per-line Rose Brand vendor cost
+ * overrides the computed make-it cost when set.
+ */
 export function computeCurtain(
   d: CurtainDraft,
   fabrics: FabricOpt[],
   /** Margin-on-price fraction; the customer tier stamp seeds this (item 11,
-   *  D87) — 0.38 remains the no-tier default the prototype shipped with. */
-  margin: number = 0.38
+   *  D87) — 0.30 is Peak's flat curtain margin, the no-tier default. */
+  margin: number = 0.3
 ): CurtainCalc {
   const fab =
     fabrics.find((f) => f.sku === d.fabric) ||
@@ -134,18 +140,21 @@ export function computeCurtain(
     ({ sku: "", name: "", costPerSqft: 0 } as FabricOpt);
   const h = parseFloat(d.height) || 0; // finished height (ft)
   const w = parseFloat(d.width) || 0; // finished width (ft)
-  const fullness = (parseFloat(d.fullness) || 0) / 100;
-  const faceArea = h * w; // finished face (sq ft)
-  const fabricArea = faceArea * (1 + fullness); // sewn fabric incl. fullness
-  const fabricCost = fabricArea * (fab.costPerSqft || 0);
-  const sewLabor = fabricArea * 0.6;
-  const bottomCost = d.bottom === "Chain" ? w * 2.5 : d.bottom === "Pocket" ? w * 1.8 : 0;
-  const hangCost =
-    d.hang === "Pipe" ? w * 3.0 : d.hang === "Track" ? w * 12.0 : d.hang === "Other" ? w * 5.0 : 0;
-  const costEach = fabricCost + sewLabor + bottomCost + hangCost;
-  const m = margin > 0 && margin < 1 ? margin : 0.38;
-  const priceEach = costEach > 0 ? costEach / (1 - m) : 0; // tier-seeded target margin
-  return { fab, faceArea, fabricArea, costEach: round2(costEach), priceEach: round2(priceEach) };
+  const fullness = parseFloat(d.fullness) || 0; // percent, e.g. 50
+  const fabricRate = fab.curtainAreaRate ?? SEED_FABRIC_RATES[fab.sku] ?? 0;
+  const override =
+    d.vendorCostOverride != null && d.vendorCostOverride !== "" ? parseFloat(d.vendorCostOverride) : null;
+  const cc = curtainCost(
+    { finishedWidthFt: w, finishedHeightFt: h, fullnessPct: fullness, qty: 1, vendorCostOverride: override },
+    { fabricRate, makingRate: makingRateFor(fullness) }
+  );
+  return {
+    fab,
+    faceArea: h * w,
+    fabricArea: cc.sewnAreaSqft,
+    costEach: cc.costEach,
+    priceEach: curtainPrice(cc.costEach, margin),
+  };
 }
 
 /* ---------------- fixture configurator ---------------- */
