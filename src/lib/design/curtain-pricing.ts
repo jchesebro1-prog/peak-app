@@ -61,7 +61,7 @@ export const SEED_FABRIC_RATES: Record<string, number> = {
   "RB-CHAR-25": 3.64, // Charisma 25oz (anchor: RB 3.313 ×1.10)
   "RB-EN-22": 2.84,   // Encore 22oz  (anchor: RB 2.582 ×1.10)
   "RB-EN-16": 2.1,    // Encore 16oz  (seed)
-  "RB-MV-MN": 3.64,   // Memorable 25oz (seed ≈ Charisma)
+  "RB-MV-MN": 4.37,   // Memorable 25oz — Rose Brand's PREMIUM velour; ~20% over Charisma so best-main ≠ better-main. Weight is correctly equal (both 25oz). PLACEHOLDER premium — refine from a real Memorable quote.
   "RB-MUS": 0.9,      // Seamless Muslin (seed)
 };
 

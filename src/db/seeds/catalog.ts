@@ -9,7 +9,7 @@ import type { CatalogPart } from "@/lib/stores/catalog";
 export function catalogSeed(): CatalogPart[] {
   return [
     // ---- Fabrics (curtain configurator pulls these) ----
-    { id: "RB-MV-MN", sku: "RB-MV-MN", desc: "25 oz Memorable Velour", category: "Fabric", unit: "sq ft", list: 6.40, cost: 4.20, mfr: "Rose Brand", costPerSqft: 4.20, oz: 25, ozBasis: "lin-yd", boltWidthIn: 54, curtainAreaRate: 3.64 },
+    { id: "RB-MV-MN", sku: "RB-MV-MN", desc: "25 oz Memorable Velour", category: "Fabric", unit: "sq ft", list: 6.40, cost: 4.20, mfr: "Rose Brand", costPerSqft: 4.20, oz: 25, ozBasis: "lin-yd", boltWidthIn: 54, curtainAreaRate: 4.37 },
     { id: "RB-CHAR-25", sku: "RB-CHAR-25", desc: "25 oz Charisma Velour", category: "Fabric", unit: "sq ft", list: 6.40, cost: 4.20, mfr: "Rose Brand", costPerSqft: 4.20, oz: 25, ozBasis: "lin-yd", boltWidthIn: 54, curtainAreaRate: 3.64 },
     { id: "RB-MARVEL", sku: "RB-MARVEL", desc: "21 oz Marvel Velour", category: "Fabric", unit: "sq ft", list: 5.30, cost: 3.45, mfr: "Rose Brand", costPerSqft: 3.45, oz: 21, ozBasis: "lin-yd", boltWidthIn: 54 },
     { id: "RB-EN-22", sku: "RB-EN-22", desc: "22 oz Encore Velour", category: "Fabric", unit: "sq ft", list: 4.60, cost: 3.05, mfr: "Rose Brand", costPerSqft: 3.05, oz: 22, ozBasis: "lin-yd", boltWidthIn: 54, curtainAreaRate: 2.84 },

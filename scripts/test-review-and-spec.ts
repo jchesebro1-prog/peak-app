@@ -865,9 +865,12 @@ ok(DEFAULT_CYC_MAKING_RATE === 4.75, `DEFAULT_CYC_MAKING_RATE is 4.75 (got ${DEF
 ok(SEED_FABRIC_RATES["RB-CHAR-25"] === 3.64, `RB-CHAR-25 seed rate is 3.64 (got ${SEED_FABRIC_RATES["RB-CHAR-25"]})`);
 ok(SEED_FABRIC_RATES["RB-EN-22"] === 2.84, `RB-EN-22 seed rate is 2.84 (got ${SEED_FABRIC_RATES["RB-EN-22"]})`);
 ok(SEED_FABRIC_RATES["RB-EN-16"] === 2.1, `RB-EN-16 seed rate is 2.1 (got ${SEED_FABRIC_RATES["RB-EN-16"]})`);
-ok(SEED_FABRIC_RATES["RB-MV-MN"] === 3.64, `RB-MV-MN seed rate is 3.64 (got ${SEED_FABRIC_RATES["RB-MV-MN"]})`);
+ok(SEED_FABRIC_RATES["RB-MV-MN"] === 4.37, `RB-MV-MN (Memorable, premium) seed rate is 4.37 (got ${SEED_FABRIC_RATES["RB-MV-MN"]})`);
 ok(SEED_FABRIC_RATES["RB-MUS"] === 0.9, `RB-MUS seed rate is 0.9 (got ${SEED_FABRIC_RATES["RB-MUS"]})`);
 ok(Object.keys(SEED_FABRIC_RATES).length === 5, `SEED_FABRIC_RATES has exactly 5 SKUs (got ${Object.keys(SEED_FABRIC_RATES).length})`);
+// best-main (Memorable) must price ABOVE better-main (Charisma) so the "best" tier is not a no-op — both are 25oz
+// so they weigh the same (correct), but Memorable is Rose Brand's premium velour and carries a premium rate.
+ok(SEED_FABRIC_RATES["RB-MV-MN"] > SEED_FABRIC_RATES["RB-CHAR-25"], "best-main Memorable prices above better-main Charisma (premium 25oz velour, not a cloned rate)");
 
 // seed-rate analog of the RB reconciliation above: exercises the make-it
 // (non-Rose-Brand) rates end to end through curtainCost, so a regression in
@@ -879,7 +882,7 @@ ok(seedBorder.costEach === 1533.75, `seed-rate border = sewnArea(225)×3.64 + se
 
 /* --- curtain seed rates cover exactly the five used fabrics (task 2) --- */
 ok(SEED_FABRIC_RATES["RB-CHAR-25"] === 3.64 && SEED_FABRIC_RATES["RB-EN-22"] === 2.84, "anchor fabrics carry their reconciled +10% seed rates");
-ok(SEED_FABRIC_RATES["RB-EN-16"] === 2.1 && SEED_FABRIC_RATES["RB-MV-MN"] === 3.64 && SEED_FABRIC_RATES["RB-MUS"] === 0.9, "the three seed fabrics carry their flagged rates");
+ok(SEED_FABRIC_RATES["RB-EN-16"] === 2.1 && SEED_FABRIC_RATES["RB-MV-MN"] === 4.37 && SEED_FABRIC_RATES["RB-MUS"] === 0.9, "the three seed fabrics carry their flagged rates");
 ok(Object.keys(SEED_FABRIC_RATES).length === 5, "exactly five fabrics have curtain rates — no unused fabrics carry one");
 
 /* --- computeCurtain rebuilt on the two-term model (task 4) --- */
