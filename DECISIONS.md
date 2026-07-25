@@ -1760,3 +1760,15 @@ quote action re-validates and re-prices server-side (client proposes hours,
 server prices). Wire, labor, and per-length rows don't count as devices.
 Refine the mapping to real per-class rules when actual usage shows where
 the heuristic is wrong.
+
+## D115 — Repairs crew fan-out on the Schedule board (2026-07-24)
+
+Jeff (D113 item 9): repairs belong on the unified Schedule like flame
+visits. They already appeared — keyed by `assignedTo` only; D100 had
+deliberately held the `crew` roster back. Reversed: `serviceToWorkItems`
+now fans records with a crew out to one bar per distinct person (lead +
+crew, deduped, trimmed), so a crew member's day never looks free while
+they're on a repair. Fanned bars share the record's href with suffixed ids
+(unique lanes/keys); lone-assignee and unassigned records keep their stable
+id. Flame/inspection records carry no crew field and are unchanged. Covered
+in test:specs.

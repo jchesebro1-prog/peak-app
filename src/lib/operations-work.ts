@@ -58,14 +58,21 @@ type ServiceLike = {
   assignedTo: string;
   scheduledDate: string;
   stage: string;
+  /** Repairs carry a crew roster; fanned out since D115 (Jeff, 2026-07-24). */
+  crew?: string[];
 };
 
 /**
  * Normalize a service store's records into single-day WorkItems.
  * Keeps only live (`stage !== "completed"`) jobs with a parseable scheduledDate;
  * an unset date ('') is excluded (never epoch 0). Unassigned jobs (assignedTo '')
- * are KEPT — they belong in the unassigned lane. One item per record, keyed by
- * `assignedTo` (repairs' `crew` is intentionally NOT fanned out — see D100).
+ * are KEPT — they belong in the unassigned lane.
+ *
+ * Records with a `crew` roster (repairs) fan out to ONE BAR PER DISTINCT
+ * PERSON — D115 reversed the D100 hold: a crew member's day must not look
+ * free on the board when they're on a repair. Fanned bars share the record's
+ * href but get suffixed ids so lanes and React keys stay unique; a lone
+ * assignee (or none) keeps the record's stable id.
  */
 export function serviceToWorkItems<T extends ServiceLike>(
   recs: readonly T[],
@@ -77,16 +84,24 @@ export function serviceToWorkItems<T extends ServiceLike>(
     if (r.stage === "completed") continue;
     const startMs = msOf(r.scheduledDate);
     if (startMs == null) continue;
-    out.push({
-      id: r.id,
-      type,
-      title: r.customer,
-      subtitle: r.venue,
-      assignee: r.assignedTo,
-      startMs,
-      endMs: startMs, // single day, inclusive
-      href: hrefFor(r.id),
-      stage: r.stage,
+    const people = [
+      ...new Set(
+        [r.assignedTo, ...(r.crew || [])].map((s) => (s || "").trim()).filter(Boolean)
+      ),
+    ];
+    if (!people.length) people.push(""); // the unassigned lane
+    people.forEach((person, i) => {
+      out.push({
+        id: people.length > 1 ? `${r.id}~${i}` : r.id,
+        type,
+        title: r.customer,
+        subtitle: r.venue,
+        assignee: person,
+        startMs,
+        endMs: startMs, // single day, inclusive
+        href: hrefFor(r.id),
+        stage: r.stage,
+      });
     });
   }
   return out;

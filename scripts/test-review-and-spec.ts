@@ -793,5 +793,25 @@ ok(suggestLabor([{ partId: "WIRE-X" }], deviceCat as PartLite[], laborCat as any
 ok(suggestLabor([{ partId: "S4LED" }], deviceCat as PartLite[], [], 0.5).length === 0,
   "no labor parts in the catalog → no suggestions (never invent rates)");
 
+/* --- repairs crew fan-out on Schedule (D115, overrides the D100 hold) --- */
+const crewJob = {
+  id: "RJ-1", customer: "Lakeside", venue: "Sanctuary", stage: "scheduled",
+  scheduledDate: "2026-08-01", assignedTo: "Jack Hamilton",
+  crew: ["Nic Trapani", "Jack Hamilton", " ", "Isaac Mittlesteadt"],
+};
+const soloJob = {
+  id: "RJ-2", customer: "Bayfront", venue: "Arena", stage: "scheduled",
+  scheduledDate: "2026-08-02", assignedTo: "", crew: [],
+};
+const fan = serviceToWorkItems([crewJob, soloJob] as any[], "repair", (id) => "/repairs/results?job=" + id);
+const rj1 = fan.filter((w) => w.href.includes("RJ-1"));
+ok(rj1.length === 3, `crew fans out to one bar per distinct person (${rj1.length})`);
+ok(new Set(rj1.map((w) => w.assignee)).size === 3, "duplicate lead/crew names collapse to one bar each");
+ok(new Set(rj1.map((w) => w.id)).size === 3, "fanned bars get distinct ids (React keys / crew lanes)");
+ok(rj1.every((w) => w.href === "/repairs/results?job=RJ-1"), "every fanned bar links to the same record");
+const rj2 = fan.filter((w) => w.href.includes("RJ-2"));
+ok(rj2.length === 1 && rj2[0].assignee === "" && rj2[0].id === "RJ-2",
+  "no lead + no crew stays a single unassigned bar with the stable id");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
