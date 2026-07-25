@@ -97,7 +97,13 @@ export default async function GridEditorPage({
         routes: project.routes || [],
         revisions: project.revisions || [],
       }}
-      sheets={sheets.map((s) => ({ id: s.id, name: s.name, mime: s.mime, dataUrl: s.dataUrl }))}
+      sheets={sheets.map((s) => ({
+        id: s.id,
+        name: s.name,
+        mime: s.mime,
+        // Blob URL when the file lives in storage (D116); the viewer takes both.
+        dataUrl: s.url || s.dataUrl,
+      }))}
       parts={parts}
       laborParts={laborParts}
       laborHoursPerDevice={laborHoursPerDevice}

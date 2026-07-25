@@ -973,5 +973,13 @@ import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFo
   ok(Math.abs(cc.costEach - 4711.8) < 1, `unrated fabric prices via costPerSqft, not $0 (got ${cc.costEach})`);
 }
 
+/* --- Blob helpers (D116) --- */
+import { dataUrlToBytes, safeName } from "@/lib/blob";
+const dub = dataUrlToBytes("data:image/png;base64," + Buffer.from("hello").toString("base64"));
+ok(dub.mime === "image/png" && dub.bytes.toString("utf8") === "hello", "data-URL decodes to bytes + mime");
+ok(dataUrlToBytes("data:,plain%20text").bytes.toString("utf8") === "plain text", "non-base64 data-URLs decode too");
+ok(/^[a-zA-Z0-9._-]+$/.test(safeName("Stage Plan (rev 3).pdf")), `unsafe filename characters are stripped (${safeName("Stage Plan (rev 3).pdf")})`);
+ok(safeName("///") === "file", "a name with nothing usable falls back to 'file'");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

@@ -49,9 +49,13 @@ export default function PdfCanvas({
         setLoading(true);
         const pdfjs = await import("pdfjs-dist");
         pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-        const bytes = Uint8Array.from(atob(dataUrl.split(",")[1] || ""), (c) => c.charCodeAt(0));
+        // The document arrives either as a base64 data-URL (in-database
+        // sheets) or as a plain https URL (Blob storage, D116).
+        const src = dataUrl.startsWith("data:")
+          ? { data: Uint8Array.from(atob(dataUrl.split(",")[1] || ""), (c) => c.charCodeAt(0)) }
+          : { url: dataUrl };
         const doc = (await pdfjs.getDocument({
-          data: bytes,
+          ...src,
           // Render glyphs as paths instead of installing @font-face rules.
           // pdf.js otherwise awaits document.fonts, which can never settle in
           // embedded/headless browsers — the render promise then hangs
