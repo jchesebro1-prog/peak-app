@@ -1,7 +1,7 @@
 import { allAssignments, type Assignment } from "@/lib/stores/assignments";
 import { allEngagements, openChecklistItems } from "@/lib/stores/engagements";
 import { getAllProjects } from "@/lib/stores/projects";
-import { allTasks } from "@/lib/stores/tasks";
+import { allTasks, ensureProjectTasksMigrated } from "@/lib/stores/tasks";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { renewals as flameRenewals } from "@/lib/stores/flame-jobs";
 import { renewals as inspectionRenewals } from "@/lib/stores/inspections";
@@ -42,16 +42,24 @@ function due(ts: number | null | undefined): number {
  * convention for ownership across quotes, projects, and engagements).
  */
 export async function loadQueue(me: string): Promise<QueueItem[]> {
-  const [assignments, engagements, projects, tasks, quotes, flames, inspections] =
+  const [assignments, engagements, projects, quotes, flames, inspections] =
     await Promise.all([
       allAssignments(),
       allEngagements(),
       getAllProjects(),
-      allTasks(),
       getAllQuotes(),
       flameRenewals({ dueOnly: true }),
       inspectionRenewals({ dueOnly: true }),
     ]);
+
+  // Self-sufficiency: /api/queue's Reminders-sync cron can call loadQueue
+  // before any page load has triggered the lazy migration, so legacy
+  // embedded project tasks would otherwise be invisible to it. Migrate here
+  // (idempotent, cheap no-op once nothing's left to migrate — early-continues
+  // on projects with an empty tasks[]), then read the tasks collection so
+  // freshly migrated rows are included in this same request.
+  await ensureProjectTasksMigrated(projects);
+  const tasks = await allTasks();
 
   const items: QueueItem[] = [];
   const horizon = Date.now() + HORIZON;
