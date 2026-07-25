@@ -109,11 +109,18 @@ const portIo = (connectionType: string): Port => ({ name: "io", direction: "io",
 
 ok(canConnect(portOut("DMX512 (5-pin XLR)"), portIn("DMX512 (5-pin XLR)")), "connect: out->in same type connects");
 ok(!canConnect(portOut("DMX512 (5-pin XLR)"), portOut("DMX512 (5-pin XLR)")), "connect: out->out same type does not connect");
+ok(!canConnect(portIn("DMX512 (5-pin XLR)"), portIn("DMX512 (5-pin XLR)")), "connect: in->in same type does not connect");
 ok(canConnect(portIo("DMX512 (5-pin XLR)"), portIn("DMX512 (5-pin XLR)")), "connect: io->in connects");
+ok(canConnect(portIo("DMX512 (5-pin XLR)"), portIo("DMX512 (5-pin XLR)")), "connect: io->io same type connects");
 ok(!canConnect(portOut("DMX512 (5-pin XLR)"), portIn("HDMI")), "connect: different connection types never connect");
 
 const dmxCompat = compatibleWireTypes("DMX512 (5-pin XLR)", DEFAULT_WIRE_TYPES);
 ok(dmxCompat.length > 0, "connect: compatibleWireTypes finds at least one DMX wire type in the defaults");
+
+const hdmiCompat = compatibleWireTypes("HDMI", DEFAULT_WIRE_TYPES);
+ok(hdmiCompat.length === 1 && hdmiCompat[0].id === "hdmi", "connect: compatibleWireTypes filters out non-matching wire types (HDMI -> only the hdmi entry)");
+
+ok(compatibleWireTypes("RDM", DEFAULT_WIRE_TYPES).length === 0, "connect: compatibleWireTypes returns an empty array for a connectionType no wire type carries");
 
 const allKnownConnTypes = DEFAULT_WIRE_TYPES.every((wt) =>
   wt.connectionTypes.every((ct) => CONNECTION_TYPES.includes(ct))
