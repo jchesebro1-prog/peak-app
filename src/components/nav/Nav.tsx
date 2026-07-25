@@ -598,7 +598,7 @@ export default function Nav({
                       {feedbackEmail && (
                         <a
                           className="pk-menu-link"
-                          href={`mailto:${feedbackEmail}?subject=${encodeURIComponent("Quartzite beta feedback")}`}
+                          href={`mailto:${feedbackEmail}?subject=${encodeURIComponent("Quartzite-6 beta feedback")}`}
                         >
                           Send feedback
                         </a>

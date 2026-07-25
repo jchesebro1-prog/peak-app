@@ -17,7 +17,7 @@ import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import { NewQuoteMenu, OwnerSelect, QuoteRevisions } from "./controls";
 import { setQuoteStatus, submitQuoteForReview } from "./actions";
 
-export const metadata = { title: "Quotes — Quartzite" };
+export const metadata = { title: "Quotes — Quartzite-6" };
 
 /* ---- prototype token maps (Quotes.dc.html statusMeta / rMeta, Estimator rbMeta) ---- */
 

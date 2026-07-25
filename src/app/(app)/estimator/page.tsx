@@ -22,7 +22,7 @@ import type {
   TravelLite,
 } from "./types";
 
-export const metadata = { title: "Estimator — Quartzite" };
+export const metadata = { title: "Estimator — Quartzite-6" };
 
 /**
  * Estimator — detailed line-item quote builder (port of Estimator.dc.html).

@@ -8,7 +8,7 @@ import {
   type ReportLayout,
 } from "../../[id]/report/report-doc";
 
-export const metadata = { title: "Inspection report — options — Quartzite" };
+export const metadata = { title: "Inspection report — options — Quartzite-6" };
 
 /**
  * Inspection Report OPTIONS — "three directions to compare", the inspection

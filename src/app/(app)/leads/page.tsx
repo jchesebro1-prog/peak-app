@@ -38,7 +38,7 @@ import type { AvatarVM, BoardCardVM, ChipVM, WorklistRowVM } from "./types";
  * the quick-add form.
  */
 
-export const metadata = { title: "Leads — Quartzite" };
+export const metadata = { title: "Leads — Quartzite-6" };
 
 type ViewKey = "board" | "worklist" | "table";
 type SegKey = "all" | "follow" | "unassigned" | "new" | "open" | "closed";

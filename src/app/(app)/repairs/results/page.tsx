@@ -16,7 +16,7 @@ import {
 } from "@/lib/stores/repair-jobs";
 import { ResultsForm } from "./controls";
 
-export const metadata = { title: "Repair results — Quartzite" };
+export const metadata = { title: "Repair results — Quartzite-6" };
 
 const MONTH_MS = 30 * 86400000;
 

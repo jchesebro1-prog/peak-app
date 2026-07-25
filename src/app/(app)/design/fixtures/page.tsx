@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import data from "@/lib/design/fixture-crossref.json";
 
-export const metadata = { title: "Fixture Cross-Reference — Quartzite" };
+export const metadata = { title: "Fixture Cross-Reference — Quartzite-6" };
 
 /**
  * Fixture Cross-Reference (punch #26) — the 7 ETC-anchored competitive matrices

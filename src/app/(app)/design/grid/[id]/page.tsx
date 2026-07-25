@@ -9,7 +9,7 @@ import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
 import GridEditor from "./editor";
 
-export const metadata = { title: "The Grid — Quartzite" };
+export const metadata = { title: "The Grid — Quartzite-6" };
 export const dynamic = "force-dynamic";
 
 /**

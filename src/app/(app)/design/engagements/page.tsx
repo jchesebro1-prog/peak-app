@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/session";
 import { loadConsultingData } from "./data";
 import { ConsultingView } from "./view";
 
-export const metadata = { title: "Consulting — Quartzite" };
+export const metadata = { title: "Consulting — Quartzite-6" };
 
 /**
  * Consulting engagements — list route (D90). Same split as Projects:

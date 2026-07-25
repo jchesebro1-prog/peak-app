@@ -14,7 +14,7 @@ import {
 import { IDENTITY, deriveInitials, fallbackColor } from "@/lib/team";
 import { createSurvey, quoteFromSurvey } from "./actions";
 
-export const metadata = { title: "Field surveys — Quartzite" };
+export const metadata = { title: "Field surveys — Quartzite-6" };
 
 /* accent-derived tints (prototype color-mix over the office accent) */
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 13%, #fff)";

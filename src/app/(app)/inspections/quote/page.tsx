@@ -9,7 +9,7 @@ import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
 
-export const metadata = { title: "Inspection quote — Quartzite" };
+export const metadata = { title: "Inspection quote — Quartzite-6" };
 
 /**
  * Inspection QUOTE builder — the auto-priced rigging-inspection estimator

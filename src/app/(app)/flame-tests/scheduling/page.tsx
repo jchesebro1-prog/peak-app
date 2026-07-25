@@ -16,7 +16,7 @@ import { FlameMap } from "../controls";
 import { ScheduleButton } from "./controls";
 import type { MapPin } from "@/components/map/LeafletMap";
 
-export const metadata = { title: "Flame test scheduler — Quartzite" };
+export const metadata = { title: "Flame test scheduler — Quartzite-6" };
 
 const DAY = 86400000;
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

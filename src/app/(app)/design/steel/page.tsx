@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { SteelCalculator } from "./steel-calc";
 
-export const metadata = { title: "Steel Calculator — Quartzite" };
+export const metadata = { title: "Steel Calculator — Quartzite-6" };
 
 export default async function SteelCalculatorPage() {
   await requireUser();

@@ -10,7 +10,7 @@ import {
   type OrgCtx,
 } from "../report-doc";
 
-export const metadata = { title: "Repair report — options — Quartzite" };
+export const metadata = { title: "Repair report — options — Quartzite-6" };
 
 /**
  * Repair Report OPTIONS — "three directions to compare", the repair twin of

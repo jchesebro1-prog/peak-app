@@ -11,7 +11,7 @@ import {
   type OrgCtx,
 } from "./report-doc";
 
-export const metadata = { title: "Field Flame Inspection report — Quartzite" };
+export const metadata = { title: "Field Flame Inspection report — Quartzite-6" };
 
 /**
  * Field Flame Inspection RESULTS REPORT — printable results document for a

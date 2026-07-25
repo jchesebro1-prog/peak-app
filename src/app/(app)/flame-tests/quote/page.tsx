@@ -8,7 +8,7 @@ import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
 
-export const metadata = { title: "Flame test quote — Quartzite" };
+export const metadata = { title: "Flame test quote — Quartzite-6" };
 
 /**
  * Flame test QUOTE builder — the auto-priced flame-test quote estimator

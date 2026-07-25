@@ -13,7 +13,7 @@ import {
 } from "@/components/letter/SinglePageLetter";
 import { DocNotFound, oneParam, officePhone } from "../../_letters/util";
 
-export const metadata = { title: "Service call completion — Quartzite" };
+export const metadata = { title: "Service call completion — Quartzite-6" };
 
 /**
  * Service Call Completion Letter — the single-page client confirmation of

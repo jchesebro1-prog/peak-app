@@ -27,7 +27,7 @@ import {
 } from "./actions";
 import type { MapPin } from "@/components/map/LeafletMap";
 
-export const metadata = { title: "Rigging Inspections — Quartzite" };
+export const metadata = { title: "Rigging Inspections — Quartzite-6" };
 
 /**
  * Rigging Inspections DASHBOARD — the flame-tests-style upgrade of the old

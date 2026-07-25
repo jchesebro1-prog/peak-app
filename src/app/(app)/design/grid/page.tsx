@@ -8,7 +8,7 @@ import { money, timeAgo } from "@/lib/format";
 import { createProjectAction } from "./actions";
 import DeleteProjectButton from "./delete-button";
 
-export const metadata = { title: "The Grid — Quartzite" };
+export const metadata = { title: "The Grid — Quartzite-6" };
 export const dynamic = "force-dynamic";
 
 /**

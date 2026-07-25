@@ -14,7 +14,7 @@ import { AVG_MPH } from "@/lib/geo";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
-export const metadata = { title: "Repair letter — Quartzite" };
+export const metadata = { title: "Repair letter — Quartzite-6" };
 
 /**
  * Repair quote LETTER — printable proposal cover letter for a saved repair

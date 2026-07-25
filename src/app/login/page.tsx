@@ -19,7 +19,7 @@ export default async function LoginPage() {
         roleLabel: u.roles.join(" · "),
       }))
     : [];
-  const markLetter = (settings.companyName.trim().charAt(0) || "P").toUpperCase();
+  const markLetter = "Q"; // Quartzite-6 (the software; companyName is the operating company)
 
   return (
     <div className="pk-login">
@@ -39,8 +39,13 @@ export default async function LoginPage() {
           >
             {markLetter}
           </div>
-          <div style={{ color: "#fff", fontSize: 17, fontWeight: 600, letterSpacing: "-0.01em" }}>
-            {settings.companyName}
+          <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
+            <div style={{ color: "#fff", fontSize: 17, fontWeight: 600, letterSpacing: "-0.01em" }}>
+              Quartzite-6
+            </div>
+            <div style={{ color: "#9aa0ab", fontSize: 10.5, fontWeight: 500 }}>
+              {settings.companyName}
+            </div>
           </div>
           <span className="pk-beta">BETA</span>
         </div>

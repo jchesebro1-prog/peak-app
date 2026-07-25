@@ -15,7 +15,7 @@ import {
 import { listConnections } from "@/lib/gmail/connections";
 import SettingsClient from "./settings-client";
 
-export const metadata = { title: "Settings — Quartzite" };
+export const metadata = { title: "Settings — Quartzite-6" };
 
 const SHARED_LABEL: Record<string, string> = {
   sales: "Sales",

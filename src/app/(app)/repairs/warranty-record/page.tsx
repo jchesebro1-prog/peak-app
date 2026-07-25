@@ -13,7 +13,7 @@ import {
 } from "@/components/letter/SinglePageLetter";
 import { DocNotFound, oneParam, officePhone } from "../../_letters/util";
 
-export const metadata = { title: "Warranty & repair record — Quartzite" };
+export const metadata = { title: "Warranty & repair record — Quartzite-6" };
 
 const WARRANTY_STATUS_LABEL: Record<string, string> = {
   active: "Warranty Active",

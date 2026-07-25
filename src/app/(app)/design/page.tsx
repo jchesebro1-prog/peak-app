@@ -8,7 +8,7 @@ import { getAllDesigns as getSandboxDesigns } from "@/lib/stores/designs";
 import { listProjects as listGridProjects } from "@/lib/stores/grid-projects";
 import { shortDate } from "@/lib/format";
 
-export const metadata = { title: "Design — Quartzite" };
+export const metadata = { title: "Design — Quartzite-6" };
 export const dynamic = "force-dynamic";
 
 function one(v: string | string[] | undefined): string {

@@ -10,7 +10,7 @@ import { AVG_MPH } from "@/lib/geo";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
-export const metadata = { title: "Field Flame Inspection — Quartzite" };
+export const metadata = { title: "Field Flame Inspection — Quartzite-6" };
 
 /**
  * Field Flame Inspection PROPOSAL — printable work order for a saved

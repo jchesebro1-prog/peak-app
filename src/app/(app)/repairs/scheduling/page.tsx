@@ -17,7 +17,7 @@ import {
 import { RepairsMap } from "../controls";
 import { scheduleRepair, unscheduleRepair } from "../actions";
 
-export const metadata = { title: "Repair scheduler — Quartzite" };
+export const metadata = { title: "Repair scheduler — Quartzite-6" };
 
 const DAY = 86400000;
 

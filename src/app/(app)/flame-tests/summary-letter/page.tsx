@@ -8,7 +8,7 @@ import {
 } from "@/components/letter/SinglePageLetter";
 import { DocNotFound, oneParam, officePhone, flameTotals } from "../../_letters/util";
 
-export const metadata = { title: "Flame-test summary — Quartzite" };
+export const metadata = { title: "Flame-test summary — Quartzite-6" };
 
 const YEAR = 365 * 24 * 60 * 60 * 1000;
 

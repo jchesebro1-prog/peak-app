@@ -16,7 +16,7 @@ import { InspectionMap } from "../controls";
 import { ScheduleButton } from "./controls";
 import type { MapPin } from "@/components/map/LeafletMap";
 
-export const metadata = { title: "Inspection scheduler — Quartzite" };
+export const metadata = { title: "Inspection scheduler — Quartzite-6" };
 
 /**
  * Inspection SCHEDULER — inspection twin of the flame-test scheduler

@@ -4,7 +4,7 @@ import { loadConsultingData } from "../data";
 import { ConsultingView } from "../view";
 import { TABS, type TabKey } from "../tabs";
 
-export const metadata = { title: "Consulting — Quartzite" };
+export const metadata = { title: "Consulting — Quartzite-6" };
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";

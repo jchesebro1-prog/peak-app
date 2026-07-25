@@ -14,7 +14,7 @@ import { ReportsMap } from "./controls";
 import type { MapPin } from "@/components/map/LeafletMap";
 import HomeTabs from "../home-tabs";
 
-export const metadata = { title: "Reports — Quartzite" };
+export const metadata = { title: "Reports — Quartzite-6" };
 
 /**
  * Reports — port of app/Reports.dc.html. Two dashboards driven by URL state

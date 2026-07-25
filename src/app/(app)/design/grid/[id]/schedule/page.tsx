@@ -8,7 +8,7 @@ import { spaceOf } from "@/lib/design/grid-geometry";
 import { riserGraph } from "@/lib/design/grid-riser";
 import { PrintButton } from "@/components/letter/print-button";
 
-export const metadata = { title: "Equipment schedule — Quartzite" };
+export const metadata = { title: "Equipment schedule — Quartzite-6" };
 export const dynamic = "force-dynamic";
 
 /**

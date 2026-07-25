@@ -46,7 +46,7 @@ export function buildIcs(ev: IcsEvent): string {
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Peak Systems Group//Peak Backend//EN",
+    "PRODID:-//Peak Systems Group//Quartzite-6//EN",
     "METHOD:PUBLISH",
     "BEGIN:VEVENT",
     "UID:" + esc(ev.uid),

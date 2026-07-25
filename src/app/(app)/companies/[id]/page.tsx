@@ -20,7 +20,7 @@ import {
 import { shortDate, timeAgo } from "@/lib/format";
 import { Avatar } from "@/components/ui";
 
-export const metadata = { title: "Company — Quartzite" };
+export const metadata = { title: "Company — Quartzite-6" };
 import { grantsFor, grantPath } from "@/lib/portal";
 import { PortalAccessCard } from "./portal-access";
 import EditCustomerModal from "../edit-modal";

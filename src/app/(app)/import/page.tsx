@@ -5,7 +5,7 @@ import { IMPORT_TYPES, getTypeMeta } from "./types";
 import { allCounts } from "./registry";
 import { PastePreview } from "./controls";
 
-export const metadata = { title: "Import & export — Quartzite" };
+export const metadata = { title: "Import & export — Quartzite-6" };
 
 const ACCENT = "var(--accent)";
 

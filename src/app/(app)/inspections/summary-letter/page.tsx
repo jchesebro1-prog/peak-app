@@ -14,7 +14,7 @@ import {
 } from "@/components/letter/SinglePageLetter";
 import { DocNotFound, oneParam, conditionWord, officePhone } from "../../_letters/util";
 
-export const metadata = { title: "Rigging inspection summary — Quartzite" };
+export const metadata = { title: "Rigging inspection summary — Quartzite-6" };
 
 /** Next inspection cycle = survey date + the level's interval (in years). */
 function nextCycleIso(surveyIso: string, years: number): string {

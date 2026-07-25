@@ -3,7 +3,7 @@ import { can } from "@/lib/team";
 import { GROUPS, value } from "@/lib/stores/pricing";
 import { RulesActions, RulesEditor, type GroupVM, type ItemVM } from "./controls";
 
-export const metadata = { title: "Estimating Rules — Quartzite" };
+export const metadata = { title: "Estimating Rules — Quartzite-6" };
 
 /**
  * Estimating Rules — port of app/Estimating Rules.dc.html. The master registry

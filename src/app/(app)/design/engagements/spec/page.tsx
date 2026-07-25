@@ -6,7 +6,7 @@ import { specsForEngagement } from "@/lib/stores/generated-specs";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import SpecGenerator from "./generator";
 
-export const metadata = { title: "Bid Specification — Quartzite" };
+export const metadata = { title: "Bid Specification — Quartzite-6" };
 export const dynamic = "force-dynamic";
 
 /**

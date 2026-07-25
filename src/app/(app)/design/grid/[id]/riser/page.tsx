@@ -7,7 +7,7 @@ import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { riserGraph } from "@/lib/design/grid-riser";
 import { PrintButton } from "@/components/letter/print-button";
 
-export const metadata = { title: "Riser sketch — Quartzite" };
+export const metadata = { title: "Riser sketch — Quartzite-6" };
 export const dynamic = "force-dynamic";
 
 /**

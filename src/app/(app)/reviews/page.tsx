@@ -8,7 +8,7 @@ import { can, deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import ReviewList, { type ReviewItem } from "./review-list";
 import type { ReviewKind } from "./actions";
 
-export const metadata = { title: "Reviews — Quartzite" };
+export const metadata = { title: "Reviews — Quartzite-6" };
 
 /** Prototype money(): $48.0k / $313k / $860. */
 function shortMoney(n: number): string {

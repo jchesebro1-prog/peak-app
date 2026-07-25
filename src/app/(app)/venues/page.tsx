@@ -12,7 +12,7 @@ import { cityState, mono } from "../companies/lib";
  * companies page's separate client controls.tsx (no debounced client state).
  */
 
-export const metadata = { title: "Venues — Quartzite" };
+export const metadata = { title: "Venues — Quartzite-6" };
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";

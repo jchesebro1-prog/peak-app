@@ -5,7 +5,7 @@ import { money } from "@/lib/format";
 import { CatalogControls, CatalogImportPanel } from "./controls";
 import { upsertPart } from "./actions";
 
-export const metadata = { title: "Catalog — Quartzite" };
+export const metadata = { title: "Catalog — Quartzite-6" };
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
