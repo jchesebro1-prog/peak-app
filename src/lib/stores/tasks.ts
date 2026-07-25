@@ -1,5 +1,5 @@
 import {
-  listDocs, getDoc, upsertDoc, patchDoc, softDeleteDoc, nextPrefixedId,
+  listDocs, getDoc, upsertDoc, patchDoc, softDeleteDoc, nextPrefixedId, insertDocIfAbsent,
 } from "@/db/doc-store";
 import type { ProjectTask, ProjectStage } from "@/lib/stores/projects";
 
@@ -83,6 +83,12 @@ export function expandTemplate(
   return out;
 }
 
+/** Deterministic id for a system-created task: same coverageKey → same id,
+    so concurrent auto-creation collapses onto one atomic insert. */
+export function autoTaskId(coverageKey: string): string {
+  return "T-auto-" + coverageKey.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
 /** Bell rail (#17): open tasks assigned to me, plus anything overdue. */
 export function taskBellItems(all: TaskRecord[], me: string, nowMs: number): TaskRecord[] {
   return all.filter(
@@ -132,17 +138,22 @@ export async function createTask(
 }
 
 /** Idempotent system-created task (templates, item 16): coverageKey is the
-    dedup guard — both trigger paths are re-runnable by design (PUNCHLIST §16). */
+    dedup guard — both trigger paths are re-runnable by design (PUNCHLIST §16).
+    The id is deterministic (autoTaskId), so concurrent callers for the same
+    coverageKey race on the same row and insertDocIfAbsent lets exactly one
+    win — the allTasks() scan below is only a cheap fast-path skip, not the
+    correctness guard (coverageKey lives in jsonb, so no DB constraint can
+    enforce it directly). */
 export async function createAutoTask(
   input: Partial<TaskRecord> & { title: string; coverageKey: string },
 ): Promise<TaskRecord | null> {
   const existing = (await allTasks()).find((t) => t.coverageKey === input.coverageKey);
   if (existing) return null;
   const at = now();
-  const id = await nextPrefixedId("tasks", "T", 6000);
+  const id = autoTaskId(input.coverageKey);
   const t = normalizeTask({ ...input, id, createdBy: input.createdBy || "System", createdAt: at, updatedAt: at });
-  await upsertDoc<TaskRecord>("tasks", t);
-  return t;
+  const inserted = await insertDocIfAbsent<TaskRecord>("tasks", t);
+  return inserted ? t : null;
 }
 
 export async function setTaskStatus(id: string, status: TaskStatus): Promise<TaskRecord | null> {

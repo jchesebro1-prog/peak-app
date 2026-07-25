@@ -1045,7 +1045,7 @@ ok(legacyEmailFor("Jeff Chesebro") === "jchesebro@peaksystemsgroup.com", "legacy
 
 /* ============ TASKS (#17) — store pure logic ============ */
 import {
-  isOverdue, taskFromLegacy, expandTemplate, taskBellItems,
+  isOverdue, taskFromLegacy, expandTemplate, taskBellItems, autoTaskId,
   STATUSES, type TaskRecord, type TaskTemplateItem,
 } from "@/lib/stores/tasks";
 
@@ -1089,6 +1089,10 @@ import {
     mk({ id: "d", assigneeName: "Jeff Chesebro", status: "done" }),       // mine but done
   ], "Jeff Chesebro", NOW);
   ok(bell.map(t => t.id).join(",") === "a,b", "tasks: bell = open assigned-to-me + overdue, done excluded");
+
+  ok(autoTaskId("item16:sold:P-3001") === "t-auto-item16-sold-p-3001".replace("t-auto", "T-auto"), "tasks: autoTaskId is deterministic and sanitized");
+  ok(autoTaskId("item16:sold:P-3001") === autoTaskId("item16:sold:P-3001"), "tasks: same coverage key, same id");
+  ok(autoTaskId("signoff:Walk-Through!!") === "T-auto-signoff-walk-through-", "tasks: autoTaskId strips non-alphanumerics and lowercases");
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
