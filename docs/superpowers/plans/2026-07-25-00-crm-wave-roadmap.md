@@ -12,7 +12,7 @@ kit, D118 sign-on emails) must merge to `main` first. Plan 01 cites nav files
 
 | # | Plan | Spec items | Status |
 |---|------|-----------|--------|
-| 01 | Tasks table + bell (`2026-07-25-01-crm-tasks-table.md`) | #17, item 16, quick fixes #32 + #28 comment | **WRITTEN — ready to execute** |
+| 01 | Tasks table + bell (`2026-07-25-01-crm-tasks-table.md`) | #17, item 16, quick fixes #32 + #28 comment | **BUILT & MERGED to main (`216c5ce`, 2026-07-25)** — subagent-driven, 6 tasks + final fable review; queue.ts + template-key-scoping plan gaps caught & fixed at final review |
 | 02 | Boards: opportunity union + projects read-only | #18, #19 | not written (needs 01's task idiom settled, generic `BoardView`) |
 | 03 | Lead → visit → survey → estimate thread | #34 | not written (SiteVisit lifecycle + leadId, survey-gated convert) |
 | 04 | Customer activity timeline + real notes | #21 | not written (reads tasks (01) + visit lifecycle (03)) |
