@@ -526,6 +526,7 @@ function Row({
   return (
     <div
       className="ib-row"
+      data-thread-id={r.id}
       onClick={onClick}
       style={{
         position: "relative",

@@ -206,6 +206,45 @@ export default function InboxShell({
     router.push(`/inbox?${baseQuery}`);
   }, [router, baseQuery]);
 
+  // Task 5 (#42): arrow-key navigation across the inbox conversation list.
+  // Desktop pane mode only — `narrow` is the same breakpoint state that
+  // hides .ib-pane / shows the mobile overlay (see page.tsx's
+  // `@media (max-width: 960px)` rule), so keyboard nav skips entirely on
+  // mobile where the list and reader don't share the screen. Never
+  // intercepts while the search box or composer holds focus. Draft rows
+  // are excluded — selecting one opens the composer, not the reading pane,
+  // so they're not part of the "selection" sequence arrows walk.
+  const currentThreadId = reader ? reader.id : null;
+  useEffect(() => {
+    if (narrow) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      const ids = list.rows.filter((r) => !r.isDraft).map((r) => r.id);
+      if (!ids.length) return;
+      const cur = ids.indexOf(currentThreadId ?? "");
+      const next =
+        e.key === "ArrowDown"
+          ? ids[Math.min(cur + 1, ids.length - 1)]
+          : ids[Math.max(cur - 1, 0)];
+      if (next && next !== currentThreadId) {
+        e.preventDefault();
+        selectThread(next);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [narrow, list.rows, currentThreadId, selectThread]);
+
+  // Selected row stays in view as the selection moves (keyboard or click).
+  useEffect(() => {
+    if (!currentThreadId) return;
+    document
+      .querySelector(`[data-thread-id="${currentThreadId}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [currentThreadId]);
+
   /* ---- filter / sort (server-driven via the URL) ---- */
   const setRefinement = useCallback(
     (key: "filter" | "sort", value: string | null) => {
