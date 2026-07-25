@@ -8,14 +8,20 @@
    ============================================================ */
 
 :root {
-  --accent: #7b3f8a; /* overridden per-request from AppSettings */
+  --accent: #b08d4a; /* Q-6 gold — overridden per-request from AppSettings (D117) */
+  --accent-ink: #8a6c34; /* gold legible on white — links/focus on light surfaces */
   --accent-soft: color-mix(in srgb, var(--accent) 13%, #fff);
-  --nav-bg: #16181d;
-  --nav-item-bg-hover: #23262d;
-  --nav-item-bg-active: #2b2e35;
-  --nav-border: #2f323a;
-  --content-bg: #f7f8fa;
-  --ink: #16181d;
+  --nav-bg: #0e0f12; /* Q-6 near-black */
+  --nav-item-bg-hover: #1a1c21;
+  --nav-item-bg-active: #22242a;
+  --nav-border: #26282e;
+  --nav-chip-bg: #16181d; /* search/sync/icon-button plates on the nav */
+  --nav-chip-border: #26282e;
+  --steel-hi: #c6c9ce;
+  --steel: #9aa0ab;
+  --steel-border: #2c2f36;
+  --content-bg: #f6f6f8; /* stone-paper */
+  --ink: #16181b;
   --muted: #9aa0ab;
   --muted-2: #8c919c;
   --label: #aab0bb;
@@ -29,6 +35,7 @@
   --amber: #d98a2b;
   --blue: #3d8bf2;
   --red: #b4543a;
+  --font-brand: var(--font-michroma), "Michroma", var(--font-ui); /* wired in layout.tsx (Task 4) */
   --font-ui: var(--font-public-sans), "Public Sans", sans-serif;
   --font-mono: var(--font-plex-mono), "IBM Plex Mono", monospace;
   /* Fluid type scale (punch #33) — headings shrink on phones, grow on desktop. */
@@ -103,7 +110,7 @@ body {
   height: 30px;
   border-radius: 7px;
   background: var(--accent);
-  color: #fff;
+  color: var(--ink);
   font-weight: 700;
   font-size: 12px;
   display: flex;
@@ -126,8 +133,8 @@ body {
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--accent);
-  border: 1px solid #3a3e46;
-  background: #23262d;
+  border: 1px solid var(--nav-chip-border);
+  background: var(--nav-chip-bg);
   padding: 2px 6px;
   border-radius: 5px;
 }
@@ -208,7 +215,7 @@ body {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
-  color: #fff;
+  color: var(--ink);
   background: var(--accent);
   padding: 1px 7px;
   border-radius: 20px;
@@ -225,15 +232,15 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #23262d;
+  background: var(--nav-chip-bg);
   border: 1px solid var(--nav-border);
   border-radius: 9px;
   padding: 8px 12px;
   min-width: 200px;
 }
 .pk-search:focus-within {
-  border-color: #4a4f59;
-  background: #272a31;
+  border-color: #3a3f47;
+  background: #1a1c21;
 }
 .pk-search input {
   font-size: 12.5px;
@@ -251,7 +258,7 @@ body {
   font-family: var(--font-mono);
   font-size: 11px;
   color: #5b606a;
-  border: 1px solid #3a3e46;
+  border: 1px solid var(--nav-chip-border);
   border-radius: 4px;
   padding: 1px 5px;
   white-space: nowrap;
@@ -280,7 +287,7 @@ body {
   display: flex;
   align-items: center;
   gap: 7px;
-  background: #23262d;
+  background: var(--nav-chip-bg);
   border: 1px solid var(--nav-border);
   border-radius: 20px;
   padding: 7px 12px;
@@ -314,7 +321,7 @@ body {
   width: 34px;
   height: 34px;
   border-radius: 9px;
-  background: #23262d;
+  background: var(--nav-chip-bg);
   border: 1px solid var(--nav-border);
   color: #cfd3da;
   display: flex;
@@ -332,7 +339,7 @@ body {
   padding: 0 4px;
   border-radius: 9px;
   background: var(--accent);
-  color: #fff;
+  color: var(--ink);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
@@ -346,7 +353,7 @@ body {
   height: 34px;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 600;
   display: flex;
@@ -382,7 +389,7 @@ body {
   height: 34px;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 600;
   display: flex;
@@ -492,7 +499,7 @@ body {
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-ink);
   background: var(--accent-soft);
   padding: 2px 8px;
   border-radius: 20px;
@@ -518,7 +525,7 @@ body {
 .pk-btn-accent {
   font-size: 12.5px;
   font-weight: 600;
-  color: #fff;
+  color: var(--ink);
   background: var(--accent);
   border: none;
   border-radius: 8px;

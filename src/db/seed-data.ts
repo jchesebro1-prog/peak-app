@@ -37,7 +37,7 @@ const ROSTER: Array<{ name: string; roles: string[]; googleEmail?: string }> = [
  * The stored row is a sparse patch over these, same as the prototype.
  */
 export const DEFAULT_SETTINGS: Record<string, unknown> = {
-  accent: "#7b3f8a",
+  accent: "#b08d4a",
   companyName: "Peak Systems Group",
   federalHolidays: true,
   seedDemo: false,

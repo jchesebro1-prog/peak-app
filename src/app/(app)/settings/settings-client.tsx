@@ -43,7 +43,7 @@ import {
  * (address search + geocoding) arrives with geo in Phase 5.
  */
 
-const ACCENTS = ["#7b3f8a", "#1f8a5b", "#3d4eb0", "#b4543a"];
+const ACCENTS = ["#b08d4a", "#7b3f8a", "#1f8a5b", "#3d4eb0", "#b4543a"];
 const ROLE_COLORS: Record<string, string> = {
   Admin: "#5b4b8a",
   Manager: "#3155a8",

@@ -73,7 +73,7 @@ export default async function ConsultingLetterPage({
     searchParams,
     getSettings(),
   ]);
-  const accent = settings.accent || "#7b3f8a";
+  const accent = settings.accent || "#b08d4a";
   const companyName = settings.companyName || "Peak Systems Group";
   const id = one(sp.id);
   const kind = one(sp.kind) === "spec" ? "spec" : "proposal";

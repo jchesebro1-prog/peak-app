@@ -10,6 +10,7 @@ import {
 } from "@/lib/operations-work";
 import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS } from "@/lib/design/venue-dims";
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
+import { DEFAULT_SETTINGS } from "@/db/seed-data";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -1005,6 +1006,9 @@ ok(dub.mime === "image/png" && dub.bytes.toString("utf8") === "hello", "data-URL
 ok(dataUrlToBytes("data:,plain%20text").bytes.toString("utf8") === "plain text", "non-base64 data-URLs decode too");
 ok(/^[a-zA-Z0-9._-]+$/.test(safeName("Stage Plan (rev 3).pdf")), `unsafe filename characters are stripped (${safeName("Stage Plan (rev 3).pdf")})`);
 ok(safeName("///") === "file", "a name with nothing usable falls back to 'file'");
+
+/* --- Quartzite-6 rebrand (D117): gold default accent --- */
+ok(DEFAULT_SETTINGS.accent === "#b08d4a", "default accent is Q-6 gold (D117)");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
