@@ -578,6 +578,7 @@ export async function createProjectFromQuote(quoteId: string): Promise<ProjectRe
     coverageKey: `item16:sold:${p.id}`,
     title: `Sold — kickoff call for ${p.name}`,
     projectId: p.id, quoteId: p.quoteId, section: "Follow-up",
+    dueAt: Date.now() + 7 * DAY, // kickoff within a week of sale; overdue then nags the bell (unassigned until roles model, D87)
   });
 
   return p;
@@ -634,6 +635,7 @@ export async function syncProjectsFromQuotes(): Promise<number> {
       coverageKey: `item16:sold:${id}`,
       title: `Sold — kickoff call for ${body.name}`,
       projectId: id, quoteId: body.quoteId, section: "Follow-up",
+      dueAt: Date.now() + 7 * DAY, // kickoff within a week of sale; overdue then nags the bell (unassigned until roles model, D87)
     });
   }
   return made;
