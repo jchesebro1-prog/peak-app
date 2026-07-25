@@ -432,6 +432,22 @@ export async function setProjectStage(
     for (const item of expandTemplate(TASK_TEMPLATE[stage] || [], stage, existing)) {
       await createAutoTask({ ...item, projectId: id, title: item.title });
     }
+
+    // Item 16: completion spawns the salesperson's how-did-it-go follow-up.
+    // "Lead Sales" ≈ the originating quote's owner until roles exist (D87).
+    if (stage === "complete") {
+      let owner = "";
+      if (result.quoteId) {
+        const q = await getDoc<QuoteLike>("quotes", result.quoteId);
+        owner = q?.owner || "";
+      }
+      await createAutoTask({
+        coverageKey: `item16:completed:${id}`,
+        title: `Completed — follow up with customer on ${result.name}`,
+        projectId: id, quoteId: result.quoteId, section: "Follow-up",
+        assigneeName: owner,
+      });
+    }
   }
 
   return result;
@@ -553,7 +569,18 @@ export async function createProjectFromQuote(quoteId: string): Promise<ProjectRe
   if (existing) return existing;
   const q = await getDoc<QuoteLike>("quotes", quoteId);
   if (!q || q.quoteType === "flame_test" || q.quoteType === "consulting") return null;
-  return createProject(fromQuote(q));
+  const p = await createProject(fromQuote(q));
+
+  // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
+  // Unassigned until the project-roles model exists (D87: assign-by-role later).
+  const { createAutoTask } = await import("@/lib/stores/tasks");
+  await createAutoTask({
+    coverageKey: `item16:sold:${p.id}`,
+    title: `Sold — kickoff call for ${p.name}`,
+    projectId: p.id, quoteId: p.quoteId, section: "Follow-up",
+  });
+
+  return p;
 }
 
 /**
@@ -573,6 +600,7 @@ export async function syncProjectsFromQuotes(): Promise<number> {
     .slice()
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   let made = 0;
+  const { createAutoTask } = await import("@/lib/stores/tasks");
   for (const q of quotes) {
     // Only install/system quotes become Projects. Repair and inspection wins
     // spawn their OWN records (repair-jobs / inspections syncs) — before this
@@ -597,6 +625,16 @@ export async function syncProjectsFromQuotes(): Promise<number> {
     await upsertDoc<ProjectRecord>("projects", { ...body, id });
     haveQ.add(q.id);
     made++;
+
+    // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
+    // Unassigned until the project-roles model exists (D87: assign-by-role
+    // later). Deterministic coverageKey makes double-hooking alongside
+    // createProjectFromQuote's own call harmless (createAutoTask no-ops).
+    await createAutoTask({
+      coverageKey: `item16:sold:${id}`,
+      title: `Sold — kickoff call for ${body.name}`,
+      projectId: id, quoteId: body.quoteId, section: "Follow-up",
+    });
   }
   return made;
 }

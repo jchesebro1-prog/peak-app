@@ -12,6 +12,8 @@ import {
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { getAll as allComms, waitHours, unreadCountFrom } from "@/lib/stores/comms";
 import { getPrefs } from "@/lib/stores/notif-prefs";
+import { allTasks, taskBellItems, isOverdue } from "@/lib/stores/tasks";
+import { shortDate } from "@/lib/format";
 import type {
   NavCounts,
   BellGroup,
@@ -42,6 +44,7 @@ export async function navData(me: string): Promise<{
     comms,
     leadFollowUps,
     renewalRows,
+    taskRows,
     prefs,
   ] = await Promise.all([
     allQuotes(),
@@ -53,6 +56,7 @@ export async function navData(me: string): Promise<{
     allComms(),
     followUps({ unownedOrMine: true, me }),
     renewals({ dueOnly: true }),
+    allTasks(),
     getPrefs(me),
   ]);
   // Everything below is derived from the arrays already fetched above — no
@@ -235,6 +239,18 @@ export async function navData(me: string): Promise<{
       };
     })
   );
+  const nowMs = Date.now();
+  const taskItems = taskBellItems(taskRows, me, nowMs);
+  push("tasks", "Tasks needing attention", taskItems.map((t) => ({
+    id: t.id,
+    title: t.title,
+    sub: t.dueAt
+      ? (isOverdue(t, nowMs) ? "Overdue" : "Due " + shortDate(t.dueAt))
+      : (t.assigneeName || "Unassigned"),
+    href: t.projectId ? `/projects/${t.projectId}` : "/field-work",
+    letter: "T",
+    color: "#b45309",
+  })));
 
   const bellCount = groups.reduce((n, g) => n + g.items.length, 0);
   return { counts, bell: groups, bellCount };

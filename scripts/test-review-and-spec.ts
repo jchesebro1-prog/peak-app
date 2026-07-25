@@ -1048,6 +1048,7 @@ import {
   isOverdue, taskFromLegacy, expandTemplate, taskBellItems, autoTaskId,
   STATUSES, type TaskRecord, type TaskTemplateItem,
 } from "@/lib/stores/tasks";
+import { CATEGORIES } from "@/lib/stores/notif-prefs";
 
 {
   const NOW = 1_800_000_000_000;
@@ -1093,6 +1094,8 @@ import {
   ok(autoTaskId("item16:sold:P-3001") === "t-auto-item16-sold-p-3001".replace("t-auto", "T-auto"), "tasks: autoTaskId is deterministic and sanitized");
   ok(autoTaskId("item16:sold:P-3001") === autoTaskId("item16:sold:P-3001"), "tasks: same coverage key, same id");
   ok(autoTaskId("signoff:Walk-Through!!") === "T-auto-signoff-walk-through-", "tasks: autoTaskId strips non-alphanumerics and lowercases");
+
+  ok(CATEGORIES.some((c) => c.key === "tasks"), "tasks: bell category registered in notif-prefs");
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
