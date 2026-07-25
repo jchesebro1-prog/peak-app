@@ -61,6 +61,11 @@ export type AppSettingsData = {
    *  via resolveCategoryMap. Absent = defaults; a stored entry wins over the
    *  default for that category key. Edited in Catalog → Categories & trades. */
   catalogCategoryMap?: import("@/lib/catalog-taxonomy").CategoryMap;
+  /** Wire-type registry override (punch #39) — a full replacement list
+   *  resolved via resolveWireTypes in lib/catalog-connect (stored ?? the
+   *  DEFAULT_WIRE_TYPES seed list, not a per-key merge). Feeds Grid wiring
+   *  validation (Task 4). */
+  wireTypes?: import("@/lib/catalog-connect").WireType[];
 };
 
 export async function getSettingsPatch(): Promise<Record<string, unknown>> {

@@ -1,4 +1,5 @@
 import { getDoc, listDocs, upsertDoc } from "@/db/doc-store";
+import type { Port } from "@/lib/catalog-connect";
 
 /**
  * Catalog — server port of app/catalog-data.js (window.MASTER_CATALOG +
@@ -53,6 +54,10 @@ export type CatalogPart = {
   note?: string;
   /** Trade override — normally derived via the category map. */
   trade?: string;
+  /** Device connectors (punch #39, Task 3) — feeds Grid wiring validation
+   *  (Task 4), which uses canConnect/compatibleWireTypes from
+   *  lib/catalog-connect to check patched runs between device ports. */
+  ports?: Port[];
 };
 
 /** All parts (port of window.MASTER_CATALOG reads). */

@@ -93,6 +93,39 @@ ok(storedMap["Brand New Category"].trade === "AV", "taxonomy: resolveCategoryMap
 ok(resolveCategoryMap().Fixtures.trade === "Lighting", "taxonomy: resolveCategoryMap with no stored map returns the defaults untouched");
 
 
+/* --- Task 3: ports + wire-type registry + compatibility rule (#39) --- */
+import {
+  CONNECTION_TYPES,
+  DEFAULT_WIRE_TYPES,
+  resolveWireTypes,
+  canConnect,
+  compatibleWireTypes,
+  type Port,
+} from "@/lib/catalog-connect";
+
+const portOut = (connectionType: string): Port => ({ name: "out", direction: "out", connectionType });
+const portIn = (connectionType: string): Port => ({ name: "in", direction: "in", connectionType });
+const portIo = (connectionType: string): Port => ({ name: "io", direction: "io", connectionType });
+
+ok(canConnect(portOut("DMX512 (5-pin XLR)"), portIn("DMX512 (5-pin XLR)")), "connect: out->in same type connects");
+ok(!canConnect(portOut("DMX512 (5-pin XLR)"), portOut("DMX512 (5-pin XLR)")), "connect: out->out same type does not connect");
+ok(canConnect(portIo("DMX512 (5-pin XLR)"), portIn("DMX512 (5-pin XLR)")), "connect: io->in connects");
+ok(!canConnect(portOut("DMX512 (5-pin XLR)"), portIn("HDMI")), "connect: different connection types never connect");
+
+const dmxCompat = compatibleWireTypes("DMX512 (5-pin XLR)", DEFAULT_WIRE_TYPES);
+ok(dmxCompat.length > 0, "connect: compatibleWireTypes finds at least one DMX wire type in the defaults");
+
+const allKnownConnTypes = DEFAULT_WIRE_TYPES.every((wt) =>
+  wt.connectionTypes.every((ct) => (CONNECTION_TYPES as readonly string[]).includes(ct))
+);
+ok(allKnownConnTypes, "connect: every DEFAULT_WIRE_TYPES connectionType is a member of CONNECTION_TYPES");
+
+ok(resolveWireTypes() !== DEFAULT_WIRE_TYPES, "connect: resolveWireTypes with no stored value returns a fresh copy, not the shared singleton");
+ok(JSON.stringify(resolveWireTypes()) === JSON.stringify(DEFAULT_WIRE_TYPES), "connect: resolveWireTypes with no stored value is equal in content to the defaults");
+const storedWireTypes = [{ id: "custom", label: "Custom", connectionTypes: ["Edison"] }];
+ok(resolveWireTypes(storedWireTypes) === storedWireTypes, "connect: resolveWireTypes returns the stored array when provided");
+
+
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
 import type { Annotation } from "@/lib/annotations";
