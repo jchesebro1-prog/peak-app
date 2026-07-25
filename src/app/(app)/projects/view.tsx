@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
+import type { TaskRecord } from "@/lib/stores/tasks";
 import { firstName, deriveInitials, fallbackColor } from "@/lib/team";
 import {
   stagesFor,
@@ -31,6 +32,7 @@ import {
   signoffAction,
   startConversionAction,
 } from "./actions";
+import { TasksCard } from "./tasks-card";
 
 /* ---------------- design tokens (accent via CSS vars, never hardcoded) ---------------- */
 
@@ -45,6 +47,7 @@ export const PROJECTS_CSS = `
   .pm-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 13px; }
   .pm-listcard:hover { border-color: #c4c9d2; }
   .pm-back { display: none; }
+  .pm-risk { background: #fdf6f3; border-radius: 6px; }
   .pm-rowscroll::-webkit-scrollbar { display: none; }
   .pm-rowscroll { -ms-overflow-style: none; scrollbar-width: none; }
   @media (max-width: 900px) {
@@ -177,6 +180,8 @@ export function ProjectsView({
   custById,
   identity,
   roster,
+  taskRows,
+  people,
 }: {
   projects: ProjectRecord[];
   pending: QuoteLike[];
@@ -186,6 +191,8 @@ export function ProjectsView({
   custById: Map<string, string>;
   identity: Identity[];
   roster: string[];
+  taskRows: TaskRecord[];
+  people: { id: string; name: string }[];
 }) {
   const custName = (p: { customerId: string | null; customer: string }) =>
     (p.customerId && custById.get(p.customerId)) || p.customer || "—";
@@ -629,6 +636,8 @@ export function ProjectsView({
               custName={custName(sel)}
               identity={identity}
               roster={roster}
+              taskRows={taskRows}
+              people={people}
             />
           ) : (
             <div
@@ -681,6 +690,8 @@ function ProjectDetail({
   custName,
   identity,
   roster,
+  taskRows,
+  people,
 }: {
   p: ProjectRecord;
   tab: string;
@@ -688,6 +699,8 @@ function ProjectDetail({
   custName: string;
   identity: Identity[];
   roster: string[];
+  taskRows: TaskRecord[];
+  people: { id: string; name: string }[];
 }) {
   const { colorOf, initialsOf } = makeIdentityLookup(identity);
   const stages = stagesFor(p.kind);
@@ -955,7 +968,14 @@ function ProjectDetail({
 
       <div style={{ padding: "18px 20px 22px" }}>
         {curTab === "overview" && (
-          <OverviewTab p={p} isOrder={isOrder} colorOf={colorOf} initialsOf={initialsOf} />
+          <OverviewTab
+            p={p}
+            isOrder={isOrder}
+            colorOf={colorOf}
+            initialsOf={initialsOf}
+            taskRows={taskRows}
+            people={people}
+          />
         )}
         {curTab === "procurement" && <ProcurementTab p={p} />}
         {curTab === "deliveries" && <DeliveriesTab p={p} />}
@@ -976,11 +996,15 @@ function OverviewTab({
   isOrder,
   colorOf,
   initialsOf,
+  taskRows,
+  people,
 }: {
   p: ProjectRecord;
   isOrder: boolean;
   colorOf: (n: string) => string;
   initialsOf: (n: string) => string;
+  taskRows: TaskRecord[];
+  people: { id: string; name: string }[];
 }) {
   const risks = riskFlags(p);
   const cards: Array<{ label: string; value: string; sub: string }> = [];
@@ -1002,9 +1026,9 @@ function OverviewTab({
     sub: p.margin ? Math.round(p.margin * 100) + "% margin" : "",
   });
 
-  const tasksDone = (p.tasks || []).filter((t) => t.done).length;
-  const taskTotal = (p.tasks || []).length;
-  const taskPct = taskTotal ? Math.round((tasksDone / taskTotal) * 100) : 0;
+  const projectTasks = taskRows.filter((t) => t.projectId === p.id);
+  const tasksDone = projectTasks.filter((t) => t.status === "done").length;
+  const taskTotal = projectTasks.length;
   const recentNotes = (p.notes || []).slice(0, 3);
 
   return (
@@ -1069,11 +1093,11 @@ function OverviewTab({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 9 }}>
         <span style={{ fontSize: 12.5, fontWeight: 600 }}>Field progress</span>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>
-          {tasksDone} / {taskTotal} tasks
+          {tasksDone} / {taskTotal} done
         </span>
       </div>
-      <div style={{ height: 7, background: "#eef0f3", borderRadius: 4, overflow: "hidden", marginBottom: 16 }}>
-        <div style={{ width: taskPct + "%", height: "100%", background: ACCENT }} />
+      <div style={{ marginBottom: 16 }}>
+        <TasksCard projectId={p.id} tasks={projectTasks} people={people} />
       </div>
 
       {recentNotes.length > 0 && (

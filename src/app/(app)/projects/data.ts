@@ -1,6 +1,7 @@
 import { getAllProjects, pendingConversions, syncProjectsFromQuotes } from "@/lib/stores/projects";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { activeUsers } from "@/lib/users";
+import { ensureProjectTasksMigrated, allTasks, type TaskRecord } from "@/lib/stores/tasks";
 import type { Identity } from "./view";
 
 /**
@@ -16,6 +17,8 @@ export async function loadProjectsData(): Promise<{
   custById: Map<string, string>;
   identity: Identity[];
   roster: string[];
+  taskRows: TaskRecord[];
+  people: { id: string; name: string }[];
 }> {
   await syncProjectsFromQuotes();
   const [projects, pending, customers, users] = await Promise.all([
@@ -24,6 +27,11 @@ export async function loadProjectsData(): Promise<{
     allCustomers(),
     activeUsers(),
   ]);
+  // #17: promote any project's still-embedded tasks[] into the tasks
+  // collection before reading it, so the detail tasks card (and anything
+  // else keyed off allTasks()) always sees the migrated rows.
+  await ensureProjectTasksMigrated(projects);
+  const taskRows = await allTasks();
   const custById = new Map(customers.map((c) => [c.id, c.name || ""]));
   const identity: Identity[] = users.map((u) => ({
     name: u.name,
@@ -31,7 +39,8 @@ export async function loadProjectsData(): Promise<{
     initials: u.initials,
   }));
   const roster = users.map((u) => u.name);
-  return { projects, pending, custById, identity, roster };
+  const people = users.map((u) => ({ id: u.id, name: u.name }));
+  return { projects, pending, custById, identity, roster, taskRows, people };
 }
 
 /** Normalize a searchParams value to a single string. */

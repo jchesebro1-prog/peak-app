@@ -35,6 +35,8 @@ export default async function ProjectDetailPage({
       custById={data.custById}
       identity={data.identity}
       roster={data.roster}
+      taskRows={data.taskRows}
+      people={data.people}
     />
   );
 }

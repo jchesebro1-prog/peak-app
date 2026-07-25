@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
+import { activeUsers } from "@/lib/users";
 import {
   getProject,
   setProjectStage,
@@ -19,6 +20,13 @@ import {
   type LineStatus,
   type DeliveryStatus,
 } from "@/lib/stores/projects";
+import {
+  createTask,
+  setTaskStatus,
+  updateTask,
+  STATUSES,
+  type TaskStatus,
+} from "@/lib/stores/tasks";
 
 /**
  * Project & sales-order mutations — the ProjectStore calls the prototype makes
@@ -136,5 +144,54 @@ export async function addTimeAction(formData: FormData): Promise<void> {
   const hours = str(formData, "hours");
   if (!id || !hours) return;
   await addTime(id, user.name || undefined, hours, str(formData, "note").trim());
+  revalidatePath("/", "layout");
+}
+
+/* ---- tasks (#17) — office-side create/status/edit for the detail tasks card ---- */
+
+export async function addTaskAction(formData: FormData) {
+  const me = await requireUser();
+  const projectId = String(formData.get("id") || "");
+  const title = String(formData.get("title") || "").trim();
+  const section = String(formData.get("section") || "Install");
+  const assigneeUserId = String(formData.get("assigneeUserId") || "") || null;
+  const due = String(formData.get("dueAt") || "");
+  if (!projectId || !title) return;
+  const assigneeName = assigneeUserId
+    ? (await activeUsers()).find((u) => u.id === assigneeUserId)?.name || ""
+    : "";
+  await createTask(
+    { title, section, projectId, assigneeUserId, assigneeName,
+      dueAt: due ? new Date(due + "T12:00:00").getTime() : null },
+    me,
+  );
+  revalidatePath("/", "layout");
+}
+
+export async function setTaskStatusAction(formData: FormData) {
+  await requireUser();
+  const taskId = String(formData.get("taskId") || "");
+  const status = String(formData.get("status") || "");
+  if (!taskId || !(STATUSES as readonly string[]).includes(status)) return;
+  await setTaskStatus(taskId, status as TaskStatus);
+  revalidatePath("/", "layout");
+}
+
+export async function updateTaskAction(formData: FormData) {
+  await requireUser();
+  const taskId = String(formData.get("taskId") || "");
+  if (!taskId) return;
+  const patch: Record<string, unknown> = {};
+  if (formData.has("assigneeUserId")) {
+    const uid = String(formData.get("assigneeUserId") || "") || null;
+    patch.assigneeUserId = uid;
+    patch.assigneeName = uid ? (await activeUsers()).find((u) => u.id === uid)?.name || "" : "";
+  }
+  if (formData.has("dueAt")) {
+    const d = String(formData.get("dueAt") || "");
+    patch.dueAt = d ? new Date(d + "T12:00:00").getTime() : null;
+  }
+  if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
+  await updateTask(taskId, patch);
   revalidatePath("/", "layout");
 }
