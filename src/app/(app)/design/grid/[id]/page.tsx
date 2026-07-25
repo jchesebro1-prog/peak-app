@@ -68,6 +68,7 @@ export default async function GridEditorPage({
     list: p.list,
     cost: p.cost,
     ...(p.ports && p.ports.length > 0 ? { ports: p.ports } : {}),
+    ...(p.datasheetBlobKey ? { hasDatasheet: true } : {}),
   }));
   const laborParts: LaborPartLite[] = catalog
     .filter((p) => (p.role || "").toLowerCase() === "labor")

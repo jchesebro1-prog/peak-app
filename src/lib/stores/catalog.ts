@@ -58,6 +58,15 @@ export type CatalogPart = {
    *  (Task 4), which uses canConnect/compatibleWireTypes from
    *  lib/catalog-connect to check patched runs between device ports. */
   ports?: Port[];
+  /** Datasheet attachment (punch #39, Task 5, D116 blob pattern) — the PDF's
+   *  bytes live in Vercel Blob, never in this doc (10.7k parts × MB-scale
+   *  jsonb is exactly the anti-pattern D116 exists to avoid); this is just
+   *  the blob's pathname, streamed by the authenticated
+   *  /api/part-datasheet/<sku> proxy. Always set/cleared together with
+   *  datasheetName by uploadPartDatasheetAction/removePartDatasheetAction. */
+  datasheetBlobKey?: string;
+  /** Original filename of the attached datasheet, for display. */
+  datasheetName?: string;
 };
 
 /** All parts (port of window.MASTER_CATALOG reads). */

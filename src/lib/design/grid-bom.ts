@@ -24,6 +24,11 @@ export type PartLite = {
    *  part has been migrated to declare ports; the Grid editor uses this to
    *  decide whether a device-wire route can be validated at all. */
   ports?: Port[];
+  /** Datasheet attachment flag (Task 5, punch #39, D116) — true only when
+   *  the catalog part has a datasheet blob attached. Deliberately just a
+   *  boolean (not the blob key): the editor only needs to know whether to
+   *  render a link to the authenticated /api/part-datasheet/<sku> proxy. */
+  hasDatasheet?: boolean;
 };
 
 export type BomLine = {

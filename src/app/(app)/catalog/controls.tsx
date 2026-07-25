@@ -1,9 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { parseCatalog } from "./parse";
-import { importCatalog } from "./actions";
+import { importCatalog, removePartDatasheetAction, uploadPartDatasheetAction } from "./actions";
 
 /** Search box + sort select for the catalog table; both drive URL state. */
 export function CatalogControls({
@@ -527,6 +527,118 @@ export function CatalogImportPanel({
             </form>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+const dsLinkStyle: React.CSSProperties = {
+  border: "none",
+  background: "transparent",
+  color: "var(--accent)",
+  fontWeight: 600,
+  fontSize: 12,
+  cursor: "pointer",
+  padding: 0,
+  fontFamily: "var(--font-ui)",
+};
+
+/**
+ * Attach/replace/remove control for a part's datasheet PDF (punch #39,
+ * Task 5, D116). Admin-gated by the caller (catalog page only mounts this
+ * for `isAdmin`) — this is the one place that calls
+ * uploadPartDatasheetAction/removePartDatasheetAction. Styled as plain text
+ * links throughout, per spec (no paperclip/emoji glyphs).
+ */
+export function PartDatasheetControl({
+  sku,
+  datasheetName,
+}: {
+  sku: string;
+  /** Present only when the part already has a datasheet attached. */
+  datasheetName?: string;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const hasDatasheet = !!datasheetName;
+
+  const onFile = (file: File) => {
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result);
+      startTransition(async () => {
+        const r = await uploadPartDatasheetAction(sku, file.name, dataUrl);
+        if (!r.ok) setError(r.error);
+        else router.refresh();
+      });
+    };
+    reader.onerror = () => setError("Could not read that file.");
+    reader.readAsDataURL(file);
+  };
+
+  const onRemove = () => {
+    setError(null);
+    startTransition(async () => {
+      const r = await removePartDatasheetAction(sku);
+      if (!r.ok) setError(r.error);
+      else router.refresh();
+    });
+  };
+
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 10.5,
+          fontWeight: 600,
+          color: "#9aa0ab",
+          textTransform: "uppercase",
+          letterSpacing: ".05em",
+          marginBottom: 6,
+        }}
+      >
+        Datasheet
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        {hasDatasheet && (
+          <a
+            href={`/api/part-datasheet/${encodeURIComponent(sku)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: 12.5, color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}
+          >
+            {datasheetName}
+          </a>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/pdf"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (f) onFile(f);
+          }}
+        />
+        <button type="button" disabled={pending} onClick={() => fileRef.current?.click()} style={dsLinkStyle}>
+          {pending ? "Uploading…" : hasDatasheet ? "Replace" : "Attach datasheet"}
+        </button>
+        {hasDatasheet && (
+          <button type="button" disabled={pending} onClick={onRemove} style={dsLinkStyle}>
+            Remove
+          </button>
+        )}
+      </div>
+      {error && (
+        <div style={{ marginTop: 6, fontSize: 11.5, color: "#b4543a" }}>{error}</div>
+      )}
+      <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 6 }}>
+        PDF only, up to 8 MB. Removing clears the attachment but keeps the
+        file in storage.
       </div>
     </div>
   );

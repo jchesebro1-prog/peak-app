@@ -5,7 +5,7 @@ import { getSettings } from "@/lib/settings";
 import { list, get, type CatalogPart } from "@/lib/stores/catalog";
 import { money } from "@/lib/format";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
-import { CatalogControls, CatalogImportPanel } from "./controls";
+import { CatalogControls, CatalogImportPanel, PartDatasheetControl } from "./controls";
 import { TaxonomyCard } from "./taxonomy-card";
 import { upsertPart } from "./actions";
 
@@ -297,23 +297,29 @@ export default async function CatalogPage({
                       {p.sku}
                       {p.mfr ? " · " + p.mfr : ""}
                     </span>
-                    {p.note && (
-                      <span
-                        style={{
-                          display: "inline-block",
-                          marginTop: 3,
-                          fontSize: 9.5,
-                          fontWeight: 700,
-                          letterSpacing: ".03em",
-                          textTransform: "uppercase",
-                          color: "#8a6d1f",
-                          background: "#fbf3dd",
-                          border: "1px solid #f0e2bd",
-                          borderRadius: 5,
-                          padding: "1px 6px",
-                        }}
-                      >
-                        ⚠ {p.note}
+                    {(p.note || p.datasheetBlobKey) && (
+                      <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
+                        {p.note && (
+                          <span
+                            style={{
+                              display: "inline-block",
+                              fontSize: 9.5,
+                              fontWeight: 700,
+                              letterSpacing: ".03em",
+                              textTransform: "uppercase",
+                              color: "#8a6d1f",
+                              background: "#fbf3dd",
+                              border: "1px solid #f0e2bd",
+                              borderRadius: 5,
+                              padding: "1px 6px",
+                            }}
+                          >
+                            ⚠ {p.note}
+                          </span>
+                        )}
+                        {p.datasheetBlobKey && (
+                          <span style={{ fontSize: 10.5, color: "#8c919c" }}>Datasheet</span>
+                        )}
                       </span>
                     )}
                   </span>
@@ -360,7 +366,14 @@ export default async function CatalogPage({
         )}
       </div>
 
-      {showForm && <PartFormModal part={editingPart} categories={categories} manufacturers={manufacturers.filter((m) => m !== UNSPEC)} />}
+      {showForm && (
+        <PartFormModal
+          part={editingPart}
+          categories={categories}
+          manufacturers={manufacturers.filter((m) => m !== UNSPEC)}
+          isAdmin={isAdmin}
+        />
+      )}
     </div>
   );
 }
@@ -459,10 +472,14 @@ function PartFormModal({
   part,
   categories,
   manufacturers,
+  isAdmin,
 }: {
   part: CatalogPart | null;
   categories: string[];
   manufacturers: string[];
+  /** Datasheet attach/replace/remove (punch #39, Task 5) is admin-gated —
+   *  same convention as the Categories & trades card. */
+  isAdmin: boolean;
 }) {
   const editing = !!part;
   const label = (t: string) => (
@@ -609,6 +626,15 @@ function PartFormModal({
                 Shows as a flag on the part. Clear it once the pricing is confirmed.
               </div>
             </div>
+
+            {/* Datasheet attach/replace/remove (punch #39, Task 5) — admin
+                only, and only once the part exists (its SKU is the doc id
+                the blob pathname is keyed under). */}
+            {isAdmin && editing && part && (
+              <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
+                <PartDatasheetControl sku={part.sku} datasheetName={part.datasheetName} />
+              </div>
+            )}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 9, marginTop: 20 }}>
               <Link

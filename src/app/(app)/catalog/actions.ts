@@ -3,10 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requirePerm } from "@/lib/session";
-import { upsert, type CatalogPart } from "@/lib/stores/catalog";
+import { get as getPart, upsert, type CatalogPart } from "@/lib/stores/catalog";
 import { parseCatalog } from "./parse";
 import { setSettings } from "@/lib/settings";
 import { GROUPS, TRADES, type CategoryMap } from "@/lib/catalog-taxonomy";
+import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
+
+type Result = { ok: true } | { ok: false; error: string };
 
 /**
  * Catalog mutations. FormData-shaped so forms work without client JS; the SKU
@@ -109,4 +112,73 @@ export async function saveCategoryMapAction(entries: CategoryMap): Promise<void>
 
   await setSettings({ catalogCategoryMap: entries });
   revalidatePath("/catalog");
+}
+
+/** ~8 MB data-URL cap on the upload transport (mirrors the Grid sheet
+ *  upload's MAX_SHEET_BYTES) — comfortably above any real datasheet PDF. */
+const MAX_DATASHEET_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Attach (or replace) a part's datasheet PDF (punch #39, Task 5, D116 blob
+ * pattern). Admin-gated like saveCategoryMapAction — a catalog-wide asset
+ * edit, not a per-quote upload. PDF only, 8 MB cap (mirrors the Grid sheet
+ * upload action's checks).
+ *
+ * Storage always goes to Blob, never the part doc: with 10.7k parts, an
+ * MB-scale PDF landing in jsonb per row is exactly the anti-pattern D116
+ * exists to avoid, so when Blob isn't configured this refuses outright
+ * rather than falling back to an in-doc dataUrl.
+ */
+export async function uploadPartDatasheetAction(
+  sku: string,
+  name: string,
+  dataUrl: string
+): Promise<Result> {
+  await requirePerm("manage_users");
+  const part = await getPart(sku);
+  if (!part) return { ok: false, error: "That part no longer exists." };
+  if (!blobEnabled())
+    return {
+      ok: false,
+      error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — datasheets can't be attached on this deployment.",
+    };
+  if (!dataUrl.startsWith("data:")) return { ok: false, error: "Not a readable file." };
+  if (dataUrl.length > MAX_DATASHEET_BYTES)
+    return { ok: false, error: "That file is over 8 MB — compress the PDF and try again." };
+
+  let bytes: Buffer;
+  let mime: string;
+  try {
+    ({ bytes, mime } = dataUrlToBytes(dataUrl));
+  } catch {
+    return { ok: false, error: "Not a readable file." };
+  }
+  if (mime !== "application/pdf") return { ok: false, error: "PDF files only." };
+
+  try {
+    const up = await putBlob(`part-datasheets/${safeName(sku)}/${safeName(name)}`, bytes, mime);
+    await upsert({ ...part, datasheetBlobKey: up.pathname, datasheetName: name });
+  } catch (e) {
+    console.error("[catalog] datasheet upload failed:", e);
+    return { ok: false, error: "Upload to file storage failed — check the Blob token, or try again." };
+  }
+  revalidatePath("/catalog");
+  return { ok: true };
+}
+
+/**
+ * Clear a part's datasheet fields. Does NOT delete the underlying blob —
+ * parity with the Grid sheet's Blob backfill, which likewise never deletes
+ * storage on removal: Blob is cheap, and an accidental remove shouldn't
+ * need a from-scratch re-upload to undo. A future cleanup job can sweep
+ * orphaned blobs if that ever matters.
+ */
+export async function removePartDatasheetAction(sku: string): Promise<Result> {
+  await requirePerm("manage_users");
+  const part = await getPart(sku);
+  if (!part) return { ok: false, error: "That part no longer exists." };
+  const { datasheetBlobKey: _key, datasheetName: _name, ...rest } = part;
+  await upsert(rest);
+  revalidatePath("/catalog");
+  return { ok: true };
 }

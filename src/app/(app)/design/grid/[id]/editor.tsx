@@ -653,45 +653,61 @@ export default function GridEditor({
               {filteredParts.slice(0, 60).map((p) => {
                 const on = p.id === armedPartId;
                 return (
-                  <button
-                    key={p.id}
-                    onClick={() => {
-                      setArmedPartId(on ? null : p.id);
-                      setSelected(null);
-                      setSpaceDrawing(false);
-                      setSpaceDraft([]);
-                      setSelectedSpaceId(null);
-                      setWireDrawing(false);
-                      setWireDraft([]);
-                      setSelectedRouteId(null);
-                    }}
-                    title={p.desc}
-                    style={{
-                      ...BTN,
-                      textAlign: "left",
-                      padding: "5px 8px",
-                      fontWeight: 500,
-                      display: "grid",
-                      gap: 1,
-                      background: on ? "#16181d" : "#fff",
-                      color: on ? "#fff" : "#3d424e",
-                      borderColor: on ? "#16181d" : "#dfe2e8",
-                    }}
-                  >
-                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span
-                        style={{
-                          width: 9, height: 9, borderRadius: "50%",
-                          background: markerColor(p.category), flex: "0 0 auto",
-                        }}
-                      />
-                      <strong style={{ fontSize: 11.5 }}>{p.sku}</strong>
-                      <span style={{ marginLeft: "auto", fontSize: 11 }}>{moneyFmt(p.list)}</span>
-                    </span>
-                    <span style={{ fontSize: 10.5, color: on ? "#c9cdd6" : "#8c919c", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {p.desc}
-                    </span>
-                  </button>
+                  <div key={p.id}>
+                    <button
+                      onClick={() => {
+                        setArmedPartId(on ? null : p.id);
+                        setSelected(null);
+                        setSpaceDrawing(false);
+                        setSpaceDraft([]);
+                        setSelectedSpaceId(null);
+                        setWireDrawing(false);
+                        setWireDraft([]);
+                        setSelectedRouteId(null);
+                      }}
+                      title={p.desc}
+                      style={{
+                        ...BTN,
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "5px 8px",
+                        fontWeight: 500,
+                        display: "grid",
+                        gap: 1,
+                        background: on ? "#16181d" : "#fff",
+                        color: on ? "#fff" : "#3d424e",
+                        borderColor: on ? "#16181d" : "#dfe2e8",
+                      }}
+                    >
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span
+                          style={{
+                            width: 9, height: 9, borderRadius: "50%",
+                            background: markerColor(p.category), flex: "0 0 auto",
+                          }}
+                        />
+                        <strong style={{ fontSize: 11.5 }}>{p.sku}</strong>
+                        <span style={{ marginLeft: "auto", fontSize: 11 }}>{moneyFmt(p.list)}</span>
+                      </span>
+                      <span style={{ fontSize: 10.5, color: on ? "#c9cdd6" : "#8c919c", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {p.desc}
+                      </span>
+                    </button>
+                    {/* Datasheet link (Task 5, punch #39) — a sibling of the
+                        arm/paint button, not nested inside it: a real <a>
+                        inside a <button> is invalid, and this still needs to
+                        open in its own tab without arming the part. */}
+                    {p.hasDatasheet && (
+                      <a
+                        href={`/api/part-datasheet/${encodeURIComponent(p.sku)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ display: "block", marginTop: 2, padding: "0 8px", fontSize: 10, color: "var(--accent)", textDecoration: "none" }}
+                      >
+                        Datasheet
+                      </a>
+                    )}
+                  </div>
                 );
               })}
               {filteredParts.length > 60 && (
@@ -870,6 +886,16 @@ export default function GridEditor({
                     >
                       {l.partId}
                     </span>
+                    {partById.get(l.partId)?.hasDatasheet && (
+                      <a
+                        href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: "var(--accent)", fontSize: 10.5, whiteSpace: "nowrap", textDecoration: "none" }}
+                      >
+                        datasheet
+                      </a>
+                    )}
                     <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
                   </div>
                 ))}
@@ -882,6 +908,16 @@ export default function GridEditor({
                     >
                       {l.partId}
                     </span>
+                    {partById.get(l.partId)?.hasDatasheet && (
+                      <a
+                        href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: "var(--accent)", fontSize: 10.5, whiteSpace: "nowrap", textDecoration: "none" }}
+                      >
+                        datasheet
+                      </a>
+                    )}
                     {l.connectionType && (
                       <span style={{ color: "#9aa0ab", fontSize: 10.5, whiteSpace: "nowrap" }}>
                         {l.connectionType}
