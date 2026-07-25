@@ -83,12 +83,28 @@ function svcChip(type: WorkItem["type"]): React.CSSProperties {
 /**
  * A project counts as "mine today" when the signed-in person is on a crew
  * booking whose inclusive span covers today (and the project isn't complete).
+ * `meName: null` = team scope (D113.10): anyone's booking counts.
  */
-function myProjectToday(p: ProjectRecord, meName: string, todayMs: number): boolean {
+function myProjectToday(p: ProjectRecord, meName: string | null, todayMs: number): boolean {
   if (p.kind !== "project" || p.stage === "complete") return false;
   return p.crew.some(
-    (c) => c.person === meName && startOfDay(c.start) <= todayMs && startOfDay(c.end) >= todayMs,
+    (c) =>
+      (meName === null || c.person === meName) &&
+      startOfDay(c.start) <= todayMs &&
+      startOfDay(c.end) >= todayMs,
   );
+}
+
+/** Crew names on site for a project today — shown in team scope. */
+function crewToday(p: ProjectRecord, todayMs: number): string[] {
+  return [
+    ...new Set(
+      p.crew
+        .filter((c) => startOfDay(c.start) <= todayMs && startOfDay(c.end) >= todayMs)
+        .map((c) => c.person)
+        .filter(Boolean),
+    ),
+  ];
 }
 
 export default async function FieldWorkPage({
@@ -112,14 +128,16 @@ export default async function FieldWorkPage({
   /* ---------------- LIST VIEW ---------------- */
   if (!selObj) {
     const today = startOfDay(Date.now());
+    /** Team scope (D113.10): the whole crew's day, default stays personal. */
+    const teamScope = one(sp.scope) === "team";
 
-    /** Mine + due now: today or overdue-and-still-live (unset dates excluded upstream). */
+    /** Due now: today or overdue-and-still-live (unset dates excluded upstream). */
     const myService = serviceWork.filter(
-      (w) => w.assignee === me.name && startOfDay(w.startMs) <= today,
+      (w) => (teamScope || w.assignee === me.name) && startOfDay(w.startMs) <= today,
     );
 
     const fieldJobs = all
-      .filter((p) => myProjectToday(p, me.name, today))
+      .filter((p) => myProjectToday(p, teamScope ? null : me.name, today))
       .sort((a, b) => (a.targetDate || 0) - (b.targetDate || 0));
     const onSiteCount = fieldJobs.filter(
       (p) => p.stage === "install" || p.stage === "training"
@@ -172,6 +190,9 @@ export default async function FieldWorkPage({
             <div style={{ fontSize: 15.5, fontWeight: 600, lineHeight: 1.3 }}>{p.name}</div>
             <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 3 }}>
               {p.customer || "—"}
+              {teamScope && crewToday(p, today).length > 0 && (
+                <span style={{ color: "#5b616e" }}> · {crewToday(p, today).join(", ")}</span>
+              )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
@@ -252,6 +273,9 @@ export default async function FieldWorkPage({
           <div style={{ fontSize: 15.5, fontWeight: 600, lineHeight: 1.3 }}>{w.title}</div>
           <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 3 }}>
             {w.subtitle || "—"}
+            {teamScope && (
+              <span style={{ color: "#5b616e" }}> · {w.assignee || "Unassigned"}</span>
+            )}
           </div>
           <div style={{ display: "flex", alignItems: "center", marginTop: 12 }}>
             <span style={{ marginLeft: "auto", color: "#c4c9d2", fontSize: 20 }}>›</span>
@@ -267,14 +291,36 @@ export default async function FieldWorkPage({
       " " +
       (rows.length === 1 ? "job" : "jobs") +
       " today" +
+      (teamScope ? " across the team" : "") +
       (onSiteCount ? " · " + onSiteCount + " on site now" : "");
+
+    const scopeTab = (label: string, href: string, on: boolean) => (
+      <Link
+        href={href}
+        style={{
+          fontSize: 12,
+          fontWeight: 600,
+          textDecoration: "none",
+          padding: "4px 11px",
+          borderRadius: 999,
+          color: on ? "#fff" : "#5b616e",
+          background: on ? "#16181d" : "#f1f2f5",
+        }}
+      >
+        {label}
+      </Link>
+    );
 
     return (
       <div style={{ maxWidth: 560, margin: "0 auto", padding: "18px 16px 80px" }}>
         <style>{CSS}</style>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-.015em" }}>
-            Field work
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-.015em", marginRight: "auto" }}>
+              Field work
+            </div>
+            {scopeTab("Mine", "/field-work", !teamScope)}
+            {scopeTab("Whole team", "/field-work?scope=team", teamScope)}
           </div>
           <div style={{ fontSize: 13, color: "#8c919c", marginTop: 4 }}>{standfirst}</div>
         </div>
