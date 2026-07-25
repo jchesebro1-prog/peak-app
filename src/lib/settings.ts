@@ -56,6 +56,11 @@ export type AppSettingsData = {
   templates?: import("@/lib/templates").TemplateOverrides;
   /** Per-template "last edited by/when" stamp (replace-in-place). */
   templatesMeta?: Record<string, { by: string; at: number }>;
+  /** Catalog category → group/trade mapping overrides (punch #39), sparse
+   *  patch over DEFAULT_CATEGORY_MAP in lib/catalog-taxonomy.ts, resolved
+   *  via resolveCategoryMap. Absent = defaults; a stored entry wins over the
+   *  default for that category key. Edited in Catalog → Categories & trades. */
+  catalogCategoryMap?: import("@/lib/catalog-taxonomy").CategoryMap;
 };
 
 export async function getSettingsPatch(): Promise<Record<string, unknown>> {

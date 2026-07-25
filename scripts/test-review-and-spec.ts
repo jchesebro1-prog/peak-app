@@ -73,6 +73,24 @@ ok(approvalIsStale(phase([], pin)), "approval goes stale when a document is remo
 ok(openChecklistItems(phase([d1], pin)).length === 1, "open checklist items are detected");
 
 
+/* --- Task 1: catalog taxonomy — groups/trades + category map (#39) --- */
+import { GROUP_TRADES, DEFAULT_CATEGORY_MAP, resolveCategoryMap, groupOf, tradeOf } from "@/lib/catalog-taxonomy";
+
+ok(groupOf({ category: "Fixtures" }, DEFAULT_CATEGORY_MAP) === "Fixtures", "taxonomy: groupOf resolves a mapped category");
+ok(groupOf({ category: "Some Unmapped Category" }, DEFAULT_CATEGORY_MAP) === null, "taxonomy: groupOf returns null for an unmapped category");
+
+ok(tradeOf({ category: "Fixtures", trade: "Rigging" }, DEFAULT_CATEGORY_MAP) === "Rigging", "taxonomy: tradeOf honors the part-level trade override");
+ok(tradeOf({ category: "Video Controls" }, DEFAULT_CATEGORY_MAP) === GROUP_TRADES["Video Controls"], "taxonomy: tradeOf falls back group->trade via GROUP_TRADES");
+
+const storedMap = resolveCategoryMap({
+  Fixtures: { group: "Curtains", trade: "Rigging" },
+  "Brand New Category": { trade: "AV" },
+});
+ok(storedMap.Fixtures.group === "Curtains" && storedMap.Fixtures.trade === "Rigging", "taxonomy: resolveCategoryMap lets a stored entry override a default");
+ok(storedMap["Brand New Category"].trade === "AV", "taxonomy: resolveCategoryMap lets a stored entry add a brand-new category key");
+ok(resolveCategoryMap().Fixtures.trade === "Lighting", "taxonomy: resolveCategoryMap with no stored map returns the defaults untouched");
+
+
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
 import type { Annotation } from "@/lib/annotations";

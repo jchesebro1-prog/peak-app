@@ -51,6 +51,8 @@ export type CatalogPart = {
   /** Freeform flag shown in the catalog (e.g. "verify price" on imported rows
    *  whose price looked off). Cleared once a human confirms the pricing. */
   note?: string;
+  /** Trade override — normally derived via the category map. */
+  trade?: string;
 };
 
 /** All parts (port of window.MASTER_CATALOG reads). */
