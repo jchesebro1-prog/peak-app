@@ -1098,5 +1098,10 @@ import { CATEGORIES } from "@/lib/stores/notif-prefs";
   ok(CATEGORIES.some((c) => c.key === "tasks"), "tasks: bell category registered in notif-prefs");
 }
 
+/* ============ #32 — venue address picker fallback ============ */
+import { addressFromHit } from "@/app/(app)/companies/lib";
+ok(addressFromHit({ street: "123 Main St", title: "Overture Center" }) === "123 Main St", "#32: street wins when present");
+ok(addressFromHit({ street: "", title: "Overture Center" }) === "Overture Center", "#32: POI without street falls back to display title");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

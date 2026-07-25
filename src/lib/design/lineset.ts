@@ -2,8 +2,8 @@
  * lineset.ts — Theatrical lineset auto-placement engine.
  *
  * This is a FAITHFUL TypeScript port of the Excel workbook
- * `lineset_schedule_80x30_v13.xlsx` (4 sheets: Inputs, Rules & Notes,
- * 8in Grid, Final Schedule). Every rule below is annotated with the sheet
+ * `lineset_schedule_80x30_v13.xlsx` (defaults since updated to 50'×30' — #28)
+ * (4 sheets: Inputs, Rules & Notes, 8in Grid, Final Schedule). Every rule below is annotated with the sheet
  * and cell whose formula it reproduces, so the two can be cross-checked.
  *
  * The workbook models a set of 8-inch grid "slots" running downstage (DS)
@@ -48,7 +48,7 @@ export type LinesetInputs = {
   includeMidstage: boolean; // Inputs!G9
 };
 
-/** v13 defaults: 80'×30', 8/10/0/12/5/16/3/4, gp 0, all toggles on. */
+/** v13 defaults: 50'×30', 8/10/0/12/5/16/3/4, gp 0, all toggles on. */
 export const DEFAULT_LINESET_INPUTS: LinesetInputs = {
   stageWidthFt: 50,
   stageWidthIn: 0,

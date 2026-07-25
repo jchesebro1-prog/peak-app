@@ -9,7 +9,7 @@ import {
   saveCustomerAction,
   searchAddressAction,
 } from "./actions";
-import { CUSTOMER_TYPES, VENUE_KINDS } from "./lib";
+import { CUSTOMER_TYPES, VENUE_KINDS, addressFromHit } from "./lib";
 import type { AddressHitVM, SaveCustomerInput } from "./types";
 
 /**
@@ -207,7 +207,7 @@ export default function EditCustomerModal({
   };
 
   const pickAddress = (i: number, h: AddressHitVM) => {
-    setLoc(i, { address: h.street, city: h.city, state: h.state, lat: h.lat, lng: h.lng });
+    setLoc(i, { address: addressFromHit(h), city: h.city, state: h.state, lat: h.lat, lng: h.lng });
     setSearch({ idx: null, hits: [], loading: false, msg: "" });
   };
 

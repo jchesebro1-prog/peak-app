@@ -2,6 +2,7 @@ import type {
   CustomerDoc,
   CustomerLocation,
 } from "@/lib/stores/customers";
+import type { AddressHitVM } from "./types";
 
 /**
  * Customers — shared, client-safe view helpers (ports of the display logic in
@@ -113,4 +114,12 @@ export function money(n: number | null | undefined): string {
 export function moneyK(n: number | null | undefined): string {
   const v = Math.round(n || 0);
   return v >= 1000 ? "$" + Math.round(v / 1000) + "k" : "$" + v;
+}
+
+/** #32: address line for a picked search hit. POI hits can lack a house
+    number AND a road (normalizeHit already falls back house→road); when
+    street is empty, use the hit's display title — same fallback the office
+    picker in settings-client.tsx applies (`r.street || r.title`). */
+export function addressFromHit(h: Pick<AddressHitVM, "street" | "title">): string {
+  return h.street || h.title;
 }
