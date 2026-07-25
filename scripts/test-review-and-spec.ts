@@ -1116,5 +1116,12 @@ ok(participantsFor(msgsThread(["Jeff", "Sarah"])) === "Jeff, Sarah", "#42: two a
 ok(participantsFor(msgsThread(["Jeff", "Sarah", "Amy", "Ben"])) === "Jeff, Sarah +2", "#42: 4 authors -> first two plus overflow count");
 ok(participantsFor(msgsThread(["Jeff", "", "Sarah", undefined])) === "Jeff, Sarah", "#42: blank/undefined authors filtered out");
 
+/* ============ Review fix — sort=date must be representable in CRM mode (#42) ============ */
+import { isModeDefaultSort } from "@/app/(app)/inbox/sort-defaults";
+ok(isModeDefaultSort("date", false), "#42 fix: plain mode's default is date, so sort=date can be stripped from the URL");
+ok(!isModeDefaultSort("date", true), "#42 fix: CRM mode's default is waiting-first, so sort=date must stay explicit on the URL");
+ok(!isModeDefaultSort("from", false), "#42 fix: sort=from is never a mode default, in either mode");
+ok(!isModeDefaultSort("subject", true), "#42 fix: sort=subject is never a mode default, in either mode");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

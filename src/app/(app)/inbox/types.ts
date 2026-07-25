@@ -215,7 +215,9 @@ export type ListVM = {
   boxSelValue: string;
   /** active command-bar filter key ('' = none) */
   filter: string;
-  /** active sort key ('date' default) */
+  /** active *explicit* sort key ('' = none chosen — the resulting order then
+   *  falls back to whichever mode's default applies, see comms.ts threadsIn
+   *  and sort-defaults.ts; punch #42 finding 1) */
   sort: string;
   /** true in the Deleted folder — bulk actions offer Restore, not Delete */
   isDeleted: boolean;

@@ -144,10 +144,13 @@ export default async function InboxPage({
   const filter: FilterKey | null = FILTER_KEYS.includes(str(params.filter))
     ? (str(params.filter) as FilterKey)
     : null;
-  // An explicit ?sort= from the Sort dropdown overrides the inbox's default
-  // waiting-first ordering; with no param we keep that default (sort="date").
+  // An explicit ?sort= from the Sort dropdown overrides each mode's default
+  // ordering (plain = date-desc, CRM = waiting-first — see comms.ts
+  // threadsIn). With no param, sortParam is null and both threadsIn and the
+  // ListVM below treat that as "no explicit sort chosen" rather than lying
+  // and calling it "date" (punch #42 finding 1 — see sort-defaults.ts).
   const sortExplicit = SORT_KEYS.includes(str(params.sort));
-  const sort: SortKey = sortExplicit ? (str(params.sort) as SortKey) : "date";
+  const sortParam: SortKey | null = sortExplicit ? (str(params.sort) as SortKey) : null;
   let box: MailboxId = (BOX_IDS as readonly string[]).includes(str(params.box))
     ? (str(params.box) as MailboxId)
     : "personal";
@@ -205,7 +208,7 @@ export default async function InboxPage({
     followUpCount({ unownedOrMine: true, me }),
     threadsIn(view ?? box, view ? "inbox" : folder, me, {
       filter,
-      sort: sortExplicit ? sort : null,
+      sort: sortParam,
       crmMode,
     }),
     activeUsers(),
@@ -428,7 +431,7 @@ export default async function InboxPage({
               : "",
     boxSelValue: view ? view : `${box}:${folder}`,
     filter: filter || "",
-    sort,
+    sort: sortParam || "",
     isDeleted,
   };
 

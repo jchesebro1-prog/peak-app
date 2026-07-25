@@ -37,6 +37,7 @@ import {
 import { FolderGlyph, PencilIcon, PhoneIcon, RefreshIcon } from "./icons";
 import ThreadList, { type HeaderCheck, type RowActions } from "./thread-list";
 import CommandBar, { type BulkHandlers } from "./command-bar";
+import { isModeDefaultSort } from "./sort-defaults";
 import type { FolderId, MailboxId } from "@/lib/stores/comms";
 import ThreadReader from "./thread-reader";
 import ComposeModal from "./compose-modal";
@@ -167,10 +168,12 @@ export default function InboxShell({
   }, [explicitSelected, reader, readIds]);
 
   // Keep the active filter/sort on the URL while reading a thread, so opening
-  // a message doesn't drop the list's refinement.
+  // a message doesn't drop the list's refinement. list.sort is already ""
+  // unless the sort was explicit (server-resolved in page.tsx — punch #42
+  // finding 1), so no mode-aware special-casing is needed here.
   const refineQuery = [
     list.filter ? `filter=${list.filter}` : "",
-    list.sort && list.sort !== "date" ? `sort=${list.sort}` : "",
+    list.sort ? `sort=${list.sort}` : "",
   ]
     .filter(Boolean)
     .join("&");
@@ -218,10 +221,17 @@ export default function InboxShell({
       const nextFilter = key === "filter" ? value : list.filter;
       const nextSort = key === "sort" ? value : list.sort;
       if (nextFilter) params.set("filter", nextFilter);
-      if (nextSort && nextSort !== "date") params.set("sort", nextSort);
+      // Only strip the sort param when it matches the *current mode's*
+      // default ordering — plain mode's default is date-desc, so "date"
+      // there is redundant; CRM mode's default is waiting-first, so an
+      // explicit "date" must stay on the URL or it's indistinguishable from
+      // "no sort chosen" and silently reverts to waiting-first (punch #42
+      // finding 1).
+      if (nextSort && !isModeDefaultSort(nextSort, crmMode))
+        params.set("sort", nextSort);
       router.push(`/inbox?${params.toString()}`);
     },
-    [router, isView, box, folder, list.filter, list.sort]
+    [router, isView, box, folder, list.filter, list.sort, crmMode]
   );
 
   /* ---- multi-select ---- */
