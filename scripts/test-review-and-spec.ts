@@ -205,36 +205,37 @@ ok(HOME_TABS.length === 5, "five Home tabs after Reports joins (D99)");
 ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab");
 
 /* --- home hub nav (D98) --- */
-ok(NAV.length === 4, "the header is down to 4 top-level items (Operations merge, D100)");
+ok(NAV.length === 4, "the header keeps 4 top-level items (chips, D117)");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "queue"), "My Queue is no longer top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "calendar"), "Calendar is no longer top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "inbox"), "Inbox is no longer top-level");
+ok(!NAV.some((e) => e.kind === "link" && e.key === "home"), "Home is no longer a tab — the Q6 mark is the home link (D117)");
 ok(activeKeyFor("/") === "home", "root lights Home");
 ok(activeKeyFor("/queue") === "home", "queue lights Home");
 ok(activeKeyFor("/calendar") === "home", "calendar lights Home — this path had NO map entry before");
 ok(activeKeyFor("/inbox") === "home", "inbox lights Home");
 ok(activeKeyFor("/reports") === "home", "Reports lights Home now that it is a Home tab (D99)");
 
-// ---- General dissolution (D99): Companies/People/Field Survey → Sales ----
-const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "sales");
+// ---- General dissolution (D99): Companies/People/Field Survey → Sales (now CRM, D117) ----
+const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "crm");
 ok(
-  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 7),
-  "Sales has seven children after Venues joins (D101)",
+  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 5),
+  "CRM has five children — Quotes and Reviews moved to EST (D117)",
 );
 ok(
   !!(
     d99Sales &&
     d99Sales.kind === "group" &&
     d99Sales.children.map((c) => c.key).join(",") ===
-      "leads,quotes,reviews,companies,people,venues,field"
+      "leads,companies,people,venues,field"
   ),
-  "Sales children are leads, quotes, reviews, companies, people, venues, field in order",
+  "CRM children are leads, companies, people, venues, field in order",
 );
 ok(
-  parentGroupOf("companies") === "sales" &&
-    parentGroupOf("people") === "sales" &&
-    parentGroupOf("field") === "sales",
-  "companies, people, field now report Sales as their parent group",
+  parentGroupOf("companies") === "crm" &&
+    parentGroupOf("people") === "crm" &&
+    parentGroupOf("field") === "crm",
+  "companies, people, field now report CRM as their parent group",
 );
 const d99Keys = NAV.flatMap((e) =>
   e.kind === "group" ? [e.key, ...e.children.map((c) => c.key)] : [e.key],
@@ -247,7 +248,7 @@ ok(
 // ---- Venues directory (D101): the venues child + route ----
 ok(activeKeyFor("/venues") === "venues", "/venues lights the venues key");
 ok(activeKeyFor("/venues/st-lakefront-1") === "venues", "/venues/[id] resolves to venues (segment-1)");
-ok(parentGroupOf("venues") === "sales", "venues reports Sales as its parent group");
+ok(parentGroupOf("venues") === "crm", "venues reports CRM as its parent group (D117)");
 
 // ---- General dissolution (D99): Reports is a Home tab ----
 ok(
@@ -275,8 +276,8 @@ ok(
 // ---- General dissolution (D99): the group is gone ----
 ok(!NAV.some((e) => e.kind === "group" && e.key === "general"), "the General group is gone");
 ok(
-  NAV.map((e) => e.key).join(",") === "home,design,sales,operations",
-  "the four top-level items are Home, Design, Sales, Operations in order",
+  NAV.map((e) => e.key).join(",") === "est,pm,crm,design",
+  "the four top-level chips are EST, PM, CRM, DESIGN in order (D117)",
 );
 ok(
   activeKeyFor("/catalog") === "settings" &&
@@ -286,11 +287,11 @@ ok(
   "catalog, templates, estimating-rules, import all light Settings",
 );
 
-// ---- Operations merge (D100): Installs + Service → Operations ----
-const d100Ops = NAV.find((e) => e.kind === "group" && e.key === "operations");
+// ---- Operations merge (D100): Installs + Service → Operations (now PM, D117) ----
+const d100Ops = NAV.find((e) => e.kind === "group" && e.key === "pm");
 ok(
   !!(d100Ops && d100Ops.kind === "group" && d100Ops.children.length === 6),
-  "Operations has six children",
+  "PM has six children",
 );
 ok(
   !!(
@@ -299,18 +300,18 @@ ok(
     d100Ops.children.map((c) => c.key).join(",") ===
       "projects,schedule,fieldwork,flametests,inspections,repairs"
   ),
-  "Operations children are projects, schedule, fieldwork, flametests, inspections, repairs in order",
+  "PM children are projects, schedule, fieldwork, flametests, inspections, repairs in order",
 );
 ok(!NAV.some((e) => e.kind === "group" && e.key === "installs"), "the Installs group is gone");
 ok(!NAV.some((e) => e.kind === "group" && e.key === "service"), "the Service group is gone");
 ok(
-  parentGroupOf("projects") === "operations" &&
-    parentGroupOf("schedule") === "operations" &&
-    parentGroupOf("fieldwork") === "operations" &&
-    parentGroupOf("flametests") === "operations" &&
-    parentGroupOf("inspections") === "operations" &&
-    parentGroupOf("repairs") === "operations",
-  "all six work children report Operations as their parent group",
+  parentGroupOf("projects") === "pm" &&
+    parentGroupOf("schedule") === "pm" &&
+    parentGroupOf("fieldwork") === "pm" &&
+    parentGroupOf("flametests") === "pm" &&
+    parentGroupOf("inspections") === "pm" &&
+    parentGroupOf("repairs") === "pm",
+  "all six work children report PM as their parent group",
 );
 
 // ---- Operations merge (D100): pure work normalization ----
@@ -1015,6 +1016,25 @@ ok(DEFAULT_SETTINGS.accent === "#b08d4a", "default accent is Q-6 gold (D117)");
 ok(accentContrast("#b08d4a") === "#16181b", "gold accent carries near-black text (D117)");
 ok(accentContrast("#7b3f8a") === "#fff" && accentContrast("#3d4eb0") === "#fff", "dark accents (purple/blue) carry white text");
 ok(accentContrast("#b4543a") === "#fff", "red accent carries white text");
+
+/* --- Quartzite-6 rebrand (D117): nav chips --- */
+const d117Est = NAV.find((e) => e.kind === "group" && e.key === "est");
+ok(
+  !!(d117Est && d117Est.kind === "group" &&
+    d117Est.children.map((c) => c.key).join(",") === "quotes,estimator,reviews"),
+  "EST = Quotes, Estimator, Reviews in order",
+);
+ok(activeKeyFor("/estimator") === "estimator", "/estimator lights its own EST child");
+ok(activeKeyFor("/") === "home", "root still resolves to home (drawer link + mark)");
+ok(
+  parentGroupOf("quotes") === "est" && parentGroupOf("estimator") === "est" && parentGroupOf("reviews") === "est",
+  "quotes, estimator, reviews report EST as parent",
+);
+ok(
+  parentGroupOf("leads") === "crm" && parentGroupOf("venues") === "crm" && parentGroupOf("field") === "crm",
+  "relationship children report CRM as parent",
+);
+ok(NAV.every((e) => e.kind === "group"), "every top-level entry is a group — the mark handles Home");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
