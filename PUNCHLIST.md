@@ -2593,6 +2593,34 @@ Do not pick up standalone; the rebuild session owns the nav.
 
 ---
 
+## 46. Inbox round 2 polish (follow-ups from the #42 reviews) — OPEN
+
+**Area:** Inbox. **Logged:** 2026-07-25, bundling the accepted-as-follow-up findings from the
+#42 per-task and whole-branch reviews. None are defects blocking daily use; batch them.
+
+- CRM chips row renders above the list's title/search block (needs a small `thread-list.tsx`
+  change that was out of scope for the toggle task).
+- Site-visit modal's open state (`visitOpen`, local to `thread-reader.tsx`) can't gate the
+  arrow-key handler — needs a state lift; open Filter▾/Sort▾ menus have the same
+  unguarded-BUTTON gap.
+- Arrow-nav `lastIndexRef` only learns positions from key presses — sync it on click
+  selections / reset on listKey change (click-then-arrow under a vanishing filter can resume
+  from a stale anchor).
+- CRM mode's Sort▾ menu has no "Default (waiting first)" entry to return to the mode default
+  after an explicit sort; mode flips also carry an explicit sort/filter param across —
+  product call (Jeff) whether flips should reset refinements.
+- `crmMode` local state never reconciles with the server prop (second tab/device flips show
+  a stale toggle until remount); key-repeat isn't throttled (held arrow = many navigations +
+  mark-reads); scroll-into-view doesn't re-fire on list re-sorts.
+- Test/seed gaps: no automated coverage for the keydown clamp/guards; no chip-less (3-line)
+  seed thread; no 3+-author seed thread for the "+N" participants badge.
+- **Jeff to confirm:** calls/flagged smart views now follow the mode's sort (date-desc in
+  plain mode; previously always waiting-first) — intended?
+
+**Status:** OPEN — polish batch, no urgency.
+
+---
+
 ## IDEA (not a punch-list item) — Consulting as a project type — BUILT (D90)
 
 **Status: BUILT 2026-07-19 (D90).** Jeff defined Consulting in the 2026-07-19 brainstorming
