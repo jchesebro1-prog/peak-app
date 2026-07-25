@@ -423,11 +423,15 @@ export async function setProjectStage(
 
   // #17 template expansion: entering a stage adds its standard checklist once
   // (coverage-key de-dup; TASK_TEMPLATE ships empty until the checklist
-  // homework lands, so this is a safe no-op today).
-  const { TASK_TEMPLATE, expandTemplate, tasksForProject, createAutoTask } = await import("@/lib/stores/tasks");
-  const existing = new Set((await tasksForProject(id)).map((t) => t.coverageKey).filter(Boolean) as string[]);
-  for (const item of expandTemplate(TASK_TEMPLATE[stage] || [], stage, existing)) {
-    await createAutoTask({ ...item, projectId: id, title: item.title });
+  // homework lands, so this is a safe no-op today). Guarded on `result` —
+  // patchDoc returns null for a nonexistent or soft-deleted project, and the
+  // expansion must not fire when the stage patch never actually applied.
+  if (result) {
+    const { TASK_TEMPLATE, expandTemplate, tasksForProject, createAutoTask } = await import("@/lib/stores/tasks");
+    const existing = new Set((await tasksForProject(id)).map((t) => t.coverageKey).filter(Boolean) as string[]);
+    for (const item of expandTemplate(TASK_TEMPLATE[stage] || [], stage, existing)) {
+      await createAutoTask({ ...item, projectId: id, title: item.title });
+    }
   }
 
   return result;
