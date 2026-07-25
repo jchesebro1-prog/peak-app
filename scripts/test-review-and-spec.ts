@@ -875,5 +875,10 @@ ok(Object.keys(SEED_FABRIC_RATES).length === 5, `SEED_FABRIC_RATES has exactly 5
 const seedBorder = curtainCost({ finishedWidthFt: 50, finishedHeightFt: 3, fullnessPct: 50, qty: 1 }, { fabricRate: SEED_FABRIC_RATES["RB-CHAR-25"], makingRate: DEFAULT_MAKING_RATE });
 ok(seedBorder.costEach === 1533.75, `seed-rate border = sewnArea(225)×3.64 + sewnWidth(75)×9.53 = 1533.75 (got ${seedBorder.costEach})`);
 
+/* --- curtain seed rates cover exactly the five used fabrics (task 2) --- */
+ok(SEED_FABRIC_RATES["RB-CHAR-25"] === 3.64 && SEED_FABRIC_RATES["RB-EN-22"] === 2.84, "anchor fabrics carry their reconciled +10% seed rates");
+ok(SEED_FABRIC_RATES["RB-EN-16"] === 2.1 && SEED_FABRIC_RATES["RB-MV-MN"] === 3.64 && SEED_FABRIC_RATES["RB-MUS"] === 0.9, "the three seed fabrics carry their flagged rates");
+ok(Object.keys(SEED_FABRIC_RATES).length === 5, "exactly five fabrics have curtain rates — no unused fabrics carry one");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
