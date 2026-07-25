@@ -1103,5 +1103,18 @@ import { addressFromHit } from "@/app/(app)/companies/lib";
 ok(addressFromHit({ street: "123 Main St", title: "Overture Center" }) === "123 Main St", "#32: street wins when present");
 ok(addressFromHit({ street: "", title: "Overture Center" }) === "Overture Center", "#32: POI without street falls back to display title");
 
+/* ============ Task 3 — inbox conversation participants (#42) ============ */
+import { participantsFor } from "@/lib/stores/comms";
+const msgsThread = (authors: Array<string | undefined>): any => ({
+  messages: authors.map((author, i) => ({
+    id: `m${i}`, at: i, direction: "in", channel: "email", author: author || "", body: "",
+  })),
+});
+ok(participantsFor(msgsThread(["Jeff"])) === "", "#42: single author -> no participants string");
+ok(participantsFor(msgsThread(["Jeff", "Jeff"])) === "", "#42: repeated author de-dupes to a single author");
+ok(participantsFor(msgsThread(["Jeff", "Sarah"])) === "Jeff, Sarah", "#42: two authors joined with comma");
+ok(participantsFor(msgsThread(["Jeff", "Sarah", "Amy", "Ben"])) === "Jeff, Sarah +2", "#42: 4 authors -> first two plus overflow count");
+ok(participantsFor(msgsThread(["Jeff", "", "Sarah", undefined])) === "Jeff, Sarah", "#42: blank/undefined authors filtered out");
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

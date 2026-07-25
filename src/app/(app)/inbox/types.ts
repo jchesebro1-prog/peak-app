@@ -80,6 +80,10 @@ export type ThreadRowVM = {
   categoryColor: string;
   categoryLabel: string;
   name: string;
+  /** count of messages[] on the underlying thread; badge hidden when <= 1 */
+  msgCount: number;
+  /** unique message authors beyond a single-author thread, e.g. "Jeff, Sarah +1"; "" when <= 1 author */
+  participants: string;
   subject: string;
   snippet: string;
   time: string;

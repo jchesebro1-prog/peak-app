@@ -601,8 +601,23 @@ function Row({
               color: unread ? "#16181d" : "#26292f",
             }}
           >
-            {r.name}
+            {r.participants || r.name}
           </span>
+          {r.msgCount > 1 && (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: "#8c919c",
+                background: "#f1f2f5",
+                borderRadius: 8,
+                padding: "0 6px",
+                flexShrink: 0,
+              }}
+            >
+              {r.msgCount}
+            </span>
+          )}
           {r.pinned && (
             <span style={{ color: "#8c919c", display: "flex" }} title="Pinned">
               <PinIcon size={12} fill="#8c919c" />

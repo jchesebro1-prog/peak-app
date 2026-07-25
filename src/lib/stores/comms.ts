@@ -528,6 +528,19 @@ export function hasQueued(t: CommThread): boolean {
   return (t.messages || []).some((m) => m.queued);
 }
 
+/**
+ * Unique message authors beyond a single-author thread, e.g. "Jeff, Sarah +1".
+ * "" when the thread has one (or zero) distinct authors.
+ */
+export function participantsFor(t: CommThread): string {
+  const authors = Array.from(
+    new Set((t.messages || []).map((m) => m.author).filter(Boolean))
+  );
+  if (authors.length <= 1) return "";
+  if (authors.length === 2) return authors.join(", ");
+  return `${authors.slice(0, 2).join(", ")} +${authors.length - 2}`;
+}
+
 /** Prototype _snippet(): one-line list preview ("You: …" for outbound). */
 export function snippet(t: CommThread): string {
   const m = lastMsg(t);
