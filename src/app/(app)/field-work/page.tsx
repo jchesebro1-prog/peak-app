@@ -368,15 +368,19 @@ export default async function FieldWorkPage({
   const jobTasks: TaskRecord[] = taskRows.filter((t) => t.projectId === p.id);
 
   const identity: Record<string, FieldIdentity> = {};
-  const addIdentity = (name: string) => {
+  // `id` param wins when known outright (the signed-in user, from
+  // requireUser()); otherwise resolved by name match against the roster —
+  // null for legacy free-text names with no matching account.
+  const addIdentity = (name: string, id?: string | null) => {
     if (!name || identity[name]) return;
     const u = users.find((x) => x.name === name);
     identity[name] = {
+      id: id ?? u?.id ?? null,
       initials: u?.initials || deriveInitials(name),
       color: u?.color || fallbackColor(name),
     };
   };
-  addIdentity(me.name);
+  addIdentity(me.name, me.id);
   (p.notes || []).forEach((n) => addIdentity(n.by));
   (p.timeLogs || []).forEach((l) => addIdentity(l.person));
 

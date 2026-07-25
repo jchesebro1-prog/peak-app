@@ -29,8 +29,11 @@ import { saveThroughOutbox } from "@/lib/sync/save";
  * client bundle, so its pure palettes/formatters are reproduced below.
  * ============================================================ */
 
-/** Identity (initials + avatar colour) for a person, resolved server-side. */
-export type FieldIdentity = { initials: string; color: string };
+/** Identity (user id + initials + avatar colour) for a person, resolved
+    server-side. `id` is the roster user id (null when unresolvable — e.g. a
+    legacy free-text name with no matching account) — used to stamp
+    assigneeUserId on field-created tasks so offline adds aren't unassigned. */
+export type FieldIdentity = { id: string | null; initials: string; color: string };
 
 export type FieldWorkDetailProps = {
   project: ProjectRecord;
@@ -159,7 +162,7 @@ export default function FieldWorkDetail({
   }
 
   function identityOf(name: string): FieldIdentity {
-    return identity[name] || { initials: "—", color: "#9aa0ab" };
+    return identity[name] || { id: null, initials: "—", color: "#9aa0ab" };
   }
 
   /**
@@ -263,10 +266,14 @@ export default function FieldWorkDetail({
     if (!title) return;
     const id = uid("tk-");
     const at = Date.now();
+    // identity[meName].id is the signed-in user's roster id (threaded down
+    // from page.tsx's requireUser()) — stamped here so a task added offline,
+    // which never reaches the server action, still lands assigned (not just
+    // named) once the outboxed doc syncs (#17 review).
     const next: TaskRecord = {
       id, title, section: "Install", projectId: cur.id, quoteId: null, coverageKey: null,
-      assigneeUserId: null, assigneeName: meName, dueAt: null, status: "open", notes: "",
-      createdBy: meName, createdAt: at, updatedAt: at, doneAt: null,
+      assigneeUserId: identity[meName]?.id ?? null, assigneeName: meName, dueAt: null,
+      status: "open", notes: "", createdBy: meName, createdAt: at, updatedAt: at, doneAt: null,
     };
     setTaskTitle("");
     const fd = new FormData();
