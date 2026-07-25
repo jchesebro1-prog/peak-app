@@ -943,5 +943,27 @@ import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFo
   ok(Math.abs(cur.cost - expected2) < 1, `tier-pipeline Draw cost = two-term make cost, not the old area×costPerSqft (got ${cur.cost}, expected ${expected2})`);
 }
 
+/* --- budget and quote agree on the same drape (task 7) --- */
+{
+  // A Draw at a 40×20 proscenium, better tier, priced both ways must match per unit.
+  // stageWidthFt: 60, not the venue's default 50 — mirrors defaultAState's wing:10
+  // (40 + 2×10 = 60) from the task 6 test above. drapeRule("Draw") never reads
+  // stage width (only proWidthFt), so this has no effect on the assertion below.
+  const dims = { proWidthFt: 40, proHeightFt: 20, stageWidthFt: 60, stageDepthFt: 30 };
+  const rule = drapeRuleQ("Draw", dims as any, "better")!;
+  const budget = curtainCostQ(
+    { finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty },
+    { fabricRate: RATES_Q[rule.fabricSku], makingRate: makingForQ(rule.fullness) }
+  ).costTotal;
+  // Quote: same geometry typed into computeCurtain, one panel × qty summed.
+  const fabrics = [{ sku: rule.fabricSku, name: "x", costPerSqft: 0, curtainAreaRate: RATES_Q[rule.fabricSku] }];
+  const quotePanel = computeCurtainQuote(
+    { name: "d", hang: "", fabric: rule.fabricSku, qty: String(rule.qty), height: String(rule.h), width: String(rule.w), fullness: String(rule.fullness), bottom: "" } as any,
+    fabrics as any,
+    0.3
+  ).costEach;
+  ok(Math.abs(budget - quotePanel * rule.qty) < 1, "budget and quote agree on the same drape's make cost");
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
