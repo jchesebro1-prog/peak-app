@@ -110,7 +110,7 @@ body {
   height: 30px;
   border-radius: 7px;
   background: var(--accent);
-  color: var(--ink);
+  color: var(--accent-contrast, #16181b); /* D117: adapts to active accent */
   font-weight: 700;
   font-size: 12px;
   display: flex;
@@ -215,7 +215,7 @@ body {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
-  color: var(--ink);
+  color: var(--accent-contrast, #16181b); /* D117: adapts to active accent */
   background: var(--accent);
   padding: 1px 7px;
   border-radius: 20px;
@@ -339,7 +339,7 @@ body {
   padding: 0 4px;
   border-radius: 9px;
   background: var(--accent);
-  color: var(--ink);
+  color: var(--accent-contrast, #16181b); /* D117: adapts to active accent */
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
@@ -525,7 +525,7 @@ body {
 .pk-btn-accent {
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--ink);
+  color: var(--accent-contrast, #16181b); /* D117: adapts to active accent */
   background: var(--accent);
   border: none;
   border-radius: 8px;

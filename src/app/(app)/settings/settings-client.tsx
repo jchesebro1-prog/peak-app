@@ -35,6 +35,7 @@ import {
   ADMIN_SCREENS,
   resolveSettingsSection,
 } from "./settings-sections";
+import { accentContrast } from "@/lib/color";
 
 /**
  * Settings — admin surface, ported from Settings.dc.html
@@ -532,7 +533,7 @@ export default function SettingsClient({
                       border: "none",
                       background: hex,
                       cursor: "pointer",
-                      color: "var(--ink)",
+                      color: accentContrast(hex), // D117: adapts to swatch's own hex
                       fontSize: 14,
                       fontWeight: 700,
                       lineHeight: 1,
@@ -1757,7 +1758,7 @@ export default function SettingsClient({
                   style={{
                     fontSize: 13,
                     fontWeight: 600,
-                    color: "var(--ink)",
+                    color: "var(--accent-contrast)", // D117: adapts to active accent
                     background: "var(--accent)",
                     border: "none",
                     borderRadius: 9,
@@ -1901,7 +1902,7 @@ export default function SettingsClient({
                             border: on
                               ? "1.5px solid var(--accent)"
                               : "1.5px solid #d6d9e0",
-                            color: on ? "var(--ink)" : "#fff",
+                            color: on ? "var(--accent-contrast)" : "#fff", // D117: adapts to active accent
                             fontSize: 12,
                             fontWeight: 700,
                           }}
@@ -1972,7 +1973,7 @@ export default function SettingsClient({
                 <button
                   onClick={saveModal}
                   style={{
-                    color: "var(--ink)",
+                    color: "var(--accent-contrast)", // D117: adapts to active accent
                     background: "var(--accent)",
                     border: "none",
                     borderRadius: 9,

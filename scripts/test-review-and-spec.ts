@@ -11,6 +11,7 @@ import {
 import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS } from "@/lib/design/venue-dims";
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
 import { DEFAULT_SETTINGS } from "@/db/seed-data";
+import { accentContrast } from "@/lib/color";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -1009,6 +1010,11 @@ ok(safeName("///") === "file", "a name with nothing usable falls back to 'file'"
 
 /* --- Quartzite-6 rebrand (D117): gold default accent --- */
 ok(DEFAULT_SETTINGS.accent === "#b08d4a", "default accent is Q-6 gold (D117)");
+
+/* --- Quartzite-6 rebrand (D117): adaptive accent-contrast text --- */
+ok(accentContrast("#b08d4a") === "#16181b", "gold accent carries near-black text (D117)");
+ok(accentContrast("#7b3f8a") === "#fff" && accentContrast("#3d4eb0") === "#fff", "dark accents (purple/blue) carry white text");
+ok(accentContrast("#b4543a") === "#fff", "red accent carries white text");
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

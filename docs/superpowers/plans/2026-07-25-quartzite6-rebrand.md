@@ -16,7 +16,7 @@
 - **Never run `npm run build` while a dev server is running** (PGlite is single-process; D106).
 - Test command: `npm run test:specs` — must end `ALL PASSED`. Type check: `npx tsc --noEmit`.
 - New brand hexes (verbatim from spec): near-black `#0e0f12`, gold accent `#b08d4a`, bronze ink `#8a6c34`, steel `#c6c9ce` / `#9aa0ab` / `#2c2f36`, content bg `#f6f6f8`.
-- Gold surfaces always carry **near-black text `#16181b`**, never white.
+- Accent surfaces carry the adaptive `--accent-contrast` text color: near-black `#16181b` when the active accent is light (gold default), `#fff` when it is dark (purple/blue overrides). White-on-gold is never acceptable. `--accent-contrast` is computed server-side from `settings.accent` luminance (helper `accentContrast(hex)` in `src/lib/color.ts`) and set beside `--accent` in `layout.tsx`.
 - Michroma is used ONLY for the wordmark/login brand text — never body text.
 - Routes never change; only nav group keys/labels change (`est`, `pm`, `crm`, `design`).
 - Print/letter CSS (`.pk-doc-page` block in globals.css) is untouched.
