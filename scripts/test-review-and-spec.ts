@@ -116,7 +116,7 @@ const dmxCompat = compatibleWireTypes("DMX512 (5-pin XLR)", DEFAULT_WIRE_TYPES);
 ok(dmxCompat.length > 0, "connect: compatibleWireTypes finds at least one DMX wire type in the defaults");
 
 const allKnownConnTypes = DEFAULT_WIRE_TYPES.every((wt) =>
-  wt.connectionTypes.every((ct) => (CONNECTION_TYPES as readonly string[]).includes(ct))
+  wt.connectionTypes.every((ct) => CONNECTION_TYPES.includes(ct))
 );
 ok(allKnownConnTypes, "connect: every DEFAULT_WIRE_TYPES connectionType is a member of CONNECTION_TYPES");
 

@@ -36,7 +36,7 @@ export type WireType = {
  * `WireType.connectionTypes` entry (and every `Port.connectionType`) must
  * resolve against.
  */
-export const CONNECTION_TYPES = [
+export const CONNECTION_TYPES: readonly string[] = [
   // power
   "powerCON/True1",
   "Edison",
@@ -64,7 +64,7 @@ export const CONNECTION_TYPES = [
   // rigging
   "motor power",
   "low-voltage pendant control",
-] as const satisfies readonly string[];
+];
 
 /**
  * Seed wire-type registry. Each entry maps to the connection type(s) it can
