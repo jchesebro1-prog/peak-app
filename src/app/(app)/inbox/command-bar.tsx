@@ -60,6 +60,8 @@ export default function CommandBar({
   filter,
   sort,
   categoryOptions,
+  crmMode,
+  onToggleMode,
   onClear,
   onFilter,
   onSort,
@@ -70,6 +72,9 @@ export default function CommandBar({
   filter: string;
   sort: string;
   categoryOptions: CategoryOpt[];
+  /** Punch #42: Inbox/CRM mode — segmented control lives here, left of Filter▾. */
+  crmMode: boolean;
+  onToggleMode: (on: boolean) => void;
   onClear: () => void;
   onFilter: (key: string) => void;
   onSort: (key: string) => void;
@@ -183,6 +188,27 @@ export default function CommandBar({
 
       <span style={{ flex: 1 }} />
 
+      {/* Inbox/CRM mode (punch #42) — hand-styled segmented control, left of
+          Filter▾ so mode and refinement read as one right-hand cluster. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          background: "#f1f2f5",
+          borderRadius: 9,
+          padding: 3,
+          gap: 2,
+          flexShrink: 0,
+        }}
+      >
+        <button onClick={() => onToggleMode(false)} style={modeBtn(!crmMode)}>
+          Inbox
+        </button>
+        <button onClick={() => onToggleMode(true)} style={modeBtn(crmMode)}>
+          CRM
+        </button>
+      </div>
+
       {/* filter + sort — always available, top-right like Outlook */}
       <Menu
         align="right"
@@ -295,6 +321,21 @@ const refineActive: React.CSSProperties = {
   background: "color-mix(in srgb, var(--accent) 10%, #fff)",
   borderColor: "color-mix(in srgb, var(--accent) 30%, #fff)",
 };
+
+function modeBtn(active: boolean): React.CSSProperties {
+  return {
+    fontFamily: "var(--font-ui)",
+    fontSize: 12.5,
+    fontWeight: 600,
+    padding: "4px 12px",
+    borderRadius: 7,
+    border: active ? "1px solid var(--hairline, #e8eaee)" : "1px solid transparent",
+    background: active ? "#fff" : "transparent",
+    color: active ? "var(--ink, #16181b)" : "#5b616e",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  };
+}
 
 function Divider() {
   return <span style={{ width: 1, height: 18, background: "#e4e7ec", margin: "0 4px" }} />;

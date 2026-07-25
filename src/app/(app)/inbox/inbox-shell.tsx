@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -29,6 +29,7 @@ import {
   pinAction,
   searchInboxAction,
   sendReceiveAction,
+  setInboxModeAction,
   type SearchRow,
 } from "./actions";
 import { FolderGlyph, PencilIcon, PhoneIcon, RefreshIcon } from "./icons";
@@ -82,11 +83,11 @@ export default function InboxShell({
   fromOptions,
   initialCompose,
   categoryOptions,
-  // Punch #42: plumbed through but not yet consumed — Task 2 adds the toggle
-  // UI that reads it. Do not remove: this is intentional, forward-looking
-  // wiring for the CRM-mode pref, not dead code.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  crmMode,
+  // Punch #42: per-user Inbox/CRM mode pref, server-resolved. Renamed on
+  // destructure — the shell keeps its own optimistic copy (see crmMode
+  // state below) so the toggle flips instantly instead of waiting on the
+  // server action + revalidate.
+  crmMode: initialCrmMode,
 }: {
   box: string;
   folder: string;
@@ -102,8 +103,8 @@ export default function InboxShell({
   fromOptions: Opt[];
   initialCompose: ComposeInit | null;
   categoryOptions: CategoryOpt[];
-  // Punch #42: per-user Inbox/CRM mode pref (waiting-first sort opt-in).
-  // Read-only plumbing for now — Task 2 adds the toggle UI that consumes it.
+  // Punch #42: per-user Inbox/CRM mode pref (waiting-first sort opt-in),
+  // resolved server-side from the current user.
   crmMode: boolean;
 }) {
   const router = useRouter();
@@ -116,6 +117,19 @@ export default function InboxShell({
     window.addEventListener("resize", upd);
     return () => window.removeEventListener("resize", upd);
   }, []);
+
+  // Punch #42: Inbox/CRM mode toggle. Optimistic — flips the local copy
+  // immediately, then persists via the server action and refreshes so the
+  // waiting-first sort (and anything else gated on crmMode) catches up.
+  const [crmMode, setCrmModeState] = useState(initialCrmMode);
+  const [, startTransition] = useTransition();
+  const onToggleMode = (on: boolean) => {
+    setCrmModeState(on);
+    startTransition(async () => {
+      await setInboxModeAction(on);
+      router.refresh();
+    });
+  };
 
   const [compose, setCompose] = useState<ComposeInit | null>(initialCompose);
   const [logging, setLogging] = useState(false);
@@ -183,7 +197,7 @@ export default function InboxShell({
 
   /* ---- filter / sort (server-driven via the URL) ---- */
   const setRefinement = useCallback(
-    (key: "filter" | "sort", value: string) => {
+    (key: "filter" | "sort", value: string | null) => {
       const params = new URLSearchParams();
       if (isView) params.set("view", box);
       else {
@@ -760,17 +774,67 @@ export default function InboxShell({
         onBoxSel={onBoxSel}
         boxSelOptions={BOX_SEL_OPTIONS}
         commandBar={
-          <CommandBar
-            selectedCount={selectedIds.size}
-            isDeleted={list.isDeleted}
-            filter={list.filter}
-            sort={list.sort}
-            categoryOptions={categoryOptions}
-            onClear={() => setSelectedIds(new Set())}
-            onFilter={(v) => setRefinement("filter", v)}
-            onSort={(v) => setRefinement("sort", v)}
-            bulk={bulk}
-          />
+          <>
+            <CommandBar
+              selectedCount={selectedIds.size}
+              isDeleted={list.isDeleted}
+              filter={list.filter}
+              sort={list.sort}
+              categoryOptions={categoryOptions}
+              crmMode={crmMode}
+              onToggleMode={onToggleMode}
+              onClear={() => setSelectedIds(new Set())}
+              onFilter={(v) => setRefinement("filter", v)}
+              onSort={(v) => setRefinement("sort", v)}
+              bulk={bulk}
+            />
+            {/* Punch #42: CRM-mode follow-up filter chips — quick access to
+                the three refinements CRM users reach for most. Clicking the
+                active chip clears the filter (same URL param the Filter▾
+                menu drives). */}
+            {crmMode && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 6,
+                  padding: "6px 12px",
+                  borderBottom: "1px solid var(--row-divider, #f5f6f8)",
+                }}
+              >
+                {(
+                  [
+                    ["needs", "Needs reply"],
+                    ["flagged", "Flagged"],
+                    ["unread", "Unread"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() =>
+                      setRefinement("filter", list.filter === key ? null : key)
+                    }
+                    style={{
+                      fontSize: 12,
+                      padding: "3px 10px",
+                      borderRadius: 999,
+                      cursor: "pointer",
+                      border:
+                        list.filter === key
+                          ? "1px solid var(--accent, #b08d4a)"
+                          : "1px solid #e8eaee",
+                      background: list.filter === key ? "#faf6ee" : "#fff",
+                      color:
+                        list.filter === key
+                          ? "var(--accent-ink, #8a6c34)"
+                          : "#5b616e",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
         }
         selectedIds={selectedIds}
         onToggleSelect={onToggleSelect}
