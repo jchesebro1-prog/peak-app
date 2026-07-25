@@ -1,4 +1,4 @@
-# MASTER HOW-TO — running, deploying, and operating Peak Backend
+# MASTER HOW-TO — running, deploying, and operating Quartzite
 
 The one document that explains how to put every part of the finished app
 into service. Written for Jeff; Claude Code executes the terminal parts.
@@ -269,3 +269,103 @@ Claude Code. Useful facts for it: the app is Next.js 16 at
 `~/Downloads/peak-app`; production DB is Neon (`DATABASE_URL` in Vercel);
 specs for every screen live in `docs/specs/` and the original prototype in
 `~/Downloads/design_handoff_claude_code/`.
+
+## 9. Vercel Blob — plan sheets (and datasheets) out of the database
+
+**Why.** The Grid stores every uploaded plan sheet as a base64 blob inside
+the database (one doc per sheet, 8 MB cap). Fine for the beta; wrong at
+production scale — file bytes don't belong in Postgres, and datasheet PDFs
+(§10) will multiply the problem. Decision D113 item 2: **Vercel Blob at
+deploy time.** The app already deploys on Vercel, so this adds no new vendor.
+
+**What you do (10 minutes, one time):**
+
+1. Sign in at **vercel.com** and open the **peak-app** project (the one
+   serving `peak-app-six.vercel.app`).
+2. Go to the project's **Storage** tab → **Create** → choose **Blob** →
+   name it `quartzite-files` → create.
+3. When it offers to **connect the store to the project**, accept — Vercel
+   adds a `BLOB_READ_WRITE_TOKEN` environment variable to Production,
+   Preview, and Development automatically.
+4. For local dev, copy that token once: project → Settings → Environment
+   Variables → reveal `BLOB_READ_WRITE_TOKEN` → paste into
+   `~/Downloads/peak-app/.env.local` as
+   `BLOB_READ_WRITE_TOKEN=vercel_blob_rw_…`
+   (`.env.local` is gitignored — the token never goes in the repo).
+5. Tell Claude "the Blob token is in" — that's the whole hand-off.
+
+**What Claude builds once the token exists** (spec'd, not yet built):
+
+- `addSheet` uploads to Blob (`@vercel/blob` `put()`, public access,
+  pathname `grid-sheets/<projectId>/<sheetId>-<name>`) and stores the URL
+  instead of the base64 payload; the viewer takes URLs and data-URLs
+  interchangeably, so nothing else changes.
+- **No token → exactly today's behavior** (data-URLs in the DB). The
+  feature is env-gated like Gmail (§5); dev machines without the token
+  keep working.
+- A one-shot backfill script moves existing sheets up and rewrites their
+  docs (dev-DB discipline per AGENTS.md: server stopped, `.data` backed up).
+- The 8 MB upload cap rises (Blob takes much larger files; the practical
+  limit becomes what a browser upload tolerates).
+- §10's datasheet PDFs land in the same store under `datasheets/`.
+
+**Cost reality check:** plan sheets are ~0.5–5 MB PDFs. Hundreds of designs
+is a few GB — Blob storage is priced per GB-month at cents; this is
+dollars-per-month territory, not a line item. Current numbers:
+vercel.com/pricing → Storage → Blob.
+
+**Rollback:** disconnect the store / remove the env var and uploads fall
+back to in-database data-URLs. Already-uploaded sheets keep their URLs
+until the store itself is deleted.
+
+## 10. The Grid — device metadata authoring (ETC lighting + rigging first)
+
+**Why.** The planning session's key insight (memory:
+`projects/peak-system-designer.md`): DaVinci's moat isn't canvas code, it's
+the **curated product database** — symbols, weights, accessory rules,
+datasheets. The Grid's code is built; this data is what turns SKU-chip
+markers into a real design tool. Decision D113 item 4: **ETC lighting +
+rigging get authored first.**
+
+**The v1 contract — four new fields per catalog part** (these become
+catalog columns + import-template columns when the first sheet comes back;
+nothing else is needed to start):
+
+| Field | What it is | Example |
+|---|---|---|
+| `symbol` | How the marker draws on a plan. One key from the fixed list below — not free text. | `ellipsoidal` |
+| `weight_lb` | Hanging weight per unit, pounds. Feeds lineset/rigging math (the same well as the auto-weights work). | `17.5` |
+| `datasheet_url` | Link to the cut sheet PDF. Manufacturer URL is fine to start; once §9 exists we bulk-upload PDFs to Blob and repoint. | `https://www.etcconnect.com/...pdf` |
+| `accessories` | Allowed add-ons as `SKU:maxQty` pairs, `;`-separated. Empty = none. | `S4-TOPHAT:1;S4-IRIS:1` |
+
+**Symbol keys (v1, fixed list):** `ellipsoidal · wash · cyc · strip ·
+mover · followspot · practical · speaker · sub · mic · dimmer · relay ·
+panel · rack · hoist · winch · lineset · track · projector · screen ·
+other`. A part with a symbol is what makes it a *paintable device*; parts
+without one stay in the palette as plain dots (today's behavior). Ask for
+new keys rather than improvising — every key needs a glyph drawn once.
+
+**How we work it:**
+
+1. **Claude generates the worksheet** from the real price book: a CSV of
+   the ETC lighting + rigging rows (sku, description, manufacturer) with
+   the four metadata columns blank. Template with examples:
+   `docs/templates/grid-device-metadata-template.csv`.
+2. **You (or whoever knows the gear) fill rows in Excel.** Skip anything
+   uncertain — blank is better than guessed, especially `weight_lb`
+   (it goes into rigging math; use the manufacturer's number, and when a
+   range exists use the heaviest configuration).
+3. **Datasheet PDFs**: drop them in a Dropbox folder named by SKU
+   (`S4LED-S2.pdf`); Claude uploads the batch to Blob and fills
+   `datasheet_url` — you never paste those links by hand.
+4. **Claude imports the sheet** (extends the price-book importer with the
+   four columns), and the editor starts drawing real symbols; datasheet
+   packages (Phase 4's remaining half) become possible.
+
+**Priority order — don't boil the catalog:** the ~50 parts that will
+actually get painted first: ① ETC Source Four / ColorSource / Desire
+families, ② house/cyc/work light, ③ hoists + linesets + track (the parts
+whose `weight_lb` matters most), ④ dimming/power (Sensor, ThruPower,
+Echo). Audio/video wait for their turn (D113: ETC lighting + rigging
+first). A part is **Grid-ready** when `symbol` is set; **submittal-ready**
+when `datasheet_url` is too.
