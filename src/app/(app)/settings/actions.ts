@@ -18,6 +18,7 @@ import {
 } from "@/lib/users";
 import { permsFor, ROLES } from "@/lib/team";
 import {
+  resolveFieldDefs,
   slugifyFieldId,
   validateFieldDefs,
   type CustomFieldDef,
@@ -383,9 +384,22 @@ export async function saveCustomerFieldDefsAction(
   input: CustomerFieldDefInput[]
 ): Promise<void> {
   await requirePerm("manage_users");
+  const stored = resolveFieldDefs((await getSettings()).customerFieldDefs);
+  const storedKindById = new Map(stored.map((d) => [d.id, d.kind]));
   const rows = (Array.isArray(input) ? input : []).filter(
     (r) => (r.label || "").trim() || (r.id || "").trim()
   );
+  // Kind-locked-after-create was UI-only (disabled <select>) — enforce it
+  // server-side too, since a forged direct call could bypass the disabled
+  // control (Task-3 review finding, #23).
+  for (const r of rows) {
+    const id = (r.id || "").trim();
+    if (!id) continue;
+    const storedKind = storedKindById.get(id);
+    if (storedKind !== undefined && storedKind !== r.kind) {
+      throw new Error(`"${r.label}": field type cannot change after creation.`);
+    }
+  }
   const taken = new Set(rows.map((r) => (r.id || "").trim()).filter(Boolean));
   const defs: CustomFieldDef[] = rows.map((r) => {
     const label = (r.label || "").trim();
