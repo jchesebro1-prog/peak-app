@@ -106,6 +106,14 @@ export const companies = pgTable(
      *  companies with no quotes. */
     ownerUserId: text("owner_user_id"),
     referredByContactId: text("referred_by_contact_id"),
+    /** #23 custom-field VALUES, keyed by CustomFieldDef.id (definitions live
+     *  in AppSettingsData.customerFieldDefs). Whole-map replacement when a
+     *  writer provides it; string | number (epoch-ms for dates) | boolean |
+     *  null per value. */
+    custom: jsonb("custom")
+      .$type<Record<string, string | number | boolean | null>>()
+      .notNull()
+      .default({}),
     deleted: boolean("deleted").notNull().default(false),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull(),

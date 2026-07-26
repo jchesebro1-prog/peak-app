@@ -112,6 +112,16 @@ export type CustomerDoc = {
    *  authoritative tier lives on the person. Part of doc content so
    *  tier-only edits register as changes. */
   pricingTier?: string;
+  /**
+   * #23 — lifecycle stage, keyword tags and custom-field values, composed
+   * straight off the relational company row. CONTENT fields (inside
+   * contentKey — see its #23 note), so an edit to any of them registers as
+   * a change; write-when-provided / preserve-when-undefined on the way in
+   * (see writeRecord).
+   */
+  lifecycle?: string;
+  keywords?: string[];
+  custom?: Record<string, string | number | boolean | null>;
 };
 
 /** The metadata keys stamped by the store, not by the edit form. */
@@ -149,6 +159,11 @@ export type CustomerRecordInput = {
   contacts?: CustomerContactInput[];
   owner?: string;
   pricingTier?: string | null;
+  /** #23 — optional; undefined = preserve what's stored (legacy writers —
+   *  lead convert, the CSV importer, seed — pass none of these). */
+  lifecycle?: string;
+  keywords?: string[];
+  custom?: Record<string, string | number | boolean | null>;
 };
 
 /** Legacy name -> locations[] cache blob (prototype rss_customer_locs_v2). */
@@ -214,6 +229,11 @@ export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
   if (owner) doc.owner = owner;
   const tier = (c.pricingTier || "").trim();
   if (tier) doc.pricingTier = tier;
+  // #23 — carry the Details fields through ONLY when the caller provided
+  // them (write-when-provided; validation happened in the server action).
+  if (c.lifecycle !== undefined) doc.lifecycle = c.lifecycle;
+  if (c.keywords !== undefined) doc.keywords = c.keywords;
+  if (c.custom !== undefined) doc.custom = c.custom;
   return doc;
 }
 
@@ -291,6 +311,10 @@ function composeDoc(
   };
   if (ownerName) doc.owner = ownerName;
   if (co.pricingTier) doc.pricingTier = co.pricingTier;
+  // #23 — always composed (the columns are notNull with defaults).
+  doc.lifecycle = co.lifecycle || "none";
+  doc.keywords = Array.isArray(co.keywords) ? co.keywords : [];
+  doc.custom = co.custom ?? {};
   return doc;
 }
 
@@ -402,6 +426,22 @@ export async function resolve(
 function contentKey(d: CustomerDoc): string {
   const rest: Partial<CustomerDoc> = { ...d };
   for (const k of META_KEYS) delete rest[k];
+  // #23: give the three new content fields a CANONICAL serialization slot.
+  // The composed side (composeDoc) always sets them; the normalized side
+  // (normalizeRecord) sets only what the caller provided and writeRecord
+  // backfills the rest — so JSON key INSERTION ORDER could differ between
+  // the two sides of the D83 no-change comparison, and custom's key order
+  // additionally survives a jsonb round-trip differently than an object
+  // literal. Pin position, defaults and sorted custom keys so equality
+  // means equality.
+  delete rest.lifecycle;
+  delete rest.keywords;
+  delete rest.custom;
+  rest.lifecycle = d.lifecycle ?? "none";
+  rest.keywords = d.keywords ?? [];
+  rest.custom = Object.fromEntries(
+    Object.entries(d.custom ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  );
   return JSON.stringify(rest);
 }
 
@@ -423,6 +463,16 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
   const t = Date.now();
   const existingCo = await getCompany(rec.id);
 
+  // #23 WRITE-WHEN-PROVIDED / PRESERVE-WHEN-UNDEFINED, resolved BEFORE the
+  // change check: callers that predate the Details fields (lead convert,
+  // the CSV importer, seed/setDirectory) pass none of them — backfilling
+  // from the existing row here means those writers neither clear values nor
+  // advance updatedAt spuriously (the no-change early-return still fires),
+  // while a Details-only edit from the modal compares different and writes.
+  if (rec.lifecycle === undefined) rec.lifecycle = existingCo?.lifecycle ?? "none";
+  if (rec.keywords === undefined) rec.keywords = existingCo?.keywords ?? [];
+  if (rec.custom === undefined) rec.custom = existingCo?.custom ?? {};
+
   // D83 semantics: updatedAt only advances when content actually changed.
   if (prev && existingCo && contentKey(rec) === contentKey(prev)) return;
 
@@ -434,8 +484,9 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
     id: rec.id,
     name: rec.name,
     type: rec.type,
-    lifecycle: existingCo?.lifecycle ?? "none",
-    keywords: existingCo?.keywords ?? [],
+    lifecycle: rec.lifecycle ?? "none",
+    keywords: rec.keywords ?? [],
+    custom: rec.custom ?? {},
     website: existingCo?.website ?? null,
     mainPhone: existingCo?.mainPhone ?? null,
     address: existingCo?.address ?? null,
@@ -719,16 +770,22 @@ export { all as list };
 
 /**
  * Light company facts for cross-store filters (#18 opportunity board):
- * venue-segment type + keyword tags straight off the relational companies
- * table (schema.ts) — never a scan of the customer docs. Map key = company
- * id (the customerId stored on leads/quotes).
+ * venue-segment type + keyword tags + lifecycle stage straight off the
+ * relational companies table (schema.ts) — never a scan of the customer
+ * docs. Map key = company id (the customerId stored on leads/quotes).
  */
-export async function companyFacts(): Promise<Map<string, { type: string; keywords: string[] }>> {
+export async function companyFacts(): Promise<
+  Map<string, { type: string; keywords: string[]; lifecycle: string }>
+> {
   const rows = await allCompanies();
   return new Map(
     rows.map((c) => [
       c.id,
-      { type: c.type || "", keywords: Array.isArray(c.keywords) ? c.keywords : [] },
+      {
+        type: c.type || "",
+        keywords: Array.isArray(c.keywords) ? c.keywords : [],
+        lifecycle: c.lifecycle || "none",
+      },
     ])
   );
 }

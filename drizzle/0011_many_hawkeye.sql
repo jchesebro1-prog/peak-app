@@ -1,0 +1,1 @@
+ALTER TABLE "companies" ADD COLUMN "custom" jsonb DEFAULT '{}'::jsonb NOT NULL;
