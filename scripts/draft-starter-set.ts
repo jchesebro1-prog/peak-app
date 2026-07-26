@@ -644,6 +644,12 @@ function buildDraftMd(results: GroupResult[], sheetPresent: boolean): string {
       "there's no antenna/RF connectionType in the current taxonomy, so those two rows carry empty ports arrays " +
       "rather than a fabricated match."
   );
+  lines.push(
+    "- **No per-part `trade` in the import JSON.** Each group's `category` above is the group name itself, which " +
+      "already resolves to the right trade via the admin-editable category→{group,trade} map (falling back to " +
+      "`GROUP_TRADES`) — see `src/lib/catalog-taxonomy.ts`. A per-part trade would be redundant and would " +
+      "permanently override any future admin remap of that category."
+  );
   lines.push("");
   return lines.join("\n");
 }
@@ -732,7 +738,11 @@ function buildImportJson(results: GroupResult[]): string {
       cost: item.cost,
       mfr: item.mfr,
       ...(item.note ? { note: item.note } : {}),
-      trade: item.trade,
+      // No per-part `trade` here on purpose: `category` above is always the
+      // group name, which DEFAULT_CATEGORY_MAP/GROUP_TRADES already resolve
+      // to the right trade (catalog-taxonomy.ts). Stamping trade here too
+      // would be redundant AND would permanently shadow any future admin
+      // remap of that category — tradeOf() prefers part.trade over the map.
       ports: item.ports,
     }))
   );

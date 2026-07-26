@@ -2460,8 +2460,9 @@ What shipped: **(1) taxonomy layer** — six groups + three trades resolved thro
 admin-editable category→{group,trade} map in appSettings (parts NOT rewritten; existing
 free-text `category` untouched; Fabric/Labor excluded), seeded for all ~28 known categories,
 with an admin "Categories & trades" editor card on /catalog; **(2) ports + wire types** —
-`ports[]` on catalog parts, a 22-entry connection-type taxonomy, an admin-editable wire-type
-registry (8 defaults), and the v1 compatibility rule (type match + direction complement);
+`ports[]` on catalog parts, a 22-entry connection-type taxonomy, wire-type registry seeded
+(8 defaults; admin UI + consumption come with the cable-BOM pricing pass), and the v1
+compatibility rule (type match + direction complement);
 **(3) Grid wiring validation** — device-to-device routes (endpoint snap) validate port
 compatibility client-side AND server-side, refuse incompatible pairs via the editor notice,
 stamp from/to placement ids + connectionType, and cable BOM lines carry the connection type
@@ -2478,8 +2479,10 @@ gaps flagged: no network/NDI or RF types yet). Staged import data:
 `scripts/starter-import-data.json` (inert). **Jeff: review the two docs, mark rows to drop,
 then say "import the starter set."** 389 spec tests green; build green. Known beta-accepted
 limitation: server route validation trusts client-supplied endpoint ids (DevTools-level
-bypass yields an unlabeled free route, nothing worse). Also noted: `importCatalog` paste
-action has NO admin gate (pre-existing — flag for Jeff).
+bypass yields an unlabeled or mislabeled free route — a tampered client borrowing two real,
+compatible placement ids gets a labeled route stamped, not just an unlabeled one — nothing
+worse). Also noted: `importCatalog` paste action has NO admin gate (pre-existing — flag for
+Jeff).
 
 ---
 

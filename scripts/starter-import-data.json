@@ -7,7 +7,6 @@
     "list": 13450,
     "cost": 8070,
     "mfr": "ETC",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX Out",
@@ -30,7 +29,6 @@
     "list": 9450,
     "cost": 5670,
     "mfr": "ETC",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX Out",
@@ -53,7 +51,6 @@
     "list": 3410,
     "cost": 2046,
     "mfr": "ETC",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX Out",
@@ -76,7 +73,6 @@
     "list": 12450,
     "cost": 7470,
     "mfr": "ETC",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX In",
@@ -104,7 +100,6 @@
     "list": 915,
     "cost": 549,
     "mfr": "ETC",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX In",
@@ -133,7 +128,6 @@
     "cost": 0,
     "mfr": "ChamSys",
     "note": "verify price (list-only sheet)",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX Out",
@@ -157,7 +151,6 @@
     "cost": 0,
     "mfr": "ChamSys",
     "note": "verify price (list-only sheet)",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX Out",
@@ -181,7 +174,6 @@
     "cost": 0,
     "mfr": "ChamSys",
     "note": "verify price (list-only sheet)",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX Out",
@@ -205,7 +197,6 @@
     "cost": 0,
     "mfr": "ChamSys",
     "note": "verify price (list-only sheet)",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX Out",
@@ -229,7 +220,6 @@
     "cost": 0,
     "mfr": "ChamSys",
     "note": "verify price (list-only sheet)",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "Console Link (sACN/Art-Net)",
@@ -247,7 +237,6 @@
     "cost": 0,
     "mfr": "ChamSys",
     "note": "verify price (list-only sheet)",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX Out",
@@ -270,7 +259,6 @@
     "list": 1260,
     "cost": 756,
     "mfr": "ETC",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "Power In",
@@ -287,7 +275,6 @@
     "list": 670,
     "cost": 402,
     "mfr": "ETC",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "Power In",
@@ -304,7 +291,6 @@
     "list": 315,
     "cost": 189,
     "mfr": "ETC",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX In",
@@ -331,7 +317,6 @@
     "list": 1040,
     "cost": 624,
     "mfr": "ETC",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX In",
@@ -358,7 +343,6 @@
     "list": 1450,
     "cost": 870,
     "mfr": "ETC",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX In",
@@ -386,7 +370,6 @@
     "cost": 0,
     "mfr": "Chauvet Professional",
     "note": "verify price (list-only sheet)",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX In",
@@ -414,7 +397,6 @@
     "cost": 0,
     "mfr": "Chauvet Professional",
     "note": "verify price (list-only sheet)",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX In",
@@ -442,7 +424,6 @@
     "cost": 0,
     "mfr": "Chauvet Professional",
     "note": "verify price (list-only sheet)",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX In",
@@ -470,7 +451,6 @@
     "cost": 0,
     "mfr": "Chauvet Professional",
     "note": "verify price (list-only sheet)",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX In",
@@ -498,7 +478,6 @@
     "cost": 0,
     "mfr": "Chauvet Professional",
     "note": "verify price (list-only sheet)",
-    "trade": "Lighting",
     "ports": [
       {
         "name": "DMX In",
@@ -525,7 +504,6 @@
     "list": 5599,
     "cost": 4199.25,
     "mfr": "BirdDog",
-    "trade": "AV",
     "ports": [
       {
         "name": "Video Out",
@@ -542,7 +520,6 @@
     "list": 1495,
     "cost": 1274.25,
     "mfr": "BirdDog",
-    "trade": "AV",
     "ports": [
       {
         "name": "Video Out",
@@ -559,7 +536,6 @@
     "list": 949,
     "cost": 759.2,
     "mfr": "BirdDog",
-    "trade": "AV",
     "ports": [
       {
         "name": "HDMI",
@@ -576,7 +552,6 @@
     "list": 2495,
     "cost": 1996,
     "mfr": "BirdDog",
-    "trade": "AV",
     "ports": [
       {
         "name": "SDI In",
@@ -594,7 +569,6 @@
     "list": 995,
     "cost": 820,
     "mfr": "Matrox",
-    "trade": "AV",
     "ports": [
       {
         "name": "HDMI In",
@@ -611,7 +585,6 @@
     "list": 1295,
     "cost": 1120,
     "mfr": "Matrox",
-    "trade": "AV",
     "ports": [
       {
         "name": "HDMI In",
@@ -628,7 +601,6 @@
     "list": 2495,
     "cost": 2075,
     "mfr": "Matrox",
-    "trade": "AV",
     "ports": [
       {
         "name": "HDMI In",
@@ -645,7 +617,6 @@
     "list": 17109,
     "cost": 7698.9,
     "mfr": "AVPro Edge",
-    "trade": "AV",
     "ports": [
       {
         "name": "HDMI In",
@@ -669,7 +640,6 @@
     "list": 5619,
     "cost": 2528.9,
     "mfr": "AVPro Edge",
-    "trade": "AV",
     "ports": [
       {
         "name": "HDBaseT In",
@@ -693,7 +663,6 @@
     "list": 759,
     "cost": 339.9,
     "mfr": "AVPro Edge",
-    "trade": "AV",
     "ports": [
       {
         "name": "HDMI In (TX)",
@@ -715,7 +684,6 @@
     "list": 439,
     "cost": 196.9,
     "mfr": "AVPro Edge",
-    "trade": "AV",
     "ports": [
       {
         "name": "HDMI In",
@@ -739,7 +707,6 @@
     "cost": 0,
     "mfr": "Meyer Sound",
     "note": "verify price (headerless rows)",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -762,7 +729,6 @@
     "cost": 0,
     "mfr": "Meyer Sound",
     "note": "verify price (headerless rows)",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -785,7 +751,6 @@
     "cost": 0,
     "mfr": "Meyer Sound",
     "note": "verify price (headerless rows)",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -808,7 +773,6 @@
     "cost": 0,
     "mfr": "Meyer Sound",
     "note": "verify price (headerless rows)",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -831,7 +795,6 @@
     "cost": 0,
     "mfr": "Meyer Sound",
     "note": "verify price (headerless rows)",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -854,7 +817,6 @@
     "cost": 5460,
     "mfr": "Danley",
     "note": "verify dealer tier pricing",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -872,7 +834,6 @@
     "cost": 5250,
     "mfr": "Danley",
     "note": "verify dealer tier pricing",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -890,7 +851,6 @@
     "cost": 1108,
     "mfr": "Danley",
     "note": "verify price (headerless rows)",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -908,7 +868,6 @@
     "cost": 0,
     "mfr": "Danley",
     "note": "verify price (headerless rows)",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -925,7 +884,6 @@
     "list": 309,
     "cost": 216.3,
     "mfr": "Tannoy",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -942,7 +900,6 @@
     "list": 389,
     "cost": 272.3,
     "mfr": "Tannoy",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -959,7 +916,6 @@
     "list": 469,
     "cost": 328.3,
     "mfr": "Tannoy",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -976,7 +932,6 @@
     "list": 379,
     "cost": 265.3,
     "mfr": "Tannoy",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -993,7 +948,6 @@
     "list": 369,
     "cost": 258.3,
     "mfr": "Tannoy",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio In",
@@ -1011,7 +965,6 @@
     "cost": 8367,
     "mfr": "Biamp",
     "note": "verify — product unidentified (dealer sheet desc = part number only)",
-    "trade": "AV",
     "ports": []
   },
   {
@@ -1023,7 +976,6 @@
     "cost": 7679.5,
     "mfr": "Biamp",
     "note": "verify — product unidentified (dealer sheet desc = part number only)",
-    "trade": "AV",
     "ports": []
   },
   {
@@ -1035,7 +987,6 @@
     "cost": 7346,
     "mfr": "Biamp",
     "note": "verify — product unidentified (dealer sheet desc = part number only)",
-    "trade": "AV",
     "ports": []
   },
   {
@@ -1047,7 +998,6 @@
     "cost": 0,
     "mfr": "Shure",
     "note": "verify price (headerless rows); verify price (cost implausible, dropped)",
-    "trade": "AV",
     "ports": []
   },
   {
@@ -1059,7 +1009,6 @@
     "cost": 0,
     "mfr": "Shure",
     "note": "verify price (headerless rows); verify price (cost implausible, dropped)",
-    "trade": "AV",
     "ports": []
   },
   {
@@ -1071,7 +1020,6 @@
     "cost": 2632,
     "mfr": "Shure",
     "note": "verify price (headerless rows)",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio Out",
@@ -1089,7 +1037,6 @@
     "cost": 0,
     "mfr": "Shure",
     "note": "verify price (headerless rows); verify price (cost implausible, dropped)",
-    "trade": "AV",
     "ports": [
       {
         "name": "Audio (Dante/AES67)",
@@ -1106,7 +1053,6 @@
     "list": 21299,
     "cost": 12793.07,
     "mfr": "Allen & Heath",
-    "trade": "AV",
     "ports": [
       {
         "name": "XLR In",
@@ -1133,7 +1079,6 @@
     "list": 35999,
     "cost": 27092.03,
     "mfr": "Allen & Heath",
-    "trade": "AV",
     "ports": [
       {
         "name": "Network to MixRack (Dante/AES67)",
@@ -1150,7 +1095,6 @@
     "list": 23999,
     "cost": 18556.03,
     "mfr": "Allen & Heath",
-    "trade": "AV",
     "ports": [
       {
         "name": "XLR In",
@@ -1179,7 +1123,6 @@
     "list": 11999,
     "cost": 9277.63,
     "mfr": "Allen & Heath",
-    "trade": "AV",
     "ports": [
       {
         "name": "XLR In",
@@ -1208,7 +1151,6 @@
     "list": 45.9,
     "cost": 18.36,
     "mfr": "Texas Scenic",
-    "trade": "Rigging",
     "ports": []
   },
   {
@@ -1219,7 +1161,6 @@
     "list": 568,
     "cost": 227.2,
     "mfr": "Texas Scenic",
-    "trade": "Rigging",
     "ports": []
   },
   {
@@ -1230,7 +1171,6 @@
     "list": 7.5,
     "cost": 3,
     "mfr": "Texas Scenic",
-    "trade": "Rigging",
     "ports": []
   },
   {
@@ -1241,7 +1181,6 @@
     "list": 57.4,
     "cost": 22.96,
     "mfr": "Texas Scenic",
-    "trade": "Rigging",
     "ports": []
   },
   {
@@ -1252,7 +1191,6 @@
     "list": 390,
     "cost": 156,
     "mfr": "Texas Scenic",
-    "trade": "Rigging",
     "ports": []
   },
   {
@@ -1263,7 +1201,6 @@
     "list": 209,
     "cost": 83.6,
     "mfr": "Texas Scenic",
-    "trade": "Rigging",
     "ports": []
   },
   {
@@ -1274,7 +1211,6 @@
     "list": 2110,
     "cost": 1477,
     "mfr": "Thern",
-    "trade": "Rigging",
     "ports": []
   },
   {
@@ -1285,7 +1221,6 @@
     "list": 3095,
     "cost": 2166.5,
     "mfr": "Thern",
-    "trade": "Rigging",
     "ports": []
   },
   {
@@ -1296,7 +1231,6 @@
     "list": 9268,
     "cost": 6487.6,
     "mfr": "Thern",
-    "trade": "Rigging",
     "ports": [
       {
         "name": "Motor Power In",
@@ -1318,7 +1252,6 @@
     "list": 13547,
     "cost": 9482.9,
     "mfr": "Thern",
-    "trade": "Rigging",
     "ports": [
       {
         "name": "Motor Power In",
@@ -1340,7 +1273,6 @@
     "list": 5723,
     "cost": 4006.1,
     "mfr": "Thern",
-    "trade": "Rigging",
     "ports": [
       {
         "name": "Motor Power In",
