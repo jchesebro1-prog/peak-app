@@ -1451,5 +1451,46 @@ import { blank as surveyBlank } from "@/lib/stores/surveys";
   ok(linked.leadId === "L-1050" && linked.visitId === "SV-5001", "#34: blank() whitelist passes leadId/visitId through");
 }
 
+/* ============ ACTIVITY TIMELINE (#21) ============ */
+/* notes collection — normalize-on-read defaults. normalizeNote is pure
+   (no DB touched by importing the store module). */
+import { normalizeNote, type NoteRecord } from "@/lib/stores/notes";
+
+{
+  const T = new Date(2026, 5, 30, 10).getTime();
+  const bare = {
+    id: "N-7001",
+    parentKind: "customer",
+    parentId: "lakefront",
+    by: "Jeff Chesebro",
+    at: T,
+    createdAt: T,
+    updatedAt: T,
+  } as unknown as NoteRecord;
+  const n = normalizeNote(bare);
+  ok(n.customerId === null, "#21: normalizeNote backfills a missing customerId to null");
+  ok(n.text === "", "#21: normalizeNote backfills missing text to ''");
+
+  const full = normalizeNote({
+    id: "N-7002",
+    parentKind: "lead",
+    parentId: "L-1051",
+    customerId: "lakefront",
+    by: "Dana Whitmer",
+    at: T,
+    text: "Called about the valance",
+    createdAt: T,
+    updatedAt: T,
+  });
+  ok(
+    full.customerId === "lakefront" && full.text === "Called about the valance",
+    "#21: normalizeNote passes populated fields through"
+  );
+  ok(
+    full.parentKind === "lead" && full.parentId === "L-1051",
+    "#21: parentKind/parentId — attachable by design (the v1 composer only writes 'customer')"
+  );
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

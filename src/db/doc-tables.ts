@@ -72,6 +72,7 @@ export const generatedSpecs = docTable("generated_specs"); // assembled bid spec
 export const gridProjects = docTable("grid_projects"); // The Grid system-design projects (D108, no prototype ancestor)
 export const gridSheets = docTable("grid_sheets"); // The Grid plan-sheet backgrounds — heavy dataUrls kept out of the placement-patched project doc (D108)
 export const tasks = docTable("tasks"); // cross-record task rows, promoted from embedded ProjectTask[] (#17)
+export const notes = docTable("notes"); // attachable note records — the customer Activity feed's note-taking surface (#21)
 
 export const DOC_TABLES = {
   quotes,
@@ -94,6 +95,7 @@ export const DOC_TABLES = {
   grid_projects: gridProjects,
   grid_sheets: gridSheets,
   tasks,
+  notes,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;
