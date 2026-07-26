@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { remove, upsert } from "@/lib/stores/customers";
+import { addNoteRecord } from "@/lib/stores/notes";
 import {
   coordsOf,
   estimate,
@@ -134,5 +135,20 @@ export async function revokePortalGrantAction(input: {
   const { revokeGrant } = await import("@/lib/portal");
   await revokeGrant(String(input.grantId || ""));
   revalidatePath("/companies/" + encodeURIComponent(String(input.customerId || "")));
+  return { ok: true as const };
+}
+
+/** #21 — the Activity card's note composer. parentKind "customer" is the
+ *  only v1 composer; the NoteRecord is attachable by design (lead/project/
+ *  quote surfaces come later with no migration). */
+export async function addCustomerNoteAction(customerId: string, text: string) {
+  const me = await requireUser();
+  const t = (text || "").trim();
+  if (!customerId || !t) return { ok: false as const, error: "Write a note first." };
+  await addNoteRecord(
+    { parentKind: "customer", parentId: customerId, customerId, text: t },
+    me.name
+  );
+  revalidatePath("/", "layout");
   return { ok: true as const };
 }
