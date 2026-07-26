@@ -5,14 +5,16 @@
  *   npx tsx scripts/import-catalog.ts
  *
  * Reads scripts/catalog-import-data.json (produced from Combined.xlsx: deduped,
- * category-inferred, keyed Vendor:Model, both list + cost prices). Upserts are
- * idempotent — re-running edits in place by SKU. Flagged rows (cost>list or no
- * list price) carry note "verify price". Safe to run against the existing DB.
+ * category-inferred, keyed Vendor:Model, both list + cost prices). Rows go
+ * through mergeUpsert, so re-running re-prices existing SKUs in place while
+ * preserving fields this file doesn't carry (ports, trade, datasheet
+ * attachments, spec text). Flagged rows (cost>list or no list price) carry
+ * note "verify price". Safe to run against the existing DB.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { getDb } from "../src/db";
-import { upsert, type CatalogPart } from "../src/lib/stores/catalog";
+import { mergeUpsert, type CatalogPart } from "../src/lib/stores/catalog";
 
 type ImportPart = Omit<CatalogPart, "id">;
 
@@ -25,7 +27,7 @@ async function main() {
   let n = 0;
   let flagged = 0;
   for (const p of parts) {
-    await upsert(p);
+    await mergeUpsert(p.sku, p);
     n++;
     if (p.note) flagged++;
     if (n % 1000 === 0) console.log(`  …${n}/${parts.length}`);
