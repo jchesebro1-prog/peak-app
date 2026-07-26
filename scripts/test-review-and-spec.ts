@@ -1375,5 +1375,68 @@ ok(dueChipLabel("install", -3, "") === "3d overdue", "#19: past-due cards read N
 ok(dueChipLabel("install", 0, "") === "Due today", "#19: due-today wording preserved");
 ok(dueChipLabel("procurement", 12, "") === "Due in 12d", "#19: future cards read Due in Nd");
 
+/* ============ LEAD THREAD (#34) — visit lifecycle + convert gate ============ */
+import {
+  VISIT_STAGES, VISIT_STAGE_META, deriveVisitStage, requestStageFor, canConvertLead,
+} from "@/lib/lead-thread";
+
+{
+  const NOW = 1_800_000_000_000;
+  const DAY = 86400000;
+
+  ok(
+    VISIT_STAGES.join(",") === "requested,open,claimed,scheduled,done",
+    "#34: visit lifecycle is the locked five-stage set"
+  );
+  ok(
+    VISIT_STAGE_META.requested.label === "Requested" &&
+      VISIT_STAGE_META.open.label === "Open — unclaimed" &&
+      VISIT_STAGE_META.claimed.label === "Claimed" &&
+      VISIT_STAGE_META.scheduled.label === "Scheduled" &&
+      VISIT_STAGE_META.done.label === "Done",
+    "#34: visit stage labels"
+  );
+
+  // deriveVisitStage — legacy stage-less records read from their times
+  ok(
+    deriveVisitStage({ startAt: NOW - 2 * DAY, endAt: NOW - 2 * DAY + 3600000 }, NOW) === "done",
+    "#34: legacy stage-less past visit reads done"
+  );
+  ok(
+    deriveVisitStage({ startAt: NOW + DAY, endAt: NOW + DAY + 3600000 }, NOW) === "scheduled",
+    "#34: legacy stage-less future visit reads scheduled"
+  );
+  // stored "scheduled" past its (endAt ?? startAt) reads done
+  ok(
+    deriveVisitStage({ stage: "scheduled", startAt: NOW - DAY, endAt: NOW - DAY + 3600000 }, NOW) === "done",
+    "#34: stored scheduled with a past end reads done"
+  );
+  ok(
+    deriveVisitStage({ stage: "scheduled", startAt: NOW - DAY, endAt: null }, NOW) === "done",
+    "#34: endAt ?? startAt — null end falls back to start"
+  );
+  ok(
+    deriveVisitStage({ stage: "scheduled", startAt: NOW + DAY, endAt: NOW + 2 * DAY }, NOW) === "scheduled",
+    "#34: stored scheduled in the future stays scheduled"
+  );
+  // stored requested/open/claimed/done pass through untouched
+  ok(deriveVisitStage({ stage: "requested", startAt: null, endAt: null }, NOW) === "requested", "#34: requested passes through");
+  ok(deriveVisitStage({ stage: "open", startAt: null, endAt: null }, NOW) === "open", "#34: open passes through");
+  ok(deriveVisitStage({ stage: "claimed", startAt: null, endAt: null }, NOW) === "claimed", "#34: claimed passes through");
+  ok(deriveVisitStage({ stage: "done", startAt: NOW + DAY, endAt: null }, NOW) === "done", "#34: stored done never resurrects");
+
+  // assign-or-open stage choice
+  ok(requestStageFor("Sam Rivera") === "claimed", "#34: request with an assignee lands claimed");
+  ok(requestStageFor("") === "requested" && requestStageFor("   ") === "requested", "#34: open — anyone can claim lands requested");
+
+  // convert gate — all four branches
+  const missing = canConvertLead(null, false);
+  ok(!missing.ok && missing.reason === "survey-missing", "#34: no linked survey blocks convert");
+  const openGate = canConvertLead({ stage: "onsite" }, false);
+  ok(!openGate.ok && openGate.reason === "survey-open", "#34: un-completed survey blocks convert");
+  ok(canConvertLead({ stage: "completed" }, false).ok, "#34: completed survey passes the gate");
+  ok(canConvertLead(null, true).ok && canConvertLead({ stage: "requested" }, true).ok, "#34: explicit skip always passes");
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
