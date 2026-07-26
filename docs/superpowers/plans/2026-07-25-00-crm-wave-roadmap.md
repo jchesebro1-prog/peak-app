@@ -15,7 +15,7 @@ kit, D118 sign-on emails) must merge to `main` first. Plan 01 cites nav files
 | 01 | Tasks table + bell (`2026-07-25-01-crm-tasks-table.md`) | #17, item 16, quick fixes #32 + #28 comment | **BUILT & MERGED to main (`216c5ce`, 2026-07-25)** — subagent-driven, 6 tasks + final fable review; queue.ts + template-key-scoping plan gaps caught & fixed at final review |
 | 02 | Boards: opportunity union + projects read-only (`2026-07-26-02-crm-boards.md`) | #18, #19 | **BUILT** (2026-07-26) — union board + filters + PO-received field + forecastAt; generic `components/board`; projects `?view=board` read-only |
 | 03 | Lead → visit → survey → estimate thread (`2026-07-26-03-crm-visit-thread.md`) | #34 | **BUILT** (2026-07-26) — SiteVisit lifecycle + leadId, request/claim/schedule + invite, auto-linked survey, queue/bell surfaces, survey-gated convert (D120) |
-| 04 | Customer activity timeline + real notes | #21 | not written (reads tasks (01) + visit lifecycle (03)) |
+| 04 | Customer activity timeline + real notes (`2026-07-26-04-crm-timeline-notes.md`) | #21 | **BUILT** (2026-07-26) — notes collection (migration 0010) + pure bucketed feed + customer-page Activity card w/ composer (D121) |
 | 05 | Customer custom fields + Mine/All nav scoping | #23, #22 | not written (touches post-rebrand nav) |
 
 Known cross-plan facts discovered during 01's exploration (verified 2026-07-25):

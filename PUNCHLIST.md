@@ -1529,7 +1529,39 @@ cards" and the contact-detail view both **depend on step 1**.
 
 ---
 
-## 21. Per-record activity timeline — OPEN
+## 21. Per-record activity timeline — DONE (customer feed v1, 2026-07-26, plan 04)
+
+**DONE 2026-07-26 (plan 04, D121) — the v1 scope: the CUSTOMER-page merged feed
++ real notes.** A full-width **Activity** card on the company page merges, at
+read time (no migration, no new machinery on the sources): quote status
+history + the PO-received / portal-acceptance annex stamps, comm messages
+(drafts and Deleted-folder threads skipped), site visits (plan-03 lifecycle
+labels), flame/repair approved/completed and inspection requested/completed
+point stamps (completion via `completedAtOf`; the un-stamped "scheduled"
+transitions are skipped — no ms timestamp exists), surveys, project stage
+history (D83) and project notes — under Daylite-style buckets (Today /
+Yesterday / This week / Last week / This month / "June 2026"; local-time,
+Monday-start weeks; pure + spec-covered in `feed-buckets.ts` /
+`customer-feed-rows.ts`). **Notes are now a real record**: new non-syncable
+`notes` collection (migration 0010), `NoteRecord` with
+`parentKind: customer|lead|project|quote` + denormalized `customerId` —
+attachable by design; the v1 composer (on the card) writes customer notes
+via `addCustomerNoteAction`. Product flags for Jeff: (a) the feed
+**duplicates the Communications card** — fold Communications into Activity
+later? (b) the feed **caps at 60 rows**, "Show more" deferred. (c)
+`LeadActivity` was deliberately NOT migrated (its `logActivity` drives SLA
+stamps); lead notes can adopt `NoteRecord` later via `parentKind: "lead"`.
+Still open from this item's original ask: per-PROJECT/record timelines,
+"All Activity" filter + feed search, attachments (decision D's second half),
+and field-level change tracking (decision C — explicitly out of scope).
+**Residual minors from the final review (beta-acceptable, not blocking):**
+`addCustomerNoteAction`'s `revalidatePath("/", "layout")` is broader than
+the single company page it needs to invalidate; the note composer calls
+`router.refresh()` redundantly alongside the action's own revalidate and its
+inline error banner persists until the next submit instead of clearing on
+retry (no try/catch around the transition); the Activity card's row-count
+chip shows the capped total with no "+" affordance to signal more rows
+exist beyond the 60-row cap.
 
 **Area:** `src/app/(app)/customers/[id]/page.tsx`, `projects/view.tsx`,
 `src/app/(app)/leads/lead-drawer.tsx:817` (the only prior art)
@@ -1605,7 +1637,7 @@ itself is deferred**, so the data stops being discarded.
 - **D. Do notes and attachments become real records?** Both are prerequisites for the "note added"
   / "file attached" rows Daylite shows.
 
-**Status:** OPEN — A and B are independently useful and cheap; C and D are the expensive half
+**Status:** DONE (plan 04) — customer feed v1 + real notes shipped; C (field-level tracking) out of scope by decision, attachments still open.
 
 ---
 

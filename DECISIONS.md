@@ -1959,3 +1959,83 @@ review**; the spec's shape (§3 #34) is followed, these are the seams:
   bad invite can't strand a good schedule) but the user isn't told the
   invite itself failed. All three are logged here for Jeff rather than
   fixed in this plan.
+
+## D121 — Customer activity feed shape: notes collection, pure row builders, 60-row cap (2026-07-26)
+
+Controller calls made to unblock plan 04 (#21) — **flagged for Jeff's
+review**; the spec's v1 (§3 #21: customer-page merged feed + notes as a real
+record, no field-level tracking) is followed, these are the seams:
+
+- **`notes` is a real doc-collection** (`N-####` from base 7000, migration
+  0010), **NOT syncable** (server-action writes only — the engagements/
+  site_visits precedent; SYNCABLE_COLLECTIONS/FIELD_COLLECTIONS untouched).
+  `NoteRecord.parentKind: customer|lead|project|quote` + `parentId` +
+  denormalized `customerId` — attachable by design; only the customer
+  composer exists in v1. `nextPrefixedId` + `upsertDoc` accepted for the
+  single-user-ish composer (no `insertDocIfAbsent`): the v1 composer is the
+  only writer of customer notes, ids are minted fresh per submit (never
+  re-target an existing id), so there's no absent-vs-present race for
+  `insertDocIfAbsent`'s guard to protect against — `upsertDoc` is the
+  simpler primitive with identical behavior for this write shape.
+- **Read-time aggregation, no source changes.** The feed renders what the
+  stores already keep: quote `history[]` + the `poReceivedAt` /
+  `portalAcceptance` annexes (setPoReceived writes no history — the annex
+  IS the record), comm `messages[]`, visit lifecycle (plan 03), flame/
+  repair `approvedAt`/`completedAt`, inspection `requestedAt` (legacy 0 →
+  skipped) + `completedAtOf`, surveys at `updatedAt`, project
+  `stageHistory[]` (D83) + newest-first `notes[]`. The un-stamped
+  "scheduled" transitions (bare ISO day, no ms) are skipped.
+- **Double-fetch accepted.** The company page's own Promise.all (quotes,
+  projects, surveys, threads, visits — for the Communications / Quotes /
+  Projects / Site visits cards) and `loadCustomerFeed`'s Promise.all
+  independently re-read the SAME underlying stores (comms `byCustomer`,
+  `getAllQuotes`, `getAllSurveys`, `getAllProjects`, `visitsForCustomer`)
+  per render — no shared cache between the page and the loader. Beta-fine
+  at hundreds-of-records volumes; a shared-fetch refactor is a candidate
+  if per-request read cost ever matters.
+- **Pure feed layer with mirrored vocab.** `customer-feed-rows.ts` /
+  `feed-buckets.ts` import no stores (client-bundle + no-DB-spec rules);
+  quote verbs and survey stage labels are mirrored locally with every
+  literal pinned by specs (drift breaks the suite) — **and, post-review,
+  the mirrors are typed `Record<QuoteStatus, string>` /
+  `Record<SurveyStage, string>` via type-only imports** (erased at build,
+  so the zero-store-import rule still holds at runtime) instead of
+  `Record<string, string>`, so an added/renamed stage in either store now
+  fails `tsc`, not just the spec suite; project stage labels are PASSED IN
+  by the loader (they differ per kind), as is the inspection completion ts.
+- **Buckets are local-time, Monday-start weeks**, Date-part math (DST-safe),
+  same-day future stamps (clock skew) still read "Today". Vocabulary:
+  Upcoming / Today / Yesterday / This week / Last week / This month /
+  "<Month Year>" (en-US, the app's locale convention). The local-midnight
+  bucket edge is the same app-wide idiom used elsewhere for day-boundary
+  math (not a one-off invented for this feed).
+- **Upcoming bucket added** (reviewer fix, 2026-07-26): timestamps at/after
+  tomorrow's local midnight — e.g. a scheduled site visit with a future
+  `startAt` — now bucket as "Upcoming" and lead the feed, instead of
+  incorrectly sitting under "Today". Rows are already ts-desc sorted, so
+  the highest-ts bucket naturally comes first; `groupRows` needed no code
+  change, only `bucketFor` gained the new branch. **Companion fix:**
+  `timeAgo` (`src/lib/format.ts`) previously clamped any future delta to
+  0 ("just now"); it now has a symmetric future branch ("in Nm"/"in Nh"/
+  "in Nd") so an Upcoming row's sub-line reads correctly instead of lying.
+  All pre-existing call sites pass only past timestamps, so this is
+  additive — behavior elsewhere is unchanged.
+- **60-row cap** (`FEED_CAP`), "Show more" deferred — product flag. The
+  card's row-count chip shows the capped total with no "+" affordance, so
+  a customer at exactly 60+ rows reads identically to one at exactly 60 —
+  a cosmetic gap logged as a residual, not fixed in v1.
+- **Communications card kept** beside the feed (duplication accepted for
+  v1) — product flag: fold it into Activity later? **Related and likewise
+  flagged:** a lead-requested site visit and its auto-created survey both
+  land on the feed as separate rows ("Site visit — …" and "Survey FS-####
+  — Requested") stamped within moments of each other — a near-duplicate
+  pair from the user's point of view, same underlying event. Not merged in
+  v1; bundled with the Communications-duplication question for Jeff's call
+  on whether either pairing should collapse to one row.
+- **`LeadActivity` NOT migrated** — `logActivity` carries SLA side effects
+  (firstContactAt/lastActivityAt) that must not be bypassed; lead notes can
+  adopt `NoteRecord` (`parentKind: "lead"`) in a later plan.
+- **Job/inspection feed hrefs go to the module list pages** (`/flame-tests`,
+  `/repairs`, `/inspections`) — those screens have no `?id=` selection to
+  deep-link; quotes (`/quotes?id=`), comms (`/inbox?thread=`), surveys
+  (`/field-survey?id=`) and projects (`/projects?id=`) deep-link for real.
