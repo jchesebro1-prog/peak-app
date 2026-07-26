@@ -114,7 +114,7 @@ const DEVICE_HIT_RADIUS = 0.012;
 const DEVICE_SNAP_RADIUS = DEVICE_HIT_RADIUS * 1.5;
 
 /** Placement (if any) on `placements` whose marker the point `p` snaps to,
- *  using the same circular-tolerance shape as the existing hit-test. Scans
+ *  using the same box-tolerance shape as the existing hit-test. Scans
  *  in the same reversed order as the marker-select hit-test below (`onDown`)
  *  so overlapping devices prefer the topmost/most-recent placement. */
 function snappedPlacement(

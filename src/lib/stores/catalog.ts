@@ -91,3 +91,32 @@ export async function upsert(
   const doc: CatalogPart = { ...part, id: part.id || part.sku };
   return upsertDoc<CatalogPart>("catalog_parts", doc);
 }
+
+/**
+ * Load the existing part (if any) and shallow-merge `patch` over it before
+ * calling `upsert` — which, per the note above, is a FULL REPLACE and will
+ * otherwise silently drop any field the caller doesn't happen to carry
+ * (ports, datasheetBlobKey/Name, trade, discipline/role, costPerSqft, …).
+ *
+ * Use this instead of a bare `upsert(...)` whenever the caller only knows
+ * about a subset of a part's fields — the catalog edit form and bulk/paste
+ * import both authoritatively own a handful of fields (desc, category, unit,
+ * list, cost, mfr, note, …) and should overwrite exactly those, while
+ * everything else on an existing part rides along untouched. A key present
+ * in `patch` always wins, including an explicit `undefined` (how a caller
+ * clears a field it owns, e.g. a blanked `mfr`/`note`); a key simply absent
+ * from `patch` (as with a JSON-parsed import row that never had it) leaves
+ * the existing value in place.
+ */
+export async function mergeUpsert(
+  sku: string,
+  patch: Partial<Omit<CatalogPart, "id" | "sku">>
+): Promise<CatalogPart> {
+  const existing = await get(sku);
+  // Cast: TS can't see that callers only omit fields `existing` already
+  // supplies (or, for a brand-new part, that `patch` carries every required
+  // field itself) — the runtime contract is enforced by callers, same as
+  // the pre-existing `{ ...part, ... } as SpecCatalogPart` pattern in
+  // design/engagements/spec/actions.ts.
+  return upsert({ ...(existing ?? {}), ...patch, sku } as Omit<CatalogPart, "id"> & { id?: string });
+}

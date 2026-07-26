@@ -65,12 +65,18 @@ export function TaxonomyCard({
   const mappedCount = eligible.filter((c) => isMapped(entries[c])).length;
   const dirty = categories.some((c) => !sameEntry(entries[c], saved[c]));
 
-  const rows = categories.slice().sort((a, b) => {
-    const am = isMapped(entries[a]) ? 1 : 0;
-    const bm = isMapped(entries[b]) ? 1 : 0;
-    if (am !== bm) return am - bm;
-    return a.localeCompare(b);
-  });
+  // Sorted once from the initial (unmapped-first) state and never
+  // recomputed: if `rows` re-sorted off live `entries`, a row would jump to
+  // the "mapped" side the instant its own Group/Trade select changes,
+  // yanking the row an admin is mid-edit on out from under their cursor.
+  const [rows] = useState(() =>
+    categories.slice().sort((a, b) => {
+      const am = isMapped(initialMap[a]) ? 1 : 0;
+      const bm = isMapped(initialMap[b]) ? 1 : 0;
+      if (am !== bm) return am - bm;
+      return a.localeCompare(b);
+    })
+  );
 
   const setGroup = (cat: string, value: string) => {
     setJustSaved(false);

@@ -6,14 +6,20 @@
  *   3. npx tsx scripts/import-dealer-sheets.ts /path/to/dealer-import-data.json
  *      (DATABASE_URL=… for the hosted catalog)
  *
- * Same contract as import-catalog.ts: upserts are idempotent (SKU is the doc
- * id — re-running edits in place), flagged rows carry `note`, nothing is
- * deleted. The existing 10.7k-part price book is untouched except where a
- * dealer sheet legitimately re-prices an identical Brand:Model SKU.
+ * Upserts are idempotent (SKU is the doc id — re-running edits in place),
+ * flagged rows carry `note`, nothing is deleted. Unlike import-catalog.ts's
+ * raw upsert (a full-replace), each row here goes through mergeUpsert
+ * (lib/stores/catalog) — it loads whatever part already exists for that SKU
+ * and overlays only the fields this sheet actually carries. So re-importing
+ * an already-catalogued SKU (a dealer sheet legitimately re-pricing an
+ * identical Brand:Model SKU) only touches desc/category/unit/list/cost/mfr/
+ * note; anything added since the original import — ports, trade, a
+ * datasheet attachment, etc. — survives untouched instead of being wiped by
+ * a bare full-replace.
  */
 import { readFileSync } from "node:fs";
 import { getDb } from "../src/db";
-import { upsert, type CatalogPart } from "../src/lib/stores/catalog";
+import { mergeUpsert, type CatalogPart } from "../src/lib/stores/catalog";
 
 type ImportPart = Omit<CatalogPart, "id">;
 
@@ -29,7 +35,7 @@ async function main() {
   let n = 0;
   let flagged = 0;
   for (const p of parts) {
-    await upsert(p);
+    await mergeUpsert(p.sku, p);
     n++;
     if (p.note) flagged++;
     if (n % 1000 === 0) console.log(`  …${n}`);

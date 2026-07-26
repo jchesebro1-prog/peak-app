@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requirePerm } from "@/lib/session";
-import { get as getPart, upsert, type CatalogPart } from "@/lib/stores/catalog";
+import { get as getPart, upsert, mergeUpsert } from "@/lib/stores/catalog";
 import { parseCatalog } from "./parse";
 import { setSettings } from "@/lib/settings";
 import { GROUPS, TRADES, type CategoryMap } from "@/lib/catalog-taxonomy";
@@ -17,15 +17,21 @@ type Result = { ok: true } | { ok: false; error: string };
  * with an existing SKU edits that part. Invalid input is a silent no-op.
  */
 
-/** Add or edit a single part. */
+/**
+ * Add or edit a single part. The edit form only owns sku/desc/category/unit/
+ * list/cost/mfr/note (see the fields in page.tsx's edit modal) — it never
+ * shows ports, trade, datasheet, discipline/role, costPerSqft, etc., so a
+ * save here must not wipe those. mergeUpsert (lib/stores/catalog) loads the
+ * existing part and overlays just the form-owned fields; a blanked mfr/note
+ * still clears intentionally (undefined wins over whatever was stored).
+ */
 export async function upsertPart(formData: FormData): Promise<void> {
   await requireUser();
   const sku = String(formData.get("sku") || "").trim();
   const desc = String(formData.get("desc") || "").trim();
   if (!sku || !desc) return;
 
-  const part: Omit<CatalogPart, "id"> & { id?: string } = {
-    sku,
+  await mergeUpsert(sku, {
     desc,
     category: String(formData.get("category") || "").trim() || "Uncategorized",
     unit: String(formData.get("unit") || "").trim() || "ea",
@@ -33,8 +39,7 @@ export async function upsertPart(formData: FormData): Promise<void> {
     cost: num(formData.get("cost")),
     mfr: String(formData.get("mfr") || "").trim() || undefined,
     note: String(formData.get("note") || "").trim() || undefined,
-  };
-  await upsert(part);
+  });
   revalidatePath("/", "layout");
   redirect("/catalog");
 }
@@ -44,6 +49,11 @@ export async function upsertPart(formData: FormData): Promise<void> {
  * gets the manufacturer chosen in the sidebar (and its default category when a
  * row leaves category blank). Redirects back filtered to that manufacturer with
  * a count so the freshly-added rows are visible.
+ *
+ * Re-importing an already-catalogued SKU (e.g. a re-priced row) must not wipe
+ * fields this parse doesn't know about (ports, trade, datasheet, …) — same
+ * failure mode as upsertPart, same fix: mergeUpsert overlays just the parsed
+ * fields onto whatever part already exists for that SKU.
  */
 export async function importCatalog(formData: FormData): Promise<void> {
   await requireUser();
@@ -58,8 +68,7 @@ export async function importCatalog(formData: FormData): Promise<void> {
   let n = 0;
   for (const r of parsed.rows) {
     if (!r.valid) continue;
-    await upsert({
-      sku: r.sku,
+    await mergeUpsert(r.sku, {
       desc: r.desc,
       category: r.category || "Uncategorized",
       unit: r.unit,
@@ -97,11 +106,19 @@ function num(v: FormDataEntryValue | null): number {
  * Every group/trade value is validated against the live GROUPS/TRADES lists
  * before anything is persisted — one bad entry rejects the whole save so a
  * stale client can never wedge a garbage value into settings.
+ *
+ * Fabric/Labor are stripped before validation/persistence regardless of what
+ * the client sends — they're excluded domains (curtain configurator / labor
+ * engine; see catalog-taxonomy.ts), and the editor's disabled rows are a UI
+ * nicety, not the enforcement: the "Fabric is EXCLUDED" constraint has to
+ * hold even against a tampered client that POSTs those keys directly.
  */
 export async function saveCategoryMapAction(entries: CategoryMap): Promise<void> {
   await requirePerm("manage_users");
 
-  for (const [category, entry] of Object.entries(entries)) {
+  const { Fabric: _fabric, Labor: _labor, ...clean } = entries;
+
+  for (const [category, entry] of Object.entries(clean)) {
     if (entry.group !== undefined && !(GROUPS as readonly string[]).includes(entry.group)) {
       throw new Error(`"${entry.group}" is not a valid group (category "${category}").`);
     }
@@ -110,7 +127,7 @@ export async function saveCategoryMapAction(entries: CategoryMap): Promise<void>
     }
   }
 
-  await setSettings({ catalogCategoryMap: entries });
+  await setSettings({ catalogCategoryMap: clean });
   revalidatePath("/catalog");
 }
 
