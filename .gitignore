@@ -52,3 +52,8 @@ next-env.d.ts
 # pre-recovery snapshots of the dev db — same encrypted-token caveat as /backups/
 .data-backup*/
 .superpowers/
+
+# generated dealer-sheet conversion dump (2.9MB, punch #39 Task 7) — the
+# reviewed/staged subset lives at scripts/starter-import-data.json instead,
+# which IS committed. Regenerate via `python3 scripts/convert-dealer-sheets.py`.
+/dealer-import-data.json

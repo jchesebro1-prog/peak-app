@@ -1,0 +1,1357 @@
+[
+  {
+    "sku": "ETC:ION XE 2K-US",
+    "desc": "Ion Xe Console 2,048 Outputs",
+    "category": "Lighting Controls",
+    "unit": "ea",
+    "list": 13450,
+    "cost": 8070,
+    "mfr": "ETC",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX Out",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)",
+        "count": 2
+      },
+      {
+        "name": "Network (sACN/Art-Net)",
+        "direction": "io",
+        "connectionType": "sACN/Art-Net (etherCON/Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "ETC:ELEMENT 2 1K",
+    "desc": "Element 2 Console, 1,024 Outputs",
+    "category": "Lighting Controls",
+    "unit": "ea",
+    "list": 9450,
+    "cost": 5670,
+    "mfr": "ETC",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX Out",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)",
+        "count": 2
+      },
+      {
+        "name": "Network (sACN/Art-Net)",
+        "direction": "io",
+        "connectionType": "sACN/Art-Net (etherCON/Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "ETC:CS40",
+    "desc": "ColorSource 40 console",
+    "category": "Lighting Controls",
+    "unit": "ea",
+    "list": 3410,
+    "cost": 2046,
+    "mfr": "ETC",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX Out",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)",
+        "count": 2
+      },
+      {
+        "name": "Network (sACN/Art-Net)",
+        "direction": "io",
+        "connectionType": "sACN/Art-Net (etherCON/Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "ETC:SP3-1220B",
+    "desc": "Sensor3 12x20A Portable Pack w/ Stage pin connectors",
+    "category": "Lighting Controls",
+    "unit": "ea",
+    "list": 12450,
+    "cost": 7470,
+    "mfr": "ETC",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX In",
+        "direction": "in",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "RDM",
+        "direction": "io",
+        "connectionType": "RDM"
+      },
+      {
+        "name": "Dimmed Power Out",
+        "direction": "out",
+        "connectionType": "stage pin",
+        "count": 12
+      }
+    ]
+  },
+  {
+    "sku": "ETC:D20AF",
+    "desc": "Dual 20A Dimmer Module 500µS Advanced Features",
+    "category": "Lighting Controls",
+    "unit": "ea",
+    "list": 915,
+    "cost": 549,
+    "mfr": "ETC",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX In",
+        "direction": "in",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "RDM",
+        "direction": "io",
+        "connectionType": "RDM"
+      },
+      {
+        "name": "Dimmed Power Out",
+        "direction": "out",
+        "connectionType": "stage pin",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "sku": "ChamSys:CHAMMQ50",
+    "desc": "MagicQ MQ50 Compact Console",
+    "category": "Lighting Controls",
+    "unit": "ea",
+    "list": 7622,
+    "cost": 0,
+    "mfr": "ChamSys",
+    "note": "verify price (list-only sheet)",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX Out",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)",
+        "count": 2
+      },
+      {
+        "name": "Network (sACN/Art-Net)",
+        "direction": "io",
+        "connectionType": "sACN/Art-Net (etherCON/Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "ChamSys:CHAMMQ70",
+    "desc": "MagicQ MQ70 Compact Console",
+    "category": "Lighting Controls",
+    "unit": "ea",
+    "list": 10546,
+    "cost": 0,
+    "mfr": "ChamSys",
+    "note": "verify price (list-only sheet)",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX Out",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)",
+        "count": 2
+      },
+      {
+        "name": "Network (sACN/Art-Net)",
+        "direction": "io",
+        "connectionType": "sACN/Art-Net (etherCON/Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "ChamSys:CHAMQUICKQ10",
+    "desc": "QuickQ 10",
+    "category": "Lighting Controls",
+    "unit": "ea",
+    "list": 3132,
+    "cost": 0,
+    "mfr": "ChamSys",
+    "note": "verify price (list-only sheet)",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX Out",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)",
+        "count": 2
+      },
+      {
+        "name": "Network (sACN/Art-Net)",
+        "direction": "io",
+        "connectionType": "sACN/Art-Net (etherCON/Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "ChamSys:CHAMQUICKQ20",
+    "desc": "QuickQ 20",
+    "category": "Lighting Controls",
+    "unit": "ea",
+    "list": 4223,
+    "cost": 0,
+    "mfr": "ChamSys",
+    "note": "verify price (list-only sheet)",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX Out",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)",
+        "count": 2
+      },
+      {
+        "name": "Network (sACN/Art-Net)",
+        "direction": "io",
+        "connectionType": "sACN/Art-Net (etherCON/Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "ChamSys:CHAMMQCOMPWING",
+    "desc": "MagicQ Compact Wing",
+    "category": "Lighting Controls",
+    "unit": "ea",
+    "list": 3723,
+    "cost": 0,
+    "mfr": "ChamSys",
+    "note": "verify price (list-only sheet)",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "Console Link (sACN/Art-Net)",
+        "direction": "io",
+        "connectionType": "sACN/Art-Net (etherCON/Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "ChamSys:CHAMMQ500MPLUSWITHCASE",
+    "desc": "MagicQ MQ500M+ Stadium Console",
+    "category": "Lighting Controls",
+    "unit": "ea",
+    "list": 44480,
+    "cost": 0,
+    "mfr": "ChamSys",
+    "note": "verify price (list-only sheet)",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX Out",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)",
+        "count": 2
+      },
+      {
+        "name": "Network (sACN/Art-Net)",
+        "direction": "io",
+        "connectionType": "sACN/Art-Net (etherCON/Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "ETC:405",
+    "desc": "Source Four 5° Fixture, Black",
+    "category": "Fixtures",
+    "unit": "ea",
+    "list": 1260,
+    "cost": 756,
+    "mfr": "ETC",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "Edison"
+      }
+    ]
+  },
+  {
+    "sku": "ETC:FRES7",
+    "desc": "7” Source Four Fresnel, Black",
+    "category": "Fixtures",
+    "unit": "ea",
+    "list": 670,
+    "cost": 402,
+    "mfr": "ETC",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "Edison"
+      }
+    ]
+  },
+  {
+    "sku": "ETC:4ML-27/90-FD-P",
+    "desc": "Source Four Mini LED F-Drive Portable 2700 K / 90+ CRI - Black",
+    "category": "Fixtures",
+    "unit": "ea",
+    "list": 315,
+    "cost": 189,
+    "mfr": "ETC",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX In",
+        "direction": "in",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "DMX Thru",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "ETC:CSPAR",
+    "desc": "ColorSource PAR, XLR, black",
+    "category": "Fixtures",
+    "unit": "ea",
+    "list": 1040,
+    "cost": 624,
+    "mfr": "ETC",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX In",
+        "direction": "in",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "DMX Thru",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "ETC:SELD22H-I",
+    "desc": "Desire D22 Studio HD Canopy wash fixture - Black",
+    "category": "Fixtures",
+    "unit": "ea",
+    "list": 1450,
+    "cost": 870,
+    "mfr": "ETC",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX In",
+        "direction": "in",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "DMX Thru",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "Chauvet Professional:COLORADO1SOLO",
+    "desc": "COLORado 1 Solo",
+    "category": "Fixtures",
+    "unit": "ea",
+    "list": 900,
+    "cost": 0,
+    "mfr": "Chauvet Professional",
+    "note": "verify price (list-only sheet)",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX In",
+        "direction": "in",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "DMX Thru",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "Chauvet Professional:COLORADOPANELQ40",
+    "desc": "COLORado Panel Q40",
+    "category": "Fixtures",
+    "unit": "ea",
+    "list": 3358,
+    "cost": 0,
+    "mfr": "Chauvet Professional",
+    "note": "verify price (list-only sheet)",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX In",
+        "direction": "in",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "DMX Thru",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "Chauvet Professional:MAVERICKFORCEXSPOT",
+    "desc": "Maverick Force X Spot",
+    "category": "Fixtures",
+    "unit": "ea",
+    "list": 5087,
+    "cost": 0,
+    "mfr": "Chauvet Professional",
+    "note": "verify price (list-only sheet)",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX In",
+        "direction": "in",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "DMX Thru",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "Chauvet Professional:MAVERICKFORCE2BEAMWASH",
+    "desc": "Maverick Force 2 BeamWash",
+    "category": "Fixtures",
+    "unit": "ea",
+    "list": 4075,
+    "cost": 0,
+    "mfr": "Chauvet Professional",
+    "note": "verify price (list-only sheet)",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX In",
+        "direction": "in",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "DMX Thru",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "Chauvet Professional:COLORSTRIKEMV2",
+    "desc": "COLOR STRIKE M",
+    "category": "Fixtures",
+    "unit": "ea",
+    "list": 3823,
+    "cost": 0,
+    "mfr": "Chauvet Professional",
+    "note": "verify price (list-only sheet)",
+    "trade": "Lighting",
+    "ports": [
+      {
+        "name": "DMX In",
+        "direction": "in",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "DMX Thru",
+        "direction": "out",
+        "connectionType": "DMX512 (5-pin XLR)"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "BirdDog:BDA200",
+    "desc": "BirdDog Eyes A200 IP67 Weatherproof Full NDI PTZ Camera w/Sony Sensor & SDI (White)",
+    "category": "Video Controls",
+    "unit": "ea",
+    "list": 5599,
+    "cost": 4199.25,
+    "mfr": "BirdDog",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Video Out",
+        "direction": "out",
+        "connectionType": "SDI/BNC"
+      }
+    ]
+  },
+  {
+    "sku": "BirdDog:BDP100B",
+    "desc": "BirdDog Eyes P100 1080P full NDI PTZ Camera with SDI (Black)",
+    "category": "Video Controls",
+    "unit": "ea",
+    "list": 1495,
+    "cost": 1274.25,
+    "mfr": "BirdDog",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Video Out",
+        "direction": "out",
+        "connectionType": "SDI/BNC"
+      }
+    ]
+  },
+  {
+    "sku": "BirdDog:BD4KHDMI",
+    "desc": "BirdDog 4K HDMI - HDMI2.0, 4Kp60 NDI Encoder/Decoder",
+    "category": "Video Controls",
+    "unit": "ea",
+    "list": 949,
+    "cost": 759.2,
+    "mfr": "BirdDog",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "HDMI",
+        "direction": "io",
+        "connectionType": "HDMI"
+      }
+    ]
+  },
+  {
+    "sku": "BirdDog:BDOG4",
+    "desc": "4-Channel 12G SDI openGear Card including main processing board and I/O extender. Supports either encode or decode NDI, Ross Dashboard integration, API Control. 1080i through UHD60 resolution support.",
+    "category": "Video Controls",
+    "unit": "ea",
+    "list": 2495,
+    "cost": 1996,
+    "mfr": "BirdDog",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "SDI In",
+        "direction": "in",
+        "connectionType": "SDI/BNC",
+        "count": 4
+      }
+    ]
+  },
+  {
+    "sku": "Matrox:MHD/I",
+    "desc": "Monarch HD",
+    "category": "Video Controls",
+    "unit": "ea",
+    "list": 995,
+    "cost": 820,
+    "mfr": "Matrox",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "HDMI In",
+        "direction": "in",
+        "connectionType": "HDMI"
+      }
+    ]
+  },
+  {
+    "sku": "Matrox:MHDX/I",
+    "desc": "Monarch HDX",
+    "category": "Video Controls",
+    "unit": "ea",
+    "list": 1295,
+    "cost": 1120,
+    "mfr": "Matrox",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "HDMI In",
+        "direction": "in",
+        "connectionType": "HDMI"
+      }
+    ]
+  },
+  {
+    "sku": "Matrox:MHLCS/I",
+    "desc": "Monarch LCS",
+    "category": "Video Controls",
+    "unit": "ea",
+    "list": 2495,
+    "cost": 2075,
+    "mfr": "Matrox",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "HDMI In",
+        "direction": "in",
+        "connectionType": "HDMI"
+      }
+    ]
+  },
+  {
+    "sku": "AVPro Edge:AC-AXION-8",
+    "desc": "18Gbps 8x8 HDBaseT Matrix with ICT and Uncompressed mirrored HDMI, IR Routing, Encapsulated RS232 Command Routing, Audio Matrixing, Scalers, EDID Management, Audio Delay.  IR, RS232 and Ethernet Contr",
+    "category": "Video Controls",
+    "unit": "ea",
+    "list": 17109,
+    "cost": 7698.9,
+    "mfr": "AVPro Edge",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "HDMI In",
+        "direction": "in",
+        "connectionType": "HDMI",
+        "count": 8
+      },
+      {
+        "name": "HDBaseT Out",
+        "direction": "out",
+        "connectionType": "HDBaseT (Cat6a)",
+        "count": 8
+      }
+    ]
+  },
+  {
+    "sku": "AVPro Edge:AC-CX-84",
+    "desc": "8x4 ConferX Auto Switching Matrix w/ HDBaseT Inputs and Outputs.  Microphone, Volume and Line Level Audio",
+    "category": "Video Controls",
+    "unit": "ea",
+    "list": 5619,
+    "cost": 2528.9,
+    "mfr": "AVPro Edge",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "HDBaseT In",
+        "direction": "in",
+        "connectionType": "HDBaseT (Cat6a)",
+        "count": 8
+      },
+      {
+        "name": "HDBaseT Out",
+        "direction": "out",
+        "connectionType": "HDBaseT (Cat6a)",
+        "count": 4
+      }
+    ]
+  },
+  {
+    "sku": "AVPro Edge:AC-EX70-UHD-KIT",
+    "desc": "HDBaseT (CAT6) Extender Kit.  10.2G, 40m 4K (70m HD) Slim Extender with I-Pass, Bi-Directional Power, RS232, IR.  4K60 4:2:0 Max, HDR/HLG: 4K30 4:2:0 12 BIT, 4K30 4:2:2 12 BIT, Dolby Vision 30 FPS",
+    "category": "Video Controls",
+    "unit": "ea",
+    "list": 759,
+    "cost": 339.9,
+    "mfr": "AVPro Edge",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "HDMI In (TX)",
+        "direction": "in",
+        "connectionType": "HDMI"
+      },
+      {
+        "name": "HDBaseT Out (RX)",
+        "direction": "out",
+        "connectionType": "HDBaseT (Cat6a)"
+      }
+    ]
+  },
+  {
+    "sku": "AVPro Edge:AC-DA14-AUHD-GEN2",
+    "desc": "HDMI 1x4 18 GBPS Splitter w/HDR & EDID Mgmt (Full HDR, 4K60 4:4:4); EDID Management is DIP Switches",
+    "category": "Video Controls",
+    "unit": "ea",
+    "list": 439,
+    "cost": 196.9,
+    "mfr": "AVPro Edge",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "HDMI In",
+        "direction": "in",
+        "connectionType": "HDMI"
+      },
+      {
+        "name": "HDMI Out",
+        "direction": "out",
+        "connectionType": "HDMI",
+        "count": 4
+      }
+    ]
+  },
+  {
+    "sku": "Meyer Sound:LEOPARD",
+    "desc": "LEOPARD,BIS,W/P,FOLD,PWRCN,3P-LOOP",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 15610,
+    "cost": 0,
+    "mfr": "Meyer Sound",
+    "note": "verify price (headerless rows)",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "XLR line/mic"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "Meyer Sound:900-LFC",
+    "desc": "900-LFC,BIS,W/P,FLD,3P,NO RIG,35MM",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 12930,
+    "cost": 0,
+    "mfr": "Meyer Sound",
+    "note": "verify price (headerless rows)",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "XLR line/mic"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "Meyer Sound:UPQ-D1",
+    "desc": "UPQ-D1,BIS,W/P,3P,PM35MM,INDIA CORD",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 13620,
+    "cost": 0,
+    "mfr": "Meyer Sound",
+    "note": "verify price (headerless rows)",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "XLR line/mic"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "Meyer Sound:USW-112XP",
+    "desc": "USW-112XP,W/P,PHOENIX",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 5410,
+    "cost": 0,
+    "mfr": "Meyer Sound",
+    "note": "verify price (headerless rows)",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "XLR line/mic"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "Meyer Sound:MM-4XP",
+    "desc": "MM-4XP,OP,WHITE",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 1290,
+    "cost": 0,
+    "mfr": "Meyer Sound",
+    "note": "verify price (headerless rows)",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "XLR line/mic"
+      },
+      {
+        "name": "Power In",
+        "direction": "in",
+        "connectionType": "powerCON/True1"
+      }
+    ]
+  },
+  {
+    "sku": "Danley:TH121-T",
+    "desc": "Touring Version",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 10500,
+    "cost": 5460,
+    "mfr": "Danley",
+    "note": "verify dealer tier pricing",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "speakON NL2"
+      }
+    ]
+  },
+  {
+    "sku": "Danley:TH121-I-B",
+    "desc": "Install version",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 10100,
+    "cost": 5250,
+    "mfr": "Danley",
+    "note": "verify dealer tier pricing",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "speakON NL2"
+      }
+    ]
+  },
+  {
+    "sku": "Danley:STUDIO SERIES",
+    "desc": "TOM DANLEY STUDIO 1, WHITE",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 2216,
+    "cost": 1108,
+    "mfr": "Danley",
+    "note": "verify price (headerless rows)",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "speakON NL2"
+      }
+    ]
+  },
+  {
+    "sku": "Danley:SIGNATURE",
+    "desc": "IMMERSIVE LISTENING EXPERIENCE 3, CUSTOM COLOR",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 19158,
+    "cost": 0,
+    "mfr": "Danley",
+    "note": "verify price (headerless rows)",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "speakON NL2"
+      }
+    ]
+  },
+  {
+    "sku": "Tannoy:TA-CVS8",
+    "desc": "8\" Coaxial In-Ceiling Loudspeaker for Installation Applications",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 309,
+    "cost": 216.3,
+    "mfr": "Tannoy",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "speakON NL2"
+      }
+    ]
+  },
+  {
+    "sku": "Tannoy:TA-CMS803DC-PI",
+    "desc": "8\" Full Range Ceiling Loudspeaker with Dual Concentric Driver for Installation Applications (Pre-Install)",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 389,
+    "cost": 272.3,
+    "mfr": "Tannoy",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "speakON NL2"
+      }
+    ]
+  },
+  {
+    "sku": "Tannoy:TA-AMS8DC-BK",
+    "desc": "8\" Dual Concentric Surface-Mount Loudspeaker for Installation Applications",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 469,
+    "cost": 328.3,
+    "mfr": "Tannoy",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "speakON NL2"
+      }
+    ]
+  },
+  {
+    "sku": "Tannoy:TA-DVS8-BK",
+    "desc": "8\" Coaxial Surface-Mount Loudspeaker for Installation Applications",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 379,
+    "cost": 265.3,
+    "mfr": "Tannoy",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "speakON NL2"
+      }
+    ]
+  },
+  {
+    "sku": "Tannoy:TA-OCV6-BK",
+    "desc": "6\" Coaxial Pendant Loudspeaker for Installation Applications",
+    "category": "Speakers",
+    "unit": "ea",
+    "list": 369,
+    "cost": 258.3,
+    "mfr": "Tannoy",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio In",
+        "direction": "in",
+        "connectionType": "speakON NL2"
+      }
+    ]
+  },
+  {
+    "sku": "Biamp:930-10008-00019",
+    "desc": "930-10008-00019",
+    "category": "Audio Controls",
+    "unit": "ea",
+    "list": 16734,
+    "cost": 8367,
+    "mfr": "Biamp",
+    "note": "verify — product unidentified (dealer sheet desc = part number only)",
+    "trade": "AV",
+    "ports": []
+  },
+  {
+    "sku": "Biamp:930-00005-00036",
+    "desc": "930-00005-00036",
+    "category": "Audio Controls",
+    "unit": "ea",
+    "list": 15359,
+    "cost": 7679.5,
+    "mfr": "Biamp",
+    "note": "verify — product unidentified (dealer sheet desc = part number only)",
+    "trade": "AV",
+    "ports": []
+  },
+  {
+    "sku": "Biamp:930-00005-00030",
+    "desc": "930-00005-00030",
+    "category": "Audio Controls",
+    "unit": "ea",
+    "list": 14692,
+    "cost": 7346,
+    "mfr": "Biamp",
+    "note": "verify — product unidentified (dealer sheet desc = part number only)",
+    "trade": "AV",
+    "ports": []
+  },
+  {
+    "sku": "Shure:AD8CUS",
+    "desc": "AXIENT DIGITAL PSM 8-PORT COMBINER 470-960 MHz",
+    "category": "Audio Controls",
+    "unit": "ea",
+    "list": 5140,
+    "cost": 0,
+    "mfr": "Shure",
+    "note": "verify price (headerless rows); verify price (cost implausible, dropped)",
+    "trade": "AV",
+    "ports": []
+  },
+  {
+    "sku": "Shure:ADTQUS=-G57",
+    "desc": "AXIENT DIGITAL PSM QUAD TRANSMITTER G57 470-608 MHz",
+    "category": "Audio Controls",
+    "unit": "ea",
+    "list": 11825,
+    "cost": 0,
+    "mfr": "Shure",
+    "note": "verify price (headerless rows); verify price (cost implausible, dropped)",
+    "trade": "AV",
+    "ports": []
+  },
+  {
+    "sku": "Shure:MXA901W-R-PM-3/8-V",
+    "desc": "MXA901W-R and A901W-R-PM-3/8IN virtual bundle",
+    "category": "Audio Controls",
+    "unit": "ea",
+    "list": 4394,
+    "cost": 2632,
+    "mfr": "Shure",
+    "note": "verify price (headerless rows)",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio Out",
+        "direction": "out",
+        "connectionType": "Dante/AES67 (Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "Shure:IMXF5",
+    "desc": "IntelliMix Foundation System, Americas",
+    "category": "Audio Controls",
+    "unit": "ea",
+    "list": 3500,
+    "cost": 0,
+    "mfr": "Shure",
+    "note": "verify price (headerless rows); verify price (cost implausible, dropped)",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Audio (Dante/AES67)",
+        "direction": "io",
+        "connectionType": "Dante/AES67 (Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "Allen & Heath:AH-AVANTIS-ULTRA",
+    "desc": "Avantis Ultra 96-channel Digital Mixer with RackUltra FX and DPACK",
+    "category": "Audio Controls",
+    "unit": "ea",
+    "list": 21299,
+    "cost": 12793.07,
+    "mfr": "Allen & Heath",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "XLR In",
+        "direction": "in",
+        "connectionType": "XLR line/mic"
+      },
+      {
+        "name": "XLR Out",
+        "direction": "out",
+        "connectionType": "XLR line/mic"
+      },
+      {
+        "name": "Network (Dante/AES67)",
+        "direction": "io",
+        "connectionType": "Dante/AES67 (Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "Allen & Heath:AH-DLIVE-S5",
+    "desc": "dLive S Class 28 Fader Surface, Dual 12\" touchscreens, 2 option I/O port, Hot Swap PSU, 27 SoftKeys",
+    "category": "Audio Controls",
+    "unit": "ea",
+    "list": 35999,
+    "cost": 27092.03,
+    "mfr": "Allen & Heath",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "Network to MixRack (Dante/AES67)",
+        "direction": "io",
+        "connectionType": "Dante/AES67 (Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "Allen & Heath:AH-DLIVE-DM64-RUFX",
+    "desc": "dLive S Class RackUltra FX MixRack 64x32 I/O, 128 x 64 FPGA, 3 option I/O, ME-1 port, Dual DX Expander Link, Hot Swap PSU",
+    "category": "Audio Controls",
+    "unit": "ea",
+    "list": 23999,
+    "cost": 18556.03,
+    "mfr": "Allen & Heath",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "XLR In",
+        "direction": "in",
+        "connectionType": "XLR line/mic",
+        "count": 64
+      },
+      {
+        "name": "XLR Out",
+        "direction": "out",
+        "connectionType": "XLR line/mic",
+        "count": 32
+      },
+      {
+        "name": "Network (Dante/AES67)",
+        "direction": "io",
+        "connectionType": "Dante/AES67 (Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "Allen & Heath:AH-DLIVE-CDM32-RUFX",
+    "desc": "dLive C Class RackUltra FX MixRack 32x16 I/O, 128 x 64 FPGA, 1 option I/O, ME-1 port, DX Expander Link",
+    "category": "Audio Controls",
+    "unit": "ea",
+    "list": 11999,
+    "cost": 9277.63,
+    "mfr": "Allen & Heath",
+    "trade": "AV",
+    "ports": [
+      {
+        "name": "XLR In",
+        "direction": "in",
+        "connectionType": "XLR line/mic",
+        "count": 32
+      },
+      {
+        "name": "XLR Out",
+        "direction": "out",
+        "connectionType": "XLR line/mic",
+        "count": 16
+      },
+      {
+        "name": "Network (Dante/AES67)",
+        "direction": "io",
+        "connectionType": "Dante/AES67 (Cat6)"
+      }
+    ]
+  },
+  {
+    "sku": "Texas Scenic:101A",
+    "desc": "COMPLETE ALUMINUM TRACK  *1",
+    "category": "Curtains",
+    "unit": "ea",
+    "list": 45.9,
+    "cost": 18.36,
+    "mfr": "Texas Scenic",
+    "trade": "Rigging",
+    "ports": []
+  },
+  {
+    "sku": "Texas Scenic:110S-20B",
+    "desc": "BLACK 20' STEEL TRACK",
+    "category": "Curtains",
+    "unit": "ea",
+    "list": 568,
+    "cost": 227.2,
+    "mfr": "Texas Scenic",
+    "trade": "Rigging",
+    "ports": []
+  },
+  {
+    "sku": "Texas Scenic:101B",
+    "desc": "BLACK SINGLE CARRIER",
+    "category": "Curtains",
+    "unit": "ea",
+    "list": 7.5,
+    "cost": 3,
+    "mfr": "Texas Scenic",
+    "trade": "Rigging",
+    "ports": []
+  },
+  {
+    "sku": "Texas Scenic:102B",
+    "desc": "BLACK MASTER CARRIER",
+    "category": "Curtains",
+    "unit": "ea",
+    "list": 57.4,
+    "cost": 22.96,
+    "mfr": "Texas Scenic",
+    "trade": "Rigging",
+    "ports": []
+  },
+  {
+    "sku": "Texas Scenic:137",
+    "desc": "BLACK LOCKING MASTER CARRIER",
+    "category": "Curtains",
+    "unit": "ea",
+    "list": 390,
+    "cost": 156,
+    "mfr": "Texas Scenic",
+    "trade": "Rigging",
+    "ports": []
+  },
+  {
+    "sku": "Texas Scenic:10",
+    "desc": "PIVOT DEVICE",
+    "category": "Curtains",
+    "unit": "ea",
+    "list": 209,
+    "cost": 83.6,
+    "mfr": "Texas Scenic",
+    "trade": "Rigging",
+    "ports": []
+  },
+  {
+    "sku": "Thern:CW11-1M",
+    "desc": "1100 lb, single compartment drum for 0.31 grv, manual hoist",
+    "category": "Curtains",
+    "unit": "ea",
+    "list": 2110,
+    "cost": 1477,
+    "mfr": "Thern",
+    "trade": "Rigging",
+    "ports": []
+  },
+  {
+    "sku": "Thern:CW25-1M",
+    "desc": "2500 lb, single compartment drum, manual hoist",
+    "category": "Curtains",
+    "unit": "ea",
+    "list": 3095,
+    "cost": 2166.5,
+    "mfr": "Thern",
+    "trade": "Rigging",
+    "ports": []
+  },
+  {
+    "sku": "Thern:CWA2-PC",
+    "desc": "BASE HOIST price for CWA, 1,500 lbs capacity, 208/60/3 AC",
+    "category": "Curtains",
+    "unit": "ea",
+    "list": 9268,
+    "cost": 6487.6,
+    "mfr": "Thern",
+    "trade": "Rigging",
+    "ports": [
+      {
+        "name": "Motor Power In",
+        "direction": "in",
+        "connectionType": "motor power"
+      },
+      {
+        "name": "Pendant Control In",
+        "direction": "in",
+        "connectionType": "low-voltage pendant control"
+      }
+    ]
+  },
+  {
+    "sku": "Thern:CT40-xx",
+    "desc": "BASE HOIST, Self-climbing Truss, 3,920 lbs capacity",
+    "category": "Curtains",
+    "unit": "ea",
+    "list": 13547,
+    "cost": 9482.9,
+    "mfr": "Thern",
+    "trade": "Rigging",
+    "ports": [
+      {
+        "name": "Motor Power In",
+        "direction": "in",
+        "connectionType": "motor power"
+      },
+      {
+        "name": "Pendant Control In",
+        "direction": "in",
+        "connectionType": "low-voltage pendant control"
+      }
+    ]
+  },
+  {
+    "sku": "Thern:RD5-xx",
+    "desc": "BASE HOIST, Roll Drop hoist, 500 lbs capacity, 5.56\" dia smooth aluminum drum, 34ft max length",
+    "category": "Curtains",
+    "unit": "ea",
+    "list": 5723,
+    "cost": 4006.1,
+    "mfr": "Thern",
+    "trade": "Rigging",
+    "ports": [
+      {
+        "name": "Motor Power In",
+        "direction": "in",
+        "connectionType": "motor power"
+      },
+      {
+        "name": "Pendant Control In",
+        "direction": "in",
+        "connectionType": "low-voltage pendant control"
+      }
+    ]
+  }
+]
