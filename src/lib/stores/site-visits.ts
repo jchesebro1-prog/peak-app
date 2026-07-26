@@ -1,4 +1,5 @@
-import { listDocs, nextPrefixedId, patchDoc, upsertDoc } from "@/db/doc-store";
+import { getDoc, listDocs, nextPrefixedId, patchDoc, upsertDoc } from "@/db/doc-store";
+import { deriveVisitStage, requestStageFor, type VisitStage } from "@/lib/lead-thread";
 
 /**
  * Site visits (D76, Jeff 2026-07-19 — PUNCHLIST #2 phase 1). A visit links a
@@ -20,8 +21,10 @@ export type SiteVisitInvite = {
 
 export type SiteVisit = {
   id: string; // 'SV-####'
-  customerId: string;
-  customer: string; // denormalized name
+  /** null while the visit is a lead-borne request that pre-dates the
+   *  customer record (#34). Pre-#34 docs always carry one. */
+  customerId: string | null;
+  customer: string; // denormalized name (lead requests: the lead's org)
   locationId: string | null;
   venue: string; // denormalized venue label
   address: string; // street + city/state at time of scheduling
@@ -29,10 +32,12 @@ export type SiteVisit = {
   contactEmail: string;
   contactPhone: string;
   reason: string; // one of the Settings picklist values
-  startAt: number; // epoch-ms
-  endAt: number; // epoch-ms
+  /** epoch-ms; null until scheduled (#34). Pre-#34 docs always carry both. */
+  startAt: number | null;
+  endAt: number | null;
   notes: string;
-  assignedTo: string; // team-member NAME (app convention)
+  /** team-member NAME (app convention); "" until claimed (#34). */
+  assignedTo: string;
   createdBy: string;
   createdAt: number;
   updatedAt: number;
@@ -41,6 +46,16 @@ export type SiteVisit = {
   /** Optional consulting-engagement link (D90) — oversight visits list
    *  under the engagement's Oversight tab. */
   engagementId?: string | null;
+  /** #34 lifecycle — requested/open/claimed/scheduled/done. Backfilled on
+   *  read (normalizeVisit → deriveVisitStage) for pre-#34 docs, and a
+   *  stored "scheduled" past its end reads as "done". */
+  stage: VisitStage;
+  /** The lead this visit was requested from (#34); null for inbox-born visits. */
+  leadId: string | null;
+  /** The auto-created linked Survey (#34); null for inbox-born visits. */
+  surveyId: string | null;
+  /** Free-text preferred timing captured on the lead's request form (#34). */
+  preferredTiming: string;
 };
 
 /** Default reason picklist (Jeff: picklist, not free text). Editable in
@@ -62,9 +77,22 @@ export function mergedVisitReasons(stored?: string[] | null): string[] {
   return list.length ? list : DEFAULT_VISIT_REASONS;
 }
 
+/** Normalize-on-read (#34): backfill the lifecycle fields on pre-#34 docs
+ *  and derive stage (a stored "scheduled" past its end reads "done"). */
+function normalizeVisit(v: SiteVisit): SiteVisit {
+  v.startAt = v.startAt ?? null;
+  v.endAt = v.endAt ?? null;
+  v.customerId = v.customerId ?? null;
+  v.stage = deriveVisitStage(v, Date.now());
+  v.leadId = v.leadId ?? null;
+  v.surveyId = v.surveyId ?? null;
+  v.preferredTiming = v.preferredTiming ?? "";
+  return v;
+}
+
 export async function allVisits(): Promise<SiteVisit[]> {
   const list = await listDocs<SiteVisit>("site_visits");
-  return list.sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
+  return list.map(normalizeVisit).sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
 }
 
 export async function visitsForCustomer(customerId: string): Promise<SiteVisit[]> {
@@ -73,6 +101,21 @@ export async function visitsForCustomer(customerId: string): Promise<SiteVisit[]
 
 export async function visitsForEngagement(engagementId: string): Promise<SiteVisit[]> {
   return (await allVisits()).filter((v) => v.engagementId === engagementId);
+}
+
+export async function getVisit(id: string): Promise<SiteVisit | null> {
+  const v = await getDoc<SiteVisit>("site_visits", id);
+  return v ? normalizeVisit(v) : null;
+}
+
+export async function visitsForLead(leadId: string): Promise<SiteVisit[]> {
+  return (await allVisits()).filter((v) => v.leadId === leadId);
+}
+
+/** The lead's one ACTIVE visit (stage not "done") — the request-dedupe and
+ *  drawer-thread read. */
+export async function activeVisitForLead(leadId: string): Promise<SiteVisit | null> {
+  return (await visitsForLead(leadId)).find((v) => v.stage !== "done") ?? null;
 }
 
 /** Link/unlink a visit to a consulting engagement (D90). */
@@ -125,6 +168,37 @@ export async function stampGoogleEvent(
 ): Promise<void> {
   await patchDoc<SiteVisit>("site_visits", id, (d) => {
     d.googleEventId = googleEventId;
+    d.updatedAt = Date.now();
+  });
+}
+
+/* ---- #34 lifecycle mutations (the LEAD claim model — no approver gate) ---- */
+
+/** Claim: assign-to-self. No claimedAt anywhere in the app — stage +
+ *  updatedAt suffice (house rule). */
+export async function claimVisit(id: string, me: string): Promise<void> {
+  await patchDoc<SiteVisit>("site_visits", id, (d) => {
+    d.assignedTo = me;
+    d.stage = "claimed";
+    d.updatedAt = Date.now();
+  });
+}
+
+/** Release an existing visit back to the pool — stage "open" (distinct from
+ *  "requested" = born open, per the lifecycle semantics). */
+export async function releaseVisit(id: string): Promise<void> {
+  await patchDoc<SiteVisit>("site_visits", id, (d) => {
+    d.assignedTo = "";
+    d.stage = "open";
+    d.updatedAt = Date.now();
+  });
+}
+
+export async function scheduleVisit(id: string, startAt: number, endAt: number): Promise<void> {
+  await patchDoc<SiteVisit>("site_visits", id, (d) => {
+    d.startAt = startAt;
+    d.endAt = endAt;
+    d.stage = "scheduled";
     d.updatedAt = Date.now();
   });
 }

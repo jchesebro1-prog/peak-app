@@ -71,13 +71,18 @@ export async function loadConsultingData(): Promise<ConsultingData> {
 
   const companyIds = new Set(engagements.map((e) => e.companyId).filter(Boolean));
   const visitLites: VisitLite[] = visits
-    .filter((v: SiteVisit) => v.engagementId || companyIds.has(v.customerId))
+    // #34: unscheduled lead requests (null startAt) don't ride the consulting
+    // Oversight timeline until scheduled — VisitLite stays non-nullable.
+    .filter(
+      (v: SiteVisit) =>
+        v.startAt != null && (v.engagementId || (v.customerId != null && companyIds.has(v.customerId)))
+    )
     .map((v: SiteVisit) => ({
       id: v.id,
-      customerId: v.customerId,
+      customerId: v.customerId || "",
       reason: v.reason,
       venue: v.venue,
-      startAt: v.startAt,
+      startAt: v.startAt ?? 0,
       assignedTo: v.assignedTo,
       engagementId: v.engagementId || null,
     }));

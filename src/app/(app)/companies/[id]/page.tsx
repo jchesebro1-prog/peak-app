@@ -6,6 +6,7 @@ import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor } from "@/lib/team";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
+import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAllProjects, riskFlags, stageIndex, stagesFor } from "@/lib/stores/projects";
 import { getAll as getAllSurveys, stageMeta as surveyStageMeta } from "@/lib/stores/surveys";
@@ -526,26 +527,47 @@ export default async function CustomerDetailPage({
               grants={portalGrants}
             />
 
-            {/* ---- site visits (D76) — scheduled from the Inbox ---- */}
+            {/* ---- site visits (D76/#34) — Inbox-scheduled + lead-requested ---- */}
             {visits.length > 0 && (
               <div style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, boxShadow: "0 1px 2px rgba(0,0,0,.04)", padding: "15px 16px" }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 12 }}>
                   Site visits
                 </div>
-                {visits.slice(0, 6).map((v) => (
-                  <div key={v.id} style={{ padding: "8px 0", borderTop: "1px solid #f3f4f7" }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3 }}>
-                      {v.reason}
-                      {v.venue ? " · " + v.venue : ""}
+                {visits.slice(0, 6).map((v) => {
+                  const sm = VISIT_STAGE_META[v.stage];
+                  return (
+                    <div key={v.id} style={{ padding: "8px 0", borderTop: "1px solid #f3f4f7" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3, minWidth: 0 }}>
+                          {v.reason}
+                          {v.venue ? " · " + v.venue : ""}
+                        </div>
+                        <span
+                          style={{
+                            fontSize: 9.5,
+                            fontWeight: 600,
+                            color: sm.ink,
+                            background: sm.soft,
+                            border: `1px solid ${sm.bd}`,
+                            padding: "1px 7px",
+                            borderRadius: 20,
+                            whiteSpace: "nowrap",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {sm.label}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
+                        {v.startAt != null
+                          ? new Date(v.startAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+                          : v.preferredTiming || "Not scheduled yet"}
+                        {v.assignedTo ? " · " + v.assignedTo : " · unclaimed"}
+                        {v.invite?.sentAt ? " · invite sent" : ""}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
-                      {new Date(v.startAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                      {" · "}
-                      {v.assignedTo}
-                      {v.invite?.sentAt ? " · invite sent" : ""}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

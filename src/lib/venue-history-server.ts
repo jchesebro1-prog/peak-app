@@ -71,7 +71,11 @@ export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
   // Site visits can be scheduled in the future; clamp to now so a scheduled
   // visit doesn't sort the venue to the top of "most recently active" (and
   // so timeAgo doesn't render a future ts as "just now").
-  for (const v of visits) bump(v.customerId, v.locationId, Math.min(v.startAt, dirNow));
+  for (const v of visits) {
+    // #34: lead-borne requests may carry no customer / no schedule yet.
+    if (v.customerId == null || v.startAt == null) continue;
+    bump(v.customerId, v.locationId, Math.min(v.startAt, dirNow));
+  }
   // Engagements use companyId + siteIds (docLocId values), not customerId/locationId.
   for (const e of engagements) {
     if (!e.companyId) continue;
@@ -168,9 +172,12 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
   }
   const now = Date.now();
   for (const v of visits.filter((r) => docMatchesVenue(r, companyId, locId))) {
+    // #34: unscheduled requests sort by creation and read open via their stage.
     rows.push({
       id: v.id, kind: "visit", title: v.reason || v.venue || v.id, subtitle: "Site visit",
-      ts: v.startAt, status: v.startAt >= now ? "upcoming" : "past", open: v.startAt >= now,
+      ts: v.startAt ?? v.createdAt,
+      status: v.startAt == null ? v.stage : v.startAt >= now ? "upcoming" : "past",
+      open: v.startAt == null ? v.stage !== "done" : v.startAt >= now,
       href: v.engagementId ? "/design/engagements/" + encodeURIComponent(v.engagementId) : "/calendar",
     });
   }

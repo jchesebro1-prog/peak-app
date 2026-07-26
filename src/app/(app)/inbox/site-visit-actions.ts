@@ -91,6 +91,10 @@ export async function createSiteVisitAction(
     assignedTo: input.assignedTo,
     createdBy: me.name,
     engagementId: input.engagementId || null,
+    stage: "scheduled",
+    leadId: null,
+    surveyId: null,
+    preferredTiming: "",
   });
 
   let inviteStatus: InviteStatus;

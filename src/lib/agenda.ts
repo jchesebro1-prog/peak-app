@@ -73,17 +73,20 @@ export async function loadAgendaRange(
   }
   for (const v of await allVisits()) {
     if (v.assignedTo !== me) continue;
-    if (v.endAt < minMs || v.startAt > maxMs) continue;
+    // #34: unscheduled requests (null startAt) have no agenda slot yet.
+    if (v.startAt == null) continue;
+    const endMs = v.endAt ?? v.startAt;
+    if (endMs < minMs || v.startAt > maxMs) continue;
     if (v.googleEventId && fetchedIds.has(v.googleEventId)) continue;
     if (fetchedIcal.has("sv-" + v.id + "@peak-app")) continue;
     items.push({
       key: "v-" + v.id,
       title: (v.venue || v.customer) + " — " + v.reason,
       startMs: v.startAt,
-      endMs: v.endAt,
+      endMs,
       allDay: false,
       location: v.address,
-      href: "/companies/" + encodeURIComponent(v.customerId),
+      href: v.customerId ? "/companies/" + encodeURIComponent(v.customerId) : "",
       source: "visit",
     });
   }
