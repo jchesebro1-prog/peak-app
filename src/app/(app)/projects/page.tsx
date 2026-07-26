@@ -16,6 +16,9 @@ export default async function ProjectsPage({
   const idParam = one(sp.id);
   if (idParam) redirect(`/projects/${encodeURIComponent(idParam)}`);
   const filter = normFilter(one(sp.filter));
+  // #19: list (default, stripped from URLs) | board — allowlisted like the
+  // leads view param.
+  const view = one(sp.view) === "board" ? ("board" as const) : ("list" as const);
 
   return (
     <ProjectsView
@@ -24,6 +27,7 @@ export default async function ProjectsPage({
       sel={null}
       filter={filter}
       tab="overview"
+      view={view}
       custById={data.custById}
       identity={data.identity}
       roster={data.roster}

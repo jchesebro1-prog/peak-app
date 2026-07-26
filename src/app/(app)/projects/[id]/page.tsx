@@ -24,6 +24,9 @@ export default async function ProjectDetailPage({
 
   const filter = normFilter(one(sp.filter));
   const tab = one(sp.tab) || "overview";
+  // #19: list (default, stripped from URLs) | board — allowlisted like the
+  // leads view param.
+  const view = one(sp.view) === "board" ? ("board" as const) : ("list" as const);
 
   return (
     <ProjectsView
@@ -32,6 +35,7 @@ export default async function ProjectDetailPage({
       sel={sel}
       filter={filter}
       tab={tab}
+      view={view}
       custById={data.custById}
       identity={data.identity}
       roster={data.roster}

@@ -16,6 +16,7 @@ import {
   fmtDateY,
   timeAgo,
   STAGING_BUFFER,
+  PROJECT_STAGES,
   type ProjectRecord,
   type ProjectStage,
   type ProjectKind,
@@ -33,6 +34,10 @@ import {
   startConversionAction,
 } from "./actions";
 import { TasksCard } from "./tasks-card";
+import { SegmentedToggle } from "@/components/ui";
+import BoardView from "@/components/board/board-view";
+import type { BoardCardVM, BoardColumnVM } from "@/components/board/types";
+import { boardProjects, dueChipLabel } from "./board-lib";
 
 /* ---------------- design tokens (accent via CSS vars, never hardcoded) ---------------- */
 
@@ -50,6 +55,11 @@ export const PROJECTS_CSS = `
   .pm-risk { background: #fdf6f3; border-radius: 6px; }
   .pm-rowscroll::-webkit-scrollbar { display: none; }
   .pm-rowscroll { -ms-overflow-style: none; scrollbar-width: none; }
+  .lv-hs::-webkit-scrollbar { height: 9px; }
+  .lv-hs::-webkit-scrollbar-thumb { background: #d3d6dd; border-radius: 8px; }
+  .lv-col::-webkit-scrollbar { width: 7px; }
+  .lv-col::-webkit-scrollbar-thumb { background: #dcdfe5; border-radius: 8px; }
+  .lv-bcard:hover { border-color: #c4c9d2; box-shadow: 0 3px 10px rgba(16,18,22,.09); }
   @media (max-width: 900px) {
     .pm-grid { grid-template-columns: 1fr !important; }
     .pm-stats { grid-template-columns: 1fr 1fr !important; }
@@ -177,6 +187,7 @@ export function ProjectsView({
   sel,
   filter,
   tab,
+  view,
   custById,
   identity,
   roster,
@@ -188,6 +199,7 @@ export function ProjectsView({
   sel: ProjectRecord | null;
   filter: string;
   tab: string;
+  view: "list" | "board";
   custById: Map<string, string>;
   identity: Identity[];
   roster: string[];
@@ -242,9 +254,43 @@ export function ProjectsView({
 
   const curPath = sel ? "/projects/" + encodeURIComponent(sel.id) : "/projects";
   const filterHref = (key: string) =>
-    curPath + qs({ filter: key === "active" ? undefined : key, tab: sel && tab !== "overview" ? tab : undefined });
+    curPath +
+    qs({
+      filter: key === "active" ? undefined : key,
+      tab: sel && tab !== "overview" ? tab : undefined,
+      view: view === "board" ? "board" : undefined,
+    });
   const cardHref = (id: string) =>
-    "/projects/" + encodeURIComponent(id) + qs({ filter: filter === "active" ? undefined : filter });
+    "/projects/" +
+    encodeURIComponent(id) +
+    qs({
+      filter: filter === "active" ? undefined : filter,
+      view: view === "board" ? "board" : undefined,
+    });
+
+  // #19 board mode: installs only, read-only (no moveAction, empty canMoveTo
+  // — stage changes keep their deliberate setProjectStage path). Columns are
+  // the 7 install stages with the view-layer STAGE_META labels.
+  const idLookup = makeIdentityLookup(identity);
+  const boardColumns: BoardColumnVM[] = PROJECT_STAGES.map((s) => ({
+    key: s.key as string,
+    label: STAGE_META[s.key].label,
+    dot: STAGE_META[s.key].ink,
+  }));
+  const boardCards: BoardCardVM[] = boardProjects(projects).map((p) => ({
+    id: p.id,
+    col: p.stage,
+    title: p.name,
+    sub: custName(p),
+    value: p.value || 0,
+    valueLabel: shortMoney(p.value),
+    chips: [],
+    owner: p.owner ? { initials: idLookup.initialsOf(p.owner), color: idLookup.colorOf(p.owner) } : null,
+    ownerTitle: p.owner || "Unassigned",
+    ageLabel: dueChipLabel(p.stage, daysUntil(p.targetDate), fmtDate(p.updatedAt)),
+    href: "/projects/" + encodeURIComponent(p.id) + "?view=board",
+    canMoveTo: [],
+  }));
 
   const standfirst =
     active.length + " active · " + shortMoney(activeValue) + " in delivery · " + atRisk.length + " need attention";
@@ -443,21 +489,22 @@ export function ProjectsView({
         </div>
       )}
 
-      {/* filters */}
-      <div
-        className="pm-rowscroll"
-        style={{
-          display: "flex",
-          background: "#eceef1",
-          borderRadius: 9,
-          padding: 3,
-          marginBottom: 14,
-          width: "max-content",
-          maxWidth: "100%",
-          overflowX: "auto",
-        }}
-      >
-        {filterDefs.map(([key, label]) => {
+      {/* filters + view toggle (#19) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        {!(view === "board" && !sel) && (
+          <div
+            className="pm-rowscroll"
+            style={{
+              display: "flex",
+              background: "#eceef1",
+              borderRadius: 9,
+              padding: 3,
+              width: "max-content",
+              maxWidth: "100%",
+              overflowX: "auto",
+            }}
+          >
+            {filterDefs.map(([key, label]) => {
           const on = filter === key;
           return (
             <Link
@@ -495,10 +542,43 @@ export function ProjectsView({
             </Link>
           );
         })}
+          </div>
+        )}
+        {!sel && (
+          <SegmentedToggle
+            options={[
+              { key: "list", label: "List" },
+              { key: "board", label: "Board" },
+            ]}
+            active={view}
+            hrefFor={(k) =>
+              k === "board"
+                ? "/projects?view=board"
+                : "/projects" + qs({ filter: filter === "active" ? undefined : filter })
+            }
+          />
+        )}
       </div>
 
-      {/* master-detail */}
-      <div className="pm-grid">
+      {view === "board" && !sel ? (
+        /* #19 read-only installs board — pending strip + stat tiles above stay */
+        <div
+          style={{
+            height: "calc(100vh - 340px)",
+            minHeight: 460,
+            display: "flex",
+            flexDirection: "column",
+            background: "#fff",
+            border: "1px solid #ececf0",
+            borderRadius: 13,
+            boxShadow: "0 1px 2px rgba(0,0,0,.04)",
+            overflow: "hidden",
+          }}
+        >
+          <BoardView columns={boardColumns} cards={boardCards} />
+        </div>
+      ) : (
+        <div className="pm-grid">
         {/* LEFT: list */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
           {listSrc.map((p) => {
@@ -507,14 +587,7 @@ export function ProjectsView({
             const risks = riskFlags(p);
             const due = daysUntil(p.targetDate);
             const pct = progressPct(p);
-            const dueLabel =
-              p.stage === "complete"
-                ? "Closed " + fmtDate(p.updatedAt)
-                : due < 0
-                  ? Math.abs(due) + "d overdue"
-                  : due === 0
-                    ? "Due today"
-                    : "Due in " + due + "d";
+            const dueLabel = dueChipLabel(p.stage, due, fmtDate(p.updatedAt));
             return (
               <Link
                 key={p.id}
@@ -633,6 +706,7 @@ export function ProjectsView({
               p={sel}
               tab={tab}
               filter={filter}
+              view={view}
               custName={custName(sel)}
               identity={identity}
               roster={roster}
@@ -675,6 +749,7 @@ export function ProjectsView({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -687,6 +762,7 @@ function ProjectDetail({
   p,
   tab,
   filter,
+  view,
   custName,
   identity,
   roster,
@@ -696,6 +772,7 @@ function ProjectDetail({
   p: ProjectRecord;
   tab: string;
   filter: string;
+  view: "list" | "board";
   custName: string;
   identity: Identity[];
   roster: string[];
@@ -715,8 +792,16 @@ function ProjectDetail({
 
   const detailBase = "/projects/" + encodeURIComponent(p.id);
   const tabHref = (key: string) =>
-    detailBase + qs({ filter: filter === "active" ? undefined : filter, tab: key === "overview" ? undefined : key });
-  const backHref = "/projects" + qs({ filter: filter === "active" ? undefined : filter });
+    detailBase +
+    qs({
+      filter: filter === "active" ? undefined : filter,
+      tab: key === "overview" ? undefined : key,
+      view: view === "board" ? "board" : undefined,
+    });
+  const backHref =
+    view === "board"
+      ? "/projects?view=board"
+      : "/projects" + qs({ filter: filter === "active" ? undefined : filter });
 
   const lateCount = (p.procurement || []).filter((l) => lineLate(p, l)).length;
   const tabDefs: Array<[string, string, number]> = isOrder
