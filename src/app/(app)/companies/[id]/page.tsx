@@ -19,6 +19,9 @@ import {
   officesFromSettings,
 } from "@/lib/geo";
 import { shortDate, timeAgo } from "@/lib/format";
+import { loadCustomerFeed } from "@/lib/customer-feed";
+import { groupRows } from "@/lib/feed-buckets";
+import ActivityComposer from "./activity-composer";
 import { Avatar } from "@/components/ui";
 
 export const metadata = { title: "Company — Quartzite-6" };
@@ -79,13 +82,14 @@ export default async function CustomerDetailPage({
   const cust = await getCustomer(id);
   if (!cust) notFound();
 
-  const [quotes, projects, surveys, threads, offices, users] = await Promise.all([
+  const [quotes, projects, surveys, threads, offices, users, feedRows] = await Promise.all([
     getAllQuotes(),
     getAllProjects(),
     getAllSurveys(),
     commsByCustomer(id),
     officesFromSettings(),
     activeUsers(),
+    loadCustomerFeed({ id: cust.id, name: cust.name }),
   ]);
 
   const edit = one(sp.edit);
@@ -195,6 +199,7 @@ export default async function CustomerDetailPage({
 
   const tc = typeColor(cust.type);
   const commWaiting = threads.filter((t) => t.status === "waiting_us").length;
+  const feedGroups = groupRows(feedRows, Date.now());
 
   const stats = [
     { label: "Open value", value: openValue > 0 ? money(openValue) : "—", color: openValue > 0 ? "#16181d" : "#aab0bb" },
@@ -360,6 +365,54 @@ export default async function CustomerDetailPage({
           {threads.length === 0 && (
             <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
               No logged interactions yet. Log a call, email, or meeting to start this company&apos;s history.
+            </div>
+          )}
+        </div>
+
+        {/* ---- activity (#21) — merged feed + real-note composer ---- */}
+        <div style={card}>
+          <div style={cardHead}>
+            <div style={{ fontSize: 14.5, fontWeight: 600 }}>Activity</div>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>{feedRows.length}</span>
+          </div>
+          <ActivityComposer customerId={cust.id} />
+          {feedGroups.map((g) => (
+            <div key={g.bucket}>
+              <div style={{ padding: "9px 18px 7px", fontSize: 10, fontWeight: 600, color: "#aab0bb", letterSpacing: ".05em", textTransform: "uppercase", background: "#fafbfc", borderBottom: "1px solid #f0f1f4" }}>
+                {g.bucket}
+              </div>
+              {g.rows.map((r) => {
+                const rowStyle: CSSProperties = { display: "flex", alignItems: "flex-start", gap: 11, padding: "10px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" };
+                const inner = (
+                  <>
+                    <span style={{ width: 26, height: 26, borderRadius: "50%", background: r.soft, color: r.ink, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, fontWeight: 700, flexShrink: 0 }}>
+                      {r.letter}
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.35, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" }}>
+                        {r.title}
+                      </span>
+                      <span style={{ display: "block", fontSize: 11, color: "#aab0bb", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {[r.sub, r.by, timeAgo(r.ts)].filter(Boolean).join(" · ")}
+                      </span>
+                    </span>
+                  </>
+                );
+                return r.href ? (
+                  <Link key={r.id} href={r.href} className="cu-d-row" style={rowStyle}>
+                    {inner}
+                  </Link>
+                ) : (
+                  <div key={r.id} style={rowStyle}>
+                    {inner}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+          {feedRows.length === 0 && (
+            <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
+              No activity yet — quotes, messages, visits and notes will land here.
             </div>
           )}
         </div>
