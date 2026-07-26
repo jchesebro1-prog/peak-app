@@ -66,6 +66,13 @@ export type AppSettingsData = {
    *  DEFAULT_WIRE_TYPES seed list, not a per-key merge). Feeds Grid wiring
    *  validation (Task 4). */
   wireTypes?: import("@/lib/catalog-connect").WireType[];
+  /** Customer custom-field DEFINITIONS (#23) — FULL REPLACEMENT on save
+   *  (the wireTypes idiom, never a per-key merge): resolveFieldDefs in
+   *  lib/customer-fields resolves `stored ?? []` and there are NO code
+   *  defaults. ≤30 defs; edited in Settings → Admin → Customer fields.
+   *  VALUES live per-company in the relational companies.custom column,
+   *  keyed by CustomFieldDef.id. */
+  customerFieldDefs?: import("@/lib/customer-fields").CustomFieldDef[];
 };
 
 export async function getSettingsPatch(): Promise<Record<string, unknown>> {

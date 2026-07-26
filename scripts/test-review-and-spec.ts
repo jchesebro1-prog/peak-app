@@ -1716,5 +1716,110 @@ import { timeAgo } from "@/lib/format";
   ok(timeAgo(Date.now() + 3 * 86_400_000 + 60_000) === "in 3d", "#21: timeAgo future days renders 'in Nd'");
 }
 
+/* ============ CUSTOMER FIELDS + MINE/ALL (#23/#22) ============ */
+/* #23 — pure custom-field helpers. Dependency-free module, exact literals.
+   The only timestamp is an epoch-ms passthrough built from LOCAL Date parts
+   (TZ house rule, see the queueDueLabel note above). */
+import {
+  defsForType,
+  resolveFieldDefs,
+  slugifyFieldId,
+  validateFieldDefs,
+  validateFieldValues,
+  type CustomFieldDef,
+} from "@/lib/customer-fields";
+
+{
+  ok(
+    resolveFieldDefs(undefined).length === 0 && resolveFieldDefs(null).length === 0,
+    "#23: resolveFieldDefs(stored) = stored ?? [] — there are NO code defaults"
+  );
+
+  // slugifyFieldId — stable ids from labels, collision-suffixed
+  ok(slugifyFieldId("Referred By", new Set()) === "referred-by", "#23: slug lowercases and dashes the label");
+  ok(
+    slugifyFieldId("Referred By", new Set(["referred-by"])) === "referred-by-2",
+    "#23: a taken slug suffixes -2"
+  );
+  ok(
+    slugifyFieldId("Referred By", new Set(["referred-by", "referred-by-2"])) === "referred-by-3",
+    "#23: suffixes keep counting"
+  );
+  ok(slugifyFieldId("!!!", new Set()) === "field", "#23: an all-symbol label falls back to 'field'");
+
+  const DEFS: CustomFieldDef[] = [
+    { id: "referred-by", label: "Referred by", kind: "text", appliesTo: [] },
+    { id: "annual-budget", label: "Annual budget", kind: "number", appliesTo: ["Education"] },
+    { id: "last-inspection", label: "Last inspection", kind: "date", appliesTo: [] },
+    { id: "region", label: "Region", kind: "select", options: ["North", "South"], appliesTo: [] },
+    { id: "tax-exempt", label: "Tax exempt", kind: "checkbox", appliesTo: ["Education", "Worship"] },
+  ];
+
+  // defsForType — empty appliesTo means EVERY type
+  ok(
+    defsForType(DEFS, "Performing arts").map((d) => d.id).join(",") === "referred-by,last-inspection,region",
+    "#23: empty appliesTo applies to every type; typed defs stay out"
+  );
+  ok(defsForType(DEFS, "Education").length === 5, "#23: a listed type gets its typed defs too");
+  ok(
+    defsForType(DEFS, "Worship").map((d) => d.id).join(",") === "referred-by,last-inspection,region,tax-exempt",
+    "#23: appliesTo is a per-def allowlist, order preserved"
+  );
+
+  // validateFieldValues — kind-checked, unknown ids stripped, null clears
+  const T = new Date(2026, 6, 20).getTime();
+  const vals = validateFieldValues(DEFS, {
+    "referred-by": "  Patrick Strain  ",
+    "annual-budget": "125000",
+    "last-inspection": T,
+    region: "North",
+    "tax-exempt": true,
+    ghost: "dropped",
+  });
+  ok(vals["referred-by"] === "Patrick Strain", "#23: text values trim");
+  ok(vals["annual-budget"] === 125000, "#23: numeric strings coerce to numbers");
+  ok(vals["last-inspection"] === T, "#23: dates are epoch-ms numbers, passed through untouched");
+  ok(vals["region"] === "North" && vals["tax-exempt"] === true, "#23: select/checkbox values pass when valid");
+  ok(!("ghost" in vals), "#23: ids with no matching def are stripped");
+
+  const bad = validateFieldValues(DEFS, {
+    "annual-budget": "a lot",
+    region: "West",
+    "tax-exempt": "yes",
+    "last-inspection": "2026-07-20",
+    "referred-by": null,
+  });
+  ok(!("annual-budget" in bad), "#23: uncoercible numbers are dropped");
+  ok(!("region" in bad), "#23: a select value outside options is dropped");
+  ok(!("tax-exempt" in bad), "#23: non-boolean checkbox values are dropped");
+  ok(!("last-inspection" in bad), "#23: ISO date strings are dropped — dates are epoch-ms ONLY");
+  ok(bad["referred-by"] === null, "#23: null clears a value");
+  ok(
+    validateFieldValues(DEFS, { "referred-by": "   " })["referred-by"] === null,
+    "#23: whitespace-only text clears like null"
+  );
+
+  // validateFieldDefs — dup ids, caps, select-without-options
+  ok(validateFieldDefs(DEFS).ok === true, "#23: the sample defs validate");
+  ok(
+    validateFieldDefs([...DEFS, { id: "region", label: "Region 2", kind: "text", appliesTo: [] }]).ok === false,
+    "#23: duplicate ids fail validation"
+  );
+  ok(
+    validateFieldDefs([{ id: "s", label: "S", kind: "select", appliesTo: [] }]).ok === false,
+    "#23: a select def with no options fails"
+  );
+  ok(
+    validateFieldDefs(
+      Array.from({ length: 31 }, (_, i) => ({ id: "f" + i, label: "F" + i, kind: "text" as const, appliesTo: [] }))
+    ).ok === false,
+    "#23: the 30-def cap holds"
+  );
+  ok(
+    validateFieldDefs([{ id: "x", label: "x".repeat(61), kind: "text", appliesTo: [] }]).ok === false,
+    "#23: labels cap at 60 chars"
+  );
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
