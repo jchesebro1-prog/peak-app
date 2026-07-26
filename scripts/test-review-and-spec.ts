@@ -1241,5 +1241,113 @@ ok(!isModeDefaultSort("date", true), "#42 fix: CRM mode's default is waiting-fir
 ok(!isModeDefaultSort("from", false), "#42 fix: sort=from is never a mode default, in either mode");
 ok(!isModeDefaultSort("subject", true), "#42 fix: sort=subject is never a mode default, in either mode");
 
+/* ============ OPPORTUNITIES (#18) — merged pipeline pure model ============ */
+import {
+  OPP_COLUMNS, OPEN_OPP_COLUMNS, leadColumn, quoteColumn, leadStageForCol,
+  canSetPoReceived, buildOpportunities, allowedMoves, applyOppFilters,
+  openTotals, ageLabel as oppAge,
+  type OppLeadInput, type OppQuoteInput, type OppRow, type CompanyFacts,
+} from "@/lib/opportunities";
+
+{
+  const NOW = 1_800_000_000_000;
+  const DAY = 86400000;
+
+  ok(
+    OPP_COLUMNS.map((c) => c.key).join(",") === "new,collect,estimate,estimate_sent,closed,po_received",
+    "#18: column keys are the locked bid-stage set"
+  );
+  ok(
+    OPP_COLUMNS.map((c) => c.label).join("|") === "New|Collect Info|Estimate|Estimate Sent|Won / Lost|PO Received",
+    "#18: column labels match the Daylite vocabulary"
+  );
+  ok(OPEN_OPP_COLUMNS.join(",") === "new,collect,estimate,estimate_sent", "#18: four open columns");
+
+  // lead stage → column
+  ok(leadColumn("new") === "new" && leadColumn("contacted") === "collect", "#18: lead new/contacted map to new/collect");
+  ok(leadColumn("qualified") === "estimate" && leadColumn("quoted") === "estimate_sent", "#18: lead qualified/quoted map to estimate/estimate_sent");
+  ok(leadColumn("won") === "closed" && leadColumn("lost") === "closed", "#18: lead won + lost share the closed column");
+  ok(leadColumn("bogus") === null, "#18: unknown lead stage maps to no column");
+
+  // quote status → column (incl. the poReceivedAt fork)
+  ok(quoteColumn({ status: "draft", poReceivedAt: null }) === "estimate", "#18: draft quote sits in Estimate");
+  ok(quoteColumn({ status: "sent", poReceivedAt: null }) === "estimate_sent", "#18: sent quote sits in Estimate Sent");
+  ok(quoteColumn({ status: "lost", poReceivedAt: null }) === "closed", "#18: lost quote sits in closed");
+  ok(quoteColumn({ status: "won", poReceivedAt: null }) === "closed", "#18: won quote without a PO sits in closed");
+  ok(quoteColumn({ status: "won", poReceivedAt: NOW }) === "po_received", "#18: won quote with poReceivedAt sits in PO Received");
+
+  // column → lead stage writeback
+  ok(leadStageForCol("new") === "new" && leadStageForCol("collect") === "contacted", "#18: new/collect map back to lead new/contacted");
+  ok(leadStageForCol("estimate") === "qualified" && leadStageForCol("estimate_sent") === "quoted", "#18: estimate columns map back to qualified/quoted");
+  ok(leadStageForCol("closed") === null && leadStageForCol("po_received") === null, "#18: closed columns never map to a lead stage write");
+
+  ok(canSetPoReceived("won") && !canSetPoReceived("sent") && !canSetPoReceived("draft") && !canSetPoReceived("lost"), "#18: PO toggle allowed on won quotes only");
+
+  // union build: converted-lead exclusion + forecast inheritance
+  const mkL = (o: Partial<OppLeadInput>): OppLeadInput => ({
+    id: "L-1050", org: "Org", interest: "Rigging", stage: "new", owner: "Jeff Chesebro",
+    value: 1000, createdAt: NOW - 3 * DAY, updatedAt: NOW, customerId: null,
+    convertedCustomerId: null, convertedQuoteId: null, forecastAt: null, ...o,
+  });
+  const mkQ = (o: Partial<OppQuoteInput>): OppQuoteInput => ({
+    id: "Q-2041", name: "Quote", customer: "Org", status: "draft", owner: "Jeff Chesebro",
+    value: 2000, createdAt: NOW - 10 * DAY, updatedAt: NOW, customerId: null,
+    poReceivedAt: null, ...o,
+  });
+  const rows = buildOpportunities(
+    [
+      mkL({ id: "L-1", stage: "quoted", convertedQuoteId: "Q-9", convertedCustomerId: "acme", forecastAt: NOW + 20 * DAY }),
+      mkL({ id: "L-2", stage: "contacted", customerId: "lakefront" }),
+    ],
+    [mkQ({ id: "Q-9", status: "sent", customerId: "acme" }), mkQ({ id: "Q-8" })]
+  );
+  ok(rows.map((r) => r.id).join(",") === "L-2,Q-9,Q-8", "#18: converted lead drops out — its quote carries the opportunity");
+  ok(rows.find((r) => r.id === "Q-9")!.forecastAt === NOW + 20 * DAY, "#18: quote card inherits forecastAt from its originating lead");
+  ok(rows.find((r) => r.id === "Q-8")!.forecastAt === null, "#18: un-linked quote has no forecast date");
+  ok(rows.find((r) => r.id === "L-2")!.col === "collect" && rows.find((r) => r.id === "L-2")!.companyId === "lakefront", "#18: lead row carries its column + company link");
+
+  // drag policy
+  ok(allowedMoves({ kind: "lead", col: "new", srcStage: "new" }).join(",") === "collect,estimate,estimate_sent", "#18: open lead moves among the other three open columns");
+  ok(allowedMoves({ kind: "lead", col: "estimate_sent", srcStage: "quoted" }).join(",") === "new,collect,estimate", "#18: estimate_sent lead moves back among open columns");
+  ok(allowedMoves({ kind: "lead", col: "closed", srcStage: "won" }).length === 0, "#18: closed lead cards never drag (convert / markLost keep their paths)");
+  ok(allowedMoves({ kind: "quote", col: "closed", srcStage: "won" }).join(",") === "po_received", "#18: won quote drags closed → po_received");
+  ok(allowedMoves({ kind: "quote", col: "po_received", srcStage: "won" }).join(",") === "closed", "#18: won quote drags back po_received → closed");
+  ok(allowedMoves({ kind: "quote", col: "estimate", srcStage: "draft" }).length === 0, "#18: draft quote cards are not draggable");
+  ok(allowedMoves({ kind: "quote", col: "estimate_sent", srcStage: "sent" }).length === 0, "#18: sent quote cards are not draggable");
+  ok(allowedMoves({ kind: "quote", col: "closed", srcStage: "lost" }).length === 0, "#18: lost quote cards are not draggable");
+
+  // filters (who / created / forecast / kw / vt)
+  const facts: CompanyFacts = new Map([
+    ["acme", { type: "Education", keywords: ["fire curtain", "Rigging"] }],
+    ["lakefront", { type: "Performing arts", keywords: [] }],
+  ]);
+  const frows: OppRow[] = [
+    { id: "a", kind: "lead", col: "new", title: "", sub: "", value: 100, owner: "Jeff Chesebro", createdAt: NOW - 2 * DAY, updatedAt: NOW, companyId: "acme", forecastAt: NOW + 10 * DAY, srcStage: "new" },
+    { id: "b", kind: "lead", col: "estimate", title: "", sub: "", value: 200, owner: "Sam Rivera", createdAt: NOW - 40 * DAY, updatedAt: NOW, companyId: "lakefront", forecastAt: NOW - DAY, srcStage: "qualified" },
+    { id: "c", kind: "quote", col: "closed", title: "", sub: "", value: 400, owner: "Jeff Chesebro", createdAt: NOW - 100 * DAY, updatedAt: NOW, companyId: null, forecastAt: null, srcStage: "won" },
+  ];
+  const none = { who: "", created: "" as const, forecast: "" as const, kw: "", vt: "" };
+  ok(applyOppFilters(frows, none, facts, NOW).length === 3, "#18: no filters keeps every card");
+  ok(applyOppFilters(frows, { ...none, who: "Sam Rivera" }, facts, NOW).map((r) => r.id).join(",") === "b", "#18: who filter matches by owner name");
+  ok(applyOppFilters(frows, { ...none, created: "7d" }, facts, NOW).map((r) => r.id).join(",") === "a", "#18: created=7d keeps only fresh cards");
+  ok(applyOppFilters(frows, { ...none, created: "90d" }, facts, NOW).map((r) => r.id).join(",") === "a,b", "#18: created=90d widens the window");
+  ok(applyOppFilters(frows, { ...none, forecast: "30d" }, facts, NOW).map((r) => r.id).join(",") === "a", "#18: forecast=30d keeps in-horizon cards and EXCLUDES no-forecast cards");
+  ok(applyOppFilters(frows, { ...none, forecast: "past" }, facts, NOW).map((r) => r.id).join(",") === "b", "#18: forecast=past keeps only overdue forecasts");
+  ok(applyOppFilters(frows, { ...none, kw: "rigging" }, facts, NOW).map((r) => r.id).join(",") === "a", "#18: kw is a case-insensitive EXACT tag match; company-less cards excluded");
+  ok(applyOppFilters(frows, { ...none, kw: "rig" }, facts, NOW).length === 0, "#18: kw does not substring-match");
+  ok(applyOppFilters(frows, { ...none, vt: "Performing arts" }, facts, NOW).map((r) => r.id).join(",") === "b", "#18: vt filters via the linked company's type; unlinked cards excluded");
+
+  // header total: the four open columns only
+  const tot = openTotals(frows);
+  ok(tot.count === 2 && tot.value === 300, "#18: open-pipeline total sums the four open columns (closed excluded)");
+  const tot2 = openTotals([...frows, { ...frows[2], id: "d", col: "po_received" }]);
+  ok(tot2.count === 2 && tot2.value === 300, "#18: po_received also excluded from the open total");
+
+  // age chip (the #18 ask)
+  ok(oppAge(NOW - 3 * DAY, NOW) === "3d", "#18: age chip renders days under two weeks");
+  ok(oppAge(NOW - 20 * DAY, NOW) === "2w", "#18: age chip switches to weeks at 14 days");
+  ok(oppAge(NOW, NOW) === "0d", "#18: brand-new card reads 0d");
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
