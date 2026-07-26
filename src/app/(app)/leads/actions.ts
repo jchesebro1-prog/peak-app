@@ -20,7 +20,12 @@ import {
   setVisitCustomer,
   visitsForLead,
 } from "@/lib/stores/site-visits";
-import { surveysForLead, update as updateSurvey } from "@/lib/stores/surveys";
+import {
+  get as getSurvey,
+  remove as removeSurvey,
+  surveysForLead,
+  update as updateSurvey,
+} from "@/lib/stores/surveys";
 import { canConvertLead } from "@/lib/lead-thread";
 
 /**
@@ -82,11 +87,21 @@ export async function markLostAction(id: string, reason: string) {
   const visit = await activeVisitForLead(id);
   if (visit && (visit.stage === "requested" || visit.stage === "open" || visit.stage === "claimed")) {
     await closeVisit(visit.id);
-    await logActivity(
-      id,
-      { type: "system", note: "Site visit request closed — lead marked lost", by: me.name },
-      me.name
-    );
+    let note = "Site visit request closed — lead marked lost";
+    // #34 task-6 fix: the auto-created survey that rode along with this
+    // visit has nowhere to go either. If it's still untouched at
+    // "requested" and still points back at this lead, soft-delete it so a
+    // dead lead's survey stops nagging the "Survey requests to schedule"
+    // bell / field-survey list. A survey someone has already started
+    // working (stage moved past requested) is left alone.
+    if (visit.surveyId) {
+      const survey = await getSurvey(visit.surveyId);
+      if (survey && survey.stage === "requested" && survey.leadId === id) {
+        await removeSurvey(survey.id);
+        note += "; linked survey request removed";
+      }
+    }
+    await logActivity(id, { type: "system", note, by: me.name }, me.name);
   }
   revalidatePath("/", "layout");
   return { ok: true as const };

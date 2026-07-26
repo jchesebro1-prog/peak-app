@@ -911,7 +911,11 @@ export default function LeadDrawer({
                     )}
                     {!thread.visit &&
                       (vm.converted ? (
-                        <div style={{ fontSize: 12, color: "#9aa0ab" }}>No site visit was requested.</div>
+                        !thread.survey && (
+                          <div style={{ fontSize: 12, color: "#9aa0ab" }}>
+                            No site visit was requested.
+                          </div>
+                        )
                       ) : (
                         <button
                           onClick={() => {
