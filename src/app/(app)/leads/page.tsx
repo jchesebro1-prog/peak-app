@@ -23,11 +23,13 @@ import {
 } from "@/lib/stores/leads";
 import { ACCENT_INK, avatarFor, buildDrawerVM, fuChip, srcChip, stageChip, type Ident } from "./lib";
 import { shortMoneyDash, shortMoneyZero } from "./money";
-import BoardView from "./board-view";
+import BoardView from "@/components/board/board-view";
 import WorklistRow from "./worklist-row";
 import LeadDrawer from "./lead-drawer";
 import { OwnerDot } from "./avatar";
-import type { AvatarVM, BoardCardVM, ChipVM, WorklistRowVM } from "./types";
+import { setStageAction } from "./actions";
+import type { AvatarVM, ChipVM, WorklistRowVM } from "./types";
+import type { BoardCardVM } from "@/components/board/types";
 
 /**
  * Leads — three directions in one route, per the prototype:
@@ -218,25 +220,30 @@ export default async function LeadsPage({
     label: STAGE_META[k].label,
     dot: STAGE_META[k].dot,
   }));
-  const boardCards: BoardCardVM[] = all.map((l) => {
-    const fu = fuChip(l);
-    return {
-      id: l.id,
-      stage: l.stage,
-      org: l.org,
-      interest: l.interest || "New enquiry",
-      value: l.value || 0,
-      valueLabel: shortMoneyZero(l.value),
-      urg: urgOf.get(l.id) || 0,
-      updatedAt: l.updatedAt || 0,
-      strip: fu.tone === "bad" ? "#c85a3c" : fu.tone === "warn" ? "#c8a53c" : "transparent",
-      showFu: fu.tone === "bad" || fu.tone === "warn" || fu.tone === "info",
-      fu: { label: fu.full, ink: fu.ink, soft: fu.soft, bd: fu.bd },
-      owner: avatarFor(roster, l.owner),
-      ownerTitle: l.owner || "Unassigned",
-      href: hrefFor("board", "all", l.id),
-    };
-  });
+  // Pre-sorted urgency-desc / updatedAt-desc — the generic board renders in
+  // given order (column sorting moved out of the component). canMoveTo lists
+  // every other stage: EXACT current behavior, drags to won/lost included.
+  const boardCards: BoardCardVM[] = all
+    .slice()
+    .sort(byUrg)
+    .map((l) => {
+      const fu = fuChip(l);
+      const showFu = fu.tone === "bad" || fu.tone === "warn" || fu.tone === "info";
+      return {
+        id: l.id,
+        col: l.stage,
+        title: l.org,
+        sub: l.interest || "New enquiry",
+        value: l.value || 0,
+        valueLabel: shortMoneyZero(l.value),
+        chips: showFu ? [{ label: fu.full, ink: fu.ink, soft: fu.soft, bd: fu.bd }] : [],
+        strip: fu.tone === "bad" ? "#c85a3c" : fu.tone === "warn" ? "#c8a53c" : "transparent",
+        owner: avatarFor(roster, l.owner),
+        ownerTitle: l.owner || "Unassigned",
+        href: hrefFor("board", "all", l.id),
+        canMoveTo: (STAGES as readonly string[]).filter((k) => k !== l.stage),
+      };
+    });
   const stats = [
     { label: "Open pipeline", value: shortMoneyZero(m.openValue), sub: `${m.open} open leads`, color: "#16181d" },
     {
@@ -587,7 +594,7 @@ export default async function LeadsPage({
               </div>
             ))}
           </div>
-          <BoardView columns={boardColumns} cards={boardCards} />
+          <BoardView columns={boardColumns} cards={boardCards} moveAction={setStageAction} />
         </div>
       )}
 

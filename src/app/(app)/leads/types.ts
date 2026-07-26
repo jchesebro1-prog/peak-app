@@ -4,30 +4,11 @@
  * safe to import from either side of the boundary.
  */
 
-export type ChipVM = { label: string; ink: string; soft: string; bd: string };
-
-/** null = unassigned (dashed placeholder avatar). */
-export type AvatarVM = { initials: string; color: string } | null;
-
-export type BoardColumnVM = { key: string; label: string; dot: string };
-
-export type BoardCardVM = {
-  id: string;
-  stage: string;
-  org: string;
-  interest: string;
-  value: number;
-  valueLabel: string;
-  urg: number;
-  updatedAt: number;
-  /** border-left strip color (#c85a3c bad / #c8a53c warn / transparent). */
-  strip: string;
-  showFu: boolean;
-  fu: ChipVM;
-  owner: AvatarVM;
-  ownerTitle: string;
-  href: string;
-};
+/** Chip + avatar VMs now live with the generic board (#19 extraction);
+    re-exported so worklist/drawer/table VMs below and avatar.tsx keep
+    their import path. Board VMs import from @/components/board/types. */
+import type { ChipVM, AvatarVM } from "@/components/board/types";
+export type { ChipVM, AvatarVM };
 
 export type WorklistRowVM = {
   id: string;

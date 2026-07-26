@@ -2,22 +2,31 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setStageAction } from "./actions";
-import { OwnerDot } from "./avatar";
-import { shortMoneyZero } from "./money";
+// Client-safe pure helpers that grew up on the leads screen (no store
+// imports, no "use client" needed on avatar.tsx). If a third consumer
+// outside boards appears, promote them into components/.
+import { OwnerDot } from "@/app/(app)/leads/avatar";
+import { shortMoneyZero } from "@/app/(app)/leads/money";
 import type { BoardCardVM, BoardColumnVM } from "./types";
 
 /**
- * 1a — pipeline board (Leads Explorations.dc.html). Kanban columns by stage;
- * HTML5 drag between columns calls the setStage server action. Cards are
- * optimistically re-homed while the transition + refresh are in flight.
+ * Generic kanban board (#18/#19) — the leads pipeline board
+ * (Leads Explorations.dc.html) generalized to any column vocabulary.
+ * HTML5 drag between columns calls the injected `moveAction` server action;
+ * cards are optimistically re-homed while the transition + refresh are in
+ * flight. Pages PRE-SORT cards (the component renders them in given order)
+ * and declare per-card drag targets via `canMoveTo`; the server re-validates
+ * every move with the same pure policy. No `moveAction`, or an empty
+ * `canMoveTo`, renders a read-only card (no draggable attr).
  */
 export default function BoardView({
   columns,
   cards,
+  moveAction,
 }: {
   columns: BoardColumnVM[];
   cards: BoardCardVM[];
+  moveAction?: (id: string, col: string) => Promise<{ ok: boolean }>;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -29,18 +38,22 @@ export default function BoardView({
     if (!isPending) setMoves((m) => (Object.keys(m).length ? {} : m));
   }, [isPending]);
 
-  const stageOf = (c: BoardCardVM) => moves[c.id] || c.stage;
+  const colOf = (c: BoardCardVM) => moves[c.id] || c.col;
+  const canDrag = (c: BoardCardVM) => !!moveAction && c.canMoveTo.length > 0;
 
-  const drop = (stage: string) => (e: React.DragEvent<HTMLDivElement>) => {
+  const drop = (col: string) => (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     const id = dragId || e.dataTransfer.getData("text/plain");
     setDragId(null);
-    if (!id) return;
+    if (!id || !moveAction) return;
     const card = cards.find((c) => c.id === id);
-    if (!card || stageOf(card) === stage) return;
-    setMoves((m) => ({ ...m, [id]: stage }));
+    if (!card || colOf(card) === col) return;
+    // Policy gate (targets are declared relative to the card's server-known
+    // column; the server action re-validates regardless).
+    if (!card.canMoveTo.includes(col)) return;
+    setMoves((m) => ({ ...m, [id]: col }));
     startTransition(async () => {
-      await setStageAction(id, stage);
+      await moveAction(id, col);
       router.refresh();
     });
   };
@@ -52,9 +65,7 @@ export default function BoardView({
     >
       <div style={{ display: "flex", gap: 13, height: "100%", minWidth: "min-content" }}>
         {columns.map((col) => {
-          const colCards = cards
-            .filter((c) => stageOf(c) === col.key)
-            .sort((a, b) => b.urg - a.urg || b.updatedAt - a.updatedAt);
+          const colCards = cards.filter((c) => colOf(c) === col.key);
           const val = colCards.reduce((s, c) => s + (c.value || 0), 0);
           return (
             <div
@@ -95,8 +106,9 @@ export default function BoardView({
                 {colCards.map((c) => (
                   <div
                     key={c.id}
-                    draggable
+                    draggable={canDrag(c)}
                     onDragStart={(e) => {
+                      if (!canDrag(c)) return;
                       setDragId(c.id);
                       try {
                         e.dataTransfer.effectAllowed = "move";
@@ -111,7 +123,7 @@ export default function BoardView({
                     style={{
                       background: "#fff",
                       border: "1px solid #e6e8ec",
-                      borderLeft: `3px solid ${c.strip}`,
+                      borderLeft: `3px solid ${c.strip || "transparent"}`,
                       borderRadius: 9,
                       padding: "10px 11px",
                       cursor: "pointer",
@@ -130,7 +142,7 @@ export default function BoardView({
                         overflow: "hidden",
                       }}
                     >
-                      {c.org}
+                      {c.title}
                     </div>
                     <div
                       style={{
@@ -142,23 +154,27 @@ export default function BoardView({
                         textOverflow: "ellipsis",
                       }}
                     >
-                      {c.interest}
+                      {c.sub}
                     </div>
-                    {c.showFu && (
-                      <div
-                        style={{
-                          display: "inline-block",
-                          fontSize: 9.5,
-                          fontWeight: 600,
-                          color: c.fu.ink,
-                          background: c.fu.soft,
-                          border: `1px solid ${c.fu.bd}`,
-                          padding: "1px 7px",
-                          borderRadius: 20,
-                          marginTop: 8,
-                        }}
-                      >
-                        {c.fu.label}
+                    {c.chips.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
+                        {c.chips.map((ch, i) => (
+                          <span
+                            key={i}
+                            style={{
+                              display: "inline-block",
+                              fontSize: 9.5,
+                              fontWeight: 600,
+                              color: ch.ink,
+                              background: ch.soft,
+                              border: `1px solid ${ch.bd}`,
+                              padding: "1px 7px",
+                              borderRadius: 20,
+                            }}
+                          >
+                            {ch.label}
+                          </span>
+                        ))}
                       </div>
                     )}
                     <div
@@ -173,13 +189,20 @@ export default function BoardView({
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, fontWeight: 600, color: "#3a3f4a" }}>
                         {c.valueLabel}
                       </span>
-                      <OwnerDot owner={c.owner} title={c.ownerTitle} size={24} />
+                      <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                        {c.ageLabel && (
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#9aa0ab" }}>
+                            {c.ageLabel}
+                          </span>
+                        )}
+                        <OwnerDot owner={c.owner} title={c.ownerTitle} size={24} />
+                      </span>
                     </div>
                   </div>
                 ))}
                 {colCards.length === 0 && (
                   <div style={{ fontSize: 11, color: "#b7bcc5", textAlign: "center", padding: "14px 6px" }}>
-                    Drop here
+                    {moveAction ? "Drop here" : "Empty"}
                   </div>
                 )}
               </div>
