@@ -1492,5 +1492,218 @@ import { normalizeNote, type NoteRecord } from "@/lib/stores/notes";
   );
 }
 
+/* #21 — date buckets. House rule (see the queueDueLabel note above): never
+   assert locale/TZ-dependent literals from raw epoch numbers — every
+   timestamp below is built from LOCAL Date parts, so the assertions hold in
+   any runner timezone. Weeks start Monday. */
+import { bucketFor, groupRows } from "@/lib/feed-buckets";
+import {
+  commFeedRows,
+  FEED_META,
+  jobFeedRows,
+  noteFeedRows,
+  projectFeedRows,
+  quoteFeedRows,
+  surveyFeedRows,
+  visitFeedRows,
+} from "@/lib/customer-feed-rows";
+
+{
+  const NOW = new Date(2026, 6, 24, 12, 0, 0).getTime(); // Fri Jul 24 2026, noon local
+
+  ok(bucketFor(new Date(2026, 6, 24, 0, 0, 0).getTime(), NOW) === "Today", "#21: local midnight today is Today");
+  ok(bucketFor(new Date(2026, 6, 24, 18).getTime(), NOW) === "Today", "#21: later today (even future of now) is Today");
+  ok(
+    bucketFor(new Date(2026, 6, 24, 13).getTime(), NOW) === "Today",
+    "#21: later today (now + 1h, same local day) is Today, not Upcoming"
+  );
+  ok(
+    bucketFor(new Date(2026, 6, 26, 9).getTime(), NOW) === "Upcoming",
+    "#21: now + 2 days (e.g. a scheduled site visit's future startAt) is Upcoming"
+  );
+  ok(
+    bucketFor(new Date(2026, 6, 23, 23, 59, 59).getTime(), NOW) === "Yesterday",
+    "#21: 23:59:59 yesterday is Yesterday — the day edge is local midnight"
+  );
+  ok(bucketFor(new Date(2026, 6, 23, 0).getTime(), NOW) === "Yesterday", "#21: yesterday start is Yesterday");
+  ok(bucketFor(new Date(2026, 6, 22, 9).getTime(), NOW) === "This week", "#21: Wednesday of the current Mon-start week is This week");
+  ok(bucketFor(new Date(2026, 6, 20, 0).getTime(), NOW) === "This week", "#21: Monday 00:00 opens This week");
+  ok(bucketFor(new Date(2026, 6, 19, 23).getTime(), NOW) === "Last week", "#21: Sunday night before rolls over to Last week");
+  ok(bucketFor(new Date(2026, 6, 13, 0).getTime(), NOW) === "Last week", "#21: last Monday 00:00 opens Last week");
+  ok(bucketFor(new Date(2026, 6, 12, 12).getTime(), NOW) === "This month", "#21: older than last week but this month is This month");
+  ok(bucketFor(new Date(2026, 6, 1, 0).getTime(), NOW) === "This month", "#21: the 1st opens This month");
+  ok(bucketFor(new Date(2026, 5, 30, 12).getTime(), NOW) === "June 2026", "#21: last month labels '<Month Year>'");
+  ok(bucketFor(new Date(2025, 11, 25).getTime(), NOW) === "December 2025", "#21: older years keep the month-year label");
+
+  // groupRows — ordering + stability (rows pre-sorted ts desc)
+  const rows = [
+    { id: "a", ts: new Date(2026, 6, 24, 11).getTime() },
+    { id: "b", ts: new Date(2026, 6, 24, 9).getTime() },
+    { id: "c", ts: new Date(2026, 6, 23, 15).getTime() },
+    { id: "d", ts: new Date(2026, 6, 21, 8).getTime() },
+    { id: "e", ts: new Date(2026, 6, 15, 8).getTime() },
+    { id: "f", ts: new Date(2026, 5, 2, 8).getTime() },
+  ];
+  const groups = groupRows(rows, NOW);
+  ok(
+    groups.map((g) => g.bucket).join("|") === "Today|Yesterday|This week|Last week|June 2026",
+    "#21: groupRows walks the buckets in feed order"
+  );
+  ok(groups[0].rows.map((r) => r.id).join(",") === "a,b", "#21: same-bucket rows keep their pre-sorted order (stable)");
+  ok(groups[3].rows.length === 1 && groups[3].rows[0].id === "e", "#21: single-row buckets survive intact");
+}
+
+/* #21 — pure row builders, exact literals. */
+{
+  const T1 = new Date(2026, 6, 20, 9).getTime();
+  const T2 = new Date(2026, 6, 22, 14).getTime();
+  const T3 = new Date(2026, 6, 23, 10).getTime();
+
+  // quotes — one row per history entry + PO / portal-acceptance annex rows
+  const q = quoteFeedRows({
+    id: "Q-2041",
+    name: "Riverside PAC rigging",
+    history: [
+      { at: T1, to: "draft" },
+      { at: T2, to: "sent" },
+    ],
+    poReceivedAt: T3,
+    portalAcceptance: { at: T3, by: "Dana Whitmer" },
+  });
+  ok(q.length === 4, "#21: quote history + PO + portal acceptance = 4 rows");
+  ok(
+    q[0].title === "Quote Q-2041 drafted" && q[1].title === "Quote Q-2041 sent",
+    "#21: history rows verb the stage vocab (draft/sent/won/lost)"
+  );
+  ok(q[2].title === "Quote Q-2041 PO received" && q[2].ts === T3, "#21: poReceivedAt annex row (setPoReceived writes NO history)");
+  ok(
+    q[3].title === "Quote Q-2041 accepted in portal" && q[3].by === "Dana Whitmer",
+    "#21: portal-acceptance annex row carries the actor"
+  );
+  ok(
+    q[0].href === "/quotes?id=Q-2041" && q[0].kind === "quote" && q[0].sub === "Riverside PAC rigging",
+    "#21: quote rows deep-link /quotes?id= and sub the quote name"
+  );
+  ok(
+    quoteFeedRows({ id: "Q-2042", name: "x", history: [{ at: T1, to: "draft" }] }).length === 1,
+    "#21: absent annex fields add no rows"
+  );
+
+  // comms — one row per message; draft threads and Deleted-folder threads skipped
+  const c = commFeedRows({
+    id: "C-1032",
+    subject: "Valance quote follow-up",
+    status: "waiting_us",
+    messages: [
+      { id: "m1-aaaa", at: T1, direction: "in", channel: "email", author: "Sarah Chen" },
+      { id: "m2-bbbb", at: T2, direction: "out", channel: "call", author: "Jeff Chesebro" },
+    ],
+  });
+  ok(c.length === 2 && c[0].title === "Valance quote follow-up", "#21: comm rows title the thread subject");
+  ok(c[0].sub === "Received · email" && c[1].sub === "Sent · call", "#21: comm sub is direction · channel");
+  ok(c[0].href === "/inbox?thread=C-1032" && c[1].by === "Jeff Chesebro", "#21: comm rows deep-link the inbox thread");
+  ok(
+    commFeedRows({
+      id: "C-1",
+      subject: "s",
+      status: "draft",
+      messages: [{ id: "m", at: T1, direction: "out", channel: "email", author: "x" }],
+    }).length === 0,
+    "#21: draft threads are skipped"
+  );
+  ok(
+    commFeedRows({
+      id: "C-2",
+      subject: "s",
+      status: "closed",
+      deleted: true,
+      messages: [{ id: "m", at: T1, direction: "out", channel: "email", author: "x" }],
+    }).length === 0,
+    "#21: Deleted-folder threads are skipped (thread flag, distinct from the row tombstone)"
+  );
+
+  // visits — ts = startAt ?? createdAt; sub = VISIT_STAGE_META label
+  const v = visitFeedRows({
+    id: "SV-5001",
+    reason: "Site survey / measure",
+    stage: "scheduled",
+    startAt: T2,
+    createdAt: T1,
+    assignedTo: "Mike Torres",
+  });
+  ok(v.length === 1 && v[0].ts === T2 && v[0].title === "Site visit — Site survey / measure", "#21: visit row at startAt");
+  ok(v[0].sub === "Scheduled" && v[0].href === "/field-survey" && v[0].by === "Mike Torres", "#21: visit sub is the stage label");
+  const vr = visitFeedRows({ id: "SV-5002", reason: "Punch walk", stage: "requested", startAt: null, createdAt: T1, assignedTo: "" });
+  ok(vr[0].ts === T1 && vr[0].sub === "Requested", "#21: unscheduled request falls back to createdAt");
+
+  // jobs — point stamps; null completion adds no row; legacy zero requestedAt skipped
+  const fj = jobFeedRows("flame", {
+    id: "FT-3001",
+    venue: "Auditorium",
+    openedAt: T1,
+    openedBy: "Jeff Chesebro",
+    completedAt: T2,
+    completedBy: "Mike Torres",
+  });
+  ok(
+    fj.length === 2 && fj[0].title === "Flame test FT-3001 approved" && fj[1].title === "Flame test FT-3001 completed",
+    "#21: flame approved + completed rows"
+  );
+  ok(
+    jobFeedRows("repair", { id: "RP-4001", venue: "", openedAt: T1, openedBy: "", completedAt: null, completedBy: "" }).length === 1,
+    "#21: null completedAt adds no completion row"
+  );
+  const ij = jobFeedRows("inspection", {
+    id: "RI-2042",
+    venue: "Main stage",
+    openedAt: 0,
+    openedBy: "",
+    completedAt: T2,
+    completedBy: "Dana Whitmer",
+  });
+  ok(ij.length === 1 && ij[0].title === "Inspection RI-2042 completed", "#21: zero requestedAt (legacy default) adds no request row");
+  ok(
+    jobFeedRows("inspection", { id: "RI-2043", venue: "", openedAt: T1, openedBy: "Sarah Chen", completedAt: null, completedBy: "" })[0]
+      .title === "Inspection RI-2043 requested",
+    "#21: the inspection open verb is 'requested'"
+  );
+
+  // surveys — one row at updatedAt with the stage label
+  const s = surveyFeedRows({ id: "FS-1054", stage: "completed", venue: "Black box", updatedAt: T3 });
+  ok(s.length === 1 && s[0].title === "Survey FS-1054 — Completed" && s[0].ts === T3, "#21: survey row titles id + stage label");
+  ok(s[0].href === "/field-survey?id=FS-1054", "#21: survey row deep-links the survey");
+
+  // projects — stage-history rows (loader-passed short labels) + newest-first notes handled
+  const pj = projectFeedRows(
+    {
+      id: "P-3001",
+      name: "Westfield HS auditorium",
+      stageHistory: [
+        { at: T1, to: "procurement", by: "Jeff Chesebro" },
+        { at: T2, to: "install", by: "Mike Torres" },
+      ],
+      notes: [
+        { id: "nt-b", at: T3, by: "Mike Torres", text: "Crew on site, linesets 1-8 done. " + "x".repeat(90) },
+        { id: "nt-a", at: T1, by: "Jeff Chesebro", text: "Kickoff scheduled" },
+      ],
+    },
+    { procurement: "Materials", install: "Install" }
+  );
+  ok(pj.length === 4, "#21: stage-history + project-note rows all present");
+  ok(
+    pj[0].title === "Project P-3001 → Materials" && pj[1].title === "Project P-3001 → Install" && pj[1].by === "Mike Torres",
+    "#21: stage rows use the passed short labels + actor (D83 anchors an opening from:null entry — renders the same way)"
+  );
+  ok(pj[2].title.length === 80, "#21: project-note titles clamp to 80 chars");
+  ok(pj[2].ts === T3 && pj[3].ts === T1, "#21: NEWEST-FIRST ProjectNote order passes through untouched — the loader sorts by ts");
+  ok(pj[2].kind === "project-note" && pj[0].kind === "project-stage", "#21: project row kinds");
+
+  // notes — the real record rows
+  const nr = noteFeedRows({ id: "N-7001", at: T2, by: "Jeff Chesebro", text: "Board approved the budget" });
+  ok(nr.length === 1 && nr[0].kind === "note" && nr[0].title === "Board approved the budget", "#21: note rows title the full text (the UI clamps display)");
+  ok(nr[0].href === null && nr[0].by === "Jeff Chesebro", "#21: note rows have no deep link");
+  ok(FEED_META.note.letter === "N" && FEED_META.quote.letter === "Q", "#21: letter-dot glyphs");
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
