@@ -50,6 +50,7 @@ const SOURCE_COLOR: Record<QueueSource, string> = {
   "project-task": "#3155a8",
   "flame-renewal": "#c4553a",
   "inspection-renewal": "#c4553a",
+  "site-visit": "#7b3f8a",
 };
 
 export default function QueueView({

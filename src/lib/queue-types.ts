@@ -13,7 +13,8 @@ export type QueueSource =
   | "milestone"
   | "project-task"
   | "flame-renewal"
-  | "inspection-renewal";
+  | "inspection-renewal"
+  | "site-visit";
 
 export type QueueItem = {
   /** Stable across runs — the Reminders agent's dedupe key. */
@@ -39,6 +40,7 @@ export const SOURCE_LABEL: Record<QueueSource, string> = {
   "project-task": "Project task",
   "flame-renewal": "Flame renewal",
   "inspection-renewal": "Inspection renewal",
+  "site-visit": "Site visit",
 };
 
 /** Open/overdue tallies for the Home queue card. `due === 0` means undated,

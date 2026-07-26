@@ -13,6 +13,9 @@ import {
 } from "@/lib/stores/surveys";
 import { IDENTITY, deriveInitials, fallbackColor } from "@/lib/team";
 import { createSurvey, quoteFromSurvey } from "./actions";
+import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
+import { VISIT_STAGE_META } from "@/lib/lead-thread";
+import VisitRequests, { type VisitRequestVM } from "./visit-requests";
 
 export const metadata = { title: "Field surveys — Quartzite-6" };
 
@@ -87,7 +90,7 @@ export default async function FieldSurveyPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, all] = await Promise.all([requireUser(), searchParams, getAll()]);
+  const [user, sp, all, visits] = await Promise.all([requireUser(), searchParams, getAll(), allVisits()]);
 
   // Cross-screen deep links (Home, Inbox, Customers) use /field-survey?id=<id>;
   // the capture editor lives at /field-survey/[id]. Redirect to keep both working.
@@ -101,6 +104,36 @@ export default async function FieldSurveyPage({
   const mine = one(sp.mine) === "1";
 
   const me = user.name;
+  // #34 — the open-visit queue: unclaimed requests for EVERYONE, plus my
+  // claimed-but-unscheduled visits (inline scheduler). Unclaimed first,
+  // oldest request first within each group.
+  const queueVisits = visits
+    .filter(
+      (v: SiteVisit) =>
+        v.stage === "requested" || v.stage === "open" || (v.stage === "claimed" && v.assignedTo === me)
+    )
+    .sort(
+      (a, b) =>
+        (a.stage === "claimed" ? 1 : 0) - (b.stage === "claimed" ? 1 : 0) ||
+        (a.createdAt || 0) - (b.createdAt || 0)
+    );
+  const visitRows: VisitRequestVM[] = queueVisits.map((v) => {
+    const sm = VISIT_STAGE_META[v.stage];
+    return {
+      id: v.id,
+      customer: v.customer || v.id,
+      reason: v.reason,
+      preferredTiming: v.preferredTiming,
+      requestedLine: "Requested by " + (v.createdBy || "—") + " · " + timeAgo(v.createdAt),
+      stageLabel: sm.label,
+      stageInk: sm.ink,
+      stageSoft: sm.soft,
+      stageBd: sm.bd,
+      surveyId: v.surveyId,
+      leadId: v.leadId,
+      mine: v.stage === "claimed",
+    };
+  });
   const stKey = (s: SurveyRecord): SurveyStage => (s.stage || "requested") as SurveyStage;
   const base = mine ? all.filter((s) => (s.assignedTo || "") === me) : all;
   const countFor = (k: Seg) => (k === "all" ? base.length : base.filter((s) => stKey(s) === k).length);
@@ -323,6 +356,9 @@ export default async function FieldSurveyPage({
           Assigned to me
         </Link>
       </div>
+
+      {/* #34 — open-visit queue, ABOVE the survey cards */}
+      <VisitRequests rows={visitRows} />
 
       {/* empty state */}
       {list.length === 0 && (

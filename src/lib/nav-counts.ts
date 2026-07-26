@@ -10,6 +10,7 @@ import {
   priorityMeta,
 } from "@/lib/stores/repair-jobs";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
+import { allVisits } from "@/lib/stores/site-visits";
 import { getAll as allComms, waitHours, unreadCountFrom } from "@/lib/stores/comms";
 import { getPrefs } from "@/lib/stores/notif-prefs";
 import { allTasks, taskBellItems, isOverdue } from "@/lib/stores/tasks";
@@ -42,6 +43,7 @@ export async function navData(me: string): Promise<{
     repairs,
     surveys,
     comms,
+    visits,
     leadFollowUps,
     renewalRows,
     taskRows,
@@ -54,6 +56,7 @@ export async function navData(me: string): Promise<{
     allRepairs(),
     allSurveys(),
     allComms(),
+    allVisits(),
     followUps({ unownedOrMine: true, me }),
     renewals({ dueOnly: true }),
     allTasks(),
@@ -93,6 +96,8 @@ export async function navData(me: string): Promise<{
   const requestedSurveys = surveys.filter(
     (s) => (s.stage || "requested") === "requested"
   );
+  const openVisits = visits.filter((v) => v.stage === "requested" || v.stage === "open");
+  const myVisitsToSchedule = visits.filter((v) => v.stage === "claimed" && v.assignedTo === me);
   const waitingComms = comms
     // archived (Peak or Gmail side) stops nagging the bell too (S14)
     .filter(
@@ -162,6 +167,21 @@ export async function navData(me: string): Promise<{
       href: "/field-survey",
       letter: "S",
       color: "#1f7a52",
+    }))
+  );
+  push(
+    "visits",
+    "Site visit requests",
+    [...openVisits, ...myVisitsToSchedule].map((v) => ({
+      id: v.id,
+      title: v.customer || v.id,
+      sub:
+        v.stage === "claimed"
+          ? `${v.reason} · claimed — pick a time`
+          : `${v.reason} · open — claim it`,
+      href: "/field-survey",
+      letter: "V",
+      color: "#7b3f8a",
     }))
   );
   push(

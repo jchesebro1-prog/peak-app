@@ -31,6 +31,7 @@ export const CATEGORIES = [
   { key: "comms",       label: "Customers waiting on a reply", desc: "Emails and threads in your mailboxes waiting on a reply from us." },
   { key: "reviews",     label: "Needs your review",            desc: "Quotes and designs submitted for you to approve." },
   { key: "surveys",     label: "Survey requests to schedule",  desc: "Field-survey requests waiting to be booked." },
+  { key: "visits",      label: "Site visit requests",          desc: "Open site-visit requests to claim, plus your claimed visits waiting on a schedule." },
   { key: "inspections", label: "Inspections to schedule",      desc: "Rigging-inspection requests waiting to be booked." },
   { key: "projects",    label: "Projects need attention",      desc: "Active installs flagged as at-risk." },
   { key: "flame",       label: "Flame tests due for renewal",  desc: "Annual flame-test renewals coming due or overdue." },

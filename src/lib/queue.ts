@@ -5,6 +5,7 @@ import { allTasks, ensureProjectTasksMigrated } from "@/lib/stores/tasks";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { renewals as flameRenewals } from "@/lib/stores/flame-jobs";
 import { renewals as inspectionRenewals } from "@/lib/stores/inspections";
+import { allVisits } from "@/lib/stores/site-visits";
 import type { QueueItem, QueueSource } from "@/lib/queue-types";
 
 /* ------------------------------------------------------------------ *
@@ -42,7 +43,7 @@ function due(ts: number | null | undefined): number {
  * convention for ownership across quotes, projects, and engagements).
  */
 export async function loadQueue(me: string): Promise<QueueItem[]> {
-  const [assignments, engagements, projects, quotes, flames, inspections] =
+  const [assignments, engagements, projects, quotes, flames, inspections, visits] =
     await Promise.all([
       allAssignments(),
       allEngagements(),
@@ -50,6 +51,7 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
       getAllQuotes(),
       flameRenewals({ dueOnly: true }),
       inspectionRenewals({ dueOnly: true }),
+      allVisits(),
     ]);
 
   // Self-sufficiency: /api/queue's Reminders-sync cron can call loadQueue
@@ -94,6 +96,33 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
       href: "/reviews",
       writable: false,
     });
+  }
+
+  /* --- open site-visit requests (#34): unclaimed for EVERYONE (the
+     unclaimed-quote-review precedent above), claimed-but-unscheduled for
+     the claimer. Due = requested + 3 days — the pool shouldn't sit. --- */
+  for (const v of visits) {
+    if (v.stage === "requested" || v.stage === "open") {
+      items.push({
+        key: `site-visit:${v.id}`,
+        source: "site-visit",
+        title: `Open site visit: ${v.customer || v.id}`,
+        context: v.reason,
+        due: (v.createdAt || 0) + 3 * DAY,
+        href: "/field-survey",
+        writable: false,
+      });
+    } else if (v.stage === "claimed" && v.assignedTo === me) {
+      items.push({
+        key: `site-visit:${v.id}`,
+        source: "site-visit",
+        title: `Schedule site visit: ${v.customer || v.id}`,
+        context: v.reason,
+        due: (v.createdAt || 0) + 3 * DAY,
+        href: "/field-survey",
+        writable: false,
+      });
+    }
   }
 
   /* --- consulting: phase reviews, open standards items, milestones --- */
