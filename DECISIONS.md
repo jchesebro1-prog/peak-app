@@ -1884,3 +1884,78 @@ review**, none block later promotion to a real Opportunity record:
   (inherit `createdAt` the same way) if Jeff wants it.
 - Projects board (#19): alongside-toggle, installs-only, read-only —
   Jeff's three open sub-decisions taken per the punchlist recommendations.
+
+## D120 — Lead-thread shape: visit lifecycle, claim model, survey-gated convert (2026-07-26)
+
+Controller calls made to unblock plan 03 (#34) — **flagged for Jeff's
+review**; the spec's shape (§3 #34) is followed, these are the seams:
+
+- **Lifecycle semantics.** `requested` = born open from a lead request;
+  `open` = explicitly released back to the pool; `claimed` = assignee, no
+  times; `scheduled` = has times (the inbox path lands here, unchanged);
+  `done` = past. Normalize-on-read (`deriveVisitStage`, pure): legacy
+  stage-less docs derive from times; stored "scheduled" past `endAt ??
+  startAt` reads done. **No migration; site_visits stays non-syncable.**
+- **Claim = the LEAD model** (any `requireUser`, no approver gate, no
+  `claimedAt` — stage + updatedAt). Release ≠ un-request: released visits
+  read "Open — unclaimed".
+- **The convert gate lives in `convertLeadAction`**, not `convert()` —
+  least ripple; `convert()` keeps its signature/null contract. Gate:
+  `canConvertLead(survey, skip)` on the survey resolved via the lead's
+  linked surveys (`surveysForLead`, newest first) — deliberately NOT the
+  active visit's `surveyId` (the brief's wording): a past visit derives
+  "done" and drops out of "active", which would fail the canonical
+  visit-happened → survey-completed → convert path as "survey-missing"
+  while the drawer preview showed green. Gate and preview share the one
+  resolution path. Skip is explicit (checkbox + optional reason) and
+  logged as lead activity. A lead with NO visit/survey at all also
+  blocks (survey-missing) — every convert now passes the gate or ticks
+  skip; that's the spec's "gated on the survey, not bypassing it".
+- **Newest survey governs the gate.** `surveysForLead` resolves newest-first,
+  so a re-request after a completed survey (a second site visit against the
+  same lead) flips the gate back to blocked until the NEW survey completes —
+  intended, not a bug: newest request = current intent, and a stale
+  completed survey shouldn't wave through a convert the team just decided
+  needed another look.
+- **The auto-created survey** carries `leadId`/`visitId` (through blank()'s
+  whitelist + SurveyPatch) and is born `requested`, so it surfaces through
+  the EXISTING field badge + "Survey requests to schedule" bell — no new
+  survey plumbing.
+- **Queue/bell:** My Queue source `site-visit` (unclaimed for everyone —
+  the unclaimed-review precedent; claimed-unscheduled for the claimer;
+  due = requested + 3 days). Bell category `visits` ("Site visit
+  requests"); **no nav badge** (nav-counts single-batch rule — one added
+  parallel fetch only).
+- **Consulting `VisitLite` filters out unscheduled visits** instead of
+  going nullable — the Oversight timeline math stays untouched; a lead
+  request joins the consulting surfaces once scheduled.
+- **`dispatchVisitInvite`** extracted from the inbox action, behavior-
+  preserving (same statuses/stamps/fallbacks, recipient = assignee only);
+  both schedulers share it.
+- **Lead stage is NOT coupled to visit progress** (spec left it open) —
+  the drawer chips surface the thread; product flag for Jeff.
+- **Final-review fix wave (`4439458`).** Three gaps closed after re-review:
+  `markLostAction` now closes any still-open pool visit (`requested` /
+  `open` / `claimed`) on a lost lead, and — if that visit's auto-created
+  survey is still untouched at stage `requested` and still carries the
+  lead's `leadId` — soft-deletes the survey too (one combined activity
+  note), so a dead lead stops nagging the survey bell/field list;
+  `convertLeadAction` backfills the resolved `customerId` onto the lead's
+  pre-conversion visits/surveys so they join the customer's own history;
+  and the lead drawer's completed-survey chip now survives visit
+  completion — the "No site visit was requested." fallback is gated on
+  `!thread.survey` too, so a converted lead whose visit is done but whose
+  survey chip is still showing doesn't also show the contradictory
+  no-visit text directly beneath it.
+- **Logged, not fixed** (product/UX follow-ups, not data-integrity bugs):
+  an outbox/sync race could in principle clobber the convert-time
+  `customerId` backfill above — the same last-write-wins idiom used
+  app-wide, not specific to this feature; `requestVisitForLead`'s
+  one-active-visit-per-lead dedupe is check-then-create, not atomic (the
+  doc-store's existing uniqueness-check idiom, same race class as
+  elsewhere in the app); and the field-survey scheduler's `doSchedule`
+  doesn't surface it to the user when `dispatchVisitInvite` returns
+  `inviteStatus: "failed"` — the visit still schedules (by design, so a
+  bad invite can't strand a good schedule) but the user isn't told the
+  invite itself failed. All three are logged here for Jeff rather than
+  fixed in this plan.

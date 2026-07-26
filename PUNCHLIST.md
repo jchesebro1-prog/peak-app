@@ -2243,7 +2243,60 @@ views + titles as named sub-items — say the word.**
 
 ---
 
-## 34. Leads → site visit → survey → estimate: wire the pipeline + a request/claim flow — OPEN (program)
+## 34. Leads → site visit → survey → estimate: wire the pipeline + a request/claim flow — DONE (2026-07-26, plan 03)
+
+**DONE 2026-07-26 (plan 03, D120).** The thread is wired. `SiteVisit` gained the
+lifecycle `requested / open / claimed / scheduled / done` + `leadId` /
+`surveyId` / `preferredTiming` (decision A: extended, not a second model),
+normalized on read (`deriveVisitStage` — legacy docs and past "scheduled"
+records read correctly; no migration). The lead drawer's **Request site
+visit** view (decision E) captures reason (default "Site survey / measure"),
+preferred timing, and assign-or-open; it dedupes to one active visit per lead
+and **auto-creates the linked Survey at stage `requested`** (decision C),
+which rides the existing Field badge/bell. The claim flow reuses the LEAD
+claim model (decision B): claim/release/schedule server actions, a "Visit
+requests" section on `/field-survey` (Claim for everyone; inline scheduler +
+Release for the claimer), a `site-visit` My Queue source (due = requested +
+3d), and a "Site visit requests" bell group (new notif-prefs category, no nav
+badge). Scheduling dispatches the D77 invite/calendar machinery via
+`dispatchVisitInvite`, extracted behavior-preserving from the inbox path
+(which is unchanged and still lands "scheduled"). Convert is **gated
+server-side** (decision D) in `convertLeadAction` via `canConvertLead`: no
+completed linked survey ⇒ `{ ok:false, reason }` unless explicitly skipped,
+and skips are logged on the lead ("Converted without completed survey — …").
+Lead stage itself was NOT changed by visit progress (the thread chips surface
+status instead) — flag for Jeff if he wants stage coupling later. A
+final-review fix wave (commit `4439458`) closed three residual gaps found in
+re-review: `markLostAction` now also closes any still-open pool visit on the
+lead and, if the visit's auto-created survey is still sitting untouched at
+stage `requested`, soft-deletes it too (so a dead lead's survey stops
+nagging the "Survey requests to schedule" bell); `convertLeadAction`
+backfills the resolved `customerId` onto the lead's pre-conversion visits/
+surveys so they join the customer's own history; and the lead drawer's
+completed-survey chip now survives visit completion (it no longer disappears
+just because `activeVisitForLead` drops the now-"done" visit), with the
+"No site visit was requested." fallback text correctly gated on `!thread.survey`
+too so a converted lead with a surviving survey chip doesn't show
+contradictory text underneath it.
+
+**Known limitations (deferred, logged not fixed):** scheduled visits have no
+cancel/reschedule flow yet — `markLostAction` only closes still-open **pool**
+visits (`requested`/`open`/`claimed`); a visit that's already `scheduled` when
+its lead goes lost is left alone, matching `closeVisit`'s own docstring ("
+scheduled visits are left alone — they belong to a future cancel/reschedule
+flow, not this closeout"). The visit chip in the lead drawer links to the bare
+`/field-survey` list (no per-record visit route exists yet), unlike the
+survey chip which deep-links to `?id=`. Three seams were consciously logged
+rather than fixed (see D120): an outbox/sync race could in principle clobber
+the convert-time `customerId` backfill (the same last-write-wins idiom used
+app-wide, not specific to this feature); `requestVisitForLead`'s one-active-
+visit-per-lead dedupe is check-then-create, not atomic (the doc-store's
+existing idiom, same class of race as any other doc-store uniqueness check);
+and the field-survey scheduler's `doSchedule` doesn't surface it to the user
+when `dispatchVisitInvite` returns `inviteStatus: "failed"` — the visit still
+schedules (by design — a good schedule shouldn't get stuck on a bad invite),
+but the user isn't told the invite itself failed, which is a follow-up UX
+gap, not a data-integrity one.
 
 **Area:** `src/app/(app)/leads/actions.ts` (lead actions), `src/lib/stores/site-visits.ts`
 (`SiteVisit`), `src/app/(app)/inbox/site-visit-actions.ts` + `site-visit-modal.tsx` (current
@@ -2299,8 +2352,7 @@ right direction.**
 for a brainstorm + design spec** (like the Daylite parity work), given it spans four stores and
 changes the lead lifecycle.
 
-**Status:** OPEN — logged 2026-07-21, no code touched. Program-level; the plumbing largely exists, the
-work is connecting it + a request/claim flow + a design decision on the lead lifecycle.
+**Status:** DONE (plan 03).
 
 ---
 
