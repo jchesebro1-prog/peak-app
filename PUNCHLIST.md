@@ -1261,7 +1261,45 @@ sold/completed" is exactly an auto-generated task with an assignee.
 
 ---
 
-## 18. Opportunities board — Daylite parity — OPEN (A answered: merged concept)
+## 18. Opportunities board — Daylite parity — DONE (2026-07-26, plan 02)
+
+**DONE 2026-07-26 (plan 02, D119).** `/opportunities` is a read-time UNION over
+leads + quotes (no new record, no migration): columns New / Collect Info /
+Estimate / Estimate Sent / Won-Lost / PO Received; a converted lead hands its
+card to its quote (which inherits the lead's new `forecastAt`). Header total
+("N opportunities • $X open pipeline") sums the four open columns. Cards carry
+the age-in-days chip, L/Q source badge, Won/Lost chip and owner avatar.
+Filters: owner (`?who=`), created presets (7d/30d/90d), forecast presets
+(30d/90d/past — new lead field `forecastAt`, drawer-editable), venue type via
+the linked company, keyword exact-tag match (**latent until #23's keyword
+authoring lands — the input only renders once a company has keywords**).
+Drag policy: leads move among the four open columns only (won/lost keep the
+convert / markLost paths); quotes drag only Won-Lost ↔ PO Received when won —
+`Quote.poReceivedAt` is a **field**, not a fifth status (`setPoReceived`,
+refuses unless won), so the won-spawn machinery is untouched. Every drag is
+re-validated server-side (`moveOpportunityAction`). Linked-people-on-cards
+still waits on item 20's junction UI.
+
+**Residual minors (logged, beta-fine):** a converted lead with a soft-deleted
+quote vanishes from the union (plan-mandated exclusion, not a bug); `?who=` is
+not roster-validated (mirrors the quotes screen's existing idiom — an unknown
+value shows the "All teammates" label while silently filtering to nobody); an
+optimistic drag reverted mid-flight (sub-second window) is ignored and
+self-heals on the next refresh; the forecast-date "Save forecast" action
+fires even on an identical re-pick (no dirty-check, harmless extra write);
+Projects board VMs are computed even when that page renders in list mode
+(negligible). Also surfaced during this task's live-drive verification, **not
+a plan-02 regression**: `buildOpportunities()`'s lead→quote `forecastAt`
+lookup has no collision guard against a duplicate `convertedQuoteId` — a
+pre-existing dangling reference in seed data (lead L-1053) collided with a
+freshly generated quote id during testing and silently misattributed a
+forecast date to the wrong card. Flagged separately as a follow-up
+(data-hygiene pass + a defensive fix in `src/lib/opportunities.ts`).
+
+**PRODUCT FLAG for Jeff:** quote cards age from `quote.createdAt`, so an
+opportunity's age chip resets to 0 at lead→quote conversion — only
+`forecastAt` is inherited, not `createdAt`. If Daylite-style age-since-lead is
+wanted instead, inheriting `createdAt` the same way is a 2-line follow-up.
 
 **Area:** `src/app/(app)/leads/board-view.tsx`, `leads/page.tsx`, `src/lib/stores/leads.ts`
 
@@ -1338,11 +1376,21 @@ appointments or tasks store to query (see items 17 and 21).
 - **C. Which filters actually matter?** Owner and date are the obvious ones; Categories /
   Keywords / Types have no Peak equivalent and would each need a new field.
 
-**Status:** OPEN — needs A first; A is a modeling question, not a UI one
+**Status:** DONE (plan 02)
 
 ---
 
-## 19. Projects board — Daylite parity — OPEN
+## 19. Projects board — Daylite parity — DONE (2026-07-26, plan 02)
+
+**DONE 2026-07-26 (plan 02).** `/projects?view=board` — List | Board toggle
+beside the filter pills (decision C: alongside). Installs only (decision A);
+orders keep the list — ORDER_STAGES is a different vocabulary. READ-ONLY
+columns (decision B: recommended; stage changes keep `setProjectStage` and its
+side effects). 7 PROJECT_STAGES columns, cards show name / customer / value /
+the extracted due-age chip (`dueChipLabel`, shared with the list rows) / owner
+avatar; detail back-link returns to the board. Built on the generalized
+`src/components/board/board-view.tsx` (the leads board, now stage-agnostic
+with injected `moveAction`).
 
 **Area:** `src/app/(app)/projects/view.tsx`, `src/lib/stores/projects.ts`,
 `src/app/(app)/leads/board-view.tsx` (the component to generalize)
@@ -1381,7 +1429,7 @@ reorder) probably wouldn't.
 - **C. Does this replace the master-detail list or sit alongside it as a `?view=board` toggle?**
   Recommend alongside, matching the leads pattern.
 
-**Status:** OPEN — depends on item 18 (shared component); B is worth thinking about carefully
+**Status:** DONE (plan 02)
 
 ---
 

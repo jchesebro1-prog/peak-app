@@ -1851,3 +1851,36 @@ the generated JSON is not (regenerate from the folder).
   (DATABASE_URL) at deploy.** Note: the Google `redirect_uri_mismatch`
   error is separate — the OAuth client in Google Cloud Console must list
   the current domain's callback (`https://quartzite-six.vercel.app/api/auth/callback/google`).
+
+## D119 — Opportunity board shape: union view, PO-as-field, all quote types (2026-07-26)
+
+Controller calls made to unblock plan 02 (#18/#19) — **flagged for Jeff's
+review**, none block later promotion to a real Opportunity record:
+
+- **Read-time union, no Opportunity record.** The board projects leads +
+  quotes through `src/lib/opportunities.ts` (pure, spec-covered). A converted
+  lead is excluded — its quote carries the card. Promote to a real record
+  only if the union creaks (spec §3).
+- **Column mapping.** Lead: new→New, contacted→Collect Info,
+  qualified→Estimate, quoted→Estimate Sent, won/lost→Won-Lost. Quote:
+  draft→Estimate, sent→Estimate Sent, lost→Won-Lost, won→Won-Lost or
+  PO Received (`poReceivedAt` fork).
+- **PO Received is a FIELD, not a fifth status.** `Quote.poReceivedAt:
+  number | null` + `setPoReceived(id, on)` (refuses unless won).
+  `QuoteStatus` stays 4-state; the won/lost spawn machinery is untouched.
+- **ALL quoteTypes ride the board** — flame_test / repair / inspection /
+  consulting bids are pipeline too. **Product flag for Jeff:** should
+  service bids be filterable out (or excluded) on the opportunity board?
+- **Drag policy.** Leads move among the four open columns only — never into
+  or out of Won-Lost by drag (convert flow and markLost-with-reason stay the
+  only paths). Quotes drag only Won-Lost ↔ PO Received while won. Server
+  re-validates every drag with the same pure policy.
+- **Forecast date lives on the lead** (`forecastAt`, drawer-edited); quote
+  cards inherit it from their originating lead. Quotes get NO new date field.
+- **Age chip resets at conversion (product flag).** Quote cards age from
+  `quote.createdAt`, not the originating lead's — only `forecastAt` is
+  inherited, so an opportunity's age-in-days chip resets to 0 at lead→quote
+  conversion. Daylite-style age-since-lead would be a 2-line follow-up
+  (inherit `createdAt` the same way) if Jeff wants it.
+- Projects board (#19): alongside-toggle, installs-only, read-only —
+  Jeff's three open sub-decisions taken per the punchlist recommendations.
