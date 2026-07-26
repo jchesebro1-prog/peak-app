@@ -4,6 +4,7 @@ import { getSettings } from "@/lib/settings";
 import { mergedCatalog } from "@/lib/stores/survey-intake";
 import { mergedVisitReasons } from "@/lib/stores/site-visits";
 import { mergedConsultingPhases } from "@/lib/stores/engagements";
+import { resolveFieldDefs } from "@/lib/customer-fields";
 import { allUsers } from "@/lib/users";
 import {
   GMAIL_MODIFY_SCOPE,
@@ -138,6 +139,7 @@ export default async function SettingsPage() {
           intakeCatalog={mergedCatalog(settings.intakeCatalog)}
           visitReasons={mergedVisitReasons(settings.visitReasons)}
           consultingPhases={mergedConsultingPhases(settings.consultingPhases)}
+          customerFieldDefs={resolveFieldDefs(settings.customerFieldDefs)}
           offices={settings.offices.map((o) => ({
             id: o.id,
             type: o.type || "Main Office",

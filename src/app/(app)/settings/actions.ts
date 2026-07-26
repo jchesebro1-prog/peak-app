@@ -17,6 +17,11 @@ import {
   setRoles,
 } from "@/lib/users";
 import { permsFor, ROLES } from "@/lib/team";
+import {
+  slugifyFieldId,
+  validateFieldDefs,
+  type CustomFieldDef,
+} from "@/lib/customer-fields";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -354,4 +359,53 @@ export async function geocodeCityAction(
 ): Promise<LatLng | null> {
   await requirePerm("manage_users");
   return geoGeocode(city, state);
+}
+
+/* ---- customer custom fields (#23) ---- */
+
+export type CustomerFieldDefInput = {
+  /** absent on a freshly-added row — the id is minted here, from the label,
+   *  and is immutable after (it keys stored values on companies.custom). */
+  id?: string;
+  label: string;
+  kind: string;
+  options?: string[];
+  appliesTo?: string[];
+};
+
+/**
+ * #23 — whole-list replacement (the wireTypes idiom; setSettings is a
+ * shallow top-level merge, so the array is written whole). Admin-gated;
+ * validates server-side and THROWS on bad input — the TaxonomyCard
+ * inline-error idiom (the card catches and displays the message).
+ */
+export async function saveCustomerFieldDefsAction(
+  input: CustomerFieldDefInput[]
+): Promise<void> {
+  await requirePerm("manage_users");
+  const rows = (Array.isArray(input) ? input : []).filter(
+    (r) => (r.label || "").trim() || (r.id || "").trim()
+  );
+  const taken = new Set(rows.map((r) => (r.id || "").trim()).filter(Boolean));
+  const defs: CustomFieldDef[] = rows.map((r) => {
+    const label = (r.label || "").trim();
+    let id = (r.id || "").trim();
+    if (!id) {
+      id = slugifyFieldId(label, taken);
+      taken.add(id);
+    }
+    return {
+      id,
+      label,
+      kind: r.kind as CustomFieldDef["kind"],
+      ...(r.kind === "select"
+        ? { options: (r.options ?? []).map((o) => o.trim()).filter(Boolean) }
+        : {}),
+      appliesTo: (r.appliesTo ?? []).filter(Boolean),
+    };
+  });
+  const res = validateFieldDefs(defs);
+  if (!res.ok) throw new Error(res.error);
+  await setSettings({ customerFieldDefs: defs });
+  revalidatePath("/", "layout");
 }
