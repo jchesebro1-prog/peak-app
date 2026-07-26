@@ -38,7 +38,22 @@ export function dateYear(ms: number | null | undefined): string {
 
 export function timeAgo(ms: number | null | undefined): string {
   if (!ms) return "—";
-  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  const deltaMs = Date.now() - ms;
+  // Future branch (reviewer fix, #21 — scheduled/Upcoming timestamps):
+  // mirrors the past thresholds below but only needs m/h/d — feed items
+  // land within days, never months/years out. |delta| < 1 min still reads
+  // "just now" regardless of direction.
+  if (deltaMs < 0) {
+    const fs = Math.floor(-deltaMs / 1000);
+    if (fs < 60) return "just now";
+    const fm = Math.floor(fs / 60);
+    if (fm < 60) return `in ${fm}m`;
+    const fh = Math.floor(fm / 60);
+    if (fh < 24) return `in ${fh}h`;
+    const fd = Math.floor(fh / 24);
+    return `in ${fd}d`;
+  }
+  const s = Math.max(0, Math.floor(deltaMs / 1000));
   if (s < 60) return "just now";
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ago`;

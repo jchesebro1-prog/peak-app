@@ -11,6 +11,10 @@
  * vary per kind (stagesFor) and are passed IN by the server loader.
  */
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
+// Type-only — erased at build time, so the zero-store-import / client-bundle
+// rule still holds at runtime (no store code is ever pulled in here).
+import type { QuoteStatus } from "@/lib/stores/quotes";
+import type { SurveyStage } from "@/lib/stores/surveys";
 
 export type FeedKind =
   | "note"
@@ -68,7 +72,7 @@ function row(
 
 /** Mirrors quotes.STAGE_LABEL's stage set as past-tense verbs ("Quote
  *  Q-2041 sent"); unknown stages fall through as the raw key. */
-const QUOTE_VERB: Record<string, string> = {
+const QUOTE_VERB: Record<QuoteStatus, string> = {
   draft: "drafted",
   sent: "sent",
   won: "won",
@@ -85,7 +89,7 @@ export function quoteFeedRows(q: {
 }): FeedRow[] {
   const href = "/quotes?id=" + encodeURIComponent(q.id);
   const rows = (q.history || []).map((h, i) =>
-    row("quote", `quote:${q.id}:${i}`, h.at, `Quote ${q.id} ${QUOTE_VERB[h.to] ?? h.to}`, q.name, href, "")
+    row("quote", `quote:${q.id}:${i}`, h.at, `Quote ${q.id} ${QUOTE_VERB[h.to as QuoteStatus] ?? h.to}`, q.name, href, "")
   );
   if (q.poReceivedAt != null)
     rows.push(row("quote", `quote:${q.id}:po`, q.poReceivedAt, `Quote ${q.id} PO received`, q.name, href, ""));
@@ -187,7 +191,7 @@ export function jobFeedRows(
 }
 
 /** Mirrors surveys.STAGES labels (same drift guard as QUOTE_VERB). */
-const SURVEY_STAGE_LABEL: Record<string, string> = {
+const SURVEY_STAGE_LABEL: Record<SurveyStage, string> = {
   requested: "Requested",
   scheduled: "Scheduled",
   onsite: "On-site",
@@ -201,7 +205,7 @@ export function surveyFeedRows(s: { id: string; stage: string; venue: string; up
       "survey",
       `survey:${s.id}`,
       s.updatedAt,
-      `Survey ${s.id} — ${SURVEY_STAGE_LABEL[s.stage] ?? s.stage}`,
+      `Survey ${s.id} — ${SURVEY_STAGE_LABEL[s.stage as SurveyStage] ?? s.stage}`,
       s.venue || "",
       `/field-survey?id=${encodeURIComponent(s.id)}`,
       ""

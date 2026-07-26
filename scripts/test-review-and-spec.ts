@@ -1705,5 +1705,16 @@ import {
   ok(FEED_META.note.letter === "N" && FEED_META.quote.letter === "Q", "#21: letter-dot glyphs");
 }
 
+/* #21 — timeAgo future branch (reviewer fix: scheduled/Upcoming timestamps,
+   e.g. a future site-visit startAt). TZ-safe: offsets are relative to
+   Date.now(), no calendar construction, so these hold in any timezone. */
+import { timeAgo } from "@/lib/format";
+
+{
+  ok(timeAgo(Date.now() + 45_000) === "just now", "#21: timeAgo future within 60s still reads 'just now'");
+  ok(timeAgo(Date.now() + 5 * 60_000 + 2_000) === "in 5m", "#21: timeAgo future minutes renders 'in Nm'");
+  ok(timeAgo(Date.now() + 3 * 86_400_000 + 60_000) === "in 3d", "#21: timeAgo future days renders 'in Nd'");
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
