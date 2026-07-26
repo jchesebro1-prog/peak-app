@@ -1438,5 +1438,18 @@ import {
   ok(canConvertLead(null, true).ok && canConvertLead({ stage: "requested" }, true).ok, "#34: explicit skip always passes");
 }
 
+/* #34 — the auto-created survey's link fields ride blank()'s whitelist
+   (fields not in the def object are SILENTLY DROPPED — this proves the def
+   carries them). blank() is pure — no DB touched. */
+import { blank as surveyBlank } from "@/lib/stores/surveys";
+
+{
+  const b = surveyBlank();
+  ok(b.leadId === null && b.visitId === null, "#34: blank survey defaults null lead/visit links");
+  ok(b.stage === "requested", "#34: blank survey is born requested");
+  const linked = surveyBlank({ leadId: "L-1050", visitId: "SV-5001" });
+  ok(linked.leadId === "L-1050" && linked.visitId === "SV-5001", "#34: blank() whitelist passes leadId/visitId through");
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

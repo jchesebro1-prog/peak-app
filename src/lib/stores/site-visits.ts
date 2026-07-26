@@ -202,3 +202,81 @@ export async function scheduleVisit(id: string, startAt: number, endAt: number):
     d.updatedAt = Date.now();
   });
 }
+
+/* ---- #34 request orchestration (lead drawer's "Request site visit") ---- */
+
+export type VisitRequestOpts = { reason: string; timing: string; assignee: string };
+
+export type VisitRequestResult =
+  | { ok: true; visitId: string; surveyId: string }
+  | { ok: false; reason: "exists"; visitId: string };
+
+/**
+ * Create the visit request + the auto-linked Survey (#34, decision C).
+ * Dedupe FIRST: one active (non-done) visit per lead. The visit is born
+ * claimed or requested per assign-or-open; the Survey is born "requested"
+ * (it rides the existing field badge + "Survey requests to schedule" bell
+ * group automatically). Surveys are dynamic-imported — the leads.ts
+ * cross-store idiom — so the store layer stays acyclic.
+ */
+export async function requestVisitForLead(
+  lead: {
+    id: string;
+    org: string;
+    contact: string;
+    email: string;
+    phone: string;
+    city: string;
+    state: string;
+    customerId: string | null;
+  },
+  opts: VisitRequestOpts,
+  me: string
+): Promise<VisitRequestResult> {
+  const existing = (await allVisits()).find((v) => v.leadId === lead.id && v.stage !== "done");
+  if (existing) return { ok: false, reason: "exists", visitId: existing.id };
+
+  const rec = await createVisit({
+    customerId: lead.customerId ?? null,
+    customer: lead.org,
+    locationId: null,
+    venue: "",
+    address: [lead.city, lead.state].filter(Boolean).join(", "),
+    contactName: lead.contact,
+    contactEmail: lead.email,
+    contactPhone: lead.phone,
+    reason: opts.reason,
+    startAt: null,
+    endAt: null,
+    notes: "",
+    assignedTo: opts.assignee.trim(),
+    createdBy: me,
+    engagementId: null,
+    stage: requestStageFor(opts.assignee),
+    leadId: lead.id,
+    surveyId: null,
+    preferredTiming: opts.timing.trim(),
+  });
+
+  const { create: createSurvey } = await import("./surveys");
+  const survey = await createSurvey(
+    {
+      customer: lead.org,
+      customerId: lead.customerId ?? null,
+      contact: lead.contact,
+      contactPhone: lead.phone,
+      contactEmail: lead.email,
+      reason: opts.reason,
+      stage: "requested",
+      leadId: lead.id,
+      visitId: rec.id,
+    },
+    me
+  );
+
+  await patchDoc<SiteVisit>("site_visits", rec.id, (d) => {
+    d.surveyId = survey.id;
+    d.updatedAt = Date.now();
+  });
+  return { ok: true, visitId: rec.id, surveyId: survey.id };
+}

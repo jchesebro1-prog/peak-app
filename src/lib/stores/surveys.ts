@@ -366,6 +366,9 @@ export interface SurveyDraft {
   disciplinesActive: string[]; // which branches the rep opened
   inventory: InventoryRow[]; // structured type+qty rows (Lighting/AV)
   intakeReady: boolean; // explicit "ready for quote" flag
+  // ---- Lead thread (#34): the visit request that spawned this survey ----
+  leadId: string | null;
+  visitId: string | null;
 }
 
 export interface SurveyRecord extends SurveyDraft {
@@ -425,6 +428,8 @@ export function blank(partial: Partial<SurveyDraft> = {}): SurveyDraft {
     disciplinesActive: [],
     inventory: [],
     intakeReady: false,
+    leadId: null,
+    visitId: null,
   };
   const rec: Record<string, unknown> = {};
   Object.keys(def).forEach((k) => {
@@ -463,6 +468,11 @@ export async function pending(): Promise<SurveyRecord[]> {
   return list
     .map(normalize)
     .filter((s) => s.syncState === "pending" || s.syncState === "syncing");
+}
+
+/** Surveys linked to a lead (#34) — newest first (getAll is updatedAt-desc). */
+export async function surveysForLead(leadId: string): Promise<SurveyRecord[]> {
+  return (await getAll()).filter((s) => (s.leadId ?? null) === leadId);
 }
 
 /* ---- mutations ---- */

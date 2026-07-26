@@ -70,6 +70,8 @@ export type SurveyPatch = Partial<
     | "disciplinesActive"
     | "inventory"
     | "intakeReady"
+    | "leadId"
+    | "visitId"
   >
 >;
 

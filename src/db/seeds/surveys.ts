@@ -21,6 +21,9 @@ export function surveysSeed(): SurveyRecord[] {
     disciplinesActive: [],
     inventory: [],
     intakeReady: false,
+    // #34: these fixtures predate the lead thread — no lead/visit link.
+    leadId: null,
+    visitId: null,
   });
 
   return [

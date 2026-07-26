@@ -2,17 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import { buildIcs } from "@/lib/ics";
-import { gmailEnabled, hasCalendarScope, personalKey } from "@/lib/gmail/config";
-import { getConnectionInfo } from "@/lib/gmail/connections";
-import { invitesOn } from "@/lib/stores/notif-prefs";
-import {
-  createVisit,
-  stampGoogleEvent,
-  stampInvite,
-} from "@/lib/stores/site-visits";
+import { createVisit } from "@/lib/stores/site-visits";
 import { update as updateThread } from "@/lib/stores/comms";
-import { allUsers } from "@/lib/users";
+import { dispatchVisitInvite } from "@/lib/visit-invite";
 
 /**
  * Schedule a site visit from an inbox thread (D76 / PUNCHLIST #2 phase 1).
@@ -43,14 +35,8 @@ export type CreateSiteVisitInput = {
   engagementId?: string | null;
 };
 
-export type InviteStatus =
-  | "calendar" // D77 — event written straight to the assignee's Google Calendar
-  | "sent"
-  | "invites-off"
-  | "gmail-off"
-  | "no-mailbox"
-  | "no-email"
-  | "failed";
+export type { InviteStatus } from "@/lib/visit-invite";
+import type { InviteStatus } from "@/lib/visit-invite";
 
 export async function createSiteVisitAction(
   input: CreateSiteVisitInput
@@ -73,8 +59,6 @@ export async function createSiteVisitAction(
     });
   }
 
-  const assignee =
-    (await allUsers()).find((u) => u.name === input.assignedTo) || null;
   const rec = await createVisit({
     customerId: input.customerId,
     customer: input.customer,
@@ -97,94 +81,10 @@ export async function createSiteVisitAction(
     preferredTiming: "",
   });
 
-  let inviteStatus: InviteStatus;
-  const toAddr = assignee?.email || "";
-  if (!gmailEnabled()) inviteStatus = "gmail-off";
-  else if (!toAddr) inviteStatus = "no-email";
-  else if (!(await invitesOn(input.assignedTo))) inviteStatus = "invites-off";
-  else {
-    // Event title = venue + reason (the punch-list formatter).
-    const title = `${input.venue || input.customer} — ${input.reason}`;
-    const body = [
-      `Site visit: ${input.reason}`,
-      `Customer: ${input.customer}`,
-      input.venue ? `Venue: ${input.venue}` : "",
-      input.address ? `Address: ${input.address}` : "",
-      input.contactName
-        ? `Contact: ${input.contactName}` +
-          (input.contactPhone ? ` · ${input.contactPhone}` : "") +
-          (input.contactEmail ? ` · ${input.contactEmail}` : "")
-        : "",
-      input.notes ? `Notes: ${input.notes}` : "",
-      `Scheduled by ${me.name} in Peak (${rec.id}).`,
-    ]
-      .filter(Boolean)
-      .join("\n");
-    const location =
-      input.address || [input.venue, input.customer].filter(Boolean).join(", ");
-
-    // D77 — when the assignee's own mailbox has the Calendar grant, write the
-    // event straight onto their primary calendar: it just appears, no email
-    // step. Falls back to the .ics email otherwise (or if the write fails).
-    let wroteCalendar = false;
-    if (assignee) {
-      const akey = personalKey(assignee.id);
-      const info = await getConnectionInfo(akey);
-      if (info && hasCalendarScope(info.scope)) {
-        try {
-          const { insertEvent } = await import("@/lib/google/calendar");
-          const ev = await insertEvent(akey, {
-            title,
-            startMs: input.startAt,
-            endMs: input.endAt,
-            description: body,
-            location,
-          });
-          await stampGoogleEvent(rec.id, ev.id);
-          wroteCalendar = true;
-        } catch (err) {
-          console.error("[site-visit] calendar write failed:", err);
-        }
-      }
-    }
-
-    if (wroteCalendar) inviteStatus = "calendar";
-    else {
-      const ics = buildIcs({
-        uid: "sv-" + rec.id + "@peak-app",
-        title,
-        description: body,
-        location,
-        start: input.startAt,
-        end: input.endAt,
-        stampAt: Date.now(),
-      });
-      try {
-        const { sendSiteVisitInvite } = await import("@/lib/gmail/bridge");
-        const sent = await sendSiteVisitInvite({
-          siteVisitId: rec.id,
-          schedulerUserId: me.id,
-          toAddr,
-          subject: title,
-          body,
-          icsText: ics,
-        });
-        if (sent) {
-          await stampInvite(rec.id, {
-            sentAt: Date.now(),
-            to: toAddr,
-            fromMailbox: sent.fromMailbox,
-            gmailId: sent.gmailId,
-            gmailThreadId: sent.gmailThreadId,
-          });
-          inviteStatus = "sent";
-        } else inviteStatus = "no-mailbox";
-      } catch (err) {
-        console.error("[site-visit] invite send failed:", err);
-        inviteStatus = "failed";
-      }
-    }
-  }
+  const inviteStatus: InviteStatus = await dispatchVisitInvite(rec, {
+    id: me.id,
+    name: me.name,
+  });
 
   revalidatePath("/", "layout");
   return { ok: true, id: rec.id, inviteStatus };

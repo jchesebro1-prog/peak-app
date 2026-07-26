@@ -13,6 +13,7 @@ import {
   setStage,
   update,
 } from "@/lib/stores/leads";
+import { requestVisitForLead } from "@/lib/stores/site-visits";
 
 /**
  * Leads mutations — thin wrappers over LeadStore with the session user as
@@ -122,4 +123,38 @@ export async function setForecastAction(id: string, at: number | null) {
   await update(id, { forecastAt: at });
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/** #34: "Request site visit" from the lead drawer. Dedupe + visit + auto-
+    linked Survey live in the store orchestration (requestVisitForLead);
+    this wraps it with the session user and the lead activity entry. */
+export async function requestSiteVisitAction(
+  id: string,
+  input: { reason: string; timing: string; assignee: string }
+) {
+  const me = await requireUser();
+  const l = await get(id);
+  if (!l) return { ok: false as const, reason: "not-found" as const, visitId: "" };
+  const res = await requestVisitForLead(
+    {
+      id: l.id,
+      org: l.org,
+      contact: l.contact,
+      email: l.email,
+      phone: l.phone,
+      city: l.city,
+      state: l.state,
+      customerId: l.customerId ?? null,
+    },
+    input,
+    me.name
+  );
+  if (!res.ok) return { ok: false as const, reason: "exists" as const, visitId: res.visitId };
+  await logActivity(
+    id,
+    { type: "system", note: "Requested site visit — " + input.reason, by: me.name },
+    me.name
+  );
+  revalidatePath("/", "layout");
+  return { ok: true as const, visitId: res.visitId, surveyId: res.surveyId };
 }
