@@ -43,6 +43,7 @@ export const NAV: NavEntry[] = [
     key: "crm",
     label: "CRM",
     children: [
+      { key: "opportunities", label: "Opportunities", href: "/opportunities" },
       { key: "leads", label: "Leads", href: "/leads" },
       { key: "companies", label: "Companies", href: "/companies" },
       { key: "people", label: "People", href: "/people" },
@@ -78,6 +79,7 @@ export function activeKeyFor(pathname: string): string {
     "/calendar": "home",
     "/inbox": "home",
     "/leads": "leads",
+    "/opportunities": "opportunities",
     "/quotes": "quotes",
     "/estimator": "estimator",
     "/design": "designoverview",

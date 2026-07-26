@@ -317,19 +317,20 @@ ok(activeKeyFor("/inbox") === "home", "inbox lights Home");
 ok(activeKeyFor("/reports") === "home", "Reports lights Home now that it is a Home tab (D99)");
 
 // ---- General dissolution (D99): Companies/People/Field Survey → Sales (now CRM, D117) ----
+// Opportunities joined as the first child (#18) — six children as of plan 02.
 const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "crm");
 ok(
-  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 5),
-  "CRM has five children — Quotes and Reviews moved to EST (D117)",
+  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 6),
+  "CRM has six children — Quotes and Reviews moved to EST (D117), Opportunities added (#18)",
 );
 ok(
   !!(
     d99Sales &&
     d99Sales.kind === "group" &&
     d99Sales.children.map((c) => c.key).join(",") ===
-      "leads,companies,people,venues,field"
+      "opportunities,leads,companies,people,venues,field"
   ),
-  "CRM children are leads, companies, people, venues, field in order",
+  "CRM children are opportunities, leads, companies, people, venues, field in order",
 );
 ok(
   parentGroupOf("companies") === "crm" &&

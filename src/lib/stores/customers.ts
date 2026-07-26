@@ -716,3 +716,19 @@ export async function resetToSeed(): Promise<void> {
 
 /** Alias — the prototype's method is all(); list() reads better server-side. */
 export { all as list };
+
+/**
+ * Light company facts for cross-store filters (#18 opportunity board):
+ * venue-segment type + keyword tags straight off the relational companies
+ * table (schema.ts) — never a scan of the customer docs. Map key = company
+ * id (the customerId stored on leads/quotes).
+ */
+export async function companyFacts(): Promise<Map<string, { type: string; keywords: string[] }>> {
+  const rows = await allCompanies();
+  return new Map(
+    rows.map((c) => [
+      c.id,
+      { type: c.type || "", keywords: Array.isArray(c.keywords) ? c.keywords : [] },
+    ])
+  );
+}
