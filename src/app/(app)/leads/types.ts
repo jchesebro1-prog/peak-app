@@ -1,7 +1,8 @@
 /**
  * Serializable view-models passed from the server page to the client
- * components (board drag, worklist row actions, lead drawer). Pure types —
- * safe to import from either side of the boundary.
+ * components (worklist row actions, lead drawer). Board VMs now live in
+ * components/board. Pure types — safe to import from either side of the
+ * boundary.
  */
 
 /** Chip + avatar VMs now live with the generic board (#19 extraction);
