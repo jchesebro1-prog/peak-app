@@ -11,6 +11,8 @@ import {
 } from "./actions";
 import { CUSTOMER_TYPES, VENUE_KINDS, addressFromHit } from "./lib";
 import type { AddressHitVM, SaveCustomerInput } from "./types";
+import { defsForType, type CustomFieldDef } from "@/lib/customer-fields";
+import { LIFECYCLES, LIFECYCLE_LABEL } from "@/lib/identity/config";
 
 /**
  * New / Edit customer modal (Customers.dc.html edit sheet). Overlays the
@@ -104,14 +106,32 @@ function newLoc(primary: boolean): LocRow {
   };
 }
 
+/** #23 — <input type="date"> ⇄ epoch-ms bridge (local Date parts, TZ-safe).
+ *  Generic date VALUES store local midnight (unlike the lead drawer's
+ *  follow-up 9:00 convention — that is a scheduling default, this is data). */
+function toDateInput(ts: number | null): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const p = (x: number) => String(x).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+}
+function fromDateInput(s: string): number | null {
+  if (!s) return null;
+  const p = s.split("-");
+  if (p.length !== 3) return null;
+  return new Date(+p[0], +p[1] - 1, +p[2]).getTime();
+}
+
 export default function EditCustomerModal({
   mode,
   initial,
   closeHref,
+  fieldDefs = [],
 }: {
   mode: "new" | "edit";
   initial: SaveCustomerInput | null;
   closeHref: string;
+  fieldDefs?: CustomFieldDef[];
 }) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
@@ -119,6 +139,14 @@ export default function EditCustomerModal({
   const [name, setName] = useState(initial?.name || "");
   const [type, setType] = useState(initial?.type || "Performing arts");
   const [pricingTier, setPricingTier] = useState(initial?.pricingTier || "");
+  // #23 Details — lifecycle / keywords / custom values (client-local state,
+  // no new deps; the server action re-validates everything).
+  const [lifecycle, setLifecycle] = useState(initial?.lifecycle || "none");
+  const [keywords, setKeywords] = useState<string[]>(initial?.keywords || []);
+  const [kwDraft, setKwDraft] = useState("");
+  const [custom, setCustom] = useState<Record<string, string | number | boolean | null>>(
+    initial?.custom || {}
+  );
   const [locations, setLocations] = useState<LocRow[]>(() => {
     const src = initial?.locations || [];
     if (!src.length) return [newLoc(true)];
@@ -190,6 +218,23 @@ export default function EditCustomerModal({
       return next;
     });
 
+  const addKeyword = () => {
+    const k = kwDraft.trim();
+    if (!k) return;
+    setKeywords((ks) =>
+      ks.some((x) => x.toLowerCase() === k.toLowerCase()) ? ks : [...ks, k]
+    );
+    setKwDraft("");
+  };
+  const removeKeyword = (k: string) => setKeywords((ks) => ks.filter((x) => x !== k));
+  const setCustomVal = (id: string, v: string | number | boolean | null) =>
+    setCustom((m) => ({ ...m, [id]: v }));
+  // Re-derived every render, so switching the Type live-swaps which custom
+  // fields show (values for hidden fields stay in state; the server strips
+  // nothing — validateFieldValues keys off ALL defs, and display filters by
+  // type at read time).
+  const typeDefs = defsForType(fieldDefs, type);
+
   const onAddressInput = (i: number, value: string) => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     const q = value.trim();
@@ -245,6 +290,9 @@ export default function EditCustomerModal({
         name: name.trim(),
         type,
         pricingTier: pricingTier || null,
+        lifecycle,
+        keywords,
+        custom,
         locations: locations.map((l) => ({
           id: l.id,
           label: l.label,
@@ -411,6 +459,131 @@ export default function EditCustomerModal({
               <option value="reseller">Reseller</option>
               <option value="employee">Employee</option>
             </select>
+          </div>
+
+          {/* ---- details (#23): lifecycle · keywords · custom fields ---- */}
+          <div style={{ margin: "22px 0 9px" }}>
+            <span style={{ ...microLbl, marginBottom: 0 }}>Details</span>
+          </div>
+          <div style={cardStyle}>
+            <label style={{ ...microLbl, fontSize: 9.5, marginBottom: 5 }}>Lifecycle</label>
+            <select
+              className="cu-m-in"
+              value={lifecycle}
+              onChange={(e) => setLifecycle(e.target.value)}
+              style={{ ...selStyle, fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 10 }}
+            >
+              {LIFECYCLES.map((l) => (
+                <option key={l} value={l}>
+                  {l === "none" ? "— None —" : LIFECYCLE_LABEL[l]}
+                </option>
+              ))}
+            </select>
+
+            <label style={{ ...microLbl, fontSize: 9.5, marginBottom: 5 }}>Keywords</label>
+            {keywords.length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+                {keywords.map((k) => (
+                  <span
+                    key={k}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, padding: "3px 9px", borderRadius: 20 }}
+                  >
+                    {k}
+                    <button
+                      onClick={() => removeKeyword(k)}
+                      title="Remove keyword"
+                      style={{ border: "none", background: "transparent", color: "inherit", cursor: "pointer", fontSize: 12, lineHeight: 1, padding: 0 }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
+              <input
+                className="cu-m-in"
+                value={kwDraft}
+                onChange={(e) => setKwDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addKeyword();
+                  }
+                }}
+                placeholder="Add a keyword (e.g. Non-profit)"
+                style={{ ...inStyle, flex: 1, minWidth: 0, fontSize: 12.5, padding: "8px 11px", borderRadius: 8 }}
+              />
+              <button
+                onClick={addKeyword}
+                style={{ fontSize: 12, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: "none", borderRadius: 8, padding: "8px 13px", cursor: "pointer", flexShrink: 0 }}
+              >
+                Add
+              </button>
+            </div>
+
+            {typeDefs.map((d) => {
+              const v = custom[d.id];
+              const small = { ...inStyle, fontSize: 12.5, padding: "8px 11px", borderRadius: 8 };
+              return (
+                <div key={d.id} style={{ marginTop: 10 }}>
+                  <label style={{ ...microLbl, fontSize: 9.5, marginBottom: 5 }}>{d.label}</label>
+                  {d.kind === "text" && (
+                    <input
+                      className="cu-m-in"
+                      value={typeof v === "string" ? v : ""}
+                      onChange={(e) => setCustomVal(d.id, e.target.value || null)}
+                      style={small}
+                    />
+                  )}
+                  {d.kind === "number" && (
+                    <input
+                      className="cu-m-in"
+                      type="number"
+                      value={typeof v === "number" ? v : ""}
+                      onChange={(e) =>
+                        setCustomVal(d.id, e.target.value === "" ? null : Number(e.target.value))
+                      }
+                      style={{ ...small, fontFamily: "var(--font-mono)" }}
+                    />
+                  )}
+                  {d.kind === "date" && (
+                    <input
+                      className="cu-m-in"
+                      type="date"
+                      value={toDateInput(typeof v === "number" ? v : null)}
+                      onChange={(e) => setCustomVal(d.id, fromDateInput(e.target.value))}
+                      style={small}
+                    />
+                  )}
+                  {d.kind === "select" && (
+                    <select
+                      className="cu-m-in"
+                      value={typeof v === "string" ? v : ""}
+                      onChange={(e) => setCustomVal(d.id, e.target.value || null)}
+                      style={{ ...small, cursor: "pointer" }}
+                    >
+                      <option value="">—</option>
+                      {(d.options ?? []).map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {d.kind === "checkbox" && (
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#3a3f4a", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={v === true}
+                        onChange={(e) => setCustomVal(d.id, e.target.checked)}
+                      />
+                      Yes
+                    </label>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* locations */}

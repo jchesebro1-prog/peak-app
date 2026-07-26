@@ -11,6 +11,8 @@ import type { MapPin } from "@/components/map/LeafletMap";
 import { CustomersMap, FilterBar } from "./controls";
 import EditCustomerModal from "./edit-modal";
 import { cityState, custLocation, mono, moneyK, typeColor } from "./lib";
+import { getSettings } from "@/lib/settings";
+import { resolveFieldDefs } from "@/lib/customer-fields";
 
 export const metadata = { title: "Companies — Quartzite-6" };
 
@@ -30,20 +32,24 @@ export default async function CustomersPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [me, sp, customers, quotes, projects, users] = await Promise.all([
+  const [me, sp, customers, quotes, projects, users, settings] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
     getAllQuotes(),
     getAllProjects(),
     activeUsers(),
+    getSettings(),
   ]);
+  const fieldDefs = resolveFieldDefs(settings.customerFieldDefs);
 
   const q = one(sp.q);
   const typeParam = one(sp.type) || "all";
   const scope = one(sp.scope) || "all";
   const view = one(sp.view);
   const edit = one(sp.edit);
+  // #22/#23 "Added in last 7 days" — one allowlisted value, strip-default.
+  const added = one(sp.added) === "7d" ? "7d" : "";
 
   const roster = users.map((u) => ({ name: u.name, initials: u.initials, color: u.color }));
   const identOf = (name: string) => {
@@ -82,7 +88,7 @@ export default async function CustomersPage({
 
   /* ---- filters ---- */
   const ql = q.trim().toLowerCase();
-  const filtered = rows.filter(({ c, owner }) => {
+  const preAdded = rows.filter(({ c, owner }) => {
     if (scope === "mine" && owner !== me.name) return false;
     if (scope !== "all" && scope !== "mine" && owner !== scope) return false;
     if (typeParam !== "all" && c.type !== typeParam) return false;
@@ -96,6 +102,17 @@ export default async function CustomersPage({
     }
     return true;
   });
+  // createdAt is typed optional on CustomerDoc, but post-D85 every row has
+  // one: composeDoc (customers.ts:288) always copies the notNull
+  // companies.created_at, and the D85 converter stamped legacy pre-D83 rows
+  // with the CONVERSION run time (`doc.createdAt ?? t`) — reseeds rerun it
+  // (seed-data.ts). So legacy/seeded rows read as "new" for 7 days after any
+  // reseed or the prod first-boot; the `?? 0` is a type guard, not a
+  // never-match path.
+  const since7 = Date.now() - 7 * 86_400_000;
+  const isRecent = ({ c }: (typeof preAdded)[number]) => (c.createdAt ?? 0) >= since7;
+  const addedCount = preAdded.filter(isRecent).length;
+  const filtered = added ? preAdded.filter(isRecent) : preAdded;
 
   const types = ["all", ...Array.from(new Set(customers.map((c) => c.type).filter(Boolean)))];
   const ownerOptions = [
@@ -179,7 +196,7 @@ export default async function CustomersPage({
           </div>
 
           {hasCustomers && (
-            <FilterBar q={q} type={typeParam} scope={scope} types={types} ownerOptions={ownerOptions} meName={me.name} />
+            <FilterBar q={q} type={typeParam} scope={scope} added={added} addedCount={addedCount} types={types} ownerOptions={ownerOptions} meName={me.name} />
           )}
 
           {!hasCustomers ? (
@@ -251,7 +268,7 @@ export default async function CustomersPage({
         </div>
       )}
 
-      {edit === "new" && <EditCustomerModal mode="new" initial={null} closeHref="/companies" />}
+      {edit === "new" && <EditCustomerModal mode="new" initial={null} fieldDefs={fieldDefs} closeHref="/companies" />}
     </>
   );
 }

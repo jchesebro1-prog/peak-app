@@ -18,11 +18,14 @@ import {
   fmtTime,
   officesFromSettings,
 } from "@/lib/geo";
-import { shortDate, timeAgo } from "@/lib/format";
+import { dateYear, shortDate, timeAgo } from "@/lib/format";
 import { loadCustomerFeed } from "@/lib/customer-feed";
 import { groupRows } from "@/lib/feed-buckets";
 import ActivityComposer from "./activity-composer";
 import { Avatar } from "@/components/ui";
+import { getSettings } from "@/lib/settings";
+import { defsForType, resolveFieldDefs } from "@/lib/customer-fields";
+import { LIFECYCLE_LABEL, type Lifecycle } from "@/lib/identity/config";
 
 export const metadata = { title: "Company — Quartzite-6" };
 import { grantsFor, grantPath } from "@/lib/portal";
@@ -82,7 +85,7 @@ export default async function CustomerDetailPage({
   const cust = await getCustomer(id);
   if (!cust) notFound();
 
-  const [quotes, projects, surveys, threads, offices, users, feedRows] = await Promise.all([
+  const [quotes, projects, surveys, threads, offices, users, feedRows, settings] = await Promise.all([
     getAllQuotes(),
     getAllProjects(),
     getAllSurveys(),
@@ -90,6 +93,7 @@ export default async function CustomerDetailPage({
     officesFromSettings(),
     activeUsers(),
     loadCustomerFeed({ id: cust.id, name: cust.name }),
+    getSettings(),
   ]);
 
   const edit = one(sp.edit);
@@ -175,6 +179,9 @@ export default async function CustomerDetailPage({
     name: cust.name,
     type: cust.type,
     pricingTier: cust.pricingTier || null,
+    lifecycle: cust.lifecycle || "none",
+    keywords: cust.keywords || [],
+    custom: cust.custom || {},
     locations: (cust.locations || []).map((l) => ({
       id: l.id,
       label: l.label || "",
@@ -200,6 +207,31 @@ export default async function CustomerDetailPage({
   const tc = typeColor(cust.type);
   const commWaiting = threads.filter((t) => t.status === "waiting_us").length;
   const feedGroups = groupRows(feedRows, Date.now());
+
+  /* ---- #23 lifecycle pill + custom-field detail rows ---- */
+  const LIFE_TONE: Record<string, { ink: string; soft: string }> = {
+    prospect: { ink: "#8a6d1f", soft: "#fbf3dd" },
+    customer: { ink: "#1f7a52", soft: "#eaf6ef" },
+    past: { ink: "#8c919c", soft: "#f1f2f5" },
+  };
+  const lifeTone = LIFE_TONE[cust.lifecycle || ""] || { ink: "#5b616e", soft: "#f1f2f5" };
+  const lifeLabel = LIFECYCLE_LABEL[cust.lifecycle as Lifecycle] ?? cust.lifecycle ?? "";
+  const fieldDefs = resolveFieldDefs(settings.customerFieldDefs);
+  const detailRows = defsForType(fieldDefs, cust.type)
+    .map((d) => ({ d, v: (cust.custom || {})[d.id] }))
+    .filter((x) => x.v !== undefined && x.v !== null && x.v !== "")
+    .map(({ d, v }) => ({
+      id: d.id,
+      label: d.label,
+      value:
+        d.kind === "date"
+          ? dateYear(v as number)
+          : d.kind === "checkbox"
+            ? v
+              ? "Yes"
+              : "No"
+            : String(v),
+    }));
 
   const stats = [
     { label: "Open value", value: openValue > 0 ? money(openValue) : "—", color: openValue > 0 ? "#16181d" : "#aab0bb" },
@@ -232,6 +264,16 @@ export default async function CustomerDetailPage({
                   {cust.type}
                 </span>
               )}
+              {cust.lifecycle && cust.lifecycle !== "none" && (
+                <span style={{ fontSize: 11, fontWeight: 600, color: lifeTone.ink, background: lifeTone.soft, padding: "3px 10px", borderRadius: 20 }}>
+                  {lifeLabel}
+                </span>
+              )}
+              {(cust.keywords || []).map((k) => (
+                <span key={k} style={{ fontSize: 10.5, fontWeight: 600, color: "#5b616e", background: "#f1f2f5", border: "1px solid #e4e7ec", padding: "2px 9px", borderRadius: 20 }}>
+                  {k}
+                </span>
+              ))}
             </div>
             <div style={{ fontSize: 13, color: "#8c919c", marginTop: 4 }}>{custLocation(cust)}</div>
             {ownerIdent && (
@@ -536,6 +578,23 @@ export default async function CustomerDetailPage({
               )}
             </div>
 
+            {/* ---- details (#23) — populated custom fields ---- */}
+            {detailRows.length > 0 && (
+              <div style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, boxShadow: "0 1px 2px rgba(0,0,0,.04)", padding: "15px 16px" }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 10 }}>
+                  Details
+                </div>
+                {detailRows.map((r) => (
+                  <div key={r.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "7px 0", borderTop: "1px solid #f3f4f7" }}>
+                    <span style={{ fontSize: 12, color: "#8c919c", flexShrink: 0 }}>{r.label}</span>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: "right", minWidth: 0, overflowWrap: "anywhere" }}>
+                      {r.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, boxShadow: "0 1px 2px rgba(0,0,0,.04)", padding: "15px 16px" }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 12 }}>Contacts</div>
               {contacts.map((ct, i) => (
@@ -627,7 +686,9 @@ export default async function CustomerDetailPage({
         </div>
       </div>
 
-      {edit === "1" && <EditCustomerModal mode="edit" initial={editInitial} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />}
+      {edit === "1" && (
+        <EditCustomerModal mode="edit" initial={editInitial} fieldDefs={fieldDefs} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />
+      )}
     </>
   );
 }

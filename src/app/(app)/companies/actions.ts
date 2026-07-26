@@ -12,6 +12,9 @@ import {
   route,
 } from "@/lib/geo";
 import type { AddressHitVM, LocationInput, RouteVM, SaveCustomerInput } from "./types";
+import { LIFECYCLES } from "@/lib/identity/config";
+import { resolveFieldDefs, validateFieldValues } from "@/lib/customer-fields";
+import { getSettings } from "@/lib/settings";
 
 /**
  * Customers mutations — thin wrappers over CustomerStore. The Customers screen
@@ -26,6 +29,37 @@ export async function saveCustomerAction(input: SaveCustomerInput) {
   const name = (input.name || "").trim();
   if (!name) return { ok: false as const, id: "" };
   const id = input.id || "c" + Date.now();
+  // #23 Details — validated server-side, never trusted from the client.
+  // Absent field = absent from the upsert input = PRESERVE (write-when-
+  // provided, see stores/customers.ts writeRecord).
+  const extras: {
+    lifecycle?: string;
+    keywords?: string[];
+    custom?: Record<string, string | number | boolean | null>;
+  } = {};
+  if (
+    input.lifecycle !== undefined &&
+    (LIFECYCLES as readonly string[]).includes(input.lifecycle)
+  ) {
+    extras.lifecycle = input.lifecycle; // unknown value → field ignored (preserve)
+  }
+  if (input.keywords !== undefined) {
+    const seen = new Set<string>();
+    extras.keywords = input.keywords
+      .map((k) => (k || "").trim().slice(0, 40))
+      .filter((k) => {
+        if (!k) return false;
+        const lc = k.toLowerCase();
+        if (seen.has(lc)) return false; // case-insensitive dedupe
+        seen.add(lc);
+        return true;
+      })
+      .slice(0, 20);
+  }
+  if (input.custom !== undefined) {
+    const defs = resolveFieldDefs((await getSettings()).customerFieldDefs);
+    extras.custom = validateFieldValues(defs, input.custom);
+  }
   await upsert({
     id,
     name,
@@ -53,6 +87,7 @@ export async function saveCustomerAction(input: SaveCustomerInput) {
         phone: (c.phone || "").trim(),
         primary: !!c.primary,
       })),
+    ...extras,
   });
   revalidatePath("/", "layout");
   return { ok: true as const, id };

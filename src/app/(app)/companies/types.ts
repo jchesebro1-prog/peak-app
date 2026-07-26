@@ -35,6 +35,13 @@ export type SaveCustomerInput = {
   pricingTier?: string | null;
   locations: LocationInput[];
   contacts: ContactInput[];
+  /** #23 Details section. lifecycle ∈ LIFECYCLES (unknown → server ignores
+   *  the field); keywords trimmed/deduped/capped server-side; custom keyed
+   *  by CustomFieldDef.id and re-validated server-side against the live
+   *  defs. All optional — absent means preserve. */
+  lifecycle?: string;
+  keywords?: string[];
+  custom?: Record<string, string | number | boolean | null>;
 };
 
 /** A normalized address suggestion for the modal's live search dropdown. */

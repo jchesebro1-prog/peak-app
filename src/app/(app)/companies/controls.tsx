@@ -55,6 +55,8 @@ export function FilterBar({
   q,
   type,
   scope,
+  added,
+  addedCount,
   types,
   ownerOptions,
   meName,
@@ -62,6 +64,8 @@ export function FilterBar({
   q: string;
   type: string;
   scope: string;
+  added: string;
+  addedCount: number;
   types: string[];
   ownerOptions: Array<{ value: string; label: string }>;
   meName: string;
@@ -79,14 +83,16 @@ export function FilterBar({
     setText(q);
   }
 
-  const pushWith = (patch: { q?: string; type?: string; scope?: string }) => {
+  const pushWith = (patch: { q?: string; type?: string; scope?: string; added?: string }) => {
     const p = new URLSearchParams();
     const nq = patch.q !== undefined ? patch.q : text;
     const nt = patch.type !== undefined ? patch.type : type;
     const ns = patch.scope !== undefined ? patch.scope : scope;
+    const na = patch.added !== undefined ? patch.added : added;
     if (nq.trim()) p.set("q", nq.trim());
     if (nt && nt !== "all") p.set("type", nt);
     if (ns && ns !== "all") p.set("scope", ns);
+    if (na === "7d") p.set("added", "7d");
     const s = p.toString();
     router.push("/companies" + (s ? "?" + s : ""));
   };
@@ -182,6 +188,28 @@ export function FilterBar({
             </option>
           ))}
         </select>
+        <button
+          onClick={() => pushWith({ added: added === "7d" ? "" : "7d" })}
+          title="Companies added in the last 7 days"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 11.5,
+            fontWeight: added === "7d" ? 600 : 500,
+            padding: "7px 11px",
+            borderRadius: 20,
+            border: `1px solid ${added === "7d" ? "var(--accent)" : "#e4e7ec"}`,
+            cursor: "pointer",
+            background: added === "7d" ? ACCENT_SOFT : "#fff",
+            color: added === "7d" ? ACCENT_INK : "#5b616e",
+            flexShrink: 0,
+            whiteSpace: "nowrap",
+          }}
+        >
+          New (7d)
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600 }}>{addedCount}</span>
+        </button>
       </div>
     </div>
   );
