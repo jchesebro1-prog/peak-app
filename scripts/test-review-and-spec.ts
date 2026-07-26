@@ -320,17 +320,17 @@ ok(activeKeyFor("/reports") === "home", "Reports lights Home now that it is a Ho
 // Opportunities joined as the first child (#18) — six children as of plan 02.
 const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "crm");
 ok(
-  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 6),
-  "CRM has six children — Quotes and Reviews moved to EST (D117), Opportunities added (#18)",
+  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 7),
+  "CRM has seven children — Quotes and Reviews moved to EST (D117), Opportunities added (#18), My Leads added (#22)",
 );
 ok(
   !!(
     d99Sales &&
     d99Sales.kind === "group" &&
     d99Sales.children.map((c) => c.key).join(",") ===
-      "opportunities,leads,companies,people,venues,field"
+      "opportunities,leads,myleads,companies,people,venues,field"
   ),
-  "CRM children are opportunities, leads, companies, people, venues, field in order",
+  "CRM children are opportunities, leads, myleads, companies, people, venues, field in order",
 );
 ok(
   parentGroupOf("companies") === "crm" &&
@@ -391,17 +391,17 @@ ok(
 // ---- Operations merge (D100): Installs + Service → Operations (now PM, D117) ----
 const d100Ops = NAV.find((e) => e.kind === "group" && e.key === "pm");
 ok(
-  !!(d100Ops && d100Ops.kind === "group" && d100Ops.children.length === 6),
-  "PM has six children",
+  !!(d100Ops && d100Ops.kind === "group" && d100Ops.children.length === 7),
+  "PM has seven children (My Projects added, #22)",
 );
 ok(
   !!(
     d100Ops &&
     d100Ops.kind === "group" &&
     d100Ops.children.map((c) => c.key).join(",") ===
-      "projects,schedule,fieldwork,flametests,inspections,repairs"
+      "projects,myprojects,schedule,fieldwork,flametests,inspections,repairs"
   ),
-  "PM children are projects, schedule, fieldwork, flametests, inspections, repairs in order",
+  "PM children are projects, myprojects, schedule, fieldwork, flametests, inspections, repairs in order",
 );
 ok(!NAV.some((e) => e.kind === "group" && e.key === "installs"), "the Installs group is gone");
 ok(!NAV.some((e) => e.kind === "group" && e.key === "service"), "the Service group is gone");
@@ -1141,8 +1141,8 @@ ok(accentContrast("#b4543a") === "#fff", "red accent carries white text");
 const d117Est = NAV.find((e) => e.kind === "group" && e.key === "est");
 ok(
   !!(d117Est && d117Est.kind === "group" &&
-    d117Est.children.map((c) => c.key).join(",") === "quotes,estimator,reviews"),
-  "EST = Quotes, Estimator, Reviews in order",
+    d117Est.children.map((c) => c.key).join(",") === "quotes,myquotes,estimator,reviews"),
+  "EST = Quotes, My Quotes, Estimator, Reviews in order (#22)",
 );
 ok(activeKeyFor("/estimator") === "estimator", "/estimator lights its own EST child");
 ok(activeKeyFor("/") === "home", "root still resolves to home (drawer link + mark)");
@@ -1818,6 +1818,33 @@ import {
   ok(
     validateFieldDefs([{ id: "x", label: "x".repeat(61), kind: "text", appliesTo: [] }]).ok === false,
     "#23: labels cap at 60 chars"
+  );
+}
+
+/* #22 — Mine/All literals. NAV / activeKeyFor / parentGroupOf are already
+   imported by the D98/D117 nav sections above — reuse, never re-import. */
+import { SEG_KEYS } from "@/app/(app)/leads/segs";
+
+{
+  ok(
+    SEG_KEYS.join("|") === "all|follow|unassigned|new|open|won|lost",
+    "#22: leads segments — the closed bundle is split into won|lost"
+  );
+  ok(
+    !(SEG_KEYS as string[]).includes("closed"),
+    "#22: legacy ?seg=closed is off the allowlist — deep links fall back to 'all'"
+  );
+
+  const childPairs = (key: string): string[] => {
+    const g = NAV.find((e) => e.kind === "group" && e.key === key);
+    return g && g.kind === "group" ? g.children.map((c) => `${c.key}:${c.href}`) : [];
+  };
+  ok(childPairs("est").includes("myquotes:/quotes?who=mine"), "#22: EST carries My Quotes → /quotes?who=mine");
+  ok(childPairs("crm").includes("myleads:/leads?who=mine"), "#22: CRM carries My Leads → /leads?who=mine");
+  ok(childPairs("pm").includes("myprojects:/projects?who=mine"), "#22: PM carries My Projects → /projects?who=mine");
+  ok(
+    activeKeyFor("/leads") === "leads" && parentGroupOf("myleads") === "crm",
+    "#22: activeKeyFor stays pathname-only — a My-X child never lights its own key (known cosmetic limitation, base child lights for both)"
   );
 }
 

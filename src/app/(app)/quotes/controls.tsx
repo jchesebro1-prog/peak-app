@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 // Nothing here may import from @/lib/stores/quotes — this is a client bundle
 // and the store transitively pulls in the db layer (postgres, drizzle), which
@@ -234,43 +233,9 @@ export function NewQuoteMenu() {
   );
 }
 
-/** Teammate scope <select> — navigates via prebuilt hrefs from the server. */
-export function OwnerSelect({
-  value,
-  options,
-}: {
-  value: string;
-  options: Array<{ value: string; label: string; href: string }>;
-}) {
-  const router = useRouter();
-  return (
-    <select
-      className="qt-sel"
-      value={value}
-      onChange={(e) => {
-        const opt = options.find((o) => o.value === e.target.value);
-        if (opt) router.push(opt.href);
-      }}
-      style={{
-        fontFamily: "var(--font-ui)",
-        fontSize: 12.5,
-        fontWeight: 600,
-        color: "#3a3f4a",
-        background: "#fff",
-        border: "1px solid #e4e7ec",
-        borderRadius: 9,
-        padding: "9px 30px 9px 12px",
-        cursor: "pointer",
-      }}
-    >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
-  );
-}
+/* #22 — OwnerSelect moved to @/components/owner-select (shared with Leads
+ * and Projects); re-exported so quotes/page.tsx's import stays put. */
+export { OwnerSelect } from "@/components/owner-select";
 
 /* ---------------- revisions (punch item 24) ---------------- */
 

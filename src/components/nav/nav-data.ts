@@ -21,6 +21,15 @@ export const NAV: NavEntry[] = [
     label: "EST",
     children: [
       { key: "quotes", label: "Quotes", href: "/quotes" },
+      /* #22 Mine/All nav children — querystring hrefs render verbatim.
+       * KNOWN cosmetic limitations (accepted, logged in PUNCHLIST #22):
+       * activeKeyFor is pathname-only, so a My-X child never lights its own
+       * key (the base child lights for both); and Nav's overlay-close
+       * effect keys on [pathname] alone, so clicking My Quotes while
+       * already on /quotes doesn't auto-close the dropdown. Wiring
+       * useSearchParams into Nav would force dynamic rendering of the
+       * layout — deliberately NOT done. */
+      { key: "myquotes", label: "My Quotes", href: "/quotes?who=mine" },
       { key: "estimator", label: "Estimator", href: "/estimator" },
       { key: "reviews", label: "Reviews", href: "/reviews" },
     ],
@@ -31,6 +40,7 @@ export const NAV: NavEntry[] = [
     label: "PM",
     children: [
       { key: "projects", label: "Projects", href: "/projects" },
+      { key: "myprojects", label: "My Projects", href: "/projects?who=mine" }, // #22 — see the EST note
       { key: "schedule", label: "Schedule", href: "/schedule" },
       { key: "fieldwork", label: "Field Work", href: "/field-work" },
       { key: "flametests", label: "Flame Tests", href: "/flame-tests" },
@@ -45,6 +55,7 @@ export const NAV: NavEntry[] = [
     children: [
       { key: "opportunities", label: "Opportunities", href: "/opportunities" },
       { key: "leads", label: "Leads", href: "/leads" },
+      { key: "myleads", label: "My Leads", href: "/leads?who=mine" }, // #22 — see the EST note
       { key: "companies", label: "Companies", href: "/companies" },
       { key: "people", label: "People", href: "/people" },
       { key: "venues", label: "Venues", href: "/venues" },

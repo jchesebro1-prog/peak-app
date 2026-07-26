@@ -10,7 +10,7 @@ import {
   followUpInfo,
   getAll,
   isOpen,
-  metrics,
+  needsFollowUp,
   sla,
   sourceMeta,
   SOURCES,
@@ -22,6 +22,8 @@ import {
   type LeadRecord,
 } from "@/lib/stores/leads";
 import { ACCENT_INK, avatarFor, buildDrawerVM, fuChip, srcChip, stageChip, type Ident } from "./lib";
+import { OwnerSelect } from "@/components/owner-select";
+import { SEG_KEYS, type SegKey } from "./segs";
 import { shortMoneyDash, shortMoneyZero } from "./money";
 import BoardView from "@/components/board/board-view";
 import WorklistRow from "./worklist-row";
@@ -47,7 +49,6 @@ import type { BoardCardVM } from "@/components/board/types";
 export const metadata = { title: "Leads — Quartzite-6" };
 
 type ViewKey = "board" | "worklist" | "table";
-type SegKey = "all" | "follow" | "unassigned" | "new" | "open" | "closed";
 
 const VIEW_OPTIONS: Array<{ key: ViewKey; label: string }> = [
   { key: "board", label: "Board" },
@@ -55,14 +56,13 @@ const VIEW_OPTIONS: Array<{ key: ViewKey; label: string }> = [
   { key: "table", label: "Table" },
 ];
 
-const SEG_KEYS: SegKey[] = ["all", "follow", "unassigned", "new", "open", "closed"];
-
 const COLS = "minmax(0,1.7fr) minmax(0,1.6fr) 82px 90px minmax(0,0.95fr) 74px 100px 66px";
 
-function hrefFor(view: ViewKey, seg: SegKey, lead?: string): string {
+function hrefFor(view: ViewKey, seg: SegKey, lead?: string, who?: string): string {
   const p = new URLSearchParams();
   if (view !== "table") p.set("view", view);
   if (view === "table" && seg !== "all") p.set("seg", seg);
+  if (who) p.set("who", who);
   if (lead) p.set("lead", lead);
   const s = p.toString();
   return "/leads" + (s ? `?${s}` : "");
@@ -85,6 +85,8 @@ const styleBlock = `
   .lv-trow { grid-template-columns: minmax(0,1fr) 74px 100px !important; }
   .lv-scope, .lv-src, .lv-stage, .lv-own, .lv-upd { display: none !important; }
 }
+/* copied from quotes/page.tsx — select.qt-sel's dropdown-arrow rule, so OwnerSelect renders identically here */
+select.qt-sel { -webkit-appearance: none; appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238c919c' stroke-width='1.5'/></svg>"); background-repeat: no-repeat; background-position: right 11px center; }
 `;
 
 const formLink: CSSProperties = {
@@ -114,16 +116,47 @@ const newBtn: CSSProperties = {
   textDecoration: "none",
 };
 
+/* ---- #22 owner-scope toolbar (the quotes My work / Everyone idiom) ---- */
+const scopeSegOn: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#16181d",
+  background: "#fff",
+  borderRadius: 7,
+  padding: "7px 12px",
+  textDecoration: "none",
+  boxShadow: "0 1px 2px rgba(0,0,0,.08)",
+};
+const scopeSegOff: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#787d87",
+  background: "transparent",
+  borderRadius: 7,
+  padding: "7px 12px",
+  textDecoration: "none",
+};
+
+type ScopeVM = {
+  who: string; // "" (everyone) | "mine" | teammate name
+  mineHref: string;
+  allHref: string;
+  ownerValue: string;
+  ownerOptions: Array<{ value: string; label: string; href: string }>;
+};
+
 function Heading({
   compact,
   standfirst,
   view,
   newHref,
+  scope,
 }: {
   compact: boolean;
   standfirst: string;
   view: ViewKey;
   newHref: string;
+  scope: ScopeVM;
 }) {
   return (
     <div
@@ -145,7 +178,16 @@ function Heading({
         <div style={{ fontSize: compact ? 13 : 13.5, color: "#8c919c", marginTop: 5 }}>{standfirst}</div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, flexWrap: "wrap" }}>
-        <SegmentedToggle options={VIEW_OPTIONS} active={view} hrefFor={(k) => hrefFor(k, "all")} />
+        <div style={{ display: "flex", background: "#eceef1", borderRadius: 9, padding: 3, flexShrink: 0 }}>
+          <Link href={scope.mineHref} style={scope.who === "mine" ? scopeSegOn : scopeSegOff}>
+            My work
+          </Link>
+          <Link href={scope.allHref} style={scope.who === "" ? scopeSegOn : scopeSegOff}>
+            Everyone
+          </Link>
+        </div>
+        <OwnerSelect value={scope.ownerValue} options={scope.ownerOptions} />
+        <SegmentedToggle options={VIEW_OPTIONS} active={view} hrefFor={(k) => hrefFor(k, "all", undefined, scope.who)} />
         <a href="/lead-intake" target="_blank" style={formLink}>
           Public form ↗
         </a>
@@ -190,15 +232,49 @@ export default async function LeadsPage({
   const seg: SegKey = SEG_KEYS.includes(segParam) ? segParam : "all";
   const leadParam = one(sp.lead);
 
-  const [all, m, users, fuList, unassignedList, settings] = await Promise.all([
+  // #22 — mirror the quotes ?who= idiom exactly: absent/all = everyone,
+  // me-by-name canonicalizes to "mine", anything else is a teammate name.
+  const whoRaw = one(sp.who);
+  const who = !whoRaw || whoRaw === "all" ? "" : whoRaw === "mine" || whoRaw === me.name ? "mine" : whoRaw;
+  const scopeName = who === "mine" ? me.name : who; // "" = unscoped
+
+  const [allLeads, users, fuList, unassignedAll, settings] = await Promise.all([
     getAll(),
-    metrics(),
     activeUsers(),
-    followUps(),
+    followUps(scopeName ? { owner: scopeName } : {}),
     unassigned(),
     getSettings(),
   ]);
   const roster: Ident[] = users.map((u) => ({ name: u.name, initials: u.initials, color: u.color }));
+
+  // #22 STRICT owner scope, applied to the full set BEFORE any view/seg
+  // logic (board, worklist, table, urgency ordering all derive from `all`).
+  // Deliberately l.owner === name, NOT unownedOrMine: unassigned leads keep
+  // their own segment + the claim flow instead of leaking into "My work" —
+  // which also means the Unassigned segment reads 0 under any owner scope.
+  const all = scopeName ? allLeads.filter((l) => l.owner === scopeName) : allLeads;
+  const unassignedList = scopeName ? [] : unassignedAll;
+
+  // #22 — metrics() is unscoped (no owner opt); recompute the same numbers
+  // over the scoped set so tiles, standfirst and segment counts agree with
+  // the view. fuList is already owner-scoped via followUps({ owner }).
+  const DAY = 86_400_000;
+  const openList = all.filter(isOpen);
+  const wonList = all.filter((l) => l.stage === "won");
+  const lostList = all.filter((l) => l.stage === "lost");
+  const decided = wonList.length + lostList.length;
+  const m = {
+    open: openList.length,
+    openValue: openList.reduce((a, l) => a + (l.value || 0), 0),
+    needFollowUp: openList.filter((l) => needsFollowUp(l)).length,
+    slaBreached: openList.filter((l) => sla(l).state === "breached").length,
+    unassigned: openList.filter((l) => !l.owner).length,
+    newThisWeek: all.filter((l) => (l.createdAt || 0) >= Date.now() - 7 * DAY).length,
+    won: wonList.length,
+    lost: lostList.length,
+    conversion: decided ? Math.round((wonList.length / decided) * 100) : 0,
+    counts: { new: all.filter((l) => l.stage === "new").length },
+  };
 
   const standfirst = `${m.open} open leads · ${shortMoneyDash(m.openValue)} in play · ${m.needFollowUp} need follow-up`;
 
@@ -206,12 +282,27 @@ export default async function LeadsPage({
   const byUrg = (a: LeadRecord, b: LeadRecord) =>
     (urgOf.get(b.id) || 0) - (urgOf.get(a.id) || 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
 
-  const closeHref = hrefFor(view, seg);
-  const newHref = hrefFor(view, seg, "new");
+  const closeHref = hrefFor(view, seg, undefined, who);
+  const newHref = hrefFor(view, seg, "new", who);
+
+  const scopeVM: ScopeVM = {
+    who,
+    mineHref: hrefFor(view, seg, undefined, "mine"),
+    allHref: hrefFor(view, seg, undefined, ""),
+    ownerValue: who === "" ? "all" : who,
+    ownerOptions: [
+      { value: "all", label: "All teammates", href: hrefFor(view, seg, undefined, "") },
+      ...roster.map((r) => ({
+        value: r.name === me.name ? "mine" : r.name,
+        label: r.name === me.name ? r.name + " (me)" : r.name,
+        href: hrefFor(view, seg, undefined, r.name === me.name ? "mine" : r.name),
+      })),
+    ],
+  };
 
   /* ---------- drawer ---------- */
   const leadRec =
-    leadParam && leadParam !== "new" ? all.find((l) => l.id === leadParam) || null : null;
+    leadParam && leadParam !== "new" ? allLeads.find((l) => l.id === leadParam) || null : null;
   const drawerMode: "new" | "detail" | null = leadParam
     ? leadParam === "new" || !leadRec
       ? "new"
@@ -280,7 +371,7 @@ export default async function LeadsPage({
         strip: fu.tone === "bad" ? "#c85a3c" : fu.tone === "warn" ? "#c8a53c" : "transparent",
         owner: avatarFor(roster, l.owner),
         ownerTitle: l.owner || "Unassigned",
-        href: hrefFor("board", "all", l.id),
+        href: hrefFor("board", "all", l.id, who),
         canMoveTo: (STAGES as readonly string[]).filter((k) => k !== l.stage),
       };
     });
@@ -327,7 +418,7 @@ export default async function LeadsPage({
       stage: stageChip(l),
       reason: { label: fu.full, ink: fu.ink, soft: fu.soft, bd: fu.bd },
       canClaim: !l.owner,
-      href: hrefFor("worklist", "all", l.id),
+      href: hrefFor("worklist", "all", l.id, who),
     };
   };
   const workGroups = [
@@ -344,14 +435,16 @@ export default async function LeadsPage({
     { key: "unassigned", label: "Unassigned", count: m.unassigned },
     { key: "new", label: "New", count: m.counts.new },
     { key: "open", label: "Open", count: m.open },
-    { key: "closed", label: "Won / Lost", count: m.won + m.lost },
+    { key: "won", label: "Won", count: m.won },
+    { key: "lost", label: "Lost", count: m.lost },
   ];
   let filtered: LeadRecord[];
   if (seg === "follow") filtered = fuList.slice();
   else if (seg === "unassigned") filtered = unassignedList.slice();
   else if (seg === "new") filtered = all.filter((l) => l.stage === "new");
   else if (seg === "open") filtered = all.filter(isOpen);
-  else if (seg === "closed") filtered = all.filter((l) => l.stage === "won" || l.stage === "lost");
+  else if (seg === "won") filtered = all.filter((l) => l.stage === "won");
+  else if (seg === "lost") filtered = all.filter((l) => l.stage === "lost");
   else filtered = all.slice();
   if (seg !== "follow") filtered = filtered.sort(byUrg);
 
@@ -359,7 +452,7 @@ export default async function LeadsPage({
     const fu = fuChip(l);
     return {
       id: l.id,
-      href: hrefFor("table", seg, l.id),
+      href: hrefFor("table", seg, l.id, who),
       org: l.org,
       idContact: l.id + (l.contact ? " · " + l.contact : ""),
       scope: l.interest || "—",
@@ -381,7 +474,7 @@ export default async function LeadsPage({
 
       {view === "table" && (
         <div className="pk-content lv-pad">
-          <Heading compact={false} standfirst={standfirst} view={view} newHref={newHref} />
+          <Heading compact={false} standfirst={standfirst} view={view} newHref={newHref} scope={scopeVM} />
 
           {/* segment chips */}
           <div className="lv-segs" style={{ display: "flex", gap: 7, overflowX: "auto", marginBottom: 14 }}>
@@ -390,7 +483,7 @@ export default async function LeadsPage({
               return (
                 <Link
                   key={s.key}
-                  href={hrefFor("table", s.key)}
+                  href={hrefFor("table", s.key, undefined, who)}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -586,7 +679,7 @@ export default async function LeadsPage({
 
       {view === "board" && (
         <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <Heading compact standfirst={standfirst} view={view} newHref={newHref} />
+          <Heading compact standfirst={standfirst} view={view} newHref={newHref} scope={scopeVM} />
           <div
             style={{
               padding: "16px 24px 4px",
@@ -640,7 +733,7 @@ export default async function LeadsPage({
 
       {view === "worklist" && (
         <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <Heading compact standfirst={standfirst} view={view} newHref={newHref} />
+          <Heading compact standfirst={standfirst} view={view} newHref={newHref} scope={scopeVM} />
           <div className="lv-vs" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 24px 26px" }}>
             {workGroups.map((g) => (
               <div key={g.key} style={{ marginBottom: 18 }}>

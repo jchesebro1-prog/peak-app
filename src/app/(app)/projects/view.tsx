@@ -35,6 +35,7 @@ import {
 } from "./actions";
 import { TasksCard } from "./tasks-card";
 import { SegmentedToggle } from "@/components/ui";
+import { OwnerSelect } from "@/components/owner-select";
 import BoardView from "@/components/board/board-view";
 import type { BoardCardVM, BoardColumnVM } from "@/components/board/types";
 import { boardProjects, dueChipLabel } from "./board-lib";
@@ -65,6 +66,8 @@ export const PROJECTS_CSS = `
     .pm-stats { grid-template-columns: 1fr 1fr !important; }
     .pm-back { display: inline-block; }
   }
+  /* copied from quotes/page.tsx — select.qt-sel's dropdown-arrow rule, so OwnerSelect renders identically here */
+  select.qt-sel { -webkit-appearance: none; appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238c919c' stroke-width='1.5'/></svg>"); background-repeat: no-repeat; background-position: right 11px center; }
 `;
 
 /* ---------------- meta tables (ported verbatim from project.js view-model) ---------------- */
@@ -188,6 +191,8 @@ export function ProjectsView({
   filter,
   tab,
   view,
+  who,
+  meName,
   custById,
   identity,
   roster,
@@ -200,6 +205,8 @@ export function ProjectsView({
   filter: string;
   tab: string;
   view: "list" | "board";
+  who: string;
+  meName: string;
   custById: Map<string, string>;
   identity: Identity[];
   roster: string[];
@@ -253,12 +260,14 @@ export function ProjectsView({
   else if (filter === "complete") listSrc = projects.filter((p) => p.stage === "complete");
 
   const curPath = sel ? "/projects/" + encodeURIComponent(sel.id) : "/projects";
+  const whoQ = who || undefined;
   const filterHref = (key: string) =>
     curPath +
     qs({
       filter: key === "active" ? undefined : key,
       tab: sel && tab !== "overview" ? tab : undefined,
       view: view === "board" ? "board" : undefined,
+      who: whoQ,
     });
   const cardHref = (id: string) =>
     "/projects/" +
@@ -266,6 +275,7 @@ export function ProjectsView({
     qs({
       filter: filter === "active" ? undefined : filter,
       view: view === "board" ? "board" : undefined,
+      who: whoQ,
     });
 
   // #19 board mode: installs only, read-only (no moveAction, empty canMoveTo
@@ -288,7 +298,7 @@ export function ProjectsView({
     owner: p.owner ? { initials: idLookup.initialsOf(p.owner), color: idLookup.colorOf(p.owner) } : null,
     ownerTitle: p.owner || "Unassigned",
     ageLabel: dueChipLabel(p.stage, daysUntil(p.targetDate), fmtDate(p.updatedAt)),
-    href: "/projects/" + encodeURIComponent(p.id) + "?view=board",
+    href: "/projects/" + encodeURIComponent(p.id) + qs({ view: "board", who: whoQ }),
     canMoveTo: [],
   }));
 
@@ -545,6 +555,45 @@ export function ProjectsView({
           </div>
         )}
         {!sel && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <div style={{ display: "flex", background: "#eceef1", borderRadius: 9, padding: 3 }}>
+              <Link
+                href={"/projects" + qs({ filter: filter === "active" ? undefined : filter, view: view === "board" ? "board" : undefined, who: "mine" })}
+                style={{ fontSize: 12, fontWeight: 600, borderRadius: 7, padding: "7px 12px", textDecoration: "none", ...(who === "mine" ? { color: "#16181d", background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,.08)" } : { color: "#787d87" }) }}
+              >
+                My work
+              </Link>
+              <Link
+                href={"/projects" + qs({ filter: filter === "active" ? undefined : filter, view: view === "board" ? "board" : undefined })}
+                style={{ fontSize: 12, fontWeight: 600, borderRadius: 7, padding: "7px 12px", textDecoration: "none", ...(who === "" ? { color: "#16181d", background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,.08)" } : { color: "#787d87" }) }}
+              >
+                Everyone
+              </Link>
+            </div>
+            <OwnerSelect
+              value={who === "" ? "all" : who}
+              options={[
+                {
+                  value: "all",
+                  label: "All teammates",
+                  href: "/projects" + qs({ filter: filter === "active" ? undefined : filter, view: view === "board" ? "board" : undefined }),
+                },
+                ...roster.map((name) => ({
+                  value: name === meName ? "mine" : name,
+                  label: name === meName ? name + " (me)" : name,
+                  href:
+                    "/projects" +
+                    qs({
+                      filter: filter === "active" ? undefined : filter,
+                      view: view === "board" ? "board" : undefined,
+                      who: name === meName ? "mine" : name,
+                    }),
+                })),
+              ]}
+            />
+          </div>
+        )}
+        {!sel && (
           <SegmentedToggle
             options={[
               { key: "list", label: "List" },
@@ -553,8 +602,8 @@ export function ProjectsView({
             active={view}
             hrefFor={(k) =>
               k === "board"
-                ? "/projects?view=board"
-                : "/projects" + qs({ filter: filter === "active" ? undefined : filter })
+                ? "/projects" + qs({ view: "board", who: whoQ })
+                : "/projects" + qs({ filter: filter === "active" ? undefined : filter, who: whoQ })
             }
           />
         )}
@@ -707,6 +756,7 @@ export function ProjectsView({
               tab={tab}
               filter={filter}
               view={view}
+              who={who}
               custName={custName(sel)}
               identity={identity}
               roster={roster}
@@ -763,6 +813,7 @@ function ProjectDetail({
   tab,
   filter,
   view,
+  who,
   custName,
   identity,
   roster,
@@ -773,6 +824,7 @@ function ProjectDetail({
   tab: string;
   filter: string;
   view: "list" | "board";
+  who: string;
   custName: string;
   identity: Identity[];
   roster: string[];
@@ -791,17 +843,19 @@ function ProjectDetail({
   const dueSub = isDone ? "closed out" : isOrder ? "to delivery" : "to install";
 
   const detailBase = "/projects/" + encodeURIComponent(p.id);
+  const whoQ = who || undefined;
   const tabHref = (key: string) =>
     detailBase +
     qs({
       filter: filter === "active" ? undefined : filter,
       tab: key === "overview" ? undefined : key,
       view: view === "board" ? "board" : undefined,
+      who: whoQ,
     });
   const backHref =
     view === "board"
-      ? "/projects?view=board"
-      : "/projects" + qs({ filter: filter === "active" ? undefined : filter });
+      ? "/projects" + qs({ view: "board", who: whoQ })
+      : "/projects" + qs({ filter: filter === "active" ? undefined : filter, who: whoQ });
 
   const lateCount = (p.procurement || []).filter((l) => lineLate(p, l)).length;
   const tabDefs: Array<[string, string, number]> = isOrder
