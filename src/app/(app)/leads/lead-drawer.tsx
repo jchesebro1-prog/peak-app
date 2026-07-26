@@ -10,6 +10,7 @@ import {
   createLeadAction,
   logActivityAction,
   markLostAction,
+  setForecastAction,
   setNextActionAction,
   setStageAction,
 } from "./actions";
@@ -265,6 +266,7 @@ export default function LeadDrawer({
   const [logText, setLogText] = useState("");
   const [naDate, setNaDate] = useState<string | null>(null);
   const [naNote, setNaNote] = useState<string | null>(null);
+  const [fcDate, setFcDate] = useState<string | null>(null);
   const [cvVenue, setCvVenue] = useState("");
   const [cvType, setCvType] = useState("");
   const [lostReason, setLostReason] = useState("");
@@ -338,6 +340,15 @@ export default function LeadDrawer({
       await setNextActionAction(vm.id, null, "");
       setNaDate(null);
       setNaNote(null);
+      router.refresh();
+    });
+  };
+
+  const saveFc = () => {
+    if (!vm || fcDate == null) return;
+    startTransition(async () => {
+      await setForecastAction(vm.id, fromDateInput(fcDate));
+      setFcDate(null);
       router.refresh();
     });
   };
@@ -772,6 +783,27 @@ export default function LeadDrawer({
                         )}
                       </div>
                     )}
+
+                    {/* forecast close date (#18 opportunity board) */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+                      <div>
+                        <div style={mbLbl}>Forecast date</div>
+                        <input
+                          type="date"
+                          className="ldw-in"
+                          value={fcDate ?? toDateInput(vm.forecastAt)}
+                          onChange={(e) => setFcDate(e.target.value)}
+                          style={inStyle}
+                        />
+                      </div>
+                      {fcDate != null && (
+                        <div style={{ display: "flex", alignItems: "flex-end" }}>
+                          <button onClick={saveFc} disabled={busy} style={smallPrimary}>
+                            Save forecast
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
                     {/* log a touch */}
                     <div style={secLbl}>Log a touch</div>

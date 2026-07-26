@@ -189,6 +189,7 @@ export function buildDrawerVM(l: LeadRecord): DrawerDetailVM {
     ownerShort: l.owner ? firstName(l.owner) : "you",
     nextActionAt: l.nextActionAt ?? null,
     nextActionNote: l.nextActionNote || "",
+    forecastAt: l.forecastAt ?? null,
     activities,
     converted,
     quoteId: l.convertedQuoteId || "",

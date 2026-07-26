@@ -168,6 +168,9 @@ export interface LeadRecord {
   firstContactAt: number | null;
   nextActionAt: number | null;
   nextActionNote: string;
+  /** Forecast (expected-close) date for the opportunity board (#18) —
+   *  epoch-ms, null = none. Absent on pre-D119 docs — read with `?? null`. */
+  forecastAt: number | null;
   lostReason: string;
   customerId: string | null;
   convertedCustomerId: string | null;
@@ -216,6 +219,7 @@ export interface LeadSeedSpec {
   firstContactAt?: number | null;
   nextActionAt?: number | null;
   nextActionNote?: string;
+  forecastAt?: number | null;
   lostReason?: string;
   customerId?: string | null;
   convertedCustomerId?: string | null;
@@ -261,6 +265,7 @@ export function mkLead(o: LeadSeedSpec): LeadRecord {
     firstContactAt: o.firstContactAt != null ? o.firstContactAt : null,
     nextActionAt: o.nextActionAt != null ? o.nextActionAt : null,
     nextActionNote: o.nextActionNote || "",
+    forecastAt: o.forecastAt != null ? o.forecastAt : null,
     lostReason: o.lostReason || "",
     customerId: o.customerId || null,
     convertedCustomerId: o.convertedCustomerId || null,

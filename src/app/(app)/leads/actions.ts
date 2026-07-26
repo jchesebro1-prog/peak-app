@@ -11,6 +11,7 @@ import {
   markLost,
   setNextAction,
   setStage,
+  update,
 } from "@/lib/stores/leads";
 
 /**
@@ -112,4 +113,13 @@ export async function createLeadAction(input: {
   );
   revalidatePath("/", "layout");
   return { ok: true as const, id: rec.id };
+}
+
+/** #18: forecast (expected-close) date — editable from the lead drawer.
+    Quote cards on the opportunity board inherit it from their lead. */
+export async function setForecastAction(id: string, at: number | null) {
+  await requireUser();
+  await update(id, { forecastAt: at });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }

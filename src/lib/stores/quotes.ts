@@ -7,6 +7,7 @@ import {
   upsertDoc,
 } from "@/db/doc-store";
 import { quotesSeed } from "@/db/seeds/quotes";
+import { canSetPoReceived } from "@/lib/opportunities";
 
 /**
  * QuoteStore — server port of app/store.js (localStorage key rss_pipeline_v2).
@@ -101,6 +102,10 @@ export type Quote = {
    *  record this quote renews — the ✉ one-click outreach reuses an existing
    *  renewal quote for the cycle instead of minting a duplicate. */
   renewalOf?: string | null;
+  /** PO received on a WON quote (#18, D119) — an annex flag, NOT a fifth
+   *  pipeline status. Set/cleared only via setPoReceived; meaningless (null)
+   *  on draft/sent/lost. Absent on pre-D119 docs — read with `?? null`. */
+  poReceivedAt?: number | null;
   review: QuoteReview;
   createdAt: number;
   updatedAt: number;
@@ -216,6 +221,7 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     owner: partial.owner || "Jeff Chesebro",
     spec: partial.spec || null,
     renewalOf: partial.renewalOf || null,
+    poReceivedAt: partial.poReceivedAt ?? null,
     review: rv("none"),
     createdAt: t,
     updatedAt: t,
@@ -375,6 +381,21 @@ export async function setStatus(
       pushRevision(doc, by || DEFAULT_ACTOR, "sent", "Sent to customer");
     }
     doc.updatedAt = t;
+  });
+}
+
+/**
+ * Toggle the PO-received flag on a WON quote (#18, D119). Not a status
+ * transition: no history entry, no revision, and none of the won/lost spawn
+ * machinery runs (that all lives behind setStatus / setQuoteStatus). Refuses
+ * (returns null) unless the quote is currently won.
+ */
+export async function setPoReceived(id: string, on: boolean): Promise<Quote | null> {
+  const q = await getDoc<Quote>("quotes", id);
+  if (!q || !canSetPoReceived(q.status)) return null;
+  return patchDoc<Quote>("quotes", id, (doc) => {
+    doc.poReceivedAt = on ? Date.now() : null;
+    doc.updatedAt = Date.now();
   });
 }
 

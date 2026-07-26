@@ -90,6 +90,7 @@ export type DrawerDetailVM = {
   ownerShort: string;
   nextActionAt: number | null;
   nextActionNote: string;
+  forecastAt: number | null;
   activities: DrawerActivityVM[];
   converted: boolean;
   quoteId: string;
