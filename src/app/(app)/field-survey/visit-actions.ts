@@ -46,6 +46,7 @@ export async function scheduleVisitAction(
     return { ok: false, error: "Bad time range" };
   const v = await getVisit(id);
   if (!v) return { ok: false, error: "Visit not found" };
+  if (v.stage === "done") return { ok: false, error: "Visit already completed" };
   if (!v.assignedTo) return { ok: false, error: "Claim the visit first" };
   await scheduleVisit(id, input.startAt, input.endAt);
   const fresh = await getVisit(id);

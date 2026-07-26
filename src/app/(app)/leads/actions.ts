@@ -13,8 +13,14 @@ import {
   setStage,
   update,
 } from "@/lib/stores/leads";
-import { requestVisitForLead } from "@/lib/stores/site-visits";
-import { surveysForLead } from "@/lib/stores/surveys";
+import {
+  activeVisitForLead,
+  closeVisit,
+  requestVisitForLead,
+  setVisitCustomer,
+  visitsForLead,
+} from "@/lib/stores/site-visits";
+import { surveysForLead, update as updateSurvey } from "@/lib/stores/surveys";
 import { canConvertLead } from "@/lib/lead-thread";
 
 /**
@@ -71,6 +77,17 @@ export async function logActivityAction(id: string, input: { type: string; note:
 export async function markLostAction(id: string, reason: string) {
   const me = await requireUser();
   await markLost(id, reason, me.name);
+  // #34 final-review fix: a still-unscheduled pool visit has nowhere to go
+  // once the lead is lost — close it out and note it on the lead.
+  const visit = await activeVisitForLead(id);
+  if (visit && (visit.stage === "requested" || visit.stage === "open" || visit.stage === "claimed")) {
+    await closeVisit(visit.id);
+    await logActivity(
+      id,
+      { type: "system", note: "Site visit request closed — lead marked lost", by: me.name },
+      me.name
+    );
+  }
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
@@ -114,6 +131,21 @@ export async function convertLeadAction(
       },
       me.name
     );
+  }
+  // #34 final-review fix: thread continuity — the visits/surveys this lead
+  // spawned pre-date the customer record (customerId null); backfill it now
+  // so the customer's own visit/survey history picks them up.
+  if (res && res.customerId) {
+    const customerId = res.customerId;
+    const [visits, surveys] = await Promise.all([visitsForLead(id), surveysForLead(id)]);
+    await Promise.all([
+      ...visits
+        .filter((v) => v.customerId == null)
+        .map((v) => setVisitCustomer(v.id, customerId)),
+      ...surveys
+        .filter((s) => s.customerId == null)
+        .map((s) => updateSurvey(s.id, { customerId })),
+    ]);
   }
   revalidatePath("/", "layout");
   if (!res)

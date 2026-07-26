@@ -203,6 +203,27 @@ export async function scheduleVisit(id: string, startAt: number, endAt: number):
   });
 }
 
+/** Close out a still-unscheduled visit (final-review fix #34): the lead it
+ *  was requested from just went lost, so the pool request has nowhere to
+ *  go. Scheduled visits are left alone — they belong to a future
+ *  cancel/reschedule flow, not this closeout. */
+export async function closeVisit(id: string): Promise<void> {
+  await patchDoc<SiteVisit>("site_visits", id, (d) => {
+    d.stage = "done";
+    d.updatedAt = Date.now();
+  });
+}
+
+/** Backfill the resolved customerId onto a lead-borne visit once its lead
+ *  converts (final-review fix #34) — only ever called for records still
+ *  null (pre-convert lead requests carry no customer yet). */
+export async function setVisitCustomer(id: string, customerId: string): Promise<void> {
+  await patchDoc<SiteVisit>("site_visits", id, (d) => {
+    d.customerId = customerId;
+    d.updatedAt = Date.now();
+  });
+}
+
 /* ---- #34 request orchestration (lead drawer's "Request site visit") ---- */
 
 export type VisitRequestOpts = { reason: string; timing: string; assignee: string };

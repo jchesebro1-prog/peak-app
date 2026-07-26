@@ -875,11 +875,16 @@ export default function LeadDrawer({
 
                     {/* #34 — site-visit / survey thread */}
                     <div style={secLbl}>Site visit</div>
-                    {thread.visit ? (
+                    {(thread.visit || thread.survey) && (
                       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-                        <Link href="/field-survey" style={threadChip(thread.visit)}>
-                          Visit · {thread.visit.label}
-                        </Link>
+                        {thread.visit && (
+                          <Link href="/field-survey" style={threadChip(thread.visit)}>
+                            Visit · {thread.visit.label}
+                          </Link>
+                        )}
+                        {/* Survives visit completion: activeVisitForLead drops the visit
+                            once it derives "done", but the completed survey chip must
+                            stay visible — it doesn't depend on an active visit. */}
                         {thread.survey && (
                           <Link
                             href={`/field-survey?id=${encodeURIComponent(thread.survey.id)}`}
@@ -888,34 +893,38 @@ export default function LeadDrawer({
                             Survey · {thread.survey.label}
                           </Link>
                         )}
-                        <span style={{ fontSize: 11.5, color: "#8c919c" }}>
-                          {thread.visit.assignedTo || "Unclaimed"}
-                          {thread.visit.startAt != null
-                            ? " · " +
-                              new Date(thread.visit.startAt).toLocaleString("en-US", {
-                                month: "short",
-                                day: "numeric",
-                                hour: "numeric",
-                                minute: "2-digit",
-                              })
-                            : ""}
-                        </span>
+                        {thread.visit && (
+                          <span style={{ fontSize: 11.5, color: "#8c919c" }}>
+                            {thread.visit.assignedTo || "Unclaimed"}
+                            {thread.visit.startAt != null
+                              ? " · " +
+                                new Date(thread.visit.startAt).toLocaleString("en-US", {
+                                  month: "short",
+                                  day: "numeric",
+                                  hour: "numeric",
+                                  minute: "2-digit",
+                                })
+                              : ""}
+                          </span>
+                        )}
                       </div>
-                    ) : vm.converted ? (
-                      <div style={{ fontSize: 12, color: "#9aa0ab" }}>No site visit was requested.</div>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setView("visit");
-                          setReqTiming("");
-                          setReqAssignee("");
-                          setReqErr("");
-                        }}
-                        style={smallGhost}
-                      >
-                        Request site visit
-                      </button>
                     )}
+                    {!thread.visit &&
+                      (vm.converted ? (
+                        <div style={{ fontSize: 12, color: "#9aa0ab" }}>No site visit was requested.</div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setView("visit");
+                            setReqTiming("");
+                            setReqAssignee("");
+                            setReqErr("");
+                          }}
+                          style={smallGhost}
+                        >
+                          Request site visit
+                        </button>
+                      ))}
 
                     {/* log a touch */}
                     <div style={secLbl}>Log a touch</div>
