@@ -2433,7 +2433,7 @@ plan uploads later, do base-sheet markers carry over or arrive as a separate she
 
 ---
 
-## 39. Catalog build-out for beta + Grid connection logic + wire types — OPEN (WAVE 1, beta-blocking)
+## 39. Catalog build-out for beta + Grid connection logic + wire types — INFRA DONE; IMPORT AWAITS JEFF (2026-07-25)
 
 **Area:** catalog (`catalog_parts`), The Grid device palette (`/design/grid`).
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
@@ -2453,7 +2453,33 @@ etc., one schema with (c); routed runs gain a real cable BOM line.
 Lighting / Rigging / AV, category→trade mapping stored as admin-editable data;
 Tannoy = Music Tribe, Ape Riggers dropped, Draper base-only.
 
-**Status:** OPEN — wave 1, in progress this session.
+**Status:** INFRA DONE 2026-07-25 (branch `punch-39-catalog-buildout`, plan
+`docs/superpowers/plans/2026-07-25-catalog-beta-buildout.md`); **the starter-set IMPORT is
+staged and waiting on Jeff's review** — that gate was a locked decision and was NOT bypassed.
+What shipped: **(1) taxonomy layer** — six groups + three trades resolved through an
+admin-editable category→{group,trade} map in appSettings (parts NOT rewritten; existing
+free-text `category` untouched; Fabric/Labor excluded), seeded for all ~28 known categories,
+with an admin "Categories & trades" editor card on /catalog; **(2) ports + wire types** —
+`ports[]` on catalog parts, a 22-entry connection-type taxonomy, an admin-editable wire-type
+registry (8 defaults), and the v1 compatibility rule (type match + direction complement);
+**(3) Grid wiring validation** — device-to-device routes (endpoint snap) validate port
+compatibility client-side AND server-side, refuse incompatible pairs via the editor notice,
+stamp from/to placement ids + connectionType, and cable BOM lines carry the connection type
+(only when every contributing route agrees); free routes and ports-less parts unaffected;
+**(4) datasheet attachments** — `datasheetBlobKey` on the part, D116 private-blob upload +
+authenticated `/api/part-datasheet/<sku>` proxy, attach/replace/remove in the part edit
+modal, "datasheet" links in the Grid palette + BOM rows (attach once → everything inherits);
+**(5) palette groups** — the Grid palette filters by All · six groups · Other; **(6) REVIEW
+GATE ARTIFACTS: `docs/catalog/STARTER-SET-2026-07-DRAFT.md`** (68 items, ≥2 manufacturers per
+group; Tannoy=Music Tribe; Ape Riggers dropped; Draper held out ENTIRELY — stronger than
+"base-only", needs Jeff's read; Biamp rows are placeholders, sheet has no product names) and
+**`docs/catalog/METADATA-WORKSHEET-2026-07.md`** (taxonomy to prune + draft ports per item;
+gaps flagged: no network/NDI or RF types yet). Staged import data:
+`scripts/starter-import-data.json` (inert). **Jeff: review the two docs, mark rows to drop,
+then say "import the starter set."** 389 spec tests green; build green. Known beta-accepted
+limitation: server route validation trusts client-supplied endpoint ids (DevTools-level
+bypass yields an unlabeled free route, nothing worse). Also noted: `importCatalog` paste
+action has NO admin gate (pre-existing — flag for Jeff).
 
 ---
 
