@@ -79,3 +79,28 @@ export type DrawerDetailVM = {
 };
 
 export type SourceOptionVM = { value: string; label: string };
+
+/** #34 — the lead's visit/survey thread, server-built with chip colors
+    precomputed (the client drawer must not value-import the stores).
+    visit is the lead's ACTIVE visit (activeVisitForLead already excludes
+    "done"), so visit !== null ⇒ hide the Request button. */
+export type LeadThreadVM = {
+  visit: {
+    id: string;
+    stage: string;
+    label: string;
+    ink: string;
+    soft: string;
+    bd: string;
+    assignedTo: string;
+    startAt: number | null;
+  } | null;
+  survey: {
+    id: string;
+    stage: string;
+    label: string;
+    ink: string;
+    soft: string;
+    bd: string;
+  } | null;
+};

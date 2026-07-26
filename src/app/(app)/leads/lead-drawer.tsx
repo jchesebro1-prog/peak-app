@@ -10,11 +10,12 @@ import {
   createLeadAction,
   logActivityAction,
   markLostAction,
+  requestSiteVisitAction,
   setForecastAction,
   setNextActionAction,
   setStageAction,
 } from "./actions";
-import type { DrawerDetailVM, SourceOptionVM } from "./types";
+import type { DrawerDetailVM, LeadThreadVM, SourceOptionVM } from "./types";
 
 /**
  * Lead Detail.dc.html — the right-hand drawer. mode "new" is the quick-add
@@ -179,6 +180,19 @@ const cvBadge: CSSProperties = {
   fontFamily: "var(--font-mono)",
 };
 
+const threadChip = (c: { ink: string; soft: string; bd: string }): CSSProperties => ({
+  display: "inline-block",
+  fontSize: 10.5,
+  fontWeight: 600,
+  color: c.ink,
+  background: c.soft,
+  border: `1px solid ${c.bd}`,
+  padding: "3px 10px",
+  borderRadius: 20,
+  textDecoration: "none",
+  whiteSpace: "nowrap",
+});
+
 const drawerCss = `
 .ldw-in::placeholder { color: #aab0bb; }
 .ldw-in:focus { outline: none; border-color: #c4c9d2; }
@@ -251,6 +265,8 @@ export default function LeadDrawer({
   meName,
   rosterNames,
   sourceOptions,
+  thread,
+  visitReasons,
 }: {
   mode: "new" | "detail";
   vm: DrawerDetailVM | null;
@@ -258,10 +274,12 @@ export default function LeadDrawer({
   meName: string;
   rosterNames: string[];
   sourceOptions: SourceOptionVM[];
+  thread: LeadThreadVM;
+  visitReasons: string[];
 }) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
-  const [view, setView] = useState<"main" | "convert" | "lost">("main");
+  const [view, setView] = useState<"main" | "convert" | "lost" | "visit">("main");
   const [logChannel, setLogChannel] = useState<Channel>("note");
   const [logText, setLogText] = useState("");
   const [naDate, setNaDate] = useState<string | null>(null);
@@ -284,6 +302,20 @@ export default function LeadDrawer({
     value: "",
   }));
   const [nfErr, setNfErr] = useState("");
+
+  // #34 — request-visit form + convert gate
+  const [reqReason, setReqReason] = useState(() => visitReasons[0] || "Site survey / measure");
+  const [reqTiming, setReqTiming] = useState("");
+  const [reqAssignee, setReqAssignee] = useState("");
+  const [reqErr, setReqErr] = useState("");
+  const [skipSurvey, setSkipSurvey] = useState(false);
+  const [skipReason, setSkipReason] = useState("");
+  const [cvErr, setCvErr] = useState("");
+  // Gate preview (server re-checks regardless): blocked unless the linked
+  // survey is completed. thread.survey is surveysForLead(leadId)[0] — the
+  // SAME resolution convertLeadAction's gate uses, so preview and server
+  // can never disagree (a past "done" visit doesn't hide the survey).
+  const gateBlocked = !thread.survey || thread.survey.stage !== "completed";
 
   const isNew = mode === "new" || !vm;
 
@@ -367,7 +399,43 @@ export default function LeadDrawer({
   const doConvert = () => {
     if (!vm) return;
     startTransition(async () => {
-      await convertLeadAction(vm.id, { venueLabel: cvVenue.trim() || "Main venue", type: cvType });
+      const res = await convertLeadAction(vm.id, {
+        venueLabel: cvVenue.trim() || "Main venue",
+        type: cvType,
+        skipSurvey,
+        skipReason: skipReason.trim(),
+      });
+      if (!res.ok) {
+        setCvErr(
+          res.reason === "survey-missing"
+            ? "No completed site survey is linked to this lead — tick “Skip survey” to convert anyway."
+            : res.reason === "survey-open"
+              ? "The linked survey isn't completed yet — finish it, or tick “Skip survey”."
+              : "Convert failed — lead not found."
+        );
+        return;
+      }
+      setView("main");
+      router.refresh();
+    });
+  };
+
+  const doRequestVisit = () => {
+    if (!vm) return;
+    startTransition(async () => {
+      const res = await requestSiteVisitAction(vm.id, {
+        reason: reqReason,
+        timing: reqTiming.trim(),
+        assignee: reqAssignee,
+      });
+      if (!res.ok) {
+        setReqErr(
+          res.reason === "exists"
+            ? "This lead already has an active site visit (" + res.visitId + ")."
+            : "Lead not found."
+        );
+        return;
+      }
       setView("main");
       router.refresh();
     });
@@ -805,6 +873,50 @@ export default function LeadDrawer({
                       )}
                     </div>
 
+                    {/* #34 — site-visit / survey thread */}
+                    <div style={secLbl}>Site visit</div>
+                    {thread.visit ? (
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                        <Link href="/field-survey" style={threadChip(thread.visit)}>
+                          Visit · {thread.visit.label}
+                        </Link>
+                        {thread.survey && (
+                          <Link
+                            href={`/field-survey?id=${encodeURIComponent(thread.survey.id)}`}
+                            style={threadChip(thread.survey)}
+                          >
+                            Survey · {thread.survey.label}
+                          </Link>
+                        )}
+                        <span style={{ fontSize: 11.5, color: "#8c919c" }}>
+                          {thread.visit.assignedTo || "Unclaimed"}
+                          {thread.visit.startAt != null
+                            ? " · " +
+                              new Date(thread.visit.startAt).toLocaleString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                hour: "numeric",
+                                minute: "2-digit",
+                              })
+                            : ""}
+                        </span>
+                      </div>
+                    ) : vm.converted ? (
+                      <div style={{ fontSize: 12, color: "#9aa0ab" }}>No site visit was requested.</div>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setView("visit");
+                          setReqTiming("");
+                          setReqAssignee("");
+                          setReqErr("");
+                        }}
+                        style={smallGhost}
+                      >
+                        Request site visit
+                      </button>
+                    )}
+
                     {/* log a touch */}
                     <div style={secLbl}>Log a touch</div>
                     <div style={{ display: "flex", background: "#eceef1", borderRadius: 9, padding: 3, gap: 2 }}>
@@ -932,6 +1044,9 @@ export default function LeadDrawer({
                             setView("convert");
                             setCvVenue("");
                             setCvType("");
+                            setSkipSurvey(false);
+                            setSkipReason("");
+                            setCvErr("");
                           }}
                           style={convertBtn}
                         >
@@ -1019,12 +1134,124 @@ export default function LeadDrawer({
                       </select>
                     </div>
                   </div>
+                  {/* #34 — survey gate (server re-checks in convertLeadAction) */}
+                  <div
+                    style={{
+                      marginTop: 16,
+                      padding: "11px 13px",
+                      borderRadius: 11,
+                      background: gateBlocked ? "#fbf3dd" : "#eaf6ef",
+                      border: `1px solid ${gateBlocked ? "#f0e2bd" : "#cce9da"}`,
+                      fontSize: 12.5,
+                      color: gateBlocked ? "#8a6d1f" : "#1f7a52",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {thread.survey
+                      ? `Site survey ${thread.survey.id} — ${thread.survey.label}.`
+                      : "No site survey is linked to this lead."}
+                    {gateBlocked && " Converting normally waits for a completed survey."}
+                  </div>
+                  {gateBlocked && (
+                    <div style={{ marginTop: 12 }}>
+                      <label
+                        style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={skipSurvey}
+                          onChange={(e) => setSkipSurvey(e.target.checked)}
+                        />
+                        Skip survey and convert anyway
+                      </label>
+                      {skipSurvey && (
+                        <input
+                          className="ldw-in"
+                          value={skipReason}
+                          onChange={(e) => setSkipReason(e.target.value)}
+                          placeholder="Why skip? (optional — logged on the lead)"
+                          style={{ ...inStyle, marginTop: 9 }}
+                        />
+                      )}
+                    </div>
+                  )}
+                  {cvErr && (
+                    <div style={{ fontSize: 12, color: "#b4543a", fontWeight: 600, marginTop: 12 }}>{cvErr}</div>
+                  )}
                   <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
                     <button onClick={() => setView("main")} style={ghostBtn}>
                       Cancel
                     </button>
-                    <button onClick={doConvert} disabled={busy} style={primaryBtn}>
+                    <button onClick={doConvert} disabled={busy || (gateBlocked && !skipSurvey)} style={primaryBtn}>
                       Convert lead
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ===== REQUEST VISIT view (#34) ===== */}
+              {view === "visit" && (
+                <div style={{ padding: "18px 22px 22px" }}>
+                  <button onClick={() => setView("main")} style={backBtn}>
+                    ← Back
+                  </button>
+                  <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: "-.01em" }}>Request a site visit</div>
+                  <div style={{ fontSize: 13, color: "#8c919c", lineHeight: 1.55, marginTop: 6 }}>
+                    Creates an open visit request and a linked survey brief. Assign someone, or leave
+                    it open for anyone to claim from Field Survey.
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 18 }}>
+                    <div>
+                      <div style={lbl}>Reason</div>
+                      <select
+                        className="ldw-in"
+                        value={reqReason}
+                        onChange={(e) => setReqReason(e.target.value)}
+                        style={selStyle}
+                      >
+                        {visitReasons.map((r) => (
+                          <option key={r} value={r}>
+                            {r}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <div style={lbl}>Preferred timing</div>
+                      <input
+                        className="ldw-in"
+                        value={reqTiming}
+                        onChange={(e) => setReqTiming(e.target.value)}
+                        placeholder="e.g. Week of Aug 10, mornings"
+                        style={inStyle}
+                      />
+                    </div>
+                    <div>
+                      <div style={lbl}>Assign to</div>
+                      <select
+                        className="ldw-in"
+                        value={reqAssignee}
+                        onChange={(e) => setReqAssignee(e.target.value)}
+                        style={selStyle}
+                      >
+                        <option value="">Open — anyone can claim</option>
+                        {rosterNames.map((n) => (
+                          <option key={n} value={n}>
+                            {n}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  {reqErr && (
+                    <div style={{ fontSize: 12, color: "#b4543a", fontWeight: 600, marginTop: 12 }}>{reqErr}</div>
+                  )}
+                  <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+                    <button onClick={() => setView("main")} style={ghostBtn}>
+                      Cancel
+                    </button>
+                    <button onClick={doRequestVisit} disabled={busy} style={primaryBtn}>
+                      Request visit
                     </button>
                   </div>
                 </div>

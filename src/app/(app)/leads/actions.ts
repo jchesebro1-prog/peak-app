@@ -14,6 +14,8 @@ import {
   update,
 } from "@/lib/stores/leads";
 import { requestVisitForLead } from "@/lib/stores/site-visits";
+import { surveysForLead } from "@/lib/stores/surveys";
+import { canConvertLead } from "@/lib/lead-thread";
 
 /**
  * Leads mutations — thin wrappers over LeadStore with the session user as
@@ -73,12 +75,49 @@ export async function markLostAction(id: string, reason: string) {
   return { ok: true as const };
 }
 
-/** Convert → Customer + draft Quote; returns the quote id for the success UI. */
-export async function convertLeadAction(id: string, opts: { venueLabel: string; type: string }) {
+/** Convert → Customer + draft Quote; returns the quote id for the success UI.
+ *  #34: the SERVER-SIDE survey gate lives here (the drawer's disabled button
+ *  is not the gate). The linked survey resolves via surveysForLead (newest
+ *  first) — the SAME path the drawer's gate preview uses, so gate and
+ *  preview can never disagree. Deliberately NOT the active visit's surveyId:
+ *  a "scheduled" visit whose end time has passed derives to "done" on read
+ *  and drops out of activeVisitForLead, so the canonical flow (visit
+ *  happened → survey completed → convert) has no active visit while the
+ *  completed survey still exists (see deviations note / D120). Skipping
+ *  requires an explicit opts.skipSurvey and logs the bypass on the lead.
+ *  Tolerance: the gate reads the survey's CURRENT stage — backwards pill
+ *  jumps before convert are respected by design. */
+export async function convertLeadAction(
+  id: string,
+  opts: { venueLabel: string; type: string; skipSurvey?: boolean; skipReason?: string }
+) {
   const me = await requireUser();
+
+  const linked = await surveysForLead(id); // newest first (getAll is updatedAt-desc)
+  const survey: { stage: string } | null = linked[0]
+    ? { stage: (linked[0].stage || "requested") as string }
+    : null;
+  const gate = canConvertLead(survey, !!opts.skipSurvey);
+  if (!gate.ok)
+    return { ok: false as const, reason: gate.reason, quoteId: "", customerId: "" };
+
   const res = await convert(id, { venueLabel: opts.venueLabel, type: opts.type }, me.name);
+  if (res && opts.skipSurvey) {
+    await logActivity(
+      id,
+      {
+        type: "system",
+        note:
+          "Converted without completed survey — " +
+          (opts.skipReason?.trim() || "no reason given"),
+        by: me.name,
+      },
+      me.name
+    );
+  }
   revalidatePath("/", "layout");
-  if (!res) return { ok: false as const, quoteId: "", customerId: "" };
+  if (!res)
+    return { ok: false as const, reason: "not-found" as const, quoteId: "", customerId: "" };
   return { ok: true as const, quoteId: res.quoteId || "", customerId: res.customerId || "" };
 }
 
