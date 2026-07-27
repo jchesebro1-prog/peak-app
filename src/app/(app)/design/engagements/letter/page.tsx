@@ -10,6 +10,7 @@ import {
 import { getAllDesigns, type DesignRecord } from "@/lib/stores/designs";
 import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
+import { scopesTotal } from "@/lib/consulting-stages";
 import { PrintButton } from "./controls";
 
 export const metadata = { title: "Consulting document — Quartzite-6" };
@@ -122,8 +123,11 @@ export default async function ConsultingLetterPage({
     quote?.contact && typeof quote.contact === "object"
       ? (quote.contact as { name?: string; role?: string; email?: string })
       : null;
-  const total =
-    pay.feeMode === "milestones"
+  const scopes = pay.scopes || [];
+  const assumptions = pay.assumptions || [];
+  const total = scopes.length
+    ? scopesTotal(scopes)
+    : pay.feeMode === "milestones"
       ? pay.fees.reduce((a, f) => a + (f.amount || 0), 0)
       : pay.fees[0]?.amount || quote?.value || 0;
 
@@ -184,9 +188,33 @@ export default async function ConsultingLetterPage({
 
             <div style={{ ...H2, color: accent }}>Scope of services</div>
             <p style={BODY}>{renderField(t, "consulting_proposal", "scopeLead", vars)}</p>
-            <p style={{ ...BODY, background: "#f9fafb", border: "1px solid #eef0f3", borderRadius: 8, padding: "12px 14px" }}>
-              {pay.scope || "Scope to be defined."}
-            </p>
+            {scopes.length ? (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 12.5, margin: "4px 0 12px" }}>
+                <tbody>
+                  {scopes.map((s) => (
+                    <tr key={s.id} style={{ borderBottom: "1px solid #eef0f3", verticalAlign: "top" }}>
+                      <td style={{ padding: "7px 4px" }}>
+                        <b>{s.title || "Scope"}</b>
+                        {s.description && (
+                          <div style={{ color: "#5b616e", marginTop: 2, whiteSpace: "pre-wrap" }}>{s.description}</div>
+                        )}
+                      </td>
+                      <td style={{ padding: "7px 4px", textAlign: "right", fontWeight: 600, whiteSpace: "nowrap" }}>
+                        {money(s.fee)}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td style={{ padding: "9px 4px", fontWeight: 700 }}>Total professional fee</td>
+                    <td style={{ padding: "9px 4px", textAlign: "right", fontWeight: 700 }}>{money(total)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            ) : (
+              <p style={{ ...BODY, background: "#f9fafb", border: "1px solid #eef0f3", borderRadius: 8, padding: "12px 14px" }}>
+                {pay.scope || "Scope to be defined."}
+              </p>
+            )}
             {pay.phases.length > 0 && (
               <p style={{ ...BODY, color: "#5b616e" }}>
                 Anticipated phases: {pay.phases.join(" · ")}. Progress gates on internal review by {companyName}.
@@ -194,7 +222,7 @@ export default async function ConsultingLetterPage({
             )}
 
             <div style={{ ...H2, color: accent }}>Professional fee</div>
-            {pay.feeMode === "milestones" && pay.fees.length > 0 ? (
+            {scopes.length ? null : pay.feeMode === "milestones" && pay.fees.length > 0 ? (
               <>
                 <p style={BODY}>{renderField(t, "consulting_proposal", "feeLineMilestones", vars)}</p>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 12.5, margin: "4px 0 12px" }}>
@@ -222,6 +250,18 @@ export default async function ConsultingLetterPage({
             <div style={{ ...H2, color: accent }}>Terms</div>
             <p style={BODY}>{renderField(t, "consulting_proposal", "termsBlock", vars)}</p>
             {pay.terms && <p style={BODY}>{pay.terms}</p>}
+
+            {assumptions.length > 0 && (
+              <>
+                <div style={{ ...H2, color: accent }}>Assumptions</div>
+                <p style={BODY}>{renderField(t, "consulting_proposal", "assumptionsLead", vars)}</p>
+                <ul style={{ fontFamily: SANS, fontSize: 12.5, lineHeight: 1.65, margin: "0 0 10px", paddingLeft: 22 }}>
+                  {assumptions.map((a, i) => (
+                    <li key={i} style={{ marginBottom: 3 }}>{a}</li>
+                  ))}
+                </ul>
+              </>
+            )}
 
             <div style={{ ...H2, color: accent }}>Acceptance</div>
             <p style={BODY}>{renderField(t, "consulting_proposal", "signoff", vars)}</p>

@@ -20,6 +20,7 @@ import {
   saveIntakeCatalogAction,
   saveVisitReasonsAction,
   saveConsultingPhasesAction,
+  saveConsultingAssumptionsAction,
   saveLogoAction,
   saveSettingsAction,
   searchAddressAction,
@@ -126,6 +127,7 @@ export default function SettingsClient({
   intakeCatalog,
   visitReasons,
   consultingPhases,
+  consultingAssumptions,
   customerFieldDefs,
   offices,
   users,
@@ -145,6 +147,7 @@ export default function SettingsClient({
   intakeCatalog: Record<string, string[]>;
   visitReasons: string[];
   consultingPhases: string[];
+  consultingAssumptions: string[];
   customerFieldDefs: CustomFieldDef[];
   offices: OfficeVM[];
   users: UserVM[];
@@ -247,6 +250,24 @@ export default function SettingsClient({
       if (res.ok) {
         setPhasesDirty(false);
         setPhasesSaved(true);
+      }
+      return res;
+    });
+  /* ---- consulting assumptions library (#35, one per line) ---- */
+  const [assumpDraft, setAssumpDraft] = useState(consultingAssumptions.join("\n"));
+  const [assumpDirty, setAssumpDirty] = useState(false);
+  const [assumpSaved, setAssumpSaved] = useState(false);
+  const saveAssumptions = () =>
+    run(async () => {
+      const res = await saveConsultingAssumptionsAction(
+        assumpDraft
+          .split("\n")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      );
+      if (res.ok) {
+        setAssumpDirty(false);
+        setAssumpSaved(true);
       }
       return res;
     });
@@ -755,6 +776,53 @@ export default function SettingsClient({
             marginTop: 14,
             minHeight: 130,
             maxWidth: 420,
+            resize: "vertical",
+            lineHeight: 1.6,
+            fontFamily: "var(--font-mono)",
+            fontSize: 12.5,
+          }}
+        />
+      </section>
+
+      {/* ---- Consulting assumptions library (#35) ---- */}
+      <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 14.5, fontWeight: 600 }}>Consulting — assumptions library</div>
+            <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
+              The standard assumptions offered as a checklist when building a
+              consulting proposal. One per line; the lines TICKED on a
+              proposal print on its letter. Draft seed — replace with the
+              lines from Peak&rsquo;s real consulting letter.
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {assumpSaved && !assumpDirty && (
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#1f7a52" }}>Saved</span>
+            )}
+            <button
+              className="pk-btn-accent"
+              onClick={saveAssumptions}
+              disabled={!assumpDirty}
+              style={{ opacity: assumpDirty ? 1 : 0.5, cursor: assumpDirty ? "pointer" : "default" }}
+            >
+              Save assumptions
+            </button>
+          </div>
+        </div>
+        <textarea
+          value={assumpDraft}
+          onChange={(e) => {
+            setAssumpDraft(e.target.value);
+            setAssumpDirty(true);
+            setAssumpSaved(false);
+          }}
+          spellCheck={false}
+          style={{
+            ...inputStyle,
+            marginTop: 14,
+            minHeight: 170,
+            maxWidth: 640,
             resize: "vertical",
             lineHeight: 1.6,
             fontFamily: "var(--font-mono)",

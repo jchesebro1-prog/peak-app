@@ -39,6 +39,11 @@ export type AppSettingsData = {
   /** Consulting phase-menu overrides (D90) — see DEFAULT_CONSULTING_PHASES
    *  in stores/engagements.ts; empty/absent means use the defaults. */
   consultingPhases?: string[];
+  /** Consulting proposal assumptions library (#35) — see
+   *  DEFAULT_CONSULTING_ASSUMPTIONS in lib/consulting-stages.ts;
+   *  empty/absent means use the (DRAFT-seed) defaults. The estimator's
+   *  shared assumptions model (spec §4, wave ③) will consume this key. */
+  consultingAssumptions?: string[];
   /** Peak-standards review checklists (D91), keyed by phase name — see
    *  DEFAULT_REVIEW_CHECKLISTS in stores/engagements.ts. Kept here beside
    *  consultingPhases rather than in its own collection: same kind of small

@@ -203,6 +203,13 @@ export const TEMPLATES: TemplateDef[] = [
           "Backgrounds are to be provided by others in AutoCAD .dwg format; Revit modeling is not supported. Reimbursable expenses, applicable sales tax, and third-party fees (plan review, permitting) are billed separately when required. Certificates of insurance are available on request. This proposal is valid for thirty (30) days. Either party may terminate with written notice; fees for work performed to date remain due.",
       },
       {
+        id: "assumptionsLead",
+        label: "Assumptions lead-in",
+        multiline: true,
+        help: "Introduces the ticked assumptions checklist (#35). The bullet lines themselves come from the proposal, frozen at save time.",
+        default: "This proposal assumes:",
+      },
+      {
         id: "signoff",
         label: "Acceptance / signature lead-in",
         multiline: true,

@@ -4,6 +4,7 @@ import { getSettings } from "@/lib/settings";
 import { mergedCatalog } from "@/lib/stores/survey-intake";
 import { mergedVisitReasons } from "@/lib/stores/site-visits";
 import { mergedConsultingPhases } from "@/lib/stores/engagements";
+import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { resolveFieldDefs } from "@/lib/customer-fields";
 import { allUsers } from "@/lib/users";
 import {
@@ -139,6 +140,7 @@ export default async function SettingsPage() {
           intakeCatalog={mergedCatalog(settings.intakeCatalog)}
           visitReasons={mergedVisitReasons(settings.visitReasons)}
           consultingPhases={mergedConsultingPhases(settings.consultingPhases)}
+          consultingAssumptions={mergedConsultingAssumptions(settings.consultingAssumptions)}
           customerFieldDefs={resolveFieldDefs(settings.customerFieldDefs)}
           offices={settings.offices.map((o) => ({
             id: o.id,

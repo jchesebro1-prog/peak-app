@@ -1996,5 +1996,41 @@ import {
   );
 }
 
+/* --- #35 assumptions library + the additive template field --- */
+import {
+  DEFAULT_CONSULTING_ASSUMPTIONS,
+  mergedConsultingAssumptions,
+} from "@/lib/consulting-stages";
+import { getTemplateDef } from "@/lib/templates";
+{
+  ok(
+    DEFAULT_CONSULTING_ASSUMPTIONS.length >= 8 && DEFAULT_CONSULTING_ASSUMPTIONS.length <= 12,
+    "#35: the DRAFT assumption seed stays 8-12 lines (Jeff replaces from the real letter)"
+  );
+  ok(
+    mergedConsultingAssumptions(undefined).join("|") === DEFAULT_CONSULTING_ASSUMPTIONS.join("|"),
+    "#35: absent settings → the default library"
+  );
+  ok(
+    mergedConsultingAssumptions([]).join("|") === DEFAULT_CONSULTING_ASSUMPTIONS.join("|"),
+    "#35: an EMPTY stored list falls back to defaults (the visitReasons idiom)"
+  );
+  ok(
+    mergedConsultingAssumptions(["  Owner provides access.  ", "", "Backgrounds by others."]).join("|") ===
+      "Owner provides access.|Backgrounds by others.",
+    "#35: a stored list wins whole, trimmed and de-blanked"
+  );
+  const cp = getTemplateDef("consulting_proposal");
+  ok(
+    !!cp && cp.fields.some((f) => f.id === "assumptionsLead"),
+    "#35: consulting_proposal carries the assumptionsLead field (additive — ids are override keys)"
+  );
+  ok(
+    cp!.fields.map((f) => f.id).join(",") ===
+      "intro,scopeLead,feeLineFixed,feeLineMilestones,termsBlock,assumptionsLead,signoff,taxNote",
+    "#35: no pre-existing field id was renamed (renames orphan stored overrides)"
+  );
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

@@ -234,6 +234,20 @@ export async function saveConsultingPhasesAction(phases: string[]) {
   return { ok: true as const };
 }
 
+/** Consulting assumptions library (#35 — DEFAULT_CONSULTING_ASSUMPTIONS
+ *  overrides). Trimmed, de-blanked, capped; an empty list falls back to the
+ *  defaults (mergedConsultingAssumptions). */
+export async function saveConsultingAssumptionsAction(assumptions: string[]) {
+  await requirePerm("manage_users");
+  const clean = (Array.isArray(assumptions) ? assumptions : [])
+    .map((t) => String(t ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 40);
+  await setSettings({ consultingAssumptions: clean });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
 /**
  * Go-live reset — permanently removes all demo records so real data can be
  * imported into a clean database. Admin-only, and guarded by a typed
