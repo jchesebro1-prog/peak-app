@@ -95,3 +95,49 @@ export function stageIndex(k: string): number {
 export function isOpenEngagement(e: { status: string }): boolean {
   return normalizeEngagementStatus(e.status) !== "closed";
 }
+
+/* ---------- spawn model (spec §1) ---------- */
+
+export type EngagementSyncAction =
+  | { kind: "create"; stage: "proposal_sent" | "awarded" }
+  | { kind: "advance"; stage: "awarded" }
+  | { kind: "close"; stage: "closed" }
+  | { kind: "reopen"; stage: "proposal_sent" }
+  | null;
+
+/**
+ * What the quotes→engagements sweep should do for ONE consulting quote
+ * (spec §1 spawn model), given the quote's status and the engagement's
+ * current stage (null = no engagement yet):
+ *   sent  → the engagement exists, at proposal_sent
+ *   won   → the engagement exists; a proposal_sent record advances to
+ *           awarded (a stage a human moved further is never touched)
+ *   lost  → an engagement still at proposal_sent closes ("Proposal lost")
+ *   sent (again), engagement closed → REOPEN to proposal_sent: a re-sent
+ *           lost proposal picks the lifecycle back up rather than staying
+ *           dead (the deliberate reopen rule)
+ * Pure and total: every other combination is a no-op, so the sweep is
+ * idempotent by construction — each branch converges on a fixed point.
+ */
+export function engagementSyncAction(
+  quoteStatus: string,
+  current: EngagementStage | null
+): EngagementSyncAction {
+  if (current === null) {
+    if (quoteStatus === "sent") return { kind: "create", stage: "proposal_sent" };
+    if (quoteStatus === "won") return { kind: "create", stage: "awarded" };
+    return null;
+  }
+  if (quoteStatus === "won" && current === "proposal_sent") {
+    return { kind: "advance", stage: "awarded" };
+  }
+  if (quoteStatus === "lost" && current === "proposal_sent") {
+    return { kind: "close", stage: "closed" };
+  }
+  if (quoteStatus === "sent" && current === "closed") {
+    // Deliberate reopen: a re-sent proposal that was previously lost picks
+    // the lifecycle back up at proposal_sent instead of staying closed.
+    return { kind: "reopen", stage: "proposal_sent" };
+  }
+  return null;
+}

@@ -1918,5 +1918,46 @@ import {
   );
 }
 
+/* --- #35 spawn model: the pure sweep rules (spec §1) --- */
+import { engagementSyncAction } from "@/lib/consulting-stages";
+{
+  const j = (x: unknown) => JSON.stringify(x);
+  ok(
+    j(engagementSyncAction("sent", null)) === j({ kind: "create", stage: "proposal_sent" }),
+    "#35: sent consulting quote with no engagement → create at proposal_sent"
+  );
+  ok(
+    j(engagementSyncAction("won", null)) === j({ kind: "create", stage: "awarded" }),
+    "#35: won with no engagement → create straight at awarded"
+  );
+  ok(
+    j(engagementSyncAction("won", "proposal_sent")) === j({ kind: "advance", stage: "awarded" }),
+    "#35: won advances proposal_sent → awarded"
+  );
+  ok(
+    engagementSyncAction("won", "design") === null &&
+      engagementSyncAction("won", "closed") === null,
+    "#35: won never moves a stage a human already advanced past proposal_sent"
+  );
+  ok(
+    j(engagementSyncAction("lost", "proposal_sent")) === j({ kind: "close", stage: "closed" }),
+    "#35: lost while still proposal_sent → closed"
+  );
+  ok(
+    j(engagementSyncAction("sent", "closed")) === j({ kind: "reopen", stage: "proposal_sent" }),
+    "#35: re-sending a proposal after Proposal lost reopens the engagement to proposal_sent (deliberate reopen rule)"
+  );
+  ok(
+    engagementSyncAction("lost", "design") === null,
+    "#35: losing a later-stage engagement is a human call, never the sweep's"
+  );
+  ok(
+    engagementSyncAction("draft", null) === null &&
+      engagementSyncAction("sent", "design") === null &&
+      engagementSyncAction("lost", null) === null,
+    "#35: drafts spawn nothing; sent/lost are no-ops without work to do (idempotence)"
+  );
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

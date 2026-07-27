@@ -7,6 +7,7 @@ import {
 } from "@/lib/consulting-review";
 import type { Annotation, Calibration } from "@/lib/annotations";
 import {
+  engagementSyncAction,
   normalizeEngagementStatus,
   type EngagementStage,
 } from "@/lib/consulting-stages";
@@ -394,7 +395,10 @@ type QuoteLike = {
   consulting?: ConsultingQuotePayload;
 };
 
-function fromQuote(q: QuoteLike): Omit<ConsultingEngagement, "id"> {
+function fromQuote(
+  q: QuoteLike,
+  status: EngagementStage
+): Omit<ConsultingEngagement, "id"> {
   const now = Date.now();
   const pay = q.consulting;
   const phases = (pay?.phases?.length
@@ -425,12 +429,7 @@ function fromQuote(q: QuoteLike): Omit<ConsultingEngagement, "id"> {
     quoteId: q.id,
     designIds: [],
     installQuoteId: null,
-    // Birth stage is untouched this task (Task 2 makes this a spawn-model
-    // parameter — spec §1: sent → proposal_sent, won → awarded). fromQuote
-    // still only fires on a WON quote here, so this preserves current
-    // behavior: the pre-rebuild literal was "active", which normalizes to
-    // "design" under the new ladder (LEGACY_STATUS_MAP).
-    status: normalizeEngagementStatus("active"),
+    status,
     phases,
     milestones,
     decisions: [],
@@ -450,44 +449,84 @@ export async function getEngagementByQuote(
   return hit ? normalizeEngagement(hit) : null;
 }
 
-/** Convert a specific won consulting quote into an engagement — idempotent
- *  (same contract as createProjectFromQuote / repair createFromQuote). */
-export async function createFromQuote(
-  quoteId: string
+/** Idempotently make sure a consulting quote has its engagement, born at
+ *  least at `minStage` (spec §1 spawn model): sent → proposal_sent, won →
+ *  awarded. An existing engagement only ever ADVANCES proposal_sent →
+ *  awarded — a stage a human moved past proposal_sent is never touched.
+ *  (Same idempotence contract as the old createFromQuote it replaces.) */
+export async function ensureEngagementForQuote(
+  quoteId: string,
+  minStage: "proposal_sent" | "awarded"
 ): Promise<ConsultingEngagement | null> {
   const existing = await getEngagementByQuote(quoteId);
-  if (existing) return existing;
+  if (existing) {
+    if (minStage === "awarded" && existing.status === "proposal_sent") {
+      await patchEngagement(existing.id, (d) => {
+        d.status = "awarded";
+      });
+      return getEngagement(existing.id);
+    }
+    return existing;
+  }
   const q = await getDoc<QuoteLike>("quotes", quoteId);
   if (!q || q.quoteType !== "consulting") return null;
-  const body = fromQuote(q);
+  const body = fromQuote(q, minStage);
   const id = await nextPrefixedId("consulting_engagements", "CE", 1000);
   const rec: ConsultingEngagement = { ...body, id };
   await upsertDoc<ConsultingEngagement>("consulting_engagements", rec);
   return rec;
 }
 
-/** Won consulting quotes → engagements (fifth sync in the on-win fan-out). */
+/** Consulting quotes → engagements (fifth sync in the on-win fan-out, AND
+ *  the loadConsultingData safety net — estimator/inbox status paths never
+ *  run syncs, mirroring syncProjectsFromQuotes-on-load). Applies the pure
+ *  engagementSyncAction rules per quote: sent/won create (proposal_sent /
+ *  awarded), won advances a proposal_sent record to awarded, lost closes a
+ *  still-proposal_sent record with a "Proposal lost" decision entry.
+ *  Idempotent throughout. Returns the number of records touched. */
 export async function syncEngagementsFromQuotes(): Promise<number> {
   const engagements = await listDocs<ConsultingEngagement>(
     "consulting_engagements"
   );
-  const haveQ = new Set<string>();
-  for (const e of engagements) haveQ.add(e.quoteId);
+  const byQuote = new Map<string, ConsultingEngagement>();
+  for (const e of engagements) byQuote.set(e.quoteId, e);
   const quotes = await listDocs<QuoteLike>("quotes");
-  let made = 0;
+  let changed = 0;
   for (const q of quotes) {
-    if (q.quoteType !== "consulting" || q.status !== "won") continue;
-    if (haveQ.has(q.id)) continue;
-    const body = fromQuote(q);
-    const id = await nextPrefixedId("consulting_engagements", "CE", 1000);
-    await upsertDoc<ConsultingEngagement>("consulting_engagements", {
-      ...body,
-      id,
-    });
-    haveQ.add(q.id);
-    made++;
+    if (q.quoteType !== "consulting") continue;
+    const existing = byQuote.get(q.id) || null;
+    const stage = existing
+      ? normalizeEngagementStatus(String(existing.status))
+      : null;
+    const action = engagementSyncAction(String(q.status || ""), stage);
+    if (!action) continue;
+    if (action.kind === "create") {
+      const body = fromQuote(q, action.stage);
+      const id = await nextPrefixedId("consulting_engagements", "CE", 1000);
+      const rec: ConsultingEngagement = { ...body, id };
+      await upsertDoc<ConsultingEngagement>("consulting_engagements", rec);
+      byQuote.set(q.id, rec);
+    } else if (action.kind === "advance" || action.kind === "reopen") {
+      // "advance" (→ awarded) and "reopen" (→ proposal_sent) are both a
+      // plain stage overwrite; only "close" below needs the decision entry.
+      await patchEngagement(existing!.id, (d) => {
+        d.status = action.stage;
+      });
+    } else {
+      await patchEngagement(existing!.id, (d) => {
+        d.status = "closed";
+        d.decisions.unshift({
+          id: uid("dc-"),
+          at: Date.now(),
+          by: "System",
+          decision: "Proposal lost",
+          context: `Consulting quote ${q.id} was marked lost while this engagement was still at Proposal sent.`,
+        });
+      });
+    }
+    changed++;
   }
-  return made;
+  return changed;
 }
 
 /** Attach a document to the engagement (phaseId null) or to one phase's

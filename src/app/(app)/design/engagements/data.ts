@@ -1,4 +1,9 @@
-import { allEngagements, mergedConsultingPhases, type ConsultingEngagement } from "@/lib/stores/engagements";
+import {
+  allEngagements,
+  mergedConsultingPhases,
+  syncEngagementsFromQuotes,
+  type ConsultingEngagement,
+} from "@/lib/stores/engagements";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAllDesigns } from "@/lib/stores/designs";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
@@ -39,6 +44,10 @@ export type ConsultingData = {
 };
 
 export async function loadConsultingData(): Promise<ConsultingData> {
+  // #35 safety net (the projects data.ts idiom): estimator/inbox/home status
+  // paths never run the quote→engagement syncs, so every consulting load
+  // sweeps first — sent proposals appear, wins advance, lost proposals close.
+  await syncEngagementsFromQuotes();
   const [engagements, quotes, designs, users, settings, visits] = await Promise.all([
     allEngagements(),
     getAllQuotes(),

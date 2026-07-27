@@ -15,7 +15,10 @@ import { syncFromQuotes } from "@/lib/stores/flame-jobs";
 import { syncFromQuotes as syncRepairsFromQuotes } from "@/lib/stores/repair-jobs";
 import { syncFromQuotes as syncInspectionsFromQuotes } from "@/lib/stores/inspections";
 import { syncProjectsFromQuotes } from "@/lib/stores/projects";
-import { syncEngagementsFromQuotes } from "@/lib/stores/engagements";
+import {
+  ensureEngagementForQuote,
+  syncEngagementsFromQuotes,
+} from "@/lib/stores/engagements";
 
 /**
  * Quote pipeline mutations — the QuoteStore calls the prototype makes from
@@ -34,13 +37,25 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
   // attributed to whoever sent it (item 24).
   const q = await setStatus(id, status as QuoteStatus, user.name);
   if (!q) return;
+  if (status === "sent" && q.quoteType === "consulting") {
+    // Spec §1 spawn model: SENDING a consulting proposal opens the
+    // engagement at Proposal sent — winning later advances it to Awarded.
+    // Idempotent: re-sending finds the existing record.
+    await ensureEngagementForQuote(id, "proposal_sent");
+  }
+  if (status === "lost" && q.quoteType === "consulting") {
+    // A proposal lost while still at Proposal sent closes its engagement
+    // with a "Proposal lost" decision — the sweep owns that rule.
+    await syncEngagementsFromQuotes();
+  }
   if (status === "won") {
     // Acceptance auto-spawns downstream work exactly like the prototype:
     // won flame-test quotes become FT jobs, won repair quotes become repair
     // jobs, won inspection quotes become requested inspections, won system
-    // quotes become Installs projects, won consulting quotes become
-    // ConsultingEngagements (D90). Each sync filters to its own
-    // quoteType and is idempotent, so calling all five is safe.
+    // quotes become Installs projects, and won consulting quotes ensure /
+    // advance ConsultingEngagements (spec §1: proposal_sent → awarded).
+    // Each sync filters to its own quoteType and is idempotent, so calling
+    // all five is safe.
     await syncFromQuotes();
     await syncRepairsFromQuotes();
     await syncInspectionsFromQuotes();
