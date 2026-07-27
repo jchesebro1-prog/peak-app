@@ -6,24 +6,41 @@ import { requireUser } from "@/lib/session";
 import { nameFor } from "@/lib/stores/customers";
 import {
   create as createQuote,
+  get as getQuote,
   update as updateQuote,
 } from "@/lib/stores/quotes";
+import {
+  create as createLead,
+  logActivity as logLeadActivity,
+  open as openLeads,
+} from "@/lib/stores/leads";
 import type { ConsultingQuotePayload } from "@/lib/stores/engagements";
+import { scopesTotal, type ConsultingScope } from "@/lib/consulting-stages";
 
 /**
- * Consulting quote mutations (D90). A LIGHTWEIGHT builder on purpose (spec
- * §"The consulting quote") — scope-of-work text, a fixed fee OR a milestone
- * fee schedule, terms, and the phase selection that later seeds the
- * engagement. No engine, no travel, and NO pricing tiers (fee-based, not
- * margin-derived — pricingTier/tierMargin stay unset). Everything downstream
- * (review gate, status pipeline, D84 revisions, letters) is the ordinary
- * quote machinery driven from the Quotes hub.
+ * Consulting proposal mutations (#35 rebuild over the D90 lightweight
+ * builder). Structured scopes (the total = scope fees), the ticked
+ * assumption texts frozen at save, terms, and the phase selection that
+ * seeds the engagement when the proposal is SENT (spec §1). Still no
+ * engine, no travel, and NO pricing tiers (fee-based, not margin-derived —
+ * pricingTier/tierMargin stay unset). Everything downstream (review gate,
+ * status pipeline, D84 revisions, letters) is the ordinary quote machinery
+ * driven from the Quotes hub.
+ *
+ * Auto-lead with dedupe (spec §1): the CREATE path (never edits) links the
+ * proposal to the company's open lead when one exists (a system activity
+ * notes the proposal), else creates a source-"consulting" lead. Either way
+ * the payload stamps leadId for traceability.
  *
  * Client input is field-allowlisted here — review/status/owner never come
  * from the form (same self-approval guardrail as updateQuoteMetaAction).
  */
 
-type PostedFee = { name?: string; amount?: number };
+function uid(p?: string): string {
+  return (p || "x") + Math.random().toString(36).slice(2, 8);
+}
+
+type PostedScope = { id?: string; title?: string; description?: string; fee?: number };
 
 async function persist(formData: FormData): Promise<string | null> {
   const user = await requireUser();
@@ -34,17 +51,19 @@ async function persist(formData: FormData): Promise<string | null> {
   const contactName = String(formData.get("contactName") || "").trim();
   const contactRole = String(formData.get("contactRole") || "").trim();
   const contactEmail = String(formData.get("contactEmail") || "").trim();
-  const scope = String(formData.get("scope") || "").trim();
   const terms = String(formData.get("terms") || "").trim();
-  const feeModeRaw = String(formData.get("feeMode") || "fixed");
-  const feeMode: ConsultingQuotePayload["feeMode"] =
-    feeModeRaw === "milestones" ? "milestones" : "fixed";
 
-  let postedFees: PostedFee[] = [];
+  let postedScopes: PostedScope[] = [];
   try {
-    postedFees = JSON.parse(String(formData.get("fees") || "[]"));
+    postedScopes = JSON.parse(String(formData.get("scopes") || "[]"));
   } catch {
-    postedFees = [];
+    postedScopes = [];
+  }
+  let postedAssumptions: unknown[] = [];
+  try {
+    postedAssumptions = JSON.parse(String(formData.get("assumptions") || "[]"));
+  } catch {
+    postedAssumptions = [];
   }
   let phases: string[] = [];
   try {
@@ -55,34 +74,45 @@ async function persist(formData: FormData): Promise<string | null> {
 
   if (!customerId) return null;
 
-  const fees = (Array.isArray(postedFees) ? postedFees : [])
-    .map((f) => ({
-      name: String(f?.name || "").trim(),
-      amount: Math.max(0, Math.round(Number(f?.amount) || 0)),
+  const scopes: ConsultingScope[] = (Array.isArray(postedScopes) ? postedScopes : [])
+    .map((s) => ({
+      id: typeof s?.id === "string" && s.id.startsWith("sc-") ? s.id : uid("sc-"),
+      title: String(s?.title || "").trim().slice(0, 120),
+      description: String(s?.description || "").trim().slice(0, 2000),
+      fee: Math.max(0, Math.round(Number(s?.fee) || 0)),
     }))
-    .filter((f) => f.name || f.amount > 0)
+    .filter((s) => s.title || s.description || s.fee > 0)
+    .slice(0, 40);
+  const assumptions = (Array.isArray(postedAssumptions) ? postedAssumptions : [])
+    .map((a) => String(a || "").trim().slice(0, 300))
+    .filter(Boolean)
     .slice(0, 40);
   const cleanPhases = (Array.isArray(phases) ? phases : [])
     .map((p) => String(p || "").trim())
     .filter(Boolean)
     .slice(0, 20);
 
-  const value =
-    feeMode === "fixed"
-      ? fees[0]?.amount || 0
-      : fees.reduce((a, f) => a + f.amount, 0);
+  const value = scopesTotal(scopes);
 
   const custName = (await nameFor(customerId)) || "";
   const contact = contactName
     ? { name: contactName, role: contactRole, email: contactEmail }
     : null;
 
+  // Pre-rebuild content survives an edit read-only: the legacy scope string
+  // rides along; fees are superseded by scopes (revisions hold the history).
+  const prior = editingId ? await getQuote(editingId) : null;
+  const priorPay = (prior?.consulting || null) as ConsultingQuotePayload | null;
+
   const consulting: ConsultingQuotePayload = {
-    scope,
-    feeMode,
-    fees,
+    scope: priorPay?.scope || "",
+    feeMode: "fixed",
+    fees: [],
     terms,
     phases: cleanPhases,
+    scopes,
+    assumptions,
+    leadId: priorPay?.leadId ?? null,
   };
 
   const payload = {
@@ -102,7 +132,36 @@ async function persist(formData: FormData): Promise<string | null> {
   const q = editingId
     ? await updateQuote(editingId, payload)
     : await createQuote(payload);
-  return (q && q.id) || editingId || null;
+  const qid = (q && q.id) || editingId || null;
+
+  /* ---- #35 auto-lead with dedupe — CREATE path only, never edits ---- */
+  if (!editingId && q) {
+    const existing = (await openLeads()).find((l) => l.customerId === customerId);
+    let leadId: string;
+    if (existing) {
+      await logLeadActivity(
+        existing.id,
+        { type: "system", note: `Consulting proposal ${q.id} created` },
+        user.name
+      );
+      leadId = existing.id;
+    } else {
+      const lead = await createLead(
+        {
+          org: custName,
+          source: "consulting",
+          owner: user.name,
+          customerId,
+          interest: "Consulting — " + payload.name,
+          value,
+        },
+        user.name
+      );
+      leadId = lead.id;
+    }
+    await updateQuote(q.id, { consulting: { ...consulting, leadId } });
+  }
+  return qid;
 }
 
 export async function saveConsultingQuote(formData: FormData): Promise<void> {

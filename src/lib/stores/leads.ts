@@ -96,6 +96,7 @@ export const SOURCES = [
   "manual",
   "event",
   "existing",
+  "consulting",
 ] as const;
 export type LeadSource = (typeof SOURCES)[number];
 
@@ -115,6 +116,7 @@ export const SOURCE_META: Record<LeadSource, LeadSourceMeta> = {
   manual: { label: "Manual entry", short: "Manual", verb: "was added by the team", sla: 48, color: "#8c919c" },
   event: { label: "Trade show / event", short: "Event", verb: "met us at an event", sla: 48, color: "#8a6d1f" },
   existing: { label: "Existing customer", short: "Existing", verb: "is an existing customer", sla: 48, color: "#5b4b8a" },
+  consulting: { label: "Consulting proposal", short: "Consulting", verb: "came from a consulting proposal", sla: 48, color: "#6b4fa1" },
 };
 
 export function sourceMeta(k: string | undefined): LeadSourceMeta {

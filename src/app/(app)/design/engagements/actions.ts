@@ -32,6 +32,7 @@ import { ENGAGEMENT_STAGE_KEYS } from "@/lib/consulting-stages";
 import { getSettings } from "@/lib/settings";
 import type { Annotation, MeasureUnit } from "@/lib/annotations";
 import { linkVisitToEngagement } from "@/lib/stores/site-visits";
+import { get as getQuote } from "@/lib/stores/quotes";
 
 /**
  * Consulting module server actions (D90) — thin, session-gated wrappers over
@@ -89,10 +90,36 @@ export async function setPeopleAction(
 export async function linkInstallQuoteAction(
   engId: string,
   quoteId: string | null
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  const clean = quoteId ? String(quoteId).trim() : null;
+  if (clean) {
+    // #35: validate the reference — the field used to accept any string.
+    const q = await getQuote(clean);
+    if (!q) return { ok: false, error: `No quote ${clean} exists.` };
+    if (q.quoteType === "consulting")
+      return {
+        ok: false,
+        error: "That's a consulting quote — link the install (system) quote Peak bid on the spec.",
+      };
+  }
+  await patchEngagement(engId, (d) => {
+    d.installQuoteId = clean;
+  });
+  return done();
+}
+
+/** #35 minimal architect link — {company, contact} strings by design (item
+ *  20's people/roles model absorbs this later). Both blank clears the link. */
+export async function setArchitectAction(
+  engId: string,
+  input: { company: string; contact: string }
 ) {
   await requireUser();
+  const company = String(input?.company || "").trim().slice(0, 120);
+  const contact = String(input?.contact || "").trim().slice(0, 120);
   await patchEngagement(engId, (d) => {
-    d.installQuoteId = quoteId ? String(quoteId).trim() : null;
+    d.architect = company || contact ? { company, contact } : null;
   });
   return done();
 }

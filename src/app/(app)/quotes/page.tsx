@@ -10,6 +10,7 @@ import {
   type QuoteStatus,
 } from "@/lib/stores/quotes";
 import { all as allCustomers } from "@/lib/stores/customers";
+import { getEngagementForQuoteRef, ENGAGEMENT_STATUS_LABEL } from "@/lib/stores/engagements";
 import { allUsers, reviewers } from "@/lib/users";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { money } from "@/lib/format";
@@ -139,6 +140,9 @@ export default async function QuotesPage({
   const typeParam = one(sp.type);
   const typeFilter = (TYPE_KEYS as readonly string[]).includes(typeParam) ? typeParam : "all";
   const selectedId = one(sp.id);
+  // #35 one-click both ways: the engagement referencing the selected quote
+  // (as its source proposal OR as Peak's install bid). Selected row only.
+  const selEng = selectedId ? await getEngagementForQuoteRef(selectedId) : null;
 
   const hrefFor = (over: {
     who?: string;
@@ -646,6 +650,11 @@ export default async function QuotesPage({
                 <SelectedPanel
                   q={q}
                   me={me}
+                  engagement={
+                    selEng
+                      ? { id: selEng.id, stage: ENGAGEMENT_STATUS_LABEL[selEng.status] }
+                      : null
+                  }
                   reviewerNames={reviewerRows
                     .filter((u) => u.name !== me && u.name !== q.owner)
                     .map((u) => u.name)}
@@ -689,10 +698,12 @@ export default async function QuotesPage({
 function SelectedPanel({
   q,
   me,
+  engagement,
   reviewerNames,
 }: {
   q: Quote;
   me: string;
+  engagement: { id: string; stage: string } | null;
   reviewerNames: string[];
 }) {
   const rev = q.review || { state: "none" as const, reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" };
@@ -862,6 +873,27 @@ function SelectedPanel({
           }))}
           canRestore={q.status !== "won"}
         />
+        {engagement && (
+          <Link
+            href={`/design/engagements/${encodeURIComponent(engagement.id)}`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: ".03em",
+              color: "#6b4fa1",
+              background: "#f0ebf9",
+              border: "1px solid #ddd2f0",
+              padding: "3px 9px",
+              borderRadius: 20,
+              textDecoration: "none",
+            }}
+          >
+            Engagement {engagement.id} · {engagement.stage}
+          </Link>
+        )}
         <div
           style={{
             marginLeft: "auto",

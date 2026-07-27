@@ -6,9 +6,19 @@ import { saveConsultingQuote } from "./actions";
 import { money } from "@/lib/format";
 
 /**
- * Consulting quote form (D90) — deliberately lightweight (spec): scope text,
- * fixed fee OR milestone fee rows, terms, and the phase selection that seeds
- * the engagement on win. Pricing is whatever is typed — no engine, no tiers.
+ * Consulting proposal builder (#35 rebuild, spec §1). Structured scopes
+ * (title + description + fee — the proposal total assembles from scope
+ * fees), a tickable assumptions checklist seeded from the Settings-editable
+ * library (ticked texts freeze onto the proposal at save), terms, and the
+ * phase selection that seeds the engagement when the proposal is SENT
+ * (spec §1 spawn model — no longer on win). Still deliberately fee-based:
+ * no engine, no travel, and NO pricing tiers (pricingTier/tierMargin stay
+ * unset).
+ *
+ * Pre-rebuild quotes (free-text scope + fixed/milestone fees) show their
+ * old content read-only below the scope rows; saving always writes
+ * structured scopes, so editing a legacy quote means carrying its content
+ * into the rows (the revision trail keeps the original).
  */
 
 export type BuilderCustomer = {
@@ -18,6 +28,8 @@ export type BuilderCustomer = {
   contacts: Array<{ name: string; role: string; email: string; primary: boolean }>;
 };
 
+export type BuilderScope = { id: string; title: string; description: string; fee: number };
+
 export type BuilderInitial = {
   id: string;
   name: string;
@@ -26,15 +38,19 @@ export type BuilderInitial = {
   contactName: string;
   contactRole: string;
   contactEmail: string;
-  scope: string;
-  feeMode: "fixed" | "milestones";
-  fees: Array<{ name: string; amount: number }>;
+  /** #35 structured content (empty arrays on pre-rebuild quotes). */
+  scopes: BuilderScope[];
+  assumptions: string[];
+  /** Pre-rebuild payload — rendered read-only when scopes is empty. */
+  legacyScope: string;
+  legacyFeeMode: "fixed" | "milestones";
+  legacyFees: Array<{ name: string; amount: number }>;
   terms: string;
   phases: string[];
   status: string;
 };
 
-type FeeRow = { name: string; amount: string };
+type ScopeRow = { id: string; title: string; description: string; fee: string };
 
 const LBL: React.CSSProperties = {
   display: "block",
@@ -61,12 +77,15 @@ const INPUT: React.CSSProperties = {
 export function ConsultingQuoteBuilder({
   customers,
   phaseMenu,
+  assumptionsMenu,
   initial,
   preCustomerId,
   justSaved,
 }: {
   customers: BuilderCustomer[];
   phaseMenu: string[];
+  /** Merged assumptions library (Settings-editable, DRAFT default seed). */
+  assumptionsMenu: string[];
   initial: BuilderInitial | null;
   preCustomerId: string;
   justSaved: boolean;
@@ -81,23 +100,37 @@ export function ConsultingQuoteBuilder({
   const [contactName, setContactName] = useState(initial?.contactName || "");
   const [contactRole, setContactRole] = useState(initial?.contactRole || "");
   const [contactEmail, setContactEmail] = useState(initial?.contactEmail || "");
-  const [scope, setScope] = useState(initial?.scope || "");
   const [terms, setTerms] = useState(initial?.terms || "");
-  const [feeMode, setFeeMode] = useState<"fixed" | "milestones">(
-    initial?.feeMode || "fixed"
+
+  /* ---- structured scopes (#35) ---- */
+  const [scopeRows, setScopeRows] = useState<ScopeRow[]>(
+    initial?.scopes.length
+      ? initial.scopes.map((s) => ({
+          id: s.id,
+          title: s.title,
+          description: s.description,
+          fee: s.fee ? String(s.fee) : "",
+        }))
+      : [{ id: "", title: "", description: "", fee: "" }]
   );
-  const [fixedFee, setFixedFee] = useState(
-    initial && initial.feeMode === "fixed" && initial.fees[0]
-      ? String(initial.fees[0].amount)
-      : ""
-  );
-  const [rows, setRows] = useState<FeeRow[]>(
-    initial && initial.feeMode === "milestones" && initial.fees.length
-      ? initial.fees.map((f) => ({ name: f.name, amount: String(f.amount) }))
-      : [{ name: "", amount: "" }]
-  );
-  // Phase menu + any custom phases already on the edited quote.
+  const setRow = (i: number, patch: Partial<ScopeRow>) =>
+    setScopeRows(scopeRows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+
+  /* ---- assumptions checklist (#35): menu = library + any ticked texts an
+     older save carried that the library no longer lists + one-off adds ---- */
+  const [customAdds, setCustomAdds] = useState<string[]>([]);
   const menu = useMemo(() => {
+    const extra = (initial?.assumptions || []).filter((a) => !assumptionsMenu.includes(a));
+    const custom = customAdds.filter((a) => !assumptionsMenu.includes(a) && !extra.includes(a));
+    return [...assumptionsMenu, ...extra, ...custom];
+  }, [assumptionsMenu, initial, customAdds]);
+  const [ticked, setTicked] = useState<string[]>(initial ? initial.assumptions : []);
+  const [newAssumption, setNewAssumption] = useState("");
+  const toggle = (a: string) =>
+    setTicked(ticked.includes(a) ? ticked.filter((x) => x !== a) : [...ticked, a]);
+
+  // Phase menu + any custom phases already on the edited quote.
+  const phaseOptions = useMemo(() => {
     const extra = (initial?.phases || []).filter((p) => !phaseMenu.includes(p));
     return [...phaseMenu, ...extra];
   }, [phaseMenu, initial]);
@@ -114,26 +147,28 @@ export function ConsultingQuoteBuilder({
     }
   };
 
-  const total =
-    feeMode === "fixed"
-      ? Math.round(Number(fixedFee) || 0)
-      : rows.reduce((a, r) => a + (Math.round(Number(r.amount)) || 0), 0);
-
-  const fees =
-    feeMode === "fixed"
-      ? [{ name: "Fixed fee", amount: Math.round(Number(fixedFee) || 0) }]
-      : rows.map((r) => ({
-          name: r.name.trim(),
-          amount: Math.round(Number(r.amount)) || 0,
-        }));
-
+  const scopes = scopeRows
+    .map((r) => ({
+      id: r.id,
+      title: r.title.trim(),
+      description: r.description.trim(),
+      fee: Math.round(Number(r.fee) || 0),
+    }))
+    .filter((s) => s.title || s.description || s.fee > 0);
+  const total = scopes.reduce((a, s) => a + s.fee, 0);
+  /** The ticked texts, in menu order — frozen onto the proposal at save. */
+  const assumptions = menu.filter((a) => ticked.includes(a));
   const canSave = !!customerId && total > 0;
+  const legacy =
+    initial && !initial.scopes.length && (initial.legacyScope || initial.legacyFees.length)
+      ? initial
+      : null;
 
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "26px 22px 60px", fontFamily: "var(--font-ui)" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ fontSize: 21, fontWeight: 700, color: "#16181d", margin: 0 }}>
-          {initial ? `Consulting quote ${initial.id}` : "New consulting quote"}
+          {initial ? `Consulting proposal ${initial.id}` : "New consulting proposal"}
         </h1>
         <span
           style={{
@@ -157,7 +192,7 @@ export function ConsultingQuoteBuilder({
             borderRadius: 9, padding: "9px 12px", fontSize: 12.5, color: "#1f7a52",
           }}
         >
-          Saved. Review, send and win this quote from the Quotes hub — winning it opens the engagement.
+          Saved. Review and send from the Quotes hub — sending opens the engagement at Proposal sent; winning advances it to Awarded.
         </div>
       )}
 
@@ -165,8 +200,8 @@ export function ConsultingQuoteBuilder({
         {initial && <input type="hidden" name="editingId" value={initial.id} />}
         <input type="hidden" name="customerId" value={customerId} />
         <input type="hidden" name="locationId" value={locationId} />
-        <input type="hidden" name="feeMode" value={feeMode} />
-        <input type="hidden" name="fees" value={JSON.stringify(fees)} />
+        <input type="hidden" name="scopes" value={JSON.stringify(scopes)} />
+        <input type="hidden" name="assumptions" value={JSON.stringify(assumptions)} />
         <input type="hidden" name="phases" value={JSON.stringify(phases)} />
 
         <label style={LBL}>Customer</label>
@@ -224,98 +259,110 @@ export function ConsultingQuoteBuilder({
           <input name="contactEmail" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="Email" style={INPUT} />
         </div>
 
-        <label style={LBL}>Scope of work</label>
-        <textarea
-          name="scope"
-          value={scope}
-          onChange={(e) => setScope(e.target.value)}
-          rows={6}
-          placeholder="What Peak is being engaged to design, assess, specify or oversee…"
-          style={{ ...INPUT, resize: "vertical", lineHeight: 1.6 }}
-        />
-
-        <label style={LBL}>Fee</label>
-        <div style={{ display: "flex", background: "#f1f2f5", borderRadius: 9, padding: 3, maxWidth: 340 }}>
-          {(
-            [
-              ["fixed", "Fixed fee"],
-              ["milestones", "Milestone schedule"],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setFeeMode(id)}
-              style={{
-                flex: 1, fontFamily: "var(--font-ui)", fontSize: 12, fontWeight: 600,
-                padding: "8px 8px", borderRadius: 7, border: "none", cursor: "pointer",
-                background: feeMode === id ? "#fff" : "transparent",
-                color: feeMode === id ? "#16181d" : "#8c919c",
-                boxShadow: feeMode === id ? "0 1px 2px rgba(0,0,0,.1)" : "none",
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {feeMode === "fixed" ? (
-          <div style={{ marginTop: 10, maxWidth: 220 }}>
-            <input
-              value={fixedFee}
-              onChange={(e) => setFixedFee(e.target.value.replace(/[^\d]/g, ""))}
-              placeholder="Fee ($)"
-              inputMode="numeric"
-              style={INPUT}
+        <label style={LBL}>Scopes of work (title · description · fee)</label>
+        {scopeRows.map((r, i) => (
+          <div key={i} style={{ border: "1px solid #e4e7ec", borderRadius: 10, padding: "10px 12px", marginBottom: 8, background: "#fbfbfc" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 130px 34px", gap: 8 }}>
+              <input
+                value={r.title}
+                onChange={(e) => setRow(i, { title: e.target.value })}
+                placeholder={`Scope ${i + 1} (e.g. Theatrical rigging design)`}
+                style={INPUT}
+              />
+              <input
+                value={r.fee}
+                onChange={(e) => setRow(i, { fee: e.target.value.replace(/[^\d]/g, "") })}
+                placeholder="Fee ($)"
+                inputMode="numeric"
+                style={INPUT}
+              />
+              <button
+                type="button"
+                onClick={() => setScopeRows(scopeRows.filter((_, j) => j !== i))}
+                title="Remove scope"
+                style={{ border: "1px solid #e4e7ec", borderRadius: 8, background: "#fff", color: "#8c919c", cursor: "pointer" }}
+              >
+                ×
+              </button>
+            </div>
+            <textarea
+              value={r.description}
+              onChange={(e) => setRow(i, { description: e.target.value })}
+              rows={2}
+              placeholder="What this scope covers — drawings, specifications, meetings, site visits…"
+              style={{ ...INPUT, marginTop: 8, resize: "vertical", lineHeight: 1.6 }}
             />
           </div>
-        ) : (
-          <div style={{ marginTop: 10 }}>
-            {rows.map((r, i) => (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 140px 34px", gap: 8, marginBottom: 8 }}>
-                <input
-                  value={r.name}
-                  onChange={(e) =>
-                    setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
-                  }
-                  placeholder={`Milestone ${i + 1} (e.g. Schematic design complete)`}
-                  style={INPUT}
-                />
-                <input
-                  value={r.amount}
-                  onChange={(e) =>
-                    setRows(rows.map((x, j) => (j === i ? { ...x, amount: e.target.value.replace(/[^\d]/g, "") } : x)))
-                  }
-                  placeholder="$"
-                  inputMode="numeric"
-                  style={INPUT}
-                />
-                <button
-                  type="button"
-                  onClick={() => setRows(rows.filter((_, j) => j !== i))}
-                  title="Remove"
-                  style={{ border: "1px solid #e4e7ec", borderRadius: 8, background: "#fff", color: "#8c919c", cursor: "pointer" }}
-                >
-                  ×
-                </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setScopeRows([...scopeRows, { id: "", title: "", description: "", fee: "" }])}
+          style={{
+            fontSize: 12.5, fontWeight: 600, color: "var(--accent)", background: "none",
+            border: "none", cursor: "pointer", padding: 0, fontFamily: "var(--font-ui)",
+          }}
+        >
+          + Add scope
+        </button>
+
+        {legacy && (
+          <div style={{ marginTop: 14, background: "#fdf8ee", border: "1px solid #f0e2bd", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: "#8a6d1f" }}>
+            <b>Pre-rebuild proposal content (read-only).</b> Carry what still
+            applies into the scope rows above — saving writes structured
+            scopes (the revision trail keeps this original).
+            {legacy.legacyScope && (
+              <div style={{ marginTop: 6, whiteSpace: "pre-wrap", color: "#5b616e" }}>{legacy.legacyScope}</div>
+            )}
+            {legacy.legacyFees.length > 0 && (
+              <div style={{ marginTop: 6, color: "#5b616e" }}>
+                {legacy.legacyFeeMode === "fixed" ? "Fixed fee: " : "Milestones: "}
+                {legacy.legacyFees.map((f) => `${f.name || "Fee"} ${money(f.amount)}`).join(" · ")}
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setRows([...rows, { name: "", amount: "" }])}
-              style={{
-                fontSize: 12.5, fontWeight: 600, color: "var(--accent)", background: "none",
-                border: "none", cursor: "pointer", padding: 0, fontFamily: "var(--font-ui)",
-              }}
-            >
-              + Add milestone
-            </button>
+            )}
           </div>
         )}
 
-        <label style={LBL}>Engagement phases (seeds the engagement on win)</label>
+        <label style={LBL}>Assumptions (ticked lines print on the proposal)</label>
+        <div style={{ display: "grid", gap: 5 }}>
+          {menu.map((a) => (
+            <label key={a} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5, color: "#3a3f4a", cursor: "pointer" }}>
+              <input type="checkbox" checked={ticked.includes(a)} onChange={() => toggle(a)} style={{ marginTop: 2 }} />
+              <span>{a}</span>
+            </label>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8, maxWidth: 560 }}>
+          <input
+            value={newAssumption}
+            onChange={(e) => setNewAssumption(e.target.value)}
+            placeholder="Add a one-off assumption…"
+            style={{ ...INPUT, flex: 1 }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              const a = newAssumption.trim();
+              if (!a) return;
+              if (!menu.includes(a)) setCustomAdds([...customAdds, a]);
+              if (!ticked.includes(a)) setTicked([...ticked, a]);
+              setNewAssumption("");
+            }}
+            style={{
+              fontSize: 12.5, fontWeight: 600, color: "var(--accent)", background: "#fff",
+              border: "1px solid #e4e7ec", borderRadius: 8, padding: "0 12px",
+              cursor: "pointer", fontFamily: "var(--font-ui)",
+            }}
+          >
+            Add
+          </button>
+        </div>
+        <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 4 }}>
+          Standard lines are managed in Settings → Consulting — assumptions library.
+        </div>
+
+        <label style={LBL}>Engagement phases (seed the engagement when the proposal is sent)</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {menu.map((p) => {
+          {phaseOptions.map((p) => {
             const on = phases.includes(p);
             return (
               <button
@@ -338,13 +385,13 @@ export function ConsultingQuoteBuilder({
           })}
         </div>
 
-        <label style={LBL}>Terms &amp; assumptions</label>
+        <label style={LBL}>Terms</label>
         <textarea
           name="terms"
           value={terms}
           onChange={(e) => setTerms(e.target.value)}
           rows={4}
-          placeholder="Payment terms, exclusions, assumptions…"
+          placeholder="Payment terms, exclusions… (assumptions live in the checklist above)"
           style={{ ...INPUT, resize: "vertical", lineHeight: 1.6 }}
         />
 
@@ -363,7 +410,7 @@ export function ConsultingQuoteBuilder({
             className="pk-btn-accent"
             style={{ opacity: canSave ? 1 : 0.5, cursor: canSave ? "pointer" : "default" }}
           >
-            {initial ? "Save changes" : "Save quote"}
+            {initial ? "Save changes" : "Save proposal"}
           </button>
           {initial && (
             <Link

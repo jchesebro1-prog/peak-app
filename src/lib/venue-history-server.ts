@@ -137,7 +137,7 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
   }
   for (const e of engagements.filter((r) => engagementMatchesVenue(r, companyId, locId))) {
     rows.push({
-      id: e.id, kind: "engagement", title: e.name || e.id, subtitle: "Engagement",
+      id: e.id, kind: "engagement", title: e.name || e.id, subtitle: "Consulting",
       ts: e.updatedAt, status: e.status, open: isOpenStage("engagement", e.status),
       href: "/design/engagements/" + encodeURIComponent(e.id),
     });

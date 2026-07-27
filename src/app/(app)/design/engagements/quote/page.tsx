@@ -5,6 +5,7 @@ import {
   mergedConsultingPhases,
   type ConsultingQuotePayload,
 } from "@/lib/stores/engagements";
+import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { getSettings } from "@/lib/settings";
 import {
   ConsultingQuoteBuilder,
@@ -59,6 +60,7 @@ export default async function ConsultingQuotePage({
   }));
 
   const phaseMenu = mergedConsultingPhases(settings.consultingPhases);
+  const assumptionsMenu = mergedConsultingAssumptions(settings.consultingAssumptions);
 
   let initial: BuilderInitial | null = null;
   if (editId) {
@@ -77,9 +79,16 @@ export default async function ConsultingQuotePage({
         contactName: contact?.name || "",
         contactRole: contact?.role || "",
         contactEmail: contact?.email || "",
-        scope: pay?.scope || "",
-        feeMode: pay?.feeMode === "milestones" ? "milestones" : "fixed",
-        fees: pay?.fees || [],
+        scopes: (pay?.scopes || []).map((s) => ({
+          id: s.id,
+          title: s.title,
+          description: s.description,
+          fee: s.fee,
+        })),
+        assumptions: pay?.assumptions || [],
+        legacyScope: pay?.scope || "",
+        legacyFeeMode: pay?.feeMode === "milestones" ? "milestones" : "fixed",
+        legacyFees: pay?.fees || [],
         terms: pay?.terms || "",
         phases: pay?.phases || [],
         status: q.status,
@@ -91,6 +100,7 @@ export default async function ConsultingQuotePage({
     <ConsultingQuoteBuilder
       customers={customers}
       phaseMenu={phaseMenu}
+      assumptionsMenu={assumptionsMenu}
       initial={initial}
       preCustomerId={preCustomer}
       justSaved={saved}

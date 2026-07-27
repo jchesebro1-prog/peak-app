@@ -29,6 +29,7 @@ import {
   removeDocumentAction,
   removeMilestoneAction,
   removePhaseAction,
+  setArchitectAction,
   setEngagementStatusAction,
   setPeopleAction,
   setPhaseStatusAction,
@@ -73,6 +74,21 @@ const REVIEW_LABEL: Record<string, string> = {
   in_review: "In review",
   approved: "Approved",
   changes: "Changes requested",
+};
+
+/** #35 install-quote status chip — stores/quotes values are client-forbidden
+ *  here ("use client"), so the 4-key label/tone maps are restated locally. */
+const QUOTE_LABEL: Record<string, string> = {
+  draft: "Draft",
+  sent: "Sent",
+  won: "Won",
+  lost: "Lost",
+};
+const QUOTE_TONE: Record<string, string> = {
+  draft: "orange",
+  sent: "blue",
+  won: "green",
+  lost: "gray",
 };
 
 const PEOPLE_ROLES = [
@@ -173,11 +189,11 @@ function ConsultingList({ data }: { data: ConsultingData }) {
     <div style={{ maxWidth: 1060, margin: "0 auto", padding: "26px 22px 60px", fontFamily: "var(--font-ui)" }}>
       <PageHeader
         title="Consulting"
-        sub="Paid design & advisory engagements — quoted first; winning the quote opens the engagement."
+        sub="Consulting — Peak as the paid specifier. Sending the proposal opens the record at Proposal sent; any stage before Closed counts as active."
       />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 18 }}>
-        <KpiTile label="Active engagements" value={active.length} tone="accent" />
-        <KpiTile label="Fee book" value={money(feeBook)} sub="all engagements" tone="blue" />
+        <KpiTile label="Active consulting" value={active.length} tone="accent" />
+        <KpiTile label="Fee book" value={money(feeBook)} sub="all consulting" tone="blue" />
         <KpiTile label="Milestones (60d)" value={soon} tone={soon ? "amber" : undefined} />
       </div>
 
@@ -186,11 +202,11 @@ function ConsultingList({ data }: { data: ConsultingData }) {
       {data.engagements.length === 0 ? (
         <Card>
           <EmptyState
-            title="No engagements yet"
+            title="No consulting yet"
             sub={
               <>
-                Start with a <Link href="/design/engagements/quote" style={{ color: "var(--accent)" }}>consulting quote</Link> — customer
-                acceptance is the paid commitment, and the won quote opens the engagement here.
+                Start with a <Link href="/design/engagements/quote" style={{ color: "var(--accent)" }}>consulting quote</Link> — sending
+                the proposal opens the engagement here at Proposal sent; winning advances it to Awarded.
               </>
             }
           />
@@ -245,7 +261,7 @@ function RollupTimeline({ engagements }: { engagements: ConsultingEngagement[] }
   return (
     <Card style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab", marginBottom: 10 }}>
-        Engagement timeline
+        Consulting timeline
       </div>
       {dated.map(({ e, lo, hi }) => {
         const ms = nextMilestone(e);
@@ -306,7 +322,7 @@ function EngagementDetail({
   return (
     <div style={{ maxWidth: 1060, margin: "0 auto", padding: "26px 22px 60px", fontFamily: "var(--font-ui)" }}>
       <Link href="/design/engagements" style={{ fontSize: 12.5, color: "var(--accent)", textDecoration: "none" }}>
-        ← All engagements
+        ← All consulting
       </Link>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "8px 0 2px" }}>
         <h1 style={{ fontSize: 21, fontWeight: 700, color: "#16181d", margin: 0 }}>{eng.name}</h1>
@@ -376,7 +392,9 @@ function EngagementDetail({
 function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngagement }) {
   const router = useRouter();
   const [installQuote, setInstallQuote] = useState(eng.installQuoteId || "");
+  const [linkErr, setLinkErr] = useState<string | null>(null);
   const visits = data.visits.filter((v) => v.engagementId === eng.id);
+  const iq = eng.installQuoteId ? data.quotesById[eng.installQuoteId] : undefined;
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -396,7 +414,7 @@ function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngag
                 {eng.quoteId}
               </Link>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span>Install quote:</span>
               <input
                 value={installQuote}
@@ -407,19 +425,33 @@ function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngag
               <button
                 style={SMALL_BTN}
                 onClick={async () => {
-                  await linkInstallQuoteAction(eng.id, installQuote.trim() || null);
+                  setLinkErr(null);
+                  const r = await linkInstallQuoteAction(eng.id, installQuote.trim() || null);
+                  if (r && "error" in r && r.error) {
+                    setLinkErr(r.error);
+                    return;
+                  }
                   router.refresh();
                 }}
               >
                 {eng.installQuoteId ? "Update" : "Link"}
               </button>
+              {iq && (
+                <Link href={`/quotes?id=${encodeURIComponent(iq.id)}`} style={{ textDecoration: "none" }}>
+                  <StatusPill tone={QUOTE_TONE[iq.status] || "gray"} minWidth={54}>
+                    {QUOTE_LABEL[iq.status] || iq.status}
+                  </StatusPill>
+                </Link>
+              )}
               {eng.installQuoteId && (
-                <span style={{ fontSize: 11, color: "#9aa0ab" }}>reference only — never a conversion</span>
+                <span style={{ fontSize: 11, color: "#9aa0ab" }}>Peak's bid on this spec — a reference, never a conversion</span>
               )}
             </div>
+            {linkErr && <div style={{ fontSize: 11.5, color: "#a0442b" }}>{linkErr}</div>}
           </div>
         </Card>
         <PeopleCard eng={eng} roster={data.roster} />
+        <ArchitectCard eng={eng} />
       </div>
       {eng.designIds.length > 0 && (
         <Card>
@@ -500,6 +532,49 @@ function PeopleCard({ eng, roster }: { eng: ConsultingEngagement; roster: string
             className="pk-btn-accent"
             onClick={async () => {
               await setPeopleAction(eng.id, rows.filter((r) => r.person));
+              setDirty(false);
+              router.refresh();
+            }}
+          >
+            Save
+          </button>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/** #35 minimal architect reference — two dumb strings, slated to migrate
+ *  into item 20's people/roles model. */
+function ArchitectCard({ eng }: { eng: ConsultingEngagement }) {
+  const router = useRouter();
+  const [company, setCompany] = useState(eng.architect?.company || "");
+  const [contact, setContact] = useState(eng.architect?.contact || "");
+  const [dirty, setDirty] = useState(false);
+  return (
+    <Card>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab", marginBottom: 10 }}>
+        Architect
+      </div>
+      <div style={{ display: "grid", gap: 7 }}>
+        <input
+          value={company}
+          onChange={(e) => { setCompany(e.target.value); setDirty(true); }}
+          placeholder="Architecture firm"
+          style={INPUT}
+        />
+        <input
+          value={contact}
+          onChange={(e) => { setContact(e.target.value); setDirty(true); }}
+          placeholder="Contact (name / email)"
+          style={INPUT}
+        />
+        {dirty && (
+          <button
+            className="pk-btn-accent"
+            style={{ justifySelf: "start" }}
+            onClick={async () => {
+              await setArchitectAction(eng.id, { company, contact });
               setDirty(false);
               router.refresh();
             }}
