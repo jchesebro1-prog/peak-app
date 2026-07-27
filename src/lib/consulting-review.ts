@@ -1,7 +1,6 @@
 import type {
   ChecklistItem,
   EngagementPhase,
-  EngagementStatus,
   ReviewComment,
 } from "@/lib/stores/engagements";
 
@@ -37,13 +36,7 @@ export function approvalIsStale(ph: EngagementPhase): boolean {
   return now.join("|") !== then.join("|");
 }
 
-/**
- * An engagement stays OPEN until construction oversight ends (D113 item 11,
- * Jeff 2026-07-24): "delivered" means the design shipped, not that the
- * relationship is over — bid support and oversight still count as live work.
- * Every dashboard/list that means "still ours to carry" filters through
- * this, so the definition can't drift per screen.
- */
-export function isOpenEngagement(e: { status: EngagementStatus }): boolean {
-  return e.status !== "oversight_complete";
-}
+/** The open-until-Closed rule (D113 item 11 carried into the six-stage
+ *  lifecycle, spec §1) now lives in consulting-stages with the other pure
+ *  stage helpers — re-exported here so existing imports keep working. */
+export { isOpenEngagement } from "@/lib/consulting-stages";

@@ -6,6 +6,10 @@ import {
   openComments,
 } from "@/lib/consulting-review";
 import type { Annotation, Calibration } from "@/lib/annotations";
+import {
+  normalizeEngagementStatus,
+  type EngagementStage,
+} from "@/lib/consulting-stages";
 
 /* ------------------------------------------------------------------ *
  * Consulting engagements (D90).
@@ -190,22 +194,23 @@ export type EngagementPerson = {
   role: string;
 };
 
-export type EngagementStatus =
-  | "active"
-  | "delivered"
-  | "bid_supported"
-  | "oversight_complete";
-
-export const ENGAGEMENT_STATUS_LABEL: Record<EngagementStatus, string> = {
-  active: "Active",
-  delivered: "Delivered",
-  bid_supported: "Bid supported",
-  oversight_complete: "Oversight complete",
-};
-
-/* The open-until-oversight-ends rule (D113 item 11) lives in
- * lib/consulting-review.ts with the other pure status helpers — client
- * components must be able to import it without dragging in the doc-store. */
+/* Six-stage lifecycle (spec §1, D123). Stored docs may still carry the old
+ * 4-status vocabulary — every read below normalizes via LEGACY_STATUS_MAP
+ * (lazy migration), and patchEngagement upgrades the literal on the doc's
+ * next write. The label map keeps its historical export name so consumers
+ * (design/page.tsx, venues) survive unchanged. The open-until-Closed rule
+ * (D113 item 11) lives in lib/consulting-stages with the other pure stage
+ * helpers — client components import it without dragging in the doc-store. */
+export type EngagementStatus = EngagementStage;
+export {
+  ENGAGEMENT_STAGES,
+  ENGAGEMENT_STAGE_KEYS,
+  ENGAGEMENT_STAGE_TONE,
+  ENGAGEMENT_STATUS_LABEL,
+  LEGACY_STATUS_MAP,
+  normalizeEngagementStatus,
+} from "@/lib/consulting-stages";
+export type { EngagementStage } from "@/lib/consulting-stages";
 
 export type ConsultingEngagement = {
   id: string; // 'CE-####'
@@ -331,15 +336,25 @@ export function makeChecklist(texts: string[]): ChecklistItem[] {
  * callers can keep importing everything engagement-shaped from one module. */
 export { approvalIsStale, openChecklistItems, openComments };
 
+/** Lazy migration (spec §1): stored legacy statuses surface as their mapped
+ *  stage on every read; the doc itself upgrades on its next write. */
+function normalizeEngagement(e: ConsultingEngagement): ConsultingEngagement {
+  const s = normalizeEngagementStatus(String(e.status));
+  return s === e.status ? e : { ...e, status: s };
+}
+
 export async function allEngagements(): Promise<ConsultingEngagement[]> {
   const list = await listDocs<ConsultingEngagement>("consulting_engagements");
-  return list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return list
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    .map(normalizeEngagement);
 }
 
 export async function getEngagement(
   id: string
 ): Promise<ConsultingEngagement | null> {
-  return getDoc<ConsultingEngagement>("consulting_engagements", id);
+  const e = await getDoc<ConsultingEngagement>("consulting_engagements", id);
+  return e ? normalizeEngagement(e) : null;
 }
 
 export async function patchEngagement(
@@ -347,6 +362,9 @@ export async function patchEngagement(
   mut: (d: ConsultingEngagement) => void
 ): Promise<void> {
   await patchDoc<ConsultingEngagement>("consulting_engagements", id, (d) => {
+    // Lazy-migration write half: any write to a legacy-status doc upgrades
+    // the stored literal to the mapped stage (reads already normalize).
+    d.status = normalizeEngagementStatus(String(d.status));
     mut(d);
     d.updatedAt = Date.now();
   });
@@ -407,7 +425,12 @@ function fromQuote(q: QuoteLike): Omit<ConsultingEngagement, "id"> {
     quoteId: q.id,
     designIds: [],
     installQuoteId: null,
-    status: "active",
+    // Birth stage is untouched this task (Task 2 makes this a spawn-model
+    // parameter — spec §1: sent → proposal_sent, won → awarded). fromQuote
+    // still only fires on a WON quote here, so this preserves current
+    // behavior: the pre-rebuild literal was "active", which normalizes to
+    // "design" under the new ladder (LEGACY_STATUS_MAP).
+    status: normalizeEngagementStatus("active"),
     phases,
     milestones,
     decisions: [],
@@ -423,7 +446,8 @@ export async function getEngagementByQuote(
   quoteId: string
 ): Promise<ConsultingEngagement | null> {
   const all = await listDocs<ConsultingEngagement>("consulting_engagements");
-  return all.find((e) => e.quoteId === quoteId) || null;
+  const hit = all.find((e) => e.quoteId === quoteId) || null;
+  return hit ? normalizeEngagement(hit) : null;
 }
 
 /** Convert a specific won consulting quote into an engagement — idempotent

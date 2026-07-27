@@ -12,6 +12,11 @@ import type {
 import type { ConsultingData, VisitLite } from "./data";
 import { isOpenEngagement } from "@/lib/consulting-review";
 import {
+  ENGAGEMENT_STAGES,
+  ENGAGEMENT_STAGE_TONE,
+  ENGAGEMENT_STATUS_LABEL,
+} from "@/lib/consulting-stages";
+import {
   addDecisionAction,
   addDocumentAction,
   addMeetingAction,
@@ -55,19 +60,6 @@ const TAB_LABEL: Record<TabKey, string> = {
   meetings: "Meetings & Decisions",
   oversight: "Oversight",
   documents: "Documents",
-};
-
-const STATUS_TONE: Record<string, string> = {
-  active: "blue",
-  delivered: "green",
-  bid_supported: "purple",
-  oversight_complete: "green",
-};
-const STATUS_LABEL: Record<string, string> = {
-  active: "Active",
-  delivered: "Delivered",
-  bid_supported: "Bid supported",
-  oversight_complete: "Oversight complete",
 };
 
 const REVIEW_TONE: Record<string, string> = {
@@ -215,7 +207,7 @@ function ConsultingList({ data }: { data: ConsultingData }) {
                 <Card style={{ height: "100%" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                     <Mono>{e.id}</Mono>
-                    <StatusPill tone={STATUS_TONE[e.status]}>{STATUS_LABEL[e.status]}</StatusPill>
+                    <StatusPill tone={ENGAGEMENT_STAGE_TONE[e.status]}>{ENGAGEMENT_STATUS_LABEL[e.status]}</StatusPill>
                   </div>
                   <div style={{ fontSize: 14.5, fontWeight: 700, color: "#16181d" }}>{e.name}</div>
                   <div style={{ fontSize: 12.5, color: "#5b616e", marginTop: 2 }}>{e.customer}</div>
@@ -319,7 +311,7 @@ function EngagementDetail({
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "8px 0 2px" }}>
         <h1 style={{ fontSize: 21, fontWeight: 700, color: "#16181d", margin: 0 }}>{eng.name}</h1>
         <Mono>{eng.id}</Mono>
-        <StatusPill tone={STATUS_TONE[eng.status]}>{STATUS_LABEL[eng.status]}</StatusPill>
+        <StatusPill tone={ENGAGEMENT_STAGE_TONE[eng.status]}>{ENGAGEMENT_STATUS_LABEL[eng.status]}</StatusPill>
         <select
           value={eng.status}
           onChange={async (ev) => {
@@ -328,8 +320,8 @@ function EngagementDetail({
           }}
           style={{ ...INPUT, padding: "5px 8px", fontSize: 12 }}
         >
-          {Object.entries(STATUS_LABEL).map(([v, l]) => (
-            <option key={v} value={v}>{l}</option>
+          {ENGAGEMENT_STAGES.map((s) => (
+            <option key={s.key} value={s.key}>{s.label}</option>
           ))}
         </select>
       </div>

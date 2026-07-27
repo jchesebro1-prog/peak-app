@@ -939,11 +939,13 @@ const rj2 = fan.filter((w) => w.href.includes("RJ-2"));
 ok(rj2.length === 1 && rj2[0].assignee === "" && rj2[0].id === "RJ-2",
   "no lead + no crew stays a single unassigned bar with the stable id");
 
-/* --- delivered engagements stay open (D113.11) --- */
+/* --- engagements stay open until Closed (D113.11 carried into the
+   six-stage lifecycle, spec §1). The legacy literals below exercise
+   normalizeEngagementStatus through isOpenEngagement. --- */
 import { isOpenEngagement } from "@/lib/consulting-review";
 ok(isOpenEngagement({ status: "active" }) && isOpenEngagement({ status: "delivered" }) && isOpenEngagement({ status: "bid_supported" }),
-  "active, delivered, and bid_supported all count as open");
-ok(!isOpenEngagement({ status: "oversight_complete" }), "only oversight_complete closes an engagement");
+  "legacy active/delivered/bid_supported map to open stages");
+ok(!isOpenEngagement({ status: "oversight_complete" }), "legacy oversight_complete maps to closed");
 
 /* --- curtain pricing: reconcile Rose Brand quote 423939 (task 1) --- */
 // Rose Brand rates (NOT the +10% make-it seeds): Charisma area 3.313, Encore-22 area 2.582, making 8.661.
@@ -1845,6 +1847,74 @@ import { SEG_KEYS } from "@/app/(app)/leads/segs";
   ok(
     activeKeyFor("/leads") === "leads" && parentGroupOf("myleads") === "crm",
     "#22: activeKeyFor stays pathname-only — a My-X child never lights its own key (known cosmetic limitation, base child lights for both)"
+  );
+}
+
+/* ============ CONSULTING REBUILD (#35/#25 — spec §1, D123) ============ */
+/* Six-stage lifecycle. Pure module, exact literals, no DB. */
+import {
+  ENGAGEMENT_STAGES,
+  ENGAGEMENT_STAGE_KEYS,
+  ENGAGEMENT_STATUS_LABEL as CONSULTING_STAGE_LABEL,
+  LEGACY_STATUS_MAP,
+  normalizeEngagementStatus,
+  OPEN_ENGAGEMENT_STAGES,
+  stageIndex,
+} from "@/lib/consulting-stages";
+
+{
+  ok(
+    ENGAGEMENT_STAGE_KEYS.join(",") ===
+      "proposal_sent,awarded,design,out_to_bid,construction_admin,closed",
+    "#35: six stages, in lifecycle order (spec §1)"
+  );
+  ok(
+    ENGAGEMENT_STAGES.map((s) => CONSULTING_STAGE_LABEL[s.key]).join(" → ") ===
+      "Proposal sent → Awarded → Design → Out to bid → Construction admin → Closed",
+    "#35: stage labels match the spec ladder verbatim"
+  );
+  ok(stageIndex("awarded") === 1, "#35: stageIndex pins ladder position (ordering only, never a gate)");
+
+  // Legacy mapping — COMPLETE over the old 4-status vocabulary
+  ok(normalizeEngagementStatus("active") === "design", "#35: legacy active → design");
+  ok(normalizeEngagementStatus("delivered") === "out_to_bid", "#35: legacy delivered → out_to_bid");
+  ok(
+    normalizeEngagementStatus("bid_supported") === "construction_admin",
+    "#35: legacy bid_supported → construction_admin"
+  );
+  ok(
+    normalizeEngagementStatus("oversight_complete") === "closed",
+    "#35: legacy oversight_complete → closed"
+  );
+  ok(
+    Object.keys(LEGACY_STATUS_MAP).sort().join(",") ===
+      "active,bid_supported,delivered,oversight_complete",
+    "#35: the legacy map covers exactly the four old literals — no more, no fewer"
+  );
+  ok(
+    ENGAGEMENT_STAGE_KEYS.every((k) => normalizeEngagementStatus(k) === k),
+    "#35: new stage keys pass through normalization untouched"
+  );
+  ok(
+    normalizeEngagementStatus("???") === "design",
+    "#35: unknown statuses land on design (safe middle of the ladder)"
+  );
+
+  // D113 item-11 carry-over: every pre-closed stage counts as open
+  ok(
+    OPEN_ENGAGEMENT_STAGES.length === 5 &&
+      OPEN_ENGAGEMENT_STAGES.every((s) => isOpenEngagement({ status: s })),
+    "#35: all five pre-closed stages count as open (D113.11 carries over)"
+  );
+  ok(!isOpenEngagement({ status: "closed" }), "#35: closed is the only closed stage");
+
+  // venue-match duplicates the open list on purpose (zero-import module) —
+  // pin the two modules in agreement so they can never drift apart.
+  ok(
+    OPEN_ENGAGEMENT_STAGES.every((s) => isOpenStage("engagement", s)) &&
+      !isOpenStage("engagement", "closed") &&
+      !isOpenStage("engagement", "active"),
+    "#35: venue-match OPEN_STAGES.engagement agrees with the stage module (and dropped the legacy literals)"
   );
 }
 

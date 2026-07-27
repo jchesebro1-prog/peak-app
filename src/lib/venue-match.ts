@@ -78,7 +78,11 @@ export function quoteDeepLink(quoteType: string, id: string): string {
 const OPEN_STAGES: Record<Exclude<VenueHistoryKind, "visit">, readonly string[]> = {
   quote: ["draft", "sent"],
   project: ["procurement", "delivery", "scheduled", "install", "training", "signoff"], // all but "complete"
-  engagement: ["active", "bid_supported"],
+  // Six-stage consulting lifecycle (spec §1, D123) — every stage but
+  // "closed" is open (D113.11). Duplicated from lib/consulting-stages ON
+  // PURPOSE (this module's zero-import constraint, see header); the spec
+  // harness pins the two lists in agreement.
+  engagement: ["proposal_sent", "awarded", "design", "out_to_bid", "construction_admin"],
   flame: ["approved", "scheduled"],
   inspection: ["requested", "scheduled", "onsite"],
   repair: ["approved", "scheduled"],

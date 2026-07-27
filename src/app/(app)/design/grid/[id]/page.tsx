@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/session";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { allEngagements } from "@/lib/stores/engagements";
+import { isOpenEngagement } from "@/lib/consulting-review";
 import { sitesForCompany } from "@/lib/identity/sites";
 import { frac } from "@/lib/stores/pricing";
 import { getSettings } from "@/lib/settings";
@@ -56,7 +57,7 @@ export default async function GridEditorPage({
   // "Start from a quote" list matches this design's quote by customer).
   const eng = project.customerId
     ? engagements.find(
-        (e) => e.companyId === project.customerId && e.status !== "oversight_complete"
+        (e) => e.companyId === project.customerId && isOpenEngagement(e)
       )
     : undefined;
   const specHref = eng ? `/design/engagements/spec?id=${encodeURIComponent(eng.id)}` : null;

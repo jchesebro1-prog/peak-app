@@ -28,6 +28,7 @@ import {
   submitPhaseReview,
   updateMeeting,
 } from "@/lib/stores/engagements";
+import { ENGAGEMENT_STAGE_KEYS } from "@/lib/consulting-stages";
 import { getSettings } from "@/lib/settings";
 import type { Annotation, MeasureUnit } from "@/lib/annotations";
 import { linkVisitToEngagement } from "@/lib/stores/site-visits";
@@ -55,6 +56,11 @@ export async function setEngagementStatusAction(
   status: EngagementStatus
 ) {
   await requireUser();
+  // Hardening while touching (#35): the select only renders legal stages,
+  // but server actions are public endpoints — allowlist the posted key.
+  if (!(ENGAGEMENT_STAGE_KEYS as readonly string[]).includes(status)) {
+    return { ok: false as const, error: "Unknown stage." };
+  }
   await patchEngagement(engId, (d) => {
     d.status = status;
   });
