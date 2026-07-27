@@ -8,7 +8,9 @@ import {
 import type { Annotation, Calibration } from "@/lib/annotations";
 import {
   engagementSyncAction,
+  milestoneSeeds,
   normalizeEngagementStatus,
+  type ConsultingScope,
   type EngagementStage,
 } from "@/lib/consulting-stages";
 
@@ -211,7 +213,7 @@ export {
   LEGACY_STATUS_MAP,
   normalizeEngagementStatus,
 } from "@/lib/consulting-stages";
-export type { EngagementStage } from "@/lib/consulting-stages";
+export type { ConsultingScope, EngagementStage } from "@/lib/consulting-stages";
 
 export type ConsultingEngagement = {
   id: string; // 'CE-####'
@@ -230,6 +232,10 @@ export type ConsultingEngagement = {
   /** If Peak bids the resulting install: an ordinary system quote id.
    *  A reference, never a conversion (spec §Lifecycle). */
   installQuoteId: string | null;
+  /** #35 minimal architect link — dumb {company, contact} strings by design,
+   *  slated to migrate into item 20's people/roles model. Read `?? null`
+   *  (absent on every pre-#35 doc). */
+  architect?: { company: string; contact: string } | null;
   status: EngagementStatus;
   phases: EngagementPhase[];
   milestones: EngagementMilestone[];
@@ -372,7 +378,12 @@ export async function patchEngagement(
 }
 
 /** The consulting payload a consulting-quote builder writes onto the quote
- *  (quotes.ts `consulting?: unknown` — this module owns the shape). */
+ *  (quotes.ts `consulting?: unknown` — this module owns the shape).
+ *  #35 rebuild: new saves write `scopes` (structured line items, total =
+ *  scope fees) + `assumptions` (the TICKED library texts, frozen at save) +
+ *  `leadId` (auto-lead traceability). `scope`/`feeMode`/`fees` are the
+ *  pre-rebuild shape — kept so old quotes render read-only; read all three
+ *  new fields with `?? []` / `?? null`. */
 export type ConsultingQuotePayload = {
   scope: string;
   feeMode: "fixed" | "milestones";
@@ -381,6 +392,12 @@ export type ConsultingQuotePayload = {
   terms: string;
   /** Phase names chosen at quote time — seeds the engagement's phases. */
   phases: string[];
+  /** #35 structured scopes — id: uid('sc-'). */
+  scopes?: ConsultingScope[];
+  /** #35 ticked assumption texts, frozen at save. */
+  assumptions?: string[];
+  /** #35 auto-lead: the open lead this proposal logged against / created. */
+  leadId?: string | null;
 };
 
 type QuoteLike = {
@@ -405,16 +422,15 @@ function fromQuote(
     ? pay.phases
     : DEFAULT_CONSULTING_PHASES
   ).map(makePhase);
-  const milestones: EngagementMilestone[] =
-    pay?.feeMode === "milestones"
-      ? (pay.fees || []).map((f) => ({
-          id: uid("ms-"),
-          name: f.name || "Milestone",
-          targetDate: 0,
-          completedAt: null,
-          amount: f.amount || 0,
-        }))
-      : [];
+  const milestones: EngagementMilestone[] = milestoneSeeds(pay || {}).map(
+    (m) => ({
+      id: uid("ms-"),
+      name: m.name,
+      targetDate: 0,
+      completedAt: null,
+      amount: m.amount,
+    })
+  );
   const contactName =
     typeof q.contact === "object" && q.contact && "name" in q.contact
       ? String((q.contact as { name?: unknown }).name || "")
@@ -429,6 +445,7 @@ function fromQuote(
     quoteId: q.id,
     designIds: [],
     installQuoteId: null,
+    architect: null,
     status,
     phases,
     milestones,
@@ -446,6 +463,21 @@ export async function getEngagementByQuote(
 ): Promise<ConsultingEngagement | null> {
   const all = await listDocs<ConsultingEngagement>("consulting_engagements");
   const hit = all.find((e) => e.quoteId === quoteId) || null;
+  return hit ? normalizeEngagement(hit) : null;
+}
+
+/** The engagement referencing this quote either as its source (quoteId) or
+ *  as Peak's own bid on the spec (installQuoteId). Selected-quote lookups
+ *  ONLY — full scan, same cost class as getEngagementByQuote; never call
+ *  per row. */
+export async function getEngagementForQuoteRef(
+  quoteId: string
+): Promise<ConsultingEngagement | null> {
+  const all = await listDocs<ConsultingEngagement>("consulting_engagements");
+  const hit =
+    all.find((e) => e.quoteId === quoteId) ||
+    all.find((e) => e.installQuoteId === quoteId) ||
+    null;
   return hit ? normalizeEngagement(hit) : null;
 }
 

@@ -141,3 +141,49 @@ export function engagementSyncAction(
   }
   return null;
 }
+
+/* ---------- structured proposal content (#35) ---------- */
+
+/** One scope-of-work line item — title + description + fee (spec §1:
+ *  "the proposal total assembles from scope fees"). id: uid("sc-"),
+ *  minted server-side in quote/actions.ts. */
+export type ConsultingScope = {
+  id: string;
+  title: string;
+  description: string;
+  fee: number;
+};
+
+export function scopesTotal(
+  scopes?: readonly ConsultingScope[] | null
+): number {
+  return (scopes || []).reduce((a, s) => a + (s.fee || 0), 0);
+}
+
+/**
+ * What an engagement's milestones seed from at spawn (pure half of
+ * fromQuote): structured scopes when the proposal has them (name = title,
+ * amount = fee), else the legacy milestone fee schedule, else nothing —
+ * exactly the pre-rebuild behavior for pre-rebuild quotes. targetDate is
+ * always 0 (unscheduled), so the Reports billing forecast — which filters
+ * targetDate > 0 — is unaffected until someone dates the milestone.
+ */
+export function milestoneSeeds(pay: {
+  scopes?: readonly ConsultingScope[] | null;
+  feeMode?: string;
+  fees?: ReadonlyArray<{ name?: string; amount?: number }> | null;
+}): Array<{ name: string; amount: number }> {
+  if (pay.scopes?.length) {
+    return pay.scopes.map((s) => ({
+      name: s.title || "Scope",
+      amount: s.fee || 0,
+    }));
+  }
+  if (pay.feeMode === "milestones") {
+    return (pay.fees || []).map((f) => ({
+      name: f.name || "Milestone",
+      amount: f.amount || 0,
+    }));
+  }
+  return [];
+}

@@ -1959,5 +1959,42 @@ import { engagementSyncAction } from "@/lib/consulting-stages";
   );
 }
 
+/* --- #35 structured scopes: totals + milestone seeding --- */
+import {
+  milestoneSeeds,
+  scopesTotal,
+  type ConsultingScope,
+} from "@/lib/consulting-stages";
+{
+  const scopes: ConsultingScope[] = [
+    { id: "sc-a", title: "Theatrical rigging design", description: "Drawings + specifications", fee: 8500 },
+    { id: "sc-b", title: "Bid support", description: "", fee: 2000 },
+  ];
+  ok(scopesTotal(scopes) === 10500, "#35: the proposal total assembles from scope fees");
+  ok(scopesTotal([]) === 0 && scopesTotal(undefined) === 0 && scopesTotal(null) === 0,
+    "#35: no scopes → zero, tolerant of absent payloads");
+
+  const seeded = milestoneSeeds({ scopes, feeMode: "milestones", fees: [{ name: "legacy", amount: 1 }] });
+  ok(
+    seeded.map((m) => `${m.name}:${m.amount}`).join("|") ===
+      "Theatrical rigging design:8500|Bid support:2000",
+    "#35: scopes seed milestones (name=title, amount=fee) and beat legacy fees"
+  );
+  ok(
+    milestoneSeeds({ feeMode: "milestones", fees: [{ name: "SD complete", amount: 4000 }, { amount: 500 }] })
+      .map((m) => `${m.name}:${m.amount}`).join("|") === "SD complete:4000|Milestone:500",
+    "#35: legacy milestone quotes still seed from fees (nameless rows fall back)"
+  );
+  ok(
+    milestoneSeeds({ feeMode: "fixed", fees: [{ name: "Fixed fee", amount: 9000 }] }).length === 0,
+    "#35: legacy fixed-fee quotes seed no milestones (pre-rebuild behavior preserved)"
+  );
+  ok(
+    milestoneSeeds({ scopes: [{ id: "sc-x", title: "", description: "d", fee: 0 }] })
+      .map((m) => `${m.name}:${m.amount}`).join("|") === "Scope:0",
+    "#35: a titleless scope still seeds, named 'Scope'"
+  );
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);
