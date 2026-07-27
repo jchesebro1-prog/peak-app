@@ -2091,3 +2091,62 @@ deferred), these are the seams:
 - **DEFAULT_ACTOR wrinkle** (flagged, not fixed): non-quote projects default
   owner "Jeff Chesebro" and no owner-editing UI exists on projects — "My
   projects" is sparse for other users until one lands.
+
+## D123 — Consulting rebuilt: six stages, sent-spawn, structured proposals (2026-07-26)
+
+Implements spec §1 (2026-07-25 remaining-items sheet), closing 13-D and punch
+items 35 + 25. Shapes and seams:
+
+- **Six-stage lifecycle** `proposal_sent → awarded → design → out_to_bid →
+  construction_admin → closed` in the dependency-free `lib/consulting-stages.ts`
+  (client-bundled + server-trusted + harness-imported). `EngagementStatus` is
+  now an alias of `EngagementStage`; `ENGAGEMENT_STATUS_LABEL` kept its export
+  name so consumers survived unchanged.
+- **Lazy migration:** `LEGACY_STATUS_MAP` = active→design, delivered→out_to_bid,
+  bid_supported→construction_admin, oversight_complete→closed. Store reads
+  normalize; `patchEngagement` upgrades the stored literal on the doc's next
+  write. Unknown strings land on "design". No bulk rewrite.
+- **ONE open-definition** (D113.11 carry-over: everything before Closed is
+  open): `isOpenEngagement` lives in consulting-stages, re-exported through
+  consulting-review; venue-match's zero-import duplicate list is spec-pinned in
+  agreement; the grid page's inline check now imports the rule. This also FIXED
+  venue-match, which still said `["active","bid_supported"]` against D113.
+- **Spawn model:** engagements are born when the consulting quote is SENT (at
+  proposal_sent, `ensureEngagementForQuote` hooked in setQuoteStatus), advance
+  to awarded on won (only from proposal_sent — a human-moved stage is never
+  touched), and close on lost-at-proposal_sent with a "Proposal lost" decision
+  entry. All routes through the idempotent `syncEngagementsFromQuotes` (rebuilt
+  over the pure `engagementSyncAction`; still the fifth on-win sync), which
+  `loadConsultingData` also runs as the safety net (the projects idiom) because
+  estimator/inbox status paths never call syncs. `createFromQuote` deleted
+  (zero callers). The SENT branch in `quotes/actions.ts` now calls
+  `syncEngagementsFromQuotes()` directly (not `ensureEngagementForQuote`) so a
+  proposal re-sent after "Proposal lost" reopens to Proposal sent immediately
+  on that same request, instead of waiting for the next `loadConsultingData`
+  safety-net pass — live-verified via the Quotes detail chip alone (which never
+  runs the sweep), so the reopen is provably an action-layer effect and not
+  masked by a subsequent page load.
+- **Proposal payload (additive):** `scopes[]` ({id "sc-", title, description,
+  fee}; quote value = scope total; engagement milestones seed name=title,
+  amount=fee, targetDate 0 — the Reports billing forecast filters
+  targetDate>0, so it is unaffected), `assumptions[]` (ticked library texts
+  frozen at save), `leadId`. Legacy scope/feeMode/fees stay on the type;
+  pre-rebuild quotes render read-only in the builder and keep their old letter
+  layout.
+- **Assumptions library:** `AppSettingsData.consultingAssumptions` +
+  `mergedConsultingAssumptions` (visitReasons idiom), admin card in Settings,
+  DRAFT 10-line seed pending Peak's real letter. Template gained the additive
+  `assumptionsLead` field ("This proposal assumes:"). This is the seam the
+  estimator's §4 assumptions model consumes in wave ③.
+- **Auto-lead with dedupe:** proposal CREATE links the company's open lead
+  (system activity "Consulting proposal Q-#### created") or creates one —
+  new closed-union LeadSource literal `"consulting"` (without it, create()
+  silently coerces to "manual").
+- **Architect:** minimal `{company, contact} | null` on the engagement, dumb by
+  design — migrates into item 20's people/roles model.
+- **Peak as bidder:** `installQuoteId` kept; the link now validates existence +
+  non-consulting, and status chips run both directions (Overview shows the
+  install quote's stage; the Quotes detail chips the engagement via
+  `getEngagementForQuoteRef`, selected row only).
+- **#25:** display-string sweep only; nav already said "Consulting" (D117).
+  URLs/keys/collection names unchanged.

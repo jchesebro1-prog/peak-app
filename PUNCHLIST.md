@@ -1947,7 +1947,7 @@ recalled numbers straight onto the quote.
 
 ---
 
-## 25. Rename the "Engagements" nav item to "Consulting" — OPEN
+## 25. Rename the "Engagements" nav item to "Consulting" — DONE (2026-07-26, plan 06)
 
 **Area:** `src/components/nav/nav-data.ts:28` (the nav label — the actual ask). Other
 user-facing "Engagements" strings if the rename should be consistent: page titles
@@ -1984,6 +1984,14 @@ all display text, still trivial) unless Jeff narrows it to the nav label only.
 
 **Status:** OPEN — queued, **not building yet.** Jeff is keeping a running list and will batch
 these. Logged 2026-07-21, no code touched.
+
+**CLOSED 2026-07-26 (plan 06).** The nav label itself had already read "Consulting"
+since the D117 Q-6 rebrand (`nav-data.ts:71`); this plan swept the remaining
+user-facing module-name strings — the Consulting list header/sub, KPI tiles,
+roll-up title, "← All consulting" breadcrumb, builder banner copy, and the venue
+history row subtitle. Prose naming the RECORD keeps "engagement" (paperwork card,
+roles, error messages) per the spec's judgment note. URLs, nav keys, and the
+`consulting_engagements` collection unchanged.
 
 ---
 
@@ -2435,7 +2443,7 @@ changes the lead lifecycle.
 
 ---
 
-## 35. Consulting proposal builder — structured scopes, checked assumptions, auto lead+estimate, architect + venue links — OPEN (program)
+## 35. Consulting proposal builder — structured scopes, checked assumptions, auto lead+estimate, architect + venue links — DONE (2026-07-26, plan 06; letter remap awaits Jeff's real letter)
 
 **Area:** `src/app/(app)/design/engagements/quote/controls.tsx` + `quote/actions.ts` (the consulting
 quote form), `src/app/(app)/design/engagements/letter/page.tsx` (`kind=proposal` generator),
@@ -2493,6 +2501,41 @@ candidate.**
 
 **Status:** OPEN — logged 2026-07-21, no code touched. **Blocked on Jeff supplying the actual Peak
 consulting letter** (needed as the format guide) and coupled to item 20 for the architect party.
+
+**CLOSED 2026-07-26 (plan 06, D123) — with two Jeff-homework residuals.** Shipped:
+six-stage lifecycle (Proposal sent → Awarded → Design → Out to bid → Construction
+admin → Closed) with lazy legacy mapping and ONE open-definition; spawn on SENT
+(proposal_sent), advance on won (awarded), close on lost-at-proposal_sent with a
+"Proposal lost" decision; structured scopes (title/description/fee, total = scope
+fees, milestones seed from scopes); Settings-editable assumptions checklist
+(ticked texts frozen per proposal; letter renders them under the new
+`assumptionsLead` field); auto-lead with open-lead dedupe (new "consulting"
+LeadSource, payload stamps leadId); minimal architect {company, contact} on the
+engagement (migrates into item 20 later); install-quote link validation + live
+status chips engagement↔quote. **Residuals:** (1) `consulting_proposal` is still
+the D90 boilerplate — remap to Peak's REAL letter when Jeff supplies it (spec §1
+Homework 1); (2) `DEFAULT_CONSULTING_ASSUMPTIONS` is a DRAFT seed marked in-code
+for the same replacement. The estimator's shared assumptions model (spec §4,
+wave ③) consumes `consultingAssumptions`/`mergedConsultingAssumptions` as-is.
+
+**Residual lines carried to the backlog (not bugs, spec-mandated or product
+questions):** reopen-overrides-manual-close — a consulting quote re-sent from
+"sent" after someone manually closed its engagement early reopens it to
+Proposal sent (the deliberate `engagementSyncAction` reopen rule fires on any
+sent-while-closed pairing); suggested follow-up guard, only reopen when the
+engagement's latest decision is "Proposal lost" (distinguishes an accidental
+early manual close from a genuine lost-then-resent cycle) — product call for
+Jeff. Direct lost→won leaves the engagement closed (no sync path advances a
+closed record on "won"; re-send first to reopen, then won advances normally).
+One-way lead linkage — the proposal stamps `leadId` on itself, but the lead
+carries no structured backlink to the quote/engagement (a system activity note
+is the only trace); a real backlink field lands with item 20's people/roles
+model. Pre-rebuild proposals edit as scopes going forward — opening an old
+scope/feeMode/fees quote in the builder shows that legacy content read-only and
+any edit re-enters it as structured scopes (revisions keep the original
+history). Install-quote win/loss feeds the record via the status chip only (no
+separate notification) — confirm the wanted behavior with Jeff alongside the
+letter homework.
 
 ---
 
