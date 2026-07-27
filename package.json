@@ -12,6 +12,7 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx scripts/seed.ts",
     "db:export": "tsx scripts/export.ts",
+    "db:inventory": "tsx scripts/inventory.ts",
     "db:reset-local": "rm -rf .data && npm run db:seed",
     "db:convert-identity": "tsx scripts/convert-identity.ts",
     "audit:daylite": "tsx scripts/audit-daylite-export.ts",
