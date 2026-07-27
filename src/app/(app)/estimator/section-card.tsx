@@ -276,17 +276,18 @@ export default function SectionCard(p: SectionCardProps) {
                   Sell
                 </span>
                 <input
-                  type="number"
-                  key={"sell-" + Math.round(itemsRev)}
-                  defaultValue={Math.round(itemsRev)}
+                  type="text"
+                  inputMode="decimal"
+                  key={"sell-" + fmt(itemsRev)}
+                  defaultValue={fmt(itemsRev)}
                   onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                   onBlur={(e) => {
-                    const target = parseFloat(e.target.value) || 0;
+                    const target = parseFloat(e.target.value.replace(/[^0-9.-]/g, "")) || 0;
                     const m = target > itemsCost ? Math.min(95, ((target - itemsCost) / target) * 100) : 0;
                     p.onSetMargin(String(m));
                   }}
                   title="Type a target sell price for this category; the margin updates to match"
-                  style={{ width: 92, fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600, color: ACCENT_INK, border: "1px solid #dfe2e8", borderRadius: 7, padding: "5px 8px", textAlign: "right" }}
+                  style={{ width: 108, fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600, color: ACCENT_INK, border: "1px solid #dfe2e8", borderRadius: 7, padding: "5px 8px", textAlign: "right" }}
                 />
               </div>
             )}

@@ -47,7 +47,16 @@ const UNASSIGNED = "Unassigned";
  * only nodes that hold devices or terminate a wire appear.
  */
 export function riserGraph(
-  placements: Array<{ sheetId: string; page: number; x: number; y: number; partId: string }>,
+  placements: Array<{
+    sheetId: string;
+    page: number;
+    x: number;
+    y: number;
+    partId: string;
+    /** Curtain drop-ins (punch #49) are goods, not signal devices - they have
+     *  no ports and terminate no wire, so they are left off the one-line. */
+    curtain?: unknown;
+  }>,
   routes: RouteLite[],
   spaces: Array<SpaceLite & { name: string; color?: string }>,
   parts: PartLite[],
@@ -63,6 +72,7 @@ export function riserGraph(
 
   // Devices → grouped part counts per node.
   for (const pl of placements) {
+    if (pl.curtain) continue; // goods, not a signal device
     const home = spaceOf(pl, spaces);
     const node = nodeById.get(home ? home.id : null)!;
     const part = partById.get(pl.partId);

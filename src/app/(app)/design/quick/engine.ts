@@ -11,7 +11,7 @@
 
 import { drapeRule } from "@/lib/design/goods";
 import { curtainCost, SEED_FABRIC_RATES, makingRateFor } from "@/lib/design/curtain-pricing";
-import { venueDimsFromEstimator, type VenueDims } from "@/lib/design/venue-dims";
+import { battenLenFt, venueDimsFromEstimator, type VenueDims } from "@/lib/design/venue-dims";
 
 /* ---------------------------------- types ---------------------------------- */
 
@@ -446,6 +446,20 @@ export function compute(s: AState): ComputeResult {
   const pick = <T,>(sm: T, md: T, lg: T): T => (size === "small" ? sm : size === "large" ? lg : md);
   const dBlk = fl(D / 10); // 10-ft depth blocks
 
+  /**
+   * Pipe (batten) length per line set, ft. Jeff, punch #50: "It is Pro Width,
+   * plus 2ft on each side, so 4ft total." The rule lives in battenLenFt()
+   * (venue-dims.ts) so the lineset builder and this BOM cannot disagree.
+   *
+   * Gated on the venue kind ON PURPOSE. `s.width` is the proscenium opening
+   * only for kind "proscenium": church / flat / blackbox / arena measure wall
+   * to wall and gym measures sideline to sideline (DIMSCHEMA above). Adding
+   * 4 ft to those would compound a mapping that is already too wide, so they
+   * keep exactly today's `sets * W` until Jeff says what a non-proscenium
+   * room's pipe should span. Only the pipe is gated; nothing else changes.
+   */
+  const pipeLenFt = venueOf(s).kind === "proscenium" ? battenLenFt(W) : W;
+
   // Rigging — single type
   const rigType = s.rigType || "counterweight";
   let rigItems: Array<{ desc: string; unit: string; qty: number; cost: number; area?: number; fabricKey?: string | null }>;
@@ -462,7 +476,7 @@ export function compute(s: AState): ComputeResult {
     const points = sets * fl(W / 10);
     rigItems = [
       { desc: "Rigging point", unit: "ea", qty: points, cost: 20 },
-      { desc: "Pipe", unit: "ft", qty: sets * W, cost: 8 },
+      { desc: "Pipe", unit: "ft", qty: sets * pipeLenFt, cost: 8 },
       { desc: "Aircraft cable", unit: "ft", qty: points * G, cost: 0.02 },
       { desc: "Chain wrap, 3 ft", unit: "ea", qty: points, cost: 1 },
       { desc: "Termination kit", unit: "ea", qty: points * 2, cost: 1 },
@@ -479,7 +493,7 @@ export function compute(s: AState): ComputeResult {
       { desc: "T-bar track", unit: "ea", qty: sets, cost: 100 },
       { desc: "Lock rail", unit: "ea", qty: sets, cost: 30 },
       { desc: "Handline", unit: "ft", qty: sets * 2 * G, cost: 3 },
-      { desc: "Pipe", unit: "ft", qty: sets * W, cost: 8 },
+      { desc: "Pipe", unit: "ft", qty: sets * pipeLenFt, cost: 8 },
       { desc: "Loftblock", unit: "ea", qty: loft, cost: 250 },
       { desc: "Aircraft cable", unit: "ft", qty: loft * (2 * G + W), cost: 0.02 },
       { desc: "Termination kit", unit: "ea", qty: loft * 2, cost: 1 },
@@ -508,7 +522,10 @@ export function compute(s: AState): ComputeResult {
   priceDrape(drape.legs, "Leg", dBlk * 2, "legs");
   priceDrape(drape.border, "Border", dBlk * 1, "border");
   priceDrape(drape.fullstage, "Full stage", dBlk * 1, "fullstage");
-  addCurtain(drape.scenerytrack, "Scenery track", dBlk * 1, W * 1, 3, null); // track hardware, not soft goods — unchanged
+  // Track hardware, not soft goods. Jeff 2026-07-27: it follows the pipe rule,
+  // so it spans the same length as the batten it parallels (PRO width + 4 ft in
+  // a proscenium house, room width elsewhere) rather than raw stage width.
+  addCurtain(drape.scenerytrack, "Scenery track", dBlk * 1, pipeLenFt * 1, 3, null);
 
   // Fixtures — multi. E = unified electric count; wUnit ≈ 1 per 8 ft of width.
   const fx = s.fixtures || {};

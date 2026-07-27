@@ -4,6 +4,8 @@
  * .dc.html screens to app routes.
  */
 
+import { HOME_TABS } from "@/app/(app)/home-tabs-keys";
+
 export type NavChild = { key: string; label: string; href: string };
 export type NavEntry =
   | { kind: "link"; key: string; label: string; href: string }
@@ -15,6 +17,16 @@ export const NAV: NavEntry[] = [
    * mark is the link); Quotes/Estimator/Reviews split out of Sales into
    * EST; the rest of Sales became CRM; Operations became PM. Routes are
    * untouched — only group keys/labels moved. */
+  /* #55 / #45(a): Home is back as a tab (the mark is ALSO a Home link, see
+   * Nav.tsx): with the mark alone, /inbox and the other hub tabs were
+   * unreachable from a cold start. Children reuse HOME_TABS from
+   * src/app/(app)/home-tabs-keys.ts so the tab row and the nav can't drift. */
+  {
+    kind: "group",
+    key: "home",
+    label: "Home",
+    children: HOME_TABS.map((t) => ({ key: t.key, label: t.label, href: t.href })),
+  },
   {
     kind: "group",
     key: "est",
@@ -83,12 +95,16 @@ export const NAV: NavEntry[] = [
 
 /** pathname → active key (child keys map to their parent group for the tab pill) */
 export function activeKeyFor(pathname: string): string {
-  if (pathname === "/") return "home";
+  /* #55: these five return their own HOME_TABS child key, not a bare "home".
+   * The group pill lights through parentGroupOf(activeKey), which only matches
+   * CHILD keys: returning "home" (the group's own key) lit nothing, which is
+   * why the Home tab looked dead before the entry existed. */
+  if (pathname === "/") return "dashboard";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
-    "/queue": "home",
-    "/calendar": "home",
-    "/inbox": "home",
+    "/queue": "queue",
+    "/calendar": "calendar",
+    "/inbox": "inbox",
     "/leads": "leads",
     "/opportunities": "opportunities",
     "/quotes": "quotes",
@@ -107,7 +123,7 @@ export function activeKeyFor(pathname: string): string {
     "/customers": "companies", // legacy route redirects to /companies (D85)
     "/field-survey": "field",
     "/catalog": "settings",
-    "/reports": "home",
+    "/reports": "reports",
     "/templates": "settings",
     "/estimating-rules": "settings",
     "/import": "settings",

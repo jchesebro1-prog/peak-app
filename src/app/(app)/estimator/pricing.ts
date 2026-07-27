@@ -211,14 +211,34 @@ export function computeFixture(d: FixtureDraft): FixtureCalc {
 
 /* ---------------- labor configurator ---------------- */
 
-export type RateFn = (sku: string) => number;
+/**
+ * Where a resolved rate came from:
+ *  - `catalog`: a live `catalog_parts` row (category 'Labor')
+ *  - `fallback`: the hardcoded LABOR_RATES_FALLBACK map (no catalog row)
+ *  - `none`: neither; the rate resolves to 0
+ */
+export type RateSource = "catalog" | "fallback" | "none";
+
+export type RateFn = ((sku: string) => number) & {
+  /** Provenance of `rate(sku)`, present on rate fns built by makeLaborRate.
+   *  Optional so a plain `(sku) => number` still satisfies RateFn. */
+  source?: (sku: string) => RateSource;
+};
+
+/** Provenance of a single sku against a live catalog rate map. */
+export function rateSource(live: Record<string, number>, sku: string): RateSource {
+  if (live && live[sku] != null) return "catalog";
+  return LABOR_RATES_FALLBACK[sku] != null ? "fallback" : "none";
+}
 
 /** Live catalog rates (sku → cost) with the built-in fallback underneath. */
 export function makeLaborRate(live: Record<string, number>): RateFn {
-  return (sku: string) => {
+  const fn: RateFn = (sku: string) => {
     if (live && live[sku] != null) return live[sku];
     return LABOR_RATES_FALLBACK[sku] != null ? LABOR_RATES_FALLBACK[sku] : 0;
   };
+  fn.source = (sku: string) => rateSource(live, sku);
+  return fn;
 }
 
 export type MobCalc = {

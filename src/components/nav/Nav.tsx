@@ -179,17 +179,33 @@ export default function Nav({
             </button>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-            {logoLight ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={logoLight}
-                alt={companyName}
-                style={{ height: 30, maxWidth: 150, objectFit: "contain", display: "block" }}
-              />
-            ) : (
-              <div className="pk-mark">{markLetter}</div>
-            )}
-            <div className="pk-company">{companyName}</div>
+            {/* #55 / #45(a): the lockup is the Home link, the behavior
+                nav-data.ts's "[Q6 mark = Home]" note already described. The
+                BETA chip stays OUTSIDE the link: it's a status badge, not a
+                nav target, and clicking it shouldn't navigate. */}
+            <Link
+              href="/"
+              aria-label="Home"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                minWidth: 0,
+                textDecoration: "none",
+              }}
+            >
+              {logoLight ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={logoLight}
+                  alt={companyName}
+                  style={{ height: 30, maxWidth: 150, objectFit: "contain", display: "block" }}
+                />
+              ) : (
+                <div className="pk-mark">{markLetter}</div>
+              )}
+              <div className="pk-company">{companyName}</div>
+            </Link>
             <span className="pk-beta">BETA</span>
           </div>
           {!narrow && (

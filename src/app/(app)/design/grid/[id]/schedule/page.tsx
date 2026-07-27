@@ -6,6 +6,7 @@ import { getSettings } from "@/lib/settings";
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { spaceOf } from "@/lib/design/grid-geometry";
 import { riserGraph } from "@/lib/design/grid-riser";
+import { curtainDesc } from "@/lib/design/grid-bom";
 import { PrintButton } from "@/components/letter/print-button";
 
 export const metadata = { title: "Equipment schedule — Quartzite-6" };
@@ -43,12 +44,26 @@ export default async function SchedulePage({
   const routes = project.routes || [];
 
   // Devices grouped per space (same computed assignment as everywhere else).
-  type Row = { partId: string; desc: string; qty: number };
+  // `code` overrides the printed Part cell for rows with no SKU (curtains).
+  type Row = { partId: string; code?: string; desc: string; qty: number };
   const bySpace = new Map<string | null, Row[]>();
   for (const pl of placements) {
     const home = spaceOf(pl, spaces);
     const key = home ? home.id : null;
     const rows = bySpace.get(key) || [];
+    // Curtains (punch #49) never group: each drop is its own made-to-size
+    // drape, so it gets its own row keyed by placement id, described by the
+    // name/type/size/fullness/fabric the designer specced.
+    if (pl.curtain) {
+      rows.push({
+        partId: pl.id,
+        code: "CURTAIN",
+        desc: curtainDesc(pl.curtain, partById.get(pl.curtain.fabricSku)?.desc),
+        qty: 1,
+      });
+      bySpace.set(key, rows);
+      continue;
+    }
     const row = rows.find((r) => r.partId === pl.partId);
     if (row) row.qty += 1;
     else
@@ -70,7 +85,8 @@ export default async function SchedulePage({
   );
 
   // Footer rollups: total devices + total footage per wire part.
-  const deviceCount = placements.length;
+  // Curtains are counted separately from devices (punch #49).
+  const deviceCount = placements.filter((pl) => !pl.curtain).length;
   const wireFeet = new Map<string, { ft: number; unit: string; unmeasured: number }>();
   for (const e of graph.edges) {
     const w = wireFeet.get(e.partId) || { ft: 0, unit: e.unit, unmeasured: 0 };
@@ -152,7 +168,7 @@ export default async function SchedulePage({
                     {sec.rows.map((r) => (
                       <tr key={r.partId}>
                         <td style={td}>{r.qty}</td>
-                        <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{r.partId}</td>
+                        <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{r.code || r.partId}</td>
                         <td style={td}>{r.desc}</td>
                       </tr>
                     ))}

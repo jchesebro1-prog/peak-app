@@ -2150,3 +2150,125 @@ items 35 + 25. Shapes and seams:
   `getEngagementForQuoteRef`, selected row only).
 - **#25:** display-string sweep only; nav already said "Consulting" (D117).
   URLs/keys/collection names unchanged.
+
+## D124: Punch wave A (#47, #50 partial, #53, #54 partial, #55): defaults taken (2026-07-27)
+
+Five unblocked items from Jeff's 2026-07-27 punch list, built on branch
+`punch-2026-07-27-wave-a`. Each carried small calls that did not need his input;
+they are recorded here rather than asked.
+
+- **#47 Grid move, a move is NOT a revision.** `addRevision()` stays
+  manual/quote/restore only; wiring drags into it would flood the snapshot array
+  on every gesture.
+- **#47: attached wires follow the device, by DELTA not by snap.** `GridRoute.points`
+  is independent of `fromPlacementId`/`toPlacementId`, so a naive move detaches the
+  drawn line. The matching endpoint is translated by the same delta inside the same
+  `patchDoc`, preserving the hand-drawn offset the wire was routed with. Coordinates
+  only: a move never changes `sheetId`/`page`, because a route lives on one page and
+  carrying a device across pages would strand its wires.
+- **#47: move does not restamp `by`/`at`.** Those record who *placed* the device.
+- **#47-4 screen-pixel click/drag threshold**, measured on `clientX/Y` rather than
+  normalized units: the plan zooms, and a normalized threshold would make the same
+  steady hand write at one zoom and not another. Below the threshold the old
+  toggle-select path runs verbatim and nothing is written.
+- **#50: no invented fallback weights.** When a drape's fabric fails to resolve,
+  `computeSetWeight` zeroes goods AND track. The fix NAMES the gap (row chip, grouped
+  banner, red-bordered select, `FABRIC UNRESOLVED` prefix in the CSV Check column)
+  and distinguishes *no Fabric parts in the catalog at all* from *this part has no
+  oz/yd²*, because they need different fixes. It does not paper over it with a default.
+- **#50: Track "None" added at the SELECT layer, not to the shared `TRACKS` const.**
+  `steel.ts` is shared with the Steel Calculator and the Grid; a 0 lb/ft row would leak
+  into both. `steel.ts` was not touched.
+- **#50: per-line pipe/batten override falls back to the global** (`L.pipe || def.pipe`;
+  blank batten length inherits `def.battenlen`, shown as the placeholder). Needed a new
+  `OptNumF`: `NumF` coerces every keystroke, which makes 0 the only expressible "unset".
+- **#50: fabric tier labels corrected to the data** (`better` = 25 oz Charisma, not the
+  21 oz Marvel the UI claimed). The labels were wrong, not the mapping.
+- **#53: the Sell box became `type="text"` with parse-on-blur.** A `number` input
+  cannot render `$` or `,` at all. Uses the existing `fmt()` (so it matches Price/Cost/
+  Freight in the same card) with `inputMode="decimal"` to keep the touch numpad; the
+  parse strips `$`, commas and spaces, and empty still yields 0 exactly as before.
+  Side effect worth knowing: the box now shows cents where it used to round to whole
+  dollars.
+- **#54: provenance rides on the rate function, not a parallel prop.** `RateFn` gained
+  an OPTIONAL `.source(sku)`, so every existing `(sku) => number` caller still satisfies
+  the type and `makeLaborRate`'s resolution logic is unchanged. The modal marks any rate
+  that came from `LABOR_RATES_FALLBACK`, a missing or renamed catalog row was previously
+  indistinguishable from a real rate. Travel/equipment rates (`TVL-*`, `EQP-LIFT`) are
+  still silent: they are per-mile/night/day, not $/hr, and did not fit the strip.
+- **#55: home routes now return their own child keys** (`/` → `dashboard`, `/queue` →
+  `queue`, …) instead of a shared `"home"`. `parentGroupOf` only matches CHILD keys, so a
+  Home group alone would still have left the pill dark on the app's most important route.
+  `activeKeyFor` has one consumer and `"home"` was otherwise dead.
+- **#55: the BETA chip stays outside the Home link.** It is a status badge, not a nav
+  target. `nav-data.ts`'s comment claiming "the mark is the link" is now true rather than
+  aspirational.
+- **Rendering bug found in review:** an empty-string JSX child between two text nodes
+  swallowed the space before "can't" in the #50 banner ("1 linecan't be weighed"). Fixed
+  by emitting the sentence as one template literal.
+
+**Not built, waiting on Jeff:** #50's three-input reduction (blocked on where `battenLen`
+comes from: it is a hardcoded 44 ft driving batten weight, track weight and the bending
+check), #54's "redo the labor estimator", and #48/#49/#51/#52/#56/#58.
+
+## D125, Wave B: batten rule everywhere, Grid scopes/layers, Grid curtains (2026-07-27)
+
+Jeff answered the four gating questions from D124 through the structured prompt. Two of his
+answers were wider than the question asked, so they are recorded verbatim.
+
+**Batten length, his words:** *"Keep this for all tools as I think it is wrong everywhere. It is
+Pro Width, plus 2ft on each side, so 4ft total. Track that into the estimator and anywhere else
+where pipe width is calculated."*
+
+- One helper, `battenLenFt(proWidthFt) = proWidthFt + 4` with `BATTEN_OVERHANG_FT = 2`, lives in
+  `src/lib/design/venue-dims.ts`. Every consumer calls it, so there is a single definition.
+- Callers: `steel.ts` `DEFAULT_WEIGHTS.battenlen` (was a bare 44, which was right only for a 40 ft
+  opening and wrong for every other one), the lineset builder's weight paths, and the estimator's
+  Pipe BOM rows in `quick/engine.ts`. The per-line manual override still wins.
+- **Scenery track now follows the pipe rule too** (Jeff's call), previously priced off raw stage
+  width.
+- **Deliberately NOT changed, and why:** the acoustic shell ceiling (`goods.ts shellGearLb`) is a
+  panel AREA, not pipe, and a ceiling overhanging the opening would be wrong; the aircraft-cable
+  run (`quick/engine.ts`) is grid geometry from loft block to head block; loft-block spacing is a
+  count rule; and the Steel Calculator's Length field is a standalone engineering input with no
+  venue context to derive from.
+- **Non-proscenium rooms:** Jeff's call is pipe spans the entered room width with NO overhang, so
+  the rule is gated on `kind === "proscenium"`. The underlying bug stays open: `venueDimsFromEstimator`
+  maps `width` to `proWidthFt` for EVERY venue kind, but that field is wall-to-wall for
+  church/flat/blackbox/arena and sideline-to-sideline for gym, so those rooms oversize drapes today.
+  Not fixed here because it moves prices on live estimates.
+
+**Lineset three-input reduction.** Venue inputs are now PRO width, PRO height and stage depth
+(plus the depth inches remainder, kept because the 8 inch slot grid is depth-driven). `stageWidthFt`
+and `stageWidthIn` are removed from `LinesetInputs` entirely rather than hidden: leaving a stored 0
+behind would have frozen the status line with no input left to fix it. Saved designs load through
+`normalizeInputs`, which copies key-by-key off the defaults, type-checks each value and silently
+drops retired keys. The nine rule constants in the settings drawer stay: they are rules, not
+venue dimensions.
+
+**Grid scopes, his answer: his five as a Grid-specific list.** `src/lib/design/grid-scopes.ts` maps
+catalog groups and trades onto Lighting / Rigging / Curtains / Audio / Video with a named `Unscoped`
+catch-all. **Trade "AV" is deliberately not auto-mapped**, because it forks into both Audio and Video
+and the trade alone cannot say which; those rows land in Unscoped until someone maps the category in
+the Catalog screen, which is an existing seam. `PartLite` gained `trade`, without which every piece
+of rigging hardware would have been Unscoped.
+
+**Layer visibility is view state, not design state.** Hidden layers are namespaced keys
+(`scope:Lighting`, `cat:Followspots`) so a user category cannot collide with a scope. Not persisted,
+never in a revision. Every canvas gesture reads the visible set rather than all placements, so a
+hidden marker cannot be grabbed by the #47 drag, and the selection is derived with a visibility
+guard rather than cleared in an effect, which would have raced `router.refresh()`.
+
+**Grid curtains, his answer: a priced line like the estimator.** A curtain is a `GridPlacement`
+carrying a `curtain` subdoc, so drag, nudge, spaces, revisions and delete need no second code path.
+Cost basis stays server-side: the editor prices through the customer-safe `curtain-geom` mirror from
+precomputed sell rates, and never imports `design/curtain-pricing`. `bomLines` skips curtain
+placements so the fabric part is never double-billed. On a customer-facing quote a curtain's sku is
+`CURTAIN`, since a placement id in front of a client would be nonsense.
+
+**Verification.** Browser-verified on a restored dev database with blob storage disabled: the batten
+rule (PRO 60 gives 64 ft battens and every weight recalculates), the arrow-key move and its
+persistence across a reload, the layer toggle (hiding Curtains removed the marker but not the BOM
+line), and a 64 x 8 ft Border at 50% fullness pricing to 768 sq ft sewn / $2,788 onto the BOM.
+**Not verified: the mouse-drag gesture**, because the automation cannot emit press-move-release with
+intermediate motion and the 4 px threshold requires it.

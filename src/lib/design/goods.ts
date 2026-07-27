@@ -1,5 +1,5 @@
 import type { VenueDims } from "./venue-dims";
-import { fabricFromPart, type Fabric, type WeightLine } from "./steel";
+import { fabByName, fabricFromPart, type Fabric, type WeightLine } from "./steel";
 
 /**
  * Peak's soft-goods geometry, as one table (spec §1).
@@ -276,4 +276,93 @@ export function mergeLineFabric(
     return { fab, fabResolved: (part && fabricFromPart(part)) || undefined };
   }
   return { fab, fabResolved: load?.fabResolved !== undefined ? load.fabResolved : base.fabResolved };
+}
+
+/* ---------------------- fabric-resolution diagnostics ---------------------- */
+
+/** The "no fabric" choice in the load editor's fabric select. Stored as the
+ *  line's `fab`, so it has to be recognizable here too. */
+export const FAB_NONE = ", none, ";
+
+/**
+ * Why a line's fabric failed to resolve. `null` means it resolved fine.
+ *
+ * The kinds are deliberately distinct because they need DIFFERENT fixes:
+ * `no-catalog` is "seed/import the Fabric category", `no-weight` is "this one
+ * part is missing its oz", `missing-part` is "this SKU isn't in the catalog".
+ * Collapsing them into one "fabric problem" would send Jeff to the wrong place.
+ */
+export type FabricIssue = {
+  kind: "no-catalog" | "missing-part" | "no-weight" | "unrecognized" | "cleared";
+  /** Short chip text for the schedule row. */
+  short: string;
+  /** Full sentence: the cause AND the fix. */
+  message: string;
+};
+
+/**
+ * Diagnose a line whose weight math will silently produce zero goods AND zero
+ * track (`computeSetWeight` gates the track lookup on the fabric, steel.ts).
+ *
+ * Resolution order mirrors computeSetWeight() exactly, `fabResolved` first,
+ * then a FABLIB name lookup, so this never warns about a line that actually
+ * weighs. It NEVER invents a fallback weight: the point is to make the gap
+ * visible, not to paper over it.
+ */
+export function lineFabricIssue(
+  line: Pick<WeightLine, "fab" | "fabResolved" | "w" | "h">,
+  rule: DrapeRule | null,
+  fabrics: GoodsFabric[]
+): FabricIssue | null {
+  // A gear-only line (Electric/Shell/General Purpose, or a custom line with no
+  // fabric named) is supposed to carry no goods, nothing to warn about.
+  const expectsFabric = !!rule || (!!line.fab && (line.w || 0) > 0 && (line.h || 0) > 0);
+  if (!expectsFabric) return null;
+  if (line.fabResolved) return null;
+  if (line.fab && line.fab !== FAB_NONE && fabByName(line.fab)) return null;
+
+  const goodsAndTrack = "goods and track weight can't be calculated";
+
+  if (line.fab === FAB_NONE)
+    return {
+      kind: "cleared",
+      short: "no fabric selected",
+      message: `Fabric is set to "${FAB_NONE}" on a drape line, it contributes no goods and no track weight. Pick a fabric to weigh it.`,
+    };
+
+  if (fabrics.length === 0)
+    return {
+      kind: "no-catalog",
+      short: "no catalog fabric",
+      message: `There are no Fabric parts in the catalog${rule ? ` (this line wants ${rule.fabricSku})` : ""}, so ${goodsAndTrack} on any drape line. Import or seed the catalog's Fabric category (Catalog → category "Fabric"), each part carrying oz + basis + bolt width.`,
+    };
+
+  if (line.fab) {
+    const picked = fabrics.find((f) => f.desc === line.fab);
+    return picked
+      ? {
+          kind: "no-weight",
+          short: "fabric has no oz",
+          message: `Catalog fabric "${picked.desc}" (${picked.sku}) has no oz/yd², ${goodsAndTrack}. Add oz, basis and bolt width to that catalog part, or pick a fabric that has them.`,
+        }
+      : {
+          kind: "unrecognized",
+          short: "fabric not recognized",
+          message: `Fabric "${line.fab}" is in neither the parts catalog nor the built-in fabric library, ${goodsAndTrack}. Pick a listed fabric.`,
+        };
+  }
+
+  const sku = rule?.fabricSku || "?";
+  const part = fabrics.find((f) => f.sku === sku);
+  return part
+    ? {
+        kind: "no-weight",
+        short: "fabric has no oz",
+        message: `Catalog fabric "${part.desc}" (${part.sku}) has no oz/yd², ${goodsAndTrack}. Add oz, basis and bolt width to that catalog part, or pick a fabric that has them.`,
+      }
+    : {
+        kind: "missing-part",
+        short: `no catalog part ${sku}`,
+        message: `The catalog has Fabric parts but none with SKU ${sku}, which is what this line's fabric tier asks for, ${goodsAndTrack}. Add that SKU to the catalog, or pick another fabric on this line.`,
+      };
 }

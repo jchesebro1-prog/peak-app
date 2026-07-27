@@ -2,7 +2,8 @@
  * lineset.ts — Theatrical lineset auto-placement engine.
  *
  * This is a FAITHFUL TypeScript port of the Excel workbook
- * `lineset_schedule_80x30_v13.xlsx` (defaults since updated to 50'×30' — #28)
+ * `lineset_schedule_80x30_v13.xlsx` (defaults since updated to a 30' depth,
+ * #28; the workbook's wall-to-wall stage width retired in #50)
  * (4 sheets: Inputs, Rules & Notes, 8in Grid, Final Schedule). Every rule below is annotated with the sheet
  * and cell whose formula it reproduces, so the two can be cross-checked.
  *
@@ -24,12 +25,16 @@
  * Feet/inches pairs (Inputs!B/C) are kept separate; totals are derived.
  */
 export type LinesetInputs = {
-  stageWidthFt: number; // Inputs!B6
-  stageWidthIn: number; // Inputs!C6
   stageDepthFt: number; // Inputs!B7
   stageDepthIn: number; // Inputs!C7
-  /** Proscenium opening width (ft). Drives drape WIDTHS. Distinct from
-   *  stageWidthFt, which is wall-to-wall and drives placement. */
+  /** Proscenium opening width (ft). Drives drape WIDTHS and, through
+   *  battenLenFt() (venue-dims.ts), every batten length.
+   *
+   *  The workbook's wall-to-wall stage width (Inputs!B6/C6) is GONE as of punch
+   *  #50. It never reached the placement math: the 8-inch grid runs downstage,
+   *  so only DEPTH sets slots, and the old width only fed a status string. The
+   *  three venue dimensions this tool needs are PRO width, PRO height and
+   *  stage depth. */
   proWidthFt: number;
   /** Proscenium opening height (ft), floor to header. Drives drape HEIGHTS. */
   proHeightFt: number;
@@ -48,10 +53,9 @@ export type LinesetInputs = {
   includeMidstage: boolean; // Inputs!G9
 };
 
-/** v13 defaults: 50'×30', 8/10/0/12/5/16/3/4, gp 0, all toggles on. */
+/** v13 defaults: 30' deep, 40'×20' opening, 8/10/0/12/5/16/3/4, gp 0, all
+ *  toggles on. */
 export const DEFAULT_LINESET_INPUTS: LinesetInputs = {
-  stageWidthFt: 50,
-  stageWidthIn: 0,
   stageDepthFt: 30,
   stageDepthIn: 0,
   proWidthFt: 40,
@@ -84,7 +88,6 @@ export type LinesetSlot = {
 };
 
 export type LinesetSummary = {
-  totalWidthIn: number; // Inputs!D6
   totalDepthIn: number; // Inputs!D7
   activeSlotCount: number; // Inputs!G14
   firstRegularElectricIn: number; // Inputs!G19 (inches)
@@ -131,7 +134,6 @@ function feetInchesLabel(totalInches: number): string {
 /* ------------------------------------------------------------------ */
 
 type Derived = {
-  widthIn: number;
   depthIn: number;
   spacing: number;
   elecIntervalIn: number; // D12
@@ -151,8 +153,8 @@ type Derived = {
 };
 
 function computeDerived(inp: LinesetInputs): Derived {
-  // Inputs!D6 / D7 — total inches from ft*12 + in.
-  const widthIn = inp.stageWidthFt * 12 + inp.stageWidthIn;
+  // Inputs!D7, total inches from ft*12 + in. (D6, stage width, is retired:
+  // punch #50 reduced the venue inputs to PRO width, PRO height and depth.)
   const depthIn = inp.stageDepthFt * 12 + inp.stageDepthIn;
   const spacing = inp.slotSpacingIn; // D11 = B11
 
@@ -218,8 +220,8 @@ function computeDerived(inp: LinesetInputs): Derived {
 
   // Inputs!G13 — Status line.
   const status =
-    widthIn === 0 || depthIn === 0
-      ? 'Enter stage width and depth to enable the layout'
+    depthIn === 0
+      ? 'Enter stage depth to enable the layout'
       : inp.includeElectrics && inp.includeShells
         ? 'Electrics and shells are both enabled; expect overlap warnings'
         : 'Auto layout ready';
@@ -229,7 +231,6 @@ function computeDerived(inp: LinesetInputs): Derived {
     spacing > 0 ? excelRound(shellStartIn / spacing) * spacing : 0;
 
   return {
-    widthIn,
     depthIn,
     spacing,
     elecIntervalIn,
@@ -331,7 +332,6 @@ export function generateLineset(input: LinesetInputs): {
       slots: [],
       schedule: [],
       summary: {
-        totalWidthIn: d.widthIn,
         totalDepthIn: d.depthIn,
         activeSlotCount: 0,
         firstRegularElectricIn: d.firstElecIn,
@@ -558,7 +558,6 @@ export function generateLineset(input: LinesetInputs): {
     slots,
     schedule,
     summary: {
-      totalWidthIn: d.widthIn,
       totalDepthIn: d.depthIn,
       activeSlotCount: d.activeCount,
       firstRegularElectricIn: d.firstElecIn,

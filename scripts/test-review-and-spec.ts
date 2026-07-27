@@ -8,7 +8,7 @@ import {
   WORK_TYPE_META,
   startOfDay as opStartOfDay,
 } from "@/lib/operations-work";
-import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS } from "@/lib/design/venue-dims";
+import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS, battenLenFt, BATTEN_OVERHANG_FT } from "@/lib/design/venue-dims";
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
 import { DEFAULT_SETTINGS } from "@/db/seed-data";
 import { accentContrast } from "@/lib/color";
@@ -305,16 +305,34 @@ ok(HOME_TABS.length === 5, "five Home tabs after Reports joins (D99)");
 ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab");
 
 /* --- home hub nav (D98) --- */
-ok(NAV.length === 4, "the header keeps 4 top-level items (chips, D117)");
-ok(!NAV.some((e) => e.kind === "link" && e.key === "queue"), "My Queue is no longer top-level");
-ok(!NAV.some((e) => e.kind === "link" && e.key === "calendar"), "Calendar is no longer top-level");
-ok(!NAV.some((e) => e.kind === "link" && e.key === "inbox"), "Inbox is no longer top-level");
-ok(!NAV.some((e) => e.kind === "link" && e.key === "home"), "Home is no longer a tab — the Q6 mark is the home link (D117)");
-ok(activeKeyFor("/") === "home", "root lights Home");
-ok(activeKeyFor("/queue") === "home", "queue lights Home");
-ok(activeKeyFor("/calendar") === "home", "calendar lights Home — this path had NO map entry before");
-ok(activeKeyFor("/inbox") === "home", "inbox lights Home");
-ok(activeKeyFor("/reports") === "home", "Reports lights Home now that it is a Home tab (D99)");
+// Punch #55 (D124) REVERSES the D117 shape: Jeff asked for Home back as a real tab
+// on web and mobile, so the header is five groups and Home is the first. The five
+// hub routes stay CHILDREN of that group (they are not top-level links).
+ok(NAV.length === 5, "the header has 5 top-level items: Home joined the chips (#55, D124)");
+ok(!NAV.some((e) => e.kind === "link" && e.key === "queue"), "My Queue is not top-level");
+ok(!NAV.some((e) => e.kind === "link" && e.key === "calendar"), "Calendar is not top-level");
+ok(!NAV.some((e) => e.kind === "link" && e.key === "inbox"), "Inbox is not top-level");
+const homeGroup = NAV.find((e) => e.kind === "group" && e.key === "home");
+ok(!!homeGroup, "Home is a top-level GROUP again (#55) — the mark links there too");
+ok(
+  !!(homeGroup && homeGroup.kind === "group" && homeGroup.children.length === HOME_TABS.length),
+  "the Home group carries the five HOME_TABS as children, not a duplicated list",
+);
+// activeKeyFor now returns the CHILD key: parentGroupOf only matches child keys, so
+// returning "home" would have left the pill dark on the app's most important route.
+ok(activeKeyFor("/") === "dashboard", "root lights the Dashboard child (#55)");
+ok(activeKeyFor("/queue") === "queue", "queue lights its own child key (#55)");
+ok(activeKeyFor("/calendar") === "calendar", "calendar lights its own child key (#55)");
+ok(activeKeyFor("/inbox") === "inbox", "inbox lights its own child key (#55)");
+ok(activeKeyFor("/reports") === "reports", "Reports lights its own child key (#55)");
+ok(
+  parentGroupOf(activeKeyFor("/")) === "home" &&
+    parentGroupOf(activeKeyFor("/queue")) === "home" &&
+    parentGroupOf(activeKeyFor("/calendar")) === "home" &&
+    parentGroupOf(activeKeyFor("/inbox")) === "home" &&
+    parentGroupOf(activeKeyFor("/reports")) === "home",
+  "all five hub routes still resolve UP to the Home group, so the chip lights (#55)",
+);
 
 // ---- General dissolution (D99): Companies/People/Field Survey → Sales (now CRM, D117) ----
 // Opportunities joined as the first child (#18) — six children as of plan 02.
@@ -377,8 +395,8 @@ ok(
 // ---- General dissolution (D99): the group is gone ----
 ok(!NAV.some((e) => e.kind === "group" && e.key === "general"), "the General group is gone");
 ok(
-  NAV.map((e) => e.key).join(",") === "est,pm,crm,design",
-  "the four top-level chips are EST, PM, CRM, DESIGN in order (D117)",
+  NAV.map((e) => e.key).join(",") === "home,est,pm,crm,design",
+  "the top-level chips are Home, EST, PM, CRM, DESIGN in order (#55 put Home back, D124)",
 );
 ok(
   activeKeyFor("/catalog") === "settings" &&
@@ -564,6 +582,15 @@ ok(DEFAULT_VENUE_DIMS.proHeightFt === 20, `DEFAULT_VENUE_DIMS proHeightFt is 20 
 ok(DEFAULT_VENUE_DIMS.stageWidthFt === 50, `DEFAULT_VENUE_DIMS stageWidthFt is 50 (got ${DEFAULT_VENUE_DIMS.stageWidthFt})`);
 ok(DEFAULT_VENUE_DIMS.stageDepthFt === 30, `DEFAULT_VENUE_DIMS stageDepthFt is 30 (got ${DEFAULT_VENUE_DIMS.stageDepthFt})`);
 
+/* --- batten / pipe length, the one shared rule (punch #50) ---
+ * Jeff: "It is Pro Width, plus 2ft on each side, so 4ft total. Track that into
+ * the estimator and anywhere else where pipe width is calculated." */
+ok(BATTEN_OVERHANG_FT === 2, `batten overhang is 2 ft per side (got ${BATTEN_OVERHANG_FT})`);
+ok(battenLenFt(40) === 44, `a 40 ft opening gets a 44 ft batten (got ${battenLenFt(40)})`);
+ok(battenLenFt(36) === 40, `a 36 ft opening gets a 40 ft batten (got ${battenLenFt(36)})`);
+ok(battenLenFt(0) === 4, "a zero opening still returns the overhang, never a negative length");
+ok(battenLenFt(-10) === 4, "a negative opening is clamped, not propagated as a negative pipe");
+
 /* --- fabric catalog weight join (task 2) --- */
 import { fabricFromPart, ozPerFt2, computeSetWeight, DEFAULT_WEIGHTS } from "@/lib/design/steel";
 
@@ -580,6 +607,11 @@ const marvel = fabricFromPart({ desc: "21 oz Marvel Velour", oz: 21, ozBasis: "l
 const wLine = computeSetWeight({ name: "t", fabResolved: marvel, w: 20, h: 19, full: 50, qty: 2 }, DEFAULT_WEIGHTS);
 ok(wLine.goods > 0, "a catalog-only fabric (Marvel is NOT in FABLIB) still produces goods weight");
 ok(computeSetWeight({ name: "t", fab: "21 oz Marvel Velour", w: 20, h: 19, full: 50, qty: 2 }, DEFAULT_WEIGHTS).goods === 0, "name-only lookup of a catalog desc weighs ZERO — the bug this join fixes");
+
+// #50: the schedule default is the derived rule, and a per-line value still beats it.
+ok(DEFAULT_WEIGHTS.battenlen === battenLenFt(DEFAULT_VENUE_DIMS.proWidthFt), `the weight defaults' batten length IS the derived rule (got ${DEFAULT_WEIGHTS.battenlen})`);
+ok(computeSetWeight({ name: "t" }, DEFAULT_WEIGHTS).battenLen === 44, "a blank line inherits the derived batten length");
+ok(computeSetWeight({ name: "t", batten: 30 }, DEFAULT_WEIGHTS).battenLen === 30, "a per-line manual batten length still overrides the derived rule");
 
 /* --- drape rule table (task 3) --- */
 import { drapeRule, TRACK_TRAVELER, DEFAULT_GEAR, shellGearLb, electricCounts, electricGearLb, ruleToWeightLine, mergeLineFabric } from "@/lib/design/goods";
@@ -660,8 +692,11 @@ ok(electricGearLb({}, 44) === 66, "a bare electric still carries its distributio
 import { generateLineset, DEFAULT_LINESET_INPUTS } from "@/lib/design/lineset";
 
 ok(DEFAULT_LINESET_INPUTS.proWidthFt === 40 && DEFAULT_LINESET_INPUTS.proHeightFt === 20, "lineset defaults carry PRO dims");
-ok(DEFAULT_LINESET_INPUTS.stageWidthFt === 50, "stage width default is unchanged at 50ft");
-ok(DEFAULT_LINESET_INPUTS.proWidthFt !== DEFAULT_LINESET_INPUTS.stageWidthFt, "PRO width and stage width are distinct values");
+// Punch #50 reduced the venue inputs to three: PRO width, PRO height, depth.
+// Wall-to-wall stage width is gone from the model, not just from the screen.
+ok(!("stageWidthFt" in DEFAULT_LINESET_INPUTS), "stage width is no longer a lineset input");
+ok(!("stageWidthIn" in DEFAULT_LINESET_INPUTS), "stage width inches is no longer a lineset input");
+ok(Object.keys(DEFAULT_LINESET_INPUTS).filter((k) => k.startsWith("stage")).length === 2, "the only stage dimension left is depth (ft + in)");
 
 const baseOut = generateLineset(DEFAULT_LINESET_INPUTS);
 const wideProOut = generateLineset({ ...DEFAULT_LINESET_INPUTS, proWidthFt: 44, proHeightFt: 26 });
@@ -1147,7 +1182,10 @@ ok(
   "EST = Quotes, My Quotes, Estimator, Reviews in order (#22)",
 );
 ok(activeKeyFor("/estimator") === "estimator", "/estimator lights its own EST child");
-ok(activeKeyFor("/") === "home", "root still resolves to home (drawer link + mark)");
+ok(
+  parentGroupOf(activeKeyFor("/")) === "home",
+  "root still resolves to the Home group (drawer section + the mark link, #55)",
+);
 ok(
   parentGroupOf("quotes") === "est" && parentGroupOf("estimator") === "est" && parentGroupOf("reviews") === "est",
   "quotes, estimator, reviews report EST as parent",
