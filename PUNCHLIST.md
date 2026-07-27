@@ -2835,7 +2835,11 @@ role (falls back to quote owner), due ~7 days: walk the site with the end user. 
 
 ---
 
-## 45. Header/nav fixes for the in-flight tabs rebuild — OPEN (TIME-SENSITIVE, route to the rebuild session)
+## 45. Header/nav fixes for the in-flight tabs rebuild — (a) DONE 2026-07-27 via #55; (b) OPEN
+
+> **(a) Home restored on web AND mobile — DONE 2026-07-27 (D124), see #55.** The tabs rebuild has
+> landed, so this is no longer routed away from the punch-list stream. (b) the responsive full-word
+> vs short-label switch is still open.
 
 **Area:** header/nav (tabs rebuild in flight).
 **Reported:** 2026-07-25 (staged off-mini late, flushed 2026-07-25)
@@ -2881,7 +2885,15 @@ Do not pick up standalone; the rebuild session owns the nav.
 
 ---
 
-## 47. The Grid: move/reposition items after they are placed — OPEN
+## 47. The Grid: move/reposition items after they are placed — BUILT 2026-07-27 (D124), BROWSER-UNVERIFIED
+
+> **Built** on `punch-2026-07-27-wave-a`: `movePlacement()` + `movePlacementAction`, drag-to-move
+> with optimistic local state, a 4-screen-pixel click/drag threshold, arrow-key nudge (Shift =
+> coarse, debounced) and an x/y readout on the selected-device panel. **Attached wires follow the
+> device** — the matching route endpoint is translated by the same delta inside the same patch.
+> A move does not cut a revision and does not restamp `by`/`at`. Typecheck + ESLint clean.
+> **NOT verified in the browser:** the Grid needs a plan sheet, and sheet upload fails in local dev
+> (`Upload to file storage failed — check the Blob token`). See the note under #58.
 
 **Area:** The Grid — `src/lib/stores/grid-projects.ts`, `src/app/(app)/design/grid/[id]/actions.ts`,
 `src/app/(app)/design/grid/[id]/editor.tsx`
@@ -3011,7 +3023,19 @@ determines how `bomLines` (`grid-bom.ts:68`) prices it, since it looks up parts 
 
 ---
 
-## 50. Lineset Builder: curtains/tracks/pipe not filling out + reduce to three dimension inputs — OPEN
+## 50. Lineset Builder: curtains/tracks/pipe not filling out + reduce to three dimension inputs — PARTIALLY BUILT 2026-07-27 (D124)
+
+> **Built and browser-verified** on `punch-2026-07-27-wave-a`: (a) the silent fabric failure is now
+> NAMED — per-row chip, a banner grouped by cause, a red-bordered fabric select and a
+> `FABRIC UNRESOLVED` prefix on the CSV Check column, distinguishing *no Fabric parts in the
+> catalog* from *this part has no oz/yd²*; (b) per-line pipe + batten-length overrides that fall
+> back to the global; (c) Track gained a real "None — no track" option, so Legs/Border/CYC stop
+> falsely displaying "Light-duty track" and a track can be cleared; (d) fabric tier labels
+> corrected to the data (Better = 25 oz Charisma, not 21 oz Marvel). `steel.ts` untouched.
+> **STILL OPEN — the three-input reduction.** Blocked on one answer from Jeff: where does
+> `battenLen` come from? It is a hardcoded 44 ft (`steel.ts:471`) driving batten weight, track
+> weight, the distribution allowance and the bending check, and (proW, proH, depth) cannot supply
+> it. Options: `proWidth + 2×wing` · `proWidth + K` · keep stage width as a 4th input.
 
 **Area:** `src/lib/design/lineset.ts`, `src/lib/design/goods.ts`, `src/lib/design/steel.ts`,
 `src/app/(app)/design/lineset/lineset-builder.tsx`, `src/lib/design/venue-dims.ts`
@@ -3184,7 +3208,14 @@ accessories, power and data, and if there is a lamp the lamp cost."*
 
 ---
 
-## 53. Estimator: section sell price shows no dollar sign or comma — OPEN (bug, small)
+## 53. Estimator: section sell price shows no dollar sign or comma — DONE 2026-07-27 (D124)
+
+> **Built and browser-verified.** The Sell box is now `type="text"` rendered through the existing
+> `fmt()` — reads `$84,820.00` and matches Price/Cost/Freight in the same card. Round-trip verified:
+> typing `$70,000` and blurring re-prices the section and re-renders formatted. `inputMode="decimal"`
+> keeps the touch numpad; the parse strips `$`, commas and spaces; empty still yields 0.
+> **Visible change beyond the ask:** the box now shows cents where it used to round to whole dollars.
+> Say the word if you want whole dollars in this box specifically.
 
 **Area:** `src/app/(app)/estimator/section-card.tsx`
 **Reported:** 2026-07-27
@@ -3209,7 +3240,19 @@ readouts use `fmt()`.
 
 ---
 
-## 54. Labor estimator: show the installer rates/cost, and confirm rates pull from the catalog — OPEN
+## 54. Labor estimator: show the installer rates/cost, and confirm rates pull from the catalog — PARTIALLY BUILT 2026-07-27 (D124)
+
+> **Answer to the question: YES, labor rates pull from the catalog** (`catalog_parts` where
+> `category = "Labor"`), with a hardcoded fallback behind them.
+> **Built and browser-verified:** a rate strip under the Scope buttons showing the resolved
+> Installer / Overtime / Supervisor $/hr for the selected discipline (verified: Rigging $50/hr,
+> Video $48/hr, Supervisor $72/hr), a second strip in Shop & engineering (PM $90/hr, In-house
+> $40/hr, Drafting), and **a DEFAULT chip whenever a rate fell back to the hardcoded map** — a
+> missing or renamed catalog row used to be invisible. Provenance rides on an optional
+> `.source(sku)` on the rate function, so no caller changed and no math moved.
+> **STILL OPEN — "overall this needs to be redone."** Needs Jeff to say what is wrong beyond the
+> invisible rates. Also still silent: travel/equipment rates (`TVL-MIL`, `TVL-HTL`, `TVL-FOD`,
+> `EQP-LIFT`) — they are per-mile/night/day, not $/hr, so they did not fit the strip.
 
 **Area:** `src/app/(app)/estimator/labor-modal.tsx`, `estimator/pricing.ts:212-347`,
 `estimator/page.tsx:168-188`, `estimator-data.ts:92-115`
@@ -3253,7 +3296,17 @@ invisible rates?
 
 ---
 
-## 55. Home dashboard / Home tab — the company mark links nowhere — OPEN
+## 55. Home dashboard / Home tab — the company mark links nowhere — DONE 2026-07-27 (D124); closes #45(a)
+
+> **Built and browser-verified on desktop AND mobile.** The company mark is now a `<Link href="/">`
+> (verified: clicking it from `/quotes` lands on Home), and a **Home** group joined the nav ahead of
+> EST/PM/CRM/DESIGN with the five existing sub-tabs (Dashboard · My Queue · Calendar · Inbox ·
+> Reports) sourced from `home-tabs-keys.ts` rather than duplicated. The mobile drawer renders the
+> same array, so it is fixed by the same change — verified at 375px, with the active row lit.
+> `/inbox` is reachable from a cold start again. Two side effects: the home routes now return their
+> own child keys so the pill actually lights (`parentGroupOf` only matches child keys), and the
+> Inbox unread badge now has somewhere to render (shows 5 on the dev DB).
+> **This closes #45(a).** #45(b), the responsive label switch, is unaffected.
 
 **Area:** `src/components/nav/Nav.tsx`, `src/components/nav/nav-data.ts`, `src/app/(app)/page.tsx`
 **Reported:** 2026-07-27

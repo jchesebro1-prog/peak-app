@@ -6,7 +6,7 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
-import type { Calibration, Point } from "@/lib/annotations";
+import { clamp01, type Calibration, type Point } from "@/lib/annotations";
 
 /**
  * The Grid (D108) — system-design projects: plan sheets, painted catalog
@@ -258,6 +258,63 @@ export async function addPlacement(
         at: Date.now(),
       },
     ];
+    p.updatedAt = Date.now();
+  });
+}
+
+/**
+ * Move one placed device (punch #47). Coordinates only: a device stays on the
+ * sheet/page it was painted on, because a wire run lives on exactly one page
+ * and carrying a device across pages would strand the wires attached to it.
+ *
+ * Attached wires follow, atomically, in the same patch. `GridRoute.points` is
+ * an INDEPENDENT polyline — `fromPlacementId`/`toPlacementId` record what a
+ * run was drawn onto but nothing keeps the geometry in sync — so moving a
+ * device without this would silently leave its wires hanging at the old spot
+ * (and, since footage is measured off `points`, quoting the old length). The
+ * endpoint is TRANSLATED by the same delta rather than snapped to the new
+ * center, which preserves the small hand-drawn offset the wire was drawn with.
+ *
+ * Deliberately does NOT cut a revision: revisions are manual/quote/restore
+ * (addRevision below), and a drag is a gesture, not a design decision.
+ */
+export async function movePlacement(
+  projectId: string,
+  placementId: string,
+  to: { x: number; y: number }
+): Promise<GridProject | null> {
+  const project = await getProject(projectId);
+  if (!project) return null;
+  const current = (project.placements || []).find((pl) => pl.id === placementId);
+  if (!current) return null;
+
+  const x = clamp01(to.x);
+  const y = clamp01(to.y);
+  const dx = x - current.x;
+  const dy = y - current.y;
+
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.placements = (p.placements || []).map((pl) =>
+      pl.id === placementId ? { ...pl, x, y } : pl
+    );
+    // Guarded so a pre-D110 doc with no `routes` key doesn't grow an empty one.
+    if (p.routes?.length) p.routes = p.routes.map((r) => {
+      const head = r.fromPlacementId === placementId;
+      const tail = r.toPlacementId === placementId;
+      // Same sheet/page only — an endpoint id can't refer across pages, but a
+      // restored revision could carry a stale pairing, and shifting a polyline
+      // on another page would be worse than leaving it be.
+      if ((!head && !tail) || r.sheetId !== current.sheetId || r.page !== current.page) return r;
+      const last = r.points.length - 1;
+      return {
+        ...r,
+        points: r.points.map((q, i) =>
+          (head && i === 0) || (tail && i === last)
+            ? { x: clamp01(q.x + dx), y: clamp01(q.y + dy) }
+            : q
+        ),
+      };
+    });
     p.updatedAt = Date.now();
   });
 }

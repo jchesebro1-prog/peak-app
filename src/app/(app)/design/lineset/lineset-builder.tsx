@@ -22,6 +22,7 @@ import {
   TRACKS,
   PRODIGY_HOISTS,
   BATTENS,
+  battenById,
   fmt,
   type WeightDefaults,
   type WeightLine,
@@ -35,9 +36,12 @@ import {
   shellGearLb,
   ruleToWeightLine,
   mergeLineFabric,
+  lineFabricIssue,
+  FAB_NONE,
   type GoodsTier,
   type GearDefaults,
   type GoodsFabric,
+  type FabricIssue,
 } from "@/lib/design/goods";
 import { SaveBar, type SavedRef } from "../save-bar";
 import { downloadCsv } from "../export";
@@ -102,6 +106,25 @@ const MODE_LABEL: Record<LinesetMode, string> = { motor: "Motor", dead: "Dead-hu
 function NumF({ v, set, w, style }: { v: number; set: (n: number) => void; w?: number; style?: React.CSSProperties }) {
   return <input type="number" value={v} onChange={(e) => set(parseFloat(e.target.value) || 0)} style={{ ...field, ...(w ? { width: w } : {}), ...style }} />;
 }
+
+/** A number field that can be EMPTY — blank sends `undefined`, which is how a
+ *  per-line value goes back to inheriting the schedule default. NumF can't do
+ *  this: it coerces every keystroke to a number, so 0 would be the only "unset". */
+function OptNumF({ v, placeholder, set, style }: { v: number | null | undefined; placeholder: number; set: (n: number | undefined) => void; style?: React.CSSProperties }) {
+  return (
+    <input
+      type="number"
+      value={v ?? ""}
+      placeholder={String(placeholder)}
+      onChange={(e) => set(e.target.value === "" ? undefined : parseFloat(e.target.value) || 0)}
+      style={{ ...field, ...style }}
+    />
+  );
+}
+
+/** Select-layer only — deliberately NOT a TRACKS entry (see the Track field in
+ *  LoadEditor). */
+const TRACK_NONE = "None";
 
 /** Stable identity for a generated line: its type + ordinal within the type
  *  ("Electric#2" = the second electric, wherever it lands). Survives slot
@@ -218,13 +241,18 @@ export function LinesetBuilder({
 
         const specified = ruled || !!load;
         const c = specified ? computeSetWeight(line, def) : null;
-        return { s, key, load, rule, ruled, specified, line, c };
+        // Why this line's fabric didn't resolve, if it didn't. computeSetWeight
+        // zeroes BOTH goods and track when it can't find a Fabric, and an empty
+        // row is indistinguishable from "not filled in yet" — so the cause gets
+        // surfaced on the row and in the banner instead (#50).
+        const issue = specified ? lineFabricIssue(line, rule, fabrics) : null;
+        return { s, key, load, rule, ruled, specified, line, c, issue };
       }),
     [out.schedule, keys, loads, def, dims, tier, gear, fabrics, inp.shellIntervalFt]
   );
   const extraRows = useMemo(
-    () => extras.map((x) => ({ x, c: computeSetWeight(x, def) })),
-    [extras, def]
+    () => extras.map((x) => ({ x, c: computeSetWeight(x, def), issue: lineFabricIssue(x, null, fabrics) })),
+    [extras, def, fabrics]
   );
 
   const totals = useMemo(() => {
@@ -256,8 +284,29 @@ export function LinesetBuilder({
 
   const unspecified = totals.generated - totals.specified;
 
+  /** Fabric failures grouped by CAUSE — one banner entry per distinct problem,
+   *  listing the lines it hits. Two lines missing the same catalog part are one
+   *  fix; a missing part and a part with no oz are two different fixes, so they
+   *  never collapse together (#50). */
+  const fabricProblems = useMemo(() => {
+    const byMessage = new Map<string, { issue: FabricIssue; lines: string[] }>();
+    const add = (issue: FabricIssue | null, name: string) => {
+      if (!issue) return;
+      const g = byMessage.get(issue.message);
+      if (g) g.lines.push(name);
+      else byMessage.set(issue.message, { issue, lines: [name] });
+    };
+    rows.forEach((r) => add(r.issue, r.line.name));
+    extraRows.forEach(({ x, issue }) => add(issue, x.name));
+    return [...byMessage.values()];
+  }, [rows, extraRows]);
+  const fabricProblemCount = fabricProblems.reduce((n, g) => n + g.lines.length, 0);
+
   function exportCsv() {
-    const header = ["#", "Slot", "Downstage", "Type", "Name", "Fabric", "W(ft)", "H(ft)", "Full%", "Qty", "Gear(lb)", "Mode", "Hoist", "Weight on batten(lb)", "Check", "Source"];
+    // Batten + the fabric warning ride along: an exported schedule that hides a
+    // zero-weight line is the same silent failure as the screen used to be (#50).
+    const header = ["#", "Slot", "Downstage", "Type", "Name", "Fabric", "W(ft)", "H(ft)", "Full%", "Qty", "Gear(lb)", "Track", "Batten", "Batten len(ft)", "Mode", "Hoist", "Weight on batten(lb)", "Check", "Source"];
+    const flag = (issue: FabricIssue | null | undefined) => (issue ? `FABRIC UNRESOLVED (${issue.short}) — goods+track 0 lb; ` : "");
     const csvRows: (string | number)[][] = rows.map((r, i) => {
       const mode = r.line.mode || def.mode;
       const check = !r.c ? "NOT SPECIFIED" : mode === "cw" ? `${r.c.combo.big}x25+${r.c.combo.small}x10 brick` : r.c.over ? "OVER LIMIT" : "OK";
@@ -265,20 +314,22 @@ export function LinesetBuilder({
       return [
         i + 1, r.s.slot, r.s.dsPositionLabel, r.s.type, r.line.name,
         r.line.fab || "", r.line.w ?? "", r.line.h ?? "", r.line.full ?? def.full, r.line.qty ?? 1, r.line.gear ?? "",
+        r.line.track || "None", battenById(r.line.pipe || def.pipe).label, r.line.batten ?? def.battenlen,
         r.c ? MODE_LABEL[mode] : "", r.c && mode === "motor" ? r.line.hoist || def.hoist : "",
-        r.c ? Math.round(r.c.onBatten) : "", check, source,
+        r.c ? Math.round(r.c.onBatten) : "", flag(r.issue) + check, source,
       ];
     });
-    extraRows.forEach(({ x, c }, i) => {
+    extraRows.forEach(({ x, c, issue }, i) => {
       const mode = x.mode || def.mode;
       csvRows.push([
         rows.length + i + 1, "", "custom", "Custom", x.name, x.fab || "", x.w ?? "", x.h ?? "", x.full ?? def.full, x.qty ?? 1, x.gear ?? "",
+        x.track || "None", battenById(x.pipe || def.pipe).label, x.batten ?? def.battenlen,
         MODE_LABEL[mode], mode === "motor" ? x.hoist || def.hoist : "", Math.round(c.onBatten),
-        mode === "cw" ? `${c.combo.big}x25+${c.combo.small}x10 brick` : c.over ? "OVER LIMIT" : "OK",
+        flag(issue) + (mode === "cw" ? `${c.combo.big}x25+${c.combo.small}x10 brick` : c.over ? "OVER LIMIT" : "OK"),
         "overridden",
       ]);
     });
-    csvRows.push(["", "", "", "", "TOTAL", "", "", "", "", "", "", "", "", Math.round(totals.onBatten), unspecified ? `${unspecified} lines not specified — excluded` : `peak/beam ${Math.round(totals.beamMax)} lb`, ""]);
+    csvRows.push(["", "", "", "", "TOTAL", "", "", "", "", "", "", "", "", "", "", "", Math.round(totals.onBatten), unspecified ? `${unspecified} lines not specified — excluded` : `peak/beam ${Math.round(totals.beamMax)} lb`, ""]);
     downloadCsv(`lineset-${inp.stageWidthFt}x${inp.stageDepthFt}`, header, csvRows);
   }
 
@@ -311,6 +362,7 @@ export function LinesetBuilder({
     // Extras and non-rule lines (Electric/Shell/General Purpose) have no
     // catalog rule behind them and keep picking from FABLIB, unchanged.
     const catalogRule = lineKey ? rows.find((r) => r.key === lineKey)?.rule : undefined;
+    const issue = lineFabricIssue(value, catalogRule || null, fabrics);
     return (
       <div style={{ background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "12px 14px", margin: "2px 0 6px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10 }}>
@@ -319,12 +371,17 @@ export function LinesetBuilder({
               <input value={value.name || ""} onChange={(e) => onChange({ name: e.target.value } as Partial<WeightLine>)} style={field} /></div>
           )}
           <div style={{ gridColumn: "span 2" }}><span style={genLabel("fab")}>Fabric / goods</span>
-            <select value={value.fab || "— none —"} onChange={(e) => onChange({ fab: e.target.value })} style={{ ...field, ...genStyle("fab") }}>
-              <option>— none —</option>
+            <select value={value.fab || FAB_NONE} onChange={(e) => onChange({ fab: e.target.value })} style={{ ...field, ...genStyle("fab"), ...(issue ? { borderColor: "#b4543a" } : {}) }}>
+              <option>{FAB_NONE}</option>
               {catalogRule
                 ? fabrics.map((f) => <option key={f.sku} value={f.desc}>{f.desc}</option>)
                 : FABLIB.map((f) => <option key={f.name}>{f.name}</option>)}
-            </select></div>
+            </select>
+            {/* The fabric drives BOTH goods and track weight — when it doesn't
+                resolve the row reads as a blank, not as a failure (#50). */}
+            {issue && (
+              <div style={{ fontSize: 11.5, color: "#b4543a", marginTop: 4, lineHeight: 1.45 }}>⚠ {issue.message}</div>
+            )}</div>
           <div><span style={genLabel("w")}>Width (ft)</span><NumF v={value.w ?? 0} set={(n) => onChange({ w: n })} style={genStyle("w")} /></div>
           <div><span style={genLabel("h")}>Height (ft)</span><NumF v={value.h ?? 0} set={(n) => onChange({ h: n })} style={genStyle("h")} /></div>
           <div><span style={genLabel("full")}>Fullness %</span><NumF v={value.full ?? def.full} set={(n) => onChange({ full: n })} style={genStyle("full")} /></div>
@@ -334,10 +391,28 @@ export function LinesetBuilder({
             <select value={value.chain || "None"} onChange={(e) => onChange({ chain: e.target.value })} style={{ ...field, ...genStyle("chain") }}>
               {CHAINS.map((c) => <option key={c.name}>{c.name}</option>)}
             </select></div>
+          {/* "None" is a select-layer option, NOT a TRACKS entry: TRACKS is
+              exported from steel.ts and a zero-weight row there would leak into
+              anything else that lists tracks. Clearing stores "" (a real, saved
+              value that reads as an override) rather than undefined, so
+              trackByName("") misses and the track weighs 0 — which is exactly
+              what a no-track line (Legs/Border/CYC) means. Before this, the
+              select showed the FIRST track on every no-track line while storing
+              nothing, and a set track could never be cleared (#50). */}
           <div><span style={genLabel("track")}>Track</span>
-            <select value={value.track || "None"} onChange={(e) => onChange({ track: e.target.value })} style={{ ...field, ...genStyle("track") }}>
-              {TRACKS.map((t) => <option key={t.name}>{t.name}</option>)}
+            <select value={value.track || TRACK_NONE} onChange={(e) => onChange({ track: e.target.value === TRACK_NONE ? "" : e.target.value })} style={{ ...field, ...genStyle("track") }}>
+              <option value={TRACK_NONE}>None — no track</option>
+              {TRACKS.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
             </select></div>
+          {/* Per-line batten: blank = the schedule default in the settings
+              drawer, matching how every other blank per-line field inherits. */}
+          <div style={{ gridColumn: "span 2" }}><span style={genLabel("pipe")}>Batten (pipe)</span>
+            <select value={value.pipe || ""} onChange={(e) => onChange({ pipe: e.target.value })} style={{ ...field, ...genStyle("pipe") }}>
+              <option value="">Default — {battenById(def.pipe).label}</option>
+              {BATTENS.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+            </select></div>
+          <div><span style={genLabel("batten")}>Batten len (ft)</span>
+            <OptNumF v={value.batten} placeholder={def.battenlen} set={(n) => onChange({ batten: n })} style={genStyle("batten")} /></div>
           <div><span style={genLabel("mode")}>Mode</span>
             <select value={mode} onChange={(e) => onChange({ mode: e.target.value as LinesetMode })} style={{ ...field, ...genStyle("mode") }}>
               <option value="motor">Motor</option><option value="dead">Dead-hung</option><option value="cw">Counterweight</option>
@@ -474,12 +549,17 @@ export function LinesetBuilder({
               </div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", margin: "14px 0 6px" }}>Soft goods</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {/* Labels track FABRIC_BY_TYPE_TIER (goods.ts) — the drape row
+                    first, then legs, which sit one grade down at every tier.
+                    The old labels named 16 oz Encore and 21 oz Marvel, neither
+                    of which any tier selects for a draw curtain (#50). */}
                 <div style={{ gridColumn: "1 / -1" }}><span style={label}>Fabric tier</span>
                   <select value={tier} onChange={(e) => setTier(e.target.value as GoodsTier)} style={field}>
-                    <option value="good">Good — 16 oz Encore</option>
-                    <option value="better">Better — 21 oz Marvel</option>
-                    <option value="best">Best — 25 oz Memorable</option>
+                    <option value="good">Good — 22 oz Encore (16 oz legs)</option>
+                    <option value="better">Better — 25 oz Charisma (22 oz legs)</option>
+                    <option value="best">Best — 25 oz Memorable (25 oz Charisma legs)</option>
                   </select>
+                  <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 4 }}>The CYC is seamless muslin at every tier.</div>
                 </div>
               </div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", margin: "14px 0 6px" }}>Gear weights (lb)</div>
@@ -535,6 +615,27 @@ export function LinesetBuilder({
             )}
           </div>
 
+          {/* Fabric failures, grouped by cause (#50). computeSetWeight zeroes
+              goods AND track when the fabric doesn't resolve, so without this
+              a broken catalog looks exactly like an unfilled row. No fallback
+              weight is invented — the gap is named, not papered over. */}
+          {fabricProblems.length > 0 && !showGrid && (
+            <div style={{ background: "#fbeceb", border: "1px solid #eccdc7", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, color: "#8c3a26", marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                {/* One template literal, not adjacent JSX children: an empty-string
+                    child between two text nodes swallowed the space before "can't". */}
+                {`⚠ ${fabricProblemCount} line${fabricProblemCount === 1 ? "" : "s"} can't be weighed — the fabric didn't resolve, so goods AND track weight are 0 lb`}
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
+                {fabricProblems.map((g) => (
+                  <li key={g.issue.message}>
+                    <strong>{g.lines.join(", ")}:</strong> {g.issue.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {showGrid ? (
             <div style={{ maxHeight: 560, overflow: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 480 }}>
@@ -574,6 +675,11 @@ export function LinesetBuilder({
                         <td style={{ ...td, fontWeight: 500 }}>
                           {r.line.name}
                           {r.s.warning && <span title={r.s.warning} style={{ color: "#b4543a", fontSize: 12, marginLeft: 6 }}>⚠</span>}
+                          {r.issue && (
+                            <div title={r.issue.message} style={{ fontSize: 11, fontWeight: 600, color: "#b4543a", marginTop: 2 }}>
+                              ⚠ {r.issue.short} — goods + track 0 lb
+                            </div>
+                          )}
                         </td>
                         <td style={{ ...td, textAlign: "right" }}>{weightCell(r.specified, r.c)}</td>
                         <td style={td}>{checkCell(r.specified, r.c, r.line.mode || def.mode)}</td>
@@ -593,14 +699,21 @@ export function LinesetBuilder({
                       )}
                     </Fragment>
                   ))}
-                  {extraRows.map(({ x, c }, i) => (
+                  {extraRows.map(({ x, c, issue }, i) => (
                     <Fragment key={x.xid}>
                       <tr onClick={() => setOpenKey(openKey === x.xid ? null : x.xid)} style={{ cursor: "pointer", background: openKey === x.xid ? "color-mix(in srgb, var(--accent) 5%, #fff)" : undefined }}>
                         <td style={{ ...td, color: "#9aa0ab", fontFamily: "var(--font-mono)" }}>{rows.length + i + 1}</td>
                         <td style={{ ...td, color: "#c4c9d2" }}>—</td>
                         <td style={{ ...td, color: "#c4c9d2", fontSize: 12 }}>custom</td>
                         <td style={td}><span style={{ display: "inline-block", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 5, color: "#5b616e", background: "#eef0f3" }}>Custom</span></td>
-                        <td style={{ ...td, fontWeight: 500 }}>{x.name}</td>
+                        <td style={{ ...td, fontWeight: 500 }}>
+                          {x.name}
+                          {issue && (
+                            <div title={issue.message} style={{ fontSize: 11, fontWeight: 600, color: "#b4543a", marginTop: 2 }}>
+                              ⚠ {issue.short} — goods + track 0 lb
+                            </div>
+                          )}
+                        </td>
                         <td style={{ ...td, textAlign: "right" }}>{weightCell(true, c)}</td>
                         <td style={td}>{checkCell(true, c, x.mode || def.mode)}</td>
                         <td style={{ ...td, color: "var(--accent)", fontSize: 12, fontWeight: 600 }}>{openKey === x.xid ? "▾" : "edit"}</td>

@@ -2,11 +2,12 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   type Calibration,
   calibrationScale,
+  clamp01,
   findCalibration,
   formatMeasure,
   MEASURE_UNITS,
@@ -34,6 +35,7 @@ import {
   calibrateAction,
   clearCalAction,
   createDraftQuoteAction,
+  movePlacementAction,
   placeDeviceAction,
   removePlacementAction,
   setVenueAction,
@@ -112,6 +114,46 @@ const OTHER_GROUP = "Other";
  *  isn't pixel-perfect on the marker center. */
 const DEVICE_HIT_RADIUS = 0.012;
 const DEVICE_SNAP_RADIUS = DEVICE_HIT_RADIUS * 1.5;
+
+/** Click-vs-drag threshold (punch #47), in SCREEN pixels rather than
+ *  normalized units: the plan zooms, and a "did the hand move?" test that
+ *  changes meaning with the zoom level would make a steady click write at one
+ *  zoom and not another. Below this the gesture is a plain click and keeps its
+ *  old toggle-select behavior — nothing is ever persisted. */
+const DRAG_PX = 4;
+
+/** Arrow-key nudge (punch #47) in normalized x-units; y divides by aspect so
+ *  a nudge covers the same on-screen distance both ways. Shift = coarse. */
+const NUDGE = 0.002;
+const NUDGE_FAST = 0.01;
+
+/** Coalesce key-repeat into one write — holding an arrow must not fire a
+ *  server action per keystroke. */
+const NUDGE_COMMIT_MS = 400;
+
+/** An in-flight marker drag (punch #47). `off` is the grab offset (pointer to
+ *  marker center) so the marker doesn't jump under the cursor; `cx/cy` are the
+ *  screen-pixel origin for the DRAG_PX test; `toggleOff` remembers that the
+ *  marker was already selected, so a click that never became a drag still
+ *  deselects exactly as it did before. */
+type MarkerDrag = {
+  id: string;
+  off: Point;
+  cx: number;
+  cy: number;
+  at: Point;
+  moved: boolean;
+  toggleOff: boolean;
+};
+
+/** An optimistic position (punch #47): where the client put a device, plus
+ *  the server position it replaces. Holding `base` is what makes the override
+ *  self-expiring WITHOUT an effect — it applies only while the server copy
+ *  still reads `base`, so the moment the refresh lands (or anything else, a
+ *  revision restore included, moves that device) the entry goes inert on its
+ *  own. Clearing it from an effect instead both races the refresh and trips
+ *  the compiler's no-setState-in-effect rule. */
+type MoveOverride = { at: Point; base: Point };
 
 /** Placement (if any) on `placements` whose marker the point `p` snaps to,
  *  using the same box-tolerance shape as the existing hit-test. Scans
@@ -199,6 +241,18 @@ export default function GridEditor({
   const [armedPartId, setArmedPartId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
 
+  // Repositioning (punch #47). Two pieces of local truth, both required:
+  //  - `drag` is the live gesture (nothing has been written yet);
+  //  - `movedLocal` is the OPTIMISTIC position of placements whose move has
+  //    been sent but whose refresh hasn't landed. Without it the marker snaps
+  //    back to its old spot the instant the pointer lifts: `project` is a
+  //    server prop and `router.refresh()` is fire-and-forget, so there is a
+  //    window where the action has committed and the props still say old.
+  //    Each entry expires by itself (see MoveOverride).
+  const [drag, setDrag] = useState<MarkerDrag | null>(null);
+  const [movedLocal, setMovedLocal] = useState<Record<string, MoveOverride>>({});
+  const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [calibrating, setCalibrating] = useState(false);
   const [calDraft, setCalDraft] = useState<Point[] | null>(null);
   const [pending, setPending] = useState<Pending>(null);
@@ -244,19 +298,64 @@ export default function GridEditor({
       .filter((p) => (q ? (p.sku + " " + p.desc).toLowerCase().includes(q) : true));
   }, [parts, search, groupFilter]);
 
-  const sheetPlacements = useMemo(
-    () => project.placements.filter((pl) => pl.sheetId === sheet?.id && pl.page === page),
-    [project.placements, sheet?.id, page]
-  );
+  /** Per-placement displacement from what the server currently says (punch
+   *  #47) — the live drag plus any committed-but-unrefreshed move. One map
+   *  drives BOTH the markers and the attached wire endpoints, so the picture
+   *  on screen mid-gesture is exactly what the store will write. */
+  const placementOffsets = useMemo(() => {
+    const m = new Map<string, { dx: number; dy: number }>();
+    const put = (id: string, at: Point) => {
+      const base = project.placements.find((q) => q.id === id);
+      if (!base) return;
+      const dx = at.x - base.x;
+      const dy = at.y - base.y;
+      if (dx !== 0 || dy !== 0) m.set(id, { dx, dy });
+      else m.delete(id);
+    };
+    for (const [id, o] of Object.entries(movedLocal)) {
+      const server = project.placements.find((q) => q.id === id);
+      // Spent: the refresh landed, or that device moved some other way.
+      if (!server || server.x !== o.base.x || server.y !== o.base.y) continue;
+      put(id, o.at);
+    }
+    if (drag && drag.moved) put(drag.id, drag.at); // the live gesture wins
+    return m;
+  }, [project.placements, movedLocal, drag]);
+
+  const sheetPlacements = useMemo(() => {
+    const base = project.placements.filter((pl) => pl.sheetId === sheet?.id && pl.page === page);
+    if (!placementOffsets.size) return base;
+    return base.map((pl) => {
+      const d = placementOffsets.get(pl.id);
+      return d ? { ...pl, x: clamp01(pl.x + d.dx), y: clamp01(pl.y + d.dy) } : pl;
+    });
+  }, [project.placements, sheet?.id, page, placementOffsets]);
   const pageSpaces = useMemo(
     () => (project.spaces || []).filter((s) => s.sheetId === sheet?.id && s.page === page),
     [project.spaces, sheet?.id, page]
   );
 
-  const pageRoutes = useMemo(
-    () => (project.routes || []).filter((r) => r.sheetId === sheet?.id && r.page === page),
-    [project.routes, sheet?.id, page]
-  );
+  const pageRoutes = useMemo(() => {
+    const base = (project.routes || []).filter((r) => r.sheetId === sheet?.id && r.page === page);
+    if (!placementOffsets.size) return base;
+    // Mirror of movePlacement()'s endpoint translation, so a wire follows its
+    // device while the pointer is still down instead of visibly detaching and
+    // snapping back a beat later. The store is the authority; this is the
+    // same arithmetic on the same delta.
+    return base.map((r) => {
+      const head = r.fromPlacementId ? placementOffsets.get(r.fromPlacementId) : undefined;
+      const tail = r.toPlacementId ? placementOffsets.get(r.toPlacementId) : undefined;
+      if (!head && !tail) return r;
+      const last = r.points.length - 1;
+      return {
+        ...r,
+        points: r.points.map((q, i) => {
+          const d = head && i === 0 ? head : tail && i === last ? tail : null;
+          return d ? { x: clamp01(q.x + d.dx), y: clamp01(q.y + d.dy) } : q;
+        }),
+      };
+    });
+  }, [project.routes, sheet?.id, page, placementOffsets]);
   const wireParts = useMemo(() => parts.filter((p) => isPerLengthUnit(p.unit)), [parts]);
 
   const lines = useMemo(() => bomLines(project.placements, parts), [project.placements, parts]);
@@ -291,6 +390,97 @@ export default function GridEditor({
 
   const armedPart = armedPartId ? partById.get(armedPartId) : null;
   const selectedPlacement = project.placements.find((pl) => pl.id === selected) || null;
+  /** Where a placement is being SHOWN right now (optimistic ⟶ server). */
+  const shownAt = useCallback(
+    (pl: GridPlacement): Point => {
+      const d = placementOffsets.get(pl.id);
+      return d ? { x: clamp01(pl.x + d.dx), y: clamp01(pl.y + d.dy) } : { x: pl.x, y: pl.y };
+    },
+    [placementOffsets]
+  );
+
+  /** Write a reposition (punch #47) — shared by the drag and the arrow-key
+   *  nudge. The optimistic entry goes in FIRST and is rolled back only if the
+   *  server refuses, so the marker never flickers back to where it was. */
+  const commitMove = useCallback(
+    (placementId: string, at: Point) => {
+      const server = project.placements.find((q) => q.id === placementId);
+      if (!server) return;
+      setMovedLocal((prev) => ({
+        ...prev,
+        [placementId]: { at, base: { x: server.x, y: server.y } },
+      }));
+      setErr(null);
+      setBusy(true);
+      movePlacementAction(project.id, { placementId, x: at.x, y: at.y }).then((r) => {
+        setBusy(false);
+        if (!r.ok) {
+          // Refused: drop the optimistic position so the marker returns to
+          // where the design actually has it, next to the error.
+          setErr(r.error);
+          setMovedLocal((prev) => {
+            if (!(placementId in prev)) return prev;
+            const next = { ...prev };
+            delete next[placementId];
+            return next;
+          });
+          return;
+        }
+        router.refresh();
+      });
+    },
+    [project.id, project.placements, router]
+  );
+
+  // Arrow-key nudge for the selected device (punch #47). Bound to the window
+  // because the plan is a div with no focus of its own; every text field in
+  // this editor (calibration/space entry, palette search, labor hours) would
+  // otherwise lose its arrow keys, hence the editable-target bail-out. Inert
+  // while any drawing mode owns the canvas.
+  useEffect(() => {
+    if (!selectedPlacement) return;
+    if (pending || calDraft || drag || spaceDrawing || wireDrawing) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const step = e.shiftKey ? NUDGE_FAST : NUDGE;
+      const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+      const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+      if (!dx && !dy) return;
+      e.preventDefault(); // don't scroll the plan out from under the device
+      const from = shownAt(selectedPlacement);
+      const at = { x: clamp01(from.x + dx), y: clamp01(from.y + dy / (aspect || 1)) };
+      // Paint every keystroke; write once the key-repeat settles.
+      setMovedLocal((prev) => ({
+        ...prev,
+        [selectedPlacement.id]: { at, base: { x: selectedPlacement.x, y: selectedPlacement.y } },
+      }));
+      if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
+      nudgeTimer.current = setTimeout(() => {
+        nudgeTimer.current = null;
+        commitMove(selectedPlacement.id, at);
+      }, NUDGE_COMMIT_MS);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    selectedPlacement,
+    shownAt,
+    commitMove,
+    aspect,
+    pending,
+    calDraft,
+    drag,
+    spaceDrawing,
+    wireDrawing,
+  ]);
+
+  // A pending nudge must not outlive the editor.
+  useEffect(() => () => {
+    if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
+  }, []);
 
   /** Null when the wrapper has no measurable size (sheet still loading, or
    *  the window is hidden): fabricating (0,0) instead would drop devices and
@@ -418,16 +608,32 @@ export default function GridEditor({
       return;
     }
 
-    // Select an existing marker when the click lands on one.
+    // Select an existing marker when the click lands on one — and arm a drag
+    // (punch #47). Nothing is written here: this gesture only becomes a move
+    // once the pointer travels DRAG_PX, so a plain click still just selects.
     // Same on-screen radius on both axes: y is a fraction of height, so the
     // x-tolerance divides by the aspect to stay circular on tall pages.
     const hit = [...sheetPlacements]
       .reverse()
-      .find((pl) => Math.abs(pl.x - p.x) < 0.012 && Math.abs(pl.y - p.y) < 0.012 / (aspect || 1));
+      .find(
+        (pl) =>
+          Math.abs(pl.x - p.x) < DEVICE_HIT_RADIUS &&
+          Math.abs(pl.y - p.y) < DEVICE_HIT_RADIUS / (aspect || 1)
+      );
     if (hit) {
-      setSelected(hit.id === selected ? null : hit.id);
+      setSelected(hit.id);
       setSelectedSpaceId(null);
       setSelectedRouteId(null);
+      setDrag({
+        id: hit.id,
+        off: { x: hit.x - p.x, y: hit.y - p.y },
+        cx: e.clientX,
+        cy: e.clientY,
+        at: { x: hit.x, y: hit.y },
+        moved: false,
+        toggleOff: hit.id === selected,
+      });
+      e.currentTarget.setPointerCapture?.(e.pointerId);
       return;
     }
     setSelected(null);
@@ -465,6 +671,16 @@ export default function GridEditor({
   }
 
   function onMove(e: React.PointerEvent) {
+    if (drag) {
+      // Until the hand has travelled DRAG_PX this is still a click: leave the
+      // marker exactly where it is so a shaky click can never nudge a device.
+      if (!drag.moved && Math.hypot(e.clientX - drag.cx, e.clientY - drag.cy) < DRAG_PX) return;
+      const p = toNorm(e);
+      if (!p) return;
+      const at = { x: clamp01(p.x + drag.off.x), y: clamp01(p.y + drag.off.y) };
+      setDrag((prev) => (prev ? { ...prev, at, moved: true } : prev));
+      return;
+    }
     if (!calDraft) return;
     const p = toNorm(e);
     if (!p) return;
@@ -472,6 +688,17 @@ export default function GridEditor({
   }
 
   function onUp() {
+    if (drag) {
+      const d = drag;
+      setDrag(null);
+      // Never travelled: this was a click, so keep the old toggle-select.
+      if (!d.moved) {
+        if (d.toggleOff) setSelected(null);
+        return;
+      }
+      commitMove(d.id, d.at);
+      return;
+    }
     if (!calDraft) return;
     const [a, b] = [calDraft[0], calDraft[calDraft.length - 1]];
     setCalDraft(null);
@@ -865,6 +1092,21 @@ export default function GridEditor({
               <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
                 by {selectedPlacement.by}
               </div>
+              {/* Position readout + nudge hint (punch #47). Percent of the
+                  page box is the honest unit here — it's what's stored, and
+                  it stays meaningful on an uncalibrated sheet. */}
+              {(() => {
+                const at = shownAt(selectedPlacement);
+                return (
+                  <div style={{ fontSize: 11, color: "#5b616e", marginTop: 6, fontFamily: "var(--font-mono)" }}>
+                    x {(at.x * 100).toFixed(1)}% · y {(at.y * 100).toFixed(1)}%
+                  </div>
+                );
+              })()}
+              <div style={{ fontSize: 10.5, color: "#8c919c", marginTop: 4, lineHeight: 1.45 }}>
+                Drag the marker to move it · arrow keys nudge (hold Shift for
+                bigger steps) · attached wires follow.
+              </div>
               <button
                 style={{ ...BTN, marginTop: 8, width: "100%", color: "#a0442b" }}
                 disabled={busy}
@@ -1066,10 +1308,15 @@ export default function GridEditor({
               onPointerDown={onDown}
               onPointerMove={onMove}
               onPointerUp={onUp}
+              // A cancelled pointer (browser gesture, lost capture) abandons
+              // the drag rather than committing wherever it stopped.
+              onPointerCancel={() => setDrag(null)}
               style={{
                 position: "relative",
                 lineHeight: 0,
-                cursor: pending ? "default" : calibrating || armedPart || spaceDrawing || wireDrawing ? "crosshair" : "default",
+                cursor: drag?.moved
+                  ? "grabbing"
+                  : pending ? "default" : calibrating || armedPart || spaceDrawing || wireDrawing ? "crosshair" : "default",
                 touchAction: "none",
                 background: "#fff",
                 boxShadow: "0 2px 14px rgba(0,0,0,.28)",
@@ -1355,9 +1602,9 @@ export default function GridEditor({
       </div>
 
       <div style={{ fontSize: 11.5, color: "#8c919c" }}>
-        Arm a device and click the plan to place each unit · click a marker to select it ·
-        click inside a space to select the room · the BOM prices every sheet in this
-        design, not just the visible page.
+        Arm a device and click the plan to place each unit · click a marker to select it,
+        drag it to move it (arrow keys nudge) · click inside a space to select the room ·
+        the BOM prices every sheet in this design, not just the visible page.
       </div>
     </div>
   );

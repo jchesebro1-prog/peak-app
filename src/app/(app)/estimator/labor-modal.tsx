@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { MOB_TYPES } from "./estimator-data";
-import { computeLabor, fmt, fmtTime, type RateFn } from "./pricing";
+import { computeLabor, fmt, fmtTime, round2, type RateFn, type RateSource } from "./pricing";
 import type { LaborDraft, MobDraft, TravelLite } from "./types";
 import { ACCENT_INK, ACCENT_SOFT, addBtnStyle, ConfigModal, LBL, LBL5, segBtn, Stat } from "./est-ui";
 
@@ -42,6 +42,64 @@ const DISC_OPTIONS: [string, string][] = [
   ["AUD", "Audio"],
   ["VID", "Video"],
 ];
+
+/** $50/hr · $52.50/hr — cents only when they exist (fmt()'s always-2 is noise here). */
+function perHr(n: number): string {
+  const v = round2(n);
+  return "$" + (Number.isInteger(v) ? v.toLocaleString("en-US") : v.toFixed(2)) + "/hr";
+}
+
+const CHIP_WARN: CSSProperties = {
+  fontFamily: "var(--font-ui)",
+  fontSize: 9,
+  fontWeight: 700,
+  letterSpacing: ".04em",
+  textTransform: "uppercase",
+  color: "#9a7d1f",
+  background: "#fffdf6",
+  border: "1px solid #efe4c4",
+  borderRadius: 5,
+  padding: "2px 5px",
+  whiteSpace: "nowrap",
+};
+
+/**
+ * Resolved $/hr for one rate sku, with its provenance made visible — a live
+ * catalog row shows the number alone; a hardcoded LABOR_RATES_FALLBACK value
+ * gets a "default" chip (item 54: a missing/renamed catalog row must not look
+ * like a real rate).
+ */
+function RateChip({ sku, label, rate }: { sku: string; label: string; rate: RateFn }) {
+  const src: RateSource = rate.source ? rate.source(sku) : "catalog";
+  return (
+    <span
+      style={{ display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}
+      title={
+        sku +
+        (src === "catalog"
+          ? " · live catalog rate (Catalog › Labor)"
+          : src === "fallback"
+            ? " · built-in default — no catalog row with this SKU"
+            : " · no rate found — priced at $0")
+      }
+    >
+      <span style={{ fontSize: 10.5, color: "#aab0bb" }}>{label}</span>
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 12,
+          fontWeight: 700,
+          color: src === "none" ? "#c0683a" : "#16181d",
+        }}
+      >
+        {perHr(rate(sku))}
+      </span>
+      {src !== "catalog" && (
+        <span style={CHIP_WARN}>{src === "none" ? "no rate" : "default"}</span>
+      )}
+    </span>
+  );
+}
 
 export default function LaborModal({
   secName,
@@ -85,6 +143,11 @@ export default function LaborModal({
   const lr = computeLabor(draft, rate);
   const valid = lr.totalCost > 0;
   const pctLabel = Math.round(lr.pct * 100) + "%";
+
+  // rate readout (item 54) — base installer rate always; OT / supervisor only
+  // when the current mobilization toggles actually bill them
+  const anyOt = lr.mobs.some((m) => (parseFloat(m.raw.otHrs) || 0) > 0);
+  const anySup = lr.mobs.some((m) => m.supHrs > 0);
 
   // travel-derived hints (round-trip mileage + >1h auto trip type, E3/E4)
   const autoRT = travel && travel.miles != null ? Math.round(travel.miles * 2) : null;
@@ -149,6 +212,25 @@ export default function LaborModal({
               {l}
             </button>
           ))}
+        </div>
+        {/* resolved $/hr for the selected scope — shows whether each rate is a
+            live catalog row or the built-in default (item 54) */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            flexWrap: "wrap",
+            marginTop: 10,
+            padding: "8px 11px",
+            border: "1px solid #eef0f3",
+            borderRadius: 9,
+            background: "#fafbfc",
+          }}
+        >
+          <RateChip sku={lr.disc + "-LBR"} label="Installer" rate={rate} />
+          {anyOt && <RateChip sku={lr.disc + "-OT"} label="Overtime" rate={rate} />}
+          {anySup && <RateChip sku={lr.disc + "-SUP"} label="Supervisor" rate={rate} />}
         </div>
       </div>
 
@@ -523,6 +605,19 @@ export default function LaborModal({
             · in-house hours (added once)
           </span>
         </label>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            flexWrap: "wrap",
+            marginBottom: 11,
+          }}
+        >
+          <RateChip sku="SHP-PM" label="PM" rate={rate} />
+          <RateChip sku="SHP-IN" label="In-house" rate={rate} />
+          <RateChip sku="DRF-SUB" label="Drafting" rate={rate} />
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
           <div>
             <label style={LBL5}>PM hrs</label>

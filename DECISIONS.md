@@ -2150,3 +2150,63 @@ items 35 + 25. Shapes and seams:
   `getEngagementForQuoteRef`, selected row only).
 - **#25:** display-string sweep only; nav already said "Consulting" (D117).
   URLs/keys/collection names unchanged.
+
+## D124 — Punch wave A (#47, #50 partial, #53, #54 partial, #55): defaults taken (2026-07-27)
+
+Five unblocked items from Jeff's 2026-07-27 punch list, built on branch
+`punch-2026-07-27-wave-a`. Each carried small calls that did not need his input;
+they are recorded here rather than asked.
+
+- **#47 Grid move — a move is NOT a revision.** `addRevision()` stays
+  manual/quote/restore only; wiring drags into it would flood the snapshot array
+  on every gesture.
+- **#47 — attached wires follow the device, by DELTA not by snap.** `GridRoute.points`
+  is independent of `fromPlacementId`/`toPlacementId`, so a naive move detaches the
+  drawn line. The matching endpoint is translated by the same delta inside the same
+  `patchDoc`, preserving the hand-drawn offset the wire was routed with. Coordinates
+  only — a move never changes `sheetId`/`page`, because a route lives on one page and
+  carrying a device across pages would strand its wires.
+- **#47 — move does not restamp `by`/`at`.** Those record who *placed* the device.
+- **#47 — 4 screen-pixel click/drag threshold**, measured on `clientX/Y` rather than
+  normalized units: the plan zooms, and a normalized threshold would make the same
+  steady hand write at one zoom and not another. Below the threshold the old
+  toggle-select path runs verbatim and nothing is written.
+- **#50 — no invented fallback weights.** When a drape's fabric fails to resolve,
+  `computeSetWeight` zeroes goods AND track. The fix NAMES the gap (row chip, grouped
+  banner, red-bordered select, `FABRIC UNRESOLVED` prefix in the CSV Check column)
+  and distinguishes *no Fabric parts in the catalog at all* from *this part has no
+  oz/yd²*, because they need different fixes. It does not paper over it with a default.
+- **#50 — Track "None" added at the SELECT layer, not to the shared `TRACKS` const.**
+  `steel.ts` is shared with the Steel Calculator and the Grid; a 0 lb/ft row would leak
+  into both. `steel.ts` was not touched.
+- **#50 — per-line pipe/batten override falls back to the global** (`L.pipe || def.pipe`;
+  blank batten length inherits `def.battenlen`, shown as the placeholder). Needed a new
+  `OptNumF` — `NumF` coerces every keystroke, which makes 0 the only expressible "unset".
+- **#50 — fabric tier labels corrected to the data** (`better` = 25 oz Charisma, not the
+  21 oz Marvel the UI claimed). The labels were wrong, not the mapping.
+- **#53 — the Sell box became `type="text"` with parse-on-blur.** A `number` input
+  cannot render `$` or `,` at all. Uses the existing `fmt()` (so it matches Price/Cost/
+  Freight in the same card) with `inputMode="decimal"` to keep the touch numpad; the
+  parse strips `$`, commas and spaces, and empty still yields 0 exactly as before.
+  Side effect worth knowing: the box now shows cents where it used to round to whole
+  dollars.
+- **#54 — provenance rides on the rate function, not a parallel prop.** `RateFn` gained
+  an OPTIONAL `.source(sku)`, so every existing `(sku) => number` caller still satisfies
+  the type and `makeLaborRate`'s resolution logic is unchanged. The modal marks any rate
+  that came from `LABOR_RATES_FALLBACK` — a missing or renamed catalog row was previously
+  indistinguishable from a real rate. Travel/equipment rates (`TVL-*`, `EQP-LIFT`) are
+  still silent: they are per-mile/night/day, not $/hr, and did not fit the strip.
+- **#55 — home routes now return their own child keys** (`/` → `dashboard`, `/queue` →
+  `queue`, …) instead of a shared `"home"`. `parentGroupOf` only matches CHILD keys, so a
+  Home group alone would still have left the pill dark on the app's most important route.
+  `activeKeyFor` has one consumer and `"home"` was otherwise dead.
+- **#55 — the BETA chip stays outside the Home link.** It is a status badge, not a nav
+  target. `nav-data.ts`'s comment claiming "the mark is the link" is now true rather than
+  aspirational.
+- **Rendering bug found in review:** an empty-string JSX child between two text nodes
+  swallowed the space before "can't" in the #50 banner ("1 linecan't be weighed"). Fixed
+  by emitting the sentence as one template literal.
+
+**Not built, waiting on Jeff:** #50's three-input reduction (blocked on where `battenLen`
+comes from — it is a hardcoded 44 ft driving batten weight, track weight and the bending
+check), #54's "redo the labor estimator", and #48/#49/#51/#52/#56/#58.

@@ -11,6 +11,7 @@ import {
   addSpace,
   clearSheetCalibration,
   getProject,
+  movePlacement,
   removePlacement,
   removeRoute,
   removeSpace,
@@ -93,6 +94,21 @@ export async function placeDeviceAction(
   const user = await requireUser();
   const p = await addPlacement(projectId, { ...input, by: user.name });
   if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/** Reposition an already-placed device (punch #47). Wires attached to it
+ *  follow — the store does that in the same patch. */
+export async function movePlacementAction(
+  projectId: string,
+  input: { placementId: string; x: number; y: number }
+): Promise<Result> {
+  await requireUser();
+  if (!Number.isFinite(input.x) || !Number.isFinite(input.y))
+    return { ok: false, error: "That drop point isn't on the sheet." };
+  const p = await movePlacement(projectId, input.placementId, { x: input.x, y: input.y });
+  if (!p) return { ok: false, error: "That device is no longer on this design." };
   revalidatePath(editorPath(projectId));
   return { ok: true };
 }
