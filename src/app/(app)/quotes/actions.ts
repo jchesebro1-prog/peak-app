@@ -15,10 +15,7 @@ import { syncFromQuotes } from "@/lib/stores/flame-jobs";
 import { syncFromQuotes as syncRepairsFromQuotes } from "@/lib/stores/repair-jobs";
 import { syncFromQuotes as syncInspectionsFromQuotes } from "@/lib/stores/inspections";
 import { syncProjectsFromQuotes } from "@/lib/stores/projects";
-import {
-  ensureEngagementForQuote,
-  syncEngagementsFromQuotes,
-} from "@/lib/stores/engagements";
+import { syncEngagementsFromQuotes } from "@/lib/stores/engagements";
 
 /**
  * Quote pipeline mutations — the QuoteStore calls the prototype makes from
@@ -40,8 +37,11 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
   if (status === "sent" && q.quoteType === "consulting") {
     // Spec §1 spawn model: SENDING a consulting proposal opens the
     // engagement at Proposal sent — winning later advances it to Awarded.
-    // Idempotent: re-sending finds the existing record.
-    await ensureEngagementForQuote(id, "proposal_sent");
+    // Routed through the sweep (not ensureEngagementForQuote) so the
+    // "sent while closed" reopen rule in engagementSyncAction fires
+    // immediately on re-send, instead of waiting for the next
+    // loadConsultingData safety-net pass. Idempotent either way.
+    await syncEngagementsFromQuotes();
   }
   if (status === "lost" && q.quoteType === "consulting") {
     // A proposal lost while still at Proposal sent closes its engagement

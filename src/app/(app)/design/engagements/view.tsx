@@ -444,7 +444,7 @@ function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngag
                 </Link>
               )}
               {eng.installQuoteId && (
-                <span style={{ fontSize: 11, color: "#9aa0ab" }}>Peak's bid on this spec — a reference, never a conversion</span>
+                <span style={{ fontSize: 11, color: "#9aa0ab" }}>Peak&apos;s bid on this spec — a reference, never a conversion</span>
               )}
             </div>
             {linkErr && <div style={{ fontSize: 11.5, color: "#a0442b" }}>{linkErr}</div>}

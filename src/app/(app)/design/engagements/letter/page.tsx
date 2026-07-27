@@ -221,31 +221,35 @@ export default async function ConsultingLetterPage({
               </p>
             )}
 
-            <div style={{ ...H2, color: accent }}>Professional fee</div>
-            {scopes.length ? null : pay.feeMode === "milestones" && pay.fees.length > 0 ? (
+            {scopes.length ? null : (
               <>
-                <p style={BODY}>{renderField(t, "consulting_proposal", "feeLineMilestones", vars)}</p>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 12.5, margin: "4px 0 12px" }}>
-                  <tbody>
-                    {pay.fees.map((f, i) => (
-                      <tr key={i} style={{ borderBottom: "1px solid #eef0f3" }}>
-                        <td style={{ padding: "7px 4px" }}>{f.name || `Milestone ${i + 1}`}</td>
-                        <td style={{ padding: "7px 4px", textAlign: "right", fontWeight: 600 }}>{money(f.amount)}</td>
-                      </tr>
-                    ))}
-                    <tr>
-                      <td style={{ padding: "9px 4px", fontWeight: 700 }}>Total</td>
-                      <td style={{ padding: "9px 4px", textAlign: "right", fontWeight: 700 }}>{money(total)}</td>
-                    </tr>
-                  </tbody>
-                </table>
+                <div style={{ ...H2, color: accent }}>Professional fee</div>
+                {pay.feeMode === "milestones" && pay.fees.length > 0 ? (
+                  <>
+                    <p style={BODY}>{renderField(t, "consulting_proposal", "feeLineMilestones", vars)}</p>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 12.5, margin: "4px 0 12px" }}>
+                      <tbody>
+                        {pay.fees.map((f, i) => (
+                          <tr key={i} style={{ borderBottom: "1px solid #eef0f3" }}>
+                            <td style={{ padding: "7px 4px" }}>{f.name || `Milestone ${i + 1}`}</td>
+                            <td style={{ padding: "7px 4px", textAlign: "right", fontWeight: 600 }}>{money(f.amount)}</td>
+                          </tr>
+                        ))}
+                        <tr>
+                          <td style={{ padding: "9px 4px", fontWeight: 700 }}>Total</td>
+                          <td style={{ padding: "9px 4px", textAlign: "right", fontWeight: 700 }}>{money(total)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </>
+                ) : (
+                  <p style={BODY}>{renderField(t, "consulting_proposal", "feeLineFixed", vars)}</p>
+                )}
+                <p style={{ ...BODY, fontSize: 11.5, color: "#5b616e" }}>
+                  {renderField(t, "consulting_proposal", "taxNote", vars)}
+                </p>
               </>
-            ) : (
-              <p style={BODY}>{renderField(t, "consulting_proposal", "feeLineFixed", vars)}</p>
             )}
-            <p style={{ ...BODY, fontSize: 11.5, color: "#5b616e" }}>
-              {renderField(t, "consulting_proposal", "taxNote", vars)}
-            </p>
 
             <div style={{ ...H2, color: accent }}>Terms</div>
             <p style={BODY}>{renderField(t, "consulting_proposal", "termsBlock", vars)}</p>
