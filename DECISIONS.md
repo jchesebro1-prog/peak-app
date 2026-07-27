@@ -2039,3 +2039,55 @@ record, no field-level tracking) is followed, these are the seams:
   `/repairs`, `/inspections`) — those screens have no `?id=` selection to
   deep-link; quotes (`/quotes?id=`), comms (`/inbox?thread=`), surveys
   (`/field-survey?id=`) and projects (`/projects?id=`) deep-link for real.
+
+## D122 — Customer custom fields + Mine/All scoping: shapes and seams (2026-07-26)
+
+Controller calls made to unblock plan 05 (#23/#22) — **flagged for Jeff's
+review**; spec §3 is followed (custom fields built without waiting for the
+export audit; Mine/All scoped nav entries first, per-person saved views
+deferred), these are the seams:
+
+- **Definitions vs values split:** `CustomFieldDef[]` lives in
+  `AppSettingsData.customerFieldDefs` (FULL-REPLACEMENT save, the wireTypes
+  idiom; `resolveFieldDefs(stored) = stored ?? []`, no code defaults, ≤30
+  defs); VALUES live in `companies.custom` jsonb (migration 0011), keyed by
+  def id. Ids are slugs minted server-side from the label at create and
+  IMMUTABLE after (they key stored values); the kind locks once created.
+  Field logic is pure + spec-covered (`lib/customer-fields.ts`, zero
+  imports). Dates are epoch-ms (local midnight); text ≤500 chars; select
+  values must match the def's options; unknown ids stripped server-side.
+- **Write-when-provided / preserve-when-undefined** on the customers store:
+  `lifecycle`/`keywords`/`custom` joined `CustomerDoc` as CONTENT fields.
+  `writeRecord` backfills absent fields from the existing row BEFORE the
+  D83 no-change check, and `contentKey` gives the three a canonical
+  serialization slot (position + defaults + sorted custom keys) — so a
+  Details-only edit registers as a change, while legacy writers (lead
+  convert, CSV importer, seed) neither clear values nor advance updatedAt.
+  `lib/identity/convert.ts` (D85 bootstrap) bypasses upsert entirely and is
+  untouched.
+- **Removing a def orphans its values silently** (they stay in the jsonb,
+  stop rendering, and are stripped on the next modal save) — accepted for
+  v1; an admin "purge orphaned values" pass can come later if wanted.
+- **Strict owner scoping** (`?who=`, the quotes canonicalization) on leads
+  and projects: `owner === name`, NOT unownedOrMine — unassigned leads keep
+  their own segment + claim flow and read 0 under any owner scope. Leads
+  counts are re-derived locally (metrics() stays unscoped/global);
+  followUps({owner}) reuses the store's existing opt. The drawer and the
+  project detail resolve deep links UNSCOPED on purpose.
+- **Leads segments:** `closed` → `won` | `lost` (`leads/segs.ts`, a
+  dependency-free allowlist module the spec harness pins); legacy
+  `?seg=closed` falls back to "all". No hardcoded closed links existed.
+- **OwnerSelect extracted** to `components/owner-select.tsx` (verbatim move;
+  quotes/controls re-exports so /quotes is untouched).
+- **Nav My-X children** are plain querystring hrefs; `activeKeyFor` stays
+  pathname-only and the overlay-close effect stays [pathname]-keyed — both
+  cosmetic limitations accepted rather than forcing useSearchParams (and
+  dynamic rendering) into the layout's Nav.
+- **"New (7d)"** (`?added=7d`) filters on `createdAt`, which post-D85 EVERY
+  company row has (composeDoc copies the notNull column; the converter
+  stamped legacy rows with the conversion run time) — legacy rows read as
+  new for a week after any reseed or the prod bootstrap (documented; real
+  creation dates are unrecoverable).
+- **DEFAULT_ACTOR wrinkle** (flagged, not fixed): non-quote projects default
+  owner "Jeff Chesebro" and no owner-editing UI exists on projects — "My
+  projects" is sparse for other users until one lands.

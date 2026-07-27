@@ -1641,7 +1641,26 @@ itself is deferred**, so the data stops being discarded.
 
 ---
 
-## 22. Navigation / module parity with Daylite's sidebar — OPEN
+## 22. Navigation / module parity with Daylite's sidebar — MINE/ALL SHIPPED (2026-07-26, plan 05); saved views still open
+
+**PARTIAL DONE 2026-07-26 (plan 05, D122) — the spec-§3 slice: Mine/All
+scoped views + nav entries.** Leads and Projects gained the quotes `?who=`
+idiom (mine | teammate | all; STRICT `owner === name` — unassigned leads
+deliberately keep their own segment + claim flow and read 0 under any owner
+scope), with every count/tile/board/worklist re-derived over the scoped set
+and `who` threaded through all hrefs. The leads **closed segment split into
+Won and Lost** (legacy `?seg=closed` deep links fall back to All). Nav
+gained **My Quotes / My Leads / My Projects** children (EST/CRM/PM). Known
+accepted wrinkles for Jeff: (a) `activeKeyFor` is pathname-only, so a My-X
+entry lights its base child, not itself; (b) the nav overlay-close effect
+keys on pathname, so clicking My Quotes while on /quotes leaves the dropdown
+open (fixing either means useSearchParams in Nav → dynamic layout — declined);
+(c) non-quote-derived projects default owner to "Jeff Chesebro"
+(DEFAULT_ACTOR) and projects have no owner-editing UI, so "My projects" is
+sparse for everyone else — needs an owner field on the project detail.
+Still open from this item: per-person saved views (B — deferred by spec),
+Learn (folds into Knowledge, wave ④), shared/team calendars (§7), tasks
+views (item 17 shipped its own).
 
 **Area:** `src/components/nav/nav-data.ts`, list screens across the app
 
@@ -1707,11 +1726,39 @@ pattern flagged in item 7.
 - **D. Shared/team calendars** — item 2 shipped a personal calendar; is an all-calendars or shared
   Peak calendar view wanted next?
 
-**Status:** OPEN — needs A–D. Items 17, 18, 19 and 20 close most of the Missing rows. **People and Companies nav entries exist since D85** (General group); the scoped-views/per-person-lists question (A/B) still stands for Phase 6.
+**Status:** MINE/ALL SHIPPED (plan 05) — A answered by spec §3 (scoped nav entries, in-page filters stay); B per-person saved views deferred; C Learn → Knowledge tab (wave ④); D team calendar wanted (§7). Residual wrinkles logged above.
 
 ---
 
-## 23. Customer / company record field parity — OPEN
+## 23. Customer / company record field parity — DONE (custom fields + lifecycle/keywords UI + added-7d, 2026-07-26, plan 05)
+
+**DONE 2026-07-26 (plan 05, D122).** Custom fields are REAL: admin-defined
+typed definitions (text / number / date / dropdown / checkbox, per-venue-type
+`appliesTo`, ≤30) live in Settings → Admin → Customer fields
+(`AppSettingsData.customerFieldDefs`, full-replacement save, server-validated);
+values live in a new `companies.custom` jsonb column (migration 0011) and are
+authored in the company edit modal's new **Details** section — which also
+finally surfaces the D85-stored **lifecycle** (Prospect/Customer/Past) and
+**keywords** (chip editor). The customer page shows a lifecycle pill +
+keyword chips in the header and a compact Details card of populated custom
+fields. Keywords authoring makes the opportunity board's keyword filter
+(item 18) live. The Companies list gained the **"New (7d)"** added-last-7-days
+toggle (`?added=7d`). Caveat: legacy rows show as new for a week after any
+reseed or the prod bootstrap — their `createdAt` is the D85 conversion time,
+not the true creation date (every row has one; no way to backfill the real
+dates).
+Store semantics: lifecycle/keywords/custom are write-when-provided /
+preserve-when-undefined, so the lead converter, CSV importer and seed remain
+byte-identical writers (D122). Pre-existing residual (predates plan 05, not
+touched): untouched modal re-saves of an OWNED company still bump Modified —
+composeDoc includes `owner` in the doc (so in contentKey) but
+saveCustomerAction never sends it, and empty-named sites compose
+`label: undefined` while the action coerces `"Venue"` — so the D83
+early-return only holds for ownerless records; a future contentKey
+canonicalization pass could close it. Remaining from the original ask: **F —
+referred-by as a linked person** (a custom text field holds it today; a real
+contact link waits on Phase-2 junctions), per-record permissions (never
+requested since), and the PO-box address line.
 
 **Area:** `src/lib/stores/customers.ts`, `src/app/(app)/customers/`
 
@@ -1790,7 +1837,7 @@ has no owner field), and nothing renders created/modified dates. **"Added in las
 - **F. Referral tracking** — a "Referred by" person link, or is the existing lead `source`
   picklist enough?
 
-**Status:** LARGELY LANDED via D85 — companies now carry type, lifecycle (Daylite category), keywords, website, mainPhone, HQ address, pricingTier (fallback), ownerUserId, referredByContactId and real timestamps as columns; contacts carry title, status (active/former/do_not_contact) and pricingTier. Remaining: UI for keywords/lifecycle editing, "added in last 7 days" view (F), and C (custom fields) still waits on the export audit.
+**Status:** DONE (plan 05) — custom fields + lifecycle/keywords UI + added-7d shipped; F (referred-by as a person link), per-record permissions and the PO-box line remain open.
 
 ---
 
