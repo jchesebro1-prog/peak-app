@@ -11,6 +11,7 @@
  */
 
 import shapesData from "./steel-shapes.json";
+import { battenLenFt, DEFAULT_VENUE_DIMS } from "./venue-dims";
 
 export type SteelShape = {
   id: string;
@@ -461,14 +462,22 @@ export type WeightDefaults = {
   hoist: string; // default hoist id
   beamspace: number; // max beam spacing (ft)
   pipe: string; // default batten id
-  battenlen: number; // default batten length (ft)
+  /** Default batten length (ft). DERIVED, not typed in: every live caller sets
+   *  this to battenLenFt(proWidthFt) (venue-dims.ts) before computing a line.
+   *  It stays on the defaults record so a per-line blank still has something to
+   *  inherit, and so computeSetWeight() keeps working standalone. */
+  battenlen: number;
   lines: number; // default lift lines
 };
 
 export const DEFAULT_WEIGHTS: WeightDefaults = {
   full: 50, cut: 6, hwPerFt: 0.5, defl: 120, df: 1, cwBat: false, wll: 0,
   mode: "motor", cableMgmt: false, hoist: "P1400", beamspace: 14,
-  pipe: 'Pipe 1-1/2" Sch40', battenlen: 44, lines: 6,
+  pipe: 'Pipe 1-1/2" Sch40',
+  // Was a hardcoded 44. Same number, but now stated as what it actually is:
+  // the default 40 ft proscenium plus 2 ft of overhang each side (punch #50).
+  battenlen: battenLenFt(DEFAULT_VENUE_DIMS.proWidthFt),
+  lines: 6,
 };
 
 /** One curtain/electric line in the weights schedule. Blank per-line values

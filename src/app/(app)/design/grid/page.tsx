@@ -4,6 +4,7 @@ import { listProjects } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { allCompanies } from "@/lib/identity/companies";
 import { bomTotals, routeLines } from "@/lib/design/grid-bom";
+import { priceGridCurtains } from "@/lib/design/grid-curtains";
 import { money, timeAgo } from "@/lib/format";
 import { createProjectAction } from "./actions";
 import DeleteProjectButton from "./delete-button";
@@ -91,6 +92,13 @@ export default async function GridIndexPage() {
           projects.map((p) => {
             const totals = bomTotals(p.placements || [], parts);
             const wireValue = routeLines(p.routes || [], parts, p.calibrations || []).value;
+            // Curtains (punch #49) price outside bomTotals, so the list total
+            // has to add them or a curtains-only design would read $0. No
+            // customer here, so this is the default margin, not a tier one:
+            // the list is an at-a-glance figure, the quote is the authority.
+            const curtainValue = [
+              ...priceGridCurtains(p.placements || [], parts).values(),
+            ].reduce((a, v) => a + v.priceEach, 0);
             return (
               <div
                 key={p.id}
@@ -118,7 +126,7 @@ export default async function GridIndexPage() {
                   </div>
                 </Link>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#16181d" }}>
-                  {money(totals.value + wireValue)}
+                  {money(totals.value + wireValue + curtainValue)}
                 </div>
                 {p.quoteId && (
                   <Link

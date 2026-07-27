@@ -18,12 +18,28 @@ import {
   bomBySpace,
   bomLines,
   bomTotals,
+  curtainDesc,
+  curtainLines,
+  curtainSpecOf,
+  GRID_CURTAIN_TYPES,
   isPerLengthUnit,
   routeLengthFt,
   routeLines,
+  type GridCurtain,
+  type GridCurtainType,
   type PartLite,
 } from "@/lib/design/grid-bom";
-import { GROUPS } from "@/lib/catalog-taxonomy";
+import {
+  categoryLayerKey,
+  GRID_LAYERS,
+  isLayerVisible,
+  normalizeCategory,
+  SCOPE_COLORS,
+  scopeLayerKey,
+  scopeOfPart,
+  type GridLayer,
+} from "@/lib/design/grid-scopes";
+import { curtainPriceEach, type FabricSell, type SellCoeffs } from "@/lib/curtain-geom";
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
@@ -36,10 +52,14 @@ import {
   clearCalAction,
   createDraftQuoteAction,
   movePlacementAction,
+  placeCurtainAction,
   placeDeviceAction,
   removePlacementAction,
+  setPlacementCategoryAction,
   setVenueAction,
 } from "./actions";
+import CurtainDrop from "./curtain-drop";
+import LayersPanel from "./layers-panel";
 import SpacesPanel from "./spaces-panel";
 import RevisionsPanel from "./revisions-panel";
 import WiresPanel from "./wires-panel";
@@ -101,11 +121,6 @@ function markerColor(category: string): string {
   for (let i = 0; i < category.length; i++) h = (h * 31 + category.charCodeAt(i)) | 0;
   return MARK_COLORS[Math.abs(h) % MARK_COLORS.length];
 }
-
-/** Palette group-filter sentinel (Task 6, punch #39) — parts whose resolved
- *  `group` is null (legacy/unmapped categories). Distinct from "" (All). */
-const OTHER_GROUP = "Other";
-
 /** Device marker hit-test radius (normalized 0..1 x-units; the existing
  *  selection test below divides by aspect for y, keeping the on-screen
  *  target circular on tall pages) — same value the click-to-select test
@@ -203,6 +218,8 @@ export default function GridEditor({
   project,
   sheets,
   parts,
+  fabrics,
+  curtainCoeffs,
   laborParts,
   laborHoursPerDevice,
   specHref,
@@ -211,6 +228,10 @@ export default function GridEditor({
   project: ProjectLite;
   sheets: SheetLite[];
   parts: PartLite[];
+  /** Catalog fabric rows with SELL price/sq ft (punch #49) - never cost. */
+  fabrics: FabricSell[];
+  /** Sell-side making coefficients for the live curtain price (punch #49). */
+  curtainCoeffs: SellCoeffs;
   /** Catalog labor rows (role "labor") for the auto-suggest (D114). */
   laborParts: LaborPartLite[];
   /** Install-hours-per-device knob from the pricing rules. */
@@ -233,13 +254,32 @@ export default function GridEditor({
   const [err, setErr] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
-  // Palette group filter (Task 6, punch #39): "" = All (today's exact
-  // behavior, every device part); one of the six beta GROUPS; or OTHER for
-  // parts whose category has no group mapping (legacy taxonomy — never
-  // hidden, just bucketed).
-  const [groupFilter, setGroupFilter] = useState("");
+  // Palette SCOPE filter (punch #48, replacing Task #39's group filter):
+  // "" = All (today's exact behavior, every device part); one of Jeff's five
+  // scopes; or Unscoped for parts the catalog taxonomy can't place (never
+  // hidden, just bucketed). This is the "what can I arm" control ONLY -
+  // layer visibility below is a separate axis and the two never touch.
+  const [scopeFilter, setScopeFilter] = useState("");
   const [armedPartId, setArmedPartId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+
+  /** Hidden LAYERS (punch #48) - namespaced keys, scopes and user categories
+   *  together (grid-scopes). View state, not design state: which layers one
+   *  person has folded away is not a property of the drawing, so it is not
+   *  persisted and never rides in a revision. */
+  const [hiddenLayers, setHiddenLayers] = useState<string[]>([]);
+  const hiddenSet = useMemo(() => new Set(hiddenLayers), [hiddenLayers]);
+  const toggleLayer = useCallback((key: string) => {
+    setHiddenLayers((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  }, []);
+
+  // Curtain drop-in (punch #49): arm a type, click the plan, spec it there.
+  const [armedCurtainType, setArmedCurtainType] = useState<GridCurtainType | null>(null);
+  const [curtainAt, setCurtainAt] = useState<Point | null>(null);
+  /** Inline category editor for the selected placement (null = closed). */
+  const [categoryDraft, setCategoryDraft] = useState<string | null>(null);
 
   // Repositioning (punch #47). Two pieces of local truth, both required:
   //  - `drag` is the live gesture (nothing has been written yet);
@@ -287,16 +327,60 @@ export default function GridEditor({
     const q = search.trim().toLowerCase();
     return parts
       .filter((p) => {
-        if (!groupFilter) return true; // All — identical to pre-Task-6 behavior.
+        if (!scopeFilter) return true; // All - identical to pre-Task-6 behavior.
         // Fabric/Labor rows aren't placeable devices. "All" already showed
         // them before this task (verified: no prior exclusion existed), so
         // that legacy behavior stays untouched above; every specific bucket
-        // (a named group, or Other) excludes them.
+        // (a named scope, or Unscoped) excludes them. Fabric reaches the plan
+        // through the curtain drop-in (#49), never as an armed device.
         if (p.category === "Fabric" || p.category === "Labor") return false;
-        return groupFilter === OTHER_GROUP ? !p.group : p.group === groupFilter;
+        return scopeOfPart(p) === scopeFilter;
       })
       .filter((p) => (q ? (p.sku + " " + p.desc).toLowerCase().includes(q) : true));
-  }, [parts, search, groupFilter]);
+  }, [parts, search, scopeFilter]);
+
+  /* ------------------------- scopes + layers (#48) ------------------------- */
+
+  /** The scope one placement belongs to. A curtain IS the Curtains scope by
+   *  construction (#49); everything else resolves through the catalog
+   *  taxonomy, so remapping a category in the Catalog re-buckets it here. */
+  const scopeOfPlacement = useCallback(
+    (pl: GridPlacement): GridLayer =>
+      pl.curtain ? "Curtains" : scopeOfPart(partById.get(pl.partId)),
+    [partById]
+  );
+
+  const placementVisible = useCallback(
+    (pl: GridPlacement) =>
+      isLayerVisible(scopeOfPlacement(pl), normalizeCategory(pl.category), hiddenSet),
+    [scopeOfPlacement, hiddenSet]
+  );
+
+  /** Whole-project counts for the layer list - a scope you can't see on this
+   *  page is still a scope in this design. */
+  const scopeCounts = useMemo(() => {
+    const m = new Map<GridLayer, number>();
+    for (const pl of project.placements) {
+      const s = scopeOfPlacement(pl);
+      m.set(s, (m.get(s) || 0) + 1);
+    }
+    for (const r of project.routes || []) {
+      const s = scopeOfPart(partById.get(r.partId));
+      m.set(s, (m.get(s) || 0) + 1);
+    }
+    return m;
+  }, [project.placements, project.routes, scopeOfPlacement, partById]);
+
+  const categoryCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const pl of project.placements) {
+      const c = normalizeCategory(pl.category);
+      if (c) m.set(c, (m.get(c) || 0) + 1);
+    }
+    return [...m.entries()]
+      .map(([key, count]) => ({ key, count }))
+      .sort((a, b) => a.key.localeCompare(b.key));
+  }, [project.placements]);
 
   /** Per-placement displacement from what the server currently says (punch
    *  #47): the live drag plus any committed-but-unrefreshed move. One map
@@ -330,6 +414,16 @@ export default function GridEditor({
       return d ? { ...pl, x: clamp01(pl.x + d.dx), y: clamp01(pl.y + d.dy) } : pl;
     });
   }, [project.placements, sheet?.id, page, placementOffsets]);
+  /**
+   * What the canvas may show, hit-test, select and drag (punch #48). Every
+   * gesture on the plan reads THIS list, never `sheetPlacements`: a hidden
+   * marker that could still be grabbed by a stray click would be worse than
+   * no layers at all, and drag-to-move (punch #47) makes that a real risk.
+   */
+  const visiblePlacements = useMemo(
+    () => sheetPlacements.filter(placementVisible),
+    [sheetPlacements, placementVisible]
+  );
   const pageSpaces = useMemo(
     () => (project.spaces || []).filter((s) => s.sheetId === sheet?.id && s.page === page),
     [project.spaces, sheet?.id, page]
@@ -356,6 +450,15 @@ export default function GridEditor({
       };
     });
   }, [project.routes, sheet?.id, page, placementOffsets]);
+  /** A wire run belongs to its part's scope, and hides with it (#48). Routes
+   *  carry no user category - only a placed item can be labelled. */
+  const visibleRoutes = useMemo(
+    () =>
+      pageRoutes.filter(
+        (r) => !hiddenSet.has(scopeLayerKey(scopeOfPart(partById.get(r.partId))))
+      ),
+    [pageRoutes, hiddenSet, partById]
+  );
   const wireParts = useMemo(() => parts.filter((p) => isPerLengthUnit(p.unit)), [parts]);
 
   const lines = useMemo(() => bomLines(project.placements, parts), [project.placements, parts]);
@@ -364,6 +467,34 @@ export default function GridEditor({
     () => routeLines(project.routes || [], parts, project.calibrations),
     [project.routes, parts, project.calibrations]
   );
+
+  /* ------------------------------ curtains (#49) ------------------------------ */
+
+  const fabricBySku = useMemo(() => new Map(fabrics.map((f) => [f.sku, f])), [fabrics]);
+  const fabricNames = useMemo(
+    () => new Map(fabrics.map((f) => [f.sku, f.name])),
+    [fabrics]
+  );
+  /** Sell price per dropped curtain, from customer-safe sell numbers. The
+   *  server recomputes this authoritatively at quote time from the cost basis
+   *  it alone holds; the two match to the cent (see lib/curtain-geom). */
+  const curtainPrices = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const pl of project.placements) {
+      if (!pl.curtain) continue;
+      const fabric = fabricBySku.get(pl.curtain.fabricSku);
+      m.set(
+        pl.id,
+        curtainPriceEach(curtainSpecOf(pl.curtain), fabric?.pricePerSqft || 0, curtainCoeffs)
+      );
+    }
+    return m;
+  }, [project.placements, fabricBySku, curtainCoeffs]);
+  const curtains = useMemo(
+    () => curtainLines(project.placements, curtainPrices, fabricNames),
+    [project.placements, curtainPrices, fabricNames]
+  );
+  const curtainValue = curtains.reduce((a, l) => a + l.ext, 0);
 
   // Labor suggestions (D114): the rule proposes; overrides let the human
   // adjust hours or exclude a line before the quote mints.
@@ -382,14 +513,19 @@ export default function GridEditor({
   const includedLabor = laborRows.filter((l) => l.included && l.hours > 0);
   const laborValue = includedLabor.reduce((a, l) => a + l.ext, 0);
 
-  const grandValue = totals.value + wires.value + laborValue;
+  const grandValue = totals.value + wires.value + laborValue + curtainValue;
   const spaceRollups = useMemo(
-    () => bomBySpace(project.placements, parts, project.spaces || []),
-    [project.placements, parts, project.spaces]
+    () => bomBySpace(project.placements, parts, project.spaces || [], curtainPrices),
+    [project.placements, parts, project.spaces, curtainPrices]
   );
 
   const armedPart = armedPartId ? partById.get(armedPartId) : null;
-  const selectedPlacement = project.placements.find((pl) => pl.id === selected) || null;
+  /** Selection follows visibility (#48): hiding a layer must not leave a
+   *  selected-but-invisible device wired to the arrow-key nudge and the
+   *  Remove button. Derived rather than cleared from an effect, so it can't
+   *  race a refresh. */
+  const selectedPlacement =
+    project.placements.find((pl) => pl.id === selected && placementVisible(pl)) || null;
   /** Where a placement is being SHOWN right now (optimistic ⟶ server). */
   const shownAt = useCallback(
     (pl: GridPlacement): Point => {
@@ -439,7 +575,7 @@ export default function GridEditor({
   // while any drawing mode owns the canvas.
   useEffect(() => {
     if (!selectedPlacement) return;
-    if (pending || calDraft || drag || spaceDrawing || wireDrawing) return;
+    if (pending || curtainAt || calDraft || drag || spaceDrawing || wireDrawing) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       const tag = t?.tagName;
@@ -471,6 +607,7 @@ export default function GridEditor({
     commitMove,
     aspect,
     pending,
+    curtainAt,
     calDraft,
     drag,
     spaceDrawing,
@@ -519,7 +656,8 @@ export default function GridEditor({
   }
 
   function onDown(e: React.PointerEvent) {
-    if (busy || pending || !sheet) return;
+    // The curtain dialog owns the canvas exactly like `pending` does (#49).
+    if (busy || pending || curtainAt || !sheet) return;
     const p = toNorm(e);
     if (!p) return;
 
@@ -563,8 +701,14 @@ export default function GridEditor({
         // device wire only when BOTH its first and last waypoint snap onto
         // a placed device on this same sheet/page — free routes (either
         // end off a device) behave exactly as before.
-        const fromPlacement = snappedPlacement(points[0], sheetPlacements, aspect);
-        const toPlacement = snappedPlacement(points[points.length - 1], sheetPlacements, aspect);
+        // Visible devices only: a wire must not snap onto a marker the
+        // designer can't see (#48).
+        const fromPlacement = snappedPlacement(points[0], visiblePlacements, aspect);
+        const toPlacement = snappedPlacement(
+          points[points.length - 1],
+          visiblePlacements,
+          aspect
+        );
         let fromPlacementId: string | undefined;
         let toPlacementId: string | undefined;
         if (fromPlacement && toPlacement) {
@@ -613,7 +757,8 @@ export default function GridEditor({
     // once the pointer travels DRAG_PX, so a plain click still just selects.
     // Same on-screen radius on both axes: y is a fraction of height, so the
     // x-tolerance divides by the aspect to stay circular on tall pages.
-    const hit = [...sheetPlacements]
+    // Hidden layers are not hit-testable (#48) - visible markers only.
+    const hit = [...visiblePlacements]
       .reverse()
       .find(
         (pl) =>
@@ -622,6 +767,7 @@ export default function GridEditor({
       );
     if (hit) {
       setSelected(hit.id);
+      setCategoryDraft(null);
       setSelectedSpaceId(null);
       setSelectedRouteId(null);
       setDrag({
@@ -637,6 +783,14 @@ export default function GridEditor({
       return;
     }
     setSelected(null);
+    setCategoryDraft(null);
+
+    // Curtain drop-in (#49): the type was armed in the sidebar, so the click
+    // just decides WHERE - the dialog gathers the five fields at that spot.
+    if (armedCurtainType) {
+      setCurtainAt(p);
+      return;
+    }
 
     if (armedPart) {
       setErr(null);
@@ -656,7 +810,7 @@ export default function GridEditor({
     }
 
     // Nothing armed: a wire is a finer target than a room, so routes first…
-    const nearRoute = [...pageRoutes]
+    const nearRoute = [...visibleRoutes]
       .reverse()
       .find((r) => distToPolyline(p, r.points, aspect) < 0.012);
     if (nearRoute) {
@@ -706,6 +860,35 @@ export default function GridEditor({
     if (Math.abs(a.x - b.x) < 0.005 && Math.abs(a.y - b.y) < 0.005) return;
     setEntry("");
     setPending({ kind: "calibrate", a, b });
+  }
+
+  /** Persist a placement's user-defined category (punch #48). "" clears it. */
+  async function saveCategory(placementId: string, label: string) {
+    setBusy(true);
+    const r = await setPlacementCategoryAction(project.id, placementId, label);
+    setBusy(false);
+    setCategoryDraft(null);
+    if (!r.ok) setErr(r.error);
+    else router.refresh();
+  }
+
+  /** Persist a dropped curtain (punch #49). The server re-validates every
+   *  field and prices the line from the cost basis it alone holds. */
+  async function dropCurtain(curtain: GridCurtain) {
+    if (!sheet || !curtainAt) return;
+    setErr(null);
+    setBusy(true);
+    const r = await placeCurtainAction(project.id, {
+      sheetId: sheet.id,
+      page,
+      x: curtainAt.x,
+      y: curtainAt.y,
+      curtain,
+    });
+    setBusy(false);
+    setCurtainAt(null);
+    if (!r.ok) setErr(r.error);
+    else router.refresh();
   }
 
   async function confirmSpace() {
@@ -801,6 +984,8 @@ export default function GridEditor({
               setWireDrawing(false);
               setWireDraft([]);
               setSelectedRouteId(null);
+              setCurtainAt(null);
+              setCategoryDraft(null);
             }}
             style={{ ...BTN, fontWeight: 500 }}
           >
@@ -839,9 +1024,9 @@ export default function GridEditor({
         <button style={BTN} onClick={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))}>+</button>
         {isPdf && pages > 1 && (
           <>
-            <button style={BTN} disabled={page <= 1} onClick={() => { setPage((p) => p - 1); setSelected(null); setSelectedSpaceId(null); setSpaceDrawing(false); setSpaceDraft([]); setWireDrawing(false); setWireDraft([]); setSelectedRouteId(null); }}>‹</button>
+            <button style={BTN} disabled={page <= 1} onClick={() => { setPage((p) => p - 1); setSelected(null); setSelectedSpaceId(null); setSpaceDrawing(false); setSpaceDraft([]); setWireDrawing(false); setWireDraft([]); setSelectedRouteId(null); setCurtainAt(null); }}>‹</button>
             <span style={{ fontSize: 12, color: "#5b616e" }}>{page} / {pages}</span>
-            <button style={BTN} disabled={page >= pages} onClick={() => { setPage((p) => p + 1); setSelected(null); setSelectedSpaceId(null); setSpaceDrawing(false); setSpaceDraft([]); setWireDrawing(false); setWireDraft([]); setSelectedRouteId(null); }}>›</button>
+            <button style={BTN} disabled={page >= pages} onClick={() => { setPage((p) => p + 1); setSelected(null); setSelectedSpaceId(null); setSpaceDrawing(false); setSpaceDraft([]); setWireDrawing(false); setWireDraft([]); setSelectedRouteId(null); setCurtainAt(null); }}>›</button>
           </>
         )}
       </div>
@@ -865,16 +1050,22 @@ export default function GridEditor({
               style={INPUT}
             />
             <select
-              value={groupFilter}
-              onChange={(e) => setGroupFilter(e.target.value)}
+              value={scopeFilter}
+              onChange={(e) => setScopeFilter(e.target.value)}
+              title="Scope filter: what you can arm. Hiding a layer is separate."
               style={{ ...INPUT, marginTop: 6 }}
             >
-              <option value="">All</option>
-              {GROUPS.map((g) => (
-                <option key={g} value={g}>{g}</option>
+              <option value="">All scopes</option>
+              {GRID_LAYERS.map((s) => (
+                <option key={s} value={s}>{s}</option>
               ))}
-              <option value={OTHER_GROUP}>Other</option>
             </select>
+            {armedPart && hiddenSet.has(scopeLayerKey(scopeOfPart(armedPart))) && (
+              <div style={{ marginTop: 6, fontSize: 10.5, color: "#a0442b", lineHeight: 1.4 }}>
+                The {scopeOfPart(armedPart)} layer is hidden, so what you place
+                won&apos;t show until you turn it back on.
+              </div>
+            )}
             {armedPart ? (
               <div style={{ marginTop: 8, fontSize: 11.5, color: "#2e7d55", fontWeight: 600 }}>
                 Painting: {armedPart.sku} — click the plan to place.{" "}
@@ -898,6 +1089,7 @@ export default function GridEditor({
                     <button
                       onClick={() => {
                         setArmedPartId(on ? null : p.id);
+                        setArmedCurtainType(null);
                         setSelected(null);
                         setSpaceDrawing(false);
                         setSpaceDraft([]);
@@ -978,7 +1170,7 @@ export default function GridEditor({
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
                   <button
                     style={{ ...BTN, padding: "4px 8px", fontSize: 11 }}
-                    onClick={() => { setCalibrating(true); setArmedPartId(null); setSelected(null); setSpaceDrawing(false); setSpaceDraft([]); setWireDrawing(false); setWireDraft([]); }}
+                    onClick={() => { setCalibrating(true); setArmedPartId(null); setArmedCurtainType(null); setSelected(null); setSpaceDrawing(false); setSpaceDraft([]); setWireDrawing(false); setWireDraft([]); }}
                   >
                     Recalibrate
                   </button>
@@ -1001,13 +1193,72 @@ export default function GridEditor({
                 </div>
                 <button
                   style={{ ...BTN, width: "100%", background: calibrating ? "#16181d" : "#fff", color: calibrating ? "#fff" : "#3d424e", borderColor: calibrating ? "#16181d" : "#dfe2e8" }}
-                  onClick={() => { setCalibrating(true); setArmedPartId(null); setSelected(null); setSpaceDrawing(false); setSpaceDraft([]); setWireDrawing(false); setWireDraft([]); }}
+                  onClick={() => { setCalibrating(true); setArmedPartId(null); setArmedCurtainType(null); setSelected(null); setSpaceDrawing(false); setSpaceDraft([]); setWireDrawing(false); setWireDraft([]); }}
                 >
                   {calibrating ? "Draw the reference…" : "Calibrate this page"}
                 </button>
               </>
             )}
           </div>
+
+          {/* curtains (punch #49) - a drop-in, not a catalog pick */}
+          <div style={PANEL}>
+            <div style={PANEL_LABEL}>Curtains</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+              {GRID_CURTAIN_TYPES.map((t) => {
+                const on = t === armedCurtainType;
+                return (
+                  <button
+                    key={t}
+                    style={{
+                      ...BTN,
+                      padding: "5px 6px",
+                      background: on ? "#16181d" : "#fff",
+                      color: on ? "#fff" : "#3d424e",
+                      borderColor: on ? "#16181d" : "#dfe2e8",
+                    }}
+                    disabled={busy}
+                    onClick={() => {
+                      setArmedCurtainType(on ? null : t);
+                      setArmedPartId(null);
+                      setCalibrating(false);
+                      setSelected(null);
+                      setSelectedSpaceId(null);
+                      setSpaceDrawing(false);
+                      setSpaceDraft([]);
+                      setWireDrawing(false);
+                      setWireDraft([]);
+                      setSelectedRouteId(null);
+                      setPending(null);
+                      setCurtainAt(null);
+                    }}
+                  >
+                    {t}s
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 7, fontSize: 11, color: armedCurtainType ? "#2e7d55" : "#8c919c", fontWeight: armedCurtainType ? 600 : 400, lineHeight: 1.45 }}>
+              {armedCurtainType
+                ? `Dropping a ${armedCurtainType.toLowerCase()}: click the plan, then give it a name and size.`
+                : "Pick a type, click the plan, then specify name, size, fullness and fabric. Priced like the estimator."}
+            </div>
+            {fabrics.length === 0 && (
+              <div style={{ marginTop: 6, fontSize: 10.5, color: "#a0442b" }}>
+                No fabric rows in the catalog yet, and a curtain needs one to price.
+              </div>
+            )}
+          </div>
+
+          {/* layers (punch #48) - visibility of what's already placed */}
+          <LayersPanel
+            scopeCounts={scopeCounts}
+            categoryCounts={categoryCounts}
+            hidden={hiddenSet}
+            scopeColor={(s) => SCOPE_COLORS[s]}
+            onToggle={toggleLayer}
+            onShowAll={() => setHiddenLayers([])}
+          />
 
           {/* spaces (D109) */}
           <SpacesPanel
@@ -1021,6 +1272,7 @@ export default function GridEditor({
               setSpaceDrawing(true);
               setSpaceDraft([]);
               setArmedPartId(null);
+              setArmedCurtainType(null);
               setCalibrating(false);
               setSelected(null);
               setSelectedSpaceId(null);
@@ -1045,7 +1297,9 @@ export default function GridEditor({
           <WiresPanel
             projectId={project.id}
             wireParts={wireParts}
-            pageRoutes={pageRoutes}
+            /* The list matches the canvas: a run in a hidden scope is out of
+               sight and out of this list too (#48). */
+            pageRoutes={visibleRoutes}
             calibrations={project.calibrations}
             calibrated={Boolean(cal)}
             wiring={wireDrawing}
@@ -1058,6 +1312,7 @@ export default function GridEditor({
               setWireDrawing(true);
               setWireDraft([]);
               setArmedPartId(null);
+              setArmedCurtainType(null);
               setCalibrating(false);
               setSpaceDrawing(false);
               setSpaceDraft([]);
@@ -1082,16 +1337,71 @@ export default function GridEditor({
           {/* selected placement */}
           {selectedPlacement && (
             <div style={{ ...PANEL, background: "#fdf4e7", border: "1px solid #f0dcbb" }}>
-              <div style={PANEL_LABEL}>Selected device</div>
+              <div style={PANEL_LABEL}>
+                {selectedPlacement.curtain ? "Selected curtain" : "Selected device"}
+              </div>
               <div style={{ fontSize: 12, color: "#16181d", fontWeight: 600 }}>
-                {selectedPlacement.partId}
+                {selectedPlacement.curtain
+                  ? selectedPlacement.curtain.name
+                  : selectedPlacement.partId}
               </div>
               <div style={{ fontSize: 11.5, color: "#5b616e", marginTop: 2 }}>
-                {partById.get(selectedPlacement.partId)?.desc || "No longer in the catalog"}
+                {selectedPlacement.curtain
+                  ? curtainDesc(
+                      selectedPlacement.curtain,
+                      fabricNames.get(selectedPlacement.curtain.fabricSku)
+                    )
+                  : partById.get(selectedPlacement.partId)?.desc || "No longer in the catalog"}
               </div>
+              {selectedPlacement.curtain && (
+                <div style={{ fontSize: 11.5, color: "#16181d", fontWeight: 600, marginTop: 3 }}>
+                  {moneyFmt(curtainPrices.get(selectedPlacement.id) || 0)}
+                </div>
+              )}
               <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
-                by {selectedPlacement.by}
+                {scopeOfPlacement(selectedPlacement)} · by {selectedPlacement.by}
               </div>
+
+              {/* User-defined category (punch #48/#41) - open-ended by
+                  design: assign now, consume later. Orthogonal to the scope
+                  above and to whatever space the marker happens to sit in. */}
+              {categoryDraft === null ? (
+                <button
+                  style={{ ...BTN, marginTop: 7, width: "100%", padding: "4px 8px", fontSize: 11, fontWeight: 500 }}
+                  onClick={() => setCategoryDraft(normalizeCategory(selectedPlacement.category) || "")}
+                >
+                  {normalizeCategory(selectedPlacement.category)
+                    ? `Category: ${normalizeCategory(selectedPlacement.category)}`
+                    : "+ Add a category"}
+                </button>
+              ) : (
+                <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
+                  <input
+                    value={categoryDraft}
+                    onChange={(e) => setCategoryDraft(e.target.value)}
+                    list="grid-category-suggestions"
+                    placeholder="Followspots, House left…"
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setCategoryDraft(null);
+                      if (e.key === "Enter") saveCategory(selectedPlacement.id, categoryDraft);
+                    }}
+                    style={{ ...INPUT, fontSize: 11.5, padding: "4px 7px" }}
+                    autoFocus
+                  />
+                  <datalist id="grid-category-suggestions">
+                    {categoryCounts.map((c) => (
+                      <option key={c.key} value={c.key} />
+                    ))}
+                  </datalist>
+                  <button
+                    style={{ ...BTN, padding: "4px 9px", fontSize: 11 }}
+                    disabled={busy}
+                    onClick={() => saveCategory(selectedPlacement.id, categoryDraft)}
+                  >
+                    Save
+                  </button>
+                </div>
+              )}
               {/* Position readout + nudge hint (punch #47). Percent of the
                   page box is the honest unit here, it's what's stored, and
                   it stays meaningful on an uncalibrated sheet. */}
@@ -1119,7 +1429,7 @@ export default function GridEditor({
                   else router.refresh();
                 }}
               >
-                Remove device
+                {selectedPlacement.curtain ? "Remove curtain" : "Remove device"}
               </button>
             </div>
           )}
@@ -1127,7 +1437,7 @@ export default function GridEditor({
           {/* BOM */}
           <div style={PANEL}>
             <div style={PANEL_LABEL}>Bill of materials</div>
-            {lines.length === 0 && wires.lines.length === 0 ? (
+            {lines.length === 0 && wires.lines.length === 0 && curtains.length === 0 ? (
               <div style={{ fontSize: 11.5, color: "#8c919c" }}>
                 Paint devices onto the plan to build the BOM.
               </div>
@@ -1187,6 +1497,21 @@ export default function GridEditor({
                     {wires.unmeasured} unmeasured wire run{wires.unmeasured === 1 ? "" : "s"} excluded.
                   </div>
                 )}
+                {/* Curtains (punch #49): one line each, never grouped - two
+                    drapes of one fabric are different goods once their
+                    dimensions differ. */}
+                {curtains.map((l) => (
+                  <div key={`c-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
+                    <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>1×</strong>
+                    <span
+                      style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                      title={l.desc}
+                    >
+                      {l.curtainName}
+                    </span>
+                    <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
+                  </div>
+                ))}
                 {laborRows.length > 0 && (
                   <div style={{ borderTop: "1px dashed #e3e5ea", marginTop: 4, paddingTop: 5, display: "grid", gap: 4 }}>
                     <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab" }}>
@@ -1249,7 +1574,7 @@ export default function GridEditor({
                 color: "#fff",
                 borderColor: "#16181d",
               }}
-              disabled={busy || (lines.length === 0 && wires.lines.length === 0)}
+              disabled={busy || (lines.length === 0 && wires.lines.length === 0 && curtains.length === 0)}
               onClick={async () => {
                 setErr(null);
                 setBusy(true);
@@ -1316,7 +1641,11 @@ export default function GridEditor({
                 lineHeight: 0,
                 cursor: drag?.moved
                   ? "grabbing"
-                  : pending ? "default" : calibrating || armedPart || spaceDrawing || wireDrawing ? "crosshair" : "default",
+                  : pending || curtainAt
+                    ? "default"
+                    : calibrating || armedPart || armedCurtainType || spaceDrawing || wireDrawing
+                      ? "crosshair"
+                      : "default",
                 touchAction: "none",
                 background: "#fff",
                 boxShadow: "0 2px 14px rgba(0,0,0,.28)",
@@ -1435,8 +1764,9 @@ export default function GridEditor({
                     strokeWidth={2}
                   />
                 )}
-                {/* wire routes (D110) — dashed polylines with a length chip */}
-                {pageRoutes.map((r) => {
+                {/* wire routes (D110) - dashed polylines with a length chip.
+                    Hidden scopes take their wires with them (#48). */}
+                {visibleRoutes.map((r) => {
                   const part = partById.get(r.partId);
                   const c = markerColor(part?.category || "Wire");
                   const on = r.id === selectedRouteId;
@@ -1496,19 +1826,39 @@ export default function GridEditor({
                     ))}
                   </g>
                 )}
-                {sheetPlacements.map((pl) => {
+                {visiblePlacements.map((pl) => {
                   const part = partById.get(pl.partId);
-                  const c = markerColor(part?.category || "");
+                  // A curtain reads as its scope's color and a drape glyph, so
+                  // a plan full of devices doesn't swallow it (#48/#49).
+                  const c = pl.curtain
+                    ? SCOPE_COLORS.Curtains
+                    : markerColor(part?.category || "");
                   const x = pl.x * size.w;
                   const y = pl.y * size.h;
                   const on = pl.id === selected;
+                  const label = pl.curtain ? pl.curtain.name : pl.partId;
                   return (
                     <g key={pl.id}>
-                      <circle cx={x} cy={y} r={10} fill={c} opacity={0.92} />
-                      <circle cx={x} cy={y} r={10} fill="none" stroke="#fff" strokeWidth={1.5} />
-                      <rect x={x + 12} y={y - 8} width={Math.max(30, pl.partId.length * 6.4) + 8} height={16} rx={4} fill="#fff" stroke={c} strokeWidth={1} opacity={0.95} />
+                      {pl.curtain ? (
+                        <>
+                          <rect x={x - 11} y={y - 8} width={22} height={16} rx={2} fill={c} opacity={0.92} />
+                          <rect x={x - 11} y={y - 8} width={22} height={16} rx={2} fill="none" stroke="#fff" strokeWidth={1.5} />
+                          <path
+                            d={`M ${x - 7} ${y - 6} L ${x - 7} ${y + 6} M ${x} ${y - 6} L ${x} ${y + 6} M ${x + 7} ${y - 6} L ${x + 7} ${y + 6}`}
+                            stroke="#fff"
+                            strokeWidth={1}
+                            opacity={0.75}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <circle cx={x} cy={y} r={10} fill={c} opacity={0.92} />
+                          <circle cx={x} cy={y} r={10} fill="none" stroke="#fff" strokeWidth={1.5} />
+                        </>
+                      )}
+                      <rect x={x + 12} y={y - 8} width={Math.max(30, label.length * 6.4) + 8} height={16} rx={4} fill="#fff" stroke={c} strokeWidth={1} opacity={0.95} />
                       <text x={x + 16} y={y + 4} fill={c} fontSize={10.5} fontWeight={700} style={{ fontFamily: "inherit" }}>
-                        {pl.partId}
+                        {label}
                       </text>
                       {on && (
                         <circle cx={x} cy={y} r={15} fill="none" stroke="#16181d" strokeDasharray="4 3" strokeWidth={1.5} />
@@ -1528,6 +1878,29 @@ export default function GridEditor({
                   />
                 )}
               </svg>
+
+              {/* curtain drop-in (punch #49) - anchored where it was dropped,
+                  same on-canvas idiom as the calibration/space entry */}
+              {curtainAt && armedCurtainType && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${curtainAt.x * 100}%`,
+                    top: `${curtainAt.y * 100}%`,
+                    transform: "translate(6px, 6px)",
+                    zIndex: 6,
+                  }}
+                >
+                  <CurtainDrop
+                    type={armedCurtainType}
+                    fabrics={fabrics}
+                    coeffs={curtainCoeffs}
+                    busy={busy}
+                    onConfirm={dropCurtain}
+                    onCancel={() => setCurtainAt(null)}
+                  />
+                </div>
+              )}
 
               {/* inline entry — window.prompt is unavailable here */}
               {pending && (() => {

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import type { GridSpace } from "@/lib/stores/grid-projects";
-import type { SpaceRollup } from "@/lib/design/grid-bom";
+import type { RollupSlice, SpaceRollup } from "@/lib/design/grid-bom";
+import { scopeColor } from "@/lib/design/grid-scopes";
 import { removeSpaceAction, renameSpaceAction } from "./actions";
 
 /**
@@ -36,6 +37,49 @@ const INPUT: React.CSSProperties = {
 
 function moneyFmt(n: number): string {
   return "$" + Math.round(n).toLocaleString("en-US");
+}
+
+/**
+ * Scope / category breakdown for one space (punch #48). Jeff: "those
+ * categories should track through with the spaces as well" - before this a
+ * space knew only a flat count and value, so the answer to "what's the
+ * lighting in the booth?" was to count markers by eye.
+ *
+ * Categories deliberately do NOT sum to the space total: they are opt-in
+ * labels, and most placements carry none.
+ */
+function Breakdown({
+  title,
+  slices,
+  color,
+}: {
+  title: string;
+  slices: RollupSlice[];
+  color?: (key: string) => string;
+}) {
+  if (slices.length === 0) return null;
+  return (
+    <div style={{ marginTop: 5, display: "grid", gap: 2 }}>
+      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#b4b9c2" }}>
+        {title}
+      </div>
+      {slices.map((s) => (
+        <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#8c919c" }}>
+          <span
+            aria-hidden
+            style={{
+              width: 7, height: 7, borderRadius: 2, flex: "0 0 auto",
+              background: color ? color(s.key) : "#c4c9d2",
+            }}
+          />
+          <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {s.key}
+          </span>
+          <span>{s.count} · {moneyFmt(s.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function SpacesPanel({
@@ -104,28 +148,39 @@ export default function SpacesPanel({
             const r = rollupById.get(s.id);
             const on = s.id === selectedSpaceId;
             return (
-              <button
-                key={s.id}
-                onClick={() => { onSelect(on ? null : s.id); setRenameDraft(null); setArmDelete(false); }}
-                style={{
-                  ...BTN,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7,
-                  fontWeight: 500,
-                  padding: "5px 8px",
-                  background: on ? "#f4f0e9" : "#fff",
-                  borderColor: on ? "#d9cbb2" : "#dfe2e8",
-                }}
-              >
-                <span style={{ width: 10, height: 10, borderRadius: 3, background: s.color, flex: "0 0 auto" }} />
-                <span style={{ flex: 1, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {s.name}
-                </span>
-                <span style={{ fontSize: 11, color: "#8c919c" }}>
-                  {r ? `${r.count} · ${moneyFmt(r.value)}` : "empty"}
-                </span>
-              </button>
+              <div key={s.id}>
+                <button
+                  onClick={() => { onSelect(on ? null : s.id); setRenameDraft(null); setArmDelete(false); }}
+                  style={{
+                    ...BTN,
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    fontWeight: 500,
+                    padding: "5px 8px",
+                    background: on ? "#f4f0e9" : "#fff",
+                    borderColor: on ? "#d9cbb2" : "#dfe2e8",
+                  }}
+                >
+                  <span style={{ width: 10, height: 10, borderRadius: 3, background: s.color, flex: "0 0 auto" }} />
+                  <span style={{ flex: 1, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {s.name}
+                  </span>
+                  <span style={{ fontSize: 11, color: "#8c919c" }}>
+                    {r ? `${r.count} · ${moneyFmt(r.value)}` : "empty"}
+                  </span>
+                </button>
+                {/* The scope/category split rides UNDER the row and only for
+                    the selected space - every space expanded at once is the
+                    "busy" Jeff was complaining about. */}
+                {on && r && (
+                  <div style={{ padding: "2px 8px 4px" }}>
+                    <Breakdown title="By scope" slices={r.byScope} color={scopeColor} />
+                    <Breakdown title="Your categories" slices={r.byCategory} />
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>

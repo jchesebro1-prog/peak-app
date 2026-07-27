@@ -2885,7 +2885,15 @@ Do not pick up standalone; the rebuild session owns the nav.
 
 ---
 
-## 47. The Grid: move/reposition items after they are placed, BUILT 2026-07-27 (D124), BROWSER-UNVERIFIED
+## 47. The Grid: move/reposition items after they are placed, DONE 2026-07-27 (D124/D125)
+
+> **Verified 2026-07-27** on a restored dev database with blob storage off (data-URL sheet fallback).
+> Placed a device, nudged it with the arrow keys, confirmed the x/y readout moved (85.5% to 84.3%)
+> and that the new position survived a full reload. The arrow keys and the mouse drag share one
+> `commitMove`, so the store action, the persistence and the readout are all proven.
+> **The mouse-drag GESTURE itself is still unproven:** the browser automation cannot emit a
+> press, move, release sequence with intermediate motion, and the 4 px threshold needs it.
+> Jeff, please drag a marker once with a real mouse and confirm.
 
 > **Built** on `punch-2026-07-27-wave-a`: `movePlacement()` + `movePlacementAction`, drag-to-move
 > with optimistic local state, a 4-screen-pixel click/drag threshold, arrow-key nudge (Shift =
@@ -2932,7 +2940,20 @@ place → select → **Remove device** → re-place.
 
 ---
 
-## 48. The Grid: per-discipline filters / layers + user-defined categories that track through Spaces, OPEN
+## 48. The Grid: per-discipline filters / layers + user-defined categories that track through Spaces, DONE 2026-07-27 (D125)
+
+> **Jeff's answer:** the buckets are his five as a Grid-specific list, Lighting / Rigging /
+> Curtains / Audio / Video, plus user-defined categories.
+> **Built and browser-verified.** New `src/lib/design/grid-scopes.ts` maps the catalog groups and
+> trades onto the five, with a named `Unscoped` catch-all (ungrouped AV parts land there rather
+> than being guessed between Audio and Video; mapping them in the Catalog screen promotes them).
+> The palette filter now offers the five scopes. A separate LAYERS panel toggles visibility of
+> PLACED items: verified that hiding Curtains removed the marker from the plan (2 markers to 1)
+> while the BOM kept both lines and the full total. A hidden marker cannot be clicked or dragged,
+> which matters now that #47 exists. Per-placement user categories are stored on the placement
+> and appear in the layer toggles. Space rollups gained a per-scope and per-category breakdown.
+> **Known limits:** layer visibility is view state, not persisted per user, and ungrouped AV parts
+> sit in Unscoped until someone maps those categories.
 
 **Area:** The Grid: `src/app/(app)/design/grid/[id]/editor.tsx`, `src/lib/design/grid-bom.ts`,
 `src/lib/catalog-taxonomy.ts`, `src/app/(app)/design/grid/[id]/spaces-panel.tsx`
@@ -2982,7 +3003,19 @@ together; don't scope #41's category field without this.
 
 ---
 
-## 49. The Grid: curtains as a first-class drop-in (Border/Draw/Full/Leg + config dialog), OPEN
+## 49. The Grid: curtains as a first-class drop-in (Border/Draw/Full/Leg + config dialog), DONE 2026-07-27 (D125)
+
+> **Jeff's answer:** a Grid curtain is a priced line like the estimator's, not a catalog part you
+> pick first and not a marker-only annotation.
+> **Built and browser-verified.** The CURTAINS panel arms one of Borders / Draws / Fulls / Legs;
+> clicking the plan opens a dialog with Name, Fabric, Width, Height and Fullness, exactly the
+> estimator's field set. Verified end to end: a 64 x 8 ft Border at 50% fullness priced live at
+> **768 sq ft sewn, $2,788**, landed on the BOM as its own line and rolled into the space total.
+> Cost basis stays server-side (the editor prices through the customer-safe `curtain-geom`
+> mirror, never `design/curtain-pricing`). Curtains ride on the placement array, so drag, nudge,
+> spaces, revisions and delete all work with no second code path.
+> **Not unified:** three other curtain vocabularies still exist (quick engine, goods, lineset).
+> The Grid's four are Border/Draw/Full/Leg.
 
 **Area:** The Grid palette + a new curtain drop dialog; mirrors `src/app/(app)/estimator/curtain-modal.tsx`
 **Reported:** 2026-07-27
@@ -3023,7 +3056,23 @@ determines how `bomLines` (`grid-bom.ts:68`) prices it, since it looks up parts 
 
 ---
 
-## 50. Lineset Builder: curtains/tracks/pipe not filling out + reduce to three dimension inputs, PARTIALLY BUILT 2026-07-27 (D124)
+## 50. Lineset Builder: curtains/tracks/pipe not filling out + reduce to three dimension inputs, DONE 2026-07-27 (D124/D125)
+
+> **Three-input reduction DONE and verified 2026-07-27.** Jeff answered the batten question, and
+> his answer was wider than this item: **batten length = PRO width + 4 ft (2 ft of overhang each
+> side), everywhere pipe length is calculated.** One helper, `battenLenFt()` in `venue-dims.ts`,
+> now feeds the lineset defaults, the steel weight model and the estimator's Pipe line.
+> Venue inputs are now PRO width, PRO height and stage depth only; `stageWidthFt` is gone from
+> `LinesetInputs` and dropped on load from saved designs. Browser-verified: PRO width 60 gives
+> 64 ft battens, and every weight and capacity check recalculates (two shell lines correctly
+> flip to over-capacity). The per-line override still wins.
+> Also per Jeff: **scenery track now follows the pipe rule** instead of raw stage width.
+> **Deliberately NOT changed:** the acoustic shell ceiling (an area, not pipe), the aircraft-cable
+> run (grid geometry), and the Steel Calculator's free Length field (no venue context).
+> **Non-proscenium rooms:** Jeff's call is that pipe spans the entered room width with NO overhang,
+> which is what the code already does. The related drape-oversizing bug in
+> `venueDimsFromEstimator` (it maps `width` to `proWidthFt` for every venue kind) is UNCHANGED
+> and still open.
 
 > **Built and browser-verified** on `punch-2026-07-27-wave-a`: (a) the silent fabric failure is now
 > NAMED: per-row chip, a banner grouped by cause, a red-bordered fabric select and a

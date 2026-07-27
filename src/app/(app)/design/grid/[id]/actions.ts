@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { findCalibration, type Calibration, type MeasureUnit, type Point } from "@/lib/annotations";
 import {
+  addCurtainPlacement,
   addPlacement,
   addRevision,
   addRoute,
@@ -17,6 +18,7 @@ import {
   removeSpace,
   renameSpace,
   restoreRevision,
+  setPlacementCategory,
   setQuote,
   setSheetCalibration,
   setVenue,
@@ -25,7 +27,18 @@ import { docLocId, getSite } from "@/lib/identity/sites";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
-import { bomLines, bomTotals, isPerLengthUnit, routeLines } from "@/lib/design/grid-bom";
+import {
+  bomLines,
+  bomTotals,
+  curtainLines,
+  GRID_CURTAIN_TYPES,
+  GRID_FULLNESS,
+  isPerLengthUnit,
+  routeLines,
+  type BomLine,
+  type GridCurtain,
+} from "@/lib/design/grid-bom";
+import { isFabricRow, priceGridCurtains } from "@/lib/design/grid-curtains";
 import { polygonArea } from "@/lib/design/grid-geometry";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
@@ -109,6 +122,95 @@ export async function movePlacementAction(
     return { ok: false, error: "That drop point isn't on the sheet." };
   const p = await movePlacement(projectId, input.placementId, { x: input.x, y: input.y });
   if (!p) return { ok: false, error: "That device is no longer on this design." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/* ------------------------------ curtains (#49) ------------------------------ */
+
+/** Sanity ceiling on a drape dimension, in feet - a typo like 400 for 40 would
+ *  otherwise quote five figures of fabric without a murmur. */
+const MAX_CURTAIN_FT = 300;
+
+/**
+ * Drop a specced curtain onto the plan (punch #49). The dialog gathers Name,
+ * Width, Height, Fullness and Fabric - Jeff's list - and this is where every
+ * one of them is checked; the client's live price is a preview, the fabric
+ * rate and the money come from the catalog here and at quote time.
+ */
+export async function placeCurtainAction(
+  projectId: string,
+  input: {
+    sheetId: string;
+    page: number;
+    x: number;
+    y: number;
+    curtain: {
+      type: string;
+      name: string;
+      widthFt: number;
+      heightFt: number;
+      fullnessPct: number;
+      fabricSku: string;
+    };
+    category?: string;
+  }
+): Promise<Result> {
+  const user = await requireUser();
+  const c = input.curtain;
+  if (!(GRID_CURTAIN_TYPES as readonly string[]).includes(c.type))
+    return { ok: false, error: "Pick a curtain type: Border, Draw, Full or Leg." };
+  const name = (c.name || "").trim();
+  if (!name) return { ok: false, error: "Name the curtain: 'Main Grand Drape', 'US Border'…" };
+  const width = Number(c.widthFt);
+  const height = Number(c.heightFt);
+  if (!(width > 0) || !(height > 0))
+    return { ok: false, error: "Width and height must both be positive numbers of feet." };
+  if (width > MAX_CURTAIN_FT || height > MAX_CURTAIN_FT)
+    return { ok: false, error: `That drape is over ${MAX_CURTAIN_FT} ft, check the dimensions.` };
+  if (!GRID_FULLNESS.some((f) => f.pct === Number(c.fullnessPct)))
+    return { ok: false, error: "Fullness must be Flat, 50%, 75% or 100%." };
+  const fabric = await getPart(c.fabricSku);
+  if (!fabric || !isFabricRow(fabric))
+    return { ok: false, error: "Pick a fabric from the catalog's fabric rows." };
+
+  const curtain: GridCurtain = {
+    type: c.type as GridCurtain["type"],
+    name: name.slice(0, 80),
+    widthFt: width,
+    heightFt: height,
+    fullnessPct: Number(c.fullnessPct),
+    fabricSku: fabric.id,
+  };
+  const p = await addCurtainPlacement(projectId, {
+    sheetId: input.sheetId,
+    page: input.page,
+    x: input.x,
+    y: input.y,
+    curtain,
+    category: (input.category || "").trim().slice(0, 40),
+    by: user.name,
+  });
+  if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/* --------------------- user-defined categories (#48/#41) --------------------- */
+
+/**
+ * Label one placement with a user-defined category, or clear it with "".
+ * Deliberately unvalidated against any list: Jeff asked for user-defined
+ * categories, which means the vocabulary is his, not ours.
+ */
+export async function setPlacementCategoryAction(
+  projectId: string,
+  placementId: string,
+  category: string
+): Promise<Result> {
+  await requireUser();
+  const p = await setPlacementCategory(projectId, placementId, category || "");
+  if (!p) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
   return { ok: true };
 }
@@ -340,10 +442,31 @@ export async function createDraftQuoteAction(
   if (!placements.length && !routes.length)
     return { ok: false, error: "Place a device or route a wire first." };
 
+  // Venue + tier stamp (D113.6): same resolution as estimator quotes (D87);
+  // re-stamped on every mint/update while the quote is still a draft. The tier
+  // margin is resolved BEFORE pricing because curtains price through it (#49),
+  // exactly as the estimator and the portal do.
+  const tier = await resolveTier(project.customerId);
+
   const catalog = await listCatalog();
   const devLines = bomLines(placements, catalog);
   const devTotals = bomTotals(placements, catalog);
   const wires = routeLines(routes, catalog, project.calibrations || []);
+
+  // Curtains (punch #49) - priced HERE, server-side, from the authoritative
+  // cost model. The editor's sidebar price is a customer-safe mirror of this
+  // same math and matches to the cent; this is the number that gets quoted.
+  const curtainPrices = priceGridCurtains(placements, catalog, tier.margin);
+  const fabricNames = new Map(
+    catalog.filter(isFabricRow).map((p) => [p.id, p.desc] as const)
+  );
+  const curtains = curtainLines(
+    placements,
+    new Map([...curtainPrices].map(([id, v]) => [id, v.priceEach])),
+    fabricNames
+  );
+  const curtainValue = curtains.reduce((a, l) => a + l.ext, 0);
+  const curtainCostTotal = [...curtainPrices.values()].reduce((a, v) => a + v.costEach, 0);
 
   // Labor rides in only as hours against real catalog labor rows — the
   // client proposes, the server prices (D114).
@@ -364,25 +487,29 @@ export async function createDraftQuoteAction(
     });
   }
 
-  const lines = [
+  const lines: BomLine[] = [
     ...devLines,
     ...wires.lines,
+    ...curtains,
     ...labor.map((l) => ({ partId: l.sku, desc: l.desc, unit: l.unit, qty: l.qty, list: l.price, ext: l.ext })),
   ];
-  const value = devTotals.value + wires.value + labor.reduce((a, l) => a + l.ext, 0);
-  const cost = devTotals.cost + wires.cost + labor.reduce((a, l) => a + l.cost, 0);
+  const value =
+    devTotals.value + wires.value + curtainValue + labor.reduce((a, l) => a + l.ext, 0);
+  const cost =
+    devTotals.cost + wires.cost + curtainCostTotal + labor.reduce((a, l) => a + l.cost, 0);
   const totals = { value, margin: value > 0 ? (value - cost) / value : 0 };
 
-  // Venue + tier stamp (D113.6): same resolution as estimator quotes (D87);
-  // re-stamped on every mint/update while the quote is still a draft.
-  const tier = await resolveTier(project.customerId);
   const site = project.siteId ? await getSite(project.siteId) : null;
   const locationId = site ? docLocId(site) : null;
   const spec = {
     kind: "grid",
     gridProjectId: project.id,
     lines: lines.map((l) => ({
-      sku: l.partId,
+      // A curtain line's partId is its PLACEMENT id, not a catalog id (#49):
+      // it has no SKU because it isn't a stocked part, and putting "gp-4f2a…"
+      // in front of a customer would be nonsense. The description carries the
+      // name, type, dimensions, fullness and fabric.
+      sku: l.kind === "curtain" ? "CURTAIN" : l.partId,
       desc: l.desc,
       qty: l.qty,
       unit: l.unit,

@@ -7,7 +7,11 @@ import { isOpenEngagement } from "@/lib/consulting-review";
 import { sitesForCompany } from "@/lib/identity/sites";
 import { frac } from "@/lib/stores/pricing";
 import { getSettings } from "@/lib/settings";
-import { groupOf, resolveCategoryMap } from "@/lib/catalog-taxonomy";
+import { groupOf, resolveCategoryMap, tradeOf } from "@/lib/catalog-taxonomy";
+import { fabricSellPerSqft, sellCoeffs } from "@/lib/curtain-pricing";
+import { resolveTier } from "@/lib/pricing-tiers";
+import { fabricAreaRate, isFabricRow } from "@/lib/design/grid-curtains";
+import type { FabricSell } from "@/lib/curtain-geom";
 import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
 import GridEditor from "./editor";
@@ -78,7 +82,30 @@ export default async function GridEditorPage({
     ...(p.ports && p.ports.length > 0 ? { ports: p.ports } : {}),
     ...(p.datasheetBlobKey ? { hasDatasheet: true } : {}),
     group: groupOf(p, categoryMap),
+    // Punch #48: the Grid's scope taxonomy folds group -> scope, and falls
+    // back to the trade for the parts that have no beta group (all of the
+    // rigging hardware). Resolved here for the same reason `group` is - the
+    // category map lives on the server and the editor stays dumb.
+    trade: tradeOf(p, categoryMap),
   }));
+
+  /**
+   * Curtain drop-in (punch #49): the fabric list and the sell coefficients for
+   * the editor's live price preview. These are SELL numbers only - the margin
+   * and the cost basis stay on the server (lib/design/curtain-pricing is never
+   * imported by the editor). The preview matches the quote to the cent because
+   * both run the same two-term model at the same tier margin.
+   */
+  const tier = await resolveTier(project.customerId);
+  const fabrics: FabricSell[] = catalog
+    .filter(isFabricRow)
+    .map((p) => ({
+      sku: p.id,
+      name: p.desc,
+      pricePerSqft: fabricSellPerSqft(fabricAreaRate(p), tier.margin),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const curtainCoeffs = sellCoeffs(tier.margin);
   const laborParts: LaborPartLite[] = catalog
     .filter((p) => (p.role || "").toLowerCase() === "labor")
     .map((p) => ({
@@ -117,6 +144,8 @@ export default async function GridEditorPage({
         dataUrl: s.blobPath ? `/api/grid-sheets/${encodeURIComponent(s.id)}` : s.dataUrl,
       }))}
       parts={parts}
+      fabrics={fabrics}
+      curtainCoeffs={curtainCoeffs}
       laborParts={laborParts}
       laborHoursPerDevice={laborHoursPerDevice}
       specHref={specHref}

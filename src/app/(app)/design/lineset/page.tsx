@@ -14,16 +14,28 @@ import {
 
 export const metadata = { title: "Lineset Builder — Quartzite-6" };
 
-/** v2 records predate the PRO dimensions. Backfill them from the defaults so an
- *  old saved design opens with working goods geometry rather than zero-size
- *  drapes. The stage dimensions in the record are preserved as-is. */
-function backfillProDims(inp: Partial<LinesetInputs> | undefined): LinesetInputs {
-  return {
-    ...DEFAULT_LINESET_INPUTS,
-    ...(inp || {}),
-    proWidthFt: inp?.proWidthFt ?? DEFAULT_LINESET_INPUTS.proWidthFt,
-    proHeightFt: inp?.proHeightFt ?? DEFAULT_LINESET_INPUTS.proHeightFt,
-  };
+/**
+ * Normalize a stored input block of ANY vintage into today's LinesetInputs.
+ *
+ * Two jobs, both key-by-key rather than by spread:
+ * - BACKFILL. v2 records predate the PRO dimensions, so an absent proWidthFt /
+ *   proHeightFt takes the default and the design opens with working goods
+ *   geometry rather than zero-size drapes.
+ * - DROP RETIRED KEYS. `stageWidthFt` / `stageWidthIn` left the model in punch
+ *   #50. A plain spread would carry them back out through the next save; worse,
+ *   a stored 0 would have survived into a field with no UI left to fix it.
+ *   Ignoring them on load (never erroring) is the compatibility rule here.
+ */
+function normalizeInputs(inp: Partial<LinesetInputs> | undefined): LinesetInputs {
+  const src = (inp || {}) as Record<string, unknown>;
+  const out: LinesetInputs = { ...DEFAULT_LINESET_INPUTS };
+  (Object.keys(DEFAULT_LINESET_INPUTS) as (keyof LinesetInputs)[]).forEach((k) => {
+    const v = src[k];
+    if (v !== undefined && v !== null && typeof v === typeof DEFAULT_LINESET_INPUTS[k]) {
+      (out as Record<string, unknown>)[k] = v;
+    }
+  });
+  return out;
 }
 
 /** The on-disk shape of a combined save at either vintage. v2 predates
@@ -56,7 +68,7 @@ function resolveInitial(
     const rec = design.data as StoredCombinedLineset;
     return {
       initial: {
-        inputs: backfillProDims(rec.inputs),
+        inputs: normalizeInputs(rec.inputs),
         defaults: rec.defaults,
         loads: rec.loads || {},
         extras: rec.extras || [],
@@ -66,10 +78,12 @@ function resolveInitial(
       adoptable: true,
     };
   }
-  if (design.kind === "lineset" && d && "stageWidthFt" in d) {
+  // Legacy bare-LinesetInputs record. Detected on stageDepthFt, which every
+  // vintage has: stageWidthFt (the old marker) was retired in punch #50.
+  if (design.kind === "lineset" && d && "stageDepthFt" in d) {
     return {
       initial: {
-        inputs: backfillProDims(design.data as Partial<LinesetInputs>),
+        inputs: normalizeInputs(design.data as Partial<LinesetInputs>),
         tier: "better",
         gear: DEFAULT_GEAR,
       },

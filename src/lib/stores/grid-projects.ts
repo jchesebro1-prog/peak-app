@@ -7,6 +7,7 @@ import {
   upsertDoc,
 } from "@/db/doc-store";
 import { clamp01, type Calibration, type Point } from "@/lib/annotations";
+import type { GridCurtain } from "@/lib/design/grid-bom";
 
 /**
  * The Grid (D108) — system-design projects: plan sheets, painted catalog
@@ -37,8 +38,23 @@ export type GridPlacement = {
   /** Normalized 0..1 against the page box. */
   x: number;
   y: number;
-  /** Catalog SKU (catalog_parts doc id). */
+  /** Catalog SKU (catalog_parts doc id). On a curtain placement this is the
+   *  FABRIC row's id - the curtain's only catalog link. */
   partId: string;
+  /**
+   * User-defined category (punch #48 / #41) - an open-ended free-text label,
+   * assigned now and consumed later. Orthogonal to the computed scope and to
+   * Spaces: a placement may carry none, and nothing validates the vocabulary.
+   * Absent on every pre-#48 placement, read as "no category".
+   */
+  category?: string;
+  /**
+   * Curtain spec (punch #49) - present only on a curtain drop-in. A curtain
+   * is a priced line, not a catalog unit: it is sized and specced here and
+   * priced from fullness + fabric through the shared curtain model, landing
+   * on the BOM as its own line.
+   */
+  curtain?: GridCurtain;
   by: string;
   at: number;
 };
@@ -258,6 +274,71 @@ export async function addPlacement(
         at: Date.now(),
       },
     ];
+    p.updatedAt = Date.now();
+  });
+}
+
+/**
+ * Drop a curtain onto a plan (punch #49). It rides on the SAME placement list
+ * as a device so every existing behavior - drag to move, arrow nudge, space
+ * assignment, revisions, delete - applies to it with no second code path;
+ * only the pricing and the BOM line differ, and those key off `curtain`.
+ *
+ * `partId` carries the fabric row so the marker, the revision snapshot and
+ * the space rollup all keep a real catalog link, and bomLines/bomTotals skip
+ * curtain placements so that fabric is never double-billed.
+ */
+export async function addCurtainPlacement(
+  projectId: string,
+  input: {
+    sheetId: string;
+    page: number;
+    x: number;
+    y: number;
+    curtain: GridCurtain;
+    category?: string;
+    by: string;
+  }
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.placements = [
+      ...(p.placements || []),
+      {
+        id: rid("gp-"),
+        sheetId: input.sheetId,
+        page: input.page,
+        x: input.x,
+        y: input.y,
+        partId: input.curtain.fabricSku,
+        curtain: input.curtain,
+        ...(input.category ? { category: input.category } : {}),
+        by: input.by,
+        at: Date.now(),
+      },
+    ];
+    p.updatedAt = Date.now();
+  });
+}
+
+/**
+ * Set (or clear, with "") one placement's user-defined category (punch #48).
+ * The empty label DELETES the key rather than storing "" - an absent category
+ * and a blank one must not be two different things in the layer list.
+ */
+export async function setPlacementCategory(
+  projectId: string,
+  placementId: string,
+  category: string
+): Promise<GridProject | null> {
+  const label = category.trim().slice(0, 40);
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.placements = (p.placements || []).map((pl) => {
+      if (pl.id !== placementId) return pl;
+      const next = { ...pl };
+      if (label) next.category = label;
+      else delete next.category;
+      return next;
+    });
     p.updatedAt = Date.now();
   });
 }

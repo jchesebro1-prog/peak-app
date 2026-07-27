@@ -43,6 +43,7 @@ import {
   type GoodsFabric,
   type FabricIssue,
 } from "@/lib/design/goods";
+import { battenLenFt, BATTEN_OVERHANG_FT } from "@/lib/design/venue-dims";
 import { SaveBar, type SavedRef } from "../save-bar";
 import { downloadCsv } from "../export";
 
@@ -196,10 +197,22 @@ export function LinesetBuilder({
     () => ({
       proWidthFt: inp.proWidthFt,
       proHeightFt: inp.proHeightFt,
-      stageWidthFt: inp.stageWidthFt,
       stageDepthFt: inp.stageDepthFt,
     }),
-    [inp.proWidthFt, inp.proHeightFt, inp.stageWidthFt, inp.stageDepthFt]
+    [inp.proWidthFt, inp.proHeightFt, inp.stageDepthFt]
+  );
+
+  /**
+   * The schedule defaults ACTUALLY used for weights. Identical to `def` except
+   * that `battenlen` is derived from the proscenium width rather than typed in
+   * (punch #50, Jeff: pro width plus 2 ft each side). Everything downstream
+   * reads `wdef`, so there is no second definition of the pipe length here.
+   * A per-line `batten` value still overrides it, in computeSetWeight().
+   */
+  const derivedBattenLen = battenLenFt(inp.proWidthFt);
+  const wdef = useMemo<WeightDefaults>(
+    () => ({ ...def, battenlen: derivedBattenLen }),
+    [def, derivedBattenLen]
   );
 
   /* merged rows: generated line + its rule + any hand-entered override.
@@ -211,7 +224,7 @@ export function LinesetBuilder({
         const key = keys[i];
         const load = loads[key];
         const rule = drapeRule(s.type, dims, tier);
-        const battenLen = load?.batten ?? def.battenlen;
+        const battenLen = load?.batten ?? wdef.battenlen;
 
         let base: Partial<WeightLine> = {};
         if (rule) {
@@ -240,7 +253,7 @@ export function LinesetBuilder({
         };
 
         const specified = ruled || !!load;
-        const c = specified ? computeSetWeight(line, def) : null;
+        const c = specified ? computeSetWeight(line, wdef) : null;
         // Why this line's fabric didn't resolve, if it didn't. computeSetWeight
         // zeroes BOTH goods and track when it can't find a Fabric, and an empty
         // row is indistinguishable from "not filled in yet", so the cause gets
@@ -248,11 +261,11 @@ export function LinesetBuilder({
         const issue = specified ? lineFabricIssue(line, rule, fabrics) : null;
         return { s, key, load, rule, ruled, specified, line, c, issue };
       }),
-    [out.schedule, keys, loads, def, dims, tier, gear, fabrics, inp.shellIntervalFt]
+    [out.schedule, keys, loads, wdef, dims, tier, gear, fabrics, inp.shellIntervalFt]
   );
   const extraRows = useMemo(
-    () => extras.map((x) => ({ x, c: computeSetWeight(x, def), issue: lineFabricIssue(x, null, fabrics) })),
-    [extras, def, fabrics]
+    () => extras.map((x) => ({ x, c: computeSetWeight(x, wdef), issue: lineFabricIssue(x, null, fabrics) })),
+    [extras, wdef, fabrics]
   );
 
   const totals = useMemo(() => {
@@ -308,32 +321,36 @@ export function LinesetBuilder({
     const header = ["#", "Slot", "Downstage", "Type", "Name", "Fabric", "W(ft)", "H(ft)", "Full%", "Qty", "Gear(lb)", "Track", "Batten", "Batten len(ft)", "Mode", "Hoist", "Weight on batten(lb)", "Check", "Source"];
     const flag = (issue: FabricIssue | null | undefined) => (issue ? `FABRIC UNRESOLVED (${issue.short}), goods+track 0 lb; ` : "");
     const csvRows: (string | number)[][] = rows.map((r, i) => {
-      const mode = r.line.mode || def.mode;
+      const mode = r.line.mode || wdef.mode;
       const check = !r.c ? "NOT SPECIFIED" : mode === "cw" ? `${r.c.combo.big}x25+${r.c.combo.small}x10 brick` : r.c.over ? "OVER LIMIT" : "OK";
       const source = r.load ? "overridden" : r.ruled ? "rule" : "manual";
       return [
         i + 1, r.s.slot, r.s.dsPositionLabel, r.s.type, r.line.name,
-        r.line.fab || "", r.line.w ?? "", r.line.h ?? "", r.line.full ?? def.full, r.line.qty ?? 1, r.line.gear ?? "",
-        r.line.track || "None", battenById(r.line.pipe || def.pipe).label, r.line.batten ?? def.battenlen,
-        r.c ? MODE_LABEL[mode] : "", r.c && mode === "motor" ? r.line.hoist || def.hoist : "",
+        r.line.fab || "", r.line.w ?? "", r.line.h ?? "", r.line.full ?? wdef.full, r.line.qty ?? 1, r.line.gear ?? "",
+        r.line.track || "None", battenById(r.line.pipe || wdef.pipe).label, r.line.batten ?? wdef.battenlen,
+        r.c ? MODE_LABEL[mode] : "", r.c && mode === "motor" ? r.line.hoist || wdef.hoist : "",
         r.c ? Math.round(r.c.onBatten) : "", flag(r.issue) + check, source,
       ];
     });
     extraRows.forEach(({ x, c, issue }, i) => {
-      const mode = x.mode || def.mode;
+      const mode = x.mode || wdef.mode;
       csvRows.push([
-        rows.length + i + 1, "", "custom", "Custom", x.name, x.fab || "", x.w ?? "", x.h ?? "", x.full ?? def.full, x.qty ?? 1, x.gear ?? "",
-        x.track || "None", battenById(x.pipe || def.pipe).label, x.batten ?? def.battenlen,
-        MODE_LABEL[mode], mode === "motor" ? x.hoist || def.hoist : "", Math.round(c.onBatten),
+        rows.length + i + 1, "", "custom", "Custom", x.name, x.fab || "", x.w ?? "", x.h ?? "", x.full ?? wdef.full, x.qty ?? 1, x.gear ?? "",
+        x.track || "None", battenById(x.pipe || wdef.pipe).label, x.batten ?? wdef.battenlen,
+        MODE_LABEL[mode], mode === "motor" ? x.hoist || wdef.hoist : "", Math.round(c.onBatten),
         flag(issue) + (mode === "cw" ? `${c.combo.big}x25+${c.combo.small}x10 brick` : c.over ? "OVER LIMIT" : "OK"),
         "overridden",
       ]);
     });
     csvRows.push(["", "", "", "", "TOTAL", "", "", "", "", "", "", "", "", "", "", "", Math.round(totals.onBatten), unspecified ? `${unspecified} lines not specified, excluded` : `peak/beam ${Math.round(totals.beamMax)} lb`, ""]);
-    downloadCsv(`lineset-${inp.stageWidthFt}x${inp.stageDepthFt}`, header, csvRows);
+    // Filename names the OPENING now, not the retired wall-to-wall width (#50).
+    downloadCsv(`lineset-pro${inp.proWidthFt}x${inp.stageDepthFt}deep`, header, csvRows);
   }
 
-  const getData = (): CombinedLinesetData => ({ v: 3, inputs: inp, defaults: def, loads, extras, tier, gear });
+  // `wdef`, not `def`: the saved record carries the batten length the schedule
+  // was actually calculated with. Reopening re-derives it from proWidthFt
+  // anyway, so the two can never drift.
+  const getData = (): CombinedLinesetData => ({ v: 3, inputs: inp, defaults: wdef, loads, extras, tier, gear });
 
   /* ---- the per-line load editor (expands under the selected row, P5) ----
    *  A fourth field class lives here alongside generated / hand-entered /
@@ -404,15 +421,17 @@ export function LinesetBuilder({
               <option value={TRACK_NONE}>None: no track</option>
               {TRACKS.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
             </select></div>
-          {/* Per-line batten: blank = the schedule default in the settings
-              drawer, matching how every other blank per-line field inherits. */}
+          {/* Per-line batten: blank = the schedule default (the pipe choice
+              comes from the settings drawer, the LENGTH is derived from PRO
+              width, #50), matching how every other blank per-line field
+              inherits. Typing a number here still overrides the rule. */}
           <div style={{ gridColumn: "span 2" }}><span style={genLabel("pipe")}>Batten (pipe)</span>
             <select value={value.pipe || ""} onChange={(e) => onChange({ pipe: e.target.value })} style={{ ...field, ...genStyle("pipe") }}>
               <option value="">Default: {battenById(def.pipe).label}</option>
               {BATTENS.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
             </select></div>
           <div><span style={genLabel("batten")}>Batten len (ft)</span>
-            <OptNumF v={value.batten} placeholder={def.battenlen} set={(n) => onChange({ batten: n })} style={genStyle("batten")} /></div>
+            <OptNumF v={value.batten} placeholder={wdef.battenlen} set={(n) => onChange({ batten: n })} style={genStyle("batten")} /></div>
           <div><span style={genLabel("mode")}>Mode</span>
             <select value={mode} onChange={(e) => onChange({ mode: e.target.value as LinesetMode })} style={{ ...field, ...genStyle("mode") }}>
               <option value="motor">Motor</option><option value="dead">Dead-hung</option><option value="cw">Counterweight</option>
@@ -483,14 +502,20 @@ export function LinesetBuilder({
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 300px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
         {/* ---- input rail ---- */}
         <div style={card}>
+          {/* Three venue dimensions, and only three (#50): PRO width, PRO
+              height, stage depth. Wall-to-wall stage width is gone, it never
+              reached the placement math. Depth keeps an inches field because
+              the 8-inch grid is depth-driven and 4 inches moves a slot. */}
           <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 10 }}>Venue dimensions</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div><span style={label}>Width (ft)</span><NumF v={inp.stageWidthFt} set={(n) => set("stageWidthFt", n)} /></div>
-            <div><span style={label}>Width (in)</span><NumF v={inp.stageWidthIn} set={(n) => set("stageWidthIn", n)} /></div>
-            <div><span style={label}>Depth (ft)</span><NumF v={inp.stageDepthFt} set={(n) => set("stageDepthFt", n)} /></div>
-            <div><span style={label}>Depth (in)</span><NumF v={inp.stageDepthIn} set={(n) => set("stageDepthIn", n)} /></div>
             <div><span style={label}>PRO width (ft)</span><NumF v={inp.proWidthFt} set={(n) => set("proWidthFt", n)} /></div>
             <div><span style={label}>PRO height (ft)</span><NumF v={inp.proHeightFt} set={(n) => set("proHeightFt", n)} /></div>
+            <div><span style={label}>Stage depth (ft)</span><NumF v={inp.stageDepthFt} set={(n) => set("stageDepthFt", n)} /></div>
+            <div><span style={label}>Stage depth (in)</span><NumF v={inp.stageDepthIn} set={(n) => set("stageDepthIn", n)} /></div>
+          </div>
+          <div style={{ fontSize: 11.5, color: "#6b7079", marginTop: 8, lineHeight: 1.45 }}>
+            Battens are <b>{derivedBattenLen} ft</b>: PRO width plus {BATTEN_OVERHANG_FT} ft of
+            overhang each side. Override a single line from its row.
           </div>
 
           <div style={{ fontSize: 13.5, fontWeight: 700, margin: "16px 0 8px" }}>Auto-layout</div>
@@ -526,7 +551,13 @@ export function LinesetBuilder({
               <div style={{ fontSize: 11, fontWeight: 700, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", margin: "14px 0 6px" }}>Weight defaults</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div><span style={label}>Lift lines</span><NumF v={def.lines} set={(n) => setD("lines", n || 1)} /></div>
-                <div><span style={label}>Batten length (ft)</span><NumF v={def.battenlen} set={(n) => setD("battenlen", n)} /></div>
+                {/* Batten length is no longer typed in here: it is PRO width +
+                    4 ft, derived (#50). Shown read-only so the number driving
+                    batten, track and distribution weight is still visible. */}
+                <div><span style={label}>Batten length (ft)</span>
+                  <div style={{ ...field, background: "#f6f7f9", color: "#5b616e" }}>
+                    {derivedBattenLen} <span style={{ fontSize: 11, color: "#9aa0ab" }}>= PRO {inp.proWidthFt} + {2 * BATTEN_OVERHANG_FT}</span>
+                  </div></div>
                 <div style={{ gridColumn: "1 / -1" }}><span style={label}>Default batten</span>
                   <select value={def.pipe} onChange={(e) => setD("pipe", e.target.value)} style={field}>{BATTENS.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}</select></div>
                 <div><span style={label}>Default hoist</span>
@@ -578,7 +609,7 @@ export function LinesetBuilder({
             </>
           )}
           <button onClick={() => setInp(DEFAULT_LINESET_INPUTS)} style={{ marginTop: 14, width: "100%", background: "#f6f7f9", border: "1px solid #e4e7ec", borderRadius: 8, padding: "8px", fontSize: 12.5, fontWeight: 600, color: "#5b616e", cursor: "pointer" }}>
-            Reset layout to 50′ × 30′ defaults
+            Reset layout to a 40′ × 20′ opening, 30′ deep
           </button>
         </div>
 

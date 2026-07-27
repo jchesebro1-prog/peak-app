@@ -47,7 +47,7 @@ function halfHourUp(h: number): number {
 }
 
 export function suggestLabor(
-  placements: Array<{ partId: string }>,
+  placements: Array<{ partId: string; curtain?: unknown }>,
   parts: PartLite[],
   laborParts: LaborPartLite[],
   hoursPerDevice: number
@@ -60,6 +60,10 @@ export function suggestLabor(
   // Devices per discipline — wire, labor, and per-length rows don't count.
   const deviceCount = new Map<string, number>();
   for (const pl of placements) {
+    // Curtains (punch #49) are not devices: hanging a 40 ft grand drape has
+    // nothing to do with an hours-per-device rule, and its partId points at a
+    // fabric row. No suggestion is better than an invented one.
+    if (pl.curtain) continue;
     const part = byId.get(pl.partId);
     if (!part) continue;
     const cat = part.category.toLowerCase();
