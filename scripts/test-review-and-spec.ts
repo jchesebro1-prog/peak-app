@@ -305,16 +305,34 @@ ok(HOME_TABS.length === 5, "five Home tabs after Reports joins (D99)");
 ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab");
 
 /* --- home hub nav (D98) --- */
-ok(NAV.length === 4, "the header keeps 4 top-level items (chips, D117)");
-ok(!NAV.some((e) => e.kind === "link" && e.key === "queue"), "My Queue is no longer top-level");
-ok(!NAV.some((e) => e.kind === "link" && e.key === "calendar"), "Calendar is no longer top-level");
-ok(!NAV.some((e) => e.kind === "link" && e.key === "inbox"), "Inbox is no longer top-level");
-ok(!NAV.some((e) => e.kind === "link" && e.key === "home"), "Home is no longer a tab — the Q6 mark is the home link (D117)");
-ok(activeKeyFor("/") === "home", "root lights Home");
-ok(activeKeyFor("/queue") === "home", "queue lights Home");
-ok(activeKeyFor("/calendar") === "home", "calendar lights Home — this path had NO map entry before");
-ok(activeKeyFor("/inbox") === "home", "inbox lights Home");
-ok(activeKeyFor("/reports") === "home", "Reports lights Home now that it is a Home tab (D99)");
+// Punch #55 (D124) REVERSES the D117 shape: Jeff asked for Home back as a real tab
+// on web and mobile, so the header is five groups and Home is the first. The five
+// hub routes stay CHILDREN of that group (they are not top-level links).
+ok(NAV.length === 5, "the header has 5 top-level items: Home joined the chips (#55, D124)");
+ok(!NAV.some((e) => e.kind === "link" && e.key === "queue"), "My Queue is not top-level");
+ok(!NAV.some((e) => e.kind === "link" && e.key === "calendar"), "Calendar is not top-level");
+ok(!NAV.some((e) => e.kind === "link" && e.key === "inbox"), "Inbox is not top-level");
+const homeGroup = NAV.find((e) => e.kind === "group" && e.key === "home");
+ok(!!homeGroup, "Home is a top-level GROUP again (#55) — the mark links there too");
+ok(
+  !!(homeGroup && homeGroup.kind === "group" && homeGroup.children.length === HOME_TABS.length),
+  "the Home group carries the five HOME_TABS as children, not a duplicated list",
+);
+// activeKeyFor now returns the CHILD key: parentGroupOf only matches child keys, so
+// returning "home" would have left the pill dark on the app's most important route.
+ok(activeKeyFor("/") === "dashboard", "root lights the Dashboard child (#55)");
+ok(activeKeyFor("/queue") === "queue", "queue lights its own child key (#55)");
+ok(activeKeyFor("/calendar") === "calendar", "calendar lights its own child key (#55)");
+ok(activeKeyFor("/inbox") === "inbox", "inbox lights its own child key (#55)");
+ok(activeKeyFor("/reports") === "reports", "Reports lights its own child key (#55)");
+ok(
+  parentGroupOf(activeKeyFor("/")) === "home" &&
+    parentGroupOf(activeKeyFor("/queue")) === "home" &&
+    parentGroupOf(activeKeyFor("/calendar")) === "home" &&
+    parentGroupOf(activeKeyFor("/inbox")) === "home" &&
+    parentGroupOf(activeKeyFor("/reports")) === "home",
+  "all five hub routes still resolve UP to the Home group, so the chip lights (#55)",
+);
 
 // ---- General dissolution (D99): Companies/People/Field Survey → Sales (now CRM, D117) ----
 // Opportunities joined as the first child (#18) — six children as of plan 02.
@@ -377,8 +395,8 @@ ok(
 // ---- General dissolution (D99): the group is gone ----
 ok(!NAV.some((e) => e.kind === "group" && e.key === "general"), "the General group is gone");
 ok(
-  NAV.map((e) => e.key).join(",") === "est,pm,crm,design",
-  "the four top-level chips are EST, PM, CRM, DESIGN in order (D117)",
+  NAV.map((e) => e.key).join(",") === "home,est,pm,crm,design",
+  "the top-level chips are Home, EST, PM, CRM, DESIGN in order (#55 put Home back, D124)",
 );
 ok(
   activeKeyFor("/catalog") === "settings" &&
@@ -1164,7 +1182,10 @@ ok(
   "EST = Quotes, My Quotes, Estimator, Reviews in order (#22)",
 );
 ok(activeKeyFor("/estimator") === "estimator", "/estimator lights its own EST child");
-ok(activeKeyFor("/") === "home", "root still resolves to home (drawer link + mark)");
+ok(
+  parentGroupOf(activeKeyFor("/")) === "home",
+  "root still resolves to the Home group (drawer section + the mark link, #55)",
+);
 ok(
   parentGroupOf("quotes") === "est" && parentGroupOf("estimator") === "est" && parentGroupOf("reviews") === "est",
   "quotes, estimator, reviews report EST as parent",
