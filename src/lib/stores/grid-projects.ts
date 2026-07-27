@@ -268,8 +268,8 @@ export async function addPlacement(
  * and carrying a device across pages would strand the wires attached to it.
  *
  * Attached wires follow, atomically, in the same patch. `GridRoute.points` is
- * an INDEPENDENT polyline — `fromPlacementId`/`toPlacementId` record what a
- * run was drawn onto but nothing keeps the geometry in sync — so moving a
+ * an INDEPENDENT polyline: `fromPlacementId`/`toPlacementId` record what a
+ * run was drawn onto but nothing keeps the geometry in sync, so moving a
  * device without this would silently leave its wires hanging at the old spot
  * (and, since footage is measured off `points`, quoting the old length). The
  * endpoint is TRANSLATED by the same delta rather than snapped to the new
@@ -301,7 +301,7 @@ export async function movePlacement(
     if (p.routes?.length) p.routes = p.routes.map((r) => {
       const head = r.fromPlacementId === placementId;
       const tail = r.toPlacementId === placementId;
-      // Same sheet/page only — an endpoint id can't refer across pages, but a
+      // Same sheet/page only, an endpoint id can't refer across pages, but a
       // restored revision could carry a stale pairing, and shifting a polyline
       // on another page would be worse than leaving it be.
       if ((!head && !tail) || r.sheetId !== current.sheetId || r.page !== current.page) return r;

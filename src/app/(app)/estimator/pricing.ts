@@ -213,14 +213,14 @@ export function computeFixture(d: FixtureDraft): FixtureCalc {
 
 /**
  * Where a resolved rate came from:
- *  - `catalog`  — a live `catalog_parts` row (category 'Labor')
- *  - `fallback` — the hardcoded LABOR_RATES_FALLBACK map (no catalog row)
- *  - `none`     — neither; the rate resolves to 0
+ *  - `catalog`: a live `catalog_parts` row (category 'Labor')
+ *  - `fallback`: the hardcoded LABOR_RATES_FALLBACK map (no catalog row)
+ *  - `none`: neither; the rate resolves to 0
  */
 export type RateSource = "catalog" | "fallback" | "none";
 
 export type RateFn = ((sku: string) => number) & {
-  /** Provenance of `rate(sku)` — present on rate fns built by makeLaborRate.
+  /** Provenance of `rate(sku)`, present on rate fns built by makeLaborRate.
    *  Optional so a plain `(sku) => number` still satisfies RateFn. */
   source?: (sku: string) => RateSource;
 };

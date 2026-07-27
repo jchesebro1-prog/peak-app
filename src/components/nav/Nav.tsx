@@ -179,7 +179,7 @@ export default function Nav({
             </button>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-            {/* #55 / #45(a): the lockup is the Home link — the behavior
+            {/* #55 / #45(a): the lockup is the Home link, the behavior
                 nav-data.ts's "[Q6 mark = Home]" note already described. The
                 BETA chip stays OUTSIDE the link: it's a status badge, not a
                 nav target, and clicking it shouldn't navigate. */}

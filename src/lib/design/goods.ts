@@ -282,7 +282,7 @@ export function mergeLineFabric(
 
 /** The "no fabric" choice in the load editor's fabric select. Stored as the
  *  line's `fab`, so it has to be recognizable here too. */
-export const FAB_NONE = "— none —";
+export const FAB_NONE = ", none, ";
 
 /**
  * Why a line's fabric failed to resolve. `null` means it resolved fine.
@@ -304,8 +304,8 @@ export type FabricIssue = {
  * Diagnose a line whose weight math will silently produce zero goods AND zero
  * track (`computeSetWeight` gates the track lookup on the fabric, steel.ts).
  *
- * Resolution order mirrors computeSetWeight() exactly — `fabResolved` first,
- * then a FABLIB name lookup — so this never warns about a line that actually
+ * Resolution order mirrors computeSetWeight() exactly, `fabResolved` first,
+ * then a FABLIB name lookup, so this never warns about a line that actually
  * weighs. It NEVER invents a fallback weight: the point is to make the gap
  * visible, not to paper over it.
  */
@@ -315,7 +315,7 @@ export function lineFabricIssue(
   fabrics: GoodsFabric[]
 ): FabricIssue | null {
   // A gear-only line (Electric/Shell/General Purpose, or a custom line with no
-  // fabric named) is supposed to carry no goods — nothing to warn about.
+  // fabric named) is supposed to carry no goods, nothing to warn about.
   const expectsFabric = !!rule || (!!line.fab && (line.w || 0) > 0 && (line.h || 0) > 0);
   if (!expectsFabric) return null;
   if (line.fabResolved) return null;
@@ -327,7 +327,7 @@ export function lineFabricIssue(
     return {
       kind: "cleared",
       short: "no fabric selected",
-      message: `Fabric is set to "${FAB_NONE}" on a drape line — it contributes no goods and no track weight. Pick a fabric to weigh it.`,
+      message: `Fabric is set to "${FAB_NONE}" on a drape line, it contributes no goods and no track weight. Pick a fabric to weigh it.`,
     };
 
   if (fabrics.length === 0)
@@ -343,12 +343,12 @@ export function lineFabricIssue(
       ? {
           kind: "no-weight",
           short: "fabric has no oz",
-          message: `Catalog fabric "${picked.desc}" (${picked.sku}) has no oz/yd² — ${goodsAndTrack}. Add oz, basis and bolt width to that catalog part, or pick a fabric that has them.`,
+          message: `Catalog fabric "${picked.desc}" (${picked.sku}) has no oz/yd², ${goodsAndTrack}. Add oz, basis and bolt width to that catalog part, or pick a fabric that has them.`,
         }
       : {
           kind: "unrecognized",
           short: "fabric not recognized",
-          message: `Fabric "${line.fab}" is in neither the parts catalog nor the built-in fabric library — ${goodsAndTrack}. Pick a listed fabric.`,
+          message: `Fabric "${line.fab}" is in neither the parts catalog nor the built-in fabric library, ${goodsAndTrack}. Pick a listed fabric.`,
         };
   }
 
@@ -358,11 +358,11 @@ export function lineFabricIssue(
     ? {
         kind: "no-weight",
         short: "fabric has no oz",
-        message: `Catalog fabric "${part.desc}" (${part.sku}) has no oz/yd² — ${goodsAndTrack}. Add oz, basis and bolt width to that catalog part, or pick a fabric that has them.`,
+        message: `Catalog fabric "${part.desc}" (${part.sku}) has no oz/yd², ${goodsAndTrack}. Add oz, basis and bolt width to that catalog part, or pick a fabric that has them.`,
       }
     : {
         kind: "missing-part",
         short: `no catalog part ${sku}`,
-        message: `The catalog has Fabric parts but none with SKU ${sku}, which is what this line's fabric tier asks for — ${goodsAndTrack}. Add that SKU to the catalog, or pick another fabric on this line.`,
+        message: `The catalog has Fabric parts but none with SKU ${sku}, which is what this line's fabric tier asks for, ${goodsAndTrack}. Add that SKU to the catalog, or pick another fabric on this line.`,
       };
 }

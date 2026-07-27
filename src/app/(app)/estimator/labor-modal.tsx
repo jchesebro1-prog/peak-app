@@ -43,7 +43,7 @@ const DISC_OPTIONS: [string, string][] = [
   ["VID", "Video"],
 ];
 
-/** $50/hr · $52.50/hr — cents only when they exist (fmt()'s always-2 is noise here). */
+/** $50/hr · $52.50/hr, cents only when they exist (fmt()'s always-2 is noise here). */
 function perHr(n: number): string {
   const v = round2(n);
   return "$" + (Number.isInteger(v) ? v.toLocaleString("en-US") : v.toFixed(2)) + "/hr";
@@ -64,7 +64,7 @@ const CHIP_WARN: CSSProperties = {
 };
 
 /**
- * Resolved $/hr for one rate sku, with its provenance made visible — a live
+ * Resolved $/hr for one rate sku, with its provenance made visible, a live
  * catalog row shows the number alone; a hardcoded LABOR_RATES_FALLBACK value
  * gets a "default" chip (item 54: a missing/renamed catalog row must not look
  * like a real rate).
@@ -79,8 +79,8 @@ function RateChip({ sku, label, rate }: { sku: string; label: string; rate: Rate
         (src === "catalog"
           ? " · live catalog rate (Catalog › Labor)"
           : src === "fallback"
-            ? " · built-in default — no catalog row with this SKU"
-            : " · no rate found — priced at $0")
+            ? " · built-in default, no catalog row with this SKU"
+            : " · no rate found, priced at $0")
       }
     >
       <span style={{ fontSize: 10.5, color: "#aab0bb" }}>{label}</span>
@@ -144,7 +144,7 @@ export default function LaborModal({
   const valid = lr.totalCost > 0;
   const pctLabel = Math.round(lr.pct * 100) + "%";
 
-  // rate readout (item 54) — base installer rate always; OT / supervisor only
+  // rate readout (item 54), base installer rate always; OT / supervisor only
   // when the current mobilization toggles actually bill them
   const anyOt = lr.mobs.some((m) => (parseFloat(m.raw.otHrs) || 0) > 0);
   const anySup = lr.mobs.some((m) => m.supHrs > 0);
@@ -213,7 +213,7 @@ export default function LaborModal({
             </button>
           ))}
         </div>
-        {/* resolved $/hr for the selected scope — shows whether each rate is a
+        {/* resolved $/hr for the selected scope, shows whether each rate is a
             live catalog row or the built-in default (item 54) */}
         <div
           style={{

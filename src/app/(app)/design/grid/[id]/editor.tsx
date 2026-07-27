@@ -119,7 +119,7 @@ const DEVICE_SNAP_RADIUS = DEVICE_HIT_RADIUS * 1.5;
  *  normalized units: the plan zooms, and a "did the hand move?" test that
  *  changes meaning with the zoom level would make a steady click write at one
  *  zoom and not another. Below this the gesture is a plain click and keeps its
- *  old toggle-select behavior — nothing is ever persisted. */
+ *  old toggle-select behavior: nothing is ever persisted. */
 const DRAG_PX = 4;
 
 /** Arrow-key nudge (punch #47) in normalized x-units; y divides by aspect so
@@ -127,7 +127,7 @@ const DRAG_PX = 4;
 const NUDGE = 0.002;
 const NUDGE_FAST = 0.01;
 
-/** Coalesce key-repeat into one write — holding an arrow must not fire a
+/** Coalesce key-repeat into one write, holding an arrow must not fire a
  *  server action per keystroke. */
 const NUDGE_COMMIT_MS = 400;
 
@@ -148,7 +148,7 @@ type MarkerDrag = {
 
 /** An optimistic position (punch #47): where the client put a device, plus
  *  the server position it replaces. Holding `base` is what makes the override
- *  self-expiring WITHOUT an effect — it applies only while the server copy
+ *  self-expiring WITHOUT an effect, it applies only while the server copy
  *  still reads `base`, so the moment the refresh lands (or anything else, a
  *  revision restore included, moves that device) the entry goes inert on its
  *  own. Clearing it from an effect instead both races the refresh and trips
@@ -299,7 +299,7 @@ export default function GridEditor({
   }, [parts, search, groupFilter]);
 
   /** Per-placement displacement from what the server currently says (punch
-   *  #47) — the live drag plus any committed-but-unrefreshed move. One map
+   *  #47): the live drag plus any committed-but-unrefreshed move. One map
    *  drives BOTH the markers and the attached wire endpoints, so the picture
    *  on screen mid-gesture is exactly what the store will write. */
   const placementOffsets = useMemo(() => {
@@ -399,7 +399,7 @@ export default function GridEditor({
     [placementOffsets]
   );
 
-  /** Write a reposition (punch #47) — shared by the drag and the arrow-key
+  /** Write a reposition (punch #47), shared by the drag and the arrow-key
    *  nudge. The optimistic entry goes in FIRST and is rolled back only if the
    *  server refuses, so the marker never flickers back to where it was. */
   const commitMove = useCallback(
@@ -608,7 +608,7 @@ export default function GridEditor({
       return;
     }
 
-    // Select an existing marker when the click lands on one — and arm a drag
+    // Select an existing marker when the click lands on one, and arm a drag
     // (punch #47). Nothing is written here: this gesture only becomes a move
     // once the pointer travels DRAG_PX, so a plain click still just selects.
     // Same on-screen radius on both axes: y is a fraction of height, so the
@@ -1093,7 +1093,7 @@ export default function GridEditor({
                 by {selectedPlacement.by}
               </div>
               {/* Position readout + nudge hint (punch #47). Percent of the
-                  page box is the honest unit here — it's what's stored, and
+                  page box is the honest unit here, it's what's stored, and
                   it stays meaningful on an uncalibrated sheet. */}
               {(() => {
                 const at = shownAt(selectedPlacement);

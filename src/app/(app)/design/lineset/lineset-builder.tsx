@@ -107,7 +107,7 @@ function NumF({ v, set, w, style }: { v: number; set: (n: number) => void; w?: n
   return <input type="number" value={v} onChange={(e) => set(parseFloat(e.target.value) || 0)} style={{ ...field, ...(w ? { width: w } : {}), ...style }} />;
 }
 
-/** A number field that can be EMPTY — blank sends `undefined`, which is how a
+/** A number field that can be EMPTY, blank sends `undefined`, which is how a
  *  per-line value goes back to inheriting the schedule default. NumF can't do
  *  this: it coerces every keystroke to a number, so 0 would be the only "unset". */
 function OptNumF({ v, placeholder, set, style }: { v: number | null | undefined; placeholder: number; set: (n: number | undefined) => void; style?: React.CSSProperties }) {
@@ -122,7 +122,7 @@ function OptNumF({ v, placeholder, set, style }: { v: number | null | undefined;
   );
 }
 
-/** Select-layer only — deliberately NOT a TRACKS entry (see the Track field in
+/** Select-layer only: deliberately NOT a TRACKS entry (see the Track field in
  *  LoadEditor). */
 const TRACK_NONE = "None";
 
@@ -243,7 +243,7 @@ export function LinesetBuilder({
         const c = specified ? computeSetWeight(line, def) : null;
         // Why this line's fabric didn't resolve, if it didn't. computeSetWeight
         // zeroes BOTH goods and track when it can't find a Fabric, and an empty
-        // row is indistinguishable from "not filled in yet" — so the cause gets
+        // row is indistinguishable from "not filled in yet", so the cause gets
         // surfaced on the row and in the banner instead (#50).
         const issue = specified ? lineFabricIssue(line, rule, fabrics) : null;
         return { s, key, load, rule, ruled, specified, line, c, issue };
@@ -284,7 +284,7 @@ export function LinesetBuilder({
 
   const unspecified = totals.generated - totals.specified;
 
-  /** Fabric failures grouped by CAUSE — one banner entry per distinct problem,
+  /** Fabric failures grouped by CAUSE, one banner entry per distinct problem,
    *  listing the lines it hits. Two lines missing the same catalog part are one
    *  fix; a missing part and a part with no oz are two different fixes, so they
    *  never collapse together (#50). */
@@ -306,7 +306,7 @@ export function LinesetBuilder({
     // Batten + the fabric warning ride along: an exported schedule that hides a
     // zero-weight line is the same silent failure as the screen used to be (#50).
     const header = ["#", "Slot", "Downstage", "Type", "Name", "Fabric", "W(ft)", "H(ft)", "Full%", "Qty", "Gear(lb)", "Track", "Batten", "Batten len(ft)", "Mode", "Hoist", "Weight on batten(lb)", "Check", "Source"];
-    const flag = (issue: FabricIssue | null | undefined) => (issue ? `FABRIC UNRESOLVED (${issue.short}) — goods+track 0 lb; ` : "");
+    const flag = (issue: FabricIssue | null | undefined) => (issue ? `FABRIC UNRESOLVED (${issue.short}), goods+track 0 lb; ` : "");
     const csvRows: (string | number)[][] = rows.map((r, i) => {
       const mode = r.line.mode || def.mode;
       const check = !r.c ? "NOT SPECIFIED" : mode === "cw" ? `${r.c.combo.big}x25+${r.c.combo.small}x10 brick` : r.c.over ? "OVER LIMIT" : "OK";
@@ -329,7 +329,7 @@ export function LinesetBuilder({
         "overridden",
       ]);
     });
-    csvRows.push(["", "", "", "", "TOTAL", "", "", "", "", "", "", "", "", "", "", "", Math.round(totals.onBatten), unspecified ? `${unspecified} lines not specified — excluded` : `peak/beam ${Math.round(totals.beamMax)} lb`, ""]);
+    csvRows.push(["", "", "", "", "TOTAL", "", "", "", "", "", "", "", "", "", "", "", Math.round(totals.onBatten), unspecified ? `${unspecified} lines not specified, excluded` : `peak/beam ${Math.round(totals.beamMax)} lb`, ""]);
     downloadCsv(`lineset-${inp.stageWidthFt}x${inp.stageDepthFt}`, header, csvRows);
   }
 
@@ -377,7 +377,7 @@ export function LinesetBuilder({
                 ? fabrics.map((f) => <option key={f.sku} value={f.desc}>{f.desc}</option>)
                 : FABLIB.map((f) => <option key={f.name}>{f.name}</option>)}
             </select>
-            {/* The fabric drives BOTH goods and track weight — when it doesn't
+            {/* The fabric drives BOTH goods and track weight, when it doesn't
                 resolve the row reads as a blank, not as a failure (#50). */}
             {issue && (
               <div style={{ fontSize: 11.5, color: "#b4543a", marginTop: 4, lineHeight: 1.45 }}>⚠ {issue.message}</div>
@@ -395,20 +395,20 @@ export function LinesetBuilder({
               exported from steel.ts and a zero-weight row there would leak into
               anything else that lists tracks. Clearing stores "" (a real, saved
               value that reads as an override) rather than undefined, so
-              trackByName("") misses and the track weighs 0 — which is exactly
+              trackByName("") misses and the track weighs 0, which is exactly
               what a no-track line (Legs/Border/CYC) means. Before this, the
               select showed the FIRST track on every no-track line while storing
               nothing, and a set track could never be cleared (#50). */}
           <div><span style={genLabel("track")}>Track</span>
             <select value={value.track || TRACK_NONE} onChange={(e) => onChange({ track: e.target.value === TRACK_NONE ? "" : e.target.value })} style={{ ...field, ...genStyle("track") }}>
-              <option value={TRACK_NONE}>None — no track</option>
+              <option value={TRACK_NONE}>None: no track</option>
               {TRACKS.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
             </select></div>
           {/* Per-line batten: blank = the schedule default in the settings
               drawer, matching how every other blank per-line field inherits. */}
           <div style={{ gridColumn: "span 2" }}><span style={genLabel("pipe")}>Batten (pipe)</span>
             <select value={value.pipe || ""} onChange={(e) => onChange({ pipe: e.target.value })} style={{ ...field, ...genStyle("pipe") }}>
-              <option value="">Default — {battenById(def.pipe).label}</option>
+              <option value="">Default: {battenById(def.pipe).label}</option>
               {BATTENS.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
             </select></div>
           <div><span style={genLabel("batten")}>Batten len (ft)</span>
@@ -549,15 +549,15 @@ export function LinesetBuilder({
               </div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", margin: "14px 0 6px" }}>Soft goods</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {/* Labels track FABRIC_BY_TYPE_TIER (goods.ts) — the drape row
+                {/* Labels track FABRIC_BY_TYPE_TIER (goods.ts), the drape row
                     first, then legs, which sit one grade down at every tier.
                     The old labels named 16 oz Encore and 21 oz Marvel, neither
                     of which any tier selects for a draw curtain (#50). */}
                 <div style={{ gridColumn: "1 / -1" }}><span style={label}>Fabric tier</span>
                   <select value={tier} onChange={(e) => setTier(e.target.value as GoodsTier)} style={field}>
-                    <option value="good">Good — 22 oz Encore (16 oz legs)</option>
-                    <option value="better">Better — 25 oz Charisma (22 oz legs)</option>
-                    <option value="best">Best — 25 oz Memorable (25 oz Charisma legs)</option>
+                    <option value="good">Good: 22 oz Encore (16 oz legs)</option>
+                    <option value="better">Better: 25 oz Charisma (22 oz legs)</option>
+                    <option value="best">Best: 25 oz Memorable (25 oz Charisma legs)</option>
                   </select>
                   <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 4 }}>The CYC is seamless muslin at every tier.</div>
                 </div>
@@ -618,13 +618,13 @@ export function LinesetBuilder({
           {/* Fabric failures, grouped by cause (#50). computeSetWeight zeroes
               goods AND track when the fabric doesn't resolve, so without this
               a broken catalog looks exactly like an unfilled row. No fallback
-              weight is invented — the gap is named, not papered over. */}
+              weight is invented: the gap is named, not papered over. */}
           {fabricProblems.length > 0 && !showGrid && (
             <div style={{ background: "#fbeceb", border: "1px solid #eccdc7", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, color: "#8c3a26", marginBottom: 10 }}>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>
                 {/* One template literal, not adjacent JSX children: an empty-string
                     child between two text nodes swallowed the space before "can't". */}
-                {`⚠ ${fabricProblemCount} line${fabricProblemCount === 1 ? "" : "s"} can't be weighed — the fabric didn't resolve, so goods AND track weight are 0 lb`}
+                {`⚠ ${fabricProblemCount} line${fabricProblemCount === 1 ? "" : "s"} can't be weighed, the fabric didn't resolve, so goods AND track weight are 0 lb`}
               </div>
               <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
                 {fabricProblems.map((g) => (
@@ -677,7 +677,7 @@ export function LinesetBuilder({
                           {r.s.warning && <span title={r.s.warning} style={{ color: "#b4543a", fontSize: 12, marginLeft: 6 }}>⚠</span>}
                           {r.issue && (
                             <div title={r.issue.message} style={{ fontSize: 11, fontWeight: 600, color: "#b4543a", marginTop: 2 }}>
-                              ⚠ {r.issue.short} — goods + track 0 lb
+                              ⚠ {r.issue.short}: goods + track 0 lb
                             </div>
                           )}
                         </td>
@@ -710,7 +710,7 @@ export function LinesetBuilder({
                           {x.name}
                           {issue && (
                             <div title={issue.message} style={{ fontSize: 11, fontWeight: 600, color: "#b4543a", marginTop: 2 }}>
-                              ⚠ {issue.short} — goods + track 0 lb
+                              ⚠ {issue.short}: goods + track 0 lb
                             </div>
                           )}
                         </td>

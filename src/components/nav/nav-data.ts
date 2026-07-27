@@ -18,7 +18,7 @@ export const NAV: NavEntry[] = [
    * EST; the rest of Sales became CRM; Operations became PM. Routes are
    * untouched — only group keys/labels moved. */
   /* #55 / #45(a): Home is back as a tab (the mark is ALSO a Home link, see
-   * Nav.tsx) — with the mark alone, /inbox and the other hub tabs were
+   * Nav.tsx): with the mark alone, /inbox and the other hub tabs were
    * unreachable from a cold start. Children reuse HOME_TABS from
    * src/app/(app)/home-tabs-keys.ts so the tab row and the nav can't drift. */
   {
@@ -97,7 +97,7 @@ export const NAV: NavEntry[] = [
 export function activeKeyFor(pathname: string): string {
   /* #55: these five return their own HOME_TABS child key, not a bare "home".
    * The group pill lights through parentGroupOf(activeKey), which only matches
-   * CHILD keys — returning "home" (the group's own key) lit nothing, which is
+   * CHILD keys: returning "home" (the group's own key) lit nothing, which is
    * why the Home tab looked dead before the entry existed. */
   if (pathname === "/") return "dashboard";
   const seg = "/" + (pathname.split("/")[1] || "");

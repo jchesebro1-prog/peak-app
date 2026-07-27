@@ -1,26 +1,26 @@
 /**
- * Data inventory — READ ONLY. Answers "what is actually in this database, and
+ * Data inventory: READ ONLY. Answers "what is actually in this database, and
  * how much of it is still demo data?" before anyone presses Clear demo data.
  *
  * This is step 0 of the MASTER-HOWTO §7 go-live sequence (punch list #59).
  * It writes nothing, migrates nothing, and seeds nothing: with DATABASE_URL
- * set, getDb() only opens a postgres-js connection (src/db/index.ts:63-79 —
+ * set, getDb() only opens a postgres-js connection (src/db/index.ts:63-79;
  * the dev auto-seed branch is skipped whenever DATABASE_URL is present).
  *
  *   npm run db:inventory                    → local PGlite (.data/pglite)
  *   DATABASE_URL=... npm run db:inventory   → hosted Postgres (Neon / prod)
  *
- * "Demo" is measured by ID overlap with the seed fixtures in src/db/seeds/*
- * — the same fixtures clearDemoData() would wipe. A row whose id is not in a
+ * "Demo" is measured by ID overlap with the seed fixtures in src/db/seeds/*,
+ * the same fixtures clearDemoData() would wipe. A row whose id is not in a
  * seed set is treated as real. Catalog parts are reported separately because
  * the imported price books dwarf everything else.
  *
  * No secrets are printed: connection strings, Gmail tokens and blob payloads
- * are never read or echoed — only counts and key names.
+ * are never read or echoed, only counts and key names.
  */
 import { readFileSync } from "node:fs";
 
-// Standalone scripts don't get Next's .env.local loading — do it by hand
+// Standalone scripts don't get Next's .env.local loading, do it by hand
 // (never overrides values already in the environment). This lets the hosted
 // connection string stay in the gitignored .env.local instead of being typed
 // on the command line. Safe: getDb() reads DATABASE_URL lazily inside
@@ -31,7 +31,7 @@ try {
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
   }
 } catch {
-  /* no .env.local — rely on the ambient environment */
+  /* no .env.local: rely on the ambient environment */
 }
 
 import { sql } from "drizzle-orm";
@@ -62,7 +62,7 @@ import { inspectionsSeed } from "../src/db/seeds/inspections";
 import { projectsSeed } from "../src/db/seeds/projects";
 import { designsSeed } from "../src/db/seeds/designs";
 
-/** Mirrors DEMO_SEEDS in src/db/seed-data.ts — the surface a go-live reset wipes. */
+/** Mirrors DEMO_SEEDS in src/db/seed-data.ts, the surface a go-live reset wipes. */
 const SEEDS: Array<[CollectionName, () => Array<{ id: string }>]> = [
   ["customers", customersSeed as () => Array<{ id: string }>],
   ["catalog_parts", catalogSeed as unknown as () => Array<{ id: string }>],
@@ -92,9 +92,9 @@ async function main() {
   console.log("");
   console.log("=".repeat(78));
   console.log(
-    `DATA INVENTORY — source: ${hosted ? "HOSTED (DATABASE_URL)" : "LOCAL PGlite (.data/pglite)"}`
+    `DATA INVENTORY, source: ${hosted ? "HOSTED (DATABASE_URL)" : "LOCAL PGlite (.data/pglite)"}`
   );
-  console.log(`taken: ${new Date().toISOString()}   (read-only — nothing was written)`);
+  console.log(`taken: ${new Date().toISOString()}   (read-only, nothing was written)`);
   console.log("=".repeat(78));
 
   // ---- Document collections -------------------------------------------------
@@ -137,7 +137,7 @@ async function main() {
     else if (seeds.size === 0) verdict = "real (no demo fixture exists)";
     else if (demo === live.length) verdict = "ALL DEMO";
     else if (demo === 0) verdict = "all real";
-    else verdict = `mixed — ${demo} demo rows to clear`;
+    else verdict = `mixed, ${demo} demo rows to clear`;
 
     console.log(
       `  ${pad(name, 24)}${padL(live.length, 8)}${padL(deleted, 9)}${padL(demo, 8)}${padL(real, 8)}  ${verdict}`
@@ -180,7 +180,7 @@ async function main() {
     );
   const withOz = fabric.filter((f) => f.oz !== null && f.oz !== "" && Number(f.oz) > 0);
   console.log("");
-  console.log("PUNCH #50 CHECK — drape fabric availability");
+  console.log("PUNCH #50 CHECK: drape fabric availability");
   console.log(`  parts with category 'Fabric' ......... ${fabric.length}`);
   console.log(`  ...of those, with a usable oz value .. ${withOz.length}`);
   if (withOz.length === 0) {
@@ -192,7 +192,7 @@ async function main() {
     );
     console.log("     lineset builder will show empty curtains and tracks. Not an equation bug.");
   } else {
-    console.log(`  >> Fabric is present (${withOz.map((f) => f.sku).join(", ")}) — look elsewhere for #50.`);
+    console.log(`  >> Fabric is present (${withOz.map((f) => f.sku).join(", ")}), look elsewhere for #50.`);
   }
 
   const labor: Array<{ n: number }> = await db
@@ -252,7 +252,7 @@ async function main() {
     `  Rows that would be DELETED by clearDemoData(): every live row in the 11 demo`
   );
   console.log(
-    `  collections — including REAL rows mixed into them. Check the 'real' column above:`
+    `  collections: including REAL rows mixed into them. Check the 'real' column above:`
   );
   console.log(
     `  clearDemoData() wipes whole collections, it does NOT delete demo rows selectively.`

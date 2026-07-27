@@ -2039,11 +2039,11 @@ then broadened to wanting a dedicated Knowledge tab for it (item 27).
 
 ---
 
-## 27. A dedicated "Knowledge" tab — OPEN (SUPERSEDED IN SCOPE BY #56)
+## 27. A dedicated "Knowledge" tab, OPEN (SUPERSEDED IN SCOPE BY #56)
 
-> **2026-07-27:** re-scoped by Jeff into **#56** — Knowledge becomes the home for COMPANY
+> **2026-07-27:** re-scoped by Jeff into **#56**, Knowledge becomes the home for COMPANY
 > settings (design doctrine, estimating rules, customer tiers) rather than just a reference
-> screen. Answer this item's A–D questions there; don't build #27 standalone.
+> screen. Answer this item's A, D questions there; don't build #27 standalone.
 
 **Area:** `src/components/nav/nav-data.ts` (a new top-level group, or a Design child). Existing
 in-app content of this kind: `src/app/(app)/design/motors/page.tsx` (Motor Library).
@@ -2080,9 +2080,9 @@ in the app for reference material, starting with the fixture cross-reference (it
 
 ---
 
-## 28. Lineset Builder: default the layout to 50′ × 30′ (was 80′ × 30′) — SHIPPED, STATUS STALE
+## 28. Lineset Builder: default the layout to 50′ × 30′ (was 80′ × 30′), SHIPPED, STATUS STALE
 
-> **2026-07-27 recon:** the code is DONE — `DEFAULT_LINESET_INPUTS` is 50×30
+> **2026-07-27 recon:** the code is DONE, `DEFAULT_LINESET_INPUTS` is 50×30
 > (`src/lib/design/lineset.ts:52-72`, header note at `:5`) and the reset button reads
 > "Reset layout to 50′ × 30′ defaults" (`lineset-builder.tsx:500-502`). The status line below
 > was never updated. Close this out with **#50** (the lineset rework).
@@ -2835,9 +2835,9 @@ role (falls back to quote owner), due ~7 days: walk the site with the end user. 
 
 ---
 
-## 45. Header/nav fixes for the in-flight tabs rebuild — (a) DONE 2026-07-27 via #55; (b) OPEN
+## 45. Header/nav fixes for the in-flight tabs rebuild, (a) DONE 2026-07-27 via #55; (b) OPEN
 
-> **(a) Home restored on web AND mobile — DONE 2026-07-27 (D124), see #55.** The tabs rebuild has
+> **(a) Home restored on web AND mobile, DONE 2026-07-27 (D124), see #55.** The tabs rebuild has
 > landed, so this is no longer routed away from the punch-list stream. (b) the responsive full-word
 > vs short-label switch is still open.
 
@@ -2885,34 +2885,34 @@ Do not pick up standalone; the rebuild session owns the nav.
 
 ---
 
-## 47. The Grid: move/reposition items after they are placed — BUILT 2026-07-27 (D124), BROWSER-UNVERIFIED
+## 47. The Grid: move/reposition items after they are placed, BUILT 2026-07-27 (D124), BROWSER-UNVERIFIED
 
 > **Built** on `punch-2026-07-27-wave-a`: `movePlacement()` + `movePlacementAction`, drag-to-move
 > with optimistic local state, a 4-screen-pixel click/drag threshold, arrow-key nudge (Shift =
 > coarse, debounced) and an x/y readout on the selected-device panel. **Attached wires follow the
-> device** — the matching route endpoint is translated by the same delta inside the same patch.
+> device**: the matching route endpoint is translated by the same delta inside the same patch.
 > A move does not cut a revision and does not restamp `by`/`at`. Typecheck + ESLint clean.
 > **NOT verified in the browser:** the Grid needs a plan sheet, and sheet upload fails in local dev
-> (`Upload to file storage failed — check the Blob token`). See the note under #58.
+> (`Upload to file storage failed, check the Blob token`). See the note under #58.
 
-**Area:** The Grid — `src/lib/stores/grid-projects.ts`, `src/app/(app)/design/grid/[id]/actions.ts`,
+**Area:** The Grid: `src/lib/stores/grid-projects.ts`, `src/app/(app)/design/grid/[id]/actions.ts`,
 `src/app/(app)/design/grid/[id]/editor.tsx`
 **Reported:** 2026-07-27
 
 **Ask (Jeff):** *"We need to be able to move around items after they are placed."*
 
-**Recon (2026-07-27):** confirmed missing — the only reposition workflow today is
+**Recon (2026-07-27):** confirmed missing, the only reposition workflow today is
 place → select → **Remove device** → re-place.
 - `GridPlacement` = `{ id, sheetId, page, x, y, partId, by, at }` (`grid-projects.ts:32-44`),
   coords normalized 0..1. Store has `addPlacement` (`:243-263`) and `removePlacement`
-  (`:265-273`) only — **no `movePlacement`/`updatePlacement`**.
+  (`:265-273`) only: **no `movePlacement`/`updatePlacement`**.
 - Actions: `placeDeviceAction` (`grid/[id]/actions.ts:89-98`), `removePlacementAction`
   (`:100-109`). No move action.
-- Client: one pointer handler `onDown` (`editor.tsx:331-465`) — marker hit-test at `:424-432`
+- Client: one pointer handler `onDown` (`editor.tsx:331-465`), marker hit-test at `:424-432`
   (radius 0.012), drop at `:435-450`. `onMove` (`:467-472`) and `onUp` (`:474-482`) are
-  **calibration-only** — there is no drag state for placements. Markers render as plain SVG
+  **calibration-only**: there is no drag state for placements. Markers render as plain SVG
   `<g>` with no pointer handlers (`:1252-1271`). No keyboard path (no Delete, no arrow nudge).
-- Selected-device panel (`editor.tsx:855-883`) shows partId/desc/author + Remove only — no
+- Selected-device panel (`editor.tsx:855-883`) shows partId/desc/author + Remove only, no
   X/Y readout, no nudge.
 
 **What has to change:** `movePlacement()` in `grid-projects.ts` next to `addPlacement:243`;
@@ -2921,20 +2921,20 @@ place → select → **Remove device** → re-place.
 
 **Traps for the implementer:**
 - The editor relies on `router.refresh()` after every action and `sheetPlacements` is derived
-  (`editor.tsx:247-250`) — a drag needs local optimistic state or it snaps back mid-gesture.
+  (`editor.tsx:247-250`): a drag needs local optimistic state or it snaps back mid-gesture.
 - **Wires do not follow the device.** `GridRoute.points` is independent of
   `fromPlacementId`/`toPlacementId` (`grid-projects.ts:93-111`), so a naive move silently
   detaches drawn routes from their markers.
 - Should a move cut a revision? `addRevision` (`grid-projects.ts:469-479`) is manual/quote/
-  restore only — wiring drags into it would flood the snapshot array.
+  restore only: wiring drags into it would flood the snapshot array.
 
-**Status:** OPEN — logged only, no code.
+**Status:** OPEN: logged only, no code.
 
 ---
 
-## 48. The Grid: per-discipline filters / layers + user-defined categories that track through Spaces — OPEN
+## 48. The Grid: per-discipline filters / layers + user-defined categories that track through Spaces, OPEN
 
-**Area:** The Grid — `src/app/(app)/design/grid/[id]/editor.tsx`, `src/lib/design/grid-bom.ts`,
+**Area:** The Grid: `src/app/(app)/design/grid/[id]/editor.tsx`, `src/lib/design/grid-bom.ts`,
 `src/lib/catalog-taxonomy.ts`, `src/app/(app)/design/grid/[id]/spaces-panel.tsx`
 **Reported:** 2026-07-27
 
@@ -2944,27 +2944,27 @@ categories should track through with the spaces as well but if we don't allow di
 then it is going to get busy quick."*
 
 **Relationship to #41:** #41 already carries the *per-item categories toggle* (open-ended,
-user-defined labels — assign now, consume later). **This item is the consumption side Jeff is
+user-defined labels: assign now, consume later). **This item is the consumption side Jeff is
 now asking for: FILTERS/LAYERS on the canvas, plus category rollup per Space.** Build them
 together; don't scope #41's category field without this.
 
 **Recon (2026-07-27):**
 - Discipline exists on the **catalog part**, never on the placement. `TRADES =
-  ["Lighting","Rigging","AV"]` (`catalog-taxonomy.ts:18`); six `GROUPS` — Lighting Controls,
+  ["Lighting","Rigging","AV"]` (`catalog-taxonomy.ts:18`); six `GROUPS`, Lighting Controls,
   Fixtures, Video Controls, Speakers, Audio Controls, Curtains (`:21-28`); `GROUP_TRADES`
   (`:35-42`); resolved server-side into `PartLite.group` (`grid-bom.ts:15-42`).
-  **`PartLite` has no `trade`** — a discipline-level filter needs it plumbed through.
+  **`PartLite` has no `trade`**, a discipline-level filter needs it plumbed through.
 - A placement stores only `partId` (`grid-projects.ts:41`); group/trade is joined at render
   (`editor.tsx:1253-1254`). No per-item category, no override.
 - The existing `groupFilter` (`editor.tsx:198`, select at `:640-650`) filters **which parts you
   can arm in the palette** (`filteredParts:232-245`). It does **not** touch `sheetPlacements`
-  (`:247-250`) or the marker layer (`:1252`) — placed items are always all visible. That is
+  (`:247-250`) or the marker layer (`:1252`), placed items are always all visible. That is
   exactly the "busy" problem.
-- Marker color is a hash of `part.category` (`markerColor:95-101`) — decorative, not a legend,
+- Marker color is a hash of `part.category` (`markerColor:95-101`), decorative, not a legend,
   not stable across category renames.
 - **Spaces:** `GridSpace` (`grid-projects.ts:52-62`); membership is **computed, never stored**
   (`spaceOf` in `grid-geometry.ts:124`). Per-space rollup `bomBySpace` (`grid-bom.ts:109-127`)
-  returns `{ spaceId, name, count, value }` — a flat count + dollar value, **no breakdown by
+  returns `{ spaceId, name, count, value }`, a flat count + dollar value, **no breakdown by
   category**. It drops the part's `group` on the floor at `:121`. That function and
   `SpaceRollup` (`:94-99`) are the exact seam for "categories track through with Spaces";
   consumers are `spaces-panel.tsx:196-210` and `editor.tsx:287-290`.
@@ -2972,17 +2972,17 @@ together; don't scope #41's category field without this.
 **Open questions for Jeff / the implementer:**
 - Are the filter buckets the six catalog GROUPS, the three TRADES, or a separate Grid-scope
   taxonomy? Jeff's list (lighting, rigging, curtains, audio, video) matches neither exactly.
-- Palette filter vs layer visibility are different concerns sharing one `groupFilter` state —
+- Palette filter vs layer visibility are different concerns sharing one `groupFilter` state, 
   independent controls, or does arming a group dim the others?
 - Stored-on-placement vs derived-from-part: derived is cheaper, but a curtain (#49) or custom
   item has no catalog category to derive from, and the map is admin-mutable at runtime
   (`catalog-taxonomy.ts:12-15`), so old designs can silently re-bucket.
 
-**Status:** OPEN — logged only, no code.
+**Status:** OPEN: logged only, no code.
 
 ---
 
-## 49. The Grid: curtains as a first-class drop-in (Border/Draw/Full/Leg + config dialog) — OPEN
+## 49. The Grid: curtains as a first-class drop-in (Border/Draw/Full/Leg + config dialog), OPEN
 
 **Area:** The Grid palette + a new curtain drop dialog; mirrors `src/app/(app)/estimator/curtain-modal.tsx`
 **Reported:** 2026-07-27
@@ -2997,8 +2997,8 @@ Fabric Type. Similar to our curtain builder for estimates."*
   note *"no imported parts use this category yet"* (`:71-73`). Worse, the palette **excludes
   `category === "Fabric"`** from every group bucket (`editor.tsx:241`), so the actual fabric
   SKUs the curtain math uses are not paintable. Selecting "Curtains" today yields an empty list.
-- The Grid's only drop is `placeDeviceAction(partId)` (`editor.tsx:438`) — carries no dimensions.
-- **The estimator builder to mirror:** `estimator/curtain-modal.tsx` — Name (`:71-80`), Fabric
+- The Grid's only drop is `placeDeviceAction(partId)` (`editor.tsx:438`), carries no dimensions.
+- **The estimator builder to mirror:** `estimator/curtain-modal.tsx`, Name (`:71-80`), Fabric
   from catalog category `Fabric` (`:82-102`), Qty/Width/Height (`:104-138`), Fullness segmented
   Flat/50/75/100 (`FULLNESS:15-20`, buttons `:141-155`), vendor cost override (`:157-172`).
   Draft type `CurtainDraft` (`estimator/types.ts:67-78`; `hang`/`bottom` are vestigial).
@@ -3006,12 +3006,12 @@ Fabric Type. Similar to our curtain builder for estimates."*
   (`estimator-client.tsx:711-733`, mints `sku: "CRT-<n>"`).
 - **Fullness/goods math:** authoritative cost model `src/lib/design/curtain-pricing.ts`
   (`curtainCost:73-89`, `CURTAIN_MARGIN:43`, making rates `:45,47`); customer-safe mirror
-  `src/lib/curtain-geom.ts`. Note `src/lib/design/goods.ts` is **not** the fullness calculator —
+  `src/lib/curtain-geom.ts`. Note `src/lib/design/goods.ts` is **not** the fullness calculator, 
   it is the finished-dimension recipe table for the lineset schedule (`drapeRule:55-102`).
 - **Three different curtain type vocabularies already exist** and none is canonical:
   Quick Design `design/quick/engine.ts:235` (Draw/Legs/Border/Scenery/Full) · `goods.ts:83-101`
   (Draw/Midstage Draw/Rear/Legs/Border/CYC) · `lineset.ts:11,364-378` (adds Electric/Shell/GP).
-  **Jeff's set here is Borders / Draws / Fulls / Legs.** Pick one shared enum first — this item,
+  **Jeff's set here is Borders / Draws / Fulls / Legs.** Pick one shared enum first, this item,
   #50 and #48 all depend on it.
 
 **Open question (blocking, for the implementer):** a Grid curtain is not a catalog SKU. Does it
@@ -3019,20 +3019,20 @@ become (a) a `GridCurtain[]` array on `GridProject`, (b) a placement with an opt
 blob, or (c) a synthesized `CRT-*` pseudo-part like `estimator-client.tsx:721`? That choice also
 determines how `bomLines` (`grid-bom.ts:68`) prices it, since it looks up parts by id.
 
-**Status:** OPEN — logged only, no code.
+**Status:** OPEN: logged only, no code.
 
 ---
 
-## 50. Lineset Builder: curtains/tracks/pipe not filling out + reduce to three dimension inputs — PARTIALLY BUILT 2026-07-27 (D124)
+## 50. Lineset Builder: curtains/tracks/pipe not filling out + reduce to three dimension inputs, PARTIALLY BUILT 2026-07-27 (D124)
 
 > **Built and browser-verified** on `punch-2026-07-27-wave-a`: (a) the silent fabric failure is now
-> NAMED — per-row chip, a banner grouped by cause, a red-bordered fabric select and a
+> NAMED: per-row chip, a banner grouped by cause, a red-bordered fabric select and a
 > `FABRIC UNRESOLVED` prefix on the CSV Check column, distinguishing *no Fabric parts in the
 > catalog* from *this part has no oz/yd²*; (b) per-line pipe + batten-length overrides that fall
-> back to the global; (c) Track gained a real "None — no track" option, so Legs/Border/CYC stop
+> back to the global; (c) Track gained a real "None, no track" option, so Legs/Border/CYC stop
 > falsely displaying "Light-duty track" and a track can be cleared; (d) fabric tier labels
 > corrected to the data (Better = 25 oz Charisma, not 21 oz Marvel). `steel.ts` untouched.
-> **STILL OPEN — the three-input reduction.** Blocked on one answer from Jeff: where does
+> **STILL OPEN: the three-input reduction.** Blocked on one answer from Jeff: where does
 > `battenLen` come from? It is a hardcoded 44 ft (`steel.ts:471`) driving batten weight, track
 > weight, the distribution allowance and the bending check, and (proW, proH, depth) cannot supply
 > it. Options: `proWidth + 2×wing` · `proWidth + K` · keep stage width as a 4th input.
@@ -3047,7 +3047,7 @@ of Pro, and Depth of Stage, that should be enough for us to define the stage are
 requirements for it. This isn't meant to be a full fleshed design just enough to spit out a
 lineset schedule and the loads calcs for it."*
 
-**Recon (2026-07-27) — the empty rows are almost certainly a DATA problem, not an equation problem:**
+**Recon (2026-07-27): the empty rows are almost certainly a DATA problem, not an equation problem:**
 - Auto-fill does run, unconditionally, on every keystroke (`lineset-builder.tsx:185-224` →
   `drapeRule` `goods.ts:55-102` → `ruleToWeightLine` `goods.ts:216-243`).
 - `ruleToWeightLine` resolves fabric by SKU against `fabrics = byCategory("Fabric")`
@@ -3058,7 +3058,7 @@ lineset schedule and the loads calcs for it."*
   (`steel.ts:501`) **`goods = 0` AND `trackWt = 0`** (track lookup is gated on the fabric,
   `steel.ts:515`). That single gap reproduces "curtains and tracks not filling out."
   Secondary: seeded fabric rows with no `oz` return `null` from `fabricFromPart`
-  (`steel.ts:399`) — same silent zero (`RB-MARVEL`, `RB-COM-16`, `RB-SCRIM`, `RB-BOBNET`,
+  (`steel.ts:399`): same silent zero (`RB-MARVEL`, `RB-COM-16`, `RB-SCRIM`, `RB-BOBNET`,
   `RB-POLY`).
   → **First step: confirm which DB Jeff is on and whether `byCategory("Fabric")` is empty.**
 - **"Pipe not filling out" is a real UI gap:** `LoadEditor` (`lineset-builder.tsx:316-351`)
@@ -3066,44 +3066,44 @@ lineset schedule and the loads calcs for it."*
   though `WeightLine` defines both (`steel.ts:489-490`). Pipe is global-only
   (`lineset-builder.tsx:455-456`).
 - **Track select bug:** `TRACKS` (`steel.ts:359-363`) has no "None" entry but the select does
-  `value={value.track || "None"}` (`lineset-builder.tsx:338`) — every no-track line
+  `value={value.track || "None"}` (`lineset-builder.tsx:338`), every no-track line
   (Legs/Border/CYC) displays "Light-duty track" while storing undefined, and a track can never
   be cleared.
-- **Tier label lies:** UI says "Better — 21 oz Marvel" (`lineset-builder.tsx:480`) but `better`
+- **Tier label lies:** UI says "Better, 21 oz Marvel" (`lineset-builder.tsx:480`) but `better`
   maps to `RB-CHAR-25`, 25 oz Charisma (`goods.ts:42`).
 
 **On the three-input reduction.** Current inputs are `stageWidthFt/In`, `stageDepthFt/In`,
 `proWidthFt`, `proHeightFt` (`lineset.ts:26-49`) plus nine rule constants in the settings drawer.
 What **cannot** be satisfied by (proW, proH, depth) alone:
-- `battenLen` — hardcoded 44 ft (`steel.ts:471`), and it drives batten weight, track weight, the
+- `battenLen`: hardcoded 44 ft (`steel.ts:471`), and it drives batten weight, track weight, the
   distribution allowance and the bending check. Needs stage width or a proW→batten rule.
 - `stageWidthFt` is **already vestigial**: `widthIn` (`lineset.ts:155`) feeds only the status
   string (`:220-225`) and the CSV filename. `venue-dims.ts:16-17` claims it "drives batten length
-  and line placement" — **false in code today.** So dropping it is close to free *if* batten
+  and line placement": **false in code today.** So dropping it is close to free *if* batten
   length gets a rule.
 - Rule constants (slot spacing 8", electric interval 10', shell interval 12', clearance 16",
-  cyc offset 3', gpCount, 4 include-toggles) — survivable as hidden defaults, but they are
+  cyc offset 3', gpCount, 4 include-toggles), survivable as hidden defaults, but they are
   inputs today.
 - Hardcoded goods constants that look like they should derive: Border height 5 ft, Legs width
   6 ft (`goods.ts:91,93`).
-- `gridHeightFt` — in `VenueDims` (`venue-dims.ts:21`) but unused by the lineset; the estimator's
+- `gridHeightFt`: in `VenueDims` (`venue-dims.ts:21`) but unused by the lineset; the estimator's
   rigging equations do need it (`quick/engine.ts:481,484`).
 
 **Shared-dims trap (still live):** `venueDimsFromEstimator` (`venue-dims.ts:33-47`) maps
 `width → proWidthFt` **unconditionally**, but `AState.width` is proscenium only for
-`kind:"proscenium"` — for church/flat/blackbox/arena/gym it is wall-to-wall
+`kind:"proscenium"`: for church/flat/blackbox/arena/gym it is wall-to-wall
 (`quick/engine.ts:162-183`). Every non-proscenium venue currently oversizes drapes. Also
-`venueDimsFromLineset` (`venue-dims.ts:50-61`) **has no callers in `src/`** — the builder builds
+`venueDimsFromLineset` (`venue-dims.ts:50-61`) **has no callers in `src/`**, the builder builds
 its own dims inline (`lineset-builder.tsx:172-180`).
 
-**Housekeeping:** **#28 is stale** — the 50′×30′ defaults shipped (`lineset.ts:52-72`,
+**Housekeeping:** **#28 is stale**, the 50′×30′ defaults shipped (`lineset.ts:52-72`,
 `lineset-builder.tsx:500-502`) but the item is still marked OPEN. Close it with this work.
 
-**Status:** OPEN — logged only, no code.
+**Status:** OPEN: logged only, no code.
 
 ---
 
-## 51. Design tab consolidation: one design toolset + a publishable package for Consulting AND Design/Build — OPEN
+## 51. Design tab consolidation: one design toolset + a publishable package for Consulting AND Design/Build, OPEN
 
 **Area:** DESIGN nav group (`src/components/nav/nav-data.ts:76-79`), The Grid, Lineset Builder,
 Steel Calculator, the D94 spec generator, Consulting/Engagements, Designs
@@ -3117,7 +3117,7 @@ information. Also we need to add Spec builder to the tools for Design. I ultimat
 either consulting or design/build to be able to publish a spec, data sheet package, drawing
 package, and estimate/budget for every single design that gets turned out."*
 
-**This is the organizing principle behind #40 and #41 — read all three together.**
+**This is the organizing principle behind #40 and #41, read all three together.**
 - #41 = split the design estimator; artifacts merge into The Grid.
 - #40 = catalog-anchored datasheets + specs → one-click client package from a BOM.
 - **#51 adds the missing frame:** the tools are *shared* by Consulting and Design/Build, the two
@@ -3127,7 +3127,7 @@ package, and estimate/budget for every single design that gets turned out."*
 **Recon (2026-07-27):**
 - DESIGN tab today: Overview, Consulting, Designs, The Grid, Steel Calculator, Lineset Builder,
   Motor Library, Fixture Cross-Ref (`nav-data.ts:76-79`). So the three tools Jeff names are
-  already in the group — what is missing is that they are **peers in a list, not tools attached
+  already in the group, what is missing is that they are **peers in a list, not tools attached
   to a design.**
 - **Spec builder is NOT in the nav at all.** It lives at
   `src/app/(app)/design/engagements/spec/page.tsx` (+ `generator.tsx`, `actions.ts`,
@@ -3147,11 +3147,11 @@ package, and estimate/budget for every single design that gets turned out."*
 - If bidding is the only difference, does the *estimate* become a **budget** on the consulting
   side (different document, same math), or the same document with a different cover?
 
-**Status:** OPEN — logged only. Direction item; sequence behind #39/#40 like #41.
+**Status:** OPEN: logged only. Direction item; sequence behind #39/#40 like #41.
 
 ---
 
-## 52. Estimator fixture builder: light engine + lens selects, and presets that carry catalog part IDs — OPEN
+## 52. Estimator fixture builder: light engine + lens selects, and presets that carry catalog part IDs, OPEN
 
 **Area:** `src/app/(app)/estimator/fixture-modal.tsx`, `estimator-data.ts`, `pricing.ts`,
 `estimator-client.tsx`, `types.ts`
@@ -3166,21 +3166,21 @@ is preset but it needs to have all of the different catalog items linked into th
 we are working we can order the individual parts. The same principle is applied for the clamp,
 accessories, power and data, and if there is a lamp the lamp cost."*
 
-**Recon (2026-07-27) — Jeff's read is correct, and the gap is deeper than two selects:**
+**Recon (2026-07-27): Jeff's read is correct, and the gap is deeper than two selects:**
 - **The fixture builder reads ZERO catalog data.** Everything comes from a hardcoded TS array:
   `FIXTURES` (`estimator-data.ts:19-37`, 17 rows, invented SKUs like `ETC-S4-26`, `ETC-CS-SPOT`),
   `FIX_MOUNTS:41-48`, `FIX_ACC:50-57`, `FIX_PWR:59-65`, `FIX_LAMPS:67-72`. Grep finds **no
   `CSSPOTVMVS` and no `426LT` anywhere in `src/`.**
 - **Light engine:** the only body picker is the `FIXTURES` select (`fixture-modal.tsx:104-109`)
-  — not catalog-bound. **Lens: no field at all** — no `FIX_LENS`, no `lens` key on
+: not catalog-bound. **Lens: no field at all**, no `FIX_LENS`, no `lens` key on
   `FixtureDraft` (`types.ts:86-97`). Confirmed missing.
 - **Presets:** `FIX_PRESETS` (`estimator-data.ts:79-85`, 5 hardcoded entries) = `{ label,
   d: Partial<FixtureDraft> }`; applied by `applyFixturePreset`
   (`estimator-client.tsx:754-767`). Rendered as **bare label chips**
-  (`fixture-modal.tsx:64-83`) — **the UI never shows what the preset selected**, which is
+  (`fixture-modal.tsx:64-83`): **the UI never shows what the preset selected**, which is
   exactly Jeff's complaint. Presets are also not user-creatable today ("after we build a fixture
   once it is preset" describes behavior that does not exist).
-- **The crux — nothing is orderable.** `addFixture` (`estimator-client.tsx:768-791`) collapses
+- **The crux: nothing is orderable.** `addFixture` (`estimator-client.tsx:768-791`) collapses
   the whole configuration into **one** `SpecItem`: clamp, gel frame, safety cable, DMX jumper,
   lamp exist only as **words in `desc`** (`:773-782`) and dollars in `cost`/`price`.
   `SpecItem` (`types.ts:22-40`) has **no component array and no catalog-part reference**, so a
@@ -3197,21 +3197,21 @@ accessories, power and data, and if there is a lamp the lamp cost."*
   `category`/`mfr`?** No ETC part numbers of that shape were found. If not, this depends on the
   #39 catalog build-out.
 - `estimator-data.ts:3-8` states the fixture list is deliberately in-screen, not catalog
-  (IDEAS #43), *"do not edit without a DECISIONS.md entry"* — **this ask reverses that
+  (IDEAS #43), *"do not edit without a DECISIONS.md entry"*, **this ask reverses that
   decision**; it needs one.
 - `SpecItem` field names are declared frozen (`types.ts:5-9,22`) and read back verbatim by
   `projects.ts` on quote-win. Adding `components[]` needs a back-compat story for saved quotes;
   the alternative (one `SpecItem` per component) changes how the fixture reads on the customer
   PDF (`preview-doc.tsx`).
 
-**Status:** OPEN — logged only, no code.
+**Status:** OPEN: logged only, no code.
 
 ---
 
-## 53. Estimator: section sell price shows no dollar sign or comma — DONE 2026-07-27 (D124)
+## 53. Estimator: section sell price shows no dollar sign or comma, DONE 2026-07-27 (D124)
 
 > **Built and browser-verified.** The Sell box is now `type="text"` rendered through the existing
-> `fmt()` — reads `$84,820.00` and matches Price/Cost/Freight in the same card. Round-trip verified:
+> `fmt()`: reads `$84,820.00` and matches Price/Cost/Freight in the same card. Round-trip verified:
 > typing `$70,000` and blurring re-prices the section and re-renders formatted. `inputMode="decimal"`
 > keeps the touch numpad; the parse strips `$`, commas and spaces; empty still yields 0.
 > **Visible change beyond the ask:** the box now shows cents where it used to round to whole dollars.
@@ -3223,36 +3223,36 @@ accessories, power and data, and if there is a lamp the lamp cost."*
 **Ask (Jeff):** *"The sell of each section should be in dollars, the price next to the margin
 slider doesn't show the dollar sign or a comma."*
 
-**Recon (2026-07-27):** the Sell box is `section-card.tsx:278-290` — a raw
+**Recon (2026-07-27):** the Sell box is `section-card.tsx:278-290`, a raw
 `<input type="number">` (`:279`) with `defaultValue={Math.round(itemsRev)}` (`:281`). No
-formatter is applied, so it renders `74200`. **A `number` input cannot hold `$` or `,` — this is
+formatter is applied, so it renders `74200`. **A `number` input cannot hold `$` or `,`, this is
 a control-type change, not just a formatter swap** (switch to `type="text"` with parse-on-blur,
 or a display span that swaps to an input on focus).
 
 Two shared formatters already exist and are used in the same file: `fmt()`
-(`estimator/pricing.ts:31-39`, `$1,234.56`) — already imported at `section-card.tsx:5` and used
-for section Price `:219`, cost `:200`, freight `:326` — and the app-wide `money()`
+(`estimator/pricing.ts:31-39`, `$1,234.56`): already imported at `section-card.tsx:5` and used
+for section Price `:219`, cost `:200`, freight `:326`, and the app-wide `money()`
 (`src/lib/format.ts:6-14`). The freight readout next to *its* slider is correctly formatted, so
 the Sell box is the odd one out. **Decide: `fmt()` (cents) or `money()` (no cents)?** Adjacent
 readouts use `fmt()`.
 
-**Status:** OPEN — small and self-contained.
+**Status:** OPEN: small and self-contained.
 
 ---
 
-## 54. Labor estimator: show the installer rates/cost, and confirm rates pull from the catalog — PARTIALLY BUILT 2026-07-27 (D124)
+## 54. Labor estimator: show the installer rates/cost, and confirm rates pull from the catalog, PARTIALLY BUILT 2026-07-27 (D124)
 
 > **Answer to the question: YES, labor rates pull from the catalog** (`catalog_parts` where
 > `category = "Labor"`), with a hardcoded fallback behind them.
 > **Built and browser-verified:** a rate strip under the Scope buttons showing the resolved
 > Installer / Overtime / Supervisor $/hr for the selected discipline (verified: Rigging $50/hr,
 > Video $48/hr, Supervisor $72/hr), a second strip in Shop & engineering (PM $90/hr, In-house
-> $40/hr, Drafting), and **a DEFAULT chip whenever a rate fell back to the hardcoded map** — a
+> $40/hr, Drafting), and **a DEFAULT chip whenever a rate fell back to the hardcoded map**, a
 > missing or renamed catalog row used to be invisible. Provenance rides on an optional
 > `.source(sku)` on the rate function, so no caller changed and no math moved.
-> **STILL OPEN — "overall this needs to be redone."** Needs Jeff to say what is wrong beyond the
+> **STILL OPEN: "overall this needs to be redone."** Needs Jeff to say what is wrong beyond the
 > invisible rates. Also still silent: travel/equipment rates (`TVL-MIL`, `TVL-HTL`, `TVL-FOD`,
-> `EQP-LIFT`) — they are per-mile/night/day, not $/hr, so they did not fit the strip.
+> `EQP-LIFT`): they are per-mile/night/day, not $/hr, so they did not fit the strip.
 
 **Area:** `src/app/(app)/estimator/labor-modal.tsx`, `estimator/pricing.ts:212-347`,
 `estimator/page.tsx:168-188`, `estimator-data.ts:92-115`
@@ -3262,20 +3262,20 @@ readouts use `fmt()`.
 the rate calculator. Overall I think this also needs to be redone and shown as I want to confirm
 that labor rates are pulling from the catalog for easy long term updating."*
 
-**Recon (2026-07-27) — answer to the question first: YES, rates do come from the catalog.**
+**Recon (2026-07-27): answer to the question first: YES, rates do come from the catalog.**
 - Loaded server-side from `catalog_parts` where `category === "Labor"`
   (`estimator/page.tsx:168`), flattened to `sku → cost` (`:185-188`), passed as `laborRates`
   (`:231`). Resolver `makeLaborRate` (`pricing.ts:217-222`): live catalog value wins, else the
-  hardcoded `LABOR_RATES_FALLBACK` (`estimator-data.ts:92-100` — `RIG-LBR: 50`, `LIG-LBR: 45`,
+  hardcoded `LABOR_RATES_FALLBACK` (`estimator-data.ts:92-100`: `RIG-LBR: 50`, `LIG-LBR: 45`,
   `TVL-MIL: 1`, `EQP-LIFT: 750`, …).
 - **Two caveats worth surfacing in the UI:** (1) the fallback **silently masks** a missing or
-  renamed catalog row — a missing rate is invisible today; (2) estimator labor rates live in the
+  renamed catalog row: a missing rate is invisible today; (2) estimator labor rates live in the
   **catalog**, NOT in `/estimating-rules` (whose registry `src/lib/stores/pricing.ts` covers
   flame/repair/inspection/system rates and has no `RIG-LBR`-style entries). **Two separate rate
-  homes** — relevant to #56, which wants company rules in one place.
+  homes**: relevant to #56, which wants company rules in one place.
 - **Installer cost is only shown in aggregate.** Footer "Cost" (`labor-modal.tsx:118`) and
   per-mob cost (`:316`) render dollars; the hours hint is at `:198`. The `rate` function is
-  passed in (`:49,68`) but used **only** to feed `computeLabor` (`:85`) — it is never called in
+  passed in (`:49,68`) but used **only** to feed `computeLabor` (`:85`), it is never called in
   the render, so **no $/hr is ever displayed.** The label at `:138` says "picks the rate set from
   the catalog" without showing a value.
 - **Current math** (`computeMob` `pricing.ts:246-286`): `reg = people × days × 8`; OT × `-OT`
@@ -3289,20 +3289,20 @@ that labor rates are pulling from the catalog for easy long term updating."*
 
 **Open questions for Jeff:** show the resolved $/hr per discipline in the modal (and flag when a
 rate fell back to the hardcoded map)? And should labor rates *also* appear in `/estimating-rules`,
-or is the catalog the sole home? "Redone" needs scoping — what specifically is wrong beyond the
+or is the catalog the sole home? "Redone" needs scoping, what specifically is wrong beyond the
 invisible rates?
 
-**Status:** OPEN — logged only, no code.
+**Status:** OPEN: logged only, no code.
 
 ---
 
-## 55. Home dashboard / Home tab — the company mark links nowhere — DONE 2026-07-27 (D124); closes #45(a)
+## 55. Home dashboard / Home tab, the company mark links nowhere, DONE 2026-07-27 (D124); closes #45(a)
 
 > **Built and browser-verified on desktop AND mobile.** The company mark is now a `<Link href="/">`
 > (verified: clicking it from `/quotes` lands on Home), and a **Home** group joined the nav ahead of
 > EST/PM/CRM/DESIGN with the five existing sub-tabs (Dashboard · My Queue · Calendar · Inbox ·
 > Reports) sourced from `home-tabs-keys.ts` rather than duplicated. The mobile drawer renders the
-> same array, so it is fixed by the same change — verified at 375px, with the active row lit.
+> same array, so it is fixed by the same change, verified at 375px, with the active row lit.
 > `/inbox` is reachable from a cold start again. Two side effects: the home routes now return their
 > own child keys so the pill actually lights (`parentGroupOf` only matches child keys), and the
 > Inbox unread badge now has somewhere to render (shows 5 on the dev DB).
@@ -3314,33 +3314,33 @@ invisible rates?
 **Ask (Jeff):** *"There still needs to be a home dashboard when I click on Peak Systems Group, or
 just a home Tab."*
 
-**Recon (2026-07-27) — confirmed, and the code comment claims the opposite:**
+**Recon (2026-07-27): confirmed, and the code comment claims the opposite:**
 - The Home page **exists** at `/` (`src/app/(app)/page.tsx`, widgets in the `home-*.tsx` siblings).
-- The company name is a plain `<div>` — `Nav.tsx:181-194`: logo + `.pk-mark` +
+- The company name is a plain `<div>`, `Nav.tsx:181-194`: logo + `.pk-mark` +
   `<div className="pk-company">{companyName}</div>` + BETA chip inside a non-interactive flex
   div. **No `<Link>`, no `onClick`.**
 - `nav-data.ts:13-17` documents *"[Q6 mark = Home] … Home left the tab row (the mark is the
-  link)"* — **that was never implemented.**
-- Desktop tabs (`nav-data.ts:12-82`) are EST / PM / CRM / DESIGN — **no Home entry.** The mobile
-  drawer uses the same `NAV` array plus `/account` and `/settings` (`Nav.tsx:697-738`) — **no
+  link)"*: **that was never implemented.**
+- Desktop tabs (`nav-data.ts:12-82`) are EST / PM / CRM / DESIGN, **no Home entry.** The mobile
+  drawer uses the same `NAV` array plus `/account` and `/settings` (`Nav.tsx:697-738`), **no
   Home either.** The user menu (`Nav.tsx:589-595`) has only Account/Settings.
 - `activeKeyFor("/")` returns `"home"` (`nav-data.ts:86`) and maps `/queue`, `/calendar`,
   `/inbox`, `/reports` → `"home"` (`:89-91,110`), but **no NAV entry has key `"home"`**, so the
   pill never lights.
 - Home sub-tabs exist but are only reachable once you are already on `/`
   (`home-tabs-keys.ts:13-19`: Dashboard, My Queue, Calendar, Inbox, Reports;
-  `home-tabs.tsx:48-63`) — **`/inbox` is currently unreachable from a cold start.**
+  `home-tabs.tsx:48-63`): **`/inbox` is currently unreachable from a cold start.**
 
 **Overlaps:** **#45(a)** is the same defect from the tabs-rebuild session (Home missing on web
-and mobile) — the cheapest fix is both: make the mark a `<Link href="/">` *and* add a Home tab.
+and mobile): the cheapest fix is both: make the mark a `<Link href="/">` *and* add a Home tab.
 **#43** (build-your-own widget system, supersedes #7) owns what the dashboard *contains*; this
 item is only about reaching it.
 
-**Status:** OPEN — small nav fix; coordinate with #45.
+**Status:** OPEN: small nav fix; coordinate with #45.
 
 ---
 
-## 56. Knowledge tab under the company — make it the home for COMPANY settings (doctrine, estimating rules, customer tiers) — OPEN
+## 56. Knowledge tab under the company, make it the home for COMPANY settings (doctrine, estimating rules, customer tiers), OPEN
 
 **Area:** new `/knowledge` (or a company group), `src/app/(app)/settings/`, `/estimating-rules`,
 `src/lib/settings.ts`, `src/lib/stores/pricing.ts`, `src/app/(app)/account/`
@@ -3351,24 +3351,24 @@ knowledge tab, this is where company knowledge is stored, like design doctrine, 
 things, I also think this is where the estimating rules and customer tiers should live. Basically
 let that be where the company settings live instead of under the person."*
 
-**This supersedes and re-scopes #27** (a dedicated Knowledge tab, logged 2026-07-21, still OPEN —
+**This supersedes and re-scopes #27** (a dedicated Knowledge tab, logged 2026-07-21, still OPEN, 
 it was **not** folded into Design; what shipped was #26, the Fixture Cross-Reference at
-`/design/fixtures`). #27's unanswered A–D (`PUNCHLIST.md:2062-2073`) should be answered here.
+`/design/fixtures`). #27's unanswered A, D (`PUNCHLIST.md:2062-2073`) should be answered here.
 The spec `docs/superpowers/specs/2026-07-25-remaining-items-decisions-design.md:138-140,190`
 already calls Knowledge a **new top-level nav group, wave ④**.
 
-**Recon (2026-07-27) — the good news: the things Jeff wants moved are ALREADY company-scoped.
+**Recon (2026-07-27): the good news: the things Jeff wants moved are ALREADY company-scoped.
 The problem is placement and discoverability, not scope.**
-- **Estimating Rules / rates** — company-scoped, admin-only: `/estimating-rules`
+- **Estimating Rules / rates**, company-scoped, admin-only: `/estimating-rules`
   (`src/app/(app)/estimating-rules/page.tsx`), definitions `src/lib/stores/pricing.ts:244+`,
   stored as `blobs` singletons `pricing_rules` / `flametest_rates` / `repair_rates` /
   `inspection_rates` (`pricing.ts:116-120`, table `doc-tables.ts:136`).
-- **Customer pricing tiers** — company-scoped but **buried inside Estimating Rules** as the
+- **Customer pricing tiers**, company-scoped but **buried inside Estimating Rules** as the
   `tiers` group (`pricing.ts:269-280`: base/copper/silver/gold/platinum/reseller/employee).
   Resolution `src/lib/pricing-tiers.ts:1-54`; enum `src/lib/identity/config.ts`; per-record
   columns `companies.pricingTier` (`schema.ts:104`) and the authoritative
   `contacts.pricingTier` (`schema.ts:136`). **Ties directly to #11.**
-- **AppSettings** — one global row `id="main"` (`schema.ts:35-39`, pinned in
+- **AppSettings**: one global row `id="main"` (`schema.ts:35-39`, pinned in
   `settings.ts:70,94,100`): accent, companyName, offices, logos, templates, visitReasons,
   consultingPhases, consultingAssumptions, reviewChecklistTemplates, catalogCategoryMap,
   wireTypes, customerFieldDefs (`settings.ts:26-81`). Sections `settings-sections.ts:10-14`
@@ -3381,17 +3381,17 @@ The problem is placement and discoverability, not scope.**
 
 **Open questions for Jeff:** is Knowledge a **top-level nav group** or a section under the
 company/settings surface? Is the content **static curated docs** (like `/design/fixtures`) or an
-**editable store** with authoring? Who can see it — everyone, or admin/role-gated? And does
+**editable store** with authoring? Who can see it, everyone, or admin/role-gated? And does
 "estimating rules and customer tiers live here" mean **moving** those screens or **linking** to
 them from Knowledge?
 
-**Status:** OPEN — logged only, no code. **Supersedes #27.**
+**Status:** OPEN: logged only, no code. **Supersedes #27.**
 
 ---
 
-## 57. Make the system company-definable — prep for other organizations (multi-tenant groundwork) — OPEN
+## 57. Make the system company-definable, prep for other organizations (multi-tenant groundwork), OPEN
 
-**Area:** whole schema — `src/db/schema.ts`, `src/db/doc-tables.ts`, `src/db/doc-store.ts`,
+**Area:** whole schema: `src/db/schema.ts`, `src/db/doc-tables.ts`, `src/db/doc-store.ts`,
 `src/lib/settings.ts`, `src/lib/session.ts`, `src/lib/portal.ts`, `src/lib/blob.ts`, sync routes
 **Reported:** 2026-07-27
 
@@ -3399,15 +3399,15 @@ them from Knowledge?
 while this is built around my current company if I want to expand this and let other organizations
 use the bones we should prep that implementation."*
 
-**Recon (2026-07-27) — there is ZERO tenant concept today. This is the largest structural item on
+**Recon (2026-07-27): there is ZERO tenant concept today. This is the largest structural item on
 the list.**
 - `grep -rn "orgId|org_id|tenantId|tenant_id|workspaceId" src drizzle` → **no matches.**
-  Migrations `drizzle/0000`–`0011` have no tenant column.
+  Migrations `drizzle/0000`, `0011` have no tenant column.
 - **`companies` is the CUSTOMER directory, not the tenant** (`schema.ts:84-122`);
   `sites.companyId` (`:188`) and `contacts.homeCompanyId` (`:132`) scope to a customer org.
 - **`app_settings` is a single global row `id="main"`** (`schema.ts:35-39`, pinned at
   `settings.ts:70,94,100`, seeded `seed-data.ts:150-155`).
-- **All 21 doc tables are tenant-less by construction** — generic `docTable(name)` gives
+- **All 21 doc tables are tenant-less by construction**, generic `docTable(name)` gives
   `id, doc, rev, seq, updatedAt, receivedAt, review, deleted` (`doc-tables.ts:30-52`); instances
   `:55-75`; registry `DOC_TABLES:77-99`. Plus 8 relational tables (`users:16`,
   `app_settings:35`, `gmail_connections:51`, `companies:84`, `contacts:124`,
@@ -3420,19 +3420,19 @@ the list.**
   `personal:<userId>`/`sales`/`installs`/`info` (`schema.ts:51-65`), portal grants
   (`portal.ts:15-45`), and Blob pathnames (`blob.ts:26-37`).
 
-**Recommendation for Jeff before any code:** decide the *ambition level* first —
-(a) **cosmetic/config white-label** (branding, terminology, rules already in AppSettings —
+**Recommendation for Jeff before any code:** decide the *ambition level* first, 
+(a) **cosmetic/config white-label** (branding, terminology, rules already in AppSettings, 
 mostly free today), (b) **one-org-per-deployment** (separate DB per customer; no schema change,
 an ops problem), or (c) **true multi-tenant single DB** (the full blast radius above). These are
 wildly different costs and (b) may buy most of the value now. Also note the doc-store carries a
 `seq`-based sync protocol and an offline PWA outbox, which makes (c) harder than a normal
 Postgres app.
 
-**Status:** OPEN — strategic. Do not start without an answer to the a/b/c question.
+**Status:** OPEN: strategic. Do not start without an answer to the a/b/c question.
 
 ---
 
-## 58. Google Drive integration for venues + file access through the customer portal — OPEN
+## 58. Google Drive integration for venues + file access through the customer portal, OPEN
 
 **Area:** `sites.driveFolderId` (`src/db/schema.ts:206-207`), `src/lib/gmail/config.ts`,
 `src/lib/google/`, `src/lib/blob.ts`, `src/app/(app)/venues/`, `src/app/portal/`
@@ -3444,39 +3444,39 @@ customers can access those files through their customer portal."*
 
 **Recon (2026-07-27):**
 - **The hook already exists as a dead column:** `sites.driveFolderId`
-  (`schema.ts:206-207`, comment *"Placeholder for the later Drive integration (§4.4) — free
+  (`schema.ts:206-207`, comment *"Placeholder for the later Drive integration (§4.4), free
   now"*). **Referenced nowhere else.**
-- **No file attachment on venues or customers today** — `src/app/(app)/venues/` is just
+- **No file attachment on venues or customers today**, `src/app/(app)/venues/` is just
   `page.tsx` + `[id]/page.tsx`; grep for `attachment|upload|dataUrl` under `venues/`,
   `companies/`, `customers/` → no matches.
 - **The storage + auth pattern to copy (D116, `DECISIONS.md:1776`, howto §9):**
   `src/lib/blob.ts:1-67` (env-gated on `BLOB_READ_WRITE_TOKEN`, `putBlob` writes
-  `access:"private"` `:26-37`, `getBlobStream` `:40-45`) behind an authenticated proxy — two
+  `access:"private"` `:26-37`, `getBlobStream` `:40-45`) behind an authenticated proxy, two
   live instances, `api/grid-sheets/[id]/route.ts:1-21` (Grid plan sheets) and
   `api/part-datasheet/[id]/route.ts:16-35` (catalog datasheets), both `requireUser()` then stream.
 - **Google surface to extend:** one shared OAuth client (`AUTH_GOOGLE_ID/SECRET` reused for SSO
   and Gmail, `gmail/config.ts:1-18`); scopes `GMAIL_SCOPES:27-32`, `GMAIL_MODIFY_SCOPE:36`,
   `CALENDAR_SCOPE:44` (opt-in per mailbox, `hasCalendarScope:47`); tokens in `gmail_connections`
   (`schema.ts:51-65`); flows `api/gmail/connect|callback|sync`. **No Drive scope, no Drive
-  client** — adding one means a re-consent for every connected mailbox.
+  client**: adding one means a re-consent for every connected mailbox.
 - **The portal has no file surface at all.** `src/app/portal/*` shows published quotes, self-serve
   estimates, open requests, renewals, venues on file (`portal/page.tsx:562`) and can accept a
   quote (`:462-479`). Grep for `download|pdf|attachment|print` under `src/app/portal/**` → **no
   matches.** Grants are per-person tokens hard-scoped to `customerId` (`src/lib/portal.ts:1-45`)
-  — that scoping is the natural authorization boundary for venue files.
+, that scoping is the natural authorization boundary for venue files.
 
 **Open questions for Jeff:** one Drive folder per **site/venue** (as the dead column implies) or
-per **company**? Whose Drive — a Peak-owned company Drive with per-venue folders, or the
+per **company**? Whose Drive, a Peak-owned company Drive with per-venue folders, or the
 customer's own Drive? **Sync or link only?** (Linking = store the folder/file id and proxy a
-signed link; syncing = mirroring, permissions, conflict handling — much bigger.) And should
+signed link; syncing = mirroring, permissions, conflict handling, much bigger.) And should
 portal file access reuse the existing authenticated-proxy pattern rather than exposing Drive
-sharing links directly (recommended — otherwise Drive ACLs become the security boundary).
+sharing links directly (recommended, otherwise Drive ACLs become the security boundary).
 
-**Status:** OPEN — logged only, no code.
+**Status:** OPEN: logged only, no code.
 
 ---
 
-## 59. Real data in the database — begin the migration off demo seeds — JEFF ASKED TO BEGIN
+## 59. Real data in the database, begin the migration off demo seeds, JEFF ASKED TO BEGIN
 
 **Area:** `src/db/seed-data.ts`, `src/app/(app)/import/`, catalog import scripts,
 `docs/MASTER-HOWTO.md` §7
@@ -3486,16 +3486,16 @@ sharing links directly (recommended — otherwise Drive ACLs become the security
 can we begin this process. I think we are getting to the point where we should do this."*
 **Note: this is the one item in the 2026-07-27 batch where Jeff asked to START, not just log.**
 
-**Recon (2026-07-27) — where things actually stand:**
+**Recon (2026-07-27): where things actually stand:**
 - **Demo seeding:** `DEMO_SEEDS` covers **11 collections** (`seed-data.ts:95-107`: customers,
   catalog_parts, quotes, leads, surveys, comms, flame_jobs, repair_jobs, inspections, projects,
   designs); `seedDemoCollections():109-120` seeds only when a collection is empty; trigger
-  `seedIfEmpty():140-167` — **demo ON by default with no `DATABASE_URL` (local dev), hosted
+  `seedIfEmpty():140-167`: **demo ON by default with no `DATABASE_URL` (local dev), hosted
   starts clean** (`:148`).
 - **Go-live reset exists:** `clearDemoData()` (`seed-data.ts:126-138`) hard-deletes the 11
   collections and **keeps** users, app_settings, rate blobs, Gmail connections. UI: Settings →
   Beta, typed `CLEAR` (`settings-client.tsx:274-278,1211-1217`).
-- **Import hub:** `/import` with **8 CSV types** (`import/registry.ts` — customers:32, leads:55,
+- **Import hub:** `/import` with **8 CSV types** (`import/registry.ts`, customers:32, leads:55,
   flametests:78, inspections:100, surveys:122, team:144, quotes:161, projects:179), plus
   export + template CSV (`:511,520`).
 - **Documented path:** `MASTER-HOWTO.md` §7 (`:187`), dedupe-key table (`:211-221`), **go-live
@@ -3504,20 +3504,20 @@ can we begin this process. I think we are getting to the point where we should d
 - **What is already REAL:** the **catalog**. D117 (`DECISIONS.md:1803-1838`, 2026-07-24) imported
   **14,674 parts across ~60 brands** from the dealer sheets (5,206 rows flagged "verify price"),
   on top of the earlier 10,729-part import. **BUT `DECISIONS.md:1836-1838` says "Local dev only
-  so far" — production has NOT had this run.**
-- **What is NOT real:** Daylite is **tooling only** — `scripts/pull-daylite.ts` (needs
+  so far": production has NOT had this run.**
+- **What is NOT real:** Daylite is **tooling only**, `scripts/pull-daylite.ts` (needs
   `DAYLITE_TOKEN`) and `scripts/import-daylite.ts` (**dry-run by default, `--commit` required**,
   commit `cd7b9e6`). **No DECISIONS/PUNCHLIST entry records an actual `--commit` run.** Identity
-  tables (`companies`/`contacts`/`sites`) hold **converted demo** data — D85's reconciliation
+  tables (`companies`/`contacts`/`sites`) hold **converted demo** data, D85's reconciliation
   reports 6 companies / 8 sites / 8 contacts, which is exactly `customersSeed`. Quotes, leads,
   surveys, comms, flame/repair/inspections, projects, designs are all demo. Users are seeded
   fixtures (the real 6-person roster is hardcoded at `seed-data.ts:26-33`, emails derived by
   `emailFor()`, D118).
-- `scripts/starter-import-data.json` + `docs/catalog/STARTER-SET-2026-07-DRAFT.md` — the curated
+- `scripts/starter-import-data.json` + `docs/catalog/STARTER-SET-2026-07-DRAFT.md`, the curated
   starter catalog subset from #39, **still awaiting Jeff's review** (that gate is unchanged).
 
 **Questions that must be answered before anything is written to a database:**
-1. **Which environment** — local dev, or the live `peak-app-six.vercel.app` deployment? (These
+1. **Which environment**: local dev, or the live `peak-app-six.vercel.app` deployment? (These
    have diverged: prod likely has neither the 14,674-part catalog nor demo data.)
 2. **Demo-plus or go-live?** Jeff's phrasing offers both. Richer demo seeds are cheap and
    reversible; go-live means pressing Clear demo data and living with real records.
@@ -3525,36 +3525,36 @@ can we begin this process. I think we are getting to the point where we should d
    Daylite export (customers/leads/opportunities)? A real project/quote history? Team roster?
 4. **Was `import:daylite -- --commit` ever run**, and is the Daylite audit checklist
    (`docs/superpowers/specs/daylite-export-audit-checklist.md`) complete?
-5. **Back up first** — `npm run db:export` is the documented first step of the cutover.
+5. **Back up first**, `npm run db:export` is the documented first step of the cutover.
 
 **Jeff's answers, 2026-07-27:** (1) target = **the live deployment**. (2) **Inventory first,
 then decide** demo-plus vs go-live. (3) [#57 parked as direction.]
 
-**BUILT 2026-07-27 — `scripts/inventory.ts` + `npm run db:inventory` (READ ONLY).** Step 0 of
+**BUILT 2026-07-27: `scripts/inventory.ts` + `npm run db:inventory` (READ ONLY).** Step 0 of
 the §7 sequence. Writes nothing, migrates nothing, seeds nothing (with `DATABASE_URL` set,
 `getDb()` skips the dev auto-seed branch, `src/db/index.ts:70`). Prints per-collection live /
 deleted / demo / real counts (demo = id overlap with `src/db/seeds/*`, the same fixtures
 `clearDemoData()` wipes), catalog category breakdown, identity + config table counts, and the
-`seedDemo` flag. **No secrets are read or echoed** — blob key names only, never payloads or
+`seedDemo` flag. **No secrets are read or echoed**, blob key names only, never payloads or
 tokens. Loads `.env.local` by hand (the `backfill-blob-sheets.ts` pattern) so the Neon URL can
 live in the gitignored env file instead of a command line. Typecheck clean.
 
-**First run — LOCAL dev, 2026-07-27** (prod run still pending the connection string):
+**First run: LOCAL dev, 2026-07-27** (prod run still pending the connection string):
 - 119 live rows. **10 of the 11 demo collections are still 100% demo**; `quotes` is **mixed
   (7 demo / 6 real)** and `leads` is **mixed (11 demo / 2 real)**.
 - **`catalog_parts` = 29 rows, ALL demo (19 Labor + 10 Fabric).** The D117 dealer import
-  (14,674 parts) is **GONE from local dev** — consistent with the 2026-07-26 dev-DB reseed
+  (14,674 parts) is **GONE from local dev**, consistent with the 2026-07-26 dev-DB reseed
   after the 4th PGlite corruption. So *neither* environment currently holds the imported
   catalog; that import has to be re-run wherever it is wanted.
 - `consulting_engagements` 3 real, `tasks` 11 real, 8 collections empty. `seedDemo = true`.
-- Fabric IS present locally with 6 usable `oz` rows — so **#50 must be reproduced against the
+- Fabric IS present locally with 6 usable `oz` rows, so **#50 must be reproduced against the
   environment Jeff actually saw it on** (very likely prod, where Fabric will be 0).
 - **Safety finding for the go-live step:** `clearDemoData()` wipes **whole collections**, not
-  demo rows selectively — on the current local DB it would destroy 6 real quotes and 2 real
+  demo rows selectively: on the current local DB it would destroy 6 real quotes and 2 real
   leads along with the fixtures. The mixed collections must be exported (or the real rows
   re-imported) before anyone presses it, in any environment.
 
-**Status:** OPEN — inventory tool built and proven locally. **Next: run
+**Status:** OPEN: inventory tool built and proven locally. **Next: run
 `npm run db:inventory` against the live Neon database** (Jeff adds `DATABASE_URL` to
 `.env.local`, or runs it himself with the URL inline), then decide demo-plus vs go-live from
 the numbers. Back up with `npm run db:export` before any write.

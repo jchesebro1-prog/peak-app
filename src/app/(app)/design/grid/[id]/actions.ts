@@ -99,7 +99,7 @@ export async function placeDeviceAction(
 }
 
 /** Reposition an already-placed device (punch #47). Wires attached to it
- *  follow — the store does that in the same patch. */
+ *  follow: the store does that in the same patch. */
 export async function movePlacementAction(
   projectId: string,
   input: { placementId: string; x: number; y: number }
