@@ -3200,7 +3200,23 @@ package, and estimate/budget for every single design that gets turned out."*
 
 ---
 
-## 52. Estimator fixture builder: light engine + lens selects, and presets that carry catalog part IDs, OPEN
+## 52. Estimator fixture builder: light engine + lens selects, and presets that carry catalog part IDs, APPROVED, BLOCKED ON JEFF'S ETC LIST
+
+> **Jeff approved the FULL catalog-backed rebuild 2026-07-27:** light engine, lens, clamp,
+> accessories, power/data and lamp all become catalog parts, and a saved preset stores every part
+> number so the individual pieces can be ordered. That reverses the IDEAS #43 decision which kept
+> the fixture list in the screen; the reversal needs its own DECISIONS entry when the work starts.
+>
+> **BLOCKED ON DATA, and the existing starter set does not solve it.**
+> `docs/catalog/STARTER-SET-2026-07-DRAFT.md` lists 10 fixtures, but they are WHOLE fixtures
+> (`ETC:405` = Source Four 5 degree, `ETC:CSPAR`, `ETC:FRES7`). There is no light-engine and lens
+> split anywhere in it, and no `CSSPOTVMVS` or `426LT`. Local dev is down to 29 demo catalog rows
+> after the 2026-07-26 reseed, and the 14,674-part dealer import never ran against production.
+>
+> **Jeff is supplying a short list of the ETC light-engine and lens SKUs he actually sells
+> (his choice, 2026-07-27).** Do not invent ETC part numbers, and do not start the picker before
+> that list lands: the engine/lens split is exactly the thing that cannot be guessed.
+> When it arrives: import those parts, then build the pickers, then make presets store part ids.
 
 **Area:** `src/app/(app)/estimator/fixture-modal.tsx`, `estimator-data.ts`, `pricing.ts`,
 `estimator-client.tsx`, `types.ts`
