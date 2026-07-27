@@ -225,7 +225,9 @@ export default async function CustomerDetailPage({
       label: d.label,
       value:
         d.kind === "date"
-          ? dateYear(v as number)
+          ? typeof v === "number"
+            ? dateYear(v)
+            : String(v)
           : d.kind === "checkbox"
             ? v
               ? "Yes"

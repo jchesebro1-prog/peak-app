@@ -407,6 +407,14 @@ export async function saveCustomerFieldDefsAction(
     if (!id) {
       id = slugifyFieldId(label, taken);
       taken.add(id);
+      // A minted id for a brand-new row can still collide with a STORED
+      // def's id (e.g. delete + re-add the same label in one save) — apply
+      // the same kind-immutability check the existing-id branch above
+      // already enforces, so this can't bypass it (final-review fix, #23).
+      const storedKind = storedKindById.get(id);
+      if (storedKind !== undefined && storedKind !== r.kind) {
+        throw new Error(`"${r.label}": field type cannot change after creation.`);
+      }
     }
     return {
       id,
