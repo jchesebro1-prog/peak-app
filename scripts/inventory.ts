@@ -18,21 +18,16 @@
  * No secrets are printed: connection strings, Gmail tokens and blob payloads
  * are never read or echoed, only counts and key names.
  */
-import { readFileSync } from "node:fs";
-
 // Standalone scripts don't get Next's .env.local loading, do it by hand
 // (never overrides values already in the environment). This lets the hosted
 // connection string stay in the gitignored .env.local instead of being typed
 // on the command line. Safe: getDb() reads DATABASE_URL lazily inside
-// createDb(), which runs long after these imports are evaluated.
-try {
-  for (const line of readFileSync(".env.local", "utf8").split("\n")) {
-    const m = /^([A-Z_][A-Z0-9_]*)="?([^"\n]*)"?$/.exec(line.trim());
-    if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
-  }
-} catch {
-  /* no .env.local: rely on the ambient environment */
-}
+// createDb(), which runs long after these imports are evaluated. Shared with
+// export.ts and the importers since 2026-07-27, so every script agrees on
+// which database it is talking to.
+import { loadEnvLocal } from "./db-target";
+
+loadEnvLocal();
 
 import { sql } from "drizzle-orm";
 import { getDb } from "../src/db";
