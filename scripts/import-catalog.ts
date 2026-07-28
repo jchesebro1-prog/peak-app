@@ -15,10 +15,13 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { getDb } from "../src/db";
 import { mergeUpsert, type CatalogPart } from "../src/lib/stores/catalog";
+import { resolveDbTarget, requireHostedConfirmation } from "./db-target";
 
 type ImportPart = Omit<CatalogPart, "id">;
 
 async function main() {
+  const { hosted } = resolveDbTarget("catalog import");
+  requireHostedConfirmation(hosted, process.argv);
   await getDb(); // ensure DB is up + migrated before upserting
   const file = path.join(process.cwd(), "scripts", "catalog-import-data.json");
   const parts: ImportPart[] = JSON.parse(readFileSync(file, "utf8"));

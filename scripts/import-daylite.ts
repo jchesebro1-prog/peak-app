@@ -30,6 +30,7 @@ import { saveContact } from "../src/lib/identity/contacts";
 import { saveSite } from "../src/lib/identity/sites";
 import { wipeIdentity } from "../src/lib/identity/convert";
 import { getDb } from "../src/db";
+import { resolveDbTarget, requireHostedConfirmation } from "./db-target";
 import { contactEmails, contactPhones } from "../src/db/schema";
 import { mkLead } from "../src/lib/stores/leads";
 import { createProject } from "../src/lib/stores/projects";
@@ -104,6 +105,9 @@ async function main() {
   if (!dir) { console.error("Usage: npm run import:daylite -- --dir <folder> [--commit] [--replace]"); process.exit(1); }
   const P = (n: string) => path.join(dir, n);
   for (const f of ["Companies.csv", "People.csv"]) if (!fs.existsSync(P(f))) { console.error("Missing " + P(f)); process.exit(1); }
+
+  const { hosted } = resolveDbTarget("daylite import");
+  if (COMMIT) requireHostedConfirmation(hosted, args);
 
   console.log(`Daylite import — ${DRY ? "DRY RUN (no writes)" : "COMMIT"}${REPLACE ? " + REPLACE" : ""}`);
   console.log("=".repeat(60));

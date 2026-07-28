@@ -13,6 +13,7 @@
  * store it somewhere private (I5: monthly export to Google Drive).
  */
 import { getDb } from "../src/db";
+import { resolveDbTarget } from "./db-target";
 import { DOC_TABLES } from "../src/db/doc-tables";
 import {
   blobs,
@@ -39,6 +40,7 @@ function stamp(): string {
 }
 
 async function main() {
+  resolveDbTarget("export");
   const db = await getDb();
 
   const collections: Record<string, unknown[]> = {};
