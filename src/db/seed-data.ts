@@ -16,20 +16,24 @@ import { projectsSeed } from "./seeds/projects";
 import { designsSeed } from "./seeds/designs";
 
 /**
- * Seed roster — the REAL Peak team (D126; replaces the prototype roster,
- * which carried two prototype-era names). Emails derive via emailFor()
- * (D118 firstname+lastinitial — jeffc@, chrism@, …), matching the company
- * Google Workspace convention recorded in the contacts source of truth.
+ * Seed roster — the real Peak team (D126/D128): the prototype six plus
+ * Chris Mittlesteadt. Emails derive via emailFor() (D118 firstname+
+ * lastinitial — jeffc@, chrism@, …), matching the company convention.
+ * Everyone except Jeff carries all four roles — Jeff's explicit choice
+ * (2026-07-29); tighten per-person in Settings → Team when he wants to.
  *
  * googleEmail for Jeff is set to his personal Gmail so the owner can sign in
  * with Google before a company Workspace is confirmed (QUESTIONS.md #1).
  */
+const EVERY_ROLE = ["Admin", "Manager", "Estimator", "Reviewer"];
 const ROSTER: Array<{ name: string; roles: string[]; googleEmail?: string }> = [
   { name: "Jeff Chesebro", roles: ["Admin", "Estimator"], googleEmail: "jchesebro1@gmail.com" },
-  { name: "Nic Trapani", roles: ["Estimator"] },
-  { name: "Jason Keagy", roles: ["Estimator"] },
-  { name: "Isaac Mittlesteadt", roles: ["Reviewer"] },
-  { name: "Chris Mittlesteadt", roles: ["Manager"] },
+  { name: "Nic Trapani", roles: EVERY_ROLE },
+  { name: "Jena Tolksdorf", roles: EVERY_ROLE },
+  { name: "Jack Hamilton", roles: EVERY_ROLE },
+  { name: "Jason Keagy", roles: EVERY_ROLE },
+  { name: "Isaac Mittlesteadt", roles: EVERY_ROLE },
+  { name: "Chris Mittlesteadt", roles: EVERY_ROLE },
 ];
 
 /**

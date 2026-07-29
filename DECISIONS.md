@@ -2316,3 +2316,21 @@ did nothing.
   impossible (no ✕ on your own row; server action also refuses).
 - Actions column widened 130→175px for the third button. Modal-footer Remove kept.
 - Verified live end-to-end: add dummy → row ✕ → confirm → row gone, no error; Keep cancels.
+
+## D128 — Roster is the original six PLUS Chris; everyone-but-Jeff gets every role (2026-07-29)
+
+Corrects D126's roster call. The prod users table told the real story of Jeff's manual cleanup
+attempt: he'd DEACTIVATED u2–u6 (the ⏻-as-remove problem D127 fixed), then re-added Jena
+Tolksdorf and Jack Hamilton with D118 emails, a second Jeff row, and a "Chris Middlesteadt"
+(misspelled) he then deactivated. So Jena and Jack are REAL team members, not prototype-era
+names — D126's removal of them was wrong and is reversed (seed fixtures restored to their
+original casting; IDENTITY back to six + Chris, who moves to #2f6f8a so Jack keeps #3155a8).
+
+Jeff's explicit picks (structured prompt, 2026-07-29): roster = **all seven** (Jeff, Nic, Jena,
+Jack, Jason, Isaac, Chris Mittlesteadt — contacts-verified spelling), and **everyone besides
+him holds all four roles**, matching what he'd set manually. He stays Admin/Estimator.
+
+`sync-team-roster.ts` grew duplicate handling for exactly the mess above: canonical row per
+person = Jeff's own row for the owner, else the lowest-numbered id (references survive);
+non-canonical rows (dupes, misspellings, off-roster names) are deleted BEFORE emails are
+reassigned so unique(email) can't trip on the hand-created jeffc@/jenat@/jackh@/chrism@ rows.

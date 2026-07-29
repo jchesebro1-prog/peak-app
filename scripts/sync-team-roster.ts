@@ -1,8 +1,14 @@
 /**
- * One-time roster sync (D126): replace the prototype seed roster with the
- * real Peak team. Returning members are UPDATED IN PLACE (same id, so any
- * assignment/review/queue reference to them survives); prototype-era rows
- * are deleted; new members are inserted with D118-derived emails.
+ * Roster sync (D126/D128): make the users table exactly the real Peak team —
+ * the prototype six plus Chris Mittlesteadt, everyone active, D118-derived
+ * emails, and (Jeff's 2026-07-29 choice) every role for everyone but him.
+ *
+ * Handles the mess a manual cleanup attempt leaves behind (seen in prod on
+ * 2026-07-29): DUPLICATE rows per person (a second Jeff, re-added Jena/Jack)
+ * and misspelled near-misses ("Chris Middlesteadt"). Per person the CANONICAL
+ * row is Jeff's own row for the owner, else the lowest-numbered id (the
+ * original — anything referencing it survives); every other row is deleted
+ * BEFORE emails are (re)assigned so the unique(email) constraint can't trip.
  *
  * Jeff's row is the lockout guard: the script refuses to run if it can't
  * find him, never deletes his row, and never touches his roles — it only
@@ -22,13 +28,21 @@ import { emailFor, deriveInitials, fallbackColor, IDENTITY } from "@/lib/team";
 const OWNER_GOOGLE = "jchesebro1@gmail.com";
 const OWNER_NAME = "jeff chesebro";
 
+const EVERY_ROLE = ["Admin", "Manager", "Estimator", "Reviewer"];
 const TARGET: Array<{ name: string; roles: string[] }> = [
-  { name: "Jeff Chesebro", roles: ["Admin", "Estimator"] },
-  { name: "Nic Trapani", roles: ["Estimator"] },
-  { name: "Jason Keagy", roles: ["Estimator"] },
-  { name: "Isaac Mittlesteadt", roles: ["Reviewer"] },
-  { name: "Chris Mittlesteadt", roles: ["Manager"] },
+  { name: "Jeff Chesebro", roles: ["Admin", "Estimator"] }, // used only if inserting
+  { name: "Nic Trapani", roles: EVERY_ROLE },
+  { name: "Jena Tolksdorf", roles: EVERY_ROLE },
+  { name: "Jack Hamilton", roles: EVERY_ROLE },
+  { name: "Jason Keagy", roles: EVERY_ROLE },
+  { name: "Isaac Mittlesteadt", roles: EVERY_ROLE },
+  { name: "Chris Mittlesteadt", roles: EVERY_ROLE },
 ];
+
+const idNum = (id: string) => {
+  const m = /u(\d+)/.exec(id || "");
+  return m ? parseInt(m[1], 10) : Number.POSITIVE_INFINITY;
+};
 
 async function main() {
   const { hosted } = resolveDbTarget("sync-team-roster");
@@ -51,28 +65,38 @@ async function main() {
     process.exit(1);
   }
 
-  const byName = new Map(rows.map((u) => [u.name.trim().toLowerCase(), u]));
-  const targetNames = new Set(TARGET.map((t) => t.name.toLowerCase()));
-
-  // 1) Delete rows that aren't on the target roster (frees their unique emails).
-  for (const u of rows) {
-    if (u.id === me.id || targetNames.has(u.name.trim().toLowerCase())) continue;
-    await db.delete(users).where(eq(users.id, u.id));
-    console.log(`\ndeleted ${u.id} ${u.name} <${u.email}>`);
-  }
-
-  // 2) Upsert the target roster.
-  let maxId = 0;
-  for (const u of rows) {
-    const m = /u(\d+)/.exec(u.id || "");
-    if (m) maxId = Math.max(maxId, parseInt(m[1], 10));
-  }
+  // Pick the canonical row per target name: the owner's own row for Jeff,
+  // otherwise the lowest-numbered (original) id among same-name rows.
+  const canonical = new Map<string, (typeof rows)[number]>();
   for (const t of TARGET) {
-    const existing = byName.get(t.name.toLowerCase());
+    const key = t.name.toLowerCase();
+    const matches = rows.filter((u) => u.name.trim().toLowerCase() === key);
+    if (!matches.length) continue;
+    const keep =
+      matches.find((u) => u.id === me.id) ??
+      [...matches].sort((a, b) => idNum(a.id) - idNum(b.id))[0];
+    canonical.set(key, keep);
+  }
+
+  // 1) Delete every non-canonical row — off-roster names, misspellings, and
+  //    same-name duplicates alike — freeing their emails for step 2.
+  console.log("");
+  for (const u of rows) {
+    if (u.id === me.id) continue;
+    if (canonical.get(u.name.trim().toLowerCase())?.id === u.id) continue;
+    await db.delete(users).where(eq(users.id, u.id));
+    console.log(`deleted ${u.id} ${u.name} <${u.email}>`);
+  }
+
+  // 2) Upsert the target roster onto the canonical rows.
+  let maxId = 0;
+  for (const u of rows) maxId = Math.max(maxId, idNum(u.id) === Infinity ? 0 : idNum(u.id));
+  for (const t of TARGET) {
+    const existing = canonical.get(t.name.toLowerCase());
     if (existing && existing.id === me.id) {
       // Owner: never touch roles. The company email still moves to the D118
-      // pattern (his ask covers his own row) — Google sign-in matches on
-      // googleEmail, which is re-asserted here, so this can't lock him out.
+      // pattern — Google sign-in matches on googleEmail, re-asserted here,
+      // so this can't lock him out.
       await db
         .update(users)
         .set({

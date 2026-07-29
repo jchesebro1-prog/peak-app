@@ -92,30 +92,30 @@ export function commsSeed(): CommThread[] {
       ],
       createdAt: ago(6), updatedAt: ago(3), syncState: "synced", syncedAt: ago(3), rev: 2,
     },
-    // Badger Ballet — noise spec answered → WAITING ON THEM, Chris
+    // Badger Ballet — noise spec answered → WAITING ON THEM, Jena
     {
       id: "C-1030", mailbox: "sales", unread: false,
       customerId: "badger", customer: "Badger Ballet Company",
       contactName: "Priya Anand", contactEmail: "priya@badgerballet.org",
       subject: "Noise level at the hoist under load", channel: "email",
-      status: "waiting_them", assignedTo: "Chris Mittlesteadt",
+      status: "waiting_them", assignedTo: "Jena Tolksdorf",
       link: { type: "quote", id: "Q-2033", label: "Q-2033 · Hoist Automation" },
       messages: [
         { id: mid(1), at: ago(5), direction: "in", channel: "email", author: "Priya Anand", body: "Before we sign off on the automation — what’s the measured noise level at the hoist while it’s running? We can’t have it audible during quiet rehearsal passages." },
-        { id: mid(2), at: ago(4), direction: "out", channel: "email", author: "Chris Mittlesteadt", body: "Good question. We measured 42 dBA at 10 ft under full load — spec sheet attached. That’s well under a typical rehearsal ambient of ~50 dBA. Happy to demo a unit if that helps the sign-off." },
+        { id: mid(2), at: ago(4), direction: "out", channel: "email", author: "Jena Tolksdorf", body: "Good question. We measured 42 dBA at 10 ft under full load — spec sheet attached. That’s well under a typical rehearsal ambient of ~50 dBA. Happy to demo a unit if that helps the sign-off." },
       ],
       createdAt: ago(5), updatedAt: ago(4), syncState: "synced", syncedAt: ago(4), rev: 2,
     },
-    // Northshore — budget check-in → WAITING ON THEM, Isaac
+    // Northshore — budget check-in → WAITING ON THEM, Jack
     {
       id: "C-1028", mailbox: "sales", unread: false,
       customerId: "northshore", customer: "Northshore Theater",
       contactName: "Susan Marsh", contactEmail: "smarsh@northshoretheater.org",
       subject: "Counterweight upgrade — budget check-in", channel: "email",
-      status: "waiting_them", assignedTo: "Isaac Mittlesteadt",
+      status: "waiting_them", assignedTo: "Jack Hamilton",
       link: { type: "quote", id: "Q-2030", label: "Q-2030 · Counterweight Upgrade" },
       messages: [
-        { id: mid(1), at: ago(2), direction: "out", channel: "email", author: "Isaac Mittlesteadt", body: "Hi Susan — just checking in on the counterweight upgrade quote. Any feedback from the board, or questions I can get ahead of? Happy to hold our current pricing through the end of the month." },
+        { id: mid(1), at: ago(2), direction: "out", channel: "email", author: "Jack Hamilton", body: "Hi Susan — just checking in on the counterweight upgrade quote. Any feedback from the board, or questions I can get ahead of? Happy to hold our current pricing through the end of the month." },
       ],
       createdAt: ago(2), updatedAt: ago(2), syncState: "synced", syncedAt: ago(2), rev: 1,
     },
@@ -134,13 +134,13 @@ export function commsSeed(): CommThread[] {
     },
 
     // ===== INSTALLS shared mailbox =======================================
-    // Badger Ballet — COI request → WAITING ON US (~28h), Chris, unread
+    // Badger Ballet — COI request → WAITING ON US (~28h), Jena, unread
     {
       id: "C-1027", mailbox: "installs", unread: true,
       customerId: "badger", customer: "Badger Ballet Company",
       contactName: "Priya Anand", contactEmail: "priya@badgerballet.org",
       subject: "Certificate of insurance before mobilization", channel: "email",
-      status: "waiting_us", assignedTo: "Chris Mittlesteadt", link: null,
+      status: "waiting_us", assignedTo: "Jena Tolksdorf", link: null,
       messages: [
         { id: mid(1), at: hrs(28), direction: "in", channel: "email", author: "Priya Anand", body: "Facilities is asking for a certificate of insurance naming Badger Ballet as additional insured before your crew mobilizes. Can you have your carrier send one over this week?" },
       ],

@@ -40,32 +40,32 @@ const SEED_REVIEWS: Record<string, () => QuoteReview> = {
   "Q-2041": () => rv("none"),
   "Q-2038": () =>
     rv("approved", {
-      reviewer: "Isaac Mittlesteadt",
+      reviewer: "Jack Hamilton",
       submittedBy: "Nic Trapani",
       submittedAt: ago(10),
-      decidedBy: "Isaac Mittlesteadt",
+      decidedBy: "Jack Hamilton",
       decidedAt: ago(9),
     }),
   "Q-2033": () =>
     rv("approved", {
       reviewer: "Isaac Mittlesteadt",
-      submittedBy: "Chris Mittlesteadt",
+      submittedBy: "Jena Tolksdorf",
       submittedAt: ago(7),
       decidedBy: "Isaac Mittlesteadt",
       decidedAt: ago(6),
     }),
   "Q-2035": () =>
     rv("approved", {
-      reviewer: "Isaac Mittlesteadt",
+      reviewer: "Jack Hamilton",
       submittedBy: "Jeff Chesebro",
       submittedAt: ago(12),
-      decidedBy: "Isaac Mittlesteadt",
+      decidedBy: "Jack Hamilton",
       decidedAt: ago(11),
     }),
   "Q-2030": () =>
     rv("in_review", {
       reviewer: "Jeff Chesebro",
-      submittedBy: "Isaac Mittlesteadt",
+      submittedBy: "Jack Hamilton",
       submittedAt: ago(1),
     }),
   "Q-2027": () =>
@@ -117,9 +117,9 @@ export function quotesSeed(): Quote[] {
   const base: SeedBase[] = [
     { id: "Q-2041", name: "Lakefront PAC — Stage Systems Package", customer: "Lakefront Performing Arts Center", value: 232160, margin: 0.31, status: "draft", source: "estimator", owner: "Jeff Chesebro", createdAt: ago(9), updatedAt: ago(2) },
     { id: "Q-2038", name: "North Ridge HS — Auditorium Rigging Refit", customer: "North Ridge High School", value: 86400, margin: 0.34, status: "sent", source: "estimator", owner: "Nic Trapani", createdAt: ago(14), updatedAt: ago(8) },
-    { id: "Q-2033", name: "Badger Ballet — Hoist Automation", customer: "Badger Ballet Company", value: 174900, margin: 0.29, status: "sent", source: "estimator", owner: "Chris Mittlesteadt", createdAt: ago(12), updatedAt: ago(5) },
+    { id: "Q-2033", name: "Badger Ballet — Hoist Automation", customer: "Badger Ballet Company", value: 174900, margin: 0.29, status: "sent", source: "estimator", owner: "Jena Tolksdorf", createdAt: ago(12), updatedAt: ago(5) },
     { id: "Q-2035", name: "Lakeside Community Church — Drapery & Track", customer: "Lakeside Community Church", value: 41720, margin: 0.36, status: "won", source: "quick", owner: "Jeff Chesebro", createdAt: ago(20), updatedAt: ago(9) },
-    { id: "Q-2030", name: "Northshore Theater — Counterweight Upgrade", customer: "Northshore Theater", value: 58200, margin: 0.30, status: "draft", source: "quick", owner: "Isaac Mittlesteadt", createdAt: ago(8), updatedAt: ago(6) },
+    { id: "Q-2030", name: "Northshore Theater — Counterweight Upgrade", customer: "Northshore Theater", value: 58200, margin: 0.30, status: "draft", source: "quick", owner: "Jack Hamilton", createdAt: ago(8), updatedAt: ago(6) },
     { id: "Q-2027", name: "Bayfront Arena — Scoreboard Hoist", customer: "Bayfront Arena", value: 312500, margin: 0.27, status: "lost", source: "estimator", owner: "Jason Keagy", createdAt: ago(30), updatedAt: ago(17) },
     { id: "Q-2042", name: "Harbor Rep — Orchestra Shell", customer: "Harbor Repertory Theatre", value: 128400, margin: 0.32, status: "draft", source: "estimator", owner: "Nic Trapani", createdAt: ago(2), updatedAt: ago(0) },
   ];

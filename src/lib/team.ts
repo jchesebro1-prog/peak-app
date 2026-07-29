@@ -32,14 +32,16 @@ export const PERM_LABEL: Record<Perm, string> = {
 };
 
 /** Static visual identity for the seed roster (from team.js IDENTITY;
- * roster corrected to the real Peak team in D126 — Jena Tolksdorf and
- * Jack Hamilton were prototype-era names, Chris Mittlesteadt is real). */
+ * D128: Chris Mittlesteadt added — the full real team is the original six
+ * plus Chris, per Jeff 2026-07-29). */
 export const IDENTITY: Record<string, { initials: string; color: string }> = {
   "Jeff Chesebro": { initials: "JC", color: "#5b4b8a" },
   "Nic Trapani": { initials: "NT", color: "#2f6f4f" },
-  "Chris Mittlesteadt": { initials: "CM", color: "#3155a8" },
+  "Jena Tolksdorf": { initials: "JT", color: "#b5683a" },
+  "Jack Hamilton": { initials: "JH", color: "#3155a8" },
   "Jason Keagy": { initials: "JK", color: "#8a6d1f" },
   "Isaac Mittlesteadt": { initials: "IM", color: "#b4543a" },
+  "Chris Mittlesteadt": { initials: "CM", color: "#2f6f8a" },
 };
 
 /** Company address pattern (D118): firstname + last initial — "Jeff
