@@ -7,6 +7,7 @@ import {
   ROLE_DESC,
   ROLE_PERMS,
   PERM_LABEL,
+  firstName,
   type Role,
 } from "@/lib/team";
 import {
@@ -162,6 +163,10 @@ export default function SettingsClient({
 
   // modal: null | 'new' | userId
   const [modal, setModal] = useState<string | null>(null);
+  // Row-level remove uses a two-step inline confirm — window.confirm() throws
+  // silently in this app (D96), and the modal-footer Remove was so buried that
+  // ⏻ (deactivate) read as "remove" and rows "never went away" (D127).
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ name: string; email: string; googleEmail: string; roles: string[] }>({
     name: "",
     email: "",
@@ -1285,7 +1290,7 @@ export default function SettingsClient({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "36px minmax(0,1.4fr) minmax(0,1.6fr) 130px",
+              gridTemplateColumns: "36px minmax(0,1.4fr) minmax(0,1.6fr) 175px",
               gap: 12,
               padding: "10px 18px",
               fontSize: 10,
@@ -1308,7 +1313,7 @@ export default function SettingsClient({
               key={u.id}
               style={{
                 display: "grid",
-                gridTemplateColumns: "36px minmax(0,1.4fr) minmax(0,1.6fr) 130px",
+                gridTemplateColumns: "36px minmax(0,1.4fr) minmax(0,1.6fr) 175px",
                 gap: 12,
                 padding: "13px 18px",
                 alignItems: "center",
@@ -1398,17 +1403,55 @@ export default function SettingsClient({
                 )}
               </span>
               <span style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
-                <button className="pk-btn-outline" title="Edit roles" onClick={() => openEdit(u)}>
-                  Roles
-                </button>
-                <button
-                  className="pk-btn-outline"
-                  title={u.active ? "Deactivate" : "Reactivate"}
-                  style={{ color: "#8c919c", padding: "6px 9px", fontSize: 13 }}
-                  onClick={() => run(() => setActiveAction(u.id, !u.active))}
-                >
-                  {u.active ? "⏻" : "↺"}
-                </button>
+                {confirmRemove === u.id ? (
+                  <>
+                    <button
+                      className="pk-btn-danger"
+                      style={{ padding: "6px 10px", fontSize: 12 }}
+                      onClick={() => {
+                        setConfirmRemove(null);
+                        run(() => removeUserAction(u.id));
+                      }}
+                    >
+                      Remove {firstName(u.name)}?
+                    </button>
+                    <button
+                      className="pk-btn-outline"
+                      style={{ padding: "6px 10px", fontSize: 12 }}
+                      onClick={() => setConfirmRemove(null)}
+                    >
+                      Keep
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="pk-btn-outline" title="Edit roles" onClick={() => openEdit(u)}>
+                      Roles
+                    </button>
+                    <button
+                      className="pk-btn-outline"
+                      title={
+                        u.active
+                          ? "Deactivate — keeps the row, blocks sign-in"
+                          : "Reactivate"
+                      }
+                      style={{ color: "#8c919c", padding: "6px 9px", fontSize: 13 }}
+                      onClick={() => run(() => setActiveAction(u.id, !u.active))}
+                    >
+                      {u.active ? "⏻" : "↺"}
+                    </button>
+                    {u.id !== meId && (
+                      <button
+                        className="pk-btn-outline"
+                        title="Remove from team"
+                        style={{ color: "#b4543a", padding: "6px 9px", fontSize: 13 }}
+                        onClick={() => setConfirmRemove(u.id)}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </>
+                )}
               </span>
             </div>
           ))}

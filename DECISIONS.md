@@ -2299,3 +2299,20 @@ changed — this is a roster-content correction.
   needed permissions. IDENTITY drops the retired names; Chris inherits the freed #3155a8.
 - Mike and Andrew (site-visit names in contacts) are NOT added: no last names on record, so
   no D118 email can be derived. Add via Settings → Team when known.
+
+## D127 — Row-level Remove on Team & Roles; ⏻ was masquerading as remove (2026-07-29)
+
+Jeff: *"When I remove people they don't go away so that is the first problem."* Reproduced the
+full flow live: the `removeUserAction` path works — the defect was UX, not data. The only
+removal-looking control on a member row was **⏻, which DEACTIVATES** (row stays, greyed, with
+a badge); actual removal was buried in the Roles modal footer. So "removing" someone visibly
+did nothing.
+
+- Each non-self row now carries a red **✕ Remove from team** button with a **two-step inline
+  confirm** ("Remove {first name}?" / "Keep") — inline because `window.confirm()` throws
+  silently in this app (D96) and would have reintroduced the exact do-nothing symptom.
+- ⏻ keeps its deactivate semantics (the invite-list model needs it) with the tooltip now
+  saying what it does: "Deactivate — keeps the row, blocks sign-in". Self-removal stays
+  impossible (no ✕ on your own row; server action also refuses).
+- Actions column widened 130→175px for the third button. Modal-footer Remove kept.
+- Verified live end-to-end: add dummy → row ✕ → confirm → row gone, no error; Keep cancels.
