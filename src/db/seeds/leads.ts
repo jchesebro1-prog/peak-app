@@ -13,7 +13,7 @@ export function leadsSeed(): LeadRecord[] {
 
   const JE = "Jeff Chesebro",
     NIC = "Nic Trapani",
-    JENA = "Jena Tolksdorf",
+    CHRIS = "Chris Mittlesteadt",
     JASON = "Jason Keagy";
 
   return [
@@ -153,7 +153,7 @@ export function leadsSeed(): LeadRecord[] {
       state: "WI",
       source: "event",
       stage: "contacted",
-      owner: JENA,
+      owner: CHRIS,
       interest: "New black box theatre — full rigging + drapery package",
       timeline: "Grant-dependent",
       value: 96000,
@@ -164,7 +164,7 @@ export function leadsSeed(): LeadRecord[] {
       nextActionAt: null,
       activities: [
         act(ago(14), "system", "", "Met at WSMA conference — badge scan"),
-        act(ago(12), "email", JENA, "Follow-up email with our black-box case studies."),
+        act(ago(12), "email", CHRIS, "Follow-up email with our black-box case studies."),
       ],
     }),
 

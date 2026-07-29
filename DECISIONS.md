@@ -2272,3 +2272,30 @@ persistence across a reload, the layer toggle (hiding Curtains removed the marke
 line), and a 64 x 8 ft Border at 50% fullness pricing to 768 sq ft sewn / $2,788 onto the BOM.
 **Not verified: the mouse-drag gesture**, because the automation cannot emit press-move-release with
 intermediate motion and the 4 px threshold requires it.
+
+## D126 — Roster corrected to the real Peak team (2026-07-29)
+
+Jeff: *"remove all users minus myself and then reupload new users for the people including
+chris and use their emails as first name and first letter of last name."* The email pattern he
+describes is exactly the D118 derivation (`emailFor`: jeffc@, chrism@, …), so no email code
+changed — this is a roster-content correction.
+
+- **The prototype roster carried two prototype-era names** — "Jena Tolksdorf" and "Jack
+  Hamilton" — that are not on the real team. The real roster (per the contacts source of truth
+  in Jeff's memory tree) is: Jeff Chesebro (Admin/Estimator), Nic Trapani (Estimator), Jason
+  Keagy (Estimator), Isaac Mittlesteadt (Reviewer), **Chris Mittlesteadt (Owner/Founder — NEW,
+  seeded as Manager)**. Chris as Manager (approve/create/send, no user management) is a default
+  Jeff may want to revisit; Jeff stays the sole Admin.
+- **Implemented as a sync, not a literal delete-all-and-reinsert:** returning members keep
+  their ids (`u2` Nic, `u5` Jason, `u6` Isaac in the live DBs) so existing assignment/review/
+  queue references don't dangle or misattribute if ids were reused. Prototype-era rows are
+  deleted; Chris is inserted with the next free id. End state is identical to Jeff's ask.
+- `scripts/sync-team-roster.ts` applies it to a live DB (db-target rails; hosted needs
+  `--yes` + a prior `db:export`). Lockout guard: aborts if Jeff's row isn't found, never
+  deletes it, never touches his roles, and re-asserts his `googleEmail` so Google sign-in
+  can't break mid-sync.
+- Seed fixtures re-cast the retired names by permission shape: Jena→Chris (creator roles),
+  Jack→Isaac (reviewer/decidedBy fields), so demo review flows still name people who hold the
+  needed permissions. IDENTITY drops the retired names; Chris inherits the freed #3155a8.
+- Mike and Andrew (site-visit names in contacts) are NOT added: no last names on record, so
+  no D118 email can be derived. Add via Settings → Team when known.

@@ -16,9 +16,10 @@ import { projectsSeed } from "./seeds/projects";
 import { designsSeed } from "./seeds/designs";
 
 /**
- * Development fixtures — the prototype's seed roster from team.js seedData().
- * Names, roles, colors, initials, and derived @peaksystemsgroup.com emails
- * are preserved exactly.
+ * Seed roster — the REAL Peak team (D126; replaces the prototype roster,
+ * which carried two prototype-era names). Emails derive via emailFor()
+ * (D118 firstname+lastinitial — jeffc@, chrism@, …), matching the company
+ * Google Workspace convention recorded in the contacts source of truth.
  *
  * googleEmail for Jeff is set to his personal Gmail so the owner can sign in
  * with Google before a company Workspace is confirmed (QUESTIONS.md #1).
@@ -26,10 +27,9 @@ import { designsSeed } from "./seeds/designs";
 const ROSTER: Array<{ name: string; roles: string[]; googleEmail?: string }> = [
   { name: "Jeff Chesebro", roles: ["Admin", "Estimator"], googleEmail: "jchesebro1@gmail.com" },
   { name: "Nic Trapani", roles: ["Estimator"] },
-  { name: "Jena Tolksdorf", roles: ["Estimator"] },
-  { name: "Jack Hamilton", roles: ["Manager"] },
   { name: "Jason Keagy", roles: ["Estimator"] },
   { name: "Isaac Mittlesteadt", roles: ["Reviewer"] },
+  { name: "Chris Mittlesteadt", roles: ["Manager"] },
 ];
 
 /**

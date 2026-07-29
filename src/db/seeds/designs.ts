@@ -39,10 +39,10 @@ export function designsSeed(): DesignRecord[] {
       submittedAt: ago(1),
     }),
     "D-101": rv("approved", {
-      reviewer: "Jack Hamilton",
+      reviewer: "Isaac Mittlesteadt",
       submittedBy: "Jeff Chesebro",
       submittedAt: ago(7),
-      decidedBy: "Jack Hamilton",
+      decidedBy: "Isaac Mittlesteadt",
       decidedAt: ago(6),
     }),
   };
