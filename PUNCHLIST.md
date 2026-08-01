@@ -3784,6 +3784,36 @@ under a clearly marked section?**
 
 ---
 
+## WAVE 4 — 2026-08-01, #68–#73 (Jeff: "let's keep going")
+
+> Four of these six were never code — they were addressed to Jeff for a decision or for
+> content. His answers, and what each produced:
+>
+> - **#68 — "I am good with the assumed rates."** Numbers unchanged. But his follow-on,
+>   *"ultimately they all should pull from the rates table on the estimating rules,"* turned
+>   into real work: the `travel`, `catalog` and `fixture` groups in Estimating Rules were
+>   **display-only** — editing them changed nothing — and are now blob-backed. The 19 fixture
+>   add-on rates existed TWICE (a hand-maintained echo in `pricing.ts`, the real source in
+>   `estimator-data.ts` carrying price AND cost); now single-sourced, with cost left where it
+>   was because the rules table has no cost column and dropping it would break margin.
+> - **#70 — answered twice.** First "build them for real," then "just fix the copy" once he
+>   saw there was nothing to finish. See the item.
+> - **#71 — Claude drafts, Jeff edits.** Draft is in `TASK_TEMPLATE`, four guesses flagged.
+> - **#73 — notices on rigging and compliance both.** Code landed; wording awaits review.
+>
+> **One agent instruction was overridden on purpose.** The rates work flipped
+> `catalog.defaultMargin` to `live: true` as asked — but NOTHING in the codebase reads it, so
+> the row would have claimed an edit reprices something when it cannot. Reverted to
+> `reference` (the value still persists, so it is one word to flip when a consumer lands).
+> Marking a no-op rate "live" is the same lie as #70's connector copy and #14's fake part
+> count. **Rule for later waves: a control may not claim an effect it does not have.**
+>
+> **Verification posture is UNCHANGED and still the weak point:** typecheck, the DB-free spec
+> suite, and code review only. No database, no browser, at any point in waves 1–4. Migration
+> `0012` from wave 2 has still never been run.
+
+---
+
 ## Items #60–#73 — provenance note (2026-07-31)
 
 **These were NOT reported by Jeff.** They came out of the source audit done to produce the
@@ -4020,7 +4050,7 @@ mint and probably a vendor link), or should the field be blank until someone typ
 
 ---
 
-## 68. Inspection rate defaults are explicit placeholders — must not ship as real pricing — OPEN (JEFF HOMEWORK)
+## 68. Inspection rate defaults are explicit placeholders — must not ship as real pricing — RESOLVED 2026-08-01 — Jeff accepts the current numbers
 
 **Area:** `src/lib/stores/pricing.ts:102-114` (`INSPECTION_RATE_DEFAULTS`)
 **Reported:** 2026-07-31 (source audit)
@@ -4045,11 +4075,11 @@ engine itself is sound and fully specified — it's the numbers that are invente
 **Ask (Jeff):** the real inspection rates. Same shape as the flame-test and repair rate sets. **Ties
 to #39 (catalog import awaits Jeff) and #56 (rules/tiers under Knowledge).**
 
-**Status:** OPEN — content, not code.
+**Status:** RESOLVED 2026-08-01 — **Jeff: "I am good with the assumed rates."** The placeholder numbers stand as-is; no code changed. His follow-on — *"ultimately they all should pull from the rates table on the estimating rules"* — became its own work, done the same day (see the wave-4 note): travel, catalog margin and the 19 fixture add-on rates were display-only and are now blob-backed. **Findings while checking:** `REPAIR_RATE_DEFAULTS` shares `laborRate` 95 / `mileageRate` 0.70 / `margin` 0.30 with the inspection placeholders (possibly copied, possibly a genuine shared skilled-labor rate — unconfirmed); flame-test labor is $30 against inspection's $95; and the fixture add-on rates were a SECOND undocumented placeholder set, now single-sourced. **Ties to #52** — the fixture rebuild may move add-ons to catalog parts.
 
 ---
 
-## 69. Email is SIMULATED unless `GMAIL_ENABLED` is set — OPEN (how we describe the product)
+## 69. Email is SIMULATED unless `GMAIL_ENABLED` is set — OPEN — unchanged; still waiting on the Google deploy accounts
 
 **Area:** `src/lib/gmail/config.ts:91`, `src/lib/stores/comms.ts:482`,
 `src/app/(app)/settings/settings-client.tsx:115`
@@ -4066,11 +4096,11 @@ isn't set. **Ties to item 1's "not yet live-tested against real Gmail" and Q-A (
 **Open question for Jeff:** when do the Google deploy accounts land? Item 1 has been waiting on the
 same blocker since 2026-07-19.
 
-**Status:** OPEN — no code needed; awareness + the deploy accounts.
+**Status:** OPEN, unchanged 2026-08-01. No code was written and none is wanted. Still blocked on the same thing as item 1: the Google deploy accounts, outstanding since 2026-07-19. **The standing rule stands:** email must not be described as working to a customer, a partner, or the third party evaluating the software, on any deployment where `GMAIL_ENABLED` is unset.
 
 ---
 
-## 70. Import "connectors" are stubs — OPEN
+## 70. Import "connectors" are stubs — DONE 2026-08-01 — copy fixed, dead metadata deleted, 2 real bugs fixed
 
 **Area:** `/import` hub
 **Reported:** 2026-07-31 (source audit)
@@ -4083,11 +4113,11 @@ promises live integrations that don't exist.
 can't do? Note the brief's recommendation on the module: import tooling is one-time, and rebuilding
 it in any port is probably not worth it. **Ties to #59 (real data migration).**
 
-**Status:** OPEN — logged only, no code.
+**Status:** DONE 2026-08-01. **The entry's premise was WRONG and Jeff's first answer was given on it** — he chose "build them for real," then chose again after seeing the inventory. There were never any stubs to finish: no OAuth routes, no vendor SDKs, no third-party fetch anywhere in the app. What existed was ONE real vendor-agnostic CSV-paste importer (genuinely well built; its counts are real, gated behind `manage_users`) wrapped in copy naming six vendors, plus a `sources` metadata field that was **never rendered anywhere**. **Jeff's revised call: fix the copy, keep the importer.** Vendor names and `sources` deleted; "Daylight" (not the product's name) corrected; the Daylite CLI path left intact as the admin/terminal migration it is. **Two real bugs found in passing and fixed:** `actions.ts` returned bare on a CSV parse failure so the form appeared inert with no error, and `DonePanel` showed a green check plus "Records are live across Peak" when ZERO rows were written.
 
 ---
 
-## 71. `TASK_TEMPLATE` ships empty — every project stage auto-creates zero tasks — OPEN (JEFF HOMEWORK)
+## 71. `TASK_TEMPLATE` ships empty — every project stage auto-creates zero tasks — DRAFTED 2026-08-01 — AWAITING JEFF'S EDIT
 
 **Area:** `src/lib/stores/tasks.ts:49-53`, consumed at `src/lib/stores/projects.ts:425-432`
 **Reported:** 2026-07-31 (source audit)
@@ -4112,11 +4142,11 @@ write the checklist.
 **Ask (Jeff):** the per-stage task checklist for install projects. **Ties to #17 (tasks on projects
 and quotes) and #44 (projects lifecycle).**
 
-**Status:** OPEN — content, not code.
+**Status:** DRAFTED 2026-08-01 — **AWAITING JEFF'S EDIT.** Jeff's call: Claude drafts, Jeff edits. `TASK_TEMPLATE` now carries a checklist for all seven stages, drawn from real structures in the codebase (`DEFAULT_CONSULTING_ASSUMPTIONS`, `ProcurementLine`/`orderByDate`, `STAGING_BUFFER`, `CrewAssignment`/`MOB_TYPES`, `ProjectSignoff`, the rubric's NFPA/ANSI/OSHA citations, existing seed task titles) rather than generic PM filler. **Marked in code as a DRAFT of inferences, not confirmed procedure.** Four items are outright guesses and are individually flagged: delivery damage inspection · O&M documentation handoff · the safe-rigging training wording · margin reconciliation at close (which may belong to accounting). Safety/compliance steps carry trailing comments so they are not trimmed as noise.
 
 ---
 
-## 72. Embedded third-party data needs an extraction boundary before any code leaves the building — OPEN (COMMERCIAL)
+## 72. Embedded third-party data needs an extraction boundary before any code leaves the building — OPEN (COMMERCIAL) — for counsel, not engineering
 
 **Area:** rate tables, parts catalog, `src/lib/design/fixture-crossref.json`, `src/lib/bid-spec.ts`
 **Reported:** 2026-07-31 (raised by the implementation-brief work)
@@ -4141,11 +4171,11 @@ before any module is shared? Peak sells to schools, churches and theatres; wheth
 address those same customers with a derivative is the question most likely to be contentious later
 and nearly free to answer now. *(Engineering flag, not legal advice — counsel should review.)*
 
-**Status:** OPEN — commercial decision, no code.
+**Status:** OPEN (COMMERCIAL), unchanged 2026-08-01. No code written; **this one is for counsel, not engineering.** The engineering recommendation stands and is cheap: separate code from data at the extraction boundary — ship the rate MECHANISM with placeholder values and let any third party supply their own numbers. The pricing core already distinguishes REAL from PLACEHOLDER rates, so the seam exists. The two questions that are nearly free to answer now and contentious later: which vendor agreements govern, and whether **field-of-use** needs settling before any module is shared.
 
 ---
 
-## 73. Rigging and compliance outputs are safety/regulatory, not just numbers — OPEN (POLICY)
+## 73. Rigging and compliance outputs are safety/regulatory, not just numbers — DONE 2026-08-01 — notices added; WORDING AWAITS JEFF + COUNSEL
 
 **Area:** `src/lib/design/steel.ts` (`beamCapacity`, flexure/shear), `goods.ts` (`computeSetWeight`,
 `brickCombo`), flame-test and inspection document generation
@@ -4167,6 +4197,6 @@ and nearly free to answer now. *(Engineering flag, not legal advice — counsel 
 goes to a customer? Should generated rigging and compliance documents carry an explicit limitation
 notice naming what was and wasn't verified on site? Who at Peak owns that call?
 
-**Status:** OPEN — policy decision, no code.
+**Status:** DONE 2026-08-01 — **code landed; the WORDING still needs Jeff's review and a professional read.** Jeff's call: notices on rigging AND compliance both. All three strings live in `src/lib/compliance-notices.ts` (single edit point) and are marked DRAFT / not reviewed by counsel. Rigging notices on the Lineset Builder and Steel Calculator; compliance notices on the flame-test report (all three variants), the inspection report, and all four summary/results letters via an opt-in `notice` prop on `SinglePageLetter`. **Placement finding that mattered:** the inspection report's EXISTING disclaimer is conditionally rendered and vanishes under `?boiler=0` and in the compact 3-up layout — so the document most needing a limitation could ship without one. The new notice sits on the closing page, which renders unconditionally. **NO CALCULATION CHANGED** (`steel.ts` is comment-only). Durable comments now record at `beamCapacity`, `brickCombo` and `computeSetWeight` that these disclaimers and sign-off steps are PRODUCT REQUIREMENTS, not decoration, and must survive any reimplementation. **Open questions Jeff has NOT answered:** does any of this need professional-engineering sign-off before it goes to a customer, and who at Peak owns that call?
 
 ---
