@@ -44,11 +44,114 @@ export type TaskRecord = {
 
 export type TaskTemplateItem = { key: string; title: string; section?: string };
 
-/** Per-stage standard checklists (#17 "template + manual"). CONTENT IS JEFF'S
-    HOMEWORK — ship empty; expansion is a no-op until items are filled in. */
+/** Per-stage standard checklists (#17 "template + manual").
+    DRAFT CHECKLIST — punch #71, drafted by Claude 2026-08-01 from codebase
+    evidence, AWAITING JEFF'S EDIT. These are inferences about Peak's
+    process, not confirmed procedure. Sources cited per item below; anything
+    marked GUESS has no direct evidence in the codebase and needs Jeff's
+    eyes first. Items marked SAFETY/COMPLIANCE encode a genuine life-safety
+    or code step — keep them even if the wording changes. */
 export const TASK_TEMPLATE: Record<ProjectStage, TaskTemplateItem[]> = {
-  procurement: [], delivery: [], scheduled: [], install: [],
-  training: [], signoff: [], complete: [],
+  // procurement ("Order materials"): ProcurementLine{sku,desc,vendor,qty,cost,
+  // leadDays,status,po}, VENDORS (JR Clancy/Rose Brand/ETC/Wenger/In-stock),
+  // criticalLineId()/orderByDate()/lineLate() risk flags, seed task
+  // "Field-verify grid heights before fab" (db/seeds/projects.ts), and
+  // DEFAULT_CONSULTING_ASSUMPTIONS' "Existing structure is assumed adequate
+  // for the loads shown; structural engineering is by others" (consulting-stages.ts).
+  procurement: [
+    { key: "release-pos", title: "Release POs for every procurement line (rigging, soft goods, control/dimming, shell)", section: "Procurement" },
+    { key: "confirm-critical-lead", title: "Confirm the order-by date for the longest lead-time line against the install target", section: "Procurement" },
+    // SAFETY: existing structure adequacy for rigging loads is a standing consulting
+    // assumption ("engineering is by others") — this is where Peak actually verifies it in the field.
+    { key: "field-verify-structure", title: "Field-verify grid heights and existing structural attachment points before fabrication", section: "Procurement" },
+    { key: "confirm-vendor-leads", title: "Confirm vendor lead times against the target date for every line", section: "Procurement" },
+  ],
+  // delivery ("Deliveries"): ProjectDelivery{label,vendor,eta,status:
+  // scheduled/in_transit/received}, STAGING_BUFFER = 7 days before install
+  // (projects.ts orderByDate), seed tasks "Confirm site access & dock" /
+  // "Stage hardware to loading dock" (db/seeds/projects.ts, "Mobilize" section).
+  delivery: [
+    { key: "confirm-staging-buffer", title: "Confirm delivery ETAs land at least 7 days before install (staging buffer)", section: "Deliveries" },
+    { key: "site-access", title: "Confirm site access, loading dock, and receiving hours with the facility", section: "Mobilize" },
+    // GUESS: no direct evidence of a damage-inspection step; inferred from ProjectDelivery's
+    // in_transit -> received status transition and general receiving practice.
+    { key: "inspect-on-arrival", title: "Inspect each delivery on arrival for shipping damage and match against the PO", section: "Deliveries" },
+    { key: "stage-hardware", title: "Stage hardware and materials for the install crew", section: "Mobilize" },
+  ],
+  // scheduled ("Crew scheduled"): CrewAssignment{person,role,start,end,mobId},
+  // riskFlags()'s "no-crew" flag, seed crew roles "Rigging lead"/"Installer"
+  // (db/seeds/projects.ts), Mobilization{type,days,crew,discipline} carried
+  // from the estimator (spec.mobs), MOB_TYPES = Site Visit/Install/Hang/
+  // Commissioning/Training (estimator-data.ts), seed task "Confirm dark week
+  // & house clearance" (db/seeds/projects.ts, "Mobilize" section).
+  scheduled: [
+    { key: "assign-crew", title: "Assign rigging lead and installers, and confirm start/end dates", section: "Scheduled" },
+    { key: "confirm-dark-week", title: "Confirm dark week / house clearance with the venue", section: "Mobilize" },
+    { key: "match-mobilization", title: "Match the crew assignment to the estimator's mobilization plan (site visit / install / hang / commissioning / training)", section: "Scheduled" },
+    { key: "confirm-crew-count", title: "Confirm crew headcount matches the mobilization plan's crew size", section: "Scheduled" },
+  ],
+  // install ("Install"): TaskRecord.section defaults to "Install"; seed tasks
+  // "Hang & level walkalong track", "Hang main drape & trim fullness",
+  // "Dress pleats & weight chain", "Assemble towers & set ceiling",
+  // "Operational test & punch walk" (db/seeds/projects.ts); TimeLog{person,
+  // date,hours,note} and ProjectNote{photo} on the project record; the
+  // rigging component rubric (loft blocks/wire rope/arbors/rope locks —
+  // inspections.ts RUBRIC_TEMPLATE) describing what a rigging system
+  // actually consists of; "Commissioning" as a distinct mob type (estimator-data.ts).
+  install: [
+    // SAFETY: rigging is a life-safety system (ANSI E1.4 counterweight rigging,
+    // per the inspection report's basis-of-recommendation text in report-doc.tsx).
+    { key: "rigging-install", title: "Complete rigging installation per line-set assignments", section: "Install" },
+    { key: "hang-soft-goods", title: "Hang and trim soft goods (drapes, track, borders, valance)", section: "Install" },
+    { key: "log-crew-hours", title: "Log daily crew hours against the job", section: "Install" },
+    { key: "photo-progress", title: "Photo-document install progress for the job file", section: "Install" },
+    // SAFETY: functional/commissioning test of installed systems before staff are
+    // trained on them or the job proceeds to sign-off.
+    { key: "operational-test", title: "Run the operational/commissioning test and punch walk before training", section: "Install" },
+  ],
+  // training ("Training"): trainingAt timestamp on the project record; seed
+  // task "Train staff on move/store" (db/seeds/projects.ts, "Closeout"
+  // section); MOB_TYPES includes "Training" as its own mobilization
+  // (estimator-data.ts); ProjectSignoff{name,role} — sign-off records who was
+  // trained, so capturing that name/role here feeds it forward.
+  training: [
+    { key: "train-operation", title: "Train venue staff on system operation (rigging, curtains, controls, as applicable)", section: "Training" },
+    // SAFETY: rigging operation/lockout training — no direct codebase evidence of
+    // Peak's exact training content, but this is standard practice for a system this
+    // codebase treats as life-safety (ANSI E1.4 references elsewhere). Confirm wording with Jeff.
+    { key: "train-safe-rigging", title: "Cover safe rigging operation and lockout procedure with the trained staff", section: "Training" },
+    // GUESS: no direct evidence Peak hands over written O&M docs; common industry
+    // practice, included for Jeff to confirm or cut.
+    { key: "deliver-om-docs", title: "Deliver O&M documentation / owner's manual", section: "Training" },
+    { key: "confirm-trained-contact", title: "Record the name and role of the staff member trained, for the sign-off record", section: "Training" },
+  ],
+  // signoff ("Customer sign-off"): ProjectSignoff{name,role,signedBy,signedAt,
+  // note} (projects.ts setSignoff); seed task "Operational test & punch walk"
+  // (db/seeds/projects.ts); NFPA 705 field-flame test for soft goods
+  // (flame-tests/*); the inspection report's compliance basis — NFPA 80 & 101
+  // life-safety codes, ANSI E1.4 counterweight rigging / E1.22 fire-safety
+  // curtain (inspections/[id]/report/report-doc.tsx) — same systems Peak installs.
+  signoff: [
+    { key: "punch-walk", title: "Walk the completed install with the customer and capture punch items", section: "Signoff" },
+    { key: "customer-acceptance", title: "Obtain signed customer acceptance (name, role, signature, date)", section: "Signoff" },
+    // SAFETY/COMPLIANCE: flame-retardancy documentation for installed soft goods
+    // (NFPA 701/705) — Peak already runs this as its own service line (flame-tests/*).
+    { key: "flame-cert-docs", title: "Deliver flame-certification documentation for installed soft goods (NFPA 701/705), if applicable to this job", section: "Signoff" },
+    // SAFETY: rigging load path / hardware vs. accepted design, before the customer signs.
+    { key: "confirm-load-path", title: "Confirm rigging load path and hardware match the accepted design before sign-off", section: "Signoff" },
+  ],
+  // complete ("Complete"): ProjectRecord.value/margin fields; setProjectStage's
+  // item-16 auto follow-up task already covers the salesperson's how-did-it-go
+  // check-in (projects.ts:442-456), so it is intentionally NOT duplicated here.
+  // ProcurementLine.po and ProjectNote.photo give the job-file artifacts to archive.
+  complete: [
+    { key: "verify-signoff-onfile", title: "Verify signed customer acceptance is on file before closing the job", section: "Closeout" },
+    // GUESS: margin reconciliation as a checklist item is inferred from the
+    // ProjectRecord.value/margin fields existing; confirm this is actually a
+    // per-job step Jeff wants tracked here vs. handled elsewhere (e.g. accounting).
+    { key: "reconcile-margin", title: "Reconcile final job value/margin against the quote", section: "Closeout" },
+    { key: "archive-job-file", title: "Archive POs, packing slips, and install photos to the job file", section: "Closeout" },
+  ],
 };
 
 /* ---------- pure helpers (covered by test:specs) ---------- */
