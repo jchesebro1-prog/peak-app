@@ -1,4 +1,5 @@
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
+import type { FixtureRates } from "@/lib/stores/pricing";
 
 /**
  * Estimator types. The spec shapes (SpecItem / SpecSection / SpecMob) are the
@@ -193,6 +194,8 @@ export type EstimatorProps = {
   fabrics: FabricOpt[];
   /** Live labor/travel rates from catalog category 'Labor' (sku → cost). */
   laborRates: Record<string, number>;
+  /** Live fixture add-on rates (Estimating Rules → fixture group). */
+  fixtureRates: FixtureRates;
   customers: CustomerLite[];
   /** Keys: `${customerId}|${locationId}` and `${customerId}|` (primary) and `name|${custName}`. */
   travel: Record<string, TravelLite>;

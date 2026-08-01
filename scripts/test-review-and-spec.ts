@@ -2219,5 +2219,161 @@ function review(over: Partial<QuoteReview> = {}): QuoteReview {
   if (goodNote.ok) ok(goodNote.note === "Reviewed by Jeff on a Teams call, 2026-08-01", "#60: the accepted note is trimmed");
 }
 
+/* --- punch 60-67: travel / catalog / fixture Estimating Rules groups are
+   now live (store/key, not ref) and pull from a single rates table --- */
+import {
+  GROUPS as PRICING_GROUPS,
+  FIXTURE_RATE_DEFAULTS,
+  TRAVEL_RATE_DEFAULTS,
+  CATALOG_RATE_DEFAULTS,
+  type RateEntry,
+  type PricingGroup,
+} from "@/lib/stores/pricing";
+{
+  const groupOf = (key: string): PricingGroup =>
+    PRICING_GROUPS.find((g) => g.key === key)!;
+  const travelG = groupOf("travel");
+  const catalogG = groupOf("catalog");
+  const fixtureG = groupOf("fixture");
+  ok(travelG.live === true, "#60-67: travel group flips to live: true");
+  /* catalog stays NOT live on purpose: the value is persisted, but nothing in the
+     codebase consumes it — a part with no list price is skipped, never defaulted
+     through this margin. Tagging it "live" would claim an edit reprices something
+     when it cannot (the punch #70 / #14 failure mode). Flip this the same day a
+     real consumer lands. */
+  ok(catalogG.live === false, "#60-67: catalog group stays NOT live — the rate persists but no pricing path reads it yet, so claiming 'live' would be false");
+  ok(fixtureG.live === true, "#60-67: fixture group flips to live: true");
+
+  const rateRows = (g: PricingGroup): RateEntry[] =>
+    g.items.filter((it): it is RateEntry => it.kind === "rate");
+  ok(
+    rateRows(travelG).every((it) => it.ref === false && it.store === "travel"),
+    "#60-67: every travel rate row carries store:'travel' and ref:false"
+  );
+  ok(
+    rateRows(catalogG).every((it) => it.store === "catalog" && it.ref === true),
+    "#60-67: the catalog rate is wired to store:'catalog' (so it persists) but stays ref:true (so the UI still calls it reference, honestly)"
+  );
+  ok(
+    rateRows(fixtureG).every((it) => it.ref === false && it.store === "fixture"),
+    "#60-67: every fixture rate row carries store:'fixture' and ref:false"
+  );
+  ok(
+    rateRows(fixtureG).length === 19,
+    `#60-67: all 19 fixture rate rows survived the conversion (got ${rateRows(fixtureG).length})`
+  );
+
+  const byId = (g: PricingGroup, id: string): RateEntry =>
+    rateRows(g).find((it) => it.id === id)!;
+  // No default VALUE changed by the conversion — the rate()'s display default
+  // still matches the seed constant it now proxies to.
+  ok(
+    byId(travelG, "travel.roadFactor").def === TRAVEL_RATE_DEFAULTS.roadFactor,
+    "#60-67: travel.roadFactor default is still 1.25"
+  );
+  ok(byId(travelG, "travel.mph").def === TRAVEL_RATE_DEFAULTS.mph, "#60-67: travel.mph default is still 50");
+  ok(
+    byId(catalogG, "catalog.defaultMargin").def === 30 && CATALOG_RATE_DEFAULTS.defaultMargin === 0.3,
+    "#60-67: catalog.defaultMargin default is still 30% (stored as the 0.30 fraction, pctStored)"
+  );
+  ok(
+    byId(fixtureG, "fixture.mountCclamp").def === FIXTURE_RATE_DEFAULTS.mountCclamp &&
+      FIXTURE_RATE_DEFAULTS.mountCclamp === 18,
+    "#60-67: fixture.mountCclamp default is still $18"
+  );
+  ok(
+    byId(fixtureG, "fixture.customCostFactor").def === FIXTURE_RATE_DEFAULTS.customCostFactor &&
+      FIXTURE_RATE_DEFAULTS.customCostFactor === 0.66,
+    "#60-67: fixture.customCostFactor default is still 0.66×"
+  );
+}
+
+/* --- punch 60-67: estimator-data.ts fixture add-ons source PRICE from the
+   Estimating Rules "fixture" store (no third copy); COST is untouched --- */
+import { fixtureAddOns } from "@/app/(app)/estimator/estimator-data";
+import { computeFixture as computeFixtureRules } from "@/app/(app)/estimator/pricing";
+{
+  const def = fixtureAddOns(); // no override — must equal today's hardcoded numbers
+  ok(
+    def.mounts["C-clamp"].price === 18 && def.mounts["C-clamp"].cost === 11,
+    "#60-67: default C-clamp mount price/cost unchanged (18 / 11)"
+  );
+  ok(def.customCostFactor === 0.66, "#60-67: default manual-entry cost factor unchanged (0.66×)");
+
+  const draft = {
+    model: "ETC-S4-26",
+    custom: false,
+    name: "",
+    price: "",
+    qty: "2",
+    mount: "C-clamp",
+    accessories: ["Safety cable"],
+    power: ["Edison"],
+    lamp: "LED",
+    position: "",
+    circuit: "",
+  } as Parameters<typeof computeFixtureRules>[0];
+
+  const base = computeFixtureRules(draft); // default add-ons (no Estimating Rules override)
+  // ETC-S4-26 list 520/cost 340; C-clamp 18/11; Safety cable 12/7; Edison 22/13; LED 0/0
+  ok(base.unit === 520 + 18 + 12 + 22, `#60-67: unit price matches the pre-existing hardcoded add-on rates (got ${base.unit})`);
+  ok(base.cost === 340 + 11 + 7 + 13, `#60-67: cost still comes from estimator-data.ts's local cost table (got ${base.cost})`);
+
+  const overridden = fixtureAddOns({ ...FIXTURE_RATE_DEFAULTS, mountCclamp: 25 });
+  const priced = computeFixtureRules(draft, overridden);
+  ok(
+    priced.unit === base.unit + 7,
+    `#60-67: an Estimating Rules override to fixture.mountCclamp reprices the Estimator fixture configurator (got +${priced.unit - base.unit}, want +7)`
+  );
+  ok(
+    priced.cost === base.cost,
+    "#60-67: overriding price in Estimating Rules does not change cost — cost has no row there and stays put"
+  );
+}
+
+/* --- punch 60-67: flametest-engine's travel fallback (roadFactor/mph) now
+   takes an explicit param sourced from Estimating Rules → "travel"; the
+   default preserves today's exact 1.25 / 50 values and live-route/OSRM
+   precedence upstream (geo.ts / companies location.travelMiles) is untouched --- */
+import { compute as computeFlameQuote, type FlameTestVenueInput as FTVenue } from "@/lib/flametest-engine";
+{
+  const rates = {
+    mileageRate: 0.7,
+    laborRate: 30,
+    curtainMinutes: 5,
+    baseFee: 150,
+    margin: 0.3,
+    travelRoundMin: 15,
+  };
+  const office = { lat: 43.039, lng: -87.906, name: "Milwaukee office" }; // Milwaukee, WI
+  const venue: FTVenue = {
+    id: "v1",
+    label: "Venue",
+    curtains: 2,
+    coords: { lat: 43.073, lng: -89.401 }, // Madison, WI (~80mi straight-line)
+  };
+
+  const implicitDefault = computeFlameQuote({ office, venues: [venue] }, rates);
+  const explicitDefault = computeFlameQuote({ office, venues: [venue] }, rates, TRAVEL_RATE_DEFAULTS);
+  ok(
+    implicitDefault.trip.miles === explicitDefault.trip.miles &&
+      implicitDefault.trip.minutesRaw === explicitDefault.trip.minutesRaw,
+    "#60-67: omitting the travel param defaults to the exact 1.25 / 50 fallback numbers used before this change"
+  );
+  ok(implicitDefault.trip.method === "route", "#60-67: full-coords trips still take the (offline) route-leg branch, unchanged");
+
+  const doubledRoad = computeFlameQuote({ office, venues: [venue] }, rates, { roadFactor: 2.5, mph: 50 });
+  ok(
+    Math.abs(doubledRoad.trip.miles - implicitDefault.trip.miles * 2) <= 2,
+    `#60-67: doubling travel.roadFactor (1.25 → 2.5) ~doubles the offline fallback road miles (base ${implicitDefault.trip.miles}, got ${doubledRoad.trip.miles})`
+  );
+
+  const halfSpeed = computeFlameQuote({ office, venues: [venue] }, rates, { roadFactor: 1.25, mph: 25 });
+  ok(
+    Math.abs(halfSpeed.trip.minutesRaw - implicitDefault.trip.minutesRaw * 2) <= 4,
+    `#60-67: halving travel.mph (50 → 25) ~doubles the offline fallback drive-time estimate (base ${implicitDefault.trip.minutesRaw}, got ${halfSpeed.trip.minutesRaw})`
+  );
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

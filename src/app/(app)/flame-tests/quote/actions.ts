@@ -11,6 +11,7 @@ import {
 } from "@/lib/stores/quotes";
 import { syncFromQuotes } from "@/lib/stores/flame-jobs";
 import { getRates, setRates, compute, type FlameTestVenueInput } from "@/lib/flametest-engine";
+import { getTravelRates } from "@/lib/stores/pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
 import { coordsOf, nearest } from "@/lib/geo";
@@ -84,7 +85,8 @@ async function persist(formData: FormData): Promise<string | null> {
   const firstCoords = venueInputs.map((v) => v.coords).find((c) => c && c.lat != null) || null;
   const office = (firstCoords ? nearest(offices, firstCoords) : null) || offices[0] || null;
 
-  const r = compute({ office: office || undefined, venues: venueInputs }, rates);
+  const travelRates = await getTravelRates();
+  const r = compute({ office: office || undefined, venues: venueInputs }, rates, travelRates);
 
   const custName = (await nameFor(customerId)) || cust?.name || "";
   const contact = contactName

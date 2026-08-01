@@ -1,5 +1,10 @@
 import { getBlob, setBlob } from "@/db/doc-store";
-import { FLAMETEST_RATE_DEFAULTS } from "@/lib/stores/pricing";
+import {
+  FLAMETEST_RATE_DEFAULTS,
+  TRAVEL_RATE_DEFAULTS,
+  getTravelRates,
+  type TravelRates,
+} from "@/lib/stores/pricing";
 
 /**
  * FlameTest — auto-pricing engine for flame-test quotes. Server port of
@@ -28,11 +33,16 @@ import { FLAMETEST_RATE_DEFAULTS } from "@/lib/stores/pricing";
  * office-editable rates blob merged over FLAMETEST_RATE_DEFAULTS.
  *
  * Travel legs use the prototype's offline geo tier inlined (haversine miles
- * x 1.25 road factor, 50 mph door-to-door, rounded per leg — geo.js
- * constants). The prototype's live OSRM routing tier is a client/network
- * concern and is not duplicated here; when coords are missing the same
- * estimate fallback applies (one round trip to the farthest venue's one-way
- * numbers).
+ * x roadFactor, mph door-to-door, rounded per leg — geo.js constants,
+ * defaulting to 1.25 / 50). These now live in Estimating Rules → "Travel &
+ * mileage" (blob `travel_rates`, src/lib/stores/pricing.ts) — priceQuote()
+ * reads the live values; compute()/tripTravel() stay pure and take an
+ * explicit `travel` param (TRAVEL_RATE_DEFAULTS when omitted), same pattern
+ * as the rates param. The prototype's live OSRM routing tier is a
+ * client/network concern and is not duplicated here; when coords are
+ * missing the same estimate fallback applies (one round trip to the
+ * farthest venue's one-way numbers, themselves derived upstream from
+ * geo.ts's estimate() — which DOES prefer a live/cached OSRM route).
  */
 
 export type FlameTestRates = {
@@ -80,11 +90,6 @@ export type LatLng = { lat: number; lng: number };
 
 type MaybeCoords = { lat?: number | null; lng?: number | null } | null | undefined;
 
-/** Straight-line → on-road distance fudge (geo.js ROAD_FACTOR). */
-const ROAD_FACTOR = 1.25;
-/** Average door-to-door driving speed (geo.js AVG_MPH). */
-const AVG_MPH = 50;
-
 function toRad(d: number): number {
   return (d * Math.PI) / 180;
 }
@@ -102,14 +107,16 @@ function haversineMiles(a: MaybeCoords, b: MaybeCoords): number | null {
   return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
 }
 
-function driveMiles(a: MaybeCoords, b: MaybeCoords): number | null {
+/** Straight-line → on-road distance, using the live (or default) road factor. */
+function driveMiles(a: MaybeCoords, b: MaybeCoords, travel: TravelRates): number | null {
   const m = haversineMiles(a, b);
-  return m == null ? null : Math.round(m * ROAD_FACTOR);
+  return m == null ? null : Math.round(m * travel.roadFactor);
 }
 
-function driveMinutes(a: MaybeCoords, b: MaybeCoords): number | null {
-  const mi = driveMiles(a, b);
-  return mi == null ? null : Math.round((mi / AVG_MPH) * 60);
+/** Road minutes from the live (or default) assumed average speed. */
+function driveMinutes(a: MaybeCoords, b: MaybeCoords, travel: TravelRates): number | null {
+  const mi = driveMiles(a, b, travel);
+  return mi == null ? null : Math.round((mi / travel.mph) * 60);
 }
 
 /* ---------- inputs & outputs ---------- */
@@ -215,7 +222,8 @@ export function priceVenue(
 export function tripTravel(
   office: FlameTestOffice | null | undefined,
   venues: FlameTestVenueInput[],
-  rates: FlameTestRates
+  rates: FlameTestRates,
+  travel: TravelRates = TRAVEL_RATE_DEFAULTS
 ): TripTravel {
   const legs: TripLeg[] = [];
   let miles = 0;
@@ -234,8 +242,8 @@ export function tripTravel(
     const seq: MaybeCoords[] = [office, ...venues.map((v) => v.coords), office];
     const labels = ["Office", ...venues.map((v) => v.label || "Venue"), "Office"];
     for (let i = 0; i < seq.length - 1; i++) {
-      const m = driveMiles(seq[i], seq[i + 1]);
-      const t = driveMinutes(seq[i], seq[i + 1]);
+      const m = driveMiles(seq[i], seq[i + 1], travel);
+      const t = driveMinutes(seq[i], seq[i + 1], travel);
       if (m != null) miles += m;
       if (t != null) minutes += t;
       legs.push({ from: labels[i], to: labels[i + 1], miles: m, minutes: t });
@@ -281,7 +289,8 @@ export function tripTravel(
  */
 export function compute(
   opts: FlameTestComputeOpts = {},
-  rates: FlameTestRates
+  rates: FlameTestRates,
+  travel: TravelRates = TRAVEL_RATE_DEFAULTS
 ): FlameTestPricing {
   const C = rates;
   const venues = (opts.venues || []).slice();
@@ -290,7 +299,7 @@ export function compute(
   const testingSubtotal = perVenue.reduce((a, v) => a + v.laborCost, 0);
   const curtainsTotal = perVenue.reduce((a, v) => a + v.curtains, 0);
 
-  const trip = tripTravel(opts.office, venues, C);
+  const trip = tripTravel(opts.office, venues, C, travel);
   // Base $150 is a floor on the WHOLE job cost (mileage + travel + testing),
   // not a per-venue charge. Margin is applied on top of the floored cost.
   const rawCost = trip.total + testingSubtotal;
@@ -323,5 +332,6 @@ export function compute(
 export async function priceQuote(
   opts: FlameTestComputeOpts = {}
 ): Promise<FlameTestPricing> {
-  return compute(opts, await getRates());
+  const [rates, travel] = await Promise.all([getRates(), getTravelRates()]);
+  return compute(opts, rates, travel);
 }

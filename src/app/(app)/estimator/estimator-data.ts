@@ -1,3 +1,4 @@
+import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/stores/pricing";
 import type { FixtureDraft, SpecSection } from "./types";
 
 /**
@@ -38,38 +39,118 @@ export const FIXTURES: FixtureDef[] = [
 
 export type AddOn = { price: number; cost: number };
 
-export const FIX_MOUNTS: Record<string, AddOn> = {
-  "C-clamp": { price: 18, cost: 11 },
-  "Half-coupler": { price: 24, cost: 15 },
-  "Yoke": { price: 0, cost: 0 },
-  "Floor base": { price: 45, cost: 30 },
-  "Truss": { price: 32, cost: 20 },
-  "None": { price: 0, cost: 0 },
+/**
+ * Fixture add-on PRICE + COST tables (IDEAS #43).
+ *
+ * PRICE is no longer duplicated here — it is sourced from the Estimating
+ * Rules "fixture" group (src/lib/stores/pricing.ts GROUPS, live blob
+ * `fixture_rates`), the single source of truth. Editing a rate in Estimating
+ * Rules reprices the Estimator's fixture configurator immediately.
+ *
+ * COST has no row in Estimating Rules (the rules table only exposes price,
+ * per the rate() shape — one editable number per row) and stays here as the
+ * only copy; it still feeds cost/margin math, untouched by rules edits.
+ *
+ * fixMounts()/fixAcc()/fixPwr()/fixLamps() take the live FixtureRates
+ * (fetched server-side via getFixtureRates() and threaded down as a prop,
+ * same pattern as EstimatorProps.laborRates) and default to
+ * FIXTURE_RATE_DEFAULTS so any caller that omits them keeps today's exact
+ * values.
+ */
+
+const MOUNT_COST: Record<string, number> = {
+  "C-clamp": 11,
+  "Half-coupler": 15,
+  "Yoke": 0,
+  "Floor base": 30,
+  "Truss": 20,
+  "None": 0,
 };
 
-export const FIX_ACC: Record<string, AddOn> = {
-  "Color frame": { price: 14, cost: 8 },
-  "Gel": { price: 9, cost: 5 },
-  "Gobo": { price: 34, cost: 20 },
-  "Barn door": { price: 58, cost: 38 },
-  "Top hat": { price: 26, cost: 16 },
-  "Safety cable": { price: 12, cost: 7 },
+const ACC_COST: Record<string, number> = {
+  "Color frame": 8,
+  "Gel": 5,
+  "Gobo": 20,
+  "Barn door": 38,
+  "Top hat": 16,
+  "Safety cable": 7,
 };
 
-export const FIX_PWR: Record<string, AddOn> = {
-  "Edison": { price: 22, cost: 13 },
-  "Twist-lock": { price: 34, cost: 21 },
-  "Soca": { price: 78, cost: 52 },
-  "DMX": { price: 26, cost: 16 },
-  "Dimmer/relay": { price: 55, cost: 38 },
+const PWR_COST: Record<string, number> = {
+  "Edison": 13,
+  "Twist-lock": 21,
+  "Soca": 52,
+  "DMX": 16,
+  "Dimmer/relay": 38,
 };
 
-export const FIX_LAMPS: Record<string, AddOn> = {
-  "LED": { price: 0, cost: 0 },
-  "575W HPL": { price: 22, cost: 14 },
-  "750W HPL": { price: 26, cost: 17 },
-  "1000W": { price: 34, cost: 22 },
+const LAMP_COST: Record<string, number> = {
+  "LED": 0,
+  "575W HPL": 14,
+  "750W HPL": 17,
+  "1000W": 22,
 };
+
+export function fixMounts(rates: FixtureRates = FIXTURE_RATE_DEFAULTS): Record<string, AddOn> {
+  return {
+    "C-clamp": { price: rates.mountCclamp, cost: MOUNT_COST["C-clamp"] },
+    "Half-coupler": { price: rates.mountHalfCoupler, cost: MOUNT_COST["Half-coupler"] },
+    "Yoke": { price: 0, cost: 0 },
+    "Floor base": { price: rates.mountFloorBase, cost: MOUNT_COST["Floor base"] },
+    "Truss": { price: rates.mountTruss, cost: MOUNT_COST["Truss"] },
+    "None": { price: 0, cost: 0 },
+  };
+}
+
+export function fixAcc(rates: FixtureRates = FIXTURE_RATE_DEFAULTS): Record<string, AddOn> {
+  return {
+    "Color frame": { price: rates.accColorFrame, cost: ACC_COST["Color frame"] },
+    "Gel": { price: rates.accGel, cost: ACC_COST["Gel"] },
+    "Gobo": { price: rates.accGobo, cost: ACC_COST["Gobo"] },
+    "Barn door": { price: rates.accBarnDoor, cost: ACC_COST["Barn door"] },
+    "Top hat": { price: rates.accTopHat, cost: ACC_COST["Top hat"] },
+    "Safety cable": { price: rates.accSafety, cost: ACC_COST["Safety cable"] },
+  };
+}
+
+export function fixPwr(rates: FixtureRates = FIXTURE_RATE_DEFAULTS): Record<string, AddOn> {
+  return {
+    "Edison": { price: rates.pwrEdison, cost: PWR_COST["Edison"] },
+    "Twist-lock": { price: rates.pwrTwistLock, cost: PWR_COST["Twist-lock"] },
+    "Soca": { price: rates.pwrSoca, cost: PWR_COST["Soca"] },
+    "DMX": { price: rates.dataDMX, cost: PWR_COST["DMX"] },
+    "Dimmer/relay": { price: rates.pwrDimmer, cost: PWR_COST["Dimmer/relay"] },
+  };
+}
+
+export function fixLamps(rates: FixtureRates = FIXTURE_RATE_DEFAULTS): Record<string, AddOn> {
+  return {
+    "LED": { price: 0, cost: 0 },
+    "575W HPL": { price: rates.lamp575, cost: LAMP_COST["575W HPL"] },
+    "750W HPL": { price: rates.lamp750, cost: LAMP_COST["750W HPL"] },
+    "1000W": { price: rates.lamp1000, cost: LAMP_COST["1000W"] },
+  };
+}
+
+export type FixtureAddOns = {
+  mounts: Record<string, AddOn>;
+  acc: Record<string, AddOn>;
+  pwr: Record<string, AddOn>;
+  lamps: Record<string, AddOn>;
+  customCostFactor: number;
+};
+
+/** Bundle of the four add-on maps + the manual-entry cost factor, resolved
+ *  from live (or default) FixtureRates in one call. */
+export function fixtureAddOns(rates: FixtureRates = FIXTURE_RATE_DEFAULTS): FixtureAddOns {
+  return {
+    mounts: fixMounts(rates),
+    acc: fixAcc(rates),
+    pwr: fixPwr(rates),
+    lamps: fixLamps(rates),
+    customCostFactor: rates.customCostFactor,
+  };
+}
 
 export type FixturePreset = {
   label: string;

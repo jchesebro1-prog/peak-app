@@ -1,13 +1,11 @@
 import { curtainCost, curtainPrice, makingRateFor, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
 import {
   DISC_LABEL,
-  FIX_ACC,
-  FIX_LAMPS,
-  FIX_MOUNTS,
-  FIX_PWR,
   FIXTURES,
+  fixtureAddOns,
   LABOR_PCT,
   LABOR_RATES_FALLBACK,
+  type FixtureAddOns,
   type FixtureDef,
 } from "./estimator-data";
 import type {
@@ -169,7 +167,10 @@ export type FixtureCalc = {
   qty: number;
 };
 
-export function computeFixture(d: FixtureDraft): FixtureCalc {
+export function computeFixture(
+  d: FixtureDraft,
+  addOns: FixtureAddOns = fixtureAddOns()
+): FixtureCalc {
   const isC = !!d.custom;
   const fxm: FixtureDef = isC
     ? {
@@ -182,11 +183,11 @@ export function computeFixture(d: FixtureDraft): FixtureCalc {
     : FIXTURES.find((f) => f.sku === d.model) || FIXTURES[0];
   const up = parseFloat(d.price);
   const unitSell = isNaN(up) ? fxm.list || 0 : up;
-  const baseCost = isC ? Math.round(unitSell * 0.66) : fxm.cost || 0;
-  const mt = FIX_MOUNTS[d.mount] || { price: 0, cost: 0 };
-  const accs = (d.accessories || []).map((k) => FIX_ACC[k]).filter(Boolean);
-  const pwr = (d.power || []).map((k) => FIX_PWR[k]).filter(Boolean);
-  const lmp = FIX_LAMPS[d.lamp] || { price: 0, cost: 0 };
+  const baseCost = isC ? Math.round(unitSell * addOns.customCostFactor) : fxm.cost || 0;
+  const mt = addOns.mounts[d.mount] || { price: 0, cost: 0 };
+  const accs = (d.accessories || []).map((k) => addOns.acc[k]).filter(Boolean);
+  const pwr = (d.power || []).map((k) => addOns.pwr[k]).filter(Boolean);
+  const lmp = addOns.lamps[d.lamp] || { price: 0, cost: 0 };
   const accSell = accs.reduce((a, x) => a + x.price, 0);
   const addSell = mt.price + accSell + pwr.reduce((a, x) => a + x.price, 0) + lmp.price;
   const addCost =

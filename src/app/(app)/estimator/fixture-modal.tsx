@@ -1,6 +1,6 @@
 "use client";
 
-import { FIX_ACC, FIX_LAMPS, FIX_MOUNTS, FIX_PRESETS, FIX_PWR, FIXTURES } from "./estimator-data";
+import { FIX_PRESETS, FIXTURES, type FixtureAddOns } from "./estimator-data";
 import { computeFixture } from "./pricing";
 import type { FixtureDraft } from "./types";
 import { addBtnStyle, chipBtn, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./est-ui";
@@ -14,6 +14,7 @@ import { addBtnStyle, chipBtn, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat }
 export default function FixtureModal({
   secName,
   draft,
+  addOns,
   onSet,
   onSetModel,
   onToggleArr,
@@ -23,6 +24,8 @@ export default function FixtureModal({
 }: {
   secName: string;
   draft: FixtureDraft;
+  /** Live add-on price/cost tables, resolved from Estimating Rules → fixture group. */
+  addOns: FixtureAddOns;
   onSet: (field: keyof FixtureDraft, val: string) => void;
   onSetModel: (sku: string) => void;
   onToggleArr: (field: "accessories" | "power", key: string) => void;
@@ -30,7 +33,7 @@ export default function FixtureModal({
   onAdd: () => void;
   onClose: () => void;
 }) {
-  const c = computeFixture(draft);
+  const c = computeFixture(draft, addOns);
   const valid = (draft.custom ? (draft.name || "").trim().length > 0 : true) && c.unit > 0;
 
   return (
@@ -159,7 +162,7 @@ export default function FixtureModal({
       <div style={{ marginBottom: 16 }}>
         <label style={LBL}>Mounting / rigging</label>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-          {Object.keys(FIX_MOUNTS).map((k) => (
+          {Object.keys(addOns.mounts).map((k) => (
             <button type="button" key={k} onClick={() => onSet("mount", k)} style={segBtn(draft.mount === k)}>
               {k}
             </button>
@@ -176,14 +179,14 @@ export default function FixtureModal({
           </span>
         </label>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-          {Object.keys(FIX_ACC).map((k) => (
+          {Object.keys(addOns.acc).map((k) => (
             <button
               type="button"
               key={k}
               onClick={() => onToggleArr("accessories", k)}
               style={chipBtn((draft.accessories || []).indexOf(k) >= 0)}
             >
-              {k + " · $" + FIX_ACC[k].price}
+              {k + " · $" + addOns.acc[k].price}
             </button>
           ))}
         </div>
@@ -198,14 +201,14 @@ export default function FixtureModal({
           </span>
         </label>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-          {Object.keys(FIX_PWR).map((k) => (
+          {Object.keys(addOns.pwr).map((k) => (
             <button
               type="button"
               key={k}
               onClick={() => onToggleArr("power", k)}
               style={chipBtn((draft.power || []).indexOf(k) >= 0)}
             >
-              {k + " · $" + FIX_PWR[k].price}
+              {k + " · $" + addOns.pwr[k].price}
             </button>
           ))}
         </div>
@@ -215,7 +218,7 @@ export default function FixtureModal({
       <div style={{ marginBottom: 16 }}>
         <label style={LBL}>Lamp / wattage</label>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-          {Object.keys(FIX_LAMPS).map((k) => (
+          {Object.keys(addOns.lamps).map((k) => (
             <button type="button" key={k} onClick={() => onSet("lamp", k)} style={segBtn(draft.lamp === k)}>
               {k}
             </button>

@@ -11,10 +11,13 @@ import { getBlob, setBlob } from "@/db/doc-store";
  *               shows HOW numbers combine, not just the knobs.
  *
  * Storage (blobs replace the prototype's localStorage keys):
- *   • Flame-test rates proxy to blob `flametest_rates` (rss_flametest_rates_v1)
- *     and repair rates to blob `repair_rates` (rss_repair_rates_v1) — editing
- *     them here is LIVE: the engines read the same blobs, so every flame-test /
- *     repair quote reprices immediately.
+ *   • Flame-test rates proxy to blob `flametest_rates` (rss_flametest_rates_v1),
+ *     repair rates to blob `repair_rates` (rss_repair_rates_v1), inspection
+ *     rates to blob `inspection_rates`, travel/mileage fallback rates to blob
+ *     `travel_rates`, catalog margin to blob `catalog_rates`, and Estimator
+ *     fixture add-on rates to blob `fixture_rates` — editing any of these here
+ *     is LIVE: the engines/screens read the same blobs, so quotes reprice
+ *     immediately.
  *   • All other editable rates persist to blob `pricing_rules`
  *     (rss_pricing_rules_v1) and are the canonical defaults. Quick Design
  *     reads its install / freight / contingency defaults from here (see num()).
@@ -113,9 +116,87 @@ export const INSPECTION_RATE_DEFAULTS: InspectionRates = {
   travelRoundMin: 15,
 };
 
+export type TravelRates = {
+  /** Straight-line → on-road distance fudge (offline fallback only). */
+  roadFactor: number;
+  /** Assumed average door-to-door driving speed, mph (offline fallback only). */
+  mph: number;
+};
+
+/** geo.js / flametest-engine.js DEFAULTS — seed/fallback for blob `travel_rates`.
+ *  Live OSRM road routing overrides these when available; offline (or when a
+ *  route hasn't been cached yet) these are the fallback used to turn
+ *  straight-line distance into an estimated road distance / drive time. */
+export const TRAVEL_RATE_DEFAULTS: TravelRates = {
+  roadFactor: 1.25,
+  mph: 50,
+};
+
+export type CatalogRates = {
+  /** Default markup for a catalog part with no list price (fraction, 0.30 = 30%). */
+  defaultMargin: number;
+};
+
+/** Catalog margin DEFAULTS — seed/fallback for blob `catalog_rates`. */
+export const CATALOG_RATE_DEFAULTS: CatalogRates = {
+  defaultMargin: 0.30,
+};
+
+export type FixtureRates = {
+  mountCclamp: number;
+  mountHalfCoupler: number;
+  mountFloorBase: number;
+  mountTruss: number;
+  accColorFrame: number;
+  accGel: number;
+  accGobo: number;
+  accBarnDoor: number;
+  accTopHat: number;
+  accSafety: number;
+  pwrEdison: number;
+  pwrTwistLock: number;
+  pwrSoca: number;
+  dataDMX: number;
+  pwrDimmer: number;
+  lamp575: number;
+  lamp750: number;
+  lamp1000: number;
+  /** When a fixture is entered manually, cost = unit price × this. */
+  customCostFactor: number;
+};
+
+/** Estimator fixture-configurator add-on PRICE defaults — seed/fallback for
+ *  blob `fixture_rates`. This is the single source of truth for add-on
+ *  price; estimator-data.ts's fixMounts()/fixAcc()/fixPwr()/fixLamps() read
+ *  the live values from here and keep only the (non-editable-here) cost side. */
+export const FIXTURE_RATE_DEFAULTS: FixtureRates = {
+  mountCclamp: 18,
+  mountHalfCoupler: 24,
+  mountFloorBase: 45,
+  mountTruss: 32,
+  accColorFrame: 14,
+  accGel: 9,
+  accGobo: 34,
+  accBarnDoor: 58,
+  accTopHat: 26,
+  accSafety: 12,
+  pwrEdison: 22,
+  pwrTwistLock: 34,
+  pwrSoca: 78,
+  dataDMX: 26,
+  pwrDimmer: 55,
+  lamp575: 22,
+  lamp750: 26,
+  lamp1000: 34,
+  customCostFactor: 0.66,
+};
+
 export const FLAMETEST_RATES_BLOB = "flametest_rates";
 export const REPAIR_RATES_BLOB = "repair_rates";
 export const INSPECTION_RATES_BLOB = "inspection_rates";
+export const TRAVEL_RATES_BLOB = "travel_rates";
+export const CATALOG_RATES_BLOB = "catalog_rates";
+export const FIXTURE_RATES_BLOB = "fixture_rates";
 /** General editable rates — replaces rss_pricing_rules_v1. */
 const PRICING_RULES_BLOB = "pricing_rules";
 
@@ -151,9 +232,46 @@ export async function setInspectionRates(
   await setBlob(INSPECTION_RATES_BLOB, patch);
 }
 
+export async function getTravelRates(): Promise<TravelRates> {
+  return getBlob(TRAVEL_RATES_BLOB, { ...TRAVEL_RATE_DEFAULTS });
+}
+
+export async function setTravelRates(
+  patch: Partial<TravelRates>
+): Promise<void> {
+  await setBlob(TRAVEL_RATES_BLOB, patch);
+}
+
+export async function getCatalogRates(): Promise<CatalogRates> {
+  return getBlob(CATALOG_RATES_BLOB, { ...CATALOG_RATE_DEFAULTS });
+}
+
+export async function setCatalogRates(
+  patch: Partial<CatalogRates>
+): Promise<void> {
+  await setBlob(CATALOG_RATES_BLOB, patch);
+}
+
+export async function getFixtureRates(): Promise<FixtureRates> {
+  return getBlob(FIXTURE_RATES_BLOB, { ...FIXTURE_RATE_DEFAULTS });
+}
+
+export async function setFixtureRates(
+  patch: Partial<FixtureRates>
+): Promise<void> {
+  await setBlob(FIXTURE_RATES_BLOB, patch);
+}
+
 /* ---------- registry entry types & builders ---------- */
 
-export type RateStore = "general" | "flame" | "repair" | "inspection";
+export type RateStore =
+  | "general"
+  | "flame"
+  | "repair"
+  | "inspection"
+  | "travel"
+  | "catalog"
+  | "fixture";
 
 export type RateEntry = {
   kind: "rate";
@@ -345,12 +463,12 @@ export const GROUPS: PricingGroup[] = [
     ],
   },
   {
-    key: "travel", label: "Travel & mileage", live: false,
+    key: "travel", label: "Travel & mileage", live: true,
     sub: "Distance / drive-time estimate (feeds flame-test + any travel line)",
-    note: "Reference defaults. When live road routing (OSRM) is available it overrides these; offline they are the fallback.",
+    note: "Live — feeds the flame-test travel estimate's offline fallback. Live road routing (OSRM) still overrides these when a cached/live route is available; these are only used for the straight-line fallback.",
     items: [
-      rate("travel.roadFactor", "Straight-line → road factor", 1.25, "×", { min: 1, max: 2, step: 0.05, ref: true, help: "Bumps as-the-crow-flies distance up to road distance." }),
-      rate("travel.mph", "Assumed average speed", 50, "mph", { min: 20, max: 75, step: 1, ref: true }),
+      rate("travel.roadFactor", "Straight-line → road factor", 1.25, "×", { min: 1, max: 2, step: 0.05, store: "travel", key: "roadFactor", help: "Bumps as-the-crow-flies distance up to road distance." }),
+      rate("travel.mph", "Assumed average speed", 50, "mph", { min: 20, max: 75, step: 1, store: "travel", key: "mph" }),
       formula("travel.miles", "Estimated road miles", "miles = straightLineMiles × roadFactor"),
       formula("travel.time", "Estimated drive time", "minutes = (miles ÷ mph) × 60"),
     ],
@@ -358,36 +476,43 @@ export const GROUPS: PricingGroup[] = [
   {
     key: "catalog", label: "Catalog margin", live: false,
     sub: "Parts & price books",
-    note: "Per-part list vs. cost is maintained in the Catalog. This is the default markup for a part with no list price.",
+    // NOT marked live on purpose (Claude, 2026-08-01). The value IS persisted to
+    // blob `catalog_rates` — the wiring is done, so this becomes live in one word
+    // — but NOTHING in the codebase reads it yet: a part with no list price is
+    // filtered out, never defaulted through this margin. Tagging the row "live"
+    // would tell the user that editing it reprices something, which is false: the
+    // same UI-claims-what-isn't-true problem as punch #70 and #14. Flip `live` and
+    // drop `ref` in the same breath as adding the first real consumer.
+    note: "Reference — the value is saved, but no pricing path consumes it yet: a part with no list price is skipped rather than defaulted through this margin. Per-part list vs. cost is maintained in the Catalog.",
     items: [
-      rate("catalog.defaultMargin", "Default part margin", 30, "%", { min: 0, max: 60, step: 1, ref: true }),
+      rate("catalog.defaultMargin", "Default part margin", 30, "%", { min: 0, max: 60, step: 1, store: "catalog", key: "defaultMargin", pctStored: true, ref: true }),
       formula("catalog.list", "List price from cost", "list = cost ÷ (1 − margin)"),
     ],
   },
   {
-    key: "fixture", label: "Lighting fixtures", live: false,
+    key: "fixture", label: "Lighting fixtures", live: true,
     sub: "Estimator → Configure fixture pop-out",
-    note: "Reference — these live in the Estimator’s fixture configurator (a built-in fixture list with an editable unit-price override, plus manual entry), not wired to the fields here. Each fixture adds one combined priced line; hang/focus labor is left to Configure labor. Placeholder add-on rates — swap for real numbers as pricing firms up.",
+    note: "Live — editing a rate here reprices the Estimator's fixture configurator immediately (shared with estimator-data.ts's fixMounts()/fixAcc()/fixPwr()/fixLamps(), which source PRICE from this store). Each fixture adds one combined priced line; hang/focus labor is left to Configure labor. Cost (for margin) isn't editable here — it stays in the estimator's fixture tables. Placeholder add-on rates — swap for real numbers as pricing firms up.",
     items: [
-      rate("fixture.mountCclamp", "Mount — C-clamp", 18, "$", { min: 0, max: 200, step: 1, ref: true }),
-      rate("fixture.mountHalfCoupler", "Mount — half-coupler", 24, "$", { min: 0, max: 200, step: 1, ref: true }),
-      rate("fixture.mountFloorBase", "Mount — floor base", 45, "$", { min: 0, max: 300, step: 1, ref: true }),
-      rate("fixture.mountTruss", "Mount — truss", 32, "$", { min: 0, max: 300, step: 1, ref: true }),
-      rate("fixture.accColorFrame", "Accessory — color frame", 14, "$", { min: 0, max: 200, step: 1, ref: true }),
-      rate("fixture.accGel", "Accessory — gel / media", 9, "$", { min: 0, max: 200, step: 1, ref: true }),
-      rate("fixture.accGobo", "Accessory — gobo", 34, "$", { min: 0, max: 300, step: 1, ref: true }),
-      rate("fixture.accBarnDoor", "Accessory — barn door", 58, "$", { min: 0, max: 300, step: 1, ref: true }),
-      rate("fixture.accTopHat", "Accessory — top hat", 26, "$", { min: 0, max: 200, step: 1, ref: true }),
-      rate("fixture.accSafety", "Accessory — safety cable", 12, "$", { min: 0, max: 100, step: 1, ref: true }),
-      rate("fixture.pwrEdison", "Power — edison cable", 22, "$", { min: 0, max: 300, step: 1, ref: true }),
-      rate("fixture.pwrTwistLock", "Power — twist-lock cable", 34, "$", { min: 0, max: 300, step: 1, ref: true }),
-      rate("fixture.pwrSoca", "Power — soca / multicable", 78, "$", { min: 0, max: 500, step: 1, ref: true }),
-      rate("fixture.dataDMX", "Data — DMX cable", 26, "$", { min: 0, max: 300, step: 1, ref: true }),
-      rate("fixture.pwrDimmer", "Power — dimmer / relay channel", 55, "$", { min: 0, max: 400, step: 1, ref: true }),
-      rate("fixture.lamp575", "Lamp — 575W HPL", 22, "$", { min: 0, max: 200, step: 1, ref: true }),
-      rate("fixture.lamp750", "Lamp — 750W HPL", 26, "$", { min: 0, max: 200, step: 1, ref: true }),
-      rate("fixture.lamp1000", "Lamp — 1000W", 34, "$", { min: 0, max: 300, step: 1, ref: true }),
-      rate("fixture.customCostFactor", "Manual entry — cost basis", 0.66, "×", { min: 0.3, max: 1, step: 0.01, ref: true, help: "When a fixture is entered manually, cost = unit price × this." }),
+      rate("fixture.mountCclamp", "Mount — C-clamp", 18, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "mountCclamp" }),
+      rate("fixture.mountHalfCoupler", "Mount — half-coupler", 24, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "mountHalfCoupler" }),
+      rate("fixture.mountFloorBase", "Mount — floor base", 45, "$", { min: 0, max: 300, step: 1, store: "fixture", key: "mountFloorBase" }),
+      rate("fixture.mountTruss", "Mount — truss", 32, "$", { min: 0, max: 300, step: 1, store: "fixture", key: "mountTruss" }),
+      rate("fixture.accColorFrame", "Accessory — color frame", 14, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "accColorFrame" }),
+      rate("fixture.accGel", "Accessory — gel / media", 9, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "accGel" }),
+      rate("fixture.accGobo", "Accessory — gobo", 34, "$", { min: 0, max: 300, step: 1, store: "fixture", key: "accGobo" }),
+      rate("fixture.accBarnDoor", "Accessory — barn door", 58, "$", { min: 0, max: 300, step: 1, store: "fixture", key: "accBarnDoor" }),
+      rate("fixture.accTopHat", "Accessory — top hat", 26, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "accTopHat" }),
+      rate("fixture.accSafety", "Accessory — safety cable", 12, "$", { min: 0, max: 100, step: 1, store: "fixture", key: "accSafety" }),
+      rate("fixture.pwrEdison", "Power — edison cable", 22, "$", { min: 0, max: 300, step: 1, store: "fixture", key: "pwrEdison" }),
+      rate("fixture.pwrTwistLock", "Power — twist-lock cable", 34, "$", { min: 0, max: 300, step: 1, store: "fixture", key: "pwrTwistLock" }),
+      rate("fixture.pwrSoca", "Power — soca / multicable", 78, "$", { min: 0, max: 500, step: 1, store: "fixture", key: "pwrSoca" }),
+      rate("fixture.dataDMX", "Data — DMX cable", 26, "$", { min: 0, max: 300, step: 1, store: "fixture", key: "dataDMX" }),
+      rate("fixture.pwrDimmer", "Power — dimmer / relay channel", 55, "$", { min: 0, max: 400, step: 1, store: "fixture", key: "pwrDimmer" }),
+      rate("fixture.lamp575", "Lamp — 575W HPL", 22, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "lamp575" }),
+      rate("fixture.lamp750", "Lamp — 750W HPL", 26, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "lamp750" }),
+      rate("fixture.lamp1000", "Lamp — 1000W", 34, "$", { min: 0, max: 300, step: 1, store: "fixture", key: "lamp1000" }),
+      rate("fixture.customCostFactor", "Manual entry — cost basis", 0.66, "×", { min: 0.3, max: 1, step: 0.01, store: "fixture", key: "customCostFactor", help: "When a fixture is entered manually, cost = unit price × this." }),
       formula("fixture.unit", "Fixture unit price", "unit = fixtureList (or manual) + mounting + Σ accessories + Σ power/data + lamp"),
       formula("fixture.line", "Fixture line (one combined line)", "ext = unit × qty   ·   cost/ea = fixtureCost + add-on costs   ·   hang/focus labor left to Configure labor"),
     ],
@@ -403,12 +528,15 @@ reindex();
 
 /* ---------- engine-backed stores (rates proxied to a pricing engine's own blob, so editing is LIVE) ---------- */
 
-type EngineStore = "flame" | "repair" | "inspection";
+type EngineStore = "flame" | "repair" | "inspection" | "travel" | "catalog" | "fixture";
 
 const ENGINE_BLOBS: Record<EngineStore, [string, Record<string, number>]> = {
   flame: [FLAMETEST_RATES_BLOB, FLAMETEST_RATE_DEFAULTS],
   repair: [REPAIR_RATES_BLOB, REPAIR_RATE_DEFAULTS],
   inspection: [INSPECTION_RATES_BLOB, INSPECTION_RATE_DEFAULTS],
+  travel: [TRAVEL_RATES_BLOB, TRAVEL_RATE_DEFAULTS],
+  catalog: [CATALOG_RATES_BLOB, CATALOG_RATE_DEFAULTS],
+  fixture: [FIXTURE_RATES_BLOB, FIXTURE_RATE_DEFAULTS],
 };
 
 async function engineGet(store: EngineStore): Promise<Record<string, number>> {
@@ -476,6 +604,9 @@ export async function resetAll(): Promise<void> {
   await setBlob(FLAMETEST_RATES_BLOB, { ...FLAMETEST_RATE_DEFAULTS });
   await setBlob(REPAIR_RATES_BLOB, { ...REPAIR_RATE_DEFAULTS });
   await setBlob(INSPECTION_RATES_BLOB, { ...INSPECTION_RATE_DEFAULTS });
+  await setBlob(TRAVEL_RATES_BLOB, { ...TRAVEL_RATE_DEFAULTS });
+  await setBlob(CATALOG_RATES_BLOB, { ...CATALOG_RATE_DEFAULTS });
+  await setBlob(FIXTURE_RATES_BLOB, { ...FIXTURE_RATE_DEFAULTS });
 }
 
 /** Read a general rate by id with fallback (Quick Design install/freight/contingency). */

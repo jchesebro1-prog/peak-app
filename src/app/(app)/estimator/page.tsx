@@ -13,6 +13,7 @@ import { reviewers as reviewerUsers } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
+import { getFixtureRates } from "@/lib/stores/pricing";
 import EstimatorClient from "./estimator-client";
 import type {
   AiSource,
@@ -163,13 +164,15 @@ export default async function EstimatorPage({
   let q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
   if (!q) q = (await getQuote("Q-2041")) as QuoteDoc | null; // demo fallback so Save has a target
 
-  const [fabricRows, laborRows, customerDocs, reviewerRows, settings] = await Promise.all([
-    byCategory("Fabric"),
-    byCategory("Labor"),
-    allCustomers(),
-    reviewerUsers(),
-    getSettings(),
-  ]);
+  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates] =
+    await Promise.all([
+      byCategory("Fabric"),
+      byCategory("Labor"),
+      allCustomers(),
+      reviewerUsers(),
+      getSettings(),
+      getFixtureRates(),
+    ]);
 
   // Only catalog fabrics with a real per-sq-ft basis feed the curtain
   // configurator — imported vendor fabric rows (priced per unit, no costPerSqft)
@@ -229,6 +232,7 @@ export default async function EstimatorPage({
       logoDark={settings.logoDark || null}
       fabrics={fabrics}
       laborRates={laborRates}
+      fixtureRates={fixtureRates}
       customers={customers}
       travel={travel}
       reviewers={reviewerRows.map((u) => u.name)}

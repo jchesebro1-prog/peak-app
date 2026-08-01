@@ -23,6 +23,7 @@ import {
   DISC_LABEL,
   FIX_PRESETS,
   FIXTURES,
+  fixtureAddOns,
   GENERIC_SUGGEST,
   SUGGEST,
   type SuggestPart,
@@ -231,6 +232,7 @@ export default function EstimatorClient({
   logoDark,
   fabrics,
   laborRates,
+  fixtureRates,
   customers,
   travel,
   reviewers,
@@ -321,6 +323,7 @@ export default function EstimatorClient({
   }, []);
 
   const rate = useMemo(() => makeLaborRate(laborRates), [laborRates]);
+  const fixAddOns = useMemo(() => fixtureAddOns(fixtureRates), [fixtureRates]);
   const t = useMemo(() => totals(sections, TAX_RATE_PCT), [sections]);
 
   const isBuild = !phone && mode === "build";
@@ -808,7 +811,7 @@ export default function EstimatorClient({
   };
   const addFixture = (secId: string) => {
     const d = fixtureDraft;
-    const c = computeFixture(d);
+    const c = computeFixture(d, fixAddOns);
     const name = d.custom ? (d.name || "").trim() : c.fx.name;
     if (!name || c.unit <= 0) return;
     const opts: string[] = [];
@@ -2097,6 +2100,7 @@ export default function EstimatorClient({
             <FixtureModal
               secName={fixtureSec ? fixtureSec.name : ""}
               draft={fixtureDraft}
+              addOns={fixAddOns}
               onSet={setFixture}
               onSetModel={setFixtureModel}
               onToggleArr={toggleFixArr}
