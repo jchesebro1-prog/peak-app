@@ -85,6 +85,13 @@
       "when": 1785105590236,
       "tag": "0011_many_hawkeye",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785591717634,
+      "tag": "0012_seq_bump_trigger",
+      "breakpoints": true
     }
   ]
 }

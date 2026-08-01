@@ -1,7 +1,7 @@
 import {
   getDoc,
+  insertWithPrefixedId,
   listDocs,
-  nextPrefixedId,
   patchDoc,
   softDeleteDoc,
   upsertDoc,
@@ -404,9 +404,8 @@ export async function byQuote(qid: string): Promise<FlameJob | null> {
 
 /** Create a job; id FT-#### minted from base 3000 (seeds occupy 3001–3008). */
 export async function create(partial: Partial<FlameJob> = {}): Promise<FlameJob> {
-  const id = partial.id || (await nextPrefixedId("flame_jobs", "FT", 3000));
   const t = now();
-  const rec: FlameJob = {
+  const build = (id: string): FlameJob => ({
     quoteId: null,
     customer: "",
     customerId: null,
@@ -428,9 +427,13 @@ export async function create(partial: Partial<FlameJob> = {}): Promise<FlameJob>
     id,
     createdAt: t,
     updatedAt: t,
-  };
-  await upsertDoc<FlameJob>("flame_jobs", rec);
-  return rec;
+  });
+  if (partial.id) {
+    const rec = build(partial.id);
+    await upsertDoc<FlameJob>("flame_jobs", rec);
+    return rec;
+  }
+  return insertWithPrefixedId<FlameJob>("flame_jobs", "FT", 3000, build);
 }
 
 /**
@@ -464,14 +467,13 @@ export async function syncFromQuotes(): Promise<number> {
   for (const q of won) {
     if (have[q.id]) continue;
     const rec = await fromQuote(q);
-    const id = await nextPrefixedId("flame_jobs", "FT", 3000);
     const t = now();
-    await upsertDoc<FlameJob>("flame_jobs", {
+    await insertWithPrefixedId<FlameJob>("flame_jobs", "FT", 3000, (id) => ({
       ...rec,
       id,
       createdAt: t,
       updatedAt: t,
-    });
+    }));
     have[q.id] = true;
     made++;
   }

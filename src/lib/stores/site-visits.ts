@@ -1,4 +1,4 @@
-import { getDoc, listDocs, nextPrefixedId, patchDoc, upsertDoc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, patchDoc } from "@/db/doc-store";
 import { deriveVisitStage, requestStageFor, type VisitStage } from "@/lib/lead-thread";
 
 /**
@@ -135,17 +135,14 @@ export type SiteVisitInput = Omit<
 >;
 
 export async function createVisit(input: SiteVisitInput): Promise<SiteVisit> {
-  const id = await nextPrefixedId("site_visits", "SV", 5000);
   const now = Date.now();
-  const rec: SiteVisit = {
+  return insertWithPrefixedId<SiteVisit>("site_visits", "SV", 5000, (id) => ({
     ...input,
     id,
     createdAt: now,
     updatedAt: now,
     invite: null,
-  };
-  await upsertDoc<SiteVisit>("site_visits", rec);
-  return rec;
+  }));
 }
 
 /** Record the sent .ics invite on the visit (D76-I). */

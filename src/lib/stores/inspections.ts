@@ -1,7 +1,7 @@
 import {
   getDoc,
+  insertWithPrefixedId,
   listDocs,
-  nextPrefixedId,
   patchDoc,
   softDeleteDoc,
   upsertDoc,
@@ -1049,9 +1049,8 @@ export async function get(id: string): Promise<InspectionRecord | null> {
 export async function create(
   partial: Partial<InspectionRecord> = {}
 ): Promise<InspectionRecord> {
-  const id = partial.id || (await nextPrefixedId("inspections", "RI", 2041));
   const t = now();
-  const rec: InspectionRecord = {
+  const build = (id: string): InspectionRecord => ({
     ...blank(partial),
     id,
     owner: partial.owner || "Jeff Chesebro",
@@ -1059,9 +1058,13 @@ export async function create(
     requestedAt: partial.requestedAt || t,
     createdAt: t,
     updatedAt: t,
-  };
-  await upsertDoc<InspectionRecord>("inspections", rec);
-  return rec;
+  });
+  if (partial.id) {
+    const rec = build(partial.id);
+    await upsertDoc<InspectionRecord>("inspections", rec);
+    return rec;
+  }
+  return insertWithPrefixedId<InspectionRecord>("inspections", "RI", 2041, build);
 }
 
 export async function update(

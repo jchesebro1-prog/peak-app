@@ -18,7 +18,13 @@ import {
  * - doc:  the full record, exactly the prototype's shape (field names are
  *         the spec — do not rename)
  * - rev:  optimistic-concurrency counter (prototype's dirty() rev)
- * - seq:  monotonic per-table write cursor — powers Phase 6 pull sync
+ * - seq:  monotonic per-table write cursor — powers Phase 6 pull sync.
+ *         bigserial only assigns on INSERT, so a `..._seq_bump` BEFORE
+ *         UPDATE trigger (drizzle/0012_seq_bump_trigger.sql) re-draws it
+ *         from the same sequence on every UPDATE, including soft-deletes
+ *         (a plain UPDATE setting deleted:true). New tables added via
+ *         docTable() need a matching trigger added in a later migration —
+ *         see that file's header comment.
  * - review: server-owned triage subdoc (CloudStore._put preserved it on
  *         re-push; same rule here — client pushes never overwrite it)
  * - deleted: soft delete so offline clients learn about removals via pull
@@ -42,7 +48,9 @@ function docTable(name: string) {
     },
     (t) => [
       // Pull-sync hot path: `WHERE seq > cursor ORDER BY seq` (doc-store
-      // listSince) — a full scan+sort without this. seq is monotonic per row.
+      // listSince) — a full scan+sort without this. seq is kept monotonic
+      // per row by the BEFORE UPDATE trigger installed in
+      // drizzle/0012_seq_bump_trigger.sql (bigserial alone only covers INSERT).
       index(`${name}_seq_idx`).on(t.seq),
       // Every listDocs filters `deleted = false`; keeps deleted tombstones
       // from dragging on scans as they accumulate.

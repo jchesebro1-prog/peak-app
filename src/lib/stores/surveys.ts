@@ -1,7 +1,7 @@
 import {
   getDoc,
+  insertWithPrefixedId,
   listDocs,
-  nextPrefixedId,
   patchDoc,
   softDeleteDoc,
   upsertDoc,
@@ -481,9 +481,8 @@ export async function create(
   partial: Partial<SurveyDraft> & { id?: string; owner?: string } = {},
   me: string = DEFAULT_ME
 ): Promise<SurveyRecord> {
-  const id = partial.id || (await nextPrefixedId("surveys", "FS", 1053));
   const t = now();
-  const rec: SurveyRecord = {
+  const build = (id: string): SurveyRecord => ({
     ...blank(partial),
     id,
     owner: partial.owner || me,
@@ -495,9 +494,13 @@ export async function create(
     syncState: "synced",
     syncedAt: t,
     rev: 1,
-  };
-  await upsertDoc("surveys", rec);
-  return rec;
+  });
+  if (partial.id) {
+    const rec = build(partial.id);
+    await upsertDoc("surveys", rec);
+    return rec;
+  }
+  return insertWithPrefixedId<SurveyRecord>("surveys", "FS", 1053, build);
 }
 
 /** Content update — bumps updatedAt + rev (prototype re-dirty). */

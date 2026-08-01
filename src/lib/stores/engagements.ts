@@ -1,4 +1,4 @@
-import { getDoc, listDocs, nextPrefixedId, patchDoc, upsertDoc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, patchDoc } from "@/db/doc-store";
 import type { QuoteReview } from "@/lib/stores/quotes";
 import {
   approvalIsStale,
@@ -503,10 +503,12 @@ export async function ensureEngagementForQuote(
   const q = await getDoc<QuoteLike>("quotes", quoteId);
   if (!q || q.quoteType !== "consulting") return null;
   const body = fromQuote(q, minStage);
-  const id = await nextPrefixedId("consulting_engagements", "CE", 1000);
-  const rec: ConsultingEngagement = { ...body, id };
-  await upsertDoc<ConsultingEngagement>("consulting_engagements", rec);
-  return rec;
+  return insertWithPrefixedId<ConsultingEngagement>(
+    "consulting_engagements",
+    "CE",
+    1000,
+    (id) => ({ ...body, id })
+  );
 }
 
 /** Consulting quotes → engagements (fifth sync in the on-win fan-out, AND
@@ -534,9 +536,12 @@ export async function syncEngagementsFromQuotes(): Promise<number> {
     if (!action) continue;
     if (action.kind === "create") {
       const body = fromQuote(q, action.stage);
-      const id = await nextPrefixedId("consulting_engagements", "CE", 1000);
-      const rec: ConsultingEngagement = { ...body, id };
-      await upsertDoc<ConsultingEngagement>("consulting_engagements", rec);
+      const rec = await insertWithPrefixedId<ConsultingEngagement>(
+        "consulting_engagements",
+        "CE",
+        1000,
+        (id) => ({ ...body, id })
+      );
       byQuote.set(q.id, rec);
     } else if (action.kind === "advance" || action.kind === "reopen") {
       // "advance" (→ awarded) and "reopen" (→ proposal_sent) are both a

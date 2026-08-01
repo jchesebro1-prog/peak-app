@@ -1,7 +1,7 @@
 import {
   getDoc,
+  insertWithPrefixedId,
   listDocs,
-  nextPrefixedId,
   patchDoc,
   softDeleteDoc,
   upsertDoc,
@@ -155,29 +155,35 @@ export async function createDesign(
   partial: Partial<DesignRecord> = {}
 ): Promise<DesignRecord> {
   const t = now();
-  const id = partial.id || (await nextPrefixedId("designs", "D", 100));
-  const d: DesignRecord = {
-    name: "Untitled design",
-    venue: "",
-    size: "medium",
-    tier: "better",
-    width: 0,
-    depth: 0,
-    grid: 0,
-    systems: [],
-    budget: 0,
-    customerId: null,
-    locationId: null,
-    customer: "",
-    owner: DEFAULT_ACTOR,
-    review: rv("none"),
-    ...partial,
-    id,
-    updatedAt: t,
+  const build = (id: string): DesignRecord => {
+    const d: DesignRecord = {
+      name: "Untitled design",
+      venue: "",
+      size: "medium",
+      tier: "better",
+      width: 0,
+      depth: 0,
+      grid: 0,
+      systems: [],
+      budget: 0,
+      customerId: null,
+      locationId: null,
+      customer: "",
+      owner: DEFAULT_ACTOR,
+      review: rv("none"),
+      ...partial,
+      id,
+      updatedAt: t,
+    };
+    if (!d.review) d.review = rv("none");
+    return d;
   };
-  if (!d.review) d.review = rv("none");
-  await upsertDoc<DesignRecord>("designs", d);
-  return d;
+  if (partial.id) {
+    const d = build(partial.id);
+    await upsertDoc<DesignRecord>("designs", d);
+    return d;
+  }
+  return insertWithPrefixedId<DesignRecord>("designs", "D", 100, build);
 }
 
 /** Shallow-merge patch, bump updatedAt (port of update). */

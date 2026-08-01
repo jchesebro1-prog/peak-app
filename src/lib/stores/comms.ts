@@ -1,7 +1,7 @@
 import {
   getDoc,
+  insertWithPrefixedId,
   listDocs,
-  nextPrefixedId,
   patchDoc,
   searchDocs,
   softDeleteDoc,
@@ -1021,7 +1021,6 @@ export type CreateCommInput = {
 export async function create(
   partial: CreateCommInput = {}
 ): Promise<CommThread> {
-  const id = partial.id || (await nextPrefixedId("comms", "C", 1032));
   const t = now();
   const dir: Direction = partial.direction === "in" ? "in" : "out";
   const channel = asChannel(partial.channel, "email");
@@ -1040,7 +1039,9 @@ export async function create(
     if (online()) deliverMessage(msg); // GMAIL BRIDGE SEAM
     else msg.queued = true; // offline → Outbox until flushOutbox()
   }
-  const rec: CommThread = {
+  // build() must stay pure (no re-sending msg) — it may run again on an id
+  // collision, but the delivery/queue decision above already happened once.
+  const build = (id: string): CommThread => ({
     id,
     mailbox: partial.mailbox || "personal",
     mailboxUser:
@@ -1065,9 +1066,15 @@ export async function create(
     syncState: "synced", // the Postgres write is the push
     syncedAt: t,
     rev: 1,
-  };
-  await upsertDoc<CommThread>("comms", rec);
-  if (dir === "out" && !msg.queued) await dispatchOutbound(id); // GMAIL BRIDGE SEAM
+  });
+  let rec: CommThread;
+  if (partial.id) {
+    rec = build(partial.id);
+    await upsertDoc<CommThread>("comms", rec);
+  } else {
+    rec = await insertWithPrefixedId<CommThread>("comms", "C", 1032, build);
+  }
+  if (dir === "out" && !msg.queued) await dispatchOutbound(rec.id); // GMAIL BRIDGE SEAM
   return rec;
 }
 

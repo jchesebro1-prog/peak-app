@@ -1,8 +1,8 @@
 import {
   getBlob,
   getDoc,
+  insertWithPrefixedId,
   listDocs,
-  nextPrefixedId,
   patchDoc,
   setBlob,
   softDeleteDoc,
@@ -338,44 +338,50 @@ export async function createProject(
   const t = now();
   const prefix = partial.kind === "order" ? "S" : "P";
   const base = prefix === "S" ? 4000 : 3000;
-  const id = partial.id || (await nextPrefixedId("projects", prefix, base));
-  const p: ProjectRecord = {
-    kind: "project",
-    quoteId: null,
-    name: "Untitled project",
-    customer: "",
-    customerId: null,
-    locationId: null,
-    owner: DEFAULT_ACTOR,
-    value: 0,
-    margin: 0,
-    startedAt: t,
-    targetDate: ahead(42),
-    installStart: null,
-    installEnd: null,
-    stage: "procurement",
-    stageHistory: [],
-    procurement: [],
-    mobilizations: [],
-    deliveries: [],
-    crew: [],
-    tasks: [],
-    notes: [],
-    timeLogs: [],
-    signoff: null,
-    trainingAt: null,
-    ...partial,
-    id,
-    createdAt: t,
-    updatedAt: t,
+  const build = (id: string): ProjectRecord => {
+    const p: ProjectRecord = {
+      kind: "project",
+      quoteId: null,
+      name: "Untitled project",
+      customer: "",
+      customerId: null,
+      locationId: null,
+      owner: DEFAULT_ACTOR,
+      value: 0,
+      margin: 0,
+      startedAt: t,
+      targetDate: ahead(42),
+      installStart: null,
+      installEnd: null,
+      stage: "procurement",
+      stageHistory: [],
+      procurement: [],
+      mobilizations: [],
+      deliveries: [],
+      crew: [],
+      tasks: [],
+      notes: [],
+      timeLogs: [],
+      signoff: null,
+      trainingAt: null,
+      ...partial,
+      id,
+      createdAt: t,
+      updatedAt: t,
+    };
+    // Anchor the history at the stage the record opened in, so the first
+    // real transition has a "from" to render against.
+    if (!p.stageHistory.length) {
+      p.stageHistory = [{ at: t, from: null, to: p.stage, by: p.owner }];
+    }
+    return p;
   };
-  // Anchor the history at the stage the record opened in, so the first real
-  // transition has a "from" to render against.
-  if (!p.stageHistory.length) {
-    p.stageHistory = [{ at: t, from: null, to: p.stage, by: p.owner }];
+  if (partial.id) {
+    const p = build(partial.id);
+    await upsertDoc<ProjectRecord>("projects", p);
+    return p;
   }
-  await upsertDoc<ProjectRecord>("projects", p);
-  return p;
+  return insertWithPrefixedId<ProjectRecord>("projects", prefix, base, build);
 }
 
 /** Shallow-merge patch, bump updatedAt (port of update). */
@@ -618,12 +624,13 @@ export async function syncProjectsFromQuotes(): Promise<number> {
       continue;
     if (haveQ.has(q.id) || skip.includes(q.id)) continue;
     const body = fromQuote(q);
-    const id = await nextPrefixedId(
+    const rec = await insertWithPrefixedId<ProjectRecord>(
       "projects",
       body.kind === "order" ? "S" : "P",
-      body.kind === "order" ? 4000 : 3000
+      body.kind === "order" ? 4000 : 3000,
+      (id) => ({ ...body, id })
     );
-    await upsertDoc<ProjectRecord>("projects", { ...body, id });
+    const id = rec.id;
     haveQ.add(q.id);
     made++;
 
@@ -674,7 +681,6 @@ export async function setLineStatus(
     l.status = status;
     if (status === "ordered" && !l.orderedAt) {
       l.orderedAt = now();
-      if (!l.po) l.po = "PO-" + (1060 + Math.floor(Math.random() * 39));
     }
     doc.updatedAt = now();
     return doc;

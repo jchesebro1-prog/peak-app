@@ -1,5 +1,5 @@
 import {
-  listDocs, getDoc, upsertDoc, patchDoc, softDeleteDoc, nextPrefixedId, insertDocIfAbsent,
+  listDocs, getDoc, upsertDoc, patchDoc, softDeleteDoc, insertDocIfAbsent, insertWithPrefixedId,
 } from "@/db/doc-store";
 import type { ProjectTask, ProjectStage, ProjectRecord } from "@/lib/stores/projects";
 
@@ -135,10 +135,14 @@ export async function createTask(
   me: { id: string; name: string },
 ): Promise<TaskRecord> {
   const at = now();
-  const id = input.id || (await nextPrefixedId("tasks", "T", 6000));
-  const t = normalizeTask({ ...input, id, createdBy: me.name, createdAt: at, updatedAt: at });
-  await upsertDoc<TaskRecord>("tasks", t);
-  return t;
+  if (input.id) {
+    const t = normalizeTask({ ...input, id: input.id, createdBy: me.name, createdAt: at, updatedAt: at });
+    await upsertDoc<TaskRecord>("tasks", t);
+    return t;
+  }
+  return insertWithPrefixedId<TaskRecord>("tasks", "T", 6000, (id) =>
+    normalizeTask({ ...input, id, createdBy: me.name, createdAt: at, updatedAt: at })
+  );
 }
 
 /** Idempotent system-created task (templates, item 16): coverageKey is the

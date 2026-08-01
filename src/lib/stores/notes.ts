@@ -1,4 +1,4 @@
-import { listDocs, nextPrefixedId, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { insertWithPrefixedId, listDocs, softDeleteDoc } from "@/db/doc-store";
 
 /**
  * Notes (#21) — the first REAL note record in the app (the three prior
@@ -12,8 +12,10 @@ import { listDocs, nextPrefixedId, softDeleteDoc, upsertDoc } from "@/db/doc-sto
  *
  * NOT syncable (server-action writes only — the engagements/site_visits
  * precedent; see the SYNCABLE_COLLECTIONS comment in doc-tables.ts).
- * nextPrefixedId is a racy max-scan; the single-user-ish composer makes
- * upsertDoc fine here (no insertDocIfAbsent — D121).
+ * nextPrefixedId is a racy max-scan; D121 had judged the single-user-ish
+ * composer safe with plain upsertDoc, but the punch-62 decision to close
+ * this race everywhere supersedes that — insertWithPrefixedId now retries
+ * on collision instead of one writer's note silently replacing another's.
  */
 
 export type NoteParentKind = "customer" | "lead" | "project" | "quote";
@@ -56,9 +58,8 @@ export async function addNoteRecord(
   input: { parentKind: NoteParentKind; parentId: string; customerId: string | null; text: string },
   me: string
 ): Promise<NoteRecord> {
-  const id = await nextPrefixedId("notes", "N", 7000);
   const t = Date.now();
-  const n: NoteRecord = {
+  return insertWithPrefixedId<NoteRecord>("notes", "N", 7000, (id) => ({
     id,
     parentKind: input.parentKind,
     parentId: input.parentId,
@@ -68,9 +69,7 @@ export async function addNoteRecord(
     text: input.text.trim(),
     createdAt: t,
     updatedAt: t,
-  };
-  await upsertDoc<NoteRecord>("notes", n);
-  return n;
+  }));
 }
 
 /** Soft delete (doc-store tombstone). */

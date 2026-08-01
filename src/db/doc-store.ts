@@ -13,6 +13,12 @@ import { DOC_TABLES, blobs, type CollectionName } from "./doc-tables";
  *   only writer (CloudStore._put preserved review on re-push),
  * - deletes are soft (deleted:true) so pull-sync clients converge,
  * - seq (bigserial) orders every write for cursor-based pull (Phase 6).
+ *   Only INSERT gets a seq from the bigserial default; every UPDATE here
+ *   (patchDoc, softDeleteDoc, setReview, and upsertDoc's onConflictDoUpdate
+ *   branch) gets its seq re-drawn by a database trigger
+ *   (drizzle/0012_seq_bump_trigger.sql), not by code in this file — so a
+ *   write path that reaches these tables directly (e.g. /api/sync/push)
+ *   still keeps seq monotonic without remembering to bump it explicitly.
  */
 
 export type Doc = Record<string, unknown> & { id: string };
@@ -265,6 +271,33 @@ export async function nextPrefixedId(
   return `${prefix}-${max + 1}`;
 }
 
+/**
+ * Mint a prefixed id and insert under it, retrying with a fresh id on
+ * collision instead of letting a concurrent creator's row get overwritten
+ * (D73 — same guard insertDocIfAbsent exists for, generalized so every
+ * nextPrefixedId call site gets it instead of hand-rolling the retry loop;
+ * ported from the one place that already did this, gmail/bridge.ts's
+ * recordMessage). `build` must be pure (id in, doc out) — it may run more
+ * than once per call, so side effects (sending a message, etc.) belong
+ * outside it, before or after calling this.
+ */
+export async function insertWithPrefixedId<T extends Doc>(
+  coll: CollectionName,
+  prefix: string,
+  base: number,
+  build: (id: string) => T,
+  maxAttempts = 5
+): Promise<T> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const id = await nextPrefixedId(coll, prefix, base);
+    const doc = build(id);
+    if (await insertDocIfAbsent<T>(coll, doc)) return doc;
+  }
+  throw new Error(
+    `insertWithPrefixedId: id collision persisted for ${coll}/${prefix} after ${maxAttempts} attempts`
+  );
+}
+
 /* ---------- blob singletons (settings-style stores) ---------- */
 
 export async function getBlob<T extends Record<string, unknown>>(
@@ -276,19 +309,41 @@ export async function getBlob<T extends Record<string, unknown>>(
   return { ...defaults, ...((rows[0]?.data as Partial<T>) || {}) };
 }
 
+/**
+ * Merge `patch` into blob `id`, atomically (punch #62). The old version did
+ * SELECT then UPDATE/INSERT in application code — a read-modify-write race:
+ * two concurrent setBlob calls on the same id but DIFFERENT top-level keys
+ * could each read the row before the other's write landed, and the slower
+ * writer's stale snapshot would silently overwrite (drop) the faster
+ * writer's key on save, with no error anywhere. `portal_grants` (D-side of
+ * src/lib/portal.ts, one key per PortalGrant incl. its encrypted magic-link
+ * token) is keyed exactly this way — two grants created around the same
+ * moment, or a revoke racing a new grant, could lose one silently. A single
+ * `INSERT ... ON CONFLICT DO UPDATE` using Postgres's jsonb `||` operator
+ * (right side wins per top-level key, same as the old `{...existing,
+ * ...patch}`) does the merge inside the database in one statement, so there
+ * is no read-then-write gap for a concurrent writer to land in — this is a
+ * single atomic statement, not a multi-statement transaction.
+ *
+ * Residual, accepted gap: two concurrent patches to the SAME top-level key
+ * (e.g. two writes racing to touch the same grant's lastSeenAt/revokedAt)
+ * still last-write-wins on that key's fields — closing that needs a
+ * row-level lock/transaction, which is out of scope here (see PUNCHLIST).
+ */
 export async function setBlob(
   id: string,
   patch: Record<string, unknown>
 ): Promise<void> {
   const db = await getDb();
-  const rows = await db.select().from(blobs).where(eq(blobs.id, id)).limit(1);
-  const next = { ...((rows[0]?.data as Record<string, unknown>) || {}), ...patch };
-  if (rows.length) {
-    await db
-      .update(blobs)
-      .set({ data: next, updatedAt: Date.now() })
-      .where(eq(blobs.id, id));
-  } else {
-    await db.insert(blobs).values({ id, data: next, updatedAt: Date.now() });
-  }
+  const json = JSON.stringify(patch);
+  await db
+    .insert(blobs)
+    .values({ id, data: patch, updatedAt: Date.now() })
+    .onConflictDoUpdate({
+      target: blobs.id,
+      set: {
+        data: sql`${blobs.data} || ${json}::jsonb`,
+        updatedAt: Date.now(),
+      },
+    });
 }

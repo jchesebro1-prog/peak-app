@@ -1,7 +1,7 @@
 import {
   getDoc,
+  insertWithPrefixedId,
   listDocs,
-  nextPrefixedId,
   patchDoc,
   softDeleteDoc,
   upsertDoc,
@@ -189,9 +189,8 @@ export async function createProject(input: {
   customerId: string | null;
   by: string;
 }): Promise<GridProject> {
-  const id = await nextPrefixedId("grid_projects", "GRD", 5001);
   const t = Date.now();
-  const p: GridProject = {
+  return insertWithPrefixedId<GridProject>("grid_projects", "GRD", 5001, (id) => ({
     id,
     name: input.name.trim() || "Untitled system design",
     customer: input.customer.trim(),
@@ -205,9 +204,7 @@ export async function createProject(input: {
     createdBy: input.by,
     createdAt: t,
     updatedAt: t,
-  };
-  await upsertDoc<GridProject>("grid_projects", p);
-  return p;
+  }));
 }
 
 /** Upload one plan background and append it to the project's sheet order.

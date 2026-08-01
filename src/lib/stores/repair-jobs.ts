@@ -1,7 +1,7 @@
 import {
   getDoc,
+  insertWithPrefixedId,
   listDocs,
-  nextPrefixedId,
   patchDoc,
   softDeleteDoc,
   upsertDoc,
@@ -568,9 +568,8 @@ export async function byQuote(qid: string): Promise<RepairJobRecord | null> {
 export async function create(
   partial: Partial<RepairJobRecord> = {}
 ): Promise<RepairJobRecord> {
-  const id = partial.id || (await nextPrefixedId("repair_jobs", "RP", 4000));
   const t = now();
-  const rec: RepairJobRecord = {
+  const build = (id: string): RepairJobRecord => ({
     quoteId: null,
     customer: "",
     customerId: null,
@@ -600,9 +599,13 @@ export async function create(
     id,
     createdAt: t,
     updatedAt: t,
-  };
-  await upsertDoc<RepairJobRecord>("repair_jobs", rec);
-  return rec;
+  });
+  if (partial.id) {
+    const rec = build(partial.id);
+    await upsertDoc<RepairJobRecord>("repair_jobs", rec);
+    return rec;
+  }
+  return insertWithPrefixedId<RepairJobRecord>("repair_jobs", "RP", 4000, build);
 }
 
 export async function createFromQuote(qid: string): Promise<RepairJobRecord | null> {

@@ -1,7 +1,7 @@
 import {
   getDoc,
+  insertWithPrefixedId,
   listDocs,
-  nextPrefixedId,
   patchDoc,
   softDeleteDoc,
   upsertDoc,
@@ -486,7 +486,6 @@ export async function create(
   partial: LeadCreateInput = {},
   me: string = DEFAULT_ME
 ): Promise<LeadRecord> {
-  const id = partial.id || (await nextPrefixedId("leads", "L", 1050));
   const src: LeadSource =
     (SOURCES as readonly string[]).indexOf(partial.source || "") >= 0
       ? (partial.source as LeadSource)
@@ -501,29 +500,34 @@ export async function create(
         src === "website" ? "Website quote request received" : partial.message
       )
     : act(t, "system", "", "Lead created");
-  const rec = mkLead({
-    id,
-    org: partial.org || "",
-    contact: partial.contact || "",
-    email: partial.email || "",
-    phone: partial.phone || "",
-    city: partial.city || "",
-    state: partial.state || "WI",
-    source: src,
-    stage: "new",
-    owner: partial.owner != null ? partial.owner : defaultOwner,
-    interest: partial.interest || "",
-    timeline: partial.timeline || "",
-    value: partial.value || 0,
-    message: partial.message || "",
-    customerId: partial.customerId || null,
-    createdAt: t,
-    activities: [firstAct],
-  });
+  const build = (id: string) =>
+    mkLead({
+      id,
+      org: partial.org || "",
+      contact: partial.contact || "",
+      email: partial.email || "",
+      phone: partial.phone || "",
+      city: partial.city || "",
+      state: partial.state || "WI",
+      source: src,
+      stage: "new",
+      owner: partial.owner != null ? partial.owner : defaultOwner,
+      interest: partial.interest || "",
+      timeline: partial.timeline || "",
+      value: partial.value || 0,
+      message: partial.message || "",
+      customerId: partial.customerId || null,
+      createdAt: t,
+      activities: [firstAct],
+    });
   // mkLead defaults land syncState 'synced' / syncedAt t — the server write
   // is the cloud write (prototype: 'pending' until the SyncEngine pushed).
-  await upsertDoc("leads", rec);
-  return rec;
+  if (partial.id) {
+    const rec = build(partial.id);
+    await upsertDoc("leads", rec);
+    return rec;
+  }
+  return insertWithPrefixedId<LeadRecord>("leads", "L", 1050, build);
 }
 
 export async function update(
@@ -739,10 +743,9 @@ export async function convert(
   // on the Base tier; existing-customer leads pick up their real tier.
   const { resolveTier } = await import("@/lib/pricing-tiers");
   const tier = await resolveTier(customerId, l.contact || null);
-  const quoteId = await nextPrefixedId("quotes", "Q", 2041);
   const t = now();
-  await upsertDoc("quotes", {
-    id: quoteId,
+  const quote = await insertWithPrefixedId("quotes", "Q", 2041, (id) => ({
+    id,
     name: l.org + (l.interest ? " — " + l.interest : " — New project"),
     customer: l.org,
     customerId: customerId || null,
@@ -770,7 +773,8 @@ export async function convert(
     createdAt: t,
     updatedAt: t,
     history: [{ at: t, to: "draft" }],
-  });
+  }));
+  const quoteId = quote.id;
 
   // 3) link + advance the lead
   const lead = await patchDoc<LeadRecord>("leads", id, (rec) => {
