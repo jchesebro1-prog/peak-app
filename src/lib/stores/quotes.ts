@@ -1,7 +1,7 @@
 import {
   getDoc,
+  insertWithPrefixedId,
   listDocs,
-  nextPrefixedId,
   patchDoc,
   softDeleteDoc,
   upsertDoc,
@@ -44,6 +44,21 @@ const DAY = 86400000;
 
 export type ReviewState = "none" | "in_review" | "approved" | "changes";
 
+/**
+ * How an "approved" review got its approval record (punch #60 / builds on
+ * D84's review state machine):
+ * - "in_app"  — someone with the `approve` permission approved it through
+ *   the review queue (claimReview/approve, unchanged).
+ * - "attested" — the estimator (or anyone) approved their OWN quote by
+ *   supplying a mandatory note naming who reviewed it and how (e.g. a phone
+ *   call or Teams review) — real reviews here often happen off-platform, and
+ *   a hard `can("approve")` gate would block that legitimate workflow.
+ * Absent/null on legacy docs decided before this field existed (seed data,
+ * pre-punch-60 approvals) — those are still valid approvals, just with an
+ * unknown method.
+ */
+export type ApprovalMethod = "in_app" | "attested";
+
 export type QuoteReview = {
   state: ReviewState;
   reviewer: string | null;
@@ -52,6 +67,8 @@ export type QuoteReview = {
   decidedBy: string | null;
   decidedAt: number | null;
   note: string;
+  /** Set alongside decidedBy/decidedAt whenever state becomes "approved". */
+  method?: ApprovalMethod | null;
 };
 
 export type QuoteHistoryEntry = {
@@ -171,7 +188,63 @@ function rv(state: ReviewState, o: Partial<QuoteReview> = {}): QuoteReview {
     decidedBy: o.decidedBy || null,
     decidedAt: o.decidedAt || null,
     note: o.note || "",
+    method: o.method ?? null,
   };
+}
+
+/**
+ * True once a quote carries a live approval RECORD — in-app or attested
+ * (punch #60). This is the single predicate both `sendToCustomerAction` and
+ * `setStatusAction("won")` must consult server-side; a hidden button is not
+ * access control. Requesting changes or resubmitting moves `state` off
+ * "approved", which correctly revokes a stale approval — a prior decision
+ * doesn't authorize sending a since-edited quote.
+ */
+export function hasApproval(review: QuoteReview | null | undefined): boolean {
+  return !!review && review.state === "approved";
+}
+
+export type ApprovalGateAction = "send" | "won";
+export type ApprovalGateResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Server-side gate for the two transitions punch #60 locks down. Pure (no
+ * I/O) so it's unit-testable without a DB: callers fetch the quote, pass its
+ * `review`, and get back a typed ok/error the UI can display verbatim
+ * instead of a raw thrown exception.
+ */
+export function requireApprovalToAdvance(
+  review: QuoteReview | null | undefined,
+  action: ApprovalGateAction
+): ApprovalGateResult {
+  if (hasApproval(review)) return { ok: true };
+  return {
+    ok: false,
+    error:
+      action === "send"
+        ? "This quote needs an approval on record before it can be sent to the customer."
+        : "This quote needs an approval on record before it can be marked Won.",
+  };
+}
+
+export type AttestationValidation = { ok: true; note: string } | { ok: false; error: string };
+
+/**
+ * Server-side validation for the attested-approval note (punch #60). The
+ * note is MANDATORY for this path — it is the only thing that makes an
+ * off-platform review attributable to a named human, so an empty or
+ * whitespace-only note is rejected here, not just hidden in the UI.
+ */
+export function validateAttestationNote(note: string | null | undefined): AttestationValidation {
+  const trimmed = (note || "").trim();
+  if (!trimmed) {
+    return {
+      ok: false,
+      error:
+        'An attested approval requires a note naming who reviewed this quote and how (e.g. "Reviewed by Jeff on a Teams call, 2026-08-01").',
+    };
+  }
+  return { ok: true, note: trimmed };
 }
 
 /** All quotes, newest activity first (port of getAll). */
@@ -198,9 +271,8 @@ export async function byRenewalOf(recordId: string): Promise<Quote | null> {
 
 /** Create a new quote; returns the created record. Id: Q-#### from base 2041. */
 export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
-  const id = partial.id || (await nextPrefixedId("quotes", "Q", 2041));
   const t = Date.now();
-  const q: Quote = {
+  const build = (id: string): Quote => ({
     id,
     name: partial.name || "Untitled estimate",
     customer: partial.customer || "",
@@ -226,9 +298,18 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     createdAt: t,
     updatedAt: t,
     history: [{ at: t, to: "draft" }],
-  };
-  await upsertDoc<Quote>("quotes", q);
-  return q;
+  });
+  // Explicit caller-supplied id (not a minted one) — no race to guard, keep
+  // the prior upsert semantics.
+  if (partial.id) {
+    const q = build(partial.id);
+    await upsertDoc<Quote>("quotes", q);
+    return q;
+  }
+  // Minted id: nextPrefixedId's max-scan lets two concurrent creates compute
+  // the same Q-####; insert-if-absent + retry (D73) instead of the second
+  // writer silently overwriting the first via upsertDoc.
+  return insertWithPrefixedId<Quote>("quotes", "Q", 2041, build);
 }
 
 /** Shallow-merge updates into a quote; bumps updatedAt, rounds value. */
@@ -443,6 +524,42 @@ export async function approve(
     review.reviewer = review.reviewer || review.decidedBy;
     review.decidedAt = Date.now();
     review.note = opts.note || "";
+    review.method = "in_app";
+    q.review = review;
+    q.updatedAt = Date.now();
+  });
+}
+
+export type AttestOpts = {
+  /** The attesting user — always the caller, never a claimed identity. */
+  by?: string | null;
+  /** Mandatory — validated server-side by `validateAttestationNote` before
+   *  this is called; re-checked here as a defense-in-depth backstop. */
+  note: string;
+};
+
+/**
+ * Attested approval (punch #60): the estimator approves their OWN quote by
+ * naming who actually reviewed it and how (phone call, Teams, etc.) instead
+ * of routing it through the in-app review queue. Produces the SAME
+ * `QuoteReview` shape `approve()` does — state "approved", decidedBy/At set —
+ * distinguished only by `method: "attested"`, so `hasApproval()` and every
+ * downstream consumer treat the two paths identically.
+ */
+export async function attestApproval(
+  id: string,
+  opts: AttestOpts
+): Promise<Quote | null> {
+  const note = (opts.note || "").trim();
+  if (!note) return null;
+  return patchDoc<Quote>("quotes", id, (q) => {
+    const review = q.review || rv("in_review");
+    review.state = "approved";
+    review.decidedBy = opts.by || null;
+    review.reviewer = review.reviewer || opts.by || null;
+    review.decidedAt = Date.now();
+    review.note = note;
+    review.method = "attested";
     q.review = review;
     q.updatedAt = Date.now();
   });

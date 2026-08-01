@@ -6,6 +6,7 @@ import { firstName } from "@/lib/team";
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import {
   approveReviewAction,
+  attestApprovalAction,
   claimReviewAction,
   draftQuoteScopeAction,
   requestChangesAction,
@@ -259,6 +260,9 @@ export default function EstimatorClient({
   const [reviewerSel, setReviewerSel] = useState("queue");
   const [rcOpen, setRcOpen] = useState(false);
   const [rcNote, setRcNote] = useState("");
+  const [attestOpen, setAttestOpen] = useState(false);
+  const [attestNote, setAttestNote] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
@@ -384,11 +388,22 @@ export default function EstimatorClient({
   };
 
   const changeStatus = (v: QuoteStatus) => {
+    const prevStatus = status;
     setStatus(v);
     if (loadedId) {
       const id = loadedId;
       startTransition(async () => {
-        await setStatusAction(id, v);
+        const r = await setStatusAction(id, v);
+        if (!r.ok) {
+          // Punch #60: server rejected the transition (e.g. "won" without an
+          // approval on record) — roll back the optimistic UI change and
+          // surface why, instead of silently pretending it worked.
+          setStatus(prevStatus);
+          setActionError(r.error || "That status change was rejected.");
+          return;
+        }
+        setActionError(null);
+        applySync(r);
       });
     }
   };
@@ -426,11 +441,37 @@ export default function EstimatorClient({
       applySync(await requestChangesAction(id, note));
     });
   };
+  /** Attested approval (punch #60): the estimator names who reviewed the
+   *  quote and how (phone call, Teams, etc.) instead of routing it through
+   *  the in-app review queue. The note is mandatory — enforced server-side,
+   *  re-checked here only so the "Record approval" button can stay disabled. */
+  const submitAttest = () => {
+    if (!attestNote.trim() || !loadedId) return;
+    const id = loadedId;
+    const note = attestNote.trim();
+    setAttestOpen(false);
+    setAttestNote("");
+    startTransition(async () => {
+      const r = await attestApprovalAction(id, note);
+      if (!r.ok) {
+        setActionError(r.error || "That attested approval could not be recorded.");
+        return;
+      }
+      setActionError(null);
+      applySync(r);
+    });
+  };
   const sendCustomer = () => {
     if (!loadedId) return;
     const id = loadedId;
     startTransition(async () => {
-      applySync(await sendToCustomerAction(id));
+      const r = await sendToCustomerAction(id);
+      if (!r.ok) {
+        setActionError(r.error || "This quote could not be sent to the customer.");
+        return;
+      }
+      setActionError(null);
+      applySync(r);
     });
   };
 
@@ -959,9 +1000,14 @@ export default function EstimatorClient({
       : "In the shared queue — awaiting a reviewer";
   else if (rev.state === "approved")
     rbSub =
-      "Approved by " +
-      firstName(rev.decidedBy || rev.reviewer || "") +
-      " — ready to send to the customer";
+      rev.method === "attested"
+        ? "Attested by " +
+          firstName(rev.decidedBy || "") +
+          (rev.note ? " — “" + rev.note + "”" : "") +
+          " — ready to send to the customer"
+        : "Approved by " +
+          firstName(rev.decidedBy || rev.reviewer || "") +
+          " — ready to send to the customer";
   else
     rbSub = rev.note
       ? "“" + rev.note + "” — " + firstName(rev.decidedBy || "")
@@ -975,6 +1021,11 @@ export default function EstimatorClient({
   const rbCanDecide = canApprove && rev.state === "in_review" && !isOwner;
   const rbCanClaim = canApprove && rev.state === "in_review" && !rev.reviewer && !isOwner;
   const rbCanSend = isOwner && rev.state === "approved" && !sentAlready;
+  // Punch #60: the estimator can self-approve any time it isn't already
+  // approved or sent — a stand-in for a review that happened by phone/Teams
+  // rather than in the app. Available regardless of canApprove: this is
+  // deliberately NOT a permission gate (see attestApprovalAction).
+  const rbCanAttest = isOwner && rev.state !== "approved" && !sentAlready;
   const showReviewBar = !!loadedId;
 
   /* ---------------- ctx bar options ---------------- */
@@ -1436,6 +1487,28 @@ export default function EstimatorClient({
                     </button>
                   </>
                 )}
+                {rbCanAttest && (
+                  <button
+                    type="button"
+                    title="Reviewed by phone, on a call, or otherwise off-platform? Record it here — a note naming who reviewed it is required."
+                    onClick={() => {
+                      setAttestOpen(true);
+                      setAttestNote("");
+                    }}
+                    style={{
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      color: "#1f7a52",
+                      background: "#ecf6f0",
+                      border: "1px solid #cce9da",
+                      borderRadius: 8,
+                      padding: "8px 13px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Attest approval…
+                  </button>
+                )}
                 {rbCanSend && (
                   <button
                     type="button"
@@ -1454,6 +1527,161 @@ export default function EstimatorClient({
                     Send to customer →
                   </button>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* action rejection banner (punch #60: send/won gated server-side) */}
+          {actionError && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "9px 22px",
+                background: "#fdecea",
+                borderBottom: "1px solid #f3c8c2",
+                color: "#9a2f22",
+                fontSize: 12.5,
+                fontWeight: 600,
+                flexShrink: 0,
+              }}
+            >
+              <span>{actionError}</span>
+              <button
+                type="button"
+                onClick={() => setActionError(null)}
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: "#9a2f22",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "2px 4px",
+                  flexShrink: 0,
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* attested-approval modal (punch #60) */}
+          {attestOpen && (
+            <div
+              className="est-modalwrap"
+              onClick={() => {
+                setAttestOpen(false);
+                setAttestNote("");
+              }}
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(16,22,30,.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 28,
+                zIndex: 80,
+              }}
+            >
+              <div
+                className="est-modal"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  width: 460,
+                  maxWidth: "100%",
+                  background: "#fff",
+                  borderRadius: 15,
+                  boxShadow: "0 24px 70px rgba(0,0,0,.34)",
+                  overflow: "hidden",
+                  color: "#16181d",
+                }}
+              >
+                <div
+                  style={{
+                    padding: "17px 22px",
+                    borderBottom: "1px solid #f0f1f4",
+                    fontSize: 16,
+                    fontWeight: 600,
+                  }}
+                >
+                  Attest approval
+                </div>
+                <div style={{ padding: "20px 22px" }}>
+                  <div
+                    style={{ fontSize: 12.5, color: "#5b616e", marginBottom: 11, lineHeight: 1.5 }}
+                  >
+                    Reviews here often happen by phone or on a call, not in the app. If that
+                    already happened, name who reviewed it and how — this note is required and
+                    becomes the approval record.
+                  </div>
+                  <textarea
+                    className="est-field"
+                    value={attestNote}
+                    onChange={(e) => setAttestNote(e.target.value)}
+                    placeholder='e.g. "Reviewed by Jeff on a Teams call, 2026-08-01"'
+                    style={{
+                      width: "100%",
+                      minHeight: 96,
+                      border: "1px solid #e4e7ec",
+                      borderRadius: 9,
+                      padding: "11px 13px",
+                      fontSize: 13.5,
+                      fontFamily: "var(--font-ui)",
+                      resize: "vertical",
+                      outline: "none",
+                    }}
+                  />
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "flex-end",
+                    gap: 9,
+                    padding: "14px 22px",
+                    borderTop: "1px solid #f0f1f4",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttestOpen(false);
+                      setAttestNote("");
+                    }}
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "#5b616e",
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "10px 12px",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitAttest}
+                    disabled={!attestNote.trim()}
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "#fff",
+                      background: attestNote.trim() ? "#1f7a52" : "#9cc7ae",
+                      border: "none",
+                      borderRadius: 9,
+                      padding: "10px 18px",
+                      cursor: attestNote.trim() ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    Record approval
+                  </button>
+                </div>
               </div>
             </div>
           )}

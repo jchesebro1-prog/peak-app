@@ -5,14 +5,17 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import {
   approve,
+  attestApproval,
   claimReview,
   create,
   get,
   requestChanges,
+  requireApprovalToAdvance,
   setStatus,
   STAGES,
   submitForReview,
   update,
+  validateAttestationNote,
   type Quote,
   type QuoteReview,
   type QuoteStatus,
@@ -71,6 +74,9 @@ export type ReviewSync = {
   ok: boolean;
   review: QuoteReview | null;
   status: QuoteStatus | null;
+  /** Set on `ok: false` — a typed, UI-displayable reason (punch #60: never a
+   *  raw thrown exception for an expected rejection like "not yet approved"). */
+  error?: string;
 };
 
 function refresh() {
@@ -185,6 +191,22 @@ export async function setStatusAction(
 ): Promise<ReviewSync> {
   await requireUser();
   if (!id || !STAGES.includes(status)) return { ok: false, review: null, status: null };
+  // Punch #60 (D84 hole): marking a quote WON requires an approval record —
+  // in-app or attested. Every other stage transition stays open to any
+  // signed-in user, as before. Checked here (not just hidden in the UI) —
+  // that's the whole point of the fix.
+  if (status === "won") {
+    const cur = await get(id);
+    const gate = requireApprovalToAdvance(cur?.review ?? null, "won");
+    if (!gate.ok) {
+      return {
+        ok: false,
+        review: cur?.review ?? null,
+        status: cur?.status ?? null,
+        error: gate.error,
+      };
+    }
+  }
   await setStatus(id, status);
   refresh();
   return syncOf(id);
@@ -231,11 +253,80 @@ export async function requestChangesAction(
   return syncOf(id);
 }
 
-/** "Send to customer →" — moves the approved quote to sent (prototype port). */
+/**
+ * "Send to customer →" — moves the approved quote to sent (prototype port).
+ *
+ * Punch #60 (D84 hole): this used to be `requireUser()` and nothing else —
+ * ANY signed-in user could send an unreviewed quote, because the review gate
+ * was UI-only (the button was just hidden). Now it requires an approval
+ * record — in-app (someone with `approve` used the review queue) OR
+ * attested (the estimator self-approved with a mandatory note naming who
+ * reviewed it and how, e.g. a phone call). See `requireApprovalToAdvance`.
+ */
 export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
   await requireUser();
   if (!id) return { ok: false, review: null, status: null };
+  const cur = await get(id);
+  const gate = requireApprovalToAdvance(cur?.review ?? null, "send");
+  if (!gate.ok) {
+    return {
+      ok: false,
+      review: cur?.review ?? null,
+      status: cur?.status ?? null,
+      error: gate.error,
+    };
+  }
   await setStatus(id, "sent");
+  refresh();
+  return syncOf(id);
+}
+
+/**
+ * Attested approval (punch #60): the estimator approves their OWN quote by
+ * naming who actually reviewed it and how (a phone call, a Teams review,
+ * etc.) rather than routing it through the in-app review queue. Deliberately
+ * NOT gated on `can("approve", ...)` — real reviews here often happen
+ * verbally and the estimator is frequently a different person from the
+ * reviewer, so a hard permission gate would block legitimate work. The note
+ * is the only thing that makes the approval attributable to a named human,
+ * so it is mandatory and validated server-side (`validateAttestationNote`) —
+ * an empty or whitespace-only note is rejected, not silently accepted.
+ */
+export async function attestApprovalAction(
+  id: string,
+  note: string
+): Promise<ReviewSync> {
+  const user = await requireUser();
+  if (!id) return { ok: false, review: null, status: null };
+  const cur = await get(id);
+  if (!cur) return { ok: false, review: null, status: null, error: "Quote not found." };
+  // Punch #60: ownership is enforced HERE, on the server — not by hiding the
+  // button. The UI only offers "Attest approval" to the quote's owner
+  // (`rbCanAttest`), but a hidden control is not an access control; that was
+  // the original defect. Attesting is self-approval, so it is limited to the
+  // estimator whose quote it is. Anyone holding `approve` may also attest —
+  // they could approve it outright through the review queue anyway.
+  if (cur.owner !== user.name && !can("approve", user.roles)) {
+    return {
+      ok: false,
+      review: cur.review ?? null,
+      status: cur.status ?? null,
+      error: "Only the quote's owner can attest an approval on it.",
+    };
+  }
+  const validated = validateAttestationNote(note);
+  if (!validated.ok) {
+    return {
+      ok: false,
+      review: cur.review ?? null,
+      status: cur.status ?? null,
+      error: validated.error,
+    };
+  }
+  const updated = await attestApproval(id, { by: user.name, note: validated.note });
+  if (!updated) {
+    return { ok: false, review: null, status: null, error: "Quote not found." };
+  }
   refresh();
   return syncOf(id);
 }
