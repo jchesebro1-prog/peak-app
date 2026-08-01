@@ -17,8 +17,6 @@ export type ImportTypeMeta = {
   mono: string;
   color: string;
   blurb: string;
-  /** Systems users usually export from — shown in the (stubbed) connect list. */
-  sources: string[];
   /** Human label for the dedupe key, shown in the flow ("matched on …"). */
   dedupeLabel: string;
   /** Where "View in …" deep-links after a successful import. */
@@ -34,7 +32,6 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     mono: "CU",
     color: "#7b3f8a",
     blurb: "Venues & accounts with their primary contact, address and venue.",
-    sources: ["Daylight CRM", "QuickBooks", "Google Sheets"],
     dedupeLabel: "customer name",
     viewHref: "/companies",
     viewLabel: "View in Customers",
@@ -57,7 +54,6 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     mono: "LD",
     color: "#b4543a",
     blurb: "Prospects & inquiries — org, contact and where they came from.",
-    sources: ["Daylight CRM", "Monday", "Google Sheets"],
     dedupeLabel: "organization + email",
     viewHref: "/leads",
     viewLabel: "View in Leads",
@@ -80,7 +76,6 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     mono: "FT",
     color: "#c0552f",
     blurb: "Past flame tests → tracked for the annual renewal (due 1yr later).",
-    sources: ["QuickBooks", "Google Sheets", "Sortly"],
     dedupeLabel: "customer + venue",
     viewHref: "/flame-tests",
     viewLabel: "View in Flame Tests",
@@ -102,7 +97,6 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     mono: "RI",
     color: "#5b4b8a",
     blurb: "Inspection history by venue — date, inspector and status.",
-    sources: ["Monday", "Google Sheets", "Google Drive"],
     dedupeLabel: "customer + venue + date",
     viewHref: "/inspections",
     viewLabel: "View in Inspections",
@@ -124,7 +118,6 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     mono: "FS",
     color: "#1f7a52",
     blurb: "Site-survey records — venue, visit purpose and status.",
-    sources: ["Monday", "Google Sheets", "Google Drive"],
     dedupeLabel: "customer + venue",
     viewHref: "/field-survey",
     viewLabel: "View in Field Survey",
@@ -146,7 +139,6 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     mono: "TM",
     color: "#3155a8",
     blurb: "People & their roles (Admin · Manager · Estimator · Reviewer).",
-    sources: ["Google Sheets", "QuickBooks"],
     dedupeLabel: "email or name",
     viewHref: "/settings",
     viewLabel: "View in Settings",
@@ -163,7 +155,6 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     mono: "QT",
     color: "#8a6d1f",
     blurb: "Existing estimates — name, customer, value and status.",
-    sources: ["QuickBooks", "Google Sheets"],
     dedupeLabel: "quote name",
     viewHref: "/quotes",
     viewLabel: "View in Quotes",
@@ -181,7 +172,6 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     mono: "PR",
     color: "#1f6f7a",
     blurb: "In-flight projects & sales orders with stage and value.",
-    sources: ["Monday", "QuickBooks", "Google Sheets"],
     dedupeLabel: "project name",
     viewHref: "/projects",
     viewLabel: "View in Projects",

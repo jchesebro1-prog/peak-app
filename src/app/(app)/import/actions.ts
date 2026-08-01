@@ -12,8 +12,10 @@ import { commitImport, type ImportMode } from "./registry";
  * paste form works without client JS; the server RE-PARSES the raw text (the
  * client preview is advisory only) and writes via the ported stores, then
  * redirects back into the flow's "done" step with the result counts encoded
- * in the URL. Importing is admin-only (prototype gated on canManageUsers);
- * anything invalid is a silent no-op.
+ * in the URL. Importing is admin-only (prototype gated on canManageUsers).
+ * Anything invalid redirects back with an `err=` param (same query-param
+ * idiom as the success path's `r=`) so the page can render the failure
+ * instead of silently doing nothing.
  */
 export async function importRecords(formData: FormData): Promise<void> {
   await requirePerm("manage_users");
@@ -23,10 +25,19 @@ export async function importRecords(formData: FormData): Promise<void> {
   const mode: ImportMode = modeRaw === "update" || modeRaw === "create" ? modeRaw : "skip";
 
   const type = getTypeMeta(key);
-  if (!type || !text.trim()) return;
+  const backTo = type ? `/import?tab=import&type=${encodeURIComponent(key)}` : `/import?tab=import`;
+
+  if (!type) {
+    redirect(`${backTo}&err=${encodeURIComponent("Unknown import type.")}`);
+  }
+  if (!text.trim()) {
+    redirect(`${backTo}&err=${encodeURIComponent("Paste rows before importing.")}`);
+  }
 
   const parsed = parseCsv(text);
-  if (!parsed.ok) return;
+  if (!parsed.ok) {
+    redirect(`${backTo}&err=${encodeURIComponent(parsed.error || "Couldn’t read that as a CSV.")}`);
+  }
 
   const mapping = autoMap(parsed.headers, type.fields);
   const prepared = prepareRows(parsed.rows, mapping, type.fields);

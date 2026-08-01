@@ -131,6 +131,7 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
   const openKey = tab === "import" ? one(sp.type) : "";
   const openType = openKey ? getTypeMeta(openKey) : null;
   const resultRaw = one(sp.r);
+  const errRaw = tab === "import" ? one(sp.err) : "";
   const counts = await allCounts();
 
   const hrefFor = (over: { tab?: string; type?: string | null; r?: string | null }) => {
@@ -219,8 +220,8 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
           <div style={{ minWidth: 200, flex: 1 }}>
             <div style={{ fontSize: 13.5, fontWeight: 600 }}>Moving in from another system?</div>
             <div style={{ fontSize: 12, color: "#8c919c", marginTop: 2, lineHeight: 1.45 }}>
-              Export from Daylight, Monday, QuickBooks or a spreadsheet, then import each type below.
-              Pick a data type to start.
+              Export a CSV or spreadsheet from wherever your data lives now, then import each type
+              below. Pick a data type to start.
             </div>
           </div>
           <div className="im-steps" style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
@@ -254,6 +255,23 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* import error surfaced with nowhere else to render (e.g. stale/unknown type) */}
+      {errRaw && !openType && (
+        <div
+          style={{
+            background: "#f9ece8",
+            border: "1px solid #f0d6cd",
+            borderRadius: 10,
+            padding: "11px 14px",
+            fontSize: 12.5,
+            color: "#a0442b",
+            marginBottom: 18,
+          }}
+        >
+          Import failed: {errRaw}
         </div>
       )}
 
@@ -501,7 +519,13 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
 
       {/* per-type flow modal */}
       {openType && (
-        <ImportFlowModal type={openType} resultRaw={resultRaw} closeHref={hrefFor({ type: null, r: null })} anotherHref={hrefFor({ type: openType.key, r: null })} />
+        <ImportFlowModal
+          type={openType}
+          resultRaw={resultRaw}
+          errRaw={errRaw}
+          closeHref={hrefFor({ type: null, r: null })}
+          anotherHref={hrefFor({ type: openType.key, r: null })}
+        />
       )}
     </>
   );
@@ -510,11 +534,13 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
 function ImportFlowModal({
   type,
   resultRaw,
+  errRaw,
   closeHref,
   anotherHref,
 }: {
   type: NonNullable<ReturnType<typeof getTypeMeta>>;
   resultRaw: string;
+  errRaw: string;
   closeHref: string;
   anotherHref: string;
 }) {
@@ -616,6 +642,21 @@ function ImportFlowModal({
               <DonePanel type={type} r={done} />
             ) : (
               <>
+                {errRaw && (
+                  <div
+                    style={{
+                      background: "#f9ece8",
+                      border: "1px solid #f0d6cd",
+                      borderRadius: 10,
+                      padding: "10px 13px",
+                      fontSize: 12.5,
+                      color: "#a0442b",
+                      marginBottom: 14,
+                    }}
+                  >
+                    {errRaw}
+                  </div>
+                )}
                 <div
                   style={{
                     display: "flex",
@@ -740,12 +781,36 @@ function DonePanel({
   r: DoneResult;
 }) {
   const totalIn = r.created + r.updated;
+  const hasErrors = r.errored > 0;
+  // Zero rows written must never read as a green success — split "nothing to
+  // do" (everything was already a duplicate, no errors) from "it failed"
+  // (rows errored out) so the panel can't imply records changed when none did.
+  const nothingImported = totalIn === 0;
   const stats: Array<{ label: string; num: number; color: string }> = [
     { label: "Created", num: r.created, color: "#1f8a5b" },
     { label: "Updated", num: r.updated, color: "#3155a8" },
     { label: "Skipped", num: r.skipped, color: "#8c919c" },
-    { label: "Errors", num: r.errored, color: r.errored > 0 ? "#b4543a" : "#8c919c" },
+    { label: "Errors", num: r.errored, color: hasErrors ? "#b4543a" : "#8c919c" },
   ];
+
+  const icon = nothingImported ? (hasErrors ? "!" : "–") : "✓";
+  const iconBg = nothingImported ? (hasErrors ? "#f9ece8" : "#f1f2f5") : "#eaf6ef";
+  const iconColor = nothingImported ? (hasErrors ? "#a0442b" : "#8c919c") : "#1f8a5b";
+
+  const headline = nothingImported
+    ? hasErrors
+      ? "Nothing imported"
+      : "Nothing new to import"
+    : `${totalIn} ${type.label.toLowerCase()} imported`;
+
+  const subtext = nothingImported
+    ? hasErrors
+      ? `${r.errored} row${r.errored === 1 ? "" : "s"} failed — nothing was written.`
+      : r.skipped > 0
+        ? `All ${r.skipped} row${r.skipped === 1 ? "" : "s"} already existed — nothing changed.`
+        : "No rows were written."
+    : `${r.skipped > 0 ? `${r.skipped} skipped as duplicates. ` : ""}Records are live across Peak.`;
+
   return (
     <>
       <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
@@ -754,8 +819,8 @@ function DonePanel({
             width: 52,
             height: 52,
             borderRadius: "50%",
-            background: "#eaf6ef",
-            color: "#1f8a5b",
+            background: iconBg,
+            color: iconColor,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -763,15 +828,10 @@ function DonePanel({
             margin: "0 auto 12px",
           }}
         >
-          ✓
+          {icon}
         </div>
-        <div style={{ fontSize: 16, fontWeight: 600 }}>
-          {totalIn > 0 ? `${totalIn} ${type.label.toLowerCase()} imported` : "Import finished"}
-        </div>
-        <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 4 }}>
-          {r.skipped > 0 ? `${r.skipped} skipped as duplicates. ` : ""}
-          Records are live across Peak.
-        </div>
+        <div style={{ fontSize: 16, fontWeight: 600 }}>{headline}</div>
+        <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 4 }}>{subtext}</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginTop: 18 }}>
         {stats.map((s) => (
