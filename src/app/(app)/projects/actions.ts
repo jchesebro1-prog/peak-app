@@ -8,6 +8,7 @@ import {
   getProject,
   setProjectStage,
   setLineStatus,
+  setLinePo,
   setDeliveryStatus,
   addCrew,
   removeCrew,
@@ -66,6 +67,17 @@ export async function cycleLineAction(formData: FormData): Promise<void> {
   const status = str(formData, "status") as LineStatus;
   if (!id || !lineId || !LINE_STATUSES.includes(status)) return;
   await setLineStatus(id, lineId, status);
+  revalidatePath("/", "layout");
+}
+
+/** Save the PO number a human typed in for a procurement line (punch #67). Free text from an external system — trimmed, not validated or generated. */
+export async function setLinePoAction(formData: FormData): Promise<void> {
+  await requireUser();
+  const id = str(formData, "id");
+  const lineId = str(formData, "lineId");
+  const po = str(formData, "po");
+  if (!id || !lineId) return;
+  await setLinePo(id, lineId, po);
   revalidatePath("/", "layout");
 }
 

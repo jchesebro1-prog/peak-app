@@ -687,6 +687,24 @@ export async function setLineStatus(
   });
 }
 
+/** Record the real PO number from the procurement system (punch #67 — free text, no format/uniqueness enforcement). */
+export async function setLinePo(
+  id: string,
+  lineId: string,
+  po: string
+): Promise<ProjectRecord | null> {
+  const p = await getProject(id);
+  if (!p) return null;
+  if (!(p.procurement || []).some((l) => l.id === lineId)) return null;
+  return patchDoc<ProjectRecord>("projects", id, (doc) => {
+    const l = (doc.procurement || []).find((x) => x.id === lineId);
+    if (!l) return doc;
+    l.po = po.trim();
+    doc.updatedAt = now();
+    return doc;
+  });
+}
+
 export async function setDeliveryStatus(
   id: string,
   deliveryId: string,

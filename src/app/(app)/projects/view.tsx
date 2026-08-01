@@ -27,6 +27,7 @@ import {
 import {
   setStageAction,
   cycleLineAction,
+  setLinePoAction,
   cycleDeliveryAction,
   addCrewAction,
   removeCrewAction,
@@ -1353,6 +1354,46 @@ function ProcurementTab({ p }: { p: ProjectRecord }) {
                   {orderByLabel}
                 </div>
               </div>
+              <form
+                action={setLinePoAction}
+                style={{ display: "flex", alignItems: "center", gap: 5, margin: 0, flexShrink: 0 }}
+              >
+                <input type="hidden" name="id" value={p.id} />
+                <input type="hidden" name="lineId" value={l.id} />
+                <input
+                  name="po"
+                  defaultValue={l.po}
+                  placeholder="PO #"
+                  title="Purchase order number"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11,
+                    color: "#3a3f4a",
+                    border: "1px solid #e4e7ec",
+                    borderRadius: 6,
+                    padding: "5px 8px",
+                    width: 84,
+                    outline: "none",
+                  }}
+                />
+                <button
+                  type="submit"
+                  title="Save PO number"
+                  style={{
+                    fontFamily: "var(--font-ui)",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "#5b616e",
+                    background: "#f3f4f7",
+                    border: "1px solid #e4e7ec",
+                    padding: "5px 9px",
+                    borderRadius: 7,
+                    cursor: "pointer",
+                  }}
+                >
+                  Save
+                </button>
+              </form>
               <form action={cycleLineAction} style={{ margin: 0, flexShrink: 0 }}>
                 <input type="hidden" name="id" value={p.id} />
                 <input type="hidden" name="lineId" value={l.id} />
@@ -1380,7 +1421,7 @@ function ProcurementTab({ p }: { p: ProjectRecord }) {
         })}
       </div>
       <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 10 }}>
-        Tap a status chip to advance: pending → ordered → shipped → received.
+        Tap a status chip to advance: pending → ordered → shipped → received. Type a PO number and Save to record it.
       </div>
     </>
   );

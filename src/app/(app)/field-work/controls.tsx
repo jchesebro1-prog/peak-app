@@ -1020,7 +1020,7 @@ export default function FieldWorkDetail({
                         marginTop: 2,
                       }}
                     >
-                      {(l.sku || "—") + " · " + l.qty + " " + l.unit}
+                      {(l.sku || "—") + " · " + l.qty + " " + l.unit + " · PO " + (l.po || "—")}
                     </div>
                   </div>
                   <span style={{ fontSize: 11, fontWeight: 600, color, flexShrink: 0 }}>
