@@ -443,15 +443,29 @@ export async function createDraftQuoteAction(
     return { ok: false, error: "Place a device or route a wire first." };
 
   // Venue + tier stamp (D113.6): same resolution as estimator quotes (D87);
-  // re-stamped on every mint/update while the quote is still a draft. The tier
-  // margin is resolved BEFORE pricing because curtains price through it (#49),
-  // exactly as the estimator and the portal do.
+  // re-stamped on every mint/update while the quote is still a draft. The
+  // tier margin is resolved BEFORE pricing because it applies to every line
+  // category on this quote — curtains, devices, wire runs and labor alike
+  // (#63) — exactly as the estimator and the portal do.
   const tier = await resolveTier(project.customerId);
 
   const catalog = await listCatalog();
-  const devLines = bomLines(placements, catalog);
-  const devTotals = bomTotals(placements, catalog);
-  const wires = routeLines(routes, catalog, project.calibrations || []);
+  // Tier-priced catalog (#63): the same cost ÷ (1 − margin) re-derivation the
+  // portal uses for its equipment lines (portal/actions.ts) and
+  // customerCatalog() uses for the picker — a part without a usable cost, or
+  // a margin outside (0, 1), keeps its plain list price. Devices, wire runs
+  // and labor all price off this list below, so the tier margin actually
+  // reaches every line, not just curtains.
+  const tierCatalog = catalog.map((p) => ({
+    ...p,
+    list:
+      typeof p.cost === "number" && p.cost > 0 && tier.margin > 0 && tier.margin < 1
+        ? Math.round((p.cost / (1 - tier.margin)) * 100) / 100
+        : p.list,
+  }));
+  const devLines = bomLines(placements, tierCatalog);
+  const devTotals = bomTotals(placements, tierCatalog);
+  const wires = routeLines(routes, tierCatalog, project.calibrations || []);
 
   // Curtains (punch #49) - priced HERE, server-side, from the authoritative
   // cost model. The editor's sidebar price is a customer-safe mirror of this
@@ -469,10 +483,11 @@ export async function createDraftQuoteAction(
   const curtainCostTotal = [...curtainPrices.values()].reduce((a, v) => a + v.costEach, 0);
 
   // Labor rides in only as hours against real catalog labor rows — the
-  // client proposes, the server prices (D114).
+  // client proposes, the server prices (D114). Priced off the tier catalog
+  // (#63) so labor carries the same margin as everything else on the quote.
   const labor: Array<{ sku: string; desc: string; qty: number; unit: string; price: number; ext: number; cost: number }> = [];
   for (const l of laborLines || []) {
-    const part = catalog.find((p) => p.id === l.partId);
+    const part = tierCatalog.find((p) => p.id === l.partId);
     const hours = Number(l.hours);
     if (!part || (part.role || "").toLowerCase() !== "labor") continue;
     if (!(hours > 0) || hours > 10000) continue;
