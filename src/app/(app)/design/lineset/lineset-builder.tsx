@@ -255,9 +255,11 @@ export function LinesetBuilder({
         const specified = ruled || !!load;
         const c = specified ? computeSetWeight(line, wdef) : null;
         // Why this line's fabric didn't resolve, if it didn't. computeSetWeight
-        // zeroes BOTH goods and track when it can't find a Fabric, and an empty
-        // row is indistinguishable from "not filled in yet", so the cause gets
-        // surfaced on the row and in the banner instead (#50).
+        // hard-fails (goods/track/onBatten -> null, `fabricUnresolved: true`)
+        // when it can't find a Fabric rather than reporting a plausible-looking
+        // 0 (#64) — an unresolved row is otherwise indistinguishable from "not
+        // filled in yet", so the cause gets surfaced on the row and in the
+        // banner instead (#50).
         const issue = specified ? lineFabricIssue(line, rule, fabrics) : null;
         return { s, key, load, rule, ruled, specified, line, c, issue };
       }),
@@ -268,24 +270,51 @@ export function LinesetBuilder({
     [extras, wdef, fabrics]
   );
 
+  /**
+   * F1 hard-fail (punch #64): a resolvable-but-summed total was the bug —
+   * excluding just the unresolved LINE and quietly summing the rest is the
+   * SAME bug in miniature (still a plausible-looking low number). So the
+   * moment any specified line comes back `fabricUnresolved`, every total
+   * field goes to `null` — `fmt()` renders that as "—" — and the offending
+   * line names ride along so the KPI can say why instead of just going blank.
+   */
   const totals = useMemo(() => {
     let onBatten = 0, setTotal = 0, cw = 0, beamMax = 0, specified = 0;
+    const unresolvedLines: string[] = [];
     rows.forEach((r) => {
       if (!r.c) return;
       specified += 1;
-      onBatten += r.c.onBatten;
-      setTotal += r.c.setTotal;
-      cw += r.c.cwLoad;
-      beamMax = Math.max(beamMax, r.c.beamLoad);
+      if (r.c.fabricUnresolved) {
+        unresolvedLines.push(r.line.name);
+        return;
+      }
+      onBatten += r.c.onBatten ?? 0;
+      setTotal += r.c.setTotal ?? 0;
+      cw += r.c.cwLoad ?? 0;
+      beamMax = Math.max(beamMax, r.c.beamLoad ?? 0);
     });
-    extraRows.forEach(({ c }) => {
-      onBatten += c.onBatten;
-      setTotal += c.setTotal;
-      cw += c.cwLoad;
-      beamMax = Math.max(beamMax, c.beamLoad);
+    extraRows.forEach(({ x, c }) => {
+      if (c.fabricUnresolved) {
+        unresolvedLines.push(x.name);
+        return;
+      }
+      onBatten += c.onBatten ?? 0;
+      setTotal += c.setTotal ?? 0;
+      cw += c.cwLoad ?? 0;
+      beamMax = Math.max(beamMax, c.beamLoad ?? 0);
     });
-    return { onBatten, setTotal, cw, beamMax, specified, generated: rows.length };
+    const unresolved = unresolvedLines.length > 0;
+    return {
+      onBatten: unresolved ? null : onBatten,
+      setTotal: unresolved ? null : setTotal,
+      cw: unresolved ? null : cw,
+      beamMax: unresolved ? null : beamMax,
+      specified,
+      generated: rows.length,
+      unresolvedLines,
+    };
   }, [rows, extraRows]);
+  const weightsUnavailable = totals.unresolvedLines.length > 0;
 
   /** loads whose key no longer matches the current schedule (P1's "visible
    *  answer for orphaned data") — they reattach automatically if the layout
@@ -316,20 +345,24 @@ export function LinesetBuilder({
   const fabricProblemCount = fabricProblems.reduce((n, g) => n + g.lines.length, 0);
 
   function exportCsv() {
-    // Batten + the fabric warning ride along: an exported schedule that hides a
-    // zero-weight line is the same silent failure as the screen used to be (#50).
+    // Batten + the fabric warning ride along: an exported schedule that hides
+    // an unresolved-weight line is the same silent failure as the screen used
+    // to be (#50). Hard-fail (#64): the Weight column reads blank, never a
+    // wrong 0, and the Check column says UNAVAILABLE, never a brick combo or
+    // an OK/OVER LIMIT verdict computed off an unresolved figure.
     const header = ["#", "Slot", "Downstage", "Type", "Name", "Fabric", "W(ft)", "H(ft)", "Full%", "Qty", "Gear(lb)", "Track", "Batten", "Batten len(ft)", "Mode", "Hoist", "Weight on batten(lb)", "Check", "Source"];
-    const flag = (issue: FabricIssue | null | undefined) => (issue ? `FABRIC UNRESOLVED (${issue.short}), goods+track 0 lb; ` : "");
+    const flag = (issue: FabricIssue | null | undefined) => (issue ? `FABRIC UNRESOLVED (${issue.short}), weight unavailable; ` : "");
+    const checkFor = (c: ReturnType<typeof computeSetWeight> | null, mode: LinesetMode) =>
+      !c ? "NOT SPECIFIED" : c.fabricUnresolved ? "UNAVAILABLE" : mode === "cw" ? `${c.combo!.big}x25+${c.combo!.small}x10 brick` : c.over ? "OVER LIMIT" : "OK";
     const csvRows: (string | number)[][] = rows.map((r, i) => {
       const mode = r.line.mode || wdef.mode;
-      const check = !r.c ? "NOT SPECIFIED" : mode === "cw" ? `${r.c.combo.big}x25+${r.c.combo.small}x10 brick` : r.c.over ? "OVER LIMIT" : "OK";
       const source = r.load ? "overridden" : r.ruled ? "rule" : "manual";
       return [
         i + 1, r.s.slot, r.s.dsPositionLabel, r.s.type, r.line.name,
         r.line.fab || "", r.line.w ?? "", r.line.h ?? "", r.line.full ?? wdef.full, r.line.qty ?? 1, r.line.gear ?? "",
         r.line.track || "None", battenById(r.line.pipe || wdef.pipe).label, r.line.batten ?? wdef.battenlen,
         r.c ? MODE_LABEL[mode] : "", r.c && mode === "motor" ? r.line.hoist || wdef.hoist : "",
-        r.c ? Math.round(r.c.onBatten) : "", flag(r.issue) + check, source,
+        r.c && r.c.onBatten != null ? Math.round(r.c.onBatten) : "", flag(r.issue) + checkFor(r.c, mode), source,
       ];
     });
     extraRows.forEach(({ x, c, issue }, i) => {
@@ -337,12 +370,21 @@ export function LinesetBuilder({
       csvRows.push([
         rows.length + i + 1, "", "custom", "Custom", x.name, x.fab || "", x.w ?? "", x.h ?? "", x.full ?? wdef.full, x.qty ?? 1, x.gear ?? "",
         x.track || "None", battenById(x.pipe || wdef.pipe).label, x.batten ?? wdef.battenlen,
-        MODE_LABEL[mode], mode === "motor" ? x.hoist || wdef.hoist : "", Math.round(c.onBatten),
-        flag(issue) + (mode === "cw" ? `${c.combo.big}x25+${c.combo.small}x10 brick` : c.over ? "OVER LIMIT" : "OK"),
+        MODE_LABEL[mode], mode === "motor" ? x.hoist || wdef.hoist : "", c.onBatten != null ? Math.round(c.onBatten) : "",
+        flag(issue) + checkFor(c, mode),
         "overridden",
       ]);
     });
-    csvRows.push(["", "", "", "", "TOTAL", "", "", "", "", "", "", "", "", "", "", "", Math.round(totals.onBatten), unspecified ? `${unspecified} lines not specified, excluded` : `peak/beam ${Math.round(totals.beamMax)} lb`, ""]);
+    csvRows.push([
+      "", "", "", "", "TOTAL", "", "", "", "", "", "", "", "", "", "", "",
+      totals.onBatten != null ? Math.round(totals.onBatten) : "",
+      weightsUnavailable
+        ? `WEIGHT UNAVAILABLE — fabric unresolved on: ${totals.unresolvedLines.join(", ")}`
+        : unspecified
+        ? `${unspecified} lines not specified, excluded`
+        : `peak/beam ${Math.round(totals.beamMax ?? 0)} lb`,
+      "",
+    ]);
     // Filename names the OPENING now, not the retired wall-to-wall width (#50).
     downloadCsv(`lineset-pro${inp.proWidthFt}x${inp.stageDepthFt}deep`, header, csvRows);
   }
@@ -476,16 +518,23 @@ export function LinesetBuilder({
   }
 
   const weightCell = (specified: boolean, c: ReturnType<typeof computeSetWeight> | null) =>
-    specified && c ? (
+    specified && c && !c.fabricUnresolved ? (
       <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>{fmt(c.onBatten)} lb</span>
+    ) : specified && c && c.fabricUnresolved ? (
+      <span title="Fabric unresolved — weight can't be calculated, not zero" style={{ color: "#b4543a", fontWeight: 600, fontSize: 12 }}>unavailable</span>
     ) : (
       <span style={{ color: "#c4c9d2" }}>—</span>
     );
 
+  // F1 hard-fail (punch #64): an unresolved-fabric line gets its OWN dot color
+  // — never the green "OK" (nothing was verified) and never folded into the
+  // yellow "not entered yet" dot (this line WAS entered, it just can't weigh).
   const checkCell = (specified: boolean, c: ReturnType<typeof computeSetWeight> | null, mode: LinesetMode) => {
     if (!specified || !c)
       return <span title="Weights not entered yet — excluded from totals" style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", background: "#d9a62a" }} />;
-    if (mode === "cw")
+    if (c.fabricUnresolved)
+      return <span title="Fabric unresolved — weight unavailable, excluded from totals" style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", background: "#8c3a26" }} />;
+    if (mode === "cw" && c.combo)
       return <span title={`${c.combo.big}×25 + ${c.combo.small}×10 lb`} style={{ fontSize: 11.5, color: "#5b616e" }}>{c.combo.big}·{c.combo.small} brick</span>;
     return <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", background: c.over ? "#b4543a" : "#1f7a52" }} title={c.over ? "Over a limit" : "OK"} />;
   };
@@ -646,16 +695,18 @@ export function LinesetBuilder({
             )}
           </div>
 
-          {/* Fabric failures, grouped by cause (#50). computeSetWeight zeroes
-              goods AND track when the fabric doesn't resolve, so without this
-              a broken catalog looks exactly like an unfilled row. No fallback
-              weight is invented: the gap is named, not papered over. */}
+          {/* Fabric failures, grouped by cause (#50/#64). computeSetWeight now
+              HARD-FAILS when the fabric doesn't resolve — goods and track
+              weight come back null, not 0, and the line is excluded from
+              every total (never silently summed in as a plausible-looking
+              low number). No fallback weight is invented: the gap is named,
+              not papered over. */}
           {fabricProblems.length > 0 && !showGrid && (
             <div style={{ background: "#fbeceb", border: "1px solid #eccdc7", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, color: "#8c3a26", marginBottom: 10 }}>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>
                 {/* One template literal, not adjacent JSX children: an empty-string
                     child between two text nodes swallowed the space before "can't". */}
-                {`⚠ ${fabricProblemCount} line${fabricProblemCount === 1 ? "" : "s"} can't be weighed, the fabric didn't resolve, so goods AND track weight are 0 lb`}
+                {`⚠ ${fabricProblemCount} line${fabricProblemCount === 1 ? "" : "s"} can't be weighed — the fabric didn't resolve, so weight is UNAVAILABLE (not zero) and excluded from every total below`}
               </div>
               <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
                 {fabricProblems.map((g) => (
@@ -708,7 +759,7 @@ export function LinesetBuilder({
                           {r.s.warning && <span title={r.s.warning} style={{ color: "#b4543a", fontSize: 12, marginLeft: 6 }}>⚠</span>}
                           {r.issue && (
                             <div title={r.issue.message} style={{ fontSize: 11, fontWeight: 600, color: "#b4543a", marginTop: 2 }}>
-                              ⚠ {r.issue.short}: goods + track 0 lb
+                              ⚠ {r.issue.short}: weight unavailable
                             </div>
                           )}
                         </td>
@@ -741,7 +792,7 @@ export function LinesetBuilder({
                           {x.name}
                           {issue && (
                             <div title={issue.message} style={{ fontSize: 11, fontWeight: 600, color: "#b4543a", marginTop: 2 }}>
-                              ⚠ {issue.short}: goods + track 0 lb
+                              ⚠ {issue.short}: weight unavailable
                             </div>
                           )}
                         </td>
@@ -784,18 +835,36 @@ export function LinesetBuilder({
                 </button>
               </div>
 
-              {/* show-wide rollup — refuses to look complete while lines are unspecified (P2) */}
+              {/* show-wide rollup — refuses to look complete while lines are
+                  unspecified (P2) OR while any specified line's fabric hasn't
+                  resolved (#64): a "Total on batten" number is safety-relevant
+                  (feeds hoist selection and batten capacity), so it goes
+                  UNAVAILABLE rather than quietly summing the resolvable lines
+                  into a plausible-but-low figure. */}
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
                 <div style={kpi(true)}>
                   <div style={{ fontSize: 11, color: "#6b7079" }}>Total on batten</div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>{fmt(totals.onBatten)} lb</div>
-                  <div style={{ fontSize: 11, color: unspecified ? "#9a7d1f" : "#9aa0ab", fontWeight: unspecified ? 600 : 400 }}>
-                    {unspecified ? `${totals.specified} of ${totals.generated} lines specified — partial total` : `${totals.generated + extraRows.length} lines`}
-                  </div>
+                  {weightsUnavailable ? (
+                    <>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#8c3a26" }}>Unavailable</div>
+                      <div style={{ fontSize: 11, color: "#8c3a26", fontWeight: 600 }}>
+                        fabric unresolved on {totals.unresolvedLines.length} line{totals.unresolvedLines.length === 1 ? "" : "s"}:{" "}
+                        {totals.unresolvedLines.slice(0, 3).join(", ")}
+                        {totals.unresolvedLines.length > 3 ? ` +${totals.unresolvedLines.length - 3} more` : ""}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 20, fontWeight: 700 }}>{fmt(totals.onBatten)} lb</div>
+                      <div style={{ fontSize: 11, color: unspecified ? "#9a7d1f" : "#9aa0ab", fontWeight: unspecified ? 600 : 400 }}>
+                        {unspecified ? `${totals.specified} of ${totals.generated} lines specified — partial total` : `${totals.generated + extraRows.length} lines`}
+                      </div>
+                    </>
+                  )}
                 </div>
-                <div style={kpi()}><div style={{ fontSize: 11, color: "#6b7079" }}>Peak load / support beam</div><div style={{ fontSize: 20, fontWeight: 700 }}>{fmt(totals.beamMax)} lb</div><div style={{ fontSize: 11, color: "#9aa0ab" }}>across {def.lines} beams</div></div>
-                <div style={kpi()}><div style={{ fontSize: 11, color: "#6b7079" }}>With powerheads</div><div style={{ fontSize: 20, fontWeight: 700 }}>{fmt(totals.setTotal)} lb</div><div style={{ fontSize: 11, color: "#9aa0ab" }}>structure sees</div></div>
-                {totals.cw > 0 && <div style={kpi()}><div style={{ fontSize: 11, color: "#6b7079" }}>Counterweight (CW lines)</div><div style={{ fontSize: 20, fontWeight: 700 }}>{fmt(totals.cw)} lb</div></div>}
+                <div style={kpi()}><div style={{ fontSize: 11, color: "#6b7079" }}>Peak load / support beam</div><div style={{ fontSize: 20, fontWeight: 700 }}>{totals.beamMax == null ? "—" : `${fmt(totals.beamMax)} lb`}</div><div style={{ fontSize: 11, color: "#9aa0ab" }}>across {def.lines} beams</div></div>
+                <div style={kpi()}><div style={{ fontSize: 11, color: "#6b7079" }}>With powerheads</div><div style={{ fontSize: 20, fontWeight: 700 }}>{totals.setTotal == null ? "—" : `${fmt(totals.setTotal)} lb`}</div><div style={{ fontSize: 11, color: "#9aa0ab" }}>structure sees</div></div>
+                {(totals.cw ?? 0) > 0 && <div style={kpi()}><div style={{ fontSize: 11, color: "#6b7079" }}>Counterweight (CW lines)</div><div style={{ fontSize: 20, fontWeight: 700 }}>{fmt(totals.cw)} lb</div></div>}
               </div>
             </>
           )}

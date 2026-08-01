@@ -511,7 +511,10 @@ export function compute(s: AState): ComputeResult {
   const addCurtain = (on: boolean | undefined, desc: string, count: number, area: number, rate: number, fabricKey: string | null) => {
     if (on && count > 0) curtainItems.push({ desc, unit: "ea", qty: count, cost: Math.round(area * rate), area, fabricKey });
   };
-  const gdims = venueDimsFromEstimator(s);
+  // `proscenium` gates the wing addition inside venueDimsFromEstimator (#66):
+  // wing space is only OUTSIDE `width` for a real proscenium opening, same
+  // venue-kind test `pipeLenFt` above already uses for the batten overhang.
+  const gdims = venueDimsFromEstimator({ ...s, proscenium: venueOf(s).kind === "proscenium" });
   const priceDrape = (on: boolean | undefined, desc: string, count: number, fabricKey: string) => {
     if (!on || count <= 0) return;
     const r = curtainMakeCost(fabricKey, gdims, s.tier);
@@ -697,7 +700,9 @@ export function fabricRate(fabrics: FabricOption[], sku: string | undefined): nu
  */
 export function applyFabrics(systems: SystemBlock[], tierKey: TierKey, tierDefs: TierDefs, fabrics: FabricOption[], s: AState): SystemBlock[] {
   const margin = 0.3;
-  const dims = venueDimsFromEstimator(s);
+  // Same venue-kind gate as compute()'s gdims (#66) — otherwise the tier grid
+  // would price curtains off a DIFFERENT stage width than the budget did.
+  const dims = venueDimsFromEstimator({ ...s, proscenium: venueOf(s).kind === "proscenium" });
   return systems.map((sys) => {
     if (sys.key !== "curtains") return sys;
     let rev = 0;

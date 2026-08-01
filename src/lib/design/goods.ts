@@ -301,8 +301,19 @@ export type FabricIssue = {
 };
 
 /**
- * Diagnose a line whose weight math will silently produce zero goods AND zero
- * track (`computeSetWeight` gates the track lookup on the fabric, steel.ts).
+ * Diagnose a line whose weight math will refuse to resolve — hard-fail,
+ * punch #64: `computeSetWeight` (steel.ts) reports `fabricUnresolved: true`
+ * and masks goods AND track weight to `null` rather than a plausible-looking
+ * 0, so this is what explains the "unavailable" to Jeff.
+ *
+ * `expectsFabric` mirrors computeSetWeight()'s own `expectsFabricWeight()`
+ * exactly (w>0 && h>0 alone, no `line.fab` requirement): a custom line with a
+ * real finished footprint typed in expects a resolvable fabric too, even
+ * before anything's been picked in the fabric select, and the two functions
+ * must agree or a line can end up "unavailable" with no explanation on
+ * screen. `!!rule` is kept as an explicit OR for a rule-derived line whose
+ * `w`/`h` haven't landed on `line` yet (defensive; every real drapeRule()
+ * output does carry w>0 && h>0).
  *
  * Resolution order mirrors computeSetWeight() exactly, `fabResolved` first,
  * then a FABLIB name lookup, so this never warns about a line that actually
@@ -314,9 +325,9 @@ export function lineFabricIssue(
   rule: DrapeRule | null,
   fabrics: GoodsFabric[]
 ): FabricIssue | null {
-  // A gear-only line (Electric/Shell/General Purpose, or a custom line with no
-  // fabric named) is supposed to carry no goods, nothing to warn about.
-  const expectsFabric = !!rule || (!!line.fab && (line.w || 0) > 0 && (line.h || 0) > 0);
+  // A gear-only line (Electric/Shell/General Purpose — no finished footprint)
+  // is supposed to carry no goods, nothing to warn about.
+  const expectsFabric = !!rule || ((line.w || 0) > 0 && (line.h || 0) > 0);
   if (!expectsFabric) return null;
   if (line.fabResolved) return null;
   if (line.fab && line.fab !== FAB_NONE && fabByName(line.fab)) return null;

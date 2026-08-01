@@ -503,12 +503,36 @@ export type WeightLine = {
   hoist?: string;
 };
 
-/** Weight + capacity breakdown for one line. Faithful port of computeLine(). */
+/**
+ * A line with a finished footprint (w × h) is a soft-goods line — it MUST
+ * resolve a fabric to weigh anything. `w`/`h` alone (no `rule`, no catalog
+ * needed) is a self-contained signal computeSetWeight can check without
+ * importing goods.ts (steel.ts must not depend on goods.ts — goods.ts already
+ * depends on steel.ts, and a back-import would cycle). Kept in sync with
+ * lineFabricIssue()'s `expectsFabric` in goods.ts.
+ */
+function expectsFabricWeight(L: Pick<WeightLine, "w" | "h">): boolean {
+  return (L.w || 0) > 0 && (L.h || 0) > 0;
+}
+
+/**
+ * Weight + capacity breakdown for one line. Faithful port of computeLine(),
+ * plus the F1 hard-fail (punch #64): a line that expects a fabric but can't
+ * resolve one no longer contributes goods=0/trackWt=0 to a plausible-looking
+ * total. It reports `fabricUnresolved: true` and every weight/capacity field
+ * that depends on the unresolved goods figure (onBatten, setTotal, cwLoad,
+ * combo, the utilization checks, beamLoad) comes back `null` — never a wrong
+ * LOW number. Callers must check `fabricUnresolved` before trusting any of
+ * those fields; `fmt()` already renders null as "—", but a null total must
+ * still be surfaced as UNAVAILABLE, not silently summed as zero (see
+ * lineset-builder.tsx's `totals`).
+ */
 export function computeSetWeight(L: WeightLine, def: WeightDefaults) {
   const pipe = battenById(L.pipe || def.pipe);
   const full = (L.full == null ? def.full : L.full) / 100;
   const f = L.fabResolved || (L.fab ? fabByName(L.fab) : undefined);
   const qty = L.qty || 1;
+  const fabricUnresolved = expectsFabricWeight(L) && !f;
   let goods = 0;
   if (f && (L.w || 0) > 0 && (L.h || 0) > 0) {
     const flatW = (L.w || 0) * (1 + full);
@@ -523,6 +547,11 @@ export function computeSetWeight(L: WeightLine, def: WeightDefaults) {
   const battenWt = battenLen * (pipe ? pipe.wt : 0);
   const trackObj = f ? trackByName(L.track || "") : null;
   const trackWt = trackObj ? trackObj.lbft * battenLen : 0;
+  // Raw internal total — still computed so every downstream check below runs
+  // its normal math (this is what the OLD code returned directly). The public
+  // return at the bottom masks this to null when fabricUnresolved, so a
+  // caller can never mistake "goods happened to compute as 0" for "goods+gear
+  // legitimately sum to a small number" (F1: those are different facts).
   const onBatten = goods + gear + battenWt + trackWt;
   const nLines = Math.max(1, L.lines != null ? L.lines : def.lines);
   const mode: LinesetMode = L.mode || def.mode;
@@ -581,11 +610,37 @@ export function computeSetWeight(L: WeightLine, def: WeightDefaults) {
   const beamSpacingOver = beamSpacing != null && beamSpacing > def.beamspace;
   if (mode === "motor" && beamSpacingOver) over = true;
 
+  // F1 hard-fail (punch #64): mask every field downstream of the unresolved
+  // goods figure to null instead of exposing the raw (artificially low)
+  // numbers computed above. `battenWt` is NOT masked — it comes from the pipe
+  // choice alone, never from fabric, so it stays a trustworthy real number
+  // even on an unresolved-fabric line.
   return {
-    mode, hoist, pipe, maxLines, goods, gear, battenWt, battenLen, trackWt, onBatten,
-    hoistPw, setTotal, cwLoad, combo, battenUtil, allowTotal, perLine, lineOverWll,
-    hoistUtil, perLineLoad, perLineOverMax, perLineUnderMin, linesOverMax,
-    totalBeams, beamSpacing, beamLoad, beamSpacingOver, capUtil, over, nLines,
+    mode, hoist, pipe, maxLines,
+    goods: fabricUnresolved ? null : goods,
+    gear, battenWt, battenLen,
+    trackWt: fabricUnresolved ? null : trackWt,
+    onBatten: fabricUnresolved ? null : onBatten,
+    hoistPw,
+    setTotal: fabricUnresolved ? null : setTotal,
+    cwLoad: fabricUnresolved ? null : cwLoad,
+    combo: fabricUnresolved ? null : combo,
+    battenUtil: fabricUnresolved ? null : battenUtil,
+    allowTotal,
+    perLine: fabricUnresolved ? null : perLine,
+    lineOverWll: fabricUnresolved ? false : lineOverWll,
+    hoistUtil: fabricUnresolved ? null : hoistUtil,
+    perLineLoad: fabricUnresolved ? null : perLineLoad,
+    perLineOverMax: fabricUnresolved ? false : perLineOverMax,
+    perLineUnderMin: fabricUnresolved ? false : perLineUnderMin,
+    linesOverMax,
+    totalBeams, beamSpacing,
+    beamLoad: fabricUnresolved ? null : beamLoad,
+    beamSpacingOver,
+    capUtil: fabricUnresolved ? null : capUtil,
+    over: fabricUnresolved ? false : over,
+    nLines,
+    fabricUnresolved,
   };
 }
 
