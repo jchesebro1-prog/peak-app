@@ -106,6 +106,11 @@ export type DesignQuotePartial = {
   margin: number;
   source: "sandbox";
   requote: true;
+  /** Customer's resolved pricing tier (punch #65) — always stamped so the
+   *  Estimator seeds labor/curtain margins from the real tier, not a
+   *  hardcoded default. */
+  pricingTier: string;
+  tierMargin: number;
   spec: {
     venue: string;
     size: string;
@@ -310,12 +315,21 @@ async function customerNameFor(id: string): Promise<string> {
  * The budgetary value is passed only as a starting reference; requote: true
  * flags that it must be re-priced against live catalog books before final.
  * The canonical customer link flows FORWARD by id (rename-safe).
+ *
+ * This is the single choke point all three promote paths (Quick Design's
+ * addToQuotesAction, and both promoteDesignAction copies) pass through, so
+ * the customer's real pricing tier is resolved and stamped HERE (punch
+ * #65) — no caller may leave pricingTier/tierMargin unset. Without this,
+ * the Estimator's freshLabor()/curtain draft seed hardcodes 30% whenever
+ * tierMargin is missing, which silently mispriced every non-Base tier.
  */
 export async function designToQuotePartial(id: string): Promise<DesignQuotePartial | null> {
   const d = await getDesign(id);
   if (!d) return null;
   const cid = d.customerId || (await resolveCustomerId(d.customer)) || null;
   const cname = cid ? (await customerNameFor(cid)) || d.customer || "" : d.customer || "";
+  const { resolveTier } = await import("@/lib/pricing-tiers");
+  const resolvedTier = await resolveTier(cid);
   return {
     name: d.name,
     customerId: cid,
@@ -325,6 +339,8 @@ export async function designToQuotePartial(id: string): Promise<DesignQuoteParti
     margin: 0,
     source: "sandbox",
     requote: true,
+    pricingTier: resolvedTier.tier,
+    tierMargin: resolvedTier.margin,
     spec: {
       venue: d.venue,
       size: d.size,
