@@ -564,13 +564,23 @@ ok(isOpenStage("inspection", "onsite") === true, "inspection onsite counts as op
 ok(isOpenStage("quote", "won") === false && isOpenStage("quote", "sent") === true, "quote open = draft or sent");
 
 /* --- venue dimensions (lineset PRO dims, task 1) --- */
-const vdEst = venueDimsFromEstimator({ width: 36, ph: 18, depth: 26, grid: 24, wing: 12 });
+const vdEst = venueDimsFromEstimator({ width: 36, ph: 18, depth: 26, grid: 24, wing: 12, proscenium: true });
 ok(vdEst.proWidthFt === 36, "estimator `width` maps to PRO width, not stage width");
 ok(vdEst.proHeightFt === 18, "estimator `ph` maps to PRO height");
-ok(vdEst.stageWidthFt === 60, `stage width = pro + 2 wings (got ${vdEst.stageWidthFt})`);
+ok(vdEst.stageWidthFt === 60, `a real proscenium house: stage width = opening + 2 wings, one outside each side of the opening (got ${vdEst.stageWidthFt})`);
 ok(vdEst.proWidthFt !== vdEst.stageWidthFt, "pro and stage width stay distinct — the collision guard");
 ok(vdEst.stageDepthFt === 26, `estimator depth maps straight through to stage depth (got ${vdEst.stageDepthFt})`);
 ok(vdEst.gridHeightFt === 24, `estimator grid maps straight through to grid height (got ${vdEst.gridHeightFt})`);
+
+/* --- wing double-count fix (#66): a non-proscenium `width` is ALREADY wall to
+ * wall (DIMSCHEMA: church/flat/blackbox "wall to wall", gym "sideline to
+ * sideline"), so the wings it carries are already inside it. Adding `2*wing`
+ * on top — the old, unconditional behavior — double-counted that space. Same
+ * inputs as `vdEst` above except `proscenium: false`, so this isolates the
+ * ONE line that changed. */
+const vdEstNonPro = venueDimsFromEstimator({ width: 36, ph: 18, depth: 26, grid: 24, wing: 12, proscenium: false });
+ok(vdEstNonPro.stageWidthFt === 36, `a non-proscenium room: stage width stays the source width, wing is NOT added again — it's already wall-to-wall (got ${vdEstNonPro.stageWidthFt}, the old unconditional formula would have given 60)`);
+ok(vdEstNonPro.proWidthFt === vdEstNonPro.stageWidthFt, "for a non-proscenium room, PRO width and stage width now agree — both ARE the same wall-to-wall number, so there is nothing left to double-count");
 
 const vdLine = venueDimsFromLineset({ proWidthFt: 40, proHeightFt: 20, stageWidthFt: 50, stageDepthFt: 30 });
 ok(vdLine.proWidthFt === 40 && vdLine.stageWidthFt === 50, "lineset inputs keep pro and stage width separate");
@@ -605,8 +615,29 @@ ok(fabricFromPart({ ...velourPart, oz: undefined }) === null, "a part with no oz
 
 const marvel = fabricFromPart({ desc: "21 oz Marvel Velour", oz: 21, ozBasis: "lin-yd", boltWidthIn: 54 })!;
 const wLine = computeSetWeight({ name: "t", fabResolved: marvel, w: 20, h: 19, full: 50, qty: 2 }, DEFAULT_WEIGHTS);
-ok(wLine.goods > 0, "a catalog-only fabric (Marvel is NOT in FABLIB) still produces goods weight");
-ok(computeSetWeight({ name: "t", fab: "21 oz Marvel Velour", w: 20, h: 19, full: 50, qty: 2 }, DEFAULT_WEIGHTS).goods === 0, "name-only lookup of a catalog desc weighs ZERO — the bug this join fixes");
+ok(wLine.fabricUnresolved === false && wLine.goods !== null && wLine.goods > 0, "a catalog-only fabric (Marvel is NOT in FABLIB) still produces goods weight");
+// F1 hard-fail (punch #64): a name-only lookup of a catalog desc (not in FABLIB)
+// used to weigh a silent ZERO — the OLD assertion here literally pinned that
+// bug as "the fix". The product-owner decision reverses it: an unresolved
+// fabric must refuse to produce a weight number at all (null + a flag),
+// never a wrong LOW number that looks like a real total.
+const nameOnlyMiss = computeSetWeight({ name: "t", fab: "21 oz Marvel Velour", w: 20, h: 19, full: 50, qty: 2 }, DEFAULT_WEIGHTS);
+ok(nameOnlyMiss.fabricUnresolved === true, "a name-only lookup of a catalog desc (not a FABLIB name) hard-fails: fabricUnresolved, not a silent resolve (#64)");
+ok(nameOnlyMiss.goods === null && nameOnlyMiss.trackWt === null && nameOnlyMiss.onBatten === null && nameOnlyMiss.setTotal === null, "hard-fail masks goods/track/onBatten/setTotal to null — never the 0 the old bug produced (#64)");
+ok(nameOnlyMiss.cwLoad === null && nameOnlyMiss.combo === null && nameOnlyMiss.beamLoad === null && nameOnlyMiss.hoistUtil === null && nameOnlyMiss.battenUtil === null && nameOnlyMiss.capUtil === null, "hard-fail masks every capacity/utilization figure derived from the unresolved goods too, not just the headline total (#64)");
+ok(nameOnlyMiss.over === false, "an unresolved line never reports 'over' — that would assert a false pass/fail verdict on an unknown number (#64)");
+ok(nameOnlyMiss.battenWt !== null && nameOnlyMiss.battenWt >= 0, "battenWt (pipe self-weight) is NOT fabric-derived, so it stays a real number even on an unresolved-fabric line");
+
+// A gear-only line (no finished w/h) must never be flagged — Electric/Shell
+// carry no soft goods at all, so "no fabric" is correct, not unresolved.
+const gearOnlyWeight = computeSetWeight({ name: "t", gear: 120 }, DEFAULT_WEIGHTS);
+ok(gearOnlyWeight.fabricUnresolved === false && gearOnlyWeight.onBatten !== null, "a gear-only line (no w/h) is never fabricUnresolved — it never expected a fabric (#64)");
+
+/* --- lineFabricIssue matches computeSetWeight's hard-fail exactly (task 2, #64) --- */
+import { lineFabricIssue } from "@/lib/design/goods";
+ok(lineFabricIssue({ w: 20, h: 19 }, null, []) !== null, "a custom line with real dimensions but no fab picked yet DOES get a diagnostic now — it matches computeSetWeight's own expectsFabric (w>0 && h>0), so a fabricUnresolved line is never left unexplained on screen");
+ok(lineFabricIssue({ gear: 1 } as never, null, []) === null, "a gear-only shape (no w/h) still gets no diagnostic — nothing to explain");
+ok(lineFabricIssue({ w: 20, h: 19, fab: "21 oz Marvel Velour" }, null, []) !== null, "the pre-existing name-only-miss diagnostic still fires unchanged");
 
 // #50: the schedule default is the derived rule, and a per-line value still beats it.
 ok(DEFAULT_WEIGHTS.battenlen === battenLenFt(DEFAULT_VENUE_DIMS.proWidthFt), `the weight defaults' batten length IS the derived rule (got ${DEFAULT_WEIGHTS.battenlen})`);
@@ -710,7 +741,8 @@ const wlDraw = ruleToWeightLine(drapeRule("Draw", DIMS36, "better")!, [
 ok(wlDraw.w === 20 && wlDraw.h === 19, "rule dimensions carry into the WeightLine unchanged");
 ok(wlDraw.full === 50, "fullness rides on the line, not the schedule default");
 ok(wlDraw.fabResolved !== undefined && wlDraw.fabResolved.oz === 25, "the SKU resolves to a weighable fabric, not just a name");
-ok(computeSetWeight({ name: "t", ...wlDraw }, DEFAULT_WEIGHTS).goods > 0, "a rule-built line actually weighs something — the end-to-end join");
+const wlDrawWeight = computeSetWeight({ name: "t", ...wlDraw }, DEFAULT_WEIGHTS);
+ok(wlDrawWeight.goods !== null && wlDrawWeight.goods > 0, "a rule-built line actually weighs something — the end-to-end join");
 
 const merged = { ...wlDraw, h: 24 };
 ok(merged.h === 24 && merged.w === 20, "a hand-entered height overrides the rule; untouched fields keep it");
@@ -719,6 +751,18 @@ const wlCyc = ruleToWeightLine(drapeRule("CYC", DIMS36, "better")!, [
   { sku: "RB-MUS", desc: "Seamless Muslin", oz: 6, ozBasis: "sq-yd" as const, boltWidthIn: 120 },
 ]);
 ok(wlCyc.full === 0, "the cyc reaches computeSetWeight at 0% fullness, not the 50% default");
+
+/* --- hard-fail against an EMPTY Fabric catalog (#64) ---
+ * The task description's real-world case: the production dealer catalog
+ * seeds ZERO rows in category "Fabric" (only the demo seed has any), so
+ * every rule-derived line's fab/fabResolved come back undefined from
+ * ruleToWeightLine — not because of a bad name lookup, but because there is
+ * nothing to look up. This is the NORMAL case on a live DB, not an edge case,
+ * and it must hard-fail exactly like the name-only miss above. */
+const emptyRuleLine = ruleToWeightLine(drapeRule("Draw", DIMS36, "better")!, []);
+ok(emptyRuleLine.fab === undefined && emptyRuleLine.fabResolved === undefined, "an empty Fabric catalog leaves a rule-derived line's fab/fabResolved both undefined (ruleToWeightLine)");
+const emptyCatalogWeight = computeSetWeight({ name: "t", ...emptyRuleLine }, DEFAULT_WEIGHTS);
+ok(emptyCatalogWeight.fabricUnresolved === true && emptyCatalogWeight.onBatten === null, "a rule line against an EMPTY Fabric catalog hard-fails too — the production-DB case, not just a bad name lookup (#64)");
 
 /* --- fabric override re-resolution on rule-derived lines (whole-branch review: F1/F2) ---
  * computeSetWeight prefers fabResolved over a fab name lookup (steel.ts). A
@@ -753,7 +797,10 @@ const overridden = mergeLineFabric(ruleLine, { fab: overrideDesc }, drawRule, OV
 ok(overridden.fab === overrideDesc, "mergeLineFabric carries the override label through as fab");
 ok(overridden.fabResolved?.oz === 21, "the fix: overriding fab on a rule line re-resolves fabResolved to the OVERRIDE fabric, not the rule's — via the real production function, not a copy of it");
 const overriddenWeight = computeSetWeight({ name: "t", ...ruleLine, ...overridden }, DEFAULT_WEIGHTS);
-ok(overriddenWeight.goods < ruleWeight.goods, `lighter override lowers goods weight end-to-end through mergeLineFabric (rule ${ruleWeight.goods.toFixed(1)} -> override ${overriddenWeight.goods.toFixed(1)})`);
+ok(
+  ruleWeight.goods !== null && overriddenWeight.goods !== null && overriddenWeight.goods < ruleWeight.goods,
+  `lighter override lowers goods weight end-to-end through mergeLineFabric (rule ${ruleWeight.goods?.toFixed(1)} -> override ${overriddenWeight.goods?.toFixed(1)})`
+);
 
 // (b) an override that misses the catalog — fabResolved must clear, not keep the stale rule value
 const missDesc = "Not in catalog";
@@ -776,8 +823,15 @@ const cutLine = { name: "t", fabResolved: cutFab, w: 10, full: 50, qty: 1 };
 const cutBase = computeSetWeight({ ...cutLine, h: 20 }, { ...DEFAULT_WEIGHTS, cut: 6 });
 const cutViaCut = computeSetWeight({ ...cutLine, h: 20 }, { ...DEFAULT_WEIGHTS, cut: 18 }); // +12 in
 const cutViaHeight = computeSetWeight({ ...cutLine, h: 21 }, { ...DEFAULT_WEIGHTS, cut: 6 }); // +1 ft
-ok(Math.abs(cutViaCut.goods - cutViaHeight.goods) < 1e-6, `+12in of cut == +1ft of height — cut is inches (got ${cutViaCut.goods.toFixed(2)} vs ${cutViaHeight.goods.toFixed(2)})`);
-ok(cutViaCut.goods > cutBase.goods, "more cut allowance still adds weight (sanity: fix didn't invert the sign)");
+ok(
+  cutBase.goods !== null && cutViaCut.goods !== null && cutViaHeight.goods !== null,
+  "a resolved fabric with real dimensions never comes back fabricUnresolved"
+);
+ok(
+  cutViaCut.goods !== null && cutViaHeight.goods !== null && Math.abs(cutViaCut.goods - cutViaHeight.goods) < 1e-6,
+  `+12in of cut == +1ft of height — cut is inches (got ${cutViaCut.goods?.toFixed(2)} vs ${cutViaHeight.goods?.toFixed(2)})`
+);
+ok(cutViaCut.goods !== null && cutBase.goods !== null && cutViaCut.goods > cutBase.goods, "more cut allowance still adds weight (sanity: fix didn't invert the sign)");
 
 /* --- The Grid BOM math (D108) --- */
 import { bomLines, bomTotals, type PartLite } from "@/lib/design/grid-bom";
@@ -2068,6 +2122,83 @@ import { getTemplateDef } from "@/lib/templates";
       "intro,scopeLead,feeLineFixed,feeLineMilestones,termsBlock,assumptionsLead,signoff,taxNote",
     "#35: no pre-existing field id was renamed (renames orphan stored overrides)"
   );
+}
+
+/* --- punch #60: send/won require an approval RECORD, not just a hidden
+ * button (D84 review workflow was UI-only enforced — sendToCustomerAction and
+ * setStatusAction("won") called nothing but requireUser()). These are the
+ * pure guard functions both server actions consult; testing them directly
+ * here (no DB) proves the rejection logic without needing a live quote doc. */
+import {
+  hasApproval,
+  requireApprovalToAdvance,
+  validateAttestationNote,
+  type QuoteReview,
+} from "@/lib/stores/quotes";
+
+function review(over: Partial<QuoteReview> = {}): QuoteReview {
+  return {
+    state: "none",
+    reviewer: null,
+    submittedBy: null,
+    submittedAt: null,
+    decidedBy: null,
+    decidedAt: null,
+    note: "",
+    method: null,
+    ...over,
+  };
+}
+
+{
+  // No review at all (null) — the "requireUser() only" hole this closes.
+  ok(!hasApproval(null), "#60: hasApproval is false with no review record");
+  ok(!hasApproval(undefined), "#60: hasApproval is false with an undefined review record");
+  ok(!hasApproval(review({ state: "none" })), "#60: hasApproval is false for state 'none'");
+  ok(!hasApproval(review({ state: "in_review" })), "#60: hasApproval is false while merely 'in_review'");
+  ok(!hasApproval(review({ state: "changes" })), "#60: hasApproval is false after 'changes' was requested — a stale approval does not carry forward");
+  ok(hasApproval(review({ state: "approved", method: "in_app" })), "#60: hasApproval is true for an in-app approval");
+  ok(hasApproval(review({ state: "approved", method: "attested" })), "#60: hasApproval is true for an attested approval");
+  ok(hasApproval(review({ state: "approved", method: null })), "#60: hasApproval is true for a legacy approval with no method stamped (pre-punch-60 seed/decision) — preserves existing behavior");
+
+  // sendToCustomerAction's gate — rejected with no approval record.
+  const sendNoRecord = requireApprovalToAdvance(null, "send");
+  ok(sendNoRecord.ok === false, "#60: send is rejected when no approval record exists");
+  if (!sendNoRecord.ok) ok(sendNoRecord.error.length > 0, "#60: the send rejection carries a non-empty typed error, not a raw exception");
+  const sendInReview = requireApprovalToAdvance(review({ state: "in_review" }), "send");
+  ok(sendInReview.ok === false, "#60: send is rejected while only 'in_review' (submitted but not decided)");
+  const sendOk = requireApprovalToAdvance(review({ state: "approved", method: "attested" }), "send");
+  ok(sendOk.ok === true, "#60: send is allowed once an approval record (either method) exists");
+
+  // setStatusAction("won")'s gate — rejected with no approval record, same predicate.
+  const wonNoRecord = requireApprovalToAdvance(null, "won");
+  ok(wonNoRecord.ok === false, "#60: marking won is rejected when no approval record exists");
+  if (!wonNoRecord.ok) ok(wonNoRecord.error.length > 0, "#60: the won rejection carries a non-empty typed error, not a raw exception");
+  ok(
+    requireApprovalToAdvance(review({ state: "approved", method: "in_app" }), "won").ok === true,
+    "#60: marking won is allowed once an in-app approval exists"
+  );
+
+  // Other STAGES transitions (draft/sent/lost via setStatusAction, minus the
+  // "won" special case) are intentionally NOT covered by this gate — the
+  // punch spec says to leave those open to any signed-in user, as today.
+  // (setStatusAction only calls requireApprovalToAdvance when status==="won";
+  // this file can't exercise the DB-backed action directly, so that call-site
+  // wiring is asserted by inspection in actions.ts rather than re-tested here.)
+
+  // Attested-approval note validation — MANDATORY, rejected empty/whitespace.
+  const emptyNote = validateAttestationNote("");
+  ok(emptyNote.ok === false, "#60: an empty attestation note is rejected");
+  const whitespaceNote = validateAttestationNote("   \n\t  ");
+  ok(whitespaceNote.ok === false, "#60: a whitespace-only attestation note is rejected");
+  const nullNote = validateAttestationNote(null);
+  ok(nullNote.ok === false, "#60: a null attestation note is rejected");
+  const undefinedNote = validateAttestationNote(undefined);
+  ok(undefinedNote.ok === false, "#60: an undefined attestation note is rejected");
+  if (!emptyNote.ok) ok(emptyNote.error.length > 0, "#60: the empty-note rejection carries a non-empty typed error");
+  const goodNote = validateAttestationNote("  Reviewed by Jeff on a Teams call, 2026-08-01  ");
+  ok(goodNote.ok === true, "#60: a real attestation note is accepted");
+  if (goodNote.ok) ok(goodNote.note === "Reviewed by Jeff on a Teams call, 2026-08-01", "#60: the accepted note is trimmed");
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
