@@ -48,6 +48,7 @@ export function SinglePageLetter({
   parties,
   sections,
   terms,
+  notice,
   footer,
   backHref,
   backLabel = "← Back",
@@ -67,6 +68,15 @@ export function SinglePageLetter({
   sections: LetterSection[];
   /** Optional term-definition strip (e.g. Urgent / Necessary / Basic). */
   terms?: { heading?: string; items: LetterTerm[] };
+  /**
+   * Optional limitation notice (punch #73), rendered above the prepared-by
+   * footer for documents with physical/regulatory consequences (flame-test
+   * and inspection letters). Callers pass one of the constants from
+   * src/lib/compliance-notices.ts — see the DRAFT WORDING comment there.
+   * Not shown by other SinglePageLetter consumers (e.g. repairs letters)
+   * unless they opt in.
+   */
+  notice?: string;
   /** Prepared-by footer line. */
   footer: string;
   backHref: string;
@@ -277,8 +287,15 @@ export function SinglePageLetter({
               </div>
             )}
 
+            {/* limitation notice (punch #73) — optional, opt-in per caller */}
+            {notice && (
+              <div style={{ borderTop: "1px solid #e4e7ec", marginTop: 22, paddingTop: 12, fontSize: "8pt", color: "#9aa0ab", lineHeight: 1.5 }}>
+                {notice}
+              </div>
+            )}
+
             {/* footer */}
-            <div style={{ borderTop: "1px solid #e4e7ec", marginTop: 26, paddingTop: 12, fontSize: "8.5pt", color: "#8c919c", lineHeight: 1.5 }}>
+            <div style={{ borderTop: notice ? "none" : "1px solid #e4e7ec", marginTop: notice ? 10 : 26, paddingTop: notice ? 0 : 12, fontSize: "8.5pt", color: "#8c919c", lineHeight: 1.5 }}>
               {footer}
             </div>
           </div>

@@ -13,6 +13,7 @@ import {
   type LetterMetaRow,
 } from "@/components/letter/SinglePageLetter";
 import { DocNotFound, oneParam, conditionWord, officePhone } from "../../_letters/util";
+import { INSPECTION_LIMITATION_NOTICE } from "@/lib/compliance-notices";
 
 export const metadata = { title: "Rigging inspection summary — Quartzite-6" };
 
@@ -104,6 +105,7 @@ export default async function InspectionSummaryLetterPage({
         { paragraphs: [t("countInterpretation")] },
         { heading: "Disclaimer", paragraphs: [t("disclaimer")] },
       ]}
+      notice={INSPECTION_LIMITATION_NOTICE}
       footer={`Prepared by ${rec.inspector || rec.owner || companyName} · ${companyName} · Office: ${officePhone(settings)}`}
       backHref={`/inspections/${encodeURIComponent(rec.id)}`}
       backLabel="← Inspection"

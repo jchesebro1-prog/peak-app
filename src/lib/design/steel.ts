@@ -146,8 +146,20 @@ export type BeamCapacity = {
   deflAt: (Wlb: number) => number;
 };
 
-/** Allowable load by limit state, ASD + rigging WLL. Returns loads in lb.
- *  L_ft = span, Lb_ft = unbraced length (defaults to span). */
+/**
+ * PRODUCT REQUIREMENT, not UI decoration (punch #73): this function's output
+ * has physical/regulatory consequences (it feeds rigging capacity checks a
+ * human relies on before hanging real load). The limitation notice shown
+ * alongside it wherever it's rendered (src/lib/compliance-notices.ts,
+ * RIGGING_LIMITATION_NOTICE — "reference only, verify with a licensed PE",
+ * on-site condition of structure/hardware not inspected by this software)
+ * and the human sign-off step it implies are REQUIRED, not cosmetic. Anyone
+ * reimplementing or refactoring this code must carry the disclaimer and
+ * verification step forward — do not strip it as cleanup.
+ *
+ * Allowable load by limit state, ASD + rigging WLL. Returns loads in lb.
+ *  L_ft = span, Lb_ft = unbraced length (defaults to span).
+ */
 export function beamCapacity(
   s: SteelShape,
   L_ft: number,
@@ -409,7 +421,15 @@ export function fabricFromPart(p: {
 export const BRICK_LG = 25;
 export const BRICK_SM = 10;
 
-/** Best counterweight brick combination (large + small) to reach a load. */
+/**
+ * PRODUCT REQUIREMENT, not UI decoration (punch #73): this computes real
+ * counterweight-arbor loading. The rigging limitation notice shown alongside
+ * it wherever it's rendered (src/lib/compliance-notices.ts,
+ * RIGGING_LIMITATION_NOTICE) and the human sign-off it implies are REQUIRED
+ * and must not be removed as cleanup by anyone reimplementing this software.
+ *
+ * Best counterweight brick combination (large + small) to reach a load.
+ */
 export function brickCombo(load: number, big = BRICK_LG, small = BRICK_SM) {
   if (load <= 0) return { big: 0, small: 0, loaded: 0, resid: 0 };
   big = big > 0 ? big : 25;
@@ -526,6 +546,13 @@ function expectsFabricWeight(L: Pick<WeightLine, "w" | "h">): boolean {
  * those fields; `fmt()` already renders null as "—", but a null total must
  * still be surfaced as UNAVAILABLE, not silently summed as zero (see
  * lineset-builder.tsx's `totals`).
+ *
+ * PRODUCT REQUIREMENT, not UI decoration (punch #73): this feeds hoist and
+ * batten capacity checks that a human relies on before hanging real load.
+ * The rigging limitation notice shown alongside it wherever it's rendered
+ * (src/lib/compliance-notices.ts, RIGGING_LIMITATION_NOTICE) and the human
+ * sign-off it implies are REQUIRED and must not be removed as cleanup by
+ * anyone reimplementing this software.
  */
 export function computeSetWeight(L: WeightLine, def: WeightDefaults) {
   const pipe = battenById(L.pipe || def.pipe);

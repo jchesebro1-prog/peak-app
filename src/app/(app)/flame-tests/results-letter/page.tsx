@@ -7,6 +7,7 @@ import {
   type LetterMetaRow,
 } from "@/components/letter/SinglePageLetter";
 import { DocNotFound, oneParam, officePhone, flameTotals } from "../../_letters/util";
+import { FLAME_TEST_LIMITATION_NOTICE } from "@/lib/compliance-notices";
 
 export const metadata = { title: "Flame-test results — Quartzite-6" };
 
@@ -88,6 +89,7 @@ export default async function FlameResultsLetterPage({
         { heading: "Results", paragraphs: [t("resultsLine"), t("findingsNote")] },
         { paragraphs: [t("failedNote"), t("retainNote")] },
       ]}
+      notice={FLAME_TEST_LIMITATION_NOTICE}
       footer={`Questions may be directed to ${technician} · ${companyName} · Office: ${officePhone(settings)} · ${job.contact?.email || ""}`}
       backHref={`/flame-tests/results?job=${encodeURIComponent(job.id)}`}
       backLabel="← Flame test"

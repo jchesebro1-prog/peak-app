@@ -14,6 +14,7 @@ import {
   type LoadType,
   type BattenPoint,
 } from "@/lib/design/steel";
+import { RIGGING_LIMITATION_NOTICE } from "@/lib/compliance-notices";
 
 /* ---------------- shared styles ---------------- */
 const card: React.CSSProperties = { background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: "16px 18px", boxShadow: "0 1px 2px rgba(0,0,0,.04)" };
@@ -58,7 +59,13 @@ export function SteelCalculator() {
       {tab === "db" && <Database />}
       <p style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 18, lineHeight: 1.5 }}>
         AISC 360 ASD (Ω<sub>b</sub>=1.67 flexure). Rigging WLL divides the plastic/shear strength by
-        your design factor. Reference only — verify with a licensed PE for any life-safety rigging.
+        your design factor.
+      </p>
+      {/* Limitation notice (punch #73). Wording lives in ONE place
+          (src/lib/compliance-notices.ts) — see the DRAFT WORDING comment
+          there; not yet reviewed by counsel or signed off by product. */}
+      <p style={{ fontSize: 11.5, color: "#6b7079", marginTop: 8, lineHeight: 1.5, borderTop: "1px solid #eef0f3", paddingTop: 10 }}>
+        {RIGGING_LIMITATION_NOTICE}
       </p>
     </div>
   );

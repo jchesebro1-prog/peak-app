@@ -2,6 +2,7 @@ import { fmtLong } from "@/lib/stores/flame-jobs";
 import { renderField } from "@/lib/templates";
 import type { TemplateOverrides } from "@/lib/templates";
 import letterhead from "./peak-letterhead.jpg";
+import { FLAME_TEST_LIMITATION_NOTICE } from "@/lib/compliance-notices";
 
 /**
  * Field Flame Inspection report document body — the three printable variants
@@ -844,6 +845,24 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
           </div>
         )}
 
+        {/* Limitation notice (punch #73) — shared by all three variants
+            (letter/summary/certificate). Wording lives in ONE place
+            (src/lib/compliance-notices.ts) — see the DRAFT WORDING comment
+            there; not yet reviewed by counsel or signed off by product. */}
+        <div
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "8pt",
+            color: "#8c919c",
+            lineHeight: 1.5,
+            borderTop: "1px solid #eef0f3",
+            paddingTop: 8,
+            marginTop: 22,
+          }}
+        >
+          {FLAME_TEST_LIMITATION_NOTICE}
+        </div>
+
         {/* shared running footer */}
         <div
           style={{
@@ -855,7 +874,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
             color: "#aab0bb",
             borderTop: "1px solid #eef0f3",
             paddingTop: 6,
-            marginTop: 26,
+            marginTop: 10,
           }}
         >
           <span>

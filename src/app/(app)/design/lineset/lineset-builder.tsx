@@ -46,6 +46,7 @@ import {
 import { battenLenFt, BATTEN_OVERHANG_FT } from "@/lib/design/venue-dims";
 import { SaveBar, type SavedRef } from "../save-bar";
 import { downloadCsv } from "../export";
+import { RIGGING_LIMITATION_NOTICE } from "@/lib/compliance-notices";
 
 /* ---- saved-design data model (P3) ---------------------------------------- */
 
@@ -874,8 +875,14 @@ export function LinesetBuilder({
             they regenerate; weight entries follow their line (1st Electric stays 1st Electric). Fabric, dimensions and
             rigging are hand-entered per line; weight, checks and brick combos are calculated. Goods = flat width
             (× fullness) × cut height × fabric weight + chain + hardware. Motor lines check hoist capacity and batten
-            bending; CW lines pick a 25/10 lb brick combo. Reference only — verify with a licensed PE for any
-            life-safety rigging.
+            bending; CW lines pick a 25/10 lb brick combo.
+          </p>
+          {/* Limitation notice (punch #73) — kept out of pk-no-print so it
+              also shows on the printed schedule. Wording lives in ONE place
+              (src/lib/compliance-notices.ts) — see the DRAFT WORDING comment
+              there; not yet reviewed by counsel or signed off by product. */}
+          <p style={{ fontSize: 11.5, color: "#6b7079", marginTop: 10, lineHeight: 1.5, borderTop: "1px solid #eef0f3", paddingTop: 10 }}>
+            {RIGGING_LIMITATION_NOTICE}
           </p>
         </div>
       </div>

@@ -18,6 +18,7 @@ import {
 } from "@/lib/stores/inspections";
 import type { Office } from "@/lib/settings";
 import { RenovationQuoteButton } from "./controls";
+import { INSPECTION_LIMITATION_NOTICE } from "@/lib/compliance-notices";
 
 export type ReportLayout = "report" | "dossier" | "compact";
 
@@ -759,6 +760,15 @@ export function InspectionReportSheets({
             <RenovationQuoteButton id={r.id} />
           </div>
           <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 22, lineHeight: 1.6 }}>{recBasis}</div>
+          {/* Limitation notice (punch #73) — on this always-rendered closing
+              page so it appears regardless of the Standards/boilerplate
+              toggle (`showBoiler`) or report layout. Wording lives in ONE
+              place (src/lib/compliance-notices.ts) — see the DRAFT WORDING
+              comment there; not yet reviewed by counsel or signed off by
+              product. */}
+          <div style={{ fontSize: 11, color: "#8c919c", marginTop: 10, lineHeight: 1.6, borderTop: "1px solid #eceef1", paddingTop: 10 }}>
+            {INSPECTION_LIMITATION_NOTICE}
+          </div>
           <div style={{ flex: 1 }} />
           <div style={{ marginTop: 26, paddingTop: 16, borderTop: "1px solid #eceef1", display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
             <div>
