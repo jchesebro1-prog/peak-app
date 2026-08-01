@@ -1025,7 +1025,11 @@ export default function EstimatorClient({
   // approved or sent — a stand-in for a review that happened by phone/Teams
   // rather than in the app. Available regardless of canApprove: this is
   // deliberately NOT a permission gate (see attestApprovalAction).
-  const rbCanAttest = isOwner && rev.state !== "approved" && !sentAlready;
+  // `changes` is excluded (Jeff 2026-08-01): a reviewer who formally asked for
+  // changes can't be attested past — resubmit for review instead. The server
+  // enforces this too (canAttestApproval); hiding it here is only convenience.
+  const rbCanAttest =
+    isOwner && rev.state !== "approved" && rev.state !== "changes" && !sentAlready;
   const showReviewBar = !!loadedId;
 
   /* ---------------- ctx bar options ---------------- */

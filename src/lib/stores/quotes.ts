@@ -247,6 +247,33 @@ export function validateAttestationNote(note: string | null | undefined): Attest
   return { ok: true, note: trimmed };
 }
 
+/**
+ * May this quote be self-attested at all (punch #60, Jeff 2026-08-01)?
+ *
+ * Attestation exists to record a review that happened OFF platform — a phone
+ * call, a Teams call. It is not a way around a review that happened ON it.
+ * So a reviewer who formally pressed "request changes" cannot be attested
+ * past: `changes` is an explicit human decision, and letting the quote's own
+ * author overrule it with a self-written note would empty the review queue of
+ * meaning. Clear the changes state the normal way (resubmit for review) and
+ * the attested path opens back up.
+ *
+ * Enforced server-side. The UI also hides the control in this state, but that
+ * is a convenience — the UI-only gate WAS the original #60 defect.
+ */
+export function canAttestApproval(
+  review: QuoteReview | null | undefined
+): { ok: true } | { ok: false; error: string } {
+  if (review?.state === "changes") {
+    return {
+      ok: false,
+      error:
+        "A reviewer asked for changes on this quote. Address them and resubmit for review — a self-attested approval can't override a review that happened in the app.",
+    };
+  }
+  return { ok: true };
+}
+
 /** All quotes, newest activity first (port of getAll). */
 export async function getAll(): Promise<Quote[]> {
   const list = await listDocs<Quote>("quotes");

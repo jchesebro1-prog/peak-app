@@ -2133,6 +2133,7 @@ import {
   hasApproval,
   requireApprovalToAdvance,
   validateAttestationNote,
+  canAttestApproval,
   type QuoteReview,
 } from "@/lib/stores/quotes";
 
@@ -2152,6 +2153,23 @@ function review(over: Partial<QuoteReview> = {}): QuoteReview {
 
 {
   // No review at all (null) — the "requireUser() only" hole this closes.
+  /* Attestation cannot override an in-app "request changes" (Jeff 2026-08-01).
+     Attestation records an OFF-platform review; it is not a way around one
+     that happened in the app. */
+  ok(
+    !canAttestApproval(review({ state: "changes" })).ok,
+    "#60: a formal 'changes requested' BLOCKS self-attestation — a reviewer's explicit decision can't be overruled by the author's own note"
+  );
+  ok(
+    canAttestApproval(review({ state: "none" })).ok,
+    "#60: attestation is available on a quote that has never been reviewed — that is the whole point of the path"
+  );
+  ok(
+    canAttestApproval(review({ state: "in_review" })).ok,
+    "#60: attestation is available while merely awaiting a reviewer (the call may have already happened)"
+  );
+  ok(canAttestApproval(null).ok, "#60: attestation is available with no review record at all");
+
   ok(!hasApproval(null), "#60: hasApproval is false with no review record");
   ok(!hasApproval(undefined), "#60: hasApproval is false with an undefined review record");
   ok(!hasApproval(review({ state: "none" })), "#60: hasApproval is false for state 'none'");

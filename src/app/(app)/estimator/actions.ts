@@ -16,6 +16,7 @@ import {
   submitForReview,
   update,
   validateAttestationNote,
+  canAttestApproval,
   type Quote,
   type QuoteReview,
   type QuoteStatus,
@@ -312,6 +313,18 @@ export async function attestApprovalAction(
       review: cur.review ?? null,
       status: cur.status ?? null,
       error: "Only the quote's owner can attest an approval on it.",
+    };
+  }
+  // Punch #60 (Jeff 2026-08-01): attestation records an OFF-platform review;
+  // it is not a way around an in-app one. A formal "request changes" blocks
+  // it until the author resubmits.
+  const attestable = canAttestApproval(cur.review ?? null);
+  if (!attestable.ok) {
+    return {
+      ok: false,
+      review: cur.review ?? null,
+      status: cur.status ?? null,
+      error: attestable.error,
     };
   }
   const validated = validateAttestationNote(note);
