@@ -499,7 +499,16 @@ matches the words — and treat (ii) as part of item 4.
 
 ---
 
-## 9. Team members: contact-card detail, email correction, active/archived/removed — OPEN
+## 9. Team members: contact-card detail, email correction, active/archived/removed — PARTIAL (audited 2026-07-29)
+
+> **Audit note 2026-07-29:** part 2 (the email-lockout defect) was fixed back in D82.
+> D126 (`241b6f8`) replaced the seed roster with the real Peak team and added
+> `scripts/sync-team-roster.ts`; D127 (`4895f6f`) gave rows a real Remove action
+> distinct from deactivate; D128 (`8f80477`) restored Jena and Jack.
+> **Still unbuilt:** `src/db/schema.ts:16-27` holds only
+> `id, name, email, googleEmail, roles[], color, initials, active, createdAt, photoUrl`
+> — no title, phone, mobile, office assignment or certification fields (decision A),
+> and no `archived`/`removed` column, just the `active` boolean (decision C).
 
 **Area:** `src/db/schema.ts:16-27` (`users`), `src/lib/users.ts`, `src/app/(app)/settings/settings-client.tsx:1197-1341`,
 `src/auth.ts:81-119`, all letter/report signature blocks
@@ -827,7 +836,15 @@ pay for itself immediately across those call sites** — recommend doing that ra
 
 ---
 
-## 13. Service records → projects (inspections, service, warranty) — OPEN
+## 13. Service records → projects (inspections, service, warranty) — PARTIAL: bug fixed, feature not (audited 2026-07-29)
+
+> **Audit note 2026-07-29:** the phantom-projects bug IS fixed —
+> `src/lib/stores/projects.ts:613-616` and `:653-654` now exclude
+> `flame_test | repair | inspection | consulting` from the projects sync (the
+> original code excluded only `flame_test`). **The feature is untouched:**
+> `inspections.ts` and `repair-jobs.ts` contain no `signoff` or `projectId`
+> reference at all, and the three separate schedulers are unchanged. Remaining work
+> is the sign-off → project spawn and the scheduler unification.
 
 **Area:** `src/lib/stores/projects.ts`, `inspections.ts`, `repair-jobs.ts`, `flame-jobs.ts`,
 `src/app/(app)/schedule/`, plus three separate scheduler UIs
@@ -929,7 +946,14 @@ Queued to build later per Jeff — follow the sequencing above.
 
 ---
 
-## 14. Catalog appears unlinked between dashboard, General, and the estimate window — OPEN
+## 14. Catalog appears unlinked between dashboard, General, and the estimate window — PARTIAL (audited 2026-07-29)
+
+> **Audit note 2026-07-29:** the dashboard card is real now —
+> `src/app/(app)/home-catalog.tsx` takes `books` and `partCount` derived server-side
+> from the catalog store, and the hardcoded `BOOKS` array is gone. **Both answered
+> decisions remain unbuilt:** catalog parts still have no `updatedAt`, so there are
+> no age pills; and `SUGGEST` / `GENERIC_SUGGEST` are still hardcoded at
+> `estimator/estimator-data.ts:129,149`, still consumed at `estimator-client.tsx:1806`.
 
 **Area:** `src/app/(app)/page.tsx:72-78` + `:1431-1516`, `src/app/(app)/catalog/`,
 `src/app/(app)/estimator/`, `src/lib/stores/catalog.ts`
@@ -1175,7 +1199,17 @@ prerequisites; do not build the email path before item 9 and a send log.
 
 ---
 
-## 17. Tasks on install projects and quotes (review / communication checklist) — OPEN (A answered: real table)
+## 17. Tasks on install projects and quotes — PARTIAL, much further along than this entry said (audited 2026-07-29)
+
+> **Audit note 2026-07-29:** decision A shipped. `src/db/doc-tables.ts:74` registers a
+> real `tasks` doc table, and `src/lib/stores/tasks.ts` implements `TaskRecord` with
+> `projectId` / `quoteId` pointers, `assigneeUserId` plus a denormalized name, a
+> 4-state status, `dueAt`, `notes`, a `coverageKey` de-dup, and a `TASK_TEMPLATE` per
+> project stage. The office UI exists at `src/app/(app)/projects/tasks-card.tsx`,
+> wired through `view.tsx` and `actions.ts`. **Remaining:** quotes have zero task UI
+> (`quoteId` is written as `null` everywhere, `tasks.ts:64`), and `TASK_TEMPLATE`
+> ships empty by design, waiting on Jeff's checklist content (decision B).
+> **This also unblocks #16** — that dependency is satisfied.
 
 **Area:** `src/lib/stores/projects.ts:161-168` (`ProjectTask`), `src/app/(app)/projects/view.tsx`,
 `src/app/(app)/field-work/`, `src/lib/stores/quotes.ts`
@@ -1995,7 +2029,15 @@ roles, error messages) per the spec's judgment note. URLs, nav keys, and the
 
 ---
 
-## 26. Fixture cross-reference in the app — OPEN
+## 26. Fixture cross-reference in the app — DONE (status corrected 2026-07-29 by code audit)
+
+> **Audit note 2026-07-29:** this shipped and the status line was stale.
+> `src/app/(app)/design/fixtures/page.tsx` renders the 7 ETC matrices (spec +
+> equivalents sheets, dividers, internal-only) from
+> `src/lib/design/fixture-crossref.json` (3,968 lines), explicitly headed "punch #26".
+> Caveats: the data is a checked-in JSON file, not a store or table, and it lives
+> under Design rather than a Knowledge tab, so decisions A/B were settled by
+> implementation rather than by Jeff. Revisit if #56 moves reference content.
 
 **Area:** new screen, home TBD — under Design or the proposed Knowledge tab (item 27). Closest
 existing analog: `src/app/(app)/design/motors/page.tsx` (Motor Library — a curated ETC-reference
@@ -2249,7 +2291,13 @@ it — likely alongside item 30.** Not a full rewrite.
 
 ---
 
-## 32. Adding a venue: address search doesn't autofill the street on select — OPEN (bug)
+## 32. Adding a venue: address search doesn't autofill the street on select — DONE (status corrected 2026-07-29 by code audit)
+
+> **Audit note 2026-07-29:** fixed, status line was stale. Both prescribed edits are
+> in: `src/app/(app)/companies/actions.ts:113` maps `street: h.street`, and
+> `edit-modal.tsx:254-256` sets `address: addressFromHit(h)` alongside city, state,
+> lat and lng. The `addressFromHit` helper implies the road/display-name fallback
+> question was answered too.
 
 **Area:** `src/app/(app)/companies/edit-modal.tsx:209-212` (`pickAddress`) +
 `src/app/(app)/companies/actions.ts:69-80` (`searchAddressAction` → `AddressHitVM`). The address
@@ -2600,7 +2648,15 @@ smaller (patterns exist), B (narrative mode) is the larger design piece.
 
 ---
 
-## 37. Estimator: enter a category sell price, back-calculate the margin — OPEN
+## 37. Estimator: enter a category sell price, back-calculate the margin — DONE (status corrected 2026-07-29 by code audit)
+
+> **Audit note 2026-07-29:** shipped, status line was stale.
+> `src/app/(app)/estimator/section-card.tsx:274-291` adds an internal-only "Sell"
+> input; on blur it computes `m = ((target - itemsCost) / target) * 100`, clamps to
+> 95, and calls `p.onSetMargin(String(m))` — decision A's recommended "solve for the
+> uniform section margin". **Two sub-decisions NOT verified:** B (does the override
+> persist across quote revisions?) and C (guardrail when the solved margin lands
+> below the floor). Confirm both before calling this fully closed.
 
 **Area:** `src/app/(app)/estimator/section-card.tsx` (per-section margin input `onSetMargin`),
 `src/app/(app)/estimator/pricing.ts` (`totals()` and the `sell = cost/(1−margin)` model),
@@ -3541,7 +3597,18 @@ sharing links directly (recommended, otherwise Drive ACLs become the security bo
 
 ---
 
-## 59. Real data in the database, begin the migration off demo seeds, JEFF ASKED TO BEGIN
+## 59. Real data in the database, begin the migration off demo seeds, STEP 0 SHIPPED, RUN PENDING
+
+> **Audit note 2026-07-29:** step 0 exists and is verified read-only —
+> `scripts/inventory.ts` (267 lines) plus `"db:inventory"` in `package.json:15`,
+> commit `e552a4a`; it only selects and counts, never writes. Commit `2cd1384` made
+> every db script resolve and announce its target. The real-roster commits
+> (`241b6f8` / `8f80477`) are one genuine slice of real data landed.
+> **Not yet done:** the inventory has only been run locally (119 rows,
+> `catalog_parts` = 29, all demo), never against production; the 14,674-part dealer
+> import has not been re-run in either environment; no `import:daylite --commit` run
+> is recorded; no export or backup taken; and demo-plus vs go-live is still undecided.
+> `clearDemoData()` remains collection-wide, so the mixed quotes/leads hazard stands.
 
 **Area:** `src/db/seed-data.ts`, `src/app/(app)/import/`, catalog import scripts,
 `docs/MASTER-HOWTO.md` §7
@@ -3662,3 +3729,399 @@ Studio already has a save-bar + per-customer saved designs.
 MASTER-QUESTIONS.md as `docs/IDEAS.md`) **no longer exists in the repo.** Parked here for now —
 **Jeff: want IDEAS.md recreated as the home for this kind of thing, or keep ideas in this file
 under a clearly marked section?**
+
+---
+
+# Quartzile-6 Punch List — batch started 2026-07-29
+
+> New batch opened at Jeff's request. Items continue the running numbering at **#60**.
+> Log-only until Jeff says to implement.
+
+---
+
+## Items #60–#73 — provenance note (2026-07-31)
+
+**These were NOT reported by Jeff.** They came out of the source audit done to produce the
+Quartzite-6 Implementation Brief (`Dropbox/Claude/Quartzite-6 Implementation Brief/`, ~19,900 lines
+across 8 documents), written for a third party who wants to rebuild the app and/or incorporate
+portions of it. Every claim below was re-verified against `main` @ `8f80477` before logging; the
+file:line references are current as of 2026-07-31.
+
+They are logged here because they need **Jeff's call**, not because anyone is proposing to build
+them. Same rule as the rest of the file: log-only until he says so.
+
+Grouped: **#60–#67 defects and one design decision · #68–#71 things that can't be represented as
+working · #72–#73 commercial and policy.**
+
+The briefs carry a much deeper catalogue than this — 23 items for the pricing core, 15 for Design,
+30 for the Grid, plus ~105 open questions across the six module documents. Only the items with a
+real consequence are promoted here; the rest are stubs, dead code and documented quirks that matter
+to a porter but not to Peak.
+
+---
+
+## 60. Quote "Send to customer" and status changes have NO server-side permission or approval gate — OPEN (SECURITY)
+
+**Area:** `src/app/(app)/estimator/actions.ts:182-191` (`setStatusAction`), `:235-241`
+(`sendToCustomerAction`)
+**Reported:** 2026-07-31 (source audit)
+
+**Finding:** Both actions call `await requireUser()` and nothing else. `sendToCustomerAction` calls
+`setStatus(id, "sent")` with **no check that the quote was ever approved**, and `setStatusAction`
+accepts any status in `STAGES` — including `won` — from any signed-in user.
+
+The contrast inside the same file is what makes this clearly unintended: every sibling review action
+gates properly.
+
+| Action | Line | Gate |
+|---|---|---|
+| `claimReviewAction` | 204 | `can("approve", user.roles)` |
+| `approveReviewAction` | 213 | `can("approve", user.roles)` |
+| `requestChangesAction` | 222 | `can("approve", user.roles)` |
+| `setStatusAction` | 182 | **`requireUser()` only** |
+| `sendToCustomerAction` | 235 | **`requireUser()` only** |
+
+**Why it matters:** the entire review/approval workflow (#24, D84) is enforced in the UI only. Any
+authenticated user — including a low-privilege one — can send an unapproved quote to a customer, or
+mark a quote won and trigger the downstream project creation. A hidden button is not an access
+control.
+
+**Open questions for Jeff:** should sending require the `approve` permission, ownership of the
+quote, an `approved` review state, or some combination? Should `won` be restricted separately from
+`sent`? (Note the no-self-approval rule already exists for reviews — sending should probably respect
+the same spirit.)
+
+**Status:** OPEN — logged only, no code. **Recommend fixing regardless of the third-party project.**
+
+---
+
+## 61. Pull-sync only ever returns newly INSERTED documents — `seq` never advances on UPDATE — OPEN (DATA INTEGRITY)
+
+**Area:** `src/db/doc-tables.ts:37` (the `seq` column), `src/db/doc-store.ts` (`listSince`)
+**Reported:** 2026-07-31 (source audit)
+
+**Finding:** `seq` is declared `bigserial("seq", { mode: "number" }).notNull()`. Postgres assigns a
+serial default **on INSERT only** — an UPDATE leaves it untouched unless something explicitly bumps
+it, and nothing does. The pull-sync hot path is `WHERE seq > cursor ORDER BY seq`.
+
+The comments in the file assert the opposite, which is how this survived:
+- `:21` — *"seq: monotonic per-table write cursor — powers Phase 6 pull sync"*
+- `:44-45` — *"Pull-sync hot path … seq is monotonic per row"*
+
+**Why it matters:** an edit or soft-delete to any document whose `seq` is already below a client's
+cursor is **invisible to that client forever**. An offline field device syncs once, then silently
+stops seeing changes to everything it already has. It never errors; it just quietly holds stale data.
+
+**Fix sketch:** bump `seq` on every write (trigger, or explicit in `patchDoc`/`upsertDoc`), or move
+the cursor to `updatedAt` with a tiebreak. The index at `:46` stays useful either way.
+
+**Open question for Jeff:** is offline field sync actually in use on any device yet? If it isn't,
+this is cheap to fix now and expensive to fix after real field data exists.
+
+**Status:** OPEN — logged only, no code.
+
+---
+
+## 62. No database transactions anywhere, and ID minting can silently overwrite a record — OPEN
+
+**Area:** `src/db/doc-store.ts:253` (`nextPrefixedId`), `insertDocIfAbsent` (same file),
+`src/lib/stores/*`
+**Reported:** 2026-07-31 (source audit)
+
+**Finding, two related halves:**
+
+1. **Zero server-side transactions.** The only `.transaction(` anywhere in `src/` is
+   `src/lib/sync/idb.ts:78` — that's IndexedDB in the browser, not Postgres. Every multi-write
+   server operation is non-atomic and can half-apply.
+2. **`nextPrefixedId` is a full-table max-scan.** Two concurrent creates read the same max, compute
+   the same `Q-####`, and the second `upsertDoc` overwrites the first via `onConflictDoUpdate`. Not
+   a constraint violation — a silent replacement.
+
+`insertDocIfAbsent` exists precisely to close this (decision **D73**) but is wired into only three
+places: `stores/notes.ts`, `stores/tasks.ts`, `lib/gmail/bridge.ts`. Every other minted id —
+quotes, projects, jobs, grid projects, engagements — still uses the racy path.
+
+**Why it matters:** two people creating quotes at the same moment can lose one, with no error
+anywhere. The same race applies to `setBlob`, which is how **customer-portal credentials** are
+stored.
+
+**Open question for Jeff:** adopt `insertDocIfAbsent` across all minting call sites (cheap, keeps
+the readable `Q-####` format), or move to real database sequences? The first is a day's work; the
+second is a migration.
+
+**Status:** OPEN — logged only, no code. **Recommend fixing regardless of the third-party project.**
+
+---
+
+## 63. The Grid quote prices ONLY curtains at the customer's tier — devices, wire and labor use raw catalog list — OPEN (DECISION FOR JEFF)
+
+**Area:** `src/app/(app)/design/grid/[id]/actions.ts:433+` (`createDraftQuoteAction`)
+**Reported:** 2026-07-31 (source audit)
+
+**Finding — and this one is deliberate in the code, which is why it needs a decision rather than a
+fix.** Inside `createDraftQuoteAction`:
+
+| Line category | How it prices | Tier applied? |
+|---|---|---|
+| Curtains | `priceGridCurtains(placements, catalog, tier.margin)` | **Yes** |
+| Devices | `bomLines(placements, catalog)` / `bomTotals(...)` | No — catalog `list` |
+| Wire runs | `routeLines(routes, catalog, calibrations)` | No — catalog `list` |
+| Labor | `price: part.list` | No — catalog `list` |
+
+The tier *is* resolved (`resolveTier(project.customerId)`), and the in-code comment states it
+plainly: *"The tier margin is resolved BEFORE pricing because curtains price through it (#49)."*
+
+**Why it matters:** the minted quote stamps `pricingTier` and `tierMargin`, so the document claims a
+tier that three of its four line categories never used. A Platinum customer gets tier treatment on
+made-to-order curtains and list price on everything else. Handover chapter 13 describes the button
+as pricing lines "at the customer's tier", which overstates what ships — so **the doc and the code
+disagree, and only Jeff can say which is right.**
+
+**Open question for Jeff:** should Grid devices, wire and labor also price through the tier margin?
+Or is list correct for stocked parts, with the tier applying only to made-to-order goods? Until this
+is answered, neither the current app nor any reimplementation can be called correct. **Ties to #11
+(customer tiers → default margin) and #49 (curtains as a first-class drop-in).**
+
+**Status:** OPEN — logged only, no code. Decision blocks correctness, not just a port.
+
+---
+
+## 64. An unresolved fabric silently zeroes BOTH drape weight and track weight — OPEN (SAFETY-ADJACENT)
+
+**Area:** `src/lib/design/goods.ts` (`computeSetWeight`, `mergeLineFabric`), Lineset Builder
+**Reported:** 2026-07-31 (source audit)
+
+**Finding:** track weight is gated on fabric resolution, so a line whose fabric doesn't resolve
+contributes `goods 0` **and** `trackWt 0`. On the verified 16-line fixture, an empty fabric catalog
+takes the total from **6,621.61 lb to 5,409.9 lb** — an 18% under-report, with no warning.
+
+Compounding it: `mergeLineFabric` prefers `fabResolved` over a `fab` name lookup, so a naive
+`{...base, ...load}` spread makes a user's fabric override a **silent no-op on weight**. The line
+shows the new fabric and keeps the old weight.
+
+**Why it matters:** this is a rigging load number. It feeds hoist selection and batten capacity —
+steel pipe and heavy fabric over people's heads. It fails quiet and light, which is the worst
+direction. Reported as a shipped bug twice already.
+
+**Open question for Jeff:** should an unresolved fabric **hard-fail** the weight calculation (refuse
+to produce a number) rather than contribute zero? A missing weight is safe; a wrong low weight is
+not. **Ties to #29 (lineset weights) and #50.**
+
+**Status:** OPEN — logged only, no code.
+
+---
+
+## 65. Two "promote to quote" paths produce differently-priced quotes from the same design — OPEN
+
+**Area:** Quick Design promotion — `addToQuotesAction` / `promoteDesignAction`
+**Reported:** 2026-07-31 (source audit)
+
+**Finding:** the same saved design, promoted through the two different buttons, yields two different
+quote values. They also differ on whether the pricing tier is stamped at birth (Quick Design stamps;
+the plain sandbox promote does not).
+
+**Why it matters:** same design, two prices, depending on which control the estimator happened to
+click. Nothing surfaces the difference.
+
+**Open question for Jeff:** which path is canonical? Recommend collapsing to one and deleting the
+other. **Ties to #41 (split the design estimator) and #51 (design tab consolidation).**
+
+**Status:** OPEN — logged only, no code.
+
+---
+
+## 66. The estimator venue adapter maps `width → proWidthFt` for EVERY venue kind — OPEN
+
+**Area:** `src/lib/design/venue-dims.ts` (`venueDimsFromEstimator`)
+**Reported:** 2026-07-31 (source audit)
+
+**Finding:** the adapter maps the estimator's `width` onto `proWidthFt` unconditionally. That is
+correct for a proscenium house, where `width` *is* the opening — and wrong for **church, flat-floor,
+black box, arena and gym**, where the estimator's `width` is already wall-to-wall.
+
+`proWidthFt` drives every drape width and, through `battenLenFt()`, every pipe length. So a
+non-proscenium room sizes every drape and every batten off the wrong number. A separate wing
+double-count exists in the same adapter.
+
+**Why it matters:** there is deliberately **no bare `width` field** on `VenueDims` precisely to stop
+this confusion, and the adapter reintroduces it.
+
+**Open question for Jeff:** what *should* `proWidthFt` be for a room with no proscenium — the full
+wall-to-wall width, a fraction of it, or should those venue kinds take a different sizing path
+entirely? This is a domain call, not a code call.
+
+**Status:** OPEN — logged only, no code.
+
+---
+
+## 67. Procurement PO numbers are random within a 39-value range — OPEN
+
+**Area:** `src/lib/stores/projects.ts:677`
+**Reported:** 2026-07-31 (source audit)
+
+**Finding:** `if (!l.po) l.po = "PO-" + (1060 + Math.floor(Math.random() * 39));`
+
+Thirty-nine possible values (`PO-1060` … `PO-1098`) across every procurement line in the system.
+Collisions are not a risk, they are the expected case.
+
+**Why it matters:** if these are read as real purchase orders by anyone in the field, they are
+wrong and they repeat. If they're demo dressing, they shouldn't survive the move to real data
+(**#59**).
+
+**Open question for Jeff:** are procurement POs going to be real (in which case this needs a proper
+mint and probably a vendor link), or should the field be blank until someone types the actual PO?
+
+**Status:** OPEN — logged only, no code.
+
+---
+
+## 68. Inspection rate defaults are explicit placeholders — must not ship as real pricing — OPEN (JEFF HOMEWORK)
+
+**Area:** `src/lib/stores/pricing.ts:102-114` (`INSPECTION_RATE_DEFAULTS`)
+**Reported:** 2026-07-31 (source audit)
+
+**Finding:** the comment at `:103` says it outright — *"numbers are placeholders, editable in
+Estimating Rules, same as every other rate."* Current values:
+
+| Rate | Value |
+|---|---|
+| `laborRate` | 95 |
+| `mileageRate` | 0.70 |
+| `lineSetMinutes` | 15 |
+| `baseHours` | 2 |
+| `level2Mult` | 1.75 |
+| `minFee` | 650 |
+| `margin` | 0.30 |
+| `travelRoundMin` | 15 |
+
+**Why it matters:** every inspection quote prices from these until someone sets real ones. The
+engine itself is sound and fully specified — it's the numbers that are invented.
+
+**Ask (Jeff):** the real inspection rates. Same shape as the flame-test and repair rate sets. **Ties
+to #39 (catalog import awaits Jeff) and #56 (rules/tiers under Knowledge).**
+
+**Status:** OPEN — content, not code.
+
+---
+
+## 69. Email is SIMULATED unless `GMAIL_ENABLED` is set — OPEN (how we describe the product)
+
+**Area:** `src/lib/gmail/config.ts:91`, `src/lib/stores/comms.ts:482`,
+`src/app/(app)/settings/settings-client.tsx:115`
+**Reported:** 2026-07-31 (source audit)
+
+**Finding:** sending requires `googleConfigured() && process.env.GMAIL_ENABLED === "true"`. Without
+both, sends are simulated. The settings screen says so honestly (*"Gmail isn't enabled on this
+deployment yet"*), so this is a correct dev posture, not a bug.
+
+**Why it's logged:** it's a **representation** item. Email must not be described as working to a
+customer, a partner, or the third party evaluating the software, on any deployment where the flag
+isn't set. **Ties to item 1's "not yet live-tested against real Gmail" and Q-A (deploy accounts).**
+
+**Open question for Jeff:** when do the Google deploy accounts land? Item 1 has been waiting on the
+same blocker since 2026-07-19.
+
+**Status:** OPEN — no code needed; awareness + the deploy accounts.
+
+---
+
+## 70. Import "connectors" are stubs — OPEN
+
+**Area:** `/import` hub
+**Reported:** 2026-07-31 (source audit)
+
+**Finding:** the in-app import connectors don't connect to anything. The Daylite path is real — the
+`pull-daylite` / `audit-daylite-export` / `import-daylite` scripts work — but the connector UI
+promises live integrations that don't exist.
+
+**Open question for Jeff:** build them, or remove them from the screen so it doesn't promise what it
+can't do? Note the brief's recommendation on the module: import tooling is one-time, and rebuilding
+it in any port is probably not worth it. **Ties to #59 (real data migration).**
+
+**Status:** OPEN — logged only, no code.
+
+---
+
+## 71. `TASK_TEMPLATE` ships empty — every project stage auto-creates zero tasks — OPEN (JEFF HOMEWORK)
+
+**Area:** `src/lib/stores/tasks.ts:49-53`, consumed at `src/lib/stores/projects.ts:425-432`
+**Reported:** 2026-07-31 (source audit)
+
+**Finding:** all seven stages are empty arrays:
+
+```ts
+export const TASK_TEMPLATE: Record<ProjectStage, TaskTemplateItem[]> = {
+  procurement: [], delivery: [], scheduled: [], install: [],
+  training: [], signoff: [], complete: [],
+};
+```
+
+The machinery around it works — `expandTemplate`, coverage-key de-dup, `createAutoTask` — and the
+comment at `projects.ts:425` acknowledges it *"ships empty until the checklist"*. There is simply
+nothing to expand.
+
+**Why it's logged:** this is **content, not engineering**. Same shape as
+`DEFAULT_CONSULTING_ASSUMPTIONS`. No amount of building makes stage tasks appear; someone has to
+write the checklist.
+
+**Ask (Jeff):** the per-stage task checklist for install projects. **Ties to #17 (tasks on projects
+and quotes) and #44 (projects lifecycle).**
+
+**Status:** OPEN — content, not code.
+
+---
+
+## 72. Embedded third-party data needs an extraction boundary before any code leaves the building — OPEN (COMMERCIAL)
+
+**Area:** rate tables, parts catalog, `src/lib/design/fixture-crossref.json`, `src/lib/bid-spec.ts`
+**Reported:** 2026-07-31 (raised by the implementation-brief work)
+
+**Finding:** several things that look like ordinary constants did not originate with Peak:
+
+| Data | Where | Concern |
+|---|---|---|
+| Vendor dealer pricing (Rose Brand and others) | Rate tables, calibration anchors | Dealer pricing is typically **confidential under the dealer agreement** — a constraint that exists independently of anything Peak owns |
+| Manufacturer catalog data, especially `cost` | Parts catalog | Same question, per vendor |
+| Fixture cross-reference matrix | `fixture-crossref.json` | Compiled from vendor literature — check redistribution rights |
+| CSI MasterFormat structure | Bid-spec generator | CSI's own licensing position |
+| Real customer/project records | Seeds, any DB copy | Should never transfer with code |
+
+**Recommendation:** separate **code from data** at the extraction boundary — ship the rate
+*mechanism* with placeholder values and let any third party supply their own numbers. The pricing
+core already distinguishes REAL from PLACEHOLDER rates, so the seam exists. This is cleaner
+commercially *and* better engineering.
+
+**Open questions for Jeff:** which vendor agreements govern, and does **field-of-use** need settling
+before any module is shared? Peak sells to schools, churches and theatres; whether a third party may
+address those same customers with a derivative is the question most likely to be contentious later
+and nearly free to answer now. *(Engineering flag, not legal advice — counsel should review.)*
+
+**Status:** OPEN — commercial decision, no code.
+
+---
+
+## 73. Rigging and compliance outputs are safety/regulatory, not just numbers — OPEN (POLICY)
+
+**Area:** `src/lib/design/steel.ts` (`beamCapacity`, flexure/shear), `goods.ts` (`computeSetWeight`,
+`brickCombo`), flame-test and inspection document generation
+**Reported:** 2026-07-31 (raised by the implementation-brief work)
+
+**Finding:** parts of this application compute things with physical and regulatory consequences:
+
+- The weight engine feeds **hoist and batten capacity checks**. `beamCapacity` implements an AISC
+  ASD subset. `brickCombo` computes **counterweight arbor** loading.
+- Flame-test and inspection documents assert **fire-code compliance**, and the inspection rubric is
+  built against OSHA/ANSI/NFPA references.
+
+**Why it's logged:** the disclaimers, tolerances and human sign-off steps in these flows are
+**product requirements, not UI decoration**. It is worth stating that once, on the record, so nobody
+"cleans them up" later — and so anyone reimplementing the software carries them forward. See also
+#64, where a weight silently reads 18% light.
+
+**Open questions for Jeff:** does any of this need **professional engineering sign-off** before it
+goes to a customer? Should generated rigging and compliance documents carry an explicit limitation
+notice naming what was and wasn't verified on site? Who at Peak owns that call?
+
+**Status:** OPEN — policy decision, no code.
+
+---
