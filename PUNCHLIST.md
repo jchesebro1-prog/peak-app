@@ -3737,6 +3737,37 @@ under a clearly marked section?**
 > New batch opened at Jeff's request. Items continue the running numbering at **#60**.
 > Log-only until Jeff says to implement.
 
+## BUILD LOG — 2026-08-01, the #60–#67 defect cluster (Jeff's order to start fixing)
+
+> Branch `punch-60-67-defect-cluster`, off `main` @ `8f80477`. Six items fixed, one
+> partial, one investigated. `tsc --noEmit` 0, `test:specs` ALL PASSED.
+>
+> **Jeff's four decisions, taken 2026-08-01:** #60 attestation model (an estimator may
+> approve their own work if they record who reviewed it and how — reviews happen on
+> phone/Teams calls) · #63 **tier applies to everything** · #64 **hard-fail** ·
+> #66 **full wall-to-wall**, i.e. the width mapping stays and only the wing
+> double-count is fixed.
+>
+> **Read before deploying:**
+> - **#61's migration `0012` has never been run.** It is the only artifact here that
+>   could break a deploy. Needs a real run against a scratch DB — the dev PGlite has a
+>   five-corruption history, so no agent was allowed near a database this session.
+> - **#63 changed the pricing BASIS**, not just the margin. Grid totals move for every
+>   customer, Base tier included. Look at real numbers before it reaches a customer.
+> - **Nothing here was exercised at runtime.** All verification was code review,
+>   typecheck, and the DB-free spec suite. No browser, no database.
+>
+> **Three corrections to this file's own claims,** found by reading the code:
+> #62 — `notes.ts`/`tasks.ts` were NOT using `insertDocIfAbsent`; only `gmail/bridge.ts`
+> was. #64 — `mergeLineFabric` already re-resolved correctly; that half of the entry was
+> wrong. #65 — there are THREE promote paths, not two. Consistent with the 2026-07-29
+> audit's lesson: verify against code, not against this file's status lines.
+>
+> **Still needing Jeff:** #65 canonical path (a platinum customer currently quotes at
+> 30% instead of 15% — the sharpest open item in this batch) · #63 labor and mixed-basis
+> follow-ups · #60 whether `changes` blocks self-attestation · #67 whether POs get an
+> entry field at all.
+
 ---
 
 ## Items #60–#73 — provenance note (2026-07-31)
@@ -3760,7 +3791,7 @@ to a porter but not to Peak.
 
 ---
 
-## 60. Quote "Send to customer" and status changes have NO server-side permission or approval gate — OPEN (SECURITY)
+## 60. Quote "Send to customer" and status changes have NO server-side permission or approval gate — DONE 2026-08-01 (wave 1) — server-side gate + attested approvals
 
 **Area:** `src/app/(app)/estimator/actions.ts:182-191` (`setStatusAction`), `:235-241`
 (`sendToCustomerAction`)
@@ -3791,11 +3822,11 @@ quote, an `approved` review state, or some combination? Should `won` be restrict
 `sent`? (Note the no-self-approval rule already exists for reviews — sending should probably respect
 the same spirit.)
 
-**Status:** OPEN — logged only, no code. **Recommend fixing regardless of the third-party project.**
+**Status:** DONE 2026-08-01. `sendToCustomerAction` and `setStatusAction`(won) now require an approval record, server-side. `QuoteReview.method` distinguishes `in_app` from `attested`; an attested approval demands a non-empty note naming who reviewed it (Jeff's call — reviews happen on phone/Teams calls). Ownership is checked on the SERVER too; the first cut gated it in the UI only, which would have reintroduced this very defect. **Watch:** quotes sitting at `review.state: "none"` can no longer be sent until approved or attested. **Still open:** should a reviewer's formal `changes` state block self-attestation?
 
 ---
 
-## 61. Pull-sync only ever returns newly INSERTED documents — `seq` never advances on UPDATE — OPEN (DATA INTEGRITY)
+## 61. Pull-sync only ever returns newly INSERTED documents — `seq` never advances on UPDATE — FIXED IN CODE 2026-08-01 — MIGRATION 0012 NOT YET APPLIED
 
 **Area:** `src/db/doc-tables.ts:37` (the `seq` column), `src/db/doc-store.ts` (`listSince`)
 **Reported:** 2026-07-31 (source audit)
@@ -3818,11 +3849,11 @@ the cursor to `updatedAt` with a tiebreak. The index at `:46` stays useful eithe
 **Open question for Jeff:** is offline field sync actually in use on any device yet? If it isn't,
 this is cheap to fix now and expensive to fix after real field data exists.
 
-**Status:** OPEN — logged only, no code.
+**Status:** FIXED IN CODE 2026-08-01 — **the migration has NOT been run.** `drizzle/0012_seq_bump_trigger.sql` adds a BEFORE UPDATE trigger on all 22 doc tables; a trigger, not an in-code bump, because `/api/sync/push/route.ts` writes the doc tables directly and bypasses `doc-store.ts`. Verified statically: `seq` is used only as a sync cursor in `listSince`, never as creation order. **Needs a real run against a scratch DB before deploy** — never validated against Postgres or PGlite.
 
 ---
 
-## 62. No database transactions anywhere, and ID minting can silently overwrite a record — OPEN
+## 62. No database transactions anywhere, and ID minting can silently overwrite a record — DONE 2026-08-01 (wave 2) — minting race closed; transactions still OPEN
 
 **Area:** `src/db/doc-store.ts:253` (`nextPrefixedId`), `insertDocIfAbsent` (same file),
 `src/lib/stores/*`
@@ -3849,11 +3880,11 @@ stored.
 the readable `Q-####` format), or move to real database sequences? The first is a day's work; the
 second is a migration.
 
-**Status:** OPEN — logged only, no code. **Recommend fixing regardless of the third-party project.**
+**Status:** DONE 2026-08-01. All 14 minting call sites go through a new `insertWithPrefixedId` that retries on collision; `Q-####` format unchanged. `setBlob` rewritten as one atomic `INSERT ... ON CONFLICT` with a jsonb `||` merge — it had a worse read-modify-write variant that could drop a whole `portal_grants` key (encrypted magic-link tokens). **Two corrections to this entry:** `notes.ts`/`tasks.ts` were NOT using `insertDocIfAbsent` as described — only `gmail/bridge.ts` was; and this supersedes D121. **Still OPEN:** database transactions, deliberately out of scope. Same-key concurrent writes still last-write-wins.
 
 ---
 
-## 63. The Grid quote prices ONLY curtains at the customer's tier — devices, wire and labor use raw catalog list — OPEN (DECISION FOR JEFF)
+## 63. The Grid quote prices ONLY curtains at the customer's tier — devices, wire and labor use raw catalog list — DONE 2026-08-01 (wave 1) — tier now applies to all four line categories
 
 **Area:** `src/app/(app)/design/grid/[id]/actions.ts:433+` (`createDraftQuoteAction`)
 **Reported:** 2026-07-31 (source audit)
@@ -3882,11 +3913,11 @@ Or is list correct for stocked parts, with the tier applying only to made-to-ord
 is answered, neither the current app nor any reimplementation can be called correct. **Ties to #11
 (customer tiers → default margin) and #49 (curtains as a first-class drop-in).**
 
-**Status:** OPEN — logged only, no code. Decision blocks correctness, not just a port.
+**Status:** DONE 2026-08-01 — **Jeff's call: tier applies to everything.** Devices, wire runs and labor now price through `tier.margin`, reusing the `cost / (1 - margin)` convention from `portal/actions.ts`. **This changed the pricing BASIS, not just the margin** — totals move for every customer including Base tier. A repricing, not a cosmetic fix; wants a look at real numbers before it reaches a customer. **Two follow-ups:** should labor be excluded (labor rows use `cost` AS the rate, so the catalog's labor `list` is now unused — ties to #54)? And a part with `cost` of 0 silently keeps `list`, so one quote can mix two bases invisibly.
 
 ---
 
-## 64. An unresolved fabric silently zeroes BOTH drape weight and track weight — OPEN (SAFETY-ADJACENT)
+## 64. An unresolved fabric silently zeroes BOTH drape weight and track weight — DONE 2026-08-01 (wave 1) — hard-fail
 
 **Area:** `src/lib/design/goods.ts` (`computeSetWeight`, `mergeLineFabric`), Lineset Builder
 **Reported:** 2026-07-31 (source audit)
@@ -3907,11 +3938,11 @@ direction. Reported as a shipped bug twice already.
 to produce a number) rather than contribute zero? A missing weight is safe; a wrong low weight is
 not. **Ties to #29 (lineset weights) and #50.**
 
-**Status:** OPEN — logged only, no code.
+**Status:** DONE 2026-08-01 — **Jeff's call: hard-fail.** `computeSetWeight` reports `fabricUnresolved` and masks goods/trackWt/onBatten/setTotal/cwLoad/combo and the utilization checks to `null`; `battenWt` stays real (pipe, not fabric). The Lineset Builder refuses a set total while any line is unresolved, naming them, and the Check column reads UNAVAILABLE — never the green OK, which would only have moved the silent failure. Verified contained: `computeSetWeight` has exactly one production consumer. `mergeLineFabric` already re-resolved correctly — that half of the entry was wrong.
 
 ---
 
-## 65. Two "promote to quote" paths produce differently-priced quotes from the same design — OPEN
+## 65. Two "promote to quote" paths produce differently-priced quotes from the same design — INVESTIGATED 2026-08-01, STILL OPEN — needs Jeff's canonical-path call
 
 **Area:** Quick Design promotion — `addToQuotesAction` / `promoteDesignAction`
 **Reported:** 2026-07-31 (source audit)
@@ -3926,11 +3957,11 @@ click. Nothing surfaces the difference.
 **Open question for Jeff:** which path is canonical? Recommend collapsing to one and deleting the
 other. **Ties to #41 (split the design estimator) and #51 (design tab consolidation).**
 
-**Status:** OPEN — logged only, no code.
+**Status:** INVESTIGATED 2026-08-01, no code — **still needs Jeff's call on which path is canonical.** It is THREE paths, not two: `addToQuotesAction` plus two near-duplicate `promoteDesignAction` copies (`home-actions.ts:45`, `design/designs/actions.ts:28`). They diverge for two independent reasons — one reads a possibly-stale saved `budget`, the other recomputes live; and only `addToQuotesAction` resolves the tier. **Live money bug found:** neither `promoteDesignAction` stamps `tierMargin`, so the Estimator falls back to a hardcoded 30% — correct by coincidence for Base tier, wrong for copper/silver/gold/platinum/reseller/employee. A platinum customer quotes at 30% instead of 15%. Fix is ~one line in `designToQuotePartial()` (`stores/designs.ts:308`), the choke point all three share.
 
 ---
 
-## 66. The estimator venue adapter maps `width → proWidthFt` for EVERY venue kind — OPEN
+## 66. The estimator venue adapter maps `width → proWidthFt` for EVERY venue kind — PARTIAL 2026-08-01 — wing double-count fixed; width mapping accepted as-is
 
 **Area:** `src/lib/design/venue-dims.ts` (`venueDimsFromEstimator`)
 **Reported:** 2026-07-31 (source audit)
@@ -3950,11 +3981,11 @@ this confusion, and the adapter reintroduces it.
 wall-to-wall width, a fraction of it, or should those venue kinds take a different sizing path
 entirely? This is a domain call, not a code call.
 
-**Status:** OPEN — logged only, no code.
+**Status:** PARTIAL 2026-08-01. **Jeff's call: `width -> proWidthFt` stays as-is** (full wall-to-wall is accepted behavior) — that mapping is deliberately UNCHANGED and should not be branched on venue kind. The separate **wing double-count IS fixed**: `2*wing` is now added only for a real proscenium, mirroring the distinction `pipeLenFt` already draws. `venueDimsFromEstimator` takes a required `proscenium` boolean, so the compiler proves every call site was updated.
 
 ---
 
-## 67. Procurement PO numbers are random within a 39-value range — OPEN
+## 67. Procurement PO numbers are random within a 39-value range — DONE 2026-08-01 (wave 1) — random mint removed
 
 **Area:** `src/lib/stores/projects.ts:677`
 **Reported:** 2026-07-31 (source audit)
@@ -3971,7 +4002,7 @@ wrong and they repeat. If they're demo dressing, they shouldn't survive the move
 **Open question for Jeff:** are procurement POs going to be real (in which case this needs a proper
 mint and probably a vendor link), or should the field be blank until someone types the actual PO?
 
-**Status:** OPEN — logged only, no code.
+**Status:** DONE 2026-08-01. The random mint is removed; `po` stays empty until a human enters the real number. Verified nothing renders it and the `line()` constructor already normalizes it to `""`. **Follow-up:** there is NO UI anywhere to type a PO, so "blank until entered" currently means blank forever — the random mint was the only writer. If POs are going to be real, an entry field (and probably a vendor link) is a separate item. Demo seeds still carry hardcoded `PO-0980`..`PO-1052`, which is #59 territory.
 
 ---
 
