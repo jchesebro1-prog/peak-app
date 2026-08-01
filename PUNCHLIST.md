@@ -3763,10 +3763,24 @@ under a clearly marked section?**
 > wrong. #65 — there are THREE promote paths, not two. Consistent with the 2026-07-29
 > audit's lesson: verify against code, not against this file's status lines.
 >
-> **Still needing Jeff:** #65 canonical path (a platinum customer currently quotes at
-> 30% instead of 15% — the sharpest open item in this batch) · #63 labor and mixed-basis
-> follow-ups · #60 whether `changes` blocks self-attestation · #67 whether POs get an
-> entry field at all.
+> **WAVE 3 — 2026-08-01, Jeff's four answers, all landed same day:**
+> - **#65 — "it should follow the tier system for the customer."** `resolveTier` folded into
+>   `designToQuotePartial()`; the platinum-at-30% bug is dead.
+> - **#63 — labor IS included.** No code needed; the wave-1 fix already priced it through
+>   the tier. Item settled.
+> - **#60 — a formal "request changes" now BLOCKS self-attestation.** Attestation records an
+>   OFF-platform review; it is not a way around one that happened in the app.
+> - **#67 — POs got an entry field** on the Procurement tab.
+>
+> **Still needing Jeff:** the **#63 mixed-basis** question (a part with `cost` of 0 keeps its
+> `list` price, so one quote can carry some lines tier-priced and some not, with nothing on the
+> document showing which — rare, since `cost` is required, but a dealer import supplying only
+> list prices would do it) · **#65's two leftovers**, the duplicate `promoteDesignAction`
+> copies and the stale-vs-fresh `budget` divergence.
+>
+> **Process note:** one wave-3 subagent ran `git stash` after being told not to, with other
+> agents' uncommitted work in the tree. Nothing was lost — but only because the at-risk work
+> was already committed. Commit each item as it lands; do not let a wave accumulate uncommitted.
 
 ---
 
@@ -3942,7 +3956,7 @@ not. **Ties to #29 (lineset weights) and #50.**
 
 ---
 
-## 65. Two "promote to quote" paths produce differently-priced quotes from the same design — INVESTIGATED 2026-08-01, STILL OPEN — needs Jeff's canonical-path call
+## 65. Two "promote to quote" paths produce differently-priced quotes from the same design — DONE 2026-08-01 (wave 3) — all three promote paths stamp the tier
 
 **Area:** Quick Design promotion — `addToQuotesAction` / `promoteDesignAction`
 **Reported:** 2026-07-31 (source audit)
@@ -3957,7 +3971,7 @@ click. Nothing surfaces the difference.
 **Open question for Jeff:** which path is canonical? Recommend collapsing to one and deleting the
 other. **Ties to #41 (split the design estimator) and #51 (design tab consolidation).**
 
-**Status:** INVESTIGATED 2026-08-01, no code — **still needs Jeff's call on which path is canonical.** It is THREE paths, not two: `addToQuotesAction` plus two near-duplicate `promoteDesignAction` copies (`home-actions.ts:45`, `design/designs/actions.ts:28`). They diverge for two independent reasons — one reads a possibly-stale saved `budget`, the other recomputes live; and only `addToQuotesAction` resolves the tier. **Live money bug found:** neither `promoteDesignAction` stamps `tierMargin`, so the Estimator falls back to a hardcoded 30% — correct by coincidence for Base tier, wrong for copper/silver/gold/platinum/reseller/employee. A platinum customer quotes at 30% instead of 15%. Fix is ~one line in `designToQuotePartial()` (`stores/designs.ts:308`), the choke point all three share.
+**Status:** DONE 2026-08-01 — **Jeff's call: "it should follow the tier system for the customer."** `resolveTier` now runs inside `designToQuotePartial()` (`stores/designs.ts`), the single choke point all three paths pass through; `pricingTier`/`tierMargin` are REQUIRED on `DesignQuotePartial`, so the compiler refuses a path that leaves them unset. This kills the hardcoded-30% fallback that quoted a platinum customer at 30% instead of 15%. Designs carry no contact, only a customer, so contact-level tiers (`resolveTier`'s 2nd arg) cannot apply here. **Still OPEN, deliberately not done:** collapsing the two duplicate `promoteDesignAction` copies (`home-actions.ts:45`, `design/designs/actions.ts:28`), and the separate **stale-vs-fresh `budget`** divergence — `addToQuotesAction` re-persists the live editor total first, the other two read the last explicit save. Neither has been ruled on.
 
 ---
 
@@ -3985,7 +3999,7 @@ entirely? This is a domain call, not a code call.
 
 ---
 
-## 67. Procurement PO numbers are random within a 39-value range — DONE 2026-08-01 (wave 1) — random mint removed
+## 67. Procurement PO numbers are random within a 39-value range — DONE 2026-08-01 — random mint removed; entry field added (wave 3)
 
 **Area:** `src/lib/stores/projects.ts:677`
 **Reported:** 2026-07-31 (source audit)
@@ -4002,7 +4016,7 @@ wrong and they repeat. If they're demo dressing, they shouldn't survive the move
 **Open question for Jeff:** are procurement POs going to be real (in which case this needs a proper
 mint and probably a vendor link), or should the field be blank until someone types the actual PO?
 
-**Status:** DONE 2026-08-01. The random mint is removed; `po` stays empty until a human enters the real number. Verified nothing renders it and the `line()` constructor already normalizes it to `""`. **Follow-up:** there is NO UI anywhere to type a PO, so "blank until entered" currently means blank forever — the random mint was the only writer. If POs are going to be real, an entry field (and probably a vendor link) is a separate item. Demo seeds still carry hardcoded `PO-0980`..`PO-1052`, which is #59 territory.
+**Status:** DONE 2026-08-01. Random mint removed, and — **Jeff's call, "POs can get an entry field"** — `setLinePo()` + `setLinePoAction` + a per-line input on the Procurement tab, mirroring `setLineStatus`/`cycleLineAction` and that screen's one-form-per-row idiom. Free text from an external system: trimmed, never generated, no format or uniqueness check. Empty renders as a placeholder / em dash, never "undefined". Demo seeds still carry hardcoded `PO-0980`..`PO-1052` — #59 territory.
 
 ---
 
