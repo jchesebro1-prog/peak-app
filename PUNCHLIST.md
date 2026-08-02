@@ -3597,7 +3597,36 @@ sharing links directly (recommended, otherwise Drive ACLs become the security bo
 
 ---
 
-## 59. Real data in the database, begin the migration off demo seeds, STEP 0 SHIPPED, RUN PENDING
+## 59. Real data in the database, begin the migration off demo seeds — PROD IS ALREADY LOADED; GO-LIVE CHOSEN; **`clearDemoData()` MUST NOT BE RUN**
+
+> ### ⚠️ 2026-08-01 — DO NOT RUN `clearDemoData()` ON PRODUCTION. IT WOULD DESTROY THE REAL DATA.
+>
+> `clearDemoData()` (`src/db/seed-data.ts:136`) loops the demo collections calling
+> `clearCollection()` (`src/db/doc-store.ts:189`), which is `db.delete(t)` **with no WHERE
+> clause — it empties the entire table**. Its own doc comment says it exists so real data can be
+> imported into a *clean database*: it was written for clear-THEN-import.
+>
+> **The opposite happened.** The 2026-07-29 import was ADDITIVE — real data added, demo kept — so
+> real and demo rows now share every collection. Running the go-live clear today would delete
+> **~1,675 leads, ~1,784 projects, ~1,723 companies, ~3,801 contacts, ~1,335 venues and the
+> ~14,722-part catalog** along with the demo fixtures. Irreversibly, on a live database.
+>
+> **The Settings → "Clear demo data" button is therefore a live footgun in production for anyone
+> who presses it, independent of this migration.**
+>
+> **The missing piece already exists.** `scripts/inventory.ts:13-16` classifies rows by ID overlap
+> with the seed fixtures — *"a row whose id is not in a seed set is treated as real."* That is
+> exactly the discrimination `clearDemoData` lacks.
+>
+> **Jeff's decisions, 2026-08-01:** production IS already loaded (this entry's "RUN PENDING" and
+> the 2026-07-29 audit note below were STALE) · **go-live is the goal** · **but via a precise
+> clear, dry-run first**: delete only seed-fixture ids, dry-run by default, hosted-write
+> confirmation, run local → inventory → prod export → prod. #59 leads the next wave.
+>
+> **Blocked on:** a `DATABASE_URL` in `.env.local` (Claude will not handle the credential; the
+> scripts read it without echoing it) and a fresh prod export — the newest is
+> `peak-backup-20260727-0915.json`.
+
 
 > **Audit note 2026-07-29:** step 0 exists and is verified read-only —
 > `scripts/inventory.ts` (267 lines) plus `"db:inventory"` in `package.json:15`,
@@ -4360,5 +4389,43 @@ beta with one operator? The honest read: this is the highest-leverage item in th
 protects every other item from silently regressing.
 
 **Status:** OPEN — logged only, no code.
+
+---
+
+## DECISIONS — 2026-08-01 questions session (Jeff)
+
+> A dedicated Q&A pass over everything outstanding. Recorded here because these answers unblock
+> work that spans many items, and several of them reverse or supersede earlier assumptions.
+
+**Direction**
+- **Next wave = the #47–#59 feature batch**, led by **#59 real data**. Waves 1–5 were all defect
+  work (#60–#78); the feature batch has not moved since 2026-07-27.
+- **#78 — BUILD the route smoke test** against a scratch database (estimator, quotes, projects,
+  lineset, grid, import return 200). It would have caught the Estimator 500 outright.
+- **#57 multi-tenant — NOT NOW.** Stays logged; nothing else is blocked on it. Do not scope it.
+- **Branch `punch-60-67-defect-cluster` (23 commits): Jeff runs `/code-review` BEFORE merge.**
+  Not pushed. Claude cannot launch that command.
+
+**Today's loose ends**
+- **#74 transactions — wrap the multi-write flows only** (won→project, design→quote, lead
+  conversion). Not a store-layer rewrite.
+- **#75 — collapse the duplicate `promoteDesignAction` copies into one helper; leave the
+  stale-vs-fresh `budget` alone** (promoted quotes are `requote: true` and re-price anyway).
+- **#76 — FLAG the affected lines** on a Grid quote when a part with no cost basis falls back to
+  list. Do not refuse the quote; do not silently mix.
+- **#77 — show method and note inline** in the quotes list, matching the Estimator.
+
+**Content and gates**
+- **#39 — IMPORT the starter set, to BOTH local and prod in one run.** The review gate that has
+  been open since 2026-07-25 is closed. (Sequence it behind #59's safety work.)
+- **#52 — Jeff will send the ETC light-engine and lens SKUs.** Still blocked until they arrive;
+  do not invent part numbers.
+- **#68 — rates accepted as-is** (see the item).
+- **#71 — REVIEWED, not draft.** Two items cut: the delivery damage inspection and the closeout
+  margin reconciliation. The O&M handoff and the safe-rigging/lockout wording were flagged as
+  guesses and kept.
+- **#73 — DEPLOY the notices as drafted.** Jeff: an imperfect limitation notice beats none on a
+  document asserting rigging capacity or fire-code compliance. Wording stays as written, still
+  marked not-reviewed-by-counsel, refine later — all three strings are in one file.
 
 ---
