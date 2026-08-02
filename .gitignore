@@ -57,3 +57,5 @@ next-env.d.ts
 # reviewed/staged subset lives at scripts/starter-import-data.json instead,
 # which IS committed. Regenerate via `python3 scripts/convert-dealer-sheets.py`.
 /dealer-import-data.json
+.data-dirty*/
+.data-*/
