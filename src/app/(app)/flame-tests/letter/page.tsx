@@ -6,7 +6,7 @@ import { nameFor } from "@/lib/stores/customers";
 import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
-import { AVG_MPH } from "@/lib/geo";
+import { getTravelRates } from "@/lib/stores/pricing";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -214,7 +214,8 @@ export default async function FlameTestLetterPage({
 
   /* visit hours from stored trip + curtain testing time */
   const rtMiles = (ft.trip && ft.trip.miles) || 0;
-  const mph = AVG_MPH || 50;
+  const travelRates = await getTravelRates();
+  const mph = travelRates.mph || 50;
   const oneWayHours = mph ? rtMiles / 2 / mph : 0;
   const curtainMin = (ft.rates && ft.rates.curtainMinutes) || 5;
   const inspectionHours = (curtainsTotal * curtainMin) / 60;

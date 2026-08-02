@@ -10,7 +10,7 @@ import {
 import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
-import { AVG_MPH } from "@/lib/geo";
+import { getTravelRates } from "@/lib/stores/pricing";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -192,7 +192,8 @@ export default async function RepairLetterPage({
   /* narrative hours from stored trip + labor */
   const rtMiles = (rp.trip && rp.trip.miles) || 0;
   const oneWayMiles = rtMiles / 2;
-  const mph = AVG_MPH || 50;
+  const travelRates = await getTravelRates();
+  const mph = travelRates.mph || 50;
   const oneWayHours = mph ? oneWayMiles / mph : 0;
   const laborHours = rp.laborHours || 0;
   const crewSize = rp.crewSize || 1;

@@ -22,7 +22,8 @@ import { get as getCustomer, locationById } from "@/lib/stores/customers";
 import { getSettings, type AppSettingsData } from "@/lib/settings";
 import { allUsers } from "@/lib/users";
 import { firstName } from "@/lib/team";
-import { AVG_MPH, coordsOf, driveMiles, driveMinutes, nearest } from "@/lib/geo";
+import { coordsOf, driveMiles, driveMinutes, nearest } from "@/lib/geo";
+import { getTravelRates } from "@/lib/stores/pricing";
 import {
   compute as computeFlame,
   getRates as getFlameRates,
@@ -306,7 +307,12 @@ async function ensureFlameRenewalQuote(
     (firstCoords ? nearest(offices, firstCoords) : null) || offices[0] || null;
 
   const rates = await getFlameRates();
-  const r = computeFlame({ office: office || undefined, venues: venueInputs }, rates);
+  const travelRates = await getTravelRates();
+  const r = computeFlame(
+    { office: office || undefined, venues: venueInputs },
+    rates,
+    travelRates
+  );
 
   const origin = office
     ? {
@@ -439,7 +445,7 @@ async function flameLetterDoc(
   const rtMiles = (ft.trip && ft.trip.miles) || 0;
   if (rtMiles > 0) {
     const oneWayMiles = rtMiles / 2;
-    const mph = AVG_MPH || 50;
+    const mph = (await getTravelRates()).mph || 50;
     const oneWayHours = mph ? oneWayMiles / mph : 0;
     const curtainMin = (ft.rates && ft.rates.curtainMinutes) || 5;
     const inspectionHours = (curtainsTotal * curtainMin) / 60;
@@ -610,12 +616,16 @@ async function ensureInspectionRenewalQuote(
 
   const level = levelMeta(rec.level).key;
   const rates = await getInspectionRates();
+  const travelRates = await getTravelRates();
   const r = computeInspection(
     {
       office: office || undefined,
       venues: [venueInput],
       level,
-      geo: { driveMiles, driveMinutes },
+      geo: {
+        driveMiles: (a, b) => driveMiles(a, b, travelRates),
+        driveMinutes: (a, b) => driveMinutes(a, b, travelRates),
+      },
     },
     rates
   );
@@ -753,7 +763,7 @@ async function inspectionLetterDoc(
   const rtMiles = (insp.trip && insp.trip.miles) || 0;
   if (rtMiles > 0) {
     const oneWayMiles = rtMiles / 2;
-    const mph = AVG_MPH || 50;
+    const mph = (await getTravelRates()).mph || 50;
     const oneWayHours = mph ? oneWayMiles / mph : 0;
     const inspectHours = insp.inspectHours || 0;
     blocks.push({

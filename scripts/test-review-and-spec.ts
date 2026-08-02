@@ -2375,5 +2375,64 @@ import { compute as computeFlameQuote, type FlameTestVenueInput as FTVenue } fro
   );
 }
 
+/* --- punch 60-67: geo.ts's own offline fallback (driveMiles/driveMinutes/
+   minutesFromMiles) now takes an explicit `travel` param sourced from
+   Estimating Rules -> "travel" (TRAVEL_RATE_DEFAULTS), same pattern as
+   flametest-engine.ts above. The default preserves the exact 1.25 / 50
+   values used before this change; live/cached OSRM routing in estimate()
+   still wins ahead of this tier (untouched — this DB-free suite can't
+   reach estimate() itself, which is asserted by inspection instead). ---
+*/
+import {
+  driveMiles as geoDriveMiles,
+  driveMinutes as geoDriveMinutes,
+  minutesFromMiles as geoMinutesFromMiles,
+} from "@/lib/geo";
+{
+  const office = { lat: 43.039, lng: -87.906 }; // Milwaukee, WI
+  const venue = { lat: 43.073, lng: -89.401 }; // Madison, WI (~80mi straight-line)
+
+  const defaultMiles = geoDriveMiles(office, venue);
+  const explicitDefaultMiles = geoDriveMiles(office, venue, TRAVEL_RATE_DEFAULTS);
+  ok(
+    defaultMiles === explicitDefaultMiles,
+    "#60-67: geo.driveMiles omitting travel defaults to the exact TRAVEL_RATE_DEFAULTS fallback"
+  );
+
+  const defaultMinutes = geoDriveMinutes(office, venue);
+  const explicitDefaultMinutes = geoDriveMinutes(office, venue, TRAVEL_RATE_DEFAULTS);
+  ok(
+    defaultMinutes === explicitDefaultMinutes,
+    "#60-67: geo.driveMinutes omitting travel defaults to the exact TRAVEL_RATE_DEFAULTS fallback"
+  );
+
+  const doubledRoad = geoDriveMiles(office, venue, { roadFactor: 2.5, mph: 50 });
+  ok(
+    defaultMiles !== null &&
+      doubledRoad !== null &&
+      Math.abs(doubledRoad - defaultMiles * 2) <= 2,
+    `#60-67: doubling travel.roadFactor (1.25 -> 2.5) ~doubles geo.driveMiles' fallback road miles (base ${defaultMiles}, got ${doubledRoad})`
+  );
+
+  const halfSpeed = geoDriveMinutes(office, venue, { roadFactor: 1.25, mph: 25 });
+  ok(
+    defaultMinutes !== null &&
+      halfSpeed !== null &&
+      Math.abs(halfSpeed - defaultMinutes * 2) <= 4,
+    `#60-67: halving travel.mph (50 -> 25) ~doubles geo.driveMinutes' fallback drive-time estimate (base ${defaultMinutes}, got ${halfSpeed})`
+  );
+
+  const mfmDefault = geoMinutesFromMiles(100);
+  ok(
+    mfmDefault === Math.round((100 / 50) * 60),
+    `#60-67: geo.minutesFromMiles defaults to mph=50 (got ${mfmDefault})`
+  );
+  const mfmOverride = geoMinutesFromMiles(100, { roadFactor: 1.25, mph: 25 });
+  ok(
+    mfmOverride === Math.round((100 / 25) * 60),
+    `#60-67: geo.minutesFromMiles honors an overridden travel.mph (got ${mfmOverride})`
+  );
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

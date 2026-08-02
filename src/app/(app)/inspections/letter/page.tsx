@@ -6,7 +6,7 @@ import { levelMeta } from "@/lib/stores/inspections";
 import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
-import { AVG_MPH } from "@/lib/geo";
+import { getTravelRates } from "@/lib/stores/pricing";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -201,7 +201,8 @@ export default async function InspectionLetterPage({
 
   /* visit hours from stored trip + inspection time */
   const rtMiles = (insp.trip && insp.trip.miles) || 0;
-  const mph = AVG_MPH || 50;
+  const travelRates = await getTravelRates();
+  const mph = travelRates.mph || 50;
   const oneWayHours = mph ? rtMiles / 2 / mph : 0;
   const inspectHours = insp.inspectHours || 0;
   const travelHours = 2 * oneWayHours;

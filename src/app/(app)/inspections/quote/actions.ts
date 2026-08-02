@@ -18,6 +18,7 @@ import {
 } from "@/lib/inspection-engine";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
+import { getTravelRates } from "@/lib/stores/pricing";
 import { coordsOf, nearest, driveMiles, driveMinutes } from "@/lib/geo";
 
 /**
@@ -93,14 +94,20 @@ async function persist(formData: FormData): Promise<string | null> {
   const firstCoords = venueInputs.map((v) => v.coords).find((c) => c && c.lat != null) || null;
   const office = (firstCoords ? nearest(offices, firstCoords) : null) || offices[0] || null;
 
+  // same offline haversine tier the client inlines, so the saved value
+  // matches the live preview — but bound to the LIVE Estimating Rules
+  // travel rates (roadFactor/mph), not driveMiles/driveMinutes' hardcoded
+  // defaults.
+  const travelRates = await getTravelRates();
   const r = computeEstimate(
     {
       office: office || undefined,
       venues: venueInputs,
       level,
-      // same offline haversine tier the client inlines, so the saved value
-      // matches the live preview
-      geo: { driveMiles, driveMinutes },
+      geo: {
+        driveMiles: (a, b) => driveMiles(a, b, travelRates),
+        driveMinutes: (a, b) => driveMinutes(a, b, travelRates),
+      },
     },
     rates
   );

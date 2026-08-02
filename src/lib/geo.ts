@@ -2,6 +2,11 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { geoCache } from "@/db/schema";
 import { getSettings, type Office } from "@/lib/settings";
+import {
+  TRAVEL_RATE_DEFAULTS,
+  getTravelRates,
+  type TravelRates,
+} from "@/lib/stores/pricing";
 
 /**
  * Geo — shared travel / distance estimation. Server port of app/geo.js
@@ -13,11 +18,18 @@ import { getSettings, type Office } from "@/lib/settings";
  *    becomes the `geo_cache` table, same key scheme, so a routed number is
  *    available to estimate() once it's been fetched at least once.
  * 2) FALLBACK: a tiny built-in geocoder for the cities the app ships with,
- *    plus a straight-line (haversine) estimate x ROAD_FACTOR -> minutes at
- *    AVG_MPH.
+ *    plus a straight-line (haversine) estimate x roadFactor -> minutes at
+ *    mph. Those two knobs now live in Estimating Rules -> "Travel & mileage"
+ *    (blob `travel_rates`, src/lib/stores/pricing.ts, TRAVEL_RATE_DEFAULTS);
+ *    driveMiles()/driveMinutes()/minutesFromMiles() stay pure/synchronous
+ *    and take an explicit `travel` param (defaulting to TRAVEL_RATE_DEFAULTS)
+ *    so every existing caller keeps working unchanged, same pattern as
+ *    flametest-engine.ts. estimate() reads the live values via
+ *    getTravelRates() since it's already async/DB-backed.
  *
  * Priority in estimate(): manual override > cached live route > haversine
- * fallback > none — identical chain and math to the prototype; estimate()
+ * fallback > none — identical chain and math to the prototype (only the
+ * roadFactor/mph knobs feeding the haversine tier are now live); estimate()
  * is async here only because the route cache lives in Postgres.
  *
  * Live fetches (search/route) use a 5s timeout and fail soft (null / [])
@@ -72,9 +84,6 @@ export type GeoSearchHit = {
 
 /* ---------------- constants + pure math ---------------- */
 
-export const ROAD_FACTOR = 1.25; // straight-line -> on-road distance fudge (fallback only)
-export const AVG_MPH = 50; // average door-to-door driving speed (fallback only)
-
 const FETCH_TIMEOUT_MS = 5000;
 
 function toRad(d: number): number {
@@ -101,24 +110,31 @@ export function haversineMiles(
   return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
 }
 
+/** Straight-line -> on-road distance, using the live (or default) road factor. */
 export function driveMiles(
   a: GeoPointLike | null | undefined,
-  b: GeoPointLike | null | undefined
+  b: GeoPointLike | null | undefined,
+  travel: TravelRates = TRAVEL_RATE_DEFAULTS
 ): number | null {
   const m = haversineMiles(a, b);
-  return m == null ? null : Math.round(m * ROAD_FACTOR);
+  return m == null ? null : Math.round(m * travel.roadFactor);
 }
 
+/** Road minutes from the live (or default) assumed average speed. */
 export function driveMinutes(
   a: GeoPointLike | null | undefined,
-  b: GeoPointLike | null | undefined
+  b: GeoPointLike | null | undefined,
+  travel: TravelRates = TRAVEL_RATE_DEFAULTS
 ): number | null {
-  const mi = driveMiles(a, b);
-  return mi == null ? null : Math.round((mi / AVG_MPH) * 60);
+  const mi = driveMiles(a, b, travel);
+  return mi == null ? null : Math.round((mi / travel.mph) * 60);
 }
 
-export function minutesFromMiles(mi: number | null | undefined): number | null {
-  return mi == null || isNaN(mi) ? null : Math.round((mi / AVG_MPH) * 60);
+export function minutesFromMiles(
+  mi: number | null | undefined,
+  travel: TravelRates = TRAVEL_RATE_DEFAULTS
+): number | null {
+  return mi == null || isNaN(mi) ? null : Math.round((mi / travel.mph) * 60);
 }
 
 export function fmtMiles(mi: number | null | undefined): string {
@@ -384,21 +400,25 @@ export async function estimate<T extends GeoPointLike>(
   target: EstimateTarget | null | undefined
 ): Promise<TravelEstimate<T>> {
   const office = nearest(offices, target);
+  // Same manual > routed(OSRM) > haversine-auto > none chain as before; only
+  // the roadFactor/mph knobs feeding the haversine tier now come live from
+  // Estimating Rules instead of a hardcoded constant.
+  const travel = await getTravelRates();
   if (target && target.travelMiles != null && target.travelMiles !== "") {
     const mi = Math.round(Number(target.travelMiles));
     const min =
       target.travelMin != null && target.travelMin !== ""
         ? Math.round(Number(target.travelMin))
-        : minutesFromMiles(mi);
+        : minutesFromMiles(mi, travel);
     return { miles: mi, minutes: min, office, source: "manual" };
   }
   if (office) {
     const routed = await routeCached(office, target);
     if (routed)
       return { miles: routed.miles, minutes: routed.minutes, office, source: "routed" };
-    const mi = driveMiles(office, target);
+    const mi = driveMiles(office, target, travel);
     if (mi != null)
-      return { miles: mi, minutes: minutesFromMiles(mi), office, source: "auto" };
+      return { miles: mi, minutes: minutesFromMiles(mi, travel), office, source: "auto" };
   }
   return { miles: null, minutes: null, office, source: "none" };
 }
