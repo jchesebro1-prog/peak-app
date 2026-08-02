@@ -6,6 +6,7 @@ import {
   timeAgo,
   STAGES,
   STAGE_LABEL,
+  approvedReviewLine,
   type Quote,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
@@ -736,11 +737,7 @@ function SelectedPanel({
     rbSub = rev.reviewer
       ? "With " + firstName(rev.reviewer) + " for approval"
       : "In the shared queue — awaiting a reviewer";
-  else if (rev.state === "approved")
-    rbSub =
-      "Approved by " +
-      firstName(rev.decidedBy || rev.reviewer || "") +
-      " — ready to send to the customer";
+  else if (rev.state === "approved") rbSub = approvedReviewLine(rev);
   else
     rbSub = rev.note
       ? "“" + rev.note + "” — " + firstName(rev.decidedBy || "")

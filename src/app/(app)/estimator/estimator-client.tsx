@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { CSSProperties } from "react";
 import { firstName } from "@/lib/team";
+import { approvedReviewLine } from "@/lib/review-line";
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import {
   approveReviewAction,
@@ -1001,16 +1002,11 @@ export default function EstimatorClient({
     rbSub = rev.reviewer
       ? "With " + firstName(rev.reviewer) + " for approval"
       : "In the shared queue — awaiting a reviewer";
-  else if (rev.state === "approved")
-    rbSub =
-      rev.method === "attested"
-        ? "Attested by " +
-          firstName(rev.decidedBy || "") +
-          (rev.note ? " — “" + rev.note + "”" : "") +
-          " — ready to send to the customer"
-        : "Approved by " +
-          firstName(rev.decidedBy || rev.reviewer || "") +
-          " — ready to send to the customer";
+  // Punch #77: one shared phrasing for both surfaces. When the quotes list had
+  // its own copy of this, it silently dropped the attestation detail. Imported
+  // from @/lib/review-line, NOT from @/lib/stores/quotes — that would pull the
+  // doc store into this client bundle and 500 the page.
+  else if (rev.state === "approved") rbSub = approvedReviewLine(rev);
   else
     rbSub = rev.note
       ? "“" + rev.note + "” — " + firstName(rev.decidedBy || "")

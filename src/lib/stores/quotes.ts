@@ -274,6 +274,27 @@ export function canAttestApproval(
   return { ok: true };
 }
 
+/**
+ * The "approved" review-banner subtitle for a QuoteReview (punch #77).
+ * Shared by the Estimator's review banner and the quotes-list panel so the
+ * two surfaces render an attested approval identically instead of drifting.
+ *
+ * - `method === "attested"` — off-platform review recorded by the estimator
+ *   themself (punch #60): shows WHO recorded it and, when present, the
+ *   mandatory note naming who actually reviewed it and how.
+ * - anything else, including legacy docs decided before punch #60 where
+ *   `method` is absent/null — renders as a plain in-app approval, exactly as
+ *   it did before `method` existed. Legacy approvals are still valid
+ *   approvals; they must not read as attested and must not break.
+ *
+ * Caller is expected to only invoke this for `review.state === "approved"`.
+ */
+/** Re-exported from the client-safe module so server code can keep importing
+ *  it from the quotes store. The implementation lives in `@/lib/review-line`
+ *  because the Estimator client component needs it too and must not import
+ *  this file (doc store -> drizzle -> postgres in a browser bundle). */
+export { approvedReviewLine, type ApprovedReviewLike } from "@/lib/review-line";
+
 /** All quotes, newest activity first (port of getAll). */
 export async function getAll(): Promise<Quote[]> {
   const list = await listDocs<Quote>("quotes");
