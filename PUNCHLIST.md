@@ -4307,7 +4307,7 @@ always re-persist first? **Ties to #41 and #51.**
 
 ---
 
-## 76. A Grid quote can silently mix two pricing bases — OPEN
+## 76. A Grid quote can silently mix two pricing bases — DONE 2026-08-01 — fallback lines are flagged on the quote
 
 **Area:** `src/app/(app)/design/grid/[id]/actions.ts` (`createDraftQuoteAction`, the `tierCatalog` map)
 **Reported:** 2026-08-01 (follow-up from #63)
@@ -4327,11 +4327,11 @@ one remaining way that stamp can overstate what actually happened, and it fails 
 flag the line) rather than quietly falling back to list? Or is list the correct answer for a part
 with no cost basis, in which case the document should say so per line. **Ties to #63 and #39.**
 
-**Status:** OPEN — logged only, no code.
+**Status:** DONE 2026-08-01 — **Jeff's call: flag, don't refuse** (contrast #64's hard-fail — that was a rigging safety number; this is pricing transparency, so the quote still gets produced). A part that cannot be tier-priced now marks its line with `tierFallback` on the stored spec line, and the Grid editor names the affected lines in a non-blocking banner after the draft is minted. **No price changed.** **Real build hazard found while reviewing and fixed:** `isTierPriced` was a plain synchronous `export function` inside a `"use server"` module, where Next requires every export to be async — `tsc` does NOT catch that. It now lives in `src/lib/tier-pricing.ts`, which also lets the spec suite import the REAL predicate; the test had been keeping a hand-synced copy that would have gone on passing after the two drifted.
 
 ---
 
-## 77. The quotes list drops the attestation detail that makes an approval attributable — OPEN
+## 77. The quotes list drops the attestation detail that makes an approval attributable — DONE 2026-08-01 — one shared phrasing, both surfaces
 
 **Area:** `src/app/(app)/quotes/page.tsx` (`SelectedPanel` review banner) vs
 `src/app/(app)/estimator/estimator-client.tsx` (the same banner in the Estimator)
@@ -4350,11 +4350,11 @@ important of the two surfaces, and it is the one that loses the distinction.
 **Open questions for Jeff:** show the method and note inline on the list, or a marker (e.g. an
 "attested" chip) that reveals the note on hover/expand? **Ties to #60.**
 
-**Status:** OPEN — logged only, no code. Small.
+**Status:** DONE 2026-08-01. `approvedReviewLine()` is now the single phrasing for an approved review, used by BOTH the quotes list and the Estimator; the Estimator's inline duplicate is deleted rather than left alongside it. It lives in `src/lib/review-line.ts`, NOT in `stores/quotes.ts`, because `estimator-client.tsx` is a `"use client"` component and importing a value from the quotes store drags doc-store → drizzle → `postgres` into the browser bundle and 500s the page — the same trap that broke the Estimator earlier the same day. Legacy approvals with `method` absent/null still render as plain in-app approvals.
 
 ---
 
-## 78. Nothing in our verification runs the app — OPEN (PROCESS)
+## 78. Nothing in our verification runs the app — DONE 2026-08-01 — `npm run test:smoke`, and it has PROVEN it catches the real defect
 
 **Area:** `scripts/test-review-and-spec.ts`, `package.json` scripts, CI
 **Reported:** 2026-08-01 (earned twice in one session)
@@ -4388,7 +4388,7 @@ when `DATABASE_URL` is unset.
 beta with one operator? The honest read: this is the highest-leverage item in the file, because it
 protects every other item from silently regressing.
 
-**Status:** OPEN — logged only, no code.
+**Status:** DONE 2026-08-01. `scripts/smoke-routes.ts` (`npm run test:smoke`) spawns `next dev` on a free port against a THROWAWAY PGlite datadir in a temp dir (`PGLITE_PATH`, an additive override — ordinary `next dev` is unchanged; `DATABASE_URL` is explicitly deleted so it can never reach a real Postgres), signs in via the dev-login provider **so pages actually render**, and asserts 40 routes. Fails on 5xx, 404, **landing at `/login` after redirects** (the false-green that would let a broken page pass unauthenticated), and crash-page markers. Cleans up the child process and datadir even on failure. **PROVEN, not assumed:** reintroducing the `estimator-data → stores/pricing` import produced `FAIL /estimator (status 500)` with the `Can't resolve 'fs'` trace, then was reverted. **KNOWN GAP: only top-level routes — NO dynamic `[id]` route is covered**, so the Grid editor, the Estimator with a quote loaded, and every record detail page are still unexercised, including the page that would have surfaced the `"use server"` export bug fixed in #76.
 
 ---
 
@@ -4427,5 +4427,34 @@ protects every other item from silently regressing.
 - **#73 — DEPLOY the notices as drafted.** Jeff: an imperfect limitation notice beats none on a
   document asserting rigging capacity or fire-code compliance. Wording stays as written, still
   marked not-reviewed-by-counsel, refine later — all three strings are in one file.
+
+---
+
+## 79. The smoke test covers no dynamic `[id]` routes — OPEN
+
+**Area:** `scripts/smoke-routes.ts`
+**Reported:** 2026-08-01 (gap in #78, recorded at the moment of building it)
+
+**Finding:** #78's route smoke test covers 40 top-level routes and **zero dynamic ones**. Nothing
+under `[id]` is exercised: the Grid editor (`/design/grid/<id>`), the Estimator with a quote loaded
+(`/estimator?id=…`), and every record detail page — project, quote, inspection, flame test, repair,
+customer, company, person.
+
+**Why it matters:** that is where most of the app's real behaviour lives, and it is demonstrably
+where defects hide. The `"use server"` illegal-export bug fixed in #76 sat in
+`design/grid/[id]/actions.ts` — the smoke test passed 40/40 with it present, because it never
+compiled a route that imports that module. The Estimator 500 was only caught because #78's author
+reintroduced it by hand on a top-level route.
+
+**What it needs:** stable record ids to hit. The seed fixtures provide them (`Q-2041`, `P-3001` and
+friends), but a fresh scratch datadir seeds demo data only when `!DATABASE_URL`, so the ids need to
+be discovered at runtime rather than hardcoded — query one id per collection after boot, then hit
+its detail route. Alternatively assert against the seed constants directly.
+
+**Open question for Jeff:** extend the existing smoke test to dynamic routes (cheap, same
+machinery), or leave it at top-level coverage and rely on the Playwright option he declined
+earlier? **Ties to #78.**
+
+**Status:** OPEN — logged only, no code.
 
 ---
