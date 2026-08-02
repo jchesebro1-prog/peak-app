@@ -602,6 +602,7 @@ ok(battenLenFt(0) === 4, "a zero opening still returns the overhang, never a neg
 ok(battenLenFt(-10) === 4, "a negative opening is clamped, not propagated as a negative pipe");
 
 /* --- fabric catalog weight join (task 2) --- */
+import { isTierPriced } from "@/lib/tier-pricing";
 import { fabricFromPart, ozPerFt2, computeSetWeight, DEFAULT_WEIGHTS } from "@/lib/design/steel";
 
 const velourPart = { id: "RB-MV-MN", sku: "RB-MV-MN", desc: "25 oz Memorable Velour", category: "Fabric", unit: "sq ft", list: 6.4, cost: 4.2, oz: 25, ozBasis: "lin-yd" as const, boltWidthIn: 54 };
@@ -2284,6 +2285,55 @@ import { resolveStatusGate, type SetStatusOpts } from "@/lib/stores/quotes";
   ok(resolveStatusGate("won", noRecord).ok === resolveStatusGate("won", noRecord, {}).ok, "#60-67: omitting opts entirely behaves identically to passing {} — the gate is ON by default, not opt-in");
 }
 
+/* --- punch #77: the quotes-list "approved" banner used to hardcode "Approved
+ * by X — ready to send" regardless of `method`/`note`, silently dropping the
+ * attribution punch #60's attested path exists to preserve. `approvedReviewLine`
+ * is the exact pure formatter both the Estimator banner and the quotes-list
+ * panel now render — asserting it here (no DB) covers in_app, attested, and
+ * the legacy method-absent/null case without a browser. */
+import { approvedReviewLine } from "@/lib/stores/quotes";
+{
+  const inApp = review({ state: "approved", method: "in_app", decidedBy: "Jeff Chesebro", reviewer: "Nic" });
+  ok(
+    approvedReviewLine(inApp) === "Approved by Jeff — ready to send to the customer",
+    `#77: an in-app approval renders "Approved by <first name>" (got "${approvedReviewLine(inApp)}")`
+  );
+
+  const attested = review({
+    state: "approved",
+    method: "attested",
+    decidedBy: "Jeff Chesebro",
+    note: "Reviewed by Nic on a Teams call, 2026-08-01",
+  });
+  ok(
+    approvedReviewLine(attested) ===
+      "Attested by Jeff — “Reviewed by Nic on a Teams call, 2026-08-01” — ready to send to the customer",
+    `#77: an attested approval names who recorded it AND quotes the mandatory note (got "${approvedReviewLine(attested)}")`
+  );
+
+  const attestedNoNote = review({ state: "approved", method: "attested", decidedBy: "Jeff Chesebro", note: "" });
+  ok(
+    approvedReviewLine(attestedNoNote) === "Attested by Jeff — ready to send to the customer",
+    `#77: an attested approval with no note still reads as attested but omits the empty quote (got "${approvedReviewLine(attestedNoNote)}")`
+  );
+
+  // Legacy docs decided before punch #60 added `method` — absent/null, but
+  // still a valid approval. Must render exactly like an in-app approval
+  // (never as attested, never broken) so pre-#60 history doesn't regress.
+  const legacyAbsent = review({ state: "approved", decidedBy: "Jeff Chesebro", reviewer: "Nic" });
+  delete (legacyAbsent as Partial<QuoteReview>).method;
+  ok(
+    approvedReviewLine(legacyAbsent) === "Approved by Jeff — ready to send to the customer",
+    `#77: a legacy approval with method absent renders as a plain in-app approval, not attested (got "${approvedReviewLine(legacyAbsent)}")`
+  );
+
+  const legacyNull = review({ state: "approved", method: null, decidedBy: null, reviewer: "Nic" });
+  ok(
+    approvedReviewLine(legacyNull) === "Approved by Nic — ready to send to the customer",
+    `#77: a legacy approval with method null and no decidedBy falls back to the reviewer, same as the in-app branch (got "${approvedReviewLine(legacyNull)}")`
+  );
+}
+
 /* --- punch 60-67: travel / catalog / fixture Estimating Rules groups are
    now live (store/key, not ref) and pull from a single rates table --- */
 import {
@@ -2497,6 +2547,22 @@ import {
     mfmOverride === Math.round((100 / 25) * 60),
     `#60-67: geo.minutesFromMiles honors an overridden travel.mph (got ${mfmOverride})`
   );
+}
+
+/* --- #76: tier-catalog fallback classification --- */
+// #76: the real predicate, IMPORTED from its dependency-free module rather than
+// copied. It used to live in the "use server" actions.ts, which forced this test
+// to keep a hand-synced duplicate — a test that validates its own copy and keeps
+// passing once the two drift. Moving it to @/lib/tier-pricing fixed that AND an
+// illegal non-async export from a "use server" module.
+{
+
+  ok(isTierPriced(500, 0.3) === true, "#76: cost > 0 and margin in (0,1) -> tier-priced");
+  ok(isTierPriced(0, 0.3) === false, "#76: cost = 0 -> fallback to list, not tier-priced");
+  ok(isTierPriced(500, 0) === false, "#76: margin = 0 (outside open interval) -> fallback");
+  ok(isTierPriced(500, 1) === false, "#76: margin = 1 (outside open interval) -> fallback");
+  ok(isTierPriced(500, 1.2) === false, "#76: margin > 1 -> fallback");
+  ok(isTierPriced(500, -0.1) === false, "#76: negative margin -> fallback");
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");

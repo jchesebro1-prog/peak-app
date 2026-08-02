@@ -47,9 +47,13 @@ async function createDb(): Promise<Db> {
   const os = await import("node:os");
   // During a build, give every worker its OWN throwaway datadir so the real
   // dev database is never opened concurrently (and never touched at all).
+  // PGLITE_PATH lets tooling (e.g. the route smoke test, scripts/smoke-routes.ts)
+  // point a normal (non-build) run at a scratch datadir instead of the real
+  // dev database. Unset by default, so ordinary `next dev` / `next start` are
+  // completely unaffected — this is additive, not a behavior change.
   const dataDir = isBuild
     ? path.join(os.tmpdir(), `peak-build-db-${process.pid}`, "pglite")
-    : path.join(process.cwd(), ".data", "pglite");
+    : process.env.PGLITE_PATH || path.join(process.cwd(), ".data", "pglite");
   if (isBuild) {
     console.log(`[db] build phase — using throwaway datadir ${dataDir} (dev DB untouched)`);
   }

@@ -18,7 +18,8 @@
     "audit:daylite": "tsx scripts/audit-daylite-export.ts",
     "pull:daylite": "tsx scripts/pull-daylite.ts",
     "import:daylite": "tsx scripts/import-daylite.ts",
-    "test:specs": "tsx scripts/test-review-and-spec.ts"
+    "test:specs": "tsx scripts/test-review-and-spec.ts",
+    "test:smoke": "tsx scripts/smoke-routes.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
