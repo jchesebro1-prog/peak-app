@@ -4211,3 +4211,154 @@ notice naming what was and wasn't verified on site? Who at Peak owns that call?
 **Status:** DONE 2026-08-01 — **code landed; the WORDING still needs Jeff's review and a professional read.** Jeff's call: notices on rigging AND compliance both. All three strings live in `src/lib/compliance-notices.ts` (single edit point) and are marked DRAFT / not reviewed by counsel. Rigging notices on the Lineset Builder and Steel Calculator; compliance notices on the flame-test report (all three variants), the inspection report, and all four summary/results letters via an opt-in `notice` prop on `SinglePageLetter`. **Placement finding that mattered:** the inspection report's EXISTING disclaimer is conditionally rendered and vanishes under `?boiler=0` and in the compact 3-up layout — so the document most needing a limitation could ship without one. The new notice sits on the closing page, which renders unconditionally. **NO CALCULATION CHANGED** (`steel.ts` is comment-only). Durable comments now record at `beamCapacity`, `brickCombo` and `computeSetWeight` that these disclaimers and sign-off steps are PRODUCT REQUIREMENTS, not decoration, and must survive any reimplementation. **Open questions Jeff has NOT answered:** does any of this need professional-engineering sign-off before it goes to a customer, and who at Peak owns that call?
 
 ---
+
+## Items #74–#78 — provenance note (2026-08-01)
+
+**These were NOT reported by Jeff.** They came out of the 2026-08-01 build-and-verify session on
+the #60–#73 batch — four are loose ends the work itself exposed, and one is a gap in how we verify.
+Logged at Jeff's instruction ("log those as #74-#78"). Same rule as the rest of the file: log-only
+until he says to build.
+
+---
+
+## 74. No database transactions anywhere — every multi-write operation can half-apply — OPEN
+
+**Area:** `src/db/doc-store.ts`, `src/lib/stores/*`
+**Reported:** 2026-08-01 (the open half of #62)
+
+**Finding:** the only `.transaction(` anywhere in `src/` is `src/lib/sync/idb.ts:78` — that is
+IndexedDB in the browser, not Postgres. Every multi-write server operation is non-atomic and can
+half-apply: a crash or an error partway through leaves the database in a state no single operation
+would ever have produced.
+
+#62 closed the *id-minting* half of this (every mint now retries through `insertWithPrefixedId`,
+and `setBlob` became a single atomic upsert). Transactions were explicitly ruled OUT OF SCOPE there
+because they are a much larger change. This item carries that remainder so it is not lost.
+
+**Why it matters:** the exposure is any flow that writes more than one document. Marking a quote
+won writes the quote AND spawns a project. Promoting a design writes a quote AND deletes the
+design. Converting a lead touches several collections. None of these can currently roll back.
+
+**Open questions for Jeff:** is this worth doing before beta widens, or is it a known-accepted risk
+while the data is still small and recoverable? Note it is much cheaper to adopt before more write
+paths exist than after. **Ties to #62 and #59** (real data raises the cost of a half-applied write).
+
+**Status:** OPEN — logged only, no code.
+
+---
+
+## 75. Two duplicate `promoteDesignAction` copies, and a stale-vs-fresh `budget` divergence — OPEN
+
+**Area:** `src/app/(app)/home-actions.ts:45-58`, `src/app/(app)/design/designs/actions.ts:28-38`,
+`src/app/(app)/design/quick/actions.ts:96-116`, `src/lib/stores/designs.ts`
+**Reported:** 2026-08-01 (the leftovers from #65)
+
+**Finding, two parts.** #65 fixed the money bug — all three promote paths now stamp the customer's
+tier via `designToQuotePartial()`. Two structural problems were deliberately left:
+
+1. **`promoteDesignAction` exists TWICE**, near-identically, in `home-actions.ts` and
+   `design/designs/actions.ts`. They differ only in return-field name (`id` vs `quoteId`) and
+   `revalidatePath` targets. Two copies of one flow is how #65's divergence happened in the first
+   place — the tier stamp was added to one path and not the others.
+2. **`budget` is fresh on one path and stale on the other two.** `addToQuotesAction` calls
+   `persistDesign()` first, so the promoted value reflects the live editor. Both
+   `promoteDesignAction` copies read whatever `budget` was left by the last explicit Save, which
+   diverges if the design was edited and not saved, or promoted from a list view.
+
+**Why it matters:** the same design promoted through different buttons can still produce different
+values — just no longer different *margins*. And the duplication means the next fix applied to
+"the promote path" will again land on one of three.
+
+**Open questions for Jeff:** collapse to one shared helper (each call site keeping its own
+revalidate targets and return shape)? And for `budget` — is it acceptable that it is advisory
+(quotes are flagged `requote: true` and re-priced in the Estimator anyway), or should promotion
+always re-persist first? **Ties to #41 and #51.**
+
+**Status:** OPEN — logged only, no code.
+
+---
+
+## 76. A Grid quote can silently mix two pricing bases — OPEN
+
+**Area:** `src/app/(app)/design/grid/[id]/actions.ts` (`createDraftQuoteAction`, the `tierCatalog` map)
+**Reported:** 2026-08-01 (follow-up from #63)
+
+**Finding:** #63 made devices, wire and labor price through `cost ÷ (1 − tier.margin)` — but a part
+whose `cost` is 0 (or missing, or with a margin outside 0–1) falls back to its plain `list` price.
+So one quote can carry some lines tier-priced and others at raw list, with **nothing on the document
+indicating which**.
+
+`cost` is a required field on `CatalogPart`, so this should be rare — but a bulk dealer import that
+supplied only list prices would produce exactly this, silently, across a whole category.
+
+**Why it matters:** the quote stamps `pricingTier`/`tierMargin`, which #63 made honest. This is the
+one remaining way that stamp can overstate what actually happened, and it fails quietly.
+
+**Open questions for Jeff:** should a zero-cost part on a tier-priced quote fail loudly (refuse, or
+flag the line) rather than quietly falling back to list? Or is list the correct answer for a part
+with no cost basis, in which case the document should say so per line. **Ties to #63 and #39.**
+
+**Status:** OPEN — logged only, no code.
+
+---
+
+## 77. The quotes list drops the attestation detail that makes an approval attributable — OPEN
+
+**Area:** `src/app/(app)/quotes/page.tsx` (`SelectedPanel` review banner) vs
+`src/app/(app)/estimator/estimator-client.tsx` (the same banner in the Estimator)
+**Reported:** 2026-08-01 (found while testing #60's attestation flow in the running app)
+
+**Finding:** the Estimator renders an attested approval in full — *"Attested by Jeff — 'Reviewed by
+Nic on a Teams call, 2026-08-01' — ready to send to the customer."* The quotes-list panel renders
+the same approval as *"Approved by Jeff — ready to send to the customer"* — identical to how it
+shows an in-app review-queue approval. The stored record is correct (`method: "attested"` plus the
+note); only this surface does not read it.
+
+**Why it matters:** attestation exists precisely so an off-platform review stays attributable to a
+named human. The quotes list is where someone scans the pipeline, so it is arguably the more
+important of the two surfaces, and it is the one that loses the distinction.
+
+**Open questions for Jeff:** show the method and note inline on the list, or a marker (e.g. an
+"attested" chip) that reveals the note on hover/expand? **Ties to #60.**
+
+**Status:** OPEN — logged only, no code. Small.
+
+---
+
+## 78. Nothing in our verification runs the app — OPEN (PROCESS)
+
+**Area:** `scripts/test-review-and-spec.ts`, `package.json` scripts, CI
+**Reported:** 2026-08-01 (earned twice in one session)
+
+**Finding:** the checks we run are `npx tsc --noEmit` and `npm run test:specs` — a DB-free
+pure-function suite executed in node. **Neither can catch two entire classes of defect, and both
+classes shipped on 2026-08-01 with every check green:**
+
+1. **A missed call path.** #60's gate was applied to `estimator/actions.ts` while `setStatus` had
+   ~8 callers. An unapproved quote went to `won` from the quotes list and spawned a project. Passed
+   typecheck, 600+ assertions, and a careful diff review. Found on the first click in a browser.
+2. **A client/server bundling break.** Wiring the fixture rates made `estimator-data.ts` import
+   `stores/pricing.ts`, dragging the doc store → drizzle → `postgres` into a `"use client"` bundle.
+   **The entire Estimator returned 500.** `tsc` cannot see it (bundling boundary, not a type error);
+   `test:specs` cannot see it (runs in node, where `fs`/`net`/`tls` exist).
+
+**Why it matters:** every wave in this file has been verified the same way. The two escapes above
+were caught only because the app was run by hand, once, late in the session. Nothing makes that
+happen automatically or repeatably.
+
+**Recommendation (cheapest first):** a smoke test that boots the app against a THROWAWAY database
+and asserts that the main routes return 200 — estimator, quotes, projects, lineset, grid, import.
+That alone would have caught #2 outright. A step further: a handful of Playwright paths over the
+invariants that must not regress (send/won refused without approval; a rigging total refusing rather
+than under-reporting). **Note the DB constraint** — the dev PGlite is single-process with a
+five-corruption history, so any such harness MUST target a scratch datadir, never `.data/pglite`,
+and `npm run db:migrate` is unsafe for this because `drizzle.config.ts` hardcodes `./.data/pglite`
+when `DATABASE_URL` is unset.
+
+**Open questions for Jeff:** worth building now, or accept manual spot-checks while this is still a
+beta with one operator? The honest read: this is the highest-leverage item in the file, because it
+protects every other item from silently regressing.
+
+**Status:** OPEN — logged only, no code.
+
+---
