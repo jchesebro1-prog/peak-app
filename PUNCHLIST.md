@@ -3809,9 +3809,19 @@ under a clearly marked section?**
 > count. **Rule for later waves: a control may not claim an effect it does not have.**
 >
 > **Verification posture is UNCHANGED and still the weak point:** typecheck, the DB-free spec
-> suite, and code review only — no browser at any point in waves 1–4, and the only database
-> work was the isolated scratch run that verified migration `0012` (see #61). **Nothing in
-> these 17 commits has been exercised through the running app.**
+> suite, and code review only for waves 1–4. **That was then closed out on 2026-08-01 evening:
+> migration `0012` was verified on a scratch PGlite (#61), and the app was RUN against a
+> backed-up dev database.**
+>
+> **Running it immediately found a hole that four levels of static checking had missed** —
+> #60's gate was on 2 of ~8 call paths, and the original defect reproduced on the first click.
+> See #60. Verified working in the browser afterwards: #60 (refused, with a banner), #64
+> (total reads "Unavailable", not a low number), #67 (PO saves and trims), #70 (no vendor
+> names). **Still never exercised: the attestation UI end-to-end, the import error banners,
+> and the #73 limitation notices on printed output.**
+>
+> **Process rule earned the hard way: for an invariant, gate the chokepoint, not the caller —
+> and confirm a security fix by performing the attack, not by reading the diff.**
 
 ---
 
@@ -3867,7 +3877,7 @@ quote, an `approved` review state, or some combination? Should `won` be restrict
 `sent`? (Note the no-self-approval rule already exists for reviews — sending should probably respect
 the same spirit.)
 
-**Status:** DONE 2026-08-01. `sendToCustomerAction` and `setStatusAction`(won) now require an approval record, server-side. `QuoteReview.method` distinguishes `in_app` from `attested`; an attested approval demands a non-empty note naming who reviewed it (Jeff's call — reviews happen on phone/Teams calls). Ownership is checked on the SERVER too; the first cut gated it in the UI only, which would have reintroduced this very defect. **Watch:** quotes sitting at `review.state: "none"` can no longer be sent until approved or attested. **Still open:** should a reviewer's formal `changes` state block self-attestation?
+**Status:** DONE 2026-08-01 — **fixed TWICE; the first fix did not hold, and only running the app revealed it.** Round 1 gated `sendToCustomerAction` and `setStatusAction` in `estimator/actions.ts`. Round 2 (same day) moved the gate into **`setStatus()` in the store**, where every caller inherits it. **Why round 1 failed:** `setStatus` has ~8 callers and only 2 were gated. From the quotes LIST, signed in as a user with no `approve` role, an unapproved quote went straight to `won` and created a downstream project — the original defect, still open after review, typecheck and 600+ passing assertions. Punch #24 had already recorded the answer ("one point covers six callers" — the revision snapshot lives INSIDE `setStatus` for exactly this reason) and it was not connected. **The gate is now ON BY DEFAULT**; bypass is explicit and typed, used at exactly 5 sites: 3 engine flows (repairs/inspections/flame-tests mark their own quote won as the last step of a self-contained accept flow) and 2 importer paths (an imported row records a status reached in another system — history, not an approval decision here; without it a spreadsheet of won/lost rows would throw on its first non-draft line). Refusals surface as messages, never 500s. **Verified in the running app:** same click, same user, same quote → stays Draft, inline banner "This quote needs an approval on record before it can be marked Won", no phantom project. Also live: attested approvals, server-side ownership, and `changes` blocking self-attestation. **LESSON: for a rule that must always hold, gate the chokepoint, not the caller.**
 
 ---
 
