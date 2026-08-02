@@ -133,7 +133,30 @@ export async function convertLeadAction(
   if (!gate.ok)
     return { ok: false as const, reason: gate.reason, quoteId: "", customerId: "" };
 
-  const res = await convert(id, { venueLabel: opts.venueLabel, type: opts.type }, me.name);
+  // convert() writes in three steps with no transaction between them (#74):
+  // upsertCustomer() into the relational identity core, THEN the quote mint,
+  // THEN the lead patch. The mint goes through insertWithPrefixedId, which
+  // THROWS once an id collision outlasts its retry budget (#62). Unguarded,
+  // that escaped as a raw exception from a button press, leaving a customer
+  // row created while the lead still looked unconverted.
+  //
+  // Nothing here can roll the identity write back, but it does not need to:
+  // upsertCustomer is keyed on a deterministic customerId, so a retry re-upserts
+  // the same customer and finishes the conversion. Hence "try again" rather
+  // than "contact support" — the half-state is genuinely recoverable.
+  let res: Awaited<ReturnType<typeof convert>>;
+  try {
+    res = await convert(id, { venueLabel: opts.venueLabel, type: opts.type }, me.name);
+  } catch (e) {
+    return {
+      ok: false as const,
+      reason:
+        (e instanceof Error ? e.message : "The conversion could not be completed") +
+        " — nothing was lost, please try again.",
+      quoteId: "",
+      customerId: "",
+    };
+  }
   if (res && opts.skipSurvey) {
     await logActivity(
       id,
