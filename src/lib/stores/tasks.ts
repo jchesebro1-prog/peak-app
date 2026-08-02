@@ -45,12 +45,15 @@ export type TaskRecord = {
 export type TaskTemplateItem = { key: string; title: string; section?: string };
 
 /** Per-stage standard checklists (#17 "template + manual").
-    DRAFT CHECKLIST — punch #71, drafted by Claude 2026-08-01 from codebase
-    evidence, AWAITING JEFF'S EDIT. These are inferences about Peak's
-    process, not confirmed procedure. Sources cited per item below; anything
-    marked GUESS has no direct evidence in the codebase and needs Jeff's
-    eyes first. Items marked SAFETY/COMPLIANCE encode a genuine life-safety
-    or code step — keep them even if the wording changes. */
+    REVIEWED — punch #71. Drafted by Claude 2026-08-01 from codebase evidence,
+    then WALKED THROUGH WITH JEFF the same day. He cut two items (the delivery
+    damage inspection and the closeout margin reconciliation — see the inline
+    REMOVED notes, and do not reintroduce either) and kept the rest, including
+    the O&M documentation handoff and the safe-rigging/lockout training step,
+    both of which were flagged to him as guesses. Sources are cited per item.
+    Items marked SAFETY/COMPLIANCE encode a genuine life-safety or code step —
+    keep them even if the wording changes. Still worth correcting in real use
+    once tasks actually appear on a project, but this is no longer inference. */
 export const TASK_TEMPLATE: Record<ProjectStage, TaskTemplateItem[]> = {
   // procurement ("Order materials"): ProcurementLine{sku,desc,vendor,qty,cost,
   // leadDays,status,po}, VENDORS (JR Clancy/Rose Brand/ETC/Wenger/In-stock),
@@ -73,9 +76,9 @@ export const TASK_TEMPLATE: Record<ProjectStage, TaskTemplateItem[]> = {
   delivery: [
     { key: "confirm-staging-buffer", title: "Confirm delivery ETAs land at least 7 days before install (staging buffer)", section: "Deliveries" },
     { key: "site-access", title: "Confirm site access, loading dock, and receiving hours with the facility", section: "Mobilize" },
-    // GUESS: no direct evidence of a damage-inspection step; inferred from ProjectDelivery's
-    // in_transit -> received status transition and general receiving practice.
-    { key: "inspect-on-arrival", title: "Inspect each delivery on arrival for shipping damage and match against the PO", section: "Deliveries" },
+    // REMOVED 2026-08-01 (Jeff): a formal receiving/damage inspection is not a step
+    // Peak tracks here. Was a guess inferred from ProjectDelivery's in_transit ->
+    // received transition; do not reintroduce it.
     { key: "stage-hardware", title: "Stage hardware and materials for the install crew", section: "Mobilize" },
   ],
   // scheduled ("Crew scheduled"): CrewAssignment{person,role,start,end,mobId},
@@ -146,10 +149,9 @@ export const TASK_TEMPLATE: Record<ProjectStage, TaskTemplateItem[]> = {
   // ProcurementLine.po and ProjectNote.photo give the job-file artifacts to archive.
   complete: [
     { key: "verify-signoff-onfile", title: "Verify signed customer acceptance is on file before closing the job", section: "Closeout" },
-    // GUESS: margin reconciliation as a checklist item is inferred from the
-    // ProjectRecord.value/margin fields existing; confirm this is actually a
-    // per-job step Jeff wants tracked here vs. handled elsewhere (e.g. accounting).
-    { key: "reconcile-margin", title: "Reconcile final job value/margin against the quote", section: "Closeout" },
+    // REMOVED 2026-08-01 (Jeff): margin reconciliation is not a project-checklist
+    // step — it belongs to accounting, not to the crew-facing closeout. Was a guess
+    // inferred from ProjectRecord.value/margin existing; do not reintroduce it.
     { key: "archive-job-file", title: "Archive POs, packing slips, and install photos to the job file", section: "Closeout" },
   ],
 };
