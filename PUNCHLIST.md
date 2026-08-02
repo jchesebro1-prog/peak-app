@@ -3749,9 +3749,9 @@ under a clearly marked section?**
 > double-count is fixed.
 >
 > **Read before deploying:**
-> - **#61's migration `0012` has never been run.** It is the only artifact here that
->   could break a deploy. Needs a real run against a scratch DB — the dev PGlite has a
->   five-corruption history, so no agent was allowed near a database this session.
+> - **#61's migration `0012` HAS NOW BEEN RUN AND VERIFIED** (2026-08-01 evening, scratch
+>   PGlite, dev DB untouched). It applies cleanly and demonstrably fixes the bug; see #61.
+>   This was the one artifact that could have broken a deploy.
 > - **#63 changed the pricing BASIS**, not just the margin. Grid totals move for every
 >   customer, Base tier included. Look at real numbers before it reaches a customer.
 > - **Nothing here was exercised at runtime.** All verification was code review,
@@ -3809,8 +3809,9 @@ under a clearly marked section?**
 > count. **Rule for later waves: a control may not claim an effect it does not have.**
 >
 > **Verification posture is UNCHANGED and still the weak point:** typecheck, the DB-free spec
-> suite, and code review only. No database, no browser, at any point in waves 1–4. Migration
-> `0012` from wave 2 has still never been run.
+> suite, and code review only — no browser at any point in waves 1–4, and the only database
+> work was the isolated scratch run that verified migration `0012` (see #61). **Nothing in
+> these 17 commits has been exercised through the running app.**
 
 ---
 
@@ -3870,7 +3871,7 @@ the same spirit.)
 
 ---
 
-## 61. Pull-sync only ever returns newly INSERTED documents — `seq` never advances on UPDATE — FIXED IN CODE 2026-08-01 — MIGRATION 0012 NOT YET APPLIED
+## 61. Pull-sync only ever returns newly INSERTED documents — `seq` never advances on UPDATE — DONE 2026-08-01 — migration 0012 VERIFIED on a scratch database
 
 **Area:** `src/db/doc-tables.ts:37` (the `seq` column), `src/db/doc-store.ts` (`listSince`)
 **Reported:** 2026-07-31 (source audit)
@@ -3893,7 +3894,7 @@ the cursor to `updatedAt` with a tiebreak. The index at `:46` stays useful eithe
 **Open question for Jeff:** is offline field sync actually in use on any device yet? If it isn't,
 this is cheap to fix now and expensive to fix after real field data exists.
 
-**Status:** FIXED IN CODE 2026-08-01 — **the migration has NOT been run.** `drizzle/0012_seq_bump_trigger.sql` adds a BEFORE UPDATE trigger on all 22 doc tables; a trigger, not an in-code bump, because `/api/sync/push/route.ts` writes the doc tables directly and bypasses `doc-store.ts`. Verified statically: `seq` is used only as a sync cursor in `listSince`, never as creation order. **Needs a real run against a scratch DB before deploy** — never validated against Postgres or PGlite.
+**Status:** DONE 2026-08-01 — **migration `0012` was RUN and VERIFIED** (2026-08-01 evening). All 13 migrations applied cleanly in journal order against a throwaway PGlite in the scratch dir; the dev database at `.data/pglite` was never opened (its mtime is still Jul 29). Measured on a real `quotes` row: `seq` 1 after INSERT → **2 after UPDATE** → **3 after soft-delete**, and a client holding cursor=1 now sees the edited row. **Control test:** with `quotes_seq_bump` dropped, `seq` stayed put across an UPDATE — i.e. the old bug reproduces on demand, which proves the trigger is what fixes it rather than something else. **Coverage confirmed complete by query:** 21 doc tables carry a `seq` column, 21 carry the trigger, zero gaps. (Earlier notes said 22/22 — a miscount; both greps had included the migration's own comment line, which contains the literal text `CREATE TRIGGER ..._seq_bump`.) A brand-new doc table still needs its own `CREATE TRIGGER` in a later migration — the trigger cannot attach itself retroactively.
 
 ---
 
