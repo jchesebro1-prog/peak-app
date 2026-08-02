@@ -120,7 +120,27 @@ export async function saveQuoteAction(
   if (loadedId) {
     q = await update(loadedId, patch);
   } else {
-    const created = await create({ ...patch, owner: user.name });
+    // #62 gave every mint a retry budget; `insertWithPrefixedId` THROWS once an
+    // id collision outlasts it (doc-store.ts). Rare, but this is a save button —
+    // it must come back as a typed message, not a raw 500. The sibling
+    // setStatus call below already does this; create() was the one gap.
+    let created: Quote;
+    try {
+      created = await create({ ...patch, owner: user.name });
+    } catch (e) {
+      return {
+        ok: false,
+        id: null,
+        revNum: 1,
+        updatedAt: Date.now(),
+        review: null,
+        status: null,
+        error:
+          e instanceof Error
+            ? e.message
+            : "Could not create the quote — please try again.",
+      };
+    }
     // create() promotes only the declared columns — stamp the extras + status.
     q = await update(created.id, {
       contactName: payload.contactName || "",
