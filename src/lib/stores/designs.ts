@@ -6,6 +6,7 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { create as createQuote, update as updateQuote, type Quote } from "@/lib/stores/quotes";
 
 /**
  * SandboxStore — the Design Dashboard's data layer. Port of app/sandbox.js
@@ -352,6 +353,34 @@ export async function designToQuotePartial(id: string): Promise<DesignQuoteParti
       fromDesign: d.id,
     },
   };
+}
+
+/**
+ * Shared promotion flow (punch #75): all three promote-to-quote call sites
+ * (Quick Design's addToQuotesAction, and both promoteDesignAction copies)
+ * delegate here for the common build-partial → create-quote → stamp-requote
+ * → remove-design steps. Callers retain their own `revalidatePath` targets
+ * and response shapes — those differ deliberately per call site and are
+ * NOT folded in here (see the actions files' own comments).
+ *
+ * Returns null when the design can't be found (mirrors
+ * designToQuotePartial); callers decide how to surface that (throw vs.
+ * `{ok:false}`).
+ */
+export async function promoteDesignToQuote(
+  id: string,
+  owner: string
+): Promise<Quote | null> {
+  const partial = await designToQuotePartial(id);
+  if (!partial) return null;
+  const q = await createQuote({ ...(partial as unknown as Partial<Quote>), owner });
+  // designToQuotePartial's requote is always true by type, but keep the
+  // conditional — it's what all three original call sites did.
+  if (partial.requote) {
+    await updateQuote(q.id, { requote: true } as unknown as Partial<Quote>);
+  }
+  await removeDesign(id);
+  return q;
 }
 
 /* ---------- formatting (ported for parity) ---------- */

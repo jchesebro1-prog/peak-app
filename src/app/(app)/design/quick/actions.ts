@@ -7,11 +7,9 @@ import {
   updateDesign,
   getDesign,
   addDesignRevision,
-  removeDesign,
-  designToQuotePartial,
+  promoteDesignToQuote,
   type DesignRecord,
 } from "@/lib/stores/designs";
-import { create as createQuote, update as updateQuote, type Quote } from "@/lib/stores/quotes";
 
 /**
  * Quick Design server actions — the screen computes budgetary math
@@ -99,21 +97,13 @@ export async function addToQuotesAction(
 ): Promise<{ ok: true; quoteId: string }> {
   const user = await requireUser();
   const saved = await persistDesign(id, partial, user.name);
-  const qp = await designToQuotePartial(saved.id);
-  if (!qp) throw new Error("Design not found");
-  // DesignQuotePartial carries requote/spec/source beyond the Quote hot
-  // columns — the doc store keeps them on the document (prototype parity).
   // Tier stamp at promotion (item 11, D88): Quick Design stays a sandbox at
   // its own engine margins; the customer's tier takes over when the design
   // becomes a quote (it's flagged requote and re-priced in the Estimator).
-  // designToQuotePartial() already resolves and stamps pricingTier/tierMargin
-  // (punch #65) — no need to re-resolve here.
-  const q = await createQuote({
-    ...(qp as unknown as Partial<Quote>),
-    owner: user.name,
-  });
-  await updateQuote(q.id, { requote: true } as unknown as Partial<Quote>);
-  await removeDesign(saved.id);
+  // promoteDesignToQuote() → designToQuotePartial() already resolves and
+  // stamps pricingTier/tierMargin (punch #65) — no need to re-resolve here.
+  const q = await promoteDesignToQuote(saved.id, user.name);
+  if (!q) throw new Error("Design not found");
   revalidatePath("/design/designs");
   revalidatePath("/quotes");
   return { ok: true, quoteId: q.id };

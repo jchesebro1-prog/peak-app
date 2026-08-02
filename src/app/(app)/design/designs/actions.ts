@@ -6,14 +6,12 @@ import { can } from "@/lib/team";
 import {
   approveDesign,
   claimDesignReview,
-  designToQuotePartial,
   getDesign,
-  removeDesign,
+  promoteDesignToQuote,
   requestDesignChanges,
   submitDesignForReview,
   type DesignRecord,
 } from "@/lib/stores/designs";
-import { create as createQuote, update as updateQuote, type Quote } from "@/lib/stores/quotes";
 
 /**
  * Design dashboard server actions — promote-to-quote plus the design
@@ -25,15 +23,13 @@ import { create as createQuote, update as updateQuote, type Quote } from "@/lib/
  * QuoteStore.create (flagged requote) → remove from the sandbox.
  * Port of Design.dc.html promoteDesign(id).
  */
+// Punch #75: shared flow lives in promoteDesignToQuote(); this used to be a near-identical duplicate of the other copy, which is how #65's missing tier stamp happened.
 export async function promoteDesignAction(
   id: string
 ): Promise<{ ok: true; quoteId: string } | { ok: false; error: string }> {
   const user = await requireUser();
-  const partial = await designToQuotePartial(id);
-  if (!partial) return { ok: false, error: "Design not found." };
-  const q = await createQuote({ ...(partial as unknown as Partial<Quote>), owner: user.name });
-  if (partial.requote) await updateQuote(q.id, { requote: true } as unknown as Partial<Quote>);
-  await removeDesign(id);
+  const q = await promoteDesignToQuote(id, user.name);
+  if (!q) return { ok: false, error: "Design not found." };
   revalidatePath("/design/designs");
   revalidatePath("/quotes");
   return { ok: true, quoteId: q.id };
