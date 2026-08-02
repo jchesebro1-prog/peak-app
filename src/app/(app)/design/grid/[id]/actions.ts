@@ -25,6 +25,7 @@ import {
 } from "@/lib/stores/grid-projects";
 import { docLocId, getSite } from "@/lib/identity/sites";
 import { resolveTier } from "@/lib/pricing-tiers";
+import { isTierPriced } from "@/lib/tier-pricing";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
 import {
@@ -424,6 +425,17 @@ export async function restoreRevisionAction(
 }
 
 /**
+ * Whether a part can be tier-priced at all — the same condition tierCatalog
+ * (below) uses to decide between the cost ÷ (1 − margin) re-derivation and
+ * the part's plain list price. Pulled out as its own predicate (punch #76)
+ * so the fallback-tracking set and the pure unit tests share one definition
+ * instead of two copies of the same condition drifting apart. `cost` is a
+ * required field on CatalogPart, but the `typeof` guard stays — a bulk
+ * import or a bad edit can still land a non-numeric value at runtime even
+ * when the static type promises otherwise.
+ */
+
+/**
  * Turn the design's BOM into a draft quote — or refresh the one it already
  * minted, as long as that quote is still a draft. Once the quote moves past
  * draft (sent/won/lost) this action refuses rather than silently rewriting
@@ -433,7 +445,10 @@ export async function restoreRevisionAction(
 export async function createDraftQuoteAction(
   projectId: string,
   laborLines?: Array<{ partId: string; hours: number }>
-): Promise<{ ok: true; quoteId: string; updated: boolean } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; quoteId: string; updated: boolean; fallbackLines: string[] }
+  | { ok: false; error: string }
+> {
   const user = await requireUser();
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
@@ -458,11 +473,25 @@ export async function createDraftQuoteAction(
   // reaches every line, not just curtains.
   const tierCatalog = catalog.map((p) => ({
     ...p,
-    list:
-      typeof p.cost === "number" && p.cost > 0 && tier.margin > 0 && tier.margin < 1
-        ? Math.round((p.cost / (1 - tier.margin)) * 100) / 100
-        : p.list,
+    list: isTierPriced(p.cost, tier.margin)
+      ? Math.round((p.cost / (1 - tier.margin)) * 100) / 100
+      : p.list,
   }));
+  // Punch #76: the fallback above is silent — a part with no usable cost (a
+  // bulk import that only carried list prices, say) keeps its plain list
+  // price while everything around it gets tier-priced, and nothing on the
+  // quote said so even though pricingTier/tierMargin implies every line got
+  // the tier treatment. Track which parts fell back, by BOTH id and SKU:
+  // device/wire lines key off the catalog id, but the labor lines built below
+  // key off the part's SKU instead (see the `labor.push` below), so a single
+  // id-only set would silently miss labor fallbacks. Curtains are never in
+  // this set — priceGridCurtains prices them straight from cost + margin with
+  // no separate "list" to fall back to.
+  const fallbackKeys = new Set(
+    catalog.filter((p) => !isTierPriced(p.cost, tier.margin)).flatMap((p) => [p.id, p.sku])
+  );
+  const isFallbackLine = (l: Pick<BomLine, "partId" | "kind">) =>
+    l.kind !== "curtain" && fallbackKeys.has(l.partId);
   const devLines = bomLines(placements, tierCatalog);
   const devTotals = bomTotals(placements, tierCatalog);
   const wires = routeLines(routes, tierCatalog, project.calibrations || []);
@@ -514,6 +543,12 @@ export async function createDraftQuoteAction(
     devTotals.cost + wires.cost + curtainCostTotal + labor.reduce((a, l) => a + l.cost, 0);
   const totals = { value, margin: value > 0 ? (value - cost) / value : 0 };
 
+  // Punch #76: which of the assembled lines actually landed on a
+  // fallback-priced part — computed once here so the flag on the spec below
+  // and the list handed back to the caller (for the editor's banner) can
+  // never disagree.
+  const fallbackLines = lines.filter(isFallbackLine).map((l) => l.desc);
+
   const site = project.siteId ? await getSite(project.siteId) : null;
   const locationId = site ? docLocId(site) : null;
   const spec = {
@@ -530,6 +565,14 @@ export async function createDraftQuoteAction(
       unit: l.unit,
       price: l.list,
       ext: l.ext,
+      // Punch #76: this line's part had no usable cost (or the tier margin
+      // itself was out of range) and so kept its plain list price while its
+      // tier stamp (pricingTier/tierMargin, below) implies every line got
+      // the tier treatment. Never a price change — a fallback line keeps its
+      // list price — only a marker so the mix is visible on the document
+      // instead of silent. Omitted (not `false`) on every ordinary line so
+      // existing quotes/specs with no such lines are untouched.
+      ...(isFallbackLine(l) ? { tierFallback: true as const } : {}),
     })),
   };
 
@@ -553,7 +596,7 @@ export async function createDraftQuoteAction(
     await addRevision(projectId, { by: user.name, reason: "quote", note: `Quoted as ${existing.id}` });
     revalidatePath(editorPath(projectId));
     revalidatePath("/quotes");
-    return { ok: true, quoteId: existing.id, updated: true };
+    return { ok: true, quoteId: existing.id, updated: true, fallbackLines };
   }
 
   const q = await createQuote({
@@ -575,5 +618,5 @@ export async function createDraftQuoteAction(
   revalidatePath(editorPath(projectId));
   revalidatePath("/quotes");
   revalidatePath("/design/grid");
-  return { ok: true, quoteId: q.id, updated: false };
+  return { ok: true, quoteId: q.id, updated: false, fallbackLines };
 }

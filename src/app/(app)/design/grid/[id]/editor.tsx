@@ -252,6 +252,14 @@ export default function GridEditor({
   const [size, setSize] = useState({ w: 900, h: 1200 });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /** Punch #76 — lines the last successful draft/update quoted at plain list
+   *  price because the part had no usable cost (or the resolved tier margin
+   *  itself was out of range), even though this quote's pricingTier/tierMargin
+   *  stamp implies every line got the tier treatment. Non-blocking, mirrors
+   *  the Lineset Builder's fabric-unresolved banner (#64): names the lines,
+   *  impossible to miss, never refuses the quote. Cleared on every new
+   *  mint/update so a fixed catalog makes the warning go away on its own. */
+  const [tierFallbackLines, setTierFallbackLines] = useState<string[]>([]);
 
   const [search, setSearch] = useState("");
   // Palette SCOPE filter (punch #48, replacing Task #39's group filter):
@@ -1577,18 +1585,50 @@ export default function GridEditor({
               disabled={busy || (lines.length === 0 && wires.lines.length === 0 && curtains.length === 0)}
               onClick={async () => {
                 setErr(null);
+                setTierFallbackLines([]);
                 setBusy(true);
                 const r = await createDraftQuoteAction(
                   project.id,
                   includedLabor.map((l) => ({ partId: l.partId, hours: l.hours }))
                 );
                 setBusy(false);
-                if (!r.ok) setErr(r.error);
-                else router.refresh();
+                if (!r.ok) {
+                  setErr(r.error);
+                } else {
+                  setTierFallbackLines(r.fallbackLines);
+                  router.refresh();
+                }
               }}
             >
               {project.quoteId ? `Update draft quote ${project.quoteId}` : "Create draft quote"}
             </button>
+            {/* Punch #76 — non-blocking: the quote was still created/updated
+                above, this only says part of it priced at plain list instead
+                of the tier rate because the part had no usable cost. Same
+                spirit as the Lineset Builder's fabric-unresolved banner
+                (#64): specific, names the lines, doesn't refuse the quote. */}
+            {tierFallbackLines.length > 0 && (
+              <div
+                style={{
+                  marginTop: 8,
+                  background: "#fdf3e3",
+                  border: "1px solid #f0d9a8",
+                  borderRadius: 9,
+                  padding: "8px 11px",
+                  fontSize: 11.5,
+                  color: "#8a5a12",
+                  lineHeight: 1.5,
+                }}
+              >
+                <strong>{tierFallbackLines.length} line{tierFallbackLines.length === 1 ? "" : "s"} priced at list, not tier</strong> — no
+                usable cost for {tierFallbackLines.length === 1 ? "this part" : "these parts"}, so{" "}
+                {tierFallbackLines.length === 1 ? "it" : "they"} missed the {project.customer ? `${project.customer}'s ` : ""}
+                tier discount everything else on this quote got:
+                <br />
+                {tierFallbackLines.slice(0, 4).join("; ")}
+                {tierFallbackLines.length > 4 ? ` +${tierFallbackLines.length - 4} more` : ""}
+              </div>
+            )}
             {project.quoteId && (
               <Link
                 href="/quotes"
