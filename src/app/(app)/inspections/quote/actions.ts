@@ -178,8 +178,11 @@ export async function approveInspectionQuote(formData: FormData): Promise<void> 
     revalidatePath("/", "layout");
     return;
   }
-  // accept → mark won, which spawns the requested inspection record(s)
-  await setStatus(id, "won");
+  // accept → mark won, which spawns the requested inspection record(s).
+  // Bypasses the punch #60 approval gate: this screen IS the approval — a
+  // self-contained accept flow, not a quote routed through the estimator's
+  // review queue.
+  await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
   await createFromQuote(id);
   revalidatePath("/", "layout");
   redirect("/inspections/quote?id=" + encodeURIComponent(id) + "&approved=1");

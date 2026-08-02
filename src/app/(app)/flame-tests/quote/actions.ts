@@ -161,8 +161,11 @@ export async function approveFlameQuote(formData: FormData): Promise<void> {
     revalidatePath("/", "layout");
     return;
   }
-  // accept → mark won, which spins up the approved flame-test job
-  await setStatus(id, "won");
+  // accept → mark won, which spins up the approved flame-test job. Bypasses
+  // the punch #60 approval gate: this screen IS the approval — a
+  // self-contained accept flow, not a quote routed through the estimator's
+  // review queue.
+  await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
   await syncFromQuotes();
   revalidatePath("/", "layout");
   redirect("/flame-tests/quote?id=" + encodeURIComponent(id) + "&approved=1");

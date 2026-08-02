@@ -2170,6 +2170,23 @@ function review(over: Partial<QuoteReview> = {}): QuoteReview {
   );
   ok(canAttestApproval(null).ok, "#60: attestation is available with no review record at all");
 
+  /* The CSV importer records a status the quote already reached elsewhere.
+     Without a bypass the gate throws on the first won/sent row of a history
+     import — a legitimate flow, already gated behind manage_users. */
+  ok(
+    resolveStatusGate("won", review({ state: "none" }), { bypassApprovalGate: "historical-import" }).ok,
+    "#60: the CSV importer may record an already-won quote with no approval record — imported history is not an approval decision made in this app"
+  );
+  ok(
+    resolveStatusGate("sent", review({ state: "none" }), { bypassApprovalGate: "historical-import" }).ok,
+    "#60: the same applies to an imported quote that was already sent"
+  );
+  ok(
+    !resolveStatusGate("won", review({ state: "none" })).ok,
+    "#60: but WITHOUT a bypass reason the gate still refuses won — the importer's exemption must not leak to ordinary callers"
+  );
+
+
   ok(!hasApproval(null), "#60: hasApproval is false with no review record");
   ok(!hasApproval(undefined), "#60: hasApproval is false with an undefined review record");
   ok(!hasApproval(review({ state: "none" })), "#60: hasApproval is false for state 'none'");
@@ -2197,13 +2214,6 @@ function review(over: Partial<QuoteReview> = {}): QuoteReview {
     "#60: marking won is allowed once an in-app approval exists"
   );
 
-  // Other STAGES transitions (draft/sent/lost via setStatusAction, minus the
-  // "won" special case) are intentionally NOT covered by this gate — the
-  // punch spec says to leave those open to any signed-in user, as today.
-  // (setStatusAction only calls requireApprovalToAdvance when status==="won";
-  // this file can't exercise the DB-backed action directly, so that call-site
-  // wiring is asserted by inspection in actions.ts rather than re-tested here.)
-
   // Attested-approval note validation — MANDATORY, rejected empty/whitespace.
   const emptyNote = validateAttestationNote("");
   ok(emptyNote.ok === false, "#60: an empty attestation note is rejected");
@@ -2217,6 +2227,61 @@ function review(over: Partial<QuoteReview> = {}): QuoteReview {
   const goodNote = validateAttestationNote("  Reviewed by Jeff on a Teams call, 2026-08-01  ");
   ok(goodNote.ok === true, "#60: a real attestation note is accepted");
   if (goodNote.ok) ok(goodNote.note === "Reviewed by Jeff on a Teams call, 2026-08-01", "#60: the accepted note is trimmed");
+}
+
+/* --- punch 60-67: the approval gate moved INTO setStatus() so every caller
+ * inherits it (D84's gate only lived in two of eight-plus callers — the
+ * quotes-list "Won" button, the create-with-status estimator path, and the
+ * renewal-outreach auto-send in inbox/actions.ts were all still wide open).
+ * `resolveStatusGate` is the exact pure decision `setStatus` consults before
+ * writing — testing it directly here proves the gate holds/bypasses
+ * correctly for every call path without touching a DB, so a future refactor
+ * of setStatus can silently drop the check only if it also breaks this file. */
+import { resolveStatusGate, type SetStatusOpts } from "@/lib/stores/quotes";
+{
+  const noRecord: QuoteReview | null = null;
+  const inReview = review({ state: "in_review" });
+  const changesRequested = review({ state: "changes" });
+  const approvedInApp = review({ state: "approved", method: "in_app" });
+  const approvedAttested = review({ state: "approved", method: "attested" });
+  const engineBypass: SetStatusOpts = { bypassApprovalGate: "engine-owned-flow" };
+
+  // unapproved -> won: refused (the exact hole reproduced from the quotes list).
+  ok(resolveStatusGate("won", noRecord).ok === false, "#60-67: setStatus gate refuses unapproved -> won (no review record)");
+  ok(resolveStatusGate("won", inReview).ok === false, "#60-67: setStatus gate refuses unapproved -> won (merely in_review)");
+  ok(resolveStatusGate("won", changesRequested).ok === false, "#60-67: setStatus gate refuses unapproved -> won (changes requested — a stale/reverted decision doesn't authorize it)");
+
+  // unapproved -> sent: refused (the renewal-outreach auto-send + setStatusAction("sent") hole).
+  ok(resolveStatusGate("sent", noRecord).ok === false, "#60-67: setStatus gate refuses unapproved -> sent (no review record)");
+  ok(resolveStatusGate("sent", inReview).ok === false, "#60-67: setStatus gate refuses unapproved -> sent (merely in_review)");
+
+  // approved (either method) -> won / sent: allowed.
+  ok(resolveStatusGate("won", approvedInApp).ok === true, "#60-67: setStatus gate allows won with an in-app approval");
+  ok(resolveStatusGate("won", approvedAttested).ok === true, "#60-67: setStatus gate allows won with an attested approval");
+  ok(resolveStatusGate("sent", approvedInApp).ok === true, "#60-67: setStatus gate allows sent with an in-app approval");
+  ok(resolveStatusGate("sent", approvedAttested).ok === true, "#60-67: setStatus gate allows sent with an attested approval");
+
+  // draft/lost: always open, approval record or not — the punch spec leaves
+  // every OTHER transition exactly as open as it always was.
+  ok(resolveStatusGate("draft", noRecord).ok === true, "#60-67: setStatus gate never blocks -> draft, even with no review record");
+  ok(resolveStatusGate("lost", noRecord).ok === true, "#60-67: setStatus gate never blocks -> lost, even with no review record");
+  ok(resolveStatusGate("draft", changesRequested).ok === true, "#60-67: setStatus gate never blocks -> draft regardless of review state");
+  ok(resolveStatusGate("lost", inReview).ok === true, "#60-67: setStatus gate never blocks -> lost regardless of review state");
+
+  // The engine bypass (repairs/quote, inspections/quote, flame-tests/quote
+  // ONLY) — permitted through even with zero approval record, because that
+  // opt-out is exactly what those three self-contained accept flows pass.
+  ok(resolveStatusGate("won", noRecord, engineBypass).ok === true, "#60-67: the engine-owned-flow bypass permits won with NO approval record at all — this is what repairs/inspections/flame-tests quote actions rely on");
+  ok(resolveStatusGate("sent", noRecord, engineBypass).ok === true, "#60-67: the engine-owned-flow bypass also covers sent, not just won");
+  ok(resolveStatusGate("won", changesRequested, engineBypass).ok === true, "#60-67: the engine-owned-flow bypass overrides even an explicit 'changes requested' review state — it is a full opt-out by design, scoped to exactly three call sites");
+
+  // Without the bypass opt-in, the default is ALWAYS gated for won/sent —
+  // this is the regression the punch spec calls "impossible to reintroduce
+  // silently": a bare `resolveStatusGate(status, review)` call (no third
+  // arg) must refuse an unapproved won/sent exactly like the explicit-{}
+  // form above, so a future caller that forgets the options argument stays
+  // safe automatically instead of accidentally landing on an open gate.
+  ok(resolveStatusGate("won", noRecord).ok === resolveStatusGate("won", noRecord, {}).ok, "#60-67: omitting opts entirely behaves identically to passing {} — the gate is ON by default, not opt-in");
 }
 
 /* --- punch 60-67: travel / catalog / fixture Estimating Rules groups are

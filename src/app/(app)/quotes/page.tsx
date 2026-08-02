@@ -140,6 +140,11 @@ export default async function QuotesPage({
   const typeParam = one(sp.type);
   const typeFilter = (TYPE_KEYS as readonly string[]).includes(typeParam) ? typeParam : "all";
   const selectedId = one(sp.id);
+  // Punch #60: setQuoteStatus (quotes/actions.ts) redirects back here with
+  // this param when the store's approval gate refuses a status change (e.g.
+  // an unapproved quote pushed straight to Won from these plain buttons) —
+  // surfaced on the selected row instead of a raw thrown-exception 500.
+  const statusError = one(sp.statusError) || null;
   // #35 one-click both ways: the engagement referencing the selected quote
   // (as its source proposal OR as Peak's install bid). Selected row only.
   const selEng = selectedId ? await getEngagementForQuoteRef(selectedId) : null;
@@ -658,6 +663,8 @@ export default async function QuotesPage({
                   reviewerNames={reviewerRows
                     .filter((u) => u.name !== me && u.name !== q.owner)
                     .map((u) => u.name)}
+                  backHref={hrefFor({ id: q.id })}
+                  statusError={statusError}
                 />
               )}
             </div>
@@ -700,11 +707,20 @@ function SelectedPanel({
   me,
   engagement,
   reviewerNames,
+  backHref,
+  statusError,
 }: {
   q: Quote;
   me: string;
   engagement: { id: string; stage: string } | null;
   reviewerNames: string[];
+  /** Current list URL (filters + this row selected) — round-tripped through
+   *  setQuoteStatus's hidden "back" field so a gate refusal redirects to
+   *  exactly this view instead of a bare "/quotes". */
+  backHref: string;
+  /** Set when setQuoteStatus's approval gate just refused a change for THIS
+   *  row (punch #60). */
+  statusError: string | null;
 }) {
   const rev = q.review || { state: "none" as const, reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" };
   const rm = RB_META[rev.state] || RB_META.none;
@@ -740,6 +756,25 @@ function SelectedPanel({
         borderBottom: "1px solid #f0f1f4",
       }}
     >
+      {statusError && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "10px 14px",
+            marginBottom: 10,
+            background: "#fcefe9",
+            border: "1px solid #f0d6cd",
+            borderRadius: 10,
+            fontSize: 12.5,
+            color: "#b4543a",
+            fontWeight: 600,
+          }}
+        >
+          {statusError}
+        </div>
+      )}
       {/* review & approval banner (Estimator port) */}
       <div
         style={{
@@ -824,6 +859,7 @@ function SelectedPanel({
         {canSend && (
           <form action={setQuoteStatus}>
             <input type="hidden" name="id" value={q.id} />
+            <input type="hidden" name="back" value={backHref} />
             <button
               type="submit"
               name="status"
@@ -916,6 +952,7 @@ function SelectedPanel({
           </span>
           <form action={setQuoteStatus} style={{ display: "flex", gap: 6 }}>
             <input type="hidden" name="id" value={q.id} />
+            <input type="hidden" name="back" value={backHref} />
             {STAGES.map((s) => {
               const cur = s === q.status;
               return cur ? (

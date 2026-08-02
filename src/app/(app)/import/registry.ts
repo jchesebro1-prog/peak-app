@@ -361,7 +361,14 @@ const WRITERS: Record<string, Writer> = {
         quoteType: pick(v.quoteType, ["system", "flame_test", "inspection", "service"] as const, "system"),
       });
       const status = pick(v.status, ["draft", "sent", "won", "lost"] as const, "draft");
-      if (status !== "draft") await Quotes.setStatus(rec.id, status);
+      // Punch #60: an imported row records a status the quote already reached
+      // in the system it came from — there is no approval record here to check
+      // and none to demand. Without the bypass the gate throws on the first
+      // won/sent row of a history import.
+      if (status !== "draft")
+        await Quotes.setStatus(rec.id, status, undefined, {
+          bypassApprovalGate: "historical-import",
+        });
       cache.push({ id: rec.id, name: str(v.name), customer: str(v.customer) });
     },
     update: async (ex, v) => {
@@ -370,7 +377,12 @@ const WRITERS: Record<string, Writer> = {
         customer: str(v.customer) || str(ex.customer),
       });
       const status = pick(v.status, ["draft", "sent", "won", "lost"] as const, "draft");
-      if (str(v.status)) await Quotes.setStatus(str(ex.id), status);
+      // Same as the create path above (punch #60): imported history, not an
+      // approval decision made in this app.
+      if (str(v.status))
+        await Quotes.setStatus(str(ex.id), status, undefined, {
+          bypassApprovalGate: "historical-import",
+        });
     },
     exportObjects: async () => {
       const list = await Quotes.getAll();

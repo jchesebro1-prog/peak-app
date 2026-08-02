@@ -235,8 +235,11 @@ export async function approveRepairQuote(formData: FormData): Promise<void> {
     revalidatePath("/", "layout");
     return;
   }
-  // accept → mark won, which spins up the approved repair job
-  await setStatus(id, "won");
+  // accept → mark won, which spins up the approved repair job. Bypasses the
+  // punch #60 approval gate: this screen IS the approval — accepting a repair
+  // quote here is a self-contained flow with no separate estimator review
+  // queue to check a record against, unlike the estimator's send/won paths.
+  await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
   await createFromQuote(id);
   revalidatePath("/", "layout");
   redirect("/repairs/quote?id=" + encodeURIComponent(id) + "&approved=1");

@@ -355,7 +355,20 @@ async function completeRenewalOutreach(
     return;
   }
   const quote = await byRenewalOf(link.id);
-  if (quote && quote.status === "draft") await setQuoteStatus(quote.id, "sent");
+  if (quote && quote.status === "draft") {
+    // Punch #60: setQuoteStatus (quotes.setStatus) now throws when a quote
+    // being advanced to "sent" has no approval record. This side effect runs
+    // AFTER the outreach email has already been sent (sendDraft above already
+    // succeeded) — a renewal quote that happens to lack an approval must not
+    // turn a successful send into a thrown-exception failure here. Swallow
+    // and leave the quote in draft; the team still sees it needs approval
+    // before it can actually go out.
+    try {
+      await setQuoteStatus(quote.id, "sent");
+    } catch {
+      /* no-op — see comment above */
+    }
+  }
 }
 
 export async function composeSendAction(d: ComposePayload) {

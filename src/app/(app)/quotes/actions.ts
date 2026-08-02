@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import {
   get,
@@ -29,10 +30,27 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = String(formData.get("id") || "");
   const status = String(formData.get("status") || "");
+  // Where to send the user back (current list filters + the row still
+  // selected) — the forms that call this action embed the page's own
+  // computed hrefFor() as a hidden field so a refusal can redirect back to
+  // the exact view the user was on, not a bare "/quotes".
+  const back = String(formData.get("back") || "/quotes");
   if (!id || !(STAGES as readonly string[]).includes(status)) return;
-  // The actor is passed through so the automatic on-send revision is
-  // attributed to whoever sent it (item 24).
-  const q = await setStatus(id, status as QuoteStatus, user.name);
+  // Punch #60 (the actual hole the product owner reproduced): this used to
+  // call setStatus() with no gate at all — any signed-in user could push an
+  // unapproved quote straight to Won from the plain list buttons, no review
+  // required. setStatus() now enforces the approval gate itself and THROWS
+  // on refusal; catch it here and send the user back with a clear message
+  // instead of letting a raw exception 500 the page.
+  let q: Awaited<ReturnType<typeof setStatus>>;
+  try {
+    // The actor is passed through so the automatic on-send revision is
+    // attributed to whoever sent it (item 24).
+    q = await setStatus(id, status as QuoteStatus, user.name);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "That status change was refused.";
+    redirect(back + (back.includes("?") ? "&" : "?") + "statusError=" + encodeURIComponent(msg));
+  }
   if (!q) return;
   if (status === "sent" && q.quoteType === "consulting") {
     // Spec §1 spawn model: SENDING a consulting proposal opens the

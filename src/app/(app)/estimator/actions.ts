@@ -69,6 +69,9 @@ export type SaveResult = {
   updatedAt: number;
   review: QuoteReview | null;
   status: QuoteStatus | null;
+  /** Set on `ok: false` when the record was created but a requested status
+   *  transition was refused (punch #60: setStatus's approval gate). */
+  error?: string;
 };
 
 export type ReviewSync = {
@@ -113,6 +116,7 @@ export async function saveQuoteAction(
     spec: { sections: payload.sections, mobs: payload.mobs },
   };
   let q: Quote | null = null;
+  let statusError: string | undefined;
   if (loadedId) {
     q = await update(loadedId, patch);
   } else {
@@ -122,17 +126,29 @@ export async function saveQuoteAction(
       contactName: payload.contactName || "",
       quoteNote: payload.quoteNote || "",
     } as QuotePatch);
-    if (payload.status !== "draft") q = await setStatus(created.id, payload.status);
+    if (payload.status !== "draft") {
+      // Punch #60: setStatus's approval gate now applies here too. A brand
+      // new quote can never already carry an approval record, so this can
+      // only succeed for "lost" — and "won"/"sent" would always be refused.
+      // Catch rather than let a raw exception blow up an otherwise-successful
+      // save: the quote stays created (in draft), just not advanced.
+      try {
+        q = await setStatus(created.id, payload.status);
+      } catch (e) {
+        statusError = e instanceof Error ? e.message : "That status change was refused.";
+      }
+    }
     q = q || created;
   }
   refresh();
   return {
-    ok: !!q,
+    ok: !!q && !statusError,
     id: q?.id ?? null,
     revNum: Math.max(1, q?.revisions?.length || 1),
     updatedAt: q?.updatedAt ?? Date.now(),
     review: q?.review ?? null,
     status: q?.status ?? null,
+    ...(statusError ? { error: statusError } : {}),
   };
 }
 
@@ -192,13 +208,18 @@ export async function setStatusAction(
 ): Promise<ReviewSync> {
   await requireUser();
   if (!id || !STAGES.includes(status)) return { ok: false, review: null, status: null };
-  // Punch #60 (D84 hole): marking a quote WON requires an approval record —
-  // in-app or attested. Every other stage transition stays open to any
-  // signed-in user, as before. Checked here (not just hidden in the UI) —
-  // that's the whole point of the fix.
-  if (status === "won") {
+  // Punch #60 (D84 hole): marking a quote WON or SENT requires an approval
+  // record — in-app or attested. Every other stage transition stays open to
+  // any signed-in user, as before. Pre-checked here so the UI gets the same
+  // typed error sendToCustomerAction/setStatusAction("won") always returned;
+  // setStatus() now enforces this same gate itself (punch #60 follow-up — it
+  // moved there so every OTHER caller inherits it too), so this pre-check and
+  // the store are both consulting `requireApprovalToAdvance`/the review
+  // record, never two different rules. The try/catch below is just a
+  // backstop — it should never actually fire given this pre-check.
+  if (status === "won" || status === "sent") {
     const cur = await get(id);
-    const gate = requireApprovalToAdvance(cur?.review ?? null, "won");
+    const gate = requireApprovalToAdvance(cur?.review ?? null, status === "won" ? "won" : "send");
     if (!gate.ok) {
       return {
         ok: false,
@@ -208,7 +229,17 @@ export async function setStatusAction(
       };
     }
   }
-  await setStatus(id, status);
+  try {
+    await setStatus(id, status);
+  } catch (e) {
+    const cur = await get(id);
+    return {
+      ok: false,
+      review: cur?.review ?? null,
+      status: cur?.status ?? null,
+      error: e instanceof Error ? e.message : "That status change was refused.",
+    };
+  }
   refresh();
   return syncOf(id);
 }
@@ -277,7 +308,20 @@ export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
       error: gate.error,
     };
   }
-  await setStatus(id, "sent");
+  // setStatus() also enforces this same gate internally now (punch #60
+  // follow-up — moved into the store so every caller inherits it); the
+  // try/catch is a backstop that should never actually fire given the
+  // pre-check above, not a second source of truth.
+  try {
+    await setStatus(id, "sent");
+  } catch (e) {
+    return {
+      ok: false,
+      review: cur?.review ?? null,
+      status: cur?.status ?? null,
+      error: e instanceof Error ? e.message : "That status change was refused.",
+    };
+  }
   refresh();
   return syncOf(id);
 }

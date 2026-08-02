@@ -465,21 +465,91 @@ export async function restoreQuoteRevision(
 }
 
 /**
+ * Explicit opt-out from the approval gate below (punch #60 follow-up — the
+ * gate moved from the two estimator actions INTO `setStatus` itself so all
+ * seven-plus callers inherit it; see `resolveStatusGate`).
+ *
+ * The gate is ON BY DEFAULT: a caller must name this to skip it. That default
+ * is deliberate — a future call site nobody remembers to gate must still be
+ * safe automatically, which is exactly the hole this punch closes (D84's gate
+ * only lived in `setStatusAction`/`sendToCustomerAction`, so five other
+ * callers — including the plain quotes-list status buttons — could push an
+ * unapproved quote straight to `won`).
+ *
+ * `"engine-owned-flow"` is the ONLY value, and it exists for exactly three
+ * call sites: repairs/quote, inspections/quote, flame-tests/quote. Each of
+ * those builder screens marks its OWN quote won as the last step of a
+ * self-contained accept flow (persist → setStatus(id,"won") → spawn the job)
+ * — there is no separate estimator review queue in that flow to check an
+ * approval record against, and gating it would just break those screens
+ * outright. Do not reach for this anywhere else; every other caller must go
+ * through the real gate.
+ *
+ * `"historical-import"` exists for the CSV importer (`/import` registry) only.
+ * An imported row records a status a quote ALREADY reached in whatever system
+ * it came from — it is not a decision being made in this app, and there is no
+ * approval record to find because the approval (if any) happened elsewhere.
+ * Without this, importing a spreadsheet of won/lost history would throw on the
+ * first non-draft row. The importer is already gated behind `manage_users`.
+ */
+export type SetStatusOpts = {
+  bypassApprovalGate?: "engine-owned-flow" | "historical-import";
+};
+
+/**
+ * Pure: does THIS transition need (and have) an approval record? Exported so
+ * it is unit-testable without a DB — `setStatus` is the single call site that
+ * consults it, but the decision itself lives here so the logic can be
+ * asserted directly instead of only by inspecting `setStatus`'s source.
+ *
+ * Mirrors `requireApprovalToAdvance`'s two gated actions ("send" == advancing
+ * to `sent`, "won" == advancing to `won`); every other status stays open, as
+ * it always has been.
+ */
+export function resolveStatusGate(
+  status: QuoteStatus,
+  review: QuoteReview | null | undefined,
+  opts: SetStatusOpts = {}
+): ApprovalGateResult {
+  if (
+    opts.bypassApprovalGate === "engine-owned-flow" ||
+    opts.bypassApprovalGate === "historical-import"
+  )
+    return { ok: true };
+  if (status !== "won" && status !== "sent") return { ok: true };
+  return requireApprovalToAdvance(review, status === "won" ? "won" : "send");
+}
+
+/**
  * Move through the pipeline; stamps history [{at, from, to}]. No-op write when unchanged.
  *
  * Sending also cuts an automatic revision (item 24 decision A) — that snapshot
  * is the record of what the customer was actually quoted, so it is taken here
  * rather than at any one call site: every legitimate transition funnels through
  * this function.
+ *
+ * Punch #60 (D84 hole, closed for real this time): advancing to `won` or
+ * `sent` now requires an approval record — checked HERE, not in just two of
+ * the eight-plus callers, so a caller nobody remembers to update is still
+ * safe. Refuses by THROWING (not returning null), because null already means
+ * "not found" / "no-op" elsewhere in this function and silently overloading
+ * it would let a refusal look identical to nothing having happened. Callers
+ * that need a typed result instead of a thrown exception (any UI-facing
+ * caller that didn't already pre-check with `requireApprovalToAdvance`) catch
+ * this and surface `error.message` — see quotes/actions.ts, inbox/actions.ts,
+ * estimator/actions.ts.
  */
 export async function setStatus(
   id: string,
   status: QuoteStatus,
-  by?: string | null
+  by?: string | null,
+  opts: SetStatusOpts = {}
 ): Promise<Quote | null> {
   if (!STAGES.includes(status)) return null;
   const q = await getDoc<Quote>("quotes", id);
   if (!q || q.status === status) return q;
+  const gate = resolveStatusGate(status, q.review, opts);
+  if (!gate.ok) throw new Error(gate.error);
   return patchDoc<Quote>("quotes", id, (doc) => {
     const t = Date.now();
     doc.history = doc.history || [];
