@@ -1,4 +1,5 @@
 import { getBlob, setBlob } from "@/db/doc-store";
+import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
 
 /**
  * PricingRules — server port of app/pricing.js: the single master registry of
@@ -142,54 +143,19 @@ export const CATALOG_RATE_DEFAULTS: CatalogRates = {
   defaultMargin: 0.30,
 };
 
-export type FixtureRates = {
-  mountCclamp: number;
-  mountHalfCoupler: number;
-  mountFloorBase: number;
-  mountTruss: number;
-  accColorFrame: number;
-  accGel: number;
-  accGobo: number;
-  accBarnDoor: number;
-  accTopHat: number;
-  accSafety: number;
-  pwrEdison: number;
-  pwrTwistLock: number;
-  pwrSoca: number;
-  dataDMX: number;
-  pwrDimmer: number;
-  lamp575: number;
-  lamp750: number;
-  lamp1000: number;
-  /** When a fixture is entered manually, cost = unit price × this. */
-  customCostFactor: number;
-};
-
-/** Estimator fixture-configurator add-on PRICE defaults — seed/fallback for
- *  blob `fixture_rates`. This is the single source of truth for add-on
- *  price; estimator-data.ts's fixMounts()/fixAcc()/fixPwr()/fixLamps() read
- *  the live values from here and keep only the (non-editable-here) cost side. */
-export const FIXTURE_RATE_DEFAULTS: FixtureRates = {
-  mountCclamp: 18,
-  mountHalfCoupler: 24,
-  mountFloorBase: 45,
-  mountTruss: 32,
-  accColorFrame: 14,
-  accGel: 9,
-  accGobo: 34,
-  accBarnDoor: 58,
-  accTopHat: 26,
-  accSafety: 12,
-  pwrEdison: 22,
-  pwrTwistLock: 34,
-  pwrSoca: 78,
-  dataDMX: 26,
-  pwrDimmer: 55,
-  lamp575: 22,
-  lamp750: 26,
-  lamp1000: 34,
-  customCostFactor: 0.66,
-};
+/**
+ * Fixture add-on rate type + defaults now live in `@/lib/fixture-rates`, a
+ * DEPENDENCY-FREE module, and are re-exported here so server code can keep
+ * importing them from the rates store unchanged.
+ *
+ * Why they moved: `estimator-data.ts` needs the defaults and is pulled into
+ * `estimator-client.tsx` ("use client"). Importing them from THIS file dragged
+ * the doc store -> drizzle -> `postgres` into the browser bundle, which tried
+ * to resolve `fs`/`net`/`tls` and 500'd the entire Estimator page. tsc cannot
+ * see that (bundling boundary, not a type error) and the spec suite runs in
+ * node where those modules exist — only loading the page catches it.
+ */
+export { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
 
 export const FLAMETEST_RATES_BLOB = "flametest_rates";
 export const REPAIR_RATES_BLOB = "repair_rates";

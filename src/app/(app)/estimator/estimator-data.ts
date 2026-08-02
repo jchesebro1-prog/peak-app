@@ -1,4 +1,4 @@
-import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/stores/pricing";
+import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
 import type { FixtureDraft, SpecSection } from "./types";
 
 /**
