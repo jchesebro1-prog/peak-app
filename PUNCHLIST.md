@@ -4272,7 +4272,13 @@ design. Converting a lead touches several collections. None of these can current
 while the data is still small and recoverable? Note it is much cheaper to adopt before more write
 paths exist than after. **Ties to #62 and #59** (real data raises the cost of a half-applied write).
 
-**Status:** OPEN — logged only, no code.
+**Status:** OPEN — **investigated 2026-08-01, deliberately NOT built. The item as scoped is not achievable, and the achievable part is not worth its cost.** Jeff approved "wrap the multi-write flows only" (won→project, design→quote, lead conversion). Mapping them found:
+- **Every one of the 8 doc-store writers calls `getDb()` itself** (`doc-store.ts:83,119,143,166,189,198,284,333`) and **no store function anywhere accepts a `tx`/`db` handle** — so nothing can join a caller's transaction. Wrapping ANY flow first needs an optional `tx` threaded through all 8 plus every intermediate. That is the store-wide plumbing #62 explicitly deferred.
+- **won→project is NOT a single call stack, so it cannot be wrapped at all.** `setStatus` (`quotes.ts:563`) never touches projects; the project is created later by `syncProjectsFromQuotes()` (`projects.ts:600`), a sync that runs on page load (see #16's "triggers re-run on every page load"). Confirmed live 2026-08-01: clicking Won created no project until `/projects` was opened. **The #74 entry above describes this flow inaccurately** — it is eventually-consistent by construction, not a half-appliable transaction.
+- **lead conversion cannot be covered either** — it writes the relational identity core (`upsertCustomer`, `leads.ts:731`) as well as the doc store, so one doc-store transaction would not span it.
+- **design→quote is the ONLY wrappable flow** (`promoteDesignToQuote`: quote insert → requote patch → design soft-delete). Its failure mode is a leftover design sitting alongside its new quote.
+
+**Judgement:** touching all 8 writers to protect one 3-write flow with a mild failure mode is a poor trade, and `.transaction()` IS available on both drivers (`drizzle-orm/postgres-js` hosted, `drizzle-orm/pglite` local) whenever this is revisited. **Revisit when** a second wrappable flow appears, or before real multi-user concurrency (#57/#59 territory).
 
 ---
 
