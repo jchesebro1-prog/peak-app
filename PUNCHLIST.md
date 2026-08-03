@@ -4464,3 +4464,56 @@ earlier? **Ties to #78.**
 **Status:** OPEN — logged only, no code.
 
 ---
+
+## 80. `insertWithPrefixedId` throws, and almost nothing catches it — OPEN
+
+**Area:** `src/db/doc-store.ts:284-299` (the throw), ~14 store modules that mint through it, and the
+server actions above them
+**Reported:** 2026-08-01 (code review of the #60–#79 branch)
+
+**Finding:** #62 replaced the racy `nextPrefixedId` + `upsertDoc` pattern with
+`insertWithPrefixedId`, which retries on id collision instead of letting one creator's row silently
+overwrite another's. That was the right fix. But it ends with:
+
+```ts
+throw new Error(
+  `insertWithPrefixedId: id collision persisted for ${coll}/${prefix} after ${maxAttempts} attempts`
+);
+```
+
+Minting now happens through it in **~14 store modules** — quotes, projects, leads, designs, tasks,
+notes, surveys, inspections, repair jobs, flame jobs, grid projects, engagements, comms,
+site visits. **Exactly two server actions catch that throw:** `saveQuoteAction`
+(`estimator/actions.ts`) and `convertLeadAction` (`leads/actions.ts`), both guarded on 2026-08-01
+in response to this review. Everywhere else it escapes as a raw exception from a button press.
+
+**Why it matters:** two different consequences, and the second is the real one.
+- **Cosmetic:** a raw 500 where the action has a perfectly good typed failure shape to return.
+- **Structural:** where the mint sits in the MIDDLE of a multi-write sequence, the throw leaves
+  partial state and there is no transaction to unwind it (**#74** — and #74 was investigated and
+  deliberately not built). `convertLeadAction` was the worked example: `upsertCustomer()` lands in
+  the relational identity core, then the quote mint throws, leaving an orphan customer while the
+  lead still reads as unconverted. That one is recoverable only because `upsertCustomer` is keyed
+  on a deterministic id, so a retry is idempotent. **Not every mint site has that property, and
+  nobody has checked which do.**
+
+**How likely:** low by construction — it needs a genuine id collision to survive five attempts,
+which means real write concurrency on the same collection. It is a robustness gap, not a live bug.
+Worth noting it gets more likely, not less, as #59 brings real data and more users.
+
+**Open questions for Jeff:**
+1. Guard each server action individually (mechanical, ~12 small edits), or change the contract so
+   `insertWithPrefixedId` returns `null` on exhaustion and let each caller decide? The second is
+   fewer edits but silently converts a loud failure into a quiet one, which is how #62's original
+   bug behaved in the first place.
+2. Or leave it: accept a raw error on a genuinely rare path, and revisit alongside #74 when
+   transactions are reconsidered.
+
+**Recommendation:** option 1 (explicit guards), because the failure it replaces — a silently
+overwritten record — is exactly what #62 existed to stop. Do NOT make it return null.
+
+**Ties to:** #62 (created it), #74 (no transactions to unwind partial state), #59 (raises the odds).
+
+**Status:** OPEN — logged only, no code.
+
+---
