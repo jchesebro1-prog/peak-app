@@ -5,15 +5,24 @@ import { byCategory } from "@/lib/stores/catalog";
 import {
   all as allCustomers,
   resolveId,
-  travelForId,
   travelForName,
+  primaryLoc,
   type CustomerDoc,
+  type CustomerLocation,
 } from "@/lib/stores/customers";
 import { reviewers as reviewerUsers } from "@/lib/users";
-import { getSettings } from "@/lib/settings";
+import { getSettings, type Office } from "@/lib/settings";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
-import { getFixtureRates } from "@/lib/stores/pricing";
+import { getFixtureRates, getTravelRates } from "@/lib/stores/pricing";
+import {
+  nearest,
+  coordsOf,
+  hasCoords,
+  routeKey,
+  routeCachedBulk,
+  estimateFromParts,
+} from "@/lib/geo";
 import EstimatorClient from "./estimator-client";
 import type {
   AiSource,
@@ -208,18 +217,54 @@ export default async function EstimatorPage({
 
   const initial = await initialFrom(q, customers, user.name);
 
-  /* ---- travel estimates for every (customer, venue) pair (E3/E4) ---- */
-  const travel: Record<string, TravelLite> = {};
-  const lite = (e: Awaited<ReturnType<typeof travelForId>>): TravelLite => ({
+  /* ---- travel estimates for every (customer, venue) pair (E3/E4) ----
+     Was: one travelForId() per customer + per location, each re-fetching
+     the office list and hitting the geo_cache table individually — with
+     the real directory (~1700+ companies) that's thousands of sequential
+     round trips serialized in a for-await loop, which is what made this
+     page take minutes to load. customerDocs already carries every
+     customer's locations (all()'s own bulk query, see customers.ts), so
+     the only genuinely per-row cost left is the route-cache lookup — batched
+     below into one query. Everything else (nearest office, haversine
+     fallback) is pure/synchronous. */
+  const officesList: Office[] = Array.isArray(settings.offices) ? settings.offices : [];
+  const travelRates = await getTravelRates();
+
+  type TravelTarget = { key: string; office: Office | null; target: CustomerLocation | null };
+  const asTarget = (loc: CustomerLocation | null): CustomerLocation | null => {
+    if (!loc) return null;
+    const coords = coordsOf(loc);
+    return coords ? { ...loc, lat: coords.lat, lng: coords.lng } : loc;
+  };
+  const targets: TravelTarget[] = [];
+  for (const c of customerDocs) {
+    const prim = asTarget(primaryLoc(c.locations));
+    targets.push({ key: c.id + "|", office: nearest(officesList, prim), target: prim });
+    for (const l of c.locations || []) {
+      if (!l.id) continue;
+      const t = asTarget(l);
+      targets.push({ key: c.id + "|" + l.id, office: nearest(officesList, t), target: t });
+    }
+  }
+  const keyFor = (t: TravelTarget): string | null =>
+    t.office && t.target && hasCoords(t.office) && hasCoords(t.target)
+      ? routeKey(t.office, t.target)
+      : null;
+  const cacheKeys = Array.from(
+    new Set(targets.map(keyFor).filter((k): k is string => k != null))
+  );
+  const routeCache = await routeCachedBulk(cacheKeys);
+
+  const lite = (e: { miles: number | null; minutes: number | null; office: Office | null } | null): TravelLite => ({
     miles: e?.miles ?? null,
     minutes: e?.minutes ?? null,
     officeName: e?.office?.name ?? null,
   });
-  for (const c of customerDocs) {
-    travel[c.id + "|"] = lite(await travelForId(c.id));
-    for (const l of c.locations || []) {
-      if (l.id) travel[c.id + "|" + l.id] = lite(await travelForId(c.id, l.id));
-    }
+  const travel: Record<string, TravelLite> = {};
+  for (const t of targets) {
+    const ck = keyFor(t);
+    const cached = ck ? routeCache.get(ck) ?? null : null;
+    travel[t.key] = lite(estimateFromParts(t.office, t.target, travelRates, cached));
   }
   if (!initial.customerId && initial.custName) {
     travel["name|" + initial.custName] = lite(await travelForName(initial.custName));

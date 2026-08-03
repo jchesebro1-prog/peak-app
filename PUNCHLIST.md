@@ -4624,3 +4624,63 @@ survey / venue measurement, a related but distinct venues-adjacent item already 
 **Status:** OPEN — logged only, no code. Needs scoping before it needs building.
 
 ---
+
+## 84. Estimator took minutes to open — N+1 travel-estimate queries on every load — DONE
+
+**Area:** `src/app/(app)/estimator/page.tsx`, `src/lib/geo.ts`
+**Reported:** 2026-08-03 (Jeff: "When I click estimator it just takes a really long time to load").
+
+**Root cause:** `EstimatorPage` precomputes a drive-time estimate for **every customer in the
+directory** (so the in-app customer picker has instant mileage/labor defaults the moment you pick
+someone, not just the customer already on the quote). That part is correct and needed — the bug was
+*how* it was computed: a `for` loop awaited `travelForId()` once per customer and again per
+location, and each call independently re-queried `sitesForCompany` (redundant — `customerDocs`
+already carries every location from `all()`'s own bulk fetch), `getSettings()` for the office list
+(redundant — already fetched once earlier in the same function), `getTravelRates()` (redundant —
+same row every time), and the Postgres-backed route cache. With the real directory (~1,700+
+companies, ~1,335 venues) that's on the order of several thousand **sequential** DB round trips
+against the deployed Neon database — each one waiting for the last to finish before starting the
+next. Locally against PGlite this is barely noticeable (no network hop); against a real hosted
+Postgres from a Vercel function it's minutes.
+
+**Fix:** kept the same precompute-everyone behavior (nothing removed, no UX change) but collapsed
+the per-row DB work to a small constant number of queries regardless of company count:
+- Reuse `settings.offices` (already fetched at the top of the page) instead of re-querying it once
+  per customer/location via `travelForId`'s internal call.
+- Fetch `getTravelRates()` once instead of once per row.
+- Resolve the nearest office and haversine fallback in memory (pure/synchronous — `nearest()`,
+  `coordsOf()`, `driveMiles()` were already pure) instead of awaiting them per row.
+- Batch the one genuinely per-row DB read — the route cache lookup — into a single
+  `routeCachedBulk()` query keyed on the full set of (office, target) pairs, instead of one
+  `routeCached()` call per row.
+- Extracted the manual/routed/haversine/none branching out of `geo.ts`'s `estimate()` into a new
+  pure `estimateFromParts()` so both the original single-target `estimate()` (still used unchanged
+  by `repairs/quote`, `inspections/quote`, `flame-tests/quote`, and the Estimator's own no-customer
+  fallback) and the new bulk path share one implementation instead of two copies of the same math
+  drifting apart later (the #60/#65/#77 duplication pattern already bit this codebase twice this
+  session).
+
+Net: DB round trips for this page's travel computation went from roughly `4 × (customers +
+locations)` sequential calls down to 2 (one `getTravelRates()`, one `routeCachedBulk()`), independent
+of directory size.
+
+**Verified:** `tsc --noEmit` clean, `eslint` clean on both changed files, full `npm run test:specs`
+suite still passes (including the existing geo/travel-rate tests), `npm run test:smoke` still shows
+`PASS /estimator (status 200)`. `estimate()`'s own behavior is unchanged (same branching, same
+inputs/outputs) — verified by inspection since it now just calls the extracted pure function with
+identical arguments in the identical order.
+
+**Also found in the same investigation (not a code bug — flagging for awareness):** the Vercel
+project has `DATABASE_URL` scoped to **both Production and Preview** environments, and this repo's
+build script (`node scripts/migrate.mjs && next build`) runs migrations on every build — meaning
+every push to a feature branch triggers a Preview deploy that applies that branch's pending
+migrations to the **same real production database**. This has been true since `DATABASE_URL` was
+added (18 days before this was noticed) and has been happening silently on every push this session.
+Nothing has broken from it so far, but it means Preview and Production are not actually isolated —
+worth deciding whether Preview should point at a separate database.
+
+**Status:** DONE — fixed, verified, not yet merged to `main` (still on
+`punch-60-67-defect-cluster`, same as the rest of this session's work; see the still-open question of
+when that branch goes to production).
+
+---

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { geoCache } from "@/db/schema";
 import { getSettings, type Office } from "@/lib/settings";
@@ -188,14 +188,14 @@ function r4(n: number | string): string {
   return (Math.round(Number(n) * 1e4) / 1e4).toFixed(4);
 }
 
-function routeKey(
+export function routeKey(
   a: { lat: number | string; lng: number | string },
   b: { lat: number | string; lng: number | string }
 ): string {
   return r4(a.lat) + "," + r4(a.lng) + "|" + r4(b.lat) + "," + r4(b.lng);
 }
 
-function hasCoords(
+export function hasCoords(
   p: GeoPointLike | null | undefined
 ): p is { lat: number | string; lng: number | string } {
   return !!p && p.lat != null && p.lng != null && p.lat !== "" && p.lng !== "";
@@ -237,6 +237,32 @@ export async function routeCached(
   } catch {
     return null;
   }
+}
+
+/**
+ * Bulk form of routeCached — one query for every key instead of one query
+ * per pair. Used where estimate() would otherwise run once per row (e.g.
+ * every customer in a directory); same fail-soft contract as routeCached.
+ */
+export async function routeCachedBulk(
+  keys: string[]
+): Promise<Map<string, RouteResult>> {
+  const out = new Map<string, RouteResult>();
+  if (!keys.length) return out;
+  try {
+    const db = await getDb();
+    const rows = await db
+      .select()
+      .from(geoCache)
+      .where(inArray(geoCache.key, keys));
+    for (const r of rows) {
+      const d = r.data as { miles: number; minutes: number };
+      out.set(r.key, { miles: d.miles, minutes: d.minutes });
+    }
+  } catch {
+    // best-effort, same as routeCached
+  }
+  return out;
 }
 
 /**
@@ -395,15 +421,18 @@ export async function search(
  * exact priority chain (async only because the route cache is in Postgres).
  * Returns { miles, minutes, office, source: 'manual'|'routed'|'auto'|'none' }.
  */
-export async function estimate<T extends GeoPointLike>(
-  offices: readonly T[] | null | undefined,
-  target: EstimateTarget | null | undefined
-): Promise<TravelEstimate<T>> {
-  const office = nearest(offices, target);
-  // Same manual > routed(OSRM) > haversine-auto > none chain as before; only
-  // the roadFactor/mph knobs feeding the haversine tier now come live from
-  // Estimating Rules instead of a hardcoded constant.
-  const travel = await getTravelRates();
+/**
+ * The manual > routed(OSRM) > haversine-auto > none chain, factored out of
+ * estimate() so a caller that already knows the office + cached route (e.g.
+ * a bulk pass that pre-fetched the cache in one query) can skip the two
+ * awaits and call this directly. Pure/synchronous — same math either way.
+ */
+export function estimateFromParts<T extends GeoPointLike>(
+  office: T | null,
+  target: EstimateTarget | null | undefined,
+  travel: TravelRates,
+  cachedRoute: RouteResult | null
+): TravelEstimate<T> {
   if (target && target.travelMiles != null && target.travelMiles !== "") {
     const mi = Math.round(Number(target.travelMiles));
     const min =
@@ -413,14 +442,26 @@ export async function estimate<T extends GeoPointLike>(
     return { miles: mi, minutes: min, office, source: "manual" };
   }
   if (office) {
-    const routed = await routeCached(office, target);
-    if (routed)
-      return { miles: routed.miles, minutes: routed.minutes, office, source: "routed" };
+    if (cachedRoute)
+      return { miles: cachedRoute.miles, minutes: cachedRoute.minutes, office, source: "routed" };
     const mi = driveMiles(office, target, travel);
     if (mi != null)
       return { miles: mi, minutes: minutesFromMiles(mi, travel), office, source: "auto" };
   }
   return { miles: null, minutes: null, office, source: "none" };
+}
+
+export async function estimate<T extends GeoPointLike>(
+  offices: readonly T[] | null | undefined,
+  target: EstimateTarget | null | undefined
+): Promise<TravelEstimate<T>> {
+  const office = nearest(offices, target);
+  // Same manual > routed(OSRM) > haversine-auto > none chain as before; only
+  // the roadFactor/mph knobs feeding the haversine tier now come live from
+  // Estimating Rules instead of a hardcoded constant.
+  const travel = await getTravelRates();
+  const cachedRoute = office ? await routeCached(office, target) : null;
+  return estimateFromParts(office, target, travel, cachedRoute);
 }
 
 /* ---- tiny built-in geocoder: "city, st" (lowercased) -> {lat,lng} ----
