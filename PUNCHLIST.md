@@ -4517,3 +4517,110 @@ overwritten record — is exactly what #62 existed to stop. Do NOT make it retur
 **Status:** OPEN — logged only, no code.
 
 ---
+
+## 81. No spreadsheet import for the catalog — Excel not supported anywhere — OPEN
+
+**Area:** `src/app/(app)/import/` (the in-app hub), `src/lib/stores/catalog.ts` (`CatalogPart`,
+collection `catalog_parts`), `scripts/import-catalog.ts` / `scripts/import-dealer-sheets.ts` /
+`scripts/convert-dealer-sheets.py` (CLI-only, separate from the hub)
+**Reported:** 2026-08-01 (Jeff: "we need to get a sample import for excel for the catalog set up")
+
+**Finding, two gaps, not one:**
+1. **The `/import` hub has no `catalog` import type at all.** Its 8 types are `customers, leads,
+   flametests, inspections, surveys, team, quotes, projects` (`import/types.ts:30+`) — catalog
+   parts are not one of them. The real catalog-loading path is a set of standalone CLI scripts
+   (`import-catalog.ts`, `import-dealer-sheets.ts`, `convert-dealer-sheets.py`), which is a
+   different, admin/terminal-only mechanism from the paste-a-CSV importer everything else uses.
+2. **Nothing anywhere reads `.xlsx`.** The in-app importer is CSV-paste text only (`parse.ts`);
+   `node_modules` has no Excel-parsing library at all (checked: no `xlsx`, no `exceljs`, no
+   `node-xlsx`). `convert-dealer-sheets.py` converts dealer *price sheets* (a specific format) with
+   Python/pandas, outside the Node toolchain entirely — it is not a general "upload an Excel file"
+   path.
+
+**Why it matters:** the dealer price sheets that already exist on disk
+(`~/Downloads/Dealer Price Sheets/Peak Import/`, referenced in the 2026-07-25 catalog build-out
+staging note) are `.xlsx`, and #39's starter-set import has been waiting since 2026-07-25 partly
+because there was no clean bulk path for this shape of data.
+
+**Open questions for Jeff:**
+1. Is "a sample import for Excel" a real `.xlsx` upload (needs a parsing library — `xlsx`/`exceljs`
+   are the standard choices, MIT-licensed, no server dependency), or is CSV/paste (already
+   supported) an acceptable substitute if Excel can export to it? The cheaper path is teaching
+   people to save-as-CSV; the more convenient one is accepting `.xlsx` directly.
+2. Does this become its own `catalog` type in the `/import` hub (consistent with every other
+   collection), or does it plug into the existing dealer-sheet CLI pipeline instead? The two paths
+   currently do different things — the hub writes through the app's own stores; the CLI scripts are
+   a separate one-time migration tool.
+3. Which columns does a real dealer sheet actually have? `CatalogPart` (`catalog.ts:21`) is the
+   target shape; a real vendor file's headers need mapping to it, same as every other import type's
+   `aliases` mechanism.
+
+**Ties to:** #39 (the starter-set import this has been blocking), #70 (the import hub's honesty
+work — a new type should follow the same pattern, not reopen the vendor-promises problem).
+
+**Status:** OPEN — logged only, no code.
+
+---
+
+## 82. People need to import as first-class records, not riding along on Customers — OPEN
+
+**Area:** `src/app/(app)/import/` (no `people` type exists), `src/lib/identity/contacts.ts`,
+`src/app/(app)/people/` (the People surface itself, [[peak-app]] #20)
+**Reported:** 2026-08-01 (Jeff: "we also need a way to import people")
+
+**Finding:** there is no `people` import type. The only way a contact enters the system today is
+embedded inside the `customers` import row — one "Contact Name" / "Email" / "Phone" per customer
+(`import/types.ts:30-48`), written as a single-element `contacts: [...]` array
+(`import/registry.ts:90,118`). A spreadsheet of people — multiple contacts per company, people
+without a company yet, or people who should link to more than one company — has no import path at
+all.
+
+**This is not a new problem — it is punch #20 again, from the import side.** #20 already recorded:
+no person record with its own id, no multi-linking, and the doc-store architecture resists one.
+Building a real `people` importer without #20's decision would mean importing INTO a shape that
+#20 says is wrong, and reworking the import the moment #20 is answered.
+
+**Open questions for Jeff:**
+1. Is this waiting on #20 (first-class person + multi-link model), or is a narrower "import
+   contacts as a list, each linked to exactly one company" enough for now — cheaper, but the same
+   80%-solution question #20 already poses?
+2. What does the source file actually look like — one company per contact (matches today's model),
+   or genuinely one person linked to several companies/venues (needs #20 first)?
+
+**Ties to:** #20 (the real blocker), #81/#83 (the same "which collections get a bulk import"
+question, asked three times in one day).
+
+**Status:** OPEN — logged only, no code.
+
+---
+
+## 83. Venues need a bulk import — data model / cleanup TBD — OPEN
+
+**Area:** `src/app/(app)/venues/`, `src/lib/identity/sites.ts`, `src/lib/identity/venue-defaults.ts`
+**Reported:** 2026-08-01 (Jeff: "we need to ... sort through the venues portion")
+
+**Finding:** same shape as #82 — venues have no standalone import type; a venue enters only as a
+single "Venue" field on a `customers` row (`import/types.ts:44`), one venue per customer. Jeff
+confirmed **a bulk venue import is wanted**, same as the catalog and people asks, but was **not yet
+sure what else is wrong** beyond that — flagged for a closer look rather than guessed at now.
+
+**Not yet scoped, needs recon before any code:**
+- What fields a real venue record needs beyond what `sites.ts`/`venue-defaults.ts` carry today
+  (dimensions? multiple venues per customer — already true in the schema, unclear if the importer
+  or UI honor it?).
+- Whether existing venue records (demo seed + the 2026-07-29 real-data load) have data-quality
+  problems — duplicates, bad links to customers/contacts — independent of adding an import.
+- Whether "venues" here means performance-space venues (proscenium/grid/wing dims, the estimator's
+  `VenueDims`) or facility/site records more broadly — the codebase currently conflates the two
+  under `sites.ts`.
+
+**Open question for Jeff:** next session, walk through what specifically feels wrong on the venues
+screens/records, before scoping an import for them — the ask may be bigger than "add an import
+type" once that's seen.
+
+**Ties to:** #81, #82 (same day, same "no bulk import for this collection" pattern) · #30 (site
+survey / venue measurement, a related but distinct venues-adjacent item already on the list).
+
+**Status:** OPEN — logged only, no code. Needs scoping before it needs building.
+
+---
