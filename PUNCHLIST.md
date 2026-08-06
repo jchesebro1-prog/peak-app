@@ -4453,7 +4453,7 @@ protects every other item from silently regressing.
 
 ---
 
-## 79. The smoke test covers no dynamic `[id]` routes — OPEN
+## 79. The smoke test covers no dynamic `[id]` routes — DONE 2026-08-06 — 10 dynamic routes covered, and the #76 bug shape PROVEN to fail against them
 
 **Area:** `scripts/smoke-routes.ts`
 **Reported:** 2026-08-01 (gap in #78, recorded at the moment of building it)
@@ -4478,11 +4478,17 @@ its detail route. Alternatively assert against the seed constants directly.
 machinery), or leave it at top-level coverage and rely on the Playwright option he declined
 earlier? **Ties to #78.**
 
-**Status:** OPEN — logged only, no code.
+**Status:** DONE 2026-08-06 — `scripts/smoke-routes.ts` now asserts **50 routes: the original 40 top-level plus 10 dynamic `[id]` routes**, including the Grid editor and every record detail page that actually exists.
+
+- **The ids are hardcoded seed constants, NOT discovered at runtime** — the entry above proposed querying one id per collection after boot, and that is not possible. **PGlite is single-writer/single-process**: while `next dev` holds the scratch datadir, the test process cannot open it to run a query. The only way to read an id at runtime would be through the running app itself, which is the thing under test. Hardcoding is safe here for a specific reason: **every covered route except the Grid calls `notFound()` on an unknown id**, so a constant that drifts out of the seed fails loudly as a `FAIL … (status 404)` rather than passing on an empty page.
+- **The demo seed gained two records** so the two thinnest surfaces have something to open: Grid design `GRD-5001`, and consulting quote `Q-2045`. The quote is the interesting one — it exists so engagement `CE-1001` **materializes through the existing `syncEngagementsFromQuotes`** on page load, rather than hand-authoring an engagement document that would immediately drift from its `fromQuote` source. The seed states the cause; the app derives the effect.
+- **`design/grid/[id]` is the exception and needed a different check.** It answers **200** with a friendly "That design no longer exists" page for an unknown id instead of calling `notFound()`. Status alone therefore cannot distinguish a rendered editor from a miss, so that route's assertion **also rejects that body string**. Without it the Grid check would have been permanently green and worthless.
+- **PROVEN, not assumed** (same standard as #78): an illegal *synchronous* export was added to `design/grid/[id]/actions.ts` — **the exact shape of #76's bug**, the one that passed 40/40 — and `/design/grid/GRD-5001` came back **FAIL (status 500)**. Removing the canary restored 50/50. **The canary was not committed.** Worth noting as an observation: the same canary also broke `/design/engagements/CE-1001`, which suggests a shared `"use server"` build step rather than per-route compilation. Observed, not investigated.
+- **Correction to this entry as originally written:** it listed `/quotes/[id]`, `/flame-tests/[id]` and `/repairs/[id]` among the detail pages to cover. **Those routes do not exist.** Quotes, flame tests and repairs are list-only screens — a quote opens in the Estimator via `?id=`, which the smoke test now covers that way. The original list was written from the shape of the data model, not from the route tree.
 
 ---
 
-## 80. `insertWithPrefixedId` throws, and almost nothing catches it — OPEN
+## 80. `insertWithPrefixedId` throws, and almost nothing catches it — PARTIAL 2026-08-06 — 6 of 11 call sites guarded; the other 5 need UI that does not exist (#85)
 
 **Area:** `src/db/doc-store.ts:284-299` (the throw), ~14 store modules that mint through it, and the
 server actions above them
@@ -4531,11 +4537,19 @@ overwritten record — is exactly what #62 existed to stop. Do NOT make it retur
 
 **Ties to:** #62 (created it), #74 (no transactions to unwind partial state), #59 (raises the odds).
 
-**Status:** OPEN — logged only, no code.
+**Status:** PARTIAL 2026-08-06 — **Jeff's call was option 1 (explicit guards). Half of it is built; the other half was refused on purpose, not forgotten.** Three corrections to the entry above, all found by actually enumerating the call sites instead of trusting the count:
+
+1. **The real scope was 11 unguarded call sites, not "~12 of ~14 store modules."** The entry counted *store modules that mint*, which is the wrong unit — what matters is the *server action* above the mint, since that is the only place a failure can be reported. And one of the modules it counted was already covered: **`import/registry.ts`'s mints never escaped**, because `commitImport` wraps every row in its own try/catch and converts a throw into `res.errored++`. The importer has reported mint failures correctly this whole time.
+2. **Only 6 of those 11 were guarded.** The other 5 are `Promise<void>` FormData actions — `design/grid/actions.ts`, `field-work/actions.ts`, `projects/actions.ts`, `inspections/actions.ts`, `field-survey/actions.ts` — which have **nowhere to return an error to**. Giving them an `?err=` redirect would have been the cheap-looking fix and was **deliberately rejected**: no destination page renders such a param, so the result would be a redirect back to an unchanged list with no message — a **silent no-op that reads as success**. That is precisely the failure mode #62 existed to eliminate, arrived at from the other direction. A loud crash is worse UX and better information. **Deferred whole to #85** rather than half-fixed.
+3. **`insertWithPrefixedId` itself is unchanged and still throws.** Only callers changed. The "return `null` on exhaustion" option was not taken and should not be later — it would silently reintroduce #62's bug class across every mint site at once.
+
+**A real bug surfaced by this work, and it is the reason the pass was worth doing at all:** `lead-drawer.tsx` was **discarding `createLeadAction`'s return value entirely** — calling it, ignoring the result, and closing the drawer. Because nothing read the return, widening that action's type to carry a failure could not make `tsc` complain; the code would have gone on cheerfully reporting success for a lead that was never written, on the intake surface. The result is now routed into the drawer's existing `nfErr` surface. This is the same class as #78's lesson: the type system cannot flag a value nobody looks at.
+
+**Remaining:** #85 (the 5 void actions plus `addToQuotesAction`), #86 (mints inside page-load sync functions, which need a third fix shape), #88 (the intake route's advertised retry does not actually work).
 
 ---
 
-## 81. No spreadsheet import for the catalog — Excel not supported anywhere — OPEN
+## 81. No spreadsheet import for the catalog — Excel not supported anywhere — DONE 2026-08-06 — `catalog` is the 9th import type, and `.xlsx` uploads convert server-side
 
 **Area:** `src/app/(app)/import/` (the in-app hub), `src/lib/stores/catalog.ts` (`CatalogPart`,
 collection `catalog_parts`), `scripts/import-catalog.ts` / `scripts/import-dealer-sheets.ts` /
@@ -4575,7 +4589,14 @@ because there was no clean bulk path for this shape of data.
 **Ties to:** #39 (the starter-set import this has been blocking), #70 (the import hub's honesty
 work — a new type should follow the same pattern, not reopen the vendor-promises problem).
 
-**Status:** OPEN — logged only, no code.
+**Status:** DONE 2026-08-06 — **both gaps closed, and Jeff got the more convenient answer to question 1 (a real `.xlsx` upload) and the consistent answer to question 2 (its own hub type).**
+
+- **`catalog` is now the 9th type in the `/import` hub**, following the same shape as the other eight — aliases, preview, mapping, dedupe. Rows dedupe on **SKU** and are written through **`catalog.mergeUpsert`**, which is *the same entry point the CLI importer already uses*. That matters more than it sounds: re-importing an updated price sheet **re-prices in place** rather than replacing records, so a part keeps its `ports`, `trade`, spec text and datasheet attachments instead of losing them to a fresh row. One writer, one merge semantic, no second definition of "what an import does to an existing part."
+- **`.xlsx` is parsed server-side** by `exceljs` in `POST /api/import/xlsx`, which returns **CSV text that lands in exactly the state the paste textarea already binds to**. Chosen deliberately over parsing in the browser or adding a parallel upload pipeline: preview, mapping, dedupe, and the authoritative re-parse inside `importRecords` are **literally unchanged code paths**. The file picker is a new way to fill the box, not a new importer.
+- **Why `xlsx`/SheetJS was rejected — recorded so nobody "upgrades" to it later.** It is the better-known library and the obvious reach, which is why this needs to be written down. **The npm copy is abandoned at 0.18.5, published March 2022, carrying unpatched CVE-2023-30533 (prototype pollution)** — upstream moved distribution to their own CDN and stopped publishing to npm, so the registry version will never receive the fix. `exceljs` is MIT, on npm, and maintained; its only advisory is a **moderate transitive `uuid <11.1.1`** — no high, no critical. If someone later proposes swapping to SheetJS "because it's the standard one," this is the reason not to.
+- **The header aliases were not guessed.** They were lifted from the vocabulary in `scripts/convert-dealer-sheets.py`, which was **derived from 52 real vendor sheets** — so the columns the importer recognizes are the columns vendors actually ship.
+- **This is explicitly NOT a replacement for `convert-dealer-sheets.py`.** That script exists to handle 52 vendors' headerless, multi-tab, PDF-converted sheets for the one-time #39 build-out, and it stays. This path reads **one ordinary spreadsheet with a header row** — the case Jeff asked for. Two tools, two jobs; conflating them would break #39's pipeline for no gain.
+- **Verified end-to-end against a scratch database**, not by inspection: a real generated `.xlsx` uploaded and converted correctly — including **embedded commas quoted, embedded quotes doubled, and a formula cell resolving to its cached value** — plus garbage input → **422**, no file → **400**, and an **unauthenticated upload does not convert**. (The harness that did this was not committed — see **#87**.)
 
 ---
 
@@ -4699,5 +4720,149 @@ worth deciding whether Preview should point at a separate database.
 **Status:** DONE — fixed, verified, not yet merged to `main` (still on
 `punch-60-67-defect-cluster`, same as the rest of this session's work; see the still-open question of
 when that branch goes to production).
+
+---
+
+## Items #85–#88 — provenance note (2026-08-06)
+
+**These were NOT reported by Jeff.** They came out of building #79, #80 and #81 on 2026-08-06 —
+three are the parts of #80 that could not be closed with #80's fix shape, and one is the coverage
+gap #81's verification exposed. Same rule as the rest of the file: log-only until he says to build.
+
+---
+
+## 85. Five void FormData actions still crash on a mint failure — OPEN
+
+**Area:** `src/app/(app)/design/grid/actions.ts:19`, `src/app/(app)/field-work/actions.ts:38`,
+`src/app/(app)/projects/actions.ts:175`, `src/app/(app)/inspections/actions.ts:23`,
+`src/app/(app)/field-survey/actions.ts:18` — plus `addToQuotesAction` in
+`src/app/(app)/design/quick/actions.ts`
+**Reported:** 2026-08-06 (the part of #80 that could not be built)
+
+**Finding:** these five actions return `Promise<void>`. They are invoked as form `action=` handlers
+and redirect or revalidate when they finish — there is **no return channel**, so #80's fix shape
+(widen the result type, return a typed failure, render it) simply does not reach them. A mint that
+exhausts its five retries still escapes as a raw exception from a button press.
+
+**`addToQuotesAction` in `design/quick/actions.ts` belongs to this group too**, for a different
+reason. It calls the same `persistDesign` helper, and its mint is still unguarded. Guarding *only*
+the mint there would be half a fix: the very next line is `if (!q) throw new Error("Design not
+found")`, an unconditional throw on the same path. Either both are handled or neither is worth
+touching.
+
+**Why it matters — and why the cheap fix was refused.** The obvious move is to redirect with an
+`?err=` param. **That is worse than the crash.** No destination page renders such a param today, so
+the user would land back on an unchanged list with no message and no record created, and read that
+as success. #62 existed to eliminate exactly this — a write that fails quietly and looks fine. A
+stack trace is bad UX and honest; a silent no-op is good UX and a lie. Closing this properly means
+`?err=` handling **plus the rendering on each destination page** — the grid list, field-work,
+project detail, inspections, and field-survey. Roughly five pages of UI.
+
+**Open questions for Jeff:** is five pages of error-rendering UI worth it for a failure that
+requires a genuine id collision to survive five retries? Or accept the raw crash on these five and
+revisit if real concurrency (#59, #57) ever makes it plausible? Note the answer may reasonably be
+"accept it" — the point of this entry is that the decision was made knowingly rather than papered
+over.
+
+**Ties to:** #80 (this is its unbuilt remainder), #62 (the bug class the half-fix would have
+recreated).
+
+**Status:** OPEN — logged only, no code. Deliberately not half-built.
+
+---
+
+## 86. Mints inside page-load sync functions need a third fix shape — OPEN
+
+**Area:** `syncFromQuotes` (flame), `syncProjectsFromQuotes` (`src/lib/stores/projects.ts`),
+`syncEngagementsFromQuotes`
+**Reported:** 2026-08-06 (found enumerating #80's call sites)
+
+**Finding:** these three call `insertWithPrefixedId` from code that runs during a page **render**,
+not from a server action. Neither #80's fix nor #85's applies, because **a page cannot return a
+typed failure** — there is no result shape and no caller to receive one. A mint failure here surfaces
+as a rendering error on a page the user merely opened, on a write they did not ask for.
+
+**Why it matters:** this is the same eventually-consistent machinery #74 documented — a quote marked
+won does not create its project until someone opens `/projects`. That design makes these mints run
+at unpredictable moments, on read paths, under whoever happens to load the page. It is also the
+mechanism #79's seed now leans on deliberately (`Q-2045` → `CE-1001`), so it is load-bearing, not
+vestigial. A fix likely means catching at the sync boundary and surfacing a degraded state on the
+page rather than failing the render — a different shape from both #80 and #85.
+
+**Open questions for Jeff:** worth addressing at all before transactions (#74) are reconsidered,
+given all three failure paths need a genuine id collision first? And is the page-load sync pattern
+itself the thing to revisit instead of patching its error handling?
+
+**Ties to:** #80 (same throw, third fix shape), #74 (the same page-load sync machinery, documented
+there), #16 (triggers re-running on every page load).
+
+**Status:** OPEN — logged only, no code.
+
+---
+
+## 87. The upload path has no committed automated coverage — OPEN
+
+**Area:** `scripts/smoke-routes.ts`, `src/app/api/import/xlsx/route.ts`
+**Reported:** 2026-08-06 (recorded while verifying #81)
+
+**Finding:** the route smoke test (#78, extended in #79) **only issues GETs**. `POST
+/api/import/xlsx` and the file-picker flow that feeds it are covered by **nothing in the repo** — the
+newest write path in the app is the least verified, which is the pattern #78 was built to stop.
+
+**The awkward part: a working harness already exists, and it is what verified #81.** It boots
+`next dev` against a scratch `PGLITE_PATH` with `DATABASE_URL` deleted (the same safety shape as
+`smoke-routes.ts`), authenticates through the dev-login provider, POSTs a **real generated `.xlsx`**,
+and asserts the converted CSV plus the 422, 400 and unauthenticated cases. It proved the feature
+works. **It lives only in a scratch directory and was not committed**, so today's evidence exists and
+tomorrow's does not.
+
+**Why it matters:** adopting it is cheap — it is written, it passes, and it reuses machinery already
+in the repo. Leaving it uncommitted means the `.xlsx` path silently reverts to manual spot-checking
+the moment this session ends, which is precisely the state #78 called the highest-leverage item in
+the file.
+
+**Open question for Jeff:** commit it as a second smoke script (`test:smoke:upload`, run alongside),
+or fold the POST assertions into the existing `smoke-routes.ts` so there is one harness rather than
+two boots of `next dev`? The second is tidier and slower to run.
+
+**Ties to:** #78 (the harness it extends), #79 (same script), #81 (the feature it covers).
+
+**Status:** OPEN — logged only. The code exists but is not in the repo.
+
+---
+
+## 88. The leads intake route advertises a retry that does not work for five minutes — OPEN
+
+**Area:** `src/app/api/leads/intake/route.ts` (the `dedupKey` gate at :68-70 vs the 503 at :84),
+`src/lib/rate-limit.ts`
+**Reported:** 2026-08-06 (found guarding this route for #80)
+
+**Finding:** the dedup token is **consumed before the write is attempted**. The route calls
+`rateLimit(dedupKey, 1, DEDUP_WINDOW_MS)` and returns early if it is not `ok` — so the first request
+spends the only token for that email+message pair, then tries `create`. #80 gave this route a **503
+with "Please try again"** on a mint failure, which is the correct status for a transient failure. But
+**a client that honors it inside `DEDUP_WINDOW_MS` gets `{ok: true, id: null, duplicate: true}` at
+status 200** — the dedup gate fires on the retry of a request that never wrote anything.
+
+**Why it matters:** that is a **false success on the public lead-capture endpoint**. The website form
+gets a 200 and an `ok: true`, shows the customer a thank-you, and no lead exists. A dropped lead here
+is lost revenue, and nobody finds out — there is no record to be missing from a list. Being honest
+about the size of it: **the pre-#80 behavior had the identical hole plus a worse status** (an
+unhandled 500 instead of a 503), so #80 is a strict improvement and nothing regressed. What #80 did
+was **advertise a retry path that is dead for five minutes**, which is new.
+
+**Fixing it needs a rate-limit refund primitive** — `rate-limit.ts` has no way to release a consumed
+token today. Either consume the dedup token only after a successful write, or refund it when the
+write fails.
+
+**Open questions for Jeff:** refund the token on failure (smaller change, keeps the dedup check
+before the expensive work), or move the dedup check after the write (simpler to reason about, but
+double-submits then race on `create` instead)? Either way `rate-limit.ts` grows a primitive it does
+not have.
+
+**Ties to:** #80 (which introduced the 503 and this entry's exact wording), #62 (a write that fails
+while reporting success is the same class).
+
+**Status:** OPEN — logged only, no code.
 
 ---
