@@ -52,9 +52,19 @@ async function persistDesign(
 export async function saveDesignAction(
   id: string | null,
   partial: DesignPartial
-): Promise<{ ok: true; record: DesignRecord }> {
+): Promise<{ ok: true; record: DesignRecord } | { ok: false; error: string }> {
   const user = await requireUser();
-  const record = await persistDesign(id, partial, user.name);
+  // #80: persistDesign falls through to createDesign, whose mint
+  // (insertWithPrefixedId) THROWS once an id collision outlasts its retry
+  // budget (doc-store.ts). Rare, but this is a Save button — report it as a
+  // typed message instead of letting a raw exception escape as a 500.
+  let record: DesignRecord;
+  try {
+    record = await persistDesign(id, partial, user.name);
+  } catch (err) {
+    console.error("saveDesignAction: design mint failed", err);
+    return { ok: false, error: "Couldn’t save that design — please try again." };
+  }
   revalidatePath("/design/designs");
   return { ok: true, record };
 }
@@ -63,9 +73,19 @@ export async function saveDesignAction(
 export async function saveRevisionAction(
   id: string | null,
   partial: DesignPartial
-): Promise<{ ok: true; record: DesignRecord; rev: number }> {
+): Promise<
+  { ok: true; record: DesignRecord; rev: number } | { ok: false; error: string }
+> {
   const user = await requireUser();
-  const saved = await persistDesign(id, partial, user.name);
+  // #80: same mint throw as saveDesignAction — a revision saves the design
+  // first, so the create path is identical.
+  let saved: DesignRecord;
+  try {
+    saved = await persistDesign(id, partial, user.name);
+  } catch (err) {
+    console.error("saveRevisionAction: design mint failed", err);
+    return { ok: false, error: "Couldn’t save that revision — please try again." };
+  }
   const snap = {
     name: partial.name,
     tier: partial.tier,

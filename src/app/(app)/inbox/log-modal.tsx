@@ -60,6 +60,7 @@ export default function LogModal({
     assignedTo: "",
   });
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
   const set = (patch: Partial<LogDraft>) => setLd((d) => ({ ...d, ...patch }));
 
   const contacts = ld.customerId
@@ -70,9 +71,17 @@ export default function LogModal({
   const doSave = async () => {
     if (!logReady || busy) return;
     setBusy(true);
+    setErr("");
     try {
       const res = await logInteractionAction(ld);
-      if (res.ok) onLogged(res.id);
+      // #80: the action can now come back ok:false when the record's id mint
+      // fails. Say so — this modal used to just close-nothing on !ok, which
+      // reads like the entry was logged when it wasn't.
+      if (!res.ok) {
+        setErr("Couldn’t log that — please try again.");
+        return;
+      }
+      onLogged(res.id);
     } finally {
       setBusy(false);
     }
@@ -273,6 +282,18 @@ export default function LogModal({
             flexShrink: 0,
           }}
         >
+          {err && (
+            <div
+              style={{
+                marginRight: "auto",
+                fontSize: 12,
+                color: "#b4543a",
+                fontWeight: 600,
+              }}
+            >
+              {err}
+            </div>
+          )}
           <button
             onClick={onClose}
             style={{

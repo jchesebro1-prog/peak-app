@@ -59,27 +59,37 @@ export async function createSiteVisitAction(
     });
   }
 
-  const rec = await createVisit({
-    customerId: input.customerId,
-    customer: input.customer,
-    locationId: input.locationId,
-    venue: input.venue,
-    address: input.address,
-    contactName: input.contactName,
-    contactEmail: input.contactEmail,
-    contactPhone: input.contactPhone,
-    reason: input.reason,
-    startAt: input.startAt,
-    endAt: input.endAt,
-    notes: input.notes,
-    assignedTo: input.assignedTo,
-    createdBy: me.name,
-    engagementId: input.engagementId || null,
-    stage: "scheduled",
-    leadId: null,
-    surveyId: null,
-    preferredTiming: "",
-  });
+  // #80: insertWithPrefixedId THROWS once an id collision outlasts its retry
+  // budget (doc-store.ts). Rare, but this is a Schedule button — report it
+  // through the failure shape this action already has instead of letting a
+  // raw exception escape as a 500.
+  let rec: Awaited<ReturnType<typeof createVisit>>;
+  try {
+    rec = await createVisit({
+      customerId: input.customerId,
+      customer: input.customer,
+      locationId: input.locationId,
+      venue: input.venue,
+      address: input.address,
+      contactName: input.contactName,
+      contactEmail: input.contactEmail,
+      contactPhone: input.contactPhone,
+      reason: input.reason,
+      startAt: input.startAt,
+      endAt: input.endAt,
+      notes: input.notes,
+      assignedTo: input.assignedTo,
+      createdBy: me.name,
+      engagementId: input.engagementId || null,
+      stage: "scheduled",
+      leadId: null,
+      surveyId: null,
+      preferredTiming: "",
+    });
+  } catch (err) {
+    console.error("createSiteVisitAction: visit mint failed", err);
+    return { ok: false, error: "Couldn’t schedule that visit — please try again." };
+  }
 
   const inviteStatus: InviteStatus = await dispatchVisitInvite(rec, {
     id: me.id,

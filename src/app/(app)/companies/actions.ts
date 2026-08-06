@@ -180,10 +180,19 @@ export async function addCustomerNoteAction(customerId: string, text: string) {
   const me = await requireUser();
   const t = (text || "").trim();
   if (!customerId || !t) return { ok: false as const, error: "Write a note first." };
-  await addNoteRecord(
-    { parentKind: "customer", parentId: customerId, customerId, text: t },
-    me.name
-  );
+  try {
+    await addNoteRecord(
+      { parentKind: "customer", parentId: customerId, customerId, text: t },
+      me.name
+    );
+  } catch (err) {
+    // #80: insertWithPrefixedId THROWS once an id collision outlasts its retry
+    // budget (doc-store.ts). Rare, but this is a button press — report it
+    // through the failure shape this action already has instead of letting a
+    // raw exception escape as a 500.
+    console.error("addCustomerNoteAction: note mint failed", err);
+    return { ok: false as const, error: "Couldn’t save that note — please try again." };
+  }
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

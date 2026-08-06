@@ -449,20 +449,30 @@ export async function logInteractionAction(d: LogPayload) {
     return { ok: false as const, id: null };
   }
   const customer = await nameFor(d.customerId);
-  const rec = await create({
-    mailbox: "personal",
-    mailboxUser: me,
-    customerId: d.customerId,
-    customer,
-    contactName: d.contactName,
-    contactEmail: d.contactEmail,
-    subject: (d.subject || "").trim() || "(" + channelMeta(d.channel).label + ")",
-    channel: d.channel,
-    direction: d.direction,
-    body: d.body,
-    assignedTo: d.assignedTo || me,
-    me,
-  });
+  // #80: insertWithPrefixedId THROWS once an id collision outlasts its retry
+  // budget (doc-store.ts). Rare, but this is a Log button — report it through
+  // the failure shape this action already has instead of letting a raw
+  // exception escape as a 500.
+  let rec: Awaited<ReturnType<typeof create>>;
+  try {
+    rec = await create({
+      mailbox: "personal",
+      mailboxUser: me,
+      customerId: d.customerId,
+      customer,
+      contactName: d.contactName,
+      contactEmail: d.contactEmail,
+      subject: (d.subject || "").trim() || "(" + channelMeta(d.channel).label + ")",
+      channel: d.channel,
+      direction: d.direction,
+      body: d.body,
+      assignedTo: d.assignedTo || me,
+      me,
+    });
+  } catch (err) {
+    console.error("logInteractionAction: comm mint failed", err);
+    return { ok: false as const, id: null };
+  }
   revalidate();
   return { ok: true as const, id: rec.id };
 }

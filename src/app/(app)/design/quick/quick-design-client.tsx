@@ -265,6 +265,10 @@ export default function QuickDesignClient({
     const partial = makeDesign();
     startTransition(async () => {
       const res = await saveDesignAction(designId, partial);
+      // #80: the save can now come back as a typed failure (id-mint collision).
+      // Same surfacing the review buttons use — toast the message, leave the
+      // designer's state untouched so they can retry.
+      if (!res.ok) return toast(res.error);
       afterSave(res.record, null);
     });
   };
@@ -273,6 +277,7 @@ export default function QuickDesignClient({
     const partial = makeDesign();
     startTransition(async () => {
       const res = await saveRevisionAction(designId, partial);
+      if (!res.ok) return toast(res.error);
       afterSave(res.record, "Revision v" + res.rev + " saved");
     });
   };

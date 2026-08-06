@@ -70,6 +70,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, id: null, duplicate: true }, { status: 200 });
   }
 
-  const lead = await create({ ...fields, source: "website" });
+  // #80: insertWithPrefixedId THROWS once an id collision outlasts its retry
+  // budget (doc-store.ts). This is a public endpoint, so it must answer with a
+  // status a website form can act on rather than an unhandled 500. 503, not
+  // 500: the failure is transient contention, so a retry is the right move.
+  let lead;
+  try {
+    lead = await create({ ...fields, source: "website" });
+  } catch (err) {
+    console.error("leads intake: lead mint failed", err);
+    return NextResponse.json(
+      { ok: false, error: "Could not record that submission. Please try again." },
+      { status: 503 }
+    );
+  }
   return NextResponse.json({ ok: true, id: lead.id }, { status: 201 });
 }

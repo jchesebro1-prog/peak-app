@@ -202,27 +202,39 @@ export async function createLeadAction(input: {
   interest: string;
   owner?: string;
   value: number;
-}) {
+}): Promise<
+  { ok: true; id: string } | { ok: false; id: null; error: string }
+> {
   const me = await requireUser();
-  const rec = await create(
-    {
-      source: input.source,
-      org: input.org,
-      contact: input.contact,
-      email: input.email,
-      phone: input.phone,
-      city: input.city,
-      state: input.state || "WI",
-      interest: input.interest,
-      // '' (Unassigned) falls through to the store's per-source default,
-      // exactly like the prototype's `owner: nf.owner || undefined`.
-      owner: input.owner || undefined,
-      value: input.value || 0,
-    },
-    me.name
-  );
+  // #80: create()'s mint (insertWithPrefixedId) THROWS once an id collision
+  // outlasts its retry budget (doc-store.ts). Rare, but this is the New Lead
+  // button — report it as a typed message instead of letting a raw exception
+  // escape as a 500.
+  let rec;
+  try {
+    rec = await create(
+      {
+        source: input.source,
+        org: input.org,
+        contact: input.contact,
+        email: input.email,
+        phone: input.phone,
+        city: input.city,
+        state: input.state || "WI",
+        interest: input.interest,
+        // '' (Unassigned) falls through to the store's per-source default,
+        // exactly like the prototype's `owner: nf.owner || undefined`.
+        owner: input.owner || undefined,
+        value: input.value || 0,
+      },
+      me.name
+    );
+  } catch (err) {
+    console.error("createLeadAction: lead mint failed", err);
+    return { ok: false, id: null, error: "Couldn’t create that lead — please try again." };
+  }
   revalidatePath("/", "layout");
-  return { ok: true as const, id: rec.id };
+  return { ok: true, id: rec.id };
 }
 
 /** #18: forecast (expected-close) date — editable from the lead drawer.

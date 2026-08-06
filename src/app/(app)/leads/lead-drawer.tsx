@@ -337,7 +337,7 @@ export default function LeadDrawer({
       return;
     }
     startTransition(async () => {
-      await createLeadAction({
+      const res = await createLeadAction({
         source: nf.source,
         org: nf.org.trim(),
         contact: nf.contact.trim(),
@@ -349,6 +349,14 @@ export default function LeadDrawer({
         owner: nf.owner || undefined,
         value: parseInt(nf.value.replace(/[^0-9]/g, ""), 10) || 0,
       });
+      // #80: the create can now come back as a typed failure (id-mint
+      // collision). Show it where the validation error already goes and keep
+      // the drawer open with the typed values, so closing on a lead that was
+      // never written can't read as success.
+      if (!res.ok) {
+        setNfErr(res.error);
+        return;
+      }
       router.push(closeHref);
       router.refresh();
     });
