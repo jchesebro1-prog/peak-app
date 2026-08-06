@@ -4157,7 +4157,7 @@ it in any port is probably not worth it. **Ties to #59 (real data migration).**
 
 ---
 
-## 71. `TASK_TEMPLATE` ships empty — every project stage auto-creates zero tasks — DRAFTED 2026-08-01 — AWAITING JEFF'S EDIT
+## 71. `TASK_TEMPLATE` ships empty — every project stage auto-creates zero tasks — DONE 2026-08-01 — drafted, walked through with Jeff, two items cut
 
 **Area:** `src/lib/stores/tasks.ts:49-53`, consumed at `src/lib/stores/projects.ts:425-432`
 **Reported:** 2026-07-31 (source audit)
@@ -4182,7 +4182,17 @@ write the checklist.
 **Ask (Jeff):** the per-stage task checklist for install projects. **Ties to #17 (tasks on projects
 and quotes) and #44 (projects lifecycle).**
 
-**Status:** DRAFTED 2026-08-01 — **AWAITING JEFF'S EDIT.** Jeff's call: Claude drafts, Jeff edits. `TASK_TEMPLATE` now carries a checklist for all seven stages, drawn from real structures in the codebase (`DEFAULT_CONSULTING_ASSUMPTIONS`, `ProcurementLine`/`orderByDate`, `STAGING_BUFFER`, `CrewAssignment`/`MOB_TYPES`, `ProjectSignoff`, the rubric's NFPA/ANSI/OSHA citations, existing seed task titles) rather than generic PM filler. **Marked in code as a DRAFT of inferences, not confirmed procedure.** Four items are outright guesses and are individually flagged: delivery damage inspection · O&M documentation handoff · the safe-rigging training wording · margin reconciliation at close (which may belong to accounting). Safety/compliance steps carry trailing comments so they are not trimmed as noise.
+**Status:** DONE 2026-08-01 — **Jeff's call: Claude drafts, Jeff edits.** `TASK_TEMPLATE` carries a
+checklist for all seven stages, drawn from real structures in the codebase
+(`DEFAULT_CONSULTING_ASSUMPTIONS`, `ProcurementLine`/`orderByDate`, `STAGING_BUFFER`,
+`CrewAssignment`/`MOB_TYPES`, `ProjectSignoff`, the rubric's NFPA/ANSI/OSHA citations, existing seed
+task titles) rather than generic PM filler. Walked through with Jeff the same day — he **cut two of
+the four flagged guesses**: the delivery damage inspection and the closeout margin reconciliation
+(both left as inline `REMOVED 2026-08-01 (Jeff): ...` comments so they aren't silently
+reintroduced). He **kept** the other two flagged guesses (O&M documentation handoff, safe-rigging
+training wording). Banner comment in code changed from DRAFT to REVIEWED. Still worth correcting in
+real use once tasks actually appear on a project, but this is no longer inference awaiting review.
+*(Status corrected 2026-08-06 — code already said REVIEWED; header was never updated.)*
 
 ---
 
@@ -4282,7 +4292,7 @@ paths exist than after. **Ties to #62 and #59** (real data raises the cost of a 
 
 ---
 
-## 75. Two duplicate `promoteDesignAction` copies, and a stale-vs-fresh `budget` divergence — OPEN
+## 75. Two duplicate `promoteDesignAction` copies, and a stale-vs-fresh `budget` divergence — DONE 2026-08-01 — collapsed to one helper, budget left as-is
 
 **Area:** `src/app/(app)/home-actions.ts:45-58`, `src/app/(app)/design/designs/actions.ts:28-38`,
 `src/app/(app)/design/quick/actions.ts:96-116`, `src/lib/stores/designs.ts`
@@ -4309,7 +4319,14 @@ revalidate targets and return shape)? And for `budget` — is it acceptable that
 (quotes are flagged `requote: true` and re-priced in the Estimator anyway), or should promotion
 always re-persist first? **Ties to #41 and #51.**
 
-**Status:** OPEN — logged only, no code.
+**Status:** DONE 2026-08-01 — **Jeff's call: collapse to one shared helper, leave `budget` as-is.**
+All three call sites (`home-actions.ts`, `design/designs/actions.ts`, `design/quick/actions.ts`) now
+delegate to one `promoteDesignToQuote(designId, ownerName)` in `src/lib/stores/designs.ts`, each
+keeping its own return shape (`{ok,id}` vs `{ok,quoteId,error}`) and `revalidatePath` targets. Part 2
+(the stale-vs-fresh `budget` divergence) was left exactly as it was — Jeff accepted it as advisory
+since promoted quotes are flagged `requote: true` and re-priced in the Estimator anyway.
+*(Status corrected 2026-08-06 — this fix landed same-day as the entry but the header was never
+updated; verified against current code before correcting.)*
 
 ---
 
