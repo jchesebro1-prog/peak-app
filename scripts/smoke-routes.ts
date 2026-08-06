@@ -117,11 +117,12 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/people/ct-lakefront-1" }, // identity convert: ct-${docId}-${m}
   { route: "/estimator?id=Q-2041" },
   { route: "/design/grid/GRD-5001", reject: "no longer exists" },
-  // CE-1001 is not seeded directly: syncEngagementsFromQuotes() lazily mints it
-  // from the seeded won consulting quote, and the static /design/engagements
-  // route above is what triggers that sync. The static loop runs before this
-  // one, so the engagement exists by the time this request lands — keep both
-  // entries, and keep them in that order.
+  // CE-1001 is not seeded directly: it is lazily minted by
+  // syncEngagementsFromQuotes() from the seeded won consulting quote Q-2045.
+  // The [id] page's own loader (loadConsultingData(), in
+  // design/engagements/data.ts) awaits that sync before reading engagements,
+  // so this route mints CE-1001 on its own — there is no ordering dependency
+  // on the static /design/engagements entry above.
   { route: "/design/engagements/CE-1001" },
 ];
 

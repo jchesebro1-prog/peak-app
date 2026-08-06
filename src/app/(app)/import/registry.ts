@@ -85,6 +85,18 @@ function seq(): number {
  * `mfr` is omitted entirely when neither side carries one: mergeUpsert spreads
  * the patch over the existing part, so an explicitly-passed `undefined` would
  * CLEAR a stored manufacturer rather than leave it alone.
+ *
+ * Known limitation: `coerce()` in `./parse` maps an absent column, a blank
+ * cell, AND a literal "0" to the same coerced value, 0 — so `num(v.x) ||
+ * num(ex.x)` cannot tell "column not in this sheet" apart from "vendor
+ * priced this at zero." A row that legitimately zeroes `list` or `cost`
+ * will silently keep the part's old price instead. That's the accepted
+ * trade: failing toward preserving existing data rather than destroying it
+ * on a sparse re-import, the same choice the `leads` and `quotes` writers
+ * above make for their own numeric fields. Fixing it isn't possible in this
+ * patch shape alone — `prepareRows` would need to carry "column absent" as
+ * a distinct value (e.g. `undefined`) instead of collapsing it to 0 before
+ * it ever reaches here.
  */
 export function catalogPatch(
   v: Values,
