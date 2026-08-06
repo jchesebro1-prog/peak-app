@@ -32,12 +32,20 @@ function cellText(value: ExcelJS.CellValue): string {
   if (value == null) return "";
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   if (typeof value === "object") {
-    const o = value as unknown as Record<string, unknown>;
-    if ("result" in o) return cellText(o.result as ExcelJS.CellValue);
-    if ("text" in o) return String(o.text ?? "");
-    if ("richText" in o)
-      return (o.richText as Array<{ text?: string }>).map((r) => r.text ?? "").join("");
-    if ("hyperlink" in o) return String(o.text ?? o.hyperlink ?? "");
+    if ("result" in value) return cellText(value.result);
+    if ("text" in value) return String(value.text ?? "");
+    if ("richText" in value) return value.richText.map((r) => r.text ?? "").join("");
+    // "hyperlink" implies the shape of CellHyperlinkValue, which also declares
+    // `text` as required — but by this point control-flow narrowing has
+    // already excluded CellHyperlinkValue from the union (the "text" check
+    // above returned for every constituent that has a required `text`
+    // property). A defensive fallback to `.text` here only matters for a
+    // runtime value that carries `hyperlink` without `text`, which no
+    // declared CellValue variant does; the cast documents that this branch
+    // reads a property the narrowed type can no longer see, not a use we
+    // expect to exercise.
+    if ("hyperlink" in value)
+      return String((value as { text?: unknown }).text ?? value.hyperlink ?? "");
     return "";
   }
   return String(value);

@@ -2601,6 +2601,7 @@ async function xlsxFixture(): Promise<Buffer> {
   ws.addRow(["Part Number", "Description", "MSRP", "Dealer", "Manufacturer"]);
   ws.addRow(["S4LED-S2", "Source Four LED Series 2", 1899.5, 1139.7, "ETC"]);
   ws.addRow(["CS-40", 'Curtain track, 40" carrier, "heavy" duty', 42, 25.2, "ADC"]);
+  ws.addRow(["CS-41", "Multi-line\ndescription", 10, 5, "ADC"]);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
@@ -2615,7 +2616,11 @@ async function asyncChecks(): Promise<void> {
       lines[2] === 'CS-40,"Curtain track, 40"" carrier, ""heavy"" duty",42,25.2,ADC',
       "#81 commas and quotes are CSV-escaped"
     );
-    ok(xr.rows === 2, "#81 row count excludes the header");
+    ok(
+      xr.csv.includes('CS-41,"Multi-line\ndescription",10,5,ADC'),
+      "#81 an embedded newline is quoted so it can't be misread as a row break"
+    );
+    ok(xr.rows === 3, "#81 row count excludes the header");
     ok(xr.sheetName === "Price List", "#81 the sheet name comes back for the UI");
   }
 
