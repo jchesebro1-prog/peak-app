@@ -67,7 +67,7 @@ export default async function ImportPage({
           >
             ADMIN
           </span>
-          <span style={{ fontSize: 11.5, color: "#aab0bb", whiteSpace: "nowrap" }}>CSV · paste</span>
+          <span style={{ fontSize: 11.5, color: "#aab0bb", whiteSpace: "nowrap" }}>CSV · Excel · paste</span>
         </div>
       </div>
 
@@ -673,7 +673,7 @@ function ImportFlowModal({
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 12.5, fontWeight: 600 }}>Uploading a file?</div>
                     <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 1, lineHeight: 1.4 }}>
-                      Open your CSV/Excel export, copy the rows, and paste below — same result.
+                      Choose an Excel file, or copy rows from any spreadsheet and paste them below — same result.
                     </div>
                   </div>
                   <a

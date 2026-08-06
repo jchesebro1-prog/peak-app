@@ -6,8 +6,9 @@
  * screen needs. Kept INSIDE the import route folder and free of any store
  * imports so it is safe to run in a client component (live preview) AND in a
  * server action (the authoritative write). The `.xlsx` branch of the
- * prototype parser is intentionally dropped — see the drag-drop decision in
- * the screen; real uploads feed the same paste path.
+ * prototype parser is intentionally dropped — uploads are converted to CSV
+ * server-side first (see `/api/import/xlsx`), and the result still feeds the
+ * same paste path this module parses.
  */
 
 export type FieldKind = "text" | "number" | "date" | "email" | "enum";

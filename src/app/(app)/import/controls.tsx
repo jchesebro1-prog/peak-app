@@ -7,8 +7,10 @@ import { importRecords } from "./actions";
 /**
  * Paste → live preview → confirm, the client leaf of the import flow. It parses
  * the pasted text locally only to render the preview + stats; the authoritative
- * write re-parses the same text server-side in `importRecords`. Drag-drop file
- * upload is stubbed (see the note in the flow header) and funnels users here.
+ * write re-parses the same text server-side in `importRecords`. An `.xlsx` file
+ * picker posts to `/api/import/xlsx`, which converts the file to CSV server-side,
+ * and the result lands in the same `text` state the textarea binds to — so it
+ * funnels through this same paste flow unchanged.
  */
 export function PastePreview({
   typeKey,
@@ -23,6 +25,9 @@ export function PastePreview({
 }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"skip" | "update" | "create">("skip");
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState("");
+  const [uploadNote, setUploadNote] = useState("");
 
   const trimmed = text.trim();
   const parsed = trimmed ? parseCsv(text) : null;
@@ -46,6 +51,40 @@ export function PastePreview({
     { id: "create", label: "Create new" },
   ];
 
+  /* punch #81 — .xlsx upload. The file is converted to CSV server-side
+     (exceljs is server-only; importing it here would drag Node stream
+     internals into the client bundle and 500 the page, per #78) and the
+     result lands in the same `text` state the textarea binds to, so preview,
+     mapping and commit all run unchanged from here. */
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the same file be re-picked after a failure
+    if (!file) return;
+    setUploading(true);
+    setUploadErr("");
+    setUploadNote("");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/import/xlsx", { method: "POST", body: fd });
+      const data = (await res.json()) as
+        | { ok: true; csv: string; rows: number; sheetName: string }
+        | { ok: false; error: string };
+      if (!data.ok) {
+        setUploadErr(data.error);
+        return;
+      }
+      setText(data.csv);
+      setUploadNote(
+        `Read ${data.rows} row${data.rows === 1 ? "" : "s"} from “${data.sheetName}” in ${file.name}. Check the preview below before importing.`
+      );
+    } catch {
+      setUploadErr("That upload didn’t go through. Check your connection and try again.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <form action={importRecords}>
       <input type="hidden" name="type" value={typeKey} />
@@ -63,6 +102,46 @@ export function PastePreview({
         Columns are auto-matched to fields; duplicates are handled on import,
         matched on {dedupeLabel}.
       </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 10px", flexWrap: "wrap" }}>
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 7,
+            border: "1px solid #e4e7ec",
+            borderRadius: 9,
+            padding: "7px 11px",
+            fontSize: 12,
+            cursor: uploading ? "default" : "pointer",
+            background: uploading ? "#f4f5f7" : "#fff",
+            color: uploading ? "#aab0bb" : "#16181d",
+          }}
+        >
+          <input
+            type="file"
+            accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={onFile}
+            disabled={uploading}
+            style={{ display: "none" }}
+          />
+          {uploading ? "Reading…" : "Choose an Excel file"}
+        </label>
+        <span style={{ fontSize: 11.5, color: "#aab0bb" }}>
+          .xlsx — first sheet, header row required. Or paste below.
+        </span>
+      </div>
+
+      {uploadNote && (
+        <div style={{ margin: "0 0 10px", padding: "9px 11px", borderRadius: 9, background: "#eef4f8", border: "1px solid #d5e3ec", fontSize: 12, color: "#2f6f8f" }}>
+          {uploadNote}
+        </div>
+      )}
+      {uploadErr && (
+        <div style={{ margin: "0 0 10px", padding: "9px 11px", borderRadius: 9, background: "#f9ece8", border: "1px solid #f0d6cd", fontSize: 12.5, color: "#a0442b" }}>
+          {uploadErr}
+        </div>
+      )}
 
       <textarea
         name="text"
