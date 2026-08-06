@@ -91,6 +91,35 @@ const ROUTES = [
   "/people",
 ];
 
+/**
+ * Dynamic `[id]` routes (punch #79). The top-level pass above never compiles
+ * these, which is where most of the app's behaviour lives — #76's
+ * "use server" illegal-export bug sat in design/grid/[id]/actions.ts and
+ * passed 40/40 because no route importing that module was ever built.
+ *
+ * Ids are seed constants, NOT discovered at runtime: PGlite is single-writer,
+ * so this process cannot open the scratch datadir while `next dev` holds it.
+ * That is safe because every route here except the Grid calls notFound() on
+ * an unknown id, so a drifted constant fails loudly as a 404 rather than
+ * silently covering nothing.
+ *
+ * `reject` guards the one exception: design/grid/[id] renders a friendly 200
+ * "That design no longer exists" page instead of a 404, so status alone
+ * cannot distinguish a rendered editor from a miss.
+ */
+const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
+  { route: "/projects/P-3001" },
+  { route: "/inspections/RI-2042" },
+  { route: "/field-survey/FS-1055" },
+  { route: "/companies/lakefront" },
+  { route: "/customers/lakefront" }, // redirects to /companies/lakefront
+  { route: "/venues/st-lakefront-1" }, // identity convert: st-${docId}-${n}
+  { route: "/people/ct-lakefront-1" }, // identity convert: ct-${docId}-${m}
+  { route: "/estimator?id=Q-2041" },
+  { route: "/design/grid/GRD-5001", reject: "no longer exists" },
+  { route: "/design/engagements/CE-1001" },
+];
+
 let fail = 0;
 const results: string[] = [];
 function report(ok: boolean, msg: string) {
@@ -236,7 +265,8 @@ function looksLikeErrorPage(status: number, finalPath: string, body: string): st
 async function checkRoute(
   base: string,
   route: string,
-  jar: CookieJar | null
+  jar: CookieJar | null,
+  reject?: string
 ): Promise<{ route: string; ok: boolean; detail: string }> {
   try {
     const res = await fetch(base + route, {
@@ -245,7 +275,10 @@ async function checkRoute(
     });
     const body = await res.text();
     const finalUrl = new URL(res.url);
-    const problem = looksLikeErrorPage(res.status, finalUrl.pathname + finalUrl.search, body);
+    let problem = looksLikeErrorPage(res.status, finalUrl.pathname + finalUrl.search, body);
+    if (!problem && reject && body.includes(reject)) {
+      problem = `body contains "${reject}" — the route answered 200 without rendering the record`;
+    }
     if (problem) {
       return { route, ok: false, detail: `status ${res.status}, final ${finalUrl.pathname}${finalUrl.search} — ${problem}` };
     }
@@ -337,6 +370,12 @@ async function main() {
     for (const route of ROUTES) {
       const r = await checkRoute(base, route, jar);
       report(r.ok, `${route} (${r.detail})`);
+    }
+
+    console.log("[smoke] --- dynamic [id] routes ---");
+    for (const d of DYNAMIC_ROUTES) {
+      const r = await checkRoute(base, d.route, jar, d.reject);
+      report(r.ok, `${d.route} (${r.detail})`);
     }
 
     if (!auth.ok) {
