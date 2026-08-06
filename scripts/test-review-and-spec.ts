@@ -17,6 +17,12 @@ import { gridProjectsSeed } from "@/db/seeds/grid-projects";
 import { quotesSeed } from "@/db/seeds/quotes";
 import ExcelJS from "exceljs";
 import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
+import { getTypeMeta } from "@/app/(app)/import/types";
+import {
+  autoMap,
+  parseCsv as parseImportCsv,
+  prepareRows,
+} from "@/app/(app)/import/parse";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -2626,6 +2632,29 @@ async function asyncChecks(): Promise<void> {
 
   const notAWorkbook = await xlsxToCsv(Buffer.from("this is not a spreadsheet"));
   ok(!notAWorkbook.ok, "#81 garbage input fails cleanly instead of throwing");
+
+  /* ---- punch #81: catalog import type maps a real vendor sheet ---- */
+  const catType = getTypeMeta("catalog");
+  ok(!!catType, "#81 a catalog import type is registered");
+  if (catType) {
+    const vendorCsv = [
+      "Part Number,Description,MSRP,Dealer Net,Manufacturer",
+      "S4LED-S2,Source Four LED Series 2,1899.50,1139.70,ETC",
+      ",Row with no SKU,10,5,ETC",
+    ].join("\n");
+    const vp = parseImportCsv(vendorCsv);
+    ok(vp.ok, "#81 vendor CSV parses");
+    const vmap = autoMap(vp.headers, catType.fields);
+    ok(vmap.sku === 0, "#81 'Part Number' auto-maps to sku");
+    ok(vmap.list === 2, "#81 'MSRP' auto-maps to list");
+    ok(vmap.cost === 3, "#81 'Dealer Net' auto-maps to cost");
+    ok(vmap.mfr === 4, "#81 'Manufacturer' auto-maps to mfr");
+
+    const vprep = prepareRows(vp.rows, vmap, catType.fields);
+    ok(vprep.stats.valid === 1, "#81 the row with no SKU is not importable");
+    ok(vprep.stats.invalid === 1, "#81 …and is counted as needing attention");
+    ok(Number(vprep.rows[0].values.list) === 1899.5, "#81 list price coerces to a number");
+  }
 }
 
 asyncChecks()

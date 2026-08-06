@@ -13,6 +13,7 @@ import * as Inspections from "@/lib/stores/inspections";
 import * as Surveys from "@/lib/stores/surveys";
 import * as Quotes from "@/lib/stores/quotes";
 import * as Projects from "@/lib/stores/projects";
+import * as Catalog from "@/lib/stores/catalog";
 import { allUsers, addUser, setRoles } from "@/lib/users";
 import { getTypeMeta, IMPORT_TYPE_KEYS } from "./types";
 import { norm, isoToMs, type PreparedRow } from "./parse";
@@ -421,6 +422,50 @@ const WRITERS: Record<string, Writer> = {
         value: p.value || 0,
         stage: p.stage || "",
         targetDate: p.targetDate ? isoOf(p.targetDate) : "",
+      }));
+    },
+  },
+
+  catalog: {
+    count: async () => (await Catalog.list()).length,
+    load: async () => (await Catalog.list()) as unknown as Record<string, unknown>[],
+    find: (v, cache) => cache.find((p) => ci(p.sku, v.sku)) || null,
+    create: async (v, cache) => {
+      const sku = str(v.sku);
+      // mergeUpsert is the same entry point scripts/import-catalog.ts uses —
+      // it preserves fields a price sheet doesn't carry (ports, trade, spec
+      // text, datasheet attachments) when a SKU is re-imported.
+      await Catalog.mergeUpsert(sku, {
+        desc: str(v.desc) || sku,
+        category: str(v.category) || "Uncategorized",
+        unit: str(v.unit) || "ea",
+        list: num(v.list),
+        cost: num(v.cost),
+        mfr: str(v.mfr) || undefined,
+      });
+      cache.push({ id: sku, sku });
+    },
+    update: async (ex, v) => {
+      const sku = str(ex.sku);
+      await Catalog.mergeUpsert(sku, {
+        desc: str(v.desc) || str(ex.desc),
+        category: str(v.category) || str(ex.category),
+        unit: str(v.unit) || str(ex.unit),
+        list: num(v.list),
+        cost: num(v.cost),
+        mfr: str(v.mfr) || (ex.mfr as string | undefined),
+      });
+    },
+    exportObjects: async () => {
+      const list = await Catalog.list();
+      return list.map((p) => ({
+        sku: p.sku || "",
+        desc: p.desc || "",
+        category: p.category || "",
+        unit: p.unit || "",
+        list: p.list ?? 0,
+        cost: p.cost ?? 0,
+        mfr: p.mfr || "",
       }));
     },
   },

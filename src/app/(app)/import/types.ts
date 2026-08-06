@@ -184,6 +184,25 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "targetDate", header: "Target Date", label: "Target date", kind: "date", aliases: ["target", "target date", "due", "due date", "install date", "complete by"], example: "2026-09-01" },
     ],
   },
+  {
+    key: "catalog",
+    label: "Catalog parts",
+    mono: "CA",
+    color: "#2f6f8f",
+    blurb: "Vendor price lists — SKU, description, list and dealer cost.",
+    dedupeLabel: "SKU",
+    viewHref: "/catalog",
+    viewLabel: "View in Catalog",
+    fields: [
+      { key: "sku", header: "SKU", label: "SKU", required: true, aliases: ["sku", "part number", "part no", "part #", "part", "model", "model number", "item number", "item code", "order code", "product code", "cat no"], example: "ETC:S4LED-S2" },
+      { key: "desc", header: "Description", label: "Description", aliases: ["description", "desc", "product description", "item description", "item name", "product name", "name", "details"], example: "Source Four LED Series 2" },
+      { key: "category", header: "Category", label: "Category", aliases: ["category", "family", "product family", "group", "series", "line", "type", "class"], example: "Lighting" },
+      { key: "unit", header: "Unit", label: "Unit", aliases: ["unit", "uom", "u/m", "um"], example: "ea" },
+      { key: "list", header: "List Price", label: "List price", kind: "number", aliases: ["list", "list price", "msrp", "retail", "srp", "suggested retail", "price"], example: "1899.50" },
+      { key: "cost", header: "Cost", label: "Dealer cost", kind: "number", aliases: ["cost", "dealer", "dealer net", "dealer price", "dealer cost", "net", "net price", "wholesale", "our cost"], example: "1139.70" },
+      { key: "mfr", header: "Manufacturer", label: "Manufacturer", aliases: ["mfr", "manufacturer", "brand", "mfg", "vendor", "make"], example: "ETC" },
+    ],
+  },
 ];
 
 const BY_KEY: Record<string, ImportTypeMeta> = {};
