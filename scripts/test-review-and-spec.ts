@@ -15,6 +15,8 @@ import { accentContrast } from "@/lib/color";
 import { emailFor, legacyEmailFor } from "@/lib/team";
 import { gridProjectsSeed } from "@/db/seeds/grid-projects";
 import { quotesSeed } from "@/db/seeds/quotes";
+import ExcelJS from "exceljs";
+import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -2585,5 +2587,48 @@ ok(
   "#79 the consulting quote is won, so syncEngagementsFromQuotes mints an engagement"
 );
 
-console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
-process.exit(fail ? 1 : 0);
+/* ---- punch #81: xlsx → CSV conversion ----
+ * The file's first ASYNC assertions. This script is CommonJS (no top-level
+ * await), so every async check lives inside asyncChecks() below, invoked
+ * once at the very end; the summary/exit-code block is chained onto its
+ * settlement (.then/.catch) instead of running as bare top-level statements,
+ * so it can no longer report a false "ALL PASSED" while these are still
+ * in flight. Task 5 appends its catalog checks into this same function
+ * rather than adding a second one. */
+async function xlsxFixture(): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Price List");
+  ws.addRow(["Part Number", "Description", "MSRP", "Dealer", "Manufacturer"]);
+  ws.addRow(["S4LED-S2", "Source Four LED Series 2", 1899.5, 1139.7, "ETC"]);
+  ws.addRow(["CS-40", 'Curtain track, 40" carrier, "heavy" duty', 42, 25.2, "ADC"]);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+async function asyncChecks(): Promise<void> {
+  const xr = await xlsxToCsv(await xlsxFixture());
+  ok(xr.ok, "#81 a well-formed .xlsx converts");
+  if (xr.ok) {
+    const lines = xr.csv.split("\n");
+    ok(lines[0] === "Part Number,Description,MSRP,Dealer,Manufacturer", "#81 header row survives");
+    ok(lines[1] === "S4LED-S2,Source Four LED Series 2,1899.5,1139.7,ETC", "#81 numbers keep full precision");
+    ok(
+      lines[2] === 'CS-40,"Curtain track, 40"" carrier, ""heavy"" duty",42,25.2,ADC',
+      "#81 commas and quotes are CSV-escaped"
+    );
+    ok(xr.rows === 2, "#81 row count excludes the header");
+    ok(xr.sheetName === "Price List", "#81 the sheet name comes back for the UI");
+  }
+
+  const notAWorkbook = await xlsxToCsv(Buffer.from("this is not a spreadsheet"));
+  ok(!notAWorkbook.ok, "#81 garbage input fails cleanly instead of throwing");
+}
+
+asyncChecks()
+  .then(() => {
+    console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
+    process.exit(fail ? 1 : 0);
+  })
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
