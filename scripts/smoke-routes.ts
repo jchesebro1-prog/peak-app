@@ -112,11 +112,16 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/inspections/RI-2042" },
   { route: "/field-survey/FS-1055" },
   { route: "/companies/lakefront" },
-  { route: "/customers/lakefront" }, // redirects to /companies/lakefront
+  { route: "/customers/lakefront" }, // the legacy path — this entry tests that the redirect to /companies/[id] still resolves
   { route: "/venues/st-lakefront-1" }, // identity convert: st-${docId}-${n}
   { route: "/people/ct-lakefront-1" }, // identity convert: ct-${docId}-${m}
   { route: "/estimator?id=Q-2041" },
   { route: "/design/grid/GRD-5001", reject: "no longer exists" },
+  // CE-1001 is not seeded directly: syncEngagementsFromQuotes() lazily mints it
+  // from the seeded won consulting quote, and the static /design/engagements
+  // route above is what triggers that sync. The static loop runs before this
+  // one, so the engagement exists by the time this request lands — keep both
+  // entries, and keep them in that order.
   { route: "/design/engagements/CE-1001" },
 ];
 

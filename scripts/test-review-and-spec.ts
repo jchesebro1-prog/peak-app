@@ -23,6 +23,8 @@ import {
   parseCsv as parseImportCsv,
   prepareRows,
 } from "@/app/(app)/import/parse";
+// Pure (no store access, no DB) — see the note on catalogPatch itself.
+import { catalogPatch } from "@/app/(app)/import/registry";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -2654,6 +2656,71 @@ async function asyncChecks(): Promise<void> {
     ok(vprep.stats.valid === 1, "#81 the row with no SKU is not importable");
     ok(vprep.stats.invalid === 1, "#81 …and is counted as needing attention");
     ok(Number(vprep.rows[0].values.list) === 1899.5, "#81 list price coerces to a number");
+
+    /* ---- punch #81: re-importing a price sheet must not zero stored prices ----
+     * The writer itself (commitImport → WRITERS.catalog.update → mergeUpsert)
+     * needs a database, and this script never opens one. `catalogPatch` is the
+     * pure half of that writer — the exact object the update path hands
+     * mergeUpsert — so the merge semantics are exercised for real here, fed by
+     * real prepareRows output rather than hand-built values. */
+    const stored = {
+      id: "S4LED-S2",
+      sku: "S4LED-S2",
+      desc: "Source Four LED Series 2",
+      category: "Lighting",
+      unit: "ea",
+      list: 1899.5,
+      cost: 1139.7,
+      mfr: "ETC",
+    };
+    const prepOf = (csv: string) => {
+      const p2 = parseImportCsv(csv);
+      return prepareRows(p2.rows, autoMap(p2.headers, catType.fields), catType.fields);
+    };
+
+    // The #81 workflow: an updated vendor sheet carrying List but no Cost column.
+    const noCost = prepOf(
+      ["Part Number,Description,List Price", "S4LED-S2,Source Four LED Series 2,1999.00"].join("\n")
+    );
+    ok(
+      noCost.rows[0].values.cost === 0,
+      "#81 an absent Cost column prepares as 0 — the writer can't read it as 'leave alone'"
+    );
+    const upd = catalogPatch(noCost.rows[0].values, stored, "S4LED-S2");
+    ok(upd.list === 1999, "#81 re-import takes the new list price from the sheet");
+    ok(upd.cost === 1139.7, "#81 …and does NOT zero the stored cost the sheet omits");
+    ok(upd.mfr === "ETC", "#81 …and keeps the stored manufacturer");
+    ok(
+      upd.category === "Lighting" && upd.unit === "ea",
+      "#81 …and keeps the other columns the sheet doesn't carry"
+    );
+
+    // Column present, single cell blank — same protection.
+    const blankCell = prepOf(
+      ["Part Number,Description,List Price,Cost", "S4LED-S2,Source Four LED Series 2,1999.00,"].join("\n")
+    );
+    ok(
+      catalogPatch(blankCell.rows[0].values, stored, "S4LED-S2").cost === 1139.7,
+      "#81 a blank Cost cell doesn't zero the stored cost either"
+    );
+
+    // …but a cost the sheet DOES carry still wins.
+    const realCost = prepOf(
+      ["Part Number,Description,List Price,Cost", "S4LED-S2,Source Four LED Series 2,1999.00,1200.00"].join("\n")
+    );
+    ok(
+      catalogPatch(realCost.rows[0].values, stored, "S4LED-S2").cost === 1200,
+      "#81 a Cost the sheet does carry still overwrites the stored one"
+    );
+
+    // Create path (no existing part): mergeUpsert reads an explicitly-passed
+    // undefined as "clear this field", so an absent Manufacturer omits the key.
+    const created = catalogPatch(noCost.rows[0].values, null, "S4LED-S2");
+    ok(!("mfr" in created), "#81 create omits mfr rather than passing an explicit undefined");
+    ok(
+      created.category === "Uncategorized" && created.unit === "ea",
+      "#81 create still applies its own defaults for absent columns"
+    );
   }
 }
 

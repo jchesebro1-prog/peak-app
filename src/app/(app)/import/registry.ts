@@ -67,6 +67,42 @@ function seq(): number {
   return ++seqN;
 }
 
+/**
+ * The patch the catalog writer hands `Catalog.mergeUpsert`, shared by its
+ * create and update paths. Pure — it touches no store — so the merge
+ * semantics are unit-testable without a database (scripts/test-review-and-spec.ts).
+ *
+ * `ex` is the part already in the catalog (null on the create path).
+ *
+ * Every field falls back to what the part already holds before falling back to
+ * a default, because a vendor price sheet is allowed to omit columns: neither
+ * `list` nor `cost` is required, and prepareRows coerces an absent column or a
+ * blank cell to 0, so `num(v.cost)` alone would silently zero a stored dealer
+ * cost on every "Update existing" re-import — and catalog cost feeds tier
+ * pricing and the estimator. `num(v.x) || num(ex.x)` is the same shape the
+ * leads (`value`) and quotes (`value`) writers use above.
+ *
+ * `mfr` is omitted entirely when neither side carries one: mergeUpsert spreads
+ * the patch over the existing part, so an explicitly-passed `undefined` would
+ * CLEAR a stored manufacturer rather than leave it alone.
+ */
+export function catalogPatch(
+  v: Values,
+  ex: Record<string, unknown> | null,
+  sku: string
+): Partial<Omit<Catalog.CatalogPart, "id" | "sku">> {
+  const e = ex ?? {};
+  const mfr = str(v.mfr) || str(e.mfr);
+  return {
+    desc: str(v.desc) || str(e.desc) || sku,
+    category: str(v.category) || str(e.category) || "Uncategorized",
+    unit: str(v.unit) || str(e.unit) || "ea",
+    list: num(v.list) || num(e.list),
+    cost: num(v.cost) || num(e.cost),
+    ...(mfr ? { mfr } : {}),
+  };
+}
+
 const WRITERS: Record<string, Writer> = {
   customers: {
     count: async () => (await Customers.all()).length,
@@ -435,26 +471,12 @@ const WRITERS: Record<string, Writer> = {
       // mergeUpsert is the same entry point scripts/import-catalog.ts uses —
       // it preserves fields a price sheet doesn't carry (ports, trade, spec
       // text, datasheet attachments) when a SKU is re-imported.
-      await Catalog.mergeUpsert(sku, {
-        desc: str(v.desc) || sku,
-        category: str(v.category) || "Uncategorized",
-        unit: str(v.unit) || "ea",
-        list: num(v.list),
-        cost: num(v.cost),
-        mfr: str(v.mfr) || undefined,
-      });
+      await Catalog.mergeUpsert(sku, catalogPatch(v, null, sku));
       cache.push({ id: sku, sku });
     },
     update: async (ex, v) => {
       const sku = str(ex.sku);
-      await Catalog.mergeUpsert(sku, {
-        desc: str(v.desc) || str(ex.desc),
-        category: str(v.category) || str(ex.category),
-        unit: str(v.unit) || str(ex.unit),
-        list: num(v.list),
-        cost: num(v.cost),
-        mfr: str(v.mfr) || (ex.mfr as string | undefined),
-      });
+      await Catalog.mergeUpsert(sku, catalogPatch(v, ex, sku));
     },
     exportObjects: async () => {
       const list = await Catalog.list();
