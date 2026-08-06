@@ -13,6 +13,8 @@ import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_
 import { DEFAULT_SETTINGS } from "@/db/seed-data";
 import { accentContrast } from "@/lib/color";
 import { emailFor, legacyEmailFor } from "@/lib/team";
+import { gridProjectsSeed } from "@/db/seeds/grid-projects";
+import { quotesSeed } from "@/db/seeds/quotes";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -2564,6 +2566,24 @@ import {
   ok(isTierPriced(500, 1.2) === false, "#76: margin > 1 -> fallback");
   ok(isTierPriced(500, -0.1) === false, "#76: negative margin -> fallback");
 }
+
+/* ---- punch #79: demo seed reaches the dynamic routes ---- */
+const gridSeeded = gridProjectsSeed();
+ok(gridSeeded.length >= 1, "#79 grid seed produces at least one design");
+ok(gridSeeded[0].id === "GRD-5001", "#79 grid seed id is GRD-5001 (base 5001 floor)");
+ok(
+  typeof gridSeeded[0].customer === "string" && gridSeeded[0].customer.length > 0,
+  "#79 grid seed carries a customer name"
+);
+
+const consultingQuotes = quotesSeed().filter(
+  (q) => (q as { quoteType?: string }).quoteType === "consulting"
+);
+ok(consultingQuotes.length === 1, "#79 exactly one consulting quote is seeded");
+ok(
+  consultingQuotes[0].status === "won",
+  "#79 the consulting quote is won, so syncEngagementsFromQuotes mints an engagement"
+);
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
 process.exit(fail ? 1 : 0);

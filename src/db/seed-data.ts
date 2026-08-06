@@ -14,6 +14,7 @@ import { repairJobsSeed } from "./seeds/repair-jobs";
 import { inspectionsSeed } from "./seeds/inspections";
 import { projectsSeed } from "./seeds/projects";
 import { designsSeed } from "./seeds/designs";
+import { gridProjectsSeed } from "./seeds/grid-projects";
 
 /**
  * Seed roster — the real Peak team (D126/D128): the prototype six plus
@@ -108,6 +109,7 @@ const DEMO_SEEDS: Array<[CollectionName, () => Doc[]]> = [
   ["inspections", inspectionsSeed as unknown as () => Doc[]],
   ["projects", projectsSeed as unknown as () => Doc[]],
   ["designs", designsSeed as unknown as () => Doc[]],
+  ["grid_projects", gridProjectsSeed as unknown as () => Doc[]],
 ];
 
 export async function seedDemoCollections(): Promise<number> {

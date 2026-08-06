@@ -98,6 +98,7 @@ const SEED_CUST: Record<string, readonly [string, string]> = {
   "Q-2035": ["lakeside", "lc1"],
   "Q-2030": ["northshore", "ns1"],
   "Q-2027": ["bayfront", "ba1"],
+  "Q-2045": ["lakefront", "lf1"],
 };
 
 type SeedBase = {
@@ -111,6 +112,9 @@ type SeedBase = {
   owner: string;
   createdAt: number;
   updatedAt: number;
+  /** Absent on system quotes; "consulting" routes the quote into the
+   *  engagement sync (punch #79 needs one so CE-1001 materializes). */
+  quoteType?: string;
 };
 
 export function quotesSeed(): Quote[] {
@@ -122,6 +126,7 @@ export function quotesSeed(): Quote[] {
     { id: "Q-2030", name: "Northshore Theater — Counterweight Upgrade", customer: "Northshore Theater", value: 58200, margin: 0.30, status: "draft", source: "quick", owner: "Jack Hamilton", createdAt: ago(8), updatedAt: ago(6) },
     { id: "Q-2027", name: "Bayfront Arena — Scoreboard Hoist", customer: "Bayfront Arena", value: 312500, margin: 0.27, status: "lost", source: "estimator", owner: "Jason Keagy", createdAt: ago(30), updatedAt: ago(17) },
     { id: "Q-2042", name: "Harbor Rep — Orchestra Shell", customer: "Harbor Repertory Theatre", value: 128400, margin: 0.32, status: "draft", source: "estimator", owner: "Nic Trapani", createdAt: ago(2), updatedAt: ago(0) },
+    { id: "Q-2045", name: "Lakefront PAC — Systems Consulting & Bid Support", customer: "Lakefront Performing Arts Center", value: 48500, margin: 0.42, status: "won", source: "estimator", owner: "Jack Hamilton", createdAt: ago(24), updatedAt: ago(11), quoteType: "consulting" },
   ];
   return base.map((q): Quote => {
     const sc = SEED_CUST[q.id] || ([null, null] as const);
