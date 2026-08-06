@@ -22,27 +22,64 @@ loaded, and every record detail page are unexercised. The `"use server"`
 illegal-export bug fixed in #76 lived in `design/grid/[id]/actions.ts` and
 would not have been caught by the existing test.
 
-**Design:** after the existing top-level pass boots the app and signs in,
-query one seeded id per collection from the scratch DB's demo seed data, then
-hit each corresponding detail route:
+**Corrections to the first draft of this section (verified 2026-08-06 against
+the actual route tree):**
 
-| Collection | Route |
-|---|---|
-| quote | `/quotes/<id>`, `/estimator?id=<id>` |
-| project | `/projects/<id>` |
-| grid design | `/design/grid/<id>` |
-| inspection | `/inspections/<id>` |
-| flame test | `/flame-tests/<id>` |
-| repair job | `/repairs/<id>` |
-| customer/company | `/companies/<id>` |
-| person | `/people/<id>` |
+- **`/quotes/[id]`, `/flame-tests/[id]` and `/repairs/[id]` do not exist.**
+  Those are list-only screens; a quote is opened in the Estimator via
+  `/estimator?id=…`. The full dynamic-route inventory under `src/app/(app)`
+  is: `companies/[id]`, `consulting/[id]`, `consulting/spec/[id]`,
+  `customers/[id]`, `design/engagements/[id]`,
+  `design/engagements/spec/[id]`, `design/grid/[id]`, `field-survey/[id]`,
+  `inspections/[id]`, `people/[id]`, `projects/[id]`, `venues/[id]`.
+- **Runtime id discovery by querying the DB is not possible.** PGlite is
+  single-writer/single-process; the smoke-test process cannot open the
+  scratch datadir while `next dev` holds it. Use the alternative #79 itself
+  named — assert against the seed constants directly. This is safe *because*
+  every one of these routes calls `notFound()` on an unknown id, producing a
+  real 404 that the existing `looksLikeErrorPage` already fails on. A seed
+  id that drifts therefore fails loudly rather than silently covering
+  nothing.
 
-Ids are discovered at runtime (query one row per collection after boot), not
-hardcoded — the scratch datadir reseeds fresh each run, and hardcoding to the
-current seed constants (`Q-2041`, `P-3001`, …) would silently stop covering
-anything if the seed ever changes shape. Same pass/fail rules as the existing
-test: fail on 5xx, 404, landing at `/login` after redirects, or a crash-page
-marker.
+**Design:** after the existing top-level pass boots the app and signs in, hit
+each detail route using its seeded id:
+
+| Route | Id | Source |
+|---|---|---|
+| `/projects/<id>` | `P-3001` | `seeds/projects.ts` |
+| `/inspections/<id>` | `RI-2042` | `seeds/inspections.ts` |
+| `/field-survey/<id>` | `FS-1055` | `seeds/surveys.ts` |
+| `/companies/<id>` | `lakefront` | `seeds/customers.ts` (company id = customer doc id) |
+| `/customers/<id>` | `lakefront` | redirects to `/companies/lakefront` |
+| `/venues/<id>` | `st-lakefront-1` | `identity/convert.ts` — deterministic `st-${docId}-${n}` |
+| `/people/<id>` | `ct-lakefront-1` | `identity/convert.ts` — deterministic `ct-${docId}-${m}` |
+| `/estimator?id=<id>` | `Q-2041` | `seeds/quotes.ts` |
+| `/design/grid/<id>` | `GRD-5001` | new seed — see below |
+| `/design/engagements/<id>` | `CE-<n>` | new seed — see below |
+
+Same pass/fail rules as the existing test: fail on 5xx, 404, landing at
+`/login` after redirects, or a crash-page marker.
+
+**The Grid problem, and why it needs new seed data.** `design/grid/[id]`
+does *not* call `notFound()` on an unknown id — it renders a friendly 200
+*"That design no longer exists."* page and never mounts `GridEditor`. So
+pointing the smoke test at a made-up grid id would **pass while compiling
+none of the editor's client bundle** — exactly the false-green #79 exists to
+eliminate, on the single highest-value target in the item (#76's
+`"use server"` illegal-export bug lived in `design/grid/[id]/actions.ts`,
+which the editor imports). `grid_projects` and `consulting_engagements` have
+no demo seed at all — they are not in `DEMO_SEEDS`.
+
+**Decision (Jeff, 2026-08-06): add demo seed records.** One grid project and
+one consulting engagement join `DEMO_SEEDS`, making both routes genuinely
+reachable — and giving local dev a Grid example it currently lacks. Demo data
+is wiped by the #59 go-live reset, so this adds nothing a real deployment
+keeps.
+
+**Assert on content, not just status.** Because the Grid route can return 200
+without rendering the editor, its check additionally asserts the response
+body does *not* contain "no longer exists". Status alone is not a sufficient
+signal for this one route.
 
 **Out of scope:** Playwright / interaction testing (Jeff already declined
 this in the 2026-08-01 decisions pass) — this stays a "does the route render"
@@ -70,13 +107,39 @@ Do NOT make it return `null` on exhaustion — that would silently reintroduce
 the class of bug #62 was built to stop (a mint failure disappearing instead
 of surfacing).
 
-**Site inventory (to guard):** every store module that mints via
-`insertWithPrefixedId` other than the two already-guarded call sites —
-projects, designs, tasks, notes, surveys, inspections, repair jobs, flame
-jobs, grid projects, engagements, comms, site visits — traced up to whichever
-server action(s) call each store's create function. Exact list confirmed at
-implementation time via `grep insertWithPrefixedId` cross-referenced against
-`grep -r "from \"@/lib/stores/<x>\"" src/app/**/actions.ts`.
+**Site inventory — traced and verified 2026-08-06** (not "to be confirmed at
+implementation time"):
+
+| # | Call site | Mints |
+|---|---|---|
+| 1 | `design/grid/actions.ts:19` | grid project |
+| 2 | `design/quick/actions.ts:48` | design |
+| 3 | `field-work/actions.ts:38` | task |
+| 4 | `projects/actions.ts:175` | task |
+| 5 | `companies/actions.ts:183` | note |
+| 6 | `inbox/site-visit-actions.ts:62` | site visit |
+| 7 | `inbox/actions.ts:452` | comm thread |
+| 8 | `inspections/actions.ts:23` | inspection |
+| 9 | `field-survey/actions.ts:18` | survey |
+| 10 | `leads/actions.ts:207` | lead |
+| 11 | `src/app/api/leads/intake/route.ts:73` | lead (public intake route) |
+
+**Already guarded, leave alone:** `estimator/actions.ts:129`
+(`saveQuoteAction`) and `convertLeadAction` in `leads/actions.ts`.
+
+**Discovered and explicitly OUT of scope — `import/registry.ts`.** Its ~7
+mint calls (`Quotes.create`, `Leads.create`, `Surveys.create`,
+`Inspections.create`, `Flame.create`, `Projects.createProject`, …) are
+already covered: `commitImport` wraps every row in try/catch and converts a
+throw into `res.errored++`. No change needed there. The original punch entry's
+"~14 store modules, only 2 guarded" framing counted store modules, not
+reachable unguarded call sites; the real number is the 11 above.
+
+**Also noted, NOT fixed here:** `syncFromQuotes` (flame), `syncProjectsFromQuotes`
+(projects) and `syncEngagementsFromQuotes` mint from *page-load sync
+functions*, not server actions — a throw there breaks a page render rather
+than a button press, and the fix shape is different (a page can't return a
+typed failure). Logged as a follow-up rather than silently half-addressed.
 
 **Out of scope:** transactions/rollback of partial state (#74 — investigated,
 deliberately not built). This item only makes the failure loud and typed
@@ -100,24 +163,45 @@ a separate one-time-migration mechanism unrelated to the hub's UI.
 
 ### Architecture
 
-**Parsing library:** `xlsx` (SheetJS community edition, MIT). Read-only
-need; parses an `ArrayBuffer` client-side, so it fits the existing
-architecture where CSV parsing happens in the browser for live preview and
-only the commit crosses into a server action.
+**Parsing library — `exceljs` 4.4.0, NOT `xlsx`/SheetJS.** The obvious
+choice, SheetJS, is **abandoned on npm**: `xlsx@0.18.5` (published
+2022-03-24) is the newest version the registry has, because SheetJS moved
+distribution to their own CDN. That npm copy never received the fix for
+CVE-2023-30533 (prototype pollution, high severity, patched in 0.19.3+,
+which is not on npm). Adding it would put a known-unpatched advisory in the
+dependency tree of an app heading toward real customer data.
+`exceljs` is MIT, on npm, maintained, and carries no equivalent advisory.
+**Decision (Jeff, 2026-08-06): exceljs, parsed server-side.**
 
-**New UI — file input alongside paste.** `parse.ts`'s docblock currently
-says the prototype's `.xlsx` branch was "intentionally dropped... real
-uploads feed the same paste path" — that was last session's call under the
-CSV-only assumption; this design supersedes it now that Jeff has asked for
-real `.xlsx` support. The import screen (`page.tsx`) gets a file-drop /
-`<input type="file" accept=".xlsx">` control next to the existing textarea.
-An uploaded file is parsed via `xlsx` into the *same* `ParsedTable` shape
-(`headers: string[]`, `rows: string[][]`, `objects: Record<string,string>[]`)
-that `parseCsv()` already produces — every downstream step (column
-auto-mapping preview, field mapping UI, commit) is shared code, unchanged.
-Only sheet 1 of the workbook is read for this general-purpose importer (the
-multi-tab, multi-format handling in `convert-dealer-sheets.py` stays there —
-see Scope boundary below).
+**Architecture — server-side parse, CSV back into the existing flow.**
+`exceljs` runs in Node, where it needs no browser polyfills and costs the
+client bundle nothing. The flow:
+
+1. The import screen gets `<input type="file" accept=".xlsx,.xls">`
+   alongside the existing textarea.
+2. Picking a file POSTs it to a new route handler, `POST /api/import/xlsx`,
+   which parses sheet 1 with `exceljs` and returns the rows as **CSV text**.
+3. The client drops that CSV into the existing `text` state — the same state
+   the textarea binds to.
+4. **Everything downstream is untouched.** Live preview, column auto-mapping,
+   the stats pills, the confirm button, and the authoritative server-side
+   re-parse in `importRecords` all run exactly as they do for pasted CSV.
+
+This is deliberately the smallest possible change: `parse.ts`, `actions.ts`
+and the commit path need no modification at all, and the user sees their
+spreadsheet arrive as reviewable rows rather than an opaque "file attached"
+state. `parse.ts`'s docblock (which says the `.xlsx` branch was
+"intentionally dropped… real uploads feed the same paste path") stays
+literally true — uploads still feed the paste path; they just get converted
+on the way in now.
+
+Only sheet 1 of the workbook is read (the multi-tab, per-vendor heuristics in
+`convert-dealer-sheets.py` stay there — see Scope boundary below).
+
+**Route handler auth:** `POST /api/import/xlsx` gates on the same
+`requirePerm("manage_users")` that `importRecords` already uses. It only
+converts a file to text — it writes nothing — but it must not be an open
+parser endpoint.
 
 **New type definition (`types.ts`).** `CatalogPart`'s fields, mapped with
 `aliases` the same way `customers`/`leads` are:
@@ -166,8 +250,13 @@ separately; this item does not touch it.
 ### Testing
 
 - Extend `test:specs` with a fixture `.xlsx` (a handful of rows, standard
-  headers) asserting it parses to the expected `ParsedTable` and that
-  required-field / numeric-coercion behavior matches the CSV path.
+  headers) asserting the sheet→CSV conversion produces the expected text, and
+  that feeding that text through `parseCsv` → `autoMap` → `prepareRows`
+  against the new `catalog` field set yields the expected mapped values,
+  required-field enforcement, and numeric coercion.
+- The fixture `.xlsx` is generated by the test itself via `exceljs` (write a
+  workbook in memory, read it back), so no binary file is committed to the
+  repo and the round-trip is what's actually verified.
 - `test:smoke` doesn't apply here — it asserts routes return 200 on GET, and
   file upload isn't a route-GET concern. The fixture test above is the
   verification for this item.
