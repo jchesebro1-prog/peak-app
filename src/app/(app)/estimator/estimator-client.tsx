@@ -15,6 +15,7 @@ import {
   sendToCustomerAction,
   setStatusAction,
   submitReviewAction,
+  travelForSelectionAction,
   updateQuoteMetaAction,
   type ReviewSync,
 } from "./actions";
@@ -334,12 +335,47 @@ export default function EstimatorClient({
     ? "minmax(190px,1fr) 112px 128px 80px 58px 100px 22px"
     : "minmax(190px,1fr) 112px 128px 100px 22px";
 
-  /* ---------------- travel (precomputed server-side) ---------------- */
+  /* ---------------- travel (seeded + fetched on demand, punch #89) ----------------
+     `travel` used to carry an estimate for every customer AND venue in the
+     directory — 5,100 entries / ~327 KiB measured against ~1,700 companies,
+     to serve one lookup at a time. It now arrives holding only the loaded
+     quote's own estimate, and anything else is fetched when the user picks
+     it. Results are cached in `travelSeen` so re-picking a customer, or
+     switching back and forth, never refetches. */
+  const [travelSeen, setTravelSeen] = useState<Record<string, TravelLite | null>>(travel);
+  const travelKey = (custId: string | null, locId: string | null) =>
+    custId ? custId + "|" + (locId || "") : "name|" + custName;
   const travelEstFor = (custId: string | null, locId: string | null): TravelLite | null => {
-    if (custId) return travel[custId + "|" + (locId || "")] ?? travel[custId + "|"] ?? null;
-    return travel["name|" + custName] ?? null;
+    if (custId) {
+      const k = custId + "|" + (locId || "");
+      return travelSeen[k] ?? travelSeen[custId + "|"] ?? null;
+    }
+    return travelSeen["name|" + custName] ?? null;
   };
   const travelEstNow = () => travelEstFor(customerId, locationId);
+  /** Fetch (once) the estimate for a selection, then hand it to `then`.
+   *  Resolves from cache synchronously when we already have it, so the
+   *  common re-select path stays instant and does no round trip. */
+  const withTravelFor = (
+    custId: string | null,
+    locId: string | null,
+    then: (est: TravelLite | null) => void
+  ) => {
+    const k = travelKey(custId, locId);
+    if (k in travelSeen) {
+      then(travelSeen[k]);
+      return;
+    }
+    if (!custId) {
+      then(null);
+      return;
+    }
+    startTransition(async () => {
+      const est = await travelForSelectionAction(custId, locId);
+      setTravelSeen((m) => (k in m ? m : { ...m, [k]: est }));
+      then(est);
+    });
+  };
 
   /* ---------------- persistence ---------------- */
   const persistMeta = (meta: Parameters<typeof updateQuoteMetaAction>[1]) => {
@@ -723,7 +759,13 @@ export default function EstimatorClient({
     setCustomFor(null);
     setCurtainFor(null);
     setFixtureFor(null);
-    setLaborDraft(freshLabor(travelEstNow(), tierMargin));
+    // Resolve travel before seeding the draft (punch #89): the estimate is
+    // fetched on selection now, so opening this immediately after picking a
+    // customer could otherwise seed the mobilization with no distance and
+    // quietly price the trip as local. Cached selections call back inline.
+    withTravelFor(customerId, locationId, (est) =>
+      setLaborDraft(freshLabor(est, tierMargin))
+    );
   };
 
   const addCustomPart = (secId: string) => {
@@ -909,10 +951,21 @@ export default function EstimatorClient({
       ),
     }));
   };
-  /** Re-apply the >1h auto trip-type when customer/venue changes mid-configure. */
+  /** Re-apply the >1h auto trip-type when customer/venue changes mid-configure.
+   *  The estimate may need fetching (punch #89), so the draft update runs in
+   *  the callback rather than inline — `withTravelFor` calls back synchronously
+   *  whenever the value is already cached, which is every re-selection. */
   const reapplyAutoTrips = (custId: string | null, locId: string | null) => {
-    if (!laborFor) return;
-    const est = travelEstFor(custId, locId);
+    // NB: fetch unconditionally, apply only when the configurator is open.
+    // The `!laborFor` early return used to live at the top, which was safe
+    // when every estimate was precomputed — now it would leave the selection
+    // unfetched, and travelEstNow() also drives the labor modal's own
+    // defaults (freshLabor/freshMob) and the distance it displays.
+    withTravelFor(custId, locId, (est) => {
+      if (laborFor) applyAutoTrips(est);
+    });
+  };
+  const applyAutoTrips = (est: TravelLite | null) => {
     const far = !!(est && est.minutes != null && est.minutes > 60);
     const rt = est && est.miles != null ? Math.round(est.miles * 2) : null;
     setLaborDraft((d) => ({

@@ -21,6 +21,8 @@ import {
   type QuoteReview,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
+import { travelForId } from "@/lib/stores/customers";
+import type { TravelLite } from "./types";
 import type { DraftedLine } from "./ai-scope-modal";
 import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
 import {
@@ -588,4 +590,32 @@ export async function searchCatalog(
     mfr: p.mfr || "",
   }));
   return { hits, total: scored.length };
+}
+
+/* ---------------- travel, on demand (punch #89) ----------------
+   The Estimator used to precompute a travel estimate for EVERY customer and
+   venue in the directory and ship the whole map to the client. #84 collapsed
+   the query cost (thousands of round trips → 2), but the map itself still
+   scaled with the directory: measured at ~1,700 companies it was 5,100
+   entries, ~327 KiB of the page's ~1.05 MiB payload, all so the client could
+   answer ONE lookup at a time.
+
+   Both client consumers only ever want the current selection —
+   `travelEstNow()` for the loaded customer, and `reapplyAutoTrips()` fired
+   from the customer/venue pickers with the id the user just chose. So the
+   page now precomputes only the loaded quote's own estimate and the client
+   asks for the rest here, one selection at a time. */
+export async function travelForSelectionAction(
+  customerId: string | null,
+  locationId: string | null
+): Promise<TravelLite | null> {
+  await requireUser();
+  if (!customerId) return null;
+  const est = await travelForId(customerId, locationId || undefined);
+  if (!est) return null;
+  return {
+    miles: est.miles ?? null,
+    minutes: est.minutes ?? null,
+    officeName: est.office?.name ?? null,
+  };
 }
