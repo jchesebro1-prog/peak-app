@@ -4866,3 +4866,59 @@ while reporting success is the same class).
 **Status:** OPEN — logged only, no code.
 
 ---
+
+## WAVE 6 — 2026-08-06, #79–#81 (Jeff: "Let's work on the engineering items")
+
+> Three items picked up together, planned as a spec + plan before any code. Two closed, one
+> deliberately did not. **Merged to `main` (fast-forward) the same day.**
+>
+> - **#79 — DONE, and PROVEN.** The smoke test now covers 10 dynamic `[id]` routes. Planning
+>   found three things the entry had wrong: `/quotes/[id]`, `/flame-tests/[id]` and
+>   `/repairs/[id]` **do not exist** (list-only screens); ids cannot be discovered at runtime
+>   (PGlite is single-writer, so the test process cannot open the scratch datadir while
+>   `next dev` holds it); and `design/grid/[id]` answers **200** with a friendly "no longer
+>   exists" page rather than `notFound()`, so a check against a made-up id would have passed
+>   while compiling none of the editor — the exact false-green the item exists to kill. That
+>   forced new demo seed data (`GRD-5001`, consulting quote `Q-2045`) for two collections that
+>   had none. Closed by reintroducing #76's illegal-export bug and watching the run FAIL, then
+>   pass once removed.
+> - **#80 — PARTIAL on purpose.** The entry said "~14 store modules, 2 guarded." The real
+>   number was **11 unguarded call sites** — `import/registry.ts` was already covered by
+>   `commitImport`'s per-row try/catch — and only **6** of those can report a failure at all.
+>   The other 5 are void FormData actions whose destination pages render no error param, so an
+>   `?err=` redirect would have converted a loud crash into a silent no-op that reads as
+>   success. **Refusing that half-fix was the decision**; it became #85.
+> - **#81 — DONE.** Catalog is the 9th `/import` type; `.xlsx` parses server-side via
+>   `exceljs`. **`xlsx`/SheetJS was rejected on security grounds** — the npm copy is abandoned
+>   at 0.18.5 (2022) with unpatched CVE-2023-30533, because upstream moved distribution to
+>   their own CDN. Recorded in the item so nobody "upgrades" to it later.
+>
+> **Three real bugs surfaced that were not on the list, none of them the thing being worked on:**
+> `lead-drawer.tsx` was **discarding `createLeadAction`'s return value entirely**, so the
+> compiler could not flag it when the type widened — it would have closed the drawer on a lead
+> that was never written. The catalog importer's `update` wrote `list`/`cost` with no fallback
+> to the stored record, and `num()` returns 0 for a blank — so **re-importing a vendor sheet
+> that omits a Cost column silently zeroed that part's price**, on precisely the workflow #81
+> exists to serve, feeding tier-pricing and the estimator downstream. And the comment written
+> to explain the fix for that was itself **factually wrong** about a smoke-test ordering
+> dependency that does not exist.
+>
+> **Where each was caught is the lesson.** The discarded return value came out of widening a
+> type. The price-zeroing survived its own task review and was caught only by the
+> **cross-cutting review at the end** — no per-task reviewer could see it, because the writer
+> looked correct in isolation and only reads wrong against the sibling writers' idiom. The
+> false comment was caught by **re-reviewing the fix**, not the original work. **Rule earned:
+> a fix's own explanatory comment is code under review, not commentary about it.**
+>
+> **Verification posture, improved but still short in one place.** `test:smoke` now runs 50
+> checks. The upload path was verified end-to-end against a scratch database — real `.xlsx`
+> in, correct CSV out, garbage → 422, unauthenticated refused — but that harness lives in a
+> scratch directory and **is not committed** (#87). The one gap no pure test can close: nothing
+> exercises `commitImport` routing an update-mode row through the real writer against a
+> database. `.data/pglite` was never written to at any point.
+>
+> **Still never exercised: a real dealer price sheet.** All #81 verification used generated
+> workbooks. The 52 real vendor sheets are the messy ones — headerless, multi-tab,
+> PDF-converted — and `convert-dealer-sheets.py` still owns that shape of data.
+
+---
