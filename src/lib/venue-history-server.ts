@@ -8,7 +8,7 @@
  */
 import type { SiteRow } from "@/db/schema";
 import { getAllSites } from "@/lib/identity/sites";
-import { getCompany } from "@/lib/identity/companies";
+import { getCompanies } from "@/lib/identity/companies";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAllProjects } from "@/lib/stores/projects";
 import { allEngagements } from "@/lib/stores/engagements";
@@ -82,15 +82,16 @@ export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
     for (const sid of e.siteIds ?? []) bump(e.companyId, sid, e.updatedAt);
   }
 
-  const companyName = new Map<string, string>();
+  /* Company names in ONE query (punch #91). This used to await getCompany()
+     inside the site loop — memoized per company, so "only" one serialized
+     round trip per DISTINCT company, which is still ~1,700 of them against
+     the real directory and made this page take >10s. */
+  const companyRows = await getCompanies(
+    Array.from(new Set(sites.map((s) => s.companyId).filter(Boolean)))
+  );
   const rows: VenueDirRow[] = [];
   for (const site of sites) {
-    let name = companyName.get(site.companyId);
-    if (name === undefined) {
-      const co = await getCompany(site.companyId);
-      name = co?.name ?? site.companyId;
-      companyName.set(site.companyId, name);
-    }
+    const name = companyRows.get(site.companyId)?.name ?? site.companyId;
     const key = site.companyId + "|" + venueDocLocId(site);
     rows.push({
       site,
