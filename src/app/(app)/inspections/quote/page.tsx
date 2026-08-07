@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
-import { travelForId } from "@/lib/stores/customers";
+import { travelForCustomerVenues } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { LEVELS, levelMeta } from "@/lib/stores/inspections";
 import { getRates } from "@/lib/inspection-engine";
@@ -61,14 +61,17 @@ export default async function InspectionQuotePage({
   /* ---- serializable customer directory with per-venue coords + travel ---- */
   // Customer tier margins seed the builder's margin knob (item 11, D88).
   const tierInfo = await builderTiers(customerDocs.map((c: CustomerDoc) => c.id));
-  const customers: BuilderCustomer[] = await Promise.all(
-    customerDocs.map(async (c: CustomerDoc) => ({
+  /* Travel is NO LONGER resolved here per venue (punch #90). This built an
+     estimate for every venue of every customer while rendering — thousands of
+     concurrent geo queries against the real directory, enough to exhaust a
+     serverless connection pool. The builder only ever reads the SELECTED
+     customer's venues, so the pre-selected one is filled in below and the
+     client fetches the rest through venueTravelAction. */
+  const customers: BuilderCustomer[] = customerDocs.map((c: CustomerDoc) => ({
       id: c.id,
       name: c.name,
-      locations: await Promise.all(
-        (c.locations || []).map(async (l) => {
+      locations: (c.locations || []).map((l) => {
           const coords = coordsOf(l);
-          const t = l.id ? await travelForId(c.id, l.id) : await travelForId(c.id);
           return {
             id: l.id || "",
             label: l.label || "Venue",
@@ -76,11 +79,10 @@ export default async function InspectionQuotePage({
             state: l.state || "",
             primary: !!l.primary,
             coords: coords ? { lat: coords.lat, lng: coords.lng } : null,
-            oneWayMiles: t?.miles ?? null,
-            oneWayMin: t?.minutes ?? null,
+            oneWayMiles: null as number | null,
+            oneWayMin: null as number | null,
           };
-        })
-      ),
+      }),
       contacts: (c.contacts || []).map((ct) => ({
         name: ct.name,
         role: ct.role || "",
@@ -89,8 +91,7 @@ export default async function InspectionQuotePage({
         tierMargin: tierInfo[c.id]?.byContact[ct.name] ?? null,
       })),
       tierMargin: tierInfo[c.id]?.margin ?? null,
-    }))
-  );
+  }));
 
   const offices = (Array.isArray(settings.offices) ? settings.offices : []).map((o) => ({
     name: o.name || "",
@@ -172,6 +173,21 @@ export default async function InspectionQuotePage({
         saved: false,
         approved: false,
       };
+    }
+  }
+
+  /* Seed travel for the customer the builder OPENS on, so the venue list and
+     its mileage are right on first paint with no round trip (punch #90). Every
+     other customer resolves on selection. */
+  if (initial.customerId) {
+    const seeded = await travelForCustomerVenues(initial.customerId);
+    const target = customers.find((c) => c.id === initial.customerId);
+    if (target) {
+      target.locations = target.locations.map((l) => ({
+        ...l,
+        oneWayMiles: seeded[l.id]?.miles ?? null,
+        oneWayMin: seeded[l.id]?.minutes ?? null,
+      }));
     }
   }
 

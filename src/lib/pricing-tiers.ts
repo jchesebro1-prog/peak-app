@@ -1,6 +1,10 @@
 import { frac } from "@/lib/stores/pricing";
-import { getCompany } from "@/lib/identity/companies";
-import { contactsForCompany, displayName } from "@/lib/identity/contacts";
+import { getCompanies, getCompany } from "@/lib/identity/companies";
+import {
+  contactsForCompanies,
+  contactsForCompany,
+  displayName,
+} from "@/lib/identity/contacts";
 import {
   DEFAULT_PRICING_TIER,
   PRICING_TIERS,
@@ -113,14 +117,41 @@ export async function builderTiers(
   companyIds: string[]
 ): Promise<Record<string, BuilderTier>> {
   const out: Record<string, BuilderTier> = {};
+  if (!companyIds.length) return out;
+
+  /* Batched (punch #90). This used to loop the company list serially, awaiting
+     getCompany() + contactsForCompany() + a margin read PER company — ~3,400
+     sequential round trips for the real directory (~1,700 companies), which is
+     what made the three service-quote builders take seconds locally and would
+     be far worse against a hosted Postgres. Two bulk queries now, plus at most
+     one margin read per DISTINCT tier (there are seven). Resolution order is
+     unchanged: contact tier → company tier → default. */
+  const [companies, contactsByCompany] = await Promise.all([
+    getCompanies(companyIds),
+    contactsForCompanies(companyIds),
+  ]);
+
+  const marginCache = new Map<PricingTier, number>();
+  const marginFor = async (tier: PricingTier): Promise<number> => {
+    const hit = marginCache.get(tier);
+    if (hit != null) return hit;
+    const m = await tierMargin(tier);
+    marginCache.set(tier, m);
+    return m;
+  };
+  const defaultMargin = await marginFor(DEFAULT_PRICING_TIER);
+
   for (const id of companyIds) {
-    const companyLevel = await resolveTier(id);
+    const companyTier = asTier(companies.get(id)?.pricingTier);
     const byContact: Record<string, number> = {};
-    for (const p of await contactsForCompany(id)) {
+    for (const p of contactsByCompany.get(id) || []) {
       const t = asTier(p.pricingTier);
-      if (t) byContact[displayName(p)] = await tierMargin(t);
+      if (t) byContact[displayName(p)] = await marginFor(t);
     }
-    out[id] = { margin: companyLevel.margin, byContact };
+    out[id] = {
+      margin: companyTier ? await marginFor(companyTier) : defaultMargin,
+      byContact,
+    };
   }
   return out;
 }

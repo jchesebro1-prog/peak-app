@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
+import { venueTravelAction, type VenueTravel } from "../../quote-builder-travel";
 import type { CSSProperties } from "react";
 import { saveFlameQuote, approveFlameQuote } from "./actions";
 
@@ -274,10 +275,37 @@ export function QuoteBuilder({
     () => customers.find((c) => c.id === customerId) || null,
     [customers, customerId]
   );
-  const locations = customer?.locations || [];
+  /* Venue travel arrives for the OPENED customer only (punch #90); every other
+     customer resolves when it is picked. Merged over the directory copy here
+     so `locations` stays the single source the venue list, the trip-mileage
+     math and the saved venues all read. */
+  const [venueTravel, setVenueTravel] = useState<
+    Record<string, Record<string, VenueTravel>>
+  >({});
+  const locations = useMemo(() => {
+    const base = customer?.locations || [];
+    const fetched = customer ? venueTravel[customer.id] : undefined;
+    if (!fetched) return base;
+    return base.map((l) => ({
+      ...l,
+      oneWayMiles: fetched[l.id]?.miles ?? l.oneWayMiles,
+      oneWayMin: fetched[l.id]?.minutes ?? l.oneWayMin,
+    }));
+  }, [customer, venueTravel]);
+  /** Fetch a customer's venue travel once, the first time it is selected. */
+  const ensureVenueTravel = (id: string) => {
+    if (!id || venueTravel[id]) return;
+    const already = customer?.id === id && (customer.locations || []).some((l) => l.oneWayMiles != null);
+    if (already) return; // server already seeded the opened customer
+    startTransition(async () => {
+      const t = await venueTravelAction(id);
+      setVenueTravel((m) => (m[id] ? m : { ...m, [id]: t }));
+    });
+  };
   const contacts = customer?.contacts || [];
 
   function pickCustomer(id: string) {
+    ensureVenueTravel(id);
     const c = customers.find((x) => x.id === id) || null;
     const locs = c?.locations || [];
     const sel: Record<string, { on: boolean; curtains: string }> = {};

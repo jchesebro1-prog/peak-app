@@ -1,6 +1,16 @@
 import { getBlob, setBlob } from "@/db/doc-store";
 import { getSettings, type Office } from "@/lib/settings";
-import { coordsOf, estimate, type TravelEstimate } from "@/lib/geo";
+import {
+  coordsOf,
+  estimate,
+  estimateFromParts,
+  hasCoords,
+  nearest,
+  routeCachedBulk,
+  routeKey,
+  type TravelEstimate,
+} from "@/lib/geo";
+import { getTravelRates } from "@/lib/stores/pricing";
 import { customersSeed } from "@/db/seeds/customers";
 import {
   allCompanies,
@@ -746,6 +756,55 @@ export async function travelForId(
   if (!l) return null;
   const coords = coordsOf(l) || {};
   return estimate(await offices(), { ...l, ...coords });
+}
+
+/**
+ * Travel to EVERY venue of one customer, in a fixed number of queries
+ * (punch #90). Calling travelForId() per venue re-fetches the office list and
+ * hits the geo cache once per row; the three service-quote builders did that
+ * for every customer in the directory, which against real data fires
+ * thousands of concurrent queries at a hosted Postgres.
+ *
+ * Keyed by the id the directory uses for a venue (legacyLocId when present,
+ * else the site id) so callers can index straight off CustomerLocation.id.
+ * Same fail-soft contract as travelForId: a venue that cannot be estimated
+ * maps to null rather than throwing.
+ */
+export async function travelForCustomerVenues(
+  id: string | null | undefined
+): Promise<Record<string, TravelEstimate<Office> | null>> {
+  const out: Record<string, TravelEstimate<Office> | null> = {};
+  if (!id) return out;
+  const rec = await get(id);
+  const locs = rec?.locations || [];
+  if (!locs.length) return out;
+
+  const [officeList, rates] = await Promise.all([offices(), getTravelRates()]);
+  const targets = locs.map((l) => {
+    const coords = coordsOf(l);
+    const target = coords ? { ...l, lat: coords.lat, lng: coords.lng } : l;
+    return { locId: l.id || "", target, office: nearest(officeList, target) };
+  });
+  const keys = Array.from(
+    new Set(
+      targets
+        .map((t) =>
+          t.office && hasCoords(t.office) && hasCoords(t.target)
+            ? routeKey(t.office, t.target)
+            : null
+        )
+        .filter((k): k is string => k != null)
+    )
+  );
+  const cache = await routeCachedBulk(keys);
+  for (const t of targets) {
+    const k =
+      t.office && hasCoords(t.office) && hasCoords(t.target)
+        ? routeKey(t.office, t.target)
+        : null;
+    out[t.locId] = estimateFromParts(t.office, t.target, rates, k ? cache.get(k) ?? null : null);
+  }
+  return out;
 }
 
 export async function travelForName(
