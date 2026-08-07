@@ -5028,3 +5028,70 @@ preview. Verified in a browser against a scratch DB: Lakefront ~2 mi (Milwaukee)
 (Appleton), each fetched on selection.
 
 ---
+
+## 91. `/venues` resolved company names one query at a time — DONE 2026-08-07 — but that was not the slow part
+
+**Area:** `src/lib/venue-history-server.ts` (`loadVenueDirectory`)
+**Reported:** 2026-08-07 (Jeff: "check /venues and /companies too", after #89 and #90)
+
+**Finding:** `loadVenueDirectory()` awaited `getCompany()` inside its per-site loop. It memoized by
+company id, so it was one serialized round trip per DISTINCT company rather than per site — but that
+is still ~1,700 sequential queries against the real directory. Now one `getCompanies()` bulk call.
+
+**Measured** at 1,700 companies / 3,400 sites, booted against a scratch database:
+
+| | median render |
+|---|---|
+| before | 10,684 ms |
+| after | 8,501 ms |
+
+**The honest read: this was NOT the dominant cost, and fixing it did not make the page usable.** See
+#92 — the remaining 8.5 s is the page rendering every row.
+
+**`/companies` was checked and is clean** — it loads everything through one `Promise.all` of bulk
+calls, with no per-row query.
+
+**Also found while sweeping:** `tierMarginByCompany()` (`src/lib/pricing-tiers.ts`) has the same
+serial-loop shape (`resolveTier()` per company) and **has no callers anywhere** — dead code. Left in
+place rather than deleted as drive-by scope; worth removing or batching before anything starts
+calling it.
+
+**Ties to:** #84, #89, #90 (same defect class, fourth and fifth instances), #92.
+
+**Status:** DONE 2026-08-07.
+
+---
+
+## 92. `/venues` renders every venue and every company in one page — 10 MiB, 8.5 s — OPEN
+
+**Area:** `src/app/(app)/venues/page.tsx`
+**Reported:** 2026-08-07 (found while fixing #91 — it is what #91's fix left behind)
+
+**Finding:** the page has **no pagination and no limit**. It renders one row per venue for the entire
+directory, plus a company filter `<select>` carrying an `<option>` per company.
+
+**Measured** at 1,700 companies / 3,400 sites against a scratch database, *after* #91's query fix:
+**8,501 ms median render, 10.04 MiB payload.** #91 removed ~2.2 s of query time; essentially all of
+what remains is building and serializing that markup.
+
+**Why it matters:** this is the same shape as #89 — work proportional to the whole directory done on
+every page load — but the fix is different in kind. #89 could drop the payload because the client
+only needed one record at a time. Here the rows ARE the page, so it needs a product decision, not a
+refactor.
+
+**Open questions for Jeff:**
+1. Paginate (say 50/page, with the existing `?q=`/`?company=` filters narrowing first), infinite
+   scroll, or virtualize the list?
+2. Should the company filter become a typeahead rather than a 1,700-option `<select>`? That control
+   alone is a large share of the markup.
+3. Is a venue directory that lists everything even the right surface at this size, or should it open
+   filtered/empty and require a search — the way an operator actually uses it?
+
+**Note this is invisible in dev:** the demo directory is a handful of venues, so the page feels
+instant locally. It was only found by seeding 1,700 synthetic companies and measuring.
+
+**Ties to:** #91, #89, #59 (real data is what makes this bite).
+
+**Status:** OPEN — logged only, no code. Needs a UX decision before anything is built.
+
+---
