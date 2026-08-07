@@ -4973,7 +4973,7 @@ pages).
 
 ---
 
-## 90. Three quote builders still run the travel N+1 the Estimator just shed — OPEN
+## 90. Three quote builders still run the travel N+1 the Estimator just shed — DONE 2026-08-07 — and a bigger N+1 was hiding under it
 
 **Area:** `src/app/(app)/repairs/quote/page.tsx:86`, `src/app/(app)/inspections/quote/page.tsx:71`,
 `src/app/(app)/flame-tests/quote/page.tsx:62`
@@ -5000,7 +5000,31 @@ server-side batch.
 
 **Ties to:** #84, #89.
 
-**Status:** OPEN — logged only, no code. Not fixed alongside #89 because it is three separate
-surfaces and Jeff asked for the Estimator.
+**Status:** DONE 2026-08-07 — **and the travel N+1 was not the main problem.** Removing it exposed
+a second, larger one underneath: `builderTiers()` (`src/lib/pricing-tiers.ts`) looped the company
+list **serially**, awaiting `getCompany()` + `contactsForCompany()` + a margin read per company —
+~3,400 sequential round trips for 1,700 companies, dwarfing the travel cost.
+
+Measured against 1,700 synthetic companies (2 venues each), booted against a scratch database:
+
+| | outcome |
+|---|---|
+| before | **CRASHES** — `RangeError: Maximum call stack size exceeded` |
+| after travel fix only | 7,161 ms |
+| after both fixes | **277 ms** |
+
+**The page could not render at all at that scale** — this was a hard failure, not a slow load, and
+nobody had reported it because the dev PGlite has no network hop and the demo directory is tiny.
+
+**What changed:** (1) travel resolves for the selected customer only, seeded server-side for the
+customer the builder opens on and fetched by the client through ONE shared `venueTravelAction` (not
+three copies — that is how #65 and #75 happened); `travelForCustomerVenues()` does a whole customer's
+venues in a fixed number of queries. (2) `builderTiers()` now issues two bulk queries plus at most
+one margin read per DISTINCT tier (seven exist), with resolution order unchanged.
+
+**Saved quotes are unaffected** — the save actions already re-resolve travel server-side from the
+directory (`loc?.travelMiles`), so the client's mileage only ever drove the venue labels and the live
+preview. Verified in a browser against a scratch DB: Lakefront ~2 mi (Milwaukee), North Ridge ~113 mi
+(Appleton), each fetched on selection.
 
 ---
