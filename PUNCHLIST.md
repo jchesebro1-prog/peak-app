@@ -4922,3 +4922,85 @@ while reporting success is the same class).
 > PDF-converted — and `convert-dealer-sheets.py` still owns that shape of data.
 
 ---
+
+## 89. The Estimator shipped a travel estimate for the entire customer directory — DONE 2026-08-07 — fetched on selection instead
+
+**Area:** `src/app/(app)/estimator/page.tsx`, `estimator-client.tsx`, `actions.ts`
+**Reported:** 2026-08-07 (Jeff: "can we fix the estimator bug, maybe only have it render the
+travel distance when a customer is selected")
+
+**Finding:** #84 fixed the Estimator's *query* cost — thousands of serialized round trips down to
+2 — but not its *payload*. The page still computed a travel estimate for every customer AND every
+venue in the directory and serialized the whole map to the client.
+
+Measured against 1,700 synthetic companies (2 venues each), booted against a scratch database:
+
+| | payload | travel entries | median render |
+|---|---|---|---|
+| before | 1,077 KiB | 5,100 | 267 ms |
+| after | 675 KiB | 0 | 243 ms |
+
+The travel map alone was ~327 KiB of JSON; the rest of the drop is RSC serialization overhead.
+
+**Why it was all waste:** the client has exactly two consumers of that map, and both only ever read
+the **current selection** — `travelEstNow()` for the loaded quote, and `reapplyAutoTrips()` called
+from the customer and venue pickers with the id the user just chose. A directory-wide map existed to
+answer one lookup at a time. **Jeff's instinct was right, and an earlier session's reasoning here was
+wrong:** the picker was assumed to need every estimate precomputed, when it only needs one at the
+moment of selection — where an async fetch is perfectly acceptable.
+
+**Fix:** the page seeds only the loaded quote's own estimate (so first paint is correct, no flash of
+a missing distance) and the client fetches everything else through a new `travelForSelectionAction`,
+caching each result so re-selecting or switching back never refetches.
+
+**Two traps this exposed, both caught before shipping — neither would have failed a typecheck:**
+1. `reapplyAutoTrips` early-returned when the labor configurator was closed. That was safe when every
+   estimate was precomputed; with on-demand fetching it would have left the *normal* flow (pick the
+   customer, THEN open labor) with no estimate at all. It now always fetches and only applies the
+   auto trip-type when the configurator is open.
+2. `toggleLabor` seeded the mobilization from `travelEstNow()` synchronously, so opening it right
+   after picking a customer could seed no distance and **quietly price a travel trip as local**. It
+   now resolves travel before seeding the draft.
+
+**Verified in a browser** against a scratch database (never `.data/pglite`): switching customers
+fetches and applies distinct estimates — North Ridge 2h16m / 226 mi RT, Lakeside 1h55m / 192 mi RT —
+with the trip type auto-set to Travel in both cases.
+
+**Ties to:** #84 (fixed the queries, not the payload), #90 (the same bug, still live on three other
+pages).
+
+**Status:** DONE 2026-08-07.
+
+---
+
+## 90. Three quote builders still run the travel N+1 the Estimator just shed — OPEN
+
+**Area:** `src/app/(app)/repairs/quote/page.tsx:86`, `src/app/(app)/inspections/quote/page.tsx:71`,
+`src/app/(app)/flame-tests/quote/page.tsx:62`
+**Reported:** 2026-08-07 (found while fixing #89)
+
+**Finding:** all three call `travelForId(c.id, l.id)` **per customer, per venue**, inside nested
+`Promise.all` maps over the entire customer directory. Each call re-fetches the office list and hits
+the geo-cache individually — the same shape as the defect #84 fixed in the Estimator.
+
+**One difference makes these less catastrophic but not safe:** they use `Promise.all`, so the calls
+are concurrent rather than serialized in a for-await loop. That avoids the Estimator's original
+minutes-long wall clock. But against the real directory (~1,700 companies, ~2 venues each) it fires
+**several thousand simultaneous queries** at a hosted Postgres from a serverless function — which
+trades a slow page for connection-pool exhaustion, a failure mode that hits *other* requests too.
+
+**Why it matters:** these pages were never reported as slow, which is itself the point — the dev
+PGlite has no network hop, so this class of defect is invisible locally and only appears against
+Neon. #84 was only found because Jeff hit it in production.
+
+**Open questions for Jeff:** apply #89's fix (seed the loaded record, fetch the rest on selection),
+or #84's (keep precomputing but batch the queries)? #89's is the better shape — these pages have the
+same "one selection at a time" usage — but it is three pages of client work rather than a
+server-side batch.
+
+**Ties to:** #84, #89.
+
+**Status:** OPEN — logged only, no code. Not fixed alongside #89 because it is three separate
+surfaces and Jeff asked for the Estimator.
+
+---
