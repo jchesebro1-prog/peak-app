@@ -193,6 +193,25 @@ export async function getProject(id: string): Promise<GridProject | null> {
   return getDoc<GridProject>("grid_projects", id);
 }
 
+/**
+ * Reverse lookup for the Grid→quote link (#41). `GridProject.quoteId` is the
+ * only direction stored, so this is a filter over listProjects() — beta
+ * scale, no schema change, no migration; add an index if it ever runs
+ * somewhere hot.
+ *
+ * A blank/absent quote id is never a match: `quoteId` is null on every
+ * project that hasn't minted a quote, and `find` over a null needle would
+ * otherwise hand back the first unquoted design in the list.
+ *
+ * listProjects() is sorted newest-activity-first, so if two projects somehow
+ * carry the same quote id the most recently touched one wins.
+ */
+export async function getProjectByQuoteId(quoteId: string): Promise<GridProject | null> {
+  if (!quoteId) return null;
+  const all = await listProjects();
+  return all.find((p) => p.quoteId === quoteId) || null;
+}
+
 export async function createProject(input: {
   name: string;
   customer: string;

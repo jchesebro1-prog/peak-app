@@ -21,7 +21,11 @@ import {
   addSheet as addGridSheet,
   addPlacement as addGridPlacement,
   getProject as getGridProject,
+  getProjectByQuoteId,
+  setQuote as setGridQuote,
 } from "@/lib/stores/grid-projects";
+import { priceFromGridOrParametric } from "@/lib/design/quick-grid-seam";
+import { list as listCatalogParts } from "@/lib/stores/catalog";
 import { quotesSeed } from "@/db/seeds/quotes";
 import ExcelJS from "exceljs";
 import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
@@ -3092,6 +3096,53 @@ async function asyncChecks(): Promise<void> {
     const after = await getGridProject(proj.id);
     ok(!!after && after.placements.every((p) => p.sheetId === uploaded!.id), "grid: carryPlacementsToSheet re-anchors every placement onto the new sheet");
     ok(!!after && after.placements[0].x === 0.4 && after.placements[0].y === 0.5, "grid: carryPlacementsToSheet preserves normalized x/y");
+  }
+
+  /* --- Quick estimator: use a linked Grid BOM when one exists (#41) --- */
+  {
+    // A quote id unique to THIS run: the reverse lookup scans every live
+    // project, and a fixed literal would collide with the row a previous run
+    // of this suite left behind in the same datadir.
+    const stamp = `Q-TEST-SEAM-${Date.now()}`;
+    const withLink = await createGridProject({ name: "Linked", customer: "", customerId: null, by: "test" });
+    await setGridQuote(withLink.id, stamp);
+
+    const found = await getProjectByQuoteId(stamp);
+    ok(found?.id === withLink.id, "quick-grid-seam: getProjectByQuoteId finds the project a quote is linked from");
+
+    const notFound = await getProjectByQuoteId("Q-DOES-NOT-EXIST");
+    ok(notFound === null, "quick-grid-seam: getProjectByQuoteId returns null for an unlinked quote");
+
+    // An empty-but-linked design is a real claim ("this system is nothing
+    // yet"), NOT the absence of a design — it must price from Grid at 0,
+    // never silently fall through to the parametric guess.
+    const emptyGridResult = await priceFromGridOrParametric(stamp, () => 999);
+    ok(
+      emptyGridResult.source === "grid",
+      "quick-grid-seam: prices from the Grid BOM when a linked project exists, even an empty one (0, not a fallback to parametric)"
+    );
+    ok(emptyGridResult.value === 0, "quick-grid-seam: …and an empty linked design prices at 0, not at the parametric number");
+
+    const fallbackResult = await priceFromGridOrParametric("Q-DOES-NOT-EXIST", () => 999);
+    ok(
+      fallbackResult.source === "parametric" && fallbackResult.value === 999,
+      "quick-grid-seam: falls back to the parametric calculator when no Grid project is linked"
+    );
+
+    // A linked design with a real device on it prices at that device's list
+    // price — the number the Grid BOM itself would show, not a guess.
+    const catalogParts = await listCatalogParts();
+    const priced = catalogParts.find((c) => c.list > 0);
+    ok(!!priced, "quick-grid-seam: the test catalog has at least one priced part to place");
+    if (priced) {
+      const sheet = await addGeneratedSheet(withLink.id, { venueDims: DEFAULT_VENUE_DIMS, by: "test" });
+      await addGridPlacement(withLink.id, { sheetId: sheet!.id, page: 1, x: 0.5, y: 0.5, partId: priced.id, by: "test" });
+      const populated = await priceFromGridOrParametric(stamp, () => 999);
+      ok(
+        populated.source === "grid" && populated.value === priced.list,
+        `quick-grid-seam: a populated linked design prices off its placements (want ${priced.list}, got ${populated.value})`
+      );
+    }
   }
 }
 
