@@ -235,6 +235,18 @@ ok(
 );
 
 
+/* --- Grid seeding action: starter layout from dims (#38) --- */
+import { suggestSeedPlacements } from "@/lib/design/grid-seed";
+
+const seeds = suggestSeedPlacements(DEFAULT_VENUE_DIMS, 0);
+ok(seeds.length > 0, "grid-seed: suggestSeedPlacements returns at least one starter drop for a fresh project");
+ok(seeds.every((s) => s.x >= 0 && s.x <= 1 && s.y >= 0 && s.y <= 1), "grid-seed: every suggested drop is normalized 0..1");
+ok(seeds.some((s) => s.category === "Curtains" || s.category === "Rigging"), "grid-seed: starter layout includes at least one rigging/curtain drop");
+
+const reSeed = suggestSeedPlacements(DEFAULT_VENUE_DIMS, 5);
+ok(reSeed.length === seeds.length, "grid-seed: re-running suggests the same starter set regardless of unrelated existing placements (caller decides additive-vs-replace, not this function)");
+
+
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
 import type { Annotation } from "@/lib/annotations";
