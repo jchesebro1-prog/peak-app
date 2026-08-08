@@ -23,6 +23,7 @@ import {
   curtainSpecOf,
   GRID_CURTAIN_TYPES,
   isPerLengthUnit,
+  isRiggingHardwarePart,
   routeLengthFt,
   routeLines,
   type GridCurtain,
@@ -409,28 +410,38 @@ export default function GridEditor({
   const partById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
 
   /** "Generate starting layout" (#38) — the two real catalog SKUs the
-   *  seeding action paints (first Rigging row, first Curtains row). `parts`
-   *  already carries every catalog row's raw `category` (server-resolved,
-   *  same slice the palette itself reads), so no extra server round trip is
-   *  needed just to find one of each. Undefined until the catalog actually
-   *  has a row in that category — the starter-set import (#39) may not have
-   *  landed yet, or a scratch/dev DB may simply start empty. */
-  const seedPipePart = useMemo(() => parts.find((p) => p.category === "Rigging") || null, [parts]);
+   *  seeding action paints (a rigging-hardware row, first Curtains row).
+   *  `parts` carries the server-resolved `trade`/`group` (punch #48/#39),
+   *  not just the raw `category` string — "Rigging" is a TRADE (resolved
+   *  through the admin-editable category map, catalog-taxonomy.ts), never a
+   *  literal `category` value, so matching on `category === "Rigging"`
+   *  could never find a real part. `group !== "Curtains"` excludes the
+   *  Curtains-group rows (which also resolve to the Rigging trade, per
+   *  GROUP_TRADES) so this doesn't just re-find the same row as
+   *  `seedCurtainPart`. Undefined until the catalog actually has a
+   *  matching row — the starter-set import (#39) may not have landed yet,
+   *  or a scratch/dev DB may simply start empty. */
+  const seedPipePart = useMemo(() => parts.find(isRiggingHardwarePart) || null, [parts]);
   const seedCurtainPart = useMemo(() => parts.find((p) => p.category === "Curtains") || null, [parts]);
-  const seedDisabled = !seedPipePart || !seedCurtainPart;
-  /** The dims suggestSeedPlacements would use — the generated base sheet's,
-   *  when the first sheet is one (venueDims is only ever set on a generated
-   *  sheet); DEFAULT_VENUE_DIMS otherwise so the action always has a shape
-   *  to call with even before that function reads dims at all. */
-  const seedDims: VenueDims = sheets[0]?.venueDims ?? DEFAULT_VENUE_DIMS;
+  const seedDisabled = !seedPipePart || !seedCurtainPart || !sheet;
+  /** The dims suggestSeedPlacements would use — the ACTIVE sheet's (the one
+   *  currently displayed, tracked by `activeSheetId`), not always the
+   *  first sheet in the project: after a carry-over the active sheet is the
+   *  uploaded plan, not the generated one, and seeding must agree with
+   *  wherever the devices actually land (see `runSeed` below) or the dims
+   *  and the target sheet could silently disagree. venueDims is only ever
+   *  set on a generated sheet, so this is DEFAULT_VENUE_DIMS on an upload. */
+  const seedDims: VenueDims = sheet?.venueDims ?? DEFAULT_VENUE_DIMS;
 
   const runSeed = useCallback(async () => {
-    if (!seedPipePart || !seedCurtainPart) return;
+    if (!seedPipePart || !seedCurtainPart || !sheet) return;
     setBusy(true);
-    const r = await seedStarterLayoutAction(project.id, seedDims, {
-      PIPE: seedPipePart.id,
-      CURTAIN: seedCurtainPart.id,
-    });
+    const r = await seedStarterLayoutAction(
+      project.id,
+      seedDims,
+      { PIPE: seedPipePart.id, CURTAIN: seedCurtainPart.id },
+      sheet.id
+    );
     setBusy(false);
     setSeedArm(false);
     if (!r.ok) {
@@ -438,7 +449,7 @@ export default function GridEditor({
       return;
     }
     router.refresh();
-  }, [project.id, seedDims, seedPipePart, seedCurtainPart, router]);
+  }, [project.id, seedDims, seedPipePart, seedCurtainPart, sheet, router]);
 
   const filteredParts = useMemo(() => {
     const q = search.trim().toLowerCase();

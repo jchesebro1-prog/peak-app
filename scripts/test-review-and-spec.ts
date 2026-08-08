@@ -324,6 +324,26 @@ ok(
 const reSeed = suggestSeedPlacements(DEFAULT_VENUE_DIMS, 5);
 ok(reSeed.length === seeds.length, "grid-seed: re-running suggests the same starter set regardless of unrelated existing placements (caller decides additive-vs-replace, not this function)");
 
+/* --- Seed-part resolution: rigging hardware vs. Curtains-group (#38 review fix) --- */
+import { isRiggingHardwarePart } from "@/lib/design/grid-bom";
+
+ok(
+  !isRiggingHardwarePart({ trade: undefined, group: undefined }),
+  "grid-bom: isRiggingHardwarePart is false with no trade at all — the bug this replaces (category === \"Rigging\") could never match a real part, since Rigging is a trade, not a category"
+);
+ok(
+  isRiggingHardwarePart({ trade: "Rigging", group: null }),
+  "grid-bom: isRiggingHardwarePart is true for a genuine rigging-hardware row (trade-only, no group — e.g. Pipe, Track, Loftblocks)"
+);
+ok(
+  !isRiggingHardwarePart({ trade: "Rigging", group: "Curtains" }),
+  "grid-bom: isRiggingHardwarePart excludes Curtains-group rows even though Curtains also resolves to the Rigging trade — this is exactly what the imported starter set's Curtains-category rows look like"
+);
+ok(
+  !isRiggingHardwarePart({ trade: "Lighting", group: null }),
+  "grid-bom: isRiggingHardwarePart is false for a non-Rigging trade"
+);
+
 
 /* --- Lineset schedule derived from Grid placements (#41) --- */
 import { linesetScheduleFromGrid, linesetScheduleReport } from "@/lib/design/grid-lineset-schedule";

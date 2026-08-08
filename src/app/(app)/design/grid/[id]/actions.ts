@@ -126,13 +126,24 @@ export async function carryOverAction(
 
 /**
  * "Generate starting layout" (#38) — paints suggestSeedPlacements' small
- * starter set (rigging pipes + a curtain-hardware drop) onto the project's
- * first sheet, using real catalog SKUs the caller already resolved (the
- * editor picks the first Rigging/Curtains catalog row; re-resolving here
- * would just be the same lookup twice). ALWAYS additive — it only ever
- * appends placements, never removes or replaces any — so "never a silent
- * replace" is enforced by the editor's confirm-gate UI, not by refusing a
- * non-empty project here.
+ * starter set (rigging pipes + a curtain-hardware drop) onto the sheet the
+ * caller specifies, using real catalog SKUs the caller already resolved
+ * (the editor picks the first Rigging/Curtains catalog row; re-resolving
+ * here would just be the same lookup twice). ALWAYS additive — it only
+ * ever appends placements, never removes or replaces any — so "never a
+ * silent replace" is enforced by the editor's confirm-gate UI, not by
+ * refusing a non-empty project here.
+ *
+ * `sheetId` MUST be the editor's currently-ACTIVE sheet, not an
+ * independently-picked default — after a carry-over (#38) the active sheet
+ * is the uploaded plan the user is looking at, not `project.sheetIds[0]`
+ * (always the generated sheet, since `addGeneratedSheet` prepends while
+ * `addSheet` uploads append). Picking `sheetIds[0]` here unconditionally
+ * used to mean: carry over, then seed, and the 3 new devices land on the
+ * abandoned generated sheet while the user is looking at the uploaded one
+ * — a silent "success" that seeds nothing visible. Re-verified against
+ * `project.sheetIds` below since a stale client value must not let a
+ * request target a sheet that isn't actually part of this project.
  *
  * `addPlacement` (grid-projects.ts) has no `category` parameter — only
  * `addCurtainPlacement` does — so each drop's user-defined category label
@@ -145,13 +156,14 @@ export async function carryOverAction(
 export async function seedStarterLayoutAction(
   projectId: string,
   dims: VenueDims,
-  resolvedPartIds: { PIPE: string; CURTAIN: string }
+  resolvedPartIds: { PIPE: string; CURTAIN: string },
+  sheetId: string
 ): Promise<Result> {
   const user = await requireUser();
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
-  const sheetId = project.sheetIds[0];
-  if (!sheetId) return { ok: false, error: "No sheet to seed onto." };
+  if (!sheetId || !project.sheetIds.includes(sheetId))
+    return { ok: false, error: "No sheet to seed onto." };
 
   // Re-verify server-side (the client proposes, the server prices/validates
   // — the same rule placeCurtainAction and addRouteAction follow): a part

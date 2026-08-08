@@ -52,6 +52,19 @@ export type PartLite = {
   trade?: string | null;
 };
 
+/** True for a PartLite that resolves to genuine rigging HARDWARE (pipes,
+ *  battens, hoists, track, etc.) as distinct from a Curtains-GROUP part,
+ *  which also resolves to the Rigging trade (Curtains -> Rigging per
+ *  GROUP_TRADES in catalog-taxonomy.ts) but isn't rigging hardware. Used by
+ *  the Grid editor's "Generate starting layout" seed-part resolution (#38):
+ *  "Rigging" is a TRADE, never a literal `category` string, so matching on
+ *  `category === "Rigging"` could never find a real catalog row. Pulled out
+ *  here (rather than inlined in the editor) so the resolution rule has one
+ *  place to test. */
+export function isRiggingHardwarePart(p: Pick<PartLite, "trade" | "group">): boolean {
+  return p.trade === "Rigging" && p.group !== "Curtains";
+}
+
 /* -------------------------------- curtains -------------------------------- */
 
 /** Jeff's Grid set (punch #49). Three other curtain vocabularies already
