@@ -27,6 +27,7 @@ import {
 import { priceFromGridOrParametric } from "@/lib/design/quick-grid-seam";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { drawPlanDataPage, computeTextOrigin } from "@/lib/design/plan-to-pdf";
+import { walkBundle } from "@/lib/design/client-package";
 import { budgetFor, type DesignPartial } from "@/app/(app)/design/quick/actions";
 import { createDesign, addDesignRevision, designRevisions } from "@/lib/stores/designs";
 import { list as listCatalogParts } from "@/lib/stores/catalog";
@@ -3330,6 +3331,25 @@ async function asyncChecks(): Promise<void> {
       rotOrigin.y === flipY(rotText.y) - rotWidth / 2 && rotOrigin.y !== flipY(rotText.y),
       "plan-to-pdf anchor math: rotated anchor:'middle' shifts y by half the text width, NOT the naive un-shifted y"
     );
+  }
+
+  /* --- Client package bundle walker (#40) --- */
+  {
+    const cpCatalog = [
+      { id: "p1", sku: "ETC:405", desc: "Source Four 5°", category: "Fixtures", unit: "ea", list: 1260, cost: 756, datasheetBlobKey: "blob/etc-405.pdf", specCsi: "26 55 33", specText: "Ellipsoidal fixture..." },
+      { id: "p2", sku: "Thern:CW11-1M", desc: "Manual hoist", category: "Curtains", unit: "ea", list: 2110, cost: 1477 }, // no datasheet, no spec
+    ];
+    const bundle = await walkBundle({
+      bom: [{ sku: "ETC:405", desc: "Source Four 5°", qty: 2 }, { sku: "Thern:CW11-1M", desc: "Manual hoist", qty: 1 }],
+      catalog: cpCatalog as never,
+      engagementId: "eng-test",
+      projectName: "Test Project",
+      customer: "Test Customer",
+      preparedBy: "Tester",
+    });
+    ok(bundle.datasheets.length === 1, "client-package: walkBundle finds exactly one row with a datasheet");
+    ok(bundle.gaps.some((g) => g.sku === "Thern:CW11-1M" && g.reason === "no-datasheet"), "client-package: walkBundle gaps the row with no datasheetBlobKey");
+    ok(bundle.spec.sections.length >= 0, "client-package: walkBundle always produces an AssembledSpec, even with incomplete rows");
   }
 }
 
