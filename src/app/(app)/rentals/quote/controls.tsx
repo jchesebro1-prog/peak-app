@@ -312,11 +312,16 @@ export function QuoteBuilder({
     return fd;
   }
   function doSave() {
-    if (!canSave || pending) return;
+    // A won quote's bookings have already been spawned (createFromQuote
+    // short-circuits once they exist); re-saving would silently rewrite
+    // quote.rental.lines without reconciling those bookings, desyncing the
+    // customer-facing quote from what's actually reserved. Lock Save once
+    // approved — same gate the Approve button already gets via showApprove.
+    if (!canSave || pending || isApproved) return;
     startTransition(() => saveRentalQuote(buildForm()));
   }
   function doApprove() {
-    if (!canSave || pending) return;
+    if (!canSave || pending || isApproved) return;
     startTransition(() => approveRentalQuote(buildForm()));
   }
 
@@ -783,7 +788,8 @@ export function QuoteBuilder({
               <button
                 type="button"
                 onClick={doSave}
-                disabled={!canSave || pending}
+                disabled={!canSave || pending || isApproved}
+                title={isApproved ? "This quote is already approved and its bookings are locked." : undefined}
                 style={{
                   marginTop: 14,
                   width: "100%",
@@ -794,13 +800,18 @@ export function QuoteBuilder({
                   border: "none",
                   borderRadius: 10,
                   padding: 12,
-                  cursor: canSave && !pending ? "pointer" : "not-allowed",
-                  background: canSave ? accent : "#c8ccd3",
+                  cursor: canSave && !pending && !isApproved ? "pointer" : "not-allowed",
+                  background: canSave && !isApproved ? accent : "#c8ccd3",
                   boxSizing: "border-box",
                 }}
               >
-                {savedFlag ? "Saved ✓" : editingId ? "Update quote" : "Save quote"}
+                {isApproved ? "Locked — approved" : savedFlag ? "Saved ✓" : editingId ? "Update quote" : "Save quote"}
               </button>
+              {isApproved && (
+                <div style={{ marginTop: 8, fontSize: 11, color: "#9aa0ab", textAlign: "center", lineHeight: 1.5 }}>
+                  This quote is already approved and its bookings are locked — edits here won&apos;t update inventory.
+                </div>
+              )}
 
               {showApprove && (
                 <button

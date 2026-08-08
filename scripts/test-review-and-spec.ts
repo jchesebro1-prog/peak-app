@@ -2630,6 +2630,27 @@ import { priceRental } from "../src/lib/pricing/rental";
   ok(priceRental(10, rentalRates) === 400, "priceRental: 10 days bills at week rate (2 weeks = 400)");
   ok(priceRental(30, rentalRates) === 600, "priceRental: 30 days bills at month rate (600)");
   ok(priceRental(0, rentalRates) === 0, "priceRental: 0 days bills 0");
+
+  // Punch review fix: a blank/zero rate period must never win the min() and
+  // silently price the whole rental free — it must be excluded from the
+  // candidate set, falling back to whichever positive rate is cheapest.
+  const blankWeek = { dayRate: 50, weekRate: 0, monthRate: 600 };
+  ok(
+    priceRental(10, blankWeek) === 500,
+    "priceRental: blank weekRate (0) doesn't collapse a 10-day rental to $0 — falls back to day rate (10 * 50 = 500, cheaper than the 600 month rate)"
+  );
+  const blankMonth = { dayRate: 50, weekRate: 200, monthRate: 0 };
+  ok(
+    priceRental(30, blankMonth) === 1000,
+    "priceRental: blank monthRate (0) doesn't collapse a 30-day rental to $0 — falls back to cheaper of day (1500) / week (ceil(30/7)=5 weeks * 200 = 1000)"
+  );
+  const blankDay = { dayRate: 0, weekRate: 200, monthRate: 600 };
+  ok(
+    priceRental(3, blankDay) === 200,
+    "priceRental: blank dayRate (0) doesn't collapse a 3-day rental to $0 — falls back to week rate (200)"
+  );
+  const allZero = { dayRate: 0, weekRate: 0, monthRate: 0 };
+  ok(priceRental(10, allZero) === 0, "priceRental: all-zero rates (no usable rate data) still returns 0, not a crash");
 }
 
 async function xlsxFixture(): Promise<Buffer> {

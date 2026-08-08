@@ -24,6 +24,10 @@ export type EquipmentBooking = {
   startDate: number;
   endDate: number;
   status: BookingStatus;
+  /** Total price for ONE unit across the line's full [startDate, endDate]
+   *  range (i.e. `priceRental(days, item.rates)`) — NOT a per-day rate.
+   *  `qty * rate` is the line's sell price. Frozen at booking creation
+   *  (Won time), not re-derived later. */
   rate: number;
 };
 
