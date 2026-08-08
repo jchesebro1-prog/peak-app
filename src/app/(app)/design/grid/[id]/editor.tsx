@@ -1872,6 +1872,12 @@ export default function GridEditor({
                 onClick={async () => {
                   if (!engagementId) return;
                   setCpErr(null);
+                  // Clear stale gap chips from a prior successful generate
+                  // before this attempt runs — otherwise a failure here
+                  // would leave last time's chip list sitting right below
+                  // the new error, which reads as "these are today's gaps"
+                  // when they're actually leftovers from a different run.
+                  setCpGaps(null);
                   setCpBusy(true);
                   try {
                     const r = await generateClientPackageAction(project.id, engagementId);
