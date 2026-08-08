@@ -85,6 +85,64 @@ export function scopeOfPart(part: ScopedPartLite | null | undefined): GridLayer 
   return UNSCOPED;
 }
 
+/* --------------------- scope of a PLACED item (#41) ---------------------- */
+
+/**
+ * How a placement's scope was determined. Carried out of `scopeOfPlacement`
+ * so the derived artifacts (#41: lineset schedule, Control Riser) can say WHY
+ * a row is in or out rather than silently including/dropping it - the
+ * MatchReport ethos from bid-spec.ts.
+ */
+export type ScopeSource =
+  | "curtain" // the placement is a curtain drop-in; it IS the goods
+  | "part" // group/trade resolved server-side (the normal path)
+  | "part-category" // the part's literal `category` IS one of the six groups
+  | "placement-category" // the user's free-text label named a scope
+  | "none"; // nothing resolvable - Unscoped
+
+export type PlacedScope = { scope: GridLayer; source: ScopeSource };
+
+/**
+ * Scope for one placement, with provenance.
+ *
+ * `scopeOfPart` alone is not enough for a derived artifact, because only the
+ * Grid EDITOR route resolves `group`/`trade` server-side (see PartLite's
+ * comment in grid-bom.ts) - every other PartLite-shaped caller passes raw
+ * catalog rows through. So this walks four sources, most trustworthy first,
+ * and reports which one answered:
+ *
+ *   1. a curtain drop-in is Curtains by construction (its `partId` is a
+ *      FABRIC row, a category the taxonomy deliberately excludes, so it can
+ *      never resolve through the map);
+ *   2. the server-resolved group/trade, via scopeOfPart;
+ *   3. the part's literal `category` when it IS one of the six group names -
+ *      exactly what DEFAULT_CATEGORY_MAP's identity entries encode. This is
+ *      NOT a general category->scope guess: trade-only categories ("Pipe",
+ *      "Track", "Loftblocks", ...) correctly fall through, because "Rigging"
+ *      is a TRADE and never a literal category string;
+ *   4. the placement's own free-text category (punch #48's "assign now,
+ *      consume later" label) when the user typed a scope name.
+ */
+export function scopeOfPlacement(
+  placement: { category?: string | null; curtain?: unknown },
+  part?: (ScopedPartLite & { category?: string | null }) | null
+): PlacedScope {
+  if (placement.curtain) return { scope: "Curtains", source: "curtain" };
+  if (part) {
+    const resolved = scopeOfPart(part);
+    if (resolved !== UNSCOPED) return { scope: resolved, source: "part" };
+    const cat = part.category as CatalogGroup | null | undefined;
+    if (cat && cat in GROUP_SCOPES) {
+      return { scope: GROUP_SCOPES[cat], source: "part-category" };
+    }
+  }
+  const label = normalizeCategory(placement.category);
+  if (label && (GRID_SCOPES as readonly string[]).includes(label)) {
+    return { scope: label as GridScope, source: "placement-category" };
+  }
+  return { scope: UNSCOPED, source: "none" };
+}
+
 /**
  * Stable swatch per scope - the layer list, the marker for a dropped curtain
  * and the per-space breakdown all read as the same five families. Deliberately
