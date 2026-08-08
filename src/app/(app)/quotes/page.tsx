@@ -47,6 +47,7 @@ const TYPE_BADGE: Record<
   repair: { label: "Repair", ink: "#9a6a1f", soft: "#fbf3dd", bd: "#f0e2bd" },
   inspection: { label: "Inspection", ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" },
   consulting: { label: "Consulting", ink: "#6b4fa1", soft: "#f0ebf9", bd: "#ddd2f0" },
+  rental: { label: "Rental", ink: "#2f7a52", soft: "#e6f4ec", bd: "#cde7d8" },
 };
 
 /** Each service quote type edits in its own builder; system quotes in the Estimator. */
@@ -59,6 +60,8 @@ function editHrefFor(q: Quote): { href: string; label: string } {
     return { href: `/inspections/quote?id=${encodeURIComponent(q.id)}`, label: "Open inspection quote →" };
   if (q.quoteType === "consulting")
     return { href: `/design/engagements/quote?id=${encodeURIComponent(q.id)}`, label: "Open consulting quote →" };
+  if (q.quoteType === "rental")
+    return { href: `/rentals/quote?id=${encodeURIComponent(q.id)}`, label: "Open rental quote →" };
   return { href: `/estimator?id=${encodeURIComponent(q.id)}`, label: "Open in Estimator →" };
 }
 
@@ -137,7 +140,7 @@ export default async function QuotesPage({
   const statusParam = one(sp.status);
   const filter =
     (STAGES as readonly string[]).includes(statusParam) ? (statusParam as QuoteStatus) : "all";
-  const TYPE_KEYS = ["system", "flame_test", "repair", "inspection", "consulting"] as const;
+  const TYPE_KEYS = ["system", "flame_test", "repair", "inspection", "consulting", "rental"] as const;
   const typeParam = one(sp.type);
   const typeFilter = (TYPE_KEYS as readonly string[]).includes(typeParam) ? typeParam : "all";
   const selectedId = one(sp.id);
@@ -410,6 +413,7 @@ export default async function QuotesPage({
             ["repair", "Repair", TYPE_BADGE.repair],
             ["inspection", "Inspection", TYPE_BADGE.inspection],
             ["consulting", "Consulting", TYPE_BADGE.consulting],
+            ["rental", "Rental", TYPE_BADGE.rental],
           ] as Array<[string, string, { ink: string } | null]>
         ).map(([key, label, badge]) => {
           const active = typeFilter === key;
