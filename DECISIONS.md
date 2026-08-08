@@ -2354,3 +2354,53 @@ three new doc tables got their own `..._seq_bump` BEFORE UPDATE triggers
 it) — without one, `upsertDoc`'s onConflictDoUpdate branch (i.e. every
 re-upsert of an existing item, e.g. a rate change) would leave `seq` stale
 and silently break pull-sync's cursor query for these collections.
+
+## D130. Rentals module — whole-branch review fix pass (2026-08-08)
+
+Three call-outs from closing punch #93 (the pre-merge review across all nine
+Rentals tasks), each a deliberate boundary rather than an oversight:
+
+1. **Stock editing, not location editing.** The item edit form
+   (`src/app/(app)/rentals/page.tsx`) gained a "Stock by location" section —
+   a numeric qty input per existing `equipmentLocations.list()` row, wired
+   through `actions.ts`'s `upsertEquipmentItem` into the item's
+   `stock: Array<{locationId, qty}>` (both create and edit, edit still via
+   `mergeUpsert` per Task 4's pattern). This closes the real gap: new items
+   (hub-created or CSV-imported) were born with `stock: []` and so were
+   permanently unbookable. Creating new *locations* is still out of scope —
+   `upsertEquipmentLocation` in `actions.ts` remains unused by design;
+   locations stay seed/import-managed until a real location-CRUD UI is
+   scoped separately.
+2. **Task 6's PDF letter route has no reference to mirror.** As documented
+   in its own header comment
+   (`src/app/(app)/rentals/quote/letter/route.ts:10-27`), no existing page
+   calls `renderLetterPdf()` directly — the closest analogs
+   (`/flame-tests/letter`, `/inspections/letter`) are print-styled HTML, and
+   the only real `renderLetterPdf`/`LetterDoc` caller is
+   `lib/renewal-outreach.ts`'s `flameLetterDoc()`/`inspectionLetterDoc()`,
+   built to attach to an email, never served over HTTP. The route was
+   synthesized from that pattern plus the generated-Buffer-to-Response
+   wiring `/api/spec/[id]/docx/route.ts` already uses, not ported from an
+   assumed reference screen that turned out not to exist.
+3. **`quotes.ts`'s `rental` field is in-pattern, not scope creep.** Task 5's
+   file list didn't call out `src/lib/stores/quotes.ts`, but adding
+   `rental?: unknown` to the `Quote`/`QuoteRevision` types and threading it
+   through `create()`/`snapshotOf()` was required — `consulting` already had
+   this exact shape, and a rental quote builder with nowhere to persist its
+   line items isn't a working builder. `restoreQuoteRevision` was missed in
+   that pass for both `rental` and pre-existing `consulting` (recalling a
+   revision silently left the line items ahead of the recalled name/value);
+   fixed in this same review pass.
+
+Also fixed in this pass, all flagged by the whole-branch review: nav-data.ts's
+new `rentals` PM child had no hub-facing route to reach `/rentals/board` or
+`/rentals/quote` from (the hub header now links both, mirroring
+`repairs/page.tsx`); `approveRentalQuote` in
+`src/app/(app)/rentals/quote/actions.ts` checked `requirePerm("send")` AFTER
+`persist()` had already written the quote; the three rentals stores
+(`equipment-items.ts`, `equipment-locations.ts`, `equipment-bookings.ts`)
+minted ids via a read-then-write `${prefix}-${all.length + 1}` count, a
+concurrent-write race — swapped to `insertWithPrefixedId` (D73's helper,
+same as `quotes.ts`); and the booking board's empty state linked to `/rentals`
+(the inventory hub) instead of `/rentals/quote` (where quotes are actually
+created).
