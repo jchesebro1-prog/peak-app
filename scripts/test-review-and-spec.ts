@@ -204,6 +204,20 @@ ok(
 );
 
 
+/* --- Grid generated base sheet: proscenium geometry (#38) --- */
+import { buildGridBaseSheetPlan } from "@/lib/design/grid-base-sheet";
+import { DEFAULT_VENUE_DIMS } from "@/lib/design/venue-dims";
+
+const basePlan = buildGridBaseSheetPlan(DEFAULT_VENUE_DIMS);
+ok(basePlan.W > 0 && basePlan.H > 0, "grid-base-sheet: generated plan has a positive canvas size");
+ok(basePlan.rects.length >= 2, "grid-base-sheet: generated plan draws at least a house floor + stage box");
+ok(basePlan.texts.some((t) => t.t.includes(String(DEFAULT_VENUE_DIMS.proWidthFt))), "grid-base-sheet: generated plan labels the proscenium width dimension");
+ok(basePlan.texts.some((t) => t.t.includes(String(DEFAULT_VENUE_DIMS.stageDepthFt))), "grid-base-sheet: generated plan labels the stage depth dimension");
+
+const narrow = buildGridBaseSheetPlan({ ...DEFAULT_VENUE_DIMS, proWidthFt: 20, stageWidthFt: undefined });
+ok(narrow.W === basePlan.W, "grid-base-sheet: canvas width is fixed regardless of venue size (only scale/ppf changes)");
+
+
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
 import type { Annotation } from "@/lib/annotations";
