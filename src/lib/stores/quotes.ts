@@ -97,7 +97,7 @@ export type Quote = {
   status: QuoteStatus;
   /** 'estimator' | 'quick' */
   source: string;
-  /** 'system' (default) | 'flame_test' | 'repair' | 'inspection' | 'consulting' — absent on seed rows. */
+  /** 'system' (default) | 'flame_test' | 'repair' | 'inspection' | 'consulting' | 'rental' — absent on seed rows. */
   quoteType?: string;
   /** Flame-test engine subdoc (owned by the flame-test module). */
   flameTest?: unknown;
@@ -497,14 +497,14 @@ export async function restoreQuoteRevision(
  * callers — including the plain quotes-list status buttons — could push an
  * unapproved quote straight to `won`).
  *
- * `"engine-owned-flow"` is the ONLY value, and it exists for exactly three
- * call sites: repairs/quote, inspections/quote, flame-tests/quote. Each of
- * those builder screens marks its OWN quote won as the last step of a
- * self-contained accept flow (persist → setStatus(id,"won") → spawn the job)
- * — there is no separate estimator review queue in that flow to check an
- * approval record against, and gating it would just break those screens
- * outright. Do not reach for this anywhere else; every other caller must go
- * through the real gate.
+ * `"engine-owned-flow"` is the ONLY value, and it exists for exactly four
+ * call sites: repairs/quote, inspections/quote, flame-tests/quote,
+ * rentals/quote. Each of those builder screens marks its OWN quote won as
+ * the last step of a self-contained accept flow (persist →
+ * setStatus(id,"won") → spawn the job) — there is no separate estimator
+ * review queue in that flow to check an approval record against, and gating
+ * it would just break those screens outright. Do not reach for this
+ * anywhere else; every other caller must go through the real gate.
  *
  * `"historical-import"` exists for the CSV importer (`/import` registry) only.
  * An imported row records a status a quote ALREADY reached in whatever system

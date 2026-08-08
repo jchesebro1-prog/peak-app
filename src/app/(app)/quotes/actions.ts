@@ -17,6 +17,7 @@ import { syncFromQuotes as syncRepairsFromQuotes } from "@/lib/stores/repair-job
 import { syncFromQuotes as syncInspectionsFromQuotes } from "@/lib/stores/inspections";
 import { syncProjectsFromQuotes } from "@/lib/stores/projects";
 import { syncEngagementsFromQuotes } from "@/lib/stores/engagements";
+import { syncFromQuotes as syncBookingsFromQuotes } from "@/lib/stores/equipment-bookings";
 
 /**
  * Quote pipeline mutations — the QuoteStore calls the prototype makes from
@@ -70,15 +71,17 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
     // Acceptance auto-spawns downstream work exactly like the prototype:
     // won flame-test quotes become FT jobs, won repair quotes become repair
     // jobs, won inspection quotes become requested inspections, won system
-    // quotes become Installs projects, and won consulting quotes ensure /
-    // advance ConsultingEngagements (spec §1: proposal_sent → awarded).
-    // Each sync filters to its own quoteType and is idempotent, so calling
-    // all five is safe.
+    // quotes become Installs projects, won consulting quotes ensure /
+    // advance ConsultingEngagements (spec §1: proposal_sent → awarded), and
+    // won rental quotes become confirmed equipment bookings. Each sync
+    // filters to its own quoteType and is idempotent, so calling all six is
+    // safe.
     await syncFromQuotes();
     await syncRepairsFromQuotes();
     await syncInspectionsFromQuotes();
     await syncProjectsFromQuotes();
     await syncEngagementsFromQuotes();
+    await syncBookingsFromQuotes();
   }
   revalidatePath("/", "layout");
 }
