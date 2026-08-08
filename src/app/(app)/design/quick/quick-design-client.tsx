@@ -912,7 +912,7 @@ export default function QuickDesignClient({
                     <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 10, lineHeight: 1.5 }}>
                       {gridPrice ? (
                         <>
-                          Priced from {gridPrice.gridProjectName || gridPrice.gridProjectId} ({gridPrice.gridProjectId}), the Grid design linked to {quoteId} — its real BOM, not the parametric estimate.
+                          Priced from {gridPrice.gridProjectName || gridPrice.gridProjectId} ({gridPrice.gridProjectId}), the Grid design linked to {quoteId} — its real BOM, not the parametric estimate, but at catalog list, before labor and before the customer&apos;s pricing tier, so it can differ from what the Grid&apos;s own quote would produce for this design.
                           The {selTd.label} tier estimate above is {moneyRound(selTot.grand)}; the tier cards and per-system breakdown stay parametric, because a drawn design has one BOM, not three.
                         </>
                       ) : (

@@ -129,6 +129,11 @@ export default function DesignClient({
 
   const totalBudget = raw.reduce((a, d) => a + (d.budget || 0), 0);
   const avgBudget = raw.length ? totalBudget / raw.length : 0;
+  // A design's budget is either a parametric tier estimate or (when quoteId is
+  // set) a Grid-BOM list-price sum — two different bases. Summing across all
+  // designs is still useful as a rough total, but flag it when the mix occurs
+  // rather than implying every dollar in it is a tier estimate.
+  const hasGridLinkedBudget = raw.some((d) => d.quoteId);
   const venueCount = useMemo(() => {
     const venues: Record<string, number> = {};
     raw.forEach((d) => {
@@ -140,7 +145,7 @@ export default function DesignClient({
 
   const stats = [
     { label: "Active designs", value: String(raw.length), sub: "in the sandbox" },
-    { label: "Total budgetary", value: shortMoney(totalBudget), sub: "across all designs" },
+    { label: "Total budgetary", value: shortMoney(totalBudget), sub: hasGridLinkedBudget ? "mixes Grid list-price & tier est." : "across all designs" },
     { label: "Avg design", value: shortMoney(avgBudget), sub: "estimated value" },
     { label: "Venue types", value: String(venueCount), sub: "distinct contexts" },
   ];
@@ -327,7 +332,9 @@ export default function DesignClient({
               <div style={{ textAlign: "right" }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, justifyContent: "flex-end" }}>
                   <span style={{ fontFamily: MONO, fontSize: 26, fontWeight: 600, letterSpacing: "-.01em" }}>{shortMoney(sel.budget || 0)}</span>
-                  <span style={{ fontSize: 11, color: "#9aa0ab" }}>est. · {(sel.tier || "better").replace(/^./, (c) => c.toUpperCase())}</span>
+                  <span style={{ fontSize: 11, color: "#9aa0ab" }}>
+                    {sel.quoteId ? "from linked Grid design" : `est. · ${(sel.tier || "better").replace(/^./, (c) => c.toUpperCase())}`}
+                  </span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
                   <Link href={`/design/quick?design=${encodeURIComponent(sel.id)}`} className="dd-accent-btn" style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: ACCENT, padding: "9px 14px", borderRadius: 8, textDecoration: "none" }}>
@@ -501,7 +508,9 @@ export default function DesignClient({
                   </div>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 15 }}>
                     <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 600, letterSpacing: "-.01em" }}>{shortMoney(d.budget || 0)}</span>
-                    <span style={{ fontSize: 11, color: "#9aa0ab" }}>est. · {(d.tier || "better").replace(/^./, (c) => c.toUpperCase())}</span>
+                    <span style={{ fontSize: 11, color: "#9aa0ab" }}>
+                      {d.quoteId ? "from linked Grid design" : `est. · ${(d.tier || "better").replace(/^./, (c) => c.toUpperCase())}`}
+                    </span>
                   </div>
                   <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 7 }}>
                     {(d.systems || []).length} systems · edited {timeAgoMs(d.updatedAt)}
