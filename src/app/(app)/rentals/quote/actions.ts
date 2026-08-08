@@ -131,12 +131,15 @@ export async function saveRentalQuote(formData: FormData): Promise<void> {
 }
 
 export async function approveRentalQuote(formData: FormData): Promise<void> {
+  // Permission check BEFORE persist() — persist() writes the quote, so
+  // checking after it let a user without `send` still mutate the quote
+  // before the throw (final review, punch #93).
+  await requirePerm("send");
   const id = await persist(formData);
   if (!id) {
     revalidatePath("/", "layout");
     return;
   }
-  await requirePerm("send");
   // accept -> mark won, which spawns confirmed equipment bookings. Bypasses
   // the punch #60 approval gate: this screen IS the approval, same reasoning
   // as the repair/flame/inspection builders (see quotes.ts's

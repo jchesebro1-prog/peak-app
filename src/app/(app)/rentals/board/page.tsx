@@ -223,7 +223,7 @@ export default async function BookingBoardPage() {
           <div style={{ fontSize: 15, fontWeight: 600, color: "#5b616e" }}>Nothing booked yet</div>
           <div style={{ fontSize: 13, lineHeight: 1.6, marginTop: 6 }}>
             Win a{" "}
-            <Link href="/rentals" style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>
+            <Link href="/rentals/quote" style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>
               rental quote
             </Link>{" "}
             to create the first booking.
