@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { list, get, type EquipmentItem, type EquipmentCategory } from "@/lib/stores/equipment-items";
-import { list as listLocations } from "@/lib/stores/equipment-locations";
+import { list as listLocations, type EquipmentLocation } from "@/lib/stores/equipment-locations";
 import { money } from "@/lib/format";
 import { upsertEquipmentItem } from "./actions";
 
@@ -91,14 +91,49 @@ export default async function RentalsPage({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
           <Link
+            href="/rentals/board"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 7,
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#16181d",
+              background: "#fff",
+              border: "1px solid #e4e7ec",
+              borderRadius: 10,
+              padding: "10px 15px",
+              textDecoration: "none",
+            }}
+          >
+            Booking board →
+          </Link>
+          <Link
+            href="/rentals/quote"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 7,
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#fff",
+              background: "var(--accent)",
+              borderRadius: 10,
+              padding: "10px 16px",
+              textDecoration: "none",
+            }}
+          >
+            + New rental quote
+          </Link>
+          <Link
             href="/rentals?new=1"
             scroll={false}
             style={{
               fontSize: 13,
               fontWeight: 600,
-              color: "#fff",
-              background: "var(--accent)",
-              border: "none",
+              color: "#16181d",
+              background: "#fff",
+              border: "1px solid #e4e7ec",
               borderRadius: 9,
               padding: "10px 16px",
               textDecoration: "none",
@@ -232,7 +267,7 @@ export default async function RentalsPage({
         </div>
       </div>
 
-      {showForm && <ItemFormModal item={editingItem} catParam={catParam} />}
+      {showForm && <ItemFormModal item={editingItem} catParam={catParam} locations={locations} />}
     </div>
   );
 }
@@ -318,7 +353,15 @@ function FilterGroup({
   );
 }
 
-function ItemFormModal({ item, catParam }: { item: EquipmentItem | null; catParam: string }) {
+function ItemFormModal({
+  item,
+  catParam,
+  locations,
+}: {
+  item: EquipmentItem | null;
+  catParam: string;
+  locations: EquipmentLocation[];
+}) {
   const editing = !!item;
   const closeHref = "/rentals" + (catParam !== "all" ? "?cat=" + catParam : "");
   const label = (t: string) => (
@@ -461,6 +504,28 @@ function ItemFormModal({ item, catParam }: { item: EquipmentItem | null; catPara
                 />
               </div>
             </div>
+
+            {locations.length > 0 && (
+              <div style={{ marginTop: 17 }}>
+                {label("Stock by location")}
+                <div style={{ display: "grid", gap: 8 }}>
+                  {locations.map((loc) => {
+                    const existingQty = item?.stock.find((s) => s.locationId === loc.id)?.qty ?? 0;
+                    return (
+                      <div key={loc.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 13, color: "#3a3f4a", flex: 1, minWidth: 0 }}>{loc.name}</span>
+                        <input
+                          name={`stock_${loc.id}`}
+                          defaultValue={String(existingQty)}
+                          inputMode="numeric"
+                          style={{ ...inputStyle, width: 90, textAlign: "right" }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 9, marginTop: 20 }}>
               <Link
