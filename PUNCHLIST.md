@@ -5095,3 +5095,26 @@ instant locally. It was only found by seeding 1,700 synthetic companies and meas
 **Status:** OPEN — logged only, no code. Needs a UX decision before anything is built.
 
 ---
+
+## 94. Go-live reset doesn't clear `equipment_bookings` — OPEN — found in Rentals module final review
+
+**Reported:** 2026-08-08, whole-branch final review of the new Rentals module.
+
+**Finding:** Settings → Beta's "Clear demo data (go-live)" reset (`clearDemoData()`) derives which
+collections to wipe from `DEMO_SEEDS` (`src/db/seed-data.ts`). `equipment_items` and
+`equipment_locations` are registered there and get cleared; `equipment_bookings` has no demo seed, so
+it's never registered and survives the reset untouched — leftover bookings can reference item/location
+ids that a fresh id sequence (`nextPrefixedId`, base 0) will re-mint for brand-new real records after
+go-live, silently consuming availability that belongs to the new record.
+
+**Doesn't affect a truly fresh deploy** (the collection starts empty) — only a dev/demo DB that's been
+exercised and then reset. Same shape as a pre-existing gap shared by `grid_sheets`/`tasks`/`notes`
+(no-seed collections `clearDemoData()` also can't see) — not novel to Rentals, so the real fix is a
+small pass across all of them, not a Rentals-only patch. Spun off separately rather than fixed inline
+here to avoid scope creep into unrelated collections.
+
+**Ties to:** the Rentals module build (docs/superpowers/plans/2026-08-07-rentals-module.md).
+
+**Status:** flagged as a spawned follow-up task, not fixed in the Rentals branch.
+
+---
