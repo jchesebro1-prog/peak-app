@@ -1845,12 +1845,30 @@ export default function GridEditor({
                   if (!engagementId) return;
                   setCpErr(null);
                   setCpBusy(true);
-                  const r = await generateClientPackageAction(project.id, engagementId);
-                  setCpBusy(false);
-                  if (!r.ok) {
-                    setCpErr(r.error);
-                  } else {
-                    window.location.href = `/api/client-package/${encodeURIComponent(r.blobPath)}`;
+                  try {
+                    const r = await generateClientPackageAction(project.id, engagementId);
+                    if (!r.ok) {
+                      setCpErr(r.error);
+                      return;
+                    }
+                    // Hidden-anchor click rather than a full navigation
+                    // (window.location.href): the download route can 404
+                    // (blob missing, path rejected, …), and a full nav on
+                    // that path would blow away this editor's in-memory
+                    // state (unsaved drag offsets, panel toggles, …) for
+                    // nothing more than a failed download. Same pattern as
+                    // templates-editor.tsx's downloadJson/estimating-rules'
+                    // download() helper.
+                    const a = document.createElement("a");
+                    a.href = `/api/client-package/download?path=${encodeURIComponent(r.blobPath)}`;
+                    a.download = "client-package.zip";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                  } catch (e) {
+                    setCpErr(e instanceof Error ? e.message : "Couldn't generate the client package — try again.");
+                  } finally {
+                    setCpBusy(false);
                   }
                 }}
               >

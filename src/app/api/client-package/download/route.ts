@@ -10,9 +10,13 @@ import { getBlobStream } from "@/lib/blob";
  * Unlike part-datasheet/grid-sheets (whose [id] is a catalog SKU / doc id,
  * looked up in a store for its blobPath), a client-package zip has no
  * persisted record of its own — generateClientPackageAction's return value
- * (the blob's own pathname) IS the artifact, so the [id] segment here is
- * that blobPath directly, URL-encoded by the caller (same contract those
- * routes use for their own id segment).
+ * (the blob's own pathname) IS the artifact. That pathname contains slashes
+ * (`client-packages/<projectId>/<epochMs>.zip`), so it's carried as a
+ * `?path=` query param rather than a `[id]` dynamic segment: a slash-bearing
+ * value double-encoded into a single path segment is fragile against
+ * edge/proxy normalization of `%2F` (a review finding on the first cut of
+ * this route, which used `/api/client-package/[id]` with `decodeURIComponent`
+ * — switched to a query param, per the original brief's own suggestion).
  *
  * The blobPath is constrained to the client-packages/ prefix this route's
  * own generator writes under, rather than passing an arbitrary caller
@@ -20,13 +24,10 @@ import { getBlobStream } from "@/lib/blob";
  * this route as a generic proxy for any private blob in the store (part
  * datasheets, plan sheets, …), not just client packages.
  */
-export async function GET(
-  _req: Request,
-  ctx: { params: Promise<{ id: string }> }
-) {
+export async function GET(req: Request) {
   await requireUser();
-  const { id } = await ctx.params;
-  const blobPath = decodeURIComponent(id);
+  const { searchParams } = new URL(req.url);
+  const blobPath = searchParams.get("path") || "";
   if (!blobPath.startsWith("client-packages/")) {
     return new Response("Not found", { status: 404 });
   }

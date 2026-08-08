@@ -762,41 +762,57 @@ export async function generateClientPackageAction(
       error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — client packages can't be generated on this deployment.",
     };
   }
-  const parts = await listCatalog();
-  const partById = new Map(parts.map((p) => [p.id, p]));
-  const lines = bomLines(project.placements || [], parts);
-  const bom = lines
-    .map((l) => {
-      const part = partById.get(l.partId);
-      return part ? { sku: part.sku, desc: l.desc, qty: l.qty } : null;
-    })
-    .filter((row): row is { sku: string; desc: string; qty: number } => row !== null);
+  // The whole assemble-and-upload pipeline (BOM/catalog walk, datasheet
+  // merge, spec docx, PDF drawings, zip finalize, Blob upload) is a
+  // multi-second, multi-network-hop, MB-scale operation — any stage can
+  // throw. Without this catch, a thrown error rejects the action outright
+  // and leaves the caller's busy state stuck with no message (the editor's
+  // click handler has its own try/finally for that half; this is the
+  // server-side half of the same fix), so wrap the whole body the same way
+  // seedStarterLayoutAction above does.
+  try {
+    const parts = await listCatalog();
+    const partById = new Map(parts.map((p) => [p.id, p]));
+    const lines = bomLines(project.placements || [], parts);
+    const bom = lines
+      .map((l) => {
+        const part = partById.get(l.partId);
+        return part ? { sku: part.sku, desc: l.desc, qty: l.qty } : null;
+      })
+      .filter((row): row is { sku: string; desc: string; qty: number } => row !== null);
 
-  // Drawings (#40): the generated base sheet (#38), when this project has
-  // one — the only PlanData source currently wired into the drawings PDF.
-  // No generated sheet (an uploaded-only project) means an empty drawings
-  // list, which buildClientPackageZip renders as an explicit "none yet"
-  // page rather than a silently missing file.
-  const drawings: Array<{ title: string; plan: ReturnType<typeof buildGridBaseSheetPlan> }> = [];
-  const genSheet = (await listSheets(projectId)).find((s) => s.kind === "generated" && s.venueDims);
-  if (genSheet?.venueDims) {
-    drawings.push({ title: "Plan sheet", plan: buildGridBaseSheetPlan(genSheet.venueDims) });
+    // Drawings (#40): the generated base sheet (#38), when this project has
+    // one — the only PlanData source currently wired into the drawings PDF.
+    // No generated sheet (an uploaded-only project) means an empty drawings
+    // list, which buildClientPackageZip renders as an explicit "none yet"
+    // page rather than a silently missing file.
+    const drawings: Array<{ title: string; plan: ReturnType<typeof buildGridBaseSheetPlan> }> = [];
+    const genSheet = (await listSheets(projectId)).find((s) => s.kind === "generated" && s.venueDims);
+    if (genSheet?.venueDims) {
+      drawings.push({ title: "Plan sheet", plan: buildGridBaseSheetPlan(genSheet.venueDims) });
+    }
+
+    const zipBytes = await buildClientPackageZip({
+      bom,
+      catalog: parts as SpecCatalogPart[],
+      engagementId,
+      projectName: project.name,
+      customer: project.customer,
+      preparedBy: user.name,
+      drawings,
+    });
+    const up = await putBlob(
+      `client-packages/${projectId}/${Date.now()}.zip`,
+      Buffer.from(zipBytes),
+      "application/zip"
+    );
+    revalidatePath(editorPath(projectId));
+    return { ok: true, blobPath: up.pathname };
+  } catch (e) {
+    console.error("[grid] generateClientPackageAction failed:", e);
+    return {
+      ok: false,
+      error: "Couldn't generate the client package — try again, or check the server log if it keeps failing.",
+    };
   }
-
-  const zipBytes = await buildClientPackageZip({
-    bom,
-    catalog: parts as SpecCatalogPart[],
-    engagementId,
-    projectName: project.name,
-    customer: project.customer,
-    preparedBy: user.name,
-    drawings,
-  });
-  const up = await putBlob(
-    `client-packages/${projectId}/${Date.now()}.zip`,
-    Buffer.from(zipBytes),
-    "application/zip"
-  );
-  revalidatePath(editorPath(projectId));
-  return { ok: true, blobPath: up.pathname };
 }
