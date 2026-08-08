@@ -1137,6 +1137,13 @@ export default function GridEditor({
         <Link href={`/design/grid/${encodeURIComponent(project.id)}/schedule`} style={{ ...BTN, textDecoration: "none" }}>
           Schedule →
         </Link>
+        {/* Derived artifacts (#41): both read only from what is painted here. */}
+        <Link href={`/design/grid/${encodeURIComponent(project.id)}/lineset`} style={{ ...BTN, textDecoration: "none" }}>
+          Lineset →
+        </Link>
+        <Link href={`/design/grid/${encodeURIComponent(project.id)}/control-riser`} style={{ ...BTN, textDecoration: "none" }}>
+          Control Riser →
+        </Link>
         <input
           ref={fileRef}
           type="file"
