@@ -25,6 +25,7 @@ import {
   setQuote as setGridQuote,
 } from "@/lib/stores/grid-projects";
 import { priceFromGridOrParametric } from "@/lib/design/quick-grid-seam";
+import { budgetFor, type DesignPartial } from "@/app/(app)/design/quick/actions";
 import { list as listCatalogParts } from "@/lib/stores/catalog";
 import { quotesSeed } from "@/db/seeds/quotes";
 import ExcelJS from "exceljs";
@@ -3141,6 +3142,45 @@ async function asyncChecks(): Promise<void> {
       ok(
         populated.source === "grid" && populated.value === priced.list,
         `quick-grid-seam: a populated linked design prices off its placements (want ${priced.list}, got ${populated.value})`
+      );
+
+      // #41 review round 2, Finding 1: budgetFor() must set budgetSource from
+      // the live priced.source, never from quoteId's mere presence. The case
+      // the reviewer caught — a quoteId set but pointing at a quote with NO
+      // linked Grid project — must still resolve to "parametric".
+      const basePartial: DesignPartial = {
+        name: "budgetFor test",
+        venue: "",
+        size: "medium",
+        tier: "better",
+        width: 0,
+        depth: 0,
+        grid: 0,
+        systems: [],
+        budget: 4242,
+        customerId: null,
+        locationId: null,
+        customer: "",
+        config: {},
+        quoteId: null,
+      };
+
+      const unlinked = await budgetFor(basePartial);
+      ok(
+        unlinked.source === "parametric" && unlinked.value === 4242,
+        "budgetFor: no quoteId -> parametric, unchanged value"
+      );
+
+      const quoteNoGrid = await budgetFor({ ...basePartial, quoteId: "Q-DOES-NOT-EXIST-BUDGETFOR" });
+      ok(
+        quoteNoGrid.source === "parametric" && quoteNoGrid.value === 4242,
+        "budgetFor: quoteId set but no linked Grid project -> still parametric, NOT mislabeled grid (the exact case review round 2 caught)"
+      );
+
+      const quoteWithGrid = await budgetFor({ ...basePartial, quoteId: stamp });
+      ok(
+        quoteWithGrid.source === "grid" && quoteWithGrid.value === priced.list,
+        `budgetFor: quoteId linked to a populated Grid project -> grid, seam's own value (want ${priced.list}, got ${quoteWithGrid.value})`
       );
     }
   }

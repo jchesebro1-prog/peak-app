@@ -105,6 +105,20 @@ export type DesignRecord = {
    * parametric-only path, so there is nothing to migrate.
    */
   quoteId?: string | null;
+  /**
+   * The actual pricing basis the current `budget` number was computed on
+   * (#41 review round 2). `quoteId` being set only means the screen was
+   * opened against a quote — it does NOT mean the Grid seam actually priced
+   * this record (a quote with no linked Grid project still resolves through
+   * `priceFromGridOrParametric` to `source: "parametric"`, so `quoteId` set
+   * + `budgetSource: "parametric"` is a real, exercised combination). Set
+   * from the live `priced.source` every time `budgetFor()` runs, so display
+   * sites can gate on the true basis instead of inferring it from `quoteId`
+   * truthiness. Optional/JSONB, same as `quoteId` — no migration. Absent on
+   * every pre-#41 record, which reads as "unknown basis" and falls back to
+   * the ordinary tier-estimate label wherever it's checked.
+   */
+  budgetSource?: "grid" | "parametric";
 };
 
 /** The partial that promotes a budgetary design into a real quote (port of toQuotePartial's return). */

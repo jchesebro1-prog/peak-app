@@ -19,6 +19,13 @@ export type DesignCard = {
   meta: string;
   budget: string;
   tier: string;
+  /**
+   * The pricing basis for `budget` (#41 review round 2, Finding 2). "grid"
+   * means the number came from a linked Grid design's real BOM, not a tier
+   * estimate — this card must not caption it "est. · {tier}" in that case,
+   * same gating as the designs dashboard (design-client.tsx).
+   */
+  budgetSource?: "grid" | "parametric";
   systemsLabel: string;
   edited: string;
   openHref: string;
@@ -208,7 +215,9 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
                 >
                   {d.budget}
                 </span>
-                <span style={{ fontSize: 11, color: "#9aa0ab" }}>est. · {d.tier}</span>
+                <span style={{ fontSize: 11, color: "#9aa0ab" }}>
+                  {d.budgetSource === "grid" ? "from linked Grid design" : `est. · ${d.tier}`}
+                </span>
               </div>
               <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 6 }}>
                 {d.systemsLabel} · {d.edited}

@@ -49,11 +49,23 @@ export type DesignPartial = {
  * Grid layout changed stores the current number. With no quoteId there is
  * nothing to look up and the parametric total is stored unchanged, exactly
  * as before this feature.
+ *
+ * Exported (legal — it's already async, and "use server" only requires that
+ * of its exports) so the test suite can exercise the actual basis-selection
+ * logic directly instead of hand-duplicating it (#41 review round 2).
  */
-async function budgetFor(partial: DesignPartial): Promise<number> {
-  if (!partial.quoteId) return partial.budget;
+export async function budgetFor(
+  partial: DesignPartial
+): Promise<{ value: number; source: "grid" | "parametric" }> {
+  // No quoteId: never reaches the seam, so the basis is unambiguously
+  // parametric — same short-circuit as before, now with a basis attached.
+  if (!partial.quoteId) return { value: partial.budget, source: "parametric" };
   const priced = await priceFromGridOrParametric(partial.quoteId, () => partial.budget);
-  return priced.value;
+  // priced.source is the ONLY source of truth for what actually priced this
+  // record — a quoteId with no linked Grid project still resolves here to
+  // "parametric" (review round 2, Finding 1). Never infer the basis from
+  // quoteId's mere presence.
+  return { value: priced.value, source: priced.source };
 }
 
 async function persistDesign(
@@ -61,7 +73,8 @@ async function persistDesign(
   partial: DesignPartial,
   owner: string
 ): Promise<DesignRecord> {
-  const priced: DesignPartial = { ...partial, budget: await budgetFor(partial) };
+  const { value, source } = await budgetFor(partial);
+  const priced = { ...partial, budget: value, budgetSource: source };
   if (id) {
     const d = await updateDesign(id, priced);
     if (d) return d;

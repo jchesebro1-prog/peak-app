@@ -444,6 +444,7 @@ export default async function HomePage({
       name: d.name,
       tier: (d.tier || "better").replace(/^./, (c) => c.toUpperCase()),
       budget: shortMoney(d.budget || 0),
+      budgetSource: d.budgetSource,
       meta: `${d.id} · ${d.width || "?"}' × ${d.depth || "?"}' × ${d.grid || "?"}'`,
       systemsLabel: `${(d.systems || []).length} systems`,
       edited: designTimeAgo(d.updatedAt),
