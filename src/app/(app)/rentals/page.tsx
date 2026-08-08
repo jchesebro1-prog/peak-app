@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/session";
 import { list, get, type EquipmentItem, type EquipmentCategory } from "@/lib/stores/equipment-items";
 import { list as listLocations, type EquipmentLocation } from "@/lib/stores/equipment-locations";
 import { money } from "@/lib/format";
-import { upsertEquipmentItem } from "./actions";
+import { upsertEquipmentItem, upsertEquipmentLocation } from "./actions";
 
 export const metadata = { title: "Rentals — Quartzite-6" };
 
@@ -47,6 +47,7 @@ export default async function RentalsPage({
   const catParam = (one(sp.cat) || "all") as EquipmentCategory | "all";
   const editId = one(sp.edit);
   const isNew = one(sp.new) === "1";
+  const isNewLocation = one(sp.newloc) === "1";
 
   const hrefFor = (over: { cat?: string }) => {
     const qs = new URLSearchParams();
@@ -124,6 +125,22 @@ export default async function RentalsPage({
             }}
           >
             + New rental quote
+          </Link>
+          <Link
+            href={"/rentals?newloc=1" + (catParam !== "all" ? "&cat=" + catParam : "")}
+            scroll={false}
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#16181d",
+              background: "#fff",
+              border: "1px solid #e4e7ec",
+              borderRadius: 9,
+              padding: "10px 16px",
+              textDecoration: "none",
+            }}
+          >
+            + Add location
           </Link>
           <Link
             href="/rentals?new=1"
@@ -268,6 +285,7 @@ export default async function RentalsPage({
       </div>
 
       {showForm && <ItemFormModal item={editingItem} catParam={catParam} locations={locations} />}
+      {isNewLocation && <LocationFormModal catParam={catParam} />}
     </div>
   );
 }
@@ -558,6 +576,150 @@ function ItemFormModal({
                 }}
               >
                 {editing ? "Save changes" : "Add item"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Minimal location-create affordance (final review round 2, punch #93).
+ * `upsertEquipmentLocation` in `actions.ts` had zero callers — on a hosted
+ * deploy demo seeding never runs, and even in dev the go-live reset wipes
+ * `equipment_locations` with no way to add one back. This form is
+ * intentionally create-only (no edit/delete) — a full location-management
+ * screen is out of scope; it just gets at least one location into the
+ * store so the item stock editor and the quote builder's location picker
+ * (both already read `equipmentLocations.list()`) have something to show.
+ */
+function LocationFormModal({ catParam }: { catParam: string }) {
+  const closeHref = "/rentals" + (catParam !== "all" ? "?cat=" + catParam : "");
+  const label = (t: string) => (
+    <div style={{ fontSize: 10.5, fontWeight: 600, color: "#9aa0ab", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 5 }}>
+      {t}
+    </div>
+  );
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    fontSize: 13,
+    fontFamily: "var(--font-ui)",
+    color: "#16181d",
+    border: "1px solid #e4e7ec",
+    borderRadius: 8,
+    padding: "9px 11px",
+    outline: "none",
+    background: "#fff",
+  };
+
+  return (
+    <>
+      <Link
+        href={closeHref}
+        scroll={false}
+        aria-label="Close"
+        style={{ position: "fixed", inset: 0, background: "rgba(16,18,22,.5)", zIndex: 60 }}
+      />
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 61,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 26,
+          pointerEvents: "none",
+        }}
+      >
+        <div
+          style={{
+            width: 420,
+            maxWidth: "100%",
+            maxHeight: "88vh",
+            background: "#fff",
+            borderRadius: 16,
+            boxShadow: "0 24px 70px rgba(0,0,0,.34)",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            pointerEvents: "auto",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "16px 20px",
+              borderBottom: "1px solid #f0f1f4",
+            }}
+          >
+            <div style={{ fontSize: 15, fontWeight: 600 }}>Add location</div>
+            <Link
+              href={closeHref}
+              scroll={false}
+              style={{
+                width: 30,
+                height: 30,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "#f1f2f5",
+                borderRadius: 8,
+                color: "#5b616e",
+                fontSize: 17,
+                textDecoration: "none",
+              }}
+            >
+              ×
+            </Link>
+          </div>
+
+          <form action={upsertEquipmentLocation} style={{ padding: "18px 20px", overflowY: "auto" }}>
+            <div style={{ marginBottom: 13 }}>
+              {label("Name")}
+              <input name="name" required placeholder="Main warehouse" style={inputStyle} />
+            </div>
+            <div>
+              {label("Address (optional)")}
+              <input name="address" placeholder="1400 Industrial Pkwy, Denver CO" style={inputStyle} />
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 9, marginTop: 20 }}>
+              <Link
+                href={closeHref}
+                scroll={false}
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#5b616e",
+                  background: "#fff",
+                  border: "1px solid #e4e7ec",
+                  borderRadius: 9,
+                  padding: "9px 15px",
+                  textDecoration: "none",
+                }}
+              >
+                Cancel
+              </Link>
+              <button
+                type="submit"
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#fff",
+                  background: "var(--accent)",
+                  border: "none",
+                  borderRadius: 9,
+                  padding: "10px 18px",
+                  cursor: "pointer",
+                }}
+              >
+                Add location
               </button>
             </div>
           </form>
