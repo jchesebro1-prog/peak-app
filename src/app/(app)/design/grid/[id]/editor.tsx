@@ -45,6 +45,7 @@ import { validateDeviceWire } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
 import { PlanSvg } from "@/app/(app)/design/quick/plan-svg";
 import { buildGridBaseSheetPlan } from "@/lib/design/grid-base-sheet";
+import type { PackageGap } from "@/lib/design/client-package";
 import { DEFAULT_VENUE_DIMS, type VenueDims } from "@/lib/design/venue-dims";
 import type { GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
@@ -80,6 +81,13 @@ const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr:
  * Painting = the count tool grown up: arm a catalog part in the palette,
  * click the plan to drop instances; the BOM groups and prices them live.
  */
+
+/** Human labels for PackageGap.reason (#40 Task 5), used on the gap chips. */
+const GAP_REASON_LABEL: Record<PackageGap["reason"], string> = {
+  "no-datasheet": "no datasheet",
+  "no-spec": "no spec",
+  "no-match": "no catalog match",
+};
 
 const BTN: React.CSSProperties = {
   borderWidth: 1, borderStyle: "solid", borderColor: "#dfe2e8",
@@ -289,6 +297,14 @@ export default function GridEditor({
    *  or vice versa. */
   const [cpBusy, setCpBusy] = useState(false);
   const [cpErr, setCpErr] = useState<string | null>(null);
+  // Gap-surfacing chips (#40 Task 5): the SKUs the generated package
+  // couldn't fully cover (no datasheet / no spec language / no catalog
+  // match), one chip each, linking back to the catalog so attaching the
+  // missing piece is a click away — "drives attachment population where it
+  // matters first." null before the first successful generate (nothing to
+  // show yet); [] after a generate with zero gaps (shown, not just absent,
+  // so a clean run reads as confirmed-clean rather than untried).
+  const [cpGaps, setCpGaps] = useState<PackageGap[] | null>(null);
 
   /** Real-plan-upload carry-over prompt (#38) — set right after a new sheet
    *  uploads over a generated base sheet that already has placements on it;
@@ -1838,6 +1854,18 @@ export default function GridEditor({
               style={{ marginTop: 6 }}
               title={engagementId ? undefined : "Link this design to a customer engagement first — a client package needs one for the specification half."}
             >
+              {/* Scope disclosure (#40 Task 5, carried over from Task 4's
+                  review): the zip's BOM is `bomLines(placements, parts)` —
+                  device placements only. Curtains are skipped inside
+                  bomLines itself ("if (pl.curtain) continue") and wire
+                  routes are a separate project.routes array this action
+                  never reads at all (unlike createDraftQuoteAction, which
+                  pulls in curtainLines + routeLines too). Said here, before
+                  the click, so nobody downloads the zip believing it's the
+                  full scope the quote flow would produce. */}
+              <div style={{ fontSize: 10.5, color: "var(--muted, #8a8f98)", lineHeight: 1.4, marginBottom: 5 }}>
+                Covers device placements only — curtains and wire-route footage aren&rsquo;t included in this package&rsquo;s BOM.
+              </div>
               <button
                 style={{ ...BTN, width: "100%" }}
                 disabled={cpBusy || !engagementId}
@@ -1851,6 +1879,7 @@ export default function GridEditor({
                       setCpErr(r.error);
                       return;
                     }
+                    setCpGaps(r.gaps);
                     // Hidden-anchor click rather than a full navigation
                     // (window.location.href): the download route can 404
                     // (blob missing, path rejected, …), and a full nav on
@@ -1877,6 +1906,53 @@ export default function GridEditor({
             </div>
             {cpErr && (
               <div style={{ marginTop: 6, fontSize: 11.5, color: "#b3261e" }}>{cpErr}</div>
+            )}
+            {/* Gap chips (#40 Task 5): every SKU the walker (walkBundle,
+                client-package.ts) couldn't fully cover — no datasheet, no
+                spec language, or no catalog match at all — one chip each,
+                linking to the catalog's own search so attaching the missing
+                piece is a click away. A SKU can appear here AND still be
+                included in the package (e.g. "no-spec": it has a datasheet,
+                just no spec section) — this list is "needs attention", not
+                "missing entirely". Rendered once cpGaps is non-null (i.e.
+                after a successful generate), including the empty case, so a
+                clean run reads as confirmed-clean rather than untried. */}
+            {cpGaps && (
+              <div style={{ marginTop: 8 }}>
+                {cpGaps.length === 0 ? (
+                  <div style={{ fontSize: 11, color: "#2e7d32" }}>
+                    Every BOM line matched a catalog part with a datasheet and spec — no gaps.
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 11, color: "var(--muted, #8a8f98)", marginBottom: 4 }}>
+                      {cpGaps.length} line{cpGaps.length === 1 ? "" : "s"} need attention in the catalog — click to fix:
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                      {cpGaps.map((g, i) => (
+                        <Link
+                          key={`${g.sku}-${g.reason}-${i}`}
+                          href={`/catalog?q=${encodeURIComponent(g.sku)}`}
+                          title={g.desc}
+                          style={{
+                            display: "inline-block",
+                            fontSize: 10.5,
+                            color: "#8a5a12",
+                            background: "#fdf3e3",
+                            border: "1px solid #f0d9a8",
+                            borderRadius: 999,
+                            padding: "2px 9px",
+                            textDecoration: "none",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {g.sku} — {GAP_REASON_LABEL[g.reason]}
+                        </Link>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
 

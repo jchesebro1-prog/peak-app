@@ -48,6 +48,7 @@ import type { VenueDims } from "@/lib/design/venue-dims";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
 import { buildClientPackageZip } from "@/lib/design/client-package-zip";
+import type { PackageGap } from "@/lib/design/client-package";
 import { buildGridBaseSheetPlan } from "@/lib/design/grid-base-sheet";
 import type { SpecCatalogPart } from "@/lib/bid-spec";
 
@@ -746,7 +747,7 @@ export async function createDraftQuoteAction(
 export async function generateClientPackageAction(
   projectId: string,
   engagementId: string
-): Promise<{ ok: true; blobPath: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; blobPath: string; gaps: PackageGap[] } | { ok: false; error: string }> {
   const user = await requireUser();
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
@@ -792,7 +793,7 @@ export async function generateClientPackageAction(
       drawings.push({ title: "Plan sheet", plan: buildGridBaseSheetPlan(genSheet.venueDims) });
     }
 
-    const zipBytes = await buildClientPackageZip({
+    const { zipBytes, gaps } = await buildClientPackageZip({
       bom,
       catalog: parts as SpecCatalogPart[],
       engagementId,
@@ -807,7 +808,7 @@ export async function generateClientPackageAction(
       "application/zip"
     );
     revalidatePath(editorPath(projectId));
-    return { ok: true, blobPath: up.pathname };
+    return { ok: true, blobPath: up.pathname, gaps };
   } catch (e) {
     console.error("[grid] generateClientPackageAction failed:", e);
     return {

@@ -3608,7 +3608,7 @@ async function asyncChecks(): Promise<void> {
 
     // Empty BOM: still produces a real, non-empty zip carrying all three
     // named entries (an empty zip would look like a bug, not an empty state).
-    const emptyZip = await buildClientPackageZip({
+    const { zipBytes: emptyZip, gaps: emptyGaps } = await buildClientPackageZip({
       bom: [],
       catalog: [],
       engagementId: "eng-test",
@@ -3618,6 +3618,7 @@ async function asyncChecks(): Promise<void> {
       drawings: [],
     });
     ok(emptyZip.length > 0, "client-package-zip: buildClientPackageZip returns non-empty bytes even for an empty BOM");
+    ok(Array.isArray(emptyGaps) && emptyGaps.length === 0, "client-package-zip: an empty BOM produces zero gaps");
 
     // Real content: a matched row (datasheet-eligible) plus a drawing page,
     // unzipped back out to confirm exactly the three locked entry names and
@@ -3625,7 +3626,7 @@ async function asyncChecks(): Promise<void> {
     const zipCatalog = [
       { id: "p1", sku: "ETC:405", desc: "Source Four 5°", category: "Fixtures", unit: "ea", list: 1260, cost: 756, specSectionId: "ss-1", specBody: "Ellipsoidal fixture." },
     ];
-    const realZip = await buildClientPackageZip({
+    const { zipBytes: realZip, gaps: realGaps } = await buildClientPackageZip({
       bom: [{ sku: "ETC:405", desc: "Source Four 5°", qty: 2 }],
       catalog: zipCatalog as never,
       engagementId: "eng-real",
@@ -3634,6 +3635,7 @@ async function asyncChecks(): Promise<void> {
       preparedBy: "Tester",
       drawings: [{ title: "Plan sheet", plan: { W: 400, H: 300, rects: [], lines: [], circles: [], texts: [], paths: [] } as never }],
     });
+    ok(Array.isArray(realGaps), "client-package-zip: a real BOM returns a gaps array alongside the zip bytes");
     const entries = readZipEntries(Buffer.from(realZip));
     const entryNames = [...entries.keys()].sort();
     ok(

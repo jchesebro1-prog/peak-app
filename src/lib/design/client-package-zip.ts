@@ -15,7 +15,7 @@
 import { ZipArchive } from "archiver";
 import { PassThrough } from "node:stream";
 import { PDFDocument, StandardFonts } from "pdf-lib";
-import { walkBundle } from "./client-package";
+import { walkBundle, type PackageGap } from "./client-package";
 import { mergeDatasheets } from "./datasheet-merge";
 import { drawPlanDataPage } from "./plan-to-pdf";
 import { buildSpecDocx } from "@/lib/bid-spec-docx";
@@ -31,7 +31,7 @@ export async function buildClientPackageZip(input: {
   preparedBy: string;
   /** Plan/riser pages to render into the rough-drawings PDF, titled. */
   drawings: Array<{ title: string; plan: PlanData }>;
-}): Promise<Uint8Array> {
+}): Promise<{ zipBytes: Uint8Array; gaps: PackageGap[] }> {
   const bundle = await walkBundle(input);
   const datasheetPdf = await mergeDatasheets(bundle);
   const specDocx = await buildSpecDocx(bundle.spec);
@@ -72,5 +72,5 @@ export async function buildClientPackageZip(input: {
   done.catch(() => {});
   await archive.finalize();
   await done;
-  return new Uint8Array(Buffer.concat(chunks));
+  return { zipBytes: new Uint8Array(Buffer.concat(chunks)), gaps: bundle.gaps };
 }
