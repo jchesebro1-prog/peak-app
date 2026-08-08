@@ -1609,28 +1609,82 @@ ok(dataUrlToBytes("data:,plain%20text").bytes.toString("utf8") === "plain text",
 ok(/^[a-zA-Z0-9._-]+$/.test(safeName("Stage Plan (rev 3).pdf")), `unsafe filename characters are stripped (${safeName("Stage Plan (rev 3).pdf")})`);
 ok(safeName("///") === "file", "a name with nothing usable falls back to 'file'");
 
-/* --- isBlobPathUnderPrefix (#40 review fix — client-package/download route hardening) --- */
+/* --- isBlobPathUnderPrefix (#40 review fix, 3rd pass — normalize-then-compare,
+ * closing the tab/newline + percent-encoded dot-segment bypasses a literal
+ * ".."-substring blacklist can't catch) ---
+ *
+ * The route (src/app/api/client-package/download/route.ts) reads the path
+ * from `searchParams.get("path")`, which URL-decodes the query param ONCE.
+ * So an attacker's wire-level `%252e` (percent-encoded `%2e`) arrives here
+ * as a literal `%2e` substring, and a wire-level `%09` (tab) arrives here
+ * as a literal TAB character. Test inputs below are written in that
+ * post-one-decode shape — what this function actually receives — not the
+ * raw wire-level query string.
+ */
 {
-  // The legitimate shape: a real generated client-package path.
+  // The legitimate shape: a real generated client-package path. Must pass.
+  ok(
+    isBlobPathUnderPrefix("client-packages/GRD-5002/1754500000000-Ab3xY9.zip", "client-packages/"),
+    "isBlobPathUnderPrefix: accepts a real in-prefix generated path"
+  );
   ok(
     isBlobPathUnderPrefix("client-packages/proj-1/1234567890.zip", "client-packages/"),
-    "isBlobPathUnderPrefix: accepts a real in-prefix path"
+    "isBlobPathUnderPrefix: accepts another real in-prefix path"
   );
+
   // Out-of-prefix, no trickery: rejected by the plain prefix check.
   ok(
     !isBlobPathUnderPrefix("part-datasheets/evil/x.pdf", "client-packages/"),
     "isBlobPathUnderPrefix: rejects a path outside the prefix"
   );
-  // The actual exploit this function exists to close: a path that starts
-  // with the prefix (so a bare startsWith would pass it) but contains ".."
-  // and would resolve, after @vercel/blob's URL-based normalization,
-  // outside client-packages/ entirely.
-  const traversal = "client-packages/../part-datasheets/secret.pdf";
-  ok(traversal.startsWith("client-packages/"), "sanity: the traversal path DOES pass a bare startsWith check");
+
+  // The two original literal ".." cases.
+  const traversal1 = "client-packages/../part-datasheets/secret.pdf";
+  ok(traversal1.startsWith("client-packages/"), "sanity: the traversal path DOES pass a bare startsWith check");
   ok(
-    !isBlobPathUnderPrefix(traversal, "client-packages/"),
-    "isBlobPathUnderPrefix: rejects a '..'-bearing path even though it passes a bare startsWith"
+    !isBlobPathUnderPrefix(traversal1, "client-packages/"),
+    "isBlobPathUnderPrefix: rejects literal '..' even though it passes a bare startsWith"
   );
+  ok(
+    !isBlobPathUnderPrefix("client-packages/../../etc/passwd", "client-packages/"),
+    "isBlobPathUnderPrefix: rejects a deep literal '../../' traversal"
+  );
+
+  // Percent-encoded dot-segment bypasses. Wire-level %252e%252e / .%252e /
+  // %252e. decode ONCE (by searchParams.get) into a literal "%2e" substring
+  // — no ".." substring present, so a substring blacklist misses these, but
+  // the URL parser @vercel/blob hands the path to collapses %2e as ".".
+  ok(
+    !isBlobPathUnderPrefix("client-packages/%2e%2e/part-datasheets/secret.pdf", "client-packages/"),
+    "isBlobPathUnderPrefix: rejects post-decode '%2e%2e' dot-segment (wire-level %252e%252e)"
+  );
+  ok(
+    !isBlobPathUnderPrefix("client-packages/.%2e/part-datasheets/secret.pdf", "client-packages/"),
+    "isBlobPathUnderPrefix: rejects post-decode '.%2e' dot-segment (wire-level .%252e)"
+  );
+  ok(
+    !isBlobPathUnderPrefix("client-packages/%2e./part-datasheets/secret.pdf", "client-packages/"),
+    "isBlobPathUnderPrefix: rejects post-decode '%2e.' dot-segment (wire-level %252e.)"
+  );
+
+  // Tab/newline-based dot-segment reconstruction. The URL parser strips
+  // TAB/LF/CR BEFORE collapsing dot-segments, so "." + TAB + "." becomes
+  // ".." only after normalization — no ".." substring is ever present in
+  // the raw pathname, so a substring blacklist misses these too.
+  ok(
+    !isBlobPathUnderPrefix("client-packages/.\t./part-datasheets/secret.pdf", "client-packages/"),
+    "isBlobPathUnderPrefix: rejects a TAB-reconstructed '..' dot-segment"
+  );
+  ok(
+    !isBlobPathUnderPrefix("client-packages/.\r./part-datasheets/secret.pdf", "client-packages/"),
+    "isBlobPathUnderPrefix: rejects a CR-reconstructed '..' dot-segment"
+  );
+  ok(
+    !isBlobPathUnderPrefix("client-packages/.\n./part-datasheets/secret.pdf", "client-packages/"),
+    "isBlobPathUnderPrefix: rejects an LF-reconstructed '..' dot-segment"
+  );
+
+  // Still covered: a '..' anywhere in the path, and the two edge cases.
   ok(
     !isBlobPathUnderPrefix("client-packages/foo/../../bar.zip", "client-packages/"),
     "isBlobPathUnderPrefix: rejects '..' anywhere in the path, not just at the start"
