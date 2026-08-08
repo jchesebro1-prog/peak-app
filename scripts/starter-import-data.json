@@ -992,39 +992,6 @@
     ]
   },
   {
-    "sku": "Biamp:930-10008-00019",
-    "desc": "930-10008-00019",
-    "category": "Audio Controls",
-    "unit": "ea",
-    "list": 16734,
-    "cost": 8367,
-    "mfr": "Biamp",
-    "note": "verify — product unidentified (dealer sheet desc = part number only)",
-    "ports": []
-  },
-  {
-    "sku": "Biamp:930-00005-00036",
-    "desc": "930-00005-00036",
-    "category": "Audio Controls",
-    "unit": "ea",
-    "list": 15359,
-    "cost": 7679.5,
-    "mfr": "Biamp",
-    "note": "verify — product unidentified (dealer sheet desc = part number only)",
-    "ports": []
-  },
-  {
-    "sku": "Biamp:930-00005-00030",
-    "desc": "930-00005-00030",
-    "category": "Audio Controls",
-    "unit": "ea",
-    "list": 14692,
-    "cost": 7346,
-    "mfr": "Biamp",
-    "note": "verify — product unidentified (dealer sheet desc = part number only)",
-    "ports": []
-  },
-  {
     "sku": "Shure:AD8CUS",
     "desc": "AXIENT DIGITAL PSM 8-PORT COMBINER 470-960 MHz",
     "category": "Audio Controls",

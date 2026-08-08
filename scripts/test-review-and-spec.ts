@@ -129,6 +129,9 @@ ok(birdDogBackfilled, "starter-set: BirdDog:BDA200 has a Network/NDI port after 
 const shureBackfilled = starterSetRaw.find((r) => r.sku === "Shure:AD8CUS")!.ports.some((p) => p.connectionType === "RF/antenna");
 ok(shureBackfilled, "starter-set: Shure:AD8CUS has an RF/antenna port after back-fill");
 
+const droppedBiampSkus = ["Biamp:930-10008-00019", "Biamp:930-00005-00036", "Biamp:930-00005-00030"];
+const noDroppedBiamp = droppedBiampSkus.every((sku) => !starterSetRaw.some((r) => r.sku === sku));
+ok(noDroppedBiamp, "starter-set: the 3 unidentified Biamp rows are not present after the review drop (#39)");
 
 const portOut = (connectionType: string): Port => ({ name: "out", direction: "out", connectionType });
 const portIn = (connectionType: string): Port => ({ name: "in", direction: "in", connectionType });
