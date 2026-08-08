@@ -10,6 +10,7 @@ import {
   promoteDesignToQuote,
   type DesignRecord,
 } from "@/lib/stores/designs";
+import { priceFromGridOrParametric } from "@/lib/design/quick-grid-seam";
 
 /**
  * Quick Design server actions — the screen computes budgetary math
@@ -33,19 +34,40 @@ export type DesignPartial = {
   customer: string;
   /** full designer state — opaque to the server, round-trips on reopen */
   config: Record<string, unknown>;
+  /** Quote this estimate is being priced against (#41), when the screen was
+   *  opened with one. Null on an ordinary sandbox design. */
+  quoteId: string | null;
 };
+
+/**
+ * The Grid-BOM-if-present seam (#41) applied to what actually gets STORED.
+ *
+ * `partial.budget` arrives as the client's live parametric total, which is
+ * the right fallback by construction. When a Grid project links to this
+ * design's quote, its BOM wins — re-resolved here at save time rather than
+ * trusting the snapshot the screen loaded with, so a design saved after the
+ * Grid layout changed stores the current number. With no quoteId there is
+ * nothing to look up and the parametric total is stored unchanged, exactly
+ * as before this feature.
+ */
+async function budgetFor(partial: DesignPartial): Promise<number> {
+  if (!partial.quoteId) return partial.budget;
+  const priced = await priceFromGridOrParametric(partial.quoteId, () => partial.budget);
+  return priced.value;
+}
 
 async function persistDesign(
   id: string | null,
   partial: DesignPartial,
   owner: string
 ): Promise<DesignRecord> {
+  const priced: DesignPartial = { ...partial, budget: await budgetFor(partial) };
   if (id) {
-    const d = await updateDesign(id, partial);
+    const d = await updateDesign(id, priced);
     if (d) return d;
   }
   // prototype: SandboxStore.create() stamps the current user as owner
-  return createDesign({ ...partial, owner });
+  return createDesign({ ...priced, owner });
 }
 
 /** Save / update the design in the sandbox (NOT the pipeline). */
@@ -89,7 +111,10 @@ export async function saveRevisionAction(
   const snap = {
     name: partial.name,
     tier: partial.tier,
-    budget: partial.budget,
+    // The SAVED budget, not the incoming parametric one — a revision has to
+    // record the number the design actually carries once the Grid seam has
+    // had its say (#41), or the history would contradict the design.
+    budget: saved.budget,
     venue: partial.venue,
     size: partial.size,
     width: partial.width,

@@ -95,6 +95,16 @@ export type DesignRecord = {
   revisions?: DesignRevision[];
   /** Opaque drawing/designer state saved by the Quick Design screen. Not interpreted server-side. */
   config?: Record<string, unknown> | null;
+  /**
+   * Quote this budgetary design is being estimated against (#41), when the
+   * screen was opened with one (`/design/quick?quote=Q-####`). Its only job
+   * is to let the Quick estimator find a linked Grid project through
+   * getProjectByQuoteId and price from that design's real BOM instead of the
+   * parametric guess. Absent on every pre-#41 record and on every design that
+   * has no quote yet — read as "no link", which is the unchanged
+   * parametric-only path, so there is nothing to migrate.
+   */
+  quoteId?: string | null;
 };
 
 /** The partial that promotes a budgetary design into a real quote (port of toQuotePartial's return). */

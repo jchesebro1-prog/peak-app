@@ -104,10 +104,17 @@ export type CustomerOpt = {
 
 /* ================================ component ================================ */
 
+/** A linked Grid design's real BOM value, resolved server-side by
+ *  priceFromGridOrParametric (#41). Null when nothing is linked — that is the
+ *  ordinary parametric estimate, untouched by this feature. */
+export type GridPrice = { value: number; gridProjectId: string; gridProjectName: string };
+
 export default function QuickDesignClient({
   me,
   canApprove,
   initialDesign,
+  quoteId,
+  gridPrice,
   customers,
   fabrics,
   rates,
@@ -116,6 +123,8 @@ export default function QuickDesignClient({
   me: string;
   canApprove: boolean;
   initialDesign: DesignRecord | null;
+  quoteId: string | null;
+  gridPrice: GridPrice | null;
   customers: CustomerOpt[];
   fabrics: FabricOption[];
   rates: { installPct: number; freightPct: number; contingencyPct: number };
@@ -206,6 +215,18 @@ export default function QuickDesignClient({
     });
   }, [selBase, a.qtyOverrides, selKey]);
   const selTot = useMemo(() => tierTotals(selSystems, selTd, laborPct, freightPct, contPct), [selSystems, selTd, laborPct, freightPct, contPct]);
+  /**
+   * The budget headline (#41). A linked Grid design's BOM is authoritative —
+   * including when it prices at $0, because an empty real system is a
+   * different claim from "no system drawn yet, guess from dimensions". With
+   * nothing linked, `gridPrice` is null and this is the live parametric total
+   * exactly as before.
+   *
+   * Only the bottom line moves. The tier cards and the per-system breakdown
+   * stay parametric: Good/Better/Best is a spec ladder the parametric engine
+   * invents, and a drawn Grid design has one BOM, not three.
+   */
+  const budgetTotal = gridPrice ? gridPrice.value : selTot.grand;
   const tierCards = useMemo(
     () =>
       TIERS.map((td) => ({
@@ -244,7 +265,13 @@ export default function QuickDesignClient({
       depth: s.depth,
       grid: s.grid,
       systems: sysNames,
+      // The PARAMETRIC total, deliberately: persistDesign re-runs the Grid
+      // seam server-side with this as its fallback (#41), so a linked design
+      // stores a freshly-resolved BOM number and an unlinked one stores this
+      // one untouched. Sending the already-overridden headline would hand the
+      // seam its own output as the fallback.
       budget: tot.grand,
+      quoteId,
       customerId: linkedCustomerObj ? linkedCustomerObj.id : null,
       locationId: linkedCustomerObj ? linkedLocation || null : null,
       customer: linkedCustomerObj ? linkedCustomerObj.name : "",
@@ -258,7 +285,14 @@ export default function QuickDesignClient({
     setDesignRec(record);
     setSavedId(record.id);
     toast(msg);
-    if (isNew) router.replace(`/design/quick?design=${encodeURIComponent(record.id)}`, { scroll: false });
+    // Keep ?quote= on the URL through the first save (#41) — dropping it would
+    // silently un-link the estimate from its Grid design mid-session.
+    if (isNew)
+      router.replace(
+        `/design/quick?design=${encodeURIComponent(record.id)}` +
+          (quoteId ? `&quote=${encodeURIComponent(quoteId)}` : ""),
+        { scroll: false }
+      );
   };
 
   const onSaveDesign = () => {
@@ -865,11 +899,27 @@ export default function QuickDesignClient({
                       <span style={{ fontFamily: MONO, fontWeight: 500, fontSize: 13, flexShrink: 0 }}>{moneyRound(selTot.contingency)}</span>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#16181d", color: "#fff", borderRadius: 9, padding: "13px 16px" }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>{selTd.label} total</span>
-                      <span style={{ fontFamily: MONO, fontSize: 19, fontWeight: 600 }}>{moneyRound(selTot.grand)}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>{gridPrice ? "Budget total" : `${selTd.label} total`}</span>
+                        {gridPrice && (
+                          <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "#16181d", background: "#fff", borderRadius: 5, padding: "2px 7px", whiteSpace: "nowrap" }}>
+                            Priced from linked Grid design
+                          </span>
+                        )}
+                      </span>
+                      <span style={{ fontFamily: MONO, fontSize: 19, fontWeight: 600 }}>{moneyRound(budgetTotal)}</span>
                     </div>
                     <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 10, lineHeight: 1.5 }}>
-                      {selTd.label} tier combines {selSystems.filter((x) => x.on).length} systems. Good / Better / Best swap the spec on every line — open in the Estimator to lock pricing against live catalog books.
+                      {gridPrice ? (
+                        <>
+                          Priced from {gridPrice.gridProjectName || gridPrice.gridProjectId} ({gridPrice.gridProjectId}), the Grid design linked to {quoteId} — its real BOM, not the parametric estimate.
+                          The {selTd.label} tier estimate above is {moneyRound(selTot.grand)}; the tier cards and per-system breakdown stay parametric, because a drawn design has one BOM, not three.
+                        </>
+                      ) : (
+                        <>
+                          {selTd.label} tier combines {selSystems.filter((x) => x.on).length} systems. Good / Better / Best swap the spec on every line — open in the Estimator to lock pricing against live catalog books.
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -5,6 +5,7 @@ import { all as allCustomers } from "@/lib/stores/customers";
 import { byCategory } from "@/lib/stores/catalog";
 import { num } from "@/lib/stores/pricing";
 import { reviewers } from "@/lib/users";
+import { priceFromGridOrParametric } from "@/lib/design/quick-grid-seam";
 import QuickDesignClient from "./quick-design-client";
 import "./quick-design.css";
 
@@ -20,11 +21,12 @@ export const dynamic = "force-dynamic";
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ design?: string }>;
+  searchParams: Promise<{ design?: string; quote?: string }>;
 }) {
   const user = await requireUser();
   const sp = await searchParams;
   const designId = sp.design || null;
+  const quoteFromUrl = (sp.quote || "").trim() || null;
 
   const [design, customers, fabricParts, installPct, freightPct, contingencyPct, reviewerRows] =
     await Promise.all([
@@ -37,11 +39,36 @@ export default async function Page({
       reviewers(),
     ]);
 
+  // "Estimating consumes a Grid BOM when one exists" (#41). The quote link
+  // comes from the URL when the screen was opened against one, otherwise from
+  // whatever the saved design already carries. With no link at all this whole
+  // branch is skipped and the screen prices parametrically exactly as before.
+  //
+  // The fallback handed to the seam is the design's LAST SAVED budget, not the
+  // live one: the parametric total is recomputed client-side on every
+  // keystroke and the server can't know it. That value is deliberately unused
+  // downstream — the client ignores it and keeps its own live math whenever
+  // `source` comes back "parametric". Only the "grid" branch reaches the UI.
+  const quoteId = quoteFromUrl || design?.quoteId || null;
+  const priced = quoteId
+    ? await priceFromGridOrParametric(quoteId, () => design?.budget ?? 0)
+    : null;
+  const gridPrice =
+    priced && priced.source === "grid"
+      ? {
+          value: priced.value,
+          gridProjectId: priced.gridProjectId || "",
+          gridProjectName: priced.gridProjectName || "",
+        }
+      : null;
+
   return (
     <QuickDesignClient
       me={user.name}
       canApprove={can("approve", user.roles)}
       initialDesign={design}
+      quoteId={quoteId}
+      gridPrice={gridPrice}
       customers={customers.map((c) => ({
         id: c.id,
         name: c.name,
