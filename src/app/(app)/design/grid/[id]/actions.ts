@@ -42,6 +42,8 @@ import {
 } from "@/lib/design/grid-bom";
 import { isFabricRow, priceGridCurtains } from "@/lib/design/grid-curtains";
 import { polygonArea } from "@/lib/design/grid-geometry";
+import { suggestSeedPlacements } from "@/lib/design/grid-seed";
+import type { VenueDims } from "@/lib/design/venue-dims";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
 
@@ -113,6 +115,65 @@ export async function carryOverAction(
   await requireUser();
   const p = await carryPlacementsToSheet(projectId, fromSheetId, toSheetId);
   if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/**
+ * "Generate starting layout" (#38) — paints suggestSeedPlacements' small
+ * starter set (rigging pipes + a curtain-hardware drop) onto the project's
+ * first sheet, using real catalog SKUs the caller already resolved (the
+ * editor picks the first Rigging/Curtains catalog row; re-resolving here
+ * would just be the same lookup twice). ALWAYS additive — it only ever
+ * appends placements, never removes or replaces any — so "never a silent
+ * replace" is enforced by the editor's confirm-gate UI, not by refusing a
+ * non-empty project here.
+ *
+ * `addPlacement` (grid-projects.ts) has no `category` parameter — only
+ * `addCurtainPlacement` does — so each drop's user-defined category label
+ * is stamped in a second patch via `setPlacementCategory`, keyed off the
+ * placement `addPlacement` just appended (always the last entry, since the
+ * store only ever appends). Two patches per drop instead of one is a small
+ * price for not widening a shared store function's signature for a single
+ * caller.
+ */
+export async function seedStarterLayoutAction(
+  projectId: string,
+  dims: VenueDims,
+  resolvedPartIds: { PIPE: string; CURTAIN: string }
+): Promise<Result> {
+  const user = await requireUser();
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  const sheetId = project.sheetIds[0];
+  if (!sheetId) return { ok: false, error: "No sheet to seed onto." };
+
+  // Re-verify server-side (the client proposes, the server prices/validates
+  // — the same rule placeCurtainAction and addRouteAction follow): a part
+  // id from a stale palette, or one a tampered request invented, must not
+  // silently land a device that no longer resolves to a real catalog row.
+  const [pipePart, curtainPart] = await Promise.all([
+    getPart(resolvedPartIds.PIPE),
+    getPart(resolvedPartIds.CURTAIN),
+  ]);
+  if (!pipePart || !curtainPart)
+    return { ok: false, error: "Import the catalog starter set first — no Rigging/Curtains parts found." };
+
+  const drops = suggestSeedPlacements(dims, project.placements.length);
+  for (const d of drops) {
+    const partId = d.partId === "PIPE" ? pipePart.id : curtainPart.id;
+    const updated = await addPlacement(projectId, {
+      sheetId,
+      page: 1,
+      x: d.x,
+      y: d.y,
+      partId,
+      by: user.name,
+    });
+    if (!updated) return { ok: false, error: "Design not found." };
+    const newest = updated.placements[updated.placements.length - 1];
+    if (newest) await setPlacementCategory(projectId, newest.id, d.category);
+  }
   revalidatePath(editorPath(projectId));
   return { ok: true };
 }

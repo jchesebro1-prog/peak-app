@@ -45,7 +45,7 @@ import { validateDeviceWire } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
 import { PlanSvg } from "@/app/(app)/design/quick/plan-svg";
 import { buildGridBaseSheetPlan } from "@/lib/design/grid-base-sheet";
-import type { VenueDims } from "@/lib/design/venue-dims";
+import { DEFAULT_VENUE_DIMS, type VenueDims } from "@/lib/design/venue-dims";
 import type { GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
   addRouteAction,
@@ -59,6 +59,7 @@ import {
   placeCurtainAction,
   placeDeviceAction,
   removePlacementAction,
+  seedStarterLayoutAction,
   setPlacementCategoryAction,
   setVenueAction,
 } from "./actions";
@@ -283,6 +284,11 @@ export default function GridEditor({
     toSheetId: string;
   } | null>(null);
 
+  /** "Generate starting layout" (#38) — armed only on a non-empty project;
+   *  an empty one has nothing to silently overwrite (the action is additive
+   *  regardless), so the confirm step is skipped entirely there. */
+  const [seedArm, setSeedArm] = useState(false);
+
   const [search, setSearch] = useState("");
   // Palette SCOPE filter (punch #48, replacing Task #39's group filter):
   // "" = All (today's exact behavior, every device part); one of Jeff's five
@@ -371,6 +377,39 @@ export default function GridEditor({
   const cal = sheet ? findCalibration(project.calibrations, sheet.id, page) : null;
 
   const partById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
+
+  /** "Generate starting layout" (#38) — the two real catalog SKUs the
+   *  seeding action paints (first Rigging row, first Curtains row). `parts`
+   *  already carries every catalog row's raw `category` (server-resolved,
+   *  same slice the palette itself reads), so no extra server round trip is
+   *  needed just to find one of each. Undefined until the catalog actually
+   *  has a row in that category — the starter-set import (#39) may not have
+   *  landed yet, or a scratch/dev DB may simply start empty. */
+  const seedPipePart = useMemo(() => parts.find((p) => p.category === "Rigging") || null, [parts]);
+  const seedCurtainPart = useMemo(() => parts.find((p) => p.category === "Curtains") || null, [parts]);
+  const seedDisabled = !seedPipePart || !seedCurtainPart;
+  /** The dims suggestSeedPlacements would use — the generated base sheet's,
+   *  when the first sheet is one (venueDims is only ever set on a generated
+   *  sheet); DEFAULT_VENUE_DIMS otherwise so the action always has a shape
+   *  to call with even before that function reads dims at all. */
+  const seedDims: VenueDims = sheets[0]?.venueDims ?? DEFAULT_VENUE_DIMS;
+
+  const runSeed = useCallback(async () => {
+    if (!seedPipePart || !seedCurtainPart) return;
+    setBusy(true);
+    const r = await seedStarterLayoutAction(project.id, seedDims, {
+      PIPE: seedPipePart.id,
+      CURTAIN: seedCurtainPart.id,
+    });
+    setBusy(false);
+    setSeedArm(false);
+    if (!r.ok) {
+      setErr(r.error);
+      return;
+    }
+    router.refresh();
+  }, [project.id, seedDims, seedPipePart, seedCurtainPart, router]);
+
   const filteredParts = useMemo(() => {
     const q = search.trim().toLowerCase();
     return parts
@@ -1058,6 +1097,36 @@ export default function GridEditor({
         <button style={BTN} disabled={busy} onClick={() => fileRef.current?.click()}>
           + Plan sheet
         </button>
+        {seedDisabled ? (
+          <button style={{ ...BTN, opacity: 0.5, cursor: "not-allowed" }} disabled title="Import the catalog starter set first">
+            Generate starting layout
+          </button>
+        ) : !seedArm ? (
+          <button
+            style={BTN}
+            disabled={busy}
+            onClick={() => {
+              if (project.placements.length === 0) runSeed();
+              else setSeedArm(true);
+            }}
+          >
+            Generate starting layout
+          </button>
+        ) : (
+          <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+            <span style={{ fontSize: 11.5, color: "#8c919c" }}>Adds 3 more devices:</span>
+            <button
+              style={{ ...BTN, background: "#16181d", color: "#fff", borderColor: "#16181d" }}
+              disabled={busy}
+              onClick={runSeed}
+            >
+              {busy ? "Adding…" : "Confirm"}
+            </button>
+            <button style={BTN} disabled={busy} onClick={() => setSeedArm(false)}>
+              Cancel
+            </button>
+          </span>
+        )}
         <Link href={`/design/grid/${encodeURIComponent(project.id)}/riser`} style={{ ...BTN, textDecoration: "none" }}>
           Riser →
         </Link>
