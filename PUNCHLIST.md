@@ -2791,8 +2791,7 @@ encoders) and RF/antenna (Shure Axient PSM combiner/transmitter) — with ports 
 the rows that needed them. Net: ~65 items land (11 Lighting Controls, 10 Fixtures, 11 Video
 Controls, 14 Speakers, 8 Audio Controls, 11 Curtains).
 
-**Status:** IMPORT APPROVED 2026-08-07 — decisions locked, **not yet executed**; queued as the
-first build task ahead of #38/#40/#41 (see #41 sequencing).
+**Status:** DONE 2026-08-07 — 65 items imported (see scripts/import-starter-set.ts)
 
 ---
 
