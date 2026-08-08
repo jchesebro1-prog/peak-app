@@ -213,7 +213,7 @@ ok(
 
 
 /* --- Grid generated base sheet: proscenium geometry (#38) --- */
-import { buildGridBaseSheetPlan } from "@/lib/design/grid-base-sheet";
+import { buildGridBaseSheetPlan, stageBandNormalized } from "@/lib/design/grid-base-sheet";
 // DEFAULT_VENUE_DIMS is already imported at the top of this file (line 11).
 
 const basePlan = buildGridBaseSheetPlan(DEFAULT_VENUE_DIMS);
@@ -234,6 +234,36 @@ ok(
   "grid-base-sheet: a stageWidthFt narrower than proWidthFt is clamped, opening never exceeds the house floor"
 );
 
+// stageBandNormalized is the ONE statement of where the stage sits on the
+// page, and everything that maps a painted y to a real depth reads it. These
+// assertions tie it back to the PIXELS THE SHEET ACTUALLY DRAWS, so the two
+// can never drift: rects[0] is the house floor (its top edge IS the back
+// wall) and lines[2] is the plaster line.
+const band = stageBandNormalized(DEFAULT_VENUE_DIMS);
+ok(
+  Math.abs(band.yBackNorm * basePlan.H - basePlan.rects[0].y) < 0.05,
+  `grid-base-sheet: the normalized band's back wall is the drawn back wall (${band.yBackNorm * basePlan.H} vs ${basePlan.rects[0].y})`
+);
+ok(
+  Math.abs(band.yPlasterNorm * basePlan.H - basePlan.lines[2].y1) < 0.05,
+  `grid-base-sheet: the normalized band's plaster line is the drawn plaster line (${band.yPlasterNorm * basePlan.H} vs ${basePlan.lines[2].y1})`
+);
+// The stage is a BAND, never the whole page — margins above the back wall and
+// below the plaster line. This is the fact the lineset schedule used to
+// ignore, and it moves with venue size, so no fixed literal can stand in for
+// it: a 20 ft × 60 ft house puts the plaster line at y≈0.97, a 100 ft × 15 ft
+// one at y≈0.83.
+ok(
+  band.yBackNorm > 0.02 && band.yPlasterNorm < 0.98 && band.yPlasterNorm > band.yBackNorm,
+  `grid-base-sheet: the stage occupies a strict sub-band of the page (${band.yBackNorm.toFixed(3)}…${band.yPlasterNorm.toFixed(3)})`
+);
+const bandDeep = stageBandNormalized({ ...DEFAULT_VENUE_DIMS, proWidthFt: 20, stageWidthFt: undefined, stageDepthFt: 60 });
+const bandWide = stageBandNormalized({ ...DEFAULT_VENUE_DIMS, proWidthFt: 100, stageWidthFt: undefined, stageDepthFt: 15 });
+ok(
+  bandDeep.yPlasterNorm > band.yPlasterNorm && bandWide.yPlasterNorm < band.yPlasterNorm,
+  "grid-base-sheet: the band moves with venue size — a fixed y literal cannot represent it"
+);
+
 
 /* --- Grid seeding action: starter layout from dims (#38) --- */
 import { suggestSeedPlacements } from "@/lib/design/grid-seed";
@@ -242,16 +272,37 @@ const seeds = suggestSeedPlacements(DEFAULT_VENUE_DIMS, 0);
 ok(seeds.length > 0, "grid-seed: suggestSeedPlacements returns at least one starter drop for a fresh project");
 ok(seeds.every((s) => s.x >= 0 && s.x <= 1 && s.y >= 0 && s.y <= 1), "grid-seed: every suggested drop is normalized 0..1");
 ok(seeds.some((s) => s.category === "Curtains" || s.category === "Rigging"), "grid-seed: starter layout includes at least one rigging/curtain drop");
-// The depth axis the GENERATED base sheet actually draws is upstage 0 ->
-// downstage 1 (back wall at yBack = MT, plaster line below it), so a main
-// drape — which hangs just upstage of the proscenium — must be the LARGEST-y
-// seed, with the pipes stepping back upstage from it.
+// The depth axis the GENERATED base sheet actually draws is upstage ->
+// downstage (back wall above, plaster line below), so a main drape — which
+// hangs just upstage of the proscenium — must be the LARGEST-y seed, with the
+// pipes stepping back upstage from it.
 const seedCurtain = seeds.find((s) => s.partId === "CURTAIN")!;
 ok(
   !!seedCurtain && seeds.every((s) => s === seedCurtain || s.y < seedCurtain.y),
   "grid-seed: the curtain seeds closest to the plaster line, downstage of every seeded pipe"
 );
-ok(seedCurtain.y < 1, "grid-seed: …but upstage of the plaster line itself, never on it");
+// The boundary is the REAL plaster line, not y=1. `y < 1` used to pass while
+// the curtain sat at 0.92 — out in the house, past a plaster line that is
+// actually at y≈0.888. Every seed must land inside the drawn stage band.
+ok(
+  seedCurtain.y < band.yPlasterNorm,
+  `grid-seed: …but upstage of the plaster line the sheet actually draws (${seedCurtain.y} vs ${band.yPlasterNorm})`
+);
+ok(
+  seeds.every((s) => s.y >= band.yBackNorm && s.y <= band.yPlasterNorm),
+  "grid-seed: every starter drop lands inside the generated sheet's stage band, never in a page margin"
+);
+// And the band is dims-dependent, so the seeds must be too — a literal that
+// happens to sit inside the default band is off-stage on a deep narrow house.
+const deepSeeds = suggestSeedPlacements({ ...DEFAULT_VENUE_DIMS, proWidthFt: 20, stageWidthFt: undefined, stageDepthFt: 60 }, 0);
+ok(
+  deepSeeds.every((s) => s.y >= bandDeep.yBackNorm && s.y <= bandDeep.yPlasterNorm),
+  "grid-seed: …on a 20 ft × 60 ft house too — the seeds track the band, they are not fixed literals"
+);
+ok(
+  deepSeeds[0].y !== seeds[0].y,
+  "grid-seed: …which means a different venue really does move the drops"
+);
 
 const reSeed = suggestSeedPlacements(DEFAULT_VENUE_DIMS, 5);
 ok(reSeed.length === seeds.length, "grid-seed: re-running suggests the same starter set regardless of unrelated existing placements (caller decides additive-vs-replace, not this function)");
@@ -260,25 +311,91 @@ ok(reSeed.length === seeds.length, "grid-seed: re-running suggests the same star
 /* --- Lineset schedule derived from Grid placements (#41) --- */
 import { linesetScheduleFromGrid, linesetScheduleReport } from "@/lib/design/grid-lineset-schedule";
 
+/** The options a design WITH a generated base sheet passes: dims and the
+ *  sheet they describe travel together. */
+const GEN = { generatedSheetId: "gs-1" };
+
 const linesetPlacements = [
   { id: "gp-1", sheetId: "gs-1", page: 1, x: 0.5, y: 0.3, partId: "test-pipe", category: "Rigging", by: "test", at: 0 },
 ];
-const schedule = linesetScheduleFromGrid(linesetPlacements, DEFAULT_VENUE_DIMS);
+const schedule = linesetScheduleFromGrid(linesetPlacements, DEFAULT_VENUE_DIMS, [], GEN);
 ok(Array.isArray(schedule), "grid-lineset-schedule: linesetScheduleFromGrid returns an array");
 ok(schedule.length === 1, "grid-lineset-schedule: one Rigging placement produces one schedule row");
 
-// The depth mapping is the whole point of the bridge: y is the normalized
-// depth axis UPSTAGE 0 -> DOWNSTAGE 1 (what the generated base sheet actually
-// draws — back wall at the top of the page, plaster line below it), and
-// dsInches is the distance UPSTAGE OF THE PLASTER LINE. So y=0.3 on a 30 ft
-// stage is 0.7 × 30 = 21 ft off the plaster line, 9 ft off the back wall.
-ok(schedule[0].dsInches === 252, `grid-lineset-schedule: y=0.3 of a 30 ft stage is 21 ft upstage of the plaster line (got ${schedule[0]?.dsInches})`);
-ok(schedule[0].usPositionLabel === "9' 0\"", `grid-lineset-schedule: the upstage label is measured off the back wall (got ${schedule[0]?.usPositionLabel})`);
-// 252" sits exactly between the slot-32 (248") and slot-33 (256") centers;
-// the workbook's ROUND rounds half away from zero, so slot 33 — and the row
-// is flagged 4" off that center rather than silently snapped to it.
-ok(schedule[0].slot === 33, `grid-lineset-schedule: the row lands on the workbook's nearest 8-inch grid slot (got ${schedule[0]?.slot})`);
+// THE DEPTH MAPPING — the whole point of the bridge, and twice-wrong before
+// this. Anchored three ways, most physical first, so a future regression
+// cannot pass by coincidence:
+//
+//  1. a marker ON the plaster line is 0" off it;
+//  2. a marker ON the back wall is the full stage depth off it;
+//  3. a marker halfway between them is half the depth.
+//
+// None of those depend on the page geometry at all — they are what "distance
+// upstage of the plaster line" MEANS. The band is where they live on the page.
+const dsAt = (y: number) =>
+  linesetScheduleFromGrid([{ id: "anchor", sheetId: "gs-1", page: 1, x: 0.5, y, partId: "p", category: "Rigging", by: "test", at: 0 }], DEFAULT_VENUE_DIMS, [], GEN)[0].dsInches;
+ok(dsAt(band.yPlasterNorm) === 0, `grid-lineset-schedule: a marker on the drawn plaster line is 0" off it (got ${dsAt(band.yPlasterNorm)})`);
+ok(dsAt(band.yBackNorm) === 360, `grid-lineset-schedule: a marker on the drawn back wall is the full 30 ft off it (got ${dsAt(band.yBackNorm)})`);
+ok(dsAt((band.yBackNorm + band.yPlasterNorm) / 2) === 180, `grid-lineset-schedule: mid-band is half the stage depth (got ${dsAt((band.yBackNorm + band.yPlasterNorm) / 2)})`);
+
+// And the concrete case, derived from the sheet's real pixel geometry rather
+// than guessed. DEFAULT dims: ppf = (640−58−138)/50 = 8.88 px/ft, depthPx =
+// 30×8.88 = 266.4, yBack = 52, yPlaster = 318.4, H = 358.4. So the band is
+// 52/358.4 = 0.14509 … 318.4/358.4 = 0.88839, and
+//   ds = 360 × (0.88839 − 0.3) / 0.74330 = 284.97 → 285" (23' 9").
+// The margin-blind formula this replaced returned 360 × (1 − 0.3) = 252"
+// (21' 0") — 2 ft 9 in of pure page margin, on a stage only 30 ft deep.
+ok(schedule[0].dsInches === 285, `grid-lineset-schedule: y=0.3 on the default generated sheet is 285" upstage of the plaster line (got ${schedule[0]?.dsInches})`);
+ok(schedule[0].usPositionLabel === "6' 3\"", `grid-lineset-schedule: the upstage label is measured off the back wall (got ${schedule[0]?.usPositionLabel})`);
+// 285" is 3" past the slot-37 center (288"), so slot 37 — and the row is
+// flagged 3" off that center rather than silently snapped to it.
+ok(schedule[0].slot === 37, `grid-lineset-schedule: the row lands on the workbook's nearest 8-inch grid slot (got ${schedule[0]?.slot})`);
 ok((schedule[0].warning || "").includes("off the nearest 8-inch grid center"), "grid-lineset-schedule: an off-grid position is flagged, not snapped");
+
+// Painted OUTSIDE the drawn stage (in the page margin, or off in the house):
+// clamped to the stage, never a negative or over-depth number — and said out
+// loud on the row, not silently absorbed.
+const offDownstage = linesetScheduleFromGrid([{ id: "off-ds", sheetId: "gs-1", page: 1, x: 0.5, y: 0.99, partId: "p", category: "Rigging", by: "test", at: 0 }], DEFAULT_VENUE_DIMS, [], GEN);
+ok(offDownstage[0].dsInches === 0, `grid-lineset-schedule: a marker downstage of the plaster line clamps to 0", never negative (got ${offDownstage[0]?.dsInches})`);
+ok(
+  offDownstage[0].unresolved.some((u) => u.includes("off the drawn stage")),
+  "grid-lineset-schedule: …and the clamp is flagged on the row, not silent"
+);
+const offUpstage = linesetScheduleFromGrid([{ id: "off-us", sheetId: "gs-1", page: 1, x: 0.5, y: 0.01, partId: "p", category: "Rigging", by: "test", at: 0 }], DEFAULT_VENUE_DIMS, [], GEN);
+ok(offUpstage[0].dsInches === 360, `grid-lineset-schedule: a marker upstage of the back wall clamps to the stage depth, never over it (got ${offUpstage[0]?.dsInches})`);
+ok(
+  offUpstage[0].unresolved.some((u) => u.includes("off the drawn stage")),
+  "grid-lineset-schedule: …and that clamp is flagged too"
+);
+
+// UPLOADED-ONLY design: no generatedSheetId, so no band is known and the
+// coarse whole-page mapping stands in — deliberately, with the page printing
+// the "indicative until calibrated" hedge off `depthsFromGeneratedSheet`.
+const uploadedOnly = linesetScheduleReport(linesetPlacements, DEFAULT_VENUE_DIMS);
+ok(uploadedOnly.depthsFromGeneratedSheet === false, "grid-lineset-schedule: with no generated sheet the report says its depths are not band-derived");
+ok(uploadedOnly.rows[0].dsInches === 252, `grid-lineset-schedule: …and falls back to the whole-page mapping, 360 × (1 − 0.3) (got ${uploadedOnly.rows[0]?.dsInches})`);
+ok(
+  linesetScheduleReport(linesetPlacements, DEFAULT_VENUE_DIMS, [], GEN).depthsFromGeneratedSheet === true,
+  "grid-lineset-schedule: with a generated sheet it says the depths ARE band-derived"
+);
+
+// MIXED SHEETS: dims and the depth axis belong to ONE sheet. A marker painted
+// on a different (uploaded) sheet has no comparable position, so it is
+// EXCLUDED and named — never scored against geometry that isn't its own.
+const mixedSheets = linesetScheduleReport(
+  [
+    { id: "on-gen", sheetId: "gs-1", page: 1, x: 0.5, y: 0.5, partId: "p", category: "Rigging", by: "test", at: 0 },
+    { id: "on-upload", sheetId: "gs-9", page: 1, x: 0.5, y: 0.5, partId: "p", category: "Rigging", by: "test", at: 0 },
+  ],
+  DEFAULT_VENUE_DIMS,
+  [],
+  GEN
+);
+ok(mixedSheets.rows.length === 1 && mixedSheets.rows[0].placementId === "on-gen", "grid-lineset-schedule: only placements on the generated sheet the dims came from are scheduled");
+ok(
+  mixedSheets.skipped.length === 1 && mixedSheets.skipped[0].placementId === "on-upload" && mixedSheets.skipped[0].reason.includes("uploaded sheet"),
+  "grid-lineset-schedule: …and the ones on other sheets are reported with the reason, not silently dropped or mis-scored"
+);
 
 // A pipe's lineset TYPE is not knowable from the catalog - noted, never guessed.
 ok(schedule[0].type === "", "grid-lineset-schedule: an untyped rigging part gets a blank type, not a guess");
@@ -323,17 +440,45 @@ ok(
 
 // Rows are ordered downstage -> upstage, the order the schedule is read in.
 // y=0.8 is the DOWNSTAGE one (nearer the plaster line), so it reads first.
+// Magnitudes are pinned too, not just the order, so an inverted or
+// margin-blind formula that happens to preserve ordering still fails:
+// 360 × (0.88839 − 0.8) / 0.74330 = 42.8 → 43", and
+// 360 × (0.88839 − 0.2) / 0.74330 = 333.4 → 333".
 const ordered = linesetScheduleFromGrid(
   [
     { id: "b", sheetId: "gs-1", page: 1, x: 0.5, y: 0.8, partId: "p", category: "Rigging", by: "test", at: 0 },
     { id: "a", sheetId: "gs-1", page: 1, x: 0.5, y: 0.2, partId: "p", category: "Rigging", by: "test", at: 0 },
   ],
-  DEFAULT_VENUE_DIMS
+  DEFAULT_VENUE_DIMS,
+  [],
+  GEN
 );
 ok(ordered.map((r) => r.placementId).join(",") === "b,a", "grid-lineset-schedule: rows run downstage to upstage");
 ok(
-  ordered[0].dsInches === 72 && ordered[1].dsInches === 288,
-  `grid-lineset-schedule: the downstage row is 6' off the plaster line, the upstage one 24' (got ${ordered[0]?.dsInches}, ${ordered[1]?.dsInches})`
+  ordered[0].dsInches === 43 && ordered[1].dsInches === 333,
+  `grid-lineset-schedule: the downstage row is 3' 7" off the plaster line, the upstage one 27' 9" (got ${ordered[0]?.dsInches}, ${ordered[1]?.dsInches})`
+);
+
+// End to end: the SEEDED starter layout, scored by the schedule that reads
+// the same band — the drape 1' 6" off the plaster line, the pipes 9' and
+// 16' 6" upstage of it. This is the pairing the y=0.92 literal broke (the
+// drape scored as if it were out in the house), and it only holds because
+// both modules read stageBandNormalized rather than each guessing.
+const seededRows = linesetScheduleFromGrid(
+  suggestSeedPlacements(DEFAULT_VENUE_DIMS, 0).map((s, i) => ({
+    id: `seed-${i}`, sheetId: "gs-1", page: 1, x: s.x, y: s.y, partId: "p", category: "Rigging", by: "test", at: 0,
+  })),
+  DEFAULT_VENUE_DIMS,
+  [],
+  GEN
+);
+ok(
+  seededRows.map((r) => r.dsPositionLabel).join(" | ") === `1' 6" | 9' 0" | 16' 6"`,
+  `grid-lineset-schedule: the seeded starter layout scores as real on-stage depths (got ${seededRows.map((r) => r.dsPositionLabel).join(" | ")})`
+);
+ok(
+  seededRows.every((r) => r.unresolved.every((u) => !u.includes("off the drawn stage"))),
+  "grid-lineset-schedule: …with no seed landing off the drawn stage"
 );
 
 

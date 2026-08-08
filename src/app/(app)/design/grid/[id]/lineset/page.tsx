@@ -63,9 +63,20 @@ export default async function LinesetSchedulePage({
   // defaults stand in and the page says so.
   const generated = sheets.find((s) => s.kind === "generated" && s.venueDims);
   const dims: VenueDims = generated?.venueDims ?? DEFAULT_VENUE_DIMS;
-  const dimsAreAssumed = !generated;
 
-  const { rows, skipped } = linesetScheduleReport(project.placements || [], dims, parts);
+  // The generated sheet's id goes in with its dims, never separately: they are
+  // one coordinate system. It makes the schedule interpolate depths across
+  // that sheet's real stage band AND excludes placements painted on any other
+  // sheet (they land in `skipped` with the reason) — a marker on an uploaded
+  // plan has no depth axis to score against these dims, and mixing the two
+  // would print a column of meaningless numbers with no way to tell which
+  // rows were which. See LinesetScheduleOptions.
+  const { rows, skipped, depthsFromGeneratedSheet } = linesetScheduleReport(
+    project.placements || [],
+    dims,
+    parts,
+    { generatedSheetId: generated?.id ?? null }
+  );
 
   const th: React.CSSProperties = {
     textAlign: "left",
@@ -176,15 +187,15 @@ export default async function LinesetSchedulePage({
 
         {/* The honest caveats, said out loud rather than buried. The depth
             axis is only ambiguous on an UPLOADED plan — a generated base sheet
-            draws the back wall at the top and the plaster line at the bottom,
-            so its depths are real, not indicative. */}
+            draws the back wall and the plaster line at known positions, so
+            depths measured between them are real, not indicative. */}
         <div className="pk-no-print" style={{ marginTop: 14, fontSize: "10pt", color: "#8c919c", lineHeight: 1.55 }}>
           Positions are measured upstage of the plaster line, from each marker&rsquo;s place on
           the plan&rsquo;s depth axis (upstage 0 → downstage 1) against the{" "}
           {dims.stageDepthFt}′ stage depth
-          {dimsAreAssumed
-            ? " assumed for this design — it has no generated base sheet stating its dimensions. An uploaded plan also states no orientation or scale of its own, so treat these depths as indicative until the sheet is calibrated."
-            : " stated by this design's generated base sheet, whose depth axis these positions follow."}{" "}
+          {depthsFromGeneratedSheet
+            ? " stated by this design's generated base sheet, measured between the back wall and plaster line that sheet actually draws. Markers painted on any OTHER sheet in this design are listed above as not scheduled rather than scored against those dimensions — an uploaded page states no depth axis of its own."
+            : " assumed for this design — it has no generated base sheet stating its dimensions. An uploaded plan also states no orientation or scale of its own, so treat these depths as indicative until the sheet is calibrated."}{" "}
           Nothing here is typed by guess: a line reads &ldquo;—&rdquo; until the placement is
           labelled with a lineset type.
         </div>
