@@ -64,6 +64,9 @@ export const CONNECTION_TYPES: readonly string[] = [
   // rigging
   "motor power",
   "low-voltage pendant control",
+  // network / RF (added 2026-08-07, starter-set import gap — punch #39)
+  "Network/NDI",
+  "RF/antenna",
 ];
 
 /**

@@ -138,6 +138,8 @@ const allKnownConnTypes = DEFAULT_WIRE_TYPES.every((wt) =>
   wt.connectionTypes.every((ct) => CONNECTION_TYPES.includes(ct))
 );
 ok(allKnownConnTypes, "connect: every DEFAULT_WIRE_TYPES connectionType is a member of CONNECTION_TYPES");
+ok(CONNECTION_TYPES.includes("Network/NDI"), "connect: CONNECTION_TYPES includes the new Network/NDI type (punch #39 starter-set import)");
+ok(CONNECTION_TYPES.includes("RF/antenna"), "connect: CONNECTION_TYPES includes the new RF/antenna type (punch #39 starter-set import)");
 
 ok(resolveWireTypes() !== DEFAULT_WIRE_TYPES, "connect: resolveWireTypes with no stored value returns a fresh copy, not the shared singleton");
 ok(JSON.stringify(resolveWireTypes()) === JSON.stringify(DEFAULT_WIRE_TYPES), "connect: resolveWireTypes with no stored value is equal in content to the defaults");
