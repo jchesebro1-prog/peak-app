@@ -59,3 +59,6 @@ next-env.d.ts
 /dealer-import-data.json
 .data-dirty*/
 .data-*/
+
+# local git worktrees (superpowers:using-git-worktrees)
+/.worktrees/
