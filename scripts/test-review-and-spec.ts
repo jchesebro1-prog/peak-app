@@ -29,6 +29,11 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 import { drawPlanDataPage, computeTextOrigin } from "@/lib/design/plan-to-pdf";
 import { walkBundle } from "@/lib/design/client-package";
 import { mergeDatasheets, buildCoverIndex } from "@/lib/design/datasheet-merge";
+// archiver@8 is pure ESM with no default factory export (see the header
+// comment in client-package-zip.ts) — the dependency-resolves check below
+// imports the real named export, ZipArchive.
+import { ZipArchive as ArchiverDepCheck } from "archiver";
+import { buildClientPackageZip } from "@/lib/design/client-package-zip";
 import { budgetFor, type DesignPartial } from "@/app/(app)/design/quick/actions";
 import { createDesign, addDesignRevision, designRevisions } from "@/lib/stores/designs";
 import { list as listCatalogParts } from "@/lib/stores/catalog";
@@ -134,6 +139,7 @@ import {
 } from "@/lib/catalog-connect";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { inflateRawSync } from "node:zlib";
 
 /* --- Task 2: Starter-set import data: every port's connectionType is real (#39) --- */
 const starterSetRaw = JSON.parse(readFileSync(path.join(process.cwd(), "scripts", "starter-import-data.json"), "utf8")) as Array<{ sku: string; ports: Array<{ connectionType: string }> }>;
@@ -2982,6 +2988,57 @@ async function xlsxFixture(): Promise<Buffer> {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+/**
+ * Minimal ZIP central-directory reader (#40 test-only) — reads entry names
+ * and sizes from the central directory (always accurate, unlike the local
+ * file header archiver writes with a streaming data descriptor when it
+ * doesn't commit sizes up front) and inflates each entry's bytes straight
+ * out of its local file header. This lets the client-package-zip test
+ * assert real entry names and real decompressed content without adding a
+ * new zip-reading dependency to the project.
+ */
+function readZipEntries(buf: Buffer): Map<string, Buffer> {
+  // Locate the End Of Central Directory record by scanning backward for its
+  // signature (it's followed by a variable-length, possibly empty comment).
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error("readZipEntries: no End Of Central Directory record found");
+  const cdEntryCount = buf.readUInt16LE(eocd + 10);
+  const cdOffset = buf.readUInt32LE(eocd + 16);
+
+  const entries = new Map<string, Buffer>();
+  let cdPos = cdOffset;
+  for (let i = 0; i < cdEntryCount; i++) {
+    if (buf.readUInt32LE(cdPos) !== 0x02014b50) {
+      throw new Error(`readZipEntries: central directory entry ${i} has a bad signature`);
+    }
+    const compMethod = buf.readUInt16LE(cdPos + 10);
+    const compSize = buf.readUInt32LE(cdPos + 20);
+    const nameLen = buf.readUInt16LE(cdPos + 28);
+    const extraLen = buf.readUInt16LE(cdPos + 30);
+    const commentLen = buf.readUInt16LE(cdPos + 32);
+    const localHeaderOffset = buf.readUInt32LE(cdPos + 42);
+    const name = buf.toString("utf8", cdPos + 46, cdPos + 46 + nameLen);
+
+    // Local file header's own name/extra lengths (not necessarily identical
+    // to the central directory's) determine where this entry's data starts.
+    const localNameLen = buf.readUInt16LE(localHeaderOffset + 26);
+    const localExtraLen = buf.readUInt16LE(localHeaderOffset + 28);
+    const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+    const compData = buf.subarray(dataStart, dataStart + compSize);
+    const data = compMethod === 0 ? Buffer.from(compData) : inflateRawSync(compData);
+    entries.set(name, data);
+
+    cdPos += 46 + nameLen + extraLen + commentLen;
+  }
+  return entries;
+}
+
 async function asyncChecks(): Promise<void> {
   const xr = await xlsxToCsv(await xlsxFixture());
   ok(xr.ok, "#81 a well-formed .xlsx converts");
@@ -3459,6 +3516,56 @@ async function asyncChecks(): Promise<void> {
       realDoc.getPageCount() === 1 + 2 + 3,
       `datasheet-merge: real merge produces cover(1) + A(2) + B(3) = 6 pages, skipping the missing and throwing blobs (got ${realDoc.getPageCount()})`
     );
+  }
+
+  /* --- Client package zip assembly (#40) --- */
+  {
+    ok(ArchiverDepCheck !== undefined, "client-package-zip: archiver dependency resolves");
+
+    // Empty BOM: still produces a real, non-empty zip carrying all three
+    // named entries (an empty zip would look like a bug, not an empty state).
+    const emptyZip = await buildClientPackageZip({
+      bom: [],
+      catalog: [],
+      engagementId: "eng-test",
+      projectName: "Empty Test",
+      customer: "Test Customer",
+      preparedBy: "Tester",
+      drawings: [],
+    });
+    ok(emptyZip.length > 0, "client-package-zip: buildClientPackageZip returns non-empty bytes even for an empty BOM");
+
+    // Real content: a matched row (datasheet-eligible) plus a drawing page,
+    // unzipped back out to confirm exactly the three locked entry names and
+    // that each one carries real, non-trivial bytes — not empty placeholders.
+    const zipCatalog = [
+      { id: "p1", sku: "ETC:405", desc: "Source Four 5°", category: "Fixtures", unit: "ea", list: 1260, cost: 756, specSectionId: "ss-1", specBody: "Ellipsoidal fixture." },
+    ];
+    const realZip = await buildClientPackageZip({
+      bom: [{ sku: "ETC:405", desc: "Source Four 5°", qty: 2 }],
+      catalog: zipCatalog as never,
+      engagementId: "eng-real",
+      projectName: "Real Test Project",
+      customer: "Real Test Customer",
+      preparedBy: "Tester",
+      drawings: [{ title: "Plan sheet", plan: { W: 400, H: 300, rects: [], lines: [], circles: [], texts: [], paths: [] } as never }],
+    });
+    const entries = readZipEntries(Buffer.from(realZip));
+    const entryNames = [...entries.keys()].sort();
+    ok(
+      JSON.stringify(entryNames) === JSON.stringify(["datasheets.pdf", "drawings.pdf", "spec.docx"]),
+      `client-package-zip: the zip contains exactly the three locked entries (got ${JSON.stringify(entryNames)})`
+    );
+    const datasheetsBytes = entries.get("datasheets.pdf")!;
+    const specBytes = entries.get("spec.docx")!;
+    const drawingsBytes = entries.get("drawings.pdf")!;
+    ok(datasheetsBytes.length > 200, "client-package-zip: datasheets.pdf has real content, not an empty placeholder");
+    ok(specBytes.length > 200, "client-package-zip: spec.docx has real content, not an empty placeholder");
+    ok(drawingsBytes.length > 200, "client-package-zip: drawings.pdf has real content, not an empty placeholder");
+    const datasheetsDoc = await PDFDocument.load(datasheetsBytes);
+    ok(datasheetsDoc.getPageCount() >= 1, "client-package-zip: datasheets.pdf has at least one page");
+    const drawingsDoc = await PDFDocument.load(drawingsBytes);
+    ok(drawingsDoc.getPageCount() >= 1, "client-package-zip: drawings.pdf has at least one page (the drawing we passed in)");
   }
 }
 
