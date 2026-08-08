@@ -2621,6 +2621,17 @@ ok(overlaps(1000, 2000, 2000, 3000) === true, "overlaps: touching boundary count
 ok(overlaps(1000, 2000, 2001, 3000) === false, "overlaps: adjacent non-touching is not overlap");
 ok(overlaps(1000, 5000, 2000, 3000) === true, "overlaps: fully contained overlap detected");
 
+/* --- Rentals module, Task 5: rental pricing formula --- pure, asserted here at top level. */
+import { priceRental } from "../src/lib/pricing/rental";
+
+{
+  const rentalRates = { dayRate: 50, weekRate: 200, monthRate: 600 };
+  ok(priceRental(3, rentalRates) === 150, "priceRental: 3 days bills at day rate (150)");
+  ok(priceRental(10, rentalRates) === 400, "priceRental: 10 days bills at week rate (2 weeks = 400)");
+  ok(priceRental(30, rentalRates) === 600, "priceRental: 30 days bills at month rate (600)");
+  ok(priceRental(0, rentalRates) === 0, "priceRental: 0 days bills 0");
+}
+
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Price List");

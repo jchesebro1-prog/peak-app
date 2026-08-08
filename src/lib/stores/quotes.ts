@@ -107,6 +107,10 @@ export type Quote = {
   inspection?: unknown;
   /** Consulting engagement subdoc (owned by the consulting module, D90). */
   consulting?: unknown;
+  /** Rental engine subdoc (owned by the rentals module, D129) — shape
+   *  `{ lines: [{ itemId, locationId, qty, startDate, endDate, rate }] }`,
+   *  read by equipment-bookings.ts's createFromQuote/syncFromQuotes. */
+  rental?: unknown;
   contact?: unknown;
   owner: string;
   /** Estimator/Quick Design spec subdoc. */
@@ -170,6 +174,7 @@ export type QuoteRevision = {
   repair?: unknown;
   inspection?: unknown;
   consulting?: unknown;
+  rental?: unknown;
 };
 
 export type ReviewOpts = {
@@ -337,6 +342,7 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     repair: partial.repair || null,
     inspection: partial.inspection || null,
     consulting: partial.consulting || null,
+    rental: partial.rental || null,
     contact: partial.contact || null,
     owner: partial.owner || "Jeff Chesebro",
     spec: partial.spec || null,
@@ -399,6 +405,7 @@ function snapshotOf(
     repair: doc.repair ?? null,
     inspection: doc.inspection ?? null,
     consulting: doc.consulting ?? null,
+    rental: doc.rental ?? null,
   };
 }
 
