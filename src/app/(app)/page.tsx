@@ -41,6 +41,7 @@ import HomeTabs from "./home-tabs";
 import { loadHomeAgenda } from "@/lib/agenda";
 import { loadQueue, queueNow, queueCardCounts, queueDueLabel } from "@/lib/queue";
 import { list as catalogList } from "@/lib/stores/catalog";
+import { priceBooks } from "@/lib/catalog-books";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 import HomeGreeting from "./home-greeting";
 import HomeStats from "./home-stats";
@@ -62,31 +63,6 @@ import HomeNeedsAttention, { type AlertRow } from "./home-needs-attention";
 const DAY = 86400000;
 
 type QuoteX = Quote & { requote?: boolean };
-
-/** Price-book glance (PUNCHLIST #14): derived from the REAL catalog store,
- *  grouped by manufacturer — the prototype shipped a hardcoded list here
- *  that said "529 parts" forever. Age pills dropped: CatalogPart has no
- *  updatedAt to derive them from (decision A on the punch item). */
-function priceBooks(parts: { mfr?: string }[]): { mono: string; name: string; count: number }[] {
-  const by = new Map<string, number>();
-  for (const pt of parts) {
-    const name = (pt.mfr || "").trim() || "Unbranded";
-    by.set(name, (by.get(name) || 0) + 1);
-  }
-  return [...by.entries()]
-    .map(([name, count]) => ({
-      mono: name
-        .split(/\s+/)
-        .map((w) => w[0] || "")
-        .join("")
-        .slice(0, 2)
-        .toUpperCase(),
-      name,
-      count,
-    }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 6);
-}
 
 /* ---- helpers (ports of the prototype component's) ---- */
 

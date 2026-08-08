@@ -6,6 +6,7 @@ import { firstName } from "@/lib/team";
 import { approvedReviewLine } from "@/lib/review-line";
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import {
+  addQuoteTaskAction,
   approveReviewAction,
   attestApprovalAction,
   claimReviewAction,
@@ -13,12 +14,15 @@ import {
   requestChangesAction,
   saveQuoteAction,
   sendToCustomerAction,
+  setQuoteTaskStatusAction,
   setStatusAction,
   submitReviewAction,
   travelForSelectionAction,
   updateQuoteMetaAction,
+  updateQuoteTaskAction,
   type ReviewSync,
 } from "./actions";
+import { TasksCard } from "@/components/tasks-card";
 import type { DraftedLine } from "./ai-scope-modal";
 import {
   demoSections,
@@ -26,8 +30,6 @@ import {
   FIX_PRESETS,
   FIXTURES,
   fixtureAddOns,
-  GENERIC_SUGGEST,
-  SUGGEST,
   type SuggestPart,
 } from "./estimator-data";
 import {
@@ -241,6 +243,8 @@ export default function EstimatorClient({
   me,
   canApprove,
   aiSource,
+  people,
+  quoteTasks,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   const [sections, setSections] = useState<SpecSection[]>(
@@ -610,6 +614,11 @@ export default function EstimatorClient({
   };
   const renameSystem = (secId: string, name: string) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, name } : s)));
+  /** Manufacturer feeds the catalog-backed quick-add suggestions (PUNCHLIST
+   *  #14, decision B) — sections start with mfr:"" (addSystem) and had no way
+   *  to set one until now. */
+  const setSectionMfr = (secId: string, mfr: string) =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, mfr } : s)));
   const deleteSystem = (secId: string) => {
     const list = sections.filter((s) => s.id !== secId);
     setSections(list);
@@ -2061,6 +2070,38 @@ export default function EstimatorClient({
                   <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(t.fr)}</span>
                 </div>
               </div>
+
+              {/* Tasks (PUNCHLIST #17 remainder) — needs a saved quote to
+                  attach to; a brand-new unsaved draft has nowhere for
+                  quoteId to point yet. */}
+              <div style={{ margin: "6px 14px 14px" }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "#9aa0ab",
+                    letterSpacing: ".05em",
+                    textTransform: "uppercase",
+                    marginBottom: 8,
+                  }}
+                >
+                  Tasks
+                </div>
+                {loadedId ? (
+                  <TasksCard
+                    parentField="quoteId"
+                    parentId={loadedId}
+                    tasks={quoteTasks}
+                    people={people}
+                    addAction={addQuoteTaskAction}
+                    setStatusAction={setQuoteTaskStatusAction}
+                    updateAction={updateQuoteTaskAction}
+                    defaultSection="Review"
+                  />
+                ) : (
+                  <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the quote to add tasks.</div>
+                )}
+              </div>
             </div>
 
             {/* main cards */}
@@ -2087,12 +2128,12 @@ export default function EstimatorClient({
                   catalogOpen={openCatalog === sec.id}
                   customOpen={customFor === sec.id}
                   customDraft={customDraft}
-                  suggestions={SUGGEST[sec.id] || GENERIC_SUGGEST}
                   registerRef={(id, el) => {
                     cardRefs.current[id] = el;
                   }}
                   onToggleExpand={() => toggleExpand(sec.id)}
                   onRename={(name) => renameSystem(sec.id, name)}
+                  onSetMfr={(v) => setSectionMfr(sec.id, v)}
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}
                   onSetFreight={(v) => setFreightPct(sec.id, v)}

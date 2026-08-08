@@ -2617,6 +2617,17 @@ import { equipmentItemsSeed } from "../src/db/seeds/equipment";
 import { overlaps, availableQty, create as createBooking, byQuote as bookingsByQuote } from "../src/lib/stores/equipment-bookings";
 import { qtyOwned as equipmentQtyOwned } from "../src/lib/stores/equipment-items";
 
+/* --- PUNCHLIST #13: service-linked project dual-write ---
+ * createFromQuote() reads the quote doc directly via doc-store (not the
+ * quotes.ts store module — InspectionQuoteLike/RepairQuoteLike are
+ * deliberately minimal structural views), so a fake quote written the same
+ * way is a faithful, isolated way to exercise the spawn without going
+ * through the real quote builder UI/actions. Asserted inside asyncChecks(). */
+import { upsertDoc } from "../src/db/doc-store";
+import { createFromQuote as createInspectionFromQuote, byQuote as inspectionsByQuote } from "../src/lib/stores/inspections";
+import { createFromQuote as createRepairFromQuote, byQuote as repairByQuote } from "../src/lib/stores/repair-jobs";
+import { getProject, getProjectByQuote } from "../src/lib/stores/projects";
+
 ok(overlaps(1000, 2000, 1500, 2500) === true, "overlaps: partial overlap detected");
 ok(overlaps(1000, 2000, 2000, 3000) === true, "overlaps: touching boundary counts as overlap");
 ok(overlaps(1000, 2000, 2001, 3000) === false, "overlaps: adjacent non-touching is not overlap");
@@ -2652,6 +2663,82 @@ import { priceRental } from "../src/lib/pricing/rental";
   );
   const allZero = { dayRate: 0, weekRate: 0, monthRate: 0 };
   ok(priceRental(10, allZero) === 0, "priceRental: all-zero rates (no usable rate data) still returns 0, not a crash");
+}
+
+/* --- #88: rate-limit refund primitive --- pure in-memory module, asserted here at top level. */
+import { rateLimit, rateLimitRefund } from "../src/lib/rate-limit";
+
+{
+  const k = "test:88:basic";
+  ok(rateLimit(k, 1, 60_000).ok, "#88 rateLimit: first hit within a fresh window is ok");
+  ok(!rateLimit(k, 1, 60_000).ok, "#88 rateLimit: second hit against a limit of 1 is refused");
+  rateLimitRefund(k);
+  ok(rateLimit(k, 1, 60_000).ok, "#88 rateLimitRefund: refunding the spent token lets the next hit through");
+  ok(!rateLimit(k, 1, 60_000).ok, "#88 rateLimitRefund: the refund itself doesn't grant a second extra hit");
+
+  const k2 = "test:88:refund-preserves-others";
+  ok(rateLimit(k2, 2, 60_000).ok, "#88 rateLimitRefund setup: hit 1 of 2 ok");
+  ok(rateLimit(k2, 2, 60_000).ok, "#88 rateLimitRefund setup: hit 2 of 2 ok");
+  ok(!rateLimit(k2, 2, 60_000).ok, "#88 rateLimitRefund setup: hit 3 of 2 refused");
+  rateLimitRefund(k2);
+  ok(
+    rateLimit(k2, 2, 60_000).ok,
+    "#88 rateLimitRefund: refunding one of two spent tokens frees exactly one slot, not the whole window"
+  );
+
+  const k3 = "test:88:refund-empty-key";
+  rateLimitRefund(k3); // must not throw on a key with no recorded hits
+  ok(rateLimit(k3, 1, 60_000).ok, "#88 rateLimitRefund: refunding an untouched key is a safe no-op");
+}
+
+/* --- #14: catalog price-book age pills --- pure, asserted here at top level. */
+import { priceBooks } from "../src/lib/catalog-books";
+
+{
+  const now = Date.now();
+  const DAY = 86400000;
+
+  const fullyFresh = priceBooks([
+    { mfr: "Acme", updatedAt: now - 3 * DAY },
+    { mfr: "Acme", updatedAt: now - 5 * DAY },
+  ]);
+  ok(
+    fullyFresh[0]?.ageDays === Math.floor((Date.now() - (now - 5 * DAY)) / DAY),
+    "#14 priceBooks: age pill is the OLDEST updatedAt in a fully-covered book, not the newest"
+  );
+
+  const partialCoverage = priceBooks([
+    { mfr: "Beta", updatedAt: now },
+    { mfr: "Beta" }, // never touched
+  ]);
+  ok(
+    partialCoverage[0]?.count === 2 && partialCoverage[0]?.ageDays === undefined,
+    "#14 priceBooks: one touched row out of two does NOT produce an age pill for the whole book " +
+      "(a partial edit must not make a mostly-untouched book read as fresh)"
+  );
+
+  const neverTouched = priceBooks([{ mfr: "Gamma" }, { mfr: "Gamma" }]);
+  ok(
+    neverTouched[0]?.ageDays === undefined,
+    "#14 priceBooks: a book with no updatedAt anywhere gets no pill (honest unknown, not a fake 0d)"
+  );
+
+  const unbranded = priceBooks([{ updatedAt: now }, { mfr: "  " }]);
+  ok(
+    unbranded.some((b) => b.name === "Unbranded" && b.count === 2),
+    "#14 priceBooks: blank/whitespace-only mfr groups under 'Unbranded'"
+  );
+
+  const capped = priceBooks(
+    Array.from({ length: 8 }, (_, i) => ({ mfr: `Mfr${i}`, updatedAt: now })).flatMap((p, i) =>
+      Array.from({ length: 8 - i }, () => p)
+    )
+  );
+  ok(capped.length === 6, `#14 priceBooks: caps at the top 6 books by count (got ${capped.length})`);
+  ok(
+    capped[0]?.name === "Mfr0" && capped[0]?.count === 8,
+    "#14 priceBooks: sorted by count descending"
+  );
 }
 
 async function xlsxFixture(): Promise<Buffer> {
@@ -2839,6 +2926,91 @@ async function asyncChecks(): Promise<void> {
   }
   const after = await availableQty("eq-1", "loc-1", TEST_WINDOW_START, TEST_WINDOW_END);
   ok(after === owned - 3, "equipment-bookings: confirmed booking reduces availability");
+
+  /* --- PUNCHLIST #13: service-linked project dual-write ---
+   * Fixed test ids + idempotency checks (same "safe to run any number of
+   * times" requirement as the equipment-bookings test above) since this
+   * writes to the real persistent dev DB, not a scratch one. A fake quote
+   * written directly via doc-store is a faithful, isolated way to exercise
+   * the spawn without the real quote builder UI/actions — createFromQuote()
+   * reads the quote the same way (InspectionQuoteLike/RepairQuoteLike are
+   * deliberately minimal structural views, not the quotes.ts store). */
+  const TEST_INSPECTION_QUOTE_ID = "test-quote-punch13-inspection";
+  const TEST_REPAIR_QUOTE_ID = "test-quote-punch13-repair";
+
+  {
+    const priorInspections = await inspectionsByQuote(TEST_INSPECTION_QUOTE_ID);
+    if (!priorInspections.length) {
+      await upsertDoc("quotes", {
+        id: TEST_INSPECTION_QUOTE_ID,
+        name: "PUNCHLIST #13 test inspection quote",
+        quoteType: "inspection",
+        status: "won",
+        customer: "Test Customer #13",
+        customerId: null,
+        locationId: null,
+        value: 500,
+        owner: "Jeff Chesebro",
+      });
+    }
+    const recs = await createInspectionFromQuote(TEST_INSPECTION_QUOTE_ID);
+    ok(!!recs && recs.length === 1, "#13 inspection createFromQuote spawns a record for the test quote");
+    const projectId = recs?.[0]?.projectId;
+    ok(!!projectId, "#13 inspection record carries a projectId");
+    if (projectId) {
+      const proj = await getProject(projectId);
+      ok(!!proj, "#13 the linked project actually exists");
+      ok(proj?.projectType === "inspection", `#13 linked project projectType is 'inspection' (got ${proj?.projectType})`);
+      ok(proj?.stage === "complete", `#13 linked project starts at stage 'complete' (got ${proj?.stage})`);
+      ok(
+        proj?.value === 0,
+        `#13 linked project carries no value (got ${proj?.value}) — the real $ lives on the quote/inspection, never doubled here`
+      );
+      ok(proj?.kind === "order", `#13 linked project kind is 'order' (got ${proj?.kind})`);
+      ok(proj?.quoteId === TEST_INSPECTION_QUOTE_ID, "#13 linked project's quoteId matches the originating quote");
+    }
+    // Idempotency: re-running createFromQuote must not spawn a second project or duplicate records.
+    const recs2 = await createInspectionFromQuote(TEST_INSPECTION_QUOTE_ID);
+    ok(recs2?.length === 1, "#13 inspection createFromQuote is idempotent (no duplicate records on re-run)");
+    ok(recs2?.[0]?.projectId === projectId, "#13 re-running createFromQuote returns the SAME linked project id");
+  }
+
+  {
+    const priorRepair = await repairByQuote(TEST_REPAIR_QUOTE_ID);
+    if (!priorRepair) {
+      await upsertDoc("quotes", {
+        id: TEST_REPAIR_QUOTE_ID,
+        name: "PUNCHLIST #13 test repair quote",
+        quoteType: "repair",
+        status: "won",
+        customer: "Test Customer #13",
+        customerId: null,
+        locationId: null,
+        value: 750,
+        owner: "Jeff Chesebro",
+      });
+    }
+    const rec = await createRepairFromQuote(TEST_REPAIR_QUOTE_ID);
+    ok(!!rec, "#13 repair createFromQuote spawns a record for the test quote");
+    ok(!!rec?.projectId, "#13 repair record carries a projectId");
+    if (rec?.projectId) {
+      const proj = await getProject(rec.projectId);
+      ok(proj?.projectType === "repair", `#13 linked project projectType is 'repair' (got ${proj?.projectType})`);
+      ok(proj?.stage === "complete", "#13 linked project starts at stage 'complete'");
+      ok(proj?.value === 0, "#13 linked project carries no value");
+    }
+    const rec2 = await createRepairFromQuote(TEST_REPAIR_QUOTE_ID);
+    ok(
+      rec2?.id === rec?.id && rec2?.projectId === rec?.projectId,
+      "#13 repair createFromQuote is idempotent (same record, same linked project on re-run)"
+    );
+  }
+
+  {
+    const p1 = await getProjectByQuote(TEST_INSPECTION_QUOTE_ID);
+    const p2 = await getProjectByQuote(TEST_REPAIR_QUOTE_ID);
+    ok(!!p1 && !!p2 && p1.id !== p2.id, "#13 the inspection and repair test quotes get DISTINCT linked projects");
+  }
 }
 
 asyncChecks()

@@ -8,7 +8,14 @@ import { CardHeadTitle } from "./home-shared";
  * in page.tsx since nothing but this one data-prep step calls it.
  */
 
-export type PriceBook = { mono: string; name: string; count: number };
+export type PriceBook = { mono: string; name: string; count: number; ageDays?: number };
+
+/** "3d ago" / "1 day ago" / "today" — omitted entirely when ageDays is undefined. */
+function ageLabel(ageDays: number): string {
+  if (ageDays <= 0) return "today";
+  if (ageDays === 1) return "1d ago";
+  return `${ageDays}d ago`;
+}
 
 export default function HomeCatalog({
   books,
@@ -86,6 +93,23 @@ export default function HomeCatalog({
                 {b.count} parts
               </div>
             </div>
+            {b.ageDays != null && (
+              <span
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 600,
+                  color: "#9aa0ab",
+                  background: "#f1f2f5",
+                  borderRadius: 999,
+                  padding: "3px 8px",
+                  fontFamily: "var(--font-mono)",
+                  flexShrink: 0,
+                }}
+                title="Oldest last-updated part in this price book"
+              >
+                {ageLabel(b.ageDays)}
+              </span>
+            )}
           </div>
         );
       })}

@@ -9,11 +9,12 @@ import {
   travelForName,
   type CustomerDoc,
 } from "@/lib/stores/customers";
-import { reviewers as reviewerUsers } from "@/lib/users";
+import { reviewers as reviewerUsers, activeUsers } from "@/lib/users";
 import { getSettings, type Office } from "@/lib/settings";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates } from "@/lib/stores/pricing";
+import { tasksForQuote } from "@/lib/stores/tasks";
 import EstimatorClient from "./estimator-client";
 import type {
   AiSource,
@@ -164,7 +165,7 @@ export default async function EstimatorPage({
   let q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
   if (!q) q = (await getQuote("Q-2041")) as QuoteDoc | null; // demo fallback so Save has a target
 
-  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates] =
+  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster] =
     await Promise.all([
       byCategory("Fabric"),
       byCategory("Labor"),
@@ -172,7 +173,11 @@ export default async function EstimatorPage({
       reviewerUsers(),
       getSettings(),
       getFixtureRates(),
+      activeUsers(),
     ]);
+  // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
+  // saved once; q.id is only real once a doc exists to key tasks off of).
+  const quoteTasks = q ? await tasksForQuote(q.id) : [];
 
   // Only catalog fabrics with a real per-sq-ft basis feed the curtain
   // configurator — imported vendor fabric rows (priced per unit, no costPerSqft)
@@ -251,6 +256,8 @@ export default async function EstimatorPage({
       me={user.name}
       canApprove={can("approve", user.roles)}
       aiSource={aiSource}
+      people={roster.map((u) => ({ id: u.id, name: u.name }))}
+      quoteTasks={quoteTasks}
     />
   );
 }

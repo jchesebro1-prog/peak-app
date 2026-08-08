@@ -2,14 +2,21 @@
 
 import type { CSSProperties } from "react";
 import type { TaskRecord, TaskStatus } from "@/lib/stores/tasks";
-import { addTaskAction, setTaskStatusAction, updateTaskAction } from "./actions";
 
 /**
- * Project-detail tasks card (#17) — renders + mutates one project's rows from
- * the shared tasks collection (office side of the Field Work punch list).
+ * Shared tasks card (#17) — renders + mutates one parent record's rows from
+ * the shared tasks collection. Originally project-only (`projects/tasks-card.tsx`);
+ * generalized (#17 remainder) so quotes can use the same UI over the same
+ * store, since `TaskRecord` already carries both `projectId` and `quoteId` as
+ * nullable parent pointers. The three mutation actions and the add-form's
+ * hidden parent-id field are passed in as props rather than imported, since
+ * each parent type owns its own thin server-action wrappers (projects/actions.ts,
+ * estimator/actions.ts) — the underlying store calls are identical, but each
+ * route keeps its own `"use server"` file per the rest of the app's convention.
+ *
  * Client component so the status / assignee / due-date controls can
  * auto-submit their own `<form>` on change, matching the file-scoped forms
- * pattern used elsewhere in view.tsx (hidden ids + a server action).
+ * pattern used elsewhere (hidden ids + a server action).
  *
  * Only `import type` reaches `@/lib/stores/tasks` — importing a value (e.g.
  * `STATUS_META`) would pull the whole module, and with it `doc-store.ts` /
@@ -70,13 +77,27 @@ const dateInputStyle: CSSProperties = {
 };
 
 export function TasksCard({
-  projectId,
+  parentField,
+  parentId,
   tasks,
   people,
+  addAction,
+  setStatusAction,
+  updateAction,
+  defaultSection = "Install",
 }: {
-  projectId: string;
+  /** Name of the hidden field the add-task form submits (e.g. "id" for
+   *  projects' addTaskAction, "quoteId" for the estimator's). */
+  parentField: string;
+  parentId: string;
   tasks: TaskRecord[];
   people: { id: string; name: string }[];
+  addAction: (formData: FormData) => void | Promise<void>;
+  setStatusAction: (formData: FormData) => void | Promise<void>;
+  updateAction: (formData: FormData) => void | Promise<void>;
+  /** Placeholder section for a new task — "Install" fits project work,
+   *  quotes pass something that fits a review checklist instead. */
+  defaultSection?: string;
 }) {
   const groupsMap: Record<string, TaskRecord[]> = {};
   const order: string[] = [];
@@ -145,7 +166,7 @@ export function TasksCard({
                   )}
                 </div>
 
-                <form action={setTaskStatusAction} style={{ margin: 0 }}>
+                <form action={setStatusAction} style={{ margin: 0 }}>
                   <input type="hidden" name="taskId" value={t.id} />
                   <select
                     name="status"
@@ -161,7 +182,7 @@ export function TasksCard({
                   </select>
                 </form>
 
-                <form action={updateTaskAction} style={{ margin: 0, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <form action={updateAction} style={{ margin: 0, display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <input type="hidden" name="taskId" value={t.id} />
                   <select
                     name="assigneeUserId"
@@ -191,7 +212,7 @@ export function TasksCard({
       ))}
 
       <form
-        action={addTaskAction}
+        action={addAction}
         style={{
           display: "flex",
           alignItems: "center",
@@ -202,7 +223,7 @@ export function TasksCard({
           flexWrap: "wrap",
         }}
       >
-        <input type="hidden" name="id" value={projectId} />
+        <input type="hidden" name={parentField} value={parentId} />
         <input
           type="text"
           name="title"
@@ -214,7 +235,7 @@ export function TasksCard({
           type="text"
           name="section"
           placeholder="Section"
-          defaultValue="Install"
+          defaultValue={defaultSection}
           style={{ ...dateInputStyle, width: 100 }}
         />
         <select name="assigneeUserId" defaultValue="" style={selectStyle}>

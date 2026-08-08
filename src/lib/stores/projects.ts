@@ -195,6 +195,11 @@ export type ProjectRecord = {
   id: string; // P-#### (base 3000) | S-#### (base 4000)
   kind: ProjectKind;
   quoteId: string | null;
+  /** The originating quote's quoteType ("system" | "flame_test" | "repair" |
+   *  "inspection" | "consulting"), carried through at conversion (PUNCHLIST
+   *  #13, decision 2) — previously dropped at fromQuote() entirely. null on
+   *  projects created before this field existed or without a quote. */
+  projectType: string | null;
   name: string;
   customer: string;
   customerId: string | null;
@@ -296,6 +301,7 @@ function normalizeProject(p: ProjectRecord): ProjectRecord {
   }
   if (!p.kind) p.kind = "project";
   if (!p.stage) p.stage = "procurement";
+  if (p.projectType === undefined) p.projectType = null;
   return p;
 }
 
@@ -342,6 +348,7 @@ export async function createProject(
     const p: ProjectRecord = {
       kind: "project",
       quoteId: null,
+      projectType: null,
       name: "Untitled project",
       customer: "",
       customerId: null,
@@ -542,6 +549,7 @@ function fromQuote(q: QuoteLike): Omit<ProjectRecord, "id"> {
   return {
     kind,
     quoteId: q.id,
+    projectType: q.quoteType || null,
     name: q.name,
     customer: q.customer || "",
     customerId: q.customerId || null,
@@ -588,6 +596,55 @@ export async function createProjectFromQuote(quoteId: string): Promise<ProjectRe
   });
 
   return p;
+}
+
+/**
+ * PUNCHLIST #13, decision A — a lightweight, non-progressing project entry
+ * linked from a won inspection/repair quote (dual-write: the inspection or
+ * repair record stays what it is and gains a `projectId` back-link, it does
+ * not get converted). Called from inspections.ts/repair-jobs.ts's own
+ * createFromQuote/syncFromQuotes — those already own the "signed off" =
+ * quote-approved trigger (decision B), so this only needs to spawn the
+ * project, not decide when to.
+ *
+ * Deliberately NOT a real install/order to progress:
+ * - `stage: "complete"` from the start, never via setProjectStage() — so it
+ *   never fires that function's own side effects (item-16 auto-tasks,
+ *   TASK_TEMPLATE expansion), which are for real installs work a PM
+ *   actually walks through, not a service job's shadow record.
+ * - `stage !== "complete"` is exactly what Reports' Installs book filters
+ *   on (reports/page.tsx's `book`), so a "complete"-from-birth record can
+ *   never inflate an active-pipeline rollup.
+ * - `value: 0`, not copied from the quote — the real dollar figure already
+ *   lives on the quote/inspection/repair record; carrying it here too would
+ *   double-count revenue in anything that sums ProjectRecord.value.
+ * - No crew, no procurement, no deliveries — an inspection/repair already
+ *   owns its own scheduling (assignedTo/scheduledDate) and already renders
+ *   on the main Gantt via operations-work.ts (D100/D115); this project
+ *   entry exists purely so the job also shows up in /projects, not to
+ *   duplicate its scheduling.
+ *
+ * Idempotent on quoteId, matching createProjectFromQuote's own pattern.
+ */
+export async function spawnServiceLinkedProject(
+  q: QuoteLike,
+  projectType: "inspection" | "repair"
+): Promise<ProjectRecord> {
+  const existing = await getProjectByQuote(q.id);
+  if (existing) return existing;
+  return createProject({
+    kind: "order",
+    quoteId: q.id,
+    projectType,
+    name: q.name,
+    customer: q.customer || "",
+    customerId: q.customerId || null,
+    locationId: q.locationId || null,
+    owner: q.owner || DEFAULT_ACTOR,
+    value: 0,
+    margin: 0,
+    stage: "complete",
+  });
 }
 
 /**

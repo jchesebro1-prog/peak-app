@@ -1,5 +1,6 @@
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import type { FixtureRates } from "@/lib/stores/pricing";
+import type { TaskRecord } from "@/lib/stores/tasks";
 
 /**
  * Estimator types. The spec shapes (SpecItem / SpecSection / SpecMob) are the
@@ -206,4 +207,9 @@ export type EstimatorProps = {
   /** Linked survey/inspection to assemble the scope from, or null
    *  (S12/D83 — rules-based, no AI gate). */
   aiSource: AiSource | null;
+  /** Active roster for the quote Tasks card's assignee picker (PUNCHLIST #17 remainder). */
+  people: { id: string; name: string }[];
+  /** This quote's rows from the shared tasks collection, keyed by loadedId —
+   *  empty for a quote that's never been saved (no id to attach tasks to yet). */
+  quoteTasks: TaskRecord[];
 };

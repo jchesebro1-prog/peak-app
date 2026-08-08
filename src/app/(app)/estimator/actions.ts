@@ -31,6 +31,15 @@ import {
 } from "@/lib/stores/inspections";
 import { list as catalogList } from "@/lib/stores/catalog";
 import type { CatalogSearch, SpecMob, SpecSection } from "./types";
+import type { SuggestPart } from "./estimator-data";
+import { activeUsers } from "@/lib/users";
+import {
+  createTask,
+  setTaskStatus as setTaskStatusStore,
+  updateTask as updateTaskStore,
+  STATUSES as TASK_STATUSES,
+  type TaskStatus,
+} from "@/lib/stores/tasks";
 
 /**
  * Estimator server actions — thin, session-gated wrappers over the quotes
@@ -592,6 +601,34 @@ export async function searchCatalog(
   return { hits, total: scored.length };
 }
 
+/**
+ * Catalog-backed quick-add suggestions for a section (PUNCHLIST #14, decision
+ * B — replaces the hardcoded SUGGEST/GENERIC_SUGGEST arrays, which listed
+ * SKUs that mostly didn't exist in the real catalog). Exact match (trimmed,
+ * case-insensitive) on `mfr` — sections now carry an editable manufacturer,
+ * so this only returns anything once one is set. Empty input -> empty
+ * result rather than an unfiltered top-N, matching decision B's spirit: a
+ * real, validated suggestion or nothing, never a guess.
+ */
+export async function suggestPartsForMfr(mfr: string, limit = 4): Promise<SuggestPart[]> {
+  await requireUser();
+  const m = (mfr || "").trim().toLowerCase();
+  if (!m) return [];
+
+  const parts = await catalogList();
+  return parts
+    .filter((p) => (p.mfr || "").trim().toLowerCase() === m)
+    .sort((a, b) => (a.desc || "").localeCompare(b.desc || ""))
+    .slice(0, Math.max(1, limit))
+    .map((p) => ({
+      sku: p.sku,
+      desc: p.desc,
+      cost: p.cost || 0,
+      price: p.list || 0,
+      unit: p.unit || "ea",
+    }));
+}
+
 /* ---------------- travel, on demand (punch #89) ----------------
    The Estimator used to precompute a travel estimate for EVERY customer and
    venue in the directory and ship the whole map to the client. #84 collapsed
@@ -618,4 +655,66 @@ export async function travelForSelectionAction(
     minutes: est.minutes ?? null,
     officeName: est.office?.name ?? null,
   };
+}
+
+/* ---------------- quote tasks (PUNCHLIST #17 remainder) ----------------
+   Thin wrappers over the shared tasks store, mirroring projects/actions.ts's
+   addTaskAction/setTaskStatusAction/updateTaskAction — same store, same
+   shape, kept as separate action functions per-route (each route owns its
+   own "use server" file in this app) rather than importing across routes.
+   setTaskStatusAction/updateTaskAction there are already parent-agnostic
+   (they only ever touch taskId), so only "add" needs a quote-specific
+   version — it writes quoteId instead of projectId. */
+
+export async function addQuoteTaskAction(formData: FormData) {
+  const me = await requireUser();
+  const quoteId = String(formData.get("quoteId") || "");
+  const title = String(formData.get("title") || "").trim();
+  const section = String(formData.get("section") || "Review");
+  const assigneeUserId = String(formData.get("assigneeUserId") || "") || null;
+  const due = String(formData.get("dueAt") || "");
+  if (!quoteId || !title) return;
+  const assigneeName = assigneeUserId
+    ? (await activeUsers()).find((u) => u.id === assigneeUserId)?.name || ""
+    : "";
+  await createTask(
+    {
+      title,
+      section,
+      quoteId,
+      assigneeUserId,
+      assigneeName,
+      dueAt: due ? new Date(due + "T12:00:00").getTime() : null,
+    },
+    me
+  );
+  revalidatePath("/", "layout");
+}
+
+export async function setQuoteTaskStatusAction(formData: FormData) {
+  await requireUser();
+  const taskId = String(formData.get("taskId") || "");
+  const status = String(formData.get("status") || "");
+  if (!taskId || !(TASK_STATUSES as readonly string[]).includes(status)) return;
+  await setTaskStatusStore(taskId, status as TaskStatus);
+  revalidatePath("/", "layout");
+}
+
+export async function updateQuoteTaskAction(formData: FormData) {
+  await requireUser();
+  const taskId = String(formData.get("taskId") || "");
+  if (!taskId) return;
+  const patch: Record<string, unknown> = {};
+  if (formData.has("assigneeUserId")) {
+    const uid = String(formData.get("assigneeUserId") || "") || null;
+    patch.assigneeUserId = uid;
+    patch.assigneeName = uid ? (await activeUsers()).find((u) => u.id === uid)?.name || "" : "";
+  }
+  if (formData.has("dueAt")) {
+    const d = String(formData.get("dueAt") || "");
+    patch.dueAt = d ? new Date(d + "T12:00:00").getTime() : null;
+  }
+  if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
+  await updateTaskStore(taskId, patch);
+  revalidatePath("/", "layout");
 }

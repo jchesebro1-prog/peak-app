@@ -12,9 +12,11 @@ import {
 import {
   addUser,
   allUsers,
-  removeUser,
-  setActive,
+  getUser,
   setRoles,
+  setStatus,
+  updateUser,
+  type UserStatus,
 } from "@/lib/users";
 import { permsFor, ROLES } from "@/lib/team";
 import {
@@ -45,7 +47,7 @@ async function assertNotLastAdmin(exceptId: string, nextRoles?: string[]) {
   const list = await allUsers();
   const admins = list.filter(
     (u) =>
-      u.active &&
+      u.status === "active" &&
       permsFor(u.id === exceptId && nextRoles ? nextRoles : u.roles)
         .manage_users
   );
@@ -58,6 +60,11 @@ export async function addUserAction(input: {
   name: string;
   email: string;
   roles: string[];
+  title?: string;
+  phone?: string;
+  mobile?: string;
+  officeId?: string;
+  certifications?: string;
 }) {
   await requirePerm("manage_users");
   const name = (input.name || "").trim();
@@ -66,24 +73,45 @@ export async function addUserAction(input: {
     name,
     email: (input.email || "").trim(),
     roles: cleanRoles(input.roles || []),
+    title: input.title,
+    phone: input.phone,
+    mobile: input.mobile,
+    officeId: input.officeId,
+    certifications: input.certifications,
   });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
 
-/** Edit an existing member's identity fields (PUNCHLIST #9 defect fix —
- *  wrong seeded emails were a sign-in LOCKOUT with no remedy: auth matches
- *  on email/googleEmail and nothing could correct them). */
+/** Edit an existing member's identity + contact-card fields (PUNCHLIST #9).
+ *  Identity fix: wrong seeded emails were a sign-in LOCKOUT with no remedy —
+ *  auth matches on email/googleEmail and nothing could correct them.
+ *  Contact-card fields (decision A) feed outbound service-document
+ *  signatures — title replaces the roles[0] hack where set, officeId drives
+ *  the signature-block phone (decision D). */
 export async function updateMemberAction(
   id: string,
-  patch: { name?: string; email?: string; googleEmail?: string }
+  patch: {
+    name?: string;
+    email?: string;
+    googleEmail?: string;
+    title?: string;
+    phone?: string;
+    mobile?: string;
+    officeId?: string;
+    certifications?: string;
+  }
 ) {
   await requirePerm("manage_users");
-  const clean: { name?: string; email?: string; googleEmail?: string } = {};
+  const clean: Parameters<typeof updateUser>[1] = {};
   if (patch.name !== undefined && patch.name.trim()) clean.name = patch.name.trim();
   if (patch.email !== undefined) clean.email = patch.email.trim();
-  if (patch.googleEmail !== undefined) clean.googleEmail = patch.googleEmail.trim();
-  const { updateUser } = await import("@/lib/users");
+  if (patch.googleEmail !== undefined) clean.googleEmail = patch.googleEmail.trim() || null;
+  if (patch.title !== undefined) clean.title = patch.title.trim() || null;
+  if (patch.phone !== undefined) clean.phone = patch.phone.trim() || null;
+  if (patch.mobile !== undefined) clean.mobile = patch.mobile.trim() || null;
+  if (patch.officeId !== undefined) clean.officeId = patch.officeId.trim() || null;
+  if (patch.certifications !== undefined) clean.certifications = patch.certifications.trim() || null;
   await updateUser(id, clean);
   revalidatePath("/", "layout");
   return { ok: true as const };
@@ -102,31 +130,31 @@ export async function setRolesAction(id: string, roles: string[]) {
   return { ok: true as const };
 }
 
-export async function setActiveAction(id: string, active: boolean) {
+/** Sets a member's status (PUNCHLIST #9, decision C) — replaces the old
+ *  boolean setActiveAction and the hard-delete removeUserAction. Archived
+ *  and removed both block sign-in and drop out of active-roster pickers;
+ *  removed also hides the row from the Settings team list by default.
+ *  Neither ever deletes the row (finding 6: quotes/jobs/signatures join a
+ *  member by NAME string — a hard delete would orphan every historical
+ *  record that named them). */
+export async function setUserStatusAction(id: string, status: UserStatus) {
   const me = await requirePerm("manage_users");
-  if (!active && id === me.id) {
-    return { ok: false as const, error: "You can't deactivate your own account." };
+  if (status !== "active" && id === me.id) {
+    return {
+      ok: false as const,
+      error:
+        status === "archived"
+          ? "You can't deactivate your own account."
+          : "You can't remove your own account.",
+    };
   }
-  await setActive(id, active);
+  const before = await getUser(id);
+  const previousStatus = before?.status ?? "active";
+  await setStatus(id, status);
   try {
     await assertNotLastAdmin("");
   } catch (e) {
-    await setActive(id, true); // roll back
-    return { ok: false as const, error: (e as Error).message };
-  }
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-export async function removeUserAction(id: string) {
-  const me = await requirePerm("manage_users");
-  if (id === me.id) {
-    return { ok: false as const, error: "You can't remove your own account." };
-  }
-  await removeUser(id);
-  try {
-    await assertNotLastAdmin("");
-  } catch (e) {
+    await setStatus(id, previousStatus); // roll back
     return { ok: false as const, error: (e as Error).message };
   }
   revalidatePath("/", "layout");
@@ -281,6 +309,7 @@ export async function saveOfficeAction(input: {
   city?: string;
   state?: string;
   zip?: string;
+  phone?: string;
   lat?: number | string | null;
   lng?: number | string | null;
 }) {
@@ -320,6 +349,10 @@ export async function saveOfficeAction(input: {
     city,
     state,
     zip: (input.zip || "").trim(),
+    // PUNCHLIST #9, decision D: phone is now an editable field (was
+    // passthrough-only, always read from offices[0] regardless of signer) —
+    // it drives the signature-block phone on repairs/flame-tests reports.
+    phone: (input.phone || "").trim(),
     lat,
     lng,
   };
@@ -327,7 +360,6 @@ export async function saveOfficeAction(input: {
     offices.push(clean);
   } else {
     const i = offices.findIndex((o) => o.id === input.id);
-    // Preserve fields the modal never edits (e.g. seed offices' `phone`).
     if (i >= 0) offices[i] = { ...offices[i], ...clean };
     else offices.push(clean);
   }

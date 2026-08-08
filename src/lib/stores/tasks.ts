@@ -230,6 +230,13 @@ export async function tasksForProject(projectId: string): Promise<TaskRecord[]> 
   return (await allTasks()).filter((t) => t.projectId === projectId);
 }
 
+/** PUNCHLIST #17 remainder — the quote side of the same collection.
+ *  `quoteId` has been written as `null` everywhere until now (no UI wrote
+ *  it); this is the read half once one exists. */
+export async function tasksForQuote(quoteId: string): Promise<TaskRecord[]> {
+  return (await allTasks()).filter((t) => t.quoteId === quoteId);
+}
+
 export async function getTask(id: string): Promise<TaskRecord | null> {
   const doc = await getDoc<TaskRecord>("tasks", id);
   return doc ? normalizeTask(doc) : null;

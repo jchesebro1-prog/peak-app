@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   const uid = session?.user?.id;
   if (!uid) return NextResponse.redirect(new URL("/login", origin));
   const me = await getUser(uid);
-  if (!me || !me.active) return NextResponse.redirect(new URL("/login", origin));
+  if (!me || me.status !== "active") return NextResponse.redirect(new URL("/login", origin));
 
   // Teammates without the admin Settings page land on their own Account page
   // instead of the admin-lock card (C7 — self-serve mailbox connect).

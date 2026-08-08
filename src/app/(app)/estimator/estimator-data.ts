@@ -206,33 +206,15 @@ export type SuggestPart = {
   unit: string;
 };
 
-/** Per-system quick-add suggestions (keyed by the demo section ids). */
-export const SUGGEST: Record<string, SuggestPart[]> = {
-  rig: [
-    { sku: "CL-LB-UH",   desc: "Loft block, under-hung",            cost: 100,  price: 145,  unit: "ea" },
-    { sku: "CL-PIPE-26", desc: "Batten pipe, 1.5″ sch.40, 26′",     cost: 78,   price: 120,  unit: "ea" },
-    { sku: "CL-SPLT",    desc: "Spreader plate, galvanized",        cost: 44,   price: 70,   unit: "ea" },
-  ],
-  soft: [
-    { sku: "RB-SCRIM", desc: "Sharkstooth scrim, 48′ × 24′, black",  cost: 2600, price: 3900, unit: "ea" },
-    { sku: "RB-TRAV",  desc: "Black traveler track, 54′, walkalong", cost: 1450, price: 2300, unit: "set" },
-  ],
-  hoist: [
-    { sku: "ETC-PD-LB",   desc: "Prodigy loft block kit",     cost: 210, price: 310, unit: "ea" },
-    { sku: "ETC-PD-DROP", desc: "Prodigy drop box, 8-circuit", cost: 430, price: 640, unit: "ea" },
-  ],
-  labor: [
-    { sku: "LAB-ENG", desc: "Engineering & stamped drawings", cost: 90, price: 150, unit: "hr" },
-  ],
-};
-
-/** Generic suggestions for new/unknown systems. */
-export const GENERIC_SUGGEST: SuggestPart[] = [
-  { sku: "GEN-FIXT",  desc: "Fixture / device (generic)",     cost: 140, price: 210, unit: "ea" },
-  { sku: "GEN-CABLE", desc: "Cable & connectors allowance",   cost: 90,  price: 140, unit: "lot" },
-  { sku: "GEN-HW",    desc: "Mounting hardware allowance",    cost: 60,  price: 95,  unit: "lot" },
-  { sku: "GEN-LAB",   desc: "Installation labor",             cost: 65,  price: 95,  unit: "hr" },
-];
+/**
+ * SUGGEST/GENERIC_SUGGEST retired (PUNCHLIST #14, decision B) — they were
+ * hardcoded SKUs that didn't exist in the real catalog (only RB-SCRIM
+ * happened to overlap, at a different price/unit), keyed by the four demo
+ * section ids so real user-created sections never matched them anyway.
+ * Quick-add suggestions are now catalog-backed: `suggestPartsForMfr` in
+ * ./actions, driven by the section's own (now-editable) `mfr` field, and
+ * rendered by ./suggested-parts.
+ */
 
 /** The prototype's starting sections — used when the quote has no saved spec. */
 export function demoSections(): SpecSection[] {

@@ -2414,3 +2414,39 @@ concurrent-write race — swapped to `insertWithPrefixedId` (D73's helper,
 same as `quotes.ts`); and the booking board's empty state linked to `/rentals`
 (the inventory hub) instead of `/rentals/quote` (where quotes are actually
 created).
+
+## D131. Team member contact card + archived/removed status (2026-08-08)
+
+Punch #9, decisions A/C/D (all answered by Jeff 2026-07-19, built now).
+`users.active` (boolean) replaced with `status` ('active' | 'archived' |
+'removed') — archived and removed both block sign-in and drop out of
+active-roster pickers (`activeUsers()`); removed also hides the row from the
+Settings team list by default (a "Show N removed" toggle is the escape
+hatch — restore sets status back to 'active'). Neither ever hard-deletes:
+`removeUser`'s old `db.delete` is gone, matching finding 6's own
+recommendation (members are joined by NAME string all over the app; a hard
+delete would orphan every historical record that named them). Migration
+0015 adds the new columns and backfills `status='archived'` for existing
+`active=false` rows BEFORE migration 0016 drops the old column — generated
+as two separate `db:generate` passes because drizzle-kit's interactive
+rename-detection prompt can't run in this environment (add-only diff, then
+drop-only diff, avoids the ambiguity entirely).
+
+Contact-card fields added: `title`, `phone`, `mobile`, `officeId`,
+`certifications`. `officeId` drives decision D — the signature-block phone
+on the two documents that actually show one (`repairs/report/report-doc.tsx`,
+`flame-tests/report/report-doc.tsx`) now resolves from the SIGNER's assigned
+office, falling back to `offices[0]` only when unassigned, instead of always
+reading `offices[0]` regardless of who signed. Office phone is now editable
+in Settings → Locations (was passthrough-only — the field existed on `Office`
+but no UI ever wrote it).
+
+Scope cut, deliberately: finding 1 (the `roles[0]`-as-title hack producing
+"Admin" as a job title on some documents, "Estimator" on others) was NOT
+promoted to an answered decision on this punch item — only decision D
+(phone) was. `title` is stored and shown in the contact card, but the six
+"single-page" letter templates (results/summary/completion/warranty ×
+repairs/flame-tests/inspections) that use `_letters/util.tsx`'s
+`officePhone(settings)` were left untouched — they don't currently resolve
+a per-signer user at all, so wiring them in is a separable, larger task, not
+this one's scope.

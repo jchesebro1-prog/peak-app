@@ -33,8 +33,11 @@ import {
   removeCrewAction,
   signoffAction,
   startConversionAction,
+  addTaskAction,
+  setTaskStatusAction,
+  updateTaskAction,
 } from "./actions";
-import { TasksCard } from "./tasks-card";
+import { TasksCard } from "@/components/tasks-card";
 import { SegmentedToggle } from "@/components/ui";
 import { OwnerSelect } from "@/components/owner-select";
 import BoardView from "@/components/board/board-view";
@@ -1237,7 +1240,15 @@ function OverviewTab({
         </span>
       </div>
       <div style={{ marginBottom: 16 }}>
-        <TasksCard projectId={p.id} tasks={projectTasks} people={people} />
+        <TasksCard
+          parentField="id"
+          parentId={p.id}
+          tasks={projectTasks}
+          people={people}
+          addAction={addTaskAction}
+          setStatusAction={setTaskStatusAction}
+          updateAction={updateTaskAction}
+        />
       </div>
 
       {recentNotes.length > 0 && (

@@ -698,6 +698,14 @@ export type InspectionRecord = {
   id: string;
   /** Accepted inspection quote this record was spawned from (IDEAS #44). */
   quoteId: string | null;
+  /** Lightweight linked project spawned alongside this record from the same
+   *  quote (PUNCHLIST #13, decision A — dual-write, this record is NOT
+   *  converted). All venue-records from one quote share the same project.
+   *  Optional: absent on records that predate this field — there is no
+   *  read-time normalize pass in this file (unlike projects.ts), so old
+   *  docs simply don't have the key rather than reading as null.
+   *  See spawnServiceLinkedProject() in stores/projects.ts. */
+  projectId?: string | null;
   /** 1 = annual · 2 = five-year in-depth — drives the renewal cadence. */
   level: number;
   /** Line sets covered (from the quote; informs the estimate + scope). */
@@ -928,6 +936,7 @@ export function findingsFromRubricRating(
 
 export type InspectionDraft = {
   quoteId: string | null;
+  projectId: string | null;
   level: number;
   lineSets: number;
   value: number;
@@ -963,7 +972,7 @@ export type InspectionDraft = {
  *  value when it is neither undefined nor null. Unknown keys are dropped. */
 export function blank(partial: Partial<InspectionRecord> = {}): InspectionDraft {
   const def: InspectionDraft = {
-    quoteId: null, level: 1, lineSets: 0, value: 0,
+    quoteId: null, projectId: null, level: 1, lineSets: 0, value: 0,
     customer: "", customerId: null, locationId: null, venue: "",
     venueType: VENUE_TYPES[0], address: "",
     contact: "", contactPhone: "", contactEmail: "",
@@ -1194,6 +1203,7 @@ export async function renewals(
 /** Minimal structural view of an inspection quote doc (collection "quotes"). */
 export type InspectionQuoteLike = {
   id: string;
+  name?: string;
   quoteType?: string;
   status?: string;
   customer?: string;
@@ -1255,6 +1265,15 @@ export async function createFromQuote(
       : [{ id: q.locationId, label: "", lineSets: 0 }];
   const share = Math.round((q.value || 0) / venues.length);
   const contact = q.contact || insp.contact || null;
+
+  // PUNCHLIST #13, decision A — one lightweight linked project per QUOTE
+  // (spawned once, shared by every venue-record below), not per venue.
+  const { spawnServiceLinkedProject } = await import("@/lib/stores/projects");
+  const project = await spawnServiceLinkedProject(
+    { id: q.id, name: q.name || "Rigging Inspection", customer: q.customer, customerId: q.customerId, locationId: q.locationId, owner: q.owner, quoteType: q.quoteType },
+    "inspection"
+  );
+
   const made: InspectionRecord[] = [];
   for (let i = 0; i < venues.length; i++) {
     const v = venues[i];
@@ -1269,6 +1288,7 @@ export async function createFromQuote(
     const lineSets = Math.max(0, Number(v.lineSets) || 0);
     const rec = await create({
       quoteId: q.id,
+      projectId: project.id,
       level,
       lineSets,
       // first venue absorbs the rounding remainder

@@ -185,7 +185,7 @@ export default async function QuotesPage({
   });
   if (typeFilter !== "all") scoped = scoped.filter((q) => typeOf(q) === typeFilter);
 
-  const roster = users.filter((u) => u.active);
+  const roster = users.filter((u) => u.status === "active");
   const ownerOptions = [
     { value: "all", label: "All teammates", href: hrefFor({ who: "all" }) },
   ].concat(

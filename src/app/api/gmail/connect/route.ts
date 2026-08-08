@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
   const uid = session?.user?.id;
   if (!uid) return NextResponse.redirect(new URL("/login", origin));
   const me = await getUser(uid);
-  if (!me || !me.active) return NextResponse.redirect(new URL("/login", origin));
+  if (!me || me.status !== "active") return NextResponse.redirect(new URL("/login", origin));
 
   const mailboxKey = (req.nextUrl.searchParams.get("mailbox") || "").trim();
   const shared = (SHARED_KEYS as readonly string[]).includes(mailboxKey);

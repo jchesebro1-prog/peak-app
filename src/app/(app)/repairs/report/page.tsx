@@ -210,7 +210,7 @@ export default async function RepairReportPage({
     accent,
     companyName: settings.companyName || "Peak Systems Group",
     offices: Array.isArray(settings.offices) ? settings.offices : [],
-    users: users.map((u) => ({ name: u.name, roles: u.roles, email: u.email })),
+    users: users.map((u) => ({ name: u.name, roles: u.roles, email: u.email, officeId: u.officeId })),
     letterhead: settings.logoDark || null,
   };
   const model = buildReportModel(job, org);

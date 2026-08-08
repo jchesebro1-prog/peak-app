@@ -12,6 +12,22 @@ export * from "./doc-tables";
  *   differs from the canonical company address (e.g. a personal Gmail).
  * - photoUrl: Google profile photo; UI still renders initials+color avatars
  *   as in the prototype, photo is kept for future use.
+ *
+ * PUNCHLIST #9 additions (D131):
+ * - status replaces the old `active` boolean — 'active' | 'archived' |
+ *   'removed'. Archived and removed both block sign-in and drop out of
+ *   active-roster pickers (see activeUsers() in lib/users.ts); the only
+ *   difference is that 'removed' also hides the row from the Settings team
+ *   list by default. Neither ever hard-deletes the row (finding 6: quotes/
+ *   jobs/signatures join a member by NAME string, so a hard delete orphans
+ *   every historical record that named them).
+ * - title/phone/mobile/certifications: contact-card fields for outbound
+ *   service paperwork signatures (decision A). `title` is the real job
+ *   title shown on documents, replacing the `roles[0]`-as-title hack where
+ *   it's set; falls back to the old derivation when blank.
+ * - officeId: which Office (settings.offices[].id) this member signs from —
+ *   drives the signature-block phone number (decision D), which reads the
+ *   SIGNER's office rather than unconditionally offices[0].
  */
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
@@ -21,7 +37,14 @@ export const users = pgTable("users", {
   roles: jsonb("roles").$type<string[]>().notNull(),
   color: text("color").notNull(),
   initials: text("initials").notNull(),
-  active: boolean("active").notNull().default(true),
+  status: text("status", { enum: ["active", "archived", "removed"] })
+    .notNull()
+    .default("active"),
+  title: text("title"),
+  phone: text("phone"),
+  mobile: text("mobile"),
+  officeId: text("office_id"),
+  certifications: text("certifications"),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   photoUrl: text("photo_url"),
 });

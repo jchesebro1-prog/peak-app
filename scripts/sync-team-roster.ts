@@ -53,7 +53,7 @@ async function main() {
 
   console.log("\nBEFORE:");
   for (const u of rows)
-    console.log(`  ${u.id}  ${u.name}  <${u.email}>  google=${u.googleEmail ?? "—"}  roles=${(u.roles || []).join("/")}  active=${u.active}`);
+    console.log(`  ${u.id}  ${u.name}  <${u.email}>  google=${u.googleEmail ?? "—"}  roles=${(u.roles || []).join("/")}  status=${u.status}`);
 
   const me = rows.find(
     (u) =>
@@ -101,7 +101,7 @@ async function main() {
         .update(users)
         .set({
           email: emailFor(existing.name),
-          active: true,
+          status: "active",
           googleEmail: existing.googleEmail || OWNER_GOOGLE,
         })
         .where(eq(users.id, existing.id));
@@ -109,7 +109,7 @@ async function main() {
     } else if (existing) {
       await db
         .update(users)
-        .set({ email: emailFor(t.name), roles: t.roles, active: true })
+        .set({ email: emailFor(t.name), roles: t.roles, status: "active" })
         .where(eq(users.id, existing.id));
       console.log(`updated ${existing.id} ${t.name} -> <${emailFor(t.name)}> roles=${t.roles.join("/")}`);
     } else {
@@ -122,7 +122,7 @@ async function main() {
         roles: t.roles,
         color: IDENTITY[t.name]?.color ?? fallbackColor(t.name),
         initials: IDENTITY[t.name]?.initials ?? deriveInitials(t.name),
-        active: true,
+        status: "active",
         createdAt: Date.now(),
         photoUrl: null,
       });
@@ -133,7 +133,7 @@ async function main() {
   const after = await db.select().from(users).orderBy(users.id);
   console.log("\nAFTER:");
   for (const u of after)
-    console.log(`  ${u.id}  ${u.name}  <${u.email}>  google=${u.googleEmail ?? "—"}  roles=${(u.roles || []).join("/")}  active=${u.active}`);
+    console.log(`  ${u.id}  ${u.name}  <${u.email}>  google=${u.googleEmail ?? "—"}  roles=${(u.roles || []).join("/")}  status=${u.status}`);
   process.exit(0);
 }
 

@@ -6,6 +6,7 @@ import { fmt, marginColor, systemFreight, systemItemsCost, systemItemsRev } from
 import type { CustomDraft, SpecSection } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import CatalogPicker from "./catalog-picker";
+import SuggestedParts from "./suggested-parts";
 
 /**
  * One system card — header (badge / rename / cost / price), per-system margin
@@ -43,10 +44,10 @@ export type SectionCardProps = {
   catalogOpen: boolean;
   customOpen: boolean;
   customDraft: CustomDraft;
-  suggestions: SuggestPart[];
   registerRef: (id: string, el: HTMLDivElement | null) => void;
   onToggleExpand: () => void;
   onRename: (name: string) => void;
+  onSetMfr: (mfr: string) => void;
   onDelete: () => void;
   onSetMargin: (v: string) => void;
   onSetFreight: (v: string) => void;
@@ -326,6 +327,35 @@ export default function SectionCard(p: SectionCardProps) {
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#9aa0ab" }}>
                 {fmt(secFreight)}
               </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "#9aa0ab",
+                  letterSpacing: ".04em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Manufacturer
+              </span>
+              <input
+                type="text"
+                value={sec.mfr}
+                onChange={(e) => p.onSetMfr(e.target.value)}
+                placeholder="e.g. JR Clancy"
+                title="Drives the catalog-backed quick-add suggestions below"
+                style={{
+                  width: 140,
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 12.5,
+                  color: "#16181d",
+                  border: "1px solid #dfe2e8",
+                  borderRadius: 7,
+                  padding: "5px 8px",
+                }}
+              />
             </div>
             <button
               type="button"
@@ -640,6 +670,8 @@ export default function SectionCard(p: SectionCardProps) {
             </div>
 
             {p.catalogOpen && <CatalogPicker onAdd={p.onAddPart} />}
+
+            <SuggestedParts mfr={sec.mfr} onAdd={p.onAddPart} />
 
             {/* ===== custom part portal ===== */}
             {p.customOpen && (

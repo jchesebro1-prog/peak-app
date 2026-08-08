@@ -150,6 +150,7 @@ export default async function SettingsPage() {
             city: o.city || "",
             state: o.state || "",
             zip: o.zip || "",
+            phone: o.phone || "",
             lat: o.lat,
             lng: o.lng,
           }))}
@@ -161,7 +162,12 @@ export default async function SettingsPage() {
             roles: u.roles,
             color: u.color,
             initials: u.initials,
-            active: u.active,
+            status: u.status,
+            title: u.title || "",
+            phone: u.phone || "",
+            mobile: u.mobile || "",
+            officeId: u.officeId || "",
+            certifications: u.certifications || "",
           }))}
         />
       )}

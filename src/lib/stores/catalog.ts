@@ -67,6 +67,12 @@ export type CatalogPart = {
   datasheetBlobKey?: string;
   /** Original filename of the attached datasheet, for display. */
   datasheetName?: string;
+  /** Epoch ms of the last write through `upsert`/`mergeUpsert` (PUNCHLIST
+   *  #14, decision A) — drives the dashboard's price-book age pills. Unset
+   *  on rows that have never been touched since seeding (the seed fixtures
+   *  predate this field on purpose; "unknown age" is honest for a row
+   *  nobody has confirmed since import). */
+  updatedAt?: number;
 };
 
 /** All parts (port of window.MASTER_CATALOG reads). */
@@ -84,11 +90,15 @@ export async function byCategory(category: string): Promise<CatalogPart[]> {
   return all.filter((p) => p.category === category);
 }
 
-/** Insert or fully replace a part; the SKU is the document id. */
+/** Insert or fully replace a part; the SKU is the document id. Stamps
+ *  `updatedAt` on every write (PUNCHLIST #14, decision A) — centralized here
+ *  rather than left to each caller so every write path (the catalog edit
+ *  form, the .xlsx/CSV importer, the spec-builder's create-on-the-fly path)
+ *  gets it for free instead of needing to remember it individually. */
 export async function upsert(
   part: Omit<CatalogPart, "id"> & { id?: string }
 ): Promise<CatalogPart> {
-  const doc: CatalogPart = { ...part, id: part.id || part.sku };
+  const doc: CatalogPart = { ...part, id: part.id || part.sku, updatedAt: Date.now() };
   return upsertDoc<CatalogPart>("catalog_parts", doc);
 }
 

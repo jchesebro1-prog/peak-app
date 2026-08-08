@@ -14,7 +14,7 @@ export async function allUsers(): Promise<UserRow[]> {
 }
 
 export async function activeUsers(): Promise<UserRow[]> {
-  return (await allUsers()).filter((u) => u.active);
+  return (await allUsers()).filter((u) => u.status === "active");
 }
 
 export async function getUser(id: string): Promise<UserRow | null> {
@@ -56,6 +56,11 @@ export async function addUser(partial: {
   email?: string;
   googleEmail?: string;
   roles?: string[];
+  title?: string;
+  phone?: string;
+  mobile?: string;
+  officeId?: string;
+  certifications?: string;
 }): Promise<UserRow> {
   const db = await getDb();
   const list = await allUsers();
@@ -73,7 +78,12 @@ export async function addUser(partial: {
     roles: partial.roles && partial.roles.length ? partial.roles : ["Estimator"],
     color: fallbackColor(name),
     initials: deriveInitials(name),
-    active: true,
+    status: "active" as const,
+    title: (partial.title || "").trim() || null,
+    phone: (partial.phone || "").trim() || null,
+    mobile: (partial.mobile || "").trim() || null,
+    officeId: (partial.officeId || "").trim() || null,
+    certifications: (partial.certifications || "").trim() || null,
     createdAt: Date.now(),
     photoUrl: null,
   };
@@ -89,22 +99,39 @@ export async function setRoles(id: string, roles: string[]): Promise<void> {
     .where(eq(users.id, id));
 }
 
-export async function setActive(id: string, active: boolean): Promise<void> {
+export type UserStatus = "active" | "archived" | "removed";
+
+/** Replaces the old boolean setActive (PUNCHLIST #9, decision C) — archived
+ *  and removed both block sign-in and drop out of active-roster pickers
+ *  (activeUsers()); removed additionally hides the row from the Settings
+ *  team list by default. Neither ever hard-deletes. */
+export async function setStatus(id: string, status: UserStatus): Promise<void> {
   const db = await getDb();
-  await db.update(users).set({ active: !!active }).where(eq(users.id, id));
+  await db.update(users).set({ status }).where(eq(users.id, id));
 }
 
 export async function updateUser(
   id: string,
-  patch: Partial<Pick<UserRow, "name" | "email" | "googleEmail" | "roles" | "color" | "initials" | "photoUrl">>
+  patch: Partial<
+    Pick<
+      UserRow,
+      | "name"
+      | "email"
+      | "googleEmail"
+      | "roles"
+      | "color"
+      | "initials"
+      | "photoUrl"
+      | "title"
+      | "phone"
+      | "mobile"
+      | "officeId"
+      | "certifications"
+    >
+  >
 ): Promise<void> {
   const db = await getDb();
   await db.update(users).set(patch).where(eq(users.id, id));
-}
-
-export async function removeUser(id: string): Promise<void> {
-  const db = await getDb();
-  await db.delete(users).where(eq(users.id, id));
 }
 
 export function userCan(u: Pick<UserRow, "roles"> | null | undefined, perm: Perm): boolean {

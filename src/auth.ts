@@ -42,7 +42,7 @@ if (devLoginEnabled()) {
       credentials: { userId: { label: "User id" } },
       async authorize(creds) {
         const u = await getUser(String(creds?.userId ?? ""));
-        if (!u || !u.active) return null;
+        if (!u || u.status !== "active") return null;
         return { id: u.id, name: u.name, email: u.email };
       },
     })
@@ -80,7 +80,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signIn({ user, account }) {
       if (account?.provider === "google") {
         const row = await getUserByEmail(user.email || "");
-        if (!row || !row.active) return false;
+        if (!row || row.status !== "active") return false;
         if (user.image && user.image !== row.photoUrl) {
           await updateUser(row.id, { photoUrl: user.image });
         }
@@ -111,7 +111,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.roles = row.roles;
         session.user.initials = row.initials;
         session.user.color = row.color;
-        session.user.active = row.active;
+        session.user.active = row.status === "active";
       } else if (session.user) {
         session.user.active = false;
       }

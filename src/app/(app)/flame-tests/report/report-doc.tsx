@@ -59,8 +59,8 @@ export type ReportJob = {
 export type OrgCtx = {
   accent: string;
   companyName: string;
-  offices: Array<{ city?: string; phone?: string }>;
-  users: Array<{ name: string; roles: string[] | null; email: string }>;
+  offices: Array<{ id?: string; city?: string; phone?: string }>;
+  users: Array<{ name: string; roles: string[] | null; email: string; officeId?: string | null }>;
   /** Uploaded dark brand mark (Settings → Branding, IDEAS #32) — replaces the
    *  baked-in letterhead image when present. */
   letterhead?: string | null;
@@ -206,7 +206,10 @@ export function buildReportModel(job: ReportJob, org: OrgCtx) {
   const roles = (u && u.roles) || [];
   const signerTitle = roles.filter((r) => r !== "Admin")[0] || roles[0] || "Estimator";
   const signerEmail = (u && u.email) || "";
-  const office = org.offices[0] || {};
+  // PUNCHLIST #9, decision D: the signature phone comes from the SIGNER's
+  // assigned office, not unconditionally offices[0] — falls back to
+  // offices[0] when the signer has no office assignment yet.
+  const office = (u?.officeId && org.offices.find((o) => o.id === u.officeId)) || org.offices[0] || {};
   const signerPhone = office.phone || "";
   const officeCity = office.city || "";
 

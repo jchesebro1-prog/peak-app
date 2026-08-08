@@ -15,7 +15,6 @@ import {
   clearDemoDataAction,
   geocodeCityAction,
   removeOfficeAction,
-  removeUserAction,
   saveOfficeAction,
   disconnectMailboxAction,
   saveIntakeCatalogAction,
@@ -25,10 +24,11 @@ import {
   saveLogoAction,
   saveSettingsAction,
   searchAddressAction,
-  setActiveAction,
   setRolesAction,
+  setUserStatusAction,
   updateMemberAction,
 } from "./actions";
+import type { UserStatus } from "@/lib/users";
 import type { GeoSearchHit } from "@/lib/geo";
 import type { CustomFieldDef } from "@/lib/customer-fields";
 import { CustomerFieldsCard } from "./customer-fields-card";
@@ -64,7 +64,12 @@ type UserVM = {
   roles: string[];
   color: string;
   initials: string;
-  active: boolean;
+  status: UserStatus;
+  title: string;
+  phone: string;
+  mobile: string;
+  officeId: string;
+  certifications: string;
 };
 
 type OfficeVM = {
@@ -75,6 +80,7 @@ type OfficeVM = {
   city: string;
   state: string;
   zip: string;
+  phone: string;
   lat: number | null;
   lng: number | null;
 };
@@ -86,6 +92,7 @@ type OfficeDraft = {
   city: string;
   state: string;
   zip: string;
+  phone: string;
   lat: string;
   lng: string;
   geoMiss: boolean;
@@ -167,11 +174,29 @@ export default function SettingsClient({
   // silently in this app (D96), and the modal-footer Remove was so buried that
   // ⏻ (deactivate) read as "remove" and rows "never went away" (D127).
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{ name: string; email: string; googleEmail: string; roles: string[] }>({
+  // Removed members are hidden from the list by default (decision C) — this
+  // is the escape hatch so an accidental Remove isn't a dead end.
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [draft, setDraft] = useState<{
+    name: string;
+    email: string;
+    googleEmail: string;
+    roles: string[];
+    title: string;
+    phone: string;
+    mobile: string;
+    officeId: string;
+    certifications: string;
+  }>({
     name: "",
     email: "",
     googleEmail: "",
     roles: ["Estimator"],
+    title: "",
+    phone: "",
+    mobile: "",
+    officeId: "",
+    certifications: "",
   });
   const nameTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -310,6 +335,7 @@ export default function SettingsClient({
     city: "",
     state: "",
     zip: "",
+    phone: "",
     lat: "",
     lng: "",
     geoMiss: false,
@@ -328,6 +354,7 @@ export default function SettingsClient({
       city: o.city,
       state: o.state,
       zip: o.zip,
+      phone: o.phone || "",
       lat: o.lat == null ? "" : String(o.lat),
       lng: o.lng == null ? "" : String(o.lng),
       geoMiss: false,
@@ -391,6 +418,7 @@ export default function SettingsClient({
         city: officeDraft.city,
         state: officeDraft.state,
         zip: officeDraft.zip,
+        phone: officeDraft.phone,
         lat: officeDraft.lat,
         lng: officeDraft.lng,
       })
@@ -405,7 +433,17 @@ export default function SettingsClient({
   const officeIsNew = officeModal === "__new__";
 
   const openNew = () => {
-    setDraft({ name: "", email: "", googleEmail: "", roles: ["Estimator"] });
+    setDraft({
+      name: "",
+      email: "",
+      googleEmail: "",
+      roles: ["Estimator"],
+      title: "",
+      phone: "",
+      mobile: "",
+      officeId: "",
+      certifications: "",
+    });
     setModal("new");
   };
   const openEdit = (u: UserVM) => {
@@ -414,6 +452,11 @@ export default function SettingsClient({
       email: u.email,
       googleEmail: u.googleEmail || "",
       roles: u.roles.slice(),
+      title: u.title,
+      phone: u.phone,
+      mobile: u.mobile,
+      officeId: u.officeId,
+      certifications: u.certifications,
     });
     setModal(u.id);
   };
@@ -439,6 +482,11 @@ export default function SettingsClient({
           name: draft.name,
           email: draft.email,
           googleEmail: draft.googleEmail,
+          title: draft.title,
+          phone: draft.phone,
+          mobile: draft.mobile,
+          officeId: draft.officeId,
+          certifications: draft.certifications,
         });
         return setRolesAction(id, draft.roles);
       });
@@ -449,6 +497,11 @@ export default function SettingsClient({
   const isNew = modal === "new";
   const editingUser = modal && !isNew ? users.find((u) => u.id === modal) : null;
   const canDelete = !!editingUser && editingUser.name !== meName;
+
+  // Removed members are hidden by default (decision C) — showRemoved is the
+  // escape hatch so an accidental Remove isn't a dead end.
+  const removedCount = users.filter((u) => u.status === "removed").length;
+  const visibleUsers = showRemoved ? users : users.filter((u) => u.status !== "removed");
 
   const labelStyle: React.CSSProperties = {
     display: "block",
@@ -1279,8 +1332,24 @@ export default function SettingsClient({
             <div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
               <span style={{ fontSize: 15, fontWeight: 600 }}>Team members</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#9aa0ab" }}>
-                {users.length}
+                {visibleUsers.length}
               </span>
+              {removedCount > 0 && (
+                <button
+                  onClick={() => setShowRemoved((s) => !s)}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: showRemoved ? "var(--accent)" : "#9aa0ab",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  {showRemoved ? "Hide" : "Show"} {removedCount} removed
+                </button>
+              )}
             </div>
             <button className="pk-btn-accent" onClick={openNew}>
               + Add user
@@ -1308,7 +1377,7 @@ export default function SettingsClient({
             <span style={{ textAlign: "right" }}>Actions</span>
           </div>
 
-          {users.map((u) => (
+          {visibleUsers.map((u) => (
             <div
               key={u.id}
               style={{
@@ -1318,7 +1387,7 @@ export default function SettingsClient({
                 padding: "13px 18px",
                 alignItems: "center",
                 borderBottom: "1px solid #f5f6f8",
-                opacity: u.active ? 1 : 0.55,
+                opacity: u.status === "active" ? 1 : 0.55,
               }}
             >
               <span
@@ -1386,19 +1455,19 @@ export default function SettingsClient({
                 {u.roles.map((r) => (
                   <RolePill key={r} role={r} />
                 ))}
-                {!u.active && (
+                {u.status !== "active" && (
                   <span
                     style={{
                       fontSize: 10,
                       fontWeight: 600,
                       padding: "2px 8px",
                       borderRadius: 20,
-                      color: "#8c919c",
-                      background: "#f1f2f5",
-                      border: "1px solid #e4e7ec",
+                      color: u.status === "removed" ? "#b4543a" : "#8c919c",
+                      background: u.status === "removed" ? "#fbf0ed" : "#f1f2f5",
+                      border: u.status === "removed" ? "1px solid #f0ddd6" : "1px solid #e4e7ec",
                     }}
                   >
-                    Deactivated
+                    {u.status === "removed" ? "Removed" : "Archived"}
                   </span>
                 )}
               </span>
@@ -1410,7 +1479,7 @@ export default function SettingsClient({
                       style={{ padding: "6px 10px", fontSize: 12 }}
                       onClick={() => {
                         setConfirmRemove(null);
-                        run(() => removeUserAction(u.id));
+                        run(() => setUserStatusAction(u.id, "removed"));
                       }}
                     >
                       Remove {firstName(u.name)}?
@@ -1423,22 +1492,33 @@ export default function SettingsClient({
                       Keep
                     </button>
                   </>
+                ) : u.status === "removed" ? (
+                  <button
+                    className="pk-btn-outline"
+                    title="Restore to the active roster"
+                    style={{ padding: "6px 10px", fontSize: 12 }}
+                    onClick={() => run(() => setUserStatusAction(u.id, "active"))}
+                  >
+                    ↺ Restore
+                  </button>
                 ) : (
                   <>
-                    <button className="pk-btn-outline" title="Edit roles" onClick={() => openEdit(u)}>
+                    <button className="pk-btn-outline" title="Edit roles & contact card" onClick={() => openEdit(u)}>
                       Roles
                     </button>
                     <button
                       className="pk-btn-outline"
                       title={
-                        u.active
+                        u.status === "active"
                           ? "Deactivate — keeps the row, blocks sign-in"
                           : "Reactivate"
                       }
                       style={{ color: "#8c919c", padding: "6px 9px", fontSize: 13 }}
-                      onClick={() => run(() => setActiveAction(u.id, !u.active))}
+                      onClick={() =>
+                        run(() => setUserStatusAction(u.id, u.status === "active" ? "archived" : "active"))
+                      }
                     >
-                      {u.active ? "⏻" : "↺"}
+                      {u.status === "active" ? "⏻" : "↺"}
                     </button>
                     {u.id !== meId && (
                       <button
@@ -1788,6 +1868,18 @@ export default function SettingsClient({
                 </div>
               </div>
 
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ ...labelStyle, marginBottom: 6 }}>
+                  Phone (shown on service documents signed from this office)
+                </label>
+                <input
+                  style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
+                  placeholder="(414) 555-0100"
+                  value={officeDraft.phone}
+                  onChange={(e) => setOf({ phone: e.target.value })}
+                />
+              </div>
+
               <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <label style={{ ...labelStyle, marginBottom: 6 }}>Latitude</label>
@@ -1932,7 +2024,7 @@ export default function SettingsClient({
               }}
             >
               <span style={{ fontSize: 16, fontWeight: 600 }}>
-                {isNew ? "Add team member" : "Edit roles"}
+                {isNew ? "Add team member" : "Edit team member"}
               </span>
               <button
                 onClick={() => setModal(null)}
@@ -1983,6 +2075,64 @@ export default function SettingsClient({
                 placeholder="optional — e.g. their @gmail.com"
                 value={draft.googleEmail}
                 onChange={(e) => setDraft({ ...draft, googleEmail: e.target.value })}
+              />
+
+              {/* Contact card (PUNCHLIST #9, decision A) — feeds outbound
+                  service-document signatures: title replaces the roles[0]
+                  hack where set, office assignment drives the signature
+                  phone (decision D) rather than always offices[0]. */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+                <div>
+                  <label style={{ ...labelStyle, marginBottom: 6 }}>Title</label>
+                  <input
+                    style={inputStyle}
+                    placeholder="e.g. Senior Estimator"
+                    value={draft.title}
+                    onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label style={{ ...labelStyle, marginBottom: 6 }}>Office</label>
+                  <select
+                    style={{ ...inputStyle, cursor: "pointer" }}
+                    value={draft.officeId}
+                    onChange={(e) => setDraft({ ...draft, officeId: e.target.value })}
+                  >
+                    <option value="">— unassigned —</option>
+                    {offices.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+                <div>
+                  <label style={{ ...labelStyle, marginBottom: 6 }}>Direct phone</label>
+                  <input
+                    style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
+                    placeholder="optional"
+                    value={draft.phone}
+                    onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label style={{ ...labelStyle, marginBottom: 6 }}>Mobile</label>
+                  <input
+                    style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
+                    placeholder="optional"
+                    value={draft.mobile}
+                    onChange={(e) => setDraft({ ...draft, mobile: e.target.value })}
+                  />
+                </div>
+              </div>
+              <label style={{ ...labelStyle, marginBottom: 6 }}>Certifications / license numbers</label>
+              <input
+                style={{ ...inputStyle, marginBottom: 16 }}
+                placeholder="optional — e.g. NETA Level II #12345"
+                value={draft.certifications}
+                onChange={(e) => setDraft({ ...draft, certifications: e.target.value })}
               />
 
               <label style={{ ...labelStyle, marginBottom: 6 }}>Roles</label>
@@ -2066,7 +2216,7 @@ export default function SettingsClient({
                 <button
                   className="pk-btn-danger"
                   onClick={() => {
-                    if (modal && modal !== "new") run(() => removeUserAction(modal));
+                    if (modal && modal !== "new") run(() => setUserStatusAction(modal, "removed"));
                     setModal(null);
                   }}
                 >
@@ -2105,7 +2255,7 @@ export default function SettingsClient({
                     fontFamily: "var(--font-ui)",
                   }}
                 >
-                  {isNew ? "Add user" : "Save roles"}
+                  {isNew ? "Add user" : "Save changes"}
                 </button>
               </span>
             </div>

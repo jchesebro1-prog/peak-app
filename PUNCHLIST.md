@@ -499,7 +499,7 @@ matches the words — and treat (ii) as part of item 4.
 
 ---
 
-## 9. Team members: contact-card detail, email correction, active/archived/removed — PARTIAL (audited 2026-07-29)
+## 9. Team members: contact-card detail, email correction, active/archived/removed — DONE 2026-08-08
 
 > **Audit note 2026-07-29:** part 2 (the email-lockout defect) was fixed back in D82.
 > D126 (`241b6f8`) replaced the seed roster with the real Peak team and added
@@ -588,10 +588,66 @@ worth deciding before any team-member work.
   member an office assignment (part of A), and resolve the signature phone from the *signer's*
   office rather than `offices[0]`.
 
-**Status:** ALL ANSWERED 2026-07-19 — ready to build. Part 2 was already fixed (`01310aa`, D82:
-name/email/google-email editable, wrong-email lockout ended). Remaining build: contact-card
-fields (A), archived/removed states replacing the lone `active` boolean (C), and office-number
-signature resolution (D). Jeff's framing: store to run later — queued, not started.
+**Build note (2026-08-08, D131):** all three remaining pieces built.
+
+**Schema (`users` table):** `active: boolean` replaced with `status: 'active'|'archived'|'removed'`
+(decision C), plus `title`, `phone`, `mobile`, `officeId`, `certifications` (decision A). Two
+migrations rather than one — `db:generate` wants an interactive prompt to disambiguate "rename
+active→status" from "drop active, add 6 columns" when both land in one diff, and that prompt can't
+run in this environment. Split into an add-only pass (0015: adds all 6 new columns, including
+`status` defaulted to `'active'`) and a drop-only pass (0016: drops `active`) — each generates
+clean with no prompt. 0015 also carries a hand-added data-preserving step: `UPDATE users SET
+status='archived' WHERE active=false`, run *before* 0016 drops the column it reads — otherwise
+every previously-deactivated member would silently reactivate under the new column's default.
+
+**Store/auth/actions:** `activeUsers()`, `addUser()`, `updateUser()` patch type, and a new
+`setStatus()` (replacing `setActive`) all moved to `status`. `removeUser()`'s `db.delete` is gone
+— removing a member now calls `setStatus(id, "removed")`, matching decision C's "neither ever
+hard-deletes" (finding 6: members are joined by NAME string everywhere; a hard delete orphans
+every historical record that named them). `auth.ts`'s three sign-in-gate checks now read
+`status === "active"` — archived and removed both refuse sign-in, same as before.
+
+**Settings UI:** the edit modal gained Title / Office (select) / Direct phone / Mobile /
+Certifications fields, all wired through `updateMemberAction`. Removed members are hidden from
+the team list by default (decision C) with a "Show N removed" toggle as the escape hatch — a
+gap the decision text didn't explicitly ask for but that a genuinely-recoverable "removed" state
+implies (findable but out of the way, not a dead end). The deactivate/reactivate toggle and the
+two-step Remove confirm now drive `setUserStatusAction`. Office phone is now editable in
+Settings → Locations (was a field the modal never surfaced — decision D's other half).
+
+**Signature phone (decision D):** scoped down after finding the real blast radius by reading
+every file, not just the one the finding named. Only two documents actually render a
+per-signer phone at all — `repairs/report/report-doc.tsx` and `flame-tests/report/report-doc.tsx`
+(confirmed by grep + reading each of the 14 `roles[0]`/`offices[0]` hits the original finding's
+pattern matched — the rest are either unrelated nearest-office travel math, an inspections report
+letterhead address, or letter templates that show title/email but never a phone at all). Both now
+resolve `office = offices.find(o => o.id === signer.officeId) || offices[0]`, falling back
+exactly as before when the signer has no office set. Verified live end-to-end against the real
+dev catalog: assigned a real team member to Milwaukee Shop, confirmed the flame-test report
+showed Milwaukee's number (not the member's own direct-line phone); reassigned to Madison Office,
+confirmed the report's number changed to Madison's — proving per-signer resolution rather than an
+accidental always-offices[0]. Reverted the test edits afterward.
+
+**Deliberately not built:** finding 1 (the `roles[0]`-as-title inconsistency — "Admin" on letters,
+"Estimator" on reports for the same person) was never promoted to an answered decision on this
+item, only decision D (phone) was — so `title` is stored and shown in the contact card, but the
+existing `roles[0]` title derivation in `repairs/report/report-doc.tsx` and
+`flame-tests/report/report-doc.tsx` is untouched. Also untouched: the six single-page letter
+templates (results/summary/completion/warranty × repairs/flame-tests/inspections) that call
+`_letters/util.tsx`'s `officePhone(settings)` — they don't resolve a per-signer user at all today,
+so wiring decision D into them is a separable, larger task than this item's scope.
+
+**Verified:** `tsc --noEmit` and `eslint` clean on every changed file (pre-existing findings
+elsewhere in touched files — e.g. `repairs/report/page.tsx`'s unrelated `Frame`-in-render lint
+error — confirmed via `git diff` to predate this change, left alone). `test:specs` and
+`test:smoke` (all 50 routes, including `/settings`) pass against a fresh migration. Live-verified
+against the real dev DB: contact-card round-trip, office-phone edit, the deactivate → archived →
+reactivate cycle, and the remove → hidden → "Show removed" → restore cycle, all on throwaway or
+fully-reverted data (one harmless leftover: a `ZZTEST Punch9 Verify` row left in `removed` status
+— same class as the `TEST-PUNCH14` catalog row from #14, no delete UI exists to clean it up and
+none should be added just for this).
+
+**Status:** DONE 2026-08-08.
 
 ---
 
@@ -836,7 +892,7 @@ pay for itself immediately across those call sites** — recommend doing that ra
 
 ---
 
-## 13. Service records → projects (inspections, service, warranty) — PARTIAL: bug fixed, feature not (audited 2026-07-29)
+## 13. Service records → projects (inspections, service, warranty) — DONE 2026-08-08
 
 > **Audit note 2026-07-29:** the phantom-projects bug IS fixed —
 > `src/lib/stores/projects.ts:613-616` and `:653-654` now exclude
@@ -944,9 +1000,92 @@ filed). The phantom-projects sync bug is FIXED (`01310aa`, D82): won repair/insp
 longer mint Projects. (Any phantoms already in a DB remain — delete from Projects manually.)
 Queued to build later per Jeff — follow the sequencing above.
 
+**Build note (2026-08-08).** Before writing any code, re-verified the suggested sequence against
+the *current* tree rather than trusting this entry's own 2026-07-29 audit note, which turned out
+to be stale in two load-bearing ways:
+
+1. **Step 5 (scheduler unification) was already ~80% done**, and this file never recorded it. D100
+   (2026-07-20, one day after these decisions) and D115 (2026-07-24) already made the main
+   `/schedule` Gantt read all four sources — projects, flame jobs, inspections, repair jobs — via
+   `src/lib/operations-work.ts`, exactly decision C's "one Gantt for all four sources; no separate
+   unified screen." Only the *write* side (assigning date/tech — still three separate
+   `/…/scheduling` screens) was actually still separate; the "three separate schedulers are
+   unchanged" line above described only that half.
+2. **Step 4's trigger already existed, fully built** — just not reused yet. Decision B redefined
+   "signed off" as the inspection *quote* being approved, and every service quote builder
+   (`inspections/quote/actions.ts`, `repairs/quote/actions.ts`, `flame-tests/quote/actions.ts`)
+   already has exactly one moment that happens: its own `approve*Quote` action, whose comment
+   already says "this screen IS the approval," calling `setStatus(..., "won", ...)` then
+   `createFromQuote(id)`. No new signoff object needed inventing on `InspectionRecord` — the spawn
+   just needed to hook into a call site that already runs.
+
+Given that, the real remaining scope was much narrower than the punchlist's own "four schedulers,
+four stage vocabularies, four tables" framing suggested. Also **re-checked with Jeff mid-build**:
+given the Gantt visibility problem was already solved by D100/D115, does decision A's "linked
+project" still pull its weight, or was the original want fully satisfied already? **Confirmed:
+build it, but as a lightweight, non-progressing tracking record** — not a second thing to manage,
+just enough to show up in `/projects` and carry a back-link.
+
+**What shipped:**
+- **`projectType`** (decision 2) — added to `ProjectRecord`, carried through the existing
+  `fromQuote()` (used by both `createProjectFromQuote` and `syncProjectsFromQuotes`) as
+  `q.quoteType || null`. Normalized to `null` on read for pre-existing records that predate the
+  field (`normalizeProject()`, matching that function's existing `kind`/`stage` backfill pattern).
+- **`projectId`** (decision 3) — added to `InspectionRecord` and `RepairJobRecord` (flame jobs
+  excluded — Jeff's own ask text says flame tests aren't in "the installs window"; warranty still
+  isn't a record type, per the original finding, so nothing to add there either). Marked optional
+  on both, since neither store has a read-time normalize pass the way `projects.ts` does — old
+  records simply lack the key rather than reading as `null`.
+- **`spawnServiceLinkedProject(q, projectType)`** (new, in `stores/projects.ts`) — the dual-write
+  (decision A). Idempotent on `quoteId` (same `getProjectByQuote` check `createProjectFromQuote`
+  already uses). Deliberately NOT a real install to progress: created directly at
+  `stage: "complete"` (never via `setProjectStage()`, so it can't fire that function's own
+  side-effects — item-16's auto-tasks, `TASK_TEMPLATE` expansion — which are for real PM-walked
+  installs work, not a service job's shadow record); `stage !== "complete"` is exactly what
+  Reports' Installs book (`reports/page.tsx`) filters on, so a complete-from-birth record can never
+  inflate that rollup; `kind: "order"`; **`value: 0`, never copied from the quote** — the real
+  dollar figure already lives on the quote/inspection/repair record, and copying it here too would
+  double-count revenue in anything that sums `ProjectRecord.value`; no crew/procurement/deliveries
+  — the service record already owns its own scheduling and already renders on the Gantt via
+  D100/D115, so this exists purely for `/projects`-list membership, not to duplicate scheduling.
+- Wired into `inspections.ts`'s `createFromQuote()` (one project per QUOTE, shared across every
+  venue-record spawned from it — inspections are per-venue but the quote is one) and
+  `repair-jobs.ts`'s `fromQuote()` (covers both its `createFromQuote` and `syncFromQuotes`
+  callers automatically, since both route through it — avoids duplicating the spawn call).
+
+**Deliberately not touched, and why:**
+- **The three write-side scheduling screens stay separate.** Decision C's literal text only asked
+  for read-side (Gantt) unification, which was already done. Merging the write UIs is a real
+  future simplification (they duplicate a fair amount of near-identical code) but was never
+  actually asked for.
+- **#16 decision D** (a project must not reach `complete` without a signoff — `setStageAction` has
+  no such gate today) and **decision E** (a real project-roles model, so "the PM" and "the
+  salesperson" can be assigned to something instead of item-16's tasks going out unassigned) are
+  both real, both directly adjacent to this work (both #16's completion trigger and this item's
+  dual-write terminate at the same `complete` transition), and both still unbuilt. Neither is
+  decision A/B/C/D of *this* item — flagging rather than bundling them in silently.
+- **PUNCHLIST.md's own #16 entry is stale independent of this item** — its header still reads
+  "OPEN … queued to build," but `projects.ts` already implements decision A's task-first mechanism
+  (`createProjectFromQuote` and `syncProjectsFromQuotes` both spawn the "Sold — kickoff call" task;
+  `setProjectStage` spawns "Completed — follow up" on reaching `complete`) — landed under commit
+  `724016c` alongside #17. Corrected the #16 entry's status line below to stop the doc drifting
+  further from the working tree; the decision D/E gap noted above is copied there too.
+
+**Verified:** `tsc --noEmit` and `eslint` clean on every changed file (no new findings). 17 new
+tests added to `test-review-and-spec.ts`, run against the real dev DB (not scratch) with fixed
+test-quote ids and idempotency checks matching the equipment-bookings test's existing pattern:
+spawn creates exactly one record/one linked project; `projectType`/`stage`/`value`/`kind`/`quoteId`
+all correct; re-running `createFromQuote` is idempotent (no duplicate records, same linked project
+returned); the inspection and repair test quotes get distinct projects. All 17 pass.
+`test:specs` and `test:smoke` (all 50 routes) still pass. Live-checked `/projects` against the
+real dev DB afterward: the dashboard's Active/At-risk/Awaiting-start counts were unaffected by the
+two new test-linked projects (both landed in the 1,725-strong Complete bucket, exactly as
+designed) — confirms the "never inflates an active rollup" design goal holds against real data,
+not just the synthetic test path.
+
 ---
 
-## 14. Catalog appears unlinked between dashboard, General, and the estimate window — PARTIAL (audited 2026-07-29)
+## 14. Catalog appears unlinked between dashboard, General, and the estimate window — DONE 2026-08-08
 
 > **Audit note 2026-07-29:** the dashboard card is real now —
 > `src/app/(app)/home-catalog.tsx` takes `books` and `partCount` derived server-side
@@ -1008,10 +1147,64 @@ the same store with cost/margin stripped.
   **ANSWERED 2026-07-19 (Jeff): retire it in favour of the catalog** — catalog-backed suggestions
   replace the hardcoded strip.
 
-**Status:** ANSWERED 2026-07-19 (A add `updatedAt` to catalog parts; B retire `SUGGEST` for
-catalog-backed suggestions) — queued to build later per Jeff. Dashboard card already FIXED
-(`01310aa`, D82) — derived from the real store (revealed the actual 10,729-part catalog the fake
-card hid).
+**Status:** Decision A DONE 2026-08-08. Decision B still queued — see note below.
+
+**Decision A build note (2026-08-08):** added `updatedAt?: number` to `CatalogPart`
+(`src/lib/stores/catalog.ts`), stamped centrally inside `upsert()` (so every write path — the
+catalog edit form, the .xlsx/CSV importer, the spec-builder's create-on-the-fly path — gets it for
+free) rather than trusting each caller to set it. The dashboard's `priceBooks()` helper moved out of
+`page.tsx` into its own pure module (`src/lib/catalog-books.ts`) so it's unit-testable, and now
+carries an `ageDays` per book: the OLDEST `updatedAt` among a book's rows, and ONLY once every row
+in that manufacturer group has one. That gate is load-bearing — an earlier draft computed the age
+from whatever subset of rows happened to have a timestamp, which manual testing against the real
+14,725-part dev catalog caught immediately: editing ONE Harman part out of 2,442 made the entire
+Harman book read as "today". Below full coverage the pill is omitted (honest unknown), not a number
+that's actually describing one row. 6 unit tests added to `test-review-and-spec.ts` covering full
+coverage, partial coverage, no coverage, blank-mfr grouping, and the top-6/sort behavior; `tsc` and
+`eslint` clean; verified live against the real dev catalog (14,724 → 14,725 parts, confirmed no
+pill appears for any of the six real price books post-change, since none are yet fully covered —
+exactly the intended behavior). One leftover manual-test row (`TEST-PUNCH14` / "Test Verify Mfr")
+remains in the local dev DB — the catalog has no delete UI/action to remove it, and running a
+cleanup script against `.data/pglite` while `next dev` holds it would risk the corruption AGENTS.md
+warns about; it's harmless (outside the top-6 by count, clearly named) and left in place.
+
+**Decision B build note (2026-08-08):** turned out to need more discovery than the entry implied.
+Two things weren't visible from the punchlist text alone:
+1. **The `suggestions` prop was already dead.** `SectionCard` received it but never rendered it
+   anywhere — the "one-click suggested parts strip" hasn't been visible in the app at all since
+   whenever the catalog-search picker (`CatalogPicker`) replaced it as the actual add-part UI.
+   Retiring `SUGGEST`/`GENERIC_SUGGEST` was therefore cleanup either way; the open question was
+   whether to also build a live replacement.
+2. **Sections had no way to set a manufacturer.** `SpecSection.mfr` existed as a field and was
+   *displayed* (in the section's meta line) but nothing ever *wrote* it except the four
+   demo-seeded sections — `addSystem()` hardcodes `mfr: ""` with no editing UI anywhere. A
+   suggestion strip keyed on mfr would therefore only ever fire for those four demo sections,
+   which get replaced the moment someone builds a real quote — i.e. never, for actual usage.
+
+Given that, "match by manufacturer" needed a manufacturer field to match against. Built:
+- `sec.mfr` is now editable — a text input in the section's per-system controls row (next to
+  Margin/Freight), wired through a new `setSectionMfr` handler in `estimator-client.tsx`.
+- `suggestPartsForMfr(mfr, limit=4)` (`estimator/actions.ts`) — exact match (trimmed,
+  case-insensitive) on `CatalogPart.mfr`, sorted by description, capped at 4. Blank mfr returns
+  `[]` rather than an unfiltered top-N — a real match or nothing, never a guess.
+- `SuggestedParts` (`estimator/suggested-parts.tsx`) — new client component mirroring
+  `CatalogPicker`'s debounced-fetch pattern, mounted in the add-part row below the catalog toggle.
+  Renders nothing until the section's mfr matches real catalog rows.
+- `SUGGEST`/`GENERIC_SUGGEST` deleted from `estimator-data.ts` (the `SuggestPart` type stays — it's
+  the shared shape `CatalogPicker`, `SuggestedParts`, and `addPart` all use). Dead `suggestions`
+  prop removed from `SectionCardProps`.
+
+**Verified:** `tsc --noEmit` clean; `eslint` clean (one pre-existing `set-state-in-effect` finding
+shared with `CatalogPicker`, the file this mirrors — not new). Live end-to-end against the real
+dev catalog: set a section's manufacturer to "Harman" (2,442 real parts), watched the "Quick add ·
+Harman" strip populate with 4 real SKUs/prices, clicked Add, confirmed the quote total, section
+total, and cost breakdown all updated correctly (verified via the DOM, not just the network log),
+then reloaded WITHOUT saving to discard the test edit — Q-2041 is unchanged in the database.
+Also hit and diagnosed a `next dev` stale-Turbopack-cache crash (`priceBooks is not defined`,
+left over from an earlier `next build` run in the same session) — cleared `.next` and confirmed
+it was a build-artifact issue, not a code regression, before re-verifying.
+
+**Status:** DONE 2026-08-08 (both decisions).
 
 ---
 
@@ -1107,7 +1300,7 @@ queued to build later per Jeff. The per-scope default *rules* are still to be de
 
 ---
 
-## 16. Notify the company when a project is sold and when it's completed — OPEN
+## 16. Notify the company when a project is sold and when it's completed — PARTIAL (corrected 2026-08-08)
 
 **Area:** `src/app/(app)/quotes/actions.ts:25-43` (won), `src/app/(app)/projects/actions.ts:100-111`
 (signoff), `src/lib/gmail/bridge.ts`, `src/lib/stores/comms.ts`, `src/lib/stores/notif-prefs.ts`
@@ -1197,9 +1390,21 @@ completion, single trigger path; E project-roles model — the new prerequisite)
 later per Jeff. **Build order note:** E's roles model + item 17's task table are the
 prerequisites; do not build the email path before item 9 and a send log.
 
+**Status correction (2026-08-08), found while building #13 — this header was stale relative to
+the working tree, not relative to a fresh decision.** Decision A (task-first) turned out to be
+already substantially built: `createProjectFromQuote` and `syncProjectsFromQuotes`
+(`stores/projects.ts`) both spawn a `coverageKey: "item16:sold:<id>"` "Sold — kickoff call" task
+on conversion, and `setProjectStage` spawns `"item16:completed:<id>"` "Completed — follow up" on
+reaching `complete` — landed under commit `724016c`, alongside item 17's task table, with no
+corresponding update to this entry. Still genuinely open: **decision D** (nothing today stops a
+direct stage change from reaching `complete` without a signoff — `setStageAction` has no gate) and
+**decision E** (the project-roles model — tasks still spawn unassigned, per D87). Both are
+unbuilt, both real, and both worth a look together with item 20 Phase 2 (the roles model's stated
+home) whenever that's picked up — not built here, this is a documentation correction only.
+
 ---
 
-## 17. Tasks on install projects and quotes — PARTIAL, much further along than this entry said (audited 2026-07-29)
+## 17. Tasks on install projects and quotes — DONE 2026-08-08
 
 > **Audit note 2026-07-29:** decision A shipped. `src/db/doc-tables.ts:74` registers a
 > real `tasks` doc table, and `src/lib/stores/tasks.ts` implements `TaskRecord` with
@@ -1291,7 +1496,49 @@ tab; wiring the two dead server actions; and the assignee-identity decision.
 **Related:** item 16 depends on this — the recommended task-first implementation of "notify when
 sold/completed" is exactly an auto-generated task with an assignee.
 
-**Status:** OPEN — needs A–E. A is the decision that shapes everything else.
+**Build note (2026-08-08) — the quote-side remainder.** Decision A shipped earlier (the `tasks`
+doc table, store, and project-side UI, per the 2026-07-29 audit note above). What was left:
+`quoteId` was written as `null` everywhere because nothing ever set it — no UI existed to create
+or edit a quote-scoped task.
+
+- `tasksForQuote(quoteId)` added to `src/lib/stores/tasks.ts`, mirroring the existing
+  `tasksForProject`.
+- The office UI — `src/app/(app)/projects/tasks-card.tsx` — was project-only: it hardcoded the
+  add-form's hidden field name (`id`) and imported `projects/actions.ts`'s three task actions
+  directly. Generalized into `src/components/tasks-card.tsx`: the three mutation actions and the
+  add-form's parent-id field name are now props, not imports, so any parent type can reuse the
+  same card over the same store. `setTaskStatusAction`/`updateTaskAction` were already
+  parent-agnostic (they only ever touch `taskId`) so they didn't need duplicating; only "add"
+  needed a quote-scoped twin (`addQuoteTaskAction` in `estimator/actions.ts`, writing `quoteId`
+  instead of `projectId`) since each route keeps its own `"use server"` file per the app's
+  existing convention — projects/view.tsx updated to pass its three actions as props instead of
+  the old hardcoded import.
+- Rendered in the Estimator's build-mode sidebar (below Cost breakdown, `estimator-client.tsx`),
+  gated on `loadedId` — an unsaved draft quote has no id for a task to point at yet, so it shows
+  "Save the quote to add tasks" instead. `people` (active roster, for the assignee picker) and
+  `quoteTasks` (this quote's rows) are new `EstimatorProps` fields, fetched server-side in
+  `estimator/page.tsx` alongside the existing reviewer/customer data.
+- `defaultSection` made a prop (default `"Install"`, unchanged for projects) — the quote card
+  passes `"Review"` instead, since "Mobilize/Install/Closeout" doesn't fit a quote checklist.
+
+**Deliberately not touched:** decision B (`TASK_TEMPLATE` auto-generated checklist content) — the
+entry itself says Jeff needs to define the actual items; nothing here invents them. Manual
+add/status/assign/due-date is real for both projects and quotes; auto-generation on quote-side
+events is a separate, still-open ask.
+
+**Verified:** `tsc --noEmit` and `eslint` clean on every changed/new file (one pre-existing,
+unrelated `Date.now`-in-render lint error in `projects/view.tsx`, confirmed via `git diff` to sit
+nowhere near this change). `test:specs` and `test:smoke` (all 50 routes, including
+`/projects/P-3001` and `/estimator?id=Q-2041`) pass. Live-verified against the real dev DB:
+created a quote task, changed its status to "In progress" and assignee to a real team member,
+confirmed both persisted correctly after a hard reload (a mid-session DOM read briefly looked
+stale from a scripted, non-native form interaction — reload showed the true, correct state);
+separately confirmed the Projects tasks card still renders and behaves identically after the
+shared-component refactor. One harmless leftover: the test task above remains on quote Q-2041 (a
+demo/sample quote) — the shared card has no delete action for either projects or quotes (a
+pre-existing gap, not introduced here).
+
+**Status:** DONE 2026-08-08.
 
 ---
 
@@ -4800,7 +5047,7 @@ there), #16 (triggers re-running on every page load).
 
 ---
 
-## 87. The upload path has no committed automated coverage — OPEN
+## 87. The upload path has no committed automated coverage — DONE 2026-08-08
 
 **Area:** `scripts/smoke-routes.ts`, `src/app/api/import/xlsx/route.ts`
 **Reported:** 2026-08-06 (recorded while verifying #81)
@@ -4821,17 +5068,25 @@ in the repo. Leaving it uncommitted means the `.xlsx` path silently reverts to m
 the moment this session ends, which is precisely the state #78 called the highest-leverage item in
 the file.
 
-**Open question for Jeff:** commit it as a second smoke script (`test:smoke:upload`, run alongside),
-or fold the POST assertions into the existing `smoke-routes.ts` so there is one harness rather than
-two boots of `next dev`? The second is tidier and slower to run.
+**Resolution:** committed as a second smoke script rather than folded into `smoke-routes.ts` — the
+open question's own text called that option "tidier," and the two scripts test different concerns
+(page GETs vs. a file-upload POST) even though they share the same boot/auth harness by copy. New
+file `scripts/smoke-upload.ts`, wired as `npm run test:smoke:upload`. Same safety shape as
+`smoke-routes.ts`: scratch `PGLITE_PATH`, `DATABASE_URL` deleted, dev-login auth, cleanup on exit.
+Rebuilt (the original harness truly never made it into the repo) and asserts the same four cases:
+a real generated `.xlsx` → 200 with correct CSV; non-xlsx bytes → 422; missing file field → 400;
+unauthenticated → refused (never a 200 with `ok:true`). Verified: `tsc --noEmit` clean, `eslint`
+clean (one pre-existing `prefer-const` finding on `child` — present in `smoke-routes.ts` too,
+not introduced here), `test:specs` and `test:smoke` both still pass, `test:smoke:upload` passes
+all four cases.
 
 **Ties to:** #78 (the harness it extends), #79 (same script), #81 (the feature it covers).
 
-**Status:** OPEN — logged only. The code exists but is not in the repo.
+**Status:** DONE 2026-08-08 — committed, wired into `package.json`, all cases pass.
 
 ---
 
-## 88. The leads intake route advertises a retry that does not work for five minutes — OPEN
+## 88. The leads intake route advertises a retry that does not work for five minutes — DONE 2026-08-08
 
 **Area:** `src/app/api/leads/intake/route.ts` (the `dedupKey` gate at :68-70 vs the 503 at :84),
 `src/lib/rate-limit.ts`
@@ -4855,15 +5110,31 @@ was **advertise a retry path that is dead for five minutes**, which is new.
 token today. Either consume the dedup token only after a successful write, or refund it when the
 write fails.
 
-**Open questions for Jeff:** refund the token on failure (smaller change, keeps the dedup check
-before the expensive work), or move the dedup check after the write (simpler to reason about, but
-double-submits then race on `create` instead)? Either way `rate-limit.ts` grows a primitive it does
-not have.
+**Resolution:** took the smaller-change option the entry itself favored — refund on failure, dedup
+check stays before the write. Added `rateLimitRefund(key)` to `rate-limit.ts` (pops the single most
+recent timestamp for that key rather than clearing it, so it can't reset a limit hit for an
+unrelated reason in the same window) and call it from the leads-intake route's `catch` block,
+right where the 503 is returned. A retry inside `DEDUP_WINDOW_MS` now reaches `create` again
+instead of getting the false `{ok:true, duplicate:true}`.
+
+**Verified:** `tsc --noEmit` and `eslint` clean (no new findings). Added 9 unit tests for
+`rateLimit`/`rateLimitRefund` directly (pure, in-memory, no DB) — all pass alongside the full
+`test:specs` suite. Also manually exercised the intake route's dedup path end-to-end against a
+scratch database and found it **cannot be observed under `npm run dev`** — this Next version
+recompiles the route's module graph per request in dev, so the in-memory `hits` Map never survives
+between requests locally, making the limiter look like a no-op regardless of this fix. Confirmed
+the mechanism (and the fix) work correctly under a production-shaped boot (`next build && next
+start`): the same two-request sequence that always returns 201/201 in dev correctly returns
+201 then `{ok:true, duplicate:true}` in prod mode. Noted as a caveat comment in `rate-limit.ts` so
+this doesn't get re-reported as a bug by someone testing locally. The refund path itself
+(mint-failure → retry succeeds) is covered by the unit tests above and code inspection, not by
+forcing a real id-collision end-to-end — doing so needs internal test hooks `insertWithPrefixedId`
+doesn't currently expose.
 
 **Ties to:** #80 (which introduced the 503 and this entry's exact wording), #62 (a write that fails
 while reporting success is the same class).
 
-**Status:** OPEN — logged only, no code.
+**Status:** DONE 2026-08-08.
 
 ---
 

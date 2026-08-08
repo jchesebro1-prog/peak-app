@@ -99,6 +99,11 @@ export type RepairCompletion = {
 export type RepairJobRecord = {
   id: string;
   quoteId: string | null;
+  /** Lightweight linked project spawned alongside this record from the same
+   *  quote (PUNCHLIST #13, decision A — dual-write, this record is NOT
+   *  converted). See spawnServiceLinkedProject() in stores/projects.ts.
+   *  Optional: absent on records that predate this field. */
+  projectId?: string | null;
   customer: string;
   customerId: string | null;
   locationId: string | null;
@@ -489,8 +494,18 @@ async function fromQuote(q: RepairQuoteLike): Promise<Omit<RepairJobRecord, "id"
     return { id: v.id ?? null, label: v.label || "Venue", city, state, lat, lng };
   });
   const t = now();
+
+  // PUNCHLIST #13, decision A — lightweight linked project, spawned once per
+  // quote (both createFromQuote and syncFromQuotes route through this).
+  const { spawnServiceLinkedProject } = await import("@/lib/stores/projects");
+  const project = await spawnServiceLinkedProject(
+    { id: q.id, name: q.name || rp.title || "Repair", customer: q.customer, customerId: q.customerId, locationId: q.locationId, owner: q.owner, quoteType: q.quoteType },
+    "repair"
+  );
+
   return {
     quoteId: q.id,
+    projectId: project.id,
     customer: q.customer || (cust && cust.name) || "",
     customerId: q.customerId || null,
     locationId: q.locationId || (venues[0] && venues[0].id) || null,

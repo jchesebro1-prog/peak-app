@@ -78,7 +78,7 @@ export default async function FlameTestReportOptionsPage() {
     accent: settings.accent || "#7b3f8a",
     companyName: settings.companyName || "Peak Systems Group",
     offices: Array.isArray(settings.offices) ? settings.offices : [],
-    users: users.map((u) => ({ name: u.name, roles: u.roles, email: u.email })),
+    users: users.map((u) => ({ name: u.name, roles: u.roles, email: u.email, officeId: u.officeId })),
     letterhead: settings.logoDark || null,
     templates: settings.templates,
   };

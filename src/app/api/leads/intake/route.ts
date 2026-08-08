@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { create } from "@/lib/stores/leads";
-import { rateLimit, clientIp } from "@/lib/rate-limit";
+import { rateLimit, rateLimitRefund, clientIp } from "@/lib/rate-limit";
 
 /**
  * Public website quote-request intake → Leads pipeline (lead.js seam,
@@ -79,6 +79,11 @@ export async function POST(req: Request) {
     lead = await create({ ...fields, source: "website" });
   } catch (err) {
     console.error("leads intake: lead mint failed", err);
+    // #88: the dedup token above was already spent by this request even
+    // though nothing was written — refund it so a retry inside DEDUP_WINDOW_MS
+    // reaches `create` again instead of getting the false `{ok:true,
+    // duplicate:true}` a fresh dedup gate would otherwise produce.
+    rateLimitRefund(dedupKey);
     return NextResponse.json(
       { ok: false, error: "Could not record that submission. Please try again." },
       { status: 503 }
