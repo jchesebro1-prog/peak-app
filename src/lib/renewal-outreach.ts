@@ -151,8 +151,10 @@ function priceParagraph(p: RenewalPricing, kind: string): string {
 /** JPEG letterhead for the PDF: the uploaded dark logo when it's a JPEG,
  *  else the baked-in Peak letterhead, else null (typographic fallback —
  *  same ladder the on-screen letters use, D59). PNG logos can't be embedded
- *  without a decoder (see lib/pdf.ts), so they fall to the baked sheet. */
-async function letterheadJpeg(
+ *  without a decoder (see lib/pdf.ts), so they fall to the baked sheet.
+ *  Exported so other renderLetterPdf() callers (e.g. the rentals letter
+ *  route) get the same fallback ladder instead of reimplementing it. */
+export async function letterheadJpeg(
   settings: AppSettingsData
 ): Promise<{ jpeg: Buffer | null; full: boolean }> {
   const logo = dataUrlBytes(settings.logoDark, "image/jpeg");
@@ -174,7 +176,7 @@ async function letterheadJpeg(
 
 /* ---------------- signature block ---------------- */
 
-async function signerFor(
+export async function signerFor(
   owner: string
 ): Promise<{ name: string; title: string; email?: string }> {
   const users = await allUsers();

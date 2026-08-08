@@ -889,6 +889,33 @@ export function QuoteBuilder({
               )}
 
               {savedFlag && savedId && (
+                <a
+                  href={"/rentals/quote/letter?id=" + encodeURIComponent(savedId)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    marginTop: 9,
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 7,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: accent,
+                    background: "#fff",
+                    border: "1px solid #e4e7ec",
+                    borderRadius: 10,
+                    padding: 11,
+                    textDecoration: "none",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  Preview rental agreement →
+                </a>
+              )}
+
+              {savedFlag && savedId && (
                 <div style={{ marginTop: 10, textAlign: "center", fontSize: 11.5, color: "#1f7a52", fontWeight: 600 }}>
                   Saved {savedId} ·{" "}
                   <Link href="/quotes" style={{ color: "#8c919c" }}>
