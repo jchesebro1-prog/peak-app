@@ -247,6 +247,139 @@ const reSeed = suggestSeedPlacements(DEFAULT_VENUE_DIMS, 5);
 ok(reSeed.length === seeds.length, "grid-seed: re-running suggests the same starter set regardless of unrelated existing placements (caller decides additive-vs-replace, not this function)");
 
 
+/* --- Lineset schedule derived from Grid placements (#41) --- */
+import { linesetScheduleFromGrid, linesetScheduleReport } from "@/lib/design/grid-lineset-schedule";
+
+const linesetPlacements = [
+  { id: "gp-1", sheetId: "gs-1", page: 1, x: 0.5, y: 0.3, partId: "test-pipe", category: "Rigging", by: "test", at: 0 },
+];
+const schedule = linesetScheduleFromGrid(linesetPlacements, DEFAULT_VENUE_DIMS);
+ok(Array.isArray(schedule), "grid-lineset-schedule: linesetScheduleFromGrid returns an array");
+ok(schedule.length === 1, "grid-lineset-schedule: one Rigging placement produces one schedule row");
+
+// The depth mapping is the whole point of the bridge: y is the normalized
+// depth axis (downstage 0 -> upstage 1), so 0.3 of a 30 ft stage is 9 ft.
+ok(schedule[0].dsInches === 108, `grid-lineset-schedule: y=0.3 of a 30 ft stage is 9 ft downstage (got ${schedule[0]?.dsInches})`);
+ok(schedule[0].usPositionLabel === "21' 0\"", `grid-lineset-schedule: the upstage label is measured off the back wall (got ${schedule[0]?.usPositionLabel})`);
+// 108" sits exactly between the slot-14 (104") and slot-15 (112") centers;
+// the workbook's ROUND rounds half away from zero, so slot 15 — and the row
+// is flagged 4" off that center rather than silently snapped to it.
+ok(schedule[0].slot === 15, `grid-lineset-schedule: the row lands on the workbook's nearest 8-inch grid slot (got ${schedule[0]?.slot})`);
+ok((schedule[0].warning || "").includes("off the nearest 8-inch grid center"), "grid-lineset-schedule: an off-grid position is flagged, not snapped");
+
+// A pipe's lineset TYPE is not knowable from the catalog - noted, never guessed.
+ok(schedule[0].type === "", "grid-lineset-schedule: an untyped rigging part gets a blank type, not a guess");
+ok(!!schedule[0].warning, "grid-lineset-schedule: …and says so in the row's warning");
+
+// The free-text placement category is the "assign now, consume later" seam:
+// when it names a real lineset type, the row is typed from it.
+const typedRows = linesetScheduleFromGrid(
+  [{ id: "gp-2", sheetId: "gs-1", page: 1, x: 0.5, y: 0.1, partId: "test-pipe", category: "Electric", by: "test", at: 0 }],
+  DEFAULT_VENUE_DIMS,
+  [{ id: "test-pipe", desc: "1-1/2\" schedule 40 pipe", category: "Pipe", trade: "Rigging" }]
+);
+ok(typedRows.length === 1 && typedRows[0].type === "Electric", "grid-lineset-schedule: a placement category naming a lineset type types the row");
+ok(typedRows[0].name === "1-1/2\" schedule 40 pipe", "grid-lineset-schedule: the row's name comes from the catalog description");
+
+// Curtains hang on linesets too: the Curtains GROUP rolls up to the Rigging
+// TRADE (GROUP_TRADES), so a drop-in belongs on this schedule.
+const curtainRows = linesetScheduleFromGrid(
+  [{ id: "gp-3", sheetId: "gs-1", page: 1, x: 0.5, y: 0.05, partId: "FAB-1", by: "test", at: 0, curtain: { type: "Border", name: "Teaser", widthFt: 44, heightFt: 8, fullnessPct: 50, fabricSku: "FAB-1" } }],
+  DEFAULT_VENUE_DIMS
+);
+ok(curtainRows.length === 1 && curtainRows[0].type === "Border", "grid-lineset-schedule: a curtain drop-in is scheduled and typed from its curtain spec");
+
+// Nothing silently skipped: a lighting fixture is off this schedule, but it
+// is REPORTED as skipped with a reason.
+const mixedReport = linesetScheduleReport(
+  [
+    { id: "gp-4", sheetId: "gs-1", page: 1, x: 0.5, y: 0.2, partId: "S4", category: "Lighting", by: "test", at: 0 },
+    { id: "gp-5", sheetId: "gs-1", page: 1, x: 0.5, y: 0.6, partId: "PIPE", category: "Rigging", by: "test", at: 0 },
+  ],
+  DEFAULT_VENUE_DIMS
+);
+ok(mixedReport.rows.length === 1, "grid-lineset-schedule: a lighting fixture is not a lineset row");
+ok(mixedReport.skipped.length === 1 && mixedReport.skipped[0].placementId === "gp-4", "grid-lineset-schedule: …and the skipped placement is reported, not silently dropped");
+
+// Degrades on empty/legacy data rather than throwing (no-migration rule).
+ok(linesetScheduleFromGrid([], DEFAULT_VENUE_DIMS).length === 0, "grid-lineset-schedule: an empty project yields an empty schedule");
+ok(
+  linesetScheduleFromGrid([{ id: "gp-6", sheetId: "gs-1", page: 1, x: 0.5, y: 0.5, partId: "gone", by: "test", at: 0 }], DEFAULT_VENUE_DIMS).length === 0,
+  "grid-lineset-schedule: a placement with no resolvable scope is skipped, not thrown on"
+);
+
+// Rows are ordered downstage -> upstage, the order the schedule is read in.
+const ordered = linesetScheduleFromGrid(
+  [
+    { id: "b", sheetId: "gs-1", page: 1, x: 0.5, y: 0.8, partId: "p", category: "Rigging", by: "test", at: 0 },
+    { id: "a", sheetId: "gs-1", page: 1, x: 0.5, y: 0.2, partId: "p", category: "Rigging", by: "test", at: 0 },
+  ],
+  DEFAULT_VENUE_DIMS
+);
+ok(ordered.map((r) => r.placementId).join(",") === "a,b", "grid-lineset-schedule: rows run downstage to upstage");
+
+
+/* --- Control Riser: lighting/rigging circuiting graph (#41) --- */
+import { controlRiserGraph } from "@/lib/design/grid-control-riser";
+
+const crPlacements = [{ id: "gp-1", sheetId: "gs-1", page: 1, x: 0.5, y: 0.3, partId: "ETC:405", category: "Lighting", by: "test", at: 0 }];
+const crParts = [{ id: "ETC:405", sku: "ETC:405", desc: "Source Four 5°", category: "Fixtures", unit: "ea", list: 0, cost: 0, ports: [{ name: "Power In", direction: "in" as const, connectionType: "Edison" }] }];
+const crGraph = controlRiserGraph(crPlacements, [], crParts);
+ok(Array.isArray(crGraph.nodes), "grid-control-riser: controlRiserGraph returns a nodes array");
+ok(crGraph.nodes.length === 1 && crGraph.nodes[0].connectionType === "Edison", "grid-control-riser: the fixture's Edison port becomes one circuit node");
+ok(crGraph.nodes[0].devices.length === 1 && crGraph.nodes[0].devices[0].qty === 1, "grid-control-riser: the fixture is counted under that circuit");
+ok(crGraph.nodes[0].family === "power", "grid-control-riser: Edison is classified as a power circuit");
+
+// A fixture with power AND data appears under BOTH circuits - that is what a
+// control riser shows (one home run per circuit), not a device inventory.
+const crTwo = controlRiserGraph(
+  [{ id: "gp-1", sheetId: "gs-1", page: 1, x: 0.4, y: 0.3, partId: "MOVER", by: "test", at: 0 }],
+  [],
+  [{ id: "MOVER", sku: "MOVER", desc: "Moving head", category: "Fixtures", unit: "ea", list: 0, cost: 0, ports: [
+    { name: "Power In", direction: "in" as const, connectionType: "powerCON/True1" },
+    { name: "DMX In", direction: "in" as const, connectionType: "DMX512 (5-pin XLR)" },
+  ] }]
+);
+ok(crTwo.nodes.length === 2, `grid-control-riser: a powered DMX fixture lands on two circuits (got ${crTwo.nodes.length})`);
+ok(crTwo.nodes.some((n) => n.family === "lighting data"), "grid-control-riser: …one of them a lighting-data circuit");
+
+// AV signal stays on the AV riser: a speaker is not a control-riser device.
+const crAv = controlRiserGraph(
+  [{ id: "gp-1", sheetId: "gs-1", page: 1, x: 0.4, y: 0.3, partId: "SPK", category: "Audio", by: "test", at: 0 }],
+  [],
+  [{ id: "SPK", sku: "SPK", desc: "Speaker", category: "Speakers", unit: "ea", list: 0, cost: 0, ports: [{ name: "In", direction: "in" as const, connectionType: "speakON NL4" }] }]
+);
+ok(crAv.nodes.length === 0, "grid-control-riser: an audio device is not on the lighting/rigging control riser");
+ok(crAv.skipped.length === 1, "grid-control-riser: …and is reported as skipped with a reason");
+
+// A ported-but-unmigrated device is reported, never silently dropped.
+const crNoPorts = controlRiserGraph(
+  [{ id: "gp-1", sheetId: "gs-1", page: 1, x: 0.4, y: 0.3, partId: "PIPE", category: "Rigging", by: "test", at: 0 }],
+  [],
+  [{ id: "PIPE", sku: "PIPE", desc: "Batten", category: "Pipe", unit: "ea", list: 0, cost: 0 }]
+);
+ok(crNoPorts.nodes.length === 0 && crNoPorts.skipped.length === 1, "grid-control-riser: a rigging part with no ports is reported, not dropped");
+
+// Routes become edges between circuits; a validated connectionType wins.
+const crRouted = controlRiserGraph(
+  [
+    { id: "gp-1", sheetId: "gs-1", page: 1, x: 0.3, y: 0.3, partId: "MOVER", by: "test", at: 0 },
+    { id: "gp-2", sheetId: "gs-1", page: 1, x: 0.7, y: 0.3, partId: "MOVER", by: "test", at: 0 },
+  ],
+  [{ id: "wr-1", sheetId: "gs-1", page: 1, partId: "DMX-CBL", points: [{ x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 }], aspect: 1, by: "test", at: 0, fromPlacementId: "gp-1", toPlacementId: "gp-2", connectionType: "DMX512 (5-pin XLR)" }],
+  [{ id: "MOVER", sku: "MOVER", desc: "Moving head", category: "Fixtures", unit: "ea", list: 0, cost: 0, ports: [
+    { name: "Power In", direction: "in" as const, connectionType: "powerCON/True1" },
+    { name: "DMX In", direction: "in" as const, connectionType: "DMX512 (5-pin XLR)" },
+  ] }]
+);
+ok(crRouted.edges.length === 1 && crRouted.edges[0].connectionType === "DMX512 (5-pin XLR)", "grid-control-riser: a validated route becomes an edge on its own circuit");
+ok(crRouted.nodes.find((n) => n.connectionType === "powerCON/True1")?.devices[0].qty === 2, "grid-control-riser: two identical fixtures group into one device row of qty 2");
+
+// Empty project: no crash, no nodes.
+const crEmpty = controlRiserGraph([], [], []);
+ok(crEmpty.nodes.length === 0 && crEmpty.edges.length === 0, "grid-control-riser: an empty project yields an empty graph");
+
+
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
 import type { Annotation } from "@/lib/annotations";
