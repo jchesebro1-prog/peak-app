@@ -17,13 +17,41 @@
  * PlanData from the full `buildPlan` (quick/plan-svg.tsx), which DOES use
  * paths for door arcs and seating curves.
  */
-import { PDFDocument, PDFPage, rgb, StandardFonts, degrees } from "pdf-lib";
+import { PDFDocument, PDFFont, PDFPage, rgb, StandardFonts, degrees } from "pdf-lib";
 import type { PlanData } from "@/app/(app)/design/quick/plan-svg";
+
+// PlanData's texts array is typed inline on PlanData (see plan-svg.tsx's
+// `TextEl`); pull the element shape out structurally so this module doesn't
+// need a duplicate import of a type plan-svg.tsx doesn't export directly.
+type TextEl = PlanData["texts"][number];
 
 function hexToRgb(hex: string) {
   const h = hex.replace("#", "");
   const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
   return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+}
+
+/**
+ * Pure anchor-offset calculation, extracted out of the drawText loop below
+ * so it can be unit-tested directly (#40 review finding: the anchor-aware
+ * positioning is the one substantive correctness fix in this file — pdf-lib's
+ * drawText always start/baseline-anchors at (x,y), so without this offset
+ * every anchor: "middle" (and "end") label would render shifted off the
+ * center/end of the line it's meant to caption). See the loop below for the
+ * rationale on why "middle" is the dominant, load-bearing case.
+ */
+export function computeTextOrigin(
+  t: TextEl,
+  font: PDFFont,
+  margin: number,
+  flipY: (y: number) => number
+): { x: number; y: number; rotated: boolean } {
+  const rotated = t.transform?.includes("rotate(-90") ?? false;
+  const width = font.widthOfTextAtSize(t.t, t.size);
+  const f = t.anchor === "middle" ? 0.5 : t.anchor === "end" ? 1 : 0;
+  const x = margin + t.x - (rotated ? 0 : f * width);
+  const y = flipY(t.y) - (rotated ? f * width : 0);
+  return { x, y, rotated };
 }
 
 export async function drawPlanDataPage(
@@ -67,13 +95,10 @@ export async function drawPlanDataPage(
     // generators emit (buildGridBaseSheetPlan's "Pro width"/"Depth" labels,
     // and every dimH/dimV label in plan-svg.tsx) is anchor: "middle", so
     // ignoring it would visibly shift every dimension string off the center
-    // of the line it labels. Shift the start point backward along the flow
-    // direction by the anchored fraction of the text's measured width.
-    const rotated = t.transform?.includes("rotate(-90");
-    const width = font.widthOfTextAtSize(t.t, t.size);
-    const f = t.anchor === "middle" ? 0.5 : t.anchor === "end" ? 1 : 0;
-    const x = margin + t.x - (rotated ? 0 : f * width);
-    const y = flipY(t.y) - (rotated ? f * width : 0);
+    // of the line it labels. computeTextOrigin shifts the start point
+    // backward along the flow direction by the anchored fraction of the
+    // text's measured width (see its own doc comment + unit tests).
+    const { x, y, rotated } = computeTextOrigin(t, font, margin, flipY);
     page.drawText(t.t, {
       x,
       y,

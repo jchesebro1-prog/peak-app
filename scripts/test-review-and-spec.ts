@@ -25,8 +25,8 @@ import {
   setQuote as setGridQuote,
 } from "@/lib/stores/grid-projects";
 import { priceFromGridOrParametric } from "@/lib/design/quick-grid-seam";
-import { PDFDocument } from "pdf-lib";
-import { drawPlanDataPage } from "@/lib/design/plan-to-pdf";
+import { PDFDocument, StandardFonts } from "pdf-lib";
+import { drawPlanDataPage, computeTextOrigin } from "@/lib/design/plan-to-pdf";
 import { budgetFor, type DesignPartial } from "@/app/(app)/design/quick/actions";
 import { createDesign, addDesignRevision, designRevisions } from "@/lib/stores/designs";
 import { list as listCatalogParts } from "@/lib/stores/catalog";
@@ -3257,6 +3257,78 @@ async function asyncChecks(): Promise<void> {
     ok(
       reloaded.getPageCount() === 1 && reloaded.getPage(0).getWidth() === realPage.getWidth(),
       "plan-to-pdf: the saved PDF bytes for a real generated plan round-trip through PDFDocument.load() unchanged"
+    );
+
+    // Direct regression coverage for the anchor-offset math itself (review
+    // finding on #40: the page-count/dimensions/round-trip checks above
+    // would all still pass even if drawPlanDataPage went back to ignoring
+    // TextEl.anchor entirely, silently reintroducing the off-center-label
+    // bug). computeTextOrigin is the pure function drawPlanDataPage's text
+    // loop delegates to, so assert its output directly against font
+    // metrics rather than trying to inspect pdf-lib's placed-text PDF
+    // bytes (pdf-lib doesn't expose placed glyph coordinates back out of a
+    // loaded document, so a byte-level assertion isn't practical here).
+    const measureDoc = await PDFDocument.create();
+    const measureFont = await measureDoc.embedFont(StandardFonts.Helvetica);
+    const margin = 40;
+    const flipY = (y: number) => 1000 - margin - 24 - y; // arbitrary but fixed page height for this calc-only check
+
+    // "middle" anchor, unrotated — the dominant real-world case (every
+    // dimH/dimV label in plan-svg.tsx, and both of buildGridBaseSheetPlan's
+    // labels, use anchor: "middle").
+    const midText = { x: 100, y: 50, t: "Depth 30 ft", fill: "#000000", size: 11, anchor: "middle", transform: "" };
+    const midWidth = measureFont.widthOfTextAtSize(midText.t, midText.size);
+    const midOrigin = computeTextOrigin(midText, measureFont, margin, flipY);
+    const naiveX = margin + midText.x; // what the brief's sample code (anchor-blind) would have produced
+    ok(midWidth > 0, "plan-to-pdf anchor math: sanity — Helvetica reports positive width for a real label string");
+    ok(
+      midOrigin.x === naiveX - midWidth / 2 && midOrigin.x !== naiveX,
+      "plan-to-pdf anchor math: unrotated anchor:'middle' shifts x left by half the text width, NOT the naive start-anchored x"
+    );
+    ok(midOrigin.y === flipY(midText.y), "plan-to-pdf anchor math: unrotated middle anchor leaves y untouched");
+    ok(midOrigin.rotated === false, "plan-to-pdf anchor math: transform:'' is not detected as the -90 rotation case");
+
+    // "end" anchor, unrotated — full-width shift, not half.
+    const endText = { x: 200, y: 50, t: "TENSION GRID", fill: "#000000", size: 7.5, anchor: "end", transform: "" };
+    const endWidth = measureFont.widthOfTextAtSize(endText.t, endText.size);
+    const endOrigin = computeTextOrigin(endText, measureFont, margin, flipY);
+    ok(
+      endOrigin.x === margin + endText.x - endWidth && endOrigin.x !== margin + endText.x,
+      "plan-to-pdf anchor math: anchor:'end' shifts x left by the FULL text width"
+    );
+
+    // "start" anchor, unrotated — should match the naive/unadjusted position
+    // exactly (this is the one anchor value where naive-vs-anchor-aware
+    // agree, confirming the offset fraction is 0 rather than some other bug).
+    const startText = { x: 30, y: 50, t: "FOH", fill: "#000000", size: 7.5, anchor: "start", transform: "" };
+    const startOrigin = computeTextOrigin(startText, measureFont, margin, flipY);
+    ok(
+      startOrigin.x === margin + startText.x,
+      "plan-to-pdf anchor math: anchor:'start' matches the naive unadjusted x (offset fraction is correctly 0)"
+    );
+
+    // "middle" anchor, rotated -90 — the vertical dimension-label case
+    // (buildGridBaseSheetPlan's "Depth 30 ft" label, and every dimV label in
+    // plan-svg.tsx). The offset direction moves from x to y once rotated.
+    const rotText = {
+      x: 300,
+      y: 150,
+      t: "Depth 30 ft",
+      fill: "#000000",
+      size: 11,
+      anchor: "middle",
+      transform: "rotate(-90 300 150)",
+    };
+    const rotWidth = measureFont.widthOfTextAtSize(rotText.t, rotText.size);
+    const rotOrigin = computeTextOrigin(rotText, measureFont, margin, flipY);
+    ok(rotOrigin.rotated === true, "plan-to-pdf anchor math: transform containing 'rotate(-90' is detected as the rotated case");
+    ok(
+      rotOrigin.x === margin + rotText.x,
+      "plan-to-pdf anchor math: rotated middle anchor leaves x untouched (offset moves to y when rotated)"
+    );
+    ok(
+      rotOrigin.y === flipY(rotText.y) - rotWidth / 2 && rotOrigin.y !== flipY(rotText.y),
+      "plan-to-pdf anchor math: rotated anchor:'middle' shifts y by half the text width, NOT the naive un-shifted y"
     );
   }
 }
