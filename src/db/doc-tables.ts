@@ -81,6 +81,9 @@ export const gridProjects = docTable("grid_projects"); // The Grid system-design
 export const gridSheets = docTable("grid_sheets"); // The Grid plan-sheet backgrounds — heavy dataUrls kept out of the placement-patched project doc (D108)
 export const tasks = docTable("tasks"); // cross-record task rows, promoted from embedded ProjectTask[] (#17)
 export const notes = docTable("notes"); // attachable note records — the customer Activity feed's note-taking surface (#21)
+export const equipmentItems = docTable("equipment_items"); // Rentals module — gear catalog + per-location stock (D129, no prototype ancestor)
+export const equipmentLocations = docTable("equipment_locations"); // Rentals module — warehouse/trailer locations gear stock lives at (D129)
+export const equipmentBookings = docTable("equipment_bookings"); // Rentals module — booking/reservation records against equipment items (D129, Task 2)
 
 export const DOC_TABLES = {
   quotes,
@@ -104,6 +107,9 @@ export const DOC_TABLES = {
   grid_sheets: gridSheets,
   tasks,
   notes,
+  equipment_items: equipmentItems,
+  equipment_locations: equipmentLocations,
+  equipment_bookings: equipmentBookings,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;

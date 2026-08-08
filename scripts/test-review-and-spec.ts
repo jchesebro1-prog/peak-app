@@ -2603,6 +2603,12 @@ ok(
  * so it can no longer report a false "ALL PASSED" while these are still
  * in flight. Task 5 appends its catalog checks into this same function
  * rather than adding a second one. */
+/* --- Rentals module, Task 1: equipment items + locations data layer ---
+ * Real await (list()/byCategory() hit the doc-store, not a pure function),
+ * so this is asserted from inside asyncChecks() below, same as the #81
+ * catalog-import checks it sits next to. */
+import { list as listEquipmentItems, byCategory as equipmentByCategory } from "../src/lib/stores/equipment-items";
+
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Price List");
@@ -2722,6 +2728,12 @@ async function asyncChecks(): Promise<void> {
       "#81 create still applies its own defaults for absent columns"
     );
   }
+
+  /* --- Rentals module, Task 1: equipment items + locations data layer --- */
+  const eqItems = await listEquipmentItems();
+  ok(eqItems.length === 5, "equipment-items: seed produced 5 items");
+  const lighting = await equipmentByCategory("lighting");
+  ok(lighting.length === 1 && lighting[0].id === "eq-3", "equipment-items: byCategory filters correctly");
 }
 
 asyncChecks()

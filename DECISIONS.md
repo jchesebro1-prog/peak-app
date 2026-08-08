@@ -2334,3 +2334,23 @@ him holds all four roles**, matching what he'd set manually. He stays Admin/Esti
 person = Jeff's own row for the owner, else the lowest-numbered id (references survive);
 non-canonical rows (dupes, misspellings, off-roster names) are deleted BEFORE emails are
 reassigned so unique(email) can't trip on the hand-created jeffc@/jenat@/jackh@/chrism@ rows.
+
+## D129. Rentals module (2026-08-07)
+
+Equipment inventory stored as doc-store collections (equipment_items,
+equipment_locations, equipment_bookings), matching catalog_parts/repair_jobs —
+not new relational tables as the initial design spec sketched. Permissions
+reuse the existing closed create/send/approve set rather than adding
+manageRentals/viewRentals — nothing else in the app perm-gates by module. See
+docs/superpowers/specs/2026-08-07-rentals-module-design.md and
+docs/superpowers/plans/2026-08-07-rentals-module.md.
+
+Two implementation notes beyond the plan's own text: (1) `@/db/doc-store` has
+no `mergeUpsertDoc` helper — `equipment-items.ts`'s `mergeUpsert` follows
+`catalog.ts`'s existing pattern instead (get + shallow-merge + full
+upsert), which is also how `catalog.ts`'s own `mergeUpsert` is built. (2) the
+three new doc tables got their own `..._seq_bump` BEFORE UPDATE triggers
+(migration 0014, following 0012's documented pattern for tables added after
+it) — without one, `upsertDoc`'s onConflictDoUpdate branch (i.e. every
+re-upsert of an existing item, e.g. a rate change) would leave `seq` stale
+and silently break pull-sync's cursor query for these collections.
