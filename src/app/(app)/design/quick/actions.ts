@@ -128,6 +128,12 @@ export async function saveRevisionAction(
     // record the number the design actually carries once the Grid seam has
     // had its say (#41), or the history would contradict the design.
     budget: saved.budget,
+    // ...and the basis that number was computed on (#41 review round 3) —
+    // captured now because a revision is a point-in-time snapshot; if this
+    // isn't recorded when the revision is saved, there's no way to later
+    // tell whether a past revision's budget came from a Grid BOM or the
+    // parametric estimate.
+    budgetSource: saved.budgetSource,
     venue: partial.venue,
     size: partial.size,
     width: partial.width,

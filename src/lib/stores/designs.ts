@@ -72,7 +72,20 @@ export type DesignReview = {
  * numbers (Quick Design passes name/tier/budget/venue/size/width/depth/
  * grid/systems/customer/config/by — kept open like the prototype).
  */
-export type DesignRevision = Record<string, unknown> & { rev: number; at: number };
+export type DesignRevision = Record<string, unknown> & {
+  rev: number;
+  at: number;
+  /**
+   * The pricing basis `budget` on THIS snapshot was computed on (#41 review
+   * round 3). Copied from `DesignRecord.budgetSource` at the moment the
+   * revision is saved — a revision is a historical snapshot, so this has to
+   * be captured then or it's lost forever; there's no way to reconstruct it
+   * later. Optional, same JSONB-no-migration pattern as everywhere else this
+   * field appears. Absent on every revision saved before this fix, which
+   * reads as "unknown basis" and falls back to the ordinary tier label.
+   */
+  budgetSource?: "grid" | "parametric";
+};
 
 export type DesignRecord = {
   id: string; // D-### (base 100)

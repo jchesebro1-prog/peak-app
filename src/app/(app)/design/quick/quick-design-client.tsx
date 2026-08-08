@@ -1293,6 +1293,12 @@ export default function QuickDesignClient({
                   .reverse()
                   .map((r) => {
                     const tierLabel = (TIERS.find((t) => t.key === r.tier) || { label: (r.tier as string) || "" }).label;
+                    // #41 review round 3: a revision's money value can be a
+                    // Grid BOM sum, not a tier estimate — same gate as the
+                    // three persisted-record display sites (design-client.tsx,
+                    // home-my-designs.tsx), keyed off the snapshot's own
+                    // recorded basis rather than the design's *current* one.
+                    const basisLabel = r.budgetSource === "grid" ? "from linked Grid design" : tierLabel;
                     const cname = typeof r.customer === "string" && r.customer ? " · " + r.customer : "";
                     return (
                       <div key={"v" + r.rev} style={{ display: "flex", alignItems: "center", gap: 13, padding: "12px 22px", borderBottom: "1px solid #f5f6f8" }}>
@@ -1302,7 +1308,7 @@ export default function QuickDesignClient({
                             {(r.name as string) || "Revision v" + r.rev}
                           </div>
                           <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>
-                            {tierLabel + cname} · {timeAgoMs(r.at)} · {firstName((r.by as string) || "")}
+                            {basisLabel + cname} · {timeAgoMs(r.at)} · {firstName((r.by as string) || "")}
                           </div>
                         </div>
                         <span style={{ fontFamily: MONO, fontSize: 13, fontWeight: 600, color: "#16181d", flexShrink: 0 }}>{moneyRound((r.budget as number) || 0)}</span>

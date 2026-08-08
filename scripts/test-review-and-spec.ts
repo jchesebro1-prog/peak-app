@@ -26,6 +26,7 @@ import {
 } from "@/lib/stores/grid-projects";
 import { priceFromGridOrParametric } from "@/lib/design/quick-grid-seam";
 import { budgetFor, type DesignPartial } from "@/app/(app)/design/quick/actions";
+import { createDesign, addDesignRevision, designRevisions } from "@/lib/stores/designs";
 import { list as listCatalogParts } from "@/lib/stores/catalog";
 import { quotesSeed } from "@/db/seeds/quotes";
 import ExcelJS from "exceljs";
@@ -3183,6 +3184,44 @@ async function asyncChecks(): Promise<void> {
         `budgetFor: quoteId linked to a populated Grid project -> grid, seam's own value (want ${priced.list}, got ${quoteWithGrid.value})`
       );
     }
+  }
+
+  /* --- Revision snapshots carry their pricing basis (#41 review round 3) ---
+   * saveRevisionAction ("use server", needs a request-scoped requireUser())
+   * isn't directly callable from this script — same reason budgetFor was
+   * exported instead of tested through the action. addDesignRevision is the
+   * store-layer function saveRevisionAction hands its snap to, so this
+   * exercises the actual storage path: does a `budgetSource` key on the
+   * snap round-trip through patchDoc and come back on the record?
+   */
+  {
+    const d = await createDesign({ name: "Revision basis test", budget: 249, budgetSource: "grid" });
+    const rGrid = await addDesignRevision(d.id, {
+      name: d.name,
+      tier: d.tier,
+      budget: d.budget,
+      budgetSource: d.budgetSource,
+      by: "test",
+    });
+    ok(rGrid?.budgetSource === "grid", "revision snapshot: budgetSource: 'grid' round-trips through addDesignRevision");
+
+    const rParametric = await addDesignRevision(d.id, {
+      name: d.name,
+      tier: d.tier,
+      budget: 12345,
+      budgetSource: "parametric",
+      by: "test",
+    });
+    ok(
+      rParametric?.budgetSource === "parametric",
+      "revision snapshot: budgetSource: 'parametric' round-trips through addDesignRevision"
+    );
+
+    const revs = await designRevisions(d.id);
+    ok(
+      revs.length === 2 && revs[0].budgetSource === "grid" && revs[1].budgetSource === "parametric",
+      "revision snapshot: each revision keeps its OWN budgetSource, not the design's current one"
+    );
   }
 }
 
