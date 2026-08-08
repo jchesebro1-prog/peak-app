@@ -105,10 +105,10 @@ Add to `scripts/test-review-and-spec.ts`, after Task 1's new assertions:
 
 ```ts
 /* --- Starter-set import data: every port's connectionType is real (#39) --- */
-import { readFileSync as _readFileSync } from "node:fs";
-import path as _path from "node:path"; // NOTE: fix import style in Step 3 below if the file already imports `path`/`readFileSync` elsewhere — reuse the existing import instead of adding a second one.
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
-const starterSetRaw = JSON.parse(_readFileSync(_path.join(process.cwd(), "scripts", "starter-import-data.json"), "utf8")) as Array<{ sku: string; ports: Array<{ connectionType: string }> }>;
+const starterSetRaw = JSON.parse(readFileSync(path.join(process.cwd(), "scripts", "starter-import-data.json"), "utf8")) as Array<{ sku: string; ports: Array<{ connectionType: string }> }>;
 
 const allPortTypesKnown = starterSetRaw.every((row) => row.ports.every((p) => CONNECTION_TYPES.includes(p.connectionType)));
 ok(allPortTypesKnown, "starter-set: every row's port connectionType is a member of CONNECTION_TYPES");
@@ -120,7 +120,7 @@ const shureBackfilled = starterSetRaw.find((r) => r.sku === "Shure:AD8CUS")!.por
 ok(shureBackfilled, "starter-set: Shure:AD8CUS has an RF/antenna port after back-fill");
 ```
 
-(The `_readFileSync`/`_path` aliasing above is a placeholder for Step 3 — `test-review-and-spec.ts` is one big file assembled from many `import` blocks; check whether `readFileSync`/`path` are already imported earlier in the file before adding a second import of the same module under a different name. If they're already imported, drop the `_`-prefixed aliases and just call `readFileSync`/`path.join` directly.)
+`readFileSync`/`path` are not already imported anywhere in `test-review-and-spec.ts` (confirmed by grep before this plan's execution began) — the plain imports above are safe to add as-is, no aliasing needed.
 
 - [ ] **Step 2: Run the suite to verify it fails**
 

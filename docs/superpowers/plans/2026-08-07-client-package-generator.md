@@ -169,21 +169,23 @@ git commit -m "feat(client-package): add pdf-lib/archiver deps + drawPlanDataPag
 /* --- Client package bundle walker (#40) --- */
 import { walkBundle } from "@/lib/design/client-package";
 
-const cpCatalog = [
-  { id: "p1", sku: "ETC:405", desc: "Source Four 5°", category: "Fixtures", unit: "ea", list: 1260, cost: 756, datasheetBlobKey: "blob/etc-405.pdf", specCsi: "26 55 33", specText: "Ellipsoidal fixture..." },
-  { id: "p2", sku: "Thern:CW11-1M", desc: "Manual hoist", category: "Curtains", unit: "ea", list: 2110, cost: 1477 }, // no datasheet, no spec
-];
-const bundle = walkBundle({
-  bom: [{ sku: "ETC:405", desc: "Source Four 5°", qty: 2 }, { sku: "Thern:CW11-1M", desc: "Manual hoist", qty: 1 }],
-  catalog: cpCatalog as never,
-  engagementId: "eng-test",
-  projectName: "Test Project",
-  customer: "Test Customer",
-  preparedBy: "Tester",
-});
-ok(bundle.datasheets.length === 1, "client-package: walkBundle finds exactly one row with a datasheet");
-ok(bundle.gaps.some((g) => g.sku === "Thern:CW11-1M" && g.reason === "no-datasheet"), "client-package: walkBundle gaps the row with no datasheetBlobKey");
-ok(bundle.spec.sections.length >= 0, "client-package: walkBundle always produces an AssembledSpec, even with incomplete rows");
+await (async () => {
+  const cpCatalog = [
+    { id: "p1", sku: "ETC:405", desc: "Source Four 5°", category: "Fixtures", unit: "ea", list: 1260, cost: 756, datasheetBlobKey: "blob/etc-405.pdf", specCsi: "26 55 33", specText: "Ellipsoidal fixture..." },
+    { id: "p2", sku: "Thern:CW11-1M", desc: "Manual hoist", category: "Curtains", unit: "ea", list: 2110, cost: 1477 }, // no datasheet, no spec
+  ];
+  const bundle = await walkBundle({
+    bom: [{ sku: "ETC:405", desc: "Source Four 5°", qty: 2 }, { sku: "Thern:CW11-1M", desc: "Manual hoist", qty: 1 }],
+    catalog: cpCatalog as never,
+    engagementId: "eng-test",
+    projectName: "Test Project",
+    customer: "Test Customer",
+    preparedBy: "Tester",
+  });
+  ok(bundle.datasheets.length === 1, "client-package: walkBundle finds exactly one row with a datasheet");
+  ok(bundle.gaps.some((g) => g.sku === "Thern:CW11-1M" && g.reason === "no-datasheet"), "client-package: walkBundle gaps the row with no datasheetBlobKey");
+  ok(bundle.spec.sections.length >= 0, "client-package: walkBundle always produces an AssembledSpec, even with incomplete rows");
+})();
 ```
 
 - [ ] **Step 2: Run the suite to verify it fails**
@@ -210,6 +212,7 @@ Expected: FAIL — module not found.
  * failure modes.
  */
 import { matchBom, assemble, type BomRow, type MatchedRow, type SpecCatalogPart, type AssembledSpec } from "@/lib/bid-spec";
+import { allSections } from "@/lib/stores/spec-sections";
 
 export type PackageGap = { sku: string; desc: string; reason: "no-datasheet" | "no-spec" | "no-match" };
 
@@ -220,14 +223,14 @@ export type BundlePlan = {
   rows: MatchedRow[];
 };
 
-export function walkBundle(input: {
+export async function walkBundle(input: {
   bom: BomRow[];
   catalog: SpecCatalogPart[];
   engagementId: string;
   projectName: string;
   customer: string;
   preparedBy: string;
-}): BundlePlan {
+}): Promise<BundlePlan> {
   const report = matchBom(input.bom, input.catalog);
   const waivedRows: MatchedRow[] = report.rows.map((r) =>
     r.bucket === "ready" || r.waived
@@ -253,7 +256,8 @@ export function walkBundle(input: {
     }
   }
 
-  const spec = assemble(waivedRows, [], {
+  const sections = await allSections();
+  const spec = assemble(waivedRows, sections, {
     projectName: input.projectName,
     customer: input.customer,
     engagementId: input.engagementId,
@@ -265,9 +269,9 @@ export function walkBundle(input: {
 }
 ```
 
-Note for the implementer: `assemble()`'s second argument (`sections: SpecSection[]`) is the section-library list `saveSpecAction` fetches via `allSections()` (`src/app/(app)/design/engagements/spec/actions.ts:130`) — replace the `[]` placeholder above with `await allSections()` and change `walkBundle` to `async` before this ships; the test in Step 1 will need `await walkBundle(...)` at that point too. This is called out explicitly (not left as a silent gap) because `allSections()` lives in a `"use server"` actions file this module shouldn't import from directly — re-export it from `src/lib/bid-spec.ts` or a shared non-action module first, then import it here.
+`allSections()` (`src/lib/stores/spec-sections.ts:47`) is a plain store function, not a `"use server"` action — it's safe to import directly here, same as `matchBom`/`assemble` above.
 
-- [ ] **Step 4: Run the suite to verify it passes** (after resolving the `allSections()` note above)
+- [ ] **Step 4: Run the suite to verify it passes**
 
 Run: `npm run test:specs`
 Expected: PASS.
@@ -521,7 +525,14 @@ export async function generateClientPackageAction(
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
   const parts = await listCatalogParts(); // existing catalog store list()
-  const bom = bomLines(project.placements || [], parts).map((l) => ({ sku: l.desc, desc: l.desc, qty: l.qty })); // NOTE: confirm BomLine carries a real sku field distinct from desc before shipping — grid-bom.ts's BomLine type (recon: {partId, desc, unit, qty, list, ext, ...}) has no bare `sku`; map from partId -> catalog part -> part.sku instead of using desc as a placeholder here.
+  const partById = new Map(parts.map((p) => [p.id, p]));
+  const lines = bomLines(project.placements || [], parts);
+  const bom = lines
+    .map((l) => {
+      const part = partById.get(l.partId);
+      return part ? { sku: part.sku, desc: l.desc, qty: l.qty } : null;
+    })
+    .filter((row): row is { sku: string; desc: string; qty: number } => row !== null);
   const drawings: Array<{ title: string; plan: import("@/app/(app)/design/quick/plan-svg").PlanData }> = [];
   const genSheet = (await listSheets(projectId)).find((s) => s.kind === "generated" && s.venueDims);
   if (genSheet?.venueDims) {
@@ -542,7 +553,7 @@ export async function generateClientPackageAction(
 }
 ```
 
-Fix the `bom` mapping per the inline NOTE above before this ships — pull `sku` from the matched catalog part (via `partId`), not from `desc`. Add the needed imports (`listCatalogParts` from `@/lib/stores/catalog` as `list`, `bomLines` from `@/lib/design/grid-bom`, `buildClientPackageZip`, `putBlob`, `buildGridBaseSheetPlan`, `listSheets`).
+Add the needed imports (`listCatalogParts` from `@/lib/stores/catalog` as `list`, `bomLines` from `@/lib/design/grid-bom`, `buildClientPackageZip`, `putBlob`, `buildGridBaseSheetPlan`, `listSheets`).
 
 - [ ] **Step 7: Add the authenticated download route**
 
