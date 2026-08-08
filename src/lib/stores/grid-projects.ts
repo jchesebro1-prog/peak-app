@@ -435,6 +435,24 @@ export async function movePlacement(
   });
 }
 
+/** Re-anchor every placement from one sheet onto another, keeping x/y
+ *  unchanged (both are already normalized 0..1 against the page box) —
+ *  used when a real plan uploads over a generated base sheet and the user
+ *  chooses "carry markers over" (#38, resolved 2026-08-07: prompt
+ *  per-project, no fixed default). */
+export async function carryPlacementsToSheet(
+  projectId: string,
+  fromSheetId: string,
+  toSheetId: string
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.placements = (p.placements || []).map((pl) =>
+      pl.sheetId === fromSheetId ? { ...pl, sheetId: toSheetId } : pl
+    );
+    p.updatedAt = Date.now();
+  });
+}
+
 export async function removePlacement(
   projectId: string,
   placementId: string

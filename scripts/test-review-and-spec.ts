@@ -14,6 +14,14 @@ import { DEFAULT_SETTINGS } from "@/db/seed-data";
 import { accentContrast } from "@/lib/color";
 import { emailFor, legacyEmailFor } from "@/lib/team";
 import { gridProjectsSeed } from "@/db/seeds/grid-projects";
+import {
+  carryPlacementsToSheet,
+  createProject as createGridProject,
+  addGeneratedSheet,
+  addSheet as addGridSheet,
+  addPlacement as addGridPlacement,
+  getProject as getGridProject,
+} from "@/lib/stores/grid-projects";
 import { quotesSeed } from "@/db/seeds/quotes";
 import ExcelJS from "exceljs";
 import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
@@ -2764,6 +2772,18 @@ async function asyncChecks(): Promise<void> {
       created.category === "Uncategorized" && created.unit === "ea",
       "#81 create still applies its own defaults for absent columns"
     );
+  }
+
+  /* --- carryPlacementsToSheet: re-anchor markers onto a new sheet (#38) --- */
+  {
+    const proj = await createGridProject({ name: "Test carry-over", customer: "", customerId: null, by: "test" });
+    const genSheet = await addGeneratedSheet(proj.id, { venueDims: DEFAULT_VENUE_DIMS, by: "test" });
+    await addGridPlacement(proj.id, { sheetId: genSheet!.id, page: 1, x: 0.4, y: 0.5, partId: "test-part", by: "test" });
+    const uploaded = await addGridSheet(proj.id, { name: "real.pdf", mime: "application/pdf", dataUrl: "data:application/pdf;base64,AAAA", by: "test" });
+    await carryPlacementsToSheet(proj.id, genSheet!.id, uploaded!.id);
+    const after = await getGridProject(proj.id);
+    ok(!!after && after.placements.every((p) => p.sheetId === uploaded!.id), "grid: carryPlacementsToSheet re-anchors every placement onto the new sheet");
+    ok(!!after && after.placements[0].x === 0.4 && after.placements[0].y === 0.5, "grid: carryPlacementsToSheet preserves normalized x/y");
   }
 }
 
