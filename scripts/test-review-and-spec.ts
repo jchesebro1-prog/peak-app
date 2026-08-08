@@ -34,6 +34,7 @@ import { mergeDatasheets, buildCoverIndex } from "@/lib/design/datasheet-merge";
 // imports the real named export, ZipArchive.
 import { ZipArchive as ArchiverDepCheck } from "archiver";
 import { buildClientPackageZip } from "@/lib/design/client-package-zip";
+import { PassThrough } from "node:stream";
 import { budgetFor, type DesignPartial } from "@/app/(app)/design/quick/actions";
 import { createDesign, addDesignRevision, designRevisions } from "@/lib/stores/designs";
 import { list as listCatalogParts } from "@/lib/stores/catalog";
@@ -1601,12 +1602,41 @@ import { curtainPriceEach as portalPriceEach } from "@/lib/curtain-geom";
 }
 
 /* --- Blob helpers (D116) --- */
-import { dataUrlToBytes, safeName } from "@/lib/blob";
+import { dataUrlToBytes, safeName, isBlobPathUnderPrefix } from "@/lib/blob";
 const dub = dataUrlToBytes("data:image/png;base64," + Buffer.from("hello").toString("base64"));
 ok(dub.mime === "image/png" && dub.bytes.toString("utf8") === "hello", "data-URL decodes to bytes + mime");
 ok(dataUrlToBytes("data:,plain%20text").bytes.toString("utf8") === "plain text", "non-base64 data-URLs decode too");
 ok(/^[a-zA-Z0-9._-]+$/.test(safeName("Stage Plan (rev 3).pdf")), `unsafe filename characters are stripped (${safeName("Stage Plan (rev 3).pdf")})`);
 ok(safeName("///") === "file", "a name with nothing usable falls back to 'file'");
+
+/* --- isBlobPathUnderPrefix (#40 review fix — client-package/download route hardening) --- */
+{
+  // The legitimate shape: a real generated client-package path.
+  ok(
+    isBlobPathUnderPrefix("client-packages/proj-1/1234567890.zip", "client-packages/"),
+    "isBlobPathUnderPrefix: accepts a real in-prefix path"
+  );
+  // Out-of-prefix, no trickery: rejected by the plain prefix check.
+  ok(
+    !isBlobPathUnderPrefix("part-datasheets/evil/x.pdf", "client-packages/"),
+    "isBlobPathUnderPrefix: rejects a path outside the prefix"
+  );
+  // The actual exploit this function exists to close: a path that starts
+  // with the prefix (so a bare startsWith would pass it) but contains ".."
+  // and would resolve, after @vercel/blob's URL-based normalization,
+  // outside client-packages/ entirely.
+  const traversal = "client-packages/../part-datasheets/secret.pdf";
+  ok(traversal.startsWith("client-packages/"), "sanity: the traversal path DOES pass a bare startsWith check");
+  ok(
+    !isBlobPathUnderPrefix(traversal, "client-packages/"),
+    "isBlobPathUnderPrefix: rejects a '..'-bearing path even though it passes a bare startsWith"
+  );
+  ok(
+    !isBlobPathUnderPrefix("client-packages/foo/../../bar.zip", "client-packages/"),
+    "isBlobPathUnderPrefix: rejects '..' anywhere in the path, not just at the start"
+  );
+  ok(!isBlobPathUnderPrefix("", "client-packages/"), "isBlobPathUnderPrefix: rejects an empty path");
+}
 
 /* --- Quartzite-6 rebrand (D117): gold default accent --- */
 ok(DEFAULT_SETTINGS.accent === "#b08d4a", "default accent is Q-6 gold (D117)");
@@ -3566,6 +3596,53 @@ async function asyncChecks(): Promise<void> {
     ok(datasheetsDoc.getPageCount() >= 1, "client-package-zip: datasheets.pdf has at least one page");
     const drawingsDoc = await PDFDocument.load(drawingsBytes);
     ok(drawingsDoc.getPageCount() >= 1, "client-package-zip: drawings.pdf has at least one page (the drawing we passed in)");
+  }
+
+  /* --- client-package-zip: no unhandled rejection on an archiver error (#40 review fix) --- */
+  {
+    // Reproduces the exact double-rejection shape client-package-zip.ts's
+    // `done.catch(() => {})` fix guards against: archiver's finalize()
+    // emits "error" on the archive instance AND returns a promise that
+    // rejects from that SAME error, in the same call. `archive.abort()`
+    // before `finalize()` drives this for real (see node_modules/archiver
+    // /lib/core.js's `finalize()`, the `_state.aborted` branch) — no
+    // monkeypatching of archiver internals needed. Without the `done.catch`
+    // fix, `done` (which also subscribes via `archive.on("error", reject)`)
+    // would reject with nobody ever observing it once the thrown error from
+    // `await archive.finalize()` exits the function, which is an unhandled
+    // promise rejection under Node's default (crash-on-unhandled-rejection)
+    // behavior.
+    let unhandled: unknown = null;
+    const onUnhandledRejection = (err: unknown) => {
+      unhandled = err;
+    };
+    process.on("unhandledRejection", onUnhandledRejection);
+    try {
+      const archive = new ArchiverDepCheck({ zlib: { level: 9 } });
+      const pass = new PassThrough();
+      archive.pipe(pass);
+      pass.resume();
+      const done = new Promise<void>((resolve, reject) => {
+        pass.on("end", resolve);
+        archive.on("error", reject);
+      });
+      done.catch(() => {}); // <-- the fix under test
+      archive.abort(); // forces finalize() into its aborted-error branch
+      let threw = false;
+      try {
+        await archive.finalize();
+      } catch {
+        threw = true;
+      }
+      ok(threw, "client-package-zip regression: archive.finalize() still throws/propagates the real error to the caller");
+      // Give the (already-attached) `done` rejection, and any stray
+      // unhandledRejection event Node would emit for an unobserved one, a
+      // full turn of the event loop to surface before we check.
+      await new Promise((r) => setImmediate(r));
+      ok(unhandled === null, `client-package-zip regression: no unhandledRejection fires when archiver errors (got ${String(unhandled)})`);
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
   }
 }
 

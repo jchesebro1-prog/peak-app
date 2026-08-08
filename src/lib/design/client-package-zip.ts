@@ -61,6 +61,15 @@ export async function buildClientPackageZip(input: {
     pass.on("end", resolve);
     archive.on("error", reject);
   });
+  // If archiver's internal "error" event fires, BOTH archive.finalize()'s
+  // own returned promise AND `done` reject from the same underlying error.
+  // The `await archive.finalize()` below throws first and exits this
+  // function — but `done` would then be left rejected with no observer,
+  // an unhandled promise rejection that can crash the process under
+  // Node's default behavior. This no-op catch keeps `done` from ever being
+  // "unhandled"; the real error still propagates via the throw from
+  // finalize() (or, on the success path, via the `await done` below).
+  done.catch(() => {});
   await archive.finalize();
   await done;
   return new Uint8Array(Buffer.concat(chunks));

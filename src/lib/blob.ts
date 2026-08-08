@@ -56,6 +56,21 @@ export function dataUrlToBytes(dataUrl: string): { bytes: Buffer; mime: string }
   return { bytes, mime };
 }
 
+/**
+ * True if `pathname` is safely confined under `prefix`. A plain
+ * `pathname.startsWith(prefix)` is NOT enough on its own: @vercel/blob's
+ * get() builds its fetch URL by string interpolation and hands it to
+ * fetch, whose URL parser collapses ".." dot-segments during normalization.
+ * A path like "client-packages/../part-datasheets/x.pdf" passes a bare
+ * startsWith(prefix) check but resolves, post-normalization, to
+ * "part-datasheets/x.pdf" — escaping the prefix entirely. This app never
+ * legitimately writes blob paths containing "..", so rejecting them
+ * outright is correct, not just defensive.
+ */
+export function isBlobPathUnderPrefix(pathname: string, prefix: string): boolean {
+  return pathname.startsWith(prefix) && !pathname.includes("..");
+}
+
 /** Safe pathname segment from a user filename. */
 export function safeName(name: string): string {
   return (

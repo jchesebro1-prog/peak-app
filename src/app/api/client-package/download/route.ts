@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/session";
-import { getBlobStream } from "@/lib/blob";
+import { getBlobStream, isBlobPathUnderPrefix } from "@/lib/blob";
 
 /**
  * Authenticated client-package zip download (#40), mirroring
@@ -23,12 +23,20 @@ import { getBlobStream } from "@/lib/blob";
  * string straight to getBlobStream — otherwise a signed-in user could use
  * this route as a generic proxy for any private blob in the store (part
  * datasheets, plan sheets, …), not just client packages.
+ *
+ * The prefix check is done via isBlobPathUnderPrefix (src/lib/blob.ts),
+ * which also rejects "..": @vercel/blob's get() builds its fetch URL by
+ * string interpolation, and the fetch/URL parser collapses dot-segments
+ * during normalization. A bare startsWith would let
+ * "client-packages/../part-datasheets/x.pdf" pass (it does start with
+ * "client-packages/") even though it resolves to "part-datasheets/x.pdf"
+ * once normalized — defeating the prefix guarantee this comment claims.
  */
 export async function GET(req: Request) {
   await requireUser();
   const { searchParams } = new URL(req.url);
   const blobPath = searchParams.get("path") || "";
-  if (!blobPath.startsWith("client-packages/")) {
+  if (!isBlobPathUnderPrefix(blobPath, "client-packages/")) {
     return new Response("Not found", { status: 404 });
   }
   const stream = await getBlobStream(blobPath);
