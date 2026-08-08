@@ -2723,8 +2723,13 @@ default. Lineset-builder rendering merges into Grid sheets as another
 derived artifact (not a separate linked tool). Spec updated:
 `docs/superpowers/specs/2026-07-25-grid-base-sheet-and-estimator-split-design.md`.
 
-**Status:** OPEN — spec fully resolved, sequenced after #39's import lands
-(build work, not blocked by it — see #41 sequencing note).
+**Status:** DONE 2026-08-08 — generated base sheet, upload carry-over
+prompt, and seeding action all shipped and reviewed. See
+`docs/superpowers/plans/2026-08-07-grid-base-sheet-and-estimator-split.md`.
+Scoped to **proscenium venues only**, per the plan's own documented scope
+limit — the other 5 `VenueDims` venue kinds (church/flat/gym/blackbox/arena)
+are NOT covered by the generated base sheet or seeding action; that stays a
+follow-up punch item, not a gap in this one.
 
 ---
 
@@ -2816,8 +2821,14 @@ PDF, spec .docx, rough drawings PDF) — spec's default, confirmed; keeps the sp
 v1** — ship one-click generate-and-download first, attach-to-CRM is a fast-follow. Spec updated:
 `docs/superpowers/specs/2026-07-25-client-package-generator-design.md`.
 
-**Status:** OPEN — wave 2, spec fully resolved (depends on #39's import landing + #41's artifact
-relocation).
+**Status:** DONE 2026-08-08 — one-click zip (datasheet PDF + spec .docx +
+rough drawings PDF), gap-surfacing chips, and the download route all shipped
+and reviewed. See `docs/superpowers/plans/2026-08-07-client-package-generator.md`.
+Two known v1 gaps, being raised with Jeff separately as scope questions
+(NOT fixed here): **(1)** ships from a Grid project only — the "generate
+from a quote" entry point the original ask also named was not built;
+**(2)** the "rough drawings" PDF currently renders the venue shell only —
+device placements are not yet drawn onto it.
 
 ---
 
@@ -2847,7 +2858,13 @@ artifact, not a separate linked tool. **Sequencing locked across the wave:** #39
 (needs both #39's populated attachments and #41's artifact relocation). Spec updated:
 `docs/superpowers/specs/2026-07-25-grid-base-sheet-and-estimator-split-design.md`.
 
-**Status:** OPEN — wave 2, spec fully resolved.
+**Status:** DONE 2026-08-08 — lineset schedule, Control Riser, and the
+Grid-BOM-if-present pricing seam all shipped and reviewed. See
+`docs/superpowers/plans/2026-08-07-grid-base-sheet-and-estimator-split.md`.
+Note: **"Naming/nav TABLED" stays TABLED** — this only built the pricing
+seam (estimating consumes a Grid BOM when one exists, else prices
+parametrically); it did NOT relocate the estimator's UI/nav placement, per
+Jeff's locked direction.
 
 ---
 
