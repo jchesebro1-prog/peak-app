@@ -1098,7 +1098,11 @@ export default function GridEditor({
           + Plan sheet
         </button>
         {seedDisabled ? (
-          <button style={{ ...BTN, opacity: 0.5, cursor: "not-allowed" }} disabled title="Import the catalog starter set first">
+          <button
+            style={{ ...BTN, opacity: 0.5, cursor: "not-allowed" }}
+            disabled
+            title="No catalog parts found in the Rigging or Curtains categories yet"
+          >
             Generate starting layout
           </button>
         ) : !seedArm ? (

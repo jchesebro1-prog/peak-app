@@ -157,22 +157,45 @@ export async function seedStarterLayoutAction(
     getPart(resolvedPartIds.CURTAIN),
   ]);
   if (!pipePart || !curtainPart)
-    return { ok: false, error: "Import the catalog starter set first — no Rigging/Curtains parts found." };
+    return {
+      ok: false,
+      error: "No catalog parts found in the Rigging or Curtains categories yet — can't seed a starter layout.",
+    };
 
+  // Each drop is two writes (addPlacement + setPlacementCategory, see the
+  // doc comment above). If one throws partway through, the drops already
+  // committed must NOT be silently left as-is with no word to the caller —
+  // revalidate so the editor reflects whatever actually landed, and report
+  // exactly how many drops made it in so the user isn't guessing whether a
+  // retry will double up devices.
   const drops = suggestSeedPlacements(dims, project.placements.length);
-  for (const d of drops) {
-    const partId = d.partId === "PIPE" ? pipePart.id : curtainPart.id;
-    const updated = await addPlacement(projectId, {
-      sheetId,
-      page: 1,
-      x: d.x,
-      y: d.y,
-      partId,
-      by: user.name,
-    });
-    if (!updated) return { ok: false, error: "Design not found." };
-    const newest = updated.placements[updated.placements.length - 1];
-    if (newest) await setPlacementCategory(projectId, newest.id, d.category);
+  let seeded = 0;
+  try {
+    for (const d of drops) {
+      const partId = d.partId === "PIPE" ? pipePart.id : curtainPart.id;
+      const updated = await addPlacement(projectId, {
+        sheetId,
+        page: 1,
+        x: d.x,
+        y: d.y,
+        partId,
+        by: user.name,
+      });
+      if (!updated) return { ok: false, error: "Design not found." };
+      const newest = updated.placements[updated.placements.length - 1];
+      if (newest) await setPlacementCategory(projectId, newest.id, d.category);
+      seeded++;
+    }
+  } catch (e) {
+    console.error("[grid] seedStarterLayoutAction failed partway through:", e);
+    revalidatePath(editorPath(projectId));
+    return {
+      ok: false,
+      error:
+        seeded > 0
+          ? `Only ${seeded} of ${drops.length} starter devices were added before an error — check the plan, then try again if more are still needed.`
+          : "Couldn't add the starter layout — try again.",
+    };
   }
   revalidatePath(editorPath(projectId));
   return { ok: true };
