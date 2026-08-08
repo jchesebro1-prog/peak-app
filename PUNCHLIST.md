@@ -2699,7 +2699,7 @@ field already exist; the work is a sell-price input + deciding A (line distribut
 
 ---
 
-## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — OPEN
+## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — DONE (2026-08-08)
 
 **Area:** The Grid (`/design/grid`), sheet handling; shared `VenueDims`.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
@@ -2729,7 +2729,11 @@ prompt, and seeding action all shipped and reviewed. See
 Scoped to **proscenium venues only**, per the plan's own documented scope
 limit — the other 5 `VenueDims` venue kinds (church/flat/gym/blackbox/arena)
 are NOT covered by the generated base sheet or seeding action; that stays a
-follow-up punch item, not a gap in this one.
+follow-up punch item, not a gap in this one. Seeding's rigging-part
+resolution bug (matched a literal `category` that can never be "Rigging")
+was found and fixed 2026-08-08 — but the real starter-set catalog has no
+generic (non-curtain) rigging-hardware rows yet, so the button still shows
+disabled on real data today. See #95 — a data gap, not a code gap.
 
 ---
 
@@ -2800,7 +2804,7 @@ Controls, 14 Speakers, 8 Audio Controls, 11 Curtains).
 
 ---
 
-## 40. Catalog-anchored datasheets + specs → one-click client package — OPEN
+## 40. Catalog-anchored datasheets + specs → one-click client package — DONE (2026-08-08)
 
 **Area:** catalog (`catalog_parts`), The Grid, estimator, designs, D94 spec engine, D116 blob store.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
@@ -2824,15 +2828,16 @@ v1** — ship one-click generate-and-download first, attach-to-CRM is a fast-fol
 **Status:** DONE 2026-08-08 — one-click zip (datasheet PDF + spec .docx +
 rough drawings PDF), gap-surfacing chips, and the download route all shipped
 and reviewed. See `docs/superpowers/plans/2026-08-07-client-package-generator.md`.
-Two known v1 gaps, being raised with Jeff separately as scope questions
-(NOT fixed here): **(1)** ships from a Grid project only — the "generate
-from a quote" entry point the original ask also named was not built;
-**(2)** the "rough drawings" PDF currently renders the venue shell only —
-device placements are not yet drawn onto it.
+**Jeff's call 2026-08-08: ship as-is, three known v1 gaps deferred rather than
+fixed now** — see **#94** for the full writeup: **(1)** ships from a Grid
+project only, not from a quote (the original ask named both); **(2)** the
+"rough drawings" PDF renders the venue shell only, no device placements;
+**(3)** no derived riser page in the package, despite the spec asking for
+"plan sheet + derived riser."
 
 ---
 
-## 41. DIRECTION: split the design estimator; merge design-artifact logic into The Grid — OPEN
+## 41. DIRECTION: split the design estimator; merge design-artifact logic into The Grid — DONE (2026-08-08)
 
 **Area:** design estimator, The Grid, Designs.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)

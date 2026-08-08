@@ -329,7 +329,7 @@ import { isRiggingHardwarePart } from "@/lib/design/grid-bom";
 
 ok(
   !isRiggingHardwarePart({ trade: undefined, group: undefined }),
-  "grid-bom: isRiggingHardwarePart is false with no trade at all — the bug this replaces (category === \"Rigging\") could never match a real part, since Rigging is a trade, not a category"
+  "grid-bom: isRiggingHardwarePart is false with no trade at all"
 );
 ok(
   isRiggingHardwarePart({ trade: "Rigging", group: null }),
