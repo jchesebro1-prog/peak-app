@@ -2367,10 +2367,20 @@ Rentals tasks), each a deliberate boundary rather than an oversight:
    `stock: Array<{locationId, qty}>` (both create and edit, edit still via
    `mergeUpsert` per Task 4's pattern). This closes the real gap: new items
    (hub-created or CSV-imported) were born with `stock: []` and so were
-   permanently unbookable. Creating new *locations* is still out of scope —
-   `upsertEquipmentLocation` in `actions.ts` remains unused by design;
-   locations stay seed/import-managed until a real location-CRUD UI is
-   scoped separately.
+   permanently unbookable.
+   **Addendum (final review round 2, punch #93):** locations had zero way
+   to exist outside the demo seed — which never runs on a hosted deploy and
+   gets wiped by the go-live reset even in dev — so `upsertEquipmentLocation`
+   sat unused and the stock editor above never had a location to show. The
+   Rentals hub now has a minimal "+ Add location" modal (name + optional
+   address) that calls it directly; locations are created via the Rentals
+   hub, no CSV import path (there are only 10 import types and
+   `equipment_locations` isn't one — a real location-CRUD screen with
+   edit/delete is still out of scope). The same pass also guarded
+   `upsertEquipmentItem`'s `stock` field: it's now only included in the
+   `mergeUpsert` patch when at least one location exists, so editing an
+   item's rate in a location-less DB no longer silently wipes stock that
+   arrived via another route (e.g. a sync pull).
 2. **Task 6's PDF letter route has no reference to mirror.** As documented
    in its own header comment
    (`src/app/(app)/rentals/quote/letter/route.ts:10-27`), no existing page
