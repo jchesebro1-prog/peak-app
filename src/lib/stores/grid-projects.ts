@@ -8,6 +8,7 @@ import {
 } from "@/db/doc-store";
 import { clamp01, type Calibration, type Point } from "@/lib/annotations";
 import type { GridCurtain } from "@/lib/design/grid-bom";
+import type { VenueDims } from "@/lib/design/venue-dims";
 
 /**
  * The Grid (D108) — system-design projects: plan sheets, painted catalog
@@ -156,13 +157,22 @@ export type GridSheet = {
   projectId: string;
   name: string;
   mime: string;
-  /** Base64 payload — empty when the file lives in Blob storage (D116). */
+  /** Base64 payload — empty when the file lives in Blob storage (D116) OR
+   *  when this is a generated sheet (kind === "generated"). */
   dataUrl: string;
   /** Blob URL — provenance only; the store is private, reads go through
    *  the authenticated /api/grid-sheets/<id> proxy (D116). */
   url?: string;
   /** Blob pathname the proxy streams by (set together with url). */
   blobPath?: string;
+  /** "generated" = drawn from venueDims via buildGridBaseSheetPlan, no
+   *  upload/calibration (#38). Absent/undefined means "uploaded" — every
+   *  sheet before this feature reads as uploaded, no migration needed. */
+  kind?: "uploaded" | "generated";
+  /** Present only when kind === "generated" — the dims that produced it,
+   *  so the editor can re-derive the same PlanData on every render instead
+   *  of storing a baked image. */
+  venueDims?: VenueDims;
   addedBy: string;
   at: number;
 };
@@ -237,6 +247,34 @@ export async function addSheet(
   await upsertDoc<GridSheet>("grid_sheets", sheet);
   await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.sheetIds = [...(p.sheetIds || []), sheet.id];
+    p.updatedAt = Date.now();
+  });
+  return sheet;
+}
+
+/** Add the generated base sheet (#38) — no dataUrl/blob, the editor
+ *  re-derives the plan from venueDims via buildGridBaseSheetPlan on every
+ *  render. Always inserted first in sheetIds so it's the default view. */
+export async function addGeneratedSheet(
+  projectId: string,
+  input: { venueDims: VenueDims; by: string }
+): Promise<GridSheet | null> {
+  const project = await getProject(projectId);
+  if (!project) return null;
+  const sheet: GridSheet = {
+    id: rid("gs-"),
+    projectId,
+    name: "Generated base sheet",
+    mime: "application/x-grid-generated",
+    dataUrl: "",
+    kind: "generated",
+    venueDims: input.venueDims,
+    addedBy: input.by,
+    at: Date.now(),
+  };
+  await upsertDoc<GridSheet>("grid_sheets", sheet);
+  await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.sheetIds = [sheet.id, ...(p.sheetIds || [])];
     p.updatedAt = Date.now();
   });
   return sheet;

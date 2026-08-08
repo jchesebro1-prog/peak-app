@@ -43,6 +43,9 @@ import { curtainPriceEach, type FabricSell, type SellCoeffs } from "@/lib/curtai
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
+import { PlanSvg } from "@/app/(app)/design/quick/plan-svg";
+import { buildGridBaseSheetPlan } from "@/lib/design/grid-base-sheet";
+import type { VenueDims } from "@/lib/design/venue-dims";
 import type { GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
   addRouteAction,
@@ -194,7 +197,17 @@ function moneyFmt(n: number): string {
   return "$" + Math.round(n).toLocaleString("en-US");
 }
 
-export type SheetLite = { id: string; name: string; mime: string; dataUrl: string };
+export type SheetLite = {
+  id: string;
+  name: string;
+  mime: string;
+  dataUrl: string;
+  /** "generated" = drawn from venueDims via buildGridBaseSheetPlan, no
+   *  upload/calibration (#38). Absent means "uploaded". */
+  kind?: "uploaded" | "generated";
+  /** Present only when kind === "generated". */
+  venueDims?: VenueDims;
+};
 export type ProjectLite = {
   id: string;
   name: string;
@@ -1691,7 +1704,9 @@ export default function GridEditor({
                 boxShadow: "0 2px 14px rgba(0,0,0,.28)",
               }}
             >
-              {isPdf ? (
+              {sheet.kind === "generated" && sheet.venueDims ? (
+                <PlanSvg plan={buildGridBaseSheetPlan(sheet.venueDims)} accent="#16181d" />
+              ) : isPdf ? (
                 <PdfCanvas dataUrl={sheet.dataUrl} page={page} zoom={zoom} onLoaded={onLoaded} onSize={onSize} />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element

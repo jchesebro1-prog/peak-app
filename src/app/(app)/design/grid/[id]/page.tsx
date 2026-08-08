@@ -142,6 +142,10 @@ export default async function GridEditorPage({
         // Blob-stored sheets stream through the authenticated proxy (the
         // store is private, D116); in-database sheets pass their data-URL.
         dataUrl: s.blobPath ? `/api/grid-sheets/${encodeURIComponent(s.id)}` : s.dataUrl,
+        // Generated sheets (#38) carry no bytes — the editor re-derives the
+        // plan from venueDims via buildGridBaseSheetPlan on every render.
+        kind: s.kind,
+        venueDims: s.venueDims,
       }))}
       parts={parts}
       fabrics={fabrics}

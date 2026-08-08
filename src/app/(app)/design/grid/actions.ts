@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { getCompany } from "@/lib/identity/companies";
-import { createProject, removeProject } from "@/lib/stores/grid-projects";
+import { addGeneratedSheet, createProject, removeProject } from "@/lib/stores/grid-projects";
 
 /**
  * The Grid index actions (D108) — create a system-design project and land
@@ -20,6 +20,19 @@ export async function createProjectAction(formData: FormData): Promise<void> {
     name,
     customer: company?.name || "",
     customerId: company?.id || null,
+    by: user.name,
+  });
+  const num = (key: string, fallback: number) => {
+    const v = Number(formData.get(key));
+    return Number.isFinite(v) && v > 0 ? v : fallback;
+  };
+  await addGeneratedSheet(p.id, {
+    venueDims: {
+      proWidthFt: num("proWidthFt", 40),
+      proHeightFt: num("proHeightFt", 20),
+      stageDepthFt: num("stageDepthFt", 30),
+      stageWidthFt: formData.get("stageWidthFt") ? num("stageWidthFt", 50) : undefined,
+    },
     by: user.name,
   });
   revalidatePath("/design/grid");

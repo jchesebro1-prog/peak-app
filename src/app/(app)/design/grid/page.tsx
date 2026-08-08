@@ -64,6 +64,10 @@ export default async function GridIndexPage() {
               </option>
             ))}
           </select>
+          <input name="proWidthFt" type="number" step="0.5" min="1" defaultValue={40} placeholder="Pro width (ft)" style={{ ...input, width: 130 }} />
+          <input name="proHeightFt" type="number" step="0.5" min="1" defaultValue={20} placeholder="Pro height (ft)" style={{ ...input, width: 130 }} />
+          <input name="stageDepthFt" type="number" step="0.5" min="1" defaultValue={30} placeholder="Stage depth (ft)" style={{ ...input, width: 130 }} />
+          <input name="stageWidthFt" type="number" step="0.5" min="1" defaultValue={50} placeholder="Wall-to-wall (ft), optional" style={{ ...input, width: 170 }} />
           <button
             type="submit"
             style={{

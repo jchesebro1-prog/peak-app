@@ -206,7 +206,7 @@ ok(
 
 /* --- Grid generated base sheet: proscenium geometry (#38) --- */
 import { buildGridBaseSheetPlan } from "@/lib/design/grid-base-sheet";
-import { DEFAULT_VENUE_DIMS } from "@/lib/design/venue-dims";
+// DEFAULT_VENUE_DIMS is already imported at the top of this file (line 11).
 
 const basePlan = buildGridBaseSheetPlan(DEFAULT_VENUE_DIMS);
 ok(basePlan.W > 0 && basePlan.H > 0, "grid-base-sheet: generated plan has a positive canvas size");
