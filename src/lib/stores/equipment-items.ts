@@ -1,4 +1,4 @@
-import { getDoc, listDocs, upsertDoc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, upsertDoc } from "@/db/doc-store";
 
 /**
  * Rentals module — equipment items (the rentable gear catalog). Doc-store
@@ -45,14 +45,23 @@ export async function byCategory(category: EquipmentCategory): Promise<Equipment
   return all.filter((i) => i.category === category);
 }
 
+/**
+ * Explicit id (edits, via mergeUpsert below) stay a plain replace-upsert.
+ * A minted id (new items) goes through insertWithPrefixedId (D73) instead
+ * of a read-then-write `eq-${all.length + 1}` count, which two concurrent
+ * creates (e.g. two rental quotes approved moments apart, each spawning
+ * new catalog rows) could compute identically — the second silently
+ * overwriting the first via upsertDoc.
+ */
 export async function upsert(
   item: Omit<EquipmentItem, "id"> & { id?: string }
 ): Promise<EquipmentItem> {
-  const all = await list();
-  const id = item.id || `eq-${all.length + 1}`;
-  const doc: EquipmentItem = { ...item, id };
-  await upsertDoc(COLLECTION, doc);
-  return doc;
+  if (item.id) {
+    const doc: EquipmentItem = { ...item, id: item.id };
+    await upsertDoc(COLLECTION, doc);
+    return doc;
+  }
+  return insertWithPrefixedId<EquipmentItem>(COLLECTION, "eq", 0, (id) => ({ ...item, id }));
 }
 
 /**

@@ -486,6 +486,8 @@ export async function restoreQuoteRevision(
     doc.flameTest = target.flameTest ?? null;
     doc.repair = target.repair ?? null;
     doc.inspection = target.inspection ?? null;
+    doc.consulting = target.consulting ?? null;
+    doc.rental = target.rental ?? null;
     pushRevision(doc, actor, "manual", `Recalled v${rev}`);
     doc.updatedAt = Date.now();
   });

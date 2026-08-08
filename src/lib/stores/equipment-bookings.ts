@@ -1,4 +1,4 @@
-import { getDoc, listDocs, upsertDoc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, upsertDoc } from "@/db/doc-store";
 import { qtyOwned } from "./equipment-items";
 
 /**
@@ -72,14 +72,17 @@ export async function availableQty(
   return owned - committed;
 }
 
+/**
+ * Id always minted (no explicit-id callers) — insertWithPrefixedId (D73)
+ * instead of a read-then-write `bk-${all.length + 1}` count, which two
+ * rental quotes approved moments apart (each spawning bookings via
+ * createFromQuote below) could compute identically, the second silently
+ * overwriting the first via upsertDoc.
+ */
 export async function create(
   booking: Omit<EquipmentBooking, "id">
 ): Promise<EquipmentBooking> {
-  const all = await list();
-  const id = `bk-${all.length + 1}`;
-  const doc: EquipmentBooking = { ...booking, id };
-  await upsertDoc(COLLECTION, doc);
-  return doc;
+  return insertWithPrefixedId<EquipmentBooking>(COLLECTION, "bk", 0, (id) => ({ ...booking, id }));
 }
 
 export async function setStatus(id: string, status: BookingStatus): Promise<void> {
