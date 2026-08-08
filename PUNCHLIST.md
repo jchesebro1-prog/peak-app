@@ -2716,7 +2716,15 @@ calibration step on the base sheet**.
 wall-to-wall; the generated sheet must be explicit about which drives it. Open: when a real
 plan uploads later, do base-sheet markers carry over or arrive as a separate sheet?
 
-**Status:** OPEN — spec written, rides wave 2 (part of #41's architecture).
+**Resolved 2026-08-07 (planning pass):** real-plan upload on a
+project that already has a generated base sheet prompts per-project —
+carry markers over (re-anchored) vs. keep as a separate sheet, no fixed
+default. Lineset-builder rendering merges into Grid sheets as another
+derived artifact (not a separate linked tool). Spec updated:
+`docs/superpowers/specs/2026-07-25-grid-base-sheet-and-estimator-split-design.md`.
+
+**Status:** OPEN — spec fully resolved, sequenced after #39's import lands
+(build work, not blocked by it — see #41 sequencing note).
 
 ---
 
@@ -2771,6 +2779,21 @@ compatible placement ids gets a labeled route stamped, not just an unlabeled one
 worse). Also noted: `importCatalog` paste action has NO admin gate (pre-existing — flag for
 Jeff).
 
+**Review resolved 2026-08-07 (planning pass) — Jeff said "import the starter set."** Locked
+adjustments on top of the staged draft: **Draper excluded entirely** for this round (the
+size-permutation import format is a separate later decision, not a starter-set trim); **3
+unidentified Biamp rows dropped** (bare part numbers, no confirmed product identity — Audio
+Controls ships with fewer manufacturers this round); **ChamSys / Chauvet Professional / Danley
+/ Meyer Sound / Shure imported as-is with their verify flags intact** (breadth now, price/identity
+spot-checks against the vendor later, at Jeff's pace); **full `CONNECTION_TYPES` list kept, no
+strikes**, plus **two new types added** — generic Network/NDI (BirdDog PTZ cameras, Matrox
+encoders) and RF/antenna (Shure Axient PSM combiner/transmitter) — with ports back-filled onto
+the rows that needed them. Net: ~65 items land (11 Lighting Controls, 10 Fixtures, 11 Video
+Controls, 14 Speakers, 8 Audio Controls, 11 Curtains).
+
+**Status:** IMPORT APPROVED 2026-08-07 — decisions locked, **not yet executed**; queued as the
+first build task ahead of #38/#40/#41 (see #41 sequencing).
+
 ---
 
 ## 40. Catalog-anchored datasheets + specs → one-click client package — OPEN
@@ -2788,7 +2811,14 @@ across the six beta categories; **(c)** the generator: one action walks a BOM an
 datasheet package + spec + rough drawings. Much exists (Grid→D94 bridge, derived riser, .docx
 output) — the missing piece is assembly; completeness depends on (a)+(b) population.
 
-**Status:** OPEN — wave 2 (depends on #39 attachments being populated).
+**Resolved 2026-08-07 (planning pass):** bundle format = **zip of three documents** (datasheet
+PDF, spec .docx, rough drawings PDF) — spec's default, confirmed; keeps the spec as an editable
+.docx rather than flattening it into a merged PDF. CRM-thread auto-attach is **out of scope for
+v1** — ship one-click generate-and-download first, attach-to-CRM is a fast-follow. Spec updated:
+`docs/superpowers/specs/2026-07-25-client-package-generator-design.md`.
+
+**Status:** OPEN — wave 2, spec fully resolved (depends on #39's import landing + #41's artifact
+relocation).
 
 ---
 
@@ -2810,7 +2840,15 @@ labels (trade packages, alternates — open-ended by design). **Naming/nav TABLE
 rebuild in flight). **NO data migration** (beta, sample data only). Sequencing: #39 lands
 first; this rides on top. Pricing math mostly does NOT move (budget + quote share `goods.ts`).
 
-**Status:** OPEN — wave 2.
+**Resolved 2026-08-07 (planning pass):** real-plan upload on a project that already has a
+generated base sheet prompts per-project — carry markers over vs. keep as a separate sheet, no
+fixed default (see #38). Lineset-builder rendering merges into Grid sheets as another derived
+artifact, not a separate linked tool. **Sequencing locked across the wave:** #39 import
+(approved, not yet executed) → #38/#41 Grid architecture build → #40 client package generator
+(needs both #39's populated attachments and #41's artifact relocation). Spec updated:
+`docs/superpowers/specs/2026-07-25-grid-base-sheet-and-estimator-split-design.md`.
+
+**Status:** OPEN — wave 2, spec fully resolved.
 
 ---
 

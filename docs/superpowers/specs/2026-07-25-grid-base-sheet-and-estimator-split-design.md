@@ -49,7 +49,9 @@ equipment schedules/specs/quotes, and the projects-lifecycle spec's
    model (can a "generated" sheet coexist with uploaded sheets?); riser
    derivation (built slice) and lineset builder outputs.
 1. Generated base sheet: `VenueDims` entry form on new Grid project →
-   rendered venue plan sheet (no calibration step).
+   rendered venue plan sheet (no calibration step). Real-plan upload on a
+   project that already has a generated sheet prompts per-project:
+   carry markers over (re-anchored) vs. keep as a separate sheet.
 2. Seeding action → editable instances; re-run behavior = additive with
    confirm, never silent replace.
 3. Categories toggle on placed items (+ label management).
@@ -61,12 +63,17 @@ equipment schedules/specs/quotes, and the projects-lifecycle spec's
 6. Retire estimator-side drawing outputs once Grid artifacts reach parity
    (parity checklist in the plan).
 
-## Open questions
-- When a real plan PDF is uploaded later: do base-sheet markers carry over
-  onto it, or does it arrive as a separate sheet alongside? (Still open from
-  the punch item — one pop-in to Jeff at plan time.)
-- Whether lineset-builder rendering itself merges into Grid sheets or stays
-  a linked tool sharing `VenueDims` (Task 0 informs; Jeff decides).
+## Resolved (2026-08-07 planning pass)
+- **Real-plan upload on a generated-base-sheet project:** no fixed default.
+  At upload time, prompt the user per-project: carry existing markers over
+  onto the new sheet (re-anchored, same relative position), or keep the
+  upload as a separate sheet alongside the generated one with markers
+  untouched. Both paths must stay available every time, not just once.
+- **Lineset-builder rendering merges into Grid sheets** — it becomes another
+  artifact The Grid derives from its instances (consistent with "all
+  artifacts derive from Grid instances ONLY"), not a separate linked tool.
+  Task 0's recon still needs to confirm what the current lineset-builder
+  render logic actually does before the merge is built.
 
 ## Acceptance
 New Grid project → enter dims → base plan appears, correctly scaled, ready

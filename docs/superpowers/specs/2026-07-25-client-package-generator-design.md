@@ -27,7 +27,7 @@ and emits a bundle:
 2. **Spec:** the existing D94 output for the same item set.
 3. **Rough drawings:** current plan sheet render + derived riser as PDF
    pages ("rough" is the promise — not stamped drawings).
-Output: one zip or merged PDF set on the project, stored via D116 blob,
+Output: a zip of the three documents on the project, stored via D116 blob,
 downloadable/shareable.
 
 ## Build tasks
@@ -39,11 +39,14 @@ downloadable/shareable.
 4. Gap surfacing: per-part "missing datasheet/spec" chips linking to the
    catalog editor (drives attachment population where it matters first).
 
-## Open questions
-- Bundle format: single merged PDF vs zip of three documents — pop-in to
-  Jeff at plan time (default: zip of three).
-- Whether the package also attaches to the CRM thread/customer record for
-  send-out (nice, cheap if the attachment model allows).
+## Resolved (2026-08-07 planning pass)
+- **Bundle format: zip of three documents** (datasheet PDF, spec .docx, rough
+  drawings PDF) — confirmed, matches the spec default. Keeps the spec as an
+  editable .docx (D94/architects-paste-into-manuals convention) rather than
+  flattening it into the merged PDF.
+- **CRM-thread attach: out of scope for v1.** Ship the one-click
+  generate-and-download first; attaching to the CRM thread/customer record
+  for send-out is a fast-follow, not bundled into this build.
 
 ## Acceptance
 From a Grid project with a painted BOM: one click yields spec .docx +
