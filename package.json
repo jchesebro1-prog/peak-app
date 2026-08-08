@@ -18,6 +18,7 @@
     "audit:daylite": "tsx scripts/audit-daylite-export.ts",
     "pull:daylite": "tsx scripts/pull-daylite.ts",
     "import:daylite": "tsx scripts/import-daylite.ts",
+    "import:starter-set": "tsx scripts/import-starter-set.ts",
     "test:specs": "tsx scripts/test-review-and-spec.ts",
     "test:smoke": "tsx scripts/smoke-routes.ts"
   },
