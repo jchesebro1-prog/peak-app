@@ -55,6 +55,7 @@ import {
   carryOverAction,
   clearCalAction,
   createDraftQuoteAction,
+  generateClientPackageAction,
   movePlacementAction,
   placeCurtainAction,
   placeDeviceAction,
@@ -238,6 +239,7 @@ export default function GridEditor({
   laborParts,
   laborHoursPerDevice,
   specHref,
+  engagementId,
   venues,
 }: {
   project: ProjectLite;
@@ -253,6 +255,11 @@ export default function GridEditor({
   laborHoursPerDevice: number;
   /** D94 bid-spec generator for this customer's engagement, when one exists. */
   specHref: string | null;
+  /** The same resolved engagement id specHref links to (D111 bridge) — null
+   *  when the customer has no open engagement. The client package generator
+   *  (#40) needs a real engagementId for its spec half, so the "Generate
+   *  client package" button gates on this exactly like specHref does. */
+  engagementId: string | null;
   /** The customer's venues, for the picker (D113.6). */
   venues: Array<{ id: string; name: string }>;
 }) {
@@ -275,6 +282,13 @@ export default function GridEditor({
    *  impossible to miss, never refuses the quote. Cleared on every new
    *  mint/update so a fixed catalog makes the warning go away on its own. */
   const [tierFallbackLines, setTierFallbackLines] = useState<string[]>([]);
+
+  /** Client package generator (#40) — separate busy/error state from the
+   *  quote button above (`busy`/`err`) since the two actions are unrelated
+   *  and a stuck zip build must not disable the "Create draft quote" button
+   *  or vice versa. */
+  const [cpBusy, setCpBusy] = useState(false);
+  const [cpErr, setCpErr] = useState<string | null>(null);
 
   /** Real-plan-upload carry-over prompt (#38) — set right after a new sheet
    *  uploads over a generated base sheet that already has placements on it;
@@ -1813,6 +1827,38 @@ export default function GridEditor({
               >
                 Bid spec from this design →
               </Link>
+            )}
+            {/* Client package (#40) — datasheets + spec + rough drawings,
+                one zip. Gated on the same resolved engagement as the "Bid
+                spec" link above (D111 bridge): the spec half needs a real
+                engagementId, same requirement the D94 flow already has.
+                Independent of quoteId — the BOM comes straight off the
+                design's placements, not off a minted quote. */}
+            <div
+              style={{ marginTop: 6 }}
+              title={engagementId ? undefined : "Link this design to a customer engagement first — a client package needs one for the specification half."}
+            >
+              <button
+                style={{ ...BTN, width: "100%" }}
+                disabled={cpBusy || !engagementId}
+                onClick={async () => {
+                  if (!engagementId) return;
+                  setCpErr(null);
+                  setCpBusy(true);
+                  const r = await generateClientPackageAction(project.id, engagementId);
+                  setCpBusy(false);
+                  if (!r.ok) {
+                    setCpErr(r.error);
+                  } else {
+                    window.location.href = `/api/client-package/${encodeURIComponent(r.blobPath)}`;
+                  }
+                }}
+              >
+                {cpBusy ? "Generating client package…" : "Generate client package"}
+              </button>
+            </div>
+            {cpErr && (
+              <div style={{ marginTop: 6, fontSize: 11.5, color: "#b3261e" }}>{cpErr}</div>
             )}
           </div>
 

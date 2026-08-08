@@ -13,6 +13,7 @@ import {
   carryPlacementsToSheet,
   clearSheetCalibration,
   getProject,
+  listSheets,
   movePlacement,
   removePlacement,
   removeRoute,
@@ -46,6 +47,9 @@ import { suggestSeedPlacements } from "@/lib/design/grid-seed";
 import type { VenueDims } from "@/lib/design/venue-dims";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
+import { buildClientPackageZip } from "@/lib/design/client-package-zip";
+import { buildGridBaseSheetPlan } from "@/lib/design/grid-base-sheet";
+import type { SpecCatalogPart } from "@/lib/bid-spec";
 
 /** The Grid editor server actions (D108). */
 
@@ -719,4 +723,68 @@ export async function createDraftQuoteAction(
   revalidatePath("/quotes");
   revalidatePath("/design/grid");
   return { ok: true, quoteId: q.id, updated: false, fallbackLines };
+}
+
+/**
+ * One-click client package (#40) — datasheets + spec + rough drawings, one
+ * zip, stored to Blob and downloaded through the authenticated route below.
+ *
+ * `engagementId` is caller-supplied rather than re-derived here: the D111
+ * Grid→spec bridge (design/grid/[id]/page.tsx's `eng`) already resolves the
+ * customer's open engagement server-side for the "Bid spec from this
+ * design" link, and the editor button reuses that same resolved id — same
+ * requirement the existing D94 flow already has (a spec needs a real
+ * engagement). No engagementId column exists on GridProject itself; this
+ * mirrors specHref's existing resolution rather than inventing a new field.
+ */
+export async function generateClientPackageAction(
+  projectId: string,
+  engagementId: string
+): Promise<{ ok: true; blobPath: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  if (!engagementId) {
+    return {
+      ok: false,
+      error: "This design has no linked engagement — link a customer engagement before generating a client package.",
+    };
+  }
+  const parts = await listCatalog();
+  const partById = new Map(parts.map((p) => [p.id, p]));
+  const lines = bomLines(project.placements || [], parts);
+  const bom = lines
+    .map((l) => {
+      const part = partById.get(l.partId);
+      return part ? { sku: part.sku, desc: l.desc, qty: l.qty } : null;
+    })
+    .filter((row): row is { sku: string; desc: string; qty: number } => row !== null);
+
+  // Drawings (#40): the generated base sheet (#38), when this project has
+  // one — the only PlanData source currently wired into the drawings PDF.
+  // No generated sheet (an uploaded-only project) means an empty drawings
+  // list, which buildClientPackageZip renders as an explicit "none yet"
+  // page rather than a silently missing file.
+  const drawings: Array<{ title: string; plan: ReturnType<typeof buildGridBaseSheetPlan> }> = [];
+  const genSheet = (await listSheets(projectId)).find((s) => s.kind === "generated" && s.venueDims);
+  if (genSheet?.venueDims) {
+    drawings.push({ title: "Plan sheet", plan: buildGridBaseSheetPlan(genSheet.venueDims) });
+  }
+
+  const zipBytes = await buildClientPackageZip({
+    bom,
+    catalog: parts as SpecCatalogPart[],
+    engagementId,
+    projectName: project.name,
+    customer: project.customer,
+    preparedBy: user.name,
+    drawings,
+  });
+  const up = await putBlob(
+    `client-packages/${projectId}/${Date.now()}.zip`,
+    Buffer.from(zipBytes),
+    "application/zip"
+  );
+  revalidatePath(editorPath(projectId));
+  return { ok: true, blobPath: up.pathname };
 }

@@ -65,6 +65,10 @@ export default async function GridEditorPage({
       )
     : undefined;
   const specHref = eng ? `/design/engagements/spec?id=${encodeURIComponent(eng.id)}` : null;
+  // Client package generator (#40) reuses this same resolved engagement id —
+  // it needs a real engagementId for the spec half, same requirement as the
+  // D94 flow specHref already gates on.
+  const engagementId = eng ? eng.id : null;
 
   // Venue picker options (D113.6) — the customer's sites.
   const sites = project.customerId ? await sitesForCompany(project.customerId) : [];
@@ -153,6 +157,7 @@ export default async function GridEditorPage({
       laborParts={laborParts}
       laborHoursPerDevice={laborHoursPerDevice}
       specHref={specHref}
+      engagementId={engagementId}
       venues={venues}
     />
   );
