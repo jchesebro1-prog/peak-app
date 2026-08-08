@@ -2609,6 +2609,17 @@ ok(
  * catalog-import checks it sits next to. */
 import { list as listEquipmentItems, byCategory as equipmentByCategory } from "../src/lib/stores/equipment-items";
 
+/* --- Rentals module, Task 2: equipment bookings + availability logic ---
+ * overlaps() is pure, so it's asserted here at top level; availableQty()/
+ * create() hit the doc-store and are asserted from inside asyncChecks()
+ * below, next to the Task 1 checks. */
+import { overlaps, availableQty, create as createBooking } from "../src/lib/stores/equipment-bookings";
+
+ok(overlaps(1000, 2000, 1500, 2500) === true, "overlaps: partial overlap detected");
+ok(overlaps(1000, 2000, 2000, 3000) === true, "overlaps: touching boundary counts as overlap");
+ok(overlaps(1000, 2000, 2001, 3000) === false, "overlaps: adjacent non-touching is not overlap");
+ok(overlaps(1000, 5000, 2000, 3000) === true, "overlaps: fully contained overlap detected");
+
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Price List");
@@ -2734,6 +2745,13 @@ async function asyncChecks(): Promise<void> {
   ok(eqItems.length === 5, "equipment-items: seed produced 5 items");
   const lighting = await equipmentByCategory("lighting");
   ok(lighting.length === 1 && lighting[0].id === "eq-3", "equipment-items: byCategory filters correctly");
+
+  /* --- Rentals module, Task 2: equipment bookings + availability logic --- */
+  const before = await availableQty("eq-1", "loc-1", Date.now(), Date.now() + 86400000);
+  ok(before === 8, "equipment-bookings: eq-1 starts fully available at loc-1");
+  await createBooking({ itemId: "eq-1", locationId: "loc-1", qty: 3, quoteId: "test-quote", startDate: Date.now(), endDate: Date.now() + 86400000, status: "confirmed", rate: 45 });
+  const after = await availableQty("eq-1", "loc-1", Date.now(), Date.now() + 86400000);
+  ok(after === 5, "equipment-bookings: confirmed booking reduces availability");
 }
 
 asyncChecks()
