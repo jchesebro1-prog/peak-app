@@ -736,6 +736,12 @@ export async function createDraftQuoteAction(
  * requirement the existing D94 flow already has (a spec needs a real
  * engagement). No engagementId column exists on GridProject itself; this
  * mirrors specHref's existing resolution rather than inventing a new field.
+ *
+ * Blob-required, same call as uploadPartDatasheetAction (catalog/actions.ts,
+ * D116, punch #39 Task 5): a multi-datasheet zip is exactly the MB-scale
+ * content D116 exists to keep out of jsonb, so when Blob isn't configured
+ * this refuses outright with a clear error rather than falling back to an
+ * in-doc store the way addSheetAction does for much smaller plan uploads.
  */
 export async function generateClientPackageAction(
   projectId: string,
@@ -748,6 +754,12 @@ export async function generateClientPackageAction(
     return {
       ok: false,
       error: "This design has no linked engagement — link a customer engagement before generating a client package.",
+    };
+  }
+  if (!blobEnabled()) {
+    return {
+      ok: false,
+      error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — client packages can't be generated on this deployment.",
     };
   }
   const parts = await listCatalog();
