@@ -5149,3 +5149,61 @@ instant locally. It was only found by seeding 1,700 synthetic companies and meas
 **Status:** OPEN — logged only, no code. Needs a UX decision before anything is built.
 
 ---
+
+## 94. Client package v1 ships reduced scope vs. the original spec — DEFERRED (Jeff, 2026-08-08)
+
+**Area:** client package generator (`#40`), `src/app/(app)/design/grid/[id]/actions.ts`,
+`src/lib/design/client-package-zip.ts`.
+
+**Found by:** the final whole-branch review of #40's implementation (after all 5 of its tasks
+individually shipped and passed task-level review). No single task review could see this — each
+task's brief carried plan text, not the original design spec's acceptance criteria, so a scope
+narrowing that happened during planning went unnoticed until the whole branch was read against the
+spec together.
+
+**What shipped vs. what the spec (`docs/superpowers/specs/2026-07-25-client-package-generator-design.md`)
+asked for:**
+1. **"Rough drawings" page shows the empty venue outline only — no device placements.**
+   `generateClientPackageAction` builds the drawings PDF from `buildGridBaseSheetPlan(venueDims)`
+   alone, which draws the house floor, proscenium opening, and dimension labels — nothing else.
+   Every placed device/space/wire/curtain lives in the editor's separate overlay `<svg>`, never
+   folded into the `PlanData` handed to the PDF renderer. So a project with a hundred placements
+   downloads a "plan sheet" that looks identical to a project with zero.
+2. **No derived riser page.** The spec says "plan sheet + derived riser." Punch #41 built a Control
+   Riser as part of the same wave; neither it nor the existing AV `riserGraph` is wired into the
+   client package.
+3. **Generator only works from a Grid project, not from a quote.** The spec's acceptance line is
+   "the same action works from a quote" — the only call site built is the Grid editor sidebar.
+
+**Jeff's call (2026-08-08):** ship as-is; these three gaps are logged here rather than built out now.
+No further implementation is planned until re-prioritized.
+
+**Status:** DEFERRED — v1 shipped intentionally reduced. Re-open (or fold into a future wave) when
+ready to close the gap to full spec parity.
+
+---
+
+## 95. Grid seeding action's "Rigging" resolution fixed, but the real starter-set catalog has no matching rows yet — OPEN (data gap)
+
+**Area:** The Grid seeding action (`#38`), `src/lib/design/grid-bom.ts` (`isRiggingHardwarePart`),
+catalog data (`#39`'s starter set).
+
+**Found by:** the final whole-branch review, then fixed and manually verified (2026-08-08) — the
+seed-part resolution bug itself (`category === "Rigging"` can never match, since Rigging is a trade
+not a literal category) is fixed: it now resolves via `part.trade === "Rigging" && part.group !==
+"Curtains"`, verified correct against synthetic scratch-DB rows.
+
+**Remaining gap:** the REAL 65-row starter set imported for #39 has zero catalog rows satisfying that
+condition — every rigging-trade part in the starter set (Texas Scenic track hardware, Thern hoists)
+was imported under `category: "Curtains"` (group "Curtains", trade "Rigging"), which the fix
+deliberately excludes to avoid mislabeling curtain-track hardware as a generic "pipe/batten" seed.
+So on the real dev DB today, "Generate starting layout" still shows its disabled state — correctly,
+per the fixed logic, but because no generic rigging-hardware SKU (a plain pipe, batten clamp, etc.,
+distinct from curtain track) has been imported yet, not because of a code defect.
+
+**Status:** OPEN — needs either (a) a future catalog import that adds generic (non-curtain) rigging
+hardware SKUs under their own category, or (b) a decision that curtain-track hardware itself is an
+acceptable stand-in for the seeded "pipe" placement. Not urgent; the button's disabled state is
+honest and doesn't block anything else.
+
+---
