@@ -25,6 +25,8 @@ import {
   setQuote as setGridQuote,
 } from "@/lib/stores/grid-projects";
 import { priceFromGridOrParametric } from "@/lib/design/quick-grid-seam";
+import { PDFDocument } from "pdf-lib";
+import { drawPlanDataPage } from "@/lib/design/plan-to-pdf";
 import { budgetFor, type DesignPartial } from "@/app/(app)/design/quick/actions";
 import { createDesign, addDesignRevision, designRevisions } from "@/lib/stores/designs";
 import { list as listCatalogParts } from "@/lib/stores/catalog";
@@ -3221,6 +3223,40 @@ async function asyncChecks(): Promise<void> {
     ok(
       revs.length === 2 && revs[0].budgetSource === "grid" && revs[1].budgetSource === "parametric",
       "revision snapshot: each revision keeps its OWN budgetSource, not the design's current one"
+    );
+  }
+
+  /* --- PlanData -> PDF page renderer (#40) --- */
+  {
+    const doc = await PDFDocument.create();
+    const plan = {
+      W: 640, H: 400,
+      rects: [{ x: 10, y: 10, w: 100, h: 50, fill: "#ffffff", stroke: "#000000", sw: 1 }],
+      lines: [{ x1: 0, y1: 0, x2: 100, y2: 100, stroke: "#000000", sw: 1 }],
+      circles: [{ cx: 50, cy: 50, r: 5, fill: "#000000" }],
+      texts: [{ x: 20, y: 20, t: "Pro width 40 ft", fill: "#000000", size: 12, anchor: "start" as const }],
+      paths: [],
+    };
+    const page = await drawPlanDataPage(doc, plan, { title: "Test Plan" });
+    ok(doc.getPageCount() === 1, "plan-to-pdf: drawPlanDataPage adds exactly one page");
+    ok(page.getWidth() > 0 && page.getHeight() > 0, "plan-to-pdf: the rendered page has positive dimensions");
+
+    // Also render a REAL generated plan (basePlan, #38's
+    // buildGridBaseSheetPlan(DEFAULT_VENUE_DIMS) above), not just the
+    // minimal fixture — and round-trip the saved bytes through
+    // PDFDocument.load() to confirm the output is well-formed, not just
+    // that pdf-lib's in-memory objects look right.
+    const realDoc = await PDFDocument.create();
+    const realPage = await drawPlanDataPage(realDoc, basePlan, { title: "Base Sheet" });
+    ok(
+      realPage.getWidth() === basePlan.W + 80 && realPage.getHeight() === basePlan.H + 104,
+      "plan-to-pdf: a real buildGridBaseSheetPlan output sizes the page to plan.W/H plus the fixed margins"
+    );
+    const bytes = await realDoc.save();
+    const reloaded = await PDFDocument.load(bytes);
+    ok(
+      reloaded.getPageCount() === 1 && reloaded.getPage(0).getWidth() === realPage.getWidth(),
+      "plan-to-pdf: the saved PDF bytes for a real generated plan round-trip through PDFDocument.load() unchanged"
     );
   }
 }
