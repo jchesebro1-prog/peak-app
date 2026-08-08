@@ -18,11 +18,24 @@ import type { VenueDims } from "./venue-dims";
 
 export type SeedDrop = { partId: "PIPE" | "CURTAIN"; x: number; y: number; category: string };
 
-/** Normalized drop positions along the depth axis, front (0) to back (1). */
+/**
+ * Normalized drop positions along the depth axis, UPSTAGE (0) -> DOWNSTAGE (1).
+ *
+ * That direction is not arbitrary and it is not a choice this module gets to
+ * make: `buildGridBaseSheetPlan` (grid-base-sheet.ts) draws the back wall at
+ * `yBack = MT` (the top of the page) and the plaster line at
+ * `yPlaster = yBack + depthPx` (below it), so on the sheet a user actually
+ * looks at, y≈0 IS the upstage back wall and y≈1 IS the downstage plaster
+ * line. The drawing is the ground truth; these seeds follow it.
+ *
+ * So the starter set reads, in stage terms: the main drape just upstage of
+ * the proscenium (large y, near the plaster line), then two pipes stepping
+ * back toward the wall (progressively smaller y).
+ */
 export function suggestSeedPlacements(_dims: VenueDims, _existingCount: number): SeedDrop[] {
   return [
-    { partId: "CURTAIN", x: 0.5, y: 0.08, category: "Curtains" },
-    { partId: "PIPE", x: 0.5, y: 0.3, category: "Rigging" },
-    { partId: "PIPE", x: 0.5, y: 0.55, category: "Rigging" },
+    { partId: "CURTAIN", x: 0.5, y: 0.92, category: "Curtains" },
+    { partId: "PIPE", x: 0.5, y: 0.7, category: "Rigging" },
+    { partId: "PIPE", x: 0.5, y: 0.45, category: "Rigging" },
   ];
 }

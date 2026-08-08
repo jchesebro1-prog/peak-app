@@ -242,6 +242,16 @@ const seeds = suggestSeedPlacements(DEFAULT_VENUE_DIMS, 0);
 ok(seeds.length > 0, "grid-seed: suggestSeedPlacements returns at least one starter drop for a fresh project");
 ok(seeds.every((s) => s.x >= 0 && s.x <= 1 && s.y >= 0 && s.y <= 1), "grid-seed: every suggested drop is normalized 0..1");
 ok(seeds.some((s) => s.category === "Curtains" || s.category === "Rigging"), "grid-seed: starter layout includes at least one rigging/curtain drop");
+// The depth axis the GENERATED base sheet actually draws is upstage 0 ->
+// downstage 1 (back wall at yBack = MT, plaster line below it), so a main
+// drape — which hangs just upstage of the proscenium — must be the LARGEST-y
+// seed, with the pipes stepping back upstage from it.
+const seedCurtain = seeds.find((s) => s.partId === "CURTAIN")!;
+ok(
+  !!seedCurtain && seeds.every((s) => s === seedCurtain || s.y < seedCurtain.y),
+  "grid-seed: the curtain seeds closest to the plaster line, downstage of every seeded pipe"
+);
+ok(seedCurtain.y < 1, "grid-seed: …but upstage of the plaster line itself, never on it");
 
 const reSeed = suggestSeedPlacements(DEFAULT_VENUE_DIMS, 5);
 ok(reSeed.length === seeds.length, "grid-seed: re-running suggests the same starter set regardless of unrelated existing placements (caller decides additive-vs-replace, not this function)");
@@ -258,13 +268,16 @@ ok(Array.isArray(schedule), "grid-lineset-schedule: linesetScheduleFromGrid retu
 ok(schedule.length === 1, "grid-lineset-schedule: one Rigging placement produces one schedule row");
 
 // The depth mapping is the whole point of the bridge: y is the normalized
-// depth axis (downstage 0 -> upstage 1), so 0.3 of a 30 ft stage is 9 ft.
-ok(schedule[0].dsInches === 108, `grid-lineset-schedule: y=0.3 of a 30 ft stage is 9 ft downstage (got ${schedule[0]?.dsInches})`);
-ok(schedule[0].usPositionLabel === "21' 0\"", `grid-lineset-schedule: the upstage label is measured off the back wall (got ${schedule[0]?.usPositionLabel})`);
-// 108" sits exactly between the slot-14 (104") and slot-15 (112") centers;
-// the workbook's ROUND rounds half away from zero, so slot 15 — and the row
+// depth axis UPSTAGE 0 -> DOWNSTAGE 1 (what the generated base sheet actually
+// draws — back wall at the top of the page, plaster line below it), and
+// dsInches is the distance UPSTAGE OF THE PLASTER LINE. So y=0.3 on a 30 ft
+// stage is 0.7 × 30 = 21 ft off the plaster line, 9 ft off the back wall.
+ok(schedule[0].dsInches === 252, `grid-lineset-schedule: y=0.3 of a 30 ft stage is 21 ft upstage of the plaster line (got ${schedule[0]?.dsInches})`);
+ok(schedule[0].usPositionLabel === "9' 0\"", `grid-lineset-schedule: the upstage label is measured off the back wall (got ${schedule[0]?.usPositionLabel})`);
+// 252" sits exactly between the slot-32 (248") and slot-33 (256") centers;
+// the workbook's ROUND rounds half away from zero, so slot 33 — and the row
 // is flagged 4" off that center rather than silently snapped to it.
-ok(schedule[0].slot === 15, `grid-lineset-schedule: the row lands on the workbook's nearest 8-inch grid slot (got ${schedule[0]?.slot})`);
+ok(schedule[0].slot === 33, `grid-lineset-schedule: the row lands on the workbook's nearest 8-inch grid slot (got ${schedule[0]?.slot})`);
 ok((schedule[0].warning || "").includes("off the nearest 8-inch grid center"), "grid-lineset-schedule: an off-grid position is flagged, not snapped");
 
 // A pipe's lineset TYPE is not knowable from the catalog - noted, never guessed.
@@ -284,7 +297,7 @@ ok(typedRows[0].name === "1-1/2\" schedule 40 pipe", "grid-lineset-schedule: the
 // Curtains hang on linesets too: the Curtains GROUP rolls up to the Rigging
 // TRADE (GROUP_TRADES), so a drop-in belongs on this schedule.
 const curtainRows = linesetScheduleFromGrid(
-  [{ id: "gp-3", sheetId: "gs-1", page: 1, x: 0.5, y: 0.05, partId: "FAB-1", by: "test", at: 0, curtain: { type: "Border", name: "Teaser", widthFt: 44, heightFt: 8, fullnessPct: 50, fabricSku: "FAB-1" } }],
+  [{ id: "gp-3", sheetId: "gs-1", page: 1, x: 0.5, y: 0.95, partId: "FAB-1", by: "test", at: 0, curtain: { type: "Border", name: "Teaser", widthFt: 44, heightFt: 8, fullnessPct: 50, fabricSku: "FAB-1" } }],
   DEFAULT_VENUE_DIMS
 );
 ok(curtainRows.length === 1 && curtainRows[0].type === "Border", "grid-lineset-schedule: a curtain drop-in is scheduled and typed from its curtain spec");
@@ -309,6 +322,7 @@ ok(
 );
 
 // Rows are ordered downstage -> upstage, the order the schedule is read in.
+// y=0.8 is the DOWNSTAGE one (nearer the plaster line), so it reads first.
 const ordered = linesetScheduleFromGrid(
   [
     { id: "b", sheetId: "gs-1", page: 1, x: 0.5, y: 0.8, partId: "p", category: "Rigging", by: "test", at: 0 },
@@ -316,7 +330,11 @@ const ordered = linesetScheduleFromGrid(
   ],
   DEFAULT_VENUE_DIMS
 );
-ok(ordered.map((r) => r.placementId).join(",") === "a,b", "grid-lineset-schedule: rows run downstage to upstage");
+ok(ordered.map((r) => r.placementId).join(",") === "b,a", "grid-lineset-schedule: rows run downstage to upstage");
+ok(
+  ordered[0].dsInches === 72 && ordered[1].dsInches === 288,
+  `grid-lineset-schedule: the downstage row is 6' off the plaster line, the upstage one 24' (got ${ordered[0]?.dsInches}, ${ordered[1]?.dsInches})`
+);
 
 
 /* --- Control Riser: lighting/rigging circuiting graph (#41) --- */

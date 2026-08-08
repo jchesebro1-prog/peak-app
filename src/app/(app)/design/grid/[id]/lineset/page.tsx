@@ -174,14 +174,19 @@ export default async function LinesetSchedulePage({
           {skipped.length > 0 ? ` · ${skipped.length} placement${skipped.length === 1 ? "" : "s"} not scheduled` : ""}
         </div>
 
-        {/* The two honest caveats, said out loud rather than buried. */}
+        {/* The honest caveats, said out loud rather than buried. The depth
+            axis is only ambiguous on an UPLOADED plan — a generated base sheet
+            draws the back wall at the top and the plaster line at the bottom,
+            so its depths are real, not indicative. */}
         <div className="pk-no-print" style={{ marginTop: 14, fontSize: "10pt", color: "#8c919c", lineHeight: 1.55 }}>
-          Positions are derived from each marker&rsquo;s place on the plan&rsquo;s depth axis
-          (downstage 0 → upstage 1) against the {dims.stageDepthFt}′ stage depth
-          {dimsAreAssumed ? " assumed for this design — it has no generated base sheet stating its dimensions" : ""}.
-          An uploaded plan states no orientation or scale of its own, so treat these depths as
-          indicative until the sheet is calibrated. Nothing here is typed by guess: a line reads
-          &ldquo;—&rdquo; until the placement is labelled with a lineset type.
+          Positions are measured upstage of the plaster line, from each marker&rsquo;s place on
+          the plan&rsquo;s depth axis (upstage 0 → downstage 1) against the{" "}
+          {dims.stageDepthFt}′ stage depth
+          {dimsAreAssumed
+            ? " assumed for this design — it has no generated base sheet stating its dimensions. An uploaded plan also states no orientation or scale of its own, so treat these depths as indicative until the sheet is calibrated."
+            : " stated by this design's generated base sheet, whose depth axis these positions follow."}{" "}
+          Nothing here is typed by guess: a line reads &ldquo;—&rdquo; until the placement is
+          labelled with a lineset type.
         </div>
       </div>
     </div>

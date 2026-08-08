@@ -21,10 +21,12 @@
  *                     workbook's slot number means. A placement that is not
  *                     on a grid center gets an off-grid warning rather than
  *                     being silently snapped.
- *   dsInches ........ `stageDepthFt * y * 12`. HONEST but coarse: `y` is a
- *                     normalized page coordinate, so this is only a real
- *                     depth when the plan's depth axis fills the page. See
- *                     the depth-axis note below.
+ *   dsInches ........ inches UPSTAGE OF THE PLASTER LINE:
+ *                     `stageDepthFt * (1 - y) * 12`. `y` runs upstage 0 ->
+ *                     downstage 1 (see the depth-axis note below), so the
+ *                     plaster line itself (y=1) is 0" and the back wall
+ *                     (y=0) is the full stage depth. HONEST but coarse on an
+ *                     UPLOADED sheet, where `y` is only a page coordinate.
  *   dsPositionLabel . feet-inches label for dsInches.
  *   usPositionLabel . the same measured off the back wall.
  *   active .......... always true - a painted item is, by definition, there.
@@ -50,18 +52,20 @@
  *
  * DEPTH-AXIS CONVENTION
  * ---------------------
- * `y` is treated as the normalized depth axis, DOWNSTAGE 0 -> UPSTAGE 1.
- * That is the convention `suggestSeedPlacements` (grid-seed.ts) already
- * stamps onto seeded placements, so seeded and hand-painted items read the
- * same way. Two known caveats, deliberately not papered over:
- *   - the GENERATED base sheet (grid-base-sheet.ts) draws the plaster line at
- *     the BOTTOM of the page (conventional ground-plan orientation), so on
- *     that sheet the on-page axis runs the other way and also carries page
- *     margins. Depths derived from a generated sheet are therefore indicative
- *     only, which is what the page says out loud.
- *   - an UPLOADED plan has no declared orientation at all. There is no
- *     Grid-side field that states it, so nothing here can correct for it.
- * Neither is silently absorbed - both are surfaced on the schedule page.
+ * `y` is the normalized depth axis, UPSTAGE 0 -> DOWNSTAGE 1. That is what
+ * the GENERATED base sheet actually draws: `buildGridBaseSheetPlan`
+ * (grid-base-sheet.ts) puts the back wall at the top of the page
+ * (`yBack = MT`) and the plaster line below it (`yPlaster = yBack + depthPx`),
+ * conventional ground-plan orientation. `suggestSeedPlacements`
+ * (grid-seed.ts) stamps seeded placements the same way, so seeded and
+ * hand-painted items on a generated sheet read identically, and a row's
+ * `dsInches` is a real depth off the plaster line.
+ *
+ * One caveat remains, deliberately not papered over: an UPLOADED plan has no
+ * declared orientation or scale at all. There is no Grid-side field that
+ * states it, so nothing here can correct for it, and depths on a design with
+ * no generated base sheet are indicative only. That is surfaced on the
+ * schedule page rather than silently absorbed.
  *
  * Pure and dependency-free like its grid-* siblings (type-only imports only):
  * nothing here may reach the doc-store.
@@ -230,7 +234,10 @@ export function linesetScheduleReport(
       continue;
     }
 
-    const dsIn = Math.round(depthIn * clamp01(pl.y));
+    // Inches upstage of the plaster line. `y` runs upstage 0 -> downstage 1
+    // (the generated sheet's own orientation), so the distance FROM the
+    // plaster line is the complement: y=1 is at the line, y=0 is the back wall.
+    const dsIn = Math.round(depthIn * (1 - clamp01(pl.y)));
     const slot = Math.round(dsIn / SLOT_SPACING_IN) + 1;
     const offGridIn = Math.abs(dsIn - (slot - 1) * SLOT_SPACING_IN);
 
@@ -261,7 +268,7 @@ export function linesetScheduleReport(
       active: true,
       type,
       name: pl.curtain?.name || part?.desc || pl.partId,
-      rule: `Painted at y=${clamp01(pl.y).toFixed(3)} on the plan's depth axis × ${dims.stageDepthFt || 0} ft depth`,
+      rule: `Painted at y=${clamp01(pl.y).toFixed(3)} on the plan's depth axis (upstage 0 → downstage 1) × ${dims.stageDepthFt || 0} ft depth`,
       warning: unresolved.length > 0 ? unresolved.join("\n") : undefined,
       placementId: pl.id,
       partId: pl.partId,
@@ -270,8 +277,10 @@ export function linesetScheduleReport(
     });
   }
 
-  // Downstage -> upstage, the order a schedule is read and hung in. Ties keep
-  // their painted order (Array.prototype.sort is stable in ES2019+).
+  // Downstage -> upstage, the order a schedule is read and hung in. `dsInches`
+  // IS the distance upstage of the plaster line, so ascending is exactly that
+  // order: the line closest to the proscenium first, the back wall last. Ties
+  // keep their painted order (Array.prototype.sort is stable in ES2019+).
   rows.sort((a, b) => a.dsInches - b.dsInches);
   return { rows, skipped };
 }
