@@ -509,6 +509,11 @@
         "name": "Video Out",
         "direction": "out",
         "connectionType": "SDI/BNC"
+      },
+      {
+        "name": "Network (NDI)",
+        "direction": "io",
+        "connectionType": "Network/NDI"
       }
     ]
   },
@@ -525,6 +530,11 @@
         "name": "Video Out",
         "direction": "out",
         "connectionType": "SDI/BNC"
+      },
+      {
+        "name": "Network (NDI)",
+        "direction": "io",
+        "connectionType": "Network/NDI"
       }
     ]
   },
@@ -541,6 +551,11 @@
         "name": "HDMI",
         "direction": "io",
         "connectionType": "HDMI"
+      },
+      {
+        "name": "Network (NDI)",
+        "direction": "io",
+        "connectionType": "Network/NDI"
       }
     ]
   },
@@ -558,6 +573,11 @@
         "direction": "in",
         "connectionType": "SDI/BNC",
         "count": 4
+      },
+      {
+        "name": "Network (NDI)",
+        "direction": "io",
+        "connectionType": "Network/NDI"
       }
     ]
   },
@@ -574,6 +594,11 @@
         "name": "HDMI In",
         "direction": "in",
         "connectionType": "HDMI"
+      },
+      {
+        "name": "Network (stream out)",
+        "direction": "out",
+        "connectionType": "Network/NDI"
       }
     ]
   },
@@ -590,6 +615,11 @@
         "name": "HDMI In",
         "direction": "in",
         "connectionType": "HDMI"
+      },
+      {
+        "name": "Network (stream out)",
+        "direction": "out",
+        "connectionType": "Network/NDI"
       }
     ]
   },
@@ -606,6 +636,11 @@
         "name": "HDMI In",
         "direction": "in",
         "connectionType": "HDMI"
+      },
+      {
+        "name": "Network (stream out)",
+        "direction": "out",
+        "connectionType": "Network/NDI"
       }
     ]
   },
@@ -998,7 +1033,14 @@
     "cost": 0,
     "mfr": "Shure",
     "note": "verify price (headerless rows); verify price (cost implausible, dropped)",
-    "ports": []
+    "ports": [
+      {
+        "name": "RF In",
+        "direction": "in",
+        "connectionType": "RF/antenna",
+        "count": 8
+      }
+    ]
   },
   {
     "sku": "Shure:ADTQUS=-G57",
@@ -1009,7 +1051,14 @@
     "cost": 0,
     "mfr": "Shure",
     "note": "verify price (headerless rows); verify price (cost implausible, dropped)",
-    "ports": []
+    "ports": [
+      {
+        "name": "RF Out",
+        "direction": "out",
+        "connectionType": "RF/antenna",
+        "count": 4
+      }
+    ]
   },
   {
     "sku": "Shure:MXA901W-R-PM-3/8-V",

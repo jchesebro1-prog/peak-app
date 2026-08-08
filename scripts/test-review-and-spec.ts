@@ -114,6 +114,21 @@ import {
   compatibleWireTypes,
   type Port,
 } from "@/lib/catalog-connect";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+/* --- Task 2: Starter-set import data: every port's connectionType is real (#39) --- */
+const starterSetRaw = JSON.parse(readFileSync(path.join(process.cwd(), "scripts", "starter-import-data.json"), "utf8")) as Array<{ sku: string; ports: Array<{ connectionType: string }> }>;
+
+const allPortTypesKnown = starterSetRaw.every((row) => row.ports.every((p) => CONNECTION_TYPES.includes(p.connectionType)));
+ok(allPortTypesKnown, "starter-set: every row's port connectionType is a member of CONNECTION_TYPES");
+
+const birdDogBackfilled = starterSetRaw.find((r) => r.sku === "BirdDog:BDA200")!.ports.some((p) => p.connectionType === "Network/NDI");
+ok(birdDogBackfilled, "starter-set: BirdDog:BDA200 has a Network/NDI port after back-fill");
+
+const shureBackfilled = starterSetRaw.find((r) => r.sku === "Shure:AD8CUS")!.ports.some((p) => p.connectionType === "RF/antenna");
+ok(shureBackfilled, "starter-set: Shure:AD8CUS has an RF/antenna port after back-fill");
+
 
 const portOut = (connectionType: string): Port => ({ name: "out", direction: "out", connectionType });
 const portIn = (connectionType: string): Port => ({ name: "in", direction: "in", connectionType });
