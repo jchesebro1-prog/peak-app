@@ -2613,7 +2613,8 @@ import { list as listEquipmentItems, byCategory as equipmentByCategory } from ".
  * overlaps() is pure, so it's asserted here at top level; availableQty()/
  * create() hit the doc-store and are asserted from inside asyncChecks()
  * below, next to the Task 1 checks. */
-import { overlaps, availableQty, create as createBooking } from "../src/lib/stores/equipment-bookings";
+import { overlaps, availableQty, create as createBooking, byQuote as bookingsByQuote } from "../src/lib/stores/equipment-bookings";
+import { qtyOwned as equipmentQtyOwned } from "../src/lib/stores/equipment-items";
 
 ok(overlaps(1000, 2000, 1500, 2500) === true, "overlaps: partial overlap detected");
 ok(overlaps(1000, 2000, 2000, 3000) === true, "overlaps: touching boundary counts as overlap");
@@ -2746,12 +2747,49 @@ async function asyncChecks(): Promise<void> {
   const lighting = await equipmentByCategory("lighting");
   ok(lighting.length === 1 && lighting[0].id === "eq-3", "equipment-items: byCategory filters correctly");
 
-  /* --- Rentals module, Task 2: equipment bookings + availability logic --- */
-  const before = await availableQty("eq-1", "loc-1", Date.now(), Date.now() + 86400000);
-  ok(before === 8, "equipment-bookings: eq-1 starts fully available at loc-1");
-  await createBooking({ itemId: "eq-1", locationId: "loc-1", qty: 3, quoteId: "test-quote", startDate: Date.now(), endDate: Date.now() + 86400000, status: "confirmed", rate: 45 });
-  const after = await availableQty("eq-1", "loc-1", Date.now(), Date.now() + 86400000);
-  ok(after === 5, "equipment-bookings: confirmed booking reduces availability");
+  /* --- Rentals module, Task 2: equipment bookings + availability logic ---
+   * This is the first state-mutating write in the whole script — everything
+   * else here is read-only against seed/fixture data or pure functions —
+   * and it lands in the real persistent PGlite dev DB, so it must be safe
+   * to run any number of times without a manual DB reset (AGENTS.md is
+   * explicit about not casually reaching for `db:reset-local`).
+   *
+   * Two things make repeat runs safe:
+   *   1. A fixed, dedicated quoteId + a fixed far-future date window
+   *      (not Date.now()-based) so a booking created by a prior run always
+   *      lands in exactly the same window a later run checks — no drift
+   *      from "how long ago was the last run".
+   *   2. Dedup via byQuote(): if that booking already exists, skip
+   *      creating a duplicate, and derive expectations from qtyOwned()
+   *      instead of hardcoding 8/5, so the assertions hold whether this is
+   *      the first run ever or the hundredth. */
+  const TEST_BOOKING_QUOTE_ID = "test-quote-task2-lifecycle";
+  const TEST_WINDOW_START = new Date("2031-01-01T00:00:00Z").getTime();
+  const TEST_WINDOW_END = TEST_WINDOW_START + 86400000;
+
+  const owned = await equipmentQtyOwned("eq-1", "loc-1");
+  const priorTestBookings = await bookingsByQuote(TEST_BOOKING_QUOTE_ID);
+  if (priorTestBookings.length === 0) {
+    const before = await availableQty("eq-1", "loc-1", TEST_WINDOW_START, TEST_WINDOW_END);
+    ok(before === owned, "equipment-bookings: eq-1 starts fully available at loc-1 in the test window");
+    await createBooking({
+      itemId: "eq-1",
+      locationId: "loc-1",
+      qty: 3,
+      quoteId: TEST_BOOKING_QUOTE_ID,
+      startDate: TEST_WINDOW_START,
+      endDate: TEST_WINDOW_END,
+      status: "confirmed",
+      rate: 45,
+    });
+  } else {
+    ok(
+      priorTestBookings.length === 1,
+      "equipment-bookings: at most one test booking exists from prior runs (no duplicate created)"
+    );
+  }
+  const after = await availableQty("eq-1", "loc-1", TEST_WINDOW_START, TEST_WINDOW_END);
+  ok(after === owned - 3, "equipment-bookings: confirmed booking reduces availability");
 }
 
 asyncChecks()
