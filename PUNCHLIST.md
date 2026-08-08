@@ -5095,3 +5095,110 @@ instant locally. It was only found by seeding 1,700 synthetic companies and meas
 **Status:** OPEN — logged only, no code. Needs a UX decision before anything is built.
 
 ---
+
+## 93. Estimator: CSV import + template download, true blank "New estimate", and per-category clear — DONE 2026-08-07
+
+**Area:** `src/app/(app)/estimator/` (`page.tsx`, `estimator-client.tsx`, `types.ts`, `estimator-data.ts`,
+`actions.ts`, `section-card.tsx`), `src/app/(app)/import/` (existing hub, for the template pattern),
+`src/db/seeds/quotes.ts` (`Q-2041`)
+**Reported:** 2026-08-07 (Jeff: *"The estimate needs a way to import a csv file and then an example for
+download. it also needs to when you start a new estimate to start with everything blank. I also want an
+easy way to clear each category in the estimate."*)
+
+Three related asks, recon'd together since (b) turned out to be worse than described.
+
+**(a) CSV import for estimate line items + downloadable example.**
+Doesn't fit the existing `/import` hub as-is. That hub (#81's home, 9 types) imports flat records into
+global stores via a `Writer` (`registry.ts` ~lines 30–188) — customers, leads, catalog parts, etc.
+Estimate line items (`SpecItem`, `types.ts:20-42`) aren't a standalone collection; they're nested inside
+one specific quote's `spec.sections[].items[]` (`SpecSection`, `types.ts:45-53`) and need to land in
+whichever section/category the user picks on the *currently open* estimate — a shape the hub's
+global-commit model doesn't express.
+
+Recommended shape: a new importer built directly into the estimator builder, not a 10th hub type. It can
+reuse the hub's store-free CSV/TSV parser + auto-mapper (`import/parse.ts:3-11`, explicitly client-safe)
+and feed the same append path the catalog-picker already uses — `pushItems(secId, items: SpecItem[])`
+at `estimator-client.tsx:639-642`.
+
+Template download: the hub already has the exact pattern to copy — `registry.ts:601-608`
+(`templateCsv()`, header + one example row) served through `import/export/route.ts` and linked as
+"↓ Template" (`import/page.tsx:367-369`, `680-694`). A `SpecItem`-shaped template
+(sku/desc/qty/unit/cost/price/section name) plus one example row is the direct analog.
+
+**(b) New estimate starts blank — NOT cosmetic, a shared-record collision bug.**
+`/estimator` with no `?id=` doesn't create anything new. `page.tsx:164-165` falls back to loading the
+seeded demo quote **`Q-2041`** ("Lakefront PAC — Stage Systems Package," `src/db/seeds/quotes.ts:122`)
+whenever no id is given, and `initialFrom()` (`page.tsx:64-134`) returns `loadedId: q.id` = `"Q-2041"`,
+not `null`. Every "New estimate" link in the app — `home-greeting.tsx:96`, `quotes/controls.tsx:72`
+("+ New quote"), `quotes/page.tsx:688`, `companies/[id]/page.tsx:298` — points at plain `/estimator` and
+converges on this same record.
+
+Because `loadedId` is a real id, Save doesn't create a new quote — `actions.ts:122-123` runs
+`update(loadedId, patch)` straight against Q-2041. **Two people clicking "New estimate" and saving on the
+same day overwrite each other into one shared record**, pre-filled with the Lakefront PAC name/customer
+(`page.tsx:49-55`). Once anyone has ever saved over Q-2041, its saved spec — not the hardcoded demo
+sections in `estimator-data.ts:238-262` — is what every subsequent "New estimate" shows. So what Jeff is
+seeing may already be leftover state from a prior save, not just the original seed data.
+
+Fix shape: "New estimate" needs to mint a fresh quote id up front (or defer minting until first save,
+keeping `loadedId` as `null` until then) rather than defaulting to an existing record.
+
+**(c) Easy clear-all-in-one-category.**
+Confirmed absent. The section/item API in `estimator-client.tsx` has `removeItem(id)` (one item,
+line 583-584) and `deleteSystem(secId)` (whole section including its card, line 613-617, exposed as
+"Delete system" in `section-card.tsx:345`) — nothing in between. No function empties a section's items
+while keeping the section/category itself.
+
+Fix shape: a `clearSystemItems(secId)` sibling to `deleteSystem` that keeps the section and empties
+`items: []`, wired in next to the existing "Delete system" action in `section-card.tsx`.
+
+**Open questions for Jeff:**
+1. (a) Does CSV import need a section/category column so one file can span multiple categories, or is
+   it always "import into the category I currently have open"?
+2. (b) Once "New estimate" mints properly, what happens to Q-2041's current saved state — leave it
+   (it may already hold whatever the last person saved over it), reset it to the original seed, or
+   delete it?
+3. (c) Should "clear category" have an undo/confirm step, given it's a one-click bulk delete with no
+   trash?
+
+**Ties to:** #81 (the import hub's template/CSV pattern this borrows), #59 (real multi-user data — this
+is exactly the kind of collision real data makes visible).
+
+**Status:** DONE 2026-08-07 — branch `punch-93-estimator-import-blank-clear`. All three built and
+browser-verified against a scratch database (`.data/pglite` never touched).
+
+- **(a) CSV import** shipped as a new "Import CSV" modal (`csv-import-modal.tsx`) inside the estimator,
+  not a 10th `/import` hub type, per the recon above. `csv-import.ts` defines the `SpecItem` field set
+  (only **Description** required — qty/cost/price all default, so a row can carry "price TBD" the same
+  way the AI-scope-draft flow already does) and reuses `import/parse.ts`'s store-free `parseCsv` /
+  `autoMap` / `prepareRows` unchanged. **Routing decided for open question 1:** a row's `Category` column
+  routes it to an EXISTING section by case-insensitive name match; anything uncategorized or unmatched
+  falls to one target the user picks (an existing system, or a new one named on the spot) — deliberately
+  NOT auto-creating a section per unrecognized free-text category value, since that would multiply
+  sections from typos. Verified: mixed-category paste (`rigging` lower-case + an unmatched `Electrical`
+  row) landed 1 item in the matching existing "Rigging" card and 1 in the chosen fallback, no duplicate
+  section created. Template download builds the CSV client-side (`specItemTemplateCsv()`, mirrors
+  `registry.ts`'s `templateCsv()`) — no server route needed, it's static.
+- **(b) Blank "New estimate" — fixed at the root cause.** `page.tsx` no longer falls back to `Q-2041`
+  when no id is given; `initial.sections` no longer falls back to the hardcoded demo content
+  (`demoSections()` deleted from `estimator-data.ts`, was unused elsewhere). Verified in two browser
+  tabs: tab 1 saved a fresh blank draft → **Q-2046**; tab 2, also opened bare at `/estimator`, saved →
+  **Q-2047** — two distinct records, neither touched the other, and `Q-2041` itself reloaded with its
+  original seeded content untouched. **Open question 2 resolved by construction:** since new drafts no
+  longer touch Q-2041 at all, its current saved state (whatever a prior session left there) needed no
+  decision — it's simply no longer in the new-estimate path.
+- **(c) Clear-category** shipped as `clearSystemItems(secId)` next to `deleteSystem`, exposed as a
+  "Clear items" button in `section-card.tsx` (hidden when a section has 0 items). **Open question 3
+  resolved:** NOT a `window.confirm()` — the app uses that nowhere else, and it's blocking/unstyled.
+  Built a two-step inline confirm instead (click arms it for 4s and the button flips to "Click to
+  confirm" in red; a second click within that window clears; anything else — timeout, blur — disarms).
+  Verified with a real double-click: item count and section both reflected the clear, section card
+  itself stayed in place.
+- **Verification note:** this browser's `confirm()` is hard-disabled (console: *"native JavaScript
+  dialogs are disabled in this browser; confirm() returned false"*) — which is exactly why (c) couldn't
+  have shipped as a native dialog and been provably tested here. Worth remembering for any future modal
+  vs. native-dialog choice.
+- `tsc --noEmit` 0 errors, `test:specs` ALL PASSED, `test:smoke` ALL PASSED (including
+  `/estimator` and `/estimator?id=Q-2041` before AND after, on separate runs).
+
+---

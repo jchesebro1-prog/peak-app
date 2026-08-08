@@ -1,5 +1,5 @@
 import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
-import type { FixtureDraft, SpecSection } from "./types";
+import type { FixtureDraft } from "./types";
 
 /**
  * Estimator built-in data — ported VERBATIM from Estimator.dc.html's logic
@@ -234,29 +234,3 @@ export const GENERIC_SUGGEST: SuggestPart[] = [
   { sku: "GEN-LAB",   desc: "Installation labor",             cost: 65,  price: 95,  unit: "hr" },
 ];
 
-/** The prototype's starting sections — used when the quote has no saved spec. */
-export function demoSections(): SpecSection[] {
-  return [
-    { id: "rig", name: "Rigging — Counterweight System", kind: "materials", mfr: "JR Clancy", freightPct: 6, items: [
-      { id: 1, sku: "CL-SPL-26", desc: "Single-purchase line set, complete, 26′-0″ batten", qty: 22, unit: "ea", cost: 1439, price: 2180 },
-      { id: 2, sku: "CL-HB3", desc: "Head block, 3-groove, 8″ sheave", qty: 22, unit: "ea", cost: 469, price: 680 },
-      { id: 3, sku: "CL-CW24", desc: "Counterweight brick, 24 lb cast iron", qty: 480, unit: "ea", cost: 26, price: 36 },
-      { id: 4, sku: "CL-RL2", desc: "Rope lock, double, hardened", qty: 22, unit: "ea", cost: 126, price: 210 },
-    ]},
-    { id: "soft", name: "Soft Goods & Drapery", kind: "materials", mfr: "Rose Brand", freightPct: 5, items: [
-      { id: 5, sku: "RB-MV-MN", desc: "Main curtain, 25 oz Memorable Velour, 50% fullness, pleated", qty: 1, unit: "set", cost: 9176, price: 14800 },
-      { id: 6, sku: "RB-BRDR", desc: "Borders, 16 oz Encore Velour, black", qty: 6, unit: "ea", cost: 667, price: 1150 },
-      { id: 7, sku: "RB-LEG", desc: "Legs, 16 oz Encore Velour, black", qty: 8, unit: "ea", cost: 568, price: 980 },
-    ]},
-    { id: "hoist", name: "Motorized Hoists & Control", kind: "materials", mfr: "ETC Prodigy", freightPct: 4, items: [
-      { id: 9, sku: "ETC-PD-HOIST", desc: "Prodigy P1 hoist, 1,400 lb, variable speed", qty: 8, unit: "ea", cost: 3815, price: 5450 },
-      { id: 10, sku: "ETC-PD-CTRL", desc: "Foundation control console, 24-axis", qty: 1, unit: "ea", cost: 8576, price: 12800 },
-      { id: 11, sku: "ETC-PD-EPK", desc: "Emergency stop & perimeter package", qty: 1, unit: "lot", cost: 3136, price: 4900 },
-    ]},
-    { id: "labor", name: "Labor — Installation & Commissioning", kind: "labor", mfr: "", freightPct: 0, items: [
-      { id: 12, sku: "LAB-RIG", desc: "Rigging installation crew (4)", qty: 320, unit: "hr", cost: 62, price: 95 },
-      { id: 13, sku: "LAB-SG", desc: "Soft goods hang & trim", qty: 80, unit: "hr", cost: 55, price: 85 },
-      { id: 14, sku: "LAB-PM", desc: "Project management & commissioning", qty: 60, unit: "hr", cost: 72, price: 115 },
-    ]},
-  ];
-}

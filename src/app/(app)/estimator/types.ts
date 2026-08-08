@@ -170,7 +170,7 @@ export type InitialQuote = {
    *  margins; re-stamped server-side when the customer/contact changes. */
   pricingTier: string | null;
   tierMargin: number | null;
-  /** Saved builder state (spec.sections) — null falls back to the demo sections. */
+  /** Saved builder state (spec.sections) — null means a blank, unsaved draft (punch #93b). */
   sections: SpecSection[] | null;
 };
 

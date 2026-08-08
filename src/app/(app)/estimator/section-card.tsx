@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { SuggestPart } from "./estimator-data";
 import { fmt, marginColor, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
 import type { CustomDraft, SpecSection } from "./types";
@@ -48,6 +48,7 @@ export type SectionCardProps = {
   onToggleExpand: () => void;
   onRename: (name: string) => void;
   onDelete: () => void;
+  onClearItems: () => void;
   onSetMargin: (v: string) => void;
   onSetFreight: (v: string) => void;
   onInc: (id: number) => void;
@@ -66,6 +67,16 @@ export type SectionCardProps = {
 
 export default function SectionCard(p: SectionCardProps) {
   const { sec, isInternal, cols } = p;
+  // Two-step inline confirm for "Clear items" (punch #93c) — the app has no
+  // window.confirm() anywhere else (it uses its own inline/typed-note
+  // confirmations), so this matches that convention instead of a native
+  // dialog. Arms on first click, auto-disarms after 4s or on blur.
+  const [confirmClear, setConfirmClear] = useState(false);
+  useEffect(() => {
+    if (!confirmClear) return;
+    const t = setTimeout(() => setConfirmClear(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirmClear]);
   const itemsRev = systemItemsRev(sec);
   const itemsCost = systemItemsCost(sec);
   const secFreight = systemFreight(sec);
@@ -327,12 +338,44 @@ export default function SectionCard(p: SectionCardProps) {
                 {fmt(secFreight)}
               </span>
             </div>
+            {sec.items.length > 0 && (
+              <button
+                type="button"
+                className="est-clearsys"
+                onClick={() => {
+                  if (confirmClear) {
+                    setConfirmClear(false);
+                    p.onClearItems();
+                  } else {
+                    setConfirmClear(true);
+                  }
+                }}
+                onBlur={() => setConfirmClear(false)}
+                title={
+                  confirmClear
+                    ? "Click again to confirm"
+                    : `Clear all ${sec.items.length} item${sec.items.length === 1 ? "" : "s"} — the category stays`
+                }
+                style={{
+                  marginLeft: "auto",
+                  fontSize: 11.5,
+                  fontWeight: confirmClear ? 700 : 500,
+                  color: confirmClear ? "#b4272b" : "#aab0bb",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                {confirmClear ? "Click to confirm" : "Clear items"}
+              </button>
+            )}
             <button
               type="button"
               className="est-delsys"
               onClick={p.onDelete}
               style={{
-                marginLeft: "auto",
+                marginLeft: sec.items.length > 0 ? 14 : "auto",
                 fontSize: 11.5,
                 fontWeight: 500,
                 color: "#aab0bb",

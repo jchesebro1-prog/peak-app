@@ -21,7 +21,6 @@ import {
 } from "./actions";
 import type { DraftedLine } from "./ai-scope-modal";
 import {
-  demoSections,
   DISC_LABEL,
   FIX_PRESETS,
   FIXTURES,
@@ -60,6 +59,8 @@ import AiScopeModal from "./ai-scope-modal";
 import CurtainModal from "./curtain-modal";
 import FixtureModal from "./fixture-modal";
 import LaborModal from "./labor-modal";
+import CsvImportModal from "./csv-import-modal";
+import { toSpecItemInput, type ParsedSpecCsv } from "./csv-import";
 import PreviewDoc from "./preview-doc";
 
 /**
@@ -243,9 +244,9 @@ export default function EstimatorClient({
   aiSource,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
-  const [sections, setSections] = useState<SpecSection[]>(
-    () => initial.sections ?? demoSections()
-  );
+  // Punch #93b: a genuinely new estimate starts with zero sections, not the
+  // prototype's hardcoded sample rig/soft-goods/hoist/labor content.
+  const [sections, setSections] = useState<SpecSection[]>(() => initial.sections ?? []);
   const nidRef = useRef<number | null>(null);
   if (nidRef.current == null) nidRef.current = computeNid(initial.sections);
   const nextId = () => ++(nidRef.current as number);
@@ -282,7 +283,7 @@ export default function EstimatorClient({
   const [pdfPrices, setPdfPrices] = useState(true);
   const [detail, setDetail] = useState<"itemized" | "sectioned">("itemized");
   const [activeId, setActiveId] = useState<string | null>(
-    () => (initial.sections ?? demoSections())[0]?.id ?? null
+    () => (initial.sections ?? [])[0]?.id ?? null
   );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [openCatalog, setOpenCatalog] = useState<string | null>(null);
@@ -295,6 +296,7 @@ export default function EstimatorClient({
   const [fixtureFor, setFixtureFor] = useState<string | null>(null);
   const [fixtureDraft, setFixtureDraft] = useState<FixtureDraft>(freshFixture);
   const [laborFor, setLaborFor] = useState<string | null>(null);
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
   // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
   // curtain configurator; refreshed when the meta action re-stamps.
   const [tierMargin, setTierMargin] = useState<number | null>(initial.tierMargin);
@@ -615,6 +617,10 @@ export default function EstimatorClient({
     setSections(list);
     setActiveId((a) => (a === secId ? (list[0] ? list[0].id : null) : a));
   };
+  // Punch #93c: empty a category's line items without deleting the category
+  // itself — "Delete system" above removes the whole card; this keeps it.
+  const clearSystemItems = (secId: string) =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, items: [] } : s)));
 
   const scrollToCard = (id: string) => {
     const el = cardRefs.current[id];
@@ -640,6 +646,52 @@ export default function EstimatorClient({
     setSections((ss) =>
       ss.map((s) => (s.id === secId ? { ...s, items: [...s.items, ...items] } : s))
     );
+
+  /** CSV import (punch #93a): rows whose Category matches an EXISTING system
+   *  name route there; everything else lands in the chosen target (existing
+   *  or newly named). One state update so a brand-new target section and its
+   *  items land together. */
+  const NEW_SECTION = "__new__";
+  const handleCsvImport = (
+    parsed: ParsedSpecCsv,
+    targetSectionId: string,
+    newSectionName: string
+  ) => {
+    const validRows = parsed.rows.filter((r) => r.valid);
+    if (!validRows.length) {
+      setCsvImportOpen(false);
+      return;
+    }
+    const isNewTarget = targetSectionId === NEW_SECTION;
+    const newSecId = isNewTarget ? "sys" + nextId() : null;
+    const bySection: Record<string, SpecItem[]> = {};
+    validRows.forEach((row) => {
+      const catMatch = row.category
+        ? sections.find((s) => s.name.toLowerCase() === row.category.trim().toLowerCase())
+        : null;
+      const secId = catMatch ? catMatch.id : ((isNewTarget ? newSecId : targetSectionId) as string);
+      (bySection[secId] ||= []).push({ id: nextId(), ...toSpecItemInput(row) });
+    });
+    setSections((ss) => {
+      let list = ss;
+      if (isNewTarget && newSecId) {
+        list = [
+          ...list,
+          {
+            id: newSecId,
+            name: newSectionName.trim() || "Imported Items",
+            kind: "materials",
+            mfr: "",
+            freightPct: 0,
+            items: [],
+          },
+        ];
+      }
+      return list.map((s) => (bySection[s.id] ? { ...s, items: [...s.items, ...bySection[s.id]] } : s));
+    });
+    if (isNewTarget && newSecId) setActiveId(newSecId);
+    setCsvImportOpen(false);
+  };
 
   const addPart = (secId: string, cat: SuggestPart) => {
     pushItems(secId, [
@@ -1892,21 +1944,38 @@ export default function EstimatorClient({
                   >
                     Systems
                   </span>
-                  <button
-                    type="button"
-                    onClick={addSystem}
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: "var(--accent)",
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                      padding: 0,
-                    }}
-                  >
-                    + Add
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <button
+                      type="button"
+                      onClick={() => setCsvImportOpen(true)}
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "var(--accent)",
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
+                    >
+                      Import CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={addSystem}
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "var(--accent)",
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
+                    >
+                      + Add
+                    </button>
+                  </div>
                 </div>
                 {sections.map((sec) => {
                   const sub = systemItemsRev(sec) + systemFreight(sec);
@@ -2094,6 +2163,7 @@ export default function EstimatorClient({
                   onToggleExpand={() => toggleExpand(sec.id)}
                   onRename={(name) => renameSystem(sec.id, name)}
                   onDelete={() => deleteSystem(sec.id)}
+                  onClearItems={() => clearSystemItems(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}
                   onSetFreight={(v) => setFreightPct(sec.id, v)}
                   onInc={inc}
@@ -2198,6 +2268,14 @@ export default function EstimatorClient({
               onAddLine={addAiLine}
               onRetry={runAiDraft}
               onClose={() => setAiOpen(false)}
+            />
+          )}
+          {csvImportOpen && (
+            <CsvImportModal
+              sections={sections}
+              defaultTargetId={activeId}
+              onImport={handleCsvImport}
+              onClose={() => setCsvImportOpen(false)}
             />
           )}
         </div>

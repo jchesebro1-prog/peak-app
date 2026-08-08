@@ -28,9 +28,11 @@ export const metadata = { title: "Estimator — Quartzite-6" };
 /**
  * Estimator — detailed line-item quote builder (port of Estimator.dc.html).
  * /estimator?id=Q-#### loads that quote; with no id (or an unknown id) it
- * falls back to the Q-2041 demo quote so Save has a target, exactly like the
- * prototype's loadFromUrl(); if even that is missing, the builder opens as an
- * unsaved draft and Save creates the quote.
+ * opens a genuinely blank, unsaved draft (punch #93b — this used to fall back
+ * to the Q-2041 demo quote "so Save has a target", which meant every "New
+ * estimate" link in the app saved into that ONE shared record). Save mints a
+ * fresh quote the first time (`saveQuoteAction` already creates when
+ * `loadedId` is null); nothing needs to exist beforehand.
  */
 
 function rvNone(): QuoteReview {
@@ -45,13 +47,12 @@ function rvNone(): QuoteReview {
   };
 }
 
-/** Prototype constructor defaults (used only when no quote record exists). */
+/** Blank-draft defaults (punch #93b) — used only for a genuinely new, unsaved estimate. */
 const FALLBACK = {
-  quoteId: "Q-2041",
-  projectName: "Lakefront Performing Arts Center — Stage Systems Package",
-  custName: "Lakefront Performing Arts Center",
-  quoteNote:
-    "Thank you for the opportunity to quote your stage systems upgrade. This proposal reflects the scope we reviewed on-site — we’re glad to adjust as plans develop.",
+  quoteId: "Draft",
+  projectName: "New estimate",
+  custName: "",
+  quoteNote: "",
 };
 
 type QuoteDoc = Quote & {
@@ -161,8 +162,11 @@ export default async function EstimatorPage({
     }
   }
 
-  let q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
-  if (!q) q = (await getQuote("Q-2041")) as QuoteDoc | null; // demo fallback so Save has a target
+  // Punch #93b: no fallback to an existing quote here. An unrecognized/missing
+  // id (including no id at all — every "New estimate" link in the app hits
+  // this route bare) must open a blank draft, not silently attach to whatever
+  // record used to serve as the demo target.
+  const q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
 
   const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates] =
     await Promise.all([
