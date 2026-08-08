@@ -28,6 +28,7 @@ import { priceFromGridOrParametric } from "@/lib/design/quick-grid-seam";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { drawPlanDataPage, computeTextOrigin } from "@/lib/design/plan-to-pdf";
 import { walkBundle } from "@/lib/design/client-package";
+import { mergeDatasheets, buildCoverIndex } from "@/lib/design/datasheet-merge";
 import { budgetFor, type DesignPartial } from "@/app/(app)/design/quick/actions";
 import { createDesign, addDesignRevision, designRevisions } from "@/lib/stores/designs";
 import { list as listCatalogParts } from "@/lib/stores/catalog";
@@ -3350,6 +3351,114 @@ async function asyncChecks(): Promise<void> {
     ok(bundle.datasheets.length === 1, "client-package: walkBundle finds exactly one row with a datasheet");
     ok(bundle.gaps.some((g) => g.sku === "Thern:CW11-1M" && g.reason === "no-datasheet"), "client-package: walkBundle gaps the row with no datasheetBlobKey");
     ok(bundle.spec.sections.length >= 0, "client-package: walkBundle always produces an AssembledSpec, even with incomplete rows");
+  }
+
+  /* --- Datasheet PDF merge + cover index (#40) --- */
+  {
+    // Baseline (brief's Step 1): an all-gaps bundle has nothing to fetch —
+    // still produces a 1-page PDF (cover/index only), never an empty file.
+    const emptyBundle = {
+      datasheets: [],
+      gaps: [{ sku: "X:1", desc: "Widget", reason: "no-datasheet" as const }],
+      spec: { projectName: "", customer: "", engagementId: "", preparedBy: "", date: 0, sections: [], waived: [] },
+      rows: [],
+    };
+    const emptyBytes = await mergeDatasheets(emptyBundle as never);
+    const emptyDoc = await PDFDocument.load(emptyBytes);
+    ok(emptyDoc.getPageCount() === 1, "datasheet-merge: an all-gaps bundle still produces a 1-page PDF (cover/index only, nothing silently empty)");
+
+    // Dual-membership pure-function check (Task 2 finding): a SKU can be
+    // BOTH in bundle.datasheets (real datasheet, gets merged in) AND in
+    // bundle.gaps (e.g. also missing spec text) at the same time. Extracted
+    // as a pure function (same pattern as computeTextOrigin for
+    // plan-to-pdf) since pdf-lib doesn't expose placed-text back out of a
+    // loaded document, so this is the only practical way to assert the
+    // cover's *content*, not just its page count.
+    const dualBundle = {
+      datasheets: [
+        { sku: "A:1", desc: "Widget A", datasheetBlobKey: "blob/a.pdf", category: "Fixtures" },
+        { sku: "B:1", desc: "Widget B", datasheetBlobKey: "blob/b.pdf", category: "Curtains" },
+      ],
+      gaps: [
+        { sku: "A:1", desc: "Widget A", reason: "no-spec" as const }, // dual-membership: has a datasheet AND a gap
+        { sku: "C:1", desc: "Widget C", reason: "no-match" as const }, // gap-only, no datasheet at all
+      ],
+      spec: { projectName: "", customer: "", engagementId: "", preparedBy: "", date: 0, sections: [], waived: [] },
+      rows: [],
+    };
+    const idx = buildCoverIndex(dualBundle as never);
+    const includedA = idx.included.find((l) => l.text.includes("A:1"));
+    const includedB = idx.included.find((l) => l.text.includes("B:1"));
+    const gapA = idx.gaps.find((l) => l.text.includes("A:1"));
+    const gapC = idx.gaps.find((l) => l.text.includes("C:1"));
+    ok(
+      !!includedA && / gap|also/i.test(includedA.text),
+      "datasheet-merge cover: an Included line for a SKU that ALSO has a gap flags that fact right on the Included line, not silently"
+    );
+    ok(
+      !!includedB && !/gap|also/i.test(includedB.text),
+      "datasheet-merge cover: an Included line for a SKU with NO other gap does not get a spurious dual-membership marker"
+    );
+    ok(
+      !!gapA && /included|datasheet/i.test(gapA.text),
+      "datasheet-merge cover: a gap line for a SKU that ALSO has a datasheet included says so, so a reader doesn't think it's wholly missing"
+    );
+    ok(
+      !!gapC && !/included|datasheet/i.test(gapC.text),
+      "datasheet-merge cover: a gap line for a SKU with NO datasheet at all does not falsely claim one is included"
+    );
+
+    // Real multi-PDF merge, end to end — not just the trivial all-gaps
+    // case. getBlobStream (src/lib/blob.ts) calls @vercel/blob's get(),
+    // which THROWS (not returns null) when BLOB_READ_WRITE_TOKEN isn't
+    // configured (confirmed: this dev env has no token set) — so
+    // mergeDatasheets must tolerate a fetcher that both returns null AND
+    // one that throws, without losing the other datasheets. We inject a
+    // fetcher at the narrowest boundary (mergeDatasheets' optional second
+    // param) rather than hitting real Blob storage, building the fixture
+    // PDFs with pdf-lib itself so this stays a self-contained unit test.
+    const mkPdfBytes = async (pageCount: number, label: string): Promise<Uint8Array> => {
+      const doc = await PDFDocument.create();
+      const f = await doc.embedFont(StandardFonts.Helvetica);
+      for (let i = 0; i < pageCount; i++) {
+        const p = doc.addPage([200, 200]);
+        p.drawText(`${label} p${i + 1}`, { x: 10, y: 100, size: 12, font: f });
+      }
+      return doc.save();
+    };
+    const bytesToStream = (bytes: Uint8Array): ReadableStream =>
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      });
+    const aPdf = await mkPdfBytes(2, "A");
+    const bPdf = await mkPdfBytes(3, "B");
+    const realBundle = {
+      datasheets: [
+        { sku: "A:1", desc: "Widget A", datasheetBlobKey: "blob/a.pdf", category: "Fixtures" },
+        { sku: "B:1", desc: "Widget B", datasheetBlobKey: "blob/b.pdf", category: "Curtains" },
+        { sku: "C:1", desc: "Widget C (blob missing)", datasheetBlobKey: "blob/missing.pdf", category: "Fixtures" },
+        { sku: "D:1", desc: "Widget D (blob store errors)", datasheetBlobKey: "blob/throws.pdf", category: "Fixtures" },
+      ],
+      gaps: [{ sku: "A:1", desc: "Widget A", reason: "no-spec" as const }],
+      spec: { projectName: "", customer: "", engagementId: "", preparedBy: "", date: 0, sections: [], waived: [] },
+      rows: [],
+    };
+    const fetchBlob = async (key: string): Promise<ReadableStream | null> => {
+      if (key === "blob/a.pdf") return bytesToStream(aPdf);
+      if (key === "blob/b.pdf") return bytesToStream(bPdf);
+      if (key === "blob/missing.pdf") return null; // blob store: key not found
+      if (key === "blob/throws.pdf") throw new Error("simulated Blob store error (e.g. no token / network failure)");
+      throw new Error(`unexpected key ${key}`);
+    };
+    const realBytes = await mergeDatasheets(realBundle as never, { fetchBlob });
+    const realDoc = await PDFDocument.load(realBytes);
+    ok(
+      realDoc.getPageCount() === 1 + 2 + 3,
+      `datasheet-merge: real merge produces cover(1) + A(2) + B(3) = 6 pages, skipping the missing and throwing blobs (got ${realDoc.getPageCount()})`
+    );
   }
 }
 
