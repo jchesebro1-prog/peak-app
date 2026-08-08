@@ -217,6 +217,15 @@ ok(basePlan.texts.some((t) => t.t.includes(String(DEFAULT_VENUE_DIMS.stageDepthF
 const narrow = buildGridBaseSheetPlan({ ...DEFAULT_VENUE_DIMS, proWidthFt: 20, stageWidthFt: undefined });
 ok(narrow.W === basePlan.W, "grid-base-sheet: canvas width is fixed regardless of venue size (only scale/ppf changes)");
 
+// A house floor narrower than the proscenium opening (typo'd stageWidthFt)
+// is nonsensical — the opening must never draw wider than the house floor
+// that contains it. rects[0] is the house floor, rects[1] is the opening.
+const invertedInput = buildGridBaseSheetPlan({ ...DEFAULT_VENUE_DIMS, proWidthFt: 40, stageWidthFt: 10 });
+ok(
+  invertedInput.rects[1].w <= invertedInput.rects[0].w + 0.1,
+  "grid-base-sheet: a stageWidthFt narrower than proWidthFt is clamped, opening never exceeds the house floor"
+);
+
 
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";

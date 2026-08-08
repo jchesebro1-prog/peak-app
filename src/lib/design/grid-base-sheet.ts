@@ -23,7 +23,11 @@ export function buildGridBaseSheetPlan(dims: VenueDims): PlanData {
   // stageWidthFt is wall-to-wall; when absent, assume no wings beyond the
   // opening (a conservative default — the user can always upload a real
   // plan instead of trusting the generated one for wing-dependent work).
-  const houseWft = dims.stageWidthFt ?? dims.proWidthFt;
+  // Clamped to at least proWidthFt: a house floor narrower than the
+  // proscenium opening it contains is physically nonsensical and would
+  // otherwise draw the opening rect wider than the house rect (a typo'd
+  // stageWidthFt shouldn't invert the plan).
+  const houseWft = Math.max(dims.stageWidthFt ?? dims.proWidthFt, dims.proWidthFt);
   const ppf = (W - ML - MR) / Math.max(houseWft, 1);
   const depthPx = Math.max(150, dims.stageDepthFt * ppf);
   const xHouseL = ML, xHouseR = W - MR, cx = (xHouseL + xHouseR) / 2;

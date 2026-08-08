@@ -338,6 +338,24 @@ export default function GridEditor({
   const onLoaded = useCallback((n: number) => setPages(n), []);
   const onSize = useCallback((w: number, h: number) => setSize({ w, h }), []);
 
+  /** Generated sheets (#38) have no PDF/image to report an onLoaded/onSize
+   *  callback, so `size` would otherwise sit at the 900×1200 portrait
+   *  default while a proscenium plan is landscape (~0.56 H/W) — every
+   *  aspect-ratio-dependent overlay computation (hit-test radius, drag
+   *  nudge, wire-snap, calibration scale, and the overlay <svg>'s own
+   *  viewBox) would then be fed the wrong numbers, visibly displacing
+   *  markers away from screen-center toward it. Recompute the plan once
+   *  here (not twice — the render branch below reuses this same value)
+   *  and push its real W/H through the identical `onSize` path the
+   *  PDF/image branches already use. */
+  const generatedPlan = useMemo(
+    () => (sheet?.kind === "generated" && sheet.venueDims ? buildGridBaseSheetPlan(sheet.venueDims) : null),
+    [sheet?.kind, sheet?.venueDims]
+  );
+  useEffect(() => {
+    if (generatedPlan) onSize(generatedPlan.W, generatedPlan.H);
+  }, [generatedPlan, onSize]);
+
   /** Guarded: an image that reports no size yet must not poison the math
    *  with NaN — calibration would silently fail with a misleading error. */
   const aspect = size.w > 0 && size.h > 0 ? size.h / size.w : 1;
@@ -1670,8 +1688,19 @@ export default function GridEditor({
           />
         </div>
 
-        {/* document */}
-        <div style={{ overflow: "auto", background: "#6d7076", padding: 18, borderRadius: 10, display: "flex", justifyContent: "center", minHeight: 420 }}>
+        {/* document
+            alignItems: "flex-start" (not the flex default "stretch") — a
+            child with no explicit height would otherwise get force-stretched
+            to fill this panel's minHeight (420, less padding = 384px). Tall
+            portrait PDFs/images never noticed (their natural height already
+            exceeds 384, so stretch was a no-op), but a short/landscape sheet
+            — like the generated proscenium plan below, or any landscape
+            upload — got its box distorted to a taller-than-content aspect,
+            which then fed the wrong aspect into the overlay <svg>'s
+            preserveAspectRatio letterboxing (see the size-effect comment
+            above `generatedPlan`). flex-start makes the wrap div's real box
+            match its content's natural aspect instead. */}
+        <div style={{ overflow: "auto", background: "#6d7076", padding: 18, borderRadius: 10, display: "flex", justifyContent: "center", alignItems: "flex-start", minHeight: 420 }}>
           {!sheet ? (
             <div style={{ alignSelf: "center", color: "#e6e8ec", fontSize: 13.5, textAlign: "center", lineHeight: 1.6 }}>
               No plan sheets yet.
@@ -1704,8 +1733,22 @@ export default function GridEditor({
                 boxShadow: "0 2px 14px rgba(0,0,0,.28)",
               }}
             >
-              {sheet.kind === "generated" && sheet.venueDims ? (
-                <PlanSvg plan={buildGridBaseSheetPlan(sheet.venueDims)} accent="#16181d" />
+              {generatedPlan ? (
+                // <PlanSvg>'s own style is width:100%/height:auto — inside
+                // this wrap div (an auto-width flex item, not a fixed-size
+                // box), that percentage can't resolve against a real
+                // containing-block width, so the browser falls back to the
+                // SVG default replaced-element size (300px), NOT the plan's
+                // real 640px logical width. Giving it an explicit pixel
+                // width here (the same zoom-scaled-px pattern the <img>
+                // branch below uses) makes the wrap div's real rendered box
+                // land at the plan's actual W:H aspect, matching the
+                // `size` state the effect above just set — so the overlay
+                // <svg>'s viewBox lines up with the real box with no
+                // preserveAspectRatio letterboxing/offset.
+                <div style={{ width: Math.round(generatedPlan.W * zoom) }}>
+                  <PlanSvg plan={generatedPlan} accent="#16181d" />
+                </div>
               ) : isPdf ? (
                 <PdfCanvas dataUrl={sheet.dataUrl} page={page} zoom={zoom} onLoaded={onLoaded} onSize={onSize} />
               ) : (
