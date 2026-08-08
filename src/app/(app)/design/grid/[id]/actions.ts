@@ -10,6 +10,7 @@ import {
   addRoute,
   addSheet,
   addSpace,
+  carryPlacementsToSheet,
   clearSheetCalibration,
   getProject,
   movePlacement,
@@ -99,6 +100,21 @@ export async function addSheetAction(
   if (!sheet) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
   return { ok: true, sheetId: sheet.id };
+}
+
+/** Re-anchor every placement from the generated base sheet onto a freshly
+ *  uploaded real plan (#38) — the "Carry over" choice in the editor's
+ *  upload-carry prompt. */
+export async function carryOverAction(
+  projectId: string,
+  fromSheetId: string,
+  toSheetId: string
+): Promise<Result> {
+  await requireUser();
+  const p = await carryPlacementsToSheet(projectId, fromSheetId, toSheetId);
+  if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
 }
 
 export async function placeDeviceAction(

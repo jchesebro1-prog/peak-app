@@ -52,6 +52,7 @@ import {
   addSheetAction,
   addSpaceAction,
   calibrateAction,
+  carryOverAction,
   clearCalAction,
   createDraftQuoteAction,
   movePlacementAction,
@@ -273,6 +274,14 @@ export default function GridEditor({
    *  impossible to miss, never refuses the quote. Cleared on every new
    *  mint/update so a fixed catalog makes the warning go away on its own. */
   const [tierFallbackLines, setTierFallbackLines] = useState<string[]>([]);
+
+  /** Real-plan-upload carry-over prompt (#38) — set right after a new sheet
+   *  uploads over a generated base sheet that already has placements on it;
+   *  cleared once the user picks "Carry over" or "Keep separate". */
+  const [uploadCarryPrompt, setUploadCarryPrompt] = useState<{
+    fromSheetId: string;
+    toSheetId: string;
+  } | null>(null);
 
   const [search, setSearch] = useState("");
   // Palette SCOPE filter (punch #48, replacing Task #39's group filter):
@@ -689,8 +698,19 @@ export default function GridEditor({
       setErr(r.error);
       return;
     }
-    setActiveSheetId(r.sheetId);
-    setPage(1);
+    // A real plan just landed over a generated base sheet that already has
+    // placements on it (#38) — ask before silently orphaning those markers
+    // on a sheet the user is about to stop looking at.
+    const generatedSheet = sheets.find((s) => s.kind === "generated");
+    const hasGeneratedPlacements = generatedSheet
+      ? project.placements.some((p) => p.sheetId === generatedSheet.id)
+      : false;
+    if (generatedSheet && hasGeneratedPlacements) {
+      setUploadCarryPrompt({ fromSheetId: generatedSheet.id, toSheetId: r.sheetId });
+    } else {
+      setActiveSheetId(r.sheetId);
+      setPage(1);
+    }
     router.refresh();
   }
 
@@ -1073,6 +1093,44 @@ export default function GridEditor({
       {err && (
         <div style={{ background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 9, padding: "8px 11px", fontSize: 12.5, color: "#a0442b" }}>
           {err}
+        </div>
+      )}
+
+      {uploadCarryPrompt && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 12px", background: "#fff8e6", border: "1px solid #f0dca0", borderRadius: 8 }}>
+          <span style={{ fontSize: 12.5 }}>Carry the markers from the generated sheet onto this upload?</span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              const r = await carryOverAction(project.id, uploadCarryPrompt.fromSheetId, uploadCarryPrompt.toSheetId);
+              setBusy(false);
+              if (!r.ok) {
+                setErr(r.error);
+                return;
+              }
+              setActiveSheetId(uploadCarryPrompt.toSheetId);
+              setPage(1);
+              setUploadCarryPrompt(null);
+              router.refresh();
+            }}
+            style={{ fontSize: 12, fontWeight: 700, padding: "4px 10px", borderRadius: 6, border: "1px solid #16181d", background: "#16181d", color: "#fff", cursor: "pointer" }}
+          >
+            Carry over
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setActiveSheetId(uploadCarryPrompt.toSheetId);
+              setPage(1);
+              setUploadCarryPrompt(null);
+            }}
+            style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 6, border: "1px solid #dfe2e8", background: "#fff", cursor: "pointer" }}
+          >
+            Keep separate
+          </button>
         </div>
       )}
 
