@@ -203,6 +203,25 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "mfr", header: "Manufacturer", label: "Manufacturer", aliases: ["mfr", "manufacturer", "brand", "mfg", "vendor", "make"], example: "ETC" },
     ],
   },
+  {
+    key: "equipment",
+    label: "Equipment",
+    mono: "EQ",
+    color: "#2f7a52",
+    blurb: "Rentable gear — category, manufacturer, and day/week/month rates.",
+    dedupeLabel: "SKU",
+    viewHref: "/rentals",
+    viewLabel: "View in Rentals",
+    fields: [
+      { key: "sku", header: "SKU", label: "SKU", required: true, aliases: ["sku", "id"], example: "SPK-QSC-K12" },
+      { key: "name", header: "Name", label: "Name", required: true, aliases: ["name", "item", "description"], example: "QSC K12.2 Speaker" },
+      { key: "category", header: "Category", label: "Category", kind: "enum", options: ["speakers", "monitors", "lighting", "consoles", "control-io", "other"], aliases: ["category", "type"], example: "speakers" },
+      { key: "manufacturer", header: "Manufacturer", label: "Manufacturer", aliases: ["manufacturer", "mfr", "brand"], example: "QSC" },
+      { key: "dayRate", header: "Day Rate", label: "Day rate", kind: "number", aliases: ["dayrate", "day rate", "daily"], example: "45" },
+      { key: "weekRate", header: "Week Rate", label: "Week rate", kind: "number", aliases: ["weekrate", "week rate", "weekly"], example: "180" },
+      { key: "monthRate", header: "Month Rate", label: "Month rate", kind: "number", aliases: ["monthrate", "month rate", "monthly"], example: "500" },
+    ],
+  },
 ];
 
 const BY_KEY: Record<string, ImportTypeMeta> = {};

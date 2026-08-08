@@ -14,6 +14,7 @@ import * as Surveys from "@/lib/stores/surveys";
 import * as Quotes from "@/lib/stores/quotes";
 import * as Projects from "@/lib/stores/projects";
 import * as Catalog from "@/lib/stores/catalog";
+import * as Equipment from "@/lib/stores/equipment-items";
 import { allUsers, addUser, setRoles } from "@/lib/users";
 import { getTypeMeta, IMPORT_TYPE_KEYS } from "./types";
 import { norm, isoToMs, type PreparedRow } from "./parse";
@@ -66,6 +67,15 @@ let seqN = 0;
 function seq(): number {
   return ++seqN;
 }
+
+const EQUIPMENT_CATEGORIES = [
+  "speakers",
+  "monitors",
+  "lighting",
+  "consoles",
+  "control-io",
+  "other",
+] as const;
 
 /**
  * The patch the catalog writer hands `Catalog.mergeUpsert`, shared by its
@@ -500,6 +510,54 @@ const WRITERS: Record<string, Writer> = {
         list: p.list ?? 0,
         cost: p.cost ?? 0,
         mfr: p.mfr || "",
+      }));
+    },
+  },
+
+  equipment: {
+    count: async () => (await Equipment.list()).length,
+    load: async () => (await Equipment.list()) as unknown as Record<string, unknown>[],
+    find: (v, cache) => cache.find((i) => ci(i.sku, v.sku)) || null,
+    create: async (v, cache) => {
+      const sku = str(v.sku);
+      const rec = await Equipment.upsert({
+        sku,
+        name: str(v.name) || sku,
+        category: pick(v.category, EQUIPMENT_CATEGORIES, "other"),
+        manufacturer: str(v.manufacturer) || undefined,
+        dayRate: num(v.dayRate),
+        weekRate: num(v.weekRate),
+        monthRate: num(v.monthRate),
+        active: true,
+        stock: [],
+      });
+      cache.push({ id: rec.id, sku });
+    },
+    update: async (ex, v) => {
+      const patch: Partial<Omit<Equipment.EquipmentItem, "id">> = {
+        name: str(v.name) || str(ex.name),
+        manufacturer: str(v.manufacturer) || (str(ex.manufacturer) || undefined),
+        dayRate: num(v.dayRate) || num(ex.dayRate),
+        weekRate: num(v.weekRate) || num(ex.weekRate),
+        monthRate: num(v.monthRate) || num(ex.monthRate),
+      };
+      // Only overwrite category when the row actually carries one — an
+      // absent/blank column would otherwise fall through pick()'s "other"
+      // default and silently reclassify the existing item (same reasoning
+      // as catalogPatch above for mfr).
+      if (str(v.category)) patch.category = pick(v.category, EQUIPMENT_CATEGORIES, "other");
+      await Equipment.mergeUpsert(str(ex.id), patch);
+    },
+    exportObjects: async () => {
+      const list = await Equipment.list();
+      return list.map((i) => ({
+        sku: i.sku || "",
+        name: i.name || "",
+        category: i.category || "",
+        manufacturer: i.manufacturer || "",
+        dayRate: i.dayRate ?? 0,
+        weekRate: i.weekRate ?? 0,
+        monthRate: i.monthRate ?? 0,
       }));
     },
   },

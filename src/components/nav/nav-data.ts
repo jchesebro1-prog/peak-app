@@ -58,6 +58,7 @@ export const NAV: NavEntry[] = [
       { key: "flametests", label: "Flame Tests", href: "/flame-tests" },
       { key: "inspections", label: "Rigging Inspections", href: "/inspections" },
       { key: "repairs", label: "Repairs", href: "/repairs" },
+      { key: "rentals", label: "Rentals", href: "/rentals" },
     ],
   },
   {
@@ -117,6 +118,7 @@ export function activeKeyFor(pathname: string): string {
     "/flame-tests": "flametests",
     "/inspections": "inspections",
     "/repairs": "repairs",
+    "/rentals": "rentals",
     "/companies": "companies",
     "/people": "people",
     "/venues": "venues",
