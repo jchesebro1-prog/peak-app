@@ -421,17 +421,17 @@ ok(
 // ---- Operations merge (D100): Installs + Service → Operations (now PM, D117) ----
 const d100Ops = NAV.find((e) => e.kind === "group" && e.key === "pm");
 ok(
-  !!(d100Ops && d100Ops.kind === "group" && d100Ops.children.length === 7),
-  "PM has seven children (My Projects added, #22)",
+  !!(d100Ops && d100Ops.kind === "group" && d100Ops.children.length === 8),
+  "PM has eight children (My Projects added, #22; Rentals added, #93)",
 );
 ok(
   !!(
     d100Ops &&
     d100Ops.kind === "group" &&
     d100Ops.children.map((c) => c.key).join(",") ===
-      "projects,myprojects,schedule,fieldwork,flametests,inspections,repairs"
+      "projects,myprojects,schedule,fieldwork,flametests,inspections,repairs,rentals"
   ),
-  "PM children are projects, myprojects, schedule, fieldwork, flametests, inspections, repairs in order",
+  "PM children are projects, myprojects, schedule, fieldwork, flametests, inspections, repairs, rentals in order",
 );
 ok(!NAV.some((e) => e.kind === "group" && e.key === "installs"), "the Installs group is gone");
 ok(!NAV.some((e) => e.kind === "group" && e.key === "service"), "the Service group is gone");
@@ -2608,6 +2608,7 @@ ok(
  * so this is asserted from inside asyncChecks() below, same as the #81
  * catalog-import checks it sits next to. */
 import { list as listEquipmentItems, byCategory as equipmentByCategory } from "../src/lib/stores/equipment-items";
+import { equipmentItemsSeed } from "../src/db/seeds/equipment";
 
 /* --- Rentals module, Task 2: equipment bookings + availability logic ---
  * overlaps() is pure, so it's asserted here at top level; availableQty()/
@@ -2773,11 +2774,27 @@ async function asyncChecks(): Promise<void> {
     );
   }
 
-  /* --- Rentals module, Task 1: equipment items + locations data layer --- */
+  /* --- Rentals module, Task 1: equipment items + locations data layer ---
+   * Derive expectations from equipmentItemsSeed() rather than hardcoding a
+   * total count: the shared dev DB accumulates extra items from manual
+   * testing and CSV imports across later tasks, so an exact-length assert
+   * breaks the moment anyone adds one. Instead assert every seeded item is
+   * present (>= seed count, plus each seeded id specifically found), same
+   * "derive from live state" pattern as Task 2's booking checks below. */
+  const seedItems = equipmentItemsSeed();
   const eqItems = await listEquipmentItems();
-  ok(eqItems.length === 5, "equipment-items: seed produced 5 items");
+  ok(eqItems.length >= seedItems.length, "equipment-items: at least the seeded items are present");
+  ok(
+    seedItems.every((seed) => eqItems.some((item) => item.id === seed.id)),
+    "equipment-items: every seeded item id is present"
+  );
   const lighting = await equipmentByCategory("lighting");
-  ok(lighting.length === 1 && lighting[0].id === "eq-3", "equipment-items: byCategory filters correctly");
+  const seededLighting = seedItems.filter((seed) => seed.category === "lighting");
+  ok(
+    seededLighting.every((seed) => lighting.some((item) => item.id === seed.id)) &&
+      lighting.every((item) => item.category === "lighting"),
+    "equipment-items: byCategory filters correctly"
+  );
 
   /* --- Rentals module, Task 2: equipment bookings + availability logic ---
    * This is the first state-mutating write in the whole script — everything
