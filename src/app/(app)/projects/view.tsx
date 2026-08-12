@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import type { TaskRecord } from "@/lib/stores/tasks";
 import { firstName, deriveInitials, fallbackColor } from "@/lib/team";
 import {
+  canCompleteProject,
   stagesFor,
   stageIndex,
   progressPct,
@@ -36,13 +37,16 @@ import {
   addTaskAction,
   setTaskStatusAction,
   updateTaskAction,
+  setTargetDateAction,
 } from "./actions";
+import { ProjectSignoffForm } from "./signoff-form";
 import { TasksCard } from "@/components/tasks-card";
 import { SegmentedToggle } from "@/components/ui";
 import { OwnerSelect } from "@/components/owner-select";
 import BoardView from "@/components/board/board-view";
 import type { BoardCardVM, BoardColumnVM } from "@/components/board/types";
 import { boardProjects, dueChipLabel } from "./board-lib";
+import { GRID_SCOPES } from "@/lib/design/grid-scopes";
 
 /* ---------------- design tokens (accent via CSS vars, never hardcoded) ---------------- */
 
@@ -51,6 +55,15 @@ const ACCENT_SOFT = "var(--accent-soft)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 72%, #000)";
 const ACCENT_BD = "color-mix(in srgb, var(--accent) 30%, #fff)";
 const DAY = 86400000;
+
+function dateFieldValue(ts: number | null | undefined): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 export const PROJECTS_CSS = `
   .pm-grid { display: grid; grid-template-columns: 360px minmax(0,1fr); gap: 18px; align-items: start; }
@@ -880,11 +893,13 @@ function ProjectDetail({
       ];
   const curTab = tabDefs.some((t) => t[0] === tab) ? tab : "overview";
 
-  const canAdvance = !isDone && curIdx < stages.length - 1;
+  const canMarkComplete = canCompleteProject(p);
+  const nextStage = stages[Math.min(curIdx + 1, stages.length - 1)];
+  const canAdvance = !isDone && curIdx < stages.length - 1 && (nextStage.key !== "complete" || canMarkComplete);
   const advanceLabel = canAdvance
     ? curIdx + 1 === stages.length - 1
       ? "Mark complete"
-      : "Advance to " + stages[curIdx + 1].short
+      : "Advance to " + nextStage.short
     : "";
   const nodeWidth = Math.max(64, Math.floor(640 / stages.length));
 
@@ -969,6 +984,7 @@ function ProjectDetail({
                   <button
                     type="submit"
                     title={"Set stage: " + s.label}
+                    disabled={s.key === "complete" && !canMarkComplete}
                     style={{
                       width: 20,
                       height: 20,
@@ -981,7 +997,8 @@ function ProjectDetail({
                       justifyContent: "center",
                       fontSize: 10,
                       fontWeight: 700,
-                      cursor: "pointer",
+                      cursor: s.key === "complete" && !canMarkComplete ? "not-allowed" : "pointer",
+                      opacity: s.key === "complete" && !canMarkComplete ? 0.45 : 1,
                       padding: 0,
                       boxShadow: st === "current" ? "0 0 0 3px var(--accent-soft)" : undefined,
                     }}
@@ -1011,7 +1028,7 @@ function ProjectDetail({
           {canAdvance && (
             <form action={setStageAction} style={{ margin: 0 }}>
               <input type="hidden" name="id" value={p.id} />
-              <input type="hidden" name="stage" value={stages[Math.min(curIdx + 1, stages.length - 1)].key} />
+              <input type="hidden" name="stage" value={nextStage.key} />
               <button
                 type="submit"
                 style={{
@@ -1029,6 +1046,9 @@ function ProjectDetail({
                 {advanceLabel}
               </button>
             </form>
+          )}
+          {!isDone && nextStage.key === "complete" && !canMarkComplete && (
+            <span style={{ fontSize: 12, color: "#8c919c" }}>Record sign-off to complete the project.</span>
           )}
           {isDone && (
             <span
@@ -1176,6 +1196,56 @@ function OverviewTab({
 
   return (
     <>
+      <div
+        style={{
+          background: "#fafbfc",
+          border: "1px solid #eef0f3",
+          borderRadius: 11,
+          padding: "13px 14px",
+          marginBottom: 14,
+        }}
+      >
+        <div style={{ fontSize: 11, color: "#9aa0ab", marginBottom: 8 }}>
+          {isOrder ? "Delivery target" : "Completion target"}
+        </div>
+        <form action={setTargetDateAction} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", margin: 0 }}>
+          <input type="hidden" name="id" value={p.id} />
+          <input
+            type="date"
+            name="targetDate"
+            defaultValue={dateFieldValue(p.targetDate)}
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: 12.5,
+              border: "1px solid #d7dbe3",
+              borderRadius: 7,
+              padding: "8px 10px",
+              background: "#fff",
+              color: "#16181d",
+            }}
+          />
+          <button
+            type="submit"
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: "#fff",
+              background: ACCENT,
+              border: "1px solid transparent",
+              borderRadius: 7,
+              padding: "8px 12px",
+              cursor: "pointer",
+            }}
+          >
+            Save target
+          </button>
+          <span style={{ fontSize: 11, color: "#7d8390" }}>
+            {isOrder ? "Updates the delivery target." : "Updates the install-ready date and shifts the install window with it."}
+          </span>
+        </form>
+      </div>
+
       {risks.length > 0 && (
         <div
           style={{
@@ -1682,7 +1752,6 @@ function CrewTab({
 function TimelineTab({ p, isOrder }: { p: ProjectRecord; isOrder: boolean }) {
   const critId = criticalLineId(p);
   const critLine = (p.procurement || []).find((l) => l.id === critId);
-  const now = Date.now();
 
   type Bar = {
     label: string;
@@ -1699,7 +1768,7 @@ function TimelineTab({ p, isOrder }: { p: ProjectRecord; isOrder: boolean }) {
     const startTs = l.orderedAt || ob;
     const arriveTs = l.orderedAt
       ? l.orderedAt + (l.leadDays || 0) * DAY
-      : (p.targetDate || now) - STAGING_BUFFER * DAY;
+      : (p.targetDate || p.updatedAt || p.createdAt) - STAGING_BUFFER * DAY;
     bars.push({
       label: l.desc,
       sub: l.vendor + " · " + (l.leadDays || 0) + "d lead",
@@ -1729,8 +1798,8 @@ function TimelineTab({ p, isOrder }: { p: ProjectRecord; isOrder: boolean }) {
       </div>
     );
 
-  let domMin = now;
-  let domMax = now;
+  let domMin = bars[0].start;
+  let domMax = bars[0].end;
   bars.forEach((b) => {
     domMin = Math.min(domMin, b.start);
     domMax = Math.max(domMax, b.end);
@@ -1873,9 +1942,6 @@ function TimelineTab({ p, isOrder }: { p: ProjectRecord; isOrder: boolean }) {
                 {ticks.map((tk, i) => (
                   <div key={i} style={{ position: "absolute", top: 0, bottom: 0, left: tk.pos + "%", borderLeft: "1px solid #f5f6f8" }} />
                 ))}
-                {now >= domMin && now <= domMax && (
-                  <div style={{ position: "absolute", top: 0, bottom: 0, left: pct(now) + "%", borderLeft: "2px solid #16181d", opacity: 0.5 }} />
-                )}
                 {p.targetDate && (
                   <div
                     style={{
@@ -1983,6 +2049,34 @@ function SignoffTab({
           <br />
           {fmtDateY(so.signedAt)} · recorded by {firstName(so.signedBy)}
         </div>
+        {so.scopeChecks && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+            {GRID_SCOPES.map((scope) => (
+              <span
+                key={scope}
+                style={{
+                  fontSize: 12,
+                  borderRadius: 999,
+                  padding: "4px 9px",
+                  background: so.scopeChecks?.[scope] ? "#d8f0e2" : "#f3f4f6",
+                  color: so.scopeChecks?.[scope] ? "#1f6a48" : "#667085",
+                  border: `1px solid ${so.scopeChecks?.[scope] ? "#b8dec8" : "#e4e7ec"}`,
+                }}
+              >
+                {scope}: {so.scopeChecks?.[scope] ? "Accepted" : "Open"}
+              </span>
+            ))}
+          </div>
+        )}
+        {so.signatureBlobKey && (
+          <div style={{ marginTop: 12 }}>
+            <img
+              src={so.signatureBlobKey}
+              alt={`Signature for ${so.signedByName || so.name || "customer sign-off"}`}
+              style={{ maxWidth: 260, maxHeight: 120, border: "1px solid #d9e4dc", borderRadius: 10, background: "#fff" }}
+            />
+          </div>
+        )}
         {so.note && (
           <div style={{ fontSize: 12.5, color: "#3a6650", marginTop: 10, fontStyle: "italic" }}>“{so.note}”</div>
         )}
@@ -2001,39 +2095,7 @@ function SignoffTab({
       <div style={{ fontSize: 12.5, color: "#8c919c", marginBottom: 14, lineHeight: 1.5 }}>
         Record customer acceptance at hand-off. {gateNote}
       </div>
-      <form action={signoffAction} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <input type="hidden" name="id" value={p.id} />
-        <input
-          name="name"
-          required
-          placeholder="Customer name (who signed)"
-          style={inputStyle}
-        />
-        <input name="role" placeholder="Title / role" style={inputStyle} />
-        <textarea
-          name="note"
-          placeholder="Notes / punch items (optional)"
-          rows={2}
-          style={{ ...inputStyle, resize: "vertical" }}
-        />
-        <button
-          type="submit"
-          style={{
-            fontFamily: "var(--font-ui)",
-            fontSize: 13,
-            fontWeight: 600,
-            color: "#fff",
-            background: ACCENT,
-            border: "none",
-            padding: "11px 16px",
-            borderRadius: 9,
-            cursor: "pointer",
-            marginTop: 4,
-          }}
-        >
-          Record sign-off &amp; complete
-        </button>
-      </form>
+      <ProjectSignoffForm projectId={p.id} action={signoffAction} />
     </>
   );
 }

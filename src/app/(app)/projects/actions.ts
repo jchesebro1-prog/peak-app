@@ -2,9 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { GRID_SCOPES, type GridScope } from "@/lib/design/grid-scopes";
 import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
 import {
+  canCompleteProject,
   getProject,
   setProjectStage,
   setLineStatus,
@@ -16,6 +18,7 @@ import {
   addTime,
   setSignoff,
   createProjectFromQuote,
+  updateProject,
   stagesFor,
   type ProjectStage,
   type LineStatus,
@@ -28,6 +31,7 @@ import {
   STATUSES,
   type TaskStatus,
 } from "@/lib/stores/tasks";
+import { projectScheduleFromTargetDate } from "@/lib/project-target-date";
 
 /**
  * Project & sales-order mutations — the ProjectStore calls the prototype makes
@@ -46,6 +50,11 @@ function str(fd: FormData, k: string): string {
   return String(fd.get(k) || "");
 }
 
+function bool(fd: FormData, k: string): boolean {
+  const value = str(fd, k).trim().toLowerCase();
+  return value === "on" || value === "true" || value === "1" || value === "yes";
+}
+
 /** Jump/advance a project to a stage (stage tracker node + Advance button). */
 export async function setStageAction(formData: FormData): Promise<void> {
   const user = await requireUser();
@@ -55,6 +64,7 @@ export async function setStageAction(formData: FormData): Promise<void> {
   const p = await getProject(id);
   if (!p) return;
   if (!stagesFor(p.kind).some((s) => s.key === stage)) return; // illegal for kind
+  if (stage === "complete" && !canCompleteProject(p)) return;
   await setProjectStage(id, stage, user.name);
   revalidatePath("/", "layout");
 }
@@ -119,13 +129,43 @@ export async function signoffAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = str(formData, "id");
   const name = str(formData, "name").trim();
-  if (!id || !name) return;
+  const signatureBlobKey = str(formData, "signatureBlobKey").trim();
+  if (!id || !name || !signatureBlobKey) return;
   const p = await getProject(id);
   if (!p) return;
   const role = str(formData, "role").trim() || "Customer";
   const note = str(formData, "note").trim();
-  await setSignoff(id, { name, role, note }, user.name);
+  const scopeChecks = Object.fromEntries(
+    GRID_SCOPES.map((scope) => [scope, bool(formData, `scope-${scope}`)])
+  ) as Partial<Record<GridScope, boolean>>;
+  await setSignoff(
+    id,
+    {
+      name,
+      role,
+      note,
+      scopeChecks,
+      signatureBlobKey,
+      signedByName: name,
+      capturedBy: user.name,
+    },
+    user.name
+  );
   await setProjectStage(id, "complete", user.name);
+  revalidatePath("/", "layout");
+}
+
+/** PM edit path for the completion target (#15) — shifts the install window with it. */
+export async function setTargetDateAction(formData: FormData): Promise<void> {
+  await requireUser();
+  const id = str(formData, "id");
+  const target = str(formData, "targetDate");
+  if (!id || !target) return;
+  const p = await getProject(id);
+  if (!p) return;
+  const parsed = new Date(target + "T12:00:00").getTime();
+  if (!Number.isFinite(parsed)) return;
+  await updateProject(id, projectScheduleFromTargetDate(parsed, p.kind !== "order"));
   revalidatePath("/", "layout");
 }
 

@@ -77,6 +77,19 @@ export type QuoteHistoryEntry = {
   to: QuoteStatus;
 };
 
+/** Internal estimator attachment (#36) — vendor quote, scope sketch, or other
+ *  supporting file that rides with the quote record. `dataUrl` keeps the first
+ *  pass self-contained like engagement docs and comms attachments. */
+export type QuoteAttachment = {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  dataUrl: string;
+  addedAt: number;
+  addedBy: string;
+};
+
 export type Quote = {
   id: string;
   name: string;
@@ -112,6 +125,16 @@ export type Quote = {
    *  read by equipment-bookings.ts's createFromQuote/syncFromQuotes. */
   rental?: unknown;
   contact?: unknown;
+  /** Estimator assumptions printed on the customer document (#36). */
+  estimatorAssumptions?: string[];
+  /** Estimator exclusions / exceptions printed on the customer document (#36). */
+  estimatorExceptions?: string[];
+  /** Per-quote customer output mode for estimator proposals (#36-B). */
+  estimatorOutputMode?: "bom" | "narrative" | "both";
+  /** Editable rules-based narrative proposal text for estimator quotes (#36-B). */
+  estimatorNarrative?: string;
+  /** Internal-only quote attachments (#36) — e.g. vendor quotes. */
+  internalAttachments?: QuoteAttachment[];
   owner: string;
   /** Estimator/Quick Design spec subdoc. */
   spec?: unknown;
@@ -168,6 +191,11 @@ export type QuoteRevision = {
   tierMargin?: number | null;
   status: QuoteStatus;
   quoteType?: string;
+  estimatorAssumptions?: string[];
+  estimatorExceptions?: string[];
+  estimatorOutputMode?: "bom" | "narrative" | "both";
+  estimatorNarrative?: string;
+  internalAttachments?: QuoteAttachment[];
   /** Whichever priced payload this quote type carries — all already resolved. */
   spec?: unknown;
   flameTest?: unknown;
@@ -344,6 +372,11 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     consulting: partial.consulting || null,
     rental: partial.rental || null,
     contact: partial.contact || null,
+    estimatorAssumptions: partial.estimatorAssumptions || [],
+    estimatorExceptions: partial.estimatorExceptions || [],
+    estimatorOutputMode: partial.estimatorOutputMode || "bom",
+    estimatorNarrative: partial.estimatorNarrative || "",
+    internalAttachments: partial.internalAttachments || [],
     owner: partial.owner || "Jeff Chesebro",
     spec: partial.spec || null,
     renewalOf: partial.renewalOf || null,
@@ -400,6 +433,11 @@ function snapshotOf(
     tierMargin: doc.tierMargin ?? null,
     status: doc.status,
     quoteType: doc.quoteType,
+    estimatorAssumptions: doc.estimatorAssumptions || [],
+    estimatorExceptions: doc.estimatorExceptions || [],
+    estimatorOutputMode: doc.estimatorOutputMode || "bom",
+    estimatorNarrative: doc.estimatorNarrative || "",
+    internalAttachments: doc.internalAttachments || [],
     spec: doc.spec ?? null,
     flameTest: doc.flameTest ?? null,
     repair: doc.repair ?? null,
@@ -482,6 +520,11 @@ export async function restoreQuoteRevision(
     doc.margin = target.margin;
     doc.pricingTier = target.pricingTier ?? doc.pricingTier ?? null;
     doc.tierMargin = target.tierMargin ?? doc.tierMargin ?? null;
+    doc.estimatorAssumptions = target.estimatorAssumptions || [];
+    doc.estimatorExceptions = target.estimatorExceptions || [];
+    doc.estimatorOutputMode = target.estimatorOutputMode || "bom";
+    doc.estimatorNarrative = target.estimatorNarrative || "";
+    doc.internalAttachments = target.internalAttachments || [];
     doc.spec = target.spec ?? null;
     doc.flameTest = target.flameTest ?? null;
     doc.repair = target.repair ?? null;

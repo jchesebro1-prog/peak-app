@@ -10,7 +10,8 @@ import {
 } from "@/lib/operations-work";
 import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS, battenLenFt, BATTEN_OVERHANG_FT } from "@/lib/design/venue-dims";
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
-import { DEFAULT_SETTINGS } from "@/db/seed-data";
+import { DEFAULT_SETTINGS, GO_LIVE_RESET_COLLECTIONS } from "@/db/seed-data";
+import { DOC_TABLES } from "@/db/doc-tables";
 import { accentContrast } from "@/lib/color";
 import { emailFor, legacyEmailFor } from "@/lib/team";
 import { gridProjectsSeed } from "@/db/seeds/grid-projects";
@@ -25,9 +26,315 @@ import {
 } from "@/app/(app)/import/parse";
 // Pure (no store access, no DB) — see the note on catalogPatch itself.
 import { catalogPatch } from "@/app/(app)/import/registry";
+import { venueDirectoryPage } from "@/lib/venue-directory-page";
+import {
+  defaultInstallLeadWeeks,
+  projectScheduleFromQuote,
+  projectScheduleFromTargetDate,
+} from "@/lib/project-target-date";
+import { nextPendingDeliveryEta, scheduleBookingSeed } from "@/lib/schedule-booking";
+import {
+  buildFieldPacketScopeGroups,
+  buildFieldPacketVisitSummaries,
+  buildFieldWorkPacket,
+} from "@/lib/field-work-packet";
+import { applyProjectSignoff } from "@/lib/project-signoff";
+import { applyExistingCustomerToLeadForm } from "@/app/(app)/leads/new-lead-prefill";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+// The async checks exercise real stores. Keep them off the single-writer dev
+// database and make their seed state deterministic instead of racing the
+// background seed kicked off by getDb().
+const specScratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "peak-specs-"));
+process.env.PGLITE_PATH = path.join(specScratchDir, "pglite");
+process.env.SEED_DEMO = "true";
+const cleanupSpecDb = () => fs.rmSync(specScratchDir, { recursive: true, force: true });
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
+
+/* --- go-live reset coverage (#94) ---
+ * Break caught: adding or using a no-seed document collection without making
+ * the go-live reset clear it leaves demo-era rows pointing at re-minted IDs. */
+const resetCollections = [...GO_LIVE_RESET_COLLECTIONS].sort();
+const businessDocumentCollections = Object.keys(DOC_TABLES).sort();
+ok(
+  JSON.stringify(resetCollections) === JSON.stringify(businessDocumentCollections),
+  `go-live reset covers every business document collection (${resetCollections.length}/${businessDocumentCollections.length})`,
+);
+
+/* --- scalable Venues directory (#92) ---
+ * Break caught: returning the entire filtered directory instead of a bounded
+ * page recreates the multi-megabyte server-component payload. */
+const venueRows = Array.from({ length: 121 }, (_, i) => ({ id: `v-${i + 1}` }));
+const venuePage3 = venueDirectoryPage(venueRows, 3, 50);
+ok(venuePage3.page === 3, "venues pagination keeps a valid requested page");
+ok(venuePage3.totalPages === 3, "venues pagination reports three pages for 121 rows");
+ok(
+  venuePage3.rows.length === 21 && venuePage3.rows[0].id === "v-101" && venuePage3.rows[20].id === "v-121",
+  "venues pagination returns only the final 21 rows on page three",
+);
+const venuePastEnd = venueDirectoryPage(venueRows, 99, 50);
+ok(
+  venuePastEnd.page === 3 && venuePastEnd.rows[0].id === "v-101",
+  "venues pagination clamps an out-of-range page to the last page",
+);
+const emptyVenuePage = venueDirectoryPage([], -4, 50);
+ok(
+  emptyVenuePage.page === 1 && emptyVenuePage.totalPages === 1 && emptyVenuePage.rows.length === 0,
+  "venues pagination has a stable empty-directory page",
+);
+
+/* --- new lead customer prefill (#12) ---
+ * Break caught: selecting an existing customer in the New Lead form still
+ * creates an unlinked lead because the form never stamps customerId or reuses
+ * the customer's primary contact/location fields. */
+const linkedLead = applyExistingCustomerToLeadForm(
+  {
+    org: "",
+    contact: "",
+    email: "",
+    phone: "",
+    city: "",
+    state: "WI",
+    source: "phone",
+    interest: "",
+    owner: "",
+    value: "",
+    customerId: null,
+  },
+  {
+    id: "lakefront",
+    name: "Lakefront Performing Arts Center",
+    locations: [
+      { label: "Main", city: "Milwaukee", state: "WI", primary: true },
+      { label: "Annex", city: "Waukesha", state: "WI", primary: false },
+    ],
+    contacts: [
+      { name: "Morgan Hall", email: "morgan@lakefront.org", phone: "555-0100", primary: true },
+    ],
+  },
+);
+ok(linkedLead.customerId === "lakefront", "new lead selection stamps the existing customer id");
+ok(
+  linkedLead.org === "Lakefront Performing Arts Center" &&
+    linkedLead.contact === "Morgan Hall" &&
+    linkedLead.email === "morgan@lakefront.org" &&
+    linkedLead.phone === "555-0100" &&
+    linkedLead.city === "Milwaukee" &&
+  linkedLead.state === "WI",
+  "new lead selection prefills the primary customer contact and location snapshot",
+);
+
+/* --- PUNCHLIST #44: field-work install packet includes the handoff essentials ---
+ * Break caught: the Field Work surface only exposes tasks/notes/time/BOM, so
+ * the installer does not get one packet with venue/contact info, crew,
+ * recent notes, material status, and the signoff checklist. */
+{
+  const packet = buildFieldWorkPacket(
+    {
+      crew: [
+        { id: "cw-2", person: "Alex Roe", role: "Programmer", start: new Date(2026, 7, 20).getTime(), end: new Date(2026, 7, 21).getTime() },
+        { id: "cw-1", person: "Jamie Fox", role: "Installer", start: new Date(2026, 7, 18).getTime(), end: new Date(2026, 7, 19).getTime() },
+      ],
+      installStart: new Date(2026, 7, 18).getTime(),
+      installEnd: new Date(2026, 7, 21).getTime(),
+      signoff: { signedBy: "Jeff Chesebro", signedAt: new Date(2026, 7, 22).getTime(), scopeChecks: { Lighting: true, Audio: true } },
+      notes: [
+        { id: "n1", by: "Jeff Chesebro", at: new Date(2026, 7, 18, 9).getTime(), text: "Load-in through stage left.", photo: null },
+        { id: "n2", by: "Morgan Hall", at: new Date(2026, 7, 19, 14).getTime(), text: "House opens at 6pm.", photo: null },
+        { id: "n3", by: "Jeff Chesebro", at: new Date(2026, 7, 20, 11).getTime(), text: "Client added two cue lights.", photo: null },
+        { id: "n4", by: "Jamie Fox", at: new Date(2026, 7, 21, 8).getTime(), text: "Rigging inspection complete.", photo: null },
+      ],
+      procurement: [
+        { id: "pl-1", sku: "ETC-S4", desc: "Source Four", vendor: "ETC", qty: 4, unit: "ea", cost: 1200, leadDays: 14, status: "received", orderedAt: null, po: "PO-1" },
+        { id: "pl-2", sku: "CBL-01", desc: "Cable loom", vendor: "TMB", qty: 2, unit: "ea", cost: 300, leadDays: 7, status: "ordered", orderedAt: null, po: "PO-2" },
+      ],
+    } as any,
+    {
+      label: "Main Stage",
+      address: "123 Main St",
+      city: "Milwaukee",
+      state: "WI",
+      primary: true,
+      venueKind: "proscenium",
+      travelMiles: null,
+      travelMin: null,
+    },
+    [
+      { name: "Pat Venue", role: "TD", email: "pat@example.com", phone: "555-0100", primary: false },
+      { name: "Morgan Hall", role: "Client", email: "morgan@example.com", phone: "555-0111", primary: true },
+    ]
+  );
+  ok(packet.installWindowLabel === "Aug 18 – Aug 21", "#44 packet carries the install window summary");
+  ok(
+    packet.venueLabel === "Main Stage" && packet.venueAddress === "123 Main St · Milwaukee, WI",
+    "#44 packet carries venue name and address",
+  );
+  ok(
+    packet.crew.map((c) => c.person).join("|") === "Jamie Fox|Alex Roe",
+    "#44 packet sorts crew in install order",
+  );
+  ok(
+    packet.contacts[0]?.name === "Morgan Hall" && packet.contacts[1]?.name === "Pat Venue",
+    "#44 packet surfaces the primary contact first",
+  );
+  ok(
+    packet.recentNotes.map((n) => n.id).join("|") === "n4|n3|n2",
+    "#44 packet shows the three most recent notes first",
+  );
+  ok(
+    packet.materials.total === 2 && packet.materials.onSite === 1 && packet.materials.awaiting === 1,
+    "#44 packet summarizes on-site versus awaiting materials",
+  );
+  ok(
+    packet.checklist.find((c) => c.scope === "Lighting")?.accepted === true &&
+      packet.checklist.find((c) => c.scope === "Rigging")?.accepted === false,
+    "#44 packet carries the full signoff checklist with unchecked scopes still visible",
+  );
+  const scopeGroups = buildFieldPacketScopeGroups([
+    { name: "Lighting", kind: "materials", items: [{ id: 1 }, { id: 2 }] },
+    { name: "Labor", kind: "labor", items: [{ id: 3 }] },
+    { name: "Empty", kind: "materials", items: [] },
+  ]);
+  ok(
+    scopeGroups.map((g) => `${g.name}:${g.sectionKind}:${g.itemCount}`).join("|") ===
+      "Lighting:materials:2|Labor:labor:1",
+    "#44 packet carries saved scope groups from the source quote and drops empty sections",
+  );
+  const visitRows = buildFieldPacketVisitSummaries(
+    [
+      {
+        id: "SV-1",
+        reason: "Punch walk",
+        locationId: "loc1",
+        startAt: new Date(2026, 7, 8).getTime(),
+        createdAt: new Date(2026, 7, 1).getTime(),
+        assignedTo: "Jeff Chesebro",
+        stage: "scheduled",
+        engagementId: "CE-1001",
+      },
+      {
+        id: "SV-2",
+        reason: "Sales call",
+        locationId: "loc2",
+        startAt: new Date(2026, 7, 9).getTime(),
+        createdAt: new Date(2026, 7, 2).getTime(),
+        assignedTo: "",
+        stage: "done",
+        engagementId: null,
+      },
+      {
+        id: "SV-3",
+        reason: "Install check-in",
+        locationId: "loc1",
+        startAt: null,
+        createdAt: new Date(2026, 7, 10).getTime(),
+        assignedTo: "Jamie Fox",
+        stage: "claimed",
+        engagementId: null,
+      },
+    ],
+    "loc1",
+    new Date(2026, 7, 12).getTime(),
+  );
+  ok(
+    visitRows.map((v) => v.id).join("|") === "SV-3|SV-1",
+    "#44 packet visit history filters to the venue and sorts newest first",
+  );
+  ok(
+    visitRows[0]?.status === "claimed" &&
+      visitRows[0]?.href === "/calendar" &&
+      visitRows[1]?.status === "Done" &&
+      visitRows[1]?.href === "/design/engagements/CE-1001",
+    "#44 packet visit history keeps the right status/href for unscheduled and past visits",
+  );
+}
+
+/* --- PUNCHLIST #44: field-side signoff applies the same normalized project mutation offline ---
+ * Break caught: Field Work can save project docs offline, but signoff needs
+ * the same normalized signoff payload and stage-history write as the server
+ * path or the phone capture diverges from the office record. */
+{
+  const stampedAt = new Date(2026, 7, 12, 10, 30).getTime();
+  const signed = applyProjectSignoff(
+    {
+      stage: "training",
+      stageHistory: [{ at: new Date(2026, 7, 10).getTime(), from: "install", to: "training", by: "Jeff Chesebro" }],
+      signoff: null,
+      updatedAt: new Date(2026, 7, 10).getTime(),
+    },
+    {
+      name: " Morgan Hall ",
+      role: " Client ",
+      signatureBlobKey: "  data:image/png;base64,abc  ",
+      signedByName: "",
+      capturedBy: "",
+      scopeChecks: { Lighting: true, Fake: true } as any,
+      note: "  Final cue-light adjustment pending. ",
+    } as any,
+    "Jeff Chesebro",
+    stampedAt,
+  );
+  ok(signed.stage === "signoff", "#44 field-side signoff advances the local project stage to Sign-off");
+  ok(
+    signed.stageHistory?.[signed.stageHistory.length - 1]?.to === "signoff" &&
+      signed.stageHistory?.[signed.stageHistory.length - 1]?.from === "training",
+    "#44 field-side signoff appends the matching stage-history entry",
+  );
+  const signedSignoff = (signed as { signoff?: any }).signoff;
+  ok(
+    signedSignoff?.name === "Morgan Hall" &&
+      signedSignoff?.role === "Client" &&
+      signedSignoff?.signatureBlobKey === "data:image/png;base64,abc",
+    "#44 field-side signoff trims signer fields and the signature payload",
+  );
+  ok(
+    signedSignoff?.signedByName === "Morgan Hall" &&
+      signedSignoff?.capturedBy === "Jeff Chesebro" &&
+      signedSignoff?.scopeChecks?.Lighting === true &&
+      !("Fake" in (signedSignoff?.scopeChecks || {})),
+    "#44 field-side signoff keeps the same fallback and scope-normalization rules offline",
+  );
+}
+const unlinkedLead = applyExistingCustomerToLeadForm(linkedLead, null);
+ok(unlinkedLead.customerId === null, "switching back to Add new clears the customer link");
+
+/* --- estimator install timeframe → project goal (#15) ---
+ * Break caught: quote conversion ignoring the quote timeframe and falling back
+ * to a hardcoded date guess detached from the win date. */
+ok(defaultInstallLeadWeeks({ value: 12000, spec: { sections: [], mobs: [] } } as any) === 12,
+  "install timeframe defaults to the 12-week minimum for a small quote");
+ok(defaultInstallLeadWeeks({
+  value: 180000,
+  spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [] }], mobs: [] },
+} as any) === 16, "install timeframe stretches for larger quote value bands");
+ok(defaultInstallLeadWeeks({
+  value: 45000,
+  spec: { sections: [], mobs: [{ type: "Install", days: 8, crew: 4, discipline: "Install" }] },
+} as any) === 16, "install timeframe stretches for heavy mobilization scope");
+
+const wonAt = Date.UTC(2026, 7, 11, 12, 0, 0); // Aug 11 2026
+const targetOnly = projectScheduleFromTargetDate(wonAt + 12 * 7 * 86400000, false);
+ok(targetOnly.targetDate === wonAt + 12 * 7 * 86400000 && targetOnly.installStart === null && targetOnly.installEnd === null,
+  "order schedule keeps only the completion target");
+
+const installSched = projectScheduleFromQuote({
+  value: 45000,
+  installLeadWeeks: 14,
+  spec: {
+    sections: [{ id: "labor", name: "Install", kind: "labor", mfr: "", freightPct: 0, items: [{ id: 1 }] }],
+    mobs: [{ type: "Install", days: 2, crew: 3, discipline: "Install" }],
+  },
+} as any, wonAt);
+ok(installSched.targetDate === wonAt + 14 * 7 * 86400000, "project target is anchored to the win date plus quote weeks");
+ok(
+  installSched.installStart === installSched.targetDate - 4 * 86400000 &&
+    installSched.installEnd === installSched.targetDate + 2 * 86400000,
+  "install window shifts with the completion target",
+);
 
 /* --- BOM parsing --- */
 const p = parseCsv("sku,description,qty\nS4LED,Source Four LED,12\n,Mystery fixture,3\nJUNK");
@@ -385,6 +692,17 @@ ok(parentGroupOf("venues") === "crm", "venues reports CRM as its parent group (D
 ok(
   HOME_TABS.some((t) => t.key === "reports" && t.href === "/reports"),
   "Reports is present in HOME_TABS with its own route",
+);
+const topGroups = NAV.filter(
+  (e): e is Extract<(typeof NAV)[number], { kind: "group" }> => e.kind === "group",
+);
+ok(
+  topGroups.map((e) => e.label).join(" · ") === "Home · Sales · Installs · Customers · Design",
+  "desktop nav labels are the full words Jeff asked for in #45(b)",
+);
+ok(
+  topGroups.map((e) => e.shortLabel || e.label).join(" · ") === "Home · EST · PM · CRM · DESIGN",
+  "compact nav labels stay abbreviated for narrow layouts in #45(b)",
 );
 
 // ---- General dissolution (D99): Settings sections + Admin ----
@@ -1272,7 +1590,7 @@ ok(legacyEmailFor("Jeff Chesebro") === "jchesebro@peaksystemsgroup.com", "legacy
 /* ============ TASKS (#17) — store pure logic ============ */
 import {
   isOverdue, taskFromLegacy, expandTemplate, taskBellItems, autoTaskId,
-  STATUSES, type TaskRecord, type TaskTemplateItem,
+  STATUSES, tasksForProject, type TaskRecord, type TaskTemplateItem,
 } from "@/lib/stores/tasks";
 import { CATEGORIES } from "@/lib/stores/notif-prefs";
 
@@ -1459,7 +1777,7 @@ import {
 
 /* ============ PROJECTS BOARD (#19) ============ */
 import { boardProjects, dueChipLabel } from "@/app/(app)/projects/board-lib";
-import { PROJECT_STAGES, ORDER_STAGES } from "@/lib/stores/projects";
+import { PROJECT_STAGES, ORDER_STAGES, canCompleteProject } from "@/lib/stores/projects";
 
 ok(
   PROJECT_STAGES.map((s) => s.key).join(",") === "procurement,delivery,scheduled,install,training,signoff,complete",
@@ -1469,6 +1787,9 @@ ok(
   ORDER_STAGES.map((s) => s.key).join(",") === "procurement,delivery,signoff,complete",
   "#19: orders carry a different 4-stage vocabulary — excluded from the board"
 );
+ok(!canCompleteProject({ stage: "install", signoff: null }), "#19: project cannot complete before sign-off exists");
+ok(canCompleteProject({ stage: "install", signoff: { signedBy: "Jeff", signedAt: NOW } }), "#19: sign-off unlocks completion");
+ok(canCompleteProject({ stage: "complete", signoff: null }), "#19: already-complete records stay valid during migration");
 {
   const mix: Array<{ kind: "project" | "order" }> = [
     { kind: "project" },
@@ -2626,7 +2947,8 @@ import { qtyOwned as equipmentQtyOwned } from "../src/lib/stores/equipment-items
 import { upsertDoc } from "../src/db/doc-store";
 import { createFromQuote as createInspectionFromQuote, byQuote as inspectionsByQuote } from "../src/lib/stores/inspections";
 import { createFromQuote as createRepairFromQuote, byQuote as repairByQuote } from "../src/lib/stores/repair-jobs";
-import { getProject, getProjectByQuote } from "../src/lib/stores/projects";
+import { createProject, getProject, getProjectByQuote, setDeliveryStatus, setProjectStage, setSignoff } from "../src/lib/stores/projects";
+import { addQuoteRevision, create as createQuote, get as getQuote, restoreQuoteRevision, update as updateQuote } from "../src/lib/stores/quotes";
 
 ok(overlaps(1000, 2000, 1500, 2500) === true, "overlaps: partial overlap detected");
 ok(overlaps(1000, 2000, 2000, 3000) === true, "overlaps: touching boundary counts as overlap");
@@ -2752,6 +3074,8 @@ async function xlsxFixture(): Promise<Buffer> {
 }
 
 async function asyncChecks(): Promise<void> {
+  const { seedDemoCollections } = await import("../src/db/seed-data");
+  await seedDemoCollections();
   const xr = await xlsxToCsv(await xlsxFixture());
   ok(xr.ok, "#81 a well-formed .xlsx converts");
   if (xr.ok) {
@@ -3011,14 +3335,274 @@ async function asyncChecks(): Promise<void> {
     const p2 = await getProjectByQuote(TEST_REPAIR_QUOTE_ID);
     ok(!!p1 && !!p2 && p1.id !== p2.id, "#13 the inspection and repair test quotes get DISTINCT linked projects");
   }
+
+  /* --- PUNCHLIST #16: completion requires sign-off ---
+   * Break caught: the direct stage-change path could mark a project complete
+   * without a recorded signoff, which contradicted the project lifecycle and
+   * made the completion follow-up task fire too early. */
+  {
+    const project = await createProject({
+      name: "PUNCHLIST #16 completion gate",
+      kind: "project",
+      stage: "install",
+      signoff: null,
+    });
+    const blocked = await setProjectStage(project.id, "complete", "Jeff Chesebro");
+    ok(blocked?.stage === "install", "#16 direct completion is blocked until sign-off exists");
+    await setSignoff(project.id, { name: "Morgan Hall", role: "Client" }, "Jeff Chesebro");
+    const completed = await setProjectStage(project.id, "complete", "Jeff Chesebro");
+    ok(completed?.stage === "complete", "#16 completion succeeds once sign-off is recorded");
+    ok(!!completed?.signoff?.name, "#16 sign-off data persists through completion");
+  }
+
+  /* --- PUNCHLIST #36: estimator assumptions/exceptions/attachments survive quote revisions ---
+   * Break caught: saving a revision and later restoring it can currently
+   * revert priced content while silently dropping quote-side assumptions,
+   * exceptions, and internal vendor attachments. */
+  {
+    const quote = await createQuote({
+      name: "PUNCHLIST #36 revision payload",
+      customer: "Test Customer #36",
+      owner: "Jeff Chesebro",
+      source: "estimator",
+      quoteType: "system",
+    });
+    await updateQuote(quote.id, {
+      estimatorAssumptions: ["Existing power remains by owner", "Final dimmer counts confirmed at field measure"],
+      estimatorExceptions: ["Permitting excluded", "Patch/paint by others"],
+      estimatorOutputMode: "both",
+      estimatorNarrative:
+        "This proposal includes a complete theatrical lighting package plus installation and commissioning.",
+      internalAttachments: [
+        {
+          id: "att-1",
+          name: "ETC dealer quote.pdf",
+          mime: "application/pdf",
+          size: 12345,
+          dataUrl: "data:application/pdf;base64,AAA",
+          addedAt: 1,
+          addedBy: "Jeff Chesebro",
+        },
+      ],
+    } as any);
+    await addQuoteRevision(quote.id, { by: "Jeff Chesebro", note: "Captured estimator extras" });
+    await updateQuote(quote.id, {
+      estimatorAssumptions: ["CHANGED"],
+      estimatorExceptions: ["CHANGED"],
+      estimatorOutputMode: "bom",
+      estimatorNarrative: "CHANGED",
+      internalAttachments: [],
+    } as any);
+    const restored = await restoreQuoteRevision(quote.id, 1, "Jeff Chesebro");
+    ok(restored.ok, "#36 quote revision restore succeeds");
+    const live = await getQuote(quote.id);
+    ok(
+      Array.isArray((live as any)?.estimatorAssumptions) &&
+        (live as any).estimatorAssumptions.join("|") ===
+          "Existing power remains by owner|Final dimmer counts confirmed at field measure",
+      "#36 restoring a revision restores estimator assumptions",
+    );
+    ok(
+      Array.isArray((live as any)?.estimatorExceptions) &&
+        (live as any).estimatorExceptions.join("|") === "Permitting excluded|Patch/paint by others",
+      "#36 restoring a revision restores estimator exceptions",
+    );
+    ok(
+      Array.isArray((live as any)?.internalAttachments) &&
+        (live as any).internalAttachments.length === 1 &&
+        (live as any).internalAttachments[0].name === "ETC dealer quote.pdf",
+      "#36 restoring a revision restores internal quote attachments",
+    );
+    ok(
+      (live as any)?.estimatorOutputMode === "both",
+      "#36 restoring a revision restores the quote output mode",
+    );
+    ok(
+      (live as any)?.estimatorNarrative ===
+        "This proposal includes a complete theatrical lighting package plus installation and commissioning.",
+      "#36 restoring a revision restores the estimator narrative",
+    );
+  }
+
+  /* --- PUNCHLIST #44: project completion creates a due walkthrough task ---
+   * Break caught: the completion auto-task fires, but without the ~7 day due
+   * date the spec calls for, so the sales follow-up never lands in the right
+   * reminder window. */
+  {
+    const before = Date.now();
+    const project = await createProject({
+      name: "PUNCHLIST #44 walkthrough task",
+      kind: "project",
+      stage: "install",
+      signoff: null,
+      quoteId: "Q-test-44",
+    });
+    await createQuote({
+      id: "Q-test-44",
+      name: "Quote for #44",
+      customer: "Test Customer #44",
+      owner: "Sam Rivera",
+      source: "estimator",
+      quoteType: "system",
+    });
+    await setSignoff(project.id, { name: "Morgan Hall", role: "Client" }, "Jeff Chesebro");
+    await setProjectStage(project.id, "complete", "Jeff Chesebro");
+    const after = Date.now();
+    const tasks = await tasksForProject(project.id);
+    const walkthrough = tasks.find((t) => t.coverageKey === `item16:completed:${project.id}`);
+    ok(!!walkthrough, "#44 completion creates the walkthrough follow-up task");
+    ok(
+      !!walkthrough?.dueAt &&
+        walkthrough.dueAt >= before + 6 * 86400000 &&
+        walkthrough.dueAt <= after + 8 * 86400000,
+      "#44 completion walkthrough task is due about 7 days out",
+    );
+  }
+
+  /* --- PUNCHLIST #44: final delivery auto-advances the project to Scheduled ---
+   * Break caught: marking the last delivery received updates only the line,
+   * leaving the project stuck in Delivery instead of moving the install
+   * workflow forward. Reversing that received status must also undo the
+   * automatic stage bump. */
+  {
+    const project = await createProject({
+      name: "PUNCHLIST #44 delivery auto-stage",
+      kind: "project",
+      stage: "delivery",
+      deliveries: [
+        { id: "dl-1", label: "Rigging package", vendor: "JR Clancy", eta: Date.now(), status: "received", receivedAt: Date.now() },
+        { id: "dl-2", label: "Soft goods", vendor: "Rose Brand", eta: Date.now(), status: "in_transit" },
+      ],
+    });
+    const stillDelivery = await setDeliveryStatus(project.id, "dl-2", "in_transit");
+    ok(stillDelivery?.stage === "delivery", "#44 non-final delivery updates do not advance the project");
+    const autoScheduled = await setDeliveryStatus(project.id, "dl-2", "received");
+    ok(autoScheduled?.stage === "scheduled", "#44 the final received delivery auto-advances the project to Scheduled");
+    ok(
+      autoScheduled?.stageHistory?.[autoScheduled.stageHistory.length - 1]?.via === "auto-deliveries",
+      "#44 auto-scheduled delivery transitions are tagged in stage history",
+    );
+    const reverted = await setDeliveryStatus(project.id, "dl-2", "scheduled");
+    ok(reverted?.stage === "delivery", "#44 undoing the last received delivery reverts the auto-scheduled stage");
+    ok(
+      reverted?.stageHistory?.[reverted.stageHistory.length - 1]?.via === "auto-deliveries",
+      "#44 undoing the auto-stage keeps the same delivery-history tag",
+    );
+  }
+
+  /* --- PUNCHLIST #44: schedule booking seeds from the next pending delivery ETA ---
+   * Break caught: the schedule board can book crew for a pre-received project,
+   * but the booking flow anchors to today instead of the expected ship date,
+   * so the delivery-driven pre-booking view never materializes. */
+  {
+    const jan12 = new Date(2026, 0, 12).getTime();
+    const jan20 = new Date(2026, 0, 20).getTime();
+    const jan15 = new Date(2026, 0, 15).getTime();
+    const jan18 = new Date(2026, 0, 18).getTime();
+    const jan22 = new Date(2026, 0, 22).getTime();
+    const jan5 = new Date(2026, 0, 5).getTime();
+    ok(
+      nextPendingDeliveryEta({
+        deliveries: [
+          { id: "dl-1", label: "Soft goods", vendor: "Rose Brand", eta: jan20, status: "in_transit" },
+          { id: "dl-2", label: "Lighting package", vendor: "ETC", eta: jan15, status: "scheduled" },
+          { id: "dl-3", label: "Rigging", vendor: "JR Clancy", eta: jan18, status: "received", receivedAt: jan18 },
+        ],
+      } as any) === jan15,
+      "#44 nextPendingDeliveryEta picks the earliest not-yet-received ship date",
+    );
+    const deliverySeed = scheduleBookingSeed(
+      {
+        deliveries: [
+          { id: "dl-1", label: "Soft goods", vendor: "Rose Brand", eta: jan20, status: "in_transit" },
+          { id: "dl-2", label: "Lighting package", vendor: "ETC", eta: jan15, status: "scheduled" },
+        ],
+        installStart: jan22,
+      } as any,
+      jan12,
+    );
+    ok(
+      deliverySeed.start === jan15 && deliverySeed.reason === "delivery_eta",
+      "#44 booking seeds from the pending delivery ETA before the install window",
+    );
+    const installSeed = scheduleBookingSeed(
+      { deliveries: [], installStart: jan22 } as any,
+      jan12,
+    );
+    ok(
+      installSeed.start === jan22 && installSeed.reason === "install_start",
+      "#44 booking falls back to the install start when there is no pending delivery ETA",
+    );
+    const todaySeed = scheduleBookingSeed(
+      { deliveries: [], installStart: null } as any,
+      jan5,
+    );
+    ok(
+      todaySeed.start === jan5 && todaySeed.reason === "today",
+      "#44 booking falls back to today when neither delivery ETA nor install start exists",
+    );
+  }
+
+  /* --- PUNCHLIST #44: signoff persists explicit scope checks and signature metadata ---
+   * Break caught: the signoff record only stores free-text name/role/note, so
+   * the lifecycle cannot prove which install scopes were accepted or that a
+   * signature was actually captured. */
+  {
+    const project = await createProject({
+      name: "PUNCHLIST #44 explicit signoff record",
+      kind: "project",
+      stage: "training",
+      signoff: null,
+    });
+    const signed = await setSignoff(
+      project.id,
+      {
+        name: "Morgan Hall",
+        role: "Facilities Director",
+        scopeChecks: {
+          Lighting: true,
+          Rigging: false,
+          Curtains: true,
+          Audio: true,
+          Video: false,
+          Fake: true,
+        },
+        signatureBlobKey: "  data:image/png;base64,signature-demo  ",
+        signedByName: "",
+        capturedBy: "",
+        note: "Curtains punch item remains open.",
+      } as any,
+      "Jeff Chesebro",
+    );
+    ok(signed?.stage === "signoff", "#44 recording signoff still advances the project into Sign-off");
+    ok(
+      !!signed?.signoff?.scopeChecks &&
+        signed.signoff.scopeChecks.Lighting === true &&
+        signed.signoff.scopeChecks.Curtains === true &&
+        signed.signoff.scopeChecks.Video === false &&
+        !("Fake" in signed.signoff.scopeChecks),
+      "#44 signoff stores per-scope acceptance checks",
+    );
+    ok(
+      signed?.signoff?.signatureBlobKey === "data:image/png;base64,signature-demo",
+      "#44 signoff stores the captured signature reference",
+    );
+    ok(
+      signed?.signoff?.signedByName === "Morgan Hall" &&
+        signed?.signoff?.capturedBy === "Jeff Chesebro",
+      "#44 signoff stores signer identity separately from the recorder",
+    );
+  }
 }
 
 asyncChecks()
   .then(() => {
+    cleanupSpecDb();
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
   })
   .catch((err) => {
+    cleanupSpecDb();
     console.error(err);
     process.exit(1);
   });

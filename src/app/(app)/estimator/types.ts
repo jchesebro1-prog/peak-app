@@ -1,4 +1,4 @@
-import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
+import type { QuoteAttachment, QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import type { FixtureRates } from "@/lib/stores/pricing";
 import type { TaskRecord } from "@/lib/stores/tasks";
 
@@ -163,7 +163,13 @@ export type InitialQuote = {
   customerId: string | null;
   locationId: string | null;
   contactName: string;
+  installLeadWeeks: number;
   quoteNote: string;
+  estimatorAssumptions: string[];
+  estimatorExceptions: string[];
+  estimatorOutputMode: "bom" | "narrative" | "both";
+  estimatorNarrative: string;
+  internalAttachments: QuoteAttachment[];
   owner: string;
   revNum: number;
   revDateMs: number;

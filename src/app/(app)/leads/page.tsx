@@ -33,9 +33,11 @@ import { setStageAction } from "./actions";
 import { getSettings } from "@/lib/settings";
 import { activeVisitForLead, mergedVisitReasons } from "@/lib/stores/site-visits";
 import { stageMeta as surveyStageMeta, surveysForLead } from "@/lib/stores/surveys";
+import { all as allCustomers } from "@/lib/stores/customers";
 import { VISIT_STAGE_META, type VisitStage } from "@/lib/lead-thread";
 import type { AvatarVM, ChipVM, LeadThreadVM, WorklistRowVM } from "./types";
 import type { BoardCardVM } from "@/components/board/types";
+import type { ExistingLeadCustomer } from "./new-lead-prefill";
 
 /**
  * Leads — three directions in one route, per the prototype:
@@ -238,14 +240,33 @@ export default async function LeadsPage({
   const who = !whoRaw || whoRaw === "all" ? "" : whoRaw === "mine" || whoRaw === me.name ? "mine" : whoRaw;
   const scopeName = who === "mine" ? me.name : who; // "" = unscoped
 
-  const [allLeads, users, fuList, unassignedAll, settings] = await Promise.all([
+  const [allLeads, users, fuList, unassignedAll, settings, customers] = await Promise.all([
     getAll(),
     activeUsers(),
     followUps(scopeName ? { owner: scopeName } : {}),
     unassigned(),
     getSettings(),
+    allCustomers(),
   ]);
   const roster: Ident[] = users.map((u) => ({ name: u.name, initials: u.initials, color: u.color }));
+  const existingCustomers: ExistingLeadCustomer[] = customers
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      locations: (c.locations || []).map((l) => ({
+        label: l.label || "",
+        city: l.city || "",
+        state: l.state || "",
+        primary: !!l.primary,
+      })),
+      contacts: (c.contacts || []).map((ct) => ({
+        name: ct.name,
+        email: ct.email || undefined,
+        phone: ct.phone || undefined,
+        primary: !!ct.primary,
+      })),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   // #22 STRICT owner scope, applied to the full set BEFORE any view/seg
   // logic (board, worklist, table, urgency ordering all derive from `all`).
@@ -799,6 +820,7 @@ export default async function LeadsPage({
           meName={me.name}
           rosterNames={roster.map((r) => r.name)}
           sourceOptions={sourceOptions}
+          existingCustomers={existingCustomers}
           thread={thread}
           visitReasons={mergedVisitReasons(settings.visitReasons)}
         />

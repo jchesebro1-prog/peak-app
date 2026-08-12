@@ -2,6 +2,11 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor } from "@/lib/team";
+import { get as getCatalogPart } from "@/lib/stores/catalog";
+import { getEngagementForQuoteRef } from "@/lib/stores/engagements";
+import { visitsForCustomer } from "@/lib/stores/site-visits";
+import { get as getQuote } from "@/lib/stores/quotes";
+import { quoteDeepLink } from "@/lib/venue-match";
 import {
   getAllProjects,
   syncProjectsFromQuotes,
@@ -9,6 +14,18 @@ import {
   type ProjectRecord,
   type ProjectStage,
 } from "@/lib/stores/projects";
+import {
+  contactsForId,
+  locationById,
+  type CustomerContact,
+  type CustomerLocation,
+} from "@/lib/stores/customers";
+import {
+  buildFieldPacketScopeGroups,
+  buildFieldPacketVisitSummaries,
+  type FieldPacketScopeGroup,
+  type FieldPacketVisitSummary,
+} from "@/lib/field-work-packet";
 import { loadServiceWork } from "@/lib/operations-work-server";
 import { WORK_TYPE_META, startOfDay, type WorkItem } from "@/lib/operations-work";
 import { ensureProjectTasksMigrated, allTasks, type TaskRecord } from "@/lib/stores/tasks";
@@ -366,6 +383,61 @@ export default async function FieldWorkPage({
   const p = selObj;
   const tab = one(sp.tab);
   const jobTasks: TaskRecord[] = taskRows.filter((t) => t.projectId === p.id);
+  const [packetLocation, packetContacts, packetQuote, packetEngagement, packetVisits] = await Promise.all([
+    locationById(p.customerId, p.locationId),
+    contactsForId(p.customerId),
+    p.quoteId ? getQuote(p.quoteId) : Promise.resolve(null),
+    p.quoteId ? getEngagementForQuoteRef(p.quoteId) : Promise.resolve(null),
+    p.customerId ? visitsForCustomer(p.customerId) : Promise.resolve([]),
+  ]);
+  const datasheetSkus = [...new Set((p.procurement || []).map((l) => l.sku).filter(Boolean))];
+  const datasheetParts = await Promise.all(datasheetSkus.map((sku) => getCatalogPart(sku)));
+
+  const packetScopeGroups: FieldPacketScopeGroup[] = buildFieldPacketScopeGroups(
+    packetQuote && packetQuote.spec && typeof packetQuote.spec === "object" && Array.isArray((packetQuote.spec as { sections?: unknown[] }).sections)
+      ? ((packetQuote.spec as { sections?: Array<{ name?: string; kind?: string; items?: unknown[] }> }).sections || [])
+      : []
+  );
+
+  const packetReferenceDocs: Array<{ key: string; label: string; href: string; meta: string }> = [];
+  if (packetQuote) {
+    packetReferenceDocs.push({
+      key: `quote:${packetQuote.id}`,
+      label: packetQuote.name || packetQuote.id,
+      href: quoteDeepLink(packetQuote.quoteType || "", packetQuote.id),
+      meta: "Open source quote",
+    });
+    for (const a of packetQuote.internalAttachments || []) {
+      packetReferenceDocs.push({
+        key: `quote-attachment:${a.id}`,
+        label: a.name,
+        href: a.dataUrl,
+        meta: "Quote attachment",
+      });
+    }
+  }
+  for (const d of packetEngagement?.documents || []) {
+    packetReferenceDocs.push({
+      key: `engagement-doc:${d.id}`,
+      label: d.name,
+      href: d.dataUrl,
+      meta: "Drawing / submittal",
+    });
+  }
+  for (const part of datasheetParts.filter((part): part is NonNullable<typeof part> => !!part && !!part.datasheetBlobKey)) {
+    packetReferenceDocs.push({
+      key: `datasheet:${part.sku}`,
+      label: part.datasheetName || part.sku,
+      href: `/api/part-datasheet/${encodeURIComponent(part.sku)}`,
+      meta: `Datasheet · ${part.sku}`,
+    });
+  }
+
+  const packetVisitHistory: FieldPacketVisitSummary[] = buildFieldPacketVisitSummaries(
+    packetVisits,
+    p.locationId,
+    Date.now(),
+  );
 
   const identity: Record<string, FieldIdentity> = {};
   // `id` param wins when known outright (the signed-in user, from
@@ -391,6 +463,11 @@ export default async function FieldWorkPage({
       meName={me.name}
       identity={identity}
       initialTab={tab}
+      packetLocation={packetLocation as CustomerLocation | null}
+      packetContacts={packetContacts as CustomerContact[] | null}
+      packetScopeGroups={packetScopeGroups}
+      packetReferenceDocs={packetReferenceDocs}
+      packetVisitHistory={packetVisitHistory}
     />
   );
 }

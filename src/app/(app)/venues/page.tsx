@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { loadVenueDirectory } from "@/lib/venue-history-server";
 import { timeAgo } from "@/lib/format";
+import { venueDirectoryPage } from "@/lib/venue-directory-page";
 import { cityState, mono } from "../companies/lib";
 
 /**
@@ -25,27 +26,7 @@ const CSS = `
   }
 `;
 
-const chipBase: React.CSSProperties = {
-  fontSize: 11.5,
-  padding: "5px 11px",
-  borderRadius: 20,
-  textDecoration: "none",
-  whiteSpace: "nowrap",
-};
-const chipActive: React.CSSProperties = {
-  ...chipBase,
-  fontWeight: 600,
-  border: "1px solid var(--accent)",
-  background: "color-mix(in srgb, var(--accent) 12%, #fff)",
-  color: "color-mix(in srgb, var(--accent) 68%, #000)",
-};
-const chipIdle: React.CSSProperties = {
-  ...chipBase,
-  fontWeight: 500,
-  border: "1px solid #e4e7ec",
-  background: "#fff",
-  color: "#5b616e",
-};
+const PAGE_SIZE = 50;
 
 export default async function VenuesPage({
   searchParams,
@@ -56,6 +37,7 @@ export default async function VenuesPage({
 
   const q = one(sp.q);
   const company = one(sp.company);
+  const requestedPage = Number.parseInt(one(sp.page), 10);
 
   /* ---- filter ---- */
   const ql = q.trim().toLowerCase();
@@ -79,20 +61,13 @@ export default async function VenuesPage({
     return a.site.name.localeCompare(b.site.name);
   });
 
-  /* ---- distinct companies present in the directory, for the filter chips ---- */
-  const companyNames = new Map<string, string>();
-  for (const r of rows) {
-    if (!companyNames.has(r.site.companyId)) companyNames.set(r.site.companyId, r.companyName);
-  }
-  const companyOptions = Array.from(companyNames, ([id, name]) => ({ id, name })).sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
+  const result = venueDirectoryPage(filtered, requestedPage, PAGE_SIZE);
 
-  const linkWith = (patch: { company?: string }) => {
+  const linkWith = (page: number) => {
     const p = new URLSearchParams();
     if (q.trim()) p.set("q", q.trim());
-    const nextCompany = patch.company !== undefined ? patch.company : company;
-    if (nextCompany) p.set("company", nextCompany);
+    if (company) p.set("company", company);
+    if (page > 1) p.set("page", String(page));
     const s = p.toString();
     return "/venues" + (s ? "?" + s : "");
   };
@@ -145,23 +120,11 @@ export default async function VenuesPage({
               type="text"
               name="q"
               defaultValue={q}
-              placeholder="Search venues…"
+              placeholder="Search venues or companies…"
               style={{ flex: 1, border: "none", background: "transparent", fontSize: 13.5, fontFamily: "var(--font-ui)", color: "#16181d", outline: "none" }}
             />
           </form>
 
-          {companyOptions.length > 1 && (
-            <div style={{ display: "flex", gap: 6, marginTop: 11, flexWrap: "wrap" }}>
-              <Link href={linkWith({ company: "" })} style={company ? chipIdle : chipActive}>
-                All companies
-              </Link>
-              {companyOptions.map((c) => (
-                <Link key={c.id} href={linkWith({ company: c.id })} style={company === c.id ? chipActive : chipIdle}>
-                  {c.name}
-                </Link>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
@@ -174,7 +137,7 @@ export default async function VenuesPage({
         </div>
       ) : (
         <div className="pk-card" style={{ padding: 0, overflow: "hidden" }}>
-          {filtered.map((row) => (
+          {result.rows.map((row) => (
             <Link
               key={row.site.id}
               href={"/venues/" + encodeURIComponent(row.site.id)}
@@ -207,10 +170,27 @@ export default async function VenuesPage({
               </span>
             </Link>
           ))}
-          {filtered.length === 0 && (
+          {result.totalRows === 0 && (
             <div style={{ padding: "50px 22px", textAlign: "center", color: "#9aa0ab", fontSize: 13 }}>
               {ql ? `No venues match “${q.trim()}”.` : "No venues match these filters."}
             </div>
+          )}
+        </div>
+      )}
+
+      {result.totalRows > 0 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 12, fontSize: 12.5, color: "#777d89" }}>
+          <span>
+            {result.totalRows > PAGE_SIZE
+              ? `${(result.page - 1) * PAGE_SIZE + 1}–${Math.min(result.page * PAGE_SIZE, result.totalRows)} of ${result.totalRows}`
+              : `${result.totalRows} venue${result.totalRows === 1 ? "" : "s"}`}
+          </span>
+          {result.totalPages > 1 && (
+            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {result.page > 1 ? <Link href={linkWith(result.page - 1)}>Previous</Link> : <span style={{ color: "#b5bac3" }}>Previous</span>}
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>Page {result.page} of {result.totalPages}</span>
+              {result.page < result.totalPages ? <Link href={linkWith(result.page + 1)}>Next</Link> : <span style={{ color: "#b5bac3" }}>Next</span>}
+            </span>
           )}
         </div>
       )}

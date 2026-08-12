@@ -1,11 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { GRID_SCOPES, type GridScope } from "@/lib/design/grid-scopes";
 import { requireUser } from "@/lib/session";
 import {
   getProject,
   addNote,
   addTime,
+  setSignoff,
 } from "@/lib/stores/projects";
 import { createTask, setTaskStatus } from "@/lib/stores/tasks";
 
@@ -65,5 +67,35 @@ export async function logFieldTime(formData: FormData): Promise<void> {
   const p = await getProject(id);
   if (!p) return;
   await addTime(id, me.name, hours, note);
+  revalidatePath("/", "layout");
+}
+
+/** Record customer sign-off from the field without closing the project out. */
+export async function captureFieldSignoff(formData: FormData): Promise<void> {
+  const me = await requireUser();
+  const id = String(formData.get("id") || "");
+  const name = String(formData.get("name") || "").trim();
+  const signatureBlobKey = String(formData.get("signatureBlobKey") || "").trim();
+  if (!id || !name || !signatureBlobKey) return;
+  const p = await getProject(id);
+  if (!p) return;
+  const role = String(formData.get("role") || "").trim() || "Customer";
+  const note = String(formData.get("note") || "").trim();
+  const scopeChecks = Object.fromEntries(
+    GRID_SCOPES.map((scope) => [scope, String(formData.get(`scope-${scope}`) || "") === "true"])
+  ) as Partial<Record<GridScope, boolean>>;
+  await setSignoff(
+    id,
+    {
+      name,
+      role,
+      note,
+      scopeChecks,
+      signatureBlobKey,
+      signedByName: name,
+      capturedBy: me.name,
+    },
+    me.name
+  );
   revalidatePath("/", "layout");
 }

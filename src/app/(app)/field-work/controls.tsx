@@ -1,8 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { GRID_SCOPES, type GridScope } from "@/lib/design/grid-scopes";
+import { buildFieldWorkPacket } from "@/lib/field-work-packet";
+import { applyProjectSignoff } from "@/lib/project-signoff";
 import { firstName } from "@/lib/team";
+import type { CustomerContact, CustomerLocation } from "@/lib/stores/customers";
 import type { ProjectRecord, ProjectStage } from "@/lib/stores/projects";
 import type { TaskRecord } from "@/lib/stores/tasks";
 import {
@@ -10,6 +14,7 @@ import {
   addFieldTask,
   postFieldNote,
   logFieldTime,
+  captureFieldSignoff,
 } from "./actions";
 import { saveThroughOutbox } from "@/lib/sync/save";
 
@@ -41,6 +46,11 @@ export type FieldWorkDetailProps = {
   meName: string;
   identity: Record<string, FieldIdentity>;
   initialTab: string;
+  packetLocation: CustomerLocation | null;
+  packetContacts: CustomerContact[] | null;
+  packetScopeGroups: Array<{ name: string; sectionKind: string; itemCount: number }>;
+  packetReferenceDocs: Array<{ key: string; label: string; href: string; meta: string }>;
+  packetVisitHistory: Array<{ id: string; title: string; at: number; status: string; href: string; assignee: string }>;
 };
 
 /* ---- palettes & formatters (ported from page.tsx / projects.ts — pure) ---- */
@@ -72,6 +82,7 @@ const LINE_STATUS_LABEL: Record<string, string> = {
 };
 
 const TABS: Array<[string, string]> = [
+  ["packet", "Packet"],
   ["tasks", "Tasks"],
   ["notes", "Notes"],
   ["time", "Time"],
@@ -129,12 +140,27 @@ const uppLabel: React.CSSProperties = {
   letterSpacing: ".05em",
 };
 
+const signoffInputStyle: React.CSSProperties = {
+  fontFamily: "var(--font-ui)",
+  fontSize: 13,
+  border: "1px solid #e4e7ec",
+  borderRadius: 8,
+  padding: "10px 12px",
+  outline: "none",
+  background: "#fff",
+};
+
 export default function FieldWorkDetail({
   project,
   tasks,
   meName,
   identity,
   initialTab,
+  packetLocation,
+  packetContacts,
+  packetScopeGroups,
+  packetReferenceDocs,
+  packetVisitHistory,
 }: FieldWorkDetailProps) {
   const [p, setP] = useState<ProjectRecord>(project);
   // Latest record for building the whole-doc offline payload, synchronously —
@@ -153,7 +179,18 @@ export default function FieldWorkDetail({
   const [timeNote, setTimeNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [signoffName, setSignoffName] = useState("");
+  const [signoffRole, setSignoffRole] = useState("Customer");
+  const [signoffNote, setSignoffNote] = useState("");
+  const [signoffScopeChecks, setSignoffScopeChecks] = useState<Partial<Record<GridScope, boolean>>>(
+    () => Object.fromEntries(GRID_SCOPES.map((scope) => [scope, true])) as Partial<Record<GridScope, boolean>>
+  );
+  const [signatureBlobKey, setSignatureBlobKey] = useState("");
+  const [signatureError, setSignatureError] = useState("");
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawingRef = useRef(false);
+  const movedRef = useRef(false);
 
   function flash(msg: string) {
     setToast(msg);
@@ -163,6 +200,71 @@ export default function FieldWorkDetail({
 
   function identityOf(name: string): FieldIdentity {
     return identity[name] || { id: null, initials: "—", color: "#9aa0ab" };
+  }
+
+  const scopeLabels = useMemo(() => GRID_SCOPES, []);
+
+  function signoffPoint(ev: React.PointerEvent<HTMLCanvasElement>) {
+    const rect = ev.currentTarget.getBoundingClientRect();
+    return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+  }
+
+  function ensureSignatureCtx() {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return null;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = "#172033";
+    return { canvas, ctx };
+  }
+
+  function persistSignature() {
+    const canvas = canvasRef.current;
+    if (!canvas || !movedRef.current) {
+      setSignatureBlobKey("");
+      return;
+    }
+    setSignatureBlobKey(canvas.toDataURL("image/png"));
+  }
+
+  function beginSignature(ev: React.PointerEvent<HTMLCanvasElement>) {
+    const env = ensureSignatureCtx();
+    if (!env) return;
+    const p = signoffPoint(ev);
+    ev.currentTarget.setPointerCapture(ev.pointerId);
+    drawingRef.current = true;
+    env.ctx.beginPath();
+    env.ctx.moveTo(p.x, p.y);
+    setSignatureError("");
+  }
+
+  function moveSignature(ev: React.PointerEvent<HTMLCanvasElement>) {
+    if (!drawingRef.current) return;
+    const env = ensureSignatureCtx();
+    if (!env) return;
+    const p = signoffPoint(ev);
+    env.ctx.lineTo(p.x, p.y);
+    env.ctx.stroke();
+    movedRef.current = true;
+    persistSignature();
+  }
+
+  function endSignature(ev: React.PointerEvent<HTMLCanvasElement>) {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    ev.currentTarget.releasePointerCapture(ev.pointerId);
+    persistSignature();
+  }
+
+  function clearSignature() {
+    const env = ensureSignatureCtx();
+    if (!env) return;
+    env.ctx.clearRect(0, 0, env.canvas.width, env.canvas.height);
+    movedRef.current = false;
+    setSignatureBlobKey("");
+    setSignatureError("");
   }
 
   /**
@@ -327,11 +429,47 @@ export default function FieldWorkDetail({
     void persist(next, () => logFieldTime(fd));
   }
 
+  function onCaptureSignoff(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    const cur = pRef.current;
+    const name = signoffName.trim();
+    const role = signoffRole.trim() || "Customer";
+    const note = signoffNote.trim();
+    if (!name) return;
+    if (!signatureBlobKey) {
+      setSignatureError("Capture a signature before recording sign-off.");
+      return;
+    }
+    const stampedAt = Date.now();
+    const signoff = {
+      name,
+      role,
+      note,
+      scopeChecks: signoffScopeChecks,
+      signatureBlobKey,
+      signedByName: name,
+      capturedBy: meName,
+    };
+    const next = applyProjectSignoff(cur, signoff, meName, stampedAt);
+    const fd = new FormData();
+    fd.set("id", cur.id);
+    fd.set("name", name);
+    fd.set("role", role);
+    fd.set("note", note);
+    fd.set("signatureBlobKey", signatureBlobKey);
+    for (const scope of scopeLabels) {
+      fd.set(`scope-${scope}`, signoffScopeChecks[scope] ? "true" : "false");
+    }
+    void persist(next, () => captureFieldSignoff(fd));
+  }
+
   /* ---------- derived (from local state) ---------- */
 
   const myLogs = (p.timeLogs || []).filter((l) => l.person === meName);
   const myHours = myLogs.reduce((a, l) => a + (l.hours || 0), 0);
   const crewHours = (p.timeLogs || []).reduce((a, l) => a + (l.hours || 0), 0);
+  const packet = buildFieldWorkPacket(p, packetLocation, packetContacts);
 
   // tasks grouped by section (insertion order preserved)
   const groupsMap: Record<string, TaskRecord[]> = {};
@@ -466,6 +604,449 @@ export default function FieldWorkDetail({
       </div>
 
       {/* TASKS */}
+      {tab === "packet" && (
+        <>
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              padding: "14px 15px",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" }}>
+              Install packet
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 11 }}>
+              <div>
+                <div style={uppLabel}>Install window</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, marginTop: 3 }}>{packet.installWindowLabel}</div>
+              </div>
+              <div>
+                <div style={uppLabel}>Materials</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, marginTop: 3 }}>
+                  {packet.materials.onSite}/{packet.materials.total} on site
+                </div>
+                <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
+                  {packet.materials.awaiting} still incoming
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              padding: "14px 15px",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" }}>
+              Venue
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginTop: 9 }}>{packet.venueLabel}</div>
+            <div style={{ fontSize: 12.5, color: "#5b616e", marginTop: 4, lineHeight: 1.5 }}>
+              {packet.venueAddress}
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              overflow: "hidden",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", padding: "12px 15px 9px" }}>
+              Crew & contacts
+            </div>
+            {packet.crew.map((c, idx) => (
+              <div key={`crew:${c.person}:${idx}`} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "11px 15px", borderTop: idx === 0 ? "1px solid #f3f4f7" : "1px solid #f3f4f7" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{c.person}</div>
+                  <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>{c.role}</div>
+                </div>
+              </div>
+            ))}
+            {packet.crew.length === 0 && (
+              <div style={{ padding: "12px 15px", fontSize: 12.5, color: "#9aa0ab" }}>No crew bookings on this job yet.</div>
+            )}
+            {packet.contacts.map((c, idx) => (
+              <div key={`contact:${c.name}:${idx}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "11px 15px", borderTop: "1px solid #f3f4f7" }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{c.name}</div>
+                    {c.primary && (
+                      <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", color: "#1f7a52", background: "#eef3f0", border: "1px solid #d6e6dd", borderRadius: 5, padding: "2px 5px", fontFamily: "var(--font-mono)" }}>
+                        PRIMARY
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
+                    {[c.role, c.phone, c.email].filter(Boolean).join(" · ") || "No contact details on file"}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {packet.contacts.length === 0 && (
+              <div style={{ padding: "12px 15px", fontSize: 12.5, color: "#9aa0ab", borderTop: "1px solid #f3f4f7" }}>
+                No customer contacts on file.
+              </div>
+            )}
+          </div>
+
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              overflow: "hidden",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", padding: "12px 15px 9px" }}>
+              Scope &amp; BOM
+            </div>
+            {packetScopeGroups.map((group, idx) => (
+              <div key={`${group.name}:${idx}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "11px 15px", borderTop: "1px solid #f3f4f7" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{group.name}</div>
+                  <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
+                    {group.sectionKind === "labor" ? "Labor" : "Materials"}
+                  </div>
+                </div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#5b616e" }}>
+                  {group.itemCount} {group.itemCount === 1 ? "line" : "lines"}
+                </div>
+              </div>
+            ))}
+            {packetScopeGroups.length === 0 && (
+              <div style={{ padding: "12px 15px", fontSize: 12.5, color: "#9aa0ab", borderTop: "1px solid #f3f4f7" }}>
+                No saved scope breakdown on the source quote.
+              </div>
+            )}
+          </div>
+
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              overflow: "hidden",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", padding: "12px 15px 9px" }}>
+              Signoff checklist
+            </div>
+            {packet.checklist.map((item, idx) => (
+              <div key={item.scope} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "11px 15px", borderTop: idx === 0 ? "1px solid #f3f4f7" : "1px solid #f3f4f7" }}>
+                <div style={{ fontSize: 13.5, fontWeight: 500 }}>{item.scope}</div>
+                <span style={{ fontSize: 11.5, fontWeight: 600, color: item.accepted ? "#1f7a52" : "#9a5a1f" }}>
+                  {item.accepted ? "Accepted" : "Pending signoff"}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              overflow: "hidden",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", padding: "12px 15px 9px" }}>
+              Recent notes
+            </div>
+            {packet.recentNotes.map((n, idx) => (
+              <div key={n.id} style={{ padding: "11px 15px", borderTop: idx === 0 ? "1px solid #f3f4f7" : "1px solid #f3f4f7" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600 }}>{firstName(n.by)}</div>
+                  <div style={{ marginLeft: "auto", fontSize: 11, color: "#aab0bb" }}>{timeAgo(n.at)}</div>
+                </div>
+                <div style={{ fontSize: 13, color: "#2f333b", lineHeight: 1.5, marginTop: 5 }}>{n.text}</div>
+              </div>
+            ))}
+            {packet.recentNotes.length === 0 && (
+              <div style={{ padding: "12px 15px", fontSize: 12.5, color: "#9aa0ab" }}>No field notes yet.</div>
+            )}
+          </div>
+
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              overflow: "hidden",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", padding: "12px 15px 9px" }}>
+              Reference docs
+            </div>
+            {packetReferenceDocs.map((doc, idx) => (
+              <a
+                key={doc.key}
+                href={doc.href}
+                download={doc.href.startsWith("data:") ? doc.label : undefined}
+                className="fw-card-link"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "11px 15px",
+                  borderTop: "1px solid #f3f4f7",
+                  textDecoration: "none",
+                  color: "inherit",
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{doc.label}</div>
+                  <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>{doc.meta}</div>
+                </div>
+                <span style={{ color: "#c4c9d2", fontSize: 18 }}>›</span>
+              </a>
+            ))}
+            {packetReferenceDocs.length === 0 && (
+              <div style={{ padding: "12px 15px", fontSize: 12.5, color: "#9aa0ab", borderTop: "1px solid #f3f4f7" }}>
+                No drawings, attachments, or datasheets are linked yet.
+              </div>
+            )}
+          </div>
+
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              overflow: "hidden",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", padding: "12px 15px 9px" }}>
+              Recent site visits
+            </div>
+            {packetVisitHistory.map((visit) => (
+              <Link
+                key={visit.id}
+                href={visit.href}
+                className="fw-card-link"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "11px 15px",
+                  borderTop: "1px solid #f3f4f7",
+                  textDecoration: "none",
+                  color: "inherit",
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{visit.title}</div>
+                  <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
+                    {fmtDate(visit.at)} · {visit.status}
+                    {visit.assignee ? ` · ${firstName(visit.assignee)}` : ""}
+                  </div>
+                </div>
+                <span style={{ color: "#c4c9d2", fontSize: 18 }}>›</span>
+              </Link>
+            ))}
+            {packetVisitHistory.length === 0 && (
+              <div style={{ padding: "12px 15px", fontSize: 12.5, color: "#9aa0ab", borderTop: "1px solid #f3f4f7" }}>
+                No prior site visits on file for this venue.
+              </div>
+            )}
+          </div>
+
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e7e9ee",
+              borderRadius: 13,
+              padding: "14px 15px",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" }}>
+              Customer sign-off
+            </div>
+            {p.signoff ? (
+              <div style={{ display: "grid", gap: 10, marginTop: 11 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div>
+                    <div style={uppLabel}>Signed by</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, marginTop: 3 }}>
+                      {p.signoff.signedByName || p.signoff.name || "—"}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
+                      {p.signoff.role || "Customer"}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={uppLabel}>Recorded</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, marginTop: 3 }}>
+                      {fmtDate(p.signoff.signedAt)}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
+                      by {firstName(p.signoff.capturedBy || p.signoff.signedBy || meName)}
+                    </div>
+                  </div>
+                </div>
+                {p.signoff.signatureBlobKey ? (
+                  <img
+                    src={p.signoff.signatureBlobKey}
+                    alt="Customer signature"
+                    style={{
+                      width: "100%",
+                      maxWidth: 420,
+                      height: 140,
+                      objectFit: "contain",
+                      border: "1px dashed #c9d2df",
+                      borderRadius: 12,
+                      background: "#fff",
+                    }}
+                  />
+                ) : null}
+                {!!p.signoff.note && (
+                  <div style={{ fontSize: 12.5, color: "#5b616e", lineHeight: 1.5 }}>
+                    {p.signoff.note}
+                  </div>
+                )}
+                <div style={{ fontSize: 11.5, color: "#1f7a52", fontWeight: 600 }}>
+                  Sign-off is recorded. Final completion still happens from PM view.
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={onCaptureSignoff} style={{ display: "grid", gap: 10, marginTop: 11 }}>
+                <input
+                  name="name"
+                  value={signoffName}
+                  onChange={(e) => setSignoffName(e.target.value)}
+                  required
+                  placeholder="Customer name (who signed)"
+                  style={signoffInputStyle}
+                />
+                <input
+                  name="role"
+                  value={signoffRole}
+                  onChange={(e) => setSignoffRole(e.target.value)}
+                  placeholder="Title / role"
+                  style={signoffInputStyle}
+                />
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#4b5565" }}>Accepted scopes</div>
+                  <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
+                    {scopeLabels.map((scope) => (
+                      <label
+                        key={scope}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          border: "1px solid #e4e7ec",
+                          borderRadius: 10,
+                          padding: "10px 12px",
+                          fontSize: 13,
+                          color: "#172033",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!!signoffScopeChecks[scope]}
+                          onChange={(e) =>
+                            setSignoffScopeChecks((prev) => ({ ...prev, [scope]: e.target.checked }))
+                          }
+                        />
+                        <span>{scope}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#4b5565" }}>Signature</div>
+                    <button
+                      type="button"
+                      onClick={clearSignature}
+                      style={{
+                        fontFamily: "var(--font-ui)",
+                        fontSize: 12,
+                        color: "#516072",
+                        background: "#fff",
+                        border: "1px solid #d9dfe8",
+                        borderRadius: 999,
+                        padding: "6px 10px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <canvas
+                    ref={canvasRef}
+                    width={560}
+                    height={180}
+                    onPointerDown={beginSignature}
+                    onPointerMove={moveSignature}
+                    onPointerUp={endSignature}
+                    onPointerLeave={endSignature}
+                    style={{
+                      width: "100%",
+                      maxWidth: 560,
+                      height: 180,
+                      border: "1px dashed #c9d2df",
+                      borderRadius: 12,
+                      background: "#fff",
+                      touchAction: "none",
+                    }}
+                  />
+                  <div style={{ fontSize: 12, color: signatureError ? "#b42318" : "#8c919c" }}>
+                    {signatureError || "Draw the customer’s signature here."}
+                  </div>
+                </div>
+
+                <textarea
+                  name="note"
+                  value={signoffNote}
+                  onChange={(e) => setSignoffNote(e.target.value)}
+                  placeholder="Notes / punch items (optional)"
+                  rows={2}
+                  style={{ ...signoffInputStyle, resize: "vertical" }}
+                />
+                <button
+                  type="submit"
+                  style={{
+                    fontFamily: "var(--font-ui)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "#fff",
+                    background: "var(--accent)",
+                    border: "none",
+                    padding: "11px 16px",
+                    borderRadius: 9,
+                    cursor: "pointer",
+                  }}
+                >
+                  Record sign-off
+                </button>
+              </form>
+            )}
+          </div>
+        </>
+      )}
+
       {tab === "tasks" && (
         <>
           {order.map((sec) => (

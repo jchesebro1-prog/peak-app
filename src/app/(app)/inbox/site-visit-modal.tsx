@@ -150,6 +150,9 @@ export default function SiteVisitModal({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Schedule site visit"
       onClick={onClose}
       style={{
         position: "fixed",

@@ -270,6 +270,17 @@ export default function CommandBar({
       >
         {(close) => (
           <>
+            {crmMode && (
+              <MenuItem
+                active={!sort}
+                onClick={() => {
+                  onSort("");
+                  close();
+                }}
+              >
+                Default (waiting first)
+              </MenuItem>
+            )}
             {SORTS.map((s) => (
               <MenuItem
                 key={s.value}
@@ -451,7 +462,7 @@ function Menu({
     };
   }, [open]);
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div ref={ref} data-inbox-menu-open={open ? "true" : undefined} style={{ position: "relative" }}>
       <button
         onClick={() => setOpen((o) => !o)}
         style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer" }}

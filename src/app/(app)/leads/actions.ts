@@ -201,6 +201,7 @@ export async function createLeadAction(input: {
   state: string;
   interest: string;
   owner?: string;
+  customerId?: string | null;
   value: number;
 }): Promise<
   { ok: true; id: string } | { ok: false; id: null; error: string }
@@ -222,6 +223,7 @@ export async function createLeadAction(input: {
         city: input.city,
         state: input.state || "WI",
         interest: input.interest,
+        customerId: input.customerId || null,
         // '' (Unassigned) falls through to the store's per-source default,
         // exactly like the prototype's `owner: nf.owner || undefined`.
         owner: input.owner || undefined,

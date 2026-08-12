@@ -17,6 +17,7 @@ import {
   update,
   validateAttestationNote,
   canAttestApproval,
+  type QuoteAttachment,
   type Quote,
   type QuoteReview,
   type QuoteStatus,
@@ -53,7 +54,13 @@ import {
 /** Quote doc fields the estimator writes beyond the promoted Quote columns. */
 type QuoteExtras = {
   contactName?: string;
+  installLeadWeeks?: number;
   quoteNote?: string;
+  estimatorAssumptions?: string[];
+  estimatorExceptions?: string[];
+  estimatorOutputMode?: "bom" | "narrative" | "both";
+  estimatorNarrative?: string;
+  internalAttachments?: QuoteAttachment[];
   spec?: { sections: SpecSection[]; mobs: SpecMob[] };
 };
 
@@ -65,7 +72,13 @@ export type SavePayload = {
   customerId: string | null;
   locationId: string | null;
   contactName: string;
+  installLeadWeeks: number;
   quoteNote: string;
+  estimatorAssumptions: string[];
+  estimatorExceptions: string[];
+  estimatorOutputMode: "bom" | "narrative" | "both";
+  estimatorNarrative: string;
+  internalAttachments: QuoteAttachment[];
   value: number;
   margin: number;
   status: QuoteStatus;
@@ -119,7 +132,13 @@ export async function saveQuoteAction(
     customerId: payload.customerId || null,
     locationId: payload.locationId || null,
     contactName: payload.contactName || "",
+    installLeadWeeks: Math.max(12, Math.floor(payload.installLeadWeeks || 12)),
     quoteNote: payload.quoteNote || "",
+    estimatorAssumptions: payload.estimatorAssumptions || [],
+    estimatorExceptions: payload.estimatorExceptions || [],
+    estimatorOutputMode: payload.estimatorOutputMode || "bom",
+    estimatorNarrative: payload.estimatorNarrative || "",
+    internalAttachments: payload.internalAttachments || [],
     value: payload.value,
     margin: payload.margin,
     status: payload.status,
@@ -155,7 +174,13 @@ export async function saveQuoteAction(
     // create() promotes only the declared columns — stamp the extras + status.
     q = await update(created.id, {
       contactName: payload.contactName || "",
+      installLeadWeeks: Math.max(12, Math.floor(payload.installLeadWeeks || 12)),
       quoteNote: payload.quoteNote || "",
+      estimatorAssumptions: payload.estimatorAssumptions || [],
+      estimatorExceptions: payload.estimatorExceptions || [],
+      estimatorOutputMode: payload.estimatorOutputMode || "bom",
+      estimatorNarrative: payload.estimatorNarrative || "",
+      internalAttachments: payload.internalAttachments || [],
     } as QuotePatch);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand
@@ -191,6 +216,7 @@ export async function updateQuoteMetaAction(
     locationId?: string | null;
     customer?: string;
     contactName?: string;
+    installLeadWeeks?: number;
     quoteNote?: string;
   }
 ): Promise<{ ok: boolean; pricingTier?: string; tierMargin?: number }> {
@@ -206,6 +232,7 @@ export async function updateQuoteMetaAction(
   if ("locationId" in meta) patch.locationId = meta.locationId;
   if (typeof meta.customer === "string") patch.customer = meta.customer;
   if (typeof meta.contactName === "string") patch.contactName = meta.contactName;
+  if (typeof meta.installLeadWeeks === "number") patch.installLeadWeeks = Math.max(12, Math.floor(meta.installLeadWeeks));
   if (typeof meta.quoteNote === "string") patch.quoteNote = meta.quoteNote;
 
   // Item 11 (D87): a customer/contact change re-resolves the pricing tier

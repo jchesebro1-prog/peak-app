@@ -8,8 +8,8 @@ import { HOME_TABS } from "@/app/(app)/home-tabs-keys";
 
 export type NavChild = { key: string; label: string; href: string };
 export type NavEntry =
-  | { kind: "link"; key: string; label: string; href: string }
-  | { kind: "group"; key: string; label: string; children: NavChild[] };
+  | { kind: "link"; key: string; label: string; shortLabel?: string; href: string }
+  | { kind: "group"; key: string; label: string; shortLabel?: string; children: NavChild[] };
 
 export const NAV: NavEntry[] = [
   /* Q-6 rebrand (D117): the header reads like the brand lockup —
@@ -25,12 +25,14 @@ export const NAV: NavEntry[] = [
     kind: "group",
     key: "home",
     label: "Home",
+    shortLabel: "Home",
     children: HOME_TABS.map((t) => ({ key: t.key, label: t.label, href: t.href })),
   },
   {
     kind: "group",
     key: "est",
-    label: "EST",
+    label: "Sales",
+    shortLabel: "EST",
     children: [
       { key: "quotes", label: "Quotes", href: "/quotes" },
       /* #22 Mine/All nav children — querystring hrefs render verbatim.
@@ -49,7 +51,8 @@ export const NAV: NavEntry[] = [
   {
     kind: "group",
     key: "pm",
-    label: "PM",
+    label: "Installs",
+    shortLabel: "PM",
     children: [
       { key: "projects", label: "Projects", href: "/projects" },
       { key: "myprojects", label: "My Projects", href: "/projects?who=mine" }, // #22 — see the EST note
@@ -64,7 +67,8 @@ export const NAV: NavEntry[] = [
   {
     kind: "group",
     key: "crm",
-    label: "CRM",
+    label: "Customers",
+    shortLabel: "CRM",
     children: [
       { key: "opportunities", label: "Opportunities", href: "/opportunities" },
       { key: "leads", label: "Leads", href: "/leads" },
@@ -78,7 +82,8 @@ export const NAV: NavEntry[] = [
   {
     kind: "group",
     key: "design",
-    label: "DESIGN",
+    label: "Design",
+    shortLabel: "DESIGN",
     children: [
       { key: "designoverview", label: "Overview", href: "/design" },
       { key: "engagements", label: "Consulting", href: "/design/engagements" },

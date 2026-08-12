@@ -15,6 +15,7 @@ import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates } from "@/lib/stores/pricing";
 import { tasksForQuote } from "@/lib/stores/tasks";
+import { defaultInstallLeadWeeks, normalizeInstallLeadWeeks } from "@/lib/project-target-date";
 import EstimatorClient from "./estimator-client";
 import type {
   AiSource,
@@ -58,6 +59,7 @@ const FALLBACK = {
 type QuoteDoc = Quote & {
   contactName?: string;
   quoteNote?: string;
+  installLeadWeeks?: number;
   spec?: { sections?: unknown; mobs?: unknown } | null;
 };
 
@@ -78,7 +80,13 @@ async function initialFrom(
       customerId: null,
       locationId: null,
       contactName: "",
+      installLeadWeeks: 12,
       quoteNote: FALLBACK.quoteNote,
+      estimatorAssumptions: [],
+      estimatorExceptions: [],
+      estimatorOutputMode: "bom",
+      estimatorNarrative: "",
+      internalAttachments: [],
       owner: userName,
       revNum: 1,
       revDateMs: Date.now(),
@@ -110,6 +118,10 @@ async function initialFrom(
     spec && Array.isArray(spec.sections) && spec.sections.length
       ? (spec.sections as SpecSection[])
       : null;
+  const installLeadWeeks = normalizeInstallLeadWeeks(
+    q.installLeadWeeks,
+    defaultInstallLeadWeeks(q),
+  );
   return {
     loadedId: q.id,
     quoteId: q.id,
@@ -120,7 +132,13 @@ async function initialFrom(
     customerId: cid,
     locationId: locId,
     contactName: contactName || "",
+    installLeadWeeks,
     quoteNote: q.quoteNote != null ? q.quoteNote : FALLBACK.quoteNote,
+    estimatorAssumptions: Array.isArray(q.estimatorAssumptions) ? q.estimatorAssumptions : [],
+    estimatorExceptions: Array.isArray(q.estimatorExceptions) ? q.estimatorExceptions : [],
+    estimatorOutputMode: q.estimatorOutputMode === "narrative" || q.estimatorOutputMode === "both" ? q.estimatorOutputMode : "bom",
+    estimatorNarrative: typeof q.estimatorNarrative === "string" ? q.estimatorNarrative : "",
+    internalAttachments: Array.isArray(q.internalAttachments) ? q.internalAttachments : [],
     owner: q.owner || userName,
     // Real priced revisions (item 24). This used to count `history`, which is
     // the status pipeline — so the printed "Rev N" climbed every time a quote

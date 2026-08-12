@@ -68,7 +68,12 @@ export type PreviewProps = {
   companyName: string;
   /** Uploaded document logo (Settings → Branding), falls back to the baked letterhead. */
   logoDark: string | null;
+  installLeadWeeks: number;
   quoteNote: string;
+  estimatorOutputMode: "bom" | "narrative" | "both";
+  estimatorNarrative: string;
+  estimatorAssumptions: string[];
+  estimatorExceptions: string[];
   sections: SpecSection[];
   t: QuoteTotals;
   taxRatePct: number;
@@ -107,8 +112,19 @@ export default function PreviewDoc(p: PreviewProps) {
     ? (p.pdfQty ? "1fr 70px 104px" : "1fr 104px")
     : (p.pdfQty ? "1fr 70px" : "1fr");
   const showCover = !!(p.pdfCover && p.quoteNote && p.quoteNote.trim());
+  const showBom = p.estimatorOutputMode !== "narrative";
+  const showNarrative = p.estimatorOutputMode !== "bom" && !!p.estimatorNarrative.trim();
   const revDateLabel = longDate(p.revDateMs);
   const validThruLabel = longDate(p.revDateMs + 30 * DAY_MS);
+  const assumptions = (p.estimatorAssumptions || []).map((line) => line.trim()).filter(Boolean);
+  const exceptions = (p.estimatorExceptions || []).map((line) => line.trim()).filter(Boolean);
+  const terms = [
+    TERMS[0],
+    TERMS[1],
+    `Lead time assumes award at least ${p.installLeadWeeks} weeks before completion.`,
+    TERMS[2],
+    TERMS[3],
+  ];
 
   const previewSections = p.sections
     .filter((sec) => systemItemsRev(sec) > 0 || systemFreight(sec) > 0)
@@ -467,8 +483,22 @@ export default function PreviewDoc(p: PreviewProps) {
             </div>
           )}
 
+          {showNarrative && (
+            <div
+              style={{
+                fontSize: 12.5,
+                color: "#3a3f4a",
+                lineHeight: 1.75,
+                marginBottom: 22,
+              }}
+            >
+              <div style={{ ...microLabel, marginBottom: 6 }}>Narrative scope</div>
+              <div>{p.estimatorNarrative}</div>
+            </div>
+          )}
+
           {/* sections */}
-          {previewSections.map((ps) => (
+          {showBom && previewSections.map((ps) => (
             <div key={ps.num + ps.name}>
               <div
                 style={{
@@ -592,7 +622,7 @@ export default function PreviewDoc(p: PreviewProps) {
           ))}
 
           {/* optional additions — priced, not in the total */}
-          {showOptions && (
+          {showBom && showOptions && (
             <div
               style={{
                 border: `1px dashed ${ACCENT_BD}`,
@@ -656,42 +686,46 @@ export default function PreviewDoc(p: PreviewProps) {
 
           {/* totals */}
           <div style={{ borderTop: "2px solid #16181d", paddingTop: 14, marginTop: 22 }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: 12.5,
-                color: "#5b616e",
-                marginBottom: 6,
-              }}
-            >
-              <span>Materials</span>
-              <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.mat)}</span>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: 12.5,
-                color: "#5b616e",
-                marginBottom: 6,
-              }}
-            >
-              <span>Labor — installation &amp; commissioning</span>
-              <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.lab)}</span>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: 12.5,
-                color: "#5b616e",
-                marginBottom: 10,
-              }}
-            >
-              <span>Freight &amp; delivery</span>
-              <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.fr)}</span>
-            </div>
+            {showBom && (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 12.5,
+                    color: "#5b616e",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span>Materials</span>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.mat)}</span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 12.5,
+                    color: "#5b616e",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span>Labor — installation &amp; commissioning</span>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.lab)}</span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 12.5,
+                    color: "#5b616e",
+                    marginBottom: 10,
+                  }}
+                >
+                  <span>Freight &amp; delivery</span>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.fr)}</span>
+                </div>
+              </>
+            )}
             {p.t.tax > 0 && (
               <div
                 style={{
@@ -723,6 +757,70 @@ export default function PreviewDoc(p: PreviewProps) {
               </span>
             </div>
 
+            {(assumptions.length > 0 || exceptions.length > 0) && (
+              <div style={{ marginTop: 18 }}>
+                <div style={{ ...microLabel, marginBottom: 6 }}>Assumptions &amp; exceptions</div>
+                {assumptions.length > 0 && (
+                  <div style={{ marginBottom: exceptions.length > 0 ? 10 : 0 }}>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "#5b616e",
+                        textTransform: "uppercase",
+                        letterSpacing: ".04em",
+                        marginBottom: 4,
+                      }}
+                    >
+                      Assumptions
+                    </div>
+                    <ul
+                      style={{
+                        margin: 0,
+                        paddingLeft: 16,
+                        fontSize: 11,
+                        color: "#5b616e",
+                        lineHeight: 1.75,
+                      }}
+                    >
+                      {assumptions.map((line) => (
+                        <li key={"assumption-" + line}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {exceptions.length > 0 && (
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "#5b616e",
+                        textTransform: "uppercase",
+                        letterSpacing: ".04em",
+                        marginBottom: 4,
+                      }}
+                    >
+                      Exceptions
+                    </div>
+                    <ul
+                      style={{
+                        margin: 0,
+                        paddingLeft: 16,
+                        fontSize: 11,
+                        color: "#5b616e",
+                        lineHeight: 1.75,
+                      }}
+                    >
+                      {exceptions.map((line) => (
+                        <li key={"exception-" + line}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
             {p.pdfTerms && (
               <>
                 <div style={{ marginTop: 18 }}>
@@ -736,7 +834,7 @@ export default function PreviewDoc(p: PreviewProps) {
                       lineHeight: 1.75,
                     }}
                   >
-                    {TERMS.map((line) => (
+                    {terms.map((line) => (
                       <li key={line}>{line}</li>
                     ))}
                   </ul>

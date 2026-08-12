@@ -8,6 +8,9 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { GRID_SCOPES, type GridScope } from "@/lib/design/grid-scopes";
+import { applyProjectSignoff } from "@/lib/project-signoff";
+import { projectScheduleFromQuote } from "@/lib/project-target-date";
 
 /**
  * ProjectStore — post-acceptance project & order lifecycle. Direct port of
@@ -101,6 +104,10 @@ export function stageIndex(kind: ProjectKind, stage: ProjectStage): number {
   return i < 0 ? 0 : i;
 }
 
+export function canCompleteProject(p: Pick<ProjectRecord, "stage" | "signoff">): boolean {
+  return p.stage === "complete" || !!p.signoff;
+}
+
 /* ---------- vendor + lead-time knowledge (days to procure) ---------- */
 
 export const VENDORS: Record<string, { lead: number; scope: string }> = {
@@ -186,6 +193,10 @@ export type TimeLog = {
 export type ProjectSignoff = {
   name?: string;
   role?: string;
+  scopeChecks?: Partial<Record<GridScope, boolean>>;
+  signatureBlobKey?: string | null;
+  signedByName?: string;
+  capturedBy?: string;
   signedBy: string;
   signedAt: number;
   note?: string;
@@ -237,6 +248,7 @@ export type ProjectStageChange = {
   from: ProjectStage | null;
   to: ProjectStage;
   by: string;
+  via?: string | null;
 };
 
 export type RiskFlag = { kind: "late-order" | "no-crew"; label: string };
@@ -415,10 +427,15 @@ export async function removeProject(id: string): Promise<void> {
 }
 
 /** Append a transition to the record's stage history. No-op when the stage is unchanged. */
-function recordStageChange(p: ProjectRecord, to: ProjectStage, by: string): void {
+function recordStageChange(
+  p: ProjectRecord,
+  to: ProjectStage,
+  by: string,
+  via?: string | null
+): void {
   if (p.stage === to) return;
   if (!Array.isArray(p.stageHistory)) p.stageHistory = [];
-  p.stageHistory.push({ at: now(), from: p.stage ?? null, to, by });
+  p.stageHistory.push({ at: now(), from: p.stage ?? null, to, by, ...(via ? { via } : {}) });
   p.stage = to;
 }
 
@@ -427,6 +444,10 @@ export async function setProjectStage(
   stage: ProjectStage,
   by: string = DEFAULT_ACTOR
 ): Promise<ProjectRecord | null> {
+  const current = await getProject(id);
+  if (!current) return null;
+  if (stage === "complete" && !canCompleteProject(current)) return current;
+
   const result = await patchDoc<ProjectRecord>("projects", id, (p) => {
     recordStageChange(p, stage, by);
     if (stage === "training" && !p.trainingAt) p.trainingAt = now();
@@ -459,6 +480,7 @@ export async function setProjectStage(
         title: `Completed — follow up with customer on ${result.name}`,
         projectId: id, quoteId: result.quoteId, section: "Follow-up",
         assigneeName: owner,
+        dueAt: now() + 7 * DAY,
       });
     }
   }
@@ -546,6 +568,7 @@ function fromQuote(q: QuoteLike): Omit<ProjectRecord, "id"> {
   const labor = quoteHasLabor(q);
   const t = now();
   const kind: ProjectKind = labor ? "project" : "order";
+  const schedule = projectScheduleFromQuote(q, t);
   return {
     kind,
     quoteId: q.id,
@@ -560,9 +583,9 @@ function fromQuote(q: QuoteLike): Omit<ProjectRecord, "id"> {
     createdAt: t,
     updatedAt: t,
     startedAt: t,
-    targetDate: ahead(labor ? 42 : 21),
-    installStart: labor ? ahead(38) : null,
-    installEnd: labor ? ahead(44) : null,
+    targetDate: schedule.targetDate,
+    installStart: schedule.installStart,
+    installEnd: schedule.installEnd,
     stage: "procurement",
     stageHistory: [], // createProject() anchors the opening entry
     procurement: deriveProcurement(q),
@@ -773,8 +796,18 @@ export async function setDeliveryStatus(
   return patchDoc<ProjectRecord>("projects", id, (doc) => {
     const d = (doc.deliveries || []).find((x) => x.id === deliveryId);
     if (!d) return doc;
+    const wasAllReceived = (doc.deliveries || []).length > 0 && (doc.deliveries || []).every((row) => row.status === "received");
     d.status = status;
     if (status === "received") d.receivedAt = now();
+    else d.receivedAt = null;
+    const isAllReceived = (doc.deliveries || []).length > 0 && (doc.deliveries || []).every((row) => row.status === "received");
+    if (doc.kind === "project") {
+      if (!wasAllReceived && isAllReceived && doc.stage === "delivery") {
+        recordStageChange(doc, "scheduled", DEFAULT_ACTOR, "auto-deliveries");
+      } else if (wasAllReceived && !isAllReceived && doc.stage === "scheduled") {
+        recordStageChange(doc, "delivery", DEFAULT_ACTOR, "auto-deliveries");
+      }
+    }
     doc.updatedAt = now();
     return doc;
   });
@@ -883,14 +916,14 @@ export async function setSignoff(
   signedBy?: string
 ): Promise<ProjectRecord | null> {
   return patchDoc<ProjectRecord>("projects", id, (p) => {
-    p.signoff = signoff
-      ? { signedBy: signedBy || DEFAULT_ACTOR, signedAt: now(), ...signoff }
-      : null;
-    if (signoff && p.stage !== "complete") {
-      recordStageChange(p, "signoff", signedBy || DEFAULT_ACTOR);
+    const actor = signedBy || DEFAULT_ACTOR;
+    const stampedAt = now();
+    if (!signoff) {
+      p.signoff = null;
+      p.updatedAt = stampedAt;
+      return p;
     }
-    p.updatedAt = now();
-    return p;
+    return applyProjectSignoff(p, signoff, actor, stampedAt);
   });
 }
 

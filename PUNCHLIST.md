@@ -833,7 +833,7 @@ blob mutation from a quote builder). Portal prices at the grant customer's tier
 
 ---
 
-## 12. New Lead: pick existing customer, link contacts, use canonical contact fields — OPEN
+## 12. New Lead: pick existing customer, link contacts, use canonical contact fields — PARTIAL 2026-08-11
 
 **Area:** `src/app/(app)/leads/lead-drawer.tsx:396-552`, `leads/actions.ts:83-115`,
 `src/lib/stores/leads.ts`, `src/lib/stores/customers.ts`
@@ -888,7 +888,21 @@ pay for itself immediately across those call sites** — recommend doing that ra
   `customerId` non-null from the start and simplifies convert; deferred avoids junk customer
   records for leads that die at stage "new".
 
-**Status:** OPEN — needs A–D. The convert() PHONE drop is FIXED (`01310aa`); street address still can't pass through because the lead form doesn't collect one (part of decision C).
+**Status:** PARTIAL 2026-08-11. The user-visible bug is materially reduced:
+
+- New Lead now has an **existing customer picker** wired from the real customer directory.
+- Selecting an existing customer now **stamps `customerId` into the lead write** instead of always
+  creating an unlinked lead.
+- The picker **prefills contact/email/phone/city/state from the customer's primary contact and
+  primary location snapshot**, and "Add new customer / venue" clears that link again.
+- Existing linked leads now **surface an Open customer link in the drawer header**, so portal-born
+  and manually linked leads no longer hide their customer relationship.
+
+What remains open is the model question, not the basic workflow: the lead still does **not**
+collect `role` or street `address`, there is still no `contactId` / `locationId` reference model,
+and the picker is still local to Leads rather than extracted into a shared customer/contact control.
+The convert() PHONE drop is FIXED (`01310aa`); street address still can't pass through because the
+lead form doesn't collect one (part of decision C).
 
 ---
 
@@ -1208,7 +1222,7 @@ it was a build-artifact issue, not a code regression, before re-verifying.
 
 ---
 
-## 15. Suggested install timeframe on the estimate → auto-fills the project goal — OPEN
+## 15. Suggested install timeframe on the estimate → auto-fills the project goal — DONE 2026-08-11
 
 **Area:** `src/app/(app)/estimator/estimator-client.tsx` (header rows), `estimator/actions.ts`
 (meta allowlist), `src/lib/stores/quotes.ts`, **`src/lib/stores/projects.ts:488-490`** (the handoff)
@@ -1293,14 +1307,19 @@ fallback always fires. **Do not build scope defaults on `spec.systems`.**
   the billing forecast. That's a net-new write path either way.
   **ANSWERED 2026-07-19 (Jeff): yes, they can.**
 
-**Status:** ALL ANSWERED 2026-07-19 (A weeks-from-win-date; B completion date; C internal +
-lead time in terms & assumptions; D silent default at 84 days / 12 weeks minimum; E PM-editable) —
-queued to build later per Jeff. The per-scope default *rules* are still to be defined; the
-84-day minimum stands until they are.
+**Status:** DONE 2026-08-11. The estimator now carries a persisted `installLeadWeeks` field in the
+header, defaulting from quote scope with a hard floor of 12 weeks and stored on the quote itself.
+On win, project conversion resolves the target from the WIN DATE plus those weeks, then shifts the
+install window around that completion target. Projects now also have a PM edit path for the target
+date, which shifts the install window with it instead of leaving the forecast write-only. The
+customer PDF keeps this internal as a terms line ("award at least N weeks before completion"),
+matching Jeff's 2026-07-19 decision. The detailed per-scope rules are still intentionally simple:
+12 weeks minimum, 14 for mid-scale scope, 16 for larger value / mobilization bands until Jeff
+defines a richer matrix.
 
 ---
 
-## 16. Notify the company when a project is sold and when it's completed — PARTIAL (corrected 2026-08-08)
+## 16. Notify the company when a project is sold and when it's completed — PARTIAL 2026-08-11
 
 **Area:** `src/app/(app)/quotes/actions.ts:25-43` (won), `src/app/(app)/projects/actions.ts:100-111`
 (signoff), `src/lib/gmail/bridge.ts`, `src/lib/stores/comms.ts`, `src/lib/stores/notif-prefs.ts`
@@ -1401,6 +1420,14 @@ direct stage change from reaching `complete` without a signoff — `setStageActi
 **decision E** (the project-roles model — tasks still spawn unassigned, per D87). Both are
 unbuilt, both real, and both worth a look together with item 20 Phase 2 (the roles model's stated
 home) whenever that's picked up — not built here, this is a documentation correction only.
+
+**Update 2026-08-11:** decision D is now BUILT and verified. The direct stage-change path no
+longer allows `complete` without a recorded signoff, and the Projects UI no longer offers a
+completion control until signoff exists. That collapses "completed" to the single signoff-backed
+path Jeff chose, so the completion follow-up task now fires on the same definition the screen
+enforces. What still remains open is **decision E only**: assign these sold/completed follow-up
+tasks by actual project role once the role-tagged people model exists, instead of leaving them
+unassigned / owner-derived.
 
 ---
 
@@ -2369,7 +2396,7 @@ in the app for reference material, starting with the fixture cross-reference (it
 
 ---
 
-## 28. Lineset Builder: default the layout to 50′ × 30′ (was 80′ × 30′), SHIPPED, STATUS STALE
+## 28. Lineset Builder: default the layout to 50′ × 30′ (was 80′ × 30′), DONE 2026-08-12
 
 > **2026-07-27 recon:** the code is DONE, `DEFAULT_LINESET_INPUTS` is 50×30
 > (`src/lib/design/lineset.ts:52-72`, header note at `:5`) and the reset button reads
@@ -2390,7 +2417,8 @@ label `src/app/(app)/design/lineset/lineset-builder.tsx:367`.
   `setInp(DEFAULT_LINESET_INPUTS)` (`:366`). Update the label to "50′ × 30′" so it matches.
 - No decision needed; no downstream math cares (auto-layout reads the live inputs, not the constant).
 
-**Status:** OPEN — logged 2026-07-21, no code touched. Same request as item 29.
+**Status:** DONE 2026-08-12. The default layout is 50′ × 30′ in code and the reset button label
+matches it. This was already shipped; the ledger entry was stale.
 
 ---
 
@@ -2843,7 +2871,7 @@ letter homework.
 
 ---
 
-## 36. Estimator: assumptions/exceptions, BOM vs narrative quotes, and document attachments — OPEN
+## 36. Estimator: assumptions/exceptions, BOM vs narrative quotes, and document attachments — DONE 2026-08-12
 
 **Area:** `src/lib/stores/quotes.ts` (`Quote` — the target for new fields), the estimator
 (`src/app/(app)/estimator/estimator-client.tsx`, `preview-doc.tsx`, `actions.ts`). Reusable
@@ -2890,8 +2918,13 @@ attachment infra: `src/app/(app)/design/engagements/view.tsx:1258` ("Attach docu
 (the quote→project→PM handoff and where attachments live), item **24** (revisions — decide whether
 assumptions/narrative/attachments are snapshotted per revision).
 
-**Status:** OPEN — logged 2026-07-21, no code touched. Three separable parts (A/B/C); A and C are
-smaller (patterns exist), B (narrative mode) is the larger design piece.
+**Status:** DONE 2026-08-12. The estimator now carries per-quote assumptions and exceptions, a
+customer output mode (`bom` / `narrative` / `both`), an editable rules-based narrative field, and
+internal-only quote attachments for vendor quotes and supporting files. Those fields persist on the
+quote record, render through the estimator preview/doc path, and survive quote revisions and
+restores. The attachment shape reuses the app's existing document pattern (small data-URL-backed
+files on the quote, internal-only), and the handoff path now exposes those supporting files on the
+install side once the quote becomes a project.
 
 ---
 
@@ -3116,7 +3149,7 @@ category→trade mapping (no explicit Rigging category — resolved by #39's map
 
 ---
 
-## 44. Projects lifecycle: delivery-driven stages + Install module + phone signoff + walkthrough task — OPEN
+## 44. Projects lifecycle: delivery-driven stages + Install module + phone signoff + walkthrough task — DONE 2026-08-12
 
 **Area:** Projects, Install/Field Work, Schedule, tasks.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
@@ -3134,11 +3167,21 @@ into an explicit signoff record). **(d)** Complete → auto-task to the project'
 role (falls back to quote owner), due ~7 days: walk the site with the end user. Depends on
 #17 tasks table (plan 01 LANDED 2026-07-25) + #16E roles model.
 
-**Status:** OPEN — wave 2.
+**Status:** DONE 2026-08-12. Delivery lines auto-advance install projects to Scheduled when all
+shipments are received, undo back to Delivery when that condition is reversed, and stamp the
+stage-history trail with `via:"auto-deliveries"`. Crew pre-booking is not blocked by stage:
+pending ship dates seed booking start dates and now surface on the schedule board itself. Field
+Work's mobile-first packet now carries the install window, venue/address, crew, contacts, saved
+scope/BOM groups from the source quote, real reference docs (quote attachments, engagement docs,
+catalog datasheets when present), recent site visits, prior notes, materials status, and the full
+signoff checklist. Phone-side signoff capture records explicit per-scope acceptance plus drawn
+signature metadata through the same normalization path online and offline, advancing the project to
+Sign-off but not silently closing it. Completion remains the PM action and creates exactly one
+walkthrough follow-up task for Lead Sales / quote owner due about 7 days later.
 
 ---
 
-## 45. Header/nav fixes for the in-flight tabs rebuild, (a) DONE 2026-07-27 via #55; (b) OPEN
+## 45. Header/nav fixes for the in-flight tabs rebuild, DONE 2026-08-11
 
 > **(a) Home restored on web AND mobile, DONE 2026-07-27 (D124), see #55.** The tabs rebuild has
 > landed, so this is no longer routed away from the punch-list stream. (b) the responsive full-word
@@ -3155,12 +3198,14 @@ role (falls back to quote owner), due ~7 days: walk the site with the end user. 
   Implementation shape: responsive label switch (full label at desktop breakpoint, short label
   below) — ONE nav build, not two.
 
-**Status:** OPEN — belongs to the tabs/UI rebuild session, not the punch-list build stream.
-Do not pick up standalone; the rebuild session owns the nav.
+**Status:** DONE 2026-08-11. Part (a) was already closed by #55. Part (b) is now closed too:
+the top nav uses one build with responsive labels — desktop shows the full words Jeff asked for
+("Home · Sales · Installs · Customers · Design"), while the constrained top bar keeps the compact
+labels ("Home · EST · PM · CRM · DESIGN"). The drawer still shows the full labels.
 
 ---
 
-## 46. Inbox round 2 polish (follow-ups from the #42 reviews) — OPEN
+## 46. Inbox round 2 polish (follow-ups from the #42 reviews) — DONE 2026-08-11
 
 **Area:** Inbox. **Logged:** 2026-07-25, bundling the accepted-as-follow-up findings from the
 #42 per-task and whole-branch reviews. None are defects blocking daily use; batch them.
@@ -3184,7 +3229,13 @@ Do not pick up standalone; the rebuild session owns the nav.
 - **Jeff to confirm:** calls/flagged smart views now follow the mode's sort (date-desc in
   plain mode; previously always waiting-first) — intended?
 
-**Status:** OPEN — polish batch, no urgency.
+**Status:** DONE 2026-08-11. CRM chips already rendered before the title/search block, and the
+participants `+N` formatter already had automated coverage. This pass completed the live gaps:
+click selection synchronizes the arrow anchor; list changes reset it; held arrows are ignored;
+site-visit dialogs and open command menus block background arrow navigation; selected rows scroll
+back into view after re-sorts; local CRM mode reconciles with refreshed server truth; CRM Sort now
+offers “Default (waiting first)”. Mode switches deliberately clear filter/sort refinements so each
+mode opens in its own documented default. Calls/flagged therefore follow the active mode's sort.
 
 ---
 
@@ -3239,7 +3290,13 @@ place → select → **Remove device** → re-place.
 - Should a move cut a revision? `addRevision` (`grid-projects.ts:469-479`) is manual/quote/
   restore only: wiring drags into it would flood the snapshot array.
 
-**Status:** OPEN: logged only, no code.
+**Status:** PARTIAL 2026-08-11 — the original "show me the installer cost/rate and prove it pulls
+from catalog" ask is BUILT in the working tree, and this entry's old status line was stale. The
+labor modal now renders the resolved installer / overtime / supervisor rates for the selected
+discipline plus PM / in-house / drafting in Shop & engineering, and flags fallback rows with a
+DEFAULT chip instead of silently presenting them as live catalog rates. What remains open is the
+unscoped redesign sentence — *"overall this needs to be redone"* — and the question of whether the
+travel/equipment rate rows belong in the same visibility treatment even though they are not $/hr.
 
 ---
 
@@ -3608,7 +3665,7 @@ readouts use `fmt()`.
 
 ---
 
-## 54. Labor estimator: show the installer rates/cost, and confirm rates pull from the catalog, PARTIALLY BUILT 2026-07-27 (D124)
+## 54. Labor estimator: show the installer rates/cost, and confirm rates pull from the catalog — PARTIAL 2026-08-11 (D124)
 
 > **Answer to the question: YES, labor rates pull from the catalog** (`catalog_parts` where
 > `category = "Labor"`), with a hardcoded fallback behind them.
@@ -4292,7 +4349,7 @@ other. **Ties to #41 (split the design estimator) and #51 (design tab consolidat
 
 ---
 
-## 66. The estimator venue adapter maps `width → proWidthFt` for EVERY venue kind — PARTIAL 2026-08-01 — wing double-count fixed; width mapping accepted as-is
+## 66. The estimator venue adapter maps `width → proWidthFt` for EVERY venue kind — DONE 2026-08-11
 
 **Area:** `src/lib/design/venue-dims.ts` (`venueDimsFromEstimator`)
 **Reported:** 2026-07-31 (source audit)
@@ -4312,7 +4369,13 @@ this confusion, and the adapter reintroduces it.
 wall-to-wall width, a fraction of it, or should those venue kinds take a different sizing path
 entirely? This is a domain call, not a code call.
 
-**Status:** PARTIAL 2026-08-01. **Jeff's call: `width -> proWidthFt` stays as-is** (full wall-to-wall is accepted behavior) — that mapping is deliberately UNCHANGED and should not be branched on venue kind. The separate **wing double-count IS fixed**: `2*wing` is now added only for a real proscenium, mirroring the distinction `pipeLenFt` already draws. `venueDimsFromEstimator` takes a required `proscenium` boolean, so the compiler proves every call site was updated.
+**Status:** DONE 2026-08-11. This item stayed "partial" only because the original finding mixed a
+real bug with an answered domain question. **Jeff's call: `width -> proWidthFt` stays as-is**
+(full wall-to-wall is accepted behavior for non-proscenium rooms) — that mapping is deliberately
+UNCHANGED and now documented in code as accepted behavior. The actual bug in scope, the **wing
+double-count**, IS fixed: `2*wing` is added only for a real proscenium, mirroring the same
+distinction `pipeLenFt` already draws. `venueDimsFromEstimator` takes a required `proscenium`
+boolean, and the regression tests lock both behaviors.
 
 ---
 
@@ -4847,7 +4910,7 @@ work — a new type should follow the same pattern, not reopen the vendor-promis
 
 ---
 
-## 82. People need to import as first-class records, not riding along on Customers — OPEN
+## 82. People need to import as first-class records, not riding along on Customers — SOURCE-FILE GATED
 
 **Area:** `src/app/(app)/import/` (no `people` type exists), `src/lib/identity/contacts.ts`,
 `src/app/(app)/people/` (the People surface itself, [[peak-app]] #20)
@@ -4875,11 +4938,16 @@ Building a real `people` importer without #20's decision would mean importing IN
 **Ties to:** #20 (the real blocker), #81/#83 (the same "which collections get a bulk import"
 question, asked three times in one day).
 
-**Status:** OPEN — logged only, no code.
+**Status:** SOURCE-FILE GATED — reconciled 2026-08-11. The architecture blocker in
+this entry is stale: D85 already shipped first-class relational `contacts`, child email/phone
+rows, and nullable company linkage. A correct importer can now target that model directly. What
+still cannot be inferred safely is the incoming file's identity/dedupe contract (email, external
+id, or name+company) and whether one source row can carry multiple company/venue relationships.
+Build after a representative source file is available; do not recreate embedded customer contacts.
 
 ---
 
-## 83. Venues need a bulk import — data model / cleanup TBD — OPEN
+## 83. Venues need a bulk import — data model / cleanup TBD — SOURCE-FILE GATED
 
 **Area:** `src/app/(app)/venues/`, `src/lib/identity/sites.ts`, `src/lib/identity/venue-defaults.ts`
 **Reported:** 2026-08-01 (Jeff: "we need to ... sort through the venues portion")
@@ -4906,7 +4974,12 @@ type" once that's seen.
 **Ties to:** #81, #82 (same day, same "no bulk import for this collection" pattern) · #30 (site
 survey / venue measurement, a related but distinct venues-adjacent item already on the list).
 
-**Status:** OPEN — logged only, no code. Needs scoping before it needs building.
+**Status:** SOURCE-FILE GATED — reconciled 2026-08-11. The current relational `sites` table already
+supports multiple venues per company and the address/location fields needed for a standalone
+import. The remaining blocker is the real source shape and dedupe key (external id vs.
+company+venue name/address), plus whether performance-space dimensions arrive in this file or
+through surveys. Implement against a representative export rather than guessing a destructive
+merge rule.
 
 ---
 
@@ -4978,7 +5051,7 @@ gap #81's verification exposed. Same rule as the rest of the file: log-only unti
 
 ---
 
-## 85. Five void FormData actions still crash on a mint failure — OPEN
+## 85. Five void FormData actions still crash on a mint failure — MITIGATED 2026-08-11
 
 **Area:** `src/app/(app)/design/grid/actions.ts:19`, `src/app/(app)/field-work/actions.ts:38`,
 `src/app/(app)/projects/actions.ts:175`, `src/app/(app)/inspections/actions.ts:23`,
@@ -5014,11 +5087,17 @@ over.
 **Ties to:** #80 (this is its unbuilt remainder), #62 (the bug class the half-fix would have
 recreated).
 
-**Status:** OPEN — logged only, no code. Deliberately not half-built.
+**Status:** MITIGATED 2026-08-11. Reconciliation found Field Work already catches the task
+write, rolls back its optimistic row, and renders a retry message. Quick Design's promote path
+now returns a typed failure for both the design mint and missing saved design, using the screen's
+existing toast without discarding editor state. A new authenticated-route error boundary gives
+the remaining progressively-enhanced form actions a professional recovery screen and Try again
+path instead of a raw framework crash. The five-retry collision itself remains intentionally
+exceptional; no silent redirect/no-op was introduced.
 
 ---
 
-## 86. Mints inside page-load sync functions need a third fix shape — OPEN
+## 86. Mints inside page-load sync functions need a third fix shape — UX MITIGATED; ARCHITECTURE OPEN
 
 **Area:** `syncFromQuotes` (flame), `syncProjectsFromQuotes` (`src/lib/stores/projects.ts`),
 `syncEngagementsFromQuotes`
@@ -5043,7 +5122,11 @@ itself the thing to revisit instead of patching its error handling?
 **Ties to:** #80 (same throw, third fix shape), #74 (the same page-load sync machinery, documented
 there), #16 (triggers re-running on every page load).
 
-**Status:** OPEN — logged only, no code.
+**Status:** UX MITIGATED 2026-08-11; ARCHITECTURE OPEN. The authenticated-route error boundary now
+keeps an exhausted page-load mint from exposing a raw crash and gives the user a retry path.
+Moving synchronization entirely off render paths remains a separate architecture change: imports
+and old won records still rely on reconciliation when their destination module opens. Do not mark
+that eventual-consistency redesign complete merely because the failure surface is now recoverable.
 
 ---
 
@@ -5333,7 +5416,7 @@ calling it.
 
 ---
 
-## 92. `/venues` renders every venue and every company in one page — 10 MiB, 8.5 s — OPEN
+## 92. `/venues` renders every venue and every company in one page — 10 MiB, 8.5 s — DONE 2026-08-11
 
 **Area:** `src/app/(app)/venues/page.tsx`
 **Reported:** 2026-08-07 (found while fixing #91 — it is what #91's fix left behind)
@@ -5363,11 +5446,16 @@ instant locally. It was only found by seeding 1,700 synthetic companies and meas
 
 **Ties to:** #91, #89, #59 (real data is what makes this bite).
 
-**Status:** OPEN — logged only, no code. Needs a UX decision before anything is built.
+**Status:** DONE 2026-08-11. Chosen shape: 50-row URL pagination after the existing server-side
+filter/sort, with Previous/Next controls and stable page clamping. The unbounded per-company chip
+list was removed; the existing text search already matches both venue and company names, so it
+serves as the scalable company lookup without shipping 1,700 controls. Old `?company=` deep links
+remain honored. Regression coverage proves the 121-row/three-page boundary, out-of-range clamp,
+and empty state. This bounds rendered venue markup to 50 rows per response.
 
 ---
 
-## 94. Go-live reset doesn't clear `equipment_bookings` — OPEN — found in Rentals module final review
+## 94. Go-live reset doesn't clear `equipment_bookings` — DONE 2026-08-11 — exhaustive reset surface
 
 **Reported:** 2026-08-08, whole-branch final review of the new Rentals module.
 
@@ -5386,6 +5474,10 @@ here to avoid scope creep into unrelated collections.
 
 **Ties to:** the Rentals module build (docs/superpowers/plans/2026-08-07-rentals-module.md).
 
-**Status:** flagged as a spawned follow-up task, not fixed in the Rentals branch.
+**Status:** DONE 2026-08-11. `clearDemoData()` now clears every registered business document
+collection, not only collections with seed factories. That includes `equipment_bookings`,
+`grid_sheets`, `tasks`, `notes`, site visits, reviews, generated specs, and future document tables
+registered in `DOC_TABLES`; relational identity/configuration tables and blobs remain untouched.
+Regression coverage failed at 14/24 before the fix and passes at 24/24 afterward.
 
 ---

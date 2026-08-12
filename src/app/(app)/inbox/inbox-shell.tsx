@@ -129,6 +129,11 @@ export default function InboxShell({
   // segmented buttons while a flip is in flight, so a rapid second click
   // can't race the first one's persist and land out of order.
   const [crmMode, setCrmModeState] = useState(initialCrmMode);
+  const [prevInitialCrmMode, setPrevInitialCrmMode] = useState(initialCrmMode);
+  if (prevInitialCrmMode !== initialCrmMode) {
+    setPrevInitialCrmMode(initialCrmMode);
+    setCrmModeState(initialCrmMode);
+  }
   const [modePending, startTransition] = useTransition();
   const onToggleMode = (on: boolean) => {
     const previous = crmMode;
@@ -136,6 +141,7 @@ export default function InboxShell({
     startTransition(async () => {
       try {
         await setInboxModeAction(on);
+        router.push(isView ? `/inbox?view=${box}` : `/inbox?box=${box}&folder=${folder}`);
         router.refresh();
       } catch {
         setCrmModeState(previous);
@@ -147,6 +153,7 @@ export default function InboxShell({
   const [logging, setLogging] = useState(false);
   // optimistic unread clearing while markRead lands server-side
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
+  const lastIndexRef = useRef(0);
 
   // external deep links (?thread=) mark the thread read, like the prototype
   const sentReads = useRef<Set<string>>(new Set());
@@ -183,11 +190,13 @@ export default function InboxShell({
 
   const selectThread = useCallback(
     (id: string) => {
+      const clickedIndex = list.rows.findIndex((row) => row.id === id && !row.isDraft);
+      if (clickedIndex >= 0) lastIndexRef.current = clickedIndex;
       setReadIds((s) => new Set(s).add(id));
       void markReadAction(id);
       router.push(`/inbox?${baseQuery}&thread=${encodeURIComponent(id)}`);
     },
-    [router, baseQuery]
+    [router, baseQuery, list.rows]
   );
 
   const openDraft = useCallback((d: DraftPayload, id: string) => {
@@ -251,6 +260,9 @@ export default function InboxShell({
     setPrevListKey(listKey);
     if (selectedIds.size) setSelectedIds(new Set());
   }
+  useEffect(() => {
+    lastIndexRef.current = 0;
+  }, [listKey]);
 
   const onToggleSelect = useCallback(
     (id: string, shift: boolean) => {
@@ -427,11 +439,12 @@ export default function InboxShell({
   // found, we resume from that remembered spot instead, clamped to the
   // current (possibly shorter) list so ArrowDown/ArrowUp continue from where
   // the vanished row was.
-  const lastIndexRef = useRef(0);
   useEffect(() => {
     if (narrow || isSearch || !!compose || logging) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      if (e.repeat) return;
+      if (document.querySelector('[role="dialog"], [data-inbox-menu-open="true"]')) return;
       const el = e.target as HTMLElement | null;
       // SELECT isn't in the brief's guard list, but the reading pane (Owner,
       // link-type/link-record pickers in thread-reader.tsx) and the list's
@@ -471,7 +484,7 @@ export default function InboxShell({
     document
       .querySelector(`[data-thread-id="${currentThreadId}"]`)
       ?.scrollIntoView({ block: "nearest" });
-  }, [currentThreadId]);
+  }, [currentThreadId, listKey, list.rows]);
 
   // PUNCHLIST #1 — "actively sync": a silent background send/receive on mount
   // and every few minutes while the tab is visible. The server action claims

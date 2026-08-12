@@ -171,6 +171,7 @@ export function buildDrawerVM(l: LeadRecord): DrawerDetailVM {
   return {
     id: l.id,
     org: l.org,
+    customerId: l.customerId ?? null,
     contact: l.contact,
     email: l.email,
     phone: l.phone,

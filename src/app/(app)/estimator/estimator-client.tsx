@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { CSSProperties } from "react";
 import { firstName } from "@/lib/team";
 import { approvedReviewLine } from "@/lib/review-line";
-import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
+import type { QuoteAttachment, QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import {
   addQuoteTaskAction,
   approveReviewAction,
@@ -63,6 +63,7 @@ import CurtainModal from "./curtain-modal";
 import FixtureModal from "./fixture-modal";
 import LaborModal from "./labor-modal";
 import PreviewDoc from "./preview-doc";
+import { buildEstimatorNarrative } from "./narrative";
 
 /**
  * Estimator workspace — client port of Estimator.dc.html (build + preview
@@ -275,7 +276,23 @@ export default function EstimatorClient({
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
   const [contactName, setContactName] = useState(initial.contactName);
+  const [installLeadWeeks, setInstallLeadWeeks] = useState(initial.installLeadWeeks);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
+  const [estimatorAssumptions, setEstimatorAssumptions] = useState(
+    () => (initial.estimatorAssumptions || []).join("\n")
+  );
+  const [estimatorExceptions, setEstimatorExceptions] = useState(
+    () => (initial.estimatorExceptions || []).join("\n")
+  );
+  const [estimatorOutputMode, setEstimatorOutputMode] = useState<"bom" | "narrative" | "both">(
+    initial.estimatorOutputMode || "bom"
+  );
+  const [estimatorNarrative, setEstimatorNarrative] = useState(
+    () => initial.estimatorNarrative || buildEstimatorNarrative(initial.sections ?? demoSections())
+  );
+  const [internalAttachments, setInternalAttachments] = useState<QuoteAttachment[]>(
+    () => initial.internalAttachments || []
+  );
   const [revNum, setRevNum] = useState(initial.revNum);
   const [revDateMs, setRevDateMs] = useState(initial.revDateMs);
   const [pdfQty, setPdfQty] = useState(true);
@@ -397,6 +414,13 @@ export default function EstimatorClient({
     if (r.status) setStatus(r.status);
   };
 
+  const linesOf = (value: string) =>
+    value
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+  const narrativeText = (estimatorNarrative || "").trim() || buildEstimatorNarrative(sections);
+
   const doSave = () => {
     const cname = customerId
       ? customers.find((c) => c.id === customerId)?.name || custName
@@ -410,7 +434,13 @@ export default function EstimatorClient({
         customerId: customerId || null,
         locationId: locationId || null,
         contactName: contactName || "",
+        installLeadWeeks,
         quoteNote: quoteNote || "",
+        estimatorAssumptions: linesOf(estimatorAssumptions),
+        estimatorExceptions: linesOf(estimatorExceptions),
+        estimatorOutputMode,
+        estimatorNarrative: narrativeText,
+        internalAttachments,
         value: t.grand,
         margin: t.margin,
         status,
@@ -564,6 +594,56 @@ export default function EstimatorClient({
     if (noteTimer.current) clearTimeout(noteTimer.current);
     noteTimer.current = setTimeout(() => persistMeta({ quoteNote: v }), 500);
   };
+  const onInstallLeadWeeks = (v: string) => {
+    const weeks = Math.max(12, parseInt(v || "12", 10) || 12);
+    setInstallLeadWeeks(weeks);
+    persistMeta({ installLeadWeeks: weeks });
+  };
+  const addInternalAttachment = (doc: {
+    name: string;
+    mime: string;
+    size: number;
+    dataUrl: string;
+  }) => {
+    setInternalAttachments((list) => [
+      ...list,
+      {
+        id: "qa-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8),
+        name: doc.name,
+        mime: doc.mime,
+        size: doc.size,
+        dataUrl: doc.dataUrl,
+        addedAt: Date.now(),
+        addedBy: me,
+      },
+    ]);
+  };
+  const pickInternalAttachment = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) {
+        setActionError("Attachment is too large (2 MB max).");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        addInternalAttachment({
+          name: file.name,
+          mime: file.type || "application/octet-stream",
+          size: file.size,
+          dataUrl: String(reader.result || ""),
+        });
+        setActionError(null);
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+  const removeInternalAttachment = (id: string) =>
+    setInternalAttachments((list) => list.filter((doc) => doc.id !== id));
 
   /* ---------------- sections & items ---------------- */
   const isExpanded = (id: string) => expanded[id] !== false;
@@ -1380,6 +1460,44 @@ export default function EstimatorClient({
             </div>
           </div>
 
+          {/* install timeframe */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "9px 22px",
+              background: "#23262d",
+              borderTop: "1px solid #2b2e35",
+              color: "#fff",
+              flexShrink: 0,
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={CTX_LABEL}>Suggested install timeframe</span>
+            <input
+              type="number"
+              min={12}
+              step={1}
+              value={installLeadWeeks}
+              onChange={(e) => onInstallLeadWeeks(e.target.value)}
+              style={{
+                width: 88,
+                fontFamily: "var(--font-mono)",
+                fontSize: 12.5,
+                color: "#fff",
+                background: "#2b2e35",
+                border: "1px solid #3a3e46",
+                borderRadius: 7,
+                padding: "8px 11px",
+              }}
+            />
+            <span style={{ fontSize: 11, color: "#c4c9d2" }}>weeks from award to completion</span>
+            <span style={{ fontSize: 10.5, color: "#6b7079", flexShrink: 0 }}>
+              Flows to the project target when this quote is won
+            </span>
+          </div>
+
           {/* quote note */}
           <div
             className="est-noterow"
@@ -1415,6 +1533,222 @@ export default function EstimatorClient({
             <span style={{ fontSize: 10.5, color: "#6b7079", flexShrink: 0 }}>
               Shows on the PDF header
             </span>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "220px minmax(0,1fr) auto",
+              gap: 12,
+              padding: "12px 22px 14px",
+              background: "#23262d",
+              borderTop: "1px solid #2b2e35",
+              color: "#fff",
+              flexShrink: 0,
+              alignItems: "start",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div style={{ ...CTX_LABEL, marginBottom: 7 }}>Customer output</div>
+              <select
+                value={estimatorOutputMode}
+                onChange={(e) =>
+                  setEstimatorOutputMode(e.target.value as "bom" | "narrative" | "both")
+                }
+                style={{ ...DARK_SELECT, width: "100%" }}
+              >
+                <option value="bom">BOM only</option>
+                <option value="narrative">Narrative only</option>
+                <option value="both">Both</option>
+              </select>
+              <div style={{ fontSize: 10.5, color: "#6b7079", marginTop: 7, lineHeight: 1.5 }}>
+                Controls whether the customer sees line items, narrative scope, or both.
+              </div>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ ...CTX_LABEL, marginBottom: 7 }}>Narrative proposal</div>
+              <textarea
+                className="est-notefield"
+                value={estimatorNarrative}
+                onChange={(e) => setEstimatorNarrative(e.target.value)}
+                placeholder="Narrative scope for the customer-facing proposal."
+                style={{
+                  width: "100%",
+                  minHeight: 116,
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 12.5,
+                  color: "#fff",
+                  background: "#2b2e35",
+                  border: "1px solid #3a3e46",
+                  borderRadius: 7,
+                  padding: "9px 11px",
+                  resize: "vertical",
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setEstimatorNarrative(buildEstimatorNarrative(sections))}
+              style={{
+                fontSize: 11.5,
+                fontWeight: 600,
+                color: "#d9dcea",
+                background: "#2f3440",
+                border: "1px solid #3a3e46",
+                borderRadius: 7,
+                padding: "8px 10px",
+                cursor: "pointer",
+                marginTop: 22,
+              }}
+            >
+              Re-draft from BOM
+            </button>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(220px,1fr) minmax(220px,1fr) minmax(220px,1fr)",
+              gap: 12,
+              padding: "12px 22px 14px",
+              background: "#23262d",
+              borderTop: "1px solid #2b2e35",
+              color: "#fff",
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div style={{ ...CTX_LABEL, marginBottom: 7 }}>Assumptions</div>
+              <textarea
+                className="est-notefield"
+                value={estimatorAssumptions}
+                onChange={(e) => setEstimatorAssumptions(e.target.value)}
+                placeholder={"One line per assumption\nExample: Existing power and structure by others."}
+                style={{
+                  width: "100%",
+                  minHeight: 92,
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 12.5,
+                  color: "#fff",
+                  background: "#2b2e35",
+                  border: "1px solid #3a3e46",
+                  borderRadius: 7,
+                  padding: "9px 11px",
+                  resize: "vertical",
+                }}
+              />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ ...CTX_LABEL, marginBottom: 7 }}>Exceptions</div>
+              <textarea
+                className="est-notefield"
+                value={estimatorExceptions}
+                onChange={(e) => setEstimatorExceptions(e.target.value)}
+                placeholder={"One line per exclusion\nExample: Permit fees and patch/paint excluded."}
+                style={{
+                  width: "100%",
+                  minHeight: 92,
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 12.5,
+                  color: "#fff",
+                  background: "#2b2e35",
+                  border: "1px solid #3a3e46",
+                  borderRadius: 7,
+                  padding: "9px 11px",
+                  resize: "vertical",
+                }}
+              />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  marginBottom: 7,
+                }}
+              >
+                <span style={CTX_LABEL}>Internal attachments</span>
+                <button
+                  type="button"
+                  onClick={pickInternalAttachment}
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: "#d9dcea",
+                    background: "#2f3440",
+                    border: "1px solid #3a3e46",
+                    borderRadius: 7,
+                    padding: "6px 9px",
+                    cursor: "pointer",
+                  }}
+                >
+                  + Attach
+                </button>
+              </div>
+              <div
+                style={{
+                  minHeight: 92,
+                  border: "1px solid #3a3e46",
+                  borderRadius: 7,
+                  padding: "7px 10px",
+                  background: "#2b2e35",
+                }}
+              >
+                {internalAttachments.length ? (
+                  internalAttachments.map((doc, idx) => (
+                    <div
+                      key={doc.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: idx === 0 ? "0 0 7px" : "7px 0",
+                        borderTop: idx === 0 ? "none" : "1px solid #3a3e46",
+                      }}
+                    >
+                      <a
+                        href={doc.dataUrl}
+                        download={doc.name}
+                        style={{
+                          minWidth: 0,
+                          flex: 1,
+                          color: "#fff",
+                          textDecoration: "none",
+                          fontSize: 12.5,
+                        }}
+                      >
+                        {doc.name}
+                      </a>
+                      <span style={{ fontSize: 10.5, color: "#9aa0ab", flexShrink: 0 }}>
+                        {(doc.size / 1024).toFixed(0)} KB
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeInternalAttachment(doc.id)}
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: "#d9897f",
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ fontSize: 11.5, color: "#6b7079", lineHeight: 1.5 }}>
+                    Internal-only reference files. Saved on the quote and included in revisions,
+                    never shown on the customer PDF.
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* review & approval banner */}
@@ -2267,7 +2601,12 @@ export default function EstimatorClient({
           ownerName={initial.owner || me}
           companyName={companyName}
           logoDark={logoDark}
+          installLeadWeeks={installLeadWeeks}
           quoteNote={quoteNote}
+          estimatorOutputMode={estimatorOutputMode}
+          estimatorNarrative={narrativeText}
+          estimatorAssumptions={linesOf(estimatorAssumptions)}
+          estimatorExceptions={linesOf(estimatorExceptions)}
           sections={sections}
           t={t}
           taxRatePct={TAX_RATE_PCT}

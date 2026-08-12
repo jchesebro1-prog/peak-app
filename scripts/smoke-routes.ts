@@ -299,6 +299,9 @@ async function main() {
   const pglitePath = path.join(scratchDir, "pglite");
   fs.mkdirSync(pglitePath, { recursive: true });
 
+  // Assigned after port allocation but captured by cleanup handlers declared
+  // first, so this intentionally cannot be a block-local const.
+  // eslint-disable-next-line prefer-const
   let child: ChildProcess | undefined;
   let port: number;
 
@@ -342,8 +345,15 @@ async function main() {
     PGLITE_PATH: pglitePath,
     PORT: String(port),
     NEXT_TELEMETRY_DISABLED: "1",
+    // The smoke server must authenticate independently of a developer's
+    // .env.local. Auth.js returns 500 from /api/auth/csrf without a secret,
+    // and ambient Google credentials can suppress the dev provider.
+    AUTH_SECRET: "peak-smoke-only-secret-not-used-outside-this-process",
+    AUTH_DEV_LOGIN: "true",
   };
   delete env.DATABASE_URL;
+  delete env.AUTH_GOOGLE_ID;
+  delete env.AUTH_GOOGLE_SECRET;
 
   child = spawn(process.execPath, [path.join(ROOT, "node_modules/.bin/next"), "dev", "-p", String(port)], {
     cwd: ROOT,

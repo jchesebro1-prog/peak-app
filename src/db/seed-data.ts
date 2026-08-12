@@ -2,7 +2,7 @@ import { users, appSettings } from "./schema";
 import type { Db } from "./index";
 import { IDENTITY, emailFor } from "@/lib/team";
 import { listDocs, upsertDoc, clearCollection, type Doc } from "./doc-store";
-import type { CollectionName } from "./doc-tables";
+import { DOC_TABLES, type CollectionName } from "./doc-tables";
 import { customersSeed } from "./seeds/customers";
 import { quotesSeed } from "./seeds/quotes";
 import { catalogSeed } from "./seeds/catalog";
@@ -128,8 +128,20 @@ export async function seedDemoCollections(): Promise<number> {
   return seeded;
 }
 
-/** Collections filled by the demo seed — the surface a go-live reset wipes. */
+/** Collections filled directly by the demo seed. */
 export const DEMO_COLLECTIONS: CollectionName[] = DEMO_SEEDS.map(([coll]) => coll);
+
+/**
+ * Every business document table cleared by the go-live reset. This is wider
+ * than DEMO_COLLECTIONS on purpose: derived records such as tasks, notes,
+ * Grid sheets, reviews, and equipment bookings can be created while demo data
+ * is exercised even though they have no seed factory of their own.
+ *
+ * Deriving the list from DOC_TABLES makes a newly registered document table
+ * reset-safe by default. Relational identity/configuration tables and blobs
+ * are not in DOC_TABLES and remain untouched.
+ */
+export const GO_LIVE_RESET_COLLECTIONS = Object.keys(DOC_TABLES) as CollectionName[];
 
 /**
  * Go-live reset — the inverse of seedDemoCollections. Hard-deletes every
@@ -140,7 +152,7 @@ export const DEMO_COLLECTIONS: CollectionName[] = DEMO_SEEDS.map(([coll]) => col
  */
 export async function clearDemoData(): Promise<number> {
   let cleared = 0;
-  for (const coll of DEMO_COLLECTIONS) {
+  for (const coll of GO_LIVE_RESET_COLLECTIONS) {
     cleared += await clearCollection(coll);
   }
   return cleared;

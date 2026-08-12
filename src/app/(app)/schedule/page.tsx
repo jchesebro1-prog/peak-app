@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor } from "@/lib/team";
 import { coordsOf } from "@/lib/geo";
+import { nextPendingDeliveryEta, scheduleBookingSeed } from "@/lib/schedule-booking";
 import { locationById } from "@/lib/stores/customers";
 import type { MapPin } from "@/components/map/LeafletMap";
 import { ScheduleMap } from "./controls";
@@ -309,6 +310,9 @@ export default async function SchedulePage({
   const tray: Chip[] = [];
   activeProjects.forEach((p) => {
     const col = colorOf(p);
+    const bookingSeed = scheduleBookingSeed(p, sod(now));
+    const deliveryHint =
+      bookingSeed.reason === "delivery_eta" ? " · ships " + md(bookingSeed.start) : "";
     const mobs = p.mobilizations || [];
     const unplaced = mobs.filter(
       (m) => !bookings.some((b) => b.projectId === p.id && b.mobId === m.id)
@@ -318,7 +322,7 @@ export default async function SchedulePage({
         tray.push({
           key: p.id + ":" + (m.id || mi),
           name: (m.type || "Mobilization") + " · " + (m.days || 1) + "d",
-          meta: p.name + " · " + (m.crew || 1) + " crew",
+          meta: p.name + " · " + (m.crew || 1) + " crew" + deliveryHint,
           color: col,
           href: boardParams({
             book: 1,
@@ -326,6 +330,7 @@ export default async function SchedulePage({
             role: m.type || "Installer",
             days: m.days || 1,
             mob: m.id || "",
+            start: isoOf(bookingSeed.start),
           }),
         })
       );
@@ -338,9 +343,13 @@ export default async function SchedulePage({
       tray.push({
         key: p.id,
         name: p.name,
-        meta: (p.customer || "—") + " · " + (crewN ? crewN + " booked" : "no crew"),
+        meta:
+          (p.customer || "—") +
+          " · " +
+          (crewN ? crewN + " booked" : "no crew") +
+          deliveryHint,
         color: col,
-        href: boardParams({ book: 1, project: p.id, days: span }),
+        href: boardParams({ book: 1, project: p.id, days: span, start: isoOf(bookingSeed.start) }),
       });
     }
   });
@@ -402,12 +411,18 @@ export default async function SchedulePage({
   const prefRole = one(sp.role);
   const prefDays = one(sp.days);
   const prefMob = one(sp.mob);
+  const prefStart = one(sp.start);
 
   const popProjectId = editBooking?.projectId || prefProject || projectProjects[0]?.id || "";
   const popProject = projects.find((p) => p.id === popProjectId) || null;
   const popPerson = editBooking?.person || roster[0]?.name || "";
   const popRole = editBooking?.role || prefRole || "Installer";
-  const popStart = editBooking ? editBooking.start : sod(now);
+  const popStart = editBooking
+    ? editBooking.start
+    : (() => {
+        const parsed = prefStart ? new Date(prefStart + "T12:00:00").getTime() : NaN;
+        return Number.isFinite(parsed) ? sod(parsed) : sod(now);
+      })();
   const popDays = editBooking
     ? Math.round((sod(editBooking.end) - sod(editBooking.start)) / DAY) + 1
     : parseInt(prefDays || "3", 10) || 3;
@@ -418,6 +433,7 @@ export default async function SchedulePage({
     role: null,
     days: null,
     mob: null,
+    start: null,
   });
 
   const segBtn = (on: boolean): React.CSSProperties => ({
@@ -1295,6 +1311,7 @@ export default async function SchedulePage({
 
                   {tlProjects.map((p) => {
                     const cl = critOf(p);
+                    const pendingEta = nextPendingDeliveryEta(p);
                     const leadStart = cl ? orderByDate(p, cl) : p.startedAt || p.createdAt || now;
                     const onSite = p.installStart || p.targetDate || now;
                     const sm = SM[p.stage] || SM.procurement;
@@ -1365,7 +1382,12 @@ export default async function SchedulePage({
                               textOverflow: "ellipsis",
                             }}
                           >
-                            {cl ? cl.vendor + " · " + cl.leadDays + "d lead" : "In-house"}
+                            {[
+                              cl ? cl.vendor + " · " + cl.leadDays + "d lead" : "In-house",
+                              pendingEta ? "ships " + md(pendingEta) : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
                           </span>
                         </div>
                         <div

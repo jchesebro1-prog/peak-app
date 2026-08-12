@@ -49,6 +49,7 @@ export type DrawerActivityVM = {
 export type DrawerDetailVM = {
   id: string;
   org: string;
+  customerId: string | null;
   contact: string;
   email: string;
   phone: string;

@@ -15,6 +15,7 @@ import {
   setNextActionAction,
   setStageAction,
 } from "./actions";
+import { applyExistingCustomerToLeadForm, type ExistingLeadCustomer, type NewLeadFormState } from "./new-lead-prefill";
 import type { DrawerDetailVM, LeadThreadVM, SourceOptionVM } from "./types";
 
 /**
@@ -245,19 +246,6 @@ function fromDateInput(s: string): number | null {
   return new Date(+p[0], +p[1] - 1, +p[2], 9, 0, 0).getTime();
 }
 
-type NewForm = {
-  org: string;
-  contact: string;
-  email: string;
-  phone: string;
-  city: string;
-  state: string;
-  source: string;
-  interest: string;
-  owner: string;
-  value: string;
-};
-
 export default function LeadDrawer({
   mode,
   vm,
@@ -265,6 +253,7 @@ export default function LeadDrawer({
   meName,
   rosterNames,
   sourceOptions,
+  existingCustomers,
   thread,
   visitReasons,
 }: {
@@ -274,6 +263,7 @@ export default function LeadDrawer({
   meName: string;
   rosterNames: string[];
   sourceOptions: SourceOptionVM[];
+  existingCustomers: ExistingLeadCustomer[];
   thread: LeadThreadVM;
   visitReasons: string[];
 }) {
@@ -289,7 +279,7 @@ export default function LeadDrawer({
   const [cvType, setCvType] = useState("");
   const [lostReason, setLostReason] = useState("");
   const [lostOther, setLostOther] = useState("");
-  const [nf, setNf] = useState<NewForm>(() => ({
+  const [nf, setNf] = useState<NewLeadFormState>(() => ({
     org: "",
     contact: "",
     email: "",
@@ -300,6 +290,7 @@ export default function LeadDrawer({
     interest: "",
     owner: rosterNames.includes(meName) ? meName : "",
     value: "",
+    customerId: null,
   }));
   const [nfErr, setNfErr] = useState("");
 
@@ -326,7 +317,7 @@ export default function LeadDrawer({
       router.refresh();
     });
 
-  const setNfField = (patch: Partial<NewForm>) => {
+  const setNfField = (patch: Partial<NewLeadFormState>) => {
     setNf((v) => ({ ...v, ...patch }));
     setNfErr("");
   };
@@ -348,6 +339,7 @@ export default function LeadDrawer({
         interest: nf.interest.trim(),
         owner: nf.owner || undefined,
         value: parseInt(nf.value.replace(/[^0-9]/g, ""), 10) || 0,
+        customerId: nf.customerId || null,
       });
       // #80: the create can now come back as a typed failure (id-mint
       // collision). Show it where the validation error already goes and keep
@@ -510,6 +502,26 @@ export default function LeadDrawer({
                 <div style={lbl}>
                   Organization / venue <span style={{ color: ACCENT_INK }}>*</span>
                 </div>
+                <select
+                  className="ldw-in"
+                  value={nf.customerId || ""}
+                  onChange={(e) => {
+                    const nextId = e.target.value || null;
+                    const customer = nextId
+                      ? existingCustomers.find((c) => c.id === nextId) || null
+                      : null;
+                    setNf((prev) => applyExistingCustomerToLeadForm(prev, customer));
+                    setNfErr("");
+                  }}
+                  style={{ ...selStyle, marginBottom: 8 }}
+                >
+                  <option value="">Add new customer / venue</option>
+                  {existingCustomers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
                 <input
                   className="ldw-in"
                   value={nf.org}
@@ -685,7 +697,20 @@ export default function LeadDrawer({
                   )}
                   {vm.phone && <span style={{ color: "#8c919c" }}>{vm.phone}</span>}
                 </div>
-                <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 5 }}>{vm.locLine}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 5, fontSize: 12, color: "#9aa0ab" }}>
+                  <span>{vm.locLine}</span>
+                  {vm.customerId ? (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <Link
+                        href={`/customers/${encodeURIComponent(vm.customerId)}`}
+                        style={{ color: ACCENT_INK, textDecoration: "none", fontWeight: 600 }}
+                      >
+                        Open customer
+                      </Link>
+                    </>
+                  ) : null}
+                </div>
               </div>
 
               {/* ===== MAIN view ===== */}

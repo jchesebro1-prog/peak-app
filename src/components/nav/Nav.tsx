@@ -125,6 +125,7 @@ export default function Nav({
   }, []);
 
   // close overlays on navigation
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setOpenGroup(null);
     setMenuOpen(false);
@@ -132,9 +133,11 @@ export default function Nav({
     setDrawerOpen(false);
     setSearchOpen(false);
   }, [pathname]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const markLetter = (companyName.trim().charAt(0) || "P").toUpperCase();
   const bellCount = bell.reduce((n, g) => n + g.items.length, 0);
+  const topLabel = (label: string, shortLabel?: string) => (narrow ? shortLabel || label : label);
 
   const closeAll = () => {
     setOpenGroup(null);
@@ -217,7 +220,7 @@ export default function Nav({
                     href={entry.href}
                     className={`pk-tab${activeKey === entry.key ? " active" : ""}`}
                   >
-                    {entry.label}
+                    {topLabel(entry.label, entry.shortLabel)}
                   </Link>
                 ) : (
                   <div key={entry.key} style={{ position: "relative" }}>
@@ -232,7 +235,7 @@ export default function Nav({
                         setOpenGroup(openGroup === entry.key ? null : entry.key);
                       }}
                     >
-                      {entry.label}
+                      {topLabel(entry.label, entry.shortLabel)}
                       <span className={`chev${openGroup === entry.key ? " open" : ""}`}>▾</span>
                     </button>
                     {openGroup === entry.key && (

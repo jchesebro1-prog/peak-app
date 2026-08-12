@@ -2450,3 +2450,66 @@ repairs/flame-tests/inspections) that use `_letters/util.tsx`'s
 `officePhone(settings)` were left untouched — they don't currently resolve
 a per-signer user at all, so wiring them in is a separable, larger task, not
 this one's scope.
+
+## D132. Go-live reset follows the complete document-table registry (2026-08-11)
+
+Punch #94 exposed that a reset derived from seed factories misses records
+created while demo data is exercised. The reset surface now derives from
+`DOC_TABLES`, so all business documents are removed even when a collection
+has no seed factory. Relational identity/configuration tables, settings,
+rates, Gmail connections, and blobs remain outside that registry and are
+preserved. This makes a newly registered document collection reset-safe by
+default instead of relying on a second hand-maintained list.
+
+## D133. Venues uses bounded URL pagination and text company search (2026-08-11)
+
+Punch #92's production-scale directory payload is bounded at 50 venue rows
+per page after filtering and activity sorting. Pagination lives in the URL
+(`?page=`), clamps stale/out-of-range links, and preserves search/filter
+parameters. The unbounded company-chip list is removed: the same text query
+matches venue and company names, which avoids serializing one control for
+every company while preserving old `?company=` deep links.
+
+## D134. Inbox mode switches reset refinements; background arrows respect overlays (2026-08-11)
+
+Punch #46 closes the Outlook/CRM polish follow-ups. Switching Inbox ↔ CRM clears explicit
+filter/sort parameters so Inbox returns to newest-first and CRM returns to waiting-first; calls
+and flagged views use whichever mode is active. Arrow navigation ignores held-key repeats and
+never runs beneath the site-visit dialog or an open command menu. Clicks and list changes now
+maintain/reset the remembered keyboard anchor, and refreshed server preference wins over stale
+local mode state.
+
+## D135. Quote install timeframe is stored as weeks-from-award with a simple scope matrix (2026-08-11)
+
+Punch #15 now stores `installLeadWeeks` on the quote and resolves the project target from the
+quote's win date, not the quote's create date. The completion target remains the source of truth,
+and the install window shifts around it by the existing target-4 / target+2 rule. Until Jeff
+defines a richer matrix, the defaulting rule is intentionally conservative: 12 weeks minimum,
+14 weeks for mid-scale quote value / section count / mobilization scope, and 16 weeks for larger
+bands. Projects gained a target-date edit path so the reporting forecast is no longer fed by an
+uncorrectable conversion guess.
+
+## D136. Top-nav labels are full on desktop and compact only in the narrow bar (2026-08-11)
+
+Punch #45(b) closes with one nav build, not separate desktop/mobile configs. The top bar now shows
+desktop labels as "Home · Sales · Installs · Customers · Design", while the constrained top bar
+keeps the compact "Home · EST · PM · CRM · DESIGN" labels. The mobile drawer continues to show
+the full labels.
+
+## D137. New Lead existing-customer selection is snapshot prefill, not live writeback (2026-08-11)
+
+Punch #12 now lets a rep start a lead from an existing customer, but the lead record remains its
+own intake snapshot. Selecting a customer stamps `customerId` and prefills org/contact/email/phone
+city/state from the customer's primary contact and primary location; reps can then edit those lead
+fields without mutating the customer record. Clearing the picker returns the form to an unlinked
+"Add new customer / venue" lead. Existing linked leads now surface their customer relationship in
+the drawer header via an Open customer link.
+
+## D138. Project completion is signoff-gated on both the server and the UI (2026-08-11)
+
+Punch #16's remaining lifecycle bug is closed: a project can no longer be advanced to `complete`
+without a recorded signoff. The guard lives in both the mutation path and the Projects screen, so
+the server rejects a direct complete-without-signoff stage write and the UI no longer offers a
+completion control before signoff exists. Service-linked shadow projects remain allowed to start at
+`stage: "complete"` because they do not progress through the installs lifecycle at all; they are a
+separate, already-completed record shape from punch #13.
