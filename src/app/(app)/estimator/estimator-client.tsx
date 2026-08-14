@@ -272,6 +272,7 @@ export default function EstimatorClient({
   const [attestOpen, setAttestOpen] = useState(false);
   const [attestNote, setAttestNote] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [infoOpen, setInfoOpen] = useState(true);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
@@ -1384,6 +1385,69 @@ export default function EstimatorClient({
             </div>
           </div>
 
+          {/* quote info collapsible toggle (punchlist #93) */}
+          <button
+            type="button"
+            onClick={() => setInfoOpen((o) => !o)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              width: "100%",
+              padding: "7px 22px",
+              background: "#1c1f25",
+              border: "none",
+              borderTop: "1px solid #2b2e35",
+              color: "#c4c9d2",
+              cursor: "pointer",
+              flexShrink: 0,
+              textAlign: "left",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: ".04em",
+                textTransform: "uppercase",
+                color: "#6b7079",
+                flex: 1,
+              }}
+            >
+              Quote info
+            </span>
+            {!infoOpen && (
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#9aa0ab",
+                  fontStyle: "italic",
+                  marginRight: 10,
+                  maxWidth: 340,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {customerId
+                  ? customers.find((c) => c.id === customerId)?.name || custName
+                  : custName}
+              </span>
+            )}
+            <span
+              style={{
+                fontSize: 14,
+                color: "#6b7079",
+                transform: infoOpen ? "rotate(180deg)" : "none",
+                transition: "transform .15s",
+                display: "inline-block",
+              }}
+            >
+              ▾
+            </span>
+          </button>
+          {infoOpen && (
+            <>
           {/* customer / venue context bar */}
           <div
             className="est-ctxbar"
@@ -1750,6 +1814,8 @@ export default function EstimatorClient({
               </div>
             </div>
           </div>
+            </>
+          )}
 
           {/* review & approval banner */}
           {showReviewBar && (
