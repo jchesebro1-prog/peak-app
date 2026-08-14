@@ -63,6 +63,8 @@ import LayersPanel from "./layers-panel";
 import SpacesPanel from "./spaces-panel";
 import RevisionsPanel from "./revisions-panel";
 import WiresPanel from "./wires-panel";
+import { buildPlan } from "../../quick/plan-svg";
+import type { AState } from "../../quick/engine";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -145,6 +147,50 @@ const NUDGE_FAST = 0.01;
 /** Coalesce key-repeat into one write, holding an arrow must not fire a
  *  server action per keystroke. */
 const NUDGE_COMMIT_MS = 400;
+
+/**
+ * Serialise a PlanData object (from buildPlan) to an SVG string so it can
+ * be embedded in a data: URL and stored as a Grid sheet (punchlist #38).
+ * This is a plain-string mirror of what <PlanSvg> renders; no React needed.
+ */
+function planDataToSvgString(plan: ReturnType<typeof buildPlan>): string {
+  const { W, H, rects, lines, circles, texts, paths } = plan;
+  const esc = (s: string) =>
+    String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  const MONO = "IBM Plex Mono, monospace";
+  const out: string[] = [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">`,
+  ];
+  for (const r of rects || []) {
+    out.push(
+      `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${esc(r.fill)}" stroke="${esc(r.stroke)}" stroke-width="${r.sw}"${r.rx ? ` rx="${r.rx}"` : ""}${r.dash ? ` stroke-dasharray="${esc(r.dash)}"` : ""}/>`
+    );
+  }
+  for (const q of paths || []) {
+    out.push(
+      `<path d="${esc(q.d)}" fill="${esc(q.fill)}"${q.stroke ? ` stroke="${esc(q.stroke)}"` : ""}${q.sw ? ` stroke-width="${q.sw}"` : ""}${q.dash ? ` stroke-dasharray="${esc(q.dash)}"` : ""}/>`
+    );
+  }
+  for (const l of lines || []) {
+    out.push(
+      `<line x1="${l.x1}" y1="${l.y1}" x2="${l.x2}" y2="${l.y2}" stroke="${esc(l.stroke)}" stroke-width="${l.sw}"${l.dash ? ` stroke-dasharray="${esc(l.dash)}"` : ""} stroke-linecap="round"/>`
+    );
+  }
+  for (const c of circles || []) {
+    out.push(`<circle cx="${c.cx}" cy="${c.cy}" r="${c.r}" fill="${esc(c.fill)}"/>`);
+  }
+  for (const t of texts || []) {
+    out.push(
+      `<text x="${t.x}" y="${t.y}" text-anchor="${esc(t.anchor)}"${t.transform ? ` transform="${esc(t.transform)}"` : ""} font-size="${t.size}" font-weight="${t.weight || 400}" fill="${esc(t.fill)}" font-family="${MONO}">${esc(t.t)}</text>`
+    );
+  }
+  out.push("</svg>");
+  return out.join("");
+}
 
 /** An in-flight marker drag (punch #47). `off` is the grab offset (pointer to
  *  marker center) so the marker doesn't jump under the cursor; `cx/cy` are the
@@ -320,10 +366,87 @@ export default function GridEditor({
   const [wirePartId, setWirePartId] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
 
+  // Generate floor plan from dimensions (punchlist #38)
+  const [showGenForm, setShowGenForm] = useState(false);
+  const [genVenueKey, setGenVenueKey] = useState("school");
+  const [genWidth, setGenWidth] = useState(40);
+  const [genDepth, setGenDepth] = useState(30);
+
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const onLoaded = useCallback((n: number) => setPages(n), []);
   const onSize = useCallback((w: number, h: number) => setSize({ w, h }), []);
+
+  /** Generate a scaled floor-plan SVG from venue dimensions and add it as the
+   *  first plan sheet (punchlist #38). Uses the same buildPlan geometry as the
+   *  Quick Design plan view — serves as a rough canvas until a real PDF is
+   *  uploaded, at which point it can be replaced. */
+  const handleGeneratePlan = useCallback(async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const s: AState = {
+        venue: genVenueKey,
+        size: "medium",
+        width: Math.max(20, Math.min(80, genWidth)),
+        depth: Math.max(14, Math.min(52, genDepth)),
+        grid: 24,
+        wing: 0,
+        ph: 18,
+        sys: {
+          rigging: false,
+          curtains: false,
+          lighting: false,
+          controls: false,
+          audio: false,
+          video: false,
+          acoustical: false,
+          pit: false,
+        },
+        view: "plan",
+        tier: "good",
+        contingency: 0,
+        rigType: "counterweight",
+        drape: {},
+        fixtures: {},
+        ctrl: {},
+        shell: {},
+        pitType: "",
+        qtyOverrides: {},
+        mode: "auto",
+        placements: [],
+      };
+      const plan = buildPlan(s, 0, 0, "#2563eb");
+      const svgStr = planDataToSvgString(plan);
+      // Base64-encode the SVG so the data URL stays ASCII-safe.
+      const svgDataUrl =
+        "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgStr)));
+      const venueLabel: Record<string, string> = {
+        school: "Auditorium",
+        pac: "PAC",
+        church: "Church",
+        blackbox: "Black Box",
+        concenter: "Conference",
+        gym: "Gym Stage",
+      };
+      const label = venueLabel[genVenueKey] ?? "Floor Plan";
+      const res = await addSheetAction(project.id, {
+        name: `Generated ${label} floor plan — ${genWidth}' × ${genDepth}'`,
+        mime: "image/svg+xml",
+        dataUrl: svgDataUrl,
+      });
+      if (!res.ok) {
+        setErr(res.error);
+      } else {
+        setShowGenForm(false);
+        router.refresh();
+      }
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [genVenueKey, genWidth, genDepth, project.id, router]);
 
   /** Guarded: an image that reports no size yet must not poison the math
    *  with NaN — calibration would silently fail with a misleading error. */
@@ -1045,6 +1168,21 @@ export default function GridEditor({
         </div>
       )}
 
+      {/* Generated plan banner (punchlist #38) — shown when the active sheet is
+          a generated SVG floor plan rather than a real uploaded PDF/image. */}
+      {sheet?.mime === "image/svg+xml" && (
+        <div style={{ background: "#fef9eb", border: "1px solid #f0dfa0", borderRadius: 9, padding: "7px 11px", fontSize: 12, color: "#7a5c10", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontWeight: 600 }}>Generated floor plan</span> — rough plan from venue dimensions. Calibrate to add scale, or upload a PDF to replace.
+          <button
+            style={{ ...BTN, marginLeft: "auto", fontSize: 11, padding: "3px 8px", flexShrink: 0 }}
+            disabled={busy}
+            onClick={() => fileRef.current?.click()}
+          >
+            Replace with PDF
+          </button>
+        </div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "252px 1fr", gap: 12, alignItems: "start" }}>
         {/* sidebar */}
         <div style={{ display: "grid", gap: 12, position: "sticky", top: 12 }}>
@@ -1660,12 +1798,93 @@ export default function GridEditor({
         {/* document */}
         <div style={{ overflow: "auto", background: "#6d7076", padding: 18, borderRadius: 10, display: "flex", justifyContent: "center", minHeight: 420 }}>
           {!sheet ? (
-            <div style={{ alignSelf: "center", color: "#e6e8ec", fontSize: 13.5, textAlign: "center", lineHeight: 1.6 }}>
+            <div style={{ alignSelf: "center", color: "#e6e8ec", fontSize: 13.5, textAlign: "center", lineHeight: 1.6, maxWidth: 340 }}>
               No plan sheets yet.
               <br />
-              <button style={{ ...BTN, marginTop: 10 }} disabled={busy} onClick={() => fileRef.current?.click()}>
-                Upload a PDF or image
-              </button>
+              <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                <button style={{ ...BTN }} disabled={busy} onClick={() => fileRef.current?.click()}>
+                  Upload a PDF or image
+                </button>
+                <button
+                  style={{ ...BTN, borderColor: "#5b8def", color: "#2563eb" }}
+                  disabled={busy}
+                  onClick={() => setShowGenForm((v) => !v)}
+                >
+                  Generate floor plan
+                </button>
+              </div>
+              {showGenForm && (
+                <div
+                  style={{
+                    marginTop: 14,
+                    background: "#fff",
+                    borderRadius: 10,
+                    padding: "14px 16px",
+                    color: "#16181d",
+                    textAlign: "left",
+                    border: "1px solid #e0e4ed",
+                    boxShadow: "0 2px 8px rgba(0,0,0,.12)",
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "#9aa0ab", marginBottom: 10 }}>
+                    Generate floor plan from dimensions
+                  </div>
+                  <div style={{ marginBottom: 9 }}>
+                    <label style={{ fontSize: 11, color: "#6b7280", display: "block", marginBottom: 3 }}>Venue type</label>
+                    <select
+                      style={{ ...INPUT }}
+                      value={genVenueKey}
+                      onChange={(e) => setGenVenueKey(e.target.value)}
+                    >
+                      <option value="school">Proscenium / Auditorium</option>
+                      <option value="pac">PAC (large proscenium)</option>
+                      <option value="church">Church / Worship</option>
+                      <option value="blackbox">Black Box</option>
+                      <option value="concenter">Flat / Conference</option>
+                      <option value="gym">Gym Stage</option>
+                    </select>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 9 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 11, color: "#6b7280", display: "block", marginBottom: 3 }}>Width (ft)</label>
+                      <input
+                        style={{ ...INPUT }}
+                        type="number"
+                        min={20}
+                        max={80}
+                        value={genWidth}
+                        onChange={(e) => setGenWidth(Math.max(20, Math.min(80, Number(e.target.value) || 40)))}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 11, color: "#6b7280", display: "block", marginBottom: 3 }}>Depth (ft)</label>
+                      <input
+                        style={{ ...INPUT }}
+                        type="number"
+                        min={14}
+                        max={52}
+                        value={genDepth}
+                        onChange={(e) => setGenDepth(Math.max(14, Math.min(52, Number(e.target.value) || 30)))}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#9aa0ab", marginBottom: 10, lineHeight: 1.5 }}>
+                    Generates a scaled plan from these dimensions. Functions as a rough canvas until a real PDF is uploaded.
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      style={{ ...BTN, flex: 1, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+                      disabled={busy}
+                      onClick={handleGeneratePlan}
+                    >
+                      {busy ? "Generating…" : "Generate"}
+                    </button>
+                    <button style={{ ...BTN }} disabled={busy} onClick={() => setShowGenForm(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div

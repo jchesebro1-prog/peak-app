@@ -79,6 +79,23 @@ export const NAV: NavEntry[] = [
       { key: "field", label: "Field Survey", href: "/field-survey" },
     ],
   },
+  /* #56 (2026-08-14): Knowledge — top-level tab for company doctrine,
+   * design reference, and links to estimating rules + reference libraries.
+   * Admins can edit; everyone can view. Estimating Rules stay in Settings,
+   * Knowledge links out to them. */
+  {
+    kind: "group",
+    key: "knowledge",
+    label: "Knowledge",
+    shortLabel: "KB",
+    children: [
+      { key: "knowledge-overview", label: "Overview", href: "/knowledge" },
+      { key: "knowledge-doctrine", label: "Design Doctrine", href: "/knowledge/doctrine" },
+      { key: "knowledge-motors", label: "Motor Library", href: "/design/motors" },
+      { key: "knowledge-fixtures", label: "Fixture Cross-Ref", href: "/design/fixtures" },
+      { key: "knowledge-rules", label: "Estimating Rules", href: "/estimating-rules" },
+    ],
+  },
   {
     kind: "group",
     key: "design",
@@ -129,6 +146,7 @@ export function activeKeyFor(pathname: string): string {
     "/venues": "venues",
     "/customers": "companies", // legacy route redirects to /companies (D85)
     "/field-survey": "field",
+    "/knowledge": "knowledge-overview",
     "/catalog": "settings",
     "/reports": "reports",
     "/templates": "settings",

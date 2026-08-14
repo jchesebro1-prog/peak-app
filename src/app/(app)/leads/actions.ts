@@ -195,6 +195,7 @@ export async function createLeadAction(input: {
   source: string;
   org: string;
   contact: string;
+  contactRole?: string;
   email: string;
   phone: string;
   city: string;
@@ -207,7 +208,62 @@ export async function createLeadAction(input: {
   { ok: true; id: string } | { ok: false; id: null; error: string }
 > {
   const me = await requireUser();
-  // #80: create()'s mint (insertWithPrefixedId) THROWS once an id collision
+
+  // #12 decision C: when no existing customer is linked, immediately create
+  // one from the form data so the lead is linked on birth (fail-soft).
+  let resolvedCustomerId = input.customerId || null;
+  if (!resolvedCustomerId && input.org) {
+    try {
+      const { all: allCustomers, upsert: upsertCustomer } = await import(
+        "@/lib/stores/customers"
+      );
+      const taken = new Set((await allCustomers()).map((c) => c.id));
+      const base = String(input.org)
+        .toLowerCase()
+        .replace(/&/g, "and")
+        .replace(/[^a-z0-9]+/g, "")
+        .slice(0, 18) || "lead";
+      let slug = base;
+      let i = 2;
+      while (taken.has(slug)) {
+        slug = base + i;
+        i++;
+      }
+      const contacts = input.contact
+        ? [
+            {
+              name: input.contact,
+              role: input.contactRole || "",
+              email: input.email || "",
+              phone: input.phone || "",
+              primary: true,
+            },
+          ]
+        : [];
+      await upsertCustomer({
+        id: slug,
+        name: input.org,
+        location: [input.city, input.state].filter(Boolean).join(", "),
+        locations: [
+          {
+            primary: true,
+            city: input.city || "",
+            state: input.state || "WI",
+            venueKind: "proscenium",
+            travelMiles: null,
+            travelMin: null,
+          },
+        ],
+        contacts,
+      });
+      resolvedCustomerId = slug;
+    } catch (err) {
+      console.error("createLeadAction: auto-customer creation failed (fail-soft)", err);
+      // fall through — lead still created without a customerId
+    }
+  }
+
+  // #80: create()’s mint (insertWithPrefixedId) THROWS once an id collision
   // outlasts its retry budget (doc-store.ts). Rare, but this is the New Lead
   // button — report it as a typed message instead of letting a raw exception
   // escape as a 500.
@@ -218,14 +274,15 @@ export async function createLeadAction(input: {
         source: input.source,
         org: input.org,
         contact: input.contact,
+        contactRole: input.contactRole || "",
         email: input.email,
         phone: input.phone,
         city: input.city,
         state: input.state || "WI",
         interest: input.interest,
-        customerId: input.customerId || null,
-        // '' (Unassigned) falls through to the store's per-source default,
-        // exactly like the prototype's `owner: nf.owner || undefined`.
+        customerId: resolvedCustomerId,
+        // ‘’ (Unassigned) falls through to the store’s per-source default,
+        // exactly like the prototype’s `owner: nf.owner || undefined`.
         owner: input.owner || undefined,
         value: input.value || 0,
       },

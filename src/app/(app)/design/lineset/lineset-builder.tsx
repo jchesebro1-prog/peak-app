@@ -168,6 +168,7 @@ export function LinesetBuilder({
   const [showGrid, setShowGrid] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [autoFillMsg, setAutoFillMsg] = useState<string | null>(null);
 
   const set = <K extends keyof LinesetInputs>(k: K, v: LinesetInputs[K]) => setInp((s) => ({ ...s, [k]: v }));
   const setD = <K extends keyof WeightDefaults>(k: K, v: WeightDefaults[K]) => setDef((s) => ({ ...s, [k]: v }));
@@ -185,6 +186,57 @@ export function LinesetBuilder({
     });
   const patchExtra = (xid: string, patch: Partial<WeightLine>) =>
     setExtras((a) => a.map((x) => (x.xid === xid ? { ...x, ...patch } : x)));
+
+  /** Fill width, height, fullness, and fabric for every drape line that has
+   *  not yet had those values entered. Electric / Shell / General Purpose lines
+   *  are skipped — they carry gear-weight rules, not fabric dimensions.
+   *  Only fields that are still blank (null / undefined / 0) are written;
+   *  anything the user already typed is left alone (P#29). */
+  function autoFillDims() {
+    const trimH = inp.trimHeightFt ?? 20;
+    const bLen = battenLenFt(inp.proWidthFt);
+    const FAB = "Charisma Velour 25 oz";
+    let count = 0;
+
+    const updates: Record<string, LineLoad> = {};
+    rows.forEach((r) => {
+      let w: number | undefined;
+      let h: number | undefined;
+
+      switch (r.s.type) {
+        case "Border":
+          w = bLen; h = 1.5; break;
+        case "Legs":
+          w = 6; h = trimH; break;
+        case "Draw":
+        case "Midstage Draw":
+          w = Math.round(inp.proWidthFt * 0.65); h = trimH; break;
+        case "CYC":
+        case "Rear":
+          w = inp.proWidthFt; h = trimH; break;
+        default:
+          return; // skip Electric, Shell, General Purpose, etc.
+      }
+
+      const existing = loads[r.key] ?? {};
+      const patch: LineLoad = {};
+      if (!existing.w) patch.w = w;
+      if (!existing.h) patch.h = h;
+      if (!existing.full) patch.full = 25;
+      if (!existing.fab) patch.fab = FAB;
+
+      if (Object.keys(patch).length > 0) {
+        updates[r.key] = { ...existing, ...patch };
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      setLoads((m) => ({ ...m, ...updates }));
+    }
+    setAutoFillMsg(`Auto-filled ${count} line${count === 1 ? "" : "s"}.`);
+    setTimeout(() => setAutoFillMsg(null), 3500);
+  }
 
   /** True when `field` was hand-typed for line `key` (present in loads[key]),
    *  as opposed to arriving from the drape rule / gear default (P6/P7). */
@@ -560,6 +612,7 @@ export function LinesetBuilder({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div><span style={label}>PRO width (ft)</span><NumF v={inp.proWidthFt} set={(n) => set("proWidthFt", n)} /></div>
             <div><span style={label}>PRO height (ft)</span><NumF v={inp.proHeightFt} set={(n) => set("proHeightFt", n)} /></div>
+            <div><span style={label}>Trim height (ft)</span><NumF v={inp.trimHeightFt ?? 20} set={(n) => set("trimHeightFt", n)} /></div>
             <div><span style={label}>Stage depth (ft)</span><NumF v={inp.stageDepthFt} set={(n) => set("stageDepthFt", n)} /></div>
             <div><span style={label}>Stage depth (in)</span><NumF v={inp.stageDepthIn} set={(n) => set("stageDepthIn", n)} /></div>
           </div>
@@ -673,6 +726,15 @@ export function LinesetBuilder({
               <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "#5b616e" }}>
                 <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} /> Show full grid
               </label>
+              {!showGrid && (
+                <button
+                  onClick={autoFillDims}
+                  title="Pre-fill curtain widths, heights, fullness, and fabric for all unspecified drape lines using venue dimensions"
+                  style={{ fontSize: 12.5, fontWeight: 600, color: "#1f7a52", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 7, padding: "6px 11px", cursor: "pointer" }}
+                >
+                  Auto-fill defaults
+                </button>
+              )}
               <button onClick={exportCsv} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 7, padding: "6px 11px", cursor: "pointer" }}>⭳ CSV</button>
               <button onClick={() => { try { window.print(); } catch { /* no-op */ } }} className="pk-no-print" style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 7, padding: "6px 11px", cursor: "pointer" }}>⎙ Print</button>
             </div>
@@ -693,6 +755,9 @@ export function LinesetBuilder({
                   clear them
                 </button>)
               </span>
+            )}
+            {autoFillMsg && (
+              <span style={{ color: "#1f7a52", fontWeight: 600 }}>{" "}· {autoFillMsg}</span>
             )}
           </div>
 

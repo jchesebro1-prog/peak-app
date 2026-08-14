@@ -38,6 +38,10 @@ export type LinesetInputs = {
   proWidthFt: number;
   /** Proscenium opening height (ft), floor to header. Drives drape HEIGHTS. */
   proHeightFt: number;
+  /** Trim height (ft): distance from stage floor to the bottom of the trim
+   *  position. User-entered; drives curtain HEIGHT in the auto-fill defaults.
+   *  Defaults to 20 ft when not set. */
+  trimHeightFt?: number;
   slotSpacingIn: number; // Inputs!B11  (8" grid centers)
   electricIntervalFt: number; // Inputs!B12 (10')
   electricOffsetIn: number; // Inputs!B13 (0")
@@ -60,6 +64,7 @@ export const DEFAULT_LINESET_INPUTS: LinesetInputs = {
   stageDepthIn: 0,
   proWidthFt: 40,
   proHeightFt: 20,
+  trimHeightFt: 20,
   slotSpacingIn: 8,
   electricIntervalFt: 10,
   electricOffsetIn: 0,

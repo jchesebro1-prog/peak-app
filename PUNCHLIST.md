@@ -1427,7 +1427,7 @@ completion control until signoff exists. That collapses "completed" to the singl
 path Jeff chose, so the completion follow-up task now fires on the same definition the screen
 enforces. What still remains open is **decision E only**: assign these sold/completed follow-up
 tasks by actual project role once the role-tagged people model exists, instead of leaving them
-unassigned / owner-derived.
+unassigned / owner-derived. Confirmed 2026-08-14: when the project-roles model from #20 Phase 2 is built, sold tasks auto-assign to Project Manager, completed tasks to Lead Sales.
 
 ---
 
@@ -1834,6 +1834,7 @@ feature bolt-on.
 cards" and the contact-detail view both **depend on step 1**.
 
 **Status:** PHASE 1 LANDED 2026-07-19 (D85) — A was answered by the approved Daylite-parity design (full graph, phased): companies/contacts/emails/phones/sites are real relational tables; People + Companies are in the nav; every contact is openable at /people/<id>. Junction tables + shared picker (steps 2-3 here) are Phase 2 of the design; multi-link chips on quotes/projects follow there. Item 12 remains absorbed by Phase 3.
+> **2026-08-14:** Phase 2 (junction tables + multi-link chips + shared CustomerPicker) scheduled for week of 2026-08-14.
 
 ---
 
@@ -2521,8 +2522,7 @@ syncs to the app so a surveyor just points, then the reading drops into a field 
 - **D. Native shell** — if iOS is required for live sync, is Peak willing to wrap the app (Capacitor)
   or build a companion app? Bigger architectural step.
 
-**Status:** OPEN — logged 2026-07-21, no code touched. Feasible; the laser half is gated on device
-platform (Web Bluetooth ≠ iOS Safari). Manual quick-measure is unblocked and platform-agnostic.
+**Status:** OPEN — **ANSWERED 2026-08-14 (Jeff):** Field team carries iPhones. Bluetooth laser deferred. Will use **Capacitor native shell** when native features are needed (solves iOS BLE). Manual quick-measure UI can build anytime. Laser = Phase 2 after Capacitor.
 
 ---
 
@@ -2655,6 +2655,8 @@ disclosure by breakpoint).
 
 **Ties in:** doubly worth it if Peak goes native for field use (Capacitor spec + items 30/31) — the
 field survey on a phone is exactly where readability matters most.
+
+> **2026-08-14 (Jeff):** Will add specific problem screens to the punchlist while traveling. Wait for the screen list before building.
 
 **Status:** OPEN — logged 2026-07-21, no code touched. Program-level; needs Jeff's target list. **I
 can turn this from vague to concrete by running the app at iPhone width and cataloguing the worst
@@ -2996,7 +2998,7 @@ calibration step on the base sheet**.
 wall-to-wall; the generated sheet must be explicit about which drives it. Open: when a real
 plan uploads later, do base-sheet markers carry over or arrive as a separate sheet?
 
-**Status:** OPEN — spec written, rides wave 2 (part of #41's architecture).
+**Status:** OPEN — **ANSWERED 2026-08-14 (Jeff):** Build a literal scaled floor-plan SVG from venue dimensions using the same geometry as the estimator's plan view (`plan-svg.tsx` `buildPlan`). Functions as a working canvas until a real PDF is uploaded. If no PDF is ever uploaded, the generated plan can be used as a rough plan to send to clients. Building in current wave (punch-2026-08-14-wave-a).
 
 ---
 
@@ -3556,7 +3558,7 @@ package, and estimate/budget for every single design that gets turned out."*
 - If bidding is the only difference, does the *estimate* become a **budget** on the consulting
   side (different document, same math), or the same document with a different cover?
 
-**Status:** OPEN: logged only. Direction item; sequence behind #39/#40 like #41.
+**Status:** OPEN — **ANSWERED 2026-08-14 (Jeff):** (1) Publish = one button with per-artifact selectors (uncheck what you don't need). (2) Drawing package includes **DWG export option** in addition to PDF. (3) Consulting-side estimate is called **'Budget'** (same math, different label). Sequence: still behind #39/#40.
 
 ---
 
@@ -3577,6 +3579,7 @@ package, and estimate/budget for every single design that gets turned out."*
 > (his choice, 2026-07-27).** Do not invent ETC part numbers, and do not start the picker before
 > that list lands: the engine/lens split is exactly the thing that cannot be guessed.
 > When it arrives: import those parts, then build the pickers, then make presets store part ids.
+> **2026-08-14 (Jeff):** Jeff will build this out himself once the ETC SKU list is in hand. Staying BLOCKED ON DATA until the light-engine/lens SKU list arrives.
 
 **Area:** `src/app/(app)/estimator/fixture-modal.tsx`, `estimator-data.ts`, `pricing.ts`,
 `estimator-client.tsx`, `types.ts`
@@ -3675,9 +3678,7 @@ readouts use `fmt()`.
 > $40/hr, Drafting), and **a DEFAULT chip whenever a rate fell back to the hardcoded map**, a
 > missing or renamed catalog row used to be invisible. Provenance rides on an optional
 > `.source(sku)` on the rate function, so no caller changed and no math moved.
-> **STILL OPEN: "overall this needs to be redone."** Needs Jeff to say what is wrong beyond the
-> invisible rates. Also still silent: travel/equipment rates (`TVL-MIL`, `TVL-HTL`, `TVL-FOD`,
-> `EQP-LIFT`): they are per-mile/night/day, not $/hr, so they did not fit the strip.
+> **STILL OPEN — ANSWERED 2026-08-14 (Jeff):** Labor and travel/equipment rates should live in a 'Peak Price List' uploaded via catalog import (existing mechanism — Labor category parts). Jeff also believes **travel distance/time may be calculating incorrectly** — specific examples TBD. Travel/equipment rates (TVL-MIL, TVL-HTL, TVL-FOD, EQP-LIFT) must also be visible in the labor modal UI.
 
 **Area:** `src/app/(app)/estimator/labor-modal.tsx`, `estimator/pricing.ts:212-347`,
 `estimator/page.tsx:168-188`, `estimator-data.ts:92-115`
@@ -3810,7 +3811,7 @@ company/settings surface? Is the content **static curated docs** (like `/design/
 "estimating rules and customer tiers live here" mean **moving** those screens or **linking** to
 them from Knowledge?
 
-**Status:** OPEN: logged only, no code. **Supersedes #27.**
+**Status:** OPEN — **ANSWERED 2026-08-14 (Jeff):** (1) New **top-level nav tab** 'Knowledge'. (2) Content is **editable**, current sub-sections stay as their own panels. (3) **Admins only** can edit. (4) **Estimating Rules stay in Settings** — Knowledge links out to them. Building in current wave (punch-2026-08-14-wave-a).
 
 ---
 
@@ -3853,7 +3854,7 @@ wildly different costs and (b) may buy most of the value now. Also note the doc-
 `seq`-based sync protocol and an offline PWA outbox, which makes (c) harder than a normal
 Postgres app.
 
-**Status:** OPEN: strategic. Do not start without an answer to the a/b/c question.
+**Status:** TABLED long-term (Jeff, 2026-08-14). Single-tenant is fine for now. Revisit only if expanding to other organizations.
 
 ---
 
@@ -3897,7 +3898,7 @@ signed link; syncing = mirroring, permissions, conflict handling, much bigger.) 
 portal file access reuse the existing authenticated-proxy pattern rather than exposing Drive
 sharing links directly (recommended, otherwise Drive ACLs become the security boundary).
 
-**Status:** OPEN: logged only, no code.
+**Status:** OPEN — **ANSWERED 2026-08-14 (Jeff):** One folder per **site/venue** (as the dead column implies), with subfolders for projects/opportunities. Uses **Peak's company Drive**. Integration is **link-only** (store folder ID, proxy signed link — not sync/mirror). Portal access through existing authenticated-proxy pattern. Blocked on Drive OAuth scope + mailbox re-consent.
 
 ---
 
@@ -3930,7 +3931,7 @@ sharing links directly (recommended, otherwise Drive ACLs become the security bo
 > **Blocked on:** a `DATABASE_URL` in `.env.local` (Claude will not handle the credential; the
 > scripts read it without echoing it) and a fresh prod export — the newest is
 > `peak-backup-20260727-0915.json`.
-
+> **2026-08-14:** Jeff does not have the production DATABASE_URL available while traveling. Will revisit this weekend.
 
 > **Audit note 2026-07-29:** step 0 exists and is verified read-only —
 > `scripts/inventory.ts` (267 lines) plus `"db:inventory"` in `package.json:15`,
@@ -4446,7 +4447,7 @@ isn't set. **Ties to item 1's "not yet live-tested against real Gmail" and Q-A (
 **Open question for Jeff:** when do the Google deploy accounts land? Item 1 has been waiting on the
 same blocker since 2026-07-19.
 
-**Status:** OPEN, unchanged 2026-08-01. No code was written and none is wanted. Still blocked on the same thing as item 1: the Google deploy accounts, outstanding since 2026-07-19. **The standing rule stands:** email must not be described as working to a customer, a partner, or the third party evaluating the software, on any deployment where `GMAIL_ENABLED` is unset.
+**Status:** DONE — **2026-08-14 (Jeff confirms):** Jeff can see his emails in the app. Gmail integration is live on the deployment. Closing this item.
 
 ---
 
@@ -4531,7 +4532,7 @@ before any module is shared? Peak sells to schools, churches and theatres; wheth
 address those same customers with a derivative is the question most likely to be contentious later
 and nearly free to answer now. *(Engineering flag, not legal advice — counsel should review.)*
 
-**Status:** OPEN (COMMERCIAL), unchanged 2026-08-01. No code written; **this one is for counsel, not engineering.** The engineering recommendation stands and is cheap: separate code from data at the extraction boundary — ship the rate MECHANISM with placeholder values and let any third party supply their own numbers. The pricing core already distinguishes REAL from PLACEHOLDER rates, so the seam exists. The two questions that are nearly free to answer now and contentious later: which vendor agreements govern, and whether **field-of-use** needs settling before any module is shared.
+**Status:** RESOLVED — **2026-08-14 (Jeff):** Jeff considers this resolved. No further engineering or counsel action needed at this time.
 
 ---
 
@@ -4944,6 +4945,7 @@ rows, and nullable company linkage. A correct importer can now target that model
 still cannot be inferred safely is the incoming file's identity/dedupe contract (email, external
 id, or name+company) and whether one source row can carry multiple company/venue relationships.
 Build after a representative source file is available; do not recreate embedded customer contacts.
+> **2026-08-14 (Jeff):** TABLED. Jeff will upload this data directly through the Import tab UI. No separate import mechanism needed.
 
 ---
 
@@ -4980,6 +4982,7 @@ import. The remaining blocker is the real source shape and dedupe key (external 
 company+venue name/address), plus whether performance-space dimensions arrive in this file or
 through surveys. Implement against a representative export rather than guessing a destructive
 merge rule.
+> **2026-08-14 (Jeff):** TABLED. Jeff will upload this data directly through the Import tab UI. No separate import mechanism needed.
 
 ---
 

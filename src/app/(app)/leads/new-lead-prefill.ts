@@ -8,6 +8,7 @@ export type ExistingLeadCustomer = Pick<CustomerDoc, "id" | "name"> & {
 export type NewLeadFormState = {
   org: string;
   contact: string;
+  contactRole: string;
   email: string;
   phone: string;
   city: string;

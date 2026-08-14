@@ -282,6 +282,7 @@ export default function LeadDrawer({
   const [nf, setNf] = useState<NewLeadFormState>(() => ({
     org: "",
     contact: "",
+    contactRole: "",
     email: "",
     phone: "",
     city: "",
@@ -332,6 +333,7 @@ export default function LeadDrawer({
         source: nf.source,
         org: nf.org.trim(),
         contact: nf.contact.trim(),
+        contactRole: nf.contactRole.trim(),
         email: nf.email.trim(),
         phone: nf.phone.trim(),
         city: nf.city.trim(),
@@ -530,7 +532,7 @@ export default function LeadDrawer({
                   style={inStyle}
                 />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                 <div>
                   <div style={lbl}>Contact name</div>
                   <input
@@ -538,6 +540,16 @@ export default function LeadDrawer({
                     value={nf.contact}
                     onChange={(e) => setNfField({ contact: e.target.value })}
                     placeholder="First and last"
+                    style={inStyle}
+                  />
+                </div>
+                <div>
+                  <div style={lbl}>Role</div>
+                  <input
+                    className="ldw-in"
+                    value={nf.contactRole}
+                    onChange={(e) => setNfField({ contactRole: e.target.value })}
+                    placeholder="e.g. Executive Director"
                     style={inStyle}
                   />
                 </div>

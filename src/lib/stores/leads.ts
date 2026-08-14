@@ -155,6 +155,7 @@ export interface LeadRecord {
   id: string; // L-#### (base 1050)
   org: string;
   contact: string;
+  contactRole: string;
   email: string;
   phone: string;
   city: string;
@@ -206,6 +207,7 @@ export interface LeadSeedSpec {
   id: string;
   org?: string;
   contact?: string;
+  contactRole?: string;
   email?: string;
   phone?: string;
   city?: string;
@@ -246,6 +248,7 @@ export function mkLead(o: LeadSeedSpec): LeadRecord {
     id: o.id,
     org: o.org || "",
     contact: o.contact || "",
+    contactRole: o.contactRole || "",
     email: o.email || "",
     phone: o.phone || "",
     city: o.city || "",
@@ -464,6 +467,7 @@ export interface LeadCreateInput {
   id?: string;
   org?: string;
   contact?: string;
+  contactRole?: string;
   email?: string;
   phone?: string;
   city?: string;
@@ -505,6 +509,7 @@ export async function create(
       id,
       org: partial.org || "",
       contact: partial.contact || "",
+      contactRole: partial.contactRole || "",
       email: partial.email || "",
       phone: partial.phone || "",
       city: partial.city || "",

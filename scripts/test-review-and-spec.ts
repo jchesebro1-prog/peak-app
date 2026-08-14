@@ -95,6 +95,7 @@ const linkedLead = applyExistingCustomerToLeadForm(
   {
     org: "",
     contact: "",
+    contactRole: "",
     email: "",
     phone: "",
     city: "",
