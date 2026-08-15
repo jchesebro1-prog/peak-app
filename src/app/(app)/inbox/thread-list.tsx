@@ -599,68 +599,79 @@ function Row({
         <ChanGlyph chan={r.chan} color={chColor} size={13} />
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>
+        {/* primary line: subject · count · participants | time */}
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span
             style={{
               flex: 1,
               minWidth: 0,
-              fontSize: 13,
-              fontWeight: unread ? 700 : 600,
-              whiteSpace: "nowrap",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
               overflow: "hidden",
-              textOverflow: "ellipsis",
-              color: unread ? "#16181d" : "#26292f",
             }}
           >
-            {r.participants || r.name}
-          </span>
-          {r.msgCount > 1 && (
             <span
               style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "#8c919c",
-                background: "#f1f2f5",
-                borderRadius: 8,
-                padding: "0 6px",
-                flexShrink: 0,
+                fontSize: 13,
+                fontWeight: unread ? 700 : 600,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                color: unread ? "#16181d" : "#26292f",
+                flexShrink: 1,
               }}
             >
-              {r.msgCount}
+              {r.subject}
             </span>
-          )}
+            {r.msgCount > 1 && (
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "#8c919c",
+                  flexShrink: 0,
+                }}
+              >
+                ({r.msgCount})
+              </span>
+            )}
+            {(r.participants || r.name) && (
+              <span
+                style={{
+                  fontSize: 11.5,
+                  color: unread ? "#5b616e" : "#9aa0ab",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  flexShrink: 2,
+                  minWidth: 0,
+                }}
+              >
+                · {r.participants || r.name}
+              </span>
+            )}
+          </span>
           {r.pinned && (
-            <span style={{ color: "#8c919c", display: "flex" }} title="Pinned">
+            <span style={{ color: "#8c919c", display: "flex", flexShrink: 0 }} title="Pinned">
               <PinIcon size={12} fill="#8c919c" />
             </span>
           )}
           {r.flagged && (
-            <span style={{ color: "#d85a30", display: "flex" }} title="Flagged">
+            <span style={{ color: "#d85a30", display: "flex", flexShrink: 0 }} title="Flagged">
               <FlagIcon size={12} fill="#d85a30" />
             </span>
           )}
           <span style={{ fontSize: 10.5, color: "#aab0bb", flexShrink: 0 }}>{r.time}</span>
         </span>
-        <span
-          style={{
-            display: "block",
-            fontSize: 12.5,
-            fontWeight: unread ? 600 : 500,
-            color: unread ? "#16181d" : "#3a3f4a",
-            marginTop: 2,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {r.subject}
-        </span>
+        {/* snippet */}
         <span
           style={{
             display: "block",
             fontSize: 11.5,
             color: "#9aa0ab",
-            marginTop: 2,
+            marginTop: 3,
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",

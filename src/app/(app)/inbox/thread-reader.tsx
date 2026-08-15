@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import type { Opt, ReaderVM } from "./types";
 import {
@@ -64,6 +64,10 @@ export default function ThreadReader({
   // link picker
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [linkType, setLinkType] = useState("quote");
+
+  // thread-based feel: collapse older messages when a thread has more than 3
+  const [expandAll, setExpandAll] = useState(false);
+  useEffect(() => setExpandAll(false), [vm?.id]);
 
   if (!vm) {
     return (
@@ -530,8 +534,32 @@ export default function ThreadReader({
           className="ib-scroll"
           style={{ flex: 1, overflowY: "auto", padding: "18px 20px", background: "#fafbfc" }}
         >
-          {vm.messages.map((m) => (
-            <div key={m.id} style={{ display: "flex", gap: 11, marginBottom: 16 }}>
+          {vm.messages.map((m, i) => (
+            <Fragment key={m.id}>
+              {/* divider before the last-2 messages when collapsed */}
+              {vm.messages.length > 3 && !expandAll && i === vm.messages.length - 2 && (
+                <div
+                  onClick={() => setExpandAll(true)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "8px 0",
+                    cursor: "pointer",
+                    color: "#6b7079",
+                    fontSize: 12,
+                    marginBottom: 16,
+                    fontFamily: "var(--font-ui)",
+                  }}
+                >
+                  <div style={{ flex: 1, height: 1, background: "#e4e7ec" }} />
+                  <span>{vm.messages.length - 3} earlier messages</span>
+                  <div style={{ flex: 1, height: 1, background: "#e4e7ec" }} />
+                </div>
+              )}
+              {/* hide messages 1…(length-3) when collapsed — keep first and last 2 */}
+              {(expandAll || vm.messages.length <= 3 || i === 0 || i >= vm.messages.length - 2) && (
+            <div style={{ display: "flex", gap: 11, marginBottom: 16 }}>
               <span
                 style={{
                   width: 32,
@@ -656,6 +684,8 @@ export default function ThreadReader({
                 </div>
               </div>
             </div>
+              )}
+            </Fragment>
           ))}
         </div>
 

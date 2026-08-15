@@ -17,6 +17,7 @@ import { getFixtureRates } from "@/lib/stores/pricing";
 import { tasksForQuote } from "@/lib/stores/tasks";
 import { defaultInstallLeadWeeks, normalizeInstallLeadWeeks } from "@/lib/project-target-date";
 import EstimatorClient from "./estimator-client";
+import EstimatorDashboard from "./dashboard";
 import type {
   AiSource,
   CustomerLite,
@@ -179,6 +180,9 @@ export default async function EstimatorPage({
         aiSource = { kind: "inspection", id: ins.id, label: ins.venue || ins.customer || ins.id };
     }
   }
+
+  // No ?id= param → show estimator dashboard instead of opening the builder.
+  if (!rawId) return <EstimatorDashboard user={user} />;
 
   let q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
   if (!q) q = (await getQuote("Q-2041")) as QuoteDoc | null; // demo fallback so Save has a target
