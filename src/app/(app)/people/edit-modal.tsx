@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { CSSProperties } from "react";
 import { deletePersonAction, savePersonAction } from "./actions";
 import type { ChannelInputVM, CompanyOptionVM, SavePersonInput } from "./types";
+import { SearchableSelect } from "@/components/searchable-select";
 
 /**
  * New / Edit person modal (identity core, D85). A person is one row for
@@ -249,14 +250,9 @@ export default function EditPersonModal({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
               <span style={label}>Company</span>
-              <select value={companyId} onChange={(e) => setCompanyId(e.target.value)} style={field}>
-                <option value="">— No company —</option>
-                {companyOptions.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect value={companyId} onValueChange={setCompanyId}
+                options={companyOptions.map((c) => ({ value: c.id, label: c.name }))}
+                placeholder="— No company —" searchPlaceholder="Search companies…" buttonStyle={field} />
             </div>
             <div>
               <span style={label}>Pricing tier</span>

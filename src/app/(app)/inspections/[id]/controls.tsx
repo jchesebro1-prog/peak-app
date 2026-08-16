@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from "react";
 import Link from "next/link";
+import { SearchableSelect } from "@/components/searchable-select";
 import type {
   InspectionRecord,
   InspectionLog,
@@ -921,14 +922,13 @@ export default function InspectionEditor({
             <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 14 }}>Customer &amp; venue</div>
             <div style={{ marginBottom: 13 }}>
               <label style={labelStyle}>Customer</label>
-              <select value={draft.customerId ? draft.customerId : custNew ? "__new__" : ""} onChange={(e) => setCustomerSel(e.target.value)} style={selStyle}>
-                <option value="">— Select customer —</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-                {draft.customerId && !linkedCust && <option value={draft.customerId}>{draft.customer || draft.customerId}</option>}
-                <option value="__new__">+ New customer (not in directory)</option>
-              </select>
+              <SearchableSelect value={draft.customerId ? draft.customerId : custNew ? "__new__" : ""} onValueChange={setCustomerSel}
+                options={[
+                  ...customers.map((c) => ({ value: c.id, label: c.name, keywords: c.locations.map((l) => `${l.label} ${l.city}`).join(" ") })),
+                  ...(draft.customerId && !linkedCust ? [{ value: draft.customerId, label: draft.customer || draft.customerId }] : []),
+                  { value: "__new__", label: "+ New customer (not in directory)" },
+                ]}
+                placeholder="— Select customer —" searchPlaceholder="Search customers…" buttonStyle={selStyle} />
               {custNew && (
                 <input value={draft.customer} onChange={(e) => { setCustNew(true); patchDraft({ customer: e.target.value, customerId: null }); }} placeholder="New customer name" style={{ ...inpStyle, marginTop: 9 }} />
               )}

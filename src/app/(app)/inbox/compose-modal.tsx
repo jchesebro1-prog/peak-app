@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { ComposeInit, CustomerVM, Opt } from "./types";
 import { composeSendAction, saveDraftAction } from "./actions";
 import { PaperclipIcon, SendIcon } from "./icons";
+import { SearchableSelect } from "@/components/searchable-select";
 
 export default function ComposeModal({
   init,
@@ -171,27 +172,9 @@ export default function ComposeModal({
           </Row>
           {/* Customer link */}
           <Row label="Client">
-            <select
-              value={cd.customerId}
-              onChange={(e) => onCustomer(e.target.value)}
-              style={{
-                flex: 1,
-                fontFamily: "var(--font-ui)",
-                fontSize: 13,
-                color: "#16181d",
-                border: "none",
-                background: "transparent",
-                outline: "none",
-                cursor: "pointer",
-              }}
-            >
-              <option value="">Not linked to a client</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect value={cd.customerId} onValueChange={onCustomer}
+              options={customers.map((c) => ({ value: c.id, label: c.name, keywords: `${c.primaryName} ${c.primaryEmail}` }))}
+              placeholder="Not linked to a client" searchPlaceholder="Search clients…" style={{ flex: 1 }} buttonStyle={{ border: "none", padding: 0, background: "transparent" }} />
           </Row>
           {/* To */}
           <Row label="To">

@@ -8,6 +8,7 @@ import { priceGridCurtains } from "@/lib/design/grid-curtains";
 import { money, timeAgo } from "@/lib/format";
 import { createProjectAction } from "./actions";
 import DeleteProjectButton from "./delete-button";
+import { SearchableSelect } from "@/components/searchable-select";
 
 export const metadata = { title: "The Grid — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -56,14 +57,8 @@ export default async function GridIndexPage() {
             required
             style={{ ...input, flex: "1 1 280px" }}
           />
-          <select name="companyId" defaultValue="" style={{ ...input, flex: "0 1 220px" }}>
-            <option value="">No customer yet</option>
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <SearchableSelect name="companyId" options={companies.map((c) => ({ value: c.id, label: c.name }))}
+            placeholder="No customer yet" searchPlaceholder="Search customers…" style={{ flex: "0 1 220px" }} buttonStyle={input} />
           <button
             type="submit"
             style={{

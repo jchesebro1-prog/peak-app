@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveDesignAction, deleteDesignAction } from "./studio-actions";
 import type { StudioDesignKind } from "@/lib/stores/studio-designs";
+import { SearchableSelect } from "@/components/searchable-select";
 
 export type SavedRef = { id: string; name: string; customer: string };
 
@@ -64,10 +65,8 @@ export function SaveBar({
     <div style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: "12px 16px", boxShadow: "0 1px 2px rgba(0,0,0,.04)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
       <span style={{ fontSize: 12, fontWeight: 600, color: "#5b616e" }}>{id ? "Editing saved design" : "Save this design"}</span>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Design name" style={{ ...field, flex: "1 1 160px", minWidth: 130 }} />
-      <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} style={{ ...field, flex: "1 1 150px" }}>
-        <option value="">— No venue —</option>
-        {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-      </select>
+      <SearchableSelect value={customerId} onValueChange={setCustomerId} options={customers.map((c) => ({ value: c.id, label: c.name }))}
+        placeholder="— No customer —" searchPlaceholder="Search customers…" style={{ flex: "1 1 150px" }} buttonStyle={field} />
       <button onClick={() => save(false)} disabled={pending || !name.trim()} style={btn(true)}>{pending ? "Saving…" : id ? "Update" : "Save"}</button>
       {id && <button onClick={() => save(true)} disabled={pending} style={btn()}>Save as new</button>}
       {id && <button onClick={del} disabled={pending} style={{ ...btn(), color: "#b4543a" }}>Delete</button>}

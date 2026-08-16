@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from "react";
 import Link from "next/link";
+import { SearchableSelect } from "@/components/searchable-select";
 import type {
   SurveyRecord,
   SurveyPhoto,
@@ -923,13 +924,9 @@ export default function SurveyEditor({
       <>
         <div style={{ marginBottom: 13 }}>
           <label style={labelStyle}>Customer</label>
-          <select value={draft.customerId ? draft.customerId : custNew ? "__new__" : ""} onChange={(e) => setCustomerSel(e.target.value)} style={selStyle}>
-            <option value="">— Select customer —</option>
-            {customerOptions.map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-            <option value="__new__">+ New customer (not in directory)</option>
-          </select>
+          <SearchableSelect value={draft.customerId ? draft.customerId : custNew ? "__new__" : ""} onValueChange={setCustomerSel}
+            options={[...customerOptions, { value: "__new__", label: "+ New customer (not in directory)" }]}
+            placeholder="— Select customer —" searchPlaceholder="Search customers…" buttonStyle={selStyle} />
           {linkedCust && (
             <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 7, fontSize: 11.5, color: "#8c919c" }}>
               <span style={{ width: 7, height: 7, borderRadius: "50%", background: ACCENT, flexShrink: 0 }} />

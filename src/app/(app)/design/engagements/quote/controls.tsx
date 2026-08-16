@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { saveConsultingQuote } from "./actions";
 import { money } from "@/lib/format";
+import { SearchableSelect } from "@/components/searchable-select";
 
 /**
  * Consulting proposal builder (#35 rebuild, spec §1). Structured scopes
@@ -205,19 +206,13 @@ export function ConsultingQuoteBuilder({
         <input type="hidden" name="phases" value={JSON.stringify(phases)} />
 
         <label style={LBL}>Customer</label>
-        <select
-          value={customerId}
-          onChange={(e) => {
-            setCustomerId(e.target.value);
+        <SearchableSelect value={customerId}
+          onValueChange={(value) => {
+            setCustomerId(value);
             setLocationId("");
           }}
-          style={INPUT}
-        >
-          <option value="">Choose a customer…</option>
-          {customers.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
+          options={customers.map((c) => ({ value: c.id, label: c.name, keywords: c.locations.map((l) => l.label).join(" ") }))}
+          placeholder="Choose a customer…" searchPlaceholder="Search customers…" buttonStyle={INPUT} />
 
         {cust && cust.locations.length > 0 && (
           <>

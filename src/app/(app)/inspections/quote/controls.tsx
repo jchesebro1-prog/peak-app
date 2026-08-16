@@ -5,6 +5,7 @@ import { useMemo, useState, useTransition } from "react";
 import { venueTravelAction, type VenueTravel } from "../../quote-builder-travel";
 import type { CSSProperties } from "react";
 import { saveInspectionQuote, approveInspectionQuote } from "./actions";
+import { SearchableSelect } from "@/components/searchable-select";
 
 /**
  * QuoteBuilder — the auto-priced rigging-inspection quote estimator
@@ -550,19 +551,9 @@ export function QuoteBuilder({
           >
             <div>
               <label style={LABEL}>Customer</label>
-              <select
-                className="inq-sel"
-                value={customerId}
-                onChange={(e) => pickCustomer(e.target.value)}
-                style={{ ...FIELD, fontWeight: 600, cursor: "pointer" }}
-              >
-                <option value="">Select a customer…</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect className="inq-sel" value={customerId} onValueChange={pickCustomer}
+                options={customers.map((c) => ({ value: c.id, label: c.name, keywords: c.locations.map((l) => `${l.label} ${l.city}`).join(" ") }))}
+                placeholder="Select a customer…" searchPlaceholder="Search customers…" buttonStyle={{ ...FIELD, fontWeight: 600 }} />
             </div>
             <div>
               <label style={LABEL}>Quote name</label>

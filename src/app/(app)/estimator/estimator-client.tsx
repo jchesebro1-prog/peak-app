@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { CSSProperties } from "react";
 import { firstName } from "@/lib/team";
+import { SearchableSelect } from "@/components/searchable-select";
 import { approvedReviewLine } from "@/lib/review-line";
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import {
@@ -1331,18 +1332,9 @@ export default function EstimatorClient({
                 minWidth: 0,
               }}
             >
-              <select
-                value={customerId || ""}
-                onChange={(e) => pickCustomer(e.target.value)}
-                title="Linked customer — flows to the project when this quote is won"
-                style={{ ...DARK_SELECT, minWidth: 180, maxWidth: 280 }}
-              >
-                {customerOptions.map((o) => (
-                  <option key={o.value || "__none"} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect value={customerId || ""} onValueChange={pickCustomer}
+                title="Linked customer — flows to the project when this quote is won" options={customerOptions}
+                placeholder="No customer" searchPlaceholder="Search customers…" style={{ minWidth: 180, maxWidth: 280 }} buttonStyle={DARK_SELECT} />
               {showVenuePick && (
                 <>
                   <span style={{ fontSize: 11, color: "#6b7079", flexShrink: 0 }}>at</span>

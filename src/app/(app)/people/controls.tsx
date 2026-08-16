@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { SearchableSelect } from "@/components/searchable-select";
 
 /**
  * Client bits for the People directory (identity core, D85): the search /
@@ -101,19 +102,9 @@ export function PeopleFilterBar({
             </option>
           ))}
         </select>
-        <select
-          value={company}
-          onChange={(e) => pushWith({ company: e.target.value })}
-          style={select}
-          aria-label="Company filter"
-        >
-          <option value="all">All companies</option>
-          {companyOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+        <SearchableSelect value={company === "all" ? "" : company} onValueChange={(value) => pushWith({ company: value || "all" })}
+          options={companyOptions.map((c) => ({ value: c.id, label: c.name }))} placeholder="All companies"
+          searchPlaceholder="Search companies…" aria-label="Company filter" buttonStyle={select} />
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import type { CSSProperties } from "react";
 import { priceRental } from "@/lib/pricing/rental";
 import { saveRentalQuote, approveRentalQuote, checkRentalAvailabilityAction } from "./actions";
+import { SearchableSelect } from "@/components/searchable-select";
 
 /**
  * QuoteBuilder — the rental quote builder (rental twin of the repair
@@ -403,19 +404,9 @@ export function QuoteBuilder({
           >
             <div>
               <label style={LABEL}>Customer</label>
-              <select
-                className="rtq-sel"
-                value={customerId}
-                onChange={(e) => pickCustomer(e.target.value)}
-                style={{ ...FIELD, fontWeight: 600, cursor: "pointer" }}
-              >
-                <option value="">Select a customer…</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect className="rtq-sel" value={customerId} onValueChange={pickCustomer}
+                options={customers.map((c) => ({ value: c.id, label: c.name, keywords: c.contacts.map((contact) => `${contact.name} ${contact.email}`).join(" ") }))}
+                placeholder="Select a customer…" searchPlaceholder="Search customers…" buttonStyle={{ ...FIELD, fontWeight: 600 }} />
             </div>
             <div>
               <label style={LABEL}>Quote name</label>

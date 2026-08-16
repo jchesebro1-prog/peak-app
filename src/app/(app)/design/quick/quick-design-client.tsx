@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { firstName } from "@/lib/team";
+import { SearchableSelect } from "@/components/searchable-select";
 import type { DesignRecord, DesignRevision } from "@/lib/stores/designs";
 import {
   DIMSCHEMA,
@@ -585,20 +586,9 @@ export default function QuickDesignClient({
           <div style={{ fontSize: 10, fontWeight: 600, color: "#aab0bb", textTransform: "uppercase", letterSpacing: ".05em" }}>Linked customer</div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {customerMeta && <span style={{ fontFamily: MONO, fontSize: 11, color: "#9aa0ab", whiteSpace: "nowrap" }}>{customerMeta}</span>}
-            <select
-              className="qd-outline"
-              value={linkedCustomer || ""}
-              onChange={(e) => onLinkCustomer(e.target.value)}
-              title="Link this design to a customer"
-              style={{ fontFamily: UI, fontSize: 13, fontWeight: 600, color: "#16181d", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 8, padding: "8px 11px", cursor: "pointer", maxWidth: 250 }}
-            >
-              <option value="">No customer linked</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect className="qd-outline" value={linkedCustomer || ""} onValueChange={onLinkCustomer}
+              title="Link this design to a customer" options={customers.map((c) => ({ value: c.id, label: c.name, keywords: c.locations.map((l) => `${l.label} ${l.city}`).join(" ") }))}
+              placeholder="No customer linked" searchPlaceholder="Search customers…" style={{ maxWidth: 250 }} buttonStyle={{ fontFamily: UI, fontSize: 13, fontWeight: 600, border: "1px solid #e4e7ec", borderRadius: 8, padding: "8px 11px" }} />
             {showVenuePick && (
               <select
                 className="qd-outline"

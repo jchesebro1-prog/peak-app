@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { CustomerVM, Opt } from "./types";
 import { logInteractionAction } from "./actions";
+import { SearchableSelect } from "@/components/searchable-select";
 
 const labelStyle: React.CSSProperties = {
   fontSize: 10.5,
@@ -188,26 +189,16 @@ export default function LogModal({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 13 }}>
             <div>
               <label style={labelStyle}>Client</label>
-              <select
-                value={ld.customerId}
-                onChange={(e) => {
-                  const id = e.target.value;
+              <SearchableSelect value={ld.customerId}
+                onValueChange={(id) => {
                   const c = customers.find((x) => x.id === id);
                   set({
                     customerId: id,
                     contactName: c ? c.primaryName : "",
                     contactEmail: c ? c.primaryEmail : "",
                   });
-                }}
-                style={{ ...inputStyle, cursor: "pointer" }}
-              >
-                <option value="">Select client…</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+                }} options={customers.map((c) => ({ value: c.id, label: c.name, keywords: `${c.primaryName} ${c.primaryEmail}` }))}
+                placeholder="Select client…" searchPlaceholder="Search clients…" buttonStyle={inputStyle} />
             </div>
             <div>
               <label style={labelStyle}>Contact</label>
