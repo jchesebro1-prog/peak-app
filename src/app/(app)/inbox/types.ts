@@ -20,15 +20,16 @@ export type FolderRowVM = {
   icon: string; // folder glyph kind
 };
 
+/** A mailbox label (sales@/installs@/info@) — these are Gmail groups that
+ *  land tagged messages in the personal mailbox, not separate logins, so
+ *  they render as flat label filters rather than full mailboxes. */
 export type SharedBoxVM = {
   id: string;
   label: string;
-  address: string;
   color: string;
   active: boolean;
   unread: number;
   href: string;
-  folders: FolderRowVM[]; // populated when expanded (active)
 };
 
 export type SidebarVM = {

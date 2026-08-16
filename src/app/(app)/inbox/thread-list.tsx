@@ -247,8 +247,8 @@ export default function ThreadList({
         </div>
       </div>
 
-      {/* select-all header (hidden in search mode) */}
-      {!isSearch && rows.length > 0 && (
+      {/* select-all header — only when something is selected */}
+      {!isSearch && selectedIds.size > 0 && (
         <div
           style={{
             display: "flex",
@@ -522,7 +522,7 @@ function Row({
   // only takes up space when it actually has content — a plain read thread
   // with none of these renders as a clean 3-line row.
   const hasMetaChips =
-    r.showBoxTag || r.showStatus || r.showWait || r.showQueued || r.showAssignee;
+    r.showBoxTag || r.showWait || r.showQueued || r.showAssignee;
   return (
     <div
       className="ib-row"
@@ -534,7 +534,7 @@ function Row({
         display: "flex",
         alignItems: "flex-start",
         gap: 11,
-        padding: "9px 15px 9px 18px",
+        padding: "8px 13px 8px 16px",
         borderBottom: "1px solid #f5f6f8",
         cursor: "pointer",
         textAlign: "left",
@@ -683,22 +683,6 @@ function Row({
               }}
             >
               {r.boxTag}
-            </span>
-          )}
-          {r.showStatus && (
-            <span
-              style={{
-                display: "inline-block",
-                fontSize: 9.5,
-                fontWeight: 600,
-                color: r.statusInk,
-                background: r.statusSoft,
-                border: `1px solid ${r.statusBd}`,
-                padding: "2px 8px",
-                borderRadius: 20,
-              }}
-            >
-              {r.statusLabel}
             </span>
           )}
           {r.showWait && (

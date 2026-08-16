@@ -47,12 +47,9 @@ const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
 
 const BOX_SEL_OPTIONS: Opt[] = [
-  { value: "personal:inbox", label: "My Inbox" },
-  { value: "personal:sent", label: "My Sent" },
-  { value: "personal:drafts", label: "My Drafts" },
-  { value: "sales:inbox", label: "Sales" },
-  { value: "installs:inbox", label: "Installs" },
-  { value: "info:inbox", label: "Info" },
+  { value: "personal:inbox", label: "Inbox" },
+  { value: "personal:sent", label: "Sent" },
+  { value: "personal:drafts", label: "Drafts" },
   { value: "needs", label: "Needs reply" },
   { value: "calls", label: "Calls & meetings" },
 ];
@@ -575,7 +572,7 @@ export default function InboxShell({
           minHeight: 0,
         }}
       >
-        <div style={{ padding: "14px 13px 10px", flexShrink: 0 }}>
+        <div style={{ padding: "12px 12px 8px", flexShrink: 0 }}>
           <button
             onClick={() => setCompose(blankCompose(composeDefaultBox))}
             style={{
@@ -671,84 +668,70 @@ export default function InboxShell({
             <FolderRow key={f.key} f={f} indent />
           ))}
 
-          {/* shared mailboxes */}
-          <div style={sectionLabelStyle("15px 8px 5px")}>Shared mailboxes</div>
+          {/* labels — sales@/installs@/info@ are Gmail groups that land in
+              this mailbox tagged, not separate logins, so they render as
+              flat label filters (no nested folders) like Gmail labels do */}
+          <div style={sectionLabelStyle("15px 8px 5px")}>Labels</div>
           {sidebar.sharedBoxes.map((b) => (
-            <div key={b.id}>
-              <Link
-                href={b.href}
+            <Link
+              key={b.id}
+              href={b.href}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                gap: 9,
+                padding: "7px 10px",
+                border: "none",
+                borderRadius: 8,
+                cursor: "pointer",
+                marginBottom: 1,
+                background: b.active ? "#eef0f3" : "transparent",
+                textDecoration: "none",
+                color: "inherit",
+                boxSizing: "border-box",
+              }}
+            >
+              <span
                 style={{
-                  width: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 9,
-                  padding: "8px 10px",
-                  border: "none",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  marginBottom: 1,
-                  background: b.active ? "#eef0f3" : "transparent",
-                  textDecoration: "none",
-                  color: "inherit",
-                  boxSizing: "border-box",
+                  width: 9,
+                  height: 9,
+                  borderRadius: 3,
+                  flexShrink: 0,
+                  background: b.color,
+                }}
+              />
+              <span
+                style={{
+                  flex: 1,
+                  textAlign: "left",
+                  minWidth: 0,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
                 }}
               >
+                {b.label}
+              </span>
+              {b.unread > 0 && (
                 <span
                   style={{
-                    width: 9,
-                    height: 9,
-                    borderRadius: "50%",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    color: "#fff",
+                    background: "var(--accent)",
+                    padding: "0 6px",
+                    borderRadius: 20,
                     flexShrink: 0,
-                    background: b.color,
                   }}
-                />
-                <span style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
-                  <span
-                    style={{
-                      display: "block",
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      lineHeight: 1.15,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {b.label}
-                  </span>
-                  <span
-                    style={{
-                      display: "block",
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 9.5,
-                      color: "#aab0bb",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {b.address}
-                  </span>
+                >
+                  {b.unread}
                 </span>
-                {b.unread > 0 && (
-                  <span
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 10.5,
-                      fontWeight: 700,
-                      color: "#fff",
-                      background: "var(--accent)",
-                      padding: "0 6px",
-                      borderRadius: 20,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {b.unread}
-                  </span>
-                )}
-              </Link>
-              {b.active && b.folders.map((f) => <FolderRow key={f.key} f={f} indent />)}
-            </div>
+              )}
+            </Link>
           ))}
 
           {/* smart views */}
@@ -854,28 +837,10 @@ export default function InboxShell({
             {sendReceiving ? "Checking…" : "Send / Receive"}
           </button>
           <div
-            title="Forward customer emails here and they land in the right mailbox (planned — real email sync isn’t connected yet)."
-            style={{ marginTop: 9, fontSize: 10, color: "#aab0bb", lineHeight: 1.5 }}
+            title={`Forward-to-log: ${sidebar.forwardAddr} (planned)`}
+            style={{ marginTop: 8, fontSize: 10, color: "#c4c9d2", lineHeight: 1.4 }}
           >
-            Forward-to-log:{" "}
-            <span style={{ fontFamily: "var(--font-mono)", color: "#8c919c" }}>
-              {sidebar.forwardAddr}
-            </span>{" "}
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 8,
-                fontWeight: 700,
-                letterSpacing: ".05em",
-                color: "#8a6d1f",
-                background: "#fbf3dd",
-                border: "1px solid #f0e2bd",
-                padding: "0 4px",
-                borderRadius: 4,
-              }}
-            >
-              SOON
-            </span>
+            <span style={{ fontFamily: "var(--font-mono)" }}>{sidebar.forwardAddr}</span>
           </div>
         </div>
       </div>

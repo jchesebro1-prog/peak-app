@@ -184,11 +184,7 @@ export default function CommandBar({
             </>
           )}
         </>
-      ) : (
-        <span style={{ fontSize: 11, color: "#aab0bb", padding: "0 6px", whiteSpace: "nowrap" }}>
-          Select messages to act on them
-        </span>
-      )}
+      ) : null}
 
       <span style={{ flex: 1 }} />
 

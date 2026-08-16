@@ -279,19 +279,14 @@ export default async function InboxPage({
     personalFolders: foldersFor("personal"),
     sharedBoxes: boxes
       .filter((b) => b.kind === "shared")
-      .map((b): SharedBoxVM => {
-        const active = !isView && box === b.id;
-        return {
-          id: b.id,
-          label: b.label,
-          address: b.address,
-          color: b.color,
-          active,
-          unread: countsFor[b.id as Exclude<MailboxId, "personal">].inboxUnread,
-          href: folderHref(b.id, "inbox"),
-          folders: active ? foldersFor(b.id) : [],
-        };
-      }),
+      .map((b): SharedBoxVM => ({
+        id: b.id,
+        label: b.label,
+        color: b.color,
+        active: !isView && box === b.id,
+        unread: countsFor[b.id as Exclude<MailboxId, "personal">].inboxUnread,
+        href: folderHref(b.id, "inbox"),
+      })),
     views: [
       {
         key: "needs",
