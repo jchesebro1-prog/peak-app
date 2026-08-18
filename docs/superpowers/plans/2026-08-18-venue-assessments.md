@@ -1129,6 +1129,17 @@ Replace every `"/field-survey"` href with `"/venue-assessments"`, and every `` `
 
 "Field surveys" → "Venue assessments" in: the home card title, `import/types.ts` label and `viewLabel` ("View in Venue Assessments"), the settings copy at `settings-client.tsx:699`, `venue-history-server.ts:169` subtitle, and the lead-drawer copy at `lead-drawer.tsx:1222`. Leave code comments referring to the historical module name alone unless they read as user-facing.
 
+**Two hazards found during execution, recorded for anyone re-running this:**
+
+- **`scripts/` hard-codes the route too.** `scripts/smoke-routes.ts` asserts the old
+  static and dynamic routes, and `scripts/test-review-and-spec.ts` has two
+  `customer-feed-rows` href assertions comparing against literal `/field-survey`
+  strings. The Step 4 grep below is scoped to `src/` and misses both, leaving
+  `test:smoke` failing. Update them — they are assertions about the moved route,
+  not workarounds.
+- **Do not bulk-sed `field-survey` → `venue-assessments`.** It corrupts the import
+  specifier `./home-field-surveys` into `./home-venue-assessmentss`.
+
 - [ ] **Step 4: Verify nothing dangles**
 
 ```bash
