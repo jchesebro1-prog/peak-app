@@ -113,7 +113,7 @@ export async function deleteSurvey(id: string): Promise<void> {
   await requireUser();
   if (id) await remove(id);
   revalidatePath("/", "layout");
-  redirect("/field-survey");
+  redirect("/venue-assessments");
 }
 
 /**
@@ -128,7 +128,7 @@ export async function createQuoteFromSurvey(id: string, patch: SurveyPatch): Pro
   if (!rec) return;
   await update(id, { ...(patch as Partial<SurveyRecord>), stage: "completed" });
   const q = await createQuote({
-    name: (patch.customer || rec.customer || "Field survey") + " — " + (patch.venue || rec.venue || rec.venueType || "Site"),
+    name: (patch.customer || rec.customer || "Venue assessment") + " — " + (patch.venue || rec.venue || rec.venueType || "Site"),
     customer: patch.customer || rec.customer || "",
     customerId: patch.customerId ?? rec.customerId ?? null,
     locationId: patch.locationId ?? rec.locationId ?? null,

@@ -17,7 +17,7 @@ export async function createSurvey(): Promise<void> {
   const user = await requireUser();
   const rec = await create({ owner: user.name, requestedBy: user.name, stage: "requested" }, user.name);
   revalidatePath("/", "layout");
-  redirect(`/field-survey/${encodeURIComponent(rec.id)}`);
+  redirect(`/venue-assessments/${encodeURIComponent(rec.id)}`);
 }
 
 /**
@@ -32,7 +32,7 @@ export async function quoteFromSurvey(formData: FormData): Promise<void> {
   if (!rec) return;
   if (rec.stage !== "completed") await update(id, { stage: "completed" });
   const q = await createQuote({
-    name: (rec.customer || "Field survey") + " — " + (rec.venue || rec.venueType || "Site"),
+    name: (rec.customer || "Venue assessment") + " — " + (rec.venue || rec.venueType || "Site"),
     customer: rec.customer || "",
     customerId: rec.customerId || null,
     locationId: rec.locationId || null,

@@ -136,7 +136,7 @@ function VisitRequestRow({ row }: { row: VisitRequestVM }) {
           </div>
           <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
             {row.surveyId && (
-              <Link href={`/field-survey?id=${encodeURIComponent(row.surveyId)}`} style={linkStyle}>
+              <Link href={`/venue-assessments?id=${encodeURIComponent(row.surveyId)}`} style={linkStyle}>
                 Survey {row.surveyId} →
               </Link>
             )}
