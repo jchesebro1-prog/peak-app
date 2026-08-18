@@ -44,6 +44,8 @@ import {
   blankAssessment, seedFindings, newFindingId,
 } from "@/lib/stores/assessment";
 
+import { TIER1_WIDTH_KEYS, TIER1_DEPTH_KEYS, tier1Complete } from "@/lib/stores/survey-intake";
+
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
 
@@ -3044,6 +3046,66 @@ async function asyncChecks(): Promise<void> {
     const p2 = await getProjectByQuote(TEST_REPAIR_QUOTE_ID);
     ok(!!p1 && !!p2 && p1.id !== p2.id, "#13 the inspection and repair test quotes get DISTINCT linked projects");
   }
+
+  /* --- Venue Assessments: record migration --- */
+  {
+    const { getAll } = await import("@/lib/stores/surveys");
+    const all = await getAll();
+    ok(all.length > 0, "seeded surveys exist to migrate");
+    ok(
+      all.every((s) => !!(s as Record<string, unknown>).venueClass),
+      "every existing record reads with a venueClass"
+    );
+    ok(
+      all.every((s) => typeof (s as Record<string, unknown>).visitPurpose === "string"),
+      "every existing record reads with a visitPurpose"
+    );
+    const fs1053 = all.find((s) => s.id === "FS-1053");
+    ok(!!fs1053, "FS-1053 is present in the seed");
+    ok(
+      (fs1053 as Record<string, unknown>).venueClass === "theatre",
+      "FS-1053 (Proscenium theater) migrates to theatre"
+    );
+    ok(
+      (fs1053 as Record<string, unknown>).venueSubtype === "Single proscenium",
+      "FS-1053 gains the matching subtype"
+    );
+    ok(fs1053!.venueType === "Proscenium theater", "venueType is retained for existing call sites");
+    const fs1055 = all.find((s) => s.id === "FS-1055");
+    ok(
+      (fs1055 as Record<string, unknown>).venueClass === "church",
+      "FS-1055 (Worship / sanctuary) migrates to church"
+    );
+    // measurements must survive the class switch untouched
+    ok(
+      all.every((s) => s.measurements && typeof s.measurements === "object"),
+      "measurements survive migration"
+    );
+    const withMeas = all.find((s) => Object.keys(s.measurements || {}).length > 0);
+    ok(!!withMeas, "at least one seeded record carries measurements");
+    ok(
+      Object.values(withMeas!.measurements).every((v) => typeof v === "string" || typeof v === "boolean"),
+      "measurement values are untouched primitives"
+    );
+    // new sub-objects default, never undefined
+    ok(Array.isArray((fs1053 as Record<string, unknown>).linesets), "linesets defaults to an array");
+    ok(
+      (fs1053 as Record<string, unknown>).assessmentEnabled === false,
+      "the assessment layer is off by default"
+    );
+    ok(
+      typeof (fs1053 as Record<string, unknown>).assessment === "object",
+      "assessment defaults to an object, never undefined"
+    );
+    ok(
+      typeof (fs1053 as Record<string, unknown>).signoff === "object",
+      "signoff defaults to an object"
+    );
+    ok(
+      (fs1053 as Record<string, unknown>).templateRev === "1.0",
+      "records stamp the template revision"
+    );
+  }
 }
 
 /* --- Venue Assessments: class model --- */
@@ -3214,6 +3276,28 @@ seedFindings(a4);
 ok(a4.findings.length === 0, "seedFindings is pure — it never mutates the assessment");
 ok(newFindingId() !== newFindingId(), "finding ids are unique");
 
+
+/* --- Venue Assessments: Tier-1 keys cover the new classes --- */
+ok(TIER1_WIDTH_KEYS.includes("courtWidth"), "Tier-1 width accepts the gym's court width");
+ok(TIER1_WIDTH_KEYS.includes("sanctuaryWidth"), "Tier-1 width accepts the church's sanctuary width");
+ok(TIER1_DEPTH_KEYS.includes("courtLength"), "Tier-1 depth accepts the gym's court length");
+ok(TIER1_DEPTH_KEYS.includes("sanctuaryLength"), "Tier-1 depth accepts the church's sanctuary length");
+ok(
+  tier1Complete({
+    venue: "Lincoln HS Gym", contact: "Pat Lee",
+    contactEmail: "p@x.org", contactPhone: "555-0100",
+    measurements: { courtWidth: "50", courtLength: "84" },
+  }),
+  "a gym record completes Tier 1 on court dimensions alone"
+);
+ok(
+  !tier1Complete({
+    venue: "Lincoln HS Gym", contact: "Pat Lee",
+    contactEmail: "p@x.org", contactPhone: "555-0100",
+    measurements: { courtWidth: "50" },
+  }),
+  "a gym record missing court length does NOT complete Tier 1"
+);
 
 asyncChecks()
   .then(() => {

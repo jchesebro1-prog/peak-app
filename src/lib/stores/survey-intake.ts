@@ -20,8 +20,16 @@ import type { MeasureField } from "./surveys";
  * Width/depth live in `measurements` under venue-type-specific keys (the
  * quick set), so completeness accepts any of the equivalent keys. */
 
-export const TIER1_WIDTH_KEYS = ["proW", "roomWidth", "platformWidth", "stageWidth", "floorWidth"];
-export const TIER1_DEPTH_KEYS = ["stageDepth", "roomDepth", "platformDepth", "floorDepth"];
+export const TIER1_WIDTH_KEYS = [
+  "proW", "roomWidth", "platformWidth", "stageWidth", "floorWidth",
+  // Venue Assessments (D132) — the new classes' primary width keys. Existing
+  // entries stay: old records depend on them.
+  "courtWidth", "sanctuaryWidth",
+];
+export const TIER1_DEPTH_KEYS = [
+  "stageDepth", "roomDepth", "platformDepth", "floorDepth",
+  "courtLength", "sanctuaryLength",
+];
 
 /** The slice of a survey record tier-1 completeness looks at. */
 export interface Tier1Slice {

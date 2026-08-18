@@ -8,10 +8,23 @@ import {
 } from "@/db/doc-store";
 import {
   blankSystemsState,
+  SYSTEM_KEYS,
   type DisciplineData,
   type InventoryRow,
   type SystemState,
 } from "./survey-intake";
+// Venue Assessments (D132) — pure model modules shared with the client editor.
+// venue-classes.ts type-imports MeasureField from here; that import is
+// type-only and erased, so there is no runtime cycle.
+import {
+  classMeasureFields,
+  venueClassFor,
+  venueSubtypeFor,
+  visitPurposeFor,
+  type VenueClass,
+} from "./venue-classes";
+import { blankAssessment, type AssessmentData } from "./assessment";
+import type { LinesetRow } from "./linesets";
 
 // Site Intake extension model (tiers, disciplines, inventory catalog) — pure
 // module shared with the client editor; re-exported for server callers.
@@ -44,6 +57,9 @@ export * from "./survey-intake";
  */
 
 const DAY = 86400000;
+
+/** Site-visit sheet template revision stamped on every record (D132). */
+export const TEMPLATE_REV = "1.0";
 
 function now(): number {
   return Date.now();
@@ -172,46 +188,17 @@ export interface MeasureGroup {
   fields: MeasureField[];
 }
 
-// venue-type "quick" measurement set (ft). Keys are shared with the full
-// groups below where they represent the same dimension, so a value entered
-// in the quick set and in an expanded group is the same field (no dupes).
-const MEASURE_FIELDS: Record<string, MeasureField[]> = {
-  _default: [
-    { key: "proW", label: "Proscenium width" },
-    { key: "proH", label: "Proscenium height" },
-    { key: "stageDepth", label: "Stage depth (plaster→back)" },
-    { key: "gridH", label: "Grid / ceiling height" },
-    { key: "wingSL", label: "Wing space — SL" },
-    { key: "wingSR", label: "Wing space — SR" },
-  ],
-  "Black box": [
-    { key: "roomWidth", label: "Room width" },
-    { key: "roomDepth", label: "Room depth" },
-    { key: "gridH", label: "Grid height" },
-    { key: "seating", label: "Seating capacity" },
-  ],
-  "Worship / sanctuary": [
-    { key: "platformWidth", label: "Platform width" },
-    { key: "platformDepth", label: "Platform depth" },
-    { key: "houseH", label: "Ceiling height" },
-    { key: "seating", label: "Seating capacity" },
-  ],
-  "Gymnasium / gym stage": [
-    { key: "stageWidth", label: "Stage width" },
-    { key: "stageDepth", label: "Stage depth" },
-    { key: "houseH", label: "Ceiling height" },
-    { key: "curtainHeight", label: "Curtain height" },
-  ],
-  Arena: [
-    { key: "floorWidth", label: "Floor width" },
-    { key: "floorDepth", label: "Floor depth" },
-    { key: "steelH", label: "Rigging steel height" },
-    { key: "capacity", label: "Seating capacity" },
-  ],
-};
+// The venue-class "quick" measurement set (ft), from the printed site-visit
+// sheets. Keys are shared with the full groups below where they represent the
+// same dimension, so a value entered in the quick set and in an expanded group
+// is the same field (no dupes) — see venue-classes.ts.
+export function measureFieldsForClass(cls: VenueClass): MeasureField[] {
+  return classMeasureFields(cls);
+}
 
+/** @deprecated use measureFieldsForClass — kept until the editor moves in Task 8. */
 export function measureFields(venueType: string | undefined): MeasureField[] {
-  return MEASURE_FIELDS[venueType || ""] || MEASURE_FIELDS._default;
+  return classMeasureFields(venueClassFor(venueType));
 }
 
 // ---- full stage-rig measurement groups (optional, expandable) ----
@@ -366,6 +353,39 @@ export interface SurveyDraft {
   disciplinesActive: string[]; // which branches the rep opened
   inventory: InventoryRow[]; // structured type+qty rows (Lighting/AV)
   intakeReady: boolean; // explicit "ready for quote" flag
+  // ---- Venue Assessments (D132) — site-visit layer ----
+  venueClass: VenueClass;
+  venueSubtype: string;
+  visitPurpose: string;
+  templateRev: string;
+  // access & site conditions, from the sheets
+  loadingDoorSize: string;
+  liftHeight: string;
+  pathToFloor: string;
+  workingHours: string;
+  blackoutDates: string;
+  floorProtection: string;
+  badgingRequired: string;
+  firstImpressions: string;
+  // quote questions, from the sheets
+  budget: string;
+  fiscalYearSpendBy: string;
+  whoDecides: string;
+  targetInstallWindow: string;
+  // life safety (auditorium sheet p.5, offered on any class)
+  lifeSafety: { deluge: string; smokeVent: string; adaNotes: string; egressNotes: string };
+  // lineset schedule
+  linesetsEnabled: boolean;
+  linesets: LinesetRow[];
+  // close-out
+  signoff: {
+    repName: string; repSignedAt: string;
+    contactName: string; contactSignedAt: string;
+    reviewerName: string; reviewerRole: string; reviewerSignedAt: string;
+  };
+  // ---- assessment layer ----
+  assessmentEnabled: boolean;
+  assessment: AssessmentData;
   // ---- Lead thread (#34): the visit request that spawned this survey ----
   leadId: string | null;
   visitId: string | null;
@@ -428,6 +448,36 @@ export function blank(partial: Partial<SurveyDraft> = {}): SurveyDraft {
     disciplinesActive: [],
     inventory: [],
     intakeReady: false,
+    venueClass: "theatre",
+    venueSubtype: "",
+    visitPurpose: "",
+    templateRev: TEMPLATE_REV,
+    loadingDoorSize: "",
+    liftHeight: "",
+    pathToFloor: "",
+    workingHours: "",
+    blackoutDates: "",
+    floorProtection: "",
+    badgingRequired: "",
+    firstImpressions: "",
+    budget: "",
+    fiscalYearSpendBy: "",
+    whoDecides: "",
+    targetInstallWindow: "",
+    lifeSafety: { deluge: "", smokeVent: "", adaNotes: "", egressNotes: "" },
+    linesetsEnabled: false,
+    linesets: [],
+    signoff: {
+      repName: "",
+      repSignedAt: "",
+      contactName: "",
+      contactSignedAt: "",
+      reviewerName: "",
+      reviewerRole: "",
+      reviewerSignedAt: "",
+    },
+    assessmentEnabled: false,
+    assessment: blankAssessment(),
     leadId: null,
     visitId: null,
   };
@@ -443,11 +493,51 @@ export function blank(partial: Partial<SurveyDraft> = {}): SurveyDraft {
 const DEFAULT_ME = "Jeff Chesebro";
 
 /**
+ * Read-time migration — the module's single migration point.
+ *
  * Stage backfill from syncState (prototype ensure() migration): records
  * predating `stage` read as completed when synced, else onsite.
+ *
+ * Venue Assessments (D132) then folds the old flat `venueType`/`visitType`
+ * forward into the class model and defaults every new sub-object. Idempotent
+ * by construction: nothing here overwrites a value that is already present,
+ * and no result is ever written back to the doc-store.
  */
 function normalize(s: SurveyRecord): SurveyRecord {
   if (!s.stage) s.stage = s.syncState === "synced" ? "completed" : "onsite";
+  // ---- Venue Assessments read-time migration (D132) ----
+  if (!s.venueClass) s.venueClass = venueClassFor(s.venueType);
+  if (!s.venueSubtype) s.venueSubtype = venueSubtypeFor(s.venueType);
+  if (!s.visitPurpose) s.visitPurpose = visitPurposeFor(s.visitType);
+  if (!s.templateRev) s.templateRev = TEMPLATE_REV;
+  if (!Array.isArray(s.linesets)) s.linesets = [];
+  if (typeof s.linesetsEnabled !== "boolean") {
+    s.linesetsEnabled = s.venueClass === "theatre" || s.venueClass === "auditorium";
+  }
+  if (!s.lifeSafety) s.lifeSafety = { deluge: "", smokeVent: "", adaNotes: "", egressNotes: "" };
+  if (!s.signoff) {
+    s.signoff = {
+      repName: "",
+      repSignedAt: "",
+      contactName: "",
+      contactSignedAt: "",
+      reviewerName: "",
+      reviewerRole: "",
+      reviewerSignedAt: "",
+    };
+  }
+  if (typeof s.assessmentEnabled !== "boolean") s.assessmentEnabled = false;
+  if (!s.assessment || !s.assessment.conditions) s.assessment = blankAssessment();
+  // Tier-3 systemsState folds forward into the new per-system PRESENT gates:
+  // a system marked installed:"yes" seeds that discipline's present array so
+  // the answer is not lost. Runs once — guarded by the array already existing.
+  SYSTEM_KEYS.forEach(({ key }) => {
+    const st = s.systemsState?.[key];
+    if (!st || st.installed !== "yes") return;
+    const d = (s.disciplines ||= {});
+    const branch = (d[key] ||= {});
+    if (!Array.isArray(branch.present)) branch.present = ["__migrated__"];
+  });
   return s;
 }
 
