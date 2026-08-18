@@ -33,6 +33,11 @@ import {
   TIER1_WIDTH_BY_CLASS, TIER1_DEPTH_BY_CLASS,
 } from "@/lib/stores/venue-classes";
 
+import {
+  LINESET_TYPES, LINESET_CONDS, blankLinesetRow, newLinesetId,
+  linesetTypeLabel, linesetCondLabel,
+} from "@/lib/stores/linesets";
+
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
 
@@ -3105,6 +3110,26 @@ ok(
   "no class re-invents a reserved dimension under a new key name"
 );
 ok(RESERVED.length === 17, "reserved key list is the spec's list");
+
+
+/* --- Venue Assessments: linesets --- */
+ok(LINESET_TYPES.map((t) => t.key).join("") === "DMRLBCSETO", "type legend is the sheet's D M R L B C S E T O");
+ok(LINESET_CONDS.map((c) => c.key).join("") === "GFPX", "condition legend is the sheet's G F P X");
+ok(linesetTypeLabel("D") === "Draw / main", "D is draw/main");
+ok(linesetTypeLabel("O") === "Open / spare", "O is open/spare");
+ok(linesetCondLabel("X") === "Missing / inoperable", "X is missing/inoperable");
+ok(linesetTypeLabel("Z" as never) === "", "unknown type code renders empty, never throws");
+ok(linesetCondLabel("Z" as never) === "", "unknown cond code renders empty, never throws");
+const lsr = blankLinesetRow(3);
+ok(lsr.pos === "3", "blank row carries its position as a string");
+ok(lsr.type === "" && lsr.cond === "", "blank row starts unrated and untyped");
+ok(
+  ["id","pos","distFromPL","setName","type","battenLength","liftLines","goods","finishedWH","arborLoad","trimLow","trimHigh","cond","notes"]
+    .every((k) => k in lsr),
+  "blank row has all 14 Theatre-superset columns"
+);
+ok(Object.keys(lsr).length === 14, `blank row has exactly 14 keys (got ${Object.keys(lsr).length})`);
+ok(newLinesetId() !== newLinesetId(), "lineset ids are unique");
 
 
 asyncChecks()
