@@ -1,5 +1,19 @@
-import type { SurveyRecord } from "@/lib/stores/surveys";
+import type { SurveyDraft, SurveyRecord } from "@/lib/stores/surveys";
 import { blankSystemsState } from "@/lib/stores/survey-intake";
+
+/**
+ * These fixtures are deliberately *pre*-Venue-Assessments (D132) documents:
+ * they carry no venueClass / venueSubtype / visitPurpose / linesets /
+ * assessment, exactly like every record written before that change. The
+ * read-time migration in surveys.ts normalize() supplies those fields on read,
+ * so the seed keeps exercising the migration path rather than short-circuiting
+ * it. Hence the partial draft type + the single cast in surveysSeed().
+ */
+type SeedSurvey = Partial<SurveyDraft> &
+  Pick<
+    SurveyRecord,
+    "id" | "owner" | "createdAt" | "updatedAt" | "syncState" | "syncedAt" | "rev"
+  >;
 
 /**
  * Survey seed — exact port of app/survey.js seedData() (rss_surveys_v4).
@@ -26,7 +40,7 @@ export function surveysSeed(): SurveyRecord[] {
     visitId: null,
   });
 
-  return [
+  const rows: SeedSurvey[] = [
     // 1) REQUESTED — office brief filled, awaiting scheduling
     {
       id: "FS-1055",
@@ -267,4 +281,5 @@ export function surveysSeed(): SurveyRecord[] {
       rev: 5,
     },
   ];
+  return rows as SurveyRecord[];
 }
