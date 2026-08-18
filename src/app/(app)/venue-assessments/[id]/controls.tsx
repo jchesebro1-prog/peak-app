@@ -49,6 +49,8 @@ import { FieldsSection } from "./sections/fields";
 import { CustVenueSection } from "./sections/custvenue";
 import { ConditionsSection } from "./sections/conditions";
 import { PhotosSection } from "./sections/photos";
+import { LinesetsSection } from "./sections/linesets";
+import { AssessmentSection } from "./sections/assessment";
 
 /* Serializable props from the server — the store is DB-backed and cannot be
  * imported into a client bundle, so its pure meta/option-lists are handed
@@ -64,7 +66,7 @@ const STEP_BY_ID: Record<string, number> = {
 };
 const BRIEF_IDS: Record<string, boolean> = { cust: true, visit: true, project: true, assign: true };
 const INTAKE_IDS: Record<string, boolean> = { tier1: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true };
-const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "photos", "notes"];
+const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "linesets", "assessment", "signoff", "photos", "notes"];
 const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", curtain: "dCurtain", lighting: "dLighting", av: "dAv" };
 
 /** Display label for a venue class — the derived `venueType` fallback. */
@@ -157,6 +159,12 @@ function toDraft(r: SurveyRecord): Draft {
     disciplinesActive: [...(r.disciplinesActive || [])],
     inventory: [...(r.inventory || [])],
     intakeReady: !!r.intakeReady,
+    linesetsEnabled: !!r.linesetsEnabled,
+    linesets: [...(r.linesets || [])],
+    assessmentEnabled: !!r.assessmentEnabled,
+    assessment: r.assessment,
+    signoff: r.signoff,
+    templateRev: r.templateRev,
     updatedAt: r.updatedAt || 0,
   };
 }
@@ -491,6 +499,9 @@ export default function SurveyEditor({
         group: "intake", step: 3, advanced: true, kind: "discipline", disc: g.key,
       });
     });
+    secs.push({ id: "linesets", title: "Lineset schedule", subtitle: "Physical positions — add when this venue needs an inventory", group: "intake", step: 3, advanced: true, kind: "linesets" });
+    secs.push({ id: "assessment", title: "Condition & needs assessment", subtitle: "Advisory assessment and recommendations", group: "field", step: 4, advanced: true, kind: "assessment" });
+    secs.push({ id: "signoff", title: "Sign-off", subtitle: `Venue Assessment Rev. ${draft.templateRev}`, group: "field", step: 4, advanced: true, kind: "signoff" });
     secs.push({ id: "photos", title: "Photos", subtitle: "Up to 8", group: "field", step: 4, kind: "photos" });
     secs.push({
       id: "notes", title: "Scope & notes", subtitle: "Free text", group: "field", step: 4, kind: "fields",
@@ -592,6 +603,11 @@ export default function SurveyEditor({
       disciplinesActive: draft.disciplinesActive,
       inventory: draft.inventory,
       intakeReady: draft.intakeReady,
+      linesetsEnabled: draft.linesetsEnabled,
+      linesets: draft.linesets,
+      assessmentEnabled: draft.assessmentEnabled,
+      assessment: draft.assessment,
+      signoff: draft.signoff,
       ...over,
     };
   }
@@ -1163,6 +1179,9 @@ export default function SurveyEditor({
                           </div>
                         );
                       })()}
+                      {sec.kind === "linesets" && <LinesetsSection enabled={draft.linesetsEnabled} rows={draft.linesets} onEnabled={(linesetsEnabled) => patchDraft({ linesetsEnabled })} onRows={(linesets) => patchDraft({ linesets })} />}
+                      {sec.kind === "assessment" && <AssessmentSection enabled={draft.assessmentEnabled} assessment={draft.assessment} onEnabled={(assessmentEnabled) => patchDraft({ assessmentEnabled })} onChange={(assessment) => patchDraft({ assessment })} />}
+                      {sec.kind === "signoff" && <div className="sv-grid">{([['repName', 'Peak representative'], ['repSignedAt', 'Representative date'], ['contactName', 'Site contact'], ['contactSignedAt', 'Contact date'], ['reviewerName', 'Technical reviewer (optional)'], ['reviewerRole', 'Reviewer role'], ['reviewerSignedAt', 'Reviewer date']] as const).map(([key, label]) => <label key={key} style={labelStyle}>{label}<input type={key.endsWith('At') ? 'date' : 'text'} value={draft.signoff[key]} onChange={(e) => patchDraft({ signoff: { ...draft.signoff, [key]: e.target.value } })} style={inpStyle} /></label>)}</div>}
                       {sec.kind === "conditions" && (
                         <ConditionsSection
                           draft={draft}

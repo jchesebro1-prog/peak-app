@@ -10,11 +10,7 @@ import {
 } from "@/lib/operations-work";
 import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS, battenLenFt, BATTEN_OVERHANG_FT } from "@/lib/design/venue-dims";
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
-<<<<<<< HEAD
 import { DEFAULT_SETTINGS, GO_LIVE_RESET_COLLECTIONS } from "@/db/seed-data";
-=======
-import { DEFAULT_SETTINGS, DEMO_COLLECTIONS } from "@/db/seed-data";
->>>>>>> 4be1233 (feat(assessments): venue class model — 6 classes, subtypes, per-class field sets, migration maps)
 import { DOC_TABLES } from "@/db/doc-tables";
 import { accentContrast } from "@/lib/color";
 import { emailFor, legacyEmailFor } from "@/lib/team";
@@ -30,11 +26,6 @@ import {
 } from "@/app/(app)/import/parse";
 // Pure (no store access, no DB) — see the note on catalogPatch itself.
 import { catalogPatch } from "@/app/(app)/import/registry";
-import {
-  VENUE_CLASSES, SUBTYPES, VISIT_PURPOSES, classMeasureFields,
-  venueClassFor, venueSubtypeFor, visitPurposeFor,
-  TIER1_WIDTH_BY_CLASS, TIER1_DEPTH_BY_CLASS,
-} from "@/lib/stores/venue-classes";
 import { venueDirectoryPage } from "@/lib/venue-directory-page";
 import {
   defaultInstallLeadWeeks,
@@ -61,27 +52,9 @@ process.env.PGLITE_PATH = path.join(specScratchDir, "pglite");
 process.env.SEED_DEMO = "true";
 const cleanupSpecDb = () => fs.rmSync(specScratchDir, { recursive: true, force: true });
 
-import {
-  VENUE_CLASSES, SUBTYPES, VISIT_PURPOSES, classMeasureFields,
-  venueClassFor, venueSubtypeFor, visitPurposeFor, venueArchetype,
-  TIER1_WIDTH_BY_CLASS, TIER1_DEPTH_BY_CLASS,
-} from "@/lib/stores/venue-classes";
-
-import {
-  LINESET_TYPES, LINESET_CONDS, blankLinesetRow, newLinesetId,
-  linesetTypeLabel, linesetCondLabel,
-} from "@/lib/stores/linesets";
-
-import {
-  CONDITION_CATEGORIES, CONDITION_RATINGS, BUDGET_TIERS, FINDING_BUCKETS,
-  EVENT_TYPES, EVENT_FREQUENCIES, STAFF_TIERS, GROWTH_GOALS,
-  blankAssessment, seedFindings, newFindingId,
-} from "@/lib/stores/assessment";
-
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
 
-<<<<<<< HEAD
 /* --- go-live reset coverage (#94) ---
  * Break caught: adding or using a no-seed document collection without making
  * the go-live reset clear it leaves demo-era rows pointing at re-minted IDs. */
@@ -362,21 +335,6 @@ ok(
   installSched.installStart === installSched.targetDate - 4 * 86400000 &&
     installSched.installEnd === installSched.targetDate + 2 * 86400000,
   "install window shifts with the completion target",
-=======
-/* --- Go-live reset coverage (PUNCHLIST #94) --- */
-const resetCollections = [...DEMO_COLLECTIONS].sort();
-const documentCollections = Object.keys(DOC_TABLES).sort();
-ok(
-  resetCollections.join("\n") === documentCollections.join("\n"),
-  "go-live reset covers every business-document collection"
-);
-ok(
-  resetCollections.includes("equipment_bookings") &&
-    resetCollections.includes("grid_sheets") &&
-    resetCollections.includes("tasks") &&
-    resetCollections.includes("notes"),
-  "go-live reset covers no-seed child collections"
->>>>>>> 4be1233 (feat(assessments): venue class model — 6 classes, subtypes, per-class field sets, migration maps)
 );
 
 /* --- BOM parsing --- */
@@ -2103,7 +2061,7 @@ import {
     assignedTo: "Mike Torres",
   });
   ok(v.length === 1 && v[0].ts === T2 && v[0].title === "Site visit — Site survey / measure", "#21: visit row at startAt");
-  ok(v[0].sub === "Scheduled" && v[0].href === "/venue-assessments" && v[0].by === "Mike Torres", "#21: visit sub is the stage label");
+  ok(v[0].sub === "Scheduled" && v[0].href === "/field-survey" && v[0].by === "Mike Torres", "#21: visit sub is the stage label");
   const vr = visitFeedRows({ id: "SV-5002", reason: "Punch walk", stage: "requested", startAt: null, createdAt: T1, assignedTo: "" });
   ok(vr[0].ts === T1 && vr[0].sub === "Requested", "#21: unscheduled request falls back to createdAt");
 
@@ -2142,7 +2100,7 @@ import {
   // surveys — one row at updatedAt with the stage label
   const s = surveyFeedRows({ id: "FS-1054", stage: "completed", venue: "Black box", updatedAt: T3 });
   ok(s.length === 1 && s[0].title === "Survey FS-1054 — Completed" && s[0].ts === T3, "#21: survey row titles id + stage label");
-  ok(s[0].href === "/venue-assessments?id=FS-1054", "#21: survey row deep-links the survey");
+  ok(s[0].href === "/field-survey?id=FS-1054", "#21: survey row deep-links the survey");
 
   // projects — stage-history rows (loader-passed short labels) + newest-first notes handled
   const pj = projectFeedRows(
@@ -3637,219 +3595,6 @@ async function asyncChecks(): Promise<void> {
     );
   }
 }
-
-/* --- Venue Assessments: class model --- */
-ok(VENUE_CLASSES.length === 6, `six venue classes (got ${VENUE_CLASSES.length})`);
-ok(
-  VENUE_CLASSES.map((c) => c.key).join(",") ===
-    "theatre,auditorium,church,gym,convention,other",
-  "venue classes in spec order"
-);
-ok(venueClassFor("Proscenium theater") === "theatre", "proscenium theater -> theatre");
-ok(venueClassFor("Black box") === "theatre", "black box -> theatre");
-ok(venueClassFor("Worship / sanctuary") === "church", "worship -> church");
-ok(venueClassFor("Gymnasium / gym stage") === "gym", "gym stage -> gym");
-ok(venueClassFor("Arena") === "theatre", "arena -> theatre");
-ok(venueClassFor("Multipurpose room") === "convention", "multipurpose -> convention");
-ok(venueClassFor("Outdoor / amphitheater") === "other", "outdoor -> other");
-ok(venueClassFor("") === "theatre", "empty venue type falls back to theatre");
-ok(venueClassFor("Nonsense") === "theatre", "unknown venue type falls back to theatre");
-ok(venueSubtypeFor("Black box") === "Black box / flexible", "black box carries its subtype");
-ok(venueSubtypeFor("Outdoor / amphitheater") === "", "outdoor has no subtype");
-ok(
-  VENUE_CLASSES.every((c) => SUBTYPES[c.key] !== undefined),
-  "every class has a subtype list (other may be empty)"
-);
-ok(
-  VENUE_CLASSES.filter((c) => c.key !== "other").every((c) => SUBTYPES[c.key].length > 0),
-  "every class but 'other' has at least one subtype"
-);
-ok(
-  Object.values(SUBTYPES).every((list) => list.every((s) => typeof s === "string" && s.length > 0)),
-  "no empty subtype strings"
-);
-ok(visitPurposeFor("Budgetary walk-through") === "Bid walk", "budgetary -> bid walk");
-ok(visitPurposeFor("Service call") === "Repair / service", "service call -> repair/service");
-ok(visitPurposeFor("Design verification") === "New system design", "design verification -> new system design");
-ok(visitPurposeFor("") === "", "empty visit type stays empty");
-ok(VISIT_PURPOSES.length === 6, `six visit purposes (got ${VISIT_PURPOSES.length})`);
-ok(VISIT_PURPOSES[0] === "New system design", "sheet order preserved");
-
-// Every class resolves to at least one width key and one depth key, and every
-// such key must actually exist in that class's field set. This is the hard
-// invariant that keeps the Tier-1 gate satisfiable on every class.
-ok(
-  VENUE_CLASSES.every((c) => {
-    const keys = classMeasureFields(c.key).map((f) => f.key);
-    const w = TIER1_WIDTH_BY_CLASS[c.key];
-    const d = TIER1_DEPTH_BY_CLASS[c.key];
-    return !!w && !!d && keys.includes(w) && keys.includes(d);
-  }),
-  "every class has a width+depth key present in its own field set"
-);
-ok(classMeasureFields("gym").some((f) => f.key === "courtLength"), "gym asks court length");
-ok(classMeasureFields("gym").some((f) => f.key === "dividerSpan"), "gym asks divider curtain span");
-ok(classMeasureFields("gym").some((f) => f.key === "bleacherType"), "gym asks bleacher type");
-ok(classMeasureFields("auditorium").some((f) => f.key === "pinRail"), "auditorium asks pin rail location");
-ok(classMeasureFields("auditorium").some((f) => f.key === "loadingGallery"), "auditorium asks loading gallery");
-ok(classMeasureFields("theatre").some((f) => f.key === "proW"), "theatre reuses the existing proW key");
-ok(classMeasureFields("church").some((f) => f.key === "centerAisleW"), "church reuses the existing centerAisleW key");
-ok(classMeasureFields("convention").some((f) => f.key === "rigPointCapacity"), "convention asks rigging point capacity");
-ok(
-  classMeasureFields("other").length > 0,
-  "the 'other' class has a generic field set, not an empty one"
-);
-
-// --- 3D preview archetype (regression guard) ---
-// venue-3d.tsx used to pick its archetype off the flat `venueType` string via
-// a ROOM_TYPES list. With the class model in place a new record's venueType is
-// a class LABEL ("Gym", "Church", …), which that list never matched — so every
-// new non-theatre assessment drew a proscenium. venueArchetype() replaces it.
-ok(venueArchetype("theatre", "Single proscenium") === "proscenium", "theatre + proscenium -> proscenium");
-ok(venueArchetype("theatre", "Studio theatre") === "proscenium", "theatre + studio -> proscenium");
-ok(venueArchetype("theatre", "Black box / flexible") === "room", "theatre + black box -> room");
-ok(venueArchetype("theatre", "Thrust / arena") === "room", "theatre + thrust/arena -> room");
-ok(venueArchetype("auditorium", "Single proscenium") === "proscenium", "auditorium + proscenium -> proscenium");
-ok(venueArchetype("auditorium", "Multi-purpose (cafetorium)") === "proscenium", "auditorium + cafetorium -> proscenium");
-ok(venueArchetype("auditorium", "Black box / flexible") === "room", "auditorium + black box -> room");
-ok(venueArchetype("auditorium", "Thrust / arena") === "room", "auditorium + thrust/arena -> room");
-ok(venueArchetype("church", "Sanctuary — traditional") === "room", "church -> room");
-ok(venueArchetype("gym", "Multi-purpose (has stage)") === "room", "gym -> room");
-ok(venueArchetype("convention", "Ballroom / multi-purpose") === "room", "convention -> room");
-ok(venueArchetype("other", "") === "room", "other -> room");
-ok(
-  VENUE_CLASSES.every((c) =>
-    (SUBTYPES[c.key].length ? SUBTYPES[c.key] : [""]).every((sub) => {
-      const a = venueArchetype(c.key, sub);
-      return a === "room" || a === "proscenium";
-    })
-  ),
-  "every class/subtype pair resolves to a known archetype"
-);
-
-// The assertion that actually proves no regression: for each of the seven
-// legacy venue types, the class-model archetype must equal what the old
-// ROOM_TYPES.includes() check produced.
-{
-  const LEGACY_ROOM_TYPES = [
-    "Black box", "Worship / sanctuary", "Gymnasium / gym stage",
-    "Arena", "Multipurpose room", "Outdoor / amphitheater",
-  ];
-  const LEGACY_VENUE_TYPES = ["Proscenium theater", ...LEGACY_ROOM_TYPES];
-  ok(LEGACY_VENUE_TYPES.length === 7, "seven legacy venue types under trace");
-  for (const legacy of LEGACY_VENUE_TYPES) {
-    const before = LEGACY_ROOM_TYPES.includes(legacy) ? "room" : "proscenium";
-    const after = venueArchetype(venueClassFor(legacy), venueSubtypeFor(legacy));
-    ok(after === before, `legacy "${legacy}" still renders ${before} (got ${after})`);
-  }
-}
-// No class may invent a key that duplicates an existing one under a new name.
-const RESERVED = ["proW","proH","stageDepth","gridH","wingSL","wingSR","houseH","seating","boothLoc","boothWD","apron","centerAisleW","platformWidth","platformDepth","roomWidth","roomDepth","pitDepth"];
-ok(
-  VENUE_CLASSES.every((c) =>
-    classMeasureFields(c.key).every((f) => !/^(prosceniumWidth|stageW|ceilingHeight|houseHeight)$/.test(f.key))
-  ),
-  "no class re-invents a reserved dimension under a new key name"
-);
-ok(RESERVED.length === 17, "reserved key list is the spec's list");
-
-
-/* --- Venue Assessments: linesets --- */
-ok(LINESET_TYPES.map((t) => t.key).join("") === "DMRLBCSETO", "type legend is the sheet's D M R L B C S E T O");
-ok(LINESET_CONDS.map((c) => c.key).join("") === "GFPX", "condition legend is the sheet's G F P X");
-ok(linesetTypeLabel("D") === "Draw / main", "D is draw/main");
-ok(linesetTypeLabel("O") === "Open / spare", "O is open/spare");
-ok(linesetCondLabel("X") === "Missing / inoperable", "X is missing/inoperable");
-ok(linesetTypeLabel("Z" as never) === "", "unknown type code renders empty, never throws");
-ok(linesetCondLabel("Z" as never) === "", "unknown cond code renders empty, never throws");
-const lsr = blankLinesetRow(3);
-ok(lsr.pos === "3", "blank row carries its position as a string");
-ok(lsr.type === "" && lsr.cond === "", "blank row starts unrated and untyped");
-ok(
-  ["id","pos","distFromPL","setName","type","battenLength","liftLines","goods","finishedWH","arborLoad","trimLow","trimHigh","cond","notes"]
-    .every((k) => k in lsr),
-  "blank row has all 14 Theatre-superset columns"
-);
-ok(Object.keys(lsr).length === 14, `blank row has exactly 14 keys (got ${Object.keys(lsr).length})`);
-ok(newLinesetId() !== newLinesetId(), "lineset ids are unique");
-
-
-/* --- Venue Assessments: assessment layer --- */
-ok(CONDITION_CATEGORIES.length === 10, `ten condition categories (got ${CONDITION_CATEGORIES.length})`);
-ok(
-  CONDITION_CATEGORIES.map((c) => c.key).join(",") ===
-    "rigging,curtains,motors,lighting.console,lighting.dimming,lighting.fixtures,av.console,av.speakers,av.mics,av.video",
-  "categories in brief order"
-);
-ok(
-  !CONDITION_CATEGORIES.some((c) => c.key.startsWith("electrical")),
-  "electrical is NOT a rated category — brief says outside Peak's lane"
-);
-ok(CONDITION_RATINGS.map((r) => r.key).join(",") === "good,monitor,replace", "Good/Monitor/Replace scale");
-ok(BUDGET_TIERS.length === 4, "four budget tiers");
-ok(BUDGET_TIERS[0].key === "u5k" && BUDGET_TIERS[3].key === "over100k", "budget tiers span <$5k to $100k+");
-ok(FINDING_BUCKETS.map((b) => b.key).join(",") === "now,soon,later", "Now/Soon/Later buckets");
-ok(EVENT_TYPES.length === 6, "six event types incl. other");
-ok(EVENT_FREQUENCIES.length === 4, "four frequencies");
-ok(STAFF_TIERS.length === 4, "four staff capability tiers");
-ok(GROWTH_GOALS.length === 5, "five growth goals incl. other");
-
-const a0 = blankAssessment();
-ok(Object.keys(a0.conditions).length === 10, "blank assessment has all ten categories");
-ok(
-  CONDITION_CATEGORIES.every((c) => a0.conditions[c.key].rating === ""),
-  "blank assessment starts every category unrated"
-);
-ok(a0.findings.length === 0, "blank assessment has no findings");
-ok(a0.electricalNotes === "", "blank assessment has an electrical notes field");
-
-// good is never flagged; monitor and replace each seed one line
-const a1 = blankAssessment();
-a1.conditions.rigging.rating = "good";
-a1.conditions.curtains.rating = "monitor";
-a1.conditions.curtains.notes = "Main shows daylight at the seams";
-a1.conditions["av.mics"].rating = "replace";
-const r1 = seedFindings(a1);
-ok(r1.seeded.length === 2, `two flagged categories seed two findings (got ${r1.seeded.length})`);
-ok(!r1.seeded.some((f) => f.categories.includes("rigging")), "a 'good' category never seeds a finding");
-const curtainFinding = r1.seeded.find((f) => f.categories.includes("curtains"));
-ok(!!curtainFinding, "curtains seeded a finding");
-ok(curtainFinding!.title === "Curtains / Soft Goods", "seeded title is the category label");
-ok(curtainFinding!.detail === "Main shows daylight at the seams", "seeded detail is the category notes");
-ok(curtainFinding!.bucket === "", "seeded finding starts with no bucket — the assessor decides");
-ok(curtainFinding!.budgetTier === "", "seeded finding starts with no budget tier");
-ok(r1.unresolved.length === 0, "freshly seeded findings leave nothing unresolved");
-
-// already-covered categories are not re-seeded, and merging is honoured
-const a2 = blankAssessment();
-a2.conditions["lighting.console"].rating = "replace";
-a2.conditions["lighting.dimming"].rating = "replace";
-a2.findings = [{
-  id: "f1", categories: ["lighting.console", "lighting.dimming"], bucket: "now",
-  title: "Lighting system replacement", detail: "", budgetTier: "25to100k", photoIds: [],
-}];
-const r2 = seedFindings(a2);
-ok(r2.seeded.length === 0, "a merged finding suppresses re-seeding of both its categories");
-ok(r2.unresolved.length === 0, "a merged finding leaves nothing unresolved");
-
-// a flagged category with no covering finding is reported as a gap
-const a3 = blankAssessment();
-a3.conditions.motors.rating = "monitor";
-a3.conditions.curtains.rating = "replace";
-a3.findings = [{
-  id: "f9", categories: ["curtains"], bucket: "soon",
-  title: "Curtain replacement", detail: "", budgetTier: "5to25k", photoIds: [],
-}];
-ok(seedFindings(a3).unresolved.join(",") === "motors", "an uncovered flagged category is unresolved");
-ok(seedFindings(a3).seeded.length === 0, "no silent re-seeding once the assessor is driving");
-
-// seedFindings must not mutate its input
-const a4 = blankAssessment();
-a4.conditions.rigging.rating = "replace";
-seedFindings(a4);
-ok(a4.findings.length === 0, "seedFindings is pure — it never mutates the assessment");
-ok(newFindingId() !== newFindingId(), "finding ids are unique");
-
 
 asyncChecks()
   .then(() => {

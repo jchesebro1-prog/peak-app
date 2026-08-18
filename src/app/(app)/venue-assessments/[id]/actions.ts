@@ -87,6 +87,11 @@ export type SurveyPatch = Partial<
     | "whoDecides"
     | "targetInstallWindow"
     | "lifeSafety"
+    | "linesetsEnabled"
+    | "linesets"
+    | "assessmentEnabled"
+    | "assessment"
+    | "signoff"
     | "leadId"
     | "visitId"
   >

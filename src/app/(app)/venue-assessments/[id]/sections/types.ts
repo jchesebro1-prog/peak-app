@@ -11,6 +11,8 @@ import type {
 } from "@/lib/stores/surveys";
 import type { VenueClass } from "@/lib/stores/venue-classes";
 import type { DisciplineData, DisciplineKey, InventoryRow, SystemState } from "@/lib/stores/survey-intake";
+import type { LinesetRow } from "@/lib/stores/linesets";
+import type { AssessmentData } from "@/lib/stores/assessment";
 
 /* ============================================================
  * Serializable props from the server. The store is DB-backed and cannot be
@@ -105,6 +107,12 @@ export type Draft = {
   disciplinesActive: string[];
   inventory: InventoryRow[];
   intakeReady: boolean;
+  linesetsEnabled: boolean;
+  linesets: LinesetRow[];
+  assessmentEnabled: boolean;
+  assessment: AssessmentData;
+  signoff: { repName: string; repSignedAt: string; contactName: string; contactSignedAt: string; reviewerName: string; reviewerRole: string; reviewerSignedAt: string };
+  templateRev: string;
   updatedAt: number;
 };
 
@@ -139,4 +147,7 @@ export type SectionDef = {
   | { kind: "tier1" }
   | { kind: "systems" }
   | { kind: "discipline"; disc: DisciplineKey }
+  | { kind: "linesets" }
+  | { kind: "assessment" }
+  | { kind: "signoff" }
 );
