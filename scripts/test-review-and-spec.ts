@@ -38,6 +38,12 @@ import {
   linesetTypeLabel, linesetCondLabel,
 } from "@/lib/stores/linesets";
 
+import {
+  CONDITION_CATEGORIES, CONDITION_RATINGS, BUDGET_TIERS, FINDING_BUCKETS,
+  EVENT_TYPES, EVENT_FREQUENCIES, STAFF_TIERS, GROWTH_GOALS,
+  blankAssessment, seedFindings, newFindingId,
+} from "@/lib/stores/assessment";
+
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
 
@@ -3130,6 +3136,83 @@ ok(
 );
 ok(Object.keys(lsr).length === 14, `blank row has exactly 14 keys (got ${Object.keys(lsr).length})`);
 ok(newLinesetId() !== newLinesetId(), "lineset ids are unique");
+
+
+/* --- Venue Assessments: assessment layer --- */
+ok(CONDITION_CATEGORIES.length === 10, `ten condition categories (got ${CONDITION_CATEGORIES.length})`);
+ok(
+  CONDITION_CATEGORIES.map((c) => c.key).join(",") ===
+    "rigging,curtains,motors,lighting.console,lighting.dimming,lighting.fixtures,av.console,av.speakers,av.mics,av.video",
+  "categories in brief order"
+);
+ok(
+  !CONDITION_CATEGORIES.some((c) => c.key.startsWith("electrical")),
+  "electrical is NOT a rated category — brief says outside Peak's lane"
+);
+ok(CONDITION_RATINGS.map((r) => r.key).join(",") === "good,monitor,replace", "Good/Monitor/Replace scale");
+ok(BUDGET_TIERS.length === 4, "four budget tiers");
+ok(BUDGET_TIERS[0].key === "u5k" && BUDGET_TIERS[3].key === "over100k", "budget tiers span <$5k to $100k+");
+ok(FINDING_BUCKETS.map((b) => b.key).join(",") === "now,soon,later", "Now/Soon/Later buckets");
+ok(EVENT_TYPES.length === 6, "six event types incl. other");
+ok(EVENT_FREQUENCIES.length === 4, "four frequencies");
+ok(STAFF_TIERS.length === 4, "four staff capability tiers");
+ok(GROWTH_GOALS.length === 5, "five growth goals incl. other");
+
+const a0 = blankAssessment();
+ok(Object.keys(a0.conditions).length === 10, "blank assessment has all ten categories");
+ok(
+  CONDITION_CATEGORIES.every((c) => a0.conditions[c.key].rating === ""),
+  "blank assessment starts every category unrated"
+);
+ok(a0.findings.length === 0, "blank assessment has no findings");
+ok(a0.electricalNotes === "", "blank assessment has an electrical notes field");
+
+// good is never flagged; monitor and replace each seed one line
+const a1 = blankAssessment();
+a1.conditions.rigging.rating = "good";
+a1.conditions.curtains.rating = "monitor";
+a1.conditions.curtains.notes = "Main shows daylight at the seams";
+a1.conditions["av.mics"].rating = "replace";
+const r1 = seedFindings(a1);
+ok(r1.seeded.length === 2, `two flagged categories seed two findings (got ${r1.seeded.length})`);
+ok(!r1.seeded.some((f) => f.categories.includes("rigging")), "a 'good' category never seeds a finding");
+const curtainFinding = r1.seeded.find((f) => f.categories.includes("curtains"));
+ok(!!curtainFinding, "curtains seeded a finding");
+ok(curtainFinding!.title === "Curtains / Soft Goods", "seeded title is the category label");
+ok(curtainFinding!.detail === "Main shows daylight at the seams", "seeded detail is the category notes");
+ok(curtainFinding!.bucket === "", "seeded finding starts with no bucket — the assessor decides");
+ok(curtainFinding!.budgetTier === "", "seeded finding starts with no budget tier");
+ok(r1.unresolved.length === 0, "freshly seeded findings leave nothing unresolved");
+
+// already-covered categories are not re-seeded, and merging is honoured
+const a2 = blankAssessment();
+a2.conditions["lighting.console"].rating = "replace";
+a2.conditions["lighting.dimming"].rating = "replace";
+a2.findings = [{
+  id: "f1", categories: ["lighting.console", "lighting.dimming"], bucket: "now",
+  title: "Lighting system replacement", detail: "", budgetTier: "25to100k", photoIds: [],
+}];
+const r2 = seedFindings(a2);
+ok(r2.seeded.length === 0, "a merged finding suppresses re-seeding of both its categories");
+ok(r2.unresolved.length === 0, "a merged finding leaves nothing unresolved");
+
+// a flagged category with no covering finding is reported as a gap
+const a3 = blankAssessment();
+a3.conditions.motors.rating = "monitor";
+a3.conditions.curtains.rating = "replace";
+a3.findings = [{
+  id: "f9", categories: ["curtains"], bucket: "soon",
+  title: "Curtain replacement", detail: "", budgetTier: "5to25k", photoIds: [],
+}];
+ok(seedFindings(a3).unresolved.join(",") === "motors", "an uncovered flagged category is unresolved");
+ok(seedFindings(a3).seeded.length === 0, "no silent re-seeding once the assessor is driving");
+
+// seedFindings must not mutate its input
+const a4 = blankAssessment();
+a4.conditions.rigging.rating = "replace";
+seedFindings(a4);
+ok(a4.findings.length === 0, "seedFindings is pure — it never mutates the assessment");
+ok(newFindingId() !== newFindingId(), "finding ids are unique");
 
 
 asyncChecks()
