@@ -931,6 +931,7 @@ export default function SurveyEditor({
           <button onClick={onDelete} disabled={saving} style={{ flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#b4543a", background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 9, padding: "10px 14px", cursor: saving ? "default" : "pointer", minHeight: 42 }}>
             Delete
           </button>
+          <a href={`/api/venue-assessments/${record.id}/sheet`} target="_blank" rel="noreferrer" style={{ flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 9, padding: "10px 14px", textDecoration: "none", minHeight: 42, boxSizing: "border-box" }}>Print sheet</a>
           <button onClick={onSave} disabled={saving} style={{ flexShrink: 0, fontSize: 13.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", borderRadius: 9, padding: "11px 20px", cursor: saving ? "default" : "pointer", minHeight: 42, opacity: saving ? 0.7 : 1 }}>
             {saving ? "Saving…" : "Save changes"}
           </button>
@@ -1180,7 +1181,7 @@ export default function SurveyEditor({
                         );
                       })()}
                       {sec.kind === "linesets" && <LinesetsSection enabled={draft.linesetsEnabled} rows={draft.linesets} onEnabled={(linesetsEnabled) => patchDraft({ linesetsEnabled })} onRows={(linesets) => patchDraft({ linesets })} />}
-                      {sec.kind === "assessment" && <AssessmentSection enabled={draft.assessmentEnabled} assessment={draft.assessment} photos={draft.photos} onEnabled={(assessmentEnabled) => patchDraft({ assessmentEnabled })} onChange={(assessment) => patchDraft({ assessment })} />}
+                      {sec.kind === "assessment" && <AssessmentSection enabled={draft.assessmentEnabled} assessment={draft.assessment} photos={draft.photos} autoCerts={meta.autoCerts} onEnabled={(assessmentEnabled) => patchDraft({ assessmentEnabled })} onChange={(assessment) => patchDraft({ assessment })} />}
                       {sec.kind === "signoff" && <div className="sv-grid">{([['repName', 'Peak representative'], ['repSignedAt', 'Representative date'], ['contactName', 'Site contact'], ['contactSignedAt', 'Contact date'], ['reviewerName', 'Technical reviewer (optional)'], ['reviewerRole', 'Reviewer role'], ['reviewerSignedAt', 'Reviewer date']] as const).map(([key, label]) => <label key={key} style={labelStyle}>{label}<input type={key.endsWith('At') ? 'date' : 'text'} value={draft.signoff[key]} onChange={(e) => patchDraft({ signoff: { ...draft.signoff, [key]: e.target.value } })} style={inpStyle} /></label>)}</div>}
                       {sec.kind === "conditions" && (
                         <ConditionsSection

@@ -15,6 +15,7 @@ import { mergedCatalog } from "@/lib/stores/survey-intake";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { activeUsers } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
+import { resolveCerts } from "@/lib/venue-assessment-certs";
 import SurveyEditor, { type EditorMeta, type EditorCustomer } from "./controls";
 
 export const metadata = { title: "Site survey — Quartzite-6" };
@@ -33,6 +34,7 @@ export default async function SurveyEditorPage({
     getSettings(),
   ]);
   if (!rec) notFound();
+  const autoCerts = await resolveCerts(rec.customerId, rec.locationId);
 
   const editorCustomers: EditorCustomer[] = customers.map((cst) => {
     const contacts = cst.contacts || [];
@@ -66,6 +68,7 @@ export default async function SurveyEditorPage({
     stageMeta: STAGE_META,
     measureGroups: MEASURE_GROUPS,
     intakeCatalog: mergedCatalog(settings.intakeCatalog),
+    autoCerts,
   };
 
   const roster = users.map((u) => u.name);

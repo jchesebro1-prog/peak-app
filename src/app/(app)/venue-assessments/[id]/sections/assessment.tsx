@@ -1,9 +1,9 @@
 "use client";
 
-import { BUDGET_TIERS, CONDITION_CATEGORIES, CONDITION_RATINGS, EVENT_FREQUENCIES, EVENT_TYPES, FINDING_BUCKETS, GROWTH_GOALS, STAFF_TIERS, newFindingId, seedFindings, type AssessmentData, type ConditionCategory, type Finding } from "@/lib/stores/assessment";
+import { BUDGET_TIERS, CONDITION_CATEGORIES, CONDITION_RATINGS, EVENT_FREQUENCIES, EVENT_TYPES, FINDING_BUCKETS, GROWTH_GOALS, STAFF_TIERS, newFindingId, seedFindings, type AssessmentData, type ConditionCategory, type Finding, type InspectionRef } from "@/lib/stores/assessment";
 import type { SurveyPhoto } from "@/lib/stores/surveys";
 
-export function AssessmentSection({ enabled, assessment, photos, onEnabled, onChange }: { enabled: boolean; assessment: AssessmentData; photos: SurveyPhoto[]; onEnabled: (value: boolean) => void; onChange: (value: AssessmentData) => void }) {
+export function AssessmentSection({ enabled, assessment, photos, autoCerts = {}, onEnabled, onChange }: { enabled: boolean; assessment: AssessmentData; photos: SurveyPhoto[]; autoCerts?: Record<string, InspectionRef>; onEnabled: (value: boolean) => void; onChange: (value: AssessmentData) => void }) {
   const patch = (fn: (a: AssessmentData) => AssessmentData) => onChange(fn(assessment));
   const toggle = (list: string[], value: string) => list.includes(value) ? list.filter((item) => item !== value) : list.concat(value);
   const findings = seedFindings(assessment);
