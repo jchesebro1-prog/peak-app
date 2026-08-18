@@ -29,7 +29,7 @@ import { catalogPatch } from "@/app/(app)/import/registry";
 
 import {
   VENUE_CLASSES, SUBTYPES, VISIT_PURPOSES, classMeasureFields,
-  venueClassFor, venueSubtypeFor, visitPurposeFor,
+  venueClassFor, venueSubtypeFor, visitPurposeFor, venueArchetype,
   TIER1_WIDTH_BY_CLASS, TIER1_DEPTH_BY_CLASS,
 } from "@/lib/stores/venue-classes";
 
@@ -3169,6 +3169,50 @@ ok(
   classMeasureFields("other").length > 0,
   "the 'other' class has a generic field set, not an empty one"
 );
+
+// --- 3D preview archetype (regression guard) ---
+// venue-3d.tsx used to pick its archetype off the flat `venueType` string via
+// a ROOM_TYPES list. With the class model in place a new record's venueType is
+// a class LABEL ("Gym", "Church", …), which that list never matched — so every
+// new non-theatre assessment drew a proscenium. venueArchetype() replaces it.
+ok(venueArchetype("theatre", "Single proscenium") === "proscenium", "theatre + proscenium -> proscenium");
+ok(venueArchetype("theatre", "Studio theatre") === "proscenium", "theatre + studio -> proscenium");
+ok(venueArchetype("theatre", "Black box / flexible") === "room", "theatre + black box -> room");
+ok(venueArchetype("theatre", "Thrust / arena") === "room", "theatre + thrust/arena -> room");
+ok(venueArchetype("auditorium", "Single proscenium") === "proscenium", "auditorium + proscenium -> proscenium");
+ok(venueArchetype("auditorium", "Multi-purpose (cafetorium)") === "proscenium", "auditorium + cafetorium -> proscenium");
+ok(venueArchetype("auditorium", "Black box / flexible") === "room", "auditorium + black box -> room");
+ok(venueArchetype("auditorium", "Thrust / arena") === "room", "auditorium + thrust/arena -> room");
+ok(venueArchetype("church", "Sanctuary — traditional") === "room", "church -> room");
+ok(venueArchetype("gym", "Multi-purpose (has stage)") === "room", "gym -> room");
+ok(venueArchetype("convention", "Ballroom / multi-purpose") === "room", "convention -> room");
+ok(venueArchetype("other", "") === "room", "other -> room");
+ok(
+  VENUE_CLASSES.every((c) =>
+    (SUBTYPES[c.key].length ? SUBTYPES[c.key] : [""]).every((sub) => {
+      const a = venueArchetype(c.key, sub);
+      return a === "room" || a === "proscenium";
+    })
+  ),
+  "every class/subtype pair resolves to a known archetype"
+);
+
+// The assertion that actually proves no regression: for each of the seven
+// legacy venue types, the class-model archetype must equal what the old
+// ROOM_TYPES.includes() check produced.
+{
+  const LEGACY_ROOM_TYPES = [
+    "Black box", "Worship / sanctuary", "Gymnasium / gym stage",
+    "Arena", "Multipurpose room", "Outdoor / amphitheater",
+  ];
+  const LEGACY_VENUE_TYPES = ["Proscenium theater", ...LEGACY_ROOM_TYPES];
+  ok(LEGACY_VENUE_TYPES.length === 7, "seven legacy venue types under trace");
+  for (const legacy of LEGACY_VENUE_TYPES) {
+    const before = LEGACY_ROOM_TYPES.includes(legacy) ? "room" : "proscenium";
+    const after = venueArchetype(venueClassFor(legacy), venueSubtypeFor(legacy));
+    ok(after === before, `legacy "${legacy}" still renders ${before} (got ${after})`);
+  }
+}
 // No class may invent a key that duplicates an existing one under a new name.
 const RESERVED = ["proW","proH","stageDepth","gridH","wingSL","wingSR","houseH","seating","boothLoc","boothWD","apron","centerAisleW","platformWidth","platformDepth","roomWidth","roomDepth","pitDepth"];
 ok(

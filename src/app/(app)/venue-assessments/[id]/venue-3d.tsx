@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { venueArchetype, type VenueClass } from "@/lib/stores/venue-classes";
+
 /**
  * 3D venue preview (IDEAS #49 Phase 1) — a parametric model of the space
  * built straight from the survey's measurement strings. Every dimension the
@@ -16,7 +18,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 type Measurements = Record<string, string | boolean>;
 
 interface Props {
-  venueType: string;
+  venueClass: VenueClass;
+  venueSubtype: string;
   measurements: Measurements;
 }
 
@@ -78,15 +81,13 @@ interface VenueModel {
   legend: LegendEntry[];
 }
 
-const ROOM_TYPES = ["Black box", "Worship / sanctuary", "Gymnasium / gym stage", "Arena", "Multipurpose room", "Outdoor / amphitheater"];
-
 function fmtFt(v: number): string {
   const ft = Math.floor(v);
   const inches = Math.round((v - ft) * 12);
   return inches > 0 ? `${ft}'-${inches}"` : `${ft}'`;
 }
 
-function buildModel(venueType: string, m: Measurements): VenueModel {
+function buildModel(cls: VenueClass, subtype: string, m: Measurements): VenueModel {
   const legend: LegendEntry[] = [];
   const ft = (keys: string[], label: string, fallback: number): number => {
     for (const k of keys) {
@@ -100,7 +101,7 @@ function buildModel(venueType: string, m: Measurements): VenueModel {
     return fallback;
   };
 
-  const archetype = ROOM_TYPES.includes(venueType) ? "room" : "proscenium";
+  const archetype = venueArchetype(cls, subtype);
 
   let proW: number, proH: number, stageW: number, stageD: number, stageH: number, apron: number, gridH: number;
   let houseW: number, houseD: number, houseH: number;
@@ -179,16 +180,16 @@ const MEASURE_KEYS = [
   "catwalkCount", "catwalkH", "catwalk1Dist", "boothLoc", "boothWD", "boothDist", "doorCount", "doorMainWH",
 ];
 
-export default function Venue3D({ venueType, measurements }: Props) {
+export default function Venue3D({ venueClass, venueSubtype, measurements }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Only rebuild when a dimension the model actually uses changes.
   const modelKey = useMemo(
-    () => venueType + "|" + MEASURE_KEYS.map((k) => String(measurements[k] ?? "")).join("|"),
-    [venueType, measurements]
+    () => venueClass + "|" + venueSubtype + "|" + MEASURE_KEYS.map((k) => String(measurements[k] ?? "")).join("|"),
+    [venueClass, venueSubtype, measurements]
   );
-  const model = useMemo(() => buildModel(venueType, measurements), [modelKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const model = useMemo(() => buildModel(venueClass, venueSubtype, measurements), [modelKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const host = hostRef.current;
