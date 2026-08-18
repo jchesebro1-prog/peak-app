@@ -235,3 +235,13 @@ export const TIER1_DEPTH_BY_CLASS: Record<VenueClass, string> = {
   theatre: "stageDepth", auditorium: "stageDepth", church: "sanctuaryLength",
   gym: "courtLength", convention: "roomDepth", other: "roomDepth",
 };
+
+/** Which parametric 3D archetype the `/venue-assessments/[id]` preview builds.
+ *  Behaviour-preserving port of venue-3d.tsx's old flat ROOM_TYPES check: the
+ *  stage-and-house model is only right for a fixed proscenium, so every class
+ *  without one — and the two open-format theatre/auditorium subtypes — draws
+ *  the single-room model instead. */
+export function venueArchetype(cls: VenueClass, subtype: string): "room" | "proscenium" {
+  if (cls !== "theatre" && cls !== "auditorium") return "room";
+  return subtype === "Black box / flexible" || subtype === "Thrust / arena" ? "room" : "proscenium";
+}

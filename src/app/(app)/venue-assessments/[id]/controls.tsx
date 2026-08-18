@@ -1174,7 +1174,7 @@ export default function SurveyEditor({
                           chipStyle={chipStyle}
                         />
                       )}
-                      {sec.kind === "viz3d" && <Venue3D venueType={draft.venueType} measurements={draft.measurements} />}
+                      {sec.kind === "viz3d" && <Venue3D venueClass={draft.venueClass} venueSubtype={draft.venueSubtype} measurements={draft.measurements} />}
                       {sec.kind === "photos" && (
                         <PhotosSection draft={draft} onPhotos={onPhotos} removePhoto={removePhoto} />
                       )}
