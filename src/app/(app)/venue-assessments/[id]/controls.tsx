@@ -19,12 +19,13 @@ import {
 import {
   DISCIPLINE_GROUPS,
   INTAKE_STATUS_META,
-  SYSTEM_KEYS,
   blankSystemsState,
   intakeStatus,
   newInventoryId,
   tier1Items,
   tier1Complete,
+  presentOptionsFor,
+  visibleFields,
   type DisciplineKey,
   type InventoryRow,
   type SystemState,
@@ -58,12 +59,12 @@ const STEP_LABELS = ["Brief", "Site & access", "Measurements", "Site intake", "D
 const STEP_BY_ID: Record<string, number> = {
   cust: 0, visit: 0, project: 0, assign: 0, site: 1, conditions: 1, lifeSafety: 1,
   mQuick: 2, mLayout: 2, mSection: 2, mBeams: 2, mFOH: 2, mHouse: 2, m3d: 2,
-  tier1: 3, systems: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3,
+  tier1: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3,
   photos: 4, notes: 4,
 };
 const BRIEF_IDS: Record<string, boolean> = { cust: true, visit: true, project: true, assign: true };
-const INTAKE_IDS: Record<string, boolean> = { tier1: true, systems: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true };
-const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "systems", "dRigging", "dCurtain", "dLighting", "dAv", "photos", "notes"];
+const INTAKE_IDS: Record<string, boolean> = { tier1: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true };
+const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "photos", "notes"];
 const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", curtain: "dCurtain", lighting: "dLighting", av: "dAv" };
 
 /** Display label for a venue class — the derived `venueType` fallback. */
@@ -232,6 +233,16 @@ export default function SurveyEditor({
     if (i >= 0) set.splice(i, 1);
     else set.push(opt);
     setDisc(disc, "scope", set);
+  };
+  const toggleDiscPresent = (disc: DisciplineKey, opt: string) => {
+    const cur = dv(disc, "present");
+    let next = Array.isArray(cur) ? cur.slice() : [];
+    if (opt === "None") next = next.includes("None") ? [] : ["None"];
+    else {
+      next = next.filter((item) => item !== "None");
+      next = next.includes(opt) ? next.filter((item) => item !== opt) : next.concat(opt);
+    }
+    setDisc(disc, "present", next);
   };
   const setSystem = (key: string, patch: Partial<SystemState>) =>
     patchDraft({
@@ -473,10 +484,6 @@ export default function SurveyEditor({
     secs.push({
       id: "tier1", title: "Kill questions", subtitle: "Required before the discipline intakes unlock",
       group: "intake", step: 3, kind: "tier1",
-    });
-    secs.push({
-      id: "systems", title: "Existing systems", subtitle: "What's installed today — yes / no, then describe",
-      group: "intake", step: 3, kind: "systems",
     });
     DISCIPLINE_GROUPS.forEach((g) => {
       secs.push({
@@ -1117,35 +1124,24 @@ export default function SurveyEditor({
                           </div>
                         </div>
                       )}
-                      {sec.kind === "systems" && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                          {SYSTEM_KEYS.map((s) => {
-                            const st = draft.systemsState[s.key] || { installed: "", desc: "" };
-                            return (
-                              <div key={s.key} style={{ border: "1px solid #e4e7ec", borderRadius: 10, padding: "11px 13px", background: "#fff" }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                                  <span style={{ fontSize: 14, fontWeight: 500, color: "#3a3f4a", flex: 1, minWidth: 120 }}>{s.label}</span>
-                                  <div style={{ display: "flex", gap: 7 }}>
-                                    <button onClick={() => setSystem(s.key, { installed: st.installed === "yes" ? "" : "yes" })} style={{ ...toggleBtn(st.installed === "yes"), flex: "none", padding: "8px 16px", minHeight: 38 }}>Yes</button>
-                                    <button onClick={() => setSystem(s.key, { installed: st.installed === "no" ? "" : "no" })} style={{ ...toggleBtn(st.installed === "no"), flex: "none", padding: "8px 16px", minHeight: 38 }}>No</button>
-                                  </div>
-                                </div>
-                                {st.installed === "yes" && (
-                                  <input value={st.desc} onChange={(e) => setSystem(s.key, { desc: e.target.value })} placeholder={"Describe — " + s.hint} style={{ ...inpStyle, marginTop: 9, padding: "10px 12px" }} />
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
                       {sec.kind === "discipline" && (() => {
                         const g = DISCIPLINE_GROUPS.find((x) => x.key === sec.disc);
                         if (!g) return null;
                         const scope = dv(g.key, "scope");
                         const scopeSet = Array.isArray(scope) ? scope : [];
+                        const present = dv(g.key, "present");
+                        const presentSet = Array.isArray(present) ? present : [];
+                        const onlyNone = presentSet.length === 1 && presentSet[0] === "None";
                         return (
                           <div>
-                            <div className="sv-grid">{g.fields.map((f) => renderDiscField(g.key, f))}</div>
+                            <label style={labelStyle}>PRESENT</label>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                              {presentOptionsFor(g.key, draft.venueClass).map((option) => (
+                                <button key={option} onClick={() => toggleDiscPresent(g.key, option)} style={chipStyle(presentSet.includes(option))}>{option}</button>
+                              ))}
+                            </div>
+                            {!onlyNone && <>
+                            <div className="sv-grid" style={{ marginTop: 14 }}>{visibleFields(g, draft.venueClass).map((f) => renderDiscField(g.key, f))}</div>
                             <div style={{ marginTop: 14 }}>
                               <label style={labelStyle}>{g.scopeLabel}</label>
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -1163,6 +1159,7 @@ export default function SurveyEditor({
                               <label style={labelStyle}>Notes</label>
                               <textarea value={String(dv(g.key, "notes") || "")} onChange={(e) => setDisc(g.key, "notes", e.target.value)} style={taStyle} />
                             </div>
+                            </>}
                           </div>
                         );
                       })()}

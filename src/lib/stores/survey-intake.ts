@@ -14,6 +14,7 @@
  */
 
 import type { MeasureField } from "./surveys";
+import type { VenueClass } from "./venue-classes";
 
 /* ---- Tier 1: the kill questions ----
  * Venue name, contact name/email/phone, stage width, stage depth.
@@ -103,11 +104,17 @@ export type DisciplineKey = "rigging" | "curtain" | "lighting" | "av";
 /** One discipline's captured data: field values + a scope-of-interest list. */
 export type DisciplineData = Record<string, string | boolean | string[]>;
 
+export interface SystemField extends MeasureField {
+  visibleFor?: VenueClass[];
+}
+
 export interface DisciplineGroup {
   key: DisciplineKey;
   title: string;
   subtitle: string;
-  fields: MeasureField[]; // reuses the editor's field renderer shapes
+  fields: SystemField[]; // reuses the editor's field renderer shapes
+  presentOptions: string[];
+  presentOptionsByClass: Partial<Record<VenueClass, string[]>>;
   scopeLabel: string;
   scopeOptions: string[];
   /** inventory sections captured for this discipline (Lighting/AV only in v1) */
@@ -119,6 +126,8 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
     key: "rigging",
     title: "Rigging intake",
     subtitle: "Load calculations, grid analysis, hoist evaluation",
+    presentOptions: ["Grid", "Dead-hung pipe", "Counterweight", "Motorized hoists", "None"],
+    presentOptionsByClass: {},
     fields: [
       { key: "gridPresent", label: "Existing grid", type: "check" },
       { key: "gridType", label: "Grid construction & spacing" },
@@ -129,6 +138,18 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
       { key: "chainHoists", label: "Chain hoists (brand, capacity, age)" },
       { key: "deckLoad", label: "Deck load capacity (lbs/sqft)" },
       { key: "battenCount", label: "Batten count" },
+      { key: "flyType", label: "Fly system type", visibleFor: ["auditorium"] },
+      { key: "linesetCount", label: "Lineset count", visibleFor: ["auditorium"] },
+      { key: "battenLength", label: "Batten length", visibleFor: ["auditorium"] },
+      { key: "arborCapacity", label: "Arbor / motor capacity", visibleFor: ["auditorium"] },
+      { key: "gridBlockCondition", label: "Grid block condition", visibleFor: ["auditorium"] },
+      { key: "hempLineCondition", label: "Hemp line condition", visibleFor: ["auditorium"] },
+      { key: "motorControl", label: "Motor control", visibleFor: ["auditorium"] },
+      { key: "loadingGalleryNotes", label: "Loading gallery notes", visibleFor: ["auditorium"] },
+      { key: "fireCurtainPresent", label: "Fire curtain present", visibleFor: ["auditorium"] },
+      { key: "fireCurtainRating", label: "Fire curtain rating", visibleFor: ["auditorium"] },
+      { key: "releaseMechanism", label: "Release mechanism", visibleFor: ["auditorium"] },
+      { key: "fireCurtainLastInspection", label: "Fire curtain last inspection", visibleFor: ["auditorium"] },
     ],
     scopeLabel: "Rigging scope of interest",
     scopeOptions: ["New grid", "Grid refurbish", "Add hoists", "Capacity upgrade", "Inspection only"],
@@ -138,6 +159,8 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
     key: "curtain",
     title: "Curtain intake",
     subtitle: "Drapery, masking, flame-test & replacement planning",
+    presentOptions: ["Divider curtain", "Track — straight", "Track — curved", "Fixed pipe", "Wall bracket", "Cyc / backdrop", "None"],
+    presentOptionsByClass: { auditorium: ["Main / act curtain", "Grand drape", "Traveler", "Teaser / tormentors", "Legs", "Borders", "Cyc / scrim", "None"] },
     fields: [
       { key: "maskingNeeds", label: "Masking needed (legs, borders, cyc, traveler)" },
       { key: "mainCondition", label: "Main curtain (type, material, age, condition)" },
@@ -150,6 +173,12 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
         options: ["Good", "Fair", "Needs replacement"],
       },
       { key: "lastFlameTest", label: "Last flame test (date, if known)" },
+      { key: "fabricColor", label: "Fabric / colour" }, { key: "fabricWeight", label: "Weight (oz)" },
+      { key: "finishedWH", label: "Finished W × H" }, { key: "softGoodsCondition", label: "Condition" },
+      { key: "trackSeries", label: "Track series" }, { key: "trackOperation", label: "Track operation" },
+      { key: "fixedPipeQty", label: "Fixed pipe quantity" }, { key: "pipeDia", label: "Pipe diameter" },
+      { key: "mounting", label: "Mounting" }, { key: "heightAboveFloor", label: "Height above floor" },
+      { key: "loadCapacity", label: "Load capacity per position" },
       {
         key: "replaceVsReuse",
         label: "Replace vs. reuse",
@@ -165,6 +194,8 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
     key: "lighting",
     title: "Lighting intake",
     subtitle: "Rig assessment, circuits, console — with fixture inventory",
+    presentOptions: ["Console", "Dimmers / relays", "Fixtures", "House lighting", "None"],
+    presentOptionsByClass: {},
     fields: [
       {
         key: "controlProtocol",
@@ -180,6 +211,13 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
         type: "select",
         options: ["Good", "Fair", "Poor"],
       },
+      { key: "consoleMfr", label: "Console mfr / model" }, { key: "consoleLocation", label: "Console location" },
+      { key: "fixtureQty", label: "Fixture quantity (est.)" }, { key: "installYear", label: "Install year" },
+      { key: "fixtureTypes", label: "Fixture types" }, { key: "positions", label: "Positions" }, { key: "controls", label: "Controls" },
+      { key: "dimmerRack", label: "Dimmer / relay rack location + capacity", visibleFor: ["auditorium"] },
+      { key: "dmxUniverses", label: "DMX universes / protocol", visibleFor: ["auditorium"] },
+      { key: "fohPositions", label: "FOH positions", visibleFor: ["auditorium"] },
+      { key: "followSpotBooth", label: "Follow-spot booth", visibleFor: ["auditorium"] },
     ],
     scopeLabel: "Lighting scope of interest",
     scopeOptions: ["New rig", "Dimmer upgrade", "Fixture replacement", "Console upgrade", "Full system audit"],
@@ -192,10 +230,16 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
     key: "av",
     title: "AV intake",
     subtitle: "Audio focus in v1 — with device inventory",
+    presentOptions: ["PA / sound", "Paging", "Network / Wi-Fi", "Electrical service", "None"],
+    presentOptionsByClass: {},
     fields: [
       { key: "controlInfra", label: "How lights / curtains / AV are controlled today" },
       { key: "networkWifi", label: "Network / wifi quality (stage area)" },
       { key: "broadcast", label: "Broadcast / recording needs" },
+      { key: "soundMfr", label: "PA / sound mfr" }, { key: "speakerLocations", label: "Speaker locations / quantity" },
+      { key: "micPagingInputs", label: "Mic / paging inputs" }, { key: "avCondition", label: "Condition" },
+      { key: "panelLocation", label: "Electrical panel location" }, { key: "spareBreakerCapacity", label: "Spare breaker capacity" },
+      { key: "companySwitch", label: "Company switch / generator tie-in" }, { key: "networkCoverage", label: "Network / Wi-Fi coverage" },
     ],
     scopeLabel: "AV scope of interest",
     scopeOptions: [
@@ -212,6 +256,15 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
     ],
   },
 ];
+
+export function presentOptionsFor(key: DisciplineKey, cls: VenueClass): string[] {
+  const group = DISCIPLINE_GROUPS.find((entry) => entry.key === key);
+  return group?.presentOptionsByClass[cls] || group?.presentOptions || [];
+}
+
+export function visibleFields(group: DisciplineGroup, cls: VenueClass): SystemField[] {
+  return group.fields.filter((field) => !field.visibleFor || field.visibleFor.includes(cls));
+}
 
 /* ---- Structured inventory (type + quantity + flag rows) ---- */
 
