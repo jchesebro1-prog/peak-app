@@ -10,6 +10,13 @@ import type {
   MeasureGroup,
 } from "@/lib/stores/surveys";
 import {
+  VENUE_CLASSES,
+  VISIT_PURPOSES,
+  classMeasureFields,
+  venueClassFor,
+  type VenueClass,
+} from "@/lib/stores/venue-classes";
+import {
   DISCIPLINE_GROUPS,
   INTAKE_STATUS_META,
   SYSTEM_KEYS,
@@ -49,15 +56,20 @@ export type { EditorCustomer, EditorMeta } from "./sections/types";
 
 const STEP_LABELS = ["Brief", "Site & access", "Measurements", "Site intake", "Details"];
 const STEP_BY_ID: Record<string, number> = {
-  cust: 0, visit: 0, project: 0, assign: 0, site: 1, conditions: 1,
+  cust: 0, visit: 0, project: 0, assign: 0, site: 1, conditions: 1, lifeSafety: 1,
   mQuick: 2, mLayout: 2, mSection: 2, mBeams: 2, mFOH: 2, mHouse: 2, m3d: 2,
   tier1: 3, systems: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3,
   photos: 4, notes: 4,
 };
 const BRIEF_IDS: Record<string, boolean> = { cust: true, visit: true, project: true, assign: true };
 const INTAKE_IDS: Record<string, boolean> = { tier1: true, systems: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true };
-const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "systems", "dRigging", "dCurtain", "dLighting", "dAv", "photos", "notes"];
+const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "systems", "dRigging", "dCurtain", "dLighting", "dAv", "photos", "notes"];
 const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", curtain: "dCurtain", lighting: "dLighting", av: "dAv" };
+
+/** Display label for a venue class — the derived `venueType` fallback. */
+function classLabel(cls: VenueClass): string {
+  return (VENUE_CLASSES.find((c) => c.key === cls) || VENUE_CLASSES[0]).label;
+}
 
 let photoSeq = 0;
 function newPhotoId(): string {
@@ -85,11 +97,14 @@ function toDraft(r: SurveyRecord): Draft {
     locationId: r.locationId ?? null,
     venue: r.venue || "",
     venueType: r.venueType || "",
+    venueClass: r.venueClass || venueClassFor(r.venueType),
+    venueSubtype: r.venueSubtype || "",
     address: r.address || "",
     contact: r.contact || "",
     contactPhone: r.contactPhone || "",
     contactEmail: r.contactEmail || "",
     visitType: r.visitType || "",
+    visitPurpose: r.visitPurpose || "",
     reason: r.reason || "",
     travelTime: r.travelTime || "",
     distance: r.distance || "",
@@ -106,6 +121,24 @@ function toDraft(r: SurveyRecord): Draft {
     accessDoorSize: r.accessDoorSize || "",
     liftNeeded: r.liftNeeded || "",
     liftSupplier: r.liftSupplier || "",
+    loadingDoorSize: r.loadingDoorSize || "",
+    liftHeight: r.liftHeight || "",
+    pathToFloor: r.pathToFloor || "",
+    workingHours: r.workingHours || "",
+    blackoutDates: r.blackoutDates || "",
+    floorProtection: r.floorProtection || "",
+    badgingRequired: r.badgingRequired || "",
+    firstImpressions: r.firstImpressions || "",
+    budget: r.budget || "",
+    fiscalYearSpendBy: r.fiscalYearSpendBy || "",
+    whoDecides: r.whoDecides || "",
+    targetInstallWindow: r.targetInstallWindow || "",
+    lifeSafety: {
+      deluge: r.lifeSafety?.deluge || "",
+      smokeVent: r.lifeSafety?.smokeVent || "",
+      adaNotes: r.lifeSafety?.adaNotes || "",
+      egressNotes: r.lifeSafety?.egressNotes || "",
+    },
     scopeOfWork: r.scopeOfWork || "",
     quoteLook: r.quoteLook || "",
     notes: r.notes || "",
@@ -343,7 +376,8 @@ export default function SurveyEditor({
 
   /* ---------- sections ---------- */
   const sections = useMemo<SectionDef[]>(() => {
-    const quick = meta.measureFieldsByType[draft.venueType] || meta.defaultMeasureFields;
+    // the quick measurement set is the venue class's own field set (D132)
+    const quick = classMeasureFields(draft.venueClass);
     const groupFields = (g: MeasureGroup): FieldDef[] =>
       g.fields.map((f) => {
         if (f.type === "select") return { kind: "select", key: f.key, label: f.label, options: f.options || [], measure: true };
@@ -356,14 +390,17 @@ export default function SurveyEditor({
     secs.push({
       id: "visit", title: "Visit", subtitle: "Purpose & travel", group: "brief", step: 0, kind: "fields",
       fields: [
-        { kind: "select", key: "visitType", label: "Type of visit", options: meta.visitTypes },
+        { kind: "select", key: "visitPurpose", label: "Purpose of visit", options: VISIT_PURPOSES },
         { kind: "text", key: "travelTime", label: "Travel time", placeholder: "e.g. 35 min" },
         { kind: "text", key: "distance", label: "Distance", placeholder: "e.g. 22 mi" },
         { kind: "textarea", key: "reason", label: "Reason / scope of visit", placeholder: "Why are we here? What triggered the visit?" },
       ],
     });
     secs.push({
-      id: "project", title: "Existing materials & quote", subtitle: "What we have on file, and what the quote needs", group: "brief", step: 1, kind: "fields",
+      id: "project", title: "Existing materials & quote",
+      // the sheets' QUOTE QUESTIONS subtitle, kept verbatim as help text
+      subtitle: "What we have on file, and what the quote needs. A “no” does not end the visit — it changes what you collect.",
+      group: "brief", step: 1, kind: "fields",
       fields: [
         { kind: "checkTop", key: "hasBOM", label: "Existing BOM on file" },
         { kind: "checkTop", key: "hasDrawings", label: "Existing drawings on file" },
@@ -372,6 +409,12 @@ export default function SurveyEditor({
         { kind: "toggle", key: "budgetary", label: "Is it budgetary?" },
         { kind: "text", key: "projectCompletion", label: "Project completion", type: "date" },
         { kind: "select", key: "installTimeframe", label: "Install timeframe", options: meta.installTimeframes },
+        // QUOTE QUESTIONS, from the sheets (quoteNeededBy above is the sheets'
+        // QUOTE DEADLINE — deliberately not duplicated here)
+        { kind: "text", key: "budget", label: "Budget" },
+        { kind: "text", key: "fiscalYearSpendBy", label: "Fiscal year / spend-by date" },
+        { kind: "text", key: "whoDecides", label: "Who decides" },
+        { kind: "text", key: "targetInstallWindow", label: "Target install window" },
       ],
     });
     secs.push({
@@ -392,9 +435,29 @@ export default function SurveyEditor({
         { kind: "text", key: "accessDoorSize", label: "Access door size", placeholder: "e.g. 8' × 10'" },
         { kind: "select", key: "liftNeeded", label: "Kind of lift needed", options: meta.liftTypes },
         { kind: "select", key: "liftSupplier", label: "Who supplies lift", options: meta.liftSuppliers },
+        // ACCESS & SITE CONDITIONS, from the sheets
+        { kind: "text", key: "loadingDoorSize", label: "Loading door location & W × H" },
+        { kind: "text", key: "liftHeight", label: "Lift needed — type / height" },
+        { kind: "text", key: "pathToFloor", label: "Path: truck → floor" },
+        { kind: "text", key: "workingHours", label: "Working hours allowed" },
+        { kind: "text", key: "blackoutDates", label: "Blackout dates / events" },
+        { kind: "text", key: "floorProtection", label: "Floor protection required" },
+        { kind: "text", key: "badgingRequired", label: "Badging / background check" },
+        { kind: "textarea", key: "firstImpressions", label: "First impressions / notes" },
       ],
     });
     secs.push({ id: "conditions", title: "Site conditions", subtitle: "Quick tags", group: "field", step: 1, kind: "conditions" });
+    // Life safety — auditorium sheet p.5, offered on any class. Collapsed by
+    // default; the values live one level down on draft.lifeSafety.
+    secs.push({
+      id: "lifeSafety", title: "Life safety", subtitle: "Deluge, smoke vent, ADA and egress", group: "field", step: 1, advanced: true, kind: "fields",
+      fields: [
+        { kind: "sub", obj: "lifeSafety", key: "deluge", label: "Deluge / sprinkler over stage?" },
+        { kind: "sub", obj: "lifeSafety", key: "smokeVent", label: "Smoke vent / hatch?" },
+        { kind: "sub", obj: "lifeSafety", key: "adaNotes", label: "ADA access notes" },
+        { kind: "sub", obj: "lifeSafety", key: "egressNotes", label: "Egress notes" },
+      ],
+    });
     secs.push({
       id: "mQuick", title: "Measurements", subtitle: "Feet — type ft-in (38′-6″) or decimal (38.5)", group: "field", step: 2, kind: "fields",
       fields: quick.map((f) => ({ kind: "measure", key: f.key, label: f.label })),
@@ -437,7 +500,7 @@ export default function SurveyEditor({
     secs.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
     return secs;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.venueType, draft.requestedBy, meta, roster]);
+  }, [draft.venueClass, draft.requestedBy, meta, roster]);
 
   const measFilled = (fields: FieldDef[]): number =>
     fields.filter((f) => {
@@ -464,12 +527,18 @@ export default function SurveyEditor({
       customerId: draft.customerId,
       locationId: draft.locationId,
       venue: draft.venue,
-      venueType: draft.venueType,
+      // venueType is derived now (D132) — the class + subtype are the inputs.
+      // Keep writing it so the ~20 call sites that display it show something;
+      // a legacy value on the record wins over the class label.
+      venueType: draft.venueType || classLabel(draft.venueClass),
+      venueClass: draft.venueClass,
+      venueSubtype: draft.venueSubtype,
       address: draft.address,
       contact: draft.contact,
       contactPhone: draft.contactPhone,
       contactEmail: draft.contactEmail,
-      visitType: draft.visitType,
+      // visitType is legacy — read by the migration, never written from here
+      visitPurpose: draft.visitPurpose,
       reason: draft.reason,
       travelTime: draft.travelTime,
       distance: draft.distance,
@@ -486,6 +555,19 @@ export default function SurveyEditor({
       accessDoorSize: draft.accessDoorSize,
       liftNeeded: draft.liftNeeded,
       liftSupplier: draft.liftSupplier,
+      loadingDoorSize: draft.loadingDoorSize,
+      liftHeight: draft.liftHeight,
+      pathToFloor: draft.pathToFloor,
+      workingHours: draft.workingHours,
+      blackoutDates: draft.blackoutDates,
+      floorProtection: draft.floorProtection,
+      badgingRequired: draft.badgingRequired,
+      firstImpressions: draft.firstImpressions,
+      budget: draft.budget,
+      fiscalYearSpendBy: draft.fiscalYearSpendBy,
+      whoDecides: draft.whoDecides,
+      targetInstallWindow: draft.targetInstallWindow,
+      lifeSafety: draft.lifeSafety,
       scopeOfWork: draft.scopeOfWork,
       quoteLook: draft.quoteLook,
       notes: draft.notes,
@@ -968,7 +1050,6 @@ export default function SurveyEditor({
                           patchDraft={patchDraft}
                           setField={setField}
                           customers={customers}
-                          venueTypes={meta.venueTypes}
                           linkedCust={linkedCust}
                           custLocs={custLocs}
                           venueHasLocs={venueHasLocs}

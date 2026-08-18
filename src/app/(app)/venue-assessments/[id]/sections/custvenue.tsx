@@ -6,6 +6,7 @@
  * ============================================================ */
 
 import { AUDITORIUM_SIZES } from "@/lib/stores/survey-intake";
+import { SUBTYPES, VENUE_CLASSES, type VenueClass } from "@/lib/stores/venue-classes";
 import type { Draft, EditorCustomer } from "./types";
 import { ACCENT, inpStyle, labelStyle, selStyle } from "./styles";
 
@@ -14,7 +15,6 @@ export interface CustVenueProps {
   patchDraft: (patch: Partial<Draft>) => void;
   setField: <K extends keyof Draft>(key: K, val: Draft[K]) => void;
   customers: EditorCustomer[];
-  venueTypes: string[];
   linkedCust: EditorCustomer | null;
   custLocs: EditorCustomer["locations"];
   venueHasLocs: boolean;
@@ -30,7 +30,6 @@ export function CustVenueSection({
   patchDraft,
   setField,
   customers,
-  venueTypes,
   linkedCust,
   custLocs,
   venueHasLocs,
@@ -44,6 +43,10 @@ export function CustVenueSection({
   if (draft.customerId && !linkedCust) customerOptions = customerOptions.concat([{ value: draft.customerId, label: draft.customer || draft.customerId }]);
   const custMetaSuffix = linkedCust ? " · " + [linkedCust.type, linkedCust.location].filter(Boolean).join(" · ") : "";
   const venuePickMode = venueHasLocs && !venueOther;
+  // Venue class drives the measurement set and the systems fields (D132); the
+  // subtype is that class's own sheet checkbox row, so switching class clears it.
+  const classDef = VENUE_CLASSES.find((c) => c.key === draft.venueClass) || VENUE_CLASSES[0];
+  const subtypes = SUBTYPES[draft.venueClass] || [];
   return (
     <>
       <div style={{ marginBottom: 13 }}>
@@ -81,9 +84,29 @@ export function CustVenueSection({
           )}
         </div>
         <div>
-          <label style={labelStyle}>Venue type</label>
-          <select value={draft.venueType} onChange={(e) => setField("venueType", e.target.value)} style={selStyle}>
-            {venueTypes.map((v) => (
+          <label style={labelStyle}>Venue class</label>
+          <select
+            value={draft.venueClass}
+            onChange={(e) => patchDraft({ venueClass: e.target.value as VenueClass, venueSubtype: "" })}
+            style={selStyle}
+          >
+            {VENUE_CLASSES.map((c) => (
+              <option key={c.key} value={c.key}>{c.label}</option>
+            ))}
+          </select>
+          <div style={{ marginTop: 7, fontSize: 11.5, color: "#8c919c" }}>{classDef.blurb}</div>
+        </div>
+        <div>
+          {/* the sheets' own "<VENUE> TYPE" checkbox row */}
+          <label style={labelStyle}>{classDef.label + " type"}</label>
+          <select
+            value={draft.venueSubtype}
+            onChange={(e) => setField("venueSubtype", e.target.value)}
+            disabled={subtypes.length === 0}
+            style={{ ...selStyle, cursor: subtypes.length === 0 ? "default" : "pointer" }}
+          >
+            <option value="">{subtypes.length === 0 ? "— Not applicable —" : "— Select —"}</option>
+            {subtypes.map((v) => (
               <option key={v} value={v}>{v}</option>
             ))}
           </select>

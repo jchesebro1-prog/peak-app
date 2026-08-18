@@ -4,12 +4,12 @@
  * ============================================================ */
 
 import type {
-  MeasureField,
   MeasureGroup,
   SurveyPhoto,
   SurveyStage,
   SurveyStageMeta,
 } from "@/lib/stores/surveys";
+import type { VenueClass } from "@/lib/stores/venue-classes";
 import type { DisciplineData, DisciplineKey, InventoryRow, SystemState } from "@/lib/stores/survey-intake";
 
 /* ============================================================
@@ -28,8 +28,6 @@ export type EditorCustomer = {
 };
 
 export type EditorMeta = {
-  venueTypes: string[];
-  visitTypes: string[];
   floorTypes: string[];
   liftTypes: string[];
   liftSuppliers: string[];
@@ -38,8 +36,6 @@ export type EditorMeta = {
   stages: Array<{ key: SurveyStage; label: string }>;
   stageMeta: Record<SurveyStage, SurveyStageMeta>;
   measureGroups: MeasureGroup[];
-  measureFieldsByType: Record<string, MeasureField[]>;
-  defaultMeasureFields: MeasureField[];
   /** settings-merged site-intake type catalog, keyed by category */
   intakeCatalog: Record<string, string[]>;
 };
@@ -50,12 +46,17 @@ export type Draft = {
   customerId: string | null;
   locationId: string | null;
   venue: string;
+  /** derived from venueClass on save — no longer an input (D132) */
   venueType: string;
+  venueClass: VenueClass;
+  venueSubtype: string;
   address: string;
   contact: string;
   contactPhone: string;
   contactEmail: string;
+  /** legacy — read by the migration, never written from the editor (D132) */
   visitType: string;
+  visitPurpose: string;
   reason: string;
   travelTime: string;
   distance: string;
@@ -72,6 +73,20 @@ export type Draft = {
   accessDoorSize: string;
   liftNeeded: string;
   liftSupplier: string;
+  // ---- site-visit sheet additions (D132) ----
+  loadingDoorSize: string;
+  liftHeight: string;
+  pathToFloor: string;
+  workingHours: string;
+  blackoutDates: string;
+  floorProtection: string;
+  badgingRequired: string;
+  firstImpressions: string;
+  budget: string;
+  fiscalYearSpendBy: string;
+  whoDecides: string;
+  targetInstallWindow: string;
+  lifeSafety: { deluge: string; smokeVent: string; adaNotes: string; egressNotes: string };
   scopeOfWork: string;
   quoteLook: string;
   notes: string;
@@ -94,12 +109,17 @@ export type Draft = {
 };
 
 /* ---------- field / section model ---------- */
+
+/** Draft keys holding a flat string sub-object, addressable by `kind: "sub"`. */
+export type SubObjKey = "lifeSafety";
 export type FieldDef =
   | { kind: "text"; key: string; label: string; full?: boolean; type?: string; inputMode?: string; placeholder?: string }
   | { kind: "select"; key: string; label: string; options: string[]; full?: boolean; measure?: boolean }
   | { kind: "measure"; key: string; label: string; full?: boolean }
   | { kind: "toggle"; key: string; label: string; full?: boolean }
   | { kind: "textarea"; key: string; label: string; placeholder?: string }
+  /** text input bound to a key inside a draft sub-object (e.g. lifeSafety) */
+  | { kind: "sub"; obj: SubObjKey; key: string; label: string; full?: boolean; placeholder?: string }
   | { kind: "checkTop"; key: string; label: string }
   | { kind: "checkMeasure"; key: string; label: string };
 

@@ -2,9 +2,6 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import {
   get,
-  measureFields,
-  VENUE_TYPES,
-  VISIT_TYPES,
   FLOOR_TYPES,
   LIFT_TYPES,
   LIFT_SUPPLIERS,
@@ -13,7 +10,6 @@ import {
   STAGES,
   STAGE_META,
   MEASURE_GROUPS,
-  type MeasureField,
 } from "@/lib/stores/surveys";
 import { mergedCatalog } from "@/lib/stores/survey-intake";
 import { all as allCustomers } from "@/lib/stores/customers";
@@ -57,17 +53,10 @@ export default async function SurveyEditorPage({
     };
   });
 
-  // measureFields() is venue-type driven; serialize the whole map so the
-  // client editor can switch the quick-measurement set as venueType changes.
-  const measureFieldsByType: Record<string, MeasureField[]> = {};
-  VENUE_TYPES.forEach((vt) => {
-    measureFieldsByType[vt] = measureFields(vt);
-  });
-  const defaultMeasureFields = measureFields("");
-
+  // The quick-measurement set is the venue class's own field set, derived in
+  // the editor from venue-classes.ts (a pure module it imports directly), so
+  // no per-venue-type measurement map is serialized here any more.
   const meta: EditorMeta = {
-    venueTypes: VENUE_TYPES,
-    visitTypes: VISIT_TYPES,
     floorTypes: FLOOR_TYPES,
     liftTypes: LIFT_TYPES,
     liftSuppliers: LIFT_SUPPLIERS,
@@ -76,8 +65,6 @@ export default async function SurveyEditorPage({
     stages: STAGES,
     stageMeta: STAGE_META,
     measureGroups: MEASURE_GROUPS,
-    measureFieldsByType,
-    defaultMeasureFields,
     intakeCatalog: mergedCatalog(settings.intakeCatalog),
   };
 
