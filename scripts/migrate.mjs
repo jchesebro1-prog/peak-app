@@ -6,7 +6,12 @@
  */
 import { execFileSync } from "node:child_process";
 
-if (process.env.DATABASE_URL) {
+// Preview deployments inherit DATABASE_URL for runtime reads, but must never
+// mutate the shared hosted database during a branch build. Production remains
+// the migration boundary; local builds continue to be a no-op.
+if (process.env.VERCEL_ENV === "preview") {
+  console.log("[migrate] preview deployment — skipping shared database migrations.");
+} else if (process.env.DATABASE_URL) {
   console.log("[migrate] DATABASE_URL set — applying migrations…");
   try {
     const output = execFileSync("npx", ["drizzle-kit", "migrate"], {
