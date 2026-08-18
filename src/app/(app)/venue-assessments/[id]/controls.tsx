@@ -1096,8 +1096,8 @@ export default function SurveyEditor({
       {/* sticky header */}
       <div style={{ position: "sticky", top: 0, zIndex: 24, background: "#fff", borderBottom: "1px solid #ececf0", boxShadow: "0 1px 2px rgba(0,0,0,.04)" }}>
         <div className="sv-pad" style={{ display: "flex", alignItems: "center", gap: 14, maxWidth: 900, margin: "0 auto", padding: "11px 24px", flexWrap: "wrap", rowGap: 10 }}>
-          <Link href="/field-survey" style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#5b616e", background: "#f1f2f5", borderRadius: 9, padding: "9px 13px", textDecoration: "none", minHeight: 42, boxSizing: "border-box" }}>
-            <span style={{ fontSize: 15, lineHeight: 1 }}>←</span> Surveys
+          <Link href="/venue-assessments" style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#5b616e", background: "#f1f2f5", borderRadius: 9, padding: "9px 13px", textDecoration: "none", minHeight: 42, boxSizing: "border-box" }}>
+            <span style={{ fontSize: 15, lineHeight: 1 }}>←</span> Assessments
           </Link>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.25, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>

@@ -17,7 +17,7 @@ import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import VisitRequests, { type VisitRequestVM } from "./visit-requests";
 
-export const metadata = { title: "Field surveys — Quartzite-6" };
+export const metadata = { title: "Venue assessments — Quartzite-6" };
 
 /* accent-derived tints (prototype color-mix over the office accent) */
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 13%, #fff)";
@@ -92,10 +92,10 @@ export default async function FieldSurveyPage({
 }) {
   const [user, sp, all, visits] = await Promise.all([requireUser(), searchParams, getAll(), allVisits()]);
 
-  // Cross-screen deep links (Home, Inbox, Customers) use /field-survey?id=<id>;
-  // the capture editor lives at /field-survey/[id]. Redirect to keep both working.
+  // Cross-screen deep links (Home, Inbox, Customers) use /venue-assessments?id=<id>;
+  // the capture editor lives at /venue-assessments/[id]. Redirect to keep both working.
   const idParam = one(sp.id);
-  if (idParam) redirect(`/field-survey/${encodeURIComponent(idParam)}`);
+  if (idParam) redirect(`/venue-assessments/${encodeURIComponent(idParam)}`);
 
   const stageParam = one(sp.stage);
   const stage: Seg = (STAGES as ReadonlyArray<{ key: string }>).some((s) => s.key === stageParam)
@@ -174,14 +174,14 @@ export default async function FieldSurveyPage({
     if (key !== "all") params.set("stage", key);
     if (mine) params.set("mine", "1");
     const qs = params.toString();
-    return "/field-survey" + (qs ? "?" + qs : "");
+    return "/venue-assessments" + (qs ? "?" + qs : "");
   };
   const mineHref = (() => {
     const params = new URLSearchParams();
     if (stage !== "all") params.set("stage", stage);
     if (!mine) params.set("mine", "1");
     const qs = params.toString();
-    return "/field-survey" + (qs ? "?" + qs : "");
+    return "/venue-assessments" + (qs ? "?" + qs : "");
   })();
 
   const mineWord = mine ? " assigned to you" : "";
@@ -215,7 +215,7 @@ export default async function FieldSurveyPage({
         style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 14, flexWrap: "wrap", rowGap: 12, marginBottom: 16 }}
       >
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Field surveys</div>
+          <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Venue assessments</div>
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 4 }}>{standfirst}</div>
         </div>
         <form action={createSurvey} style={{ flexShrink: 0 }}>
@@ -436,7 +436,7 @@ export default async function FieldSurveyPage({
                 }}
               >
                 <Link
-                  href={`/field-survey/${encodeURIComponent(s.id)}`}
+                  href={`/venue-assessments/${encodeURIComponent(s.id)}`}
                   style={{ textAlign: "left", textDecoration: "none", color: "inherit", padding: "14px 15px 0" }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -549,7 +549,7 @@ export default async function FieldSurveyPage({
                 </Link>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 15px", borderTop: "1px solid #f2f3f5" }}>
                   <Link
-                    href={`/field-survey/${encodeURIComponent(s.id)}`}
+                    href={`/venue-assessments/${encodeURIComponent(s.id)}`}
                     className="fs-open"
                     style={{
                       flex: 1,

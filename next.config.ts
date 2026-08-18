@@ -33,6 +33,15 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // The Field Survey module was renamed Venue Assessments (route moved from
+  // /field-survey to /venue-assessments). Old links/bookmarks keep working;
+  // Next preserves the query string, so ?id=FS-1053 survives the hop.
+  async redirects() {
+    return [
+      { source: "/field-survey", destination: "/venue-assessments", permanent: true },
+      { source: "/field-survey/:path*", destination: "/venue-assessments/:path*", permanent: true },
+    ];
+  },
   // Dev-only: let other machines on the LAN load the app (Next 16 blocks
   // dev resources from non-localhost origins by default). Covers the Mac's
   // Bonjour name and common private-network IPs. No effect in production.
