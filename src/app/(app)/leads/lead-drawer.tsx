@@ -923,7 +923,7 @@ export default function LeadDrawer({
                     {(thread.visit || thread.survey) && (
                       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                         {thread.visit && (
-                          <Link href="/field-survey" style={threadChip(thread.visit)}>
+                          <Link href="/venue-assessments" style={threadChip(thread.visit)}>
                             Visit · {thread.visit.label}
                           </Link>
                         )}
@@ -932,7 +932,7 @@ export default function LeadDrawer({
                             stay visible — it doesn't depend on an active visit. */}
                         {thread.survey && (
                           <Link
-                            href={`/field-survey?id=${encodeURIComponent(thread.survey.id)}`}
+                            href={`/venue-assessments?id=${encodeURIComponent(thread.survey.id)}`}
                             style={threadChip(thread.survey)}
                           >
                             Survey · {thread.survey.label}
@@ -1256,7 +1256,7 @@ export default function LeadDrawer({
                   <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: "-.01em" }}>Request a site visit</div>
                   <div style={{ fontSize: 13, color: "#8c919c", lineHeight: 1.55, marginTop: 6 }}>
                     Creates an open visit request and a linked survey brief. Assign someone, or leave
-                    it open for anyone to claim from Field Survey.
+                    it open for anyone to claim from Venue Assessments.
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 18 }}>
                     <div>

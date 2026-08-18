@@ -164,7 +164,7 @@ export async function navData(me: string): Promise<{
       id: s.id,
       title: (s.customer as string) || s.id,
       sub: (s.venue as string) || "Site survey",
-      href: "/field-survey",
+      href: "/venue-assessments",
       letter: "S",
       color: "#1f7a52",
     }))
@@ -179,7 +179,7 @@ export async function navData(me: string): Promise<{
         v.stage === "claimed"
           ? `${v.reason} · claimed — pick a time`
           : `${v.reason} · open — claim it`,
-      href: "/field-survey",
+      href: "/venue-assessments",
       letter: "V",
       color: "#7b3f8a",
     }))

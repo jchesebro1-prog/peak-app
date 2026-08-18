@@ -696,7 +696,7 @@ export default function SettingsClient({
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Site intake — type catalog</div>
             <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
               The dropdown types reps pick from in the Lighting / AV intake
-              inventories (Field Survey). One type per line — add types any
+              inventories (Venue Assessments). One type per line — add types any
               time; they feed the quote side as standardized names.
             </div>
           </div>

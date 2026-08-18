@@ -2103,7 +2103,7 @@ import {
     assignedTo: "Mike Torres",
   });
   ok(v.length === 1 && v[0].ts === T2 && v[0].title === "Site visit — Site survey / measure", "#21: visit row at startAt");
-  ok(v[0].sub === "Scheduled" && v[0].href === "/field-survey" && v[0].by === "Mike Torres", "#21: visit sub is the stage label");
+  ok(v[0].sub === "Scheduled" && v[0].href === "/venue-assessments" && v[0].by === "Mike Torres", "#21: visit sub is the stage label");
   const vr = visitFeedRows({ id: "SV-5002", reason: "Punch walk", stage: "requested", startAt: null, createdAt: T1, assignedTo: "" });
   ok(vr[0].ts === T1 && vr[0].sub === "Requested", "#21: unscheduled request falls back to createdAt");
 
@@ -2142,7 +2142,7 @@ import {
   // surveys — one row at updatedAt with the stage label
   const s = surveyFeedRows({ id: "FS-1054", stage: "completed", venue: "Black box", updatedAt: T3 });
   ok(s.length === 1 && s[0].title === "Survey FS-1054 — Completed" && s[0].ts === T3, "#21: survey row titles id + stage label");
-  ok(s[0].href === "/field-survey?id=FS-1054", "#21: survey row deep-links the survey");
+  ok(s[0].href === "/venue-assessments?id=FS-1054", "#21: survey row deep-links the survey");
 
   // projects — stage-history rows (loader-passed short labels) + newest-first notes handled
   const pj = projectFeedRows(

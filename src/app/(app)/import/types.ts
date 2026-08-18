@@ -114,13 +114,13 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
   },
   {
     key: "surveys",
-    label: "Field surveys",
+    label: "Venue assessments",
     mono: "FS",
     color: "#1f7a52",
     blurb: "Site-survey records — venue, visit purpose and status.",
     dedupeLabel: "customer + venue",
-    viewHref: "/field-survey",
-    viewLabel: "View in Field Survey",
+    viewHref: "/venue-assessments",
+    viewLabel: "View in Venue Assessments",
     fields: [
       { key: "customer", header: "Customer", label: "Customer", required: true, aliases: ["customer", "company", "org", "account", "client", "name"], example: "Badger Ballet Company" },
       { key: "venue", header: "Venue", label: "Venue", aliases: ["venue", "location", "site"], example: "Main Stage" },

@@ -75,7 +75,7 @@ const ROUTES = [
   "/queue",
   "/templates",
   "/consulting",
-  "/field-survey",
+  "/venue-assessments",
   "/field-work",
   "/design-studio/lineset",
   "/design-studio/motors",
@@ -110,7 +110,7 @@ const ROUTES = [
 const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/projects/P-3001" },
   { route: "/inspections/RI-2042" },
-  { route: "/field-survey/FS-1055" },
+  { route: "/venue-assessments/FS-1055" },
   { route: "/companies/lakefront" },
   { route: "/customers/lakefront" }, // the legacy path — this entry tests that the redirect to /companies/[id] still resolves
   { route: "/venues/st-lakefront-1" }, // identity convert: st-${docId}-${n}

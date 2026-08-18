@@ -559,7 +559,7 @@ export default async function CustomerDetailPage({
                 return (
                   <Link
                     key={s.id}
-                    href={`/field-survey?id=${encodeURIComponent(s.id)}`}
+                    href={`/venue-assessments?id=${encodeURIComponent(s.id)}`}
                     className="cu-d-row"
                     style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
                   >

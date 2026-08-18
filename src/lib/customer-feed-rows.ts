@@ -148,7 +148,7 @@ export function visitFeedRows(v: {
       v.startAt ?? v.createdAt,
       `Site visit — ${v.reason}`,
       meta ? meta.label : v.stage,
-      "/field-survey",
+      "/venue-assessments",
       v.assignedTo || ""
     ),
   ];
@@ -207,7 +207,7 @@ export function surveyFeedRows(s: { id: string; stage: string; venue: string; up
       s.updatedAt,
       `Survey ${s.id} — ${SURVEY_STAGE_LABEL[s.stage as SurveyStage] ?? s.stage}`,
       s.venue || "",
-      `/field-survey?id=${encodeURIComponent(s.id)}`,
+      `/venue-assessments?id=${encodeURIComponent(s.id)}`,
       ""
     ),
   ];

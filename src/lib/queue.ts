@@ -109,7 +109,7 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
         title: `Open site visit: ${v.customer || v.id}`,
         context: v.reason,
         due: (v.createdAt || 0) + 3 * DAY,
-        href: "/field-survey",
+        href: "/venue-assessments",
         writable: false,
       });
     } else if (v.stage === "claimed" && v.assignedTo === me) {
@@ -119,7 +119,7 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
         title: `Schedule site visit: ${v.customer || v.id}`,
         context: v.reason,
         due: (v.createdAt || 0) + 3 * DAY,
-        href: "/field-survey",
+        href: "/venue-assessments",
         writable: false,
       });
     }

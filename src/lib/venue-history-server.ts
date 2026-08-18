@@ -166,9 +166,9 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
   }
   for (const s of surveys.filter((r) => docMatchesVenue(r, companyId, locId))) {
     rows.push({
-      id: s.id, kind: "survey", title: s.venue || s.venueType || s.id, subtitle: "Field survey",
+      id: s.id, kind: "survey", title: s.venue || s.venueType || s.id, subtitle: "Venue assessment",
       ts: s.updatedAt, status: s.stage, open: isOpenStage("survey", s.stage),
-      href: "/field-survey?id=" + encodeURIComponent(s.id),
+      href: "/venue-assessments?id=" + encodeURIComponent(s.id),
     });
   }
   const now = Date.now();

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { CardHeadTitle } from "./home-shared";
 
 /**
- * Field surveys card — port of Home.dc.html's field survey glance widget.
+ * Venue assessments card — port of Home.dc.html's field survey glance widget.
  */
 
 export type SurveyCard = {
@@ -14,7 +14,7 @@ export type SurveyCard = {
   stage: { label: string; ink: string; soft: string; bd: string };
 };
 
-export default function HomeFieldSurveys({
+export default function HomeVenueAssessments({
   surveyCards,
   surveyPendingCount,
 }: {
@@ -34,7 +34,7 @@ export default function HomeFieldSurveys({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
-          <CardHeadTitle>Field surveys</CardHeadTitle>
+          <CardHeadTitle>Venue assessments</CardHeadTitle>
           {surveyPendingCount > 0 && (
             <span
               style={{
@@ -53,7 +53,7 @@ export default function HomeFieldSurveys({
           )}
         </div>
         <Link
-          href="/field-survey"
+          href="/venue-assessments"
           style={{
             fontSize: 12,
             fontWeight: 600,
@@ -149,12 +149,12 @@ export default function HomeFieldSurveys({
             fontSize: 12.5,
           }}
         >
-          No field surveys yet.
+          No venue assessments yet.
         </div>
       )}
       <div style={{ padding: "11px 17px" }}>
         <Link
-          href="/field-survey?new=1"
+          href="/venue-assessments?new=1"
           style={{
             fontSize: 13,
             fontWeight: 600,
