@@ -16,6 +16,7 @@ import { projectsSeed } from "./seeds/projects";
 import { designsSeed } from "./seeds/designs";
 import { gridProjectsSeed } from "./seeds/grid-projects";
 import { equipmentLocationsSeed, equipmentItemsSeed } from "./seeds/equipment";
+import { DEFAULT_VENUE_DOCTRINE } from "@/lib/venue-doctrine";
 
 /**
  * Seed roster — the real Peak team (D126/D128): the prototype six plus
@@ -48,6 +49,7 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
   federalHolidays: true,
   seedDemo: false,
   feedbackEmail: "",
+  venueDoctrine: DEFAULT_VENUE_DOCTRINE,
   offices: [
     {
       id: "hq",

@@ -1149,8 +1149,11 @@ export default function SurveyEditor({
                         const present = dv(g.key, "present");
                         const presentSet = Array.isArray(present) ? present : [];
                         const onlyNone = presentSet.length === 1 && presentSet[0] === "None";
+                        const doctrine = meta.venueDoctrine?.[draft.venueClass];
+                        const guidance = g.key === "curtain" ? doctrine?.curtains : g.key === "lighting" ? doctrine?.lighting : "";
                         return (
                           <div>
+                            {guidance && <div style={{ marginBottom: 12, padding: "9px 11px", borderRadius: 8, background: "#f6f7f9", color: "#5b616e", fontSize: 12.5 }}>{guidance}{doctrine && !doctrine.confirmed ? " · Default unconfirmed for this venue class" : ""}</div>}
                             <label style={labelStyle}>PRESENT</label>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                               {presentOptionsFor(g.key, draft.venueClass).map((option) => (

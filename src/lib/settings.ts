@@ -33,6 +33,7 @@ export type AppSettingsData = {
   /** Site-intake type catalog overrides, keyed by category (e.g.
    * "lighting.fixture") — see DEFAULT_INTAKE_CATALOG in survey-intake.ts. */
   intakeCatalog?: Record<string, string[]>;
+  venueDoctrine?: import("@/lib/venue-doctrine").VenueDoctrine;
   /** Site-visit reason picklist overrides (D76) — see DEFAULT_VISIT_REASONS
    *  in stores/site-visits.ts; empty/absent means use the defaults. */
   visitReasons?: string[];
