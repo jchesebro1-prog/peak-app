@@ -32,6 +32,22 @@ export function renderField(f: FieldDef, p: FieldRenderProps) {
       </div>
     );
   }
+  if (f.kind === "sub") {
+    // fields living one level down on the draft (lifeSafety.*), not at top level
+    const bag = (draft[f.obj] || {}) as Record<string, string>;
+    return (
+      <div key={f.obj + "." + f.key} style={wrap}>
+        <label style={labelStyle}>{f.label}</label>
+        <input
+          type="text"
+          value={String(bag[f.key] ?? "")}
+          onChange={(e) => patchDraft({ [f.obj]: { ...bag, [f.key]: e.target.value } } as Partial<Draft>)}
+          placeholder={f.placeholder}
+          style={inpStyle}
+        />
+      </div>
+    );
+  }
   if (f.kind === "checkTop") {
     const c = !!draft[f.key as keyof Draft];
     return (

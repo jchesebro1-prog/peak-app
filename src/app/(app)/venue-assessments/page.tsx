@@ -11,6 +11,7 @@ import {
   type SurveyRecord,
   type SurveyStage,
 } from "@/lib/stores/surveys";
+import { VENUE_CLASSES } from "@/lib/stores/venue-classes";
 import { IDENTITY, deriveInitials, fallbackColor } from "@/lib/team";
 import { createSurvey, quoteFromSurvey } from "./actions";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
@@ -416,6 +417,7 @@ export default async function FieldSurveyPage({
             const im = INTAKE_STATUS_META[ist];
             const assignee = (s.assignedTo || "").trim();
             const sched = fmtDate(s.scheduledDate);
+            const cm = VENUE_CLASSES.find((c) => c.key === s.venueClass) || null;
             const venueBits = [s.venue, s.venueType].filter((b) => (b || "").trim());
             const venueLine = venueBits.join(" · ") || "—";
             const assignLine = assignee + (sched ? " · " + sched : "");
@@ -455,6 +457,22 @@ export default async function FieldSurveyPage({
                       >
                         {sm.label}
                       </span>
+                      {cm && (
+                        <span
+                          style={{
+                            fontSize: 10.5,
+                            fontWeight: 600,
+                            color: "#5b616e",
+                            background: "#f4f5f7",
+                            border: "1px solid #e6e8ec",
+                            padding: "3px 10px",
+                            borderRadius: 20,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {cm.label}
+                        </span>
+                      )}
                       {ist !== "draft" && (
                         <span
                           style={{
