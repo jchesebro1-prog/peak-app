@@ -18,6 +18,16 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 
+// Preview deployments inherit DATABASE_URL for runtime reads, but must never
+// mutate the shared hosted database during a branch build — Production /
+// Preview / Development all point at ONE Neon database, so a migration run
+// from any branch's build lands on live data. Production stays the migration
+// boundary; local builds remain a no-op.
+if (process.env.VERCEL_ENV === "preview") {
+  console.log("[migrate] preview deployment — skipping shared database migrations.");
+  process.exit(0);
+}
+
 if (!process.env.DATABASE_URL) {
   console.log("[migrate] no DATABASE_URL — skipping (dev uses embedded PGlite).");
   process.exit(0);
