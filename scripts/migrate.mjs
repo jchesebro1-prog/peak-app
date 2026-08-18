@@ -4,7 +4,10 @@
  * Postgres. Without it (local build, CI without a database) it's a no-op —
  * local dev migrates the embedded PGlite automatically at startup.
  */
-import { execFileSync } from "node:child_process";
+import path from "node:path";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+import postgres from "postgres";
 
 // Preview deployments inherit DATABASE_URL for runtime reads, but must never
 // mutate the shared hosted database during a branch build. Production remains
@@ -13,20 +16,20 @@ if (process.env.VERCEL_ENV === "preview") {
   console.log("[migrate] preview deployment — skipping shared database migrations.");
 } else if (process.env.DATABASE_URL) {
   console.log("[migrate] DATABASE_URL set — applying migrations…");
+  const client = postgres(process.env.DATABASE_URL, { max: 1, prepare: false });
   try {
-    const output = execFileSync("npx", ["drizzle-kit", "migrate"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
+    // Confirm the connection independently before migrating. drizzle-kit
+    // suppresses the underlying Postgres error in non-interactive builds,
+    // which leaves Vercel with only an unhelpful spinner and exit code 1.
+    await client`select 1`;
+    await migrate(drizzle(client), {
+      migrationsFolder: path.join(process.cwd(), "drizzle"),
     });
-    if (output) process.stdout.write(output);
   } catch (error) {
-    // Vercel otherwise reports only the wrapper's generic command failure,
-    // hiding the actual Postgres/Drizzle diagnostic needed to repair it.
-    console.error("[migrate] drizzle-kit migrate failed");
-    if (error.stdout) process.stdout.write(String(error.stdout));
-    if (error.stderr) process.stderr.write(String(error.stderr));
-    process.exitCode = 1;
+    console.error("[migrate] database migration failed:", error);
     throw error;
+  } finally {
+    await client.end({ timeout: 5 });
   }
   console.log("[migrate] done.");
 } else {
