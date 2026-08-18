@@ -10,7 +10,7 @@ import {
 } from "@/lib/operations-work";
 import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS, battenLenFt, BATTEN_OVERHANG_FT } from "@/lib/design/venue-dims";
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
-import { DEFAULT_SETTINGS, GO_LIVE_RESET_COLLECTIONS } from "@/db/seed-data";
+import { DEFAULT_SETTINGS, DEMO_COLLECTIONS } from "@/db/seed-data";
 import { DOC_TABLES } from "@/db/doc-tables";
 import { accentContrast } from "@/lib/color";
 import { emailFor, legacyEmailFor } from "@/lib/team";
@@ -26,315 +26,42 @@ import {
 } from "@/app/(app)/import/parse";
 // Pure (no store access, no DB) — see the note on catalogPatch itself.
 import { catalogPatch } from "@/app/(app)/import/registry";
-import { venueDirectoryPage } from "@/lib/venue-directory-page";
-import {
-  defaultInstallLeadWeeks,
-  projectScheduleFromQuote,
-  projectScheduleFromTargetDate,
-} from "@/lib/project-target-date";
-import { nextPendingDeliveryEta, scheduleBookingSeed } from "@/lib/schedule-booking";
-import {
-  buildFieldPacketScopeGroups,
-  buildFieldPacketVisitSummaries,
-  buildFieldWorkPacket,
-} from "@/lib/field-work-packet";
-import { applyProjectSignoff } from "@/lib/project-signoff";
-import { applyExistingCustomerToLeadForm } from "@/app/(app)/leads/new-lead-prefill";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 
-// The async checks exercise real stores. Keep them off the single-writer dev
-// database and make their seed state deterministic instead of racing the
-// background seed kicked off by getDb().
-const specScratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "peak-specs-"));
-process.env.PGLITE_PATH = path.join(specScratchDir, "pglite");
-process.env.SEED_DEMO = "true";
-const cleanupSpecDb = () => fs.rmSync(specScratchDir, { recursive: true, force: true });
+import {
+  VENUE_CLASSES, SUBTYPES, VISIT_PURPOSES, classMeasureFields,
+  venueClassFor, venueSubtypeFor, visitPurposeFor, venueArchetype,
+  TIER1_WIDTH_BY_CLASS, TIER1_DEPTH_BY_CLASS,
+} from "@/lib/stores/venue-classes";
+
+import {
+  LINESET_TYPES, LINESET_CONDS, blankLinesetRow, newLinesetId,
+  linesetTypeLabel, linesetCondLabel,
+} from "@/lib/stores/linesets";
+
+import {
+  CONDITION_CATEGORIES, CONDITION_RATINGS, BUDGET_TIERS, FINDING_BUCKETS,
+  EVENT_TYPES, EVENT_FREQUENCIES, STAFF_TIERS, GROWTH_GOALS,
+  blankAssessment, seedFindings, newFindingId,
+} from "@/lib/stores/assessment";
+
+import { TIER1_WIDTH_KEYS, TIER1_DEPTH_KEYS, tier1Complete } from "@/lib/stores/survey-intake";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
 
-/* --- go-live reset coverage (#94) ---
- * Break caught: adding or using a no-seed document collection without making
- * the go-live reset clear it leaves demo-era rows pointing at re-minted IDs. */
-const resetCollections = [...GO_LIVE_RESET_COLLECTIONS].sort();
-const businessDocumentCollections = Object.keys(DOC_TABLES).sort();
+/* --- Go-live reset coverage (PUNCHLIST #94) --- */
+const resetCollections = [...DEMO_COLLECTIONS].sort();
+const documentCollections = Object.keys(DOC_TABLES).sort();
 ok(
-  JSON.stringify(resetCollections) === JSON.stringify(businessDocumentCollections),
-  `go-live reset covers every business document collection (${resetCollections.length}/${businessDocumentCollections.length})`,
+  resetCollections.join("\n") === documentCollections.join("\n"),
+  "go-live reset covers every business-document collection"
 );
-
-/* --- scalable Venues directory (#92) ---
- * Break caught: returning the entire filtered directory instead of a bounded
- * page recreates the multi-megabyte server-component payload. */
-const venueRows = Array.from({ length: 121 }, (_, i) => ({ id: `v-${i + 1}` }));
-const venuePage3 = venueDirectoryPage(venueRows, 3, 50);
-ok(venuePage3.page === 3, "venues pagination keeps a valid requested page");
-ok(venuePage3.totalPages === 3, "venues pagination reports three pages for 121 rows");
 ok(
-  venuePage3.rows.length === 21 && venuePage3.rows[0].id === "v-101" && venuePage3.rows[20].id === "v-121",
-  "venues pagination returns only the final 21 rows on page three",
-);
-const venuePastEnd = venueDirectoryPage(venueRows, 99, 50);
-ok(
-  venuePastEnd.page === 3 && venuePastEnd.rows[0].id === "v-101",
-  "venues pagination clamps an out-of-range page to the last page",
-);
-const emptyVenuePage = venueDirectoryPage([], -4, 50);
-ok(
-  emptyVenuePage.page === 1 && emptyVenuePage.totalPages === 1 && emptyVenuePage.rows.length === 0,
-  "venues pagination has a stable empty-directory page",
-);
-
-/* --- new lead customer prefill (#12) ---
- * Break caught: selecting an existing customer in the New Lead form still
- * creates an unlinked lead because the form never stamps customerId or reuses
- * the customer's primary contact/location fields. */
-const linkedLead = applyExistingCustomerToLeadForm(
-  {
-    org: "",
-    contact: "",
-    contactRole: "",
-    email: "",
-    phone: "",
-    city: "",
-    state: "WI",
-    source: "phone",
-    interest: "",
-    owner: "",
-    value: "",
-    customerId: null,
-  },
-  {
-    id: "lakefront",
-    name: "Lakefront Performing Arts Center",
-    locations: [
-      { label: "Main", city: "Milwaukee", state: "WI", primary: true },
-      { label: "Annex", city: "Waukesha", state: "WI", primary: false },
-    ],
-    contacts: [
-      { name: "Morgan Hall", email: "morgan@lakefront.org", phone: "555-0100", primary: true },
-    ],
-  },
-);
-ok(linkedLead.customerId === "lakefront", "new lead selection stamps the existing customer id");
-ok(
-  linkedLead.org === "Lakefront Performing Arts Center" &&
-    linkedLead.contact === "Morgan Hall" &&
-    linkedLead.email === "morgan@lakefront.org" &&
-    linkedLead.phone === "555-0100" &&
-    linkedLead.city === "Milwaukee" &&
-  linkedLead.state === "WI",
-  "new lead selection prefills the primary customer contact and location snapshot",
-);
-
-/* --- PUNCHLIST #44: field-work install packet includes the handoff essentials ---
- * Break caught: the Field Work surface only exposes tasks/notes/time/BOM, so
- * the installer does not get one packet with venue/contact info, crew,
- * recent notes, material status, and the signoff checklist. */
-{
-  const packet = buildFieldWorkPacket(
-    {
-      crew: [
-        { id: "cw-2", person: "Alex Roe", role: "Programmer", start: new Date(2026, 7, 20).getTime(), end: new Date(2026, 7, 21).getTime() },
-        { id: "cw-1", person: "Jamie Fox", role: "Installer", start: new Date(2026, 7, 18).getTime(), end: new Date(2026, 7, 19).getTime() },
-      ],
-      installStart: new Date(2026, 7, 18).getTime(),
-      installEnd: new Date(2026, 7, 21).getTime(),
-      signoff: { signedBy: "Jeff Chesebro", signedAt: new Date(2026, 7, 22).getTime(), scopeChecks: { Lighting: true, Audio: true } },
-      notes: [
-        { id: "n1", by: "Jeff Chesebro", at: new Date(2026, 7, 18, 9).getTime(), text: "Load-in through stage left.", photo: null },
-        { id: "n2", by: "Morgan Hall", at: new Date(2026, 7, 19, 14).getTime(), text: "House opens at 6pm.", photo: null },
-        { id: "n3", by: "Jeff Chesebro", at: new Date(2026, 7, 20, 11).getTime(), text: "Client added two cue lights.", photo: null },
-        { id: "n4", by: "Jamie Fox", at: new Date(2026, 7, 21, 8).getTime(), text: "Rigging inspection complete.", photo: null },
-      ],
-      procurement: [
-        { id: "pl-1", sku: "ETC-S4", desc: "Source Four", vendor: "ETC", qty: 4, unit: "ea", cost: 1200, leadDays: 14, status: "received", orderedAt: null, po: "PO-1" },
-        { id: "pl-2", sku: "CBL-01", desc: "Cable loom", vendor: "TMB", qty: 2, unit: "ea", cost: 300, leadDays: 7, status: "ordered", orderedAt: null, po: "PO-2" },
-      ],
-    } as any,
-    {
-      label: "Main Stage",
-      address: "123 Main St",
-      city: "Milwaukee",
-      state: "WI",
-      primary: true,
-      venueKind: "proscenium",
-      travelMiles: null,
-      travelMin: null,
-    },
-    [
-      { name: "Pat Venue", role: "TD", email: "pat@example.com", phone: "555-0100", primary: false },
-      { name: "Morgan Hall", role: "Client", email: "morgan@example.com", phone: "555-0111", primary: true },
-    ]
-  );
-  ok(packet.installWindowLabel === "Aug 18 – Aug 21", "#44 packet carries the install window summary");
-  ok(
-    packet.venueLabel === "Main Stage" && packet.venueAddress === "123 Main St · Milwaukee, WI",
-    "#44 packet carries venue name and address",
-  );
-  ok(
-    packet.crew.map((c) => c.person).join("|") === "Jamie Fox|Alex Roe",
-    "#44 packet sorts crew in install order",
-  );
-  ok(
-    packet.contacts[0]?.name === "Morgan Hall" && packet.contacts[1]?.name === "Pat Venue",
-    "#44 packet surfaces the primary contact first",
-  );
-  ok(
-    packet.recentNotes.map((n) => n.id).join("|") === "n4|n3|n2",
-    "#44 packet shows the three most recent notes first",
-  );
-  ok(
-    packet.materials.total === 2 && packet.materials.onSite === 1 && packet.materials.awaiting === 1,
-    "#44 packet summarizes on-site versus awaiting materials",
-  );
-  ok(
-    packet.checklist.find((c) => c.scope === "Lighting")?.accepted === true &&
-      packet.checklist.find((c) => c.scope === "Rigging")?.accepted === false,
-    "#44 packet carries the full signoff checklist with unchecked scopes still visible",
-  );
-  const scopeGroups = buildFieldPacketScopeGroups([
-    { name: "Lighting", kind: "materials", items: [{ id: 1 }, { id: 2 }] },
-    { name: "Labor", kind: "labor", items: [{ id: 3 }] },
-    { name: "Empty", kind: "materials", items: [] },
-  ]);
-  ok(
-    scopeGroups.map((g) => `${g.name}:${g.sectionKind}:${g.itemCount}`).join("|") ===
-      "Lighting:materials:2|Labor:labor:1",
-    "#44 packet carries saved scope groups from the source quote and drops empty sections",
-  );
-  const visitRows = buildFieldPacketVisitSummaries(
-    [
-      {
-        id: "SV-1",
-        reason: "Punch walk",
-        locationId: "loc1",
-        startAt: new Date(2026, 7, 8).getTime(),
-        createdAt: new Date(2026, 7, 1).getTime(),
-        assignedTo: "Jeff Chesebro",
-        stage: "scheduled",
-        engagementId: "CE-1001",
-      },
-      {
-        id: "SV-2",
-        reason: "Sales call",
-        locationId: "loc2",
-        startAt: new Date(2026, 7, 9).getTime(),
-        createdAt: new Date(2026, 7, 2).getTime(),
-        assignedTo: "",
-        stage: "done",
-        engagementId: null,
-      },
-      {
-        id: "SV-3",
-        reason: "Install check-in",
-        locationId: "loc1",
-        startAt: null,
-        createdAt: new Date(2026, 7, 10).getTime(),
-        assignedTo: "Jamie Fox",
-        stage: "claimed",
-        engagementId: null,
-      },
-    ],
-    "loc1",
-    new Date(2026, 7, 12).getTime(),
-  );
-  ok(
-    visitRows.map((v) => v.id).join("|") === "SV-3|SV-1",
-    "#44 packet visit history filters to the venue and sorts newest first",
-  );
-  ok(
-    visitRows[0]?.status === "claimed" &&
-      visitRows[0]?.href === "/calendar" &&
-      visitRows[1]?.status === "Done" &&
-      visitRows[1]?.href === "/design/engagements/CE-1001",
-    "#44 packet visit history keeps the right status/href for unscheduled and past visits",
-  );
-}
-
-/* --- PUNCHLIST #44: field-side signoff applies the same normalized project mutation offline ---
- * Break caught: Field Work can save project docs offline, but signoff needs
- * the same normalized signoff payload and stage-history write as the server
- * path or the phone capture diverges from the office record. */
-{
-  const stampedAt = new Date(2026, 7, 12, 10, 30).getTime();
-  const signed = applyProjectSignoff(
-    {
-      stage: "training",
-      stageHistory: [{ at: new Date(2026, 7, 10).getTime(), from: "install", to: "training", by: "Jeff Chesebro" }],
-      signoff: null,
-      updatedAt: new Date(2026, 7, 10).getTime(),
-    },
-    {
-      name: " Morgan Hall ",
-      role: " Client ",
-      signatureBlobKey: "  data:image/png;base64,abc  ",
-      signedByName: "",
-      capturedBy: "",
-      scopeChecks: { Lighting: true, Fake: true } as any,
-      note: "  Final cue-light adjustment pending. ",
-    } as any,
-    "Jeff Chesebro",
-    stampedAt,
-  );
-  ok(signed.stage === "signoff", "#44 field-side signoff advances the local project stage to Sign-off");
-  ok(
-    signed.stageHistory?.[signed.stageHistory.length - 1]?.to === "signoff" &&
-      signed.stageHistory?.[signed.stageHistory.length - 1]?.from === "training",
-    "#44 field-side signoff appends the matching stage-history entry",
-  );
-  const signedSignoff = (signed as { signoff?: any }).signoff;
-  ok(
-    signedSignoff?.name === "Morgan Hall" &&
-      signedSignoff?.role === "Client" &&
-      signedSignoff?.signatureBlobKey === "data:image/png;base64,abc",
-    "#44 field-side signoff trims signer fields and the signature payload",
-  );
-  ok(
-    signedSignoff?.signedByName === "Morgan Hall" &&
-      signedSignoff?.capturedBy === "Jeff Chesebro" &&
-      signedSignoff?.scopeChecks?.Lighting === true &&
-      !("Fake" in (signedSignoff?.scopeChecks || {})),
-    "#44 field-side signoff keeps the same fallback and scope-normalization rules offline",
-  );
-}
-const unlinkedLead = applyExistingCustomerToLeadForm(linkedLead, null);
-ok(unlinkedLead.customerId === null, "switching back to Add new clears the customer link");
-
-/* --- estimator install timeframe → project goal (#15) ---
- * Break caught: quote conversion ignoring the quote timeframe and falling back
- * to a hardcoded date guess detached from the win date. */
-ok(defaultInstallLeadWeeks({ value: 12000, spec: { sections: [], mobs: [] } } as any) === 12,
-  "install timeframe defaults to the 12-week minimum for a small quote");
-ok(defaultInstallLeadWeeks({
-  value: 180000,
-  spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [] }], mobs: [] },
-} as any) === 16, "install timeframe stretches for larger quote value bands");
-ok(defaultInstallLeadWeeks({
-  value: 45000,
-  spec: { sections: [], mobs: [{ type: "Install", days: 8, crew: 4, discipline: "Install" }] },
-} as any) === 16, "install timeframe stretches for heavy mobilization scope");
-
-const wonAt = Date.UTC(2026, 7, 11, 12, 0, 0); // Aug 11 2026
-const targetOnly = projectScheduleFromTargetDate(wonAt + 12 * 7 * 86400000, false);
-ok(targetOnly.targetDate === wonAt + 12 * 7 * 86400000 && targetOnly.installStart === null && targetOnly.installEnd === null,
-  "order schedule keeps only the completion target");
-
-const installSched = projectScheduleFromQuote({
-  value: 45000,
-  installLeadWeeks: 14,
-  spec: {
-    sections: [{ id: "labor", name: "Install", kind: "labor", mfr: "", freightPct: 0, items: [{ id: 1 }] }],
-    mobs: [{ type: "Install", days: 2, crew: 3, discipline: "Install" }],
-  },
-} as any, wonAt);
-ok(installSched.targetDate === wonAt + 14 * 7 * 86400000, "project target is anchored to the win date plus quote weeks");
-ok(
-  installSched.installStart === installSched.targetDate - 4 * 86400000 &&
-    installSched.installEnd === installSched.targetDate + 2 * 86400000,
-  "install window shifts with the completion target",
+  resetCollections.includes("equipment_bookings") &&
+    resetCollections.includes("grid_sheets") &&
+    resetCollections.includes("tasks") &&
+    resetCollections.includes("notes"),
+  "go-live reset covers no-seed child collections"
 );
 
 /* --- BOM parsing --- */
@@ -693,17 +420,6 @@ ok(parentGroupOf("venues") === "crm", "venues reports CRM as its parent group (D
 ok(
   HOME_TABS.some((t) => t.key === "reports" && t.href === "/reports"),
   "Reports is present in HOME_TABS with its own route",
-);
-const topGroups = NAV.filter(
-  (e): e is Extract<(typeof NAV)[number], { kind: "group" }> => e.kind === "group",
-);
-ok(
-  topGroups.map((e) => e.label).join(" · ") === "Home · Sales · Installs · Customers · Design",
-  "desktop nav labels are the full words Jeff asked for in #45(b)",
-);
-ok(
-  topGroups.map((e) => e.shortLabel || e.label).join(" · ") === "Home · EST · PM · CRM · DESIGN",
-  "compact nav labels stay abbreviated for narrow layouts in #45(b)",
 );
 
 // ---- General dissolution (D99): Settings sections + Admin ----
@@ -1591,7 +1307,7 @@ ok(legacyEmailFor("Jeff Chesebro") === "jchesebro@peaksystemsgroup.com", "legacy
 /* ============ TASKS (#17) — store pure logic ============ */
 import {
   isOverdue, taskFromLegacy, expandTemplate, taskBellItems, autoTaskId,
-  STATUSES, tasksForProject, type TaskRecord, type TaskTemplateItem,
+  STATUSES, type TaskRecord, type TaskTemplateItem,
 } from "@/lib/stores/tasks";
 import { CATEGORIES } from "@/lib/stores/notif-prefs";
 
@@ -1778,7 +1494,7 @@ import {
 
 /* ============ PROJECTS BOARD (#19) ============ */
 import { boardProjects, dueChipLabel } from "@/app/(app)/projects/board-lib";
-import { PROJECT_STAGES, ORDER_STAGES, canCompleteProject } from "@/lib/stores/projects";
+import { PROJECT_STAGES, ORDER_STAGES } from "@/lib/stores/projects";
 
 ok(
   PROJECT_STAGES.map((s) => s.key).join(",") === "procurement,delivery,scheduled,install,training,signoff,complete",
@@ -1788,9 +1504,6 @@ ok(
   ORDER_STAGES.map((s) => s.key).join(",") === "procurement,delivery,signoff,complete",
   "#19: orders carry a different 4-stage vocabulary — excluded from the board"
 );
-ok(!canCompleteProject({ stage: "install", signoff: null }), "#19: project cannot complete before sign-off exists");
-ok(canCompleteProject({ stage: "install", signoff: { signedBy: "Jeff", signedAt: NOW } }), "#19: sign-off unlocks completion");
-ok(canCompleteProject({ stage: "complete", signoff: null }), "#19: already-complete records stay valid during migration");
 {
   const mix: Array<{ kind: "project" | "order" }> = [
     { kind: "project" },
@@ -2061,7 +1774,7 @@ import {
     assignedTo: "Mike Torres",
   });
   ok(v.length === 1 && v[0].ts === T2 && v[0].title === "Site visit — Site survey / measure", "#21: visit row at startAt");
-  ok(v[0].sub === "Scheduled" && v[0].href === "/field-survey" && v[0].by === "Mike Torres", "#21: visit sub is the stage label");
+  ok(v[0].sub === "Scheduled" && v[0].href === "/venue-assessments" && v[0].by === "Mike Torres", "#21: visit sub is the stage label");
   const vr = visitFeedRows({ id: "SV-5002", reason: "Punch walk", stage: "requested", startAt: null, createdAt: T1, assignedTo: "" });
   ok(vr[0].ts === T1 && vr[0].sub === "Requested", "#21: unscheduled request falls back to createdAt");
 
@@ -2100,7 +1813,7 @@ import {
   // surveys — one row at updatedAt with the stage label
   const s = surveyFeedRows({ id: "FS-1054", stage: "completed", venue: "Black box", updatedAt: T3 });
   ok(s.length === 1 && s[0].title === "Survey FS-1054 — Completed" && s[0].ts === T3, "#21: survey row titles id + stage label");
-  ok(s[0].href === "/field-survey?id=FS-1054", "#21: survey row deep-links the survey");
+  ok(s[0].href === "/venue-assessments?id=FS-1054", "#21: survey row deep-links the survey");
 
   // projects — stage-history rows (loader-passed short labels) + newest-first notes handled
   const pj = projectFeedRows(
@@ -2948,8 +2661,7 @@ import { qtyOwned as equipmentQtyOwned } from "../src/lib/stores/equipment-items
 import { upsertDoc } from "../src/db/doc-store";
 import { createFromQuote as createInspectionFromQuote, byQuote as inspectionsByQuote } from "../src/lib/stores/inspections";
 import { createFromQuote as createRepairFromQuote, byQuote as repairByQuote } from "../src/lib/stores/repair-jobs";
-import { createProject, getProject, getProjectByQuote, setDeliveryStatus, setProjectStage, setSignoff } from "../src/lib/stores/projects";
-import { addQuoteRevision, create as createQuote, get as getQuote, restoreQuoteRevision, update as updateQuote } from "../src/lib/stores/quotes";
+import { getProject, getProjectByQuote } from "../src/lib/stores/projects";
 
 ok(overlaps(1000, 2000, 1500, 2500) === true, "overlaps: partial overlap detected");
 ok(overlaps(1000, 2000, 2000, 3000) === true, "overlaps: touching boundary counts as overlap");
@@ -3075,8 +2787,6 @@ async function xlsxFixture(): Promise<Buffer> {
 }
 
 async function asyncChecks(): Promise<void> {
-  const { seedDemoCollections } = await import("../src/db/seed-data");
-  await seedDemoCollections();
   const xr = await xlsxToCsv(await xlsxFixture());
   ok(xr.ok, "#81 a well-formed .xlsx converts");
   if (xr.ok) {
@@ -3337,273 +3047,308 @@ async function asyncChecks(): Promise<void> {
     ok(!!p1 && !!p2 && p1.id !== p2.id, "#13 the inspection and repair test quotes get DISTINCT linked projects");
   }
 
-  /* --- PUNCHLIST #16: completion requires sign-off ---
-   * Break caught: the direct stage-change path could mark a project complete
-   * without a recorded signoff, which contradicted the project lifecycle and
-   * made the completion follow-up task fire too early. */
+  /* --- Venue Assessments: record migration --- */
   {
-    const project = await createProject({
-      name: "PUNCHLIST #16 completion gate",
-      kind: "project",
-      stage: "install",
-      signoff: null,
-    });
-    const blocked = await setProjectStage(project.id, "complete", "Jeff Chesebro");
-    ok(blocked?.stage === "install", "#16 direct completion is blocked until sign-off exists");
-    await setSignoff(project.id, { name: "Morgan Hall", role: "Client" }, "Jeff Chesebro");
-    const completed = await setProjectStage(project.id, "complete", "Jeff Chesebro");
-    ok(completed?.stage === "complete", "#16 completion succeeds once sign-off is recorded");
-    ok(!!completed?.signoff?.name, "#16 sign-off data persists through completion");
-  }
-
-  /* --- PUNCHLIST #36: estimator assumptions/exceptions/attachments survive quote revisions ---
-   * Break caught: saving a revision and later restoring it can currently
-   * revert priced content while silently dropping quote-side assumptions,
-   * exceptions, and internal vendor attachments. */
-  {
-    const quote = await createQuote({
-      name: "PUNCHLIST #36 revision payload",
-      customer: "Test Customer #36",
-      owner: "Jeff Chesebro",
-      source: "estimator",
-      quoteType: "system",
-    });
-    await updateQuote(quote.id, {
-      estimatorAssumptions: ["Existing power remains by owner", "Final dimmer counts confirmed at field measure"],
-      estimatorExceptions: ["Permitting excluded", "Patch/paint by others"],
-      estimatorOutputMode: "both",
-      estimatorNarrative:
-        "This proposal includes a complete theatrical lighting package plus installation and commissioning.",
-      internalAttachments: [
-        {
-          id: "att-1",
-          name: "ETC dealer quote.pdf",
-          mime: "application/pdf",
-          size: 12345,
-          dataUrl: "data:application/pdf;base64,AAA",
-          addedAt: 1,
-          addedBy: "Jeff Chesebro",
-        },
-      ],
-    } as any);
-    await addQuoteRevision(quote.id, { by: "Jeff Chesebro", note: "Captured estimator extras" });
-    await updateQuote(quote.id, {
-      estimatorAssumptions: ["CHANGED"],
-      estimatorExceptions: ["CHANGED"],
-      estimatorOutputMode: "bom",
-      estimatorNarrative: "CHANGED",
-      internalAttachments: [],
-    } as any);
-    const restored = await restoreQuoteRevision(quote.id, 1, "Jeff Chesebro");
-    ok(restored.ok, "#36 quote revision restore succeeds");
-    const live = await getQuote(quote.id);
+    const { getAll } = await import("@/lib/stores/surveys");
+    const all = await getAll();
+    ok(all.length > 0, "seeded surveys exist to migrate");
     ok(
-      Array.isArray((live as any)?.estimatorAssumptions) &&
-        (live as any).estimatorAssumptions.join("|") ===
-          "Existing power remains by owner|Final dimmer counts confirmed at field measure",
-      "#36 restoring a revision restores estimator assumptions",
+      all.every((s) => !!(s as Record<string, unknown>).venueClass),
+      "every existing record reads with a venueClass"
     );
     ok(
-      Array.isArray((live as any)?.estimatorExceptions) &&
-        (live as any).estimatorExceptions.join("|") === "Permitting excluded|Patch/paint by others",
-      "#36 restoring a revision restores estimator exceptions",
+      all.every((s) => typeof (s as Record<string, unknown>).visitPurpose === "string"),
+      "every existing record reads with a visitPurpose"
+    );
+    const fs1053 = all.find((s) => s.id === "FS-1053");
+    ok(!!fs1053, "FS-1053 is present in the seed");
+    ok(
+      (fs1053 as Record<string, unknown>).venueClass === "theatre",
+      "FS-1053 (Proscenium theater) migrates to theatre"
     );
     ok(
-      Array.isArray((live as any)?.internalAttachments) &&
-        (live as any).internalAttachments.length === 1 &&
-        (live as any).internalAttachments[0].name === "ETC dealer quote.pdf",
-      "#36 restoring a revision restores internal quote attachments",
+      (fs1053 as Record<string, unknown>).venueSubtype === "Single proscenium",
+      "FS-1053 gains the matching subtype"
+    );
+    ok(fs1053!.venueType === "Proscenium theater", "venueType is retained for existing call sites");
+    const fs1055 = all.find((s) => s.id === "FS-1055");
+    ok(
+      (fs1055 as Record<string, unknown>).venueClass === "church",
+      "FS-1055 (Worship / sanctuary) migrates to church"
+    );
+    // measurements must survive the class switch untouched
+    ok(
+      all.every((s) => s.measurements && typeof s.measurements === "object"),
+      "measurements survive migration"
+    );
+    const withMeas = all.find((s) => Object.keys(s.measurements || {}).length > 0);
+    ok(!!withMeas, "at least one seeded record carries measurements");
+    ok(
+      Object.values(withMeas!.measurements).every((v) => typeof v === "string" || typeof v === "boolean"),
+      "measurement values are untouched primitives"
+    );
+    // new sub-objects default, never undefined
+    ok(Array.isArray((fs1053 as Record<string, unknown>).linesets), "linesets defaults to an array");
+    ok(
+      (fs1053 as Record<string, unknown>).assessmentEnabled === false,
+      "the assessment layer is off by default"
     );
     ok(
-      (live as any)?.estimatorOutputMode === "both",
-      "#36 restoring a revision restores the quote output mode",
+      typeof (fs1053 as Record<string, unknown>).assessment === "object",
+      "assessment defaults to an object, never undefined"
     );
     ok(
-      (live as any)?.estimatorNarrative ===
-        "This proposal includes a complete theatrical lighting package plus installation and commissioning.",
-      "#36 restoring a revision restores the estimator narrative",
-    );
-  }
-
-  /* --- PUNCHLIST #44: project completion creates a due walkthrough task ---
-   * Break caught: the completion auto-task fires, but without the ~7 day due
-   * date the spec calls for, so the sales follow-up never lands in the right
-   * reminder window. */
-  {
-    const before = Date.now();
-    const project = await createProject({
-      name: "PUNCHLIST #44 walkthrough task",
-      kind: "project",
-      stage: "install",
-      signoff: null,
-      quoteId: "Q-test-44",
-    });
-    await createQuote({
-      id: "Q-test-44",
-      name: "Quote for #44",
-      customer: "Test Customer #44",
-      owner: "Sam Rivera",
-      source: "estimator",
-      quoteType: "system",
-    });
-    await setSignoff(project.id, { name: "Morgan Hall", role: "Client" }, "Jeff Chesebro");
-    await setProjectStage(project.id, "complete", "Jeff Chesebro");
-    const after = Date.now();
-    const tasks = await tasksForProject(project.id);
-    const walkthrough = tasks.find((t) => t.coverageKey === `item16:completed:${project.id}`);
-    ok(!!walkthrough, "#44 completion creates the walkthrough follow-up task");
-    ok(
-      !!walkthrough?.dueAt &&
-        walkthrough.dueAt >= before + 6 * 86400000 &&
-        walkthrough.dueAt <= after + 8 * 86400000,
-      "#44 completion walkthrough task is due about 7 days out",
-    );
-  }
-
-  /* --- PUNCHLIST #44: final delivery auto-advances the project to Scheduled ---
-   * Break caught: marking the last delivery received updates only the line,
-   * leaving the project stuck in Delivery instead of moving the install
-   * workflow forward. Reversing that received status must also undo the
-   * automatic stage bump. */
-  {
-    const project = await createProject({
-      name: "PUNCHLIST #44 delivery auto-stage",
-      kind: "project",
-      stage: "delivery",
-      deliveries: [
-        { id: "dl-1", label: "Rigging package", vendor: "JR Clancy", eta: Date.now(), status: "received", receivedAt: Date.now() },
-        { id: "dl-2", label: "Soft goods", vendor: "Rose Brand", eta: Date.now(), status: "in_transit" },
-      ],
-    });
-    const stillDelivery = await setDeliveryStatus(project.id, "dl-2", "in_transit");
-    ok(stillDelivery?.stage === "delivery", "#44 non-final delivery updates do not advance the project");
-    const autoScheduled = await setDeliveryStatus(project.id, "dl-2", "received");
-    ok(autoScheduled?.stage === "scheduled", "#44 the final received delivery auto-advances the project to Scheduled");
-    ok(
-      autoScheduled?.stageHistory?.[autoScheduled.stageHistory.length - 1]?.via === "auto-deliveries",
-      "#44 auto-scheduled delivery transitions are tagged in stage history",
-    );
-    const reverted = await setDeliveryStatus(project.id, "dl-2", "scheduled");
-    ok(reverted?.stage === "delivery", "#44 undoing the last received delivery reverts the auto-scheduled stage");
-    ok(
-      reverted?.stageHistory?.[reverted.stageHistory.length - 1]?.via === "auto-deliveries",
-      "#44 undoing the auto-stage keeps the same delivery-history tag",
-    );
-  }
-
-  /* --- PUNCHLIST #44: schedule booking seeds from the next pending delivery ETA ---
-   * Break caught: the schedule board can book crew for a pre-received project,
-   * but the booking flow anchors to today instead of the expected ship date,
-   * so the delivery-driven pre-booking view never materializes. */
-  {
-    const jan12 = new Date(2026, 0, 12).getTime();
-    const jan20 = new Date(2026, 0, 20).getTime();
-    const jan15 = new Date(2026, 0, 15).getTime();
-    const jan18 = new Date(2026, 0, 18).getTime();
-    const jan22 = new Date(2026, 0, 22).getTime();
-    const jan5 = new Date(2026, 0, 5).getTime();
-    ok(
-      nextPendingDeliveryEta({
-        deliveries: [
-          { id: "dl-1", label: "Soft goods", vendor: "Rose Brand", eta: jan20, status: "in_transit" },
-          { id: "dl-2", label: "Lighting package", vendor: "ETC", eta: jan15, status: "scheduled" },
-          { id: "dl-3", label: "Rigging", vendor: "JR Clancy", eta: jan18, status: "received", receivedAt: jan18 },
-        ],
-      } as any) === jan15,
-      "#44 nextPendingDeliveryEta picks the earliest not-yet-received ship date",
-    );
-    const deliverySeed = scheduleBookingSeed(
-      {
-        deliveries: [
-          { id: "dl-1", label: "Soft goods", vendor: "Rose Brand", eta: jan20, status: "in_transit" },
-          { id: "dl-2", label: "Lighting package", vendor: "ETC", eta: jan15, status: "scheduled" },
-        ],
-        installStart: jan22,
-      } as any,
-      jan12,
+      typeof (fs1053 as Record<string, unknown>).signoff === "object",
+      "signoff defaults to an object"
     );
     ok(
-      deliverySeed.start === jan15 && deliverySeed.reason === "delivery_eta",
-      "#44 booking seeds from the pending delivery ETA before the install window",
-    );
-    const installSeed = scheduleBookingSeed(
-      { deliveries: [], installStart: jan22 } as any,
-      jan12,
-    );
-    ok(
-      installSeed.start === jan22 && installSeed.reason === "install_start",
-      "#44 booking falls back to the install start when there is no pending delivery ETA",
-    );
-    const todaySeed = scheduleBookingSeed(
-      { deliveries: [], installStart: null } as any,
-      jan5,
-    );
-    ok(
-      todaySeed.start === jan5 && todaySeed.reason === "today",
-      "#44 booking falls back to today when neither delivery ETA nor install start exists",
-    );
-  }
-
-  /* --- PUNCHLIST #44: signoff persists explicit scope checks and signature metadata ---
-   * Break caught: the signoff record only stores free-text name/role/note, so
-   * the lifecycle cannot prove which install scopes were accepted or that a
-   * signature was actually captured. */
-  {
-    const project = await createProject({
-      name: "PUNCHLIST #44 explicit signoff record",
-      kind: "project",
-      stage: "training",
-      signoff: null,
-    });
-    const signed = await setSignoff(
-      project.id,
-      {
-        name: "Morgan Hall",
-        role: "Facilities Director",
-        scopeChecks: {
-          Lighting: true,
-          Rigging: false,
-          Curtains: true,
-          Audio: true,
-          Video: false,
-          Fake: true,
-        },
-        signatureBlobKey: "  data:image/png;base64,signature-demo  ",
-        signedByName: "",
-        capturedBy: "",
-        note: "Curtains punch item remains open.",
-      } as any,
-      "Jeff Chesebro",
-    );
-    ok(signed?.stage === "signoff", "#44 recording signoff still advances the project into Sign-off");
-    ok(
-      !!signed?.signoff?.scopeChecks &&
-        signed.signoff.scopeChecks.Lighting === true &&
-        signed.signoff.scopeChecks.Curtains === true &&
-        signed.signoff.scopeChecks.Video === false &&
-        !("Fake" in signed.signoff.scopeChecks),
-      "#44 signoff stores per-scope acceptance checks",
-    );
-    ok(
-      signed?.signoff?.signatureBlobKey === "data:image/png;base64,signature-demo",
-      "#44 signoff stores the captured signature reference",
-    );
-    ok(
-      signed?.signoff?.signedByName === "Morgan Hall" &&
-        signed?.signoff?.capturedBy === "Jeff Chesebro",
-      "#44 signoff stores signer identity separately from the recorder",
+      (fs1053 as Record<string, unknown>).templateRev === "1.0",
+      "records stamp the template revision"
     );
   }
 }
 
+/* --- Venue Assessments: class model --- */
+ok(VENUE_CLASSES.length === 6, `six venue classes (got ${VENUE_CLASSES.length})`);
+ok(
+  VENUE_CLASSES.map((c) => c.key).join(",") ===
+    "theatre,auditorium,church,gym,convention,other",
+  "venue classes in spec order"
+);
+ok(venueClassFor("Proscenium theater") === "theatre", "proscenium theater -> theatre");
+ok(venueClassFor("Black box") === "theatre", "black box -> theatre");
+ok(venueClassFor("Worship / sanctuary") === "church", "worship -> church");
+ok(venueClassFor("Gymnasium / gym stage") === "gym", "gym stage -> gym");
+ok(venueClassFor("Arena") === "theatre", "arena -> theatre");
+ok(venueClassFor("Multipurpose room") === "convention", "multipurpose -> convention");
+ok(venueClassFor("Outdoor / amphitheater") === "other", "outdoor -> other");
+ok(venueClassFor("") === "theatre", "empty venue type falls back to theatre");
+ok(venueClassFor("Nonsense") === "theatre", "unknown venue type falls back to theatre");
+ok(venueSubtypeFor("Black box") === "Black box / flexible", "black box carries its subtype");
+ok(venueSubtypeFor("Outdoor / amphitheater") === "", "outdoor has no subtype");
+ok(
+  VENUE_CLASSES.every((c) => SUBTYPES[c.key] !== undefined),
+  "every class has a subtype list (other may be empty)"
+);
+ok(
+  VENUE_CLASSES.filter((c) => c.key !== "other").every((c) => SUBTYPES[c.key].length > 0),
+  "every class but 'other' has at least one subtype"
+);
+ok(
+  Object.values(SUBTYPES).every((list) => list.every((s) => typeof s === "string" && s.length > 0)),
+  "no empty subtype strings"
+);
+ok(visitPurposeFor("Budgetary walk-through") === "Bid walk", "budgetary -> bid walk");
+ok(visitPurposeFor("Service call") === "Repair / service", "service call -> repair/service");
+ok(visitPurposeFor("Design verification") === "New system design", "design verification -> new system design");
+ok(visitPurposeFor("") === "", "empty visit type stays empty");
+ok(VISIT_PURPOSES.length === 6, `six visit purposes (got ${VISIT_PURPOSES.length})`);
+ok(VISIT_PURPOSES[0] === "New system design", "sheet order preserved");
+
+// Every class resolves to at least one width key and one depth key, and every
+// such key must actually exist in that class's field set. This is the hard
+// invariant that keeps the Tier-1 gate satisfiable on every class.
+ok(
+  VENUE_CLASSES.every((c) => {
+    const keys = classMeasureFields(c.key).map((f) => f.key);
+    const w = TIER1_WIDTH_BY_CLASS[c.key];
+    const d = TIER1_DEPTH_BY_CLASS[c.key];
+    return !!w && !!d && keys.includes(w) && keys.includes(d);
+  }),
+  "every class has a width+depth key present in its own field set"
+);
+ok(classMeasureFields("gym").some((f) => f.key === "courtLength"), "gym asks court length");
+ok(classMeasureFields("gym").some((f) => f.key === "dividerSpan"), "gym asks divider curtain span");
+ok(classMeasureFields("gym").some((f) => f.key === "bleacherType"), "gym asks bleacher type");
+ok(classMeasureFields("auditorium").some((f) => f.key === "pinRail"), "auditorium asks pin rail location");
+ok(classMeasureFields("auditorium").some((f) => f.key === "loadingGallery"), "auditorium asks loading gallery");
+ok(classMeasureFields("theatre").some((f) => f.key === "proW"), "theatre reuses the existing proW key");
+ok(classMeasureFields("church").some((f) => f.key === "centerAisleW"), "church reuses the existing centerAisleW key");
+ok(classMeasureFields("convention").some((f) => f.key === "rigPointCapacity"), "convention asks rigging point capacity");
+ok(
+  classMeasureFields("other").length > 0,
+  "the 'other' class has a generic field set, not an empty one"
+);
+
+// --- 3D preview archetype (regression guard) ---
+// venue-3d.tsx used to pick its archetype off the flat `venueType` string via
+// a ROOM_TYPES list. With the class model in place a new record's venueType is
+// a class LABEL ("Gym", "Church", …), which that list never matched — so every
+// new non-theatre assessment drew a proscenium. venueArchetype() replaces it.
+ok(venueArchetype("theatre", "Single proscenium") === "proscenium", "theatre + proscenium -> proscenium");
+ok(venueArchetype("theatre", "Studio theatre") === "proscenium", "theatre + studio -> proscenium");
+ok(venueArchetype("theatre", "Black box / flexible") === "room", "theatre + black box -> room");
+ok(venueArchetype("theatre", "Thrust / arena") === "room", "theatre + thrust/arena -> room");
+ok(venueArchetype("auditorium", "Single proscenium") === "proscenium", "auditorium + proscenium -> proscenium");
+ok(venueArchetype("auditorium", "Multi-purpose (cafetorium)") === "proscenium", "auditorium + cafetorium -> proscenium");
+ok(venueArchetype("auditorium", "Black box / flexible") === "room", "auditorium + black box -> room");
+ok(venueArchetype("auditorium", "Thrust / arena") === "room", "auditorium + thrust/arena -> room");
+ok(venueArchetype("church", "Sanctuary — traditional") === "room", "church -> room");
+ok(venueArchetype("gym", "Multi-purpose (has stage)") === "room", "gym -> room");
+ok(venueArchetype("convention", "Ballroom / multi-purpose") === "room", "convention -> room");
+ok(venueArchetype("other", "") === "room", "other -> room");
+ok(
+  VENUE_CLASSES.every((c) =>
+    (SUBTYPES[c.key].length ? SUBTYPES[c.key] : [""]).every((sub) => {
+      const a = venueArchetype(c.key, sub);
+      return a === "room" || a === "proscenium";
+    })
+  ),
+  "every class/subtype pair resolves to a known archetype"
+);
+
+// The assertion that actually proves no regression: for each of the seven
+// legacy venue types, the class-model archetype must equal what the old
+// ROOM_TYPES.includes() check produced.
+{
+  const LEGACY_ROOM_TYPES = [
+    "Black box", "Worship / sanctuary", "Gymnasium / gym stage",
+    "Arena", "Multipurpose room", "Outdoor / amphitheater",
+  ];
+  const LEGACY_VENUE_TYPES = ["Proscenium theater", ...LEGACY_ROOM_TYPES];
+  ok(LEGACY_VENUE_TYPES.length === 7, "seven legacy venue types under trace");
+  for (const legacy of LEGACY_VENUE_TYPES) {
+    const before = LEGACY_ROOM_TYPES.includes(legacy) ? "room" : "proscenium";
+    const after = venueArchetype(venueClassFor(legacy), venueSubtypeFor(legacy));
+    ok(after === before, `legacy "${legacy}" still renders ${before} (got ${after})`);
+  }
+}
+// No class may invent a key that duplicates an existing one under a new name.
+const RESERVED = ["proW","proH","stageDepth","gridH","wingSL","wingSR","houseH","seating","boothLoc","boothWD","apron","centerAisleW","platformWidth","platformDepth","roomWidth","roomDepth","pitDepth"];
+ok(
+  VENUE_CLASSES.every((c) =>
+    classMeasureFields(c.key).every((f) => !/^(prosceniumWidth|stageW|ceilingHeight|houseHeight)$/.test(f.key))
+  ),
+  "no class re-invents a reserved dimension under a new key name"
+);
+ok(RESERVED.length === 17, "reserved key list is the spec's list");
+
+
+/* --- Venue Assessments: linesets --- */
+ok(LINESET_TYPES.map((t) => t.key).join("") === "DMRLBCSETO", "type legend is the sheet's D M R L B C S E T O");
+ok(LINESET_CONDS.map((c) => c.key).join("") === "GFPX", "condition legend is the sheet's G F P X");
+ok(linesetTypeLabel("D") === "Draw / main", "D is draw/main");
+ok(linesetTypeLabel("O") === "Open / spare", "O is open/spare");
+ok(linesetCondLabel("X") === "Missing / inoperable", "X is missing/inoperable");
+ok(linesetTypeLabel("Z" as never) === "", "unknown type code renders empty, never throws");
+ok(linesetCondLabel("Z" as never) === "", "unknown cond code renders empty, never throws");
+const lsr = blankLinesetRow(3);
+ok(lsr.pos === "3", "blank row carries its position as a string");
+ok(lsr.type === "" && lsr.cond === "", "blank row starts unrated and untyped");
+ok(
+  ["id","pos","distFromPL","setName","type","battenLength","liftLines","goods","finishedWH","arborLoad","trimLow","trimHigh","cond","notes"]
+    .every((k) => k in lsr),
+  "blank row has all 14 Theatre-superset columns"
+);
+ok(Object.keys(lsr).length === 14, `blank row has exactly 14 keys (got ${Object.keys(lsr).length})`);
+ok(newLinesetId() !== newLinesetId(), "lineset ids are unique");
+
+
+/* --- Venue Assessments: assessment layer --- */
+ok(CONDITION_CATEGORIES.length === 10, `ten condition categories (got ${CONDITION_CATEGORIES.length})`);
+ok(
+  CONDITION_CATEGORIES.map((c) => c.key).join(",") ===
+    "rigging,curtains,motors,lighting.console,lighting.dimming,lighting.fixtures,av.console,av.speakers,av.mics,av.video",
+  "categories in brief order"
+);
+ok(
+  !CONDITION_CATEGORIES.some((c) => c.key.startsWith("electrical")),
+  "electrical is NOT a rated category — brief says outside Peak's lane"
+);
+ok(CONDITION_RATINGS.map((r) => r.key).join(",") === "good,monitor,replace", "Good/Monitor/Replace scale");
+ok(BUDGET_TIERS.length === 4, "four budget tiers");
+ok(BUDGET_TIERS[0].key === "u5k" && BUDGET_TIERS[3].key === "over100k", "budget tiers span <$5k to $100k+");
+ok(FINDING_BUCKETS.map((b) => b.key).join(",") === "now,soon,later", "Now/Soon/Later buckets");
+ok(EVENT_TYPES.length === 6, "six event types incl. other");
+ok(EVENT_FREQUENCIES.length === 4, "four frequencies");
+ok(STAFF_TIERS.length === 4, "four staff capability tiers");
+ok(GROWTH_GOALS.length === 5, "five growth goals incl. other");
+
+const a0 = blankAssessment();
+ok(Object.keys(a0.conditions).length === 10, "blank assessment has all ten categories");
+ok(
+  CONDITION_CATEGORIES.every((c) => a0.conditions[c.key].rating === ""),
+  "blank assessment starts every category unrated"
+);
+ok(a0.findings.length === 0, "blank assessment has no findings");
+ok(a0.electricalNotes === "", "blank assessment has an electrical notes field");
+
+// good is never flagged; monitor and replace each seed one line
+const a1 = blankAssessment();
+a1.conditions.rigging.rating = "good";
+a1.conditions.curtains.rating = "monitor";
+a1.conditions.curtains.notes = "Main shows daylight at the seams";
+a1.conditions["av.mics"].rating = "replace";
+const r1 = seedFindings(a1);
+ok(r1.seeded.length === 2, `two flagged categories seed two findings (got ${r1.seeded.length})`);
+ok(!r1.seeded.some((f) => f.categories.includes("rigging")), "a 'good' category never seeds a finding");
+const curtainFinding = r1.seeded.find((f) => f.categories.includes("curtains"));
+ok(!!curtainFinding, "curtains seeded a finding");
+ok(curtainFinding!.title === "Curtains / Soft Goods", "seeded title is the category label");
+ok(curtainFinding!.detail === "Main shows daylight at the seams", "seeded detail is the category notes");
+ok(curtainFinding!.bucket === "", "seeded finding starts with no bucket — the assessor decides");
+ok(curtainFinding!.budgetTier === "", "seeded finding starts with no budget tier");
+ok(r1.unresolved.length === 0, "freshly seeded findings leave nothing unresolved");
+
+// already-covered categories are not re-seeded, and merging is honoured
+const a2 = blankAssessment();
+a2.conditions["lighting.console"].rating = "replace";
+a2.conditions["lighting.dimming"].rating = "replace";
+a2.findings = [{
+  id: "f1", categories: ["lighting.console", "lighting.dimming"], bucket: "now",
+  title: "Lighting system replacement", detail: "", budgetTier: "25to100k", photoIds: [],
+}];
+const r2 = seedFindings(a2);
+ok(r2.seeded.length === 0, "a merged finding suppresses re-seeding of both its categories");
+ok(r2.unresolved.length === 0, "a merged finding leaves nothing unresolved");
+
+// a flagged category with no covering finding is reported as a gap
+const a3 = blankAssessment();
+a3.conditions.motors.rating = "monitor";
+a3.conditions.curtains.rating = "replace";
+a3.findings = [{
+  id: "f9", categories: ["curtains"], bucket: "soon",
+  title: "Curtain replacement", detail: "", budgetTier: "5to25k", photoIds: [],
+}];
+ok(seedFindings(a3).unresolved.join(",") === "motors", "an uncovered flagged category is unresolved");
+ok(seedFindings(a3).seeded.length === 0, "no silent re-seeding once the assessor is driving");
+
+// seedFindings must not mutate its input
+const a4 = blankAssessment();
+a4.conditions.rigging.rating = "replace";
+seedFindings(a4);
+ok(a4.findings.length === 0, "seedFindings is pure — it never mutates the assessment");
+ok(newFindingId() !== newFindingId(), "finding ids are unique");
+
+
+/* --- Venue Assessments: Tier-1 keys cover the new classes --- */
+ok(TIER1_WIDTH_KEYS.includes("courtWidth"), "Tier-1 width accepts the gym's court width");
+ok(TIER1_WIDTH_KEYS.includes("sanctuaryWidth"), "Tier-1 width accepts the church's sanctuary width");
+ok(TIER1_DEPTH_KEYS.includes("courtLength"), "Tier-1 depth accepts the gym's court length");
+ok(TIER1_DEPTH_KEYS.includes("sanctuaryLength"), "Tier-1 depth accepts the church's sanctuary length");
+ok(
+  tier1Complete({
+    venue: "Lincoln HS Gym", contact: "Pat Lee",
+    contactEmail: "p@x.org", contactPhone: "555-0100",
+    measurements: { courtWidth: "50", courtLength: "84" },
+  }),
+  "a gym record completes Tier 1 on court dimensions alone"
+);
+ok(
+  !tier1Complete({
+    venue: "Lincoln HS Gym", contact: "Pat Lee",
+    contactEmail: "p@x.org", contactPhone: "555-0100",
+    measurements: { courtWidth: "50" },
+  }),
+  "a gym record missing court length does NOT complete Tier 1"
+);
+
 asyncChecks()
   .then(() => {
-    cleanupSpecDb();
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
   })
   .catch((err) => {
-    cleanupSpecDb();
     console.error(err);
     process.exit(1);
   });

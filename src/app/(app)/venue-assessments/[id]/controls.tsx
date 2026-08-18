@@ -1180,7 +1180,7 @@ export default function SurveyEditor({
                         );
                       })()}
                       {sec.kind === "linesets" && <LinesetsSection enabled={draft.linesetsEnabled} rows={draft.linesets} onEnabled={(linesetsEnabled) => patchDraft({ linesetsEnabled })} onRows={(linesets) => patchDraft({ linesets })} />}
-                      {sec.kind === "assessment" && <AssessmentSection enabled={draft.assessmentEnabled} assessment={draft.assessment} onEnabled={(assessmentEnabled) => patchDraft({ assessmentEnabled })} onChange={(assessment) => patchDraft({ assessment })} />}
+                      {sec.kind === "assessment" && <AssessmentSection enabled={draft.assessmentEnabled} assessment={draft.assessment} photos={draft.photos} onEnabled={(assessmentEnabled) => patchDraft({ assessmentEnabled })} onChange={(assessment) => patchDraft({ assessment })} />}
                       {sec.kind === "signoff" && <div className="sv-grid">{([['repName', 'Peak representative'], ['repSignedAt', 'Representative date'], ['contactName', 'Site contact'], ['contactSignedAt', 'Contact date'], ['reviewerName', 'Technical reviewer (optional)'], ['reviewerRole', 'Reviewer role'], ['reviewerSignedAt', 'Reviewer date']] as const).map(([key, label]) => <label key={key} style={labelStyle}>{label}<input type={key.endsWith('At') ? 'date' : 'text'} value={draft.signoff[key]} onChange={(e) => patchDraft({ signoff: { ...draft.signoff, [key]: e.target.value } })} style={inpStyle} /></label>)}</div>}
                       {sec.kind === "conditions" && (
                         <ConditionsSection
