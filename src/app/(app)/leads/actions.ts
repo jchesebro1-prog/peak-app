@@ -92,7 +92,7 @@ export async function markLostAction(id: string, reason: string) {
     // visit has nowhere to go either. If it's still untouched at
     // "requested" and still points back at this lead, soft-delete it so a
     // dead lead's survey stops nagging the "Survey requests to schedule"
-    // bell / field-survey list. A survey someone has already started
+    // bell / venue-assessments list. A survey someone has already started
     // working (stage moved past requested) is left alone.
     if (visit.surveyId) {
       const survey = await getSurvey(visit.surveyId);

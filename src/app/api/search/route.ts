@@ -95,7 +95,7 @@ export async function GET(req: Request) {
         id: d.id,
         title: String(d.customer || d.id),
         sub: `${d.id} · ${String(d.venue || "site survey")}`,
-        href: `/field-survey`,
+        href: `/venue-assessments`,
         letter: "S",
         color: "#1f7a52",
       }))

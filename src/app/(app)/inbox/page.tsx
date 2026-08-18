@@ -115,7 +115,7 @@ const LINK_KIND_COLOR: Record<string, string> = {
 function linkHref(link: { type: string; id: string }): string {
   const id = encodeURIComponent(link.id);
   if (link.type === "quote") return `/quotes?id=${id}`;
-  if (link.type === "survey") return `/field-survey?id=${id}`;
+  if (link.type === "survey") return `/venue-assessments?id=${id}`;
   if (link.type === "inspection") return `/inspections?id=${id}`;
   if (link.type === "project") return `/projects`;
   if (link.type === "flame_job") return `/flame-tests/results?job=${id}`;

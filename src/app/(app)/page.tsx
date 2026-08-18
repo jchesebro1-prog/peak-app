@@ -49,7 +49,7 @@ import HomeCatalog from "./home-catalog";
 import HomeInbox from "./home-inbox";
 import HomeMyLeads, { type LeadGroup, type LeadRow } from "./home-my-leads";
 import HomePipeline, { type PipelineRow } from "./home-pipeline";
-import HomeFieldSurveys, { type SurveyCard } from "./home-field-surveys";
+import HomeVenueAssessments, { type SurveyCard } from "./home-venue-assessments";
 import HomeTeamActivity, { type TeamActivityRow } from "./home-team-activity";
 import HomeNeedsAttention, { type AlertRow } from "./home-needs-attention";
 
@@ -451,7 +451,7 @@ export default async function HomePage({
       mono: (s.customer || "FS").replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "FS",
       customer: s.customer || "Untitled survey",
       sub: `${s.id} · ${s.venueType || "—"} · ${surveyTimeAgo(s.updatedAt)}`,
-      href: `/field-survey?id=${encodeURIComponent(s.id)}`,
+      href: `/venue-assessments?id=${encodeURIComponent(s.id)}`,
       stage: m,
     };
   });
@@ -557,7 +557,7 @@ export default async function HomePage({
           <HomeCalendar items={agenda} calendarOn={calendarOn} gmailOn={gmailOn} />
 
           {/* field surveys */}
-          <HomeFieldSurveys surveyCards={surveyCards} surveyPendingCount={surveyPendingCount} />
+          <HomeVenueAssessments surveyCards={surveyCards} surveyPendingCount={surveyPendingCount} />
 
           {/* team activity glance */}
           <HomeTeamActivity teamActivity={teamActivity} />
