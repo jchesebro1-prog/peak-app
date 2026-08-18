@@ -6,12 +6,10 @@ import type {
   SurveyRecord,
   SurveyPhoto,
   SurveyStage,
-  SurveyStageMeta,
   MeasureField,
   MeasureGroup,
 } from "@/lib/stores/surveys";
 import {
-  AUDITORIUM_SIZES,
   DISCIPLINE_GROUPS,
   INTAKE_STATUS_META,
   SYSTEM_KEYS,
@@ -20,7 +18,6 @@ import {
   newInventoryId,
   tier1Items,
   tier1Complete,
-  type DisciplineData,
   type DisciplineKey,
   type InventoryRow,
   type SystemState,
@@ -28,146 +25,27 @@ import {
 import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, type SurveyPatch } from "./actions";
 import Venue3D from "./venue-3d";
 import { saveThroughOutbox } from "@/lib/sync/save";
+import type { Draft, EditorCustomer, EditorMeta, FieldDef, SectionDef } from "./sections/types";
+import {
+  ACCENT,
+  ACCENT_BORDER_LT,
+  ACCENT_INK,
+  ACCENT_SOFT,
+  inpStyle,
+  labelStyle,
+  measStyle,
+  selStyle,
+  taStyle,
+} from "./sections/styles";
+import { FieldsSection } from "./sections/fields";
+import { CustVenueSection } from "./sections/custvenue";
+import { ConditionsSection } from "./sections/conditions";
+import { PhotosSection } from "./sections/photos";
 
-/* ============================================================
- * Serializable props from the server. The store is DB-backed and cannot be
- * imported into a client bundle — its pure meta/option-lists are handed over
- * here, and the pure helpers below operate on them.
- * ============================================================ */
-
-export type EditorCustomer = {
-  id: string;
-  name: string;
-  type: string;
-  location: string;
-  locations: Array<{ id: string; label: string; primary: boolean; city: string; state: string }>;
-  primaryContact: { name: string; email: string } | null;
-};
-
-export type EditorMeta = {
-  venueTypes: string[];
-  visitTypes: string[];
-  floorTypes: string[];
-  liftTypes: string[];
-  liftSuppliers: string[];
-  installTimeframes: string[];
-  conditions: string[];
-  stages: Array<{ key: SurveyStage; label: string }>;
-  stageMeta: Record<SurveyStage, SurveyStageMeta>;
-  measureGroups: MeasureGroup[];
-  measureFieldsByType: Record<string, MeasureField[]>;
-  defaultMeasureFields: MeasureField[];
-  /** settings-merged site-intake type catalog, keyed by category */
-  intakeCatalog: Record<string, string[]>;
-};
-
-/** Local draft — the editable slice of the record plus updatedAt for display. */
-type Draft = {
-  customer: string;
-  customerId: string | null;
-  locationId: string | null;
-  venue: string;
-  venueType: string;
-  address: string;
-  contact: string;
-  contactPhone: string;
-  contactEmail: string;
-  visitType: string;
-  reason: string;
-  travelTime: string;
-  distance: string;
-  hasBOM: boolean;
-  hasDrawings: boolean;
-  hasPhotos: boolean;
-  quoteNeededBy: string;
-  budgetary: boolean;
-  projectCompletion: string;
-  installTimeframe: string;
-  loadingDock: string;
-  elevatorSize: string;
-  floorType: string;
-  accessDoorSize: string;
-  liftNeeded: string;
-  liftSupplier: string;
-  scopeOfWork: string;
-  quoteLook: string;
-  notes: string;
-  stage: SurveyStage;
-  assignedTo: string;
-  scheduledDate: string;
-  requestedBy: string;
-  measurements: Record<string, string | boolean>;
-  conditions: string[];
-  photos: SurveyPhoto[];
-  // Site Intake extension (IDEAS #45)
-  auditoriumSize: string;
-  yearBuilt: string;
-  systemsState: Record<string, SystemState>;
-  disciplines: Record<string, DisciplineData>;
-  disciplinesActive: string[];
-  inventory: InventoryRow[];
-  intakeReady: boolean;
-  updatedAt: number;
-};
-
-/* ---------- accent tints ---------- */
-const ACCENT = "var(--accent)";
-const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 13%, #fff)";
-const ACCENT_INK = "color-mix(in srgb, var(--accent) 70%, #000)";
-const ACCENT_BORDER_LT = "color-mix(in srgb, var(--accent) 30%, #fff)";
-
-/* ---------- shared field styles ---------- */
-const labelStyle: CSSProperties = {
-  fontSize: 10.5,
-  fontWeight: 600,
-  color: "#9aa0ab",
-  letterSpacing: ".04em",
-  textTransform: "uppercase",
-  marginBottom: 6,
-  display: "block",
-};
-const inpStyle: CSSProperties = {
-  width: "100%",
-  fontFamily: "var(--font-ui)",
-  fontSize: 16,
-  color: "#16181d",
-  border: "1px solid #e4e7ec",
-  borderRadius: 10,
-  padding: "12px 13px",
-  outline: "none",
-  background: "#fff",
-};
-const selStyle: CSSProperties = { ...inpStyle, cursor: "pointer" };
-const measStyle: CSSProperties = { ...inpStyle, fontFamily: "var(--font-mono)", padding: "11px 12px" };
-const taStyle: CSSProperties = { ...inpStyle, minHeight: 88, resize: "vertical", lineHeight: 1.5 };
-
-/* ---------- field / section model ---------- */
-type FieldDef =
-  | { kind: "text"; key: string; label: string; full?: boolean; type?: string; inputMode?: string; placeholder?: string }
-  | { kind: "select"; key: string; label: string; options: string[]; full?: boolean; measure?: boolean }
-  | { kind: "measure"; key: string; label: string; full?: boolean }
-  | { kind: "toggle"; key: string; label: string; full?: boolean }
-  | { kind: "textarea"; key: string; label: string; placeholder?: string }
-  | { kind: "checkTop"; key: string; label: string }
-  | { kind: "checkMeasure"; key: string; label: string };
-
-type SectionDef = {
-  id: string;
-  title: string;
-  subtitle: string;
-  group: "brief" | "field" | "intake";
-  step: number;
-  advanced?: boolean;
-} & (
-  | { kind: "custvenue" }
-  | { kind: "fields"; fields: FieldDef[] }
-  | { kind: "conditions" }
-  | { kind: "photos" }
-  | { kind: "viz3d" }
-  | { kind: "tier1" }
-  | { kind: "systems" }
-  | { kind: "discipline"; disc: DisciplineKey }
-);
+/* Serializable props from the server — the store is DB-backed and cannot be
+ * imported into a client bundle, so its pure meta/option-lists are handed
+ * over as plain props. The shapes now live in ./sections/types. */
+export type { EditorCustomer, EditorMeta } from "./sections/types";
 
 const STEP_LABELS = ["Brief", "Site & access", "Measurements", "Site intake", "Details"];
 const STEP_BY_ID: Record<string, number> = {
@@ -835,168 +713,6 @@ export default function SurveyEditor({
     background: checked ? "var(--accent)" : "#fff",
   });
 
-  function renderField(f: FieldDef) {
-    const wrap: CSSProperties | undefined =
-      "full" in f && f.full ? { gridColumn: "1 / -1" } : undefined;
-    if (f.kind === "textarea") {
-      return (
-        <div key={f.key} style={{ gridColumn: "1 / -1" }}>
-          <label style={labelStyle}>{f.label}</label>
-          <textarea value={String(draft[f.key as keyof Draft] ?? "")} onChange={(e) => setField(f.key as keyof Draft, e.target.value as never)} placeholder={f.placeholder} style={taStyle} />
-        </div>
-      );
-    }
-    if (f.kind === "checkTop") {
-      const c = !!draft[f.key as keyof Draft];
-      return (
-        <div key={f.key} style={{ gridColumn: "1 / -1" }}>
-          <div onClick={() => setField(f.key as keyof Draft, !c as never)} style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", border: "1px solid #e4e7ec", borderRadius: 10, cursor: "pointer", background: "#fff" }}>
-            <span style={boxStyle(c)}>{c ? "✓" : ""}</span>
-            <span style={{ fontSize: 14, fontWeight: 500, color: "#3a3f4a" }}>{f.label}</span>
-          </div>
-        </div>
-      );
-    }
-    if (f.kind === "checkMeasure") {
-      const c = !!mv(f.key);
-      return (
-        <div key={f.key} style={{ gridColumn: "1 / -1" }}>
-          <div onClick={() => toggleMeasure(f.key)} style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", border: "1px solid #e4e7ec", borderRadius: 10, cursor: "pointer", background: "#fff" }}>
-            <span style={boxStyle(c)}>{c ? "✓" : ""}</span>
-            <span style={{ fontSize: 14, fontWeight: 500, color: "#3a3f4a" }}>{f.label}</span>
-          </div>
-        </div>
-      );
-    }
-    if (f.kind === "toggle") {
-      const yes = draft[f.key as keyof Draft] === true;
-      const no = draft[f.key as keyof Draft] === false;
-      return (
-        <div key={f.key} style={wrap}>
-          <label style={labelStyle}>{f.label}</label>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => setField(f.key as keyof Draft, true as never)} style={toggleBtn(yes)}>Yes</button>
-            <button onClick={() => setField(f.key as keyof Draft, false as never)} style={toggleBtn(no)}>No</button>
-          </div>
-        </div>
-      );
-    }
-    if (f.kind === "select") {
-      const val = f.measure ? String(mv(f.key) ?? "") : String(draft[f.key as keyof Draft] ?? "");
-      const onChange = (e: ChangeEvent<HTMLSelectElement>) =>
-        f.measure ? setMeasure(f.key, e.target.value) : setField(f.key as keyof Draft, e.target.value as never);
-      return (
-        <div key={f.key} style={wrap}>
-          <label style={labelStyle}>{f.label}</label>
-          <select value={val} onChange={onChange} style={selStyle}>
-            <option value="">— Select —</option>
-            {f.options.map((o) => (
-              <option key={o} value={o}>{o}</option>
-            ))}
-          </select>
-        </div>
-      );
-    }
-    if (f.kind === "measure") {
-      return (
-        <div key={f.key} style={wrap}>
-          <label style={labelStyle}>{f.label}</label>
-          <input inputMode="text" value={String(mv(f.key) ?? "")} onChange={(e) => setMeasure(f.key, e.target.value)} placeholder="ft-in or ft" style={measStyle} />
-        </div>
-      );
-    }
-    // text
-    return (
-      <div key={f.key} style={wrap}>
-        <label style={labelStyle}>{f.label}</label>
-        <input type={f.type || "text"} inputMode={f.inputMode as never} value={String(draft[f.key as keyof Draft] ?? "")} onChange={(e) => setField(f.key as keyof Draft, e.target.value as never)} placeholder={f.placeholder} style={inpStyle} />
-      </div>
-    );
-  }
-
-  function renderCustVenue() {
-    let customerOptions = customers.map((c) => ({ value: c.id, label: c.name }));
-    if (draft.customerId && !linkedCust) customerOptions = customerOptions.concat([{ value: draft.customerId, label: draft.customer || draft.customerId }]);
-    const custMetaSuffix = linkedCust ? " · " + [linkedCust.type, linkedCust.location].filter(Boolean).join(" · ") : "";
-    const venuePickMode = venueHasLocs && !venueOther;
-    return (
-      <>
-        <div style={{ marginBottom: 13 }}>
-          <label style={labelStyle}>Customer</label>
-          <select value={draft.customerId ? draft.customerId : custNew ? "__new__" : ""} onChange={(e) => setCustomerSel(e.target.value)} style={selStyle}>
-            <option value="">— Select customer —</option>
-            {customerOptions.map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-            <option value="__new__">+ New customer (not in directory)</option>
-          </select>
-          {linkedCust && (
-            <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 7, fontSize: 11.5, color: "#8c919c" }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: ACCENT, flexShrink: 0 }} />
-              <span>Linked to directory{custMetaSuffix}</span>
-            </div>
-          )}
-          {custNew && (
-            <input value={draft.customer} onChange={(e) => { setCustNew(true); patchDraft({ customer: e.target.value, customerId: null }); }} placeholder="New customer name — e.g. Harbor Repertory Theatre" style={{ ...inpStyle, marginTop: 9 }} />
-          )}
-        </div>
-        <div className="sv-grid">
-          <div style={{ gridColumn: "1 / -1" }}>
-            <label style={labelStyle}>Venue</label>
-            {venuePickMode ? (
-              <select value={draft.locationId ? draft.locationId : venueOther ? "__other__" : ""} onChange={(e) => setVenueSel(e.target.value)} style={selStyle}>
-                <option value="">— Select venue —</option>
-                {custLocs.map((l) => (
-                  <option key={l.id} value={l.id}>{l.label + (l.city ? " · " + l.city : "")}</option>
-                ))}
-                <option value="__other__">Other venue…</option>
-              </select>
-            ) : (
-              <input value={draft.venue} onChange={(e) => patchDraft({ venue: e.target.value, locationId: null })} placeholder={linkedCust ? "e.g. Main Hall" : "e.g. Main Auditorium"} style={inpStyle} />
-            )}
-          </div>
-          <div>
-            <label style={labelStyle}>Venue type</label>
-            <select value={draft.venueType} onChange={(e) => setField("venueType", e.target.value)} style={selStyle}>
-              {meta.venueTypes.map((v) => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Site address</label>
-            <input value={draft.address} onChange={(e) => setField("address", e.target.value)} placeholder="Street, City, State" style={inpStyle} />
-          </div>
-          <div>
-            <label style={labelStyle}>On-site contact</label>
-            <input value={draft.contact} onChange={(e) => setField("contact", e.target.value)} placeholder="Name" style={inpStyle} />
-          </div>
-          <div>
-            <label style={labelStyle}>Contact phone</label>
-            <input type="tel" value={draft.contactPhone} onChange={(e) => setField("contactPhone", e.target.value)} placeholder="(000) 000-0000" style={inpStyle} />
-          </div>
-          <div>
-            <label style={labelStyle}>Contact email</label>
-            <input type="email" value={draft.contactEmail} onChange={(e) => setField("contactEmail", e.target.value)} placeholder="name@venue.org" style={inpStyle} />
-          </div>
-          <div>
-            <label style={labelStyle}>Auditorium size</label>
-            <select value={draft.auditoriumSize} onChange={(e) => setField("auditoriumSize", e.target.value)} style={selStyle}>
-              <option value="">— Select —</option>
-              {AUDITORIUM_SIZES.map((o) => (
-                <option key={o} value={o}>{o}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Built year</label>
-            <input inputMode="numeric" value={draft.yearBuilt} onChange={(e) => setField("yearBuilt", e.target.value)} placeholder="e.g. 1998" style={inpStyle} />
-          </div>
-        </div>
-      </>
-    );
-  }
-
   /* ---------- site intake renderers ---------- */
   function renderDiscField(disc: DisciplineKey, f: MeasureField) {
     if (f.type === "check") {
@@ -1246,8 +962,35 @@ export default function SurveyEditor({
 
                   {open && (
                     <div style={{ padding: "4px 18px 20px" }}>
-                      {sec.kind === "custvenue" && renderCustVenue()}
-                      {sec.kind === "fields" && <div className="sv-grid">{sec.fields.map(renderField)}</div>}
+                      {sec.kind === "custvenue" && (
+                        <CustVenueSection
+                          draft={draft}
+                          patchDraft={patchDraft}
+                          setField={setField}
+                          customers={customers}
+                          venueTypes={meta.venueTypes}
+                          linkedCust={linkedCust}
+                          custLocs={custLocs}
+                          venueHasLocs={venueHasLocs}
+                          custNew={custNew}
+                          setCustNew={setCustNew}
+                          venueOther={venueOther}
+                          setCustomerSel={setCustomerSel}
+                          setVenueSel={setVenueSel}
+                        />
+                      )}
+                      {sec.kind === "fields" && (
+                        <FieldsSection
+                          fields={sec.fields}
+                          draft={draft}
+                          patchDraft={patchDraft}
+                          mv={mv}
+                          setMeasure={setMeasure}
+                          toggleMeasure={toggleMeasure}
+                          toggleBtn={toggleBtn}
+                          boxStyle={boxStyle}
+                        />
+                      )}
                       {sec.kind === "tier1" && (
                         <div>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -1343,41 +1086,16 @@ export default function SurveyEditor({
                         );
                       })()}
                       {sec.kind === "conditions" && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                          {meta.conditions.map((c) => {
-                            const active = draft.conditions.indexOf(c) >= 0;
-                            return (
-                              <button key={c} onClick={() => toggleCondition(c)} style={chipStyle(active)}>{c}</button>
-                            );
-                          })}
-                        </div>
+                        <ConditionsSection
+                          draft={draft}
+                          conditions={meta.conditions}
+                          toggleCondition={toggleCondition}
+                          chipStyle={chipStyle}
+                        />
                       )}
                       {sec.kind === "viz3d" && <Venue3D venueType={draft.venueType} measurements={draft.measurements} />}
                       {sec.kind === "photos" && (
-                        <>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
-                            <span style={{ fontSize: 12, color: "#9aa0ab" }}>{draft.photos.length} of 8</span>
-                            <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER_LT}`, borderRadius: 9, padding: "9px 13px", cursor: "pointer", minHeight: 40 }}>
-                              Add photo
-                              <input type="file" accept="image/*" capture="environment" multiple onChange={onPhotos} style={{ display: "none" }} />
-                            </label>
-                          </div>
-                          {draft.photos.length > 0 ? (
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(92px,1fr))", gap: 9 }}>
-                              {draft.photos.map((p) => (
-                                <div key={p.id} style={{ position: "relative", height: 92, borderRadius: 10, overflow: "hidden", background: "#f1f2f5", border: "1px solid #e8eaee" }}>
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img src={p.dataUrl} alt="site photo" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                                  <button onClick={() => removePhoto(p.id)} aria-label="Remove photo" style={{ position: "absolute", top: 5, right: 5, width: 26, height: 26, borderRadius: "50%", background: "rgba(16,18,22,.62)", color: "#fff", border: "none", cursor: "pointer", fontSize: 14, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div style={{ border: "1.5px dashed #dfe2e8", borderRadius: 11, padding: 20, textAlign: "center", fontSize: 12.5, color: "#aab0bb" }}>
-                              No photos yet — tap <b style={{ fontWeight: 600, color: "#8c919c" }}>Add photo</b> to capture the site.
-                            </div>
-                          )}
-                        </>
+                        <PhotosSection draft={draft} onPhotos={onPhotos} removePhoto={removePhoto} />
                       )}
                     </div>
                   )}
