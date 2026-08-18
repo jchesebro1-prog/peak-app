@@ -10,7 +10,8 @@ import {
 } from "@/lib/operations-work";
 import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS, battenLenFt, BATTEN_OVERHANG_FT } from "@/lib/design/venue-dims";
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
-import { DEFAULT_SETTINGS } from "@/db/seed-data";
+import { DEFAULT_SETTINGS, DEMO_COLLECTIONS } from "@/db/seed-data";
+import { DOC_TABLES } from "@/db/doc-tables";
 import { accentContrast } from "@/lib/color";
 import { emailFor, legacyEmailFor } from "@/lib/team";
 import { gridProjectsSeed } from "@/db/seeds/grid-projects";
@@ -26,8 +27,29 @@ import {
 // Pure (no store access, no DB) — see the note on catalogPatch itself.
 import { catalogPatch } from "@/app/(app)/import/registry";
 
+import {
+  VENUE_CLASSES, SUBTYPES, VISIT_PURPOSES, classMeasureFields,
+  venueClassFor, venueSubtypeFor, visitPurposeFor,
+  TIER1_WIDTH_BY_CLASS, TIER1_DEPTH_BY_CLASS,
+} from "@/lib/stores/venue-classes";
+
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
+
+/* --- Go-live reset coverage (PUNCHLIST #94) --- */
+const resetCollections = [...DEMO_COLLECTIONS].sort();
+const documentCollections = Object.keys(DOC_TABLES).sort();
+ok(
+  resetCollections.join("\n") === documentCollections.join("\n"),
+  "go-live reset covers every business-document collection"
+);
+ok(
+  resetCollections.includes("equipment_bookings") &&
+    resetCollections.includes("grid_sheets") &&
+    resetCollections.includes("tasks") &&
+    resetCollections.includes("notes"),
+  "go-live reset covers no-seed child collections"
+);
 
 /* --- BOM parsing --- */
 const p = parseCsv("sku,description,qty\nS4LED,Source Four LED,12\n,Mystery fixture,3\nJUNK");
@@ -3012,6 +3034,78 @@ async function asyncChecks(): Promise<void> {
     ok(!!p1 && !!p2 && p1.id !== p2.id, "#13 the inspection and repair test quotes get DISTINCT linked projects");
   }
 }
+
+/* --- Venue Assessments: class model --- */
+ok(VENUE_CLASSES.length === 6, `six venue classes (got ${VENUE_CLASSES.length})`);
+ok(
+  VENUE_CLASSES.map((c) => c.key).join(",") ===
+    "theatre,auditorium,church,gym,convention,other",
+  "venue classes in spec order"
+);
+ok(venueClassFor("Proscenium theater") === "theatre", "proscenium theater -> theatre");
+ok(venueClassFor("Black box") === "theatre", "black box -> theatre");
+ok(venueClassFor("Worship / sanctuary") === "church", "worship -> church");
+ok(venueClassFor("Gymnasium / gym stage") === "gym", "gym stage -> gym");
+ok(venueClassFor("Arena") === "theatre", "arena -> theatre");
+ok(venueClassFor("Multipurpose room") === "convention", "multipurpose -> convention");
+ok(venueClassFor("Outdoor / amphitheater") === "other", "outdoor -> other");
+ok(venueClassFor("") === "theatre", "empty venue type falls back to theatre");
+ok(venueClassFor("Nonsense") === "theatre", "unknown venue type falls back to theatre");
+ok(venueSubtypeFor("Black box") === "Black box / flexible", "black box carries its subtype");
+ok(venueSubtypeFor("Outdoor / amphitheater") === "", "outdoor has no subtype");
+ok(
+  VENUE_CLASSES.every((c) => SUBTYPES[c.key] !== undefined),
+  "every class has a subtype list (other may be empty)"
+);
+ok(
+  VENUE_CLASSES.filter((c) => c.key !== "other").every((c) => SUBTYPES[c.key].length > 0),
+  "every class but 'other' has at least one subtype"
+);
+ok(
+  Object.values(SUBTYPES).every((list) => list.every((s) => typeof s === "string" && s.length > 0)),
+  "no empty subtype strings"
+);
+ok(visitPurposeFor("Budgetary walk-through") === "Bid walk", "budgetary -> bid walk");
+ok(visitPurposeFor("Service call") === "Repair / service", "service call -> repair/service");
+ok(visitPurposeFor("Design verification") === "New system design", "design verification -> new system design");
+ok(visitPurposeFor("") === "", "empty visit type stays empty");
+ok(VISIT_PURPOSES.length === 6, `six visit purposes (got ${VISIT_PURPOSES.length})`);
+ok(VISIT_PURPOSES[0] === "New system design", "sheet order preserved");
+
+// Every class resolves to at least one width key and one depth key, and every
+// such key must actually exist in that class's field set. This is the hard
+// invariant that keeps the Tier-1 gate satisfiable on every class.
+ok(
+  VENUE_CLASSES.every((c) => {
+    const keys = classMeasureFields(c.key).map((f) => f.key);
+    const w = TIER1_WIDTH_BY_CLASS[c.key];
+    const d = TIER1_DEPTH_BY_CLASS[c.key];
+    return !!w && !!d && keys.includes(w) && keys.includes(d);
+  }),
+  "every class has a width+depth key present in its own field set"
+);
+ok(classMeasureFields("gym").some((f) => f.key === "courtLength"), "gym asks court length");
+ok(classMeasureFields("gym").some((f) => f.key === "dividerSpan"), "gym asks divider curtain span");
+ok(classMeasureFields("gym").some((f) => f.key === "bleacherType"), "gym asks bleacher type");
+ok(classMeasureFields("auditorium").some((f) => f.key === "pinRail"), "auditorium asks pin rail location");
+ok(classMeasureFields("auditorium").some((f) => f.key === "loadingGallery"), "auditorium asks loading gallery");
+ok(classMeasureFields("theatre").some((f) => f.key === "proW"), "theatre reuses the existing proW key");
+ok(classMeasureFields("church").some((f) => f.key === "centerAisleW"), "church reuses the existing centerAisleW key");
+ok(classMeasureFields("convention").some((f) => f.key === "rigPointCapacity"), "convention asks rigging point capacity");
+ok(
+  classMeasureFields("other").length > 0,
+  "the 'other' class has a generic field set, not an empty one"
+);
+// No class may invent a key that duplicates an existing one under a new name.
+const RESERVED = ["proW","proH","stageDepth","gridH","wingSL","wingSR","houseH","seating","boothLoc","boothWD","apron","centerAisleW","platformWidth","platformDepth","roomWidth","roomDepth","pitDepth"];
+ok(
+  VENUE_CLASSES.every((c) =>
+    classMeasureFields(c.key).every((f) => !/^(prosceniumWidth|stageW|ceilingHeight|houseHeight)$/.test(f.key))
+  ),
+  "no class re-invents a reserved dimension under a new key name"
+);
+ok(RESERVED.length === 17, "reserved key list is the spec's list");
+
 
 asyncChecks()
   .then(() => {
