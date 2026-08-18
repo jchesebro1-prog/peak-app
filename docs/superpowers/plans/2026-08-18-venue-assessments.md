@@ -19,6 +19,10 @@
 - **Findings never spawn quotes, repair jobs, or tasks.** Budget tiers are not a quote.
 - **Tests go in `scripts/test-review-and-spec.ts`**, the house harness — a flat script of `ok(condition, message)` assertions. Run with `npm run test:specs`.
 - **Never leave a `tsx` script running.** PGlite is single-process and opening it writes. After any `npm run test:specs` or `npm run db:seed`, confirm with `ps aux | grep tsx` that nothing survives. This has destroyed the dev DB three times.
+- **NEVER `git add -A`, `git add .`, or `git commit -a`.** The working tree carries ~28
+  pre-existing modified files that belong to unrelated in-flight work (the estimator,
+  flame-tests, pricing, seed data). Stage only the exact paths your task touched, and run
+  `git status --short` before every commit to confirm the staged set.
 - **Copy is the sheets' copy.** Field labels come from the printed sheets verbatim, including their capitalisation of venue-specific terms.
 
 ---
@@ -990,6 +994,19 @@ function normalize(s: SurveyRecord): SurveyRecord {
 
 The `"__migrated__"` marker is a placeholder — replace it in Task 9 with the class's actual first PRESENT option once those lists exist. For this task, assert only that the record reads without loss.
 
+**3c-bis. The seed fixtures need retyping.** Making the new fields required on
+`SurveyDraft` breaks `src/db/seeds/surveys.ts`, which builds full record literals.
+Do NOT fix this by adding the new fields to the fixtures — that would make the
+migration assertions tautological. Instead keep the fixtures as genuine
+*pre*-migration documents and retype the array:
+
+```ts
+type SeedSurvey = Partial<SurveyDraft> &
+  Pick<SurveyRecord, "id"|"owner"|"createdAt"|"updatedAt"|"syncState"|"syncedAt"|"rev">;
+```
+
+with a single documented `as SurveyRecord[]` cast at the return of `surveysSeed()`.
+
 **3d.** Add `measureFieldsForClass(cls: VenueClass)` delegating to `classMeasureFields`, and keep the existing `measureFields(venueType)` as a thin wrapper so no call site breaks in this task:
 
 ```ts
@@ -1019,7 +1036,7 @@ Expected: clean build. Then `ps aux | grep tsx` to confirm nothing survives.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/lib/stores/surveys.ts src/lib/stores/survey-intake.ts scripts/test-review-and-spec.ts
+git add src/lib/stores/surveys.ts src/lib/stores/survey-intake.ts src/db/seeds/surveys.ts scripts/test-review-and-spec.ts
 git commit -m "feat(assessments): record shape + read-time migration for venue class, linesets, assessment layer"
 ```
 
@@ -1082,7 +1099,8 @@ Expected: clean. Then start the dev server and confirm both redirects resolve wi
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -A "src/app/(app)/venue-assessments" next.config.ts src/components/nav/nav-data.ts
+git add "src/app/(app)/venue-assessments" next.config.ts src/components/nav/nav-data.ts
+# then: git add -u  # stages the DELETIONS from the git mv of field-survey/
 git commit -m "refactor(assessments): move /field-survey to /venue-assessments with redirects"
 ```
 
@@ -1128,7 +1146,7 @@ Expected: clean build; smoke routes pass. `npm run test:smoke` runs a `tsx` scri
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A
+git add <only the exact files this task created or modified>
 git commit -m "refactor(assessments): repoint every call site and label to Venue Assessments"
 ```
 
@@ -1186,7 +1204,7 @@ Expected: clean build, `ALL PASSED`. Then load the editor for `FS-1053` and conf
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A "src/app/(app)/venue-assessments/[id]"
+git add <only the exact files this task created or modified>
 git commit -m "refactor(assessments): split the editor's section renderers out of controls.tsx"
 ```
 
@@ -1271,7 +1289,7 @@ Then open `FS-1053` and confirm: the class reads Theatre, the subtype reads Sing
 - [ ] **Step 7: Commit**
 
 ```bash
-git add -A "src/app/(app)/venue-assessments"
+git add <only the exact files this task created or modified>
 git commit -m "feat(assessments): venue class + subtype drive the measurement set"
 ```
 
@@ -1379,7 +1397,7 @@ Expected: `ALL PASSED`, clean build. Open a gym record and an auditorium record 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -A
+git add <only the exact files this task created or modified>
 git commit -m "feat(assessments): fold sheet system blocks into gated discipline sections"
 ```
 
@@ -1418,7 +1436,7 @@ Open a theatre record, add three linesets, save, reload, and confirm all three p
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A
+git add <only the exact files this task created or modified>
 git commit -m "feat(assessments): lineset schedule table"
 ```
 
@@ -1459,7 +1477,7 @@ Enable the assessment on a record, fill the usage profile, save, reload, confirm
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A
+git add <only the exact files this task created or modified>
 git commit -m "feat(assessments): assessment toggle + usage & needs profile"
 ```
 
@@ -1498,7 +1516,7 @@ Rate a few categories, save, reload, confirm persistence. Confirm no rating cont
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A
+git add <only the exact files this task created or modified>
 git commit -m "feat(assessments): category condition ratings + unrated electrical notes"
 ```
 
@@ -1544,7 +1562,7 @@ Rate three categories, seed, merge two into one finding, confirm the third stays
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -A
+git add <only the exact files this task created or modified>
 git commit -m "feat(assessments): findings, buckets, budget tiers, sign-off"
 ```
 
@@ -1583,7 +1601,7 @@ Open an assessment for a customer that has a completed flame test and confirm th
 - [ ] **Step 4: Commit**
 
 ```bash
-git add -A
+git add <only the exact files this task created or modified>
 git commit -m "feat(assessments): auto-resolve flame test + inspection references"
 ```
 
@@ -1618,7 +1636,7 @@ Confirm a gym record shows "Encore 22 oz main + valance, Encore rest" without a 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add -A
+git add <only the exact files this task created or modified>
 git commit -m "feat(assessments): venue-class doctrine defaults sourced from Estimating Rules"
 ```
 
@@ -1657,7 +1675,7 @@ Render a sheet for **each of the six classes** and confirm pagination, that the 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add -A
+git add <only the exact files this task created or modified>
 git commit -m "feat(assessments): printable field sheet per venue class"
 ```
 
