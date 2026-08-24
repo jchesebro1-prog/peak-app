@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { signIn, signOut } from "next-auth/react";
+import { signOut } from "next-auth/react";
 import {
   NAV,
   activeKeyFor,
@@ -34,20 +34,11 @@ export type NavUser = {
   isAdmin: boolean;
 };
 
-export type RosterEntry = {
-  id: string;
-  name: string;
-  initials: string;
-  color: string;
-};
-
 export default function Nav({
   user,
   companyName,
   logoLight = null,
   feedbackEmail,
-  devLogin,
-  roster,
   counts = {},
   bell = [],
 }: {
@@ -56,8 +47,6 @@ export default function Nav({
   /** Uploaded brand mark for the dark bar (Settings → Branding, IDEAS #32). */
   logoLight?: string | null;
   feedbackEmail: string;
-  devLogin: boolean;
-  roster: RosterEntry[];
   counts?: NavCounts;
   bell?: BellGroup[];
 }) {
@@ -551,55 +540,6 @@ export default function Nav({
                         </div>
                       </div>
                     </div>
-
-                    {devLogin && roster.length > 0 && (
-                      <>
-                        <div className="pk-section-label">Switch user</div>
-                        <div className="pk-roster">
-                          {roster.map((p) => (
-                            <button
-                              key={p.id}
-                              className="pk-roster-row"
-                              onClick={() =>
-                                signIn("dev-login", {
-                                  userId: p.id,
-                                  callbackUrl: pathname,
-                                })
-                              }
-                            >
-                              <span
-                                className="pk-roster-avatar"
-                                style={{ background: p.color }}
-                              >
-                                {p.initials}
-                              </span>
-                              <span
-                                style={{
-                                  fontSize: 13,
-                                  fontWeight: 500,
-                                  color: "#3a3f4a",
-                                  flex: 1,
-                                  textAlign: "left",
-                                }}
-                              >
-                                {p.name}
-                              </span>
-                              {p.name === user.name && (
-                                <span
-                                  style={{
-                                    color: "var(--accent)",
-                                    fontSize: 13,
-                                    fontWeight: 700,
-                                  }}
-                                >
-                                  ✓
-                                </span>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      </>
-                    )}
 
                     <div style={{ borderTop: "1px solid #f0f1f4" }}>
                       <Link href="/account" className="pk-menu-link" onClick={closeAll}>

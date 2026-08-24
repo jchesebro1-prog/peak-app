@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
-import { auth, devLoginEnabled, googleConfigured } from "@/auth";
+import { auth, googleConfigured, previewLoginEnabled } from "@/auth";
 import { getSettings } from "@/lib/settings";
-import { activeUsers } from "@/lib/users";
 import LoginButtons from "./login-buttons";
 
 export default async function LoginPage() {
@@ -9,16 +8,7 @@ export default async function LoginPage() {
   if (session?.user?.active) redirect("/");
 
   const settings = await getSettings();
-  const devLogin = devLoginEnabled();
-  const roster = devLogin
-    ? (await activeUsers()).map((u) => ({
-        id: u.id,
-        name: u.name,
-        initials: u.initials,
-        color: u.color,
-        roleLabel: u.roles.join(" · "),
-      }))
-    : [];
+  const previewLogin = previewLoginEnabled();
   const markLetter = "Q"; // Quartzite-6 (the software; companyName is the operating company)
 
   return (
@@ -59,8 +49,7 @@ export default async function LoginPage() {
           </div>
           <LoginButtons
             google={googleConfigured()}
-            devLogin={devLogin}
-            roster={roster}
+            previewLogin={previewLogin}
           />
         </div>
 

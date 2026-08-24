@@ -1,4 +1,5 @@
 import NextAuth from "next-auth";
+import { timingSafeEqual } from "node:crypto";
 import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
 import type { Provider } from "next-auth/providers";
@@ -10,9 +11,8 @@ import { getUser, getUserByEmail, updateUser } from "@/lib/users";
  * - Google SSO is the production sign-in. Access is invite-list based: the
  *   Google account's email must match an ACTIVE row in the users table
  *   (email or googleEmail) — Settings → Team is the invite list.
- * - Dev sign-in (pick a team member, no password) is available only when
- *   AUTH_DEV_LOGIN=true, or in local dev when Google isn't configured yet.
- *   Never enable AUTH_DEV_LOGIN in production.
+ * - Local preview sign-in accepts an active team email plus an access code.
+ *   It is available only outside production and requires AUTH_DEV_ACCESS_CODE.
  */
 
 export function googleConfigured(): boolean {
@@ -20,32 +20,48 @@ export function googleConfigured(): boolean {
 }
 
 export function devLoginEnabled(): boolean {
-  // Hard rule: passwordless "sign in as any team member" NEVER runs in
-  // production, no matter what the env says. This is the guardrail the
-  // AUTH_DEV_LOGIN comment used to only promise — if the flag ever rides
-  // into a prod deploy, it is ignored here rather than exposing account
-  // takeover on the live login page.
-  if (process.env.NODE_ENV === "production") return false;
+  // Preview deployments use production builds, so VERCEL_ENV distinguishes a
+  // disposable preview from the live app. The access-code provider below is
+  // always off for production, even if preview environment variables leak.
+  const isProductionDeployment =
+    process.env.NODE_ENV === "production" && process.env.VERCEL_ENV !== "preview";
+  if (isProductionDeployment) return false;
   if (process.env.AUTH_DEV_LOGIN === "true") return true;
-  return !googleConfigured();
+  return process.env.NODE_ENV !== "production" && !googleConfigured();
+}
+
+export function previewLoginEnabled(): boolean {
+  return devLoginEnabled() && !!process.env.AUTH_DEV_ACCESS_CODE;
+}
+
+function validPreviewCode(code: string): boolean {
+  const expected = process.env.AUTH_DEV_ACCESS_CODE;
+  if (!expected) return false;
+  const supplied = Buffer.from(code);
+  const configured = Buffer.from(expected);
+  return supplied.length === configured.length && timingSafeEqual(supplied, configured);
 }
 
 const providers: Provider[] = [];
 
 if (googleConfigured()) providers.push(Google);
 
-if (devLoginEnabled()) {
+if (previewLoginEnabled()) {
   providers.push(
     Credentials({
-      id: "dev-login",
-      name: "Dev sign-in",
-      credentials: { userId: { label: "User id" } },
+      id: "preview-login",
+      name: "Preview sign-in",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        accessCode: { label: "Access code", type: "password" },
+      },
       async authorize(creds) {
-        const u = await getUser(String(creds?.userId ?? ""));
+        if (!validPreviewCode(String(creds?.accessCode ?? ""))) return null;
+        const u = await getUserByEmail(String(creds?.email ?? ""));
         if (!u || u.status !== "active") return null;
         return { id: u.id, name: u.name, email: u.email };
       },
-    })
+    }),
   );
 }
 

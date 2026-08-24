@@ -1,22 +1,35 @@
 "use client";
 
+import { useState } from "react";
 import { signIn } from "next-auth/react";
 
 export default function LoginButtons({
   google,
-  devLogin,
-  roster,
+  previewLogin,
 }: {
   google: boolean;
-  devLogin: boolean;
-  roster: Array<{
-    id: string;
-    name: string;
-    initials: string;
-    color: string;
-    roleLabel: string;
-  }>;
+  previewLogin: boolean;
 }) {
+  const [email, setEmail] = useState("");
+  const [accessCode, setAccessCode] = useState("");
+  const [emailError, setEmailError] = useState("");
+
+  async function signInWithEmail(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setEmailError("");
+    const result = await signIn("preview-login", {
+      email,
+      accessCode,
+      redirect: false,
+      callbackUrl: window.location.origin + "/",
+    });
+    if (result?.error) {
+      setEmailError("The email or access code was not accepted.");
+      return;
+    }
+    window.location.assign(result?.url || "/");
+  }
+
   return (
     <div>
       {google && (
@@ -36,7 +49,7 @@ export default function LoginButtons({
         </button>
       )}
 
-      {!google && !devLogin && (
+      {!google && !previewLogin && (
         <div
           style={{
             fontSize: 12.5,
@@ -49,12 +62,12 @@ export default function LoginButtons({
           }}
         >
           Google sign-in isn’t configured yet. Set AUTH_GOOGLE_ID and
-          AUTH_GOOGLE_SECRET (see DEPLOY.md), or enable AUTH_DEV_LOGIN for a
-          development sign-in.
+          AUTH_GOOGLE_SECRET (see DEPLOY.md), or configure the local preview
+          sign-in with AUTH_DEV_LOGIN and AUTH_DEV_ACCESS_CODE.
         </div>
       )}
 
-      {devLogin && (
+      {previewLogin && (
         <div style={{ marginTop: google ? 16 : 0 }}>
           <div
             style={{
@@ -66,66 +79,49 @@ export default function LoginButtons({
               marginBottom: 8,
             }}
           >
-            Dev sign-in — pick a team member
+            Preview sign-in
           </div>
-          <div
-            style={{
-              border: "1px solid #ececf0",
-              borderRadius: 10,
-              overflow: "hidden",
-            }}
-          >
-            {roster.map((p, i) => (
-              <button
-                key={p.id}
-                onClick={() =>
-                  signIn("dev-login", {
-                    userId: p.id,
-                    callbackUrl: window.location.origin + "/",
-                  })
-                }
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  width: "100%",
-                  padding: "10px 12px",
-                  background: "#fff",
-                  border: "none",
-                  borderTop: i ? "1px solid #f5f6f8" : "none",
-                  cursor: "pointer",
-                  fontFamily: "var(--font-ui)",
-                }}
-              >
-                <span
-                  style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: "50%",
-                    background: p.color,
-                    color: "#fff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 10.5,
-                    fontWeight: 600,
-                    flexShrink: 0,
-                  }}
-                >
-                  {p.initials}
-                </span>
-                <span style={{ flex: 1, textAlign: "left" }}>
-                  <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#16181d" }}>
-                    {p.name}
-                  </span>
-                  <span style={{ display: "block", fontSize: 11, color: "#9aa0ab" }}>
-                    {p.roleLabel}
-                  </span>
-                </span>
-                <span style={{ color: "#c4c9d2", fontSize: 15 }}>›</span>
-              </button>
-            ))}
-          </div>
+          <form onSubmit={signInWithEmail} style={{ display: "grid", gap: 8 }}>
+            <input
+              aria-label="Team email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@company.com"
+              required
+              autoComplete="email"
+              style={{
+                minWidth: 0,
+                flex: 1,
+                border: "1px solid #d9dde5",
+                borderRadius: 8,
+                padding: "10px 11px",
+                color: "#16181d",
+                fontFamily: "var(--font-ui)",
+                fontSize: 13,
+              }}
+            />
+            <input
+              aria-label="Access code"
+              type="password"
+              value={accessCode}
+              onChange={(e) => setAccessCode(e.target.value)}
+              placeholder="Access code"
+              required
+              autoComplete="current-password"
+              style={{
+                minWidth: 0,
+                border: "1px solid #d9dde5",
+                borderRadius: 8,
+                padding: "10px 11px",
+                color: "#16181d",
+                fontFamily: "var(--font-ui)",
+                fontSize: 13,
+              }}
+            />
+            <button className="pk-google-btn" type="submit">Continue</button>
+          </form>
+          {emailError && <div style={{ color: "#b42318", fontSize: 12, marginTop: 8 }}>{emailError}</div>}
         </div>
       )}
     </div>
