@@ -1,5 +1,5 @@
 import type { VenueDims } from "./venue-dims";
-import { fabByName, fabricFromPart, type Fabric, type WeightLine } from "./steel";
+import { FABLIB, fabByName, fabricFromPart, type Fabric, type WeightLine } from "./steel";
 
 /**
  * Peak's soft-goods geometry, as one table (spec §1).
@@ -46,6 +46,22 @@ const FABRIC_BY_TYPE_TIER: Record<string, Record<GoodsTier, string>> = {
   Legs: { good: "RB-EN-16", better: "RB-EN-22", best: "RB-CHAR-25" },
   CYC: { good: "RB-MUS", better: "RB-MUS", best: "RB-MUS" },
 };
+
+/** Built-in weight fallback for the standard tier SKUs. The catalog remains
+ * authoritative when it has a valid oz/basis/width row, but tier selection
+ * must still produce a weighable fabric when a deployment has not been seeded
+ * with those catalog rows yet. */
+const TIER_FABRIC_FALLBACKS: Record<string, Fabric> = {
+  "RB-EN-22": FABLIB.find((f) => f.name === "Encore Velour 22 oz")!,
+  "RB-CHAR-25": FABLIB.find((f) => f.name === "Charisma Velour 25 oz")!,
+  "RB-MV-MN": FABLIB.find((f) => f.name === "Memorable Velour 25 oz")!,
+  "RB-EN-16": FABLIB.find((f) => f.name === "Encore Velour 15 oz")!,
+  "RB-MUS": FABLIB.find((f) => f.name === "Muslin, seamless (approx)")!,
+};
+
+function tierFabricFallback(sku: string): Fabric | undefined {
+  return TIER_FABRIC_FALLBACKS[sku];
+}
 
 /**
  * The finished-dimension recipe for one generated line.
@@ -244,12 +260,19 @@ export function ruleToWeightLine(
   chain: string;
 } {
   const part = fabrics.find((f) => f.sku === rule.fabricSku);
+  const catalogFabric = part ? fabricFromPart(part) || undefined : undefined;
+  const fallback = tierFabricFallback(rule.fabricSku);
   return {
     // `fab` is the human-readable label only. The WEIGHT comes from
     // fabResolved — catalog descriptions do not match FABLIB names, so a
     // name-only lookup silently weighs zero (see task 2 step 6).
-    fab: part ? part.desc : undefined,
-    fabResolved: part ? fabricFromPart(part) || undefined : undefined,
+    // Keep the catalog label when present; otherwise expose the tier's
+    // standard fallback label so the selected tier is visible in the editor.
+    fab: part?.desc || fallback?.name,
+    // A selected tier always carries its oz into the weight calculation. This
+    // prevents an unseeded catalog (or a catalog row with missing oz) from
+    // producing the misleading "fabric didn't resolve" error.
+    fabResolved: catalogFabric || fallback,
     w: rule.w,
     h: rule.h,
     full: rule.fullness,
