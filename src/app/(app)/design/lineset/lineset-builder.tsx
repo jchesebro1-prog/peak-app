@@ -24,6 +24,7 @@ import {
   PRODIGY_HOISTS,
   BATTENS,
   battenById,
+  fabricFromPart,
   fmt,
   type WeightDefaults,
   type WeightLine,
@@ -458,6 +459,23 @@ export function LinesetBuilder({
     // catalog rule behind them and keep picking from FABLIB, unchanged.
     const catalogRule = lineKey ? rows.find((r) => r.key === lineKey)?.rule : undefined;
     const issue = lineFabricIssue(value, catalogRule || null, fabrics);
+    const missingRuleValue = catalogRule && !value.fab ? `__missing__${catalogRule.fabricSku}` : null;
+    const fabricValue = value.fab || missingRuleValue || FAB_NONE;
+    const chooseFabric = (selected: string) => {
+      if (selected === FAB_NONE || selected.startsWith("__missing__")) {
+        onChange({ fab: undefined, fabResolved: undefined });
+        return;
+      }
+      const catalog = fabrics.find((f) => f.desc === selected);
+      const local = FABLIB.find((f) => f.name === selected);
+      onChange({
+        fab: selected,
+        // Catalog fabric remains the source of truth when present. The local
+        // library is an explicit, weighable fallback for a catalog gap; it is
+        // stored as a resolved Fabric so the row no longer hard-fails.
+        fabResolved: catalog ? fabricFromPart(catalog) || undefined : local || undefined,
+      });
+    };
     const fixtureLoads = value.fixtureLoads || [];
     const addFixture = () =>
       onChange({
@@ -518,10 +536,14 @@ export function LinesetBuilder({
               <input value={value.name || ""} onChange={(e) => onChange({ name: e.target.value } as Partial<WeightLine>)} style={field} /></div>
           )}
           <div style={{ gridColumn: "span 2" }}><span style={genLabel("fab")}>Fabric / goods</span>
-            <select value={value.fab || FAB_NONE} onChange={(e) => onChange({ fab: e.target.value, fabResolved: undefined })} style={{ ...field, ...genStyle("fab"), ...(issue ? { borderColor: "#b4543a" } : {}) }}>
+            <select value={fabricValue} onChange={(e) => chooseFabric(e.target.value)} style={{ ...field, ...genStyle("fab"), ...(issue ? { borderColor: "#b4543a" } : {}) }}>
               <option>{FAB_NONE}</option>
+              {missingRuleValue && <option value={missingRuleValue}>{catalogRule?.fabricSku} — unavailable in catalog</option>}
+              {catalogRule && fabrics.length > 0 && <option disabled>Catalog fabrics</option>}
+              {catalogRule && fabrics.map((f) => <option key={`catalog-${f.sku}`} value={f.desc}>{f.desc}</option>)}
+              {catalogRule && FABLIB.length > 0 && <option disabled>Local weighable overrides</option>}
               {catalogRule
-                ? fabrics.map((f) => <option key={f.sku} value={f.desc}>{f.desc}</option>)
+                ? FABLIB.map((f) => <option key={`local-${f.name}`} value={f.name}>{f.name} — local weight</option>)
                 : FABLIB.map((f) => <option key={f.name}>{f.name}</option>)}
             </select>
             {/* The fabric drives BOTH goods and track weight, when it doesn't
