@@ -48,21 +48,6 @@ export const NAV: NavEntry[] = [
   },
   {
     kind: "group",
-    key: "pm",
-    label: "PM",
-    children: [
-      { key: "projects", label: "Projects", href: "/projects" },
-      { key: "myprojects", label: "My Projects", href: "/projects?who=mine" }, // #22 — see the EST note
-      { key: "schedule", label: "Schedule", href: "/schedule" },
-      { key: "fieldwork", label: "Field Work", href: "/field-work" },
-      { key: "flametests", label: "Flame Tests", href: "/flame-tests" },
-      { key: "inspections", label: "Rigging Inspections", href: "/inspections" },
-      { key: "repairs", label: "Repairs", href: "/repairs" },
-      { key: "rentals", label: "Rentals", href: "/rentals" },
-    ],
-  },
-  {
-    kind: "group",
     key: "crm",
     label: "CRM",
     children: [
@@ -72,7 +57,17 @@ export const NAV: NavEntry[] = [
       { key: "companies", label: "Companies", href: "/companies" },
       { key: "people", label: "People", href: "/people" },
       { key: "venues", label: "Venues", href: "/venues" },
+      { key: "sitevisits", label: "Site Visits", href: "/site-visits" },
       { key: "field", label: "Venue Assessments", href: "/venue-assessments" },
+    ],
+  },
+  {
+    kind: "group",
+    key: "compliance",
+    label: "COMPLIANCE",
+    children: [
+      { key: "flametests", label: "Flame Tests", href: "/flame-tests" },
+      { key: "inspections", label: "Rigging Inspections", href: "/inspections" },
     ],
   },
   {
@@ -112,9 +107,7 @@ export function activeKeyFor(pathname: string): string {
     "/estimator": "estimator",
     "/design": "designoverview",
     "/reviews": "reviews",
-    "/projects": "projects",
-    "/schedule": "schedule",
-    "/field-work": "fieldwork",
+    "/site-visits": "sitevisits",
     "/flame-tests": "flametests",
     "/inspections": "inspections",
     "/repairs": "repairs",

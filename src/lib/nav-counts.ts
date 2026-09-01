@@ -1,20 +1,12 @@
 import { followUps, followUpInfo } from "@/lib/stores/leads";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAllDesigns } from "@/lib/stores/designs";
-import { getAllProjects, riskFlags } from "@/lib/stores/projects";
 import { renewals, dueLabel } from "@/lib/stores/flame-jobs";
 import { getAll as allInspections } from "@/lib/stores/inspections";
-import {
-  getAll as allRepairs,
-  flaggedFromInspections,
-  priorityMeta,
-} from "@/lib/stores/repair-jobs";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { allVisits } from "@/lib/stores/site-visits";
 import { getAll as allComms, waitHours, unreadCountFrom } from "@/lib/stores/comms";
 import { getPrefs } from "@/lib/stores/notif-prefs";
-import { allTasks, taskBellItems, isOverdue } from "@/lib/stores/tasks";
-import { shortDate } from "@/lib/format";
 import type {
   NavCounts,
   BellGroup,
@@ -38,28 +30,22 @@ export async function navData(me: string): Promise<{
   const [
     quotes,
     designs,
-    projects,
     inspections,
-    repairs,
     surveys,
     comms,
     visits,
     leadFollowUps,
     renewalRows,
-    taskRows,
     prefs,
   ] = await Promise.all([
     allQuotes(),
     getAllDesigns(),
-    getAllProjects(),
     allInspections(),
-    allRepairs(),
     allSurveys(),
     allComms(),
     allVisits(),
     followUps({ unownedOrMine: true, me }),
     renewals({ dueOnly: true }),
-    allTasks(),
     getPrefs(me),
   ]);
   // Everything below is derived from the arrays already fetched above — no
@@ -67,7 +53,6 @@ export async function navData(me: string): Promise<{
   // (flagged), leads (leadCount), and comms (unread) a second time, plus a
   // serial round-trip for unread after the parallel batch. navData runs on
   // every app page, so this is per-navigation overhead removed.
-  const flagged = await flaggedFromInspections({ jobs: repairs, inspections });
   const leadCount = leadFollowUps.length;
   const inboxUnread = unreadCountFrom(comms, me);
 
@@ -86,13 +71,9 @@ export async function navData(me: string): Promise<{
       d.review?.reviewer === me &&
       d.owner !== me
   );
-  const riskProjects = projects.filter(
-    (p) => p.stage !== "complete" && riskFlags(p).length > 0
-  );
   const requestedInspections = inspections.filter(
     (r) => (r.stage || "requested") === "requested"
   );
-  const approvedRepairs = repairs.filter((r) => r.stage === "approved");
   const requestedSurveys = surveys.filter(
     (s) => (s.stage || "requested") === "requested"
   );
@@ -113,10 +94,8 @@ export async function navData(me: string): Promise<{
     inbox: inboxUnread,
     leads: leadCount,
     reviews: reviewQuotes.length + reviewDesigns.length,
-    projects: riskProjects.length,
     flametests: renewalRows.length,
     inspections: requestedInspections.length,
-    repairs: approvedRepairs.length + flagged.length,
     field: requestedSurveys.length,
   };
 
@@ -164,7 +143,7 @@ export async function navData(me: string): Promise<{
       id: s.id,
       title: (s.customer as string) || s.id,
       sub: (s.venue as string) || "Site survey",
-      href: "/venue-assessments",
+      href: "/site-visits",
       letter: "S",
       color: "#1f7a52",
     }))
@@ -197,18 +176,6 @@ export async function navData(me: string): Promise<{
     }))
   );
   push(
-    "projects",
-    "Projects need attention",
-    riskProjects.map((p) => ({
-      id: p.id,
-      title: p.name,
-      sub: riskFlags(p)[0]?.label || "",
-      href: "/projects",
-      letter: "P",
-      color: "#b4543a",
-    }))
-  );
-  push(
     "flame",
     "Flame tests due for renewal",
     renewalRows.map((r) => ({
@@ -218,18 +185,6 @@ export async function navData(me: string): Promise<{
       href: "/flame-tests",
       letter: "F",
       color: "#b4543a",
-    }))
-  );
-  push(
-    "repairs",
-    "Repairs awaiting scheduling",
-    approvedRepairs.map((r) => ({
-      id: r.id,
-      title: (r.customer as string) || r.id,
-      sub: `${priorityMeta(r.priority).label} · awaiting scheduling`,
-      href: "/repairs",
-      letter: "R",
-      color: r.priority === "emergency" ? "#8a2f22" : "#b4543a",
     }))
   );
   push(
@@ -259,19 +214,6 @@ export async function navData(me: string): Promise<{
       };
     })
   );
-  const nowMs = Date.now();
-  const taskItems = taskBellItems(taskRows, me, nowMs);
-  push("tasks", "Tasks needing attention", taskItems.map((t) => ({
-    id: t.id,
-    title: t.title,
-    sub: t.dueAt
-      ? (isOverdue(t, nowMs) ? "Overdue" : "Due " + shortDate(t.dueAt))
-      : (t.assigneeName || "Unassigned"),
-    href: t.projectId ? `/projects/${t.projectId}` : "/field-work",
-    letter: "T",
-    color: "#b45309",
-  })));
-
   const bellCount = groups.reduce((n, g) => n + g.items.length, 0);
   return { counts, bell: groups, bellCount };
 }
