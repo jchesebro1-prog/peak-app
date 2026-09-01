@@ -487,7 +487,10 @@ export function LinesetBuilder({
     const patchFixture = (id: string, patch: Partial<ElectricFixtureLoad>) =>
       onChange({ fixtureLoads: fixtureLoads.map((f) => (f.id === id ? { ...f, ...patch } : f)) });
     return (
-      <div style={{ background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "12px 14px", margin: "2px 0 6px" }}>
+      <div
+        onClick={(event) => event.stopPropagation()}
+        style={{ background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "12px 14px", margin: "2px 0 6px" }}
+      >
         {isElectric && (
           <div style={{ display: "flex", gap: 4, marginBottom: 12, borderBottom: "1px solid #e4e7ec" }}>
             {(["load", "fixtures"] as const).map((key) => (
