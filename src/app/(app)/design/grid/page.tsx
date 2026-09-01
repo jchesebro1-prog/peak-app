@@ -56,6 +56,17 @@ export default async function GridIndexPage() {
             required
             style={{ ...input, flex: "1 1 280px" }}
           />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#5b616e" }}>
+            <input name="createBasePlan" type="checkbox" defaultChecked />
+            Generate a base plan from venue dimensions
+          </label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(104px, 1fr))", gap: 7, flex: "1 1 100%" }}>
+            <input name="proWidthFt" type="number" min="1" defaultValue="40" required placeholder="Pro width (ft)" title="Proscenium width (ft)" style={input} />
+            <input name="proHeightFt" type="number" min="1" defaultValue="20" required placeholder="Pro height (ft)" title="Proscenium height (ft)" style={input} />
+            <input name="stageWidthFt" type="number" min="1" defaultValue="50" required placeholder="Stage width (ft)" title="Wall-to-wall stage width (ft)" style={input} />
+            <input name="stageDepthFt" type="number" min="1" defaultValue="30" required placeholder="Stage depth (ft)" title="Plaster line to back wall (ft)" style={input} />
+            <input name="gridHeightFt" type="number" min="1" defaultValue="24" required placeholder="Grid height (ft)" title="Floor to grid steel (ft)" style={input} />
+          </div>
           <select name="companyId" defaultValue="" style={{ ...input, flex: "0 1 220px" }}>
             <option value="">No customer yet</option>
             {companies.map((c) => (

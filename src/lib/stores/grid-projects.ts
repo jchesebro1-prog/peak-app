@@ -8,6 +8,7 @@ import {
 } from "@/db/doc-store";
 import { clamp01, type Calibration, type Point } from "@/lib/annotations";
 import type { GridCurtain } from "@/lib/design/grid-bom";
+import type { VenueDims } from "@/lib/design/venue-dims";
 
 /**
  * The Grid (D108) — system-design projects: plan sheets, painted catalog
@@ -134,6 +135,8 @@ export type GridProject = {
   /** Venue link (D113 item 6) — identity sites.id + display name. */
   siteId?: string | null;
   siteName?: string;
+  /** Dimensions used to create the generated base sheet, when applicable. */
+  venueDims?: VenueDims;
   /** Sheet display order; the docs live in grid_sheets. */
   sheetIds: string[];
   placements: GridPlacement[];
@@ -188,6 +191,7 @@ export async function createProject(input: {
   customer: string;
   customerId: string | null;
   by: string;
+  venueDims?: VenueDims;
 }): Promise<GridProject> {
   const t = Date.now();
   return insertWithPrefixedId<GridProject>("grid_projects", "GRD", 5001, (id) => ({
@@ -200,6 +204,7 @@ export async function createProject(input: {
     calibrations: [],
     spaces: [],
     routes: [],
+    ...(input.venueDims ? { venueDims: input.venueDims } : {}),
     quoteId: null,
     createdBy: input.by,
     createdAt: t,
