@@ -130,6 +130,7 @@ const GMAIL_BANNER: Record<string, { msg: string; ok: boolean }> = {
 export default function SettingsClient({
   meId,
   meName,
+  buildInfo,
   gmail,
   settings,
   intakeCatalog,
@@ -142,6 +143,7 @@ export default function SettingsClient({
 }: {
   meId: string;
   meName: string;
+  buildInfo: { version: string; commit: string; environment: string };
   gmail: { enabled: boolean; mailboxes: MailboxVM[] };
   settings: {
     companyName: string;
@@ -524,6 +526,38 @@ export default function SettingsClient({
 
   return (
     <div>
+      <div
+        className="pk-card"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          padding: "11px 14px",
+          marginBottom: 14,
+          background: "#fafbfc",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 650, color: "#3d424e" }}>Quartzite build</div>
+          <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 2 }}>
+            Use this identifier when checking whether a deployment is current.
+          </div>
+        </div>
+        <code
+          style={{
+            color: "#3d424e",
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+          }}
+          title={`Environment: ${buildInfo.environment}`}
+        >
+          v{buildInfo.version} · {buildInfo.commit}
+        </code>
+      </div>
+
       {error && (
         <div
           style={{
@@ -803,7 +837,7 @@ export default function SettingsClient({
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Consulting — phase menu</div>
             <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
               The phases offered when building a consulting quote and on the
-              engagement's Phases tab. One per line — engagements pick any
+              engagement&apos;s Phases tab. One per line — engagements pick any
               mix, so keep these generic.
             </div>
           </div>

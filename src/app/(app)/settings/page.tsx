@@ -16,6 +16,7 @@ import {
 } from "@/lib/gmail/config";
 import { listConnections } from "@/lib/gmail/connections";
 import SettingsClient from "./settings-client";
+import { buildInfo } from "@/lib/build-info";
 
 export const metadata = { title: "Settings — Quartzite-6" };
 
@@ -127,6 +128,7 @@ export default async function SettingsPage() {
         <SettingsClient
           meId={me.id}
           meName={me.name}
+          buildInfo={buildInfo}
           gmail={{ enabled: gmailOn, mailboxes: mailboxVMs }}
           settings={{
             companyName: settings.companyName,
