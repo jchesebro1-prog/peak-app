@@ -4,7 +4,7 @@ import { all as allCustomers } from "@/lib/stores/customers";
 import { byCategory } from "@/lib/stores/catalog";
 import { listDesigns, getDesign } from "@/lib/stores/studio-designs";
 import { DEFAULT_LINESET_INPUTS, type LinesetInputs } from "@/lib/design/lineset";
-import type { WeightDefaults, WeightLine } from "@/lib/design/steel";
+import type { LinesetMode, WeightDefaults, WeightLine } from "@/lib/design/steel";
 import { DEFAULT_GEAR, type GoodsTier, type GearDefaults } from "@/lib/design/goods";
 import {
   LinesetBuilder,
@@ -41,11 +41,12 @@ function normalizeInputs(inp: Partial<LinesetInputs> | undefined): LinesetInputs
 /** The on-disk shape of a combined save at either vintage. v2 predates
  *  proWidthFt/proHeightFt (inside `inputs`) and the `tier`/`gear` fields
  *  entirely — all optional here and backfilled by resolveInitial(). */
-type StoredCombinedLineset = Omit<CombinedLinesetData, "v" | "inputs" | "tier" | "gear"> & {
-  v: 2 | 3;
+type StoredCombinedLineset = Omit<CombinedLinesetData, "v" | "inputs" | "tier" | "gear" | "categoryModes"> & {
+  v: 2 | 3 | 4;
   inputs: Partial<LinesetInputs>;
   tier?: GoodsTier;
   gear?: GearDefaults;
+  categoryModes?: Partial<Record<string, LinesetMode>>;
 };
 
 /**
@@ -64,7 +65,7 @@ function resolveInitial(
   if (!design) return { initial: undefined, adoptable: false };
   const d = design.data as Record<string, unknown>;
   const ver = (d as { v?: number }).v;
-  if (design.kind === "lineset" && d && (ver === 2 || ver === 3)) {
+  if (design.kind === "lineset" && d && (ver === 2 || ver === 3 || ver === 4)) {
     const rec = design.data as StoredCombinedLineset;
     return {
       initial: {
@@ -74,6 +75,7 @@ function resolveInitial(
         extras: rec.extras || [],
         tier: rec.tier || "better",
         gear: rec.gear || DEFAULT_GEAR,
+        categoryModes: rec.categoryModes || {},
       },
       adoptable: true,
     };

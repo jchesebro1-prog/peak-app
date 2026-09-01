@@ -45,9 +45,24 @@ import {
 } from "@/lib/stores/assessment";
 
 import { TIER1_WIDTH_KEYS, TIER1_DEPTH_KEYS, tier1Complete } from "@/lib/stores/survey-intake";
+import { resolvedLinesetMode } from "@/lib/design/lineset-mode-rules";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
+
+/* --- Lineset category rigging rules --- */
+ok(
+  resolvedLinesetMode("Electric", undefined, { Electric: "dead" }, "motor") === "dead",
+  "a Lineset category rule applies to every matching set type"
+);
+ok(
+  resolvedLinesetMode("Border", undefined, { Border: "dead" }, "motor") === "dead",
+  "a Lineset category rule also applies to curtain types"
+);
+ok(
+  resolvedLinesetMode("Draw", "cw", { Draw: "dead" }, "motor") === "cw",
+  "a per-line rigging choice overrides its category rule"
+);
 
 /* --- Go-live reset coverage (PUNCHLIST #94) --- */
 const resetCollections = [...DEMO_COLLECTIONS].sort();

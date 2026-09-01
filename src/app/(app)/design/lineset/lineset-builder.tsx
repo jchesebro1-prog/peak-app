@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/static-components -- LoadEditor intentionally closes over this builder's live rules, fabrics, and save state. */
 
 // Merged Lineset Builder + Weights (PUNCHLIST #6, D78). The Builder's
 // generated schedule supplies the ROWS; weight data are per-row fields hung
@@ -7,7 +8,7 @@
 // which slot it landed on. Three field classes render distinctly (generated /
 // hand-entered / calculated); unspecified lines are excluded from totals and
 // flagged rather than silently counted as 0 lb (P2).
-import { Fragment, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   generateLineset,
   DEFAULT_LINESET_INPUTS,
@@ -49,6 +50,7 @@ import { battenLenFt, BATTEN_OVERHANG_FT } from "@/lib/design/venue-dims";
 import { SaveBar, type SavedRef } from "../save-bar";
 import { downloadCsv } from "../export";
 import { RIGGING_LIMITATION_NOTICE } from "@/lib/compliance-notices";
+import { resolvedLinesetMode, type CategoryModeRules } from "@/lib/design/lineset-mode-rules";
 
 /* ---- saved-design data model (P3) ---------------------------------------- */
 
@@ -61,18 +63,22 @@ export type LineLoad = Partial<Omit<WeightLine, "name">> & {
   fixtureLoads?: ElectricFixtureLoad[];
 };
 
+/** Category defaults are deliberately separate from a hand override on one
+ * line. A rule applies to every generated line of its type (including all
+ * curtain types); an individual `LineLoad.mode` always wins. */
 /** v3 combined save format. Adds the PRO dimensions (carried inside `inputs`),
  *  the goods tier and the gear defaults. Legacy shapes (v2, bare LinesetInputs
  *  from the old Builder, {defaults,lines} from the old Weights tool) are
  *  adapted on load by the route page — see resolveInitial() in page.tsx. */
 export type CombinedLinesetData = {
-  v: 3;
+  v: 4;
   inputs: LinesetInputs;
   defaults: WeightDefaults;
   loads: Record<string, LineLoad>;
   extras: (WeightLine & { xid: string })[];
   tier: GoodsTier;
   gear: GearDefaults;
+  categoryModes: CategoryModeRules;
 };
 
 export type CombinedInitial = {
@@ -82,6 +88,7 @@ export type CombinedInitial = {
   extras?: (WeightLine & { xid: string })[];
   tier?: GoodsTier;
   gear?: GearDefaults;
+  categoryModes?: CategoryModeRules;
   /** set when the opened design was a legacy Weights record — saving creates
    *  a new combined design instead of overwriting the old one */
   legacyWeights?: boolean;
@@ -109,6 +116,7 @@ const TYPE_COLOR: Record<string, string> = {
 };
 
 const MODE_LABEL: Record<LinesetMode, string> = { motor: "Motor", dead: "Dead-hung", cw: "Counterweight" };
+const CURTAIN_TYPES = new Set(["Border", "Draw", "Legs", "CYC", "Rear", "Midstage Draw"]);
 
 function NumF({ v, set, w, style }: { v: number; set: (n: number) => void; w?: number; style?: React.CSSProperties }) {
   return <input type="number" value={v} onChange={(e) => set(parseFloat(e.target.value) || 0)} style={{ ...field, ...(w ? { width: w } : {}), ...style }} />;
@@ -170,6 +178,7 @@ export function LinesetBuilder({
   // instead of silently resetting them.
   const [tier, setTier] = useState<GoodsTier>(initial?.tier || "better");
   const [gear, setGear] = useState<GearDefaults>(initial?.gear || DEFAULT_GEAR);
+  const [categoryModes, setCategoryModes] = useState<CategoryModeRules>(initial?.categoryModes || {});
   const [showGrid, setShowGrid] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -190,6 +199,13 @@ export function LinesetBuilder({
     });
   const patchExtra = (xid: string, patch: Partial<WeightLine>) =>
     setExtras((a) => a.map((x) => (x.xid === xid ? { ...x, ...patch } : x)));
+  const setCategoryMode = (type: string, mode: LinesetMode | "") =>
+    setCategoryModes((current) => {
+      const next = { ...current };
+      if (mode) next[type] = mode;
+      else delete next[type];
+      return next;
+    });
 
   /** True when `field` was hand-typed for line `key` (present in loads[key]),
    *  as opposed to arriving from the drape rule / gear default (P6/P7). */
@@ -262,6 +278,7 @@ export function LinesetBuilder({
           ...load,
           ...mergeLineFabric(base, load, rule, fabrics),
         };
+        const mode = resolvedLinesetMode(s.type, load?.mode, categoryModes, def.mode);
 
         const specified = ruled || !!load;
         const c = specified ? computeSetWeight(line, wdef) : null;
@@ -272,9 +289,13 @@ export function LinesetBuilder({
         // filled in yet", so the cause gets surfaced on the row and in the
         // banner instead (#50).
         const issue = specified ? lineFabricIssue(line, rule, fabrics) : null;
-        return { s, key, load, rule, ruled, specified, line, c, issue };
+        return { s, key, load, rule, ruled, specified, line, c, mode, issue };
       }),
-    [out.schedule, keys, loads, wdef, dims, tier, gear, fabrics, inp.shellIntervalFt]
+    [out.schedule, keys, loads, wdef, dims, tier, gear, fabrics, inp.shellIntervalFt, categoryModes, def.mode]
+  );
+  const categoryTypes = useMemo(
+    () => [...new Set(out.schedule.map((s) => s.type))],
+    [out.schedule]
   );
   const extraRows = useMemo(
     () => extras.map((x) => ({ x, c: computeSetWeight(x, wdef), issue: lineFabricIssue(x, null, fabrics) })),
@@ -366,7 +387,7 @@ export function LinesetBuilder({
     const checkFor = (c: ReturnType<typeof computeSetWeight> | null, mode: LinesetMode) =>
       !c ? "NOT SPECIFIED" : c.fabricUnresolved ? "UNAVAILABLE" : mode === "cw" ? `${c.combo!.big}x25+${c.combo!.small}x10 brick` : c.over ? "OVER LIMIT" : "OK";
     const csvRows: (string | number)[][] = rows.map((r, i) => {
-      const mode = r.line.mode || wdef.mode;
+      const mode = r.mode;
       const source = r.load ? "overridden" : r.ruled ? "rule" : "manual";
       return [
         i + 1, r.s.slot, r.s.dsPositionLabel, r.s.type, r.line.name,
@@ -403,14 +424,14 @@ export function LinesetBuilder({
   // `wdef`, not `def`: the saved record carries the batten length the schedule
   // was actually calculated with. Reopening re-derives it from proWidthFt
   // anyway, so the two can never drift.
-  const getData = (): CombinedLinesetData => ({ v: 3, inputs: inp, defaults: wdef, loads, extras, tier, gear });
+  const getData = (): CombinedLinesetData => ({ v: 4, inputs: inp, defaults: wdef, loads, extras, tier, gear, categoryModes });
 
   /* ---- the per-line load editor (expands under the selected row, P5) ----
    *  A fourth field class lives here alongside generated / hand-entered /
    *  calculated (see file header): rule-derived. `lineKey` (schedule rows
    *  only — extras have no rule) drives isOverride() so a field the rule
    *  filled in renders muted until Jeff actually types over it (P7). */
-  function LoadEditor({ value, onChange, onClear, isExtra, onRemove, lineKey, isElectric = false }: {
+  function LoadEditor({ value, onChange, onClear, isExtra, onRemove, lineKey, isElectric = false, resolvedMode, categoryMode }: {
     value: LineLoad & { name?: string };
     onChange: (patch: LineLoad & Partial<WeightLine>) => void;
     onClear?: () => void;
@@ -418,9 +439,11 @@ export function LinesetBuilder({
     onRemove?: () => void;
     lineKey?: string;
     isElectric?: boolean;
+    resolvedMode?: LinesetMode;
+    categoryMode?: LinesetMode;
   }) {
     const [tab, setTab] = useState<"load" | "fixtures">("load");
-    const mode = value.mode || def.mode;
+    const mode = resolvedMode || value.mode || def.mode;
     const genStyle = (f: keyof WeightLine): React.CSSProperties | undefined =>
       lineKey && !isOverride(lineKey, f) ? { color: "#9aa0ab", background: "#fafbfc" } : undefined;
     const genLabel = (f: keyof WeightLine): React.CSSProperties =>
@@ -573,6 +596,20 @@ export function LinesetBuilder({
           )}
         </div>
         )}
+        {lineKey && !isOverride(lineKey, "mode") && categoryMode && (
+          <div style={{ marginTop: 8, fontSize: 11.5, color: "#5b616e" }}>
+            Using the <b>{MODE_LABEL[categoryMode]}</b> rule for all {rows.find((r) => r.key === lineKey)?.s.type} lines.
+          </div>
+        )}
+        {lineKey && isOverride(lineKey, "mode") && (
+          <button
+            type="button"
+            onClick={() => onChange({ mode: undefined })}
+            style={{ marginTop: 8, background: "none", border: "none", color: "var(--accent)", fontSize: 11.5, fontWeight: 600, cursor: "pointer", padding: 0 }}
+          >
+            Use category / global mode
+          </button>
+        )}
         {lineKey && loads[lineKey] && rows.find((r) => r.key === lineKey)?.rule && (
           <button
             type="button"
@@ -626,6 +663,8 @@ export function LinesetBuilder({
       return <span title={`${c.combo.big}×25 + ${c.combo.small}×10 lb`} style={{ fontSize: 11.5, color: "#5b616e" }}>{c.combo.big}·{c.combo.small} brick</span>;
     return <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", background: c.over ? "#b4543a" : "#1f7a52" }} title={c.over ? "Over a limit" : "OK"} />;
   };
+  const selectedRow = openKey ? rows.find((row) => row.key === openKey) : undefined;
+  const selectedExtra = openKey ? extraRows.find(({ x }) => x.xid === openKey) : undefined;
 
   return (
     <div>
@@ -636,7 +675,7 @@ export function LinesetBuilder({
           Saving creates a combined design; the old record stays until you delete it.
         </div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 300px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: openKey ? "minmax(250px, 300px) minmax(420px, 1fr) minmax(300px, 350px)" : "minmax(0, 300px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
         {/* ---- input rail ---- */}
         <div style={card}>
           {/* Three venue dimensions, and only three (#50): PRO width, PRO
@@ -667,6 +706,35 @@ export function LinesetBuilder({
             </label>
           ))}
           <div style={{ marginTop: 8 }}><span style={label}>General-purpose lines</span><NumF v={inp.gpCount} set={(n) => set("gpCount", n)} /></div>
+
+          <div style={{ fontSize: 13.5, fontWeight: 700, margin: "18px 0 5px" }}>Category rigging rules</div>
+          <div style={{ fontSize: 11.5, color: "#6b7079", lineHeight: 1.45, marginBottom: 9 }}>
+            Set the default mode for every line in a category. Individual line edits override these rules.
+          </div>
+          {([false, true] as const).map((curtains) => {
+            const types = categoryTypes.filter((type) => CURTAIN_TYPES.has(type) === curtains);
+            if (!types.length) return null;
+            return (
+              <div key={String(curtains)} style={{ marginTop: curtains ? 12 : 0 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#9aa0ab", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>
+                  {curtains ? "Curtains & soft goods" : "Rigging & utility"}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {types.map((type) => (
+                    <div key={type}>
+                      <span style={label}>{type}</span>
+                      <select value={categoryModes[type] || ""} onChange={(e) => setCategoryMode(type, e.target.value as LinesetMode | "")} style={field}>
+                        <option value="">Use global ({MODE_LABEL[def.mode]})</option>
+                        <option value="motor">Motor</option>
+                        <option value="dead">Dead-hung</option>
+                        <option value="cw">Counterweight</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
 
           {/* single settings drawer (P4): layout rules + weight defaults */}
           <button onClick={() => setSettingsOpen((a) => !a)} style={{ marginTop: 14, background: "none", border: "none", color: "var(--accent)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: 0 }}>
@@ -836,8 +904,7 @@ export function LinesetBuilder({
                 </thead>
                 <tbody>
                   {rows.map((r, i) => (
-                    <Fragment key={r.key}>
-                      <tr onClick={() => setOpenKey(openKey === r.key ? null : r.key)} style={{ cursor: "pointer", background: openKey === r.key ? "color-mix(in srgb, var(--accent) 5%, #fff)" : undefined }}>
+                      <tr key={r.key} onClick={() => setOpenKey(openKey === r.key ? null : r.key)} style={{ cursor: "pointer", background: openKey === r.key ? "color-mix(in srgb, var(--accent) 5%, #fff)" : undefined }}>
                         <td style={{ ...td, color: "#9aa0ab", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
                         <td style={{ ...td, fontFamily: "var(--font-mono)", color: "#9aa0ab" }}>{r.s.slot}</td>
                         <td style={{ ...td, fontFamily: "var(--font-mono)" }}>{r.s.dsPositionLabel || "—"}</td>
@@ -852,27 +919,12 @@ export function LinesetBuilder({
                           )}
                         </td>
                         <td style={{ ...td, textAlign: "right" }}>{weightCell(r.specified, r.c)}</td>
-                        <td style={td}>{checkCell(r.specified, r.c, r.line.mode || def.mode)}</td>
-                        <td style={{ ...td, color: "var(--accent)", fontSize: 12, fontWeight: 600 }}>{openKey === r.key ? "▾" : "edit"}</td>
+                        <td style={td}>{checkCell(r.specified, r.c, r.mode)}</td>
+                        <td style={{ ...td, color: "var(--accent)", fontSize: 12, fontWeight: 600 }}>{openKey === r.key ? "open →" : "edit →"}</td>
                       </tr>
-                      {openKey === r.key && (
-                        <tr>
-                          <td colSpan={8} style={{ padding: "0 6px", borderBottom: "1px solid #f4f5f7" }}>
-                            <LoadEditor
-                              value={{ ...r.line }}
-                              onChange={(patch) => patchLoad(r.key, patch)}
-                              onClear={r.specified ? () => { clearLoad(r.key); setOpenKey(null); } : undefined}
-                              lineKey={r.key}
-                              isElectric={r.s.type === "Electric"}
-                            />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
                   ))}
                   {extraRows.map(({ x, c, issue }, i) => (
-                    <Fragment key={x.xid}>
-                      <tr onClick={() => setOpenKey(openKey === x.xid ? null : x.xid)} style={{ cursor: "pointer", background: openKey === x.xid ? "color-mix(in srgb, var(--accent) 5%, #fff)" : undefined }}>
+                      <tr key={x.xid} onClick={() => setOpenKey(openKey === x.xid ? null : x.xid)} style={{ cursor: "pointer", background: openKey === x.xid ? "color-mix(in srgb, var(--accent) 5%, #fff)" : undefined }}>
                         <td style={{ ...td, color: "#9aa0ab", fontFamily: "var(--font-mono)" }}>{rows.length + i + 1}</td>
                         <td style={{ ...td, color: "#c4c9d2" }}>—</td>
                         <td style={{ ...td, color: "#c4c9d2", fontSize: 12 }}>custom</td>
@@ -887,21 +939,8 @@ export function LinesetBuilder({
                         </td>
                         <td style={{ ...td, textAlign: "right" }}>{weightCell(true, c)}</td>
                         <td style={td}>{checkCell(true, c, x.mode || def.mode)}</td>
-                        <td style={{ ...td, color: "var(--accent)", fontSize: 12, fontWeight: 600 }}>{openKey === x.xid ? "▾" : "edit"}</td>
+                        <td style={{ ...td, color: "var(--accent)", fontSize: 12, fontWeight: 600 }}>{openKey === x.xid ? "open →" : "edit →"}</td>
                       </tr>
-                      {openKey === x.xid && (
-                        <tr>
-                          <td colSpan={8} style={{ padding: "0 6px", borderBottom: "1px solid #f4f5f7" }}>
-                            <LoadEditor
-                              value={x}
-                              isExtra
-                              onChange={(patch) => patchExtra(x.xid, patch)}
-                              onRemove={() => { setExtras((a) => a.filter((e) => e.xid !== x.xid)); setOpenKey(null); }}
-                            />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -973,6 +1012,39 @@ export function LinesetBuilder({
             {RIGGING_LIMITATION_NOTICE}
           </p>
         </div>
+
+        {openKey && (
+          <aside style={{ ...card, position: "sticky", top: 14, maxHeight: "calc(100vh - 28px)", overflow: "auto", padding: 14 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#8c919c", letterSpacing: ".05em", textTransform: "uppercase" }}>Line inspector</div>
+                <div style={{ marginTop: 3, fontSize: 14, fontWeight: 700 }}>{selectedRow?.line.name || selectedExtra?.x.name || "Line"}</div>
+                {selectedRow && <div style={{ marginTop: 2, fontSize: 11.5, color: "#6b7079" }}>{selectedRow.s.type} · slot {selectedRow.s.slot}</div>}
+                {selectedExtra && <div style={{ marginTop: 2, fontSize: 11.5, color: "#6b7079" }}>Custom line</div>}
+              </div>
+              <button type="button" onClick={() => setOpenKey(null)} aria-label="Close line inspector" style={{ border: "none", background: "transparent", color: "#6b7079", fontSize: 18, lineHeight: 1, cursor: "pointer", padding: 3 }}>×</button>
+            </div>
+            {selectedRow && (
+              <LoadEditor
+                value={{ ...selectedRow.line }}
+                onChange={(patch) => patchLoad(selectedRow.key, patch)}
+                onClear={selectedRow.specified ? () => { clearLoad(selectedRow.key); setOpenKey(null); } : undefined}
+                lineKey={selectedRow.key}
+                isElectric={selectedRow.s.type === "Electric"}
+                resolvedMode={selectedRow.mode}
+                categoryMode={categoryModes[selectedRow.s.type]}
+              />
+            )}
+            {selectedExtra && (
+              <LoadEditor
+                value={selectedExtra.x}
+                isExtra
+                onChange={(patch) => patchExtra(selectedExtra.x.xid, patch)}
+                onRemove={() => { setExtras((a) => a.filter((entry) => entry.xid !== selectedExtra.x.xid)); setOpenKey(null); }}
+              />
+            )}
+          </aside>
+        )}
       </div>
     </div>
   );
