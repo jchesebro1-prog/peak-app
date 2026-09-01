@@ -183,6 +183,7 @@ export function LinesetBuilder({
   const [showGrid, setShowGrid] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [inspectorTab, setInspectorTab] = useState<"load" | "fixtures">("load");
 
   const set = <K extends keyof LinesetInputs>(k: K, v: LinesetInputs[K]) => setInp((s) => ({ ...s, [k]: v }));
   const setD = <K extends keyof WeightDefaults>(k: K, v: WeightDefaults[K]) => setDef((s) => ({ ...s, [k]: v }));
@@ -443,7 +444,6 @@ export function LinesetBuilder({
     resolvedMode?: LinesetMode;
     categoryMode?: LinesetMode;
   }) {
-    const [tab, setTab] = useState<"load" | "fixtures">("load");
     const mode = resolvedMode || value.mode || def.mode;
     const genStyle = (f: keyof WeightLine): React.CSSProperties | undefined =>
       lineKey && !isOverride(lineKey, f) ? { color: "#9aa0ab", background: "#fafbfc" } : undefined;
@@ -497,15 +497,15 @@ export function LinesetBuilder({
               <button
                 key={key}
                 type="button"
-                onClick={() => setTab(key)}
-                style={{ border: "none", borderBottom: tab === key ? "2px solid var(--accent)" : "2px solid transparent", background: "transparent", color: tab === key ? "#16181d" : "#6b7079", padding: "5px 9px 7px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12 }}
+                onClick={() => setInspectorTab(key)}
+                style={{ border: "none", borderBottom: inspectorTab === key ? "2px solid var(--accent)" : "2px solid transparent", background: "transparent", color: inspectorTab === key ? "#16181d" : "#6b7079", padding: "5px 9px 7px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12 }}
               >
                 {key === "load" ? "Load & rigging" : `Fixtures${fixtureLoads.length ? ` (${fixtureLoads.length})` : ""}`}
               </button>
             ))}
           </div>
         )}
-        {tab === "fixtures" && isElectric ? (
+        {inspectorTab === "fixtures" && isElectric ? (
           <div>
             <div style={{ fontSize: 12.5, color: "#5b616e", lineHeight: 1.45, marginBottom: 10 }}>
               List the fixtures actually hanging on this electric. Their total replaces the automatic fixture allowance; the distribution allowance remains included.
