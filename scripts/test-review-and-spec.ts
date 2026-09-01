@@ -326,7 +326,7 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
  * this reports WHICH child changed. The Fixture Cross-Ref screen joined the
  * group after D97 shipped, which is why a bare `length === 6` went stale. */
 const DESIGN_CHILDREN = [
-  "designoverview", "engagements", "designs", "grid",
+  "designoverview", "engagements", "designs", "specs", "grid",
   "steel", "lineset", "motors", "fixtures",
 ];
 ok(

@@ -78,6 +78,10 @@ export const NAV: NavEntry[] = [
       { key: "designoverview", label: "Overview", href: "/design" },
       { key: "engagements", label: "Consulting", href: "/design/engagements" },
       { key: "designs", label: "Designs", href: "/design/designs" },
+      /* #51: the bid-spec generator was previously reachable only from an
+       * engagement or Grid deep link. Keep the route engagement-aware, but
+       * expose its picker as a first-class Design tool. */
+      { key: "specs", label: "Spec Builder", href: "/design/engagements/spec" },
       /* The Grid (D108) — the DaVinci-style system designer: plan sheets,
        * painted catalog devices, live BOM → draft quote. */
       { key: "grid", label: "The Grid", href: "/design/grid" },
