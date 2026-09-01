@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { claimVisitAction, releaseVisitAction, scheduleVisitAction } from "./visit-actions";
+import { claimVisitAction, releaseVisitAction, scheduleVisitAction } from "../site-visits/visit-actions";
 
 /**
  * #34 — the open-visit queue rows above the survey cards. Unclaimed rows
