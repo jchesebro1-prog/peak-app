@@ -855,6 +855,22 @@ const missDesc = "Not in catalog";
 const missed = mergeLineFabric(ruleLine, { fab: missDesc }, drawRule, OVERRIDE_FABRICS);
 ok(missed.fab === missDesc && missed.fabResolved === undefined, "a catalog-miss override clears fabResolved rather than keeping the stale rule value, so fabByName(fab) can govern instead");
 
+// A field-measured fabric can differ from both the tier rule and the catalog.
+// The manual-ounce submenu writes this resolved shape directly, and it must
+// win over the selected catalog fabric for this row only.
+const manual = mergeLineFabric(
+  ruleLine,
+  { fab: overrideDesc, fabResolved: { name: overrideDesc, oz: 18, basis: "lin-yd", width: 54 } },
+  drawRule,
+  OVERRIDE_FABRICS
+);
+ok(manual.fabResolved?.oz === 18, "manual fabric oz overrides the catalog fabric weight on its own lineset row");
+const manualWeight = computeSetWeight({ name: "t", ...ruleLine, ...manual }, DEFAULT_WEIGHTS);
+ok(
+  manualWeight.goods !== null && overriddenWeight.goods !== null && manualWeight.goods < overriddenWeight.goods,
+  "manual fabric oz changes the calculated goods weight end-to-end"
+);
+
 // non-drape lines (no rule) never had this bug — mergeLineFabric must not invent catalog re-resolution for them
 const gearBase = { gear: 120 };
 const gearMerge = mergeLineFabric(gearBase, { fab: overrideDesc }, null, OVERRIDE_FABRICS);

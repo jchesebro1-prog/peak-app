@@ -431,7 +431,7 @@ export function LinesetBuilder({
               <input value={value.name || ""} onChange={(e) => onChange({ name: e.target.value } as Partial<WeightLine>)} style={field} /></div>
           )}
           <div style={{ gridColumn: "span 2" }}><span style={genLabel("fab")}>Fabric / goods</span>
-            <select value={value.fab || FAB_NONE} onChange={(e) => onChange({ fab: e.target.value })} style={{ ...field, ...genStyle("fab"), ...(issue ? { borderColor: "#b4543a" } : {}) }}>
+            <select value={value.fab || FAB_NONE} onChange={(e) => onChange({ fab: e.target.value, fabResolved: undefined })} style={{ ...field, ...genStyle("fab"), ...(issue ? { borderColor: "#b4543a" } : {}) }}>
               <option>{FAB_NONE}</option>
               {catalogRule
                 ? fabrics.map((f) => <option key={f.sku} value={f.desc}>{f.desc}</option>)
@@ -442,6 +442,28 @@ export function LinesetBuilder({
             {issue && (
               <div style={{ fontSize: 11.5, color: "#b4543a", marginTop: 4, lineHeight: 1.45 }}>⚠ {issue.message}</div>
             )}</div>
+          <div>
+            <span style={label}>Fabric weight (oz)</span>
+            <OptNumF
+              v={value.fabResolved?.oz}
+              placeholder={value.fabResolved?.oz || 0}
+              set={(oz) =>
+                onChange({
+                  fabResolved: oz && oz > 0
+                    ? {
+                        name: value.fab || "Manual fabric",
+                        oz,
+                        basis: value.fabResolved?.basis || "lin-yd",
+                        width: value.fabResolved?.width || 54,
+                      }
+                    : undefined,
+                })
+              }
+            />
+            <div style={{ fontSize: 10.5, color: "#8c919c", marginTop: 3, lineHeight: 1.35 }}>
+              Optional row override; blank uses the selected fabric&apos;s catalog weight.
+            </div>
+          </div>
           <div><span style={genLabel("w")}>Width (ft)</span><NumF v={value.w ?? 0} set={(n) => onChange({ w: n })} style={genStyle("w")} /></div>
           <div><span style={genLabel("h")}>Height (ft)</span><NumF v={value.h ?? 0} set={(n) => onChange({ h: n })} style={genStyle("h")} /></div>
           <div><span style={genLabel("full")}>Fullness %</span><NumF v={value.full ?? def.full} set={(n) => onChange({ full: n })} style={genStyle("full")} /></div>

@@ -271,11 +271,17 @@ export function mergeLineFabric(
   fabrics: GoodsFabric[]
 ): Pick<WeightLine, "fab" | "fabResolved"> {
   const fab = load?.fab !== undefined ? load.fab : base.fab;
+  // A manually entered oz value is stored as a complete Fabric on the load.
+  // It must win even when the user has also selected a catalog fabric: this
+  // is the field verification / substitution escape hatch, not a second
+  // catalog lookup. Clearing the input stores undefined and falls through to
+  // the normal selected-fabric resolution below.
+  if (load?.fabResolved) return { fab, fabResolved: load.fabResolved };
   if (rule && load?.fab !== undefined) {
     const part = fabrics.find((f) => f.desc === load.fab);
     return { fab, fabResolved: (part && fabricFromPart(part)) || undefined };
   }
-  return { fab, fabResolved: load?.fabResolved !== undefined ? load.fabResolved : base.fabResolved };
+  return { fab, fabResolved: base.fabResolved };
 }
 
 /* ---------------------- fabric-resolution diagnostics ---------------------- */
