@@ -135,7 +135,7 @@ export default async function LinesetBuilderPage({
   ];
 
   return (
-    <div className="pk-content" style={{ maxWidth: 1120 }}>
+    <div className="pk-content" style={{ maxWidth: 1600 }}>
       <div style={{ marginBottom: 14 }}>
         <Link href="/design" style={{ fontSize: 12.5, fontWeight: 600, color: "#8c919c", textDecoration: "none" }}>
           ← Design

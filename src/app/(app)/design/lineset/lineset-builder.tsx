@@ -697,7 +697,7 @@ export function LinesetBuilder({
           Saving creates a combined design; the old record stays until you delete it.
         </div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: openKey ? "minmax(250px, 300px) minmax(420px, 1fr) minmax(300px, 350px)" : "minmax(0, 300px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+      <div className="pk-lineset-layout" style={{ display: "grid", gridTemplateColumns: openKey ? "minmax(250px, 300px) minmax(0, 1fr) minmax(300px, 350px)" : "minmax(0, 300px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
         {/* ---- input rail ---- */}
         <div style={card}>
           {/* Three venue dimensions, and only three (#50): PRO width, PRO
@@ -897,7 +897,7 @@ export function LinesetBuilder({
           )}
 
           {showGrid ? (
-            <div style={{ maxHeight: 560, overflow: "auto" }}>
+            <div style={{ maxHeight: "min(560px, calc(100vh - 300px))", minHeight: 280, overflow: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 480 }}>
                 <thead>
                   <tr><th style={th}>Slot</th><th style={th}>Downstage</th><th style={th}>Type</th><th style={th}>Name</th><th style={th}></th></tr>
@@ -916,7 +916,7 @@ export function LinesetBuilder({
               </table>
             </div>
           ) : (
-            <div style={{ maxHeight: 560, overflow: "auto" }}>
+            <div style={{ maxHeight: "min(560px, calc(100vh - 300px))", minHeight: 280, overflow: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
                 <thead>
                   <tr>
