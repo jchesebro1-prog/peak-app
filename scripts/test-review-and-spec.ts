@@ -693,7 +693,7 @@ ok(computeSetWeight({ name: "t" }, DEFAULT_WEIGHTS).battenLen === 44, "a blank l
 ok(computeSetWeight({ name: "t", batten: 30 }, DEFAULT_WEIGHTS).battenLen === 30, "a per-line manual batten length still overrides the derived rule");
 
 /* --- drape rule table (task 3) --- */
-import { drapeRule, TRACK_TRAVELER, DEFAULT_GEAR, shellGearLb, electricCounts, electricGearLb, ruleToWeightLine, mergeLineFabric } from "@/lib/design/goods";
+import { drapeRule, TRACK_TRAVELER, DEFAULT_GEAR, shellGearLb, electricCounts, electricGearLb, fixtureLoadWeight, ruleToWeightLine, mergeLineFabric } from "@/lib/design/goods";
 
 const DIMS36 = { proWidthFt: 36, proHeightFt: 18, stageWidthFt: 50, stageDepthFt: 30 };
 
@@ -764,6 +764,13 @@ ok(cCyc.cyc === 6 && cCyc.par === 0, `the cyc electric carries cyc fixtures only
 
 const lb = electricGearLb({ par: 5, side: 3 }, 44);
 ok(lb === 5 * 12 + 3 * 18 + 1.5 * 44, `gear = fixtures + 1.5 lb/ft distribution (got ${lb})`);
+ok(
+  fixtureLoadWeight([
+    { id: "f1", name: "LED wash", qty: 6, weightLb: 18 },
+    { id: "f2", name: "Moving light", qty: 2, weightLb: 45 },
+  ]) === 198,
+  "manual electric fixtures total qty × weight for the Lineset Builder tab"
+);
 ok(electricGearLb({ front: 10 }, 0) === 0, "an explicit front count still contributes nothing — FOH is off-batten");
 ok(electricGearLb({}, 44) === 66, "a bare electric still carries its distribution allowance");
 

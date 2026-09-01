@@ -125,6 +125,23 @@ export type GearDefaults = {
   shellPsf: number;
 };
 
+/** A named fixture load placed on one electric in the Lineset Builder. */
+export type ElectricFixtureLoad = {
+  id: string;
+  name: string;
+  qty: number;
+  weightLb: number;
+};
+
+/** Weight of the explicitly listed fixtures on one electric. Kept pure so the
+ * schedule, export, and field checks all use the same arithmetic. */
+export function fixtureLoadWeight(loads: ElectricFixtureLoad[] = []): number {
+  return loads.reduce(
+    (total, f) => total + Math.max(0, f.qty || 0) * Math.max(0, f.weightLb || 0),
+    0
+  );
+}
+
 export const DEFAULT_GEAR: GearDefaults = {
   fixtureLb: { par: 12, front: 18, cyc: 14, side: 18, automated: 45 },
   distributionLbPerFt: 1.5,

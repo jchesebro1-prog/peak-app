@@ -33,6 +33,7 @@ import {
   drapeRule,
   electricCounts,
   electricGearLb,
+  fixtureLoadWeight,
   shellGearLb,
   ruleToWeightLine,
   mergeLineFabric,
@@ -41,6 +42,7 @@ import {
   type GoodsTier,
   type GearDefaults,
   type GoodsFabric,
+  type ElectricFixtureLoad,
   type FabricIssue,
 } from "@/lib/design/goods";
 import { battenLenFt, BATTEN_OVERHANG_FT } from "@/lib/design/venue-dims";
@@ -54,6 +56,9 @@ import { RIGGING_LIMITATION_NOTICE } from "@/lib/compliance-notices";
  *  presence of the record is what marks the line "specified"). */
 export type LineLoad = Partial<Omit<WeightLine, "name">> & {
   nameOverride?: string;
+  /** Explicit fixtures on an Electric. Defined (even []) replaces the
+   * generated fixture allowance; cable/distribution weight still remains. */
+  fixtureLoads?: ElectricFixtureLoad[];
 };
 
 /** v3 combined save format. Adds the PRO dimensions (carried inside `inputs`),
@@ -232,7 +237,12 @@ export function LinesetBuilder({
           base = ruleToWeightLine(rule, fabrics);
         } else if (s.type === "Electric") {
           const kind = s.name === "CYC Electric" ? "cyc" : "regular";
-          base = { gear: electricGearLb(electricCounts(dims, "medium", kind), battenLen, gear) };
+          const distribution = electricGearLb({}, battenLen, gear);
+          base = {
+            gear: load?.fixtureLoads !== undefined
+              ? distribution + fixtureLoadWeight(load.fixtureLoads)
+              : electricGearLb(electricCounts(dims, "medium", kind), battenLen, gear),
+          };
         } else if (s.type === "Shell") {
           base = { gear: shellGearLb(dims, inp.shellIntervalFt, gear) };
         }
@@ -400,14 +410,16 @@ export function LinesetBuilder({
    *  calculated (see file header): rule-derived. `lineKey` (schedule rows
    *  only — extras have no rule) drives isOverride() so a field the rule
    *  filled in renders muted until Jeff actually types over it (P7). */
-  function LoadEditor({ value, onChange, onClear, isExtra, onRemove, lineKey }: {
+  function LoadEditor({ value, onChange, onClear, isExtra, onRemove, lineKey, isElectric = false }: {
     value: LineLoad & { name?: string };
     onChange: (patch: LineLoad & Partial<WeightLine>) => void;
     onClear?: () => void;
     isExtra?: boolean;
     onRemove?: () => void;
     lineKey?: string;
+    isElectric?: boolean;
   }) {
+    const [tab, setTab] = useState<"load" | "fixtures">("load");
     const mode = value.mode || def.mode;
     const genStyle = (f: keyof WeightLine): React.CSSProperties | undefined =>
       lineKey && !isOverride(lineKey, f) ? { color: "#9aa0ab", background: "#fafbfc" } : undefined;
@@ -423,8 +435,60 @@ export function LinesetBuilder({
     // catalog rule behind them and keep picking from FABLIB, unchanged.
     const catalogRule = lineKey ? rows.find((r) => r.key === lineKey)?.rule : undefined;
     const issue = lineFabricIssue(value, catalogRule || null, fabrics);
+    const fixtureLoads = value.fixtureLoads || [];
+    const addFixture = () =>
+      onChange({
+        fixtureLoads: [
+          ...fixtureLoads,
+          { id: `fx-${Date.now()}-${fixtureLoads.length}`, name: "Fixture", qty: 1, weightLb: gear.fixtureLb.par },
+        ],
+      });
+    const patchFixture = (id: string, patch: Partial<ElectricFixtureLoad>) =>
+      onChange({ fixtureLoads: fixtureLoads.map((f) => (f.id === id ? { ...f, ...patch } : f)) });
     return (
       <div style={{ background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "12px 14px", margin: "2px 0 6px" }}>
+        {isElectric && (
+          <div style={{ display: "flex", gap: 4, marginBottom: 12, borderBottom: "1px solid #e4e7ec" }}>
+            {(["load", "fixtures"] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key)}
+                style={{ border: "none", borderBottom: tab === key ? "2px solid var(--accent)" : "2px solid transparent", background: "transparent", color: tab === key ? "#16181d" : "#6b7079", padding: "5px 9px 7px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12 }}
+              >
+                {key === "load" ? "Load & rigging" : `Fixtures${fixtureLoads.length ? ` (${fixtureLoads.length})` : ""}`}
+              </button>
+            ))}
+          </div>
+        )}
+        {tab === "fixtures" && isElectric ? (
+          <div>
+            <div style={{ fontSize: 12.5, color: "#5b616e", lineHeight: 1.45, marginBottom: 10 }}>
+              List the fixtures actually hanging on this electric. Their total replaces the automatic fixture allowance; the distribution allowance remains included.
+            </div>
+            {fixtureLoads.length === 0 ? (
+              <div style={{ fontSize: 12, color: "#8c919c", marginBottom: 10 }}>No manual fixtures yet — this electric is using its calculated fixture allowance.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
+                {fixtureLoads.map((f) => (
+                  <div key={f.id} style={{ display: "grid", gridTemplateColumns: "minmax(130px, 1fr) 76px 92px auto", gap: 6, alignItems: "end" }}>
+                    <input value={f.name} onChange={(e) => patchFixture(f.id, { name: e.target.value })} aria-label="Fixture name" style={field} />
+                    <div><span style={label}>Qty</span><NumF v={f.qty} set={(qty) => patchFixture(f.id, { qty })} /></div>
+                    <div><span style={label}>lb each</span><NumF v={f.weightLb} set={(weightLb) => patchFixture(f.id, { weightLb })} /></div>
+                    <button type="button" onClick={() => onChange({ fixtureLoads: fixtureLoads.filter((item) => item.id !== f.id) })} style={{ ...field, width: "auto", padding: "7px 9px", color: "#b4543a", cursor: "pointer" }}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button type="button" onClick={addFixture} style={{ ...field, width: "auto", padding: "6px 10px", color: "var(--accent)", cursor: "pointer", fontWeight: 600 }}>+ Add fixture</button>
+              {value.fixtureLoads !== undefined && (
+                <button type="button" onClick={() => onChange({ fixtureLoads: undefined })} style={{ ...field, width: "auto", padding: "6px 10px", color: "#5b616e", cursor: "pointer" }}>Use calculated allowance</button>
+              )}
+              <span style={{ marginLeft: "auto", fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "#3d424e" }}>{fixtureLoadWeight(fixtureLoads).toFixed(1)} lb fixtures</span>
+            </div>
+          </div>
+        ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10 }}>
           {isExtra && (
             <div style={{ gridColumn: "1 / -1" }}><span style={label}>Line name</span>
@@ -508,6 +572,7 @@ export function LinesetBuilder({
               </select></div>
           )}
         </div>
+        )}
         {lineKey && loads[lineKey] && rows.find((r) => r.key === lineKey)?.rule && (
           <button
             type="button"
@@ -798,6 +863,7 @@ export function LinesetBuilder({
                               onChange={(patch) => patchLoad(r.key, patch)}
                               onClear={r.specified ? () => { clearLoad(r.key); setOpenKey(null); } : undefined}
                               lineKey={r.key}
+                              isElectric={r.s.type === "Electric"}
                             />
                           </td>
                         </tr>
