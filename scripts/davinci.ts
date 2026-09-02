@@ -13,8 +13,9 @@ import { basename, extname, join, resolve } from "node:path";
 const repo = resolve(process.cwd());
 const dataRoot = resolve(process.env.DAVINCI_DATA_DIR || join(repo, "data", "davinci"));
 const sourceRoot = resolve(process.env.DAVINCI_SOURCE_DIR || join(dataRoot, "source"));
-const defaultLibrary = process.env.DAVINCI_LIBRARY || join(process.env.HOME || "", "Library/Application Support/ETC/DaVinci/library.json");
-const defaultImages = process.env.DAVINCI_IMAGES || join(process.env.HOME || "", "Library/Application Support/ETC/DaVinci/images");
+const handoffRoot = process.env.DAVINCI_HANDOFF_DIR ? resolve(process.env.DAVINCI_HANDOFF_DIR) : "";
+const defaultLibrary = process.env.DAVINCI_LIBRARY || (handoffRoot ? join(handoffRoot, "source/library.json") : join(process.env.HOME || "", "Library/Application Support/ETC/DaVinci/library.json"));
+const defaultImages = process.env.DAVINCI_IMAGES || (handoffRoot ? join(handoffRoot, "source/images") : join(process.env.HOME || "", "Library/Application Support/ETC/DaVinci/images"));
 
 type AnyRecord = Record<string, any>;
 type ManifestEntry = { relativePath: string; byteSize: number; sha256: string; mimeType: string; sourceModifiedAt: string };
@@ -47,9 +48,11 @@ export function snapshot() {
   if (existsSync(defaultImages)) copies.push(...walk(defaultImages));
   const dwgRoot = join(resolve(defaultLibrary, ".."));
   for (const name of ["DWG_Library.dwg", "Symbol_Library.dwg"]) if (existsSync(join(dwgRoot, name))) copies.push(join(dwgRoot, name));
+  const projectsRoot = handoffRoot ? join(handoffRoot, "source/projects") : join(resolve(defaultLibrary, ".."), "projects");
+  if (existsSync(projectsRoot)) copies.push(...walk(projectsRoot));
   const files: ManifestEntry[] = [];
   for (const file of copies) {
-    const relativePath = file === defaultLibrary ? "library.json" : file.startsWith(defaultImages + "/") ? join("images", file.slice(defaultImages.length + 1)) : basename(file);
+    const relativePath = file === defaultLibrary ? "library.json" : file.startsWith(defaultImages + "/") ? join("images", file.slice(defaultImages.length + 1)) : file.startsWith(projectsRoot + "/") ? join("projects", file.slice(projectsRoot.length + 1)) : basename(file);
     const target = join(out, relativePath);
     mkdirSync(resolve(target, ".."), { recursive: true });
     cpSync(file, target);
@@ -109,11 +112,30 @@ export function extract(snapshotDir: string) {
   console.log(`Extracted ${catalog.length} products, ${assets.length} assets, ${exceptions.length} exceptions -> ${out}`);
 }
 
+export function validateExport(exportDir: string) {
+  const summary = json(join(exportDir, "summary.json"));
+  const catalog = json(join(exportDir, "catalog.json")) as AnyRecord[];
+  const ids = catalog.map((part) => part.id).filter(Boolean) as string[];
+  const duplicateIds = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
+  const sourceLibrary = join(exportDir, "../source/library.json");
+  const checks = {
+    sourceChecksumMatches: existsSync(sourceLibrary) && sha(sourceLibrary) === summary.sourceLibrarySha256,
+    catalogCountMatches: catalog.length === summary.exportCounts.parts,
+    duplicateIds,
+    exceptionFilePresent: existsSync(join(exportDir, "exceptions.json")),
+  };
+  const status = checks.sourceChecksumMatches && checks.catalogCountMatches && duplicateIds.length === 0 ? "ok" : "review";
+  writeJson(join(exportDir, "validation.json"), { checkedAt: new Date().toISOString(), checks, status });
+  console.log(`DaVinci export validation: ${status}`);
+  if (status !== "ok") process.exitCode = 1;
+}
+
 function main() {
   const command = process.argv[2];
   if (command === "snapshot") return snapshot();
   if (command === "extract") return extract(resolve(process.argv[3] || ""));
-  if (command === "validate" || command === "report") { console.log(`${command}: use the review/summary.json produced by extract; no database writes are performed.`); return; }
+  if (command === "validate") return validateExport(resolve(process.argv[3] || ""));
+  if (command === "report") { console.log("report: review/summary.json and validation.json; no database writes are performed."); return; }
   throw new Error("usage: davinci.ts snapshot | extract <snapshot-dir> | validate | report");
 }
 if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) main();
