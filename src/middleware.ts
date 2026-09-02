@@ -15,6 +15,6 @@ export default NextAuth(authConfig).auth;
 
 export const config = {
   matcher: [
-    "/((?!api/auth|api/leads/intake|api/gmail/sync|login|lead-intake|portal|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
+    "/((?!api/auth|api/leads/intake|api/gmail/sync|login|lead-intake|portal|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images|peak-library).*)",
   ],
 };
