@@ -693,15 +693,22 @@ export default function GridEditor({
     }
 
     if (wireDrawing) {
-      // Clicking the last waypoint again (with ≥2 laid down) finishes the run.
+      // A destination device click finishes immediately; free-form runs still
+      // finish by clicking the last waypoint again.
       const last = wireDraft[wireDraft.length - 1];
-      const finishes =
+      const endpoint = snappedPlacement(p, visiblePlacements, aspect);
+      const startEndpoint = wireDraft.length > 0
+        ? snappedPlacement(wireDraft[0], visiblePlacements, aspect)
+        : null;
+      const deviceFinishes = wireDraft.length >= 1 && Boolean(endpoint) && endpoint?.id !== startEndpoint?.id;
+      const freeformFinishes =
         last &&
         wireDraft.length >= 2 &&
         Math.abs(last.x - p.x) < 0.015 &&
         Math.abs(last.y - p.y) < 0.015 / (aspect || 1);
+      const finishes = deviceFinishes || freeformFinishes;
       if (finishes && wirePartId) {
-        const points = wireDraft;
+        const points = deviceFinishes ? [...wireDraft, p] : wireDraft;
         setWireDrawing(false);
         setWireDraft([]);
 

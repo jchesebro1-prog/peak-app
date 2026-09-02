@@ -114,7 +114,7 @@ export default function WiresPanel({
             disabled={busy || !calibrated || !wirePartId}
             onClick={wiring ? onCancelDraw : onStartDraw}
           >
-            {wiring ? "Click waypoints · click the last one again to finish" : "Route wire"}
+            {wiring ? "Click devices/waypoints · destination device finishes" : "Route wire"}
           </button>
           {!calibrated && (
             <div style={{ fontSize: 10.5, color: "#a0442b", marginTop: 5 }}>
