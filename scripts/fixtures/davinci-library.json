@@ -1,0 +1,14 @@
+{
+  "images": [{ "id": "img-1", "fileName": "fixture.svg" }],
+  "productTypes": [
+    {
+      "typeId": "type-1",
+      "partNumber": "ETC-TEST-1",
+      "typeInformation": { "displayName": "Fixture Gateway", "modelNumber": "TG-1" },
+      "category": { "id": "cat-control", "name": "Gateways" },
+      "visuals": { "data": { "imageId": "img-1" } },
+      "documents": [{ "id": "doc-1", "title": "Gateway datasheet", "url": "https://example.com/datasheet.pdf" }],
+      "scriptIds": ["script-1"]
+    }
+  ]
+}

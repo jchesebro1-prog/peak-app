@@ -20,7 +20,12 @@
     "import:daylite": "tsx scripts/import-daylite.ts",
     "test:specs": "tsx scripts/test-review-and-spec.ts",
     "test:smoke": "tsx scripts/smoke-routes.ts",
-    "test:smoke:upload": "tsx scripts/smoke-upload.ts"
+    "test:smoke:upload": "tsx scripts/smoke-upload.ts",
+    "davinci:snapshot": "tsx scripts/davinci.ts snapshot",
+    "davinci:extract": "tsx scripts/davinci.ts extract",
+    "davinci:validate": "tsx scripts/davinci.ts validate",
+    "davinci:report": "tsx scripts/davinci.ts report"
+    ,"test:davinci": "tsx scripts/test-davinci.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
