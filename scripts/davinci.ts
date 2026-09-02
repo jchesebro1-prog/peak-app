@@ -27,6 +27,8 @@ const arr = (...values: unknown[]) => values.find(Array.isArray) as AnyRecord[] 
 const text = (...values: unknown[]) => values.find((v) => typeof v === "string" && v.trim()) as string | undefined;
 const idOf = (v: AnyRecord) => text(v.id, v.typeId, v.uuid, v.uid) || "";
 const writeJson = (file: string, value: unknown) => writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
+const csvCell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+const writeCsv = (file: string, headers: string[], rows: AnyRecord[]) => writeFileSync(file, [headers, ...rows.map((row) => headers.map((h) => csvCell(row[h])))] .map((row) => row.join(",")).join("\n") + "\n");
 
 function walk(dir: string): string[] {
   if (!existsSync(dir)) return [];
@@ -100,6 +102,9 @@ export function extract(snapshotDir: string) {
   const exceptions = products.filter((p) => !idOf(p)).map((p, index) => ({ kind: "missing-type-id", index, displayName: text(p.name, p.description) }));
   const out = join(snapshotDir, "review"); mkdirSync(out, { recursive: true });
   writeJson(join(out, "catalog.json"), catalog); writeJson(join(out, "assets-manifest.json"), assets); writeJson(join(out, "resources-manifest.json"), resources); writeJson(join(out, "category-map.json"), categories); writeJson(join(out, "behavior-gap-report.json"), behavior); writeJson(join(out, "exceptions.json"), exceptions);
+  writeCsv(join(out, "catalog.csv"), ["id", "sku", "desc", "category", "manufacturer", "pricingStatus"], catalog);
+  writeCsv(join(out, "category-map.csv"), ["sourceCategoryId", "sourceCategoryName", "peakCategory", "group", "trade", "discipline", "active", "notes"], categories);
+  writeCsv(join(out, "behavior-gap-report.csv"), ["typeId", "scriptId", "classification", "treatment"], behavior);
   writeJson(join(out, "summary.json"), { snapshotId: manifest.snapshotId, runId: `davinci-${Date.now()}`, completedAt: importedAt, source: { products: products.length, images: images.length, assets: assets.length, scripts: behavior.length }, output: { catalog: catalog.length, categories: categories.length, exceptions: exceptions.length }, status: exceptions.length ? "review" : "ok", librarySha256: checksum });
   console.log(`Extracted ${catalog.length} products, ${assets.length} assets, ${exceptions.length} exceptions -> ${out}`);
 }
