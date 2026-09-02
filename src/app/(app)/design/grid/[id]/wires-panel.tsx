@@ -108,7 +108,15 @@ export default function WiresPanel({
                 {p.sku} — {p.desc} (${p.list}/{p.unit})
               </option>
             ))}
-          </select>
+            </select>
+          {wirePartId && (() => {
+            const selectedWire = wireParts.find((p) => p.id === wirePartId);
+            return selectedWire?.wireConnectionTypes?.length ? (
+              <div style={{ marginTop: 5, fontSize: 10.5, color: "#5b616e", lineHeight: 1.35 }}>
+                Carries: {selectedWire.wireConnectionTypes.join(" · ")}
+              </div>
+            ) : null;
+          })()}
           <button
             style={{
               ...BTN,

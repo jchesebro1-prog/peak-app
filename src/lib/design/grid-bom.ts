@@ -32,6 +32,7 @@ export type PartLite = {
   accessories?: CatalogAccessoryLink[];
   resources?: CatalogResource[];
   visual?: CatalogVisual;
+  wireConnectionTypes?: string[];
   /** Datasheet attachment flag (Task 5, punch #39, D116) — true only when
    *  the catalog part has a datasheet blob attached. Deliberately just a
    *  boolean (not the blob key): the editor only needs to know whether to

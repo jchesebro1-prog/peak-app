@@ -84,6 +84,7 @@ export default async function GridEditorPage({
     ...(p.accessories?.length ? { accessories: p.accessories } : {}),
     ...(p.resources?.length ? { resources: p.resources } : {}),
     ...(p.visual ? { visual: p.visual } : {}),
+    ...(p.wireConnectionTypes?.length ? { wireConnectionTypes: p.wireConnectionTypes } : {}),
     ...(p.datasheetBlobKey ? { hasDatasheet: true } : {}),
     group: groupOf(p, categoryMap),
     // Punch #48: the Grid's scope taxonomy folds group -> scope, and falls
