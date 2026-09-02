@@ -24,7 +24,8 @@
     "davinci:snapshot": "tsx scripts/davinci.ts snapshot",
     "davinci:extract": "tsx scripts/davinci.ts extract",
     "davinci:validate": "tsx scripts/davinci.ts validate",
-    "davinci:report": "tsx scripts/davinci.ts report"
+    "davinci:report": "tsx scripts/davinci.ts report",
+    "davinci:import": "tsx scripts/import-davinci.ts"
     ,"test:davinci": "tsx scripts/test-davinci.ts"
   },
   "dependencies": {
