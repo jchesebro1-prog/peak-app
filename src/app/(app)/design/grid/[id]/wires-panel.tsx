@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Calibration } from "@/lib/annotations";
 import { formatMeasure } from "@/lib/annotations";
 import type { GridRoute } from "@/lib/stores/grid-projects";
+import type { GridPlacement } from "@/lib/stores/grid-projects";
 import { routeLengthFt, type PartLite } from "@/lib/design/grid-bom";
 import { removeRouteAction } from "./actions";
 
@@ -40,6 +41,7 @@ export default function WiresPanel({
   projectId,
   wireParts,
   pageRoutes,
+  placements,
   calibrations,
   calibrated,
   wiring,
@@ -59,6 +61,7 @@ export default function WiresPanel({
   wireParts: PartLite[];
   /** Routes on the active sheet+page. */
   pageRoutes: GridRoute[];
+  placements: GridPlacement[];
   calibrations: Calibration[];
   calibrated: boolean;
   wiring: boolean;
@@ -76,6 +79,11 @@ export default function WiresPanel({
 }) {
   const [armDelete, setArmDelete] = useState(false);
   const selected = pageRoutes.find((r) => r.id === selectedRouteId) || null;
+  const placementName = (id?: string) => {
+    if (!id) return null;
+    const p = placements.find((candidate) => candidate.id === id);
+    return p ? p.partId : id;
+  };
 
   return (
     <div style={{ background: "#fff", border: "1px solid #edeff3", borderRadius: 10, padding: 12 }}>
@@ -147,6 +155,12 @@ export default function WiresPanel({
               >
                 <span style={{ flex: 1, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {r.partId}
+                  {r.fromPlacementId && r.toPlacementId && (
+                    <span style={{ display: "block", fontSize: 9.5, color: "#8c919c", marginTop: 1 }}>
+                      {placementName(r.fromPlacementId)} → {placementName(r.toPlacementId)}
+                      {r.connectionType ? ` · ${r.connectionType}` : " · untyped"}
+                    </span>
+                  )}
                 </span>
                 <span style={{ fontSize: 11, color: "#5b616e" }}>
                   {ft !== null && cal ? formatMeasure(ft, cal.unit) : "unmeasured"}

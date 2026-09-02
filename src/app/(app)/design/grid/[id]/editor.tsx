@@ -1312,6 +1312,7 @@ export default function GridEditor({
           <WiresPanel
             projectId={project.id}
             wireParts={wireParts}
+            placements={visiblePlacements}
             /* The list matches the canvas: a run in a hidden scope is out of
                sight and out of this list too (#48). */
             pageRoutes={visibleRoutes}
