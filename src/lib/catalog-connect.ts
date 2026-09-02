@@ -16,10 +16,16 @@
 export type PortDirection = "in" | "out" | "io";
 
 export type Port = {
+  id?: string;
   name: string;
   direction: PortDirection;
   connectionType: string;
   count?: number;
+  connectorType?: string;
+  protocol?: string;
+  defaultWireType?: string | null;
+  alternateWireTypes?: string[];
+  sourcePortId?: string;
 };
 
 export type WireType = {

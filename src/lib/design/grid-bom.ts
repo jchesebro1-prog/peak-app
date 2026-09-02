@@ -9,6 +9,7 @@
 // Type-only — catalog-connect is itself pure/dependency-free, so this never
 // drags anything heavier into the client bundle (erased at compile time).
 import type { Port } from "@/lib/catalog-connect";
+import type { CatalogAccessoryLink, CatalogPropertyDefinition, CatalogResource, CatalogVisual } from "@/lib/stores/catalog";
 // Type-only, and curtain-geom is the CUSTOMER-SAFE mirror (no cost basis, no
 // margin) - importing it here keeps this module client-safe.
 import type { CurtainSpec } from "@/lib/curtain-geom";
@@ -27,6 +28,10 @@ export type PartLite = {
    *  part has been migrated to declare ports; the Grid editor uses this to
    *  decide whether a device-wire route can be validated at all. */
   ports?: Port[];
+  properties?: CatalogPropertyDefinition[];
+  accessories?: CatalogAccessoryLink[];
+  resources?: CatalogResource[];
+  visual?: CatalogVisual;
   /** Datasheet attachment flag (Task 5, punch #39, D116) — true only when
    *  the catalog part has a datasheet blob attached. Deliberately just a
    *  boolean (not the blob key): the editor only needs to know whether to

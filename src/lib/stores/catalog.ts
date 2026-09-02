@@ -73,7 +73,23 @@ export type CatalogPart = {
    *  predate this field on purpose; "unknown age" is honest for a row
    *  nobody has confirmed since import). */
   updatedAt?: number;
+  /** DaVinci-enriched resources and visual metadata. */
+  manufacturer?: string;
+  properties?: CatalogPropertyDefinition[];
+  accessories?: CatalogAccessoryLink[];
+  visual?: CatalogVisual;
+  resources?: CatalogResource[];
+  source?: { daVinci?: Record<string, unknown> };
 };
+
+export type CatalogPropertyDefinition = {
+  key: string; label: string; description?: string; defaultValue?: unknown;
+  choices?: Array<{ choiceId?: string; name: string; modelValue?: string; partValue?: string }>;
+  required?: boolean; sourcePropertyTypeId?: string;
+};
+export type CatalogAccessoryLink = { id?: string; sourceTypeId?: string; catalogPartId?: string; quantity?: number; relation?: string };
+export type CatalogVisual = { iconUrl?: string; riserUrl?: string; iconSourcePath?: string; riserSourcePath?: string; sourceImageIds?: { icon?: string; riser?: string } };
+export type CatalogResource = { kind: "datasheet" | "manual" | "brochure" | "presentation" | "other"; title: string; language?: string; version?: string; externalUrl?: string; blobKey?: string; sourceDocumentId: string };
 
 /** All parts (port of window.MASTER_CATALOG reads). */
 export async function list(): Promise<CatalogPart[]> {

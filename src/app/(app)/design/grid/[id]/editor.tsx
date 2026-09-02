@@ -1361,6 +1361,18 @@ export default function GridEditor({
                     )
                   : partById.get(selectedPlacement.partId)?.desc || "No longer in the catalog"}
               </div>
+              {!selectedPlacement.curtain && partById.get(selectedPlacement.partId) && (() => {
+                const part = partById.get(selectedPlacement.partId)!;
+                return (
+                  <div style={{ marginTop: 7, display: "grid", gap: 3, fontSize: 10.5, color: "#5b616e" }}>
+                    {part.ports?.length ? <div><b>Ports:</b> {part.ports.map((p) => `${p.name} · ${p.protocol || p.connectionType} · ${p.direction}`).join("; ")}</div> : null}
+                    {part.properties?.length ? <div><b>Properties:</b> {part.properties.length}</div> : null}
+                    {part.accessories?.length ? <div><b>Accessories:</b> {part.accessories.length}</div> : null}
+                    {part.visual?.iconSourcePath || part.visual?.riserSourcePath ? <div><b>DaVinci visual:</b> icon/riser metadata available</div> : null}
+                    {part.resources?.length ? <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}><b>Resources:</b> {part.resources.slice(0, 3).map((resource) => resource.externalUrl ? <a key={resource.sourceDocumentId} href={resource.externalUrl} target="_blank" rel="noreferrer" style={{ color: "#3155a8" }}>{resource.title}</a> : <span key={resource.sourceDocumentId}>{resource.title}</span>)}</div> : null}
+                  </div>
+                );
+              })()}
               {selectedPlacement.curtain && (
                 <div style={{ fontSize: 11.5, color: "#16181d", fontWeight: 600, marginTop: 3 }}>
                   {moneyFmt(curtainPrices.get(selectedPlacement.id) || 0)}
