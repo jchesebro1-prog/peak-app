@@ -25,8 +25,9 @@
     "davinci:extract": "tsx scripts/davinci.ts extract",
     "davinci:validate": "tsx scripts/davinci.ts validate",
     "davinci:report": "tsx scripts/davinci.ts report",
-    "davinci:import": "tsx scripts/import-davinci.ts"
-    ,"test:davinci": "tsx scripts/test-davinci.ts"
+    "davinci:import": "tsx scripts/import-davinci.ts",
+    "peak:import": "tsx scripts/import-peak-library.ts",
+    "test:davinci": "tsx scripts/test-davinci.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

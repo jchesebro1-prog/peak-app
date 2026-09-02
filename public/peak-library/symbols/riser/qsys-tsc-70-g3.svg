@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" role="img" aria-label="TSC-70-G3 RISER">
+  <rect width="240" height="160" fill="#f7f4eb"/>
+  <path d="M18 18 H70" stroke="#e7a335" stroke-width="5"/>
+  <text x="18" y="35" font-family="Arial, sans-serif" font-size="12" fill="#17212b" font-weight="700">RISER</text>
+  <rect x="57" y="36" width="126" height="88" rx="10" fill="#dce7e8" stroke="#17212b" stroke-width="5"/><circle cx="120" cy="111" r="4" fill="#17212b"/>
+  <text x="120" y="145" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#17212b" font-weight="700">TSC-70-G3</text>
+</svg>
