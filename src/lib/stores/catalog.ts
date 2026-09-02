@@ -79,7 +79,9 @@ export type CatalogPart = {
   accessories?: CatalogAccessoryLink[];
   visual?: CatalogVisual;
   resources?: CatalogResource[];
-  source?: { daVinci?: Record<string, unknown> };
+  /** Canonical connection families carried by a per-length wire part. */
+  wireConnectionTypes?: string[];
+  source?: { daVinci?: Record<string, unknown>; peakLibrary?: Record<string, unknown> };
 };
 
 export type CatalogPropertyDefinition = {

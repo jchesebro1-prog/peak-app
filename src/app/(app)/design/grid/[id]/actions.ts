@@ -353,6 +353,8 @@ export async function addRouteAction(
         if (!result.ok)
           return { ok: false, error: `Wire refused — ${result.reason}: ${fromPlacement.partId} → ${toPlacement.partId} share no compatible port.` };
         connectionType = result.connectionType;
+        if (part.wireConnectionTypes?.length && !part.wireConnectionTypes.includes(connectionType))
+          return { ok: false, error: `The selected wire (${part.sku}) does not carry ${connectionType}. Pick a compatible cable.` };
       }
     }
   }
