@@ -32,11 +32,13 @@ async function gcal<T>(
     },
   });
   if (!res.ok) {
-    throw new Error(
+    const error = new Error(
       "Calendar API " + path + " → " + res.status + " " + (await res.text())
-    );
+    ) as Error & { status?: number };
+    error.status = res.status;
+    throw error;
   }
-  return (await res.json()) as T;
+  return (res.status === 204 ? undefined : await res.json()) as T;
 }
 
 /* ---- types (only the fields the app reads) ---- */
@@ -131,4 +133,61 @@ export async function insertEvent(
     body: JSON.stringify(body),
   });
   return { id: r.id, htmlLink: r.htmlLink || "" };
+}
+
+type ManagedEvent = {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD, rendered as an all-day scheduler item
+  description?: string;
+  location?: string;
+};
+
+function nextIsoDay(date: string): string {
+  const d = new Date(date + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Idempotent calendar write for app-managed scheduler records. */
+export async function upsertManagedEvent(mailboxKey: string, ev: ManagedEvent): Promise<void> {
+  const body = {
+    id: ev.id,
+    summary: ev.title,
+    description: ev.description || undefined,
+    location: ev.location || undefined,
+    start: { date: ev.date },
+    end: { date: nextIsoDay(ev.date) },
+  };
+  try {
+    await gcal<GoogleEvent>(mailboxKey, "/calendars/primary/events", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    if ((err as { status?: number }).status !== 409) throw err;
+    const patch = {
+      summary: body.summary,
+      description: body.description,
+      location: body.location,
+      start: body.start,
+      end: body.end,
+    };
+    await gcal<GoogleEvent>(
+      mailboxKey,
+      "/calendars/primary/events/" + encodeURIComponent(ev.id),
+      { method: "PATCH", body: JSON.stringify(patch) }
+    );
+  }
+}
+
+export async function removeManagedEvent(mailboxKey: string, eventId: string): Promise<void> {
+  try {
+    await gcal<void>(mailboxKey, "/calendars/primary/events/" + encodeURIComponent(eventId), {
+      method: "DELETE",
+    });
+  } catch (err) {
+    if ((err as { status?: number }).status !== 404 && (err as { status?: number }).status !== 410)
+      throw err;
+  }
 }

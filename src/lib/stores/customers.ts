@@ -5,7 +5,7 @@ import {
   estimate,
   estimateFromParts,
   hasCoords,
-  nearest,
+  quoteOrigin,
   routeCachedBulk,
   routeKey,
   type TravelEstimate,
@@ -783,7 +783,7 @@ export async function travelForCustomerVenues(
   const targets = locs.map((l) => {
     const coords = coordsOf(l);
     const target = coords ? { ...l, lat: coords.lat, lng: coords.lng } : l;
-    return { locId: l.id || "", target, office: nearest(officeList, target) };
+    return { locId: l.id || "", target, office: quoteOrigin(officeList) };
   });
   const keys = Array.from(
     new Set(

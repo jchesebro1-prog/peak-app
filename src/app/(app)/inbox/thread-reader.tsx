@@ -52,6 +52,7 @@ export default function ThreadReader({
   const [cBody, setCBody] = useState("");
   const [showCc, setShowCc] = useState(false);
   const [attachNote, setAttachNote] = useState("");
+  const [showAllMessages, setShowAllMessages] = useState(false);
   // D76 — schedule-site-visit modal
   const [visitOpen, setVisitOpen] = useState(false);
   const [sending, setSending] = useState(false);
@@ -530,7 +531,35 @@ export default function ThreadReader({
           className="ib-scroll"
           style={{ flex: 1, overflowY: "auto", padding: "18px 20px", background: "#fafbfc" }}
         >
-          {vm.messages.map((m) => (
+          {vm.messages.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setShowAllMessages((open) => !open)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                width: "100%",
+                marginBottom: 14,
+                padding: "9px 11px",
+                textAlign: "left",
+                border: "1px solid #e4e7ec",
+                borderRadius: 8,
+                background: "#fff",
+                color: "#5b616e",
+                fontFamily: "var(--font-ui)",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              <span style={{ fontSize: 15, lineHeight: 1 }}>{showAllMessages ? "▾" : "▸"}</span>
+              {showAllMessages
+                ? "Hide earlier messages"
+                : `Show ${vm.messages.length - 1} earlier message${vm.messages.length - 1 === 1 ? "" : "s"}`}
+            </button>
+          )}
+          {(showAllMessages ? vm.messages : vm.messages.slice(-1)).map((m) => (
             <div key={m.id} style={{ display: "flex", gap: 11, marginBottom: 16 }}>
               <span
                 style={{

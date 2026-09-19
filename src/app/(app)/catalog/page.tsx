@@ -84,7 +84,8 @@ export default async function CatalogPage({
       !(
         (p.desc || "").toLowerCase().includes(ql) ||
         (p.sku || "").toLowerCase().includes(ql) ||
-        (p.mfr || "").toLowerCase().includes(ql)
+        (p.mfr || "").toLowerCase().includes(ql) ||
+        (p.category || "").toLowerCase().includes(ql)
       )
     )
       return false;
@@ -243,7 +244,7 @@ export default async function CatalogPage({
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(0,1fr) 110px 60px 84px 96px",
+                  gridTemplateColumns: "150px 150px minmax(220px,1fr) 110px 60px 84px 96px",
                   gap: 12,
                   padding: "8px 18px",
                   fontSize: 10,
@@ -255,7 +256,9 @@ export default async function CatalogPage({
                   background: "#fbfbfc",
                 }}
               >
-                <span>Part</span>
+                <span>Manufacturer</span>
+                <span>Model #</span>
+                <span>Description</span>
                 <span>Category</span>
                 <span style={{ textAlign: "right" }}>Unit</span>
                 <span style={{ textAlign: "right" }}>Cost</span>
@@ -270,7 +273,7 @@ export default async function CatalogPage({
                   className="ct-row"
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "minmax(0,1fr) 110px 60px 84px 96px",
+                    gridTemplateColumns: "150px 150px minmax(220px,1fr) 110px 60px 84px 96px",
                     gap: 12,
                     padding: "11px 18px",
                     alignItems: "center",
@@ -279,6 +282,9 @@ export default async function CatalogPage({
                     color: "#16181d",
                   }}
                 >
+                  <span style={{ minWidth: 0, fontSize: 12, color: "#3a3f4a" }}>
+                    {p.mfr || UNSPEC}
+                  </span>
                   <span style={{ minWidth: 0 }}>
                     <span
                       style={{
@@ -291,12 +297,19 @@ export default async function CatalogPage({
                         textOverflow: "ellipsis",
                       }}
                     >
-                      {p.desc}
-                    </span>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb" }}>
                       {p.sku}
-                      {p.mfr ? " · " + p.mfr : ""}
                     </span>
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{
+                      fontSize: 13,
+                      fontWeight: 500,
+                      display: "block",
+                      lineHeight: 1.3,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}>{p.desc}</span>
                     {(p.note || p.datasheetBlobKey) && (
                       <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
                         {p.note && (

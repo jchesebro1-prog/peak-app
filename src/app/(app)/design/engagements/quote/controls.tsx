@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { saveConsultingQuote } from "./actions";
 import { money } from "@/lib/format";
+import { CustomerCombobox } from "@/components/customer-combobox";
 
 /**
  * Consulting proposal builder (#35 rebuild, spec §1). Structured scopes
@@ -34,6 +35,7 @@ export type BuilderInitial = {
   id: string;
   name: string;
   customerId: string;
+  venueCustomerId: string;
   locationId: string;
   contactName: string;
   contactRole: string;
@@ -93,7 +95,11 @@ export function ConsultingQuoteBuilder({
   const [customerId, setCustomerId] = useState(
     initial?.customerId || preCustomerId || ""
   );
-  const cust = customers.find((c) => c.id === customerId) || null;
+  const architect = customers.find((c) => c.id === customerId) || null;
+  const [venueCustomerId, setVenueCustomerId] = useState(
+    initial?.venueCustomerId || initial?.customerId || preCustomerId || ""
+  );
+  const venueCustomer = customers.find((c) => c.id === venueCustomerId) || null;
 
   const [quoteName, setQuoteName] = useState(initial?.name || "");
   const [locationId, setLocationId] = useState(initial?.locationId || "");
@@ -139,7 +145,7 @@ export function ConsultingQuoteBuilder({
   );
 
   const pickContact = (name: string) => {
-    const ct = cust?.contacts.find((c) => c.name === name);
+    const ct = architect?.contacts.find((c) => c.name === name);
     setContactName(name);
     if (ct) {
       setContactRole(ct.role || "");
@@ -158,7 +164,7 @@ export function ConsultingQuoteBuilder({
   const total = scopes.reduce((a, s) => a + s.fee, 0);
   /** The ticked texts, in menu order — frozen onto the proposal at save. */
   const assumptions = menu.filter((a) => ticked.includes(a));
-  const canSave = !!customerId && total > 0;
+  const canSave = !!customerId && !!venueCustomerId && total > 0;
   const legacy =
     initial && !initial.scopes.length && (initial.legacyScope || initial.legacyFees.length)
       ? initial
@@ -199,32 +205,49 @@ export function ConsultingQuoteBuilder({
       <form action={saveConsultingQuote}>
         {initial && <input type="hidden" name="editingId" value={initial.id} />}
         <input type="hidden" name="customerId" value={customerId} />
+        <input type="hidden" name="venueCustomerId" value={venueCustomerId} />
         <input type="hidden" name="locationId" value={locationId} />
         <input type="hidden" name="scopes" value={JSON.stringify(scopes)} />
         <input type="hidden" name="assumptions" value={JSON.stringify(assumptions)} />
         <input type="hidden" name="phases" value={JSON.stringify(phases)} />
 
-        <label style={LBL}>Customer</label>
-        <select
+        <label style={LBL}>Customer (Architect / billed party)</label>
+        <CustomerCombobox
+          options={customers.map((c) => ({
+            id: c.id,
+            name: c.name,
+            detail: c.contacts[0]?.name || "No primary contact",
+            searchText: c.contacts.map((x) => `${x.name} ${x.email}`).join(" "),
+          }))}
           value={customerId}
-          onChange={(e) => {
-            setCustomerId(e.target.value);
+          onChange={setCustomerId}
+          placeholder="Search architect or billed customer…"
+          inputStyle={INPUT}
+        />
+
+        <label style={LBL}>Venue (Location / venue owner)</label>
+        <CustomerCombobox
+          options={customers.map((c) => ({
+            id: c.id,
+            name: c.name,
+            detail: c.locations.length ? c.locations.map((l) => l.label).slice(0, 3).join(" · ") : "No venues on file",
+            searchText: c.locations.map((l) => l.label).join(" "),
+          }))}
+          value={venueCustomerId}
+          onChange={(id) => {
+            setVenueCustomerId(id);
             setLocationId("");
           }}
-          style={INPUT}
-        >
-          <option value="">Choose a customer…</option>
-          {customers.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
+          placeholder="Search venue company or location…"
+          inputStyle={INPUT}
+        />
 
-        {cust && cust.locations.length > 0 && (
+        {venueCustomer && venueCustomer.locations.length > 0 && (
           <>
-            <label style={LBL}>Site</label>
+            <label style={LBL}>Venue site</label>
             <select value={locationId} onChange={(e) => setLocationId(e.target.value)} style={INPUT}>
               <option value="">— none —</option>
-              {cust.locations.map((l) => (
+              {venueCustomer.locations.map((l) => (
                 <option key={l.id} value={l.id}>{l.label}</option>
               ))}
             </select>
@@ -236,7 +259,7 @@ export function ConsultingQuoteBuilder({
           name="quoteName"
           value={quoteName}
           onChange={(e) => setQuoteName(e.target.value)}
-          placeholder={cust ? cust.name + " — Consulting" : "Consulting engagement"}
+          placeholder={venueCustomer ? venueCustomer.name + " — Consulting" : "Consulting engagement"}
           style={INPUT}
         />
 
@@ -251,7 +274,7 @@ export function ConsultingQuoteBuilder({
             style={INPUT}
           />
           <datalist id="consulting-contacts">
-            {(cust?.contacts || []).map((c) => (
+            {(architect?.contacts || []).map((c) => (
               <option key={c.name} value={c.name} />
             ))}
           </datalist>
@@ -260,6 +283,24 @@ export function ConsultingQuoteBuilder({
         </div>
 
         <label style={LBL}>Scopes of work (title · description · fee)</label>
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 9 }}>
+          {["Audio / Video", "Lighting", "Rigging / Curtains"].map((title) => (
+            <button
+              key={title}
+              type="button"
+              onClick={() => {
+                if (scopeRows.some((r) => r.title === title)) return;
+                const blank = scopeRows.length === 1 && !scopeRows[0].title && !scopeRows[0].description && !scopeRows[0].fee;
+                const row = { id: "", title, description: "", fee: "" };
+                setScopeRows(blank ? [row] : [...scopeRows, row]);
+              }}
+              style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", border: "1px solid #dfe2e8", borderRadius: 8, background: "#fff", cursor: "pointer", fontFamily: "var(--font-ui)" }}
+            >
+              + {title}
+            </button>
+          ))}
+          <span style={{ alignSelf: "center", fontSize: 11, color: "#9aa0ab" }}>Fees intentionally left blank for the pricing session.</span>
+        </div>
         {scopeRows.map((r, i) => (
           <div key={i} style={{ border: "1px solid #e4e7ec", borderRadius: 10, padding: "10px 12px", marginBottom: 8, background: "#fbfbfc" }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 130px 34px", gap: 8 }}>

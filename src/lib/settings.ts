@@ -21,6 +21,8 @@ export type Office = {
   phone?: string;
   lat: number | null;
   lng: number | null;
+  /** Explicit travel origin for quote pricing. Exactly one is selected in Settings. */
+  quoteDefault?: boolean;
 };
 
 export type AppSettingsData = {

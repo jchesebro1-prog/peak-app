@@ -58,7 +58,7 @@ export default async function RepairQuotePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, customerDocs, rates, settings] = await Promise.all([
+  const [, sp, customerDocs, rates, settings] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
@@ -112,6 +112,7 @@ export default async function RepairQuotePage({
     name: o.name || "",
     lat: o.lat,
     lng: o.lng,
+    quoteDefault: !!o.quoteDefault,
   }));
 
   /* ---- initial builder state (edit / inspection finding / preselected customer) ---- */
@@ -294,7 +295,6 @@ export default async function RepairQuotePage({
       categories={CATEGORIES.map((c) => ({ key: c.key, label: c.label }))}
       priorities={PRIORITIES.map((p) => ({ key: p.key, label: p.label }))}
       initial={initial}
-      me={user.name}
       accent={settings.accent || "#7b3f8a"}
     />
   );

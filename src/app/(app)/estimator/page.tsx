@@ -28,10 +28,9 @@ export const metadata = { title: "Estimator — Quartzite-6" };
 
 /**
  * Estimator — detailed line-item quote builder (port of Estimator.dc.html).
- * /estimator?id=Q-#### loads that quote; with no id (or an unknown id) it
- * falls back to the Q-2041 demo quote so Save has a target, exactly like the
- * prototype's loadFromUrl(); if even that is missing, the builder opens as an
- * unsaved draft and Save creates the quote.
+ * /estimator?id=Q-#### loads that quote. With no id, the estimator starts at
+ * the intake step so a new estimate is named and scoped before categories are
+ * added. Save creates the quote once the estimator has been started.
  */
 
 function rvNone(): QuoteReview {
@@ -70,15 +69,15 @@ async function initialFrom(
   if (!q) {
     return {
       loadedId: null,
-      quoteId: FALLBACK.quoteId,
+      quoteId: "NEW",
       status: "draft",
       review: rvNone(),
-      projectName: FALLBACK.projectName,
-      custName: FALLBACK.custName,
+      projectName: "",
+      custName: "",
       customerId: null,
       locationId: null,
       contactName: "",
-      quoteNote: FALLBACK.quoteNote,
+      quoteNote: "",
       owner: userName,
       revNum: 1,
       revDateMs: Date.now(),
@@ -162,8 +161,9 @@ export default async function EstimatorPage({
     }
   }
 
-  let q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
-  if (!q) q = (await getQuote("Q-2041")) as QuoteDoc | null; // demo fallback so Save has a target
+  const q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
+  // No quote id means a new estimate. The client presents the intake step
+  // before the category workspace rather than silently opening a demo quote.
 
   const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster] =
     await Promise.all([

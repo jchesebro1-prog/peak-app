@@ -30,7 +30,6 @@ import {
   type PartLite,
 } from "@/lib/design/grid-bom";
 import {
-  categoryLayerKey,
   GRID_LAYERS,
   isLayerVisible,
   normalizeCategory,
@@ -63,6 +62,7 @@ import LayersPanel from "./layers-panel";
 import SpacesPanel from "./spaces-panel";
 import RevisionsPanel from "./revisions-panel";
 import WiresPanel from "./wires-panel";
+import AssembliesPanel from "./assemblies-panel";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -127,7 +127,7 @@ function markerColor(category: string): string {
  *  under `onDown` uses. Route-endpoint snapping (Task 4) uses a wider,
  *  ~1.5x radius: a waypoint should count as "on the device" even when it
  *  isn't pixel-perfect on the marker center. */
-const DEVICE_HIT_RADIUS = 0.012;
+const DEVICE_HIT_RADIUS = 0.028;
 const DEVICE_SNAP_RADIUS = DEVICE_HIT_RADIUS * 1.5;
 
 /** Click-vs-drag threshold (punch #47), in SCREEN pixels rather than
@@ -344,7 +344,8 @@ export default function GridEditor({
         if (p.category === "Fabric" || p.category === "Labor") return false;
         return scopeOfPart(p) === scopeFilter;
       })
-      .filter((p) => (q ? (p.sku + " " + p.desc).toLowerCase().includes(q) : true));
+      .filter((p) => (q ? (p.desc + " " + (p.modelNumber || p.sku) + " " + (p.manufacturer || "")).toLowerCase().includes(q) : true))
+      .sort((a, b) => a.desc.localeCompare(b.desc) || a.sku.localeCompare(b.sku));
   }, [parts, search, scopeFilter]);
 
   /* ------------------------- scopes + layers (#48) ------------------------- */
@@ -1054,20 +1055,16 @@ export default function GridEditor({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search the catalog"
+              placeholder="Search names or Manufacturer #"
               style={INPUT}
             />
-            <select
-              value={scopeFilter}
-              onChange={(e) => setScopeFilter(e.target.value)}
-              title="Scope filter: what you can arm. Hiding a layer is separate."
-              style={{ ...INPUT, marginTop: 6 }}
-            >
-              <option value="">All scopes</option>
-              {GRID_LAYERS.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 7 }}>
+              {["", ...GRID_LAYERS].map((s) => {
+                const count = s ? parts.filter((p) => scopeOfPart(p) === s).length : parts.length;
+                const on = scopeFilter === s;
+                return <button key={s || "all"} type="button" onClick={() => setScopeFilter(s)} style={{ ...BTN, padding: "4px 7px", fontSize: 10.5, background: on ? "#16181d" : "#fff", color: on ? "#fff" : "#5b616e", borderColor: on ? "#16181d" : "#dfe2e8" }}>{s || "All"} <span style={{ opacity: .65 }}>{count}</span></button>;
+              })}
+            </div>
             {armedPart && hiddenSet.has(scopeLayerKey(scopeOfPart(armedPart))) && (
               <div style={{ marginTop: 6, fontSize: 10.5, color: "#a0442b", lineHeight: 1.4 }}>
                 The {scopeOfPart(armedPart)} layer is hidden, so what you place
@@ -1127,11 +1124,11 @@ export default function GridEditor({
                             background: markerColor(p.category), flex: "0 0 auto",
                           }}
                         />
-                        <strong style={{ fontSize: 11.5 }}>{p.sku}</strong>
+                        <strong style={{ fontSize: 11.5 }}>{p.desc}</strong>
                         <span style={{ marginLeft: "auto", fontSize: 11 }}>{moneyFmt(p.list)}</span>
                       </span>
                       <span style={{ fontSize: 10.5, color: on ? "#c9cdd6" : "#8c919c", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {p.desc}
+                        {p.manufacturer ? `${p.manufacturer} · ` : ""}{p.modelNumber || p.sku}{p.kind === "assembly" ? " · assembly" : ""}
                       </span>
                     </button>
                     {/* Datasheet link (Task 5, punch #39) — a sibling of the
@@ -1163,6 +1160,8 @@ export default function GridEditor({
               )}
             </div>
           </div>
+
+          <AssembliesPanel parts={parts} onChanged={() => router.refresh()} />
 
           {/* scale */}
           <div style={PANEL}>
@@ -1369,6 +1368,16 @@ export default function GridEditor({
               <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
                 {scopeOfPlacement(selectedPlacement)} · by {selectedPlacement.by}
               </div>
+              {!selectedPlacement.curtain && (partById.get(selectedPlacement.partId)?.ports || []).length > 0 && (
+                <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #f0dcbb", fontSize: 10.5, color: "#5b616e" }}>
+                  <div style={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#9a7a48", marginBottom: 3 }}>Ports</div>
+                  {(partById.get(selectedPlacement.partId)?.ports || []).map((port) => (
+                    <div key={`${port.name}-${port.connectionType}`} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <span>{port.name} · {port.direction}</span><span style={{ fontFamily: "var(--font-mono)", color: "#8c6d3d" }}>{port.connectionType}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* User-defined category (punch #48/#41) - open-ended by
                   design: assign now, consume later. Orthogonal to the scope
@@ -1876,7 +1885,7 @@ export default function GridEditor({
                   const x = pl.x * size.w;
                   const y = pl.y * size.h;
                   const on = pl.id === selected;
-                  const label = pl.curtain ? pl.curtain.name : pl.partId;
+                  const label = pl.curtain ? pl.curtain.name : part?.desc || part?.sku || pl.partId;
                   return (
                     <g key={pl.id}>
                       {pl.curtain ? (
@@ -1892,8 +1901,22 @@ export default function GridEditor({
                         </>
                       ) : (
                         <>
-                          <circle cx={x} cy={y} r={10} fill={c} opacity={0.92} />
-                          <circle cx={x} cy={y} r={10} fill="none" stroke="#fff" strokeWidth={1.5} />
+                          {(() => {
+                            const w = part?.symbolWidth || 44;
+                            const h = part?.symbolHeight || 30;
+                            return (
+                              <>
+                                <rect x={x - w / 2} y={y - h / 2} width={w} height={h} rx={4} fill={c} opacity={0.92} />
+                                <rect x={x - w / 2} y={y - h / 2} width={w} height={h} rx={4} fill="none" stroke="#fff" strokeWidth={1.5} />
+                                {part?.kind === "assembly" && (part.assemblyMembers || []).map((member) => {
+                                  const child = partById.get(member.symbolId);
+                                  const cx = x + (member.x - 0.5) * w;
+                                  const cy = y + (member.y - 0.5) * h;
+                                  return <rect key={member.symbolId} x={cx - 5} y={cy - 4} width={10} height={8} rx={1.5} fill={markerColor(child?.category || "Child")} stroke="#fff" strokeWidth={1} />;
+                                })}
+                              </>
+                            );
+                          })()}
                         </>
                       )}
                       <rect x={x + 12} y={y - 8} width={Math.max(30, label.length * 6.4) + 8} height={16} rx={4} fill="#fff" stroke={c} strokeWidth={1} opacity={0.95} />

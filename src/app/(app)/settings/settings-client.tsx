@@ -24,6 +24,7 @@ import {
   saveLogoAction,
   saveSettingsAction,
   searchAddressAction,
+  setDefaultQuoteOfficeAction,
   setRolesAction,
   setUserStatusAction,
   updateMemberAction,
@@ -83,6 +84,7 @@ type OfficeVM = {
   phone: string;
   lat: number | null;
   lng: number | null;
+  quoteDefault: boolean;
 };
 
 type OfficeDraft = {
@@ -803,7 +805,7 @@ export default function SettingsClient({
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Consulting — phase menu</div>
             <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
               The phases offered when building a consulting quote and on the
-              engagement's Phases tab. One per line — engagements pick any
+              engagement&apos;s Phases tab. One per line — engagements pick any
               mix, so keep these generic.
             </div>
           </div>
@@ -895,8 +897,8 @@ export default function SettingsClient({
           <div>
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Locations</div>
             <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
-              Used as the travel origin when estimating a job — the nearest
-              location to the site is picked automatically.
+              Choose one default quote origin. Service-quote mileage and
+              travel time are calculated from that location.
             </div>
           </div>
           <button
@@ -968,6 +970,11 @@ export default function SettingsClient({
                     >
                       {o.type || "Main Office"}
                     </span>
+                    {o.quoteDefault && (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "#1f7a52" }}>
+                        Quote origin
+                      </span>
+                    )}
                   </div>
                   <div
                     style={{
@@ -998,6 +1005,20 @@ export default function SettingsClient({
                 >
                   {hasCoords ? "Located" : "No coords"}
                 </span>
+                <button
+                  className="pk-btn-outline"
+                  disabled={o.quoteDefault}
+                  title="Use this location as the origin for quote mileage and travel time"
+                  onClick={() =>
+                    startTransition(async () => {
+                      const res = await setDefaultQuoteOfficeAction(o.id);
+                      if (!res.ok) setError(res.error);
+                      else router.refresh();
+                    })
+                  }
+                >
+                  {o.quoteDefault ? "Default" : "Set quote origin"}
+                </button>
                 <button
                   className="pk-btn-outline"
                   title="Edit office"

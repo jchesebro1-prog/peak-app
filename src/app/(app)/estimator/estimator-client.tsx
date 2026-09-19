@@ -25,7 +25,6 @@ import {
 import { TasksCard } from "@/components/tasks-card";
 import type { DraftedLine } from "./ai-scope-modal";
 import {
-  demoSections,
   DISC_LABEL,
   FIX_PRESETS,
   FIXTURES,
@@ -72,6 +71,27 @@ import PreviewDoc from "./preview-doc";
 
 /** Prototype prop taxRatePct defaulted to 0 — kept as a constant. */
 const TAX_RATE_PCT = 0;
+const INTAKE_CATEGORIES = ["Audio / Video", "Lighting", "Rigging", "Curtains"];
+const INTAKE_LABEL: CSSProperties = {
+  display: "block",
+  fontSize: 10,
+  fontWeight: 700,
+  color: "#737985",
+  textTransform: "uppercase",
+  letterSpacing: ".05em",
+  marginBottom: 6,
+};
+const INTAKE_FIELD: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  fontSize: 13,
+  color: "#16181d",
+  border: "1px solid #e4e7ec",
+  borderRadius: 8,
+  padding: "10px 11px",
+  background: "#fff",
+  fontFamily: "var(--font-ui)",
+};
 
 const CSS = `
 .est-input { font-family: var(--font-mono); }
@@ -248,7 +268,7 @@ export default function EstimatorClient({
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   const [sections, setSections] = useState<SpecSection[]>(
-    () => initial.sections ?? demoSections()
+    () => initial.sections ?? []
   );
   const nidRef = useRef<number | null>(null);
   if (nidRef.current == null) nidRef.current = computeNid(initial.sections);
@@ -271,6 +291,9 @@ export default function EstimatorClient({
   const [attestOpen, setAttestOpen] = useState(false);
   const [attestNote, setAttestNote] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [started, setStarted] = useState(!!initial.loadedId);
+  const [projectName, setProjectName] = useState(initial.projectName);
+  const [intakeCategories, setIntakeCategories] = useState<string[]>(INTAKE_CATEGORIES);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
@@ -286,7 +309,7 @@ export default function EstimatorClient({
   const [pdfPrices, setPdfPrices] = useState(true);
   const [detail, setDetail] = useState<"itemized" | "sectioned">("itemized");
   const [activeId, setActiveId] = useState<string | null>(
-    () => (initial.sections ?? demoSections())[0]?.id ?? null
+    () => initial.sections?.[0]?.id ?? null
   );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [openCatalog, setOpenCatalog] = useState<string | null>(null);
@@ -405,7 +428,7 @@ export default function EstimatorClient({
     sections.forEach((sec) => sec.items.forEach((it) => it.mob && mobs.push(it.mob)));
     startTransition(async () => {
       const res = await saveQuoteAction(loadedId, {
-        name: initial.projectName,
+        name: projectName,
         customer: cname,
         customerId: customerId || null,
         locationId: locationId || null,
@@ -643,6 +666,23 @@ export default function EstimatorClient({
     setActiveId(id);
     setOpenCatalog(id);
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToCard(id)));
+  };
+
+  const startEstimate = () => {
+    const name = projectName.trim();
+    if (!name || intakeCategories.length === 0) return;
+    const nextSections = intakeCategories.map((category) => ({
+      id: "sys" + nextId(),
+      name: category,
+      kind: "materials",
+      mfr: "",
+      freightPct: 0,
+      items: [],
+    }));
+    setProjectName(name);
+    setSections(nextSections);
+    setActiveId(nextSections[0]?.id ?? null);
+    setStarted(true);
   };
 
   const pushItems = (secId: string, items: SpecItem[]) =>
@@ -1118,6 +1158,86 @@ export default function EstimatorClient({
   const fixtureSec = sections.find((s) => s.id === fixtureFor);
   const laborSec = sections.find((s) => s.id === laborFor);
 
+  if (!started) {
+    return (
+      <div
+        className="est-root"
+        style={{
+          height: "100%",
+          overflowY: "auto",
+          background: "#f7f8fa",
+          fontFamily: "var(--font-ui)",
+          color: "#16181d",
+        }}
+      >
+        <style>{CSS}</style>
+        <div style={{ maxWidth: 760, margin: "0 auto", padding: "48px 24px 72px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: ".08em" }}>
+            New system estimate
+          </div>
+          <h1 style={{ margin: "10px 0 8px", fontSize: 30, lineHeight: 1.15, letterSpacing: "-.025em" }}>
+            Start with the project basics
+          </h1>
+          <p style={{ margin: 0, color: "#737985", fontSize: 14, lineHeight: 1.55, maxWidth: 590 }}>
+            Capture the job, then build the estimate category by category. You can refine the customer, venue, and scope as the estimate develops.
+          </p>
+
+          <div style={{ marginTop: 28, background: "#fff", border: "1px solid #ececf0", borderRadius: 14, padding: 22, boxShadow: "0 1px 2px rgba(0,0,0,.04)" }}>
+            <label style={INTAKE_LABEL}>Project / estimate name</label>
+            <input
+              autoFocus
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder="Example: Main theater lighting upgrade"
+              style={{ ...INTAKE_FIELD, fontSize: 14, padding: "11px 12px" }}
+            />
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14, marginTop: 18 }}>
+              <label style={{ display: "block" }}>
+                <span style={INTAKE_LABEL}>Customer</span>
+                <select value={customerId || ""} onChange={(e) => pickCustomer(e.target.value)} style={INTAKE_FIELD}>
+                  <option value="">Select a customer…</option>
+                  {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+              <label style={{ display: "block" }}>
+                <span style={INTAKE_LABEL}>Venue / location</span>
+                <select value={locationId || ""} onChange={(e) => pickVenue(e.target.value)} style={INTAKE_FIELD} disabled={!locations.length}>
+                  <option value="">{locations.length ? "Select a venue…" : "Choose a customer first"}</option>
+                  {locations.map((l) => <option key={l.id} value={l.id}>{l.label}{l.city ? ` · ${l.city}` : ""}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <div style={{ marginTop: 23 }}>
+              <div style={INTAKE_LABEL}>Start with categories</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                {INTAKE_CATEGORIES.map((category) => {
+                  const on = intakeCategories.includes(category);
+                  return (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => setIntakeCategories((current) => on ? current.filter((x) => x !== category) : [...current, category])}
+                      style={{ display: "flex", alignItems: "center", gap: 10, textAlign: "left", border: `1px solid ${on ? "var(--accent)" : "#e4e7ec"}`, background: on ? "var(--accent-soft)" : "#fff", color: on ? "#30313a" : "#5b616e", borderRadius: 9, padding: "12px 13px", cursor: "pointer", fontFamily: "var(--font-ui)", fontSize: 13, fontWeight: 600 }}
+                    >
+                      <span style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${on ? "var(--accent)" : "#c4c9d2"}`, background: on ? "var(--accent)" : "#fff", color: "#fff", display: "grid", placeItems: "center", fontSize: 12 }}>{on ? "✓" : ""}</span>
+                      {category}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <button type="button" onClick={startEstimate} disabled={!projectName.trim() || intakeCategories.length === 0} style={{ marginTop: 24, width: "100%", border: "none", borderRadius: 9, padding: "12px 16px", background: !projectName.trim() || intakeCategories.length === 0 ? "#d8dbe1" : "var(--accent)", color: "#fff", fontFamily: "var(--font-ui)", fontSize: 13.5, fontWeight: 700, cursor: !projectName.trim() || intakeCategories.length === 0 ? "not-allowed" : "pointer" }}>
+              Start estimating →
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="est-root"
@@ -1170,7 +1290,7 @@ export default function EstimatorClient({
                     textOverflow: "ellipsis",
                   }}
                 >
-                  {initial.projectName}
+                  {projectName || "Untitled system estimate"}
                 </div>
                 <div
                   style={{
@@ -2258,7 +2378,7 @@ export default function EstimatorClient({
           }
           hasAttn={hasAttn}
           attnLine={attnLine}
-          projectName={initial.projectName}
+          projectName={projectName}
           venueLabel={(() => {
             const l = locations.find((x) => x.id === locationId);
             if (!l) return "";

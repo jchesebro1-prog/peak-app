@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
+import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { allEngagements } from "@/lib/stores/engagements";
 import { isOpenEngagement } from "@/lib/consulting-review";
 import { sitesForCompany } from "@/lib/identity/sites";
@@ -43,9 +44,10 @@ export default async function GridEditorPage({
     );
   }
 
-  const [sheets, catalog, engagements, laborHoursPerDevice, settings] = await Promise.all([
+  const [sheets, catalog, gridSymbols, engagements, laborHoursPerDevice, settings] = await Promise.all([
     listSheets(project.id),
     listCatalog(),
+    listGridSymbols(),
     allEngagements(),
     // Install-hours-per-device knob (D114) — admin-tunable like every rate.
     frac("grid.laborHoursPerDevice", 0.5),
@@ -71,23 +73,30 @@ export default async function GridEditorPage({
   const venues = sites.map((s) => ({ id: s.id, name: s.name || "Unnamed venue" }));
 
   /** Client payload: sheets without re-serialization surprises + PartLite slice. */
-  const parts: PartLite[] = catalog.map((p) => ({
-    id: p.id,
-    sku: p.sku,
-    desc: p.desc,
-    category: p.category,
-    unit: p.unit,
-    list: p.list,
-    cost: p.cost,
-    ...(p.ports && p.ports.length > 0 ? { ports: p.ports } : {}),
-    ...(p.datasheetBlobKey ? { hasDatasheet: true } : {}),
-    group: groupOf(p, categoryMap),
-    // Punch #48: the Grid's scope taxonomy folds group -> scope, and falls
-    // back to the trade for the parts that have no beta group (all of the
-    // rigging hardware). Resolved here for the same reason `group` is - the
-    // category map lives on the server and the editor stays dumb.
-    trade: tradeOf(p, categoryMap),
-  }));
+  const pricingById = new Map(catalog.map((p) => [p.id, p]));
+  const parts: PartLite[] = gridSymbols.map((s) => {
+    const p = s.pricingPartId ? pricingById.get(s.pricingPartId) : undefined;
+    return {
+      id: s.id,
+      sku: s.modelNumber || s.id,
+      desc: s.name,
+      category: s.category || "Other",
+      unit: p?.unit || "ea",
+      list: p?.list || 0,
+      cost: p?.cost || 0,
+      ...(s.ports.length > 0 ? { ports: s.ports } : {}),
+      ...(p?.datasheetBlobKey ? { hasDatasheet: true } : {}),
+      ...(p ? { group: groupOf(p, categoryMap), trade: tradeOf(p, categoryMap) } : {}),
+      manufacturer: s.manufacturer,
+      modelNumber: s.modelNumber,
+      gridScope: s.scope,
+      symbolWidth: s.width,
+      symbolHeight: s.height,
+      kind: s.kind || "device",
+      assemblyMembers: s.members,
+      pricingPartId: s.pricingPartId,
+    };
+  });
 
   /**
    * Curtain drop-in (punch #49): the fabric list and the sell coefficients for

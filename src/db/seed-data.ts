@@ -59,6 +59,7 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
       phone: "(414) 763-2200",
       lat: 43.032,
       lng: -87.945,
+      quoteDefault: true,
     },
     {
       id: "mad",

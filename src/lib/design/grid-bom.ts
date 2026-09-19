@@ -50,6 +50,15 @@ export type PartLite = {
    *  and every loft block would fall into Unscoped. Optional for the same
    *  reason as `group`: the other PartLite-shaped callers never resolve it. */
   trade?: string | null;
+  /** Grid-owned symbol metadata; pricing remains optional and separate. */
+  manufacturer?: string;
+  modelNumber?: string;
+  gridScope?: string;
+  symbolWidth?: number;
+  symbolHeight?: number;
+  kind?: "device" | "assembly";
+  assemblyMembers?: Array<{ symbolId: string; qty: number; x: number; y: number }>;
+  pricingPartId?: string | null;
 };
 
 /* -------------------------------- curtains -------------------------------- */

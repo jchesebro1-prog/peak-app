@@ -22,7 +22,7 @@ import { get as getCustomer, locationById } from "@/lib/stores/customers";
 import { getSettings, type AppSettingsData } from "@/lib/settings";
 import { allUsers } from "@/lib/users";
 import { firstName } from "@/lib/team";
-import { coordsOf, driveMiles, driveMinutes, nearest } from "@/lib/geo";
+import { coordsOf, driveMiles, driveMinutes, quoteOrigin } from "@/lib/geo";
 import { getTravelRates } from "@/lib/stores/pricing";
 import {
   compute as computeFlame,
@@ -303,10 +303,7 @@ async function ensureFlameRenewalQuote(
 
   const settings = await getSettings();
   const offices = Array.isArray(settings.offices) ? settings.offices : [];
-  const firstCoords =
-    venueInputs.map((v) => v.coords).find((c) => c && c.lat != null) || null;
-  const office =
-    (firstCoords ? nearest(offices, firstCoords) : null) || offices[0] || null;
+  const office = quoteOrigin(offices);
 
   const rates = await getFlameRates();
   const travelRates = await getTravelRates();
@@ -380,7 +377,7 @@ async function flameLetterDoc(
   const offices = Array.isArray(settings.offices) ? settings.offices : [];
   let origin = ft.origin;
   if (!origin || !(origin.city || origin.street)) {
-    const o = offices[0] || ({} as (typeof offices)[number]);
+    const o = quoteOrigin(offices) || ({} as (typeof offices)[number]);
     origin = { name: o.name || "", city: o.city || "", state: o.state || "" };
   }
   const originCity = origin.city || origin.name || "our office";
@@ -613,8 +610,7 @@ async function ensureInspectionRenewalQuote(
 
   const settings = await getSettings();
   const offices = Array.isArray(settings.offices) ? settings.offices : [];
-  const office =
-    (coords ? nearest(offices, coords) : null) || offices[0] || null;
+  const office = quoteOrigin(offices);
 
   const level = levelMeta(rec.level).key;
   const rates = await getInspectionRates();

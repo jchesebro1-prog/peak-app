@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
-import { nameFor } from "@/lib/stores/customers";
+import { get as getCustomer, nameFor } from "@/lib/stores/customers";
 import {
   create as createQuote,
   get as getQuote,
@@ -46,6 +46,7 @@ async function persist(formData: FormData): Promise<string | null> {
   const user = await requireUser();
   const editingId = String(formData.get("editingId") || "");
   const customerId = String(formData.get("customerId") || "");
+  const venueCustomerId = String(formData.get("venueCustomerId") || "");
   const locationId = String(formData.get("locationId") || "");
   const quoteName = String(formData.get("quoteName") || "").trim();
   const contactName = String(formData.get("contactName") || "").trim();
@@ -72,7 +73,7 @@ async function persist(formData: FormData): Promise<string | null> {
     phases = [];
   }
 
-  if (!customerId) return null;
+  if (!customerId || !venueCustomerId) return null;
 
   const scopes: ConsultingScope[] = (Array.isArray(postedScopes) ? postedScopes : [])
     .map((s) => ({
@@ -94,7 +95,16 @@ async function persist(formData: FormData): Promise<string | null> {
 
   const value = scopesTotal(scopes);
 
-  const custName = (await nameFor(customerId)) || "";
+  const [architectRecord, venueRecord] = await Promise.all([
+    getCustomer(customerId),
+    getCustomer(venueCustomerId),
+  ]);
+  if (!architectRecord || !venueRecord) return null;
+  const custName = (await nameFor(customerId)) || architectRecord.name || "";
+  const venueCustomer = (await nameFor(venueCustomerId)) || venueRecord.name || "";
+  const cleanLocationId = (venueRecord.locations || []).some((l) => l.id === locationId)
+    ? locationId
+    : "";
   const contact = contactName
     ? { name: contactName, role: contactRole, email: contactEmail }
     : null;
@@ -113,13 +123,15 @@ async function persist(formData: FormData): Promise<string | null> {
     scopes,
     assumptions,
     leadId: priorPay?.leadId ?? null,
+    venueCustomerId,
+    venueCustomer,
   };
 
   const payload = {
-    name: quoteName || (custName ? custName + " — Consulting" : "Consulting"),
+    name: quoteName || (venueCustomer ? venueCustomer + " — Consulting" : "Consulting"),
     customer: custName,
     customerId: customerId || null,
-    locationId: locationId || null,
+    locationId: cleanLocationId || null,
     value,
     margin: 0,
     source: "consulting",

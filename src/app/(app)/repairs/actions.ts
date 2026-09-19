@@ -12,6 +12,7 @@ import {
   DEFAULT_WARRANTY_MONTHS,
   type RepairCompletion,
 } from "@/lib/stores/repair-jobs";
+import { removeServiceCalendar, syncServiceCalendar } from "@/lib/service-calendar";
 
 /**
  * Repair job mutations — the RepairStore calls the prototype makes from the
@@ -31,6 +32,16 @@ export async function scheduleRepair(formData: FormData): Promise<void> {
   const job = await get(id);
   if (!job) return;
   await scheduleJob(id, { scheduledDate, assignedTo });
+  await syncServiceCalendar({
+    kind: "repair",
+    id,
+    assignedTo,
+    previousAssignedTo: job.assignedTo,
+    date: scheduledDate,
+    title: `${job.venue || job.customer} — Repair`,
+    location: job.venue || job.customer,
+    description: `Repair ${job.id} · ${job.customer}`,
+  });
   revalidatePath("/", "layout");
 }
 
@@ -41,6 +52,7 @@ export async function unscheduleRepair(formData: FormData): Promise<void> {
   if (!id) return;
   const job = await get(id);
   if (!job) return;
+  await removeServiceCalendar({ kind: "repair", id, assignedTo: job.assignedTo });
   await unscheduleJob(id);
   revalidatePath("/", "layout");
 }

@@ -63,7 +63,7 @@ export function CatalogControls({
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Search parts, SKUs, manufacturers…"
+          placeholder="Search manufacturer, model #, description, category…"
           style={{
             flex: 1,
             border: "none",

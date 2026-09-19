@@ -25,7 +25,7 @@ import {
 import { resolveTier } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
-import { coordsOf, nearest, driveMiles, driveMinutes } from "@/lib/geo";
+import { coordsOf, quoteOrigin, driveMiles, driveMinutes } from "@/lib/geo";
 
 /**
  * Repair quote mutations (repair twin of the flame-test quote actions).
@@ -113,8 +113,7 @@ async function persist(formData: FormData): Promise<string | null> {
 
   const settings = await getSettings();
   const offices = Array.isArray(settings.offices) ? settings.offices : [];
-  const firstCoords = venueInputs.map((v) => v.coords).find((c) => c && c.lat != null) || null;
-  const office = (firstCoords ? nearest(offices, firstCoords) : null) || offices[0] || null;
+  const office = quoteOrigin(offices);
 
   const hoursEach = Math.max(0, Number(formData.get("laborHours")) || 0);
   const crewSize = Math.max(1, Math.round(Number(formData.get("crewSize")) || 1));
