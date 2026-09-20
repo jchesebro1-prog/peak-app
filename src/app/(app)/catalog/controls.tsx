@@ -132,7 +132,7 @@ export function CatalogImportPanel({
   manufacturers: string[];
   accent: string;
 }) {
-  const [method, setMethod] = useState<"upload" | "api" | "paste">("paste");
+  const [method, setMethod] = useState<"upload" | "api" | "paste">("upload");
   const [mfrSel, setMfrSel] = useState(manufacturers[0] || "");
   const [adding, setAdding] = useState(manufacturers.length === 0);
   const [newMfr, setNewMfr] = useState("");
@@ -143,7 +143,7 @@ export function CatalogImportPanel({
   const canImport = method === "paste" && !!parsed?.ok && parsed.stats.valid > 0;
 
   const methods = [
-    { id: "upload" as const, icon: "↑", title: "Upload a price book", desc: "CSV or Excel list." },
+    { id: "upload" as const, icon: "↑", title: "Import CSV / TSV", desc: "Upload a manufacturer or design-program export." },
     { id: "api" as const, icon: "⇄", title: "Connect a manufacturer", desc: "Live pricing via a dealer account." },
     { id: "paste" as const, icon: "☰", title: "Paste a list", desc: "Rows straight from a spreadsheet." },
   ];
@@ -320,7 +320,7 @@ export function CatalogImportPanel({
               </div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>Upload prebuilt systems or parts</div>
               <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 3, lineHeight: 1.4 }}>
-                CSV/TSV exports are matched by Manufacturer Part # (MFR PN). Include a Description, and optional Category, Unit, List, and Cost.
+                Match rows by Manufacturer Part # (MFR PN). Include Description, plus optional Category, Unit, List, and Cost columns.
               </div>
               <input name="file" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" required style={{ width: "100%", marginTop: 14, fontSize: 12 }} />
               <button type="submit" disabled={!mfr} style={{ width: "100%", marginTop: 14, border: "none", borderRadius: 9, padding: 11, color: mfr ? "#fff" : "#aab0bb", background: mfr ? accent : "#eef0f3", cursor: mfr ? "pointer" : "not-allowed", fontSize: 13.5, fontWeight: 600 }}>
