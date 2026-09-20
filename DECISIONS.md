@@ -2450,3 +2450,37 @@ repairs/flame-tests/inspections) that use `_letters/util.tsx`'s
 `officePhone(settings)` were left untouched — they don't currently resolve
 a per-signer user at all, so wiring them in is a separable, larger task, not
 this one's scope.
+
+## D132. Venue Assessments unify field sheets and advisory assessment (2026-09-20)
+
+Field Surveys is now Venue Assessments: one `FS-####` record and the
+`/venue-assessments` route contain a required site-visit layer plus an
+optional Condition & Needs advisory layer. The legacy route redirects and
+ids remain unchanged. `venueClass` (theatre, auditorium, church, gym,
+convention, other) and class-specific `venueSubtype` replace the old flat
+venue-type input on read, while preserving the legacy field and all existing
+measurement keys. Visit purpose likewise adopts the paper-sheet list through
+read-time migration.
+
+The five supplied field sheets are folded into the four existing discipline
+branches. Each branch uses the sheet's PRESENT row as its gate; the old Tier-3
+yes/no editor is retired without deleting its stored data. Theatre and
+auditorium use one unified lineset table (toggleable for any class), with the
+paper G/F/P/X condition legend kept distinct from the assessment's
+Good/Monitor/Replace scale. Venue-class Curtains and Lighting doctrine lives
+in Estimating Rules; Theatre and Church defaults remain visibly unconfirmed.
+Flame-test and rigging-inspection references auto-resolve only for the exact
+customer/location and allow manual override.
+
+Monitor/Replace ratings seed one advisory finding per category; findings can
+be merged or split. They do not create quotes or repair jobs automatically:
+the supplied brief says budget tiers are planning guidance, not a quote, and
+the existing explicit Create quote path remains authoritative. Close-out has
+Peak rep, site contact, and optional technical-reviewer lines, and every
+record stamps its template revision. A class-aware PDF field sheet is in
+scope; the customer-facing report remains deferred until the intake has been
+field-tested.
+
+Two defaults were explicitly accepted as non-blocking: advisory findings do
+not auto-spawn work, and `other` remains the sixth generic class for arenas,
+outdoor/amphitheater, and venues without a dedicated paper sheet.
