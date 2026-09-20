@@ -3,13 +3,21 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requirePerm } from "@/lib/session";
-import { get as getPart, upsert, mergeUpsert } from "@/lib/stores/catalog";
+import { clearCatalogPriceList, get as getPart, upsert, mergeUpsert } from "@/lib/stores/catalog";
 import { parseCatalog } from "./parse";
 import { setSettings } from "@/lib/settings";
 import { GROUPS, TRADES, type CategoryMap } from "@/lib/catalog-taxonomy";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 
 type Result = { ok: true } | { ok: false; error: string };
+
+export async function deleteCatalogPriceListAction(formData: FormData): Promise<void> {
+  await requirePerm("manage_users");
+  if (String(formData.get("confirmation") || "") !== "DELETE") return;
+  await clearCatalogPriceList();
+  revalidatePath("/catalog");
+  redirect("/catalog?reset=1");
+}
 
 /**
  * Catalog mutations. FormData-shaped so forms work without client JS; the SKU

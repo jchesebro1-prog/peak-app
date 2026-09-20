@@ -6,6 +6,7 @@ import { list, get, type CatalogPart } from "@/lib/stores/catalog";
 import { money } from "@/lib/format";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { CatalogControls, CatalogImportPanel, PartDatasheetControl } from "./controls";
+import CatalogDangerZone from "./catalog-danger-zone";
 import { TaxonomyCard } from "./taxonomy-card";
 import { upsertPart } from "./actions";
 
@@ -51,6 +52,7 @@ export default async function CatalogPage({
   const editSku = one(sp.edit);
   const isNew = one(sp.new) === "1";
   const importedN = one(sp.imported);
+  const reset = one(sp.reset) === "1";
 
   const mfrOf = (p: CatalogPart) => (p.mfr && p.mfr.trim() ? p.mfr.trim() : UNSPEC);
 
@@ -168,8 +170,10 @@ export default async function CatalogPage({
         </div>
       </div>
 
-      {isAdmin && (
-        <TaxonomyCard categories={categories} initialMap={resolveCategoryMap(settings.catalogCategoryMap)} />
+      {reset && (
+        <div style={{ marginBottom: 16, padding: "10px 14px", borderRadius: 10, background: "#eaf6ef", border: "1px solid #cce9da", color: "#1f7a52", fontSize: 12.5, fontWeight: 600 }}>
+          ✓ Current price list cleared. Import a new manufacturer list to start fresh.
+        </div>
       )}
 
       {importedN && (
@@ -388,6 +392,13 @@ export default async function CatalogPage({
           </div>
         )}
       </div>
+
+      {isAdmin && (
+        <>
+          <TaxonomyCard categories={categories} initialMap={resolveCategoryMap(settings.catalogCategoryMap)} />
+          <CatalogDangerZone count={parts.length} />
+        </>
+      )}
 
       {showForm && (
         <PartFormModal
