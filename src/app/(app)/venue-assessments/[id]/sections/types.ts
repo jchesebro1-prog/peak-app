@@ -11,6 +11,7 @@ import type {
 } from "@/lib/stores/surveys";
 import type { VenueClass } from "@/lib/stores/venue-classes";
 import type { LinesetRow } from "@/lib/stores/linesets";
+import type { AssessmentData } from "@/lib/stores/assessment";
 import type { DisciplineData, DisciplineKey, InventoryRow, SystemState } from "@/lib/stores/survey-intake";
 
 /* ============================================================
@@ -108,6 +109,8 @@ export type Draft = {
   intakeReady: boolean;
   linesetsEnabled: boolean;
   linesets: LinesetRow[];
+  assessmentEnabled: boolean;
+  assessment: AssessmentData;
   updatedAt: number;
 };
 
@@ -130,7 +133,7 @@ export type SectionDef = {
   id: string;
   title: string;
   subtitle: string;
-  group: "brief" | "field" | "intake";
+  group: "brief" | "field" | "intake" | "assessment";
   step: number;
   advanced?: boolean;
 } & (
@@ -141,5 +144,7 @@ export type SectionDef = {
   | { kind: "viz3d" }
   | { kind: "tier1" }
   | { kind: "linesets" }
+  | { kind: "assessmentToggle" }
+  | { kind: "assessmentUsage" }
   | { kind: "discipline"; disc: DisciplineKey }
 );

@@ -186,6 +186,23 @@ export function blankAssessment(): AssessmentData {
   };
 }
 
+export function toggleEventType(
+  usage: AssessmentUsage,
+  key: string,
+  enabled: boolean
+): AssessmentUsage {
+  const eventTypes = usage.eventTypes.filter((event) => event.key !== key);
+  if (enabled) eventTypes.push({ key, frequency: "" });
+  return { ...usage, eventTypes };
+}
+
+export function toggleGrowthGoal(usage: AssessmentUsage, goal: string): AssessmentUsage {
+  const growthGoals = usage.growthGoals.includes(goal)
+    ? usage.growthGoals.filter((item) => item !== goal)
+    : usage.growthGoals.concat(goal);
+  return { ...usage, growthGoals };
+}
+
 let findingSeq = 0;
 export function newFindingId(): string {
   findingSeq += 1;

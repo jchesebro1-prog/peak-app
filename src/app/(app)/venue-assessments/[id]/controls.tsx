@@ -42,6 +42,7 @@ import { ConditionsSection } from "./sections/conditions";
 import { PhotosSection } from "./sections/photos";
 import { SystemsSection } from "./sections/systems";
 import { LinesetsSection } from "./sections/linesets";
+import { AssessmentUsageSection } from "./sections/assessment-usage";
 import { blankLinesetRow, nextLinesetPosition } from "@/lib/stores/linesets";
 
 /* Serializable props from the server — the store is DB-backed and cannot be
@@ -49,16 +50,17 @@ import { blankLinesetRow, nextLinesetPosition } from "@/lib/stores/linesets";
  * over as plain props. The shapes now live in ./sections/types. */
 export type { EditorCustomer, EditorMeta } from "./sections/types";
 
-const STEP_LABELS = ["Brief", "Site & access", "Measurements", "Site intake", "Details"];
+const STEP_LABELS = ["Brief", "Site & access", "Measurements", "Site intake", "Details", "Assessment"];
 const STEP_BY_ID: Record<string, number> = {
   cust: 0, visit: 0, project: 0, assign: 0, site: 1, conditions: 1, lifeSafety: 1,
   mQuick: 2, mLayout: 2, mSection: 2, mBeams: 2, mFOH: 2, mHouse: 2, m3d: 2,
-  tier1: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3, linesets: 3,
+  tier1: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3, linesets: 3, assessmentToggle: 3,
+  assessmentUsage: 5,
   photos: 4, notes: 4,
 };
 const BRIEF_IDS: Record<string, boolean> = { cust: true, visit: true, project: true, assign: true };
-const INTAKE_IDS: Record<string, boolean> = { tier1: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true, linesets: true };
-const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "linesets", "photos", "notes"];
+const INTAKE_IDS: Record<string, boolean> = { tier1: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true, linesets: true, assessmentToggle: true };
+const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "linesets", "assessmentToggle", "photos", "notes", "assessmentUsage"];
 const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", curtain: "dCurtain", lighting: "dLighting", av: "dAv" };
 
 /** Display label for a venue class — the derived `venueType` fallback. */
@@ -153,6 +155,8 @@ function toDraft(r: SurveyRecord): Draft {
     intakeReady: !!r.intakeReady,
     linesetsEnabled: !!r.linesetsEnabled,
     linesets: [...(r.linesets || [])],
+    assessmentEnabled: !!r.assessmentEnabled,
+    assessment: r.assessment,
     updatedAt: r.updatedAt || 0,
   };
 }
@@ -476,6 +480,7 @@ export default function SurveyEditor({
       });
     });
     secs.push({ id: "linesets", title: "Lineset schedule", subtitle: "Physical positions, loads, trim and condition", group: "intake", step: 3, advanced: true, kind: "linesets" });
+    secs.push({ id: "assessmentToggle", title: "Condition & Needs assessment", subtitle: "Add an advisory layer when the customer needs Peak's opinion", group: "intake", step: 3, kind: "assessmentToggle" });
     secs.push({ id: "photos", title: "Photos", subtitle: "Up to 8", group: "field", step: 4, kind: "photos" });
     secs.push({
       id: "notes", title: "Scope & notes", subtitle: "Free text", group: "field", step: 4, kind: "fields",
@@ -485,14 +490,19 @@ export default function SurveyEditor({
         { kind: "textarea", key: "notes", label: "Generic notes", placeholder: "Access, hazards, scheduling constraints…" },
       ],
     });
+    if (draft.assessmentEnabled) {
+      secs.push({ id: "assessmentUsage", title: "Usage & needs profile", subtitle: "How the room is used, operated, and expected to grow", group: "assessment", step: 5, kind: "assessmentUsage" });
+    }
     secs.forEach((s) => {
-      s.group = BRIEF_IDS[s.id] ? "brief" : INTAKE_IDS[s.id] ? "intake" : "field";
+      if (s.group !== "assessment") {
+        s.group = BRIEF_IDS[s.id] ? "brief" : INTAKE_IDS[s.id] ? "intake" : "field";
+      }
       if (STEP_BY_ID[s.id] != null) s.step = STEP_BY_ID[s.id];
     });
     secs.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
     return secs;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.venueClass, draft.requestedBy, meta, roster]);
+  }, [draft.assessmentEnabled, draft.venueClass, draft.requestedBy, meta, roster]);
 
   const measFilled = (fields: FieldDef[]): number =>
     fields.filter((f) => {
@@ -579,6 +589,8 @@ export default function SurveyEditor({
       intakeReady: draft.intakeReady,
       linesetsEnabled: draft.linesetsEnabled,
       linesets: draft.linesets,
+      assessmentEnabled: draft.assessmentEnabled,
+      assessment: draft.assessment,
       ...over,
     };
   }
@@ -910,13 +922,15 @@ export default function SurveyEditor({
                 {showGroupHeader && (
                   <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "6px 2px 10px", flexWrap: "wrap" }}>
                     <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "#5b616e" }}>
-                      {sec.group === "brief" ? "Office brief" : sec.group === "intake" ? "Site intake" : "Field capture"}
+                      {sec.group === "brief" ? "Office brief" : sec.group === "intake" ? "Site intake" : sec.group === "assessment" ? "Condition & needs" : "Field capture"}
                     </span>
                     <span style={{ fontSize: 11.5, color: "#aab0bb" }}>
                       {sec.group === "brief"
                         ? "Filled when the request is created"
                         : sec.group === "intake"
                           ? "Venue baseline, then branch into a discipline"
+                          : sec.group === "assessment"
+                            ? "Advisory condition and planning profile"
                           : "Filled on-site by the surveyor"}
                     </span>
                   </div>
@@ -1056,6 +1070,25 @@ export default function SurveyEditor({
                           onAdd={addLineset}
                           onRemove={removeLineset}
                           onChange={patchLineset}
+                        />
+                      )}
+                      {sec.kind === "assessmentToggle" && (
+                        <button
+                          type="button"
+                          onClick={() => setField("assessmentEnabled", !draft.assessmentEnabled)}
+                          style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", textAlign: "left", border: `1px solid ${draft.assessmentEnabled ? ACCENT_BORDER_LT : "#e4e7ec"}`, borderRadius: 10, padding: "12px 13px", background: draft.assessmentEnabled ? ACCENT_SOFT : "#fff", color: draft.assessmentEnabled ? ACCENT_INK : "#5b616e", cursor: "pointer" }}
+                        >
+                          <span style={boxStyle(draft.assessmentEnabled)}>{draft.assessmentEnabled ? "✓" : ""}</span>
+                          <span><strong style={{ display: "block", fontSize: 13.5 }}>Add Condition & Needs assessment</strong><span style={{ display: "block", marginTop: 2, fontSize: 11.5, color: "#8c919c" }}>Use when the customer has no defined ask or needs a formal deliverable.</span></span>
+                        </button>
+                      )}
+                      {sec.kind === "assessmentUsage" && (
+                        <AssessmentUsageSection
+                          assessment={draft.assessment}
+                          roster={roster}
+                          quote={{ budget: draft.budget, fiscalYearSpendBy: draft.fiscalYearSpendBy, whoDecides: draft.whoDecides, targetInstallWindow: draft.targetInstallWindow, quoteNeededBy: draft.quoteNeededBy }}
+                          onAssessment={(assessment) => setField("assessment", assessment)}
+                          onQuoteField={(key, value) => setField(key, value)}
                         />
                       )}
                       {sec.kind === "conditions" && (

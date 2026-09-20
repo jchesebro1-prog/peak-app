@@ -41,7 +41,7 @@ import {
 import {
   CONDITION_CATEGORIES, CONDITION_RATINGS, BUDGET_TIERS, FINDING_BUCKETS,
   EVENT_TYPES, EVENT_FREQUENCIES, STAFF_TIERS, GROWTH_GOALS,
-  blankAssessment, seedFindings, newFindingId,
+  blankAssessment, seedFindings, newFindingId, toggleEventType, toggleGrowthGoal,
 } from "@/lib/stores/assessment";
 
 import {
@@ -3284,6 +3284,19 @@ ok(
 );
 ok(a0.findings.length === 0, "blank assessment has no findings");
 ok(a0.electricalNotes === "", "blank assessment has an electrical notes field");
+const usageWithEvent = toggleEventType(a0.usage, "theatrical", true);
+ok(
+  usageWithEvent.eventTypes.length === 1 && usageWithEvent.eventTypes[0].frequency === "",
+  "checking an event type adds one empty frequency row"
+);
+ok(
+  toggleEventType(usageWithEvent, "theatrical", false).eventTypes.length === 0,
+  "unchecking an event type removes its frequency row"
+);
+ok(
+  toggleGrowthGoal(a0.usage, "More community rentals").growthGoals.join("") === "More community rentals",
+  "growth-goal toggles add the selected goal"
+);
 
 // good is never flagged; monitor and replace each seed one line
 const a1 = blankAssessment();
