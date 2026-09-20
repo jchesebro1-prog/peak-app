@@ -59,6 +59,8 @@ import {
   DEFAULT_VENUE_DOCTRINE,
   resolveVenueDoctrine,
 } from "@/lib/venue-doctrine";
+import { buildAssessmentSheet } from "@/lib/venue-assessment-sheet";
+import { renderLetterPdf } from "@/lib/pdf";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -3483,6 +3485,47 @@ ok(
   doctrineOverride.gym.curtains === DEFAULT_VENUE_DOCTRINE.gym.curtains,
   "a sparse doctrine override preserves defaults for the other classes"
 );
+
+/* --- Venue Assessments: printable field sheets --- */
+for (const venueClass of VENUE_CLASSES.map((item) => item.key)) {
+  const sheet = buildAssessmentSheet({
+    id: `FS-${venueClass}`,
+    venueClass,
+    venue: `${venueClass} room`,
+    customer: "Sheet test",
+    measurements: {},
+    disciplines: {},
+    linesets: [],
+    linesetsEnabled: false,
+    lifeSafety: { deluge: "", smokeVent: "", adaNotes: "", egressNotes: "" },
+    signoff: {
+      repName: "Rep", repSignedAt: "2026-09-20",
+      contactName: "Client", contactSignedAt: "2026-09-20",
+      reviewerName: "", reviewerRole: "", reviewerSignedAt: "",
+    },
+    assessmentEnabled: false,
+    assessment: blankAssessment(),
+    templateRev: "5.1",
+  } as any);
+  ok(!!sheet.fieldSheet?.pages.length, `${venueClass} builds a paginated field sheet`);
+  ok(
+    sheet.fieldSheet?.pages.at(-1)?.sections.at(-1)?.heading === "Sign-off",
+    `${venueClass} puts sign-off at the end of the final page`
+  );
+  ok(
+    !sheet.fieldSheet?.pages.some((page) => page.title.startsWith("Assessment")),
+    `${venueClass} omits assessment pages when the layer is off`
+  );
+  ok(
+    sheet.fieldSheet?.footer === "Venue Assessment Rev. 5.1",
+    `${venueClass} prints the template revision footer`
+  );
+  const sheetPdf = renderLetterPdf(sheet);
+  ok(
+    sheetPdf.subarray(0, 8).toString("latin1") === "%PDF-1.4",
+    `${venueClass} field sheet renders to PDF bytes`
+  );
+}
 
 asyncChecks()
   .then(() => {

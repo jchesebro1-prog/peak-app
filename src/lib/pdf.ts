@@ -177,6 +177,16 @@ export type LetterBlock =
   | { kind: "quote"; text: string }
   | { kind: "bullets"; heading: string; items: string[] };
 
+export type FieldSheetRow = { label: string; value: string };
+export type FieldSheetSection = { heading: string; rows: FieldSheetRow[] };
+export type FieldSheetPage = { title: string; sections: FieldSheetSection[] };
+export type FieldSheetDoc = {
+  job: string;
+  date: string;
+  footer: string;
+  pages: FieldSheetPage[];
+};
+
 export type LetterDoc = {
   companyName: string;
   /** Brand accent for the tag line under the letterhead rule. */
@@ -198,6 +208,9 @@ export type LetterDoc = {
   costTail: string;
   taxNote: string;
   signer: { name: string; title: string; email?: string };
+  /** Structured field-sheet mode. When present, renderLetterPdf uses the
+   * paginated worksheet compositor instead of the proposal-letter body. */
+  fieldSheet?: FieldSheetDoc;
 };
 
 /* ---------------- writer --------------------------------------------------- */
@@ -387,15 +400,12 @@ class Pdf {
 
 /* ---------------- the letter compositor ------------------------------------ */
 
-/** Render a proposal letter (the /flame-tests/letter · /inspections/letter
- *  layout) to PDF bytes. */
-export function renderLetterPdf(doc: LetterDoc): Buffer {
+function initPdf(): Pdf {
   const pdf = new Pdf();
-  // fixed ids: 1 catalog, 2 pages, 3+4 fonts
-  pdf.alloc(); // 1
-  pdf.alloc(); // 2
-  pdf.alloc(); // 3
-  pdf.alloc(); // 4
+  pdf.alloc(); // 1 catalog
+  pdf.alloc(); // 2 pages
+  pdf.alloc(); // 3 regular font
+  pdf.alloc(); // 4 bold font
   pdf.set(
     3,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
@@ -404,6 +414,64 @@ export function renderLetterPdf(doc: LetterDoc): Buffer {
     4,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"
   );
+  return pdf;
+}
+
+function renderFieldSheetPdf(doc: LetterDoc, sheet: FieldSheetDoc): Buffer {
+  const pdf = initPdf();
+  const jpeg = doc.headerJpeg || null;
+  const info = jpeg ? jpegInfo(jpeg) : null;
+  const imageName = jpeg && info ? pdf.addJpeg(jpeg, info) : null;
+  const pages = sheet.pages.length ? sheet.pages : [{ title: doc.tag, sections: [] }];
+
+  pages.forEach((page, pageIndex) => {
+    if (pageIndex) pdf.newPage();
+    if (imageName && info) {
+      const h = Math.min(doc.headerFull ? 58 : 38, (CONTENT_W * info.h) / info.w);
+      const w = Math.min(CONTENT_W, (h * info.w) / info.h);
+      pdf.image(imageName, MARGIN_L, w, h);
+    } else {
+      pdf.line(doc.companyName, { size: 18, bold: true, leading: 22 });
+    }
+    pdf.space(6);
+    pdf.hairline(pdf.y, "#16181d", 1.4);
+    pdf.line(page.title, { size: 13, bold: true, color: doc.accent, leading: 21 });
+    pdf.line(`JOB/OPP #  ${sheet.job}`, { size: 9.5, bold: true, leading: 14 });
+    pdf.line(`DATE  ${sheet.date || "—"}`, { size: 9.5, leading: 14 });
+    pdf.line(`PAGE ${pageIndex + 1} OF ${pages.length}`, {
+      size: 9.5,
+      bold: true,
+      align: "right",
+      leading: 0,
+    });
+    pdf.space(10);
+
+    for (const section of page.sections) {
+      pdf.line(section.heading.toUpperCase(), {
+        size: 9.5,
+        bold: true,
+        color: LABEL_INK,
+        leading: 18,
+      });
+      pdf.hairline(pdf.y - 2, "#e4e7ec", 0.7);
+      pdf.space(4);
+      for (const row of section.rows) {
+        const value = row.value || "________________________________";
+        pdf.para(`${row.label}:  ${value}`, { size: 9.5, leadingMult: 1.35, after: 1 });
+      }
+      pdf.space(8);
+    }
+
+    pdf.line(sheet.footer, { size: 8.5, color: LABEL_INK, leading: 16 });
+  });
+  return pdf.build();
+}
+
+/** Render a proposal letter (the /flame-tests/letter · /inspections/letter
+ *  layout) to PDF bytes. */
+export function renderLetterPdf(doc: LetterDoc): Buffer {
+  if (doc.fieldSheet) return renderFieldSheetPdf(doc, doc.fieldSheet);
+  const pdf = initPdf();
 
   /* letterhead */
   const jpeg = doc.headerJpeg || null;

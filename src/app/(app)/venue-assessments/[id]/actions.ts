@@ -13,6 +13,10 @@ import {
   type SurveyStage,
 } from "@/lib/stores/surveys";
 import { create as createQuote } from "@/lib/stores/quotes";
+import { getSettings } from "@/lib/settings";
+import { buildAssessmentSheet } from "@/lib/venue-assessment-sheet";
+import { renderLetterPdf } from "@/lib/pdf";
+import { letterheadJpeg } from "@/lib/renewal-outreach";
 
 /**
  * Survey capture-editor mutations (port of the Survey.dc.html save / stage /
@@ -106,6 +110,26 @@ export async function saveSurvey(id: string, patch: SurveyPatch): Promise<void> 
   if (!existing) return;
   await update(id, patch as Partial<SurveyRecord>);
   revalidatePath("/", "layout");
+}
+
+/** Render the current editor draft without forcing a save first. */
+export async function printSurveySheet(id: string, patch: SurveyPatch) {
+  await requireUser();
+  const existing = id ? await get(id) : null;
+  if (!existing) return { ok: false as const, error: "Assessment not found." };
+  const settings = await getSettings();
+  const header = await letterheadJpeg(settings);
+  const doc = buildAssessmentSheet({ ...existing, ...patch });
+  doc.companyName = settings.companyName;
+  doc.accent = settings.accent;
+  doc.headerJpeg = header.jpeg;
+  doc.headerFull = header.full;
+  const pdf = renderLetterPdf(doc);
+  return {
+    ok: true as const,
+    filename: `${id}-venue-assessment.pdf`,
+    base64: pdf.toString("base64"),
+  };
 }
 
 /**

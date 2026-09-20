@@ -26,7 +26,7 @@ import {
   type DisciplineKey,
   type InventoryRow,
 } from "@/lib/stores/survey-intake";
-import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, type SurveyPatch } from "./actions";
+import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, printSurveySheet, type SurveyPatch } from "./actions";
 import Venue3D from "./venue-3d";
 import { saveThroughOutbox } from "@/lib/sync/save";
 import type { Draft, EditorCustomer, EditorMeta, FieldDef, SectionDef } from "./sections/types";
@@ -688,6 +688,26 @@ export default function SurveyEditor({
     }
   }
 
+  async function onPrintSheet() {
+    if (saving) return;
+    const preview = window.open("", "_blank");
+    setSaving(true);
+    try {
+      const result = await printSurveySheet(record.id, buildPatch());
+      if (!result.ok) throw new Error(result.error);
+      const bytes = Uint8Array.from(atob(result.base64), (char) => char.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      if (preview) preview.location.href = url;
+      else window.location.href = url;
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      if (preview) preview.close();
+      setSaveError("Could not build the field sheet — please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   /* ---------- derived ---------- */
   const stageKey = draft.stage || "requested";
   const curStageIdx = Math.max(0, meta.stages.findIndex((s) => s.key === stageKey));
@@ -840,6 +860,9 @@ export default function SurveyEditor({
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>{intakeMeta.label}</span>
             </div>
           </div>
+          <button onClick={onPrintSheet} disabled={saving} style={{ flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 9, padding: "10px 14px", cursor: saving ? "default" : "pointer", minHeight: 42 }}>
+            Print sheet
+          </button>
           <button onClick={onDelete} disabled={saving} style={{ flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#b4543a", background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 9, padding: "10px 14px", cursor: saving ? "default" : "pointer", minHeight: 42 }}>
             Delete
           </button>
