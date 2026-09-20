@@ -10,6 +10,7 @@ import type {
   SurveyStageMeta,
 } from "@/lib/stores/surveys";
 import type { VenueClass } from "@/lib/stores/venue-classes";
+import type { LinesetRow } from "@/lib/stores/linesets";
 import type { DisciplineData, DisciplineKey, InventoryRow, SystemState } from "@/lib/stores/survey-intake";
 
 /* ============================================================
@@ -105,6 +106,8 @@ export type Draft = {
   disciplinesActive: string[];
   inventory: InventoryRow[];
   intakeReady: boolean;
+  linesetsEnabled: boolean;
+  linesets: LinesetRow[];
   updatedAt: number;
 };
 
@@ -137,6 +140,6 @@ export type SectionDef = {
   | { kind: "photos" }
   | { kind: "viz3d" }
   | { kind: "tier1" }
-  | { kind: "systems" }
+  | { kind: "linesets" }
   | { kind: "discipline"; disc: DisciplineKey }
 );

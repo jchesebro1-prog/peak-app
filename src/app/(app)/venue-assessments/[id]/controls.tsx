@@ -41,6 +41,8 @@ import { CustVenueSection } from "./sections/custvenue";
 import { ConditionsSection } from "./sections/conditions";
 import { PhotosSection } from "./sections/photos";
 import { SystemsSection } from "./sections/systems";
+import { LinesetsSection } from "./sections/linesets";
+import { blankLinesetRow, nextLinesetPosition } from "@/lib/stores/linesets";
 
 /* Serializable props from the server — the store is DB-backed and cannot be
  * imported into a client bundle, so its pure meta/option-lists are handed
@@ -51,12 +53,12 @@ const STEP_LABELS = ["Brief", "Site & access", "Measurements", "Site intake", "D
 const STEP_BY_ID: Record<string, number> = {
   cust: 0, visit: 0, project: 0, assign: 0, site: 1, conditions: 1, lifeSafety: 1,
   mQuick: 2, mLayout: 2, mSection: 2, mBeams: 2, mFOH: 2, mHouse: 2, m3d: 2,
-  tier1: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3,
+  tier1: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3, linesets: 3,
   photos: 4, notes: 4,
 };
 const BRIEF_IDS: Record<string, boolean> = { cust: true, visit: true, project: true, assign: true };
-const INTAKE_IDS: Record<string, boolean> = { tier1: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true };
-const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "photos", "notes"];
+const INTAKE_IDS: Record<string, boolean> = { tier1: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true, linesets: true };
+const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "linesets", "photos", "notes"];
 const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", curtain: "dCurtain", lighting: "dLighting", av: "dAv" };
 
 /** Display label for a venue class — the derived `venueType` fallback. */
@@ -149,6 +151,8 @@ function toDraft(r: SurveyRecord): Draft {
     disciplinesActive: [...(r.disciplinesActive || [])],
     inventory: [...(r.inventory || [])],
     intakeReady: !!r.intakeReady,
+    linesetsEnabled: !!r.linesetsEnabled,
+    linesets: [...(r.linesets || [])],
     updatedAt: r.updatedAt || 0,
   };
 }
@@ -241,6 +245,12 @@ export default function SurveyEditor({
     patchDraft({ inventory: draft.inventory.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
   const removeInvRow = (id: string) =>
     patchDraft({ inventory: draft.inventory.filter((r) => r.id !== id) });
+  const addLineset = () =>
+    patchDraft({ linesets: draft.linesets.concat(blankLinesetRow(nextLinesetPosition(draft.linesets))) });
+  const patchLineset = (id: string, patch: Partial<(typeof draft.linesets)[number]>) =>
+    patchDraft({ linesets: draft.linesets.map((row) => (row.id === id ? { ...row, ...patch } : row)) });
+  const removeLineset = (id: string) =>
+    patchDraft({ linesets: draft.linesets.filter((row) => row.id !== id) });
 
   /* ---------- customer & venue linkage ---------- */
   const custObj = (id: string | null) => (id ? customers.find((c) => c.id === id) || null : null);
@@ -465,6 +475,7 @@ export default function SurveyEditor({
         group: "intake", step: 3, advanced: true, kind: "discipline", disc: g.key,
       });
     });
+    secs.push({ id: "linesets", title: "Lineset schedule", subtitle: "Physical positions, loads, trim and condition", group: "intake", step: 3, advanced: true, kind: "linesets" });
     secs.push({ id: "photos", title: "Photos", subtitle: "Up to 8", group: "field", step: 4, kind: "photos" });
     secs.push({
       id: "notes", title: "Scope & notes", subtitle: "Free text", group: "field", step: 4, kind: "fields",
@@ -566,6 +577,8 @@ export default function SurveyEditor({
       disciplinesActive: draft.disciplinesActive,
       inventory: draft.inventory,
       intakeReady: draft.intakeReady,
+      linesetsEnabled: draft.linesetsEnabled,
+      linesets: draft.linesets,
       ...over,
     };
   }
@@ -788,7 +801,7 @@ export default function SurveyEditor({
         .sv-rail::-webkit-scrollbar { display:none; }
         .sv-rail { -ms-overflow-style:none; scrollbar-width:none; }
         .sv-inv-row { display:grid; grid-template-columns:minmax(130px,1.3fr) 68px 44px minmax(110px,1fr) 40px; gap:7px; align-items:stretch; }
-        @media (max-width:640px){ .sv-grid{ grid-template-columns:1fr !important; } .sv-pad{ padding-left:15px !important; padding-right:15px !important; } .sv-inv-row{ grid-template-columns:minmax(0,1.3fr) 58px 42px minmax(0,1fr) 38px; } }
+        @media (max-width:640px){ .sv-grid{ grid-template-columns:1fr !important; } .sv-pad{ padding-left:15px !important; padding-right:15px !important; } .sv-inv-row{ grid-template-columns:minmax(0,1.3fr) 58px 42px minmax(0,1fr) 38px; } .va-lineset-desktop{ display:none !important; } .va-lineset-mobile{ display:flex !important; } }
       `}</style>
 
       {/* sticky header */}
@@ -1035,6 +1048,16 @@ export default function SurveyEditor({
                           />
                         );
                       })()}
+                      {sec.kind === "linesets" && (
+                        <LinesetsSection
+                          enabled={draft.linesetsEnabled}
+                          rows={draft.linesets}
+                          onEnabled={(enabled) => setField("linesetsEnabled", enabled)}
+                          onAdd={addLineset}
+                          onRemove={removeLineset}
+                          onChange={patchLineset}
+                        />
+                      )}
                       {sec.kind === "conditions" && (
                         <ConditionsSection
                           draft={draft}

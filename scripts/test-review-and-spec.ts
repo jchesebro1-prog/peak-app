@@ -35,7 +35,7 @@ import {
 
 import {
   LINESET_TYPES, LINESET_CONDS, blankLinesetRow, newLinesetId,
-  linesetTypeLabel, linesetCondLabel,
+  linesetTypeLabel, linesetCondLabel, nextLinesetPosition,
 } from "@/lib/stores/linesets";
 
 import {
@@ -3249,6 +3249,11 @@ ok(
 );
 ok(Object.keys(lsr).length === 14, `blank row has exactly 14 keys (got ${Object.keys(lsr).length})`);
 ok(newLinesetId() !== newLinesetId(), "lineset ids are unique");
+ok(nextLinesetPosition([]) === 1, "an empty schedule starts at physical position 1");
+ok(
+  nextLinesetPosition([{ ...blankLinesetRow(1), pos: "1" }, { ...blankLinesetRow(3), pos: "3" }]) === 4,
+  "adding after a deletion never duplicates an existing physical position"
+);
 
 
 /* --- Venue Assessments: assessment layer --- */

@@ -75,3 +75,10 @@ export function blankLinesetRow(pos: number): LinesetRow {
     arborLoad: "", trimLow: "", trimHigh: "", cond: "", notes: "",
   };
 }
+
+export function nextLinesetPosition(rows: LinesetRow[]): number {
+  return rows.reduce((max, row) => {
+    const position = Number.parseInt(row.pos, 10);
+    return Number.isFinite(position) ? Math.max(max, position) : max;
+  }, 0) + 1;
+}
