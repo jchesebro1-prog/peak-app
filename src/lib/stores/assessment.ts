@@ -257,3 +257,38 @@ export function seedFindings(a: AssessmentData): {
   }
   return { seeded: [], unresolved: missing.map((c) => c.key) };
 }
+
+export function mergeFindings(findings: Finding[], targetId: string, sourceId: string): Finding[] {
+  if (targetId === sourceId) return findings;
+  const target = findings.find((finding) => finding.id === targetId);
+  const source = findings.find((finding) => finding.id === sourceId);
+  if (!target || !source) return findings;
+  const merged: Finding = {
+    ...target,
+    categories: [...new Set([...target.categories, ...source.categories])],
+    photoIds: [...new Set([...target.photoIds, ...source.photoIds])],
+    detail: [target.detail, source.detail].filter(Boolean).join("\n"),
+  };
+  return findings.filter((finding) => finding.id !== sourceId).map((finding) => finding.id === targetId ? merged : finding);
+}
+
+export function splitFindingCategory(
+  findings: Finding[],
+  findingId: string,
+  category: ConditionCategory
+): Finding[] {
+  const source = findings.find((finding) => finding.id === findingId);
+  if (!source || source.categories.length < 2 || !source.categories.includes(category)) return findings;
+  const categoryLabel = CONDITION_CATEGORIES.find((item) => item.key === category)?.label || category;
+  const nextSource = { ...source, categories: source.categories.filter((item) => item !== category) };
+  const split: Finding = {
+    id: newFindingId(),
+    categories: [category],
+    bucket: source.bucket,
+    title: categoryLabel,
+    detail: source.detail,
+    budgetTier: source.budgetTier,
+    photoIds: [...source.photoIds],
+  };
+  return findings.map((finding) => finding.id === findingId ? nextSource : finding).concat(split);
+}

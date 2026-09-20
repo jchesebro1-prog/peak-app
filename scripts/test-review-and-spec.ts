@@ -43,6 +43,7 @@ import {
   CONDITION_GROUPS,
   EVENT_TYPES, EVENT_FREQUENCIES, STAFF_TIERS, GROWTH_GOALS,
   blankAssessment, seedFindings, newFindingId, toggleEventType, toggleGrowthGoal,
+  mergeFindings, splitFindingCategory,
 } from "@/lib/stores/assessment";
 
 import {
@@ -3344,6 +3345,20 @@ a3.findings = [{
 }];
 ok(seedFindings(a3).unresolved.join(",") === "motors", "an uncovered flagged category is unresolved");
 ok(seedFindings(a3).seeded.length === 0, "no silent re-seeding once the assessor is driving");
+
+const mergedFindings = mergeFindings([
+  { id: "m1", categories: ["lighting.console"], bucket: "now", title: "Controls", detail: "", budgetTier: "u5k", photoIds: [] },
+  { id: "m2", categories: ["lighting.dimming"], bucket: "soon", title: "Dimming", detail: "", budgetTier: "5to25k", photoIds: [] },
+], "m1", "m2");
+ok(
+  mergedFindings.length === 1 && mergedFindings[0].categories.join(",") === "lighting.console,lighting.dimming",
+  "merging combines category coverage without duplicates"
+);
+const splitFindings = splitFindingCategory(mergedFindings, "m1", "lighting.dimming");
+ok(
+  splitFindings.length === 2 && splitFindings.some((finding) => finding.categories.join("") === "lighting.dimming"),
+  "splitting removes one category into its own editable finding"
+);
 
 // seedFindings must not mutate its input
 const a4 = blankAssessment();

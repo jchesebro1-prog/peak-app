@@ -111,6 +111,16 @@ export type Draft = {
   linesets: LinesetRow[];
   assessmentEnabled: boolean;
   assessment: AssessmentData;
+  templateRev: string;
+  signoff: {
+    repName: string;
+    repSignedAt: string;
+    contactName: string;
+    contactSignedAt: string;
+    reviewerName: string;
+    reviewerRole: string;
+    reviewerSignedAt: string;
+  };
   updatedAt: number;
 };
 
@@ -147,5 +157,7 @@ export type SectionDef = {
   | { kind: "assessmentToggle" }
   | { kind: "assessmentUsage" }
   | { kind: "assessmentCondition" }
+  | { kind: "assessmentFindings" }
+  | { kind: "signoff" }
   | { kind: "discipline"; disc: DisciplineKey }
 );

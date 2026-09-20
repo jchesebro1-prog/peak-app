@@ -44,6 +44,8 @@ import { SystemsSection } from "./sections/systems";
 import { LinesetsSection } from "./sections/linesets";
 import { AssessmentUsageSection } from "./sections/assessment-usage";
 import { AssessmentConditionSection } from "./sections/assessment-condition";
+import { AssessmentFindingsSection } from "./sections/assessment-findings";
+import { SignoffSection } from "./sections/signoff";
 import { blankLinesetRow, nextLinesetPosition } from "@/lib/stores/linesets";
 
 /* Serializable props from the server — the store is DB-backed and cannot be
@@ -56,12 +58,12 @@ const STEP_BY_ID: Record<string, number> = {
   cust: 0, visit: 0, project: 0, assign: 0, site: 1, conditions: 1, lifeSafety: 1,
   mQuick: 2, mLayout: 2, mSection: 2, mBeams: 2, mFOH: 2, mHouse: 2, m3d: 2,
   tier1: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3, linesets: 3, assessmentToggle: 3,
-  assessmentUsage: 5, assessmentCondition: 5,
-  photos: 4, notes: 4,
+  assessmentUsage: 5, assessmentCondition: 5, assessmentFindings: 5,
+  photos: 4, notes: 4, signoff: 4,
 };
 const BRIEF_IDS: Record<string, boolean> = { cust: true, visit: true, project: true, assign: true };
 const INTAKE_IDS: Record<string, boolean> = { tier1: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true, linesets: true, assessmentToggle: true };
-const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "linesets", "assessmentToggle", "photos", "notes", "assessmentUsage", "assessmentCondition"];
+const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "linesets", "assessmentToggle", "photos", "notes", "signoff", "assessmentUsage", "assessmentCondition", "assessmentFindings"];
 const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", curtain: "dCurtain", lighting: "dLighting", av: "dAv" };
 
 /** Display label for a venue class — the derived `venueType` fallback. */
@@ -158,6 +160,8 @@ function toDraft(r: SurveyRecord): Draft {
     linesets: [...(r.linesets || [])],
     assessmentEnabled: !!r.assessmentEnabled,
     assessment: r.assessment,
+    templateRev: r.templateRev,
+    signoff: { ...r.signoff },
     updatedAt: r.updatedAt || 0,
   };
 }
@@ -491,9 +495,11 @@ export default function SurveyEditor({
         { kind: "textarea", key: "notes", label: "Generic notes", placeholder: "Access, hazards, scheduling constraints…" },
       ],
     });
+    secs.push({ id: "signoff", title: "Sign-off", subtitle: "Peak representative, site contact, and optional technical reviewer", group: "field", step: 4, kind: "signoff" });
     if (draft.assessmentEnabled) {
       secs.push({ id: "assessmentUsage", title: "Usage & needs profile", subtitle: "How the room is used, operated, and expected to grow", group: "assessment", step: 5, kind: "assessmentUsage" });
       secs.push({ id: "assessmentCondition", title: "Condition ratings", subtitle: "Good, monitor, or replace—with formal inspection references", group: "assessment", step: 5, kind: "assessmentCondition" });
+      secs.push({ id: "assessmentFindings", title: "Findings & recommendations", subtitle: "Priorities, planning ranges, and supporting photos", group: "assessment", step: 5, kind: "assessmentFindings" });
     }
     secs.forEach((s) => {
       if (s.group !== "assessment") {
@@ -593,6 +599,8 @@ export default function SurveyEditor({
       linesets: draft.linesets,
       assessmentEnabled: draft.assessmentEnabled,
       assessment: draft.assessment,
+      templateRev: draft.templateRev,
+      signoff: draft.signoff,
       ...over,
     };
   }
@@ -1095,6 +1103,12 @@ export default function SurveyEditor({
                       )}
                       {sec.kind === "assessmentCondition" && (
                         <AssessmentConditionSection assessment={draft.assessment} onChange={(assessment) => setField("assessment", assessment)} />
+                      )}
+                      {sec.kind === "assessmentFindings" && (
+                        <AssessmentFindingsSection assessment={draft.assessment} photos={draft.photos} onChange={(assessment) => setField("assessment", assessment)} />
+                      )}
+                      {sec.kind === "signoff" && (
+                        <SignoffSection value={draft.signoff} templateRev={draft.templateRev} onChange={(signoff) => setField("signoff", signoff)} />
                       )}
                       {sec.kind === "conditions" && (
                         <ConditionsSection

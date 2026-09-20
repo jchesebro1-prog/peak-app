@@ -91,6 +91,8 @@ export type SurveyPatch = Partial<
     | "linesets"
     | "assessmentEnabled"
     | "assessment"
+    | "templateRev"
+    | "signoff"
     | "leadId"
     | "visitId"
   >
