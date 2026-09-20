@@ -342,6 +342,12 @@ async function main() {
     PGLITE_PATH: pglitePath,
     PORT: String(port),
     NEXT_TELEMETRY_DISABLED: "1",
+    // The smoke server is intentionally self-contained: a fresh checkout or
+    // CI job may not have .env.local, but Auth.js still requires a secret and
+    // the route pass must exercise authenticated pages, not login redirects.
+    AUTH_SECRET: "quartzite-smoke-test-secret-not-for-production",
+    AUTH_DEV_LOGIN: "true",
+    AUTH_TRUST_HOST: "true",
   };
   delete env.DATABASE_URL;
 

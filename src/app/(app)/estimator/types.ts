@@ -176,7 +176,7 @@ export type InitialQuote = {
 };
 
 /**
- * The field-survey / inspection this quote is drafting from (Phase 8, D4).
+ * The venue-assessment / inspection this quote is drafting from (Phase 8, D4).
  * Resolved server-side in page.tsx from ?surveyId= / ?inspectionId= and passed
  * in only when the AI gate is on. `null` → no source linked (button hidden).
  */
