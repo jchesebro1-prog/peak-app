@@ -16,7 +16,7 @@ export default function VenueQuickAdd({ initial, closeHref }: { initial: SaveCus
   const [error, setError] = useState("");
   const save = () => startTransition(async () => {
     if (!venueName.trim() && !locationName.trim()) { setError("Add a location or venue name."); return; }
-    const result = await saveCustomerAction({ ...initial, locations: [...initial.locations, { id: `l${Date.now()}`, label: venueName.trim() || locationName.trim(), primary: initial.locations.length === 0, address, city, state, lat: null, lng: null, venueKind: "proscenium", travelMiles: null, travelMin: null }] });
+    const result = await saveCustomerAction({ ...initial, locations: [...initial.locations, { id: `l${Date.now()}`, locationName, label: venueName.trim() || locationName.trim(), primary: initial.locations.length === 0, address, city, state, lat: null, lng: null, venueKind: "proscenium", travelMiles: null, travelMin: null }] });
     if (!result.ok) setError("Could not save this venue.");
     else { router.push(closeHref); router.refresh(); }
   });

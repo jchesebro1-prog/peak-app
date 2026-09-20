@@ -210,6 +210,8 @@ export const sites = pgTable(
     id: text("id").primaryKey(), // 'st-<companyId>-<n>' (deterministic in convert)
     companyId: text("company_id").notNull(), // the owning organization (§4.4)
     name: text("name").notNull().default(""),
+    /** Optional campus/building grouping above the venue/space name. */
+    locationName: text("location_name"),
     /** The per-customer location id docs already store ('loc1', …). Composed
      *  CustomerLocation.id returns this when present so stored locationId
      *  values and `${customerId}|${locationId}` keys keep matching (D85). */

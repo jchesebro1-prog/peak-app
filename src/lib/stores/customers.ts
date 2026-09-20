@@ -77,6 +77,7 @@ import { eq } from "drizzle-orm";
 
 export type CustomerLocation = {
   id?: string;
+  locationName?: string;
   label?: string;
   primary: boolean;
   /** Street address (site visits / calendar invites, D76) — city/state stay
@@ -140,6 +141,7 @@ const META_KEYS = ["createdAt", "updatedAt"] as const;
 /** Loose authoring shapes (what edit forms + the CSV importer produce). */
 export type CustomerLocationInput = {
   id?: string;
+  locationName?: string;
   label?: string;
   primary?: boolean;
   address?: string;
@@ -199,6 +201,7 @@ async function offices(): Promise<Office[]> {
 export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
   const locs: CustomerLocation[] = (c.locations || []).map((l) => ({
     id: l.id,
+    locationName: l.locationName,
     label: l.label,
     primary: !!l.primary,
     address: (l.address || "").trim() || undefined,
@@ -264,6 +267,7 @@ function numOrNull(v: string | null): number | null {
 function composeLocation(s: SiteRow): CustomerLocation {
   return {
     id: docLocId(s),
+    locationName: s.locationName ?? undefined,
     label: s.name || undefined,
     primary: s.isPrimary,
     address: s.address ?? undefined,
@@ -526,6 +530,7 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
       id,
       companyId: rec.id,
       name: loc.label || "",
+      locationName: loc.locationName || null,
       // Unmatched incoming ids are legacy ids by definition — preserve them
       // so quotes/projects that stored them keep resolving.
       legacyLocId: match ? match.legacyLocId : (loc.id ?? null),

@@ -186,6 +186,7 @@ export default async function CustomerDetailPage({
     custom: cust.custom || {},
     locations: (cust.locations || []).map((l) => ({
       id: l.id,
+      locationName: l.locationName || "",
       label: l.label || "",
       primary: !!l.primary,
       address: l.address || "",
