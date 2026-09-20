@@ -7,7 +7,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   getEngine,
   initialStatus,
@@ -37,6 +37,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   // the real status (navigator.onLine, pause flag) right after mount.
   const [status, setStatus] = useState<SyncStatus>(initialStatus);
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const search = searchParams.toString();
 
   useEffect(() => {
     engine.start();
@@ -54,6 +57,16 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     // engine is a stable singleton; router is stable — run once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Next Link transitions fetch RSC payloads, not complete HTML documents.
+  // Tell the worker when a route has actually opened so it can snapshot a
+  // proper document for offline reload/Back without ever caching an RSC body.
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    void navigator.serviceWorker.ready.then((registration) => {
+      registration.active?.postMessage({ type: "CACHE_ROUTE", url: window.location.href });
+    });
+  }, [pathname, search]);
 
   const api = useMemo<SyncApi>(
     () => ({

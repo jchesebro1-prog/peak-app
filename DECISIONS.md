@@ -2484,3 +2484,18 @@ field-tested.
 Two defaults were explicitly accepted as non-blocking: advisory findings do
 not auto-spawn work, and `other` remains the sixth generic class for arenas,
 outdoor/amphitheater, and venues without a dedicated paper sheet.
+
+## D133. Offline navigation caches opened routes and fails honestly (2026-09-20)
+
+Quartzite uses the "go back and keep working" offline model rather than
+silently downloading the entire office database. Every route actually opened
+by the user is snapshotted as a full HTML document, including routes reached
+through Next client navigation; meaningful query state such as estimator ids
+is retained. RSC transport payloads, API responses, auth redirects, and login
+pages are never allowed to overwrite that document cache.
+
+If a user attempts a route that has never been opened on the device, the app
+shows an explicit offline page with **Go back** and **Try again**. It no longer
+serves the cached dashboard under an unrelated URL. The sync panel states the
+contract directly: captures save locally, opened pages/jobs remain available,
+and Back returns to cached work.

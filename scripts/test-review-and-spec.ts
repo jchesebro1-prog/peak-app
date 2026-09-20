@@ -61,9 +61,19 @@ import {
 } from "@/lib/venue-doctrine";
 import { buildAssessmentSheet } from "@/lib/venue-assessment-sheet";
 import { renderLetterPdf } from "@/lib/pdf";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
+
+/* --- Offline navigation contract --- */
+const serviceWorkerSource = readFileSync(join(process.cwd(), "public/sw.js"), "utf8");
+ok(serviceWorkerSource.includes('req.mode === "navigate"'), "offline cache treats document navigation separately");
+ok(serviceWorkerSource.includes('caches.match("/offline.html")'), "an uncached offline route gets an explicit back-capable fallback");
+ok(!serviceWorkerSource.includes('caches.match("/") ||'), "an uncached route never masquerades as the dashboard");
+ok(serviceWorkerSource.includes('url.searchParams.has("_rsc")'), "RSC payloads cannot overwrite cached HTML pages");
+ok(serviceWorkerSource.includes('event.data.type !== "CACHE_ROUTE"'), "client-side navigations can snapshot their rendered route for offline reload");
 
 /* --- Go-live reset coverage (PUNCHLIST #94) --- */
 const resetCollections = [...DEMO_COLLECTIONS].sort();

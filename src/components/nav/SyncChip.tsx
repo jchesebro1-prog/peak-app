@@ -36,9 +36,9 @@ export default function SyncChip({
   const { text, dot } = chipLabel(s);
 
   const detail = !s.online
-    ? "No connection — captures are saved on this device and will sync when you're back online."
+    ? "No connection — captures save on this device. Pages and jobs you already opened remain available; use Back if a new page is not downloaded yet."
     : s.paused
-      ? "You've turned off syncing. Captures stay on this device until you turn it back on."
+      ? "You've turned off syncing. Captures stay on this device; pages and jobs you already opened remain available."
       : s.pending > 0
         ? `${s.pending} change${s.pending === 1 ? "" : "s"} waiting to reach the office.`
         : "Everything on this device is in the office.";
