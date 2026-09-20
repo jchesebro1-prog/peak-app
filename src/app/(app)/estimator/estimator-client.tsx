@@ -304,6 +304,8 @@ export default function EstimatorClient({
   const [locationId, setLocationId] = useState(initial.locationId);
   const [contactName, setContactName] = useState(initial.contactName);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
+  const [scopeNarrative, setScopeNarrative] = useState(initial.scopeNarrative);
+  const [quoteBasis, setQuoteBasis] = useState(initial.quoteBasis);
   const [revNum, setRevNum] = useState(initial.revNum);
   const [revDateMs, setRevDateMs] = useState(initial.revDateMs);
   const [pdfQty, setPdfQty] = useState(true);
@@ -439,6 +441,8 @@ export default function EstimatorClient({
         locationId: locationId || null,
         contactName: contactName || "",
         quoteNote: quoteNote || "",
+        scopeNarrative: scopeNarrative || "",
+        quoteBasis: quoteBasis || "",
         value: t.grand,
         margin: t.margin,
         status,
@@ -591,6 +595,18 @@ export default function EstimatorClient({
     if (!loadedId) return;
     if (noteTimer.current) clearTimeout(noteTimer.current);
     noteTimer.current = setTimeout(() => persistMeta({ quoteNote: v }), 500);
+  };
+  const onScopeNarrative = (v: string) => {
+    setScopeNarrative(v);
+    if (!loadedId) return;
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => persistMeta({ scopeNarrative: v }), 500);
+  };
+  const onQuoteBasis = (v: string) => {
+    setQuoteBasis(v);
+    if (!loadedId) return;
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => persistMeta({ quoteBasis: v }), 500);
   };
 
   /* ---------------- sections & items ---------------- */
@@ -1233,6 +1249,43 @@ export default function EstimatorClient({
                 </select>
               </label>
             </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14, marginTop: 16 }}>
+              <label style={{ display: "block" }}>
+                <span style={INTAKE_LABEL}>Customer contact</span>
+                <input
+                  value={contactName}
+                  onChange={(e) => setContactName(e.target.value)}
+                  onBlur={(e) => pickContact(e.target.value)}
+                  list="estimate-contact-options"
+                  placeholder="Name of customer contact"
+                  style={INTAKE_FIELD}
+                />
+                <datalist id="estimate-contact-options">
+                  {contacts.map((c) => <option key={c.name} value={c.name}>{c.role}</option>)}
+                </datalist>
+              </label>
+              <label style={{ display: "block" }}>
+                <span style={INTAKE_LABEL}>Requested by / pricing basis</span>
+                <input
+                  value={quoteBasis}
+                  onChange={(e) => onQuoteBasis(e.target.value)}
+                  placeholder="Example: Requested by owner; based on current plans"
+                  style={INTAKE_FIELD}
+                />
+              </label>
+            </div>
+
+            <label style={{ display: "block", marginTop: 16 }}>
+              <span style={INTAKE_LABEL}>Scope narrative</span>
+              <textarea
+                value={scopeNarrative}
+                onChange={(e) => onScopeNarrative(e.target.value)}
+                placeholder="Describe the work, systems, and outcome this estimate covers."
+                rows={4}
+                style={{ ...INTAKE_FIELD, resize: "vertical", lineHeight: 1.45 }}
+              />
+            </label>
 
             <div style={{ marginTop: 23 }}>
               <div style={INTAKE_LABEL}>Start with categories</div>
@@ -2427,6 +2480,8 @@ export default function EstimatorClient({
           companyName={companyName}
           logoDark={logoDark}
           quoteNote={quoteNote}
+          scopeNarrative={scopeNarrative}
+          quoteBasis={quoteBasis}
           sections={sections}
           t={t}
           taxRatePct={TAX_RATE_PCT}

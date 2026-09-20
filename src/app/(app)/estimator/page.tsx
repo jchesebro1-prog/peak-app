@@ -54,11 +54,7 @@ const FALLBACK = {
     "Thank you for the opportunity to quote your stage systems upgrade. This proposal reflects the scope we reviewed on-site — we’re glad to adjust as plans develop.",
 };
 
-type QuoteDoc = Quote & {
-  contactName?: string;
-  quoteNote?: string;
-  spec?: { sections?: unknown; mobs?: unknown } | null;
-};
+type QuoteDoc = Quote & { spec?: { sections?: unknown; mobs?: unknown } | null };
 
 /** Resolve the loaded quote's customer link + header fields (port of loadFromUrl). */
 async function initialFrom(
@@ -78,6 +74,8 @@ async function initialFrom(
       locationId: null,
       contactName: "",
       quoteNote: "",
+      scopeNarrative: "",
+      quoteBasis: "",
       owner: userName,
       revNum: 1,
       revDateMs: Date.now(),
@@ -120,6 +118,8 @@ async function initialFrom(
     locationId: locId,
     contactName: contactName || "",
     quoteNote: q.quoteNote != null ? q.quoteNote : FALLBACK.quoteNote,
+    scopeNarrative: q.scopeNarrative || "",
+    quoteBasis: q.quoteBasis || "",
     owner: q.owner || userName,
     // Real priced revisions (item 24). This used to count `history`, which is
     // the status pipeline — so the printed "Rev N" climbed every time a quote

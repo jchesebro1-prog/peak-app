@@ -45,16 +45,16 @@ import {
 /**
  * Estimator server actions — thin, session-gated wrappers over the quotes
  * store (the prototype called window.QuoteStore directly). The estimator
- * writes the prototype's exact payload field names; `contactName` and
- * `quoteNote` ride along on the quote doc exactly as they did in the
- * prototype (the Quote type doesn't promote them — spec/unknown fields
- * round-trip through the doc store).
+ * writes the prototype's exact payload field names plus the customer-facing
+ * estimate intake fields.
  */
 
 /** Quote doc fields the estimator writes beyond the promoted Quote columns. */
 type QuoteExtras = {
   contactName?: string;
   quoteNote?: string;
+  scopeNarrative?: string;
+  quoteBasis?: string;
   spec?: { sections: SpecSection[]; mobs: SpecMob[] };
 };
 
@@ -67,6 +67,8 @@ export type SavePayload = {
   locationId: string | null;
   contactName: string;
   quoteNote: string;
+  scopeNarrative: string;
+  quoteBasis: string;
   value: number;
   margin: number;
   status: QuoteStatus;
@@ -121,6 +123,8 @@ export async function saveQuoteAction(
     locationId: payload.locationId || null,
     contactName: payload.contactName || "",
     quoteNote: payload.quoteNote || "",
+    scopeNarrative: payload.scopeNarrative || "",
+    quoteBasis: payload.quoteBasis || "",
     value: payload.value,
     margin: payload.margin,
     status: payload.status,
@@ -157,6 +161,8 @@ export async function saveQuoteAction(
     q = await update(created.id, {
       contactName: payload.contactName || "",
       quoteNote: payload.quoteNote || "",
+      scopeNarrative: payload.scopeNarrative || "",
+      quoteBasis: payload.quoteBasis || "",
     } as QuotePatch);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand
@@ -193,6 +199,8 @@ export async function updateQuoteMetaAction(
     customer?: string;
     contactName?: string;
     quoteNote?: string;
+    scopeNarrative?: string;
+    quoteBasis?: string;
   }
 ): Promise<{ ok: boolean; pricingTier?: string; tierMargin?: number }> {
   await requireUser();
@@ -208,6 +216,8 @@ export async function updateQuoteMetaAction(
   if (typeof meta.customer === "string") patch.customer = meta.customer;
   if (typeof meta.contactName === "string") patch.contactName = meta.contactName;
   if (typeof meta.quoteNote === "string") patch.quoteNote = meta.quoteNote;
+  if (typeof meta.scopeNarrative === "string") patch.scopeNarrative = meta.scopeNarrative;
+  if (typeof meta.quoteBasis === "string") patch.quoteBasis = meta.quoteBasis;
 
   // Item 11 (D87): a customer/contact change re-resolves the pricing tier
   // SERVER-side (never trusted from the client) and re-stamps the quote.

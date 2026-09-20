@@ -164,6 +164,8 @@ export type InitialQuote = {
   locationId: string | null;
   contactName: string;
   quoteNote: string;
+  scopeNarrative: string;
+  quoteBasis: string;
   owner: string;
   revNum: number;
   revDateMs: number;

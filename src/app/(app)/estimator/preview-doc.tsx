@@ -69,6 +69,8 @@ export type PreviewProps = {
   /** Uploaded document logo (Settings → Branding), falls back to the baked letterhead. */
   logoDark: string | null;
   quoteNote: string;
+  scopeNarrative: string;
+  quoteBasis: string;
   sections: SpecSection[];
   t: QuoteTotals;
   taxRatePct: number;
@@ -106,7 +108,10 @@ export default function PreviewDoc(p: PreviewProps) {
   const lineCols = p.pdfPrices
     ? (p.pdfQty ? "1fr 70px 104px" : "1fr 104px")
     : (p.pdfQty ? "1fr 70px" : "1fr");
-  const showCover = !!(p.pdfCover && p.quoteNote && p.quoteNote.trim());
+  const showCover = !!(
+    p.pdfCover &&
+    [p.scopeNarrative, p.quoteBasis, p.quoteNote].some((v) => v && v.trim())
+  );
   const revDateLabel = longDate(p.revDateMs);
   const validThruLabel = longDate(p.revDateMs + 30 * DAY_MS);
 
@@ -463,7 +468,19 @@ export default function PreviewDoc(p: PreviewProps) {
                 borderLeft: `3px solid ${ACCENT_BD}`,
               }}
             >
-              {p.quoteNote}
+              {p.scopeNarrative && (
+                <div style={{ marginBottom: p.quoteBasis || p.quoteNote ? 12 : 0 }}>
+                  <div style={microLabel}>Scope narrative</div>
+                  <div>{p.scopeNarrative}</div>
+                </div>
+              )}
+              {p.quoteBasis && (
+                <div style={{ marginBottom: p.quoteNote ? 12 : 0 }}>
+                  <div style={microLabel}>Requested by / pricing basis</div>
+                  <div>{p.quoteBasis}</div>
+                </div>
+              )}
+              {p.quoteNote && <div>{p.quoteNote}</div>}
             </div>
           )}
 

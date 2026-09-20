@@ -85,6 +85,11 @@ export type Quote = {
   /** Canonical Customers-directory link (null when unlinked, e.g. Harbor Rep). */
   customerId: string | null;
   locationId: string | null;
+  /** Customer-facing letter header fields captured by the estimator intake. */
+  contactName?: string;
+  quoteNote?: string;
+  scopeNarrative?: string;
+  quoteBasis?: string;
   value: number;
   margin: number;
   /** Customer pricing tier stamped at creation (item 11, D87) — resolved
@@ -331,6 +336,10 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     customer: partial.customer || "",
     customerId: partial.customerId || null,
     locationId: partial.locationId || null,
+    contactName: partial.contactName || "",
+    quoteNote: partial.quoteNote || "",
+    scopeNarrative: partial.scopeNarrative || "",
+    quoteBasis: partial.quoteBasis || "",
     value: Math.round(partial.value || 0),
     margin: partial.margin || 0,
     pricingTier: partial.pricingTier ?? null,
