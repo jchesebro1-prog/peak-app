@@ -13,6 +13,7 @@ import type { VenueClass } from "@/lib/stores/venue-classes";
 import type { LinesetRow } from "@/lib/stores/linesets";
 import type { AssessmentData, InspectionRef } from "@/lib/stores/assessment";
 import type { DisciplineData, DisciplineKey, InventoryRow, SystemState } from "@/lib/stores/survey-intake";
+import type { VenueDoctrine } from "@/lib/venue-doctrine";
 
 /* ============================================================
  * Serializable props from the server. The store is DB-backed and cannot be
@@ -41,6 +42,7 @@ export type EditorMeta = {
   /** settings-merged site-intake type catalog, keyed by category */
   intakeCatalog: Record<string, string[]>;
   autoCerts: Record<string, InspectionRef>;
+  venueDoctrine: VenueDoctrine;
 };
 
 /** Local draft — the editable slice of the record plus updatedAt for display. */

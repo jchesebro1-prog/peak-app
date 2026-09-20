@@ -8,7 +8,10 @@ import {
   resetAllAction,
   exportCsvAction,
   exportJsonAction,
+  saveVenueDoctrineAction,
 } from "./actions";
+import { VENUE_CLASSES, type VenueClass } from "@/lib/stores/venue-classes";
+import type { VenueDoctrine, VenueDoctrineEntry } from "@/lib/venue-doctrine";
 
 /**
  * Client islands for Estimating Rules. The server component computes each
@@ -451,6 +454,83 @@ const CHIP_BASE: React.CSSProperties = {
   lineHeight: 1.2,
 };
 
+function DoctrineRow({
+  venueClass,
+  initial,
+}: {
+  venueClass: VenueClass;
+  initial: VenueDoctrineEntry;
+}) {
+  const router = useRouter();
+  const [entry, setEntry] = useState(initial);
+  const [saved, setSaved] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const label = VENUE_CLASSES.find((item) => item.key === venueClass)?.label || venueClass;
+
+  const save = () =>
+    startTransition(async () => {
+      const result = await saveVenueDoctrineAction(venueClass, entry);
+      setSaved(result.ok);
+      if (result.ok) router.refresh();
+    });
+
+  return (
+    <div style={{ padding: "14px 0", borderBottom: "1px solid #f0f1f4" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ width: 116, fontSize: 13.5, fontWeight: 650 }}>{label}</div>
+        <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, color: "#5b616e" }}>
+          <input
+            type="checkbox"
+            checked={entry.confirmed}
+            onChange={(event) => {
+              setSaved(false);
+              setEntry({ ...entry, confirmed: event.target.checked });
+            }}
+          />
+          Confirmed default
+        </label>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, marginTop: 10 }}>
+        {(["curtains", "lighting"] as const).map((key) => (
+          <label key={key} style={{ fontSize: 11.5, color: "#8c919c" }}>
+            <span style={{ display: "block", marginBottom: 5, fontWeight: 600, textTransform: "capitalize" }}>{key}</span>
+            <input
+              value={entry[key]}
+              placeholder="No default specified"
+              onChange={(event) => {
+                setSaved(false);
+                setEntry({ ...entry, [key]: event.target.value });
+              }}
+              style={{ width: "100%", border: "1px solid #e4e7ec", borderRadius: 8, padding: "9px 10px", fontSize: 13 }}
+            />
+          </label>
+        ))}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 10 }}>
+        <button type="button" disabled={pending} onClick={save} className="pk-btn pk-btn-sm">
+          {pending ? "Saving…" : "Save class"}
+        </button>
+        {saved && <span style={{ fontSize: 11.5, color: "#1f7a52" }}>Saved</span>}
+        {!entry.confirmed && <span style={{ fontSize: 11.5, color: "#8a6d1f" }}>Shown as unconfirmed in assessments</span>}
+      </div>
+    </div>
+  );
+}
+
+function DoctrineEditor({ doctrine }: { doctrine: VenueDoctrine }) {
+  return (
+    <div className="pk-card" style={{ padding: "16px 18px 4px", marginBottom: 18 }}>
+      <div style={{ fontSize: 15, fontWeight: 600 }}>Venue class doctrine</div>
+      <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
+        Read-only soft-goods and lighting guidance shown on venue assessments.
+      </div>
+      {(Object.keys(doctrine) as VenueClass[]).map((venueClass) => (
+        <DoctrineRow key={venueClass} venueClass={venueClass} initial={doctrine[venueClass]} />
+      ))}
+    </div>
+  );
+}
+
 function ToggleChip({
   on,
   label,
@@ -479,7 +559,13 @@ function ToggleChip({
 
 /* ---------------- legend + groups ---------------- */
 
-export function RulesEditor({ groups }: { groups: GroupVM[] }) {
+export function RulesEditor({
+  groups,
+  venueDoctrine,
+}: {
+  groups: GroupVM[];
+  venueDoctrine: VenueDoctrine;
+}) {
   const prefs = useSyncExternalStore(
     subscribePrefs,
     getPrefsSnapshot,
@@ -523,6 +609,7 @@ export function RulesEditor({ groups }: { groups: GroupVM[] }) {
 
   return (
     <div>
+      <DoctrineEditor doctrine={venueDoctrine} />
       {/* legend */}
       <div
         className="pk-card"

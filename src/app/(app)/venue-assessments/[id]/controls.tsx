@@ -1061,6 +1061,7 @@ export default function SurveyEditor({
                           <SystemsSection
                             group={g}
                             venueClass={draft.venueClass}
+                            doctrine={meta.venueDoctrine[draft.venueClass]}
                             intakeCatalog={meta.intakeCatalog}
                             value={dv}
                             setValue={setDisc}

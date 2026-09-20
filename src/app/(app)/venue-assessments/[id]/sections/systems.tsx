@@ -9,6 +9,7 @@ import {
   type SystemField,
 } from "@/lib/stores/survey-intake";
 import type { VenueClass } from "@/lib/stores/venue-classes";
+import type { VenueDoctrineEntry } from "@/lib/venue-doctrine";
 import {
   ACCENT_BORDER_LT,
   ACCENT_INK,
@@ -25,6 +26,7 @@ type DisciplineValue = DisciplineData[string];
 type Props = {
   group: DisciplineGroup;
   venueClass: VenueClass;
+  doctrine: VenueDoctrineEntry;
   intakeCatalog: Record<string, string[]>;
   value: (disc: DisciplineKey, key: string) => DisciplineValue;
   setValue: (disc: DisciplineKey, key: string, value: DisciplineValue) => void;
@@ -160,6 +162,12 @@ function Inventory({
 
 export function SystemsSection(props: Props) {
   const { group, venueClass } = props;
+  const guidance =
+    group.key === "curtain"
+      ? props.doctrine.curtains
+      : group.key === "lighting"
+        ? props.doctrine.lighting
+        : "";
   const rawPresent = props.value(group.key, "present");
   const present = Array.isArray(rawPresent) ? rawPresent : [];
   const options = presentOptionsFor(group.key, venueClass);
@@ -183,6 +191,29 @@ export function SystemsSection(props: Props) {
 
   return (
     <div>
+      {(group.key === "curtain" || group.key === "lighting") && (
+        <div
+          style={{
+            marginBottom: 14,
+            padding: "11px 13px",
+            borderRadius: 9,
+            border: "1px solid #e4e7ec",
+            background: "#fbfbfc",
+          }}
+        >
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8c919c", letterSpacing: ".05em", textTransform: "uppercase" }}>
+            Venue-class guidance
+          </div>
+          <div style={{ marginTop: 4, fontSize: 13, color: guidance ? "#3a3f4a" : "#9aa0ab" }}>
+            {guidance || "No default specified"}
+          </div>
+          {!props.doctrine.confirmed && (
+            <div style={{ marginTop: 5, fontSize: 11.5, fontWeight: 600, color: "#8a6d1f" }}>
+              Default unconfirmed for this venue class
+            </div>
+          )}
+        </div>
+      )}
       <label style={labelStyle}>Present</label>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {options.map((option) => (

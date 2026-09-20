@@ -17,6 +17,7 @@ import { activeUsers } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
 import SurveyEditor, { type EditorMeta, type EditorCustomer } from "./controls";
 import { resolveCerts } from "@/lib/venue-assessment-certs";
+import { resolveVenueDoctrine } from "@/lib/venue-doctrine";
 
 export const metadata = { title: "Site survey — Quartzite-6" };
 
@@ -69,6 +70,7 @@ export default async function SurveyEditorPage({
     measureGroups: MEASURE_GROUPS,
     intakeCatalog: mergedCatalog(settings.intakeCatalog),
     autoCerts,
+    venueDoctrine: resolveVenueDoctrine(settings.venueDoctrine),
   };
 
   const roster = users.map((u) => u.name);

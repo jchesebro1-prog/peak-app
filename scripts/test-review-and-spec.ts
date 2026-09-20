@@ -55,6 +55,10 @@ import {
   presentOptionsFor,
 } from "@/lib/stores/survey-intake";
 import { resolveCertsFromRecords } from "@/lib/venue-assessment-certs";
+import {
+  DEFAULT_VENUE_DOCTRINE,
+  resolveVenueDoctrine,
+} from "@/lib/venue-doctrine";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -3453,6 +3457,31 @@ ok(
 ok(
   Object.keys(resolveCertsFromRecords([], [], null, "l1")).length === 0,
   "missing canonical customer identity resolves no certifications"
+);
+
+/* --- Venue Assessments: venue-class doctrine --- */
+ok(
+  DEFAULT_VENUE_DOCTRINE.theatre.confirmed === false &&
+    DEFAULT_VENUE_DOCTRINE.church.confirmed === false,
+  "theatre and church doctrine defaults retain the source-sheet caveat"
+);
+ok(
+  DEFAULT_VENUE_DOCTRINE.gym.curtains ===
+    "Encore 22 oz main + valance, Encore rest" &&
+    DEFAULT_VENUE_DOCTRINE.gym.confirmed === true,
+  "gym doctrine carries the confirmed Encore default"
+);
+const doctrineOverride = resolveVenueDoctrine({
+  theatre: { curtains: "Custom theatre soft goods", lighting: "Custom desk", confirmed: true },
+});
+ok(
+  doctrineOverride.theatre.curtains === "Custom theatre soft goods" &&
+    doctrineOverride.theatre.confirmed === true,
+  "stored venue doctrine overrides its class default"
+);
+ok(
+  doctrineOverride.gym.curtains === DEFAULT_VENUE_DOCTRINE.gym.curtains,
+  "a sparse doctrine override preserves defaults for the other classes"
 );
 
 asyncChecks()

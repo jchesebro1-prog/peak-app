@@ -78,6 +78,9 @@ export type AppSettingsData = {
    *  VALUES live per-company in the relational companies.custom column,
    *  keyed by CustomFieldDef.id. */
   customerFieldDefs?: import("@/lib/customer-fields").CustomFieldDef[];
+  /** Venue-class soft-goods and lighting guidance (D132), stored sparsely
+   * over the source-sheet defaults in lib/venue-doctrine.ts. */
+  venueDoctrine?: import("@/lib/venue-doctrine").VenueDoctrinePatch;
 };
 
 export async function getSettingsPatch(): Promise<Record<string, unknown>> {
