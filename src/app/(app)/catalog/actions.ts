@@ -59,10 +59,12 @@ export async function importCatalog(formData: FormData): Promise<void> {
   await requireUser();
   const mfr = String(formData.get("mfr") || "").trim();
   const defaultCategory = String(formData.get("category") || "").trim();
-  const text = String(formData.get("text") || "");
+  let text = String(formData.get("text") || "");
+  const file = formData.get("file");
+  if (file instanceof File && file.size > 0) text = await file.text();
   if (!text.trim()) return;
 
-  const parsed = parseCatalog(text, defaultCategory);
+  const parsed = parseCatalog(text, defaultCategory || (String(formData.get("prebuilt") || "") === "1" ? "Prebuilt system" : ""));
   if (!parsed.ok) return;
 
   let n = 0;

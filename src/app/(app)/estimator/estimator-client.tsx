@@ -20,6 +20,7 @@ import {
   travelForSelectionAction,
   updateQuoteMetaAction,
   updateQuoteTaskAction,
+  quickAddCustomerAction,
   type ReviewSync,
 } from "./actions";
 import { TasksCard } from "@/components/tasks-card";
@@ -295,6 +296,10 @@ export default function EstimatorClient({
   const [projectName, setProjectName] = useState(initial.projectName);
   const [intakeCategories, setIntakeCategories] = useState<string[]>(INTAKE_CATEGORIES);
   const [custName, setCustName] = useState(initial.custName);
+  const [customerList, setCustomerList] = useState(customers);
+  const [quickCustomerOpen, setQuickCustomerOpen] = useState(false);
+  const [quickCustomerName, setQuickCustomerName] = useState("");
+  const [quickCustomerError, setQuickCustomerError] = useState("");
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
   const [contactName, setContactName] = useState(initial.contactName);
@@ -422,7 +427,7 @@ export default function EstimatorClient({
 
   const doSave = () => {
     const cname = customerId
-      ? customers.find((c) => c.id === customerId)?.name || custName
+      ? customerList.find((c) => c.id === customerId)?.name || custName
       : custName;
     const mobs: SpecMob[] = [];
     sections.forEach((sec) => sec.items.forEach((it) => it.mob && mobs.push(it.mob)));
@@ -544,7 +549,7 @@ export default function EstimatorClient({
 
   /* ---------------- customer / venue / contact link ---------------- */
   const contacts = customerId
-    ? customers.find((c) => c.id === customerId)?.contacts ?? []
+    ? customerList.find((c) => c.id === customerId)?.contacts ?? []
     : [];
   const currentContact = (() => {
     if (!contacts.length || !contactName) return null;
@@ -555,11 +560,11 @@ export default function EstimatorClient({
     );
   })();
   const locations = customerId
-    ? customers.find((c) => c.id === customerId)?.locations ?? []
+    ? customerList.find((c) => c.id === customerId)?.locations ?? []
     : [];
 
   const pickCustomer = (id: string) => {
-    const c = id ? customers.find((x) => x.id === id) : undefined;
+    const c = id ? customerList.find((x) => x.id === id) : undefined;
     const prim = c ? c.locations.find((l) => l.primary) || c.locations[0] : undefined;
     const locId = prim?.id || null;
     const name = c ? c.name : custName;
@@ -1139,7 +1144,7 @@ export default function EstimatorClient({
       value: "",
       label: customerId ? "— No customer —" : custName || "— Select customer —",
     },
-  ].concat(customers.map((c) => ({ value: c.id, label: c.name })));
+  ].concat(customerList.map((c) => ({ value: c.id, label: c.name })));
   const showVenuePick = locations.length > 1;
   const venueOptions = locations.map((l) => ({
     value: l.id,
@@ -1153,6 +1158,21 @@ export default function EstimatorClient({
   const attnLine = currentContact
     ? currentContact.name + (currentContact.role ? " · " + currentContact.role : "")
     : contactName || "";
+
+  const quickAddCustomer = () => {
+    setQuickCustomerError("");
+    startTransition(async () => {
+      const result = await quickAddCustomerAction(quickCustomerName);
+      if (!result.ok) {
+        setQuickCustomerError(result.error);
+        return;
+      }
+      setCustomerList((rows) => [...rows, result.customer].sort((a, b) => a.name.localeCompare(b.name)));
+      pickCustomer(result.customer.id);
+      setQuickCustomerName("");
+      setQuickCustomerOpen(false);
+    });
+  };
 
   const curtainSec = sections.find((s) => s.id === curtainFor);
   const fixtureSec = sections.find((s) => s.id === fixtureFor);
@@ -1195,10 +1215,15 @@ export default function EstimatorClient({
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14, marginTop: 18 }}>
               <label style={{ display: "block" }}>
                 <span style={INTAKE_LABEL}>Customer</span>
-                <select value={customerId || ""} onChange={(e) => pickCustomer(e.target.value)} style={INTAKE_FIELD}>
-                  <option value="">Select a customer…</option>
-                  {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <select value={customerId || ""} onChange={(e) => pickCustomer(e.target.value)} style={{ ...INTAKE_FIELD, flex: 1 }}>
+                    <option value="">Select a customer…</option>
+                    {customerList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <button type="button" onClick={() => setQuickCustomerOpen(true)} style={{ flexShrink: 0, border: "1px solid #e4e7ec", borderRadius: 8, background: "#fff", color: "#3a3f4a", padding: "0 11px", fontFamily: "var(--font-ui)", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                    + Quick add
+                  </button>
+                </div>
               </label>
               <label style={{ display: "block" }}>
                 <span style={INTAKE_LABEL}>Venue / location</span>
@@ -1234,6 +1259,20 @@ export default function EstimatorClient({
             </button>
           </div>
         </div>
+        {quickCustomerOpen && (
+          <div onClick={() => setQuickCustomerOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 20, background: "rgba(16,22,30,.35)", display: "grid", placeItems: "center", padding: 20 }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ width: 380, maxWidth: "100%", background: "#fff", borderRadius: 13, padding: 20, boxShadow: "0 20px 60px rgba(0,0,0,.25)" }}>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>Quick add customer</div>
+              <div style={{ marginTop: 5, fontSize: 12.5, color: "#737985", lineHeight: 1.45 }}>Create the company now and complete venues and contacts from CRM later.</div>
+              <input autoFocus value={quickCustomerName} onChange={(e) => setQuickCustomerName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") quickAddCustomer(); }} placeholder="Company name" style={{ ...INTAKE_FIELD, marginTop: 16 }} />
+              {quickCustomerError && <div style={{ marginTop: 8, color: "#b4543a", fontSize: 12 }}>{quickCustomerError}</div>}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+                <button type="button" onClick={() => setQuickCustomerOpen(false)} style={{ border: "1px solid #e4e7ec", background: "#fff", borderRadius: 8, padding: "9px 12px", cursor: "pointer" }}>Cancel</button>
+                <button type="button" onClick={quickAddCustomer} disabled={!quickCustomerName.trim()} style={{ border: "none", background: quickCustomerName.trim() ? "var(--accent)" : "#d8dbe1", color: "#fff", borderRadius: 8, padding: "9px 13px", fontWeight: 700, cursor: quickCustomerName.trim() ? "pointer" : "not-allowed" }}>Add customer</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -2374,7 +2413,7 @@ export default function EstimatorClient({
           revNum={revNum}
           revDateMs={revDateMs}
           custName={
-            customerId ? customers.find((c) => c.id === customerId)?.name || custName : custName
+            customerId ? customerList.find((c) => c.id === customerId)?.name || custName : custName
           }
           hasAttn={hasAttn}
           attnLine={attnLine}

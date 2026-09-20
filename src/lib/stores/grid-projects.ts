@@ -134,6 +134,15 @@ export type GridProject = {
   /** Venue link (D113 item 6) — identity sites.id + display name. */
   siteId?: string | null;
   siteName?: string;
+  /** Cover-page intake captured before the drawing workspace opens. */
+  intake?: {
+    complete: boolean;
+    measurementBased: boolean;
+    venueName: string;
+    locationName: string;
+    address: string;
+    notes: string;
+  };
   /** Sheet display order; the docs live in grid_sheets. */
   sheetIds: string[];
   placements: GridPlacement[];
@@ -195,6 +204,7 @@ export async function createProject(input: {
     name: input.name.trim() || "Untitled system design",
     customer: input.customer.trim(),
     customerId: input.customerId,
+    intake: { complete: false, measurementBased: true, venueName: "", locationName: "", address: "", notes: "" },
     sheetIds: [],
     placements: [],
     calibrations: [],
@@ -226,6 +236,16 @@ export async function createProject(input: {
     await addSpace(project.id, { sheetId: sheet.id, page: 1, name: "FOH / control", points: [{ x: 0.38, y: 0.44 }, { x: 0.62, y: 0.44 }, { x: 0.62, y: 0.53 }, { x: 0.38, y: 0.53 }], by: input.by });
   }
   return (await getProject(project.id)) || project;
+}
+
+export async function saveGridIntake(
+  projectId: string,
+  input: GridProject["intake"]
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.intake = input;
+    p.updatedAt = Date.now();
+  });
 }
 
 /** Upload one plan background and append it to the project's sheet order.

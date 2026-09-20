@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { upsert as upsertCustomer } from "@/lib/stores/customers";
 import { can } from "@/lib/team";
 import {
   approve,
@@ -655,6 +656,19 @@ export async function travelForSelectionAction(
     minutes: est.minutes ?? null,
     officeName: est.office?.name ?? null,
   };
+}
+
+/** Quick-add from the new-estimate customer picker. Keeps the intake flow
+ * moving while the full CRM record can be completed later. */
+export async function quickAddCustomerAction(name: string) {
+  await requireUser();
+  const clean = (name || "").trim();
+  if (!clean) return { ok: false as const, error: "Enter a company name." };
+  const id = "c" + Date.now();
+  await upsertCustomer({ id, name: clean, type: "", locations: [], contacts: [] });
+  revalidatePath("/estimator");
+  revalidatePath("/companies");
+  return { ok: true as const, customer: { id, name: clean, locations: [], contacts: [] } };
 }
 
 /* ---------------- quote tasks (PUNCHLIST #17 remainder) ----------------

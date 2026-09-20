@@ -122,10 +122,8 @@ export function CatalogControls({
 }
 
 /**
- * Import-to-catalog side panel. Three methods like the prototype: Upload and
- * Connect are stubbed (no live file/API path in this build) and point users at
- * Paste, which is wired end-to-end: parse locally for the preview, submit the
- * raw text to `importCatalog` for the authoritative upsert.
+ * Import-to-catalog side panel. Upload and paste share the same parser and
+ * authoritative server action, including MFR PN files exported by design tools.
  */
 export function CatalogImportPanel({
   manufacturers,
@@ -290,9 +288,9 @@ export function CatalogImportPanel({
             </>
           )}
 
-          {/* UPLOAD — stubbed */}
+          {/* UPLOAD — CSV / TSV for prebuilt systems and design-program exports */}
           {method === "upload" && (
-            <div
+            <form action={importCatalog}
               style={{
                 border: "1.5px dashed #cfd4dd",
                 borderRadius: 11,
@@ -302,6 +300,8 @@ export function CatalogImportPanel({
                 marginTop: 12,
               }}
             >
+              <input type="hidden" name="mfr" value={mfr} />
+              <input type="hidden" name="prebuilt" value="1" />
               <div
                 style={{
                   width: 42,
@@ -318,27 +318,15 @@ export function CatalogImportPanel({
               >
                 ↑
               </div>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>File upload is coming soon</div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>Upload prebuilt systems or parts</div>
               <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 3, lineHeight: 1.4 }}>
-                For now, open your CSV/Excel price book, copy the rows, and use{" "}
-                <button
-                  type="button"
-                  onClick={() => setMethod("paste")}
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    color: "color-mix(in srgb, var(--accent) 72%, #000)",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    padding: 0,
-                    fontSize: 11.5,
-                  }}
-                >
-                  Paste a list
-                </button>
-                .
+                CSV/TSV exports are matched by Manufacturer Part # (MFR PN). Include a Description, and optional Category, Unit, List, and Cost.
               </div>
-            </div>
+              <input name="file" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" required style={{ width: "100%", marginTop: 14, fontSize: 12 }} />
+              <button type="submit" disabled={!mfr} style={{ width: "100%", marginTop: 14, border: "none", borderRadius: 9, padding: 11, color: mfr ? "#fff" : "#aab0bb", background: mfr ? accent : "#eef0f3", cursor: mfr ? "pointer" : "not-allowed", fontSize: 13.5, fontWeight: 600 }}>
+                {mfr ? "Import MFR PN file →" : "Name the manufacturer"}
+              </button>
+            </form>
           )}
 
           {/* API — stubbed */}

@@ -76,19 +76,14 @@ export default async function CatalogPage({
 
   /* ---- filter + sort ---- */
   const ql = q.toLowerCase();
+  const tokens = ql.split(/\s+/).filter(Boolean);
   let rows = parts.filter((p) => {
     if (mfrParam !== "all" && mfrOf(p) !== mfrParam) return false;
     if (catParam !== "all" && (p.category || "Uncategorized") !== catParam) return false;
-    if (
-      ql &&
-      !(
-        (p.desc || "").toLowerCase().includes(ql) ||
-        (p.sku || "").toLowerCase().includes(ql) ||
-        (p.mfr || "").toLowerCase().includes(ql) ||
-        (p.category || "").toLowerCase().includes(ql)
-      )
-    )
-      return false;
+    if (tokens.length) {
+      const hay = [p.desc, p.sku, p.mfr, p.category].filter(Boolean).join(" ").toLowerCase();
+      if (!tokens.every((token) => hay.includes(token))) return false;
+    }
     return true;
   });
   if (sort === "price") rows = rows.slice().sort((a, b) => (b.list || 0) - (a.list || 0));

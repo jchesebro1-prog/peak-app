@@ -22,6 +22,7 @@ import {
   setQuote,
   setSheetCalibration,
   setVenue,
+  saveGridIntake,
 } from "@/lib/stores/grid-projects";
 import { docLocId, getSite } from "@/lib/identity/sites";
 import { resolveTier } from "@/lib/pricing-tiers";
@@ -74,6 +75,29 @@ export async function createGridAssemblyAction(input: {
   const assembly = await createGridAssembly({ ...input, by: user.name });
   revalidatePath("/design/grid");
   return { ok: true, id: assembly.id };
+}
+
+export async function saveGridIntakeAction(input: {
+  projectId: string;
+  venueName: string;
+  locationName: string;
+  address: string;
+  notes: string;
+  measurementBased: boolean;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  if (!input.venueName.trim() && !input.locationName.trim()) return { ok: false, error: "Add a venue or location to continue." };
+  const saved = await saveGridIntake(input.projectId, {
+    complete: true,
+    measurementBased: !!input.measurementBased,
+    venueName: input.venueName.trim(),
+    locationName: input.locationName.trim(),
+    address: input.address.trim(),
+    notes: input.notes.trim(),
+  });
+  if (!saved) return { ok: false, error: "That design could not be found." };
+  revalidatePath(editorPath(input.projectId));
+  return { ok: true };
 }
 
 /** ~8 MB of dataUrl — beyond this a JSONB doc stops being a sane home. */

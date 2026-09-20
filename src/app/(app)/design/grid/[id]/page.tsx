@@ -16,6 +16,7 @@ import type { FabricSell } from "@/lib/curtain-geom";
 import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
 import GridEditor from "./editor";
+import GridIntake from "./grid-intake";
 
 export const metadata = { title: "The Grid — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -42,6 +43,10 @@ export default async function GridEditorPage({
         </Link>
       </div>
     );
+  }
+
+  if (project.intake && !project.intake.complete) {
+    return <GridIntake projectId={project.id} projectName={project.name} />;
   }
 
   const [sheets, catalog, gridSymbols, engagements, laborHoursPerDevice, settings] = await Promise.all([
