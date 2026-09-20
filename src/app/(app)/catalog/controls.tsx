@@ -322,6 +322,20 @@ export function CatalogImportPanel({
               <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 3, lineHeight: 1.4 }}>
                 Match rows by Manufacturer Part # (MFR PN). Include Description, plus optional Category, Unit, List, and Cost columns.
               </div>
+              <a
+                href="/api/catalog/template.csv"
+                download="catalog-import-template.csv"
+                style={{
+                  display: "inline-block",
+                  marginTop: 10,
+                  color: accent,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  textDecoration: "none",
+                }}
+              >
+                ↓ Download CSV template
+              </a>
               <input name="file" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" required style={{ width: "100%", marginTop: 14, fontSize: 12 }} />
               <button type="submit" disabled={!mfr} style={{ width: "100%", marginTop: 14, border: "none", borderRadius: 9, padding: 11, color: mfr ? "#fff" : "#aab0bb", background: mfr ? accent : "#eef0f3", cursor: mfr ? "pointer" : "not-allowed", fontSize: 13.5, fontWeight: 600 }}>
                 {mfr ? "Import MFR PN file →" : "Name the manufacturer"}
