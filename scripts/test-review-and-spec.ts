@@ -54,6 +54,7 @@ import {
   visibleFields,
   presentOptionsFor,
 } from "@/lib/stores/survey-intake";
+import { resolveCertsFromRecords } from "@/lib/venue-assessment-certs";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -3427,6 +3428,31 @@ ok(
   visibleFields(DISCIPLINE_GROUPS.find((g) => g.key === "lighting")!, "gym")
     .some((f) => f.key === "consoleMfr"),
   "every class asks console mfr/model"
+);
+
+/* --- Venue Assessments: certification auto-resolution --- */
+const resolvedCerts = resolveCertsFromRecords(
+  [
+    { id: "FT-old", customerId: "c1", locationId: "l1", stage: "completed", completedAt: 1000 },
+    { id: "FT-new", customerId: "c1", locationId: "l1", stage: "completed", completedAt: 2000 },
+    { id: "FT-other", customerId: "c2", locationId: "l1", stage: "completed", completedAt: 3000 },
+  ],
+  [
+    { id: "IN-old", customerId: "c1", locationId: "l1", stage: "completed", surveyDate: "2025-01-01", reportDate: "", updatedAt: 1000, level: 1 },
+    { id: "IN-new", customerId: "c1", locationId: "l1", stage: "completed", surveyDate: "2026-01-01", reportDate: "", updatedAt: 2000, level: 2 },
+  ],
+  "c1",
+  "l1"
+);
+ok(resolvedCerts.curtains?.recordId === "FT-new", "latest completed flame test resolves for the exact venue");
+ok(resolvedCerts.rigging?.recordId === "IN-new", "latest completed inspection resolves for the exact venue");
+ok(
+  resolvedCerts.curtains?.source === "auto" && resolvedCerts.rigging?.onFile === "yes",
+  "resolved references are attributable auto records, never inferred no-file answers"
+);
+ok(
+  Object.keys(resolveCertsFromRecords([], [], null, "l1")).length === 0,
+  "missing canonical customer identity resolves no certifications"
 );
 
 asyncChecks()

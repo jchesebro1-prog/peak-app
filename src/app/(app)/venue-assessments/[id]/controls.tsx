@@ -1102,7 +1102,7 @@ export default function SurveyEditor({
                         />
                       )}
                       {sec.kind === "assessmentCondition" && (
-                        <AssessmentConditionSection assessment={draft.assessment} onChange={(assessment) => setField("assessment", assessment)} />
+                        <AssessmentConditionSection assessment={draft.assessment} autoCerts={meta.autoCerts} onChange={(assessment) => setField("assessment", assessment)} />
                       )}
                       {sec.kind === "assessmentFindings" && (
                         <AssessmentFindingsSection assessment={draft.assessment} photos={draft.photos} onChange={(assessment) => setField("assessment", assessment)} />

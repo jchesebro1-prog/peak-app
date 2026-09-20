@@ -11,12 +11,13 @@ import { ACCENT_INK, ACCENT_SOFT, inpStyle, labelStyle, selStyle, taStyle } from
 
 type Props = {
   assessment: AssessmentData;
+  autoCerts: Record<string, InspectionRef>;
   onChange: (assessment: AssessmentData) => void;
 };
 
 const blankRef = (): InspectionRef => ({ onFile: "", type: "", date: "", source: "manual", recordId: null });
 
-export function AssessmentConditionSection({ assessment, onChange }: Props) {
+export function AssessmentConditionSection({ assessment, autoCerts, onChange }: Props) {
   function setCondition(category: ConditionCategory, patch: Partial<AssessmentData["conditions"][ConditionCategory]>) {
     onChange({
       ...assessment,
@@ -40,7 +41,7 @@ export function AssessmentConditionSection({ assessment, onChange }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       {CONDITION_GROUPS.map((group) => {
-        const ref = assessment.inspectionRefs[group.key] || blankRef();
+        const refKeys = group.key === "rigging" ? ["rigging", "curtains"] : [group.key];
         return (
           <section key={group.key}>
             <h3 style={{ margin: "0 0 10px", fontSize: 14.5 }}>{group.label}</h3>
@@ -63,14 +64,33 @@ export function AssessmentConditionSection({ assessment, onChange }: Props) {
               })}
             </div>
 
-            <div style={{ marginTop: 10, border: "1px solid #ececf0", borderRadius: 10, padding: 11, background: "#fafbfc" }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 9 }}>Formal inspection on file?</div>
-              <div style={{ display: "grid", gridTemplateColumns: "170px minmax(160px, 1fr) 170px", gap: 9 }} className="va-cert-row">
-                <select value={ref.onFile} onChange={(event) => setRef(group.key, { onFile: event.target.value as InspectionRef["onFile"] })} style={selStyle}><option value="">— Select —</option><option value="yes">Yes</option><option value="no">No</option></select>
-                <input value={ref.type} onChange={(event) => setRef(group.key, { type: event.target.value })} placeholder="Type / provider" style={inpStyle} />
-                <input type="date" value={ref.date} onChange={(event) => setRef(group.key, { date: event.target.value })} style={inpStyle} />
-              </div>
-            </div>
+            {refKeys.map((refKey) => {
+              const stored = assessment.inspectionRefs[refKey];
+              const automatic = autoCerts[refKey];
+              const manual = stored?.source === "manual" ? stored : null;
+              const ref = manual || blankRef();
+              const autoHref = refKey === "curtains"
+                ? `/flame-tests/results?id=${encodeURIComponent(automatic?.recordId || "")}`
+                : `/inspections/${encodeURIComponent(automatic?.recordId || "")}`;
+              const rowLabel = refKey === "curtains" ? "Flame certificate on file?" : "Formal inspection on file?";
+              return (
+                <div key={refKey} style={{ marginTop: 10, border: "1px solid #ececf0", borderRadius: 10, padding: 11, background: "#fafbfc" }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 9 }}>{rowLabel}</div>
+                  {automatic && !manual ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <Link href={autoHref} style={{ color: "var(--accent)", fontSize: 12.5, fontWeight: 650, textDecoration: "none" }}>{automatic.type} · {automatic.date || "date not recorded"} →</Link>
+                      <button type="button" onClick={() => setRef(refKey, { ...automatic, source: "manual" })} style={{ minHeight: 34, border: "1px solid #e4e7ec", borderRadius: 8, background: "#fff", color: "#5b616e", padding: "6px 10px", cursor: "pointer", fontSize: 11.5 }}>Enter manually instead</button>
+                    </div>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "170px minmax(160px, 1fr) 170px", gap: 9 }} className="va-cert-row">
+                      <select value={ref.onFile} onChange={(event) => setRef(refKey, { onFile: event.target.value as InspectionRef["onFile"] })} style={selStyle}><option value="">— Select —</option><option value="yes">Yes</option><option value="no">No</option></select>
+                      <input value={ref.type} onChange={(event) => setRef(refKey, { type: event.target.value })} placeholder="Type / provider" style={inpStyle} />
+                      <input type="date" value={ref.date} onChange={(event) => setRef(refKey, { date: event.target.value })} style={inpStyle} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </section>
         );
       })}
@@ -82,3 +102,4 @@ export function AssessmentConditionSection({ assessment, onChange }: Props) {
     </div>
   );
 }
+import Link from "next/link";
