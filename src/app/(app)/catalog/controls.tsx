@@ -291,7 +291,7 @@ export function CatalogImportPanel({
             </>
           )}
 
-          {/* UPLOAD — stubbed */}
+          {/* UPLOAD — reads the file into the paste pipeline */}
           {method === "upload" && (
             <div
               style={{
@@ -319,9 +319,38 @@ export function CatalogImportPanel({
               >
                 ↑
               </div>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>File upload is coming soon</div>
-              <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 3, lineHeight: 1.4 }}>
-                For now, open your CSV/Excel price book, copy the rows, and use{" "}
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  borderRadius: 8,
+                  padding: "9px 16px",
+                  background: accent,
+                  color: "#fff",
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Select CSV file
+                <input
+                  type="file"
+                  accept=".csv,text/csv,text/tab-separated-values"
+                  style={{ display: "none" }}
+                  onChange={(event) => {
+                    const input = event.currentTarget;
+                    const file = input.files?.[0];
+                    if (!file) return;
+                    file.text().then((fileText) => {
+                      setText(fileText);
+                      setMethod("paste");
+                    });
+                    input.value = "";
+                  }}
+                />
+              </label>
+              <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 10, lineHeight: 1.4 }}>
+                CSV or tab-separated — opens in{" "}
                 <button
                   type="button"
                   onClick={() => setMethod("paste")}
@@ -336,8 +365,8 @@ export function CatalogImportPanel({
                   }}
                 >
                   Paste a list
-                </button>
-                .
+                </button>{" "}
+                to review before importing.
               </div>
             </div>
           )}
