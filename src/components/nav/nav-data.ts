@@ -88,6 +88,7 @@ export const NAV: NavEntry[] = [
       { key: "grid", label: "The Grid", href: "/design/grid" },
       { key: "steel", label: "Steel Calculator", href: "/design/steel" },
       { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
+      { key: "assemblies", label: "Assembly Builder", href: "/design/assemblies" },
       { key: "motors", label: "Motor Library", href: "/design/motors" },
       { key: "fixtures", label: "Fixture Cross-Ref", href: "/design/fixtures" },
     ],

@@ -84,6 +84,7 @@ const ROUTES = [
   "/design/designs",
   "/design/engagements",
   "/design/fixtures",
+  "/design/assemblies",
   "/design/motors",
   "/design/quick",
   "/design/steel",

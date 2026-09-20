@@ -1,7 +1,8 @@
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { get as getQuote, type Quote, type QuoteReview } from "@/lib/stores/quotes";
-import { byCategory } from "@/lib/stores/catalog";
+import { byCategory, list as catalogList } from "@/lib/stores/catalog";
+import { resolveFixtureAssemblies } from "@/lib/fixture-assemblies";
 import {
   all as allCustomers,
   resolveId,
@@ -165,7 +166,7 @@ export default async function EstimatorPage({
   let q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
   if (!q) q = (await getQuote("Q-2041")) as QuoteDoc | null; // demo fallback so Save has a target
 
-  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster] =
+  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows] =
     await Promise.all([
       byCategory("Fabric"),
       byCategory("Labor"),
@@ -174,6 +175,7 @@ export default async function EstimatorPage({
       getSettings(),
       getFixtureRates(),
       activeUsers(),
+      catalogList(),
     ]);
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
@@ -250,6 +252,7 @@ export default async function EstimatorPage({
       fabrics={fabrics}
       laborRates={laborRates}
       fixtureRates={fixtureRates}
+      fixtureAssemblies={resolveFixtureAssemblies(settings.fixtureAssemblies, catalogRows)}
       customers={customers}
       travel={travel}
       reviewers={reviewerRows.map((u) => u.name)}

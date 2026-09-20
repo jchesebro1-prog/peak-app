@@ -113,6 +113,8 @@ export type AState = {
   rigType: string;
   drape: Record<string, boolean>;
   fixtures: Record<string, boolean>;
+  /** fixture type → catalog-backed Assembly Builder id */
+  fixtureAssemblies?: Record<string, string>;
   ctrl: Record<string, boolean>;
   shell: Record<string, boolean>;
   pitType: string;
@@ -426,7 +428,10 @@ export function curtainMakeCost(fabricKey: string, dims: VenueDims, tierKey: Tie
 /* --------------------------------- compute --------------------------------- */
 
 /** Pure function of the designer state — the refined BOM equations. */
-export function compute(s: AState): ComputeResult {
+export function compute(
+  s: AState,
+  assemblyOptions: Record<string, { name: string; cost: number }> = {}
+): ComputeResult {
   const C = clamp;
   const lineSets = C(Math.round(s.depth * 1.5), 12, 72);
   // Electrics are spaced by stage depth (~one per 12 ft), clamped 2–5.
@@ -535,16 +540,18 @@ export function compute(s: AState): ComputeResult {
   const E = Math.max(1, electrics);
   const wUnit = Math.max(1, Math.round(W / 8));
   const lightItems: Array<{ desc: string; unit: string; qty: number; cost: number }> = [];
-  const addFix = (on: boolean | undefined, desc: string, qty: number, cost: number) => {
-    if (on && qty > 0) lightItems.push({ desc, unit: "ea", qty, cost });
+  const addFix = (key: string, on: boolean | undefined, desc: string, qty: number, cost: number) => {
+    const selected = assemblyOptions[s.fixtureAssemblies?.[key] || ""];
+    if (on && qty > 0) lightItems.push({ desc: selected?.name || desc, unit: "ea", qty, cost: selected?.cost || cost });
   };
-  addFix(fx.par, "Par", Math.round(E * wUnit * pick(0.7, 1, 1.2)), 750);
-  addFix(fx.front, "Front", Math.round(wUnit * pick(2, 2.5, 3)), 2250);
-  addFix(fx.cyc, "Cyc", Math.round(wUnit * pick(1, 1.25, 1.5)), 1750);
-  addFix(fx.side, "Side light", Math.round(E * wUnit * pick(0, 0.5, 0.75)), 1800);
-  addFix(fx.automated, "Automated", Math.round(E * wUnit * pick(0, 0.5, 0.9)), 3000);
+  addFix("par", fx.par, "Par", Math.round(E * wUnit * pick(0.7, 1, 1.2)), 750);
+  addFix("front", fx.front, "Front", Math.round(wUnit * pick(2, 2.5, 3)), 2250);
+  addFix("cyc", fx.cyc, "Cyc", Math.round(wUnit * pick(1, 1.25, 1.5)), 1750);
+  addFix("side", fx.side, "Side light", Math.round(E * wUnit * pick(0, 0.5, 0.75)), 1800);
+  const automatedQty = Math.round(E * wUnit * pick(0, 0.5, 0.9));
+  addFix("automated", fx.automated, "Automated", automatedQty, 3000);
   // dimmer racks derive from the real conventional-fixture total (movers are non-dim, DMX)
-  const convFixTotal = lightItems.reduce((a, it) => a + (it.desc === "Automated" ? 0 : it.qty), 0);
+  const convFixTotal = lightItems.reduce((a, it) => a + it.qty, 0) - (fx.automated ? automatedQty : 0);
   dimmerRacks = s.sys.lighting ? Math.max(1, Math.ceil(convFixTotal / 48)) : 0;
 
   // Controls — multi (Console / Architectural / Data groups)
@@ -851,6 +858,7 @@ export function defaultAState(contingencyPct: number): AState {
     rigType: "motorized",
     drape: { draw: true, legs: true, border: true, scenerytrack: false, fullstage: true },
     fixtures: { par: true, front: true, cyc: true, side: true, automated: true },
+    fixtureAssemblies: {},
     ctrl: { console: true, architectural: true, data: true },
     shell: { towers: true, ceiling: true, transport: true },
     pitType: "clearspan",

@@ -27,14 +27,10 @@ import type { DraftedLine } from "./ai-scope-modal";
 import {
   demoSections,
   DISC_LABEL,
-  FIX_PRESETS,
-  FIXTURES,
-  fixtureAddOns,
   type SuggestPart,
 } from "./estimator-data";
 import {
   computeCurtain,
-  computeFixture,
   computeLabor,
   fmt,
   makeLaborRate,
@@ -56,6 +52,7 @@ import type {
   SpecSection,
   TravelLite,
 } from "./types";
+import { assemblyDescription } from "@/lib/fixture-assemblies";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import SectionCard from "./section-card";
 import AiScopeModal from "./ai-scope-modal";
@@ -129,17 +126,10 @@ const freshCurtain = (fabricSku: string): CurtainDraft => ({
 });
 
 const freshFixture = (): FixtureDraft => {
-  const f0 = FIXTURES[0] || { sku: "", list: 0 };
   return {
-    model: f0.sku,
-    custom: false,
-    name: "",
-    price: String(f0.list || ""),
+    assemblyId: "",
     qty: "1",
-    mount: "C-clamp",
-    accessories: ["Safety cable"],
-    power: [],
-    lamp: "LED",
+    componentQty: {},
     position: "",
     circuit: "",
   };
@@ -237,6 +227,7 @@ export default function EstimatorClient({
   fabrics,
   laborRates,
   fixtureRates,
+  fixtureAssemblies,
   customers,
   travel,
   reviewers,
@@ -329,7 +320,7 @@ export default function EstimatorClient({
   }, []);
 
   const rate = useMemo(() => makeLaborRate(laborRates), [laborRates]);
-  const fixAddOns = useMemo(() => fixtureAddOns(fixtureRates), [fixtureRates]);
+  void fixtureRates;
   const t = useMemo(() => totals(sections, TAX_RATE_PCT), [sections]);
 
   const isBuild = !phone && mode === "build";
@@ -756,7 +747,12 @@ export default function EstimatorClient({
     setCustomFor(null);
     setCurtainFor(null);
     setLaborFor(null);
-    setFixtureDraft(freshFixture());
+    const first = fixtureAssemblies[0];
+    setFixtureDraft({
+      ...freshFixture(),
+      assemblyId: first?.id || "",
+      componentQty: Object.fromEntries((first?.components || []).map((part) => [part.sku, String(part.defaultQty)])),
+    });
   };
   const toggleLabor = (id: string) => {
     if (laborFor === id) {
@@ -829,58 +825,49 @@ export default function EstimatorClient({
     setCurtainDraft(freshCurtain(defaultFabric));
   };
 
-  const setFixture = (field: keyof FixtureDraft, val: string) =>
+  const setFixture = (field: "qty" | "position" | "circuit", val: string) =>
     setFixtureDraft((d) => ({ ...d, [field]: val }));
-  const setFixtureModel = (sku: string) => {
-    if (sku === "__custom") {
-      setFixtureDraft((d) => ({ ...d, custom: true, model: "__custom", price: "", name: "" }));
-      return;
-    }
-    const f = FIXTURES.find((x) => x.sku === sku);
-    setFixtureDraft((d) => ({ ...d, custom: false, model: sku, price: f ? String(f.list) : "" }));
+  const setFixtureAssembly = (assemblyId: string) => {
+    const assembly = fixtureAssemblies.find((item) => item.id === assemblyId);
+    setFixtureDraft((draft) => ({
+      ...draft,
+      assemblyId,
+      componentQty: Object.fromEntries((assembly?.components || []).map((part) => [part.sku, String(part.defaultQty)])),
+    }));
   };
-  const toggleFixArr = (field: "accessories" | "power", key: string) =>
-    setFixtureDraft((d) => {
-      const arr = (d[field] || []).slice();
-      const i = arr.indexOf(key);
-      if (i >= 0) arr.splice(i, 1);
-      else arr.push(key);
-      return { ...d, [field]: arr };
-    });
-  const applyFixturePreset = (index: number) => {
-    const p = FIX_PRESETS[index];
-    if (!p) return;
-    const f = FIXTURES.find((x) => x.sku === p.d.model);
-    setFixtureDraft({
-      ...freshFixture(),
-      ...p.d,
-      accessories: [...(p.d.accessories || [])],
-      power: [...(p.d.power || [])],
-      custom: false,
-      price: f ? String(f.list) : "",
-      name: "",
-    });
-  };
+  const setFixtureComponentQty = (sku: string, value: string) =>
+    setFixtureDraft((draft) => ({ ...draft, componentQty: { ...draft.componentQty, [sku]: value } }));
   const addFixture = (secId: string) => {
     const d = fixtureDraft;
-    const c = computeFixture(d, fixAddOns);
-    const name = d.custom ? (d.name || "").trim() : c.fx.name;
-    if (!name || c.unit <= 0) return;
-    const opts: string[] = [];
-    if (d.mount && d.mount !== "None") opts.push(d.mount);
-    if ((d.accessories || []).length) opts.push(d.accessories.join(", "));
-    if ((d.power || []).length) opts.push(d.power.join("/"));
-    if (d.lamp && d.lamp !== "LED") opts.push(d.lamp);
+    const assembly = fixtureAssemblies.find((item) => item.id === d.assemblyId);
+    if (!assembly) return;
+    const components = assembly.components.map((part) => ({
+      sku: part.sku,
+      label: part.label,
+      role: part.role,
+      qty: Math.max(0, Number(d.componentQty[part.sku] ?? part.defaultQty) || 0),
+      unit: part.unit,
+      cost: part.cost,
+      price: part.list,
+    }));
+    const included = components.filter((part) => part.qty > 0);
+    const unitCost = included.reduce((sum, part) => sum + part.cost * part.qty, 0);
+    const unitSell = included.reduce((sum, part) => sum + part.price * part.qty, 0);
+    if (unitSell <= 0) return;
     const pc: string[] = [];
     if ((d.position || "").trim()) pc.push("Pos " + d.position.trim());
     if ((d.circuit || "").trim()) pc.push("Ckt " + d.circuit.trim());
-    let desc = name;
-    if (opts.length) desc += " — " + opts.join("; ");
+    let desc = assemblyDescription({
+      ...assembly,
+      components: assembly.components.map((part) => ({
+        ...part,
+        defaultQty: Math.max(0, Number(d.componentQty[part.sku] ?? part.defaultQty) || 0),
+      })),
+    });
     if (pc.length) desc += " (" + pc.join(" / ") + ")";
-    const idN = nextId();
-    const sku = d.custom ? "FIX-" + nextId() : c.fx.sku;
+    const qty = Math.max(1, Number.parseInt(d.qty, 10) || 1);
     pushItems(secId, [
-      { id: idN, sku, desc, qty: c.qty, unit: "ea", cost: c.cost, price: c.unit, fixture: true },
+      { id: nextId(), sku: assembly.id, desc, qty, unit: "ea", cost: unitCost, price: unitSell, fixture: true, components },
     ]);
     setFixtureFor(null);
     setFixtureDraft(freshFixture());
@@ -2190,11 +2177,10 @@ export default function EstimatorClient({
             <FixtureModal
               secName={fixtureSec ? fixtureSec.name : ""}
               draft={fixtureDraft}
-              addOns={fixAddOns}
+              assemblies={fixtureAssemblies}
               onSet={setFixture}
-              onSetModel={setFixtureModel}
-              onToggleArr={toggleFixArr}
-              onApplyPreset={applyFixturePreset}
+              onAssembly={setFixtureAssembly}
+              onComponentQty={setFixtureComponentQty}
               onAdd={() => addFixture(fixtureFor)}
               onClose={() => setFixtureFor(null)}
             />

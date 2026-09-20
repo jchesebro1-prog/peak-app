@@ -181,13 +181,13 @@ export function computeFixture(
         cost: 0,
       }
     : FIXTURES.find((f) => f.sku === d.model) || FIXTURES[0];
-  const up = parseFloat(d.price);
+  const up = parseFloat(d.price || "");
   const unitSell = isNaN(up) ? fxm.list || 0 : up;
   const baseCost = isC ? Math.round(unitSell * addOns.customCostFactor) : fxm.cost || 0;
-  const mt = addOns.mounts[d.mount] || { price: 0, cost: 0 };
+  const mt = addOns.mounts[d.mount || ""] || { price: 0, cost: 0 };
   const accs = (d.accessories || []).map((k) => addOns.acc[k]).filter(Boolean);
   const pwr = (d.power || []).map((k) => addOns.pwr[k]).filter(Boolean);
-  const lmp = addOns.lamps[d.lamp] || { price: 0, cost: 0 };
+  const lmp = addOns.lamps[d.lamp || ""] || { price: 0, cost: 0 };
   const accSell = accs.reduce((a, x) => a + x.price, 0);
   const addSell = mt.price + accSell + pwr.reduce((a, x) => a + x.price, 0) + lmp.price;
   const addCost =

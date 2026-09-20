@@ -1,6 +1,7 @@
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import type { FixtureRates } from "@/lib/stores/pricing";
 import type { TaskRecord } from "@/lib/stores/tasks";
+import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemblies";
 
 /**
  * Estimator types. The spec shapes (SpecItem / SpecSection / SpecMob) are the
@@ -40,6 +41,8 @@ export type SpecItem = {
   /** internal-only note (never shown to the customer) */
   internalNote?: string;
   mob?: SpecMob;
+  /** Orderable component detail for a catalog-backed fixture assembly. */
+  components?: Array<{ sku: string; label: string; role: AssemblyRole; qty: number; unit: string; cost: number; price: number }>;
 };
 
 /** One system card. */
@@ -80,17 +83,21 @@ export type CurtainDraft = {
 };
 
 export type FixtureDraft = {
-  model: string;
-  custom: boolean;
-  name: string;
-  price: string;
+  assemblyId: string;
   qty: string;
-  mount: string;
-  accessories: string[];
-  power: string[];
-  lamp: string;
+  componentQty: Record<string, string>;
   position: string;
   circuit: string;
+  /** Legacy configurator fields retained only for old pricing snapshots/tests;
+   * the UI now selects catalog-backed assemblies exclusively. */
+  model?: string;
+  custom?: boolean;
+  name?: string;
+  price?: string;
+  mount?: string;
+  accessories?: string[];
+  power?: string[];
+  lamp?: string;
 };
 
 export type MobDraft = {
@@ -197,6 +204,7 @@ export type EstimatorProps = {
   laborRates: Record<string, number>;
   /** Live fixture add-on rates (Estimating Rules → fixture group). */
   fixtureRates: FixtureRates;
+  fixtureAssemblies: ResolvedFixtureAssembly[];
   customers: CustomerLite[];
   /** Keys: `${customerId}|${locationId}` and `${customerId}|` (primary) and `name|${custName}`. */
   travel: Record<string, TravelLite>;

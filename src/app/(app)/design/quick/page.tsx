@@ -2,7 +2,9 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getDesign } from "@/lib/stores/designs";
 import { all as allCustomers } from "@/lib/stores/customers";
-import { byCategory } from "@/lib/stores/catalog";
+import { byCategory, list as catalogList } from "@/lib/stores/catalog";
+import { getSettings } from "@/lib/settings";
+import { assemblyUnitTotals, resolveFixtureAssemblies } from "@/lib/fixture-assemblies";
 import { num } from "@/lib/stores/pricing";
 import { reviewers } from "@/lib/users";
 import QuickDesignClient from "./quick-design-client";
@@ -26,7 +28,7 @@ export default async function Page({
   const sp = await searchParams;
   const designId = sp.design || null;
 
-  const [design, customers, fabricParts, installPct, freightPct, contingencyPct, reviewerRows] =
+  const [design, customers, fabricParts, installPct, freightPct, contingencyPct, reviewerRows, settings, catalogRows] =
     await Promise.all([
       designId ? getDesign(designId) : Promise.resolve(null),
       allCustomers(),
@@ -35,7 +37,14 @@ export default async function Page({
       num("system.freightPct", 5),
       num("system.contingencyPct", 10),
       reviewers(),
+      getSettings(),
+      catalogList(),
     ]);
+  const fixtureAssemblies = resolveFixtureAssemblies(settings.fixtureAssemblies, catalogRows).map((assembly) => ({
+    id: assembly.id,
+    name: assembly.name,
+    cost: assemblyUnitTotals(assembly).cost,
+  }));
 
   return (
     <QuickDesignClient
@@ -61,6 +70,7 @@ export default async function Page({
       }))}
       rates={{ installPct, freightPct, contingencyPct }}
       reviewerNames={reviewerRows.map((u) => u.name)}
+      fixtureAssemblies={fixtureAssemblies}
     />
   );
 }

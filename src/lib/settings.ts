@@ -81,6 +81,8 @@ export type AppSettingsData = {
   /** Venue-class soft-goods and lighting guidance (D132), stored sparsely
    * over the source-sheet defaults in lib/venue-doctrine.ts. */
   venueDoctrine?: import("@/lib/venue-doctrine").VenueDoctrinePatch;
+  /** User-authored catalog-backed fixture assemblies. Full replacement. */
+  fixtureAssemblies?: import("@/lib/fixture-assemblies").FixtureAssembly[];
 };
 
 export async function getSettingsPatch(): Promise<Record<string, unknown>> {

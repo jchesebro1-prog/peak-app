@@ -61,6 +61,11 @@ import {
 } from "@/lib/venue-doctrine";
 import { buildAssessmentSheet } from "@/lib/venue-assessment-sheet";
 import { renderLetterPdf } from "@/lib/pdf";
+import {
+  assemblyDescription,
+  assemblyUnitTotals,
+  resolveFixtureAssemblies,
+} from "@/lib/fixture-assemblies";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -74,6 +79,26 @@ ok(serviceWorkerSource.includes('caches.match("/offline.html")'), "an uncached o
 ok(!serviceWorkerSource.includes('caches.match("/") ||'), "an uncached route never masquerades as the dashboard");
 ok(serviceWorkerSource.includes('url.searchParams.has("_rsc")'), "RSC payloads cannot overwrite cached HTML pages");
 ok(serviceWorkerSource.includes('event.data.type !== "CACHE_ROUTE"'), "client-side navigations can snapshot their rendered route for offline reload");
+
+/* --- Fixture assemblies --- */
+const fixtureAssemblies = resolveFixtureAssemblies(
+  [{ id: "fa-test", name: "House fixture", components: [
+    { sku: "BODY-1", label: "Light engine", role: "fixture", defaultQty: 1 },
+    { sku: "CABLE-1", label: "25 ft power cable", role: "cable", defaultQty: 0 },
+    { sku: "SAFE-1", label: "Safety", role: "accessory", defaultQty: 1 },
+  ] }],
+  [
+    { sku: "BODY-1", desc: "Fixture body", unit: "ea", cost: 100, list: 150 },
+    { sku: "CABLE-1", desc: "Cable", unit: "ea", cost: 10, list: 20 },
+    { sku: "SAFE-1", desc: "Safety cable", unit: "ea", cost: 5, list: 8 },
+  ] as any
+);
+ok(fixtureAssemblies[0].components.length === 3, "assembly keeps zero-default components as selectable options");
+ok(assemblyUnitTotals(fixtureAssemblies[0]).sell === 158, "assembly totals include only positive default quantities");
+ok(
+  assemblyDescription(fixtureAssemblies[0]) === "House fixture — Light engine; Safety",
+  "assembly description uses the assembly name and user-defined component labels"
+);
 
 /* --- Go-live reset coverage (PUNCHLIST #94) --- */
 const resetCollections = [...DEMO_COLLECTIONS].sort();
@@ -353,7 +378,7 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
  * group after D97 shipped, which is why a bare `length === 6` went stale. */
 const DESIGN_CHILDREN = [
   "designoverview", "engagements", "designs", "grid",
-  "steel", "lineset", "motors", "fixtures",
+  "steel", "lineset", "assemblies", "motors", "fixtures",
 ];
 ok(
   !!designGroup && designGroup.kind === "group" &&
@@ -1213,6 +1238,14 @@ import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFo
     { fabricRate: RATES_Q[rule.fabricSku], makingRate: makingForQ(rule.fullness) }
   ).costTotal;
   ok(Math.abs(drawItem.cost - Math.round(expected)) < 1, `Quick Design Draw cost = shared model make cost (got ${drawItem.cost}, expected ${Math.round(expected)})`);
+}
+{
+  const base = defaultAState(0);
+  const state = { ...base, fixtureAssemblies: { ...base.fixtureAssemblies, par: "fa-par" } };
+  const fixtures = computeQuick(state, { "fa-par": { name: "House PAR assembly", cost: 432 } })
+    .systems.find((system) => system.key === "lighting")!.items;
+  const par = fixtures.find((item) => item.desc === "House PAR assembly")!;
+  ok(par?.cost === 432, "Quick Design BOM prices a selected fixture from Assembly Builder");
 }
 
 /* --- the tier pipeline (what the screen renders) uses the two-term curtain

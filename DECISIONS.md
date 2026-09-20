@@ -2499,3 +2499,21 @@ shows an explicit offline page with **Go back** and **Try again**. It no longer
 serves the cached dashboard under an unrelated URL. The sync panel states the
 contract directly: captures save locally, opened pages/jobs remain available,
 and Back returns to cached work.
+
+## D134. Fixture configurations are catalog-backed assemblies (2026-09-20)
+
+The hardcoded fixture/preset selector from IDEAS #43 is retired. The Design
+area now owns an Assembly Builder whose records are full-replacement app
+settings: an assembly name plus catalog SKUs, a user-facing component label,
+a role, and a non-negative default quantity. Quantity zero deliberately means
+"offer this option when configuring the fixture, but do not include it by
+default." No sample assemblies are seeded; Jeff's production catalog import
+will supply the real parts.
+
+The Estimator selects only saved assemblies. It produces one clean customer
+line named from the assembly and its user labels, while retaining an
+orderable component array with SKU, role, quantity, unit, cost, and sell.
+Quick Design's five auto-fixture buckets can each select one of the same
+assemblies; the BOM then uses the assembly name and current catalog cost.
+Missing catalog SKUs remain visible as missing rather than silently falling
+back to invented fixture data.

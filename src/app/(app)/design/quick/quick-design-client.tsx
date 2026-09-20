@@ -112,6 +112,7 @@ export default function QuickDesignClient({
   fabrics,
   rates,
   reviewerNames,
+  fixtureAssemblies,
 }: {
   me: string;
   canApprove: boolean;
@@ -120,6 +121,7 @@ export default function QuickDesignClient({
   fabrics: FabricOption[];
   rates: { installPct: number; freightPct: number; contingencyPct: number };
   reviewerNames: string[];
+  fixtureAssemblies: Array<{ id: string; name: string; cost: number }>;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -185,7 +187,11 @@ export default function QuickDesignClient({
   const freightPct = rates.freightPct / 100;
   const contPct = (a.contingency ?? 0) / 100;
 
-  const C = useMemo(() => compute(a), [a]);
+  const assemblyOptions = useMemo(
+    () => Object.fromEntries(fixtureAssemblies.map((assembly) => [assembly.id, { name: assembly.name, cost: assembly.cost }])),
+    [fixtureAssemblies]
+  );
+  const C = useMemo(() => compute(a, assemblyOptions), [a, assemblyOptions]);
   const selKey = (a.tier || "better") as TierKey;
   const selTd = TIERS.find((t) => t.key === selKey) || TIERS[1];
   const selBase = useMemo(() => tierSystemsBase(C, a, selKey, tierDefs, fabrics), [C, a, selKey, tierDefs, fabrics]);
@@ -230,7 +236,7 @@ export default function QuickDesignClient({
   const makeDesign = (): DesignPartial => {
     const s = a;
     const td = TIERS.find((t) => t.key === (s.tier || "better")) || TIERS[1];
-    const Cx = compute(s);
+    const Cx = compute(s, assemblyOptions);
     const sysForTot = tierSystems(Cx, s, td.key, tierDefs, fabrics);
     const tot = tierTotals(sysForTot, td, laborPct, freightPct, (s.contingency ?? 0) / 100);
     const v = venueOf(s);
@@ -737,6 +743,23 @@ export default function QuickDesignClient({
                             <button key={ch.label} onClick={ch.onClick} style={chipStyle(ch.sel)}>
                               {ch.label}
                             </button>
+                          ))}
+                        </div>
+                      )}
+                      {on && sys.key === "lighting" && fixtureAssemblies.length > 0 && (
+                        <div style={{ display: "grid", gap: 6, padding: "4px 2px 6px" }}>
+                          {([['par', 'Par'], ['front', 'Front'], ['cyc', 'Cyc'], ['side', 'Side light'], ['automated', 'Automated']] as Array<[string, string]>).filter(([key]) => !!a.fixtures?.[key]).map(([key, label]) => (
+                            <label key={key} style={{ display: "grid", gridTemplateColumns: "82px minmax(0,1fr)", gap: 8, alignItems: "center", fontSize: 11.5, color: "#777d88" }}>
+                              <span>{label}</span>
+                              <select
+                                value={a.fixtureAssemblies?.[key] || ""}
+                                onChange={(event) => updA({ fixtureAssemblies: { ...(a.fixtureAssemblies || {}), [key]: event.target.value } })}
+                                style={{ minWidth: 0, border: "1px solid #e4e7ec", borderRadius: 7, padding: "6px 8px", background: "#fff", fontSize: 11.5 }}
+                              >
+                                <option value="">Generic allowance</option>
+                                {fixtureAssemblies.map((assembly) => <option key={assembly.id} value={assembly.id}>{assembly.name}</option>)}
+                              </select>
+                            </label>
                           ))}
                         </div>
                       )}
