@@ -44,7 +44,14 @@ import {
   blankAssessment, seedFindings, newFindingId,
 } from "@/lib/stores/assessment";
 
-import { TIER1_WIDTH_KEYS, TIER1_DEPTH_KEYS, tier1Complete } from "@/lib/stores/survey-intake";
+import {
+  TIER1_WIDTH_KEYS,
+  TIER1_DEPTH_KEYS,
+  tier1Complete,
+  DISCIPLINE_GROUPS,
+  visibleFields,
+  presentOptionsFor,
+} from "@/lib/stores/survey-intake";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -3341,6 +3348,45 @@ ok(
     measurements: { courtWidth: "50" },
   }),
   "a gym record missing court length does NOT complete Tier 1"
+);
+
+/* --- Venue Assessments: systems gating --- */
+ok(DISCIPLINE_GROUPS.length === 4, "still four system sections");
+ok(
+  DISCIPLINE_GROUPS.every((g) => presentOptionsFor(g.key, "theatre").length > 0),
+  "every system section has a PRESENT row on theatre"
+);
+ok(
+  presentOptionsFor("curtain", "gym").includes("Divider curtain"),
+  "gym curtains offer the sheet's divider curtain option"
+);
+ok(
+  presentOptionsFor("curtain", "auditorium").includes("Main / act curtain"),
+  "auditorium curtains offer the full soft-goods row"
+);
+ok(
+  !presentOptionsFor("curtain", "gym").includes("Main / act curtain"),
+  "gym does NOT offer auditorium-only soft goods"
+);
+ok(
+  visibleFields(DISCIPLINE_GROUPS.find((g) => g.key === "lighting")!, "auditorium")
+    .some((f) => f.key === "dmxUniverses"),
+  "auditorium lighting asks DMX universes"
+);
+ok(
+  !visibleFields(DISCIPLINE_GROUPS.find((g) => g.key === "lighting")!, "gym")
+    .some((f) => f.key === "dmxUniverses"),
+  "gym lighting does not ask DMX universes"
+);
+ok(
+  visibleFields(DISCIPLINE_GROUPS.find((g) => g.key === "rigging")!, "auditorium")
+    .some((f) => f.key === "fireCurtainPresent"),
+  "auditorium rigging carries the fire curtain block"
+);
+ok(
+  visibleFields(DISCIPLINE_GROUPS.find((g) => g.key === "lighting")!, "gym")
+    .some((f) => f.key === "consoleMfr"),
+  "every class asks console mfr/model"
 );
 
 asyncChecks()

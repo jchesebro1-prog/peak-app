@@ -6,7 +6,6 @@ import type {
   SurveyRecord,
   SurveyPhoto,
   SurveyStage,
-  MeasureField,
   MeasureGroup,
 } from "@/lib/stores/surveys";
 import {
@@ -19,7 +18,6 @@ import {
 import {
   DISCIPLINE_GROUPS,
   INTAKE_STATUS_META,
-  SYSTEM_KEYS,
   blankSystemsState,
   intakeStatus,
   newInventoryId,
@@ -27,7 +25,6 @@ import {
   tier1Complete,
   type DisciplineKey,
   type InventoryRow,
-  type SystemState,
 } from "@/lib/stores/survey-intake";
 import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, type SurveyPatch } from "./actions";
 import Venue3D from "./venue-3d";
@@ -38,16 +35,12 @@ import {
   ACCENT_BORDER_LT,
   ACCENT_INK,
   ACCENT_SOFT,
-  inpStyle,
-  labelStyle,
-  measStyle,
-  selStyle,
-  taStyle,
 } from "./sections/styles";
 import { FieldsSection } from "./sections/fields";
 import { CustVenueSection } from "./sections/custvenue";
 import { ConditionsSection } from "./sections/conditions";
 import { PhotosSection } from "./sections/photos";
+import { SystemsSection } from "./sections/systems";
 
 /* Serializable props from the server — the store is DB-backed and cannot be
  * imported into a client bundle, so its pure meta/option-lists are handed
@@ -58,12 +51,12 @@ const STEP_LABELS = ["Brief", "Site & access", "Measurements", "Site intake", "D
 const STEP_BY_ID: Record<string, number> = {
   cust: 0, visit: 0, project: 0, assign: 0, site: 1, conditions: 1, lifeSafety: 1,
   mQuick: 2, mLayout: 2, mSection: 2, mBeams: 2, mFOH: 2, mHouse: 2, m3d: 2,
-  tier1: 3, systems: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3,
+  tier1: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3,
   photos: 4, notes: 4,
 };
 const BRIEF_IDS: Record<string, boolean> = { cust: true, visit: true, project: true, assign: true };
-const INTAKE_IDS: Record<string, boolean> = { tier1: true, systems: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true };
-const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "systems", "dRigging", "dCurtain", "dLighting", "dAv", "photos", "notes"];
+const INTAKE_IDS: Record<string, boolean> = { tier1: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true };
+const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "photos", "notes"];
 const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", curtain: "dCurtain", lighting: "dLighting", av: "dAv" };
 
 /** Display label for a venue class — the derived `venueType` fallback. */
@@ -233,14 +226,6 @@ export default function SurveyEditor({
     else set.push(opt);
     setDisc(disc, "scope", set);
   };
-  const setSystem = (key: string, patch: Partial<SystemState>) =>
-    patchDraft({
-      systemsState: {
-        ...draft.systemsState,
-        [key]: { ...(draft.systemsState[key] || { installed: "", desc: "" }), ...patch },
-      },
-    });
-
   const invRows = (disc: DisciplineKey, category: string) =>
     draft.inventory.filter((r) => r.discipline === disc && r.category === category);
   const addInvRow = (disc: DisciplineKey, category: string) =>
@@ -467,16 +452,12 @@ export default function SurveyEditor({
     });
     // 3D preview (IDEAS #49 P1) — parametric model auto-built from measurements
     secs.push({ id: "m3d", title: "3D preview", subtitle: "Auto-built from measurements — drag to orbit", group: "field", step: 2, advanced: true, kind: "viz3d" });
-    // ---- Site intake (IDEAS #45): kill-question gate, current systems,
-    // discipline branches. Soft gate — sections lock until Tier 1 is done,
+    // ---- Site intake (IDEAS #45): kill-question gate and discipline
+    // branches. Soft gate — sections lock until Tier 1 is done,
     // but the record always saves as a draft.
     secs.push({
       id: "tier1", title: "Kill questions", subtitle: "Required before the discipline intakes unlock",
       group: "intake", step: 3, kind: "tier1",
-    });
-    secs.push({
-      id: "systems", title: "Existing systems", subtitle: "What's installed today — yes / no, then describe",
-      group: "intake", step: 3, kind: "systems",
     });
     DISCIPLINE_GROUPS.forEach((g) => {
       secs.push({
@@ -795,87 +776,6 @@ export default function SurveyEditor({
     background: checked ? "var(--accent)" : "#fff",
   });
 
-  /* ---------- site intake renderers ---------- */
-  function renderDiscField(disc: DisciplineKey, f: MeasureField) {
-    if (f.type === "check") {
-      const c = dv(disc, f.key) === true;
-      return (
-        <div key={f.key} style={{ gridColumn: "1 / -1" }}>
-          <div onClick={() => setDisc(disc, f.key, !c)} style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", border: "1px solid #e4e7ec", borderRadius: 10, cursor: "pointer", background: "#fff" }}>
-            <span style={boxStyle(c)}>{c ? "✓" : ""}</span>
-            <span style={{ fontSize: 14, fontWeight: 500, color: "#3a3f4a" }}>{f.label}</span>
-          </div>
-        </div>
-      );
-    }
-    if (f.type === "select") {
-      return (
-        <div key={f.key}>
-          <label style={labelStyle}>{f.label}</label>
-          <select value={String(dv(disc, f.key) || "")} onChange={(e) => setDisc(disc, f.key, e.target.value)} style={selStyle}>
-            <option value="">— Select —</option>
-            {(f.options || []).map((o) => (
-              <option key={o} value={o}>{o}</option>
-            ))}
-          </select>
-        </div>
-      );
-    }
-    return (
-      <div key={f.key}>
-        <label style={labelStyle}>{f.label}</label>
-        <input value={String(dv(disc, f.key) || "")} onChange={(e) => setDisc(disc, f.key, e.target.value)} style={inpStyle} />
-      </div>
-    );
-  }
-
-  function renderInventory(disc: DisciplineKey, category: string, label: string) {
-    const rows = invRows(disc, category);
-    const types = meta.intakeCatalog[category] || [];
-    return (
-      <div key={category} style={{ gridColumn: "1 / -1" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 7 }}>
-          <label style={{ ...labelStyle, marginBottom: 0 }}>{label}</label>
-          <span style={{ fontSize: 11, color: "#aab0bb" }}>type · qty · flag if it needs attention</span>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-          {rows.map((r) => {
-            const known = !r.type || types.includes(r.type);
-            return (
-              <div key={r.id} className="sv-inv-row">
-                <select value={known ? r.type : "__custom__"} onChange={(e) => patchInvRow(r.id, { type: e.target.value === "__custom__" ? r.type || " " : e.target.value })} style={{ ...selStyle, padding: "10px 11px" }}>
-                  <option value="">— Type —</option>
-                  {types.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                  {!known && <option value="__custom__">{r.type}</option>}
-                </select>
-                <input inputMode="numeric" value={r.quantity} onChange={(e) => patchInvRow(r.id, { quantity: e.target.value })} placeholder="Qty" style={{ ...measStyle, padding: "10px 10px", textAlign: "center" }} />
-                <button
-                  onClick={() => patchInvRow(r.id, { flag: !r.flag })}
-                  title="Flag — needs attention / replace / verify"
-                  style={{ minHeight: 42, borderRadius: 9, cursor: "pointer", fontSize: 15, lineHeight: 1, border: `1px solid ${r.flag ? "#f0e2bd" : "#e4e7ec"}`, background: r.flag ? "#fbf3dd" : "#fff", color: r.flag ? "#8a6d1f" : "#c4c9d2" }}
-                >
-                  ⚑
-                </button>
-                <input value={r.notes} onChange={(e) => patchInvRow(r.id, { notes: e.target.value })} placeholder="Notes / model" style={{ ...inpStyle, padding: "10px 11px" }} />
-                <button onClick={() => removeInvRow(r.id)} aria-label="Remove row" style={{ minHeight: 42, borderRadius: 9, cursor: "pointer", fontSize: 16, lineHeight: 1, border: "1px solid #e4e7ec", background: "#fff", color: "#aab0bb" }}>
-                  ×
-                </button>
-              </div>
-            );
-          })}
-        </div>
-        <button
-          onClick={() => addInvRow(disc, category)}
-          style={{ marginTop: rows.length ? 8 : 0, fontSize: 12.5, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER_LT}`, borderRadius: 9, padding: "9px 13px", cursor: "pointer", minHeight: 38 }}
-        >
-          + Add {label.toLowerCase().replace(/s$/, "")}
-        </button>
-      </div>
-    );
-  }
-
   const stageBg = (i: number) => (i === curStageIdx ? ACCENT : i < curStageIdx ? ACCENT_SOFT : "#f1f2f5");
   const stageCol = (i: number) => (i === curStageIdx ? "#fff" : i < curStageIdx ? ACCENT_INK : "#9aa0ab");
 
@@ -1117,53 +1017,22 @@ export default function SurveyEditor({
                           </div>
                         </div>
                       )}
-                      {sec.kind === "systems" && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                          {SYSTEM_KEYS.map((s) => {
-                            const st = draft.systemsState[s.key] || { installed: "", desc: "" };
-                            return (
-                              <div key={s.key} style={{ border: "1px solid #e4e7ec", borderRadius: 10, padding: "11px 13px", background: "#fff" }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                                  <span style={{ fontSize: 14, fontWeight: 500, color: "#3a3f4a", flex: 1, minWidth: 120 }}>{s.label}</span>
-                                  <div style={{ display: "flex", gap: 7 }}>
-                                    <button onClick={() => setSystem(s.key, { installed: st.installed === "yes" ? "" : "yes" })} style={{ ...toggleBtn(st.installed === "yes"), flex: "none", padding: "8px 16px", minHeight: 38 }}>Yes</button>
-                                    <button onClick={() => setSystem(s.key, { installed: st.installed === "no" ? "" : "no" })} style={{ ...toggleBtn(st.installed === "no"), flex: "none", padding: "8px 16px", minHeight: 38 }}>No</button>
-                                  </div>
-                                </div>
-                                {st.installed === "yes" && (
-                                  <input value={st.desc} onChange={(e) => setSystem(s.key, { desc: e.target.value })} placeholder={"Describe — " + s.hint} style={{ ...inpStyle, marginTop: 9, padding: "10px 12px" }} />
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
                       {sec.kind === "discipline" && (() => {
                         const g = DISCIPLINE_GROUPS.find((x) => x.key === sec.disc);
                         if (!g) return null;
-                        const scope = dv(g.key, "scope");
-                        const scopeSet = Array.isArray(scope) ? scope : [];
                         return (
-                          <div>
-                            <div className="sv-grid">{g.fields.map((f) => renderDiscField(g.key, f))}</div>
-                            <div style={{ marginTop: 14 }}>
-                              <label style={labelStyle}>{g.scopeLabel}</label>
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                                {g.scopeOptions.map((o) => (
-                                  <button key={o} onClick={() => toggleDiscScope(g.key, o)} style={chipStyle(scopeSet.includes(o))}>{o}</button>
-                                ))}
-                              </div>
-                            </div>
-                            {g.inventories.length > 0 && (
-                              <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 16 }}>
-                                {g.inventories.map((inv) => renderInventory(g.key, inv.category, inv.label))}
-                              </div>
-                            )}
-                            <div style={{ marginTop: 14 }}>
-                              <label style={labelStyle}>Notes</label>
-                              <textarea value={String(dv(g.key, "notes") || "")} onChange={(e) => setDisc(g.key, "notes", e.target.value)} style={taStyle} />
-                            </div>
-                          </div>
+                          <SystemsSection
+                            group={g}
+                            venueClass={draft.venueClass}
+                            intakeCatalog={meta.intakeCatalog}
+                            value={dv}
+                            setValue={setDisc}
+                            toggleScope={toggleDiscScope}
+                            inventoryRows={invRows}
+                            addInventoryRow={addInvRow}
+                            patchInventoryRow={patchInvRow}
+                            removeInventoryRow={removeInvRow}
+                          />
                         );
                       })()}
                       {sec.kind === "conditions" && (

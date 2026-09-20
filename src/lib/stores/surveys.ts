@@ -8,8 +8,10 @@ import {
 } from "@/db/doc-store";
 import {
   blankSystemsState,
+  presentOptionsFor,
   SYSTEM_KEYS,
   type DisciplineData,
+  type DisciplineKey,
   type InventoryRow,
   type SystemState,
 } from "./survey-intake";
@@ -536,7 +538,11 @@ function normalize(s: SurveyRecord): SurveyRecord {
     if (!st || st.installed !== "yes") return;
     const d = (s.disciplines ||= {});
     const branch = (d[key] ||= {});
-    if (!Array.isArray(branch.present)) branch.present = ["__migrated__"];
+    if (!Array.isArray(branch.present)) {
+      branch.present = [
+        presentOptionsFor(key as DisciplineKey, s.venueClass)[0],
+      ].filter(Boolean);
+    }
   });
   return s;
 }
