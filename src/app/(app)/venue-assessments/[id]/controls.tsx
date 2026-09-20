@@ -43,6 +43,7 @@ import { PhotosSection } from "./sections/photos";
 import { SystemsSection } from "./sections/systems";
 import { LinesetsSection } from "./sections/linesets";
 import { AssessmentUsageSection } from "./sections/assessment-usage";
+import { AssessmentConditionSection } from "./sections/assessment-condition";
 import { blankLinesetRow, nextLinesetPosition } from "@/lib/stores/linesets";
 
 /* Serializable props from the server — the store is DB-backed and cannot be
@@ -55,12 +56,12 @@ const STEP_BY_ID: Record<string, number> = {
   cust: 0, visit: 0, project: 0, assign: 0, site: 1, conditions: 1, lifeSafety: 1,
   mQuick: 2, mLayout: 2, mSection: 2, mBeams: 2, mFOH: 2, mHouse: 2, m3d: 2,
   tier1: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3, linesets: 3, assessmentToggle: 3,
-  assessmentUsage: 5,
+  assessmentUsage: 5, assessmentCondition: 5,
   photos: 4, notes: 4,
 };
 const BRIEF_IDS: Record<string, boolean> = { cust: true, visit: true, project: true, assign: true };
 const INTAKE_IDS: Record<string, boolean> = { tier1: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true, linesets: true, assessmentToggle: true };
-const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "linesets", "assessmentToggle", "photos", "notes", "assessmentUsage"];
+const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "linesets", "assessmentToggle", "photos", "notes", "assessmentUsage", "assessmentCondition"];
 const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", curtain: "dCurtain", lighting: "dLighting", av: "dAv" };
 
 /** Display label for a venue class — the derived `venueType` fallback. */
@@ -492,6 +493,7 @@ export default function SurveyEditor({
     });
     if (draft.assessmentEnabled) {
       secs.push({ id: "assessmentUsage", title: "Usage & needs profile", subtitle: "How the room is used, operated, and expected to grow", group: "assessment", step: 5, kind: "assessmentUsage" });
+      secs.push({ id: "assessmentCondition", title: "Condition ratings", subtitle: "Good, monitor, or replace—with formal inspection references", group: "assessment", step: 5, kind: "assessmentCondition" });
     }
     secs.forEach((s) => {
       if (s.group !== "assessment") {
@@ -813,7 +815,7 @@ export default function SurveyEditor({
         .sv-rail::-webkit-scrollbar { display:none; }
         .sv-rail { -ms-overflow-style:none; scrollbar-width:none; }
         .sv-inv-row { display:grid; grid-template-columns:minmax(130px,1.3fr) 68px 44px minmax(110px,1fr) 40px; gap:7px; align-items:stretch; }
-        @media (max-width:640px){ .sv-grid{ grid-template-columns:1fr !important; } .sv-pad{ padding-left:15px !important; padding-right:15px !important; } .sv-inv-row{ grid-template-columns:minmax(0,1.3fr) 58px 42px minmax(0,1fr) 38px; } .va-lineset-desktop{ display:none !important; } .va-lineset-mobile{ display:flex !important; } }
+        @media (max-width:640px){ .sv-grid{ grid-template-columns:1fr !important; } .sv-pad{ padding-left:15px !important; padding-right:15px !important; } .sv-inv-row{ grid-template-columns:minmax(0,1.3fr) 58px 42px minmax(0,1fr) 38px; } .va-lineset-desktop{ display:none !important; } .va-lineset-mobile{ display:flex !important; } .va-condition-row,.va-cert-row{ grid-template-columns:1fr !important; } }
       `}</style>
 
       {/* sticky header */}
@@ -1090,6 +1092,9 @@ export default function SurveyEditor({
                           onAssessment={(assessment) => setField("assessment", assessment)}
                           onQuoteField={(key, value) => setField(key, value)}
                         />
+                      )}
+                      {sec.kind === "assessmentCondition" && (
+                        <AssessmentConditionSection assessment={draft.assessment} onChange={(assessment) => setField("assessment", assessment)} />
                       )}
                       {sec.kind === "conditions" && (
                         <ConditionsSection

@@ -54,6 +54,16 @@ export const CONDITION_RATINGS: Array<{ key: Exclude<ConditionRating, "">; label
   { key: "replace", label: "Replace" },
 ];
 
+export const CONDITION_GROUPS: Array<{
+  key: "rigging" | "lighting" | "av";
+  label: string;
+  categories: ConditionCategory[];
+}> = [
+  { key: "rigging", label: "Rigging / Fly / Soft Goods", categories: ["rigging", "curtains", "motors"] },
+  { key: "lighting", label: "Stage & Theatrical Lighting", categories: ["lighting.console", "lighting.dimming", "lighting.fixtures"] },
+  { key: "av", label: "Sound / AV / Video", categories: ["av.console", "av.speakers", "av.mics", "av.video"] },
+];
+
 /* ---- usage vocabularies (brief §how the room is used) ---- */
 
 export type EventFrequency = "" | "weekly" | "monthly" | "fewPerYear" | "rare";

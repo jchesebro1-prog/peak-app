@@ -146,5 +146,6 @@ export type SectionDef = {
   | { kind: "linesets" }
   | { kind: "assessmentToggle" }
   | { kind: "assessmentUsage" }
+  | { kind: "assessmentCondition" }
   | { kind: "discipline"; disc: DisciplineKey }
 );

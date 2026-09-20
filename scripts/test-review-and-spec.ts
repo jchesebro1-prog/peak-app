@@ -40,6 +40,7 @@ import {
 
 import {
   CONDITION_CATEGORIES, CONDITION_RATINGS, BUDGET_TIERS, FINDING_BUCKETS,
+  CONDITION_GROUPS,
   EVENT_TYPES, EVENT_FREQUENCIES, STAFF_TIERS, GROWTH_GOALS,
   blankAssessment, seedFindings, newFindingId, toggleEventType, toggleGrowthGoal,
 } from "@/lib/stores/assessment";
@@ -3268,6 +3269,12 @@ ok(
   "electrical is NOT a rated category — brief says outside Peak's lane"
 );
 ok(CONDITION_RATINGS.map((r) => r.key).join(",") === "good,monitor,replace", "Good/Monitor/Replace scale");
+ok(CONDITION_GROUPS.length === 3, "condition ratings render under the brief's three headings");
+ok(
+  CONDITION_GROUPS.flatMap((group) => group.categories).sort().join(",") ===
+    CONDITION_CATEGORIES.map((category) => category.key).sort().join(","),
+  "the three condition headings cover every rated category exactly once"
+);
 ok(BUDGET_TIERS.length === 4, "four budget tiers");
 ok(BUDGET_TIERS[0].key === "u5k" && BUDGET_TIERS[3].key === "over100k", "budget tiers span <$5k to $100k+");
 ok(FINDING_BUCKETS.map((b) => b.key).join(",") === "now,soon,later", "Now/Soon/Later buckets");
