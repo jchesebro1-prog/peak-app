@@ -2,7 +2,7 @@ import { users, appSettings } from "./schema";
 import type { Db } from "./index";
 import { IDENTITY, emailFor } from "@/lib/team";
 import { listDocs, upsertDoc, clearCollection, type Doc } from "./doc-store";
-import type { CollectionName } from "./doc-tables";
+import { DOC_TABLES, type CollectionName } from "./doc-tables";
 import { customersSeed } from "./seeds/customers";
 import { quotesSeed } from "./seeds/quotes";
 import { catalogSeed } from "./seeds/catalog";
@@ -128,8 +128,17 @@ export async function seedDemoCollections(): Promise<number> {
   return seeded;
 }
 
-/** Collections filled by the demo seed — the surface a go-live reset wipes. */
-export const DEMO_COLLECTIONS: CollectionName[] = DEMO_SEEDS.map(([coll]) => coll);
+/**
+ * Business-document collections wiped by the go-live reset.
+ *
+ * This deliberately comes from the table registry rather than DEMO_SEEDS:
+ * child collections such as tasks, grid sheets, notes, and equipment
+ * bookings may contain demo-created records even though they have no seed
+ * fixture of their own.
+ */
+export const DEMO_COLLECTIONS: CollectionName[] = Object.keys(
+  DOC_TABLES
+) as CollectionName[];
 
 /**
  * Go-live reset — the inverse of seedDemoCollections. Hard-deletes every
@@ -149,18 +158,25 @@ export async function clearDemoData(): Promise<number> {
 export async function seedIfEmpty(db: Db) {
   const existing = await db.select({ id: users.id }).from(users).limit(1);
   if (existing.length === 0) {
-    await db.insert(users).values(seedUsers());
+    // getDb() schedules local auto-seeding after opening the database, while
+    // `npm run db:seed` also calls seedIfEmpty() explicitly. On a brand-new
+    // database both callers can observe an empty table before either insert
+    // commits, so the bootstrap must tolerate the losing side of that race.
+    await db.insert(users).values(seedUsers()).onConflictDoNothing();
   }
   const settingsRows = await db.select().from(appSettings).limit(1);
   // Local dev (no DATABASE_URL) gets demo data on by default so the app is
   // explorable; hosted databases start clean unless SEED_DEMO=true.
   const demoDefault = !process.env.DATABASE_URL || process.env.SEED_DEMO === "true";
   if (settingsRows.length === 0) {
-    await db.insert(appSettings).values({
-      id: "main",
-      data: { ...DEFAULT_SETTINGS, seedDemo: demoDefault },
-      updatedAt: Date.now(),
-    });
+    await db
+      .insert(appSettings)
+      .values({
+        id: "main",
+        data: { ...DEFAULT_SETTINGS, seedDemo: demoDefault },
+        updatedAt: Date.now(),
+      })
+      .onConflictDoNothing();
   }
   const data =
     settingsRows.length === 0

@@ -5367,7 +5367,7 @@ instant locally. It was only found by seeding 1,700 synthetic companies and meas
 
 ---
 
-## 94. Go-live reset doesn't clear `equipment_bookings` — OPEN — found in Rentals module final review
+## 94. Go-live reset doesn't clear `equipment_bookings` — DONE 2026-09-20 — reset derives from the full document-table registry
 
 **Reported:** 2026-08-08, whole-branch final review of the new Rentals module.
 
@@ -5386,6 +5386,14 @@ here to avoid scope creep into unrelated collections.
 
 **Ties to:** the Rentals module build (docs/superpowers/plans/2026-08-07-rentals-module.md).
 
-**Status:** flagged as a spawned follow-up task, not fixed in the Rentals branch.
+**Status:** DONE 2026-09-20. `DEMO_COLLECTIONS` now derives from the
+authoritative `DOC_TABLES` registry rather than the subset that has seed
+fixtures, so the reset covers `equipment_bookings`, `grid_sheets`, `tasks`,
+`notes`, and every future registered business-document collection. The
+existing coverage assertions prove both full registry equality and the known
+no-seed children. While verifying from a fresh local database, the reset also
+exposed a first-touch race between dev auto-seeding and `npm run db:seed`;
+bootstrap inserts for users/settings are now conflict-safe, and a clean
+`db:reset-local` plus the full spec suite pass.
 
 ---
