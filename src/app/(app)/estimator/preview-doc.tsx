@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
 import { fmt, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
-import type { SpecItem, SpecSection } from "./types";
+import type { PaymentTerms, SpecItem, SpecSection } from "./types";
 
 /**
  * Customer preview — the quote document with the Show-on-PDF toggles.
@@ -80,18 +80,13 @@ export type PreviewProps = {
   pdfCover: boolean;
   pdfTerms: boolean;
   pdfOptions: boolean;
+  paymentTerms: PaymentTerms;
+  paymentTermsOptions: readonly PaymentTerms[];
+  setPaymentTerms: (terms: PaymentTerms) => void;
   togglePdf: (flag: "pdfQty" | "pdfNotes" | "pdfPrices" | "pdfCover" | "pdfTerms" | "pdfOptions") => void;
 };
 
 const DAY_MS = 86400000;
-
-/** The four sentences of the standing terms line, itemized. */
-const TERMS = [
-  "This quote is valid for 30 days from the issue date.",
-  "Pricing reflects current manufacturer list.",
-  "Acceptance generates a sales order in QuickBooks.",
-  "Installation is scheduled upon receipt of a signed quote and 40% deposit.",
-];
 
 function longDate(ms: number): string {
   return new Date(ms).toLocaleDateString("en-US", {
@@ -103,9 +98,8 @@ function longDate(ms: number): string {
 
 export default function PreviewDoc(p: PreviewProps) {
   const isItemized = p.detail === "itemized";
-  const lineCols = p.pdfPrices
-    ? (p.pdfQty ? "1fr 70px 104px" : "1fr 104px")
-    : (p.pdfQty ? "1fr 70px" : "1fr");
+  const showLines = p.pdfQty || p.pdfNotes || p.pdfPrices;
+  const lineCols = [p.pdfNotes ? "1fr" : "", p.pdfQty ? "70px" : "", p.pdfPrices ? "104px" : ""].filter(Boolean).join(" ");
   const showCover = !!(p.pdfCover && p.quoteNote && p.quoteNote.trim());
   const revDateLabel = longDate(p.revDateMs);
   const validThruLabel = longDate(p.revDateMs + 30 * DAY_MS);
@@ -196,16 +190,19 @@ export default function PreviewDoc(p: PreviewProps) {
           View only on phone — open on iPad or desktop to edit.
         </div>
       )}
-      <div
+      <div className="est-previewbody" style={{ display: "flex", flex: 1, minHeight: 0 }}>
+      <aside
         className="est-prevhead"
         style={{
           display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
+          flexDirection: "column",
+          alignItems: "stretch",
+          justifyContent: "flex-start",
           gap: 18,
-          padding: "11px 22px",
+          width: 264,
+          padding: "20px 18px",
           background: "#fff",
-          borderBottom: "1px solid #ececf0",
+          borderRight: "1px solid #ececf0",
           flexShrink: 0,
         }}
       >
@@ -230,10 +227,9 @@ export default function PreviewDoc(p: PreviewProps) {
         <div
           style={{
             display: "flex",
-            alignItems: "center",
+            flexDirection: "column",
+            alignItems: "stretch",
             gap: 9,
-            flexWrap: "wrap",
-            justifyContent: "center",
           }}
         >
           <span
@@ -259,15 +255,12 @@ export default function PreviewDoc(p: PreviewProps) {
               By section
             </button>
           </div>
-          <button type="button" onClick={() => p.togglePdf("pdfQty")} style={p.pdfQty ? segOn : segOff}>
-            {(p.pdfQty ? "✓ " : "") + "Quantities"}
-          </button>
-          <button type="button" onClick={() => p.togglePdf("pdfNotes")} style={p.pdfNotes ? segOn : segOff}>
-            {(p.pdfNotes ? "✓ " : "") + "Line notes"}
-          </button>
-          <button type="button" onClick={() => p.togglePdf("pdfPrices")} style={p.pdfPrices ? segOn : segOff} title="Off = client BOM: quantities only, no per-line pricing">
-            {(p.pdfPrices ? "✓ " : "") + "Prices"}
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 2, padding: 4, borderRadius: 7, background: "#e6e8ec" }}>
+            <span style={{ padding: "5px 7px", fontSize: 10, fontWeight: 700, color: "#777d88", textTransform: "uppercase", letterSpacing: ".04em" }}>Line detail</span>
+            <button type="button" onClick={() => p.togglePdf("pdfQty")} style={p.pdfQty ? segOn : segOff}>{(p.pdfQty ? "✓ " : "") + "Quantities"}</button>
+            <button type="button" onClick={() => p.togglePdf("pdfNotes")} style={p.pdfNotes ? segOn : segOff}>{(p.pdfNotes ? "✓ " : "") + "Descriptions"}</button>
+            <button type="button" onClick={() => p.togglePdf("pdfPrices")} style={p.pdfPrices ? segOn : segOff}>{(p.pdfPrices ? "✓ " : "") + "Prices"}</button>
+          </div>
           <button type="button" onClick={() => p.togglePdf("pdfCover")} style={p.pdfCover ? segOn : segOff}>
             {(p.pdfCover ? "✓ " : "") + "Cover note"}
           </button>
@@ -277,6 +270,9 @@ export default function PreviewDoc(p: PreviewProps) {
           <button type="button" onClick={() => p.togglePdf("pdfTerms")} style={p.pdfTerms ? segOn : segOff}>
             {(p.pdfTerms ? "✓ " : "") + "Terms"}
           </button>
+          <select value={p.paymentTerms} onChange={(event) => p.setPaymentTerms(event.target.value as PaymentTerms)} aria-label="Payment terms" style={{ border: "1px solid #dfe2e8", borderRadius: 7, background: "#fff", color: "#5b616e", padding: "6px 8px", fontSize: 11.5 }}>
+            {p.paymentTermsOptions.map((terms) => <option key={terms} value={terms}>{terms}</option>)}
+          </select>
         </div>
         <button
           type="button"
@@ -294,7 +290,7 @@ export default function PreviewDoc(p: PreviewProps) {
         >
           Download PDF
         </button>
-      </div>
+      </aside>
 
       <div
         className="est-scroll est-docwrap"
@@ -502,7 +498,7 @@ export default function PreviewDoc(p: PreviewProps) {
                   {ps.subtotalLabel}
                 </span>
               </div>
-              {isItemized ? (
+              {isItemized && showLines ? (
                 <div style={{ marginBottom: 6 }}>
                   {ps.lines.map((ln) => (
                     <div
@@ -517,7 +513,7 @@ export default function PreviewDoc(p: PreviewProps) {
                         alignItems: "center",
                       }}
                     >
-                      <span>
+                      {p.pdfNotes && <span>
                         {ln.desc}
                         {ln.showComment && (
                           <span
@@ -532,7 +528,7 @@ export default function PreviewDoc(p: PreviewProps) {
                             {ln.comment}
                           </span>
                         )}
-                      </span>
+                      </span>}
                       {p.pdfQty && (
                         <span
                           style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#8c919c" }}
@@ -549,7 +545,7 @@ export default function PreviewDoc(p: PreviewProps) {
                       )}
                     </div>
                   ))}
-                  {ps.hasFreight && (
+                  {ps.hasFreight && (p.pdfNotes || p.pdfPrices) && (
                     <div
                       style={{
                         display: "grid",
@@ -562,7 +558,7 @@ export default function PreviewDoc(p: PreviewProps) {
                         color: "#5b616e",
                       }}
                     >
-                      <span>Freight &amp; delivery</span>
+                      {p.pdfNotes && <span>Freight &amp; delivery</span>}
                       {p.pdfQty && <span></span>}
                       {p.pdfPrices && (
                         <span
@@ -574,7 +570,7 @@ export default function PreviewDoc(p: PreviewProps) {
                     </div>
                   )}
                 </div>
-              ) : (
+              ) : !isItemized ? (
                 <div
                   style={{
                     padding: "7px 13px 9px",
@@ -587,7 +583,7 @@ export default function PreviewDoc(p: PreviewProps) {
                   {ps.lines.length} line {ps.lines.length === 1 ? "item" : "items"}
                   {ps.hasFreight ? " · includes freight & delivery" : ""}
                 </div>
-              )}
+              ) : null}
             </div>
           ))}
 
@@ -736,7 +732,7 @@ export default function PreviewDoc(p: PreviewProps) {
                       lineHeight: 1.75,
                     }}
                   >
-                    {TERMS.map((line) => (
+                    {["This quote is valid for 30 days from the issue date.", `Payment terms: ${p.paymentTerms}.`].map((line) => (
                       <li key={line}>{line}</li>
                     ))}
                   </ul>
@@ -798,6 +794,7 @@ export default function PreviewDoc(p: PreviewProps) {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

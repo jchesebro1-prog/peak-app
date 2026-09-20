@@ -3,6 +3,9 @@ import type { FixtureRates } from "@/lib/stores/pricing";
 import type { TaskRecord } from "@/lib/stores/tasks";
 import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemblies";
 
+export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
+export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
+
 /**
  * Estimator types. The spec shapes (SpecItem / SpecSection / SpecMob) are the
  * prototype's in-memory section/item field names EXACTLY — they are persisted
@@ -40,6 +43,8 @@ export type SpecItem = {
   comment?: string;
   /** internal-only note (never shown to the customer) */
   internalNote?: string;
+  /** Optional vendor/product page for this material. */
+  link?: string;
   mob?: SpecMob;
   /** Orderable component detail for a catalog-backed fixture assembly. */
   components?: Array<{ sku: string; label: string; role: AssemblyRole; qty: number; unit: string; cost: number; price: number }>;
@@ -60,6 +65,7 @@ export type SpecSection = {
 
 export type CustomDraft = {
   desc: string;
+  link: string;
   sku: string;
   unit: string;
   qty: string;
@@ -171,6 +177,7 @@ export type InitialQuote = {
   locationId: string | null;
   contactName: string;
   quoteNote: string;
+  paymentTerms: PaymentTerms;
   owner: string;
   revNum: number;
   revDateMs: number;
@@ -178,7 +185,7 @@ export type InitialQuote = {
    *  margins; re-stamped server-side when the customer/contact changes. */
   pricingTier: string | null;
   tierMargin: number | null;
-  /** Saved builder state (spec.sections) — null falls back to the demo sections. */
+  /** Saved builder state (spec.sections) — null starts a clean estimate. */
   sections: SpecSection[] | null;
 };
 

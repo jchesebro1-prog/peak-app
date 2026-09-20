@@ -2517,3 +2517,22 @@ Quick Design's five auto-fixture buckets can each select one of the same
 assemblies; the BOM then uses the assembly name and current catalog cost.
 Missing catalog SKUs remain visible as missing rather than silently falling
 back to invented fixture data.
+
+## D135. New estimates are clean, margin-seeded material documents (2026-09-20)
+
+Opening `/estimator` without an id now creates a clean unsaved estimate; it no
+longer opens Q-2041 or sample systems. New systems begin at 2% freight, and
+catalog selections seed unit sell from the customer's pricing tier or the 30%
+base margin. Manufacturer remains catalog/item metadata and is no longer a
+system-level estimator control.
+
+The internal material grid uses Unit cost, Unit sell, and Ext. sell. Vendor
+quotes and material lists share one client-side CSV import with a downloadable
+example; each row may carry an optional product link. File selection is a
+visually explicit button and imported rows report added/skipped counts.
+
+Payment terms are one persisted choice: Deposit with terms, 100% prepay, Net
+30, Net 60, or Unknown. Customer-preview line detail groups quantities,
+descriptions, and prices; switching all three off removes the line rows. Quote
+display controls are a left sidebar on desktop and collapse above the document
+on narrow screens.

@@ -30,7 +30,7 @@ import {
   type InspectionRecord,
 } from "@/lib/stores/inspections";
 import { list as catalogList } from "@/lib/stores/catalog";
-import type { CatalogSearch, SpecMob, SpecSection } from "./types";
+import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection } from "./types";
 import type { SuggestPart } from "./estimator-data";
 import { activeUsers } from "@/lib/users";
 import {
@@ -54,6 +54,7 @@ import {
 type QuoteExtras = {
   contactName?: string;
   quoteNote?: string;
+  paymentTerms?: PaymentTerms;
   spec?: { sections: SpecSection[]; mobs: SpecMob[] };
 };
 
@@ -66,6 +67,7 @@ export type SavePayload = {
   locationId: string | null;
   contactName: string;
   quoteNote: string;
+  paymentTerms: PaymentTerms;
   value: number;
   margin: number;
   status: QuoteStatus;
@@ -120,6 +122,7 @@ export async function saveQuoteAction(
     locationId: payload.locationId || null,
     contactName: payload.contactName || "",
     quoteNote: payload.quoteNote || "",
+    paymentTerms: payload.paymentTerms,
     value: payload.value,
     margin: payload.margin,
     status: payload.status,
@@ -156,6 +159,7 @@ export async function saveQuoteAction(
     q = await update(created.id, {
       contactName: payload.contactName || "",
       quoteNote: payload.quoteNote || "",
+      paymentTerms: payload.paymentTerms,
     } as QuotePatch);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand

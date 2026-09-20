@@ -25,7 +25,6 @@ import {
 import { TasksCard } from "@/components/tasks-card";
 import type { DraftedLine } from "./ai-scope-modal";
 import {
-  demoSections,
   DISC_LABEL,
   type SuggestPart,
 } from "./estimator-data";
@@ -52,6 +51,7 @@ import type {
   SpecSection,
   TravelLite,
 } from "./types";
+import { PAYMENT_TERMS } from "./types";
 import { assemblyDescription } from "@/lib/fixture-assemblies";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import SectionCard from "./section-card";
@@ -69,6 +69,10 @@ import PreviewDoc from "./preview-doc";
 
 /** Prototype prop taxRatePct defaulted to 0 — kept as a constant. */
 const TAX_RATE_PCT = 0;
+
+const freshSections = (): SpecSection[] => [
+  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct: 2, items: [] },
+];
 
 const CSS = `
 .est-input { font-family: var(--font-mono); }
@@ -96,6 +100,8 @@ const CSS = `
   .est-docwrap { padding: 16px !important; }
   .est-doc { width: 100% !important; padding: 26px 20px !important; }
   .est-prevhead { flex-wrap: wrap !important; row-gap: 10px !important; }
+  .est-previewbody { flex-direction: column !important; }
+  .est-prevhead { width: 100% !important; border-right: none !important; border-bottom: 1px solid #ececf0 !important; }
   .est-modalwrap { align-items: flex-end !important; padding: 0 !important; }
   .est-modal { width: 100% !important; max-width: 100% !important; border-radius: 16px 16px 0 0 !important; max-height: 92vh !important; }
   .est-modal input, .est-modal select, .est-modal textarea { font-size: 16px !important; }
@@ -106,6 +112,7 @@ const CSS = `
 
 const freshCustom = (): CustomDraft => ({
   desc: "",
+  link: "",
   allowance: "",
   sku: "",
   unit: "ea",
@@ -239,7 +246,7 @@ export default function EstimatorClient({
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   const [sections, setSections] = useState<SpecSection[]>(
-    () => initial.sections ?? demoSections()
+    () => initial.sections ?? freshSections()
   );
   const nidRef = useRef<number | null>(null);
   if (nidRef.current == null) nidRef.current = computeNid(initial.sections);
@@ -267,6 +274,7 @@ export default function EstimatorClient({
   const [locationId, setLocationId] = useState(initial.locationId);
   const [contactName, setContactName] = useState(initial.contactName);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
+  const [paymentTerms, setPaymentTerms] = useState(initial.paymentTerms);
   const [revNum, setRevNum] = useState(initial.revNum);
   const [revDateMs, setRevDateMs] = useState(initial.revDateMs);
   const [pdfQty, setPdfQty] = useState(true);
@@ -277,7 +285,7 @@ export default function EstimatorClient({
   const [pdfPrices, setPdfPrices] = useState(true);
   const [detail, setDetail] = useState<"itemized" | "sectioned">("itemized");
   const [activeId, setActiveId] = useState<string | null>(
-    () => (initial.sections ?? demoSections())[0]?.id ?? null
+    () => (initial.sections ?? freshSections())[0]?.id ?? null
   );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [openCatalog, setOpenCatalog] = useState<string | null>(null);
@@ -327,8 +335,8 @@ export default function EstimatorClient({
   const isPreview = phone || mode === "preview";
   const isInternal = true; // build mode is the internal view (prototype view: 'internal')
   const cols = isInternal
-    ? "minmax(190px,1fr) 112px 128px 80px 58px 100px 22px"
-    : "minmax(190px,1fr) 112px 128px 100px 22px";
+    ? "minmax(190px,1fr) 112px 100px 100px 100px 22px"
+    : "minmax(190px,1fr) 112px 100px 100px 22px";
 
   /* ---------------- travel (seeded + fetched on demand, punch #89) ----------------
      `travel` used to carry an estimate for every customer AND venue in the
@@ -402,6 +410,7 @@ export default function EstimatorClient({
         locationId: locationId || null,
         contactName: contactName || "",
         quoteNote: quoteNote || "",
+        paymentTerms,
         value: t.grand,
         margin: t.margin,
         status,
@@ -605,11 +614,6 @@ export default function EstimatorClient({
   };
   const renameSystem = (secId: string, name: string) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, name } : s)));
-  /** Manufacturer feeds the catalog-backed quick-add suggestions (PUNCHLIST
-   *  #14, decision B) — sections start with mfr:"" (addSystem) and had no way
-   *  to set one until now. */
-  const setSectionMfr = (secId: string, mfr: string) =>
-    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, mfr } : s)));
   const deleteSystem = (secId: string) => {
     const list = sections.filter((s) => s.id !== secId);
     setSections(list);
@@ -629,7 +633,7 @@ export default function EstimatorClient({
     const id = "sys" + nextId();
     setSections((ss) => [
       ...ss,
-      { id, name: "New System", kind: "materials", mfr: "", freightPct: 0, items: [] },
+      { id, name: "New System", kind: "materials", mfr: "", freightPct: 2, items: [] },
     ]);
     setActiveId(id);
     setOpenCatalog(id);
@@ -642,8 +646,9 @@ export default function EstimatorClient({
     );
 
   const addPart = (secId: string, cat: SuggestPart) => {
+    const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
     pushItems(secId, [
-      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: 1, unit: cat.unit, cost: cat.cost, price: cat.price },
+      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: 1, unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
     ]);
     setOpenCatalog(null);
   };
@@ -792,6 +797,7 @@ export default function EstimatorClient({
         cost,
         price,
         custom: true,
+        link: (d.link || "").trim() || undefined,
         allowance: d.allowance ? true : undefined,
       },
     ]);
@@ -2120,7 +2126,6 @@ export default function EstimatorClient({
                   }}
                   onToggleExpand={() => toggleExpand(sec.id)}
                   onRename={(name) => renameSystem(sec.id, name)}
-                  onSetMfr={(v) => setSectionMfr(sec.id, v)}
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}
                   onSetFreight={(v) => setFreightPct(sec.id, v)}
@@ -2134,6 +2139,7 @@ export default function EstimatorClient({
                   onToggleLabor={() => toggleLabor(sec.id)}
                   onToggleCustom={() => toggleCustom(sec.id)}
                   onAddPart={(cat) => addPart(sec.id, cat)}
+                  onImportMaterials={(items) => pushItems(sec.id, items.map((item) => ({ ...item, id: nextId(), custom: !item.sku })))}
                   onSetCustomDraft={(field, v) => setCustomDraft((d) => ({ ...d, [field]: v }))}
                   onAddCustomPart={() => addCustomPart(sec.id)}
                 />
@@ -2265,6 +2271,9 @@ export default function EstimatorClient({
           pdfCover={pdfCover}
           pdfTerms={pdfTerms}
           pdfOptions={pdfOptions}
+          paymentTerms={paymentTerms}
+          paymentTermsOptions={PAYMENT_TERMS}
+          setPaymentTerms={setPaymentTerms}
           togglePdf={(flag) => {
             if (flag === "pdfQty") setPdfQty((v) => !v);
             else if (flag === "pdfNotes") setPdfNotes((v) => !v);

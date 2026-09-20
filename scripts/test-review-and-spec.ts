@@ -66,11 +66,29 @@ import {
   assemblyUnitTotals,
   resolveFixtureAssemblies,
 } from "@/lib/fixture-assemblies";
+import { parseMaterialCsv } from "@/app/(app)/estimator/material-csv";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
+
+/* --- Estimator material/vendor quote CSV --- */
+const materialCsv = parseMaterialCsv(`sku,description,quantity,unit,unit_cost,unit_sell,link
+ETC-1,Fixture body,2,ea,$100.25,$150.50,https://example.com/fixture
+,Custom bracket,1,ea,25,40,`);
+ok(materialCsv.errors.length === 0, "material CSV accepts the downloadable-template columns");
+ok(materialCsv.items.length === 2, "material CSV batch parses every valid row");
+ok(
+  materialCsv.items[0]?.cost === 100.25 && materialCsv.items[0]?.price === 150.5,
+  "material CSV treats cost and sell as currency fields"
+);
+ok(
+  materialCsv.items[0]?.link === "https://example.com/fixture",
+  "material CSV preserves an optional product link"
+);
+const badMaterialCsv = parseMaterialCsv("description,quantity,unit_sell\nNo price,1,\nBad qty,zero,10");
+ok(badMaterialCsv.items.length === 0 && badMaterialCsv.errors.length === 2, "material CSV rejects rows without a sell price or valid quantity");
 
 /* --- Offline navigation contract --- */
 const serviceWorkerSource = readFileSync(join(process.cwd(), "public/sw.js"), "utf8");

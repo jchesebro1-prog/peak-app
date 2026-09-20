@@ -21,6 +21,7 @@ import type {
   AiSource,
   CustomerLite,
   InitialQuote,
+  PaymentTerms,
   SpecSection,
   TravelLite,
 } from "./types";
@@ -29,10 +30,8 @@ export const metadata = { title: "Estimator — Quartzite-6" };
 
 /**
  * Estimator — detailed line-item quote builder (port of Estimator.dc.html).
- * /estimator?id=Q-#### loads that quote; with no id (or an unknown id) it
- * falls back to the Q-2041 demo quote so Save has a target, exactly like the
- * prototype's loadFromUrl(); if even that is missing, the builder opens as an
- * unsaved draft and Save creates the quote.
+ * /estimator?id=Q-#### loads that quote. With no id (or an unknown id), the
+ * builder opens a clean unsaved estimate; Save creates the quote.
  */
 
 function rvNone(): QuoteReview {
@@ -49,16 +48,16 @@ function rvNone(): QuoteReview {
 
 /** Prototype constructor defaults (used only when no quote record exists). */
 const FALLBACK = {
-  quoteId: "Q-2041",
-  projectName: "Lakefront Performing Arts Center — Stage Systems Package",
-  custName: "Lakefront Performing Arts Center",
-  quoteNote:
-    "Thank you for the opportunity to quote your stage systems upgrade. This proposal reflects the scope we reviewed on-site — we’re glad to adjust as plans develop.",
+  quoteId: "New estimate",
+  projectName: "New estimate",
+  custName: "",
+  quoteNote: "",
 };
 
 type QuoteDoc = Quote & {
   contactName?: string;
   quoteNote?: string;
+  paymentTerms?: PaymentTerms;
   spec?: { sections?: unknown; mobs?: unknown } | null;
 };
 
@@ -80,6 +79,7 @@ async function initialFrom(
       locationId: null,
       contactName: "",
       quoteNote: FALLBACK.quoteNote,
+      paymentTerms: "Unknown",
       owner: userName,
       revNum: 1,
       revDateMs: Date.now(),
@@ -122,6 +122,7 @@ async function initialFrom(
     locationId: locId,
     contactName: contactName || "",
     quoteNote: q.quoteNote != null ? q.quoteNote : FALLBACK.quoteNote,
+    paymentTerms: q.paymentTerms || "Unknown",
     owner: q.owner || userName,
     // Real priced revisions (item 24). This used to count `history`, which is
     // the status pipeline — so the printed "Rev N" climbed every time a quote
@@ -164,7 +165,6 @@ export default async function EstimatorPage({
   }
 
   let q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
-  if (!q) q = (await getQuote("Q-2041")) as QuoteDoc | null; // demo fallback so Save has a target
 
   const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows] =
     await Promise.all([

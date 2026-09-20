@@ -1,12 +1,12 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import type { SuggestPart } from "./estimator-data";
 import { fmt, marginColor, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
 import type { CustomDraft, SpecSection } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import CatalogPicker from "./catalog-picker";
-import SuggestedParts from "./suggested-parts";
+import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, type ImportedMaterial } from "./material-csv";
 
 /**
  * One system card — header (badge / rename / cost / price), per-system margin
@@ -47,7 +47,6 @@ export type SectionCardProps = {
   registerRef: (id: string, el: HTMLDivElement | null) => void;
   onToggleExpand: () => void;
   onRename: (name: string) => void;
-  onSetMfr: (mfr: string) => void;
   onDelete: () => void;
   onSetMargin: (v: string) => void;
   onSetFreight: (v: string) => void;
@@ -61,11 +60,14 @@ export type SectionCardProps = {
   onToggleLabor: () => void;
   onToggleCustom: () => void;
   onAddPart: (cat: SuggestPart) => void;
+  onImportMaterials: (items: ImportedMaterial[]) => void;
   onSetCustomDraft: (field: keyof CustomDraft, v: string) => void;
   onAddCustomPart: () => void;
 };
 
 export default function SectionCard(p: SectionCardProps) {
+  const [importOpen, setImportOpen] = useState(false);
+  const [importMessage, setImportMessage] = useState("");
   const { sec, isInternal, cols } = p;
   const itemsRev = systemItemsRev(sec);
   const itemsCost = systemItemsCost(sec);
@@ -74,7 +76,6 @@ export default function SectionCard(p: SectionCardProps) {
   const sysMargin = itemsRev > 0 ? Math.round(((itemsRev - itemsCost) / itemsRev) * 100) : 0;
   const visible = sec.items.filter((x) => !x.option);
   const metaParts: string[] = [];
-  if (sec.mfr) metaParts.push(sec.mfr);
   metaParts.push(visible.length + " item" + (visible.length === 1 ? "" : "s"));
   if (sysMargin > 0 && isInternal) metaParts.push(sysMargin + "% margin");
 
@@ -328,35 +329,6 @@ export default function SectionCard(p: SectionCardProps) {
                 {fmt(secFreight)}
               </span>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: "#9aa0ab",
-                  letterSpacing: ".04em",
-                  textTransform: "uppercase",
-                }}
-              >
-                Manufacturer
-              </span>
-              <input
-                type="text"
-                value={sec.mfr}
-                onChange={(e) => p.onSetMfr(e.target.value)}
-                placeholder="e.g. JR Clancy"
-                title="Drives the catalog-backed quick-add suggestions below"
-                style={{
-                  width: 140,
-                  fontFamily: "var(--font-ui)",
-                  fontSize: 12.5,
-                  color: "#16181d",
-                  border: "1px solid #dfe2e8",
-                  borderRadius: 7,
-                  padding: "5px 8px",
-                }}
-              />
-            </div>
             <button
               type="button"
               className="est-delsys"
@@ -395,16 +367,14 @@ export default function SectionCard(p: SectionCardProps) {
             >
               <span>Item</span>
               <span style={{ textAlign: "center" }}>Qty</span>
-              <span style={{ textAlign: "right" }}>Unit price</span>
-              {isInternal && <span style={{ textAlign: "right" }}>Cost</span>}
-              {isInternal && <span style={{ textAlign: "right" }}>Margin</span>}
-              <span style={{ textAlign: "right" }}>Ext. price</span>
+              {isInternal && <span style={{ textAlign: "right" }}>Unit cost</span>}
+              <span style={{ textAlign: "right" }}>Unit sell</span>
+              <span style={{ textAlign: "right" }}>Ext. sell</span>
               <span></span>
             </div>
 
             {/* line items */}
             {visible.map((it) => {
-              const m = it.price > 0 ? (it.price - it.cost) / it.price : 0;
               const hasComment = !!(it.comment && it.comment.trim());
               const showInternal = isInternal && !!(it.internalNote && it.internalNote.trim());
               return (
@@ -424,6 +394,9 @@ export default function SectionCard(p: SectionCardProps) {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ lineHeight: 1.3 }}>
                       {it.desc}
+                      {it.link && (
+                        <a href={it.link} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} title="Open product link" style={{ display: "inline-flex", marginLeft: 7, color: "var(--accent)", textDecoration: "none", fontSize: 12 }}>↗</a>
+                      )}
                       {!!it.custom && (
                         <span
                           style={{
@@ -569,11 +542,6 @@ export default function SectionCard(p: SectionCardProps) {
                       +
                     </button>
                   </div>
-                  <span
-                    style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#5b616e" }}
-                  >
-                    {it.unit} · {fmt(it.price)}
-                  </span>
                   {isInternal && (
                     <span
                       style={{
@@ -586,18 +554,7 @@ export default function SectionCard(p: SectionCardProps) {
                       {fmt(it.cost)}
                     </span>
                   )}
-                  {isInternal && (
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        textAlign: "right",
-                        fontSize: 12,
-                        color: marginColor(m),
-                      }}
-                    >
-                      {Math.round(m * 100)}%
-                    </span>
-                  )}
+                  <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#5b616e" }}>{fmt(it.price)}</span>
                   <span
                     style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
                   >
@@ -641,9 +598,8 @@ export default function SectionCard(p: SectionCardProps) {
               >
                 <div style={{ color: "#5b616e" }}>Freight &amp; delivery</div>
                 <span></span>
+                {isInternal && <span></span>}
                 <span></span>
-                {isInternal && <span></span>}
-                {isInternal && <span></span>}
                 <span
                   style={{
                     fontFamily: "var(--font-mono)",
@@ -659,7 +615,7 @@ export default function SectionCard(p: SectionCardProps) {
             )}
           </div>
 
-          {/* add part — custom part LAST (IDEAS #43) */}
+          {/* add part */}
           <div style={{ borderTop: "1px solid #f3f4f7", padding: "11px 20px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
               {addBtn("+ Add part from catalog", p.onToggleCatalog, true)}
@@ -667,11 +623,40 @@ export default function SectionCard(p: SectionCardProps) {
               {addBtn("+ Configure fixture", p.onToggleFixture)}
               {addBtn("+ Configure labor", p.onToggleLabor)}
               {addBtn("+ Build custom part", p.onToggleCustom)}
+              {addBtn("+ Vendor quote / CSV", () => { setImportOpen((open) => !open); setImportMessage(""); })}
             </div>
 
             {p.catalogOpen && <CatalogPicker onAdd={p.onAddPart} />}
 
-            <SuggestedParts mfr={sec.mfr} onAdd={p.onAddPart} />
+            {importOpen && (
+              <div style={{ marginTop: 11, background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "15px 16px" }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" }}>Import material list or vendor quote</div>
+                <div style={{ marginTop: 5, fontSize: 12, color: "#777d88" }}>Batch-add catalog or custom materials with unit cost, unit sell, and an optional product link.</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", borderRadius: 7, padding: "8px 13px", background: "var(--accent)", color: "#fff", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                    Select CSV file
+                    <input
+                      type="file"
+                      accept=".csv,text/csv,text/tab-separated-values"
+                      style={{ display: "none" }}
+                      onChange={(event) => {
+                        const input = event.currentTarget;
+                        const file = input.files?.[0];
+                        if (!file) return;
+                        file.text().then((text) => {
+                          const result = parseMaterialCsv(text);
+                          if (result.items.length) p.onImportMaterials(result.items);
+                          setImportMessage(result.items.length ? `${result.items.length} material${result.items.length === 1 ? "" : "s"} added${result.errors.length ? `; ${result.errors.length} row${result.errors.length === 1 ? "" : "s"} skipped` : ""}.` : result.errors.join(" "));
+                          input.value = "";
+                        });
+                      }}
+                    />
+                  </label>
+                  <a download="quartzite-material-import-example.csv" href={`data:text/csv;charset=utf-8,${encodeURIComponent(MATERIAL_CSV_TEMPLATE)}`} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>Download example CSV</a>
+                  {importMessage && <span role="status" style={{ fontSize: 12, color: importMessage.includes("added") ? "#1f7a52" : "#b4543a" }}>{importMessage}</span>}
+                </div>
+              </div>
+            )}
 
             {/* ===== custom part portal ===== */}
             {p.customOpen && (
@@ -710,13 +695,10 @@ export default function SectionCard(p: SectionCardProps) {
 
                 <div style={{ marginBottom: 12 }}>
                   <label style={LBL}>Description</label>
-                  <input
-                    className="est-field"
-                    value={cd.desc}
-                    onChange={(e) => p.onSetCustomDraft("desc", e.target.value)}
-                    placeholder="e.g. Custom-fabricated motor mounting bracket"
-                    style={{ ...PORTAL_FIELD, fontFamily: "var(--font-ui)", fontSize: 13, padding: "8px 10px" }}
-                  />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr minmax(180px,.45fr)", gap: 10 }}>
+                    <input className="est-field" value={cd.desc} onChange={(e) => p.onSetCustomDraft("desc", e.target.value)} placeholder="e.g. Custom-fabricated motor mounting bracket" style={{ ...PORTAL_FIELD, fontFamily: "var(--font-ui)", fontSize: 13, padding: "8px 10px" }} />
+                    <input className="est-field" type="url" value={cd.link} onChange={(e) => p.onSetCustomDraft("link", e.target.value)} placeholder="Product link (optional)" title="Optional vendor or product page" style={{ ...PORTAL_FIELD, fontFamily: "var(--font-ui)", fontSize: 12 }} />
+                  </div>
                 </div>
 
                 <div
@@ -783,7 +765,7 @@ export default function SectionCard(p: SectionCardProps) {
                     </div>
                   </div>
                   <div>
-                    <label style={LBL}>Unit price</label>
+                    <label style={LBL}>Unit sell</label>
                     <div style={{ position: "relative" }}>
                       <span
                         style={{
