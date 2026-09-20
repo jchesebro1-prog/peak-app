@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import { create, get, update } from "@/lib/stores/surveys";
+import { create, get, update, type SurveyStage } from "@/lib/stores/surveys";
 import { create as createQuote } from "@/lib/stores/quotes";
 
 /**
@@ -18,6 +18,47 @@ export async function createSurvey(): Promise<void> {
   const rec = await create({ owner: user.name, requestedBy: user.name, stage: "requested" }, user.name);
   revalidatePath("/", "layout");
   redirect(`/venue-assessments/${encodeURIComponent(rec.id)}`);
+}
+
+function csvCells(line: string): string[] {
+  const out: string[] = []; let cell = ""; let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"' && line[i + 1] === '"') { cell += '"'; i++; }
+    else if (ch === '"') quoted = !quoted;
+    else if (ch === "," && !quoted) { out.push(cell.trim()); cell = ""; }
+    else cell += ch;
+  }
+  out.push(cell.trim());
+  return out;
+}
+
+export async function importSurveyCsv(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const file = formData.get("file");
+  if (!(file instanceof File) || !file.size) return;
+  const lines = (await file.text()).split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) return;
+  const headers = csvCells(lines[0]).map((h) => h.toLowerCase());
+  let imported = 0;
+  for (const line of lines.slice(1)) {
+    const cells = csvCells(line); const row = Object.fromEntries(headers.map((h, i) => [h, cells[i] || ""]));
+    const id = row.survey_id?.trim();
+    const patch = {
+      customer: row.customer || "", venue: row.venue || "", venueType: row.venue_type || "",
+      address: row.address || "", reason: row.reason || "", scopeOfWork: row.scope_of_work || "",
+      notes: row.notes || "", stage: (["requested", "scheduled", "onsite", "completed"].includes(row.stage) ? row.stage : "requested") as SurveyStage,
+      measurements: Object.fromEntries(Object.entries(row).filter(([key, value]) => key.startsWith("measure_") && value).map(([key, value]) => [key.slice(8), value])),
+    } as const;
+    if (id) {
+      const existing = await get(id);
+      if (existing) { await update(id, patch); imported++; continue; }
+    }
+    await create({ ...patch, owner: user.name, requestedBy: user.name }, user.name);
+    imported++;
+  }
+  revalidatePath("/venue-assessments");
+  redirect(`/venue-assessments?imported=${imported}`);
 }
 
 /**

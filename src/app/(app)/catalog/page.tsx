@@ -44,6 +44,7 @@ export default async function CatalogPage({
 
   const mfrParam = one(sp.mfr) || "all";
   const catParam = one(sp.cat) || "all";
+  const unitParam = one(sp.unit) || "all";
   const q = one(sp.q).trim();
   const sort = one(sp.sort) || "relevance";
   const importOpen = one(sp.import) === "1";
@@ -60,13 +61,16 @@ export default async function CatalogPage({
   const categories = Array.from(new Set(parts.map((p) => p.category || "Uncategorized"))).sort((a, b) =>
     a.localeCompare(b)
   );
+  const units = Array.from(new Set(parts.map((p) => p.unit || "ea"))).sort();
 
-  const hrefFor = (over: { mfr?: string; cat?: string }) => {
+  const hrefFor = (over: { mfr?: string; cat?: string; unit?: string }) => {
     const qs = new URLSearchParams();
     const m = over.mfr ?? mfrParam;
     const c = over.cat ?? catParam;
+    const u = over.unit ?? unitParam;
     if (m && m !== "all") qs.set("mfr", m);
     if (c && c !== "all") qs.set("cat", c);
+    if (u && u !== "all") qs.set("unit", u);
     if (q) qs.set("q", q);
     if (sort !== "relevance") qs.set("sort", sort);
     if (importOpen) qs.set("import", "1");
@@ -80,6 +84,7 @@ export default async function CatalogPage({
   let rows = parts.filter((p) => {
     if (mfrParam !== "all" && mfrOf(p) !== mfrParam) return false;
     if (catParam !== "all" && (p.category || "Uncategorized") !== catParam) return false;
+    if (unitParam !== "all" && (p.unit || "ea") !== unitParam) return false;
     if (tokens.length) {
       const hay = [p.desc, p.sku, p.mfr, p.category].filter(Boolean).join(" ").toLowerCase();
       if (!tokens.every((token) => hay.includes(token))) return false;
@@ -102,6 +107,7 @@ export default async function CatalogPage({
     ` parts` +
     (mfrParam !== "all" ? " · " + mfrParam : "") +
     (catParam !== "all" ? " · " + catParam : "") +
+    (unitParam !== "all" ? " · " + unitParam : "") +
     (truncated ? " · refine with search or filters to narrow" : "");
 
   const editingPart = editSku ? await get(editSku) : null;
@@ -204,6 +210,15 @@ export default async function CatalogPage({
           />
           <div style={{ height: 16 }} />
           <FilterGroup
+            title="Unit"
+            active={unitParam}
+            allLabel="All units"
+            allHref={hrefFor({ unit: "all" })}
+            allCount={parts.length}
+            options={units.map((u) => ({ key: u, label: u, href: hrefFor({ unit: u }), count: parts.filter((p) => (p.unit || "ea") === u).length }))}
+          />
+          <div style={{ height: 16 }} />
+          <FilterGroup
             title="Category"
             active={catParam}
             allLabel="All categories"
@@ -252,7 +267,7 @@ export default async function CatalogPage({
                 }}
               >
                 <span>Manufacturer</span>
-                <span>Model #</span>
+                <span>MFR Part #</span>
                 <span>Description</span>
                 <span>Category</span>
                 <span style={{ textAlign: "right" }}>Unit</span>
@@ -386,7 +401,7 @@ export default async function CatalogPage({
   );
 }
 
-function hrefForImport(hrefFor: (o: { mfr?: string; cat?: string }) => string, open: boolean): string {
+function hrefForImport(hrefFor: (o: { mfr?: string; cat?: string; unit?: string }) => string, open: boolean): string {
   const base = hrefFor({});
   const url = new URL(base, "http://x");
   if (open) url.searchParams.set("import", "1");

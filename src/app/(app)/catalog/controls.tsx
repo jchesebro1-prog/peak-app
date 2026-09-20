@@ -113,7 +113,7 @@ export function CatalogControls({
           flexShrink: 0,
         }}
       >
-        <option value="relevance">Catalog order</option>
+        <option value="relevance">Master list</option>
         <option value="price">Highest price</option>
         <option value="alpha">Name A–Z</option>
       </select>

@@ -102,6 +102,7 @@ export function ConsultingQuoteBuilder({
   const venueCustomer = customers.find((c) => c.id === venueCustomerId) || null;
 
   const [quoteName, setQuoteName] = useState(initial?.name || "");
+  const [quoteNameEdited, setQuoteNameEdited] = useState(!!initial?.name);
   const [locationId, setLocationId] = useState(initial?.locationId || "");
   const [contactName, setContactName] = useState(initial?.contactName || "");
   const [contactRole, setContactRole] = useState(initial?.contactRole || "");
@@ -132,6 +133,7 @@ export function ConsultingQuoteBuilder({
   }, [assumptionsMenu, initial, customAdds]);
   const [ticked, setTicked] = useState<string[]>(initial ? initial.assumptions : []);
   const [newAssumption, setNewAssumption] = useState("");
+  const [assumptionEdits, setAssumptionEdits] = useState<Record<string, string>>({});
   const toggle = (a: string) =>
     setTicked(ticked.includes(a) ? ticked.filter((x) => x !== a) : [...ticked, a]);
 
@@ -163,7 +165,7 @@ export function ConsultingQuoteBuilder({
     .filter((s) => s.title || s.description || s.fee > 0);
   const total = scopes.reduce((a, s) => a + s.fee, 0);
   /** The ticked texts, in menu order — frozen onto the proposal at save. */
-  const assumptions = menu.filter((a) => ticked.includes(a));
+  const assumptions = menu.filter((a) => ticked.includes(a)).map((a) => (assumptionEdits[a] ?? a).trim()).filter(Boolean);
   const canSave = !!customerId && !!venueCustomerId && total > 0;
   const legacy =
     initial && !initial.scopes.length && (initial.legacyScope || initial.legacyFees.length)
@@ -220,7 +222,7 @@ export function ConsultingQuoteBuilder({
             searchText: c.contacts.map((x) => `${x.name} ${x.email}`).join(" "),
           }))}
           value={customerId}
-          onChange={setCustomerId}
+          onChange={(id) => { setCustomerId(id); if (!quoteNameEdited) setQuoteName([customers.find((c) => c.id === id)?.name, venueCustomer?.locations.find((l) => l.id === locationId)?.label || venueCustomer?.name, "Consulting", String(new Date().getFullYear())].filter(Boolean).join(" - ")); }}
           placeholder="Search architect or billed customer…"
           inputStyle={INPUT}
         />
@@ -237,6 +239,7 @@ export function ConsultingQuoteBuilder({
           onChange={(id) => {
             setVenueCustomerId(id);
             setLocationId("");
+            if (!quoteNameEdited) setQuoteName([architect?.name, customers.find((c) => c.id === id)?.name, "Consulting", String(new Date().getFullYear())].filter(Boolean).join(" - "));
           }}
           placeholder="Search venue company or location…"
           inputStyle={INPUT}
@@ -245,7 +248,7 @@ export function ConsultingQuoteBuilder({
         {venueCustomer && venueCustomer.locations.length > 0 && (
           <>
             <label style={LBL}>Venue site</label>
-            <select value={locationId} onChange={(e) => setLocationId(e.target.value)} style={INPUT}>
+            <select value={locationId} onChange={(e) => { setLocationId(e.target.value); if (!quoteNameEdited) setQuoteName([architect?.name, venueCustomer.locations.find((l) => l.id === e.target.value)?.label || venueCustomer.name, "Consulting", String(new Date().getFullYear())].filter(Boolean).join(" - ")); }} style={INPUT}>
               <option value="">— none —</option>
               {venueCustomer.locations.map((l) => (
                 <option key={l.id} value={l.id}>{l.label}</option>
@@ -258,7 +261,7 @@ export function ConsultingQuoteBuilder({
         <input
           name="quoteName"
           value={quoteName}
-          onChange={(e) => setQuoteName(e.target.value)}
+          onChange={(e) => { setQuoteName(e.target.value); setQuoteNameEdited(true); }}
           placeholder={venueCustomer ? venueCustomer.name + " — Consulting" : "Consulting engagement"}
           style={INPUT}
         />
@@ -368,7 +371,7 @@ export function ConsultingQuoteBuilder({
           {menu.map((a) => (
             <label key={a} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5, color: "#3a3f4a", cursor: "pointer" }}>
               <input type="checkbox" checked={ticked.includes(a)} onChange={() => toggle(a)} style={{ marginTop: 2 }} />
-              <span>{a}</span>
+              <input value={assumptionEdits[a] ?? a} onChange={(e) => setAssumptionEdits({ ...assumptionEdits, [a]: e.target.value })} style={{ ...INPUT, flex: 1, padding: "5px 8px", marginTop: -5 }} />
             </label>
           ))}
         </div>
