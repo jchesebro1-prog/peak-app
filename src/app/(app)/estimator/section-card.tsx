@@ -47,6 +47,9 @@ export type SectionCardProps = {
   registerRef: (id: string, el: HTMLDivElement | null) => void;
   onToggleExpand: () => void;
   onRename: (name: string) => void;
+  onSetNarrative: (narrative: string) => void;
+  onSetUnitPrice: (id: number, value: string) => void;
+  onSetExtendedPrice: (id: number, value: string) => void;
   onSetMfr: (mfr: string) => void;
   onDelete: () => void;
   onSetMargin: (v: string) => void;
@@ -271,6 +274,17 @@ export default function SectionCard(p: SectionCardProps) {
                 </span>
               </div>
             )}
+            <label style={{ display: "block", flex: "1 1 320px", minWidth: 240 }}>
+              <span style={{ ...LBL, marginBottom: 5 }}>Customer-facing section narrative</span>
+              <textarea
+                value={sec.narrative || ""}
+                onChange={(e) => p.onSetNarrative(e.target.value)}
+                placeholder="Explain what this system includes and the intended outcome."
+                rows={2}
+                style={{ ...PORTAL_FIELD, resize: "vertical", lineHeight: 1.4 }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </label>
             {isInternal && (
               <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                 <span style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".04em", textTransform: "uppercase" }}>
@@ -569,11 +583,19 @@ export default function SectionCard(p: SectionCardProps) {
                       +
                     </button>
                   </div>
-                  <span
-                    style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#5b616e" }}
-                  >
-                    {it.unit} · {fmt(it.price)}
-                  </span>
+                  <label style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
+                    <span style={{ fontFamily: "var(--font-mono)", color: "#8c919c", fontSize: 11 }}>{it.unit} ·</span>
+                    <input
+                      key={`unit-${it.id}-${it.price}`}
+                      type="text"
+                      inputMode="decimal"
+                      defaultValue={it.price.toFixed(2)}
+                      onBlur={(e) => p.onSetUnitPrice(it.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      title="Edit sell unit price"
+                      style={{ width: 78, fontFamily: "var(--font-mono)", textAlign: "right", color: "#5b616e", border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 5px", fontSize: 12 }}
+                    />
+                  </label>
                   {isInternal && (
                     <span
                       style={{
@@ -598,11 +620,16 @@ export default function SectionCard(p: SectionCardProps) {
                       {Math.round(m * 100)}%
                     </span>
                   )}
-                  <span
-                    style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
-                  >
-                    {fmt(it.qty * it.price)}
-                  </span>
+                  <input
+                    key={`ext-${it.id}-${it.qty * it.price}`}
+                    type="text"
+                    inputMode="decimal"
+                    defaultValue={(it.qty * it.price).toFixed(2)}
+                    onBlur={(e) => p.onSetExtendedPrice(it.id, e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    title="Edit extended sell price; unit price recalculates from quantity"
+                    style={{ width: 88, boxSizing: "border-box", fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600, color: "#16181d", border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 5px", fontSize: 12 }}
+                  />
                   <button
                     type="button"
                     className="est-x"

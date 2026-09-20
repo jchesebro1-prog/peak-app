@@ -90,6 +90,9 @@ export type Quote = {
   quoteNote?: string;
   scopeNarrative?: string;
   quoteBasis?: string;
+  preparedBy?: string;
+  assumptions?: string;
+  termsText?: string;
   value: number;
   margin: number;
   /** Customer pricing tier stamped at creation (item 11, D87) — resolved
@@ -340,6 +343,9 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     quoteNote: partial.quoteNote || "",
     scopeNarrative: partial.scopeNarrative || "",
     quoteBasis: partial.quoteBasis || "",
+    preparedBy: partial.preparedBy || partial.owner || "",
+    assumptions: partial.assumptions || "",
+    termsText: partial.termsText || "",
     value: Math.round(partial.value || 0),
     margin: partial.margin || 0,
     pricingTier: partial.pricingTier ?? null,

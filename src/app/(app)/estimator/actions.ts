@@ -55,6 +55,9 @@ type QuoteExtras = {
   quoteNote?: string;
   scopeNarrative?: string;
   quoteBasis?: string;
+  preparedBy?: string;
+  assumptions?: string;
+  termsText?: string;
   spec?: { sections: SpecSection[]; mobs: SpecMob[] };
 };
 
@@ -69,6 +72,9 @@ export type SavePayload = {
   quoteNote: string;
   scopeNarrative: string;
   quoteBasis: string;
+  preparedBy: string;
+  assumptions: string;
+  termsText: string;
   value: number;
   margin: number;
   status: QuoteStatus;
@@ -125,6 +131,9 @@ export async function saveQuoteAction(
     quoteNote: payload.quoteNote || "",
     scopeNarrative: payload.scopeNarrative || "",
     quoteBasis: payload.quoteBasis || "",
+    preparedBy: payload.preparedBy || user.name,
+    assumptions: payload.assumptions || "",
+    termsText: payload.termsText || "",
     value: payload.value,
     margin: payload.margin,
     status: payload.status,
@@ -163,6 +172,9 @@ export async function saveQuoteAction(
       quoteNote: payload.quoteNote || "",
       scopeNarrative: payload.scopeNarrative || "",
       quoteBasis: payload.quoteBasis || "",
+      preparedBy: payload.preparedBy || user.name,
+      assumptions: payload.assumptions || "",
+      termsText: payload.termsText || "",
     } as QuotePatch);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand
@@ -201,6 +213,9 @@ export async function updateQuoteMetaAction(
     quoteNote?: string;
     scopeNarrative?: string;
     quoteBasis?: string;
+    preparedBy?: string;
+    assumptions?: string;
+    termsText?: string;
   }
 ): Promise<{ ok: boolean; pricingTier?: string; tierMargin?: number }> {
   await requireUser();
@@ -218,6 +233,9 @@ export async function updateQuoteMetaAction(
   if (typeof meta.quoteNote === "string") patch.quoteNote = meta.quoteNote;
   if (typeof meta.scopeNarrative === "string") patch.scopeNarrative = meta.scopeNarrative;
   if (typeof meta.quoteBasis === "string") patch.quoteBasis = meta.quoteBasis;
+  if (typeof meta.preparedBy === "string") patch.preparedBy = meta.preparedBy;
+  if (typeof meta.assumptions === "string") patch.assumptions = meta.assumptions;
+  if (typeof meta.termsText === "string") patch.termsText = meta.termsText;
 
   // Item 11 (D87): a customer/contact change re-resolves the pricing tier
   // SERVER-side (never trusted from the client) and re-stamps the quote.

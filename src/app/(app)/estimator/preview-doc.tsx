@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
 import { fmt, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
 import type { SpecItem, SpecSection } from "./types";
@@ -71,6 +71,17 @@ export type PreviewProps = {
   quoteNote: string;
   scopeNarrative: string;
   quoteBasis: string;
+  preparedBy: string;
+  assumptions: string;
+  termsText: string;
+  onPreparedBy: (v: string) => void;
+  onAssumptions: (v: string) => void;
+  onTermsText: (v: string) => void;
+  pdfAssumptions: boolean;
+  sectionPrices: Record<string, boolean>;
+  sectionNarratives: Record<string, boolean>;
+  toggleSectionPrices: (id: string) => void;
+  toggleSectionNarrative: (id: string) => void;
   sections: SpecSection[];
   t: QuoteTotals;
   taxRatePct: number;
@@ -82,7 +93,7 @@ export type PreviewProps = {
   pdfCover: boolean;
   pdfTerms: boolean;
   pdfOptions: boolean;
-  togglePdf: (flag: "pdfQty" | "pdfNotes" | "pdfPrices" | "pdfCover" | "pdfTerms" | "pdfOptions") => void;
+  togglePdf: (flag: "pdfQty" | "pdfNotes" | "pdfPrices" | "pdfCover" | "pdfTerms" | "pdfOptions" | "pdfAssumptions") => void;
 };
 
 const DAY_MS = 86400000;
@@ -104,6 +115,7 @@ function longDate(ms: number): string {
 }
 
 export default function PreviewDoc(p: PreviewProps) {
+  const [editDetails, setEditDetails] = useState(false);
   const isItemized = p.detail === "itemized";
   const lineCols = p.pdfPrices
     ? (p.pdfQty ? "1fr 70px 104px" : "1fr 104px")
@@ -122,8 +134,10 @@ export default function PreviewDoc(p: PreviewProps) {
       const secFr = systemFreight(sec);
       const sub = systemItemsRev(sec) + secFr;
       return {
+        id: sec.id,
         num: i + 1,
         name: sec.name,
+        narrative: sec.narrative || "",
         subtotalLabel: fmt(sub),
         hasFreight: secFr > 0,
         freightLabel: fmt(secFr),
@@ -282,6 +296,12 @@ export default function PreviewDoc(p: PreviewProps) {
           <button type="button" onClick={() => p.togglePdf("pdfTerms")} style={p.pdfTerms ? segOn : segOff}>
             {(p.pdfTerms ? "✓ " : "") + "Terms"}
           </button>
+          <button type="button" onClick={() => p.togglePdf("pdfAssumptions")} style={p.pdfAssumptions ? segOn : segOff}>
+            {(p.pdfAssumptions ? "✓ " : "") + "Assumptions"}
+          </button>
+          <button type="button" onClick={() => setEditDetails((v) => !v)} style={editDetails ? segOn : segOff}>
+            {editDetails ? "✓ Done editing" : "✎ Edit quote details"}
+          </button>
         </div>
         <button
           type="button"
@@ -300,6 +320,23 @@ export default function PreviewDoc(p: PreviewProps) {
           Download PDF
         </button>
       </div>
+
+      {editDetails && p.canBuild && (
+        <div style={{ padding: "12px 22px", background: "#fff", borderBottom: "1px solid #ececf0", display: "grid", gridTemplateColumns: "minmax(180px, .8fr) minmax(220px, 1fr) minmax(260px, 1.4fr)", gap: 12 }}>
+          <label style={{ fontSize: 10, fontWeight: 700, color: "#737985", textTransform: "uppercase" }}>
+            Prepared by
+            <input value={p.preparedBy} onChange={(e) => p.onPreparedBy(e.target.value)} style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: "1px solid #e4e7ec", borderRadius: 7, fontSize: 12, fontWeight: 400, textTransform: "none" }} />
+          </label>
+          <label style={{ fontSize: 10, fontWeight: 700, color: "#737985", textTransform: "uppercase" }}>
+            Assumptions
+            <textarea value={p.assumptions} onChange={(e) => p.onAssumptions(e.target.value)} rows={3} placeholder="Add assumptions for the customer…" style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: "1px solid #e4e7ec", borderRadius: 7, fontSize: 12, fontWeight: 400, textTransform: "none", resize: "vertical" }} />
+          </label>
+          <label style={{ fontSize: 10, fontWeight: 700, color: "#737985", textTransform: "uppercase" }}>
+            Terms (one per line)
+            <textarea value={p.termsText} onChange={(e) => p.onTermsText(e.target.value)} rows={3} style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: "1px solid #e4e7ec", borderRadius: 7, fontSize: 12, fontWeight: 400, textTransform: "none", resize: "vertical" }} />
+          </label>
+        </div>
+      )}
 
       <div
         className="est-scroll est-docwrap"
@@ -515,10 +552,20 @@ export default function PreviewDoc(p: PreviewProps) {
                   </span>
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>{ps.name}</span>
                 </span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, flexShrink: 0 }}>
-                  {ps.subtotalLabel}
+                <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  <button type="button" onClick={() => p.toggleSectionNarrative(ps.id)} style={p.sectionNarratives[ps.id] === false ? segOff : segOn}>
+                    {p.sectionNarratives[ps.id] === false ? "Narrative off" : "Narrative on"}
+                  </button>
+                  <button type="button" onClick={() => p.toggleSectionPrices(ps.id)} style={p.sectionPrices[ps.id] === false ? segOff : segOn}>
+                    {p.sectionPrices[ps.id] === false ? "Prices off" : ps.subtotalLabel}
+                  </button>
                 </span>
               </div>
+              {ps.narrative && p.sectionNarratives[ps.id] !== false && (
+                <div style={{ padding: "8px 13px", color: "#5b616e", fontSize: 11.5, lineHeight: 1.5, borderBottom: "1px solid #f0f1f4" }}>
+                  {ps.narrative}
+                </div>
+              )}
               {isItemized ? (
                 <div style={{ marginBottom: 6 }}>
                   {ps.lines.map((ln) => (
@@ -526,7 +573,7 @@ export default function PreviewDoc(p: PreviewProps) {
                       key={ln.key}
                       style={{
                         display: "grid",
-                        gridTemplateColumns: lineCols,
+                        gridTemplateColumns: p.sectionPrices[ps.id] === false ? (p.pdfQty ? "1fr 70px" : "1fr") : lineCols,
                         gap: 8,
                         padding: "8px 13px 6px",
                         fontSize: 12.5,
@@ -557,7 +604,7 @@ export default function PreviewDoc(p: PreviewProps) {
                           {ln.qty} {ln.unit}
                         </span>
                       )}
-                      {p.pdfPrices && (
+                      {p.pdfPrices && p.sectionPrices[ps.id] !== false && (
                         <span
                           style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
                         >
@@ -570,7 +617,7 @@ export default function PreviewDoc(p: PreviewProps) {
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: lineCols,
+                        gridTemplateColumns: p.sectionPrices[ps.id] === false ? (p.pdfQty ? "1fr 70px" : "1fr") : lineCols,
                         gap: 8,
                         padding: "8px 13px 6px",
                         fontSize: 12.5,
@@ -581,7 +628,7 @@ export default function PreviewDoc(p: PreviewProps) {
                     >
                       <span>Freight &amp; delivery</span>
                       {p.pdfQty && <span></span>}
-                      {p.pdfPrices && (
+                      {p.pdfPrices && p.sectionPrices[ps.id] !== false && (
                         <span
                           style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
                         >
@@ -607,6 +654,13 @@ export default function PreviewDoc(p: PreviewProps) {
               )}
             </div>
           ))}
+
+          {p.pdfAssumptions && p.assumptions.trim() && (
+            <div style={{ marginTop: 20, padding: "12px 14px", border: "1px solid #ececf0", borderRadius: 6, color: "#5b616e", fontSize: 11.5, lineHeight: 1.6 }}>
+              <div style={{ ...microLabel, marginBottom: 5 }}>Assumptions</div>
+              {p.assumptions}
+            </div>
+          )}
 
           {/* optional additions — priced, not in the total */}
           {showOptions && (
@@ -753,7 +807,7 @@ export default function PreviewDoc(p: PreviewProps) {
                       lineHeight: 1.75,
                     }}
                   >
-                    {TERMS.map((line) => (
+                    {(p.termsText.trim() ? p.termsText.split(/\r?\n/).map((x) => x.trim()).filter(Boolean) : TERMS).map((line) => (
                       <li key={line}>{line}</li>
                     ))}
                   </ul>

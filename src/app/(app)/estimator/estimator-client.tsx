@@ -73,6 +73,12 @@ import PreviewDoc from "./preview-doc";
 /** Prototype prop taxRatePct defaulted to 0 — kept as a constant. */
 const TAX_RATE_PCT = 0;
 const INTAKE_CATEGORIES = ["Audio / Video", "Lighting", "Rigging", "Curtains"];
+const DEFAULT_TERMS_TEXT = [
+  "This quote is valid for 30 days from the issue date.",
+  "Pricing reflects current manufacturer list.",
+  "Acceptance generates a sales order in QuickBooks.",
+  "Installation is scheduled upon receipt of a signed quote and 40% deposit.",
+].join("\n");
 const INTAKE_LABEL: CSSProperties = {
   display: "block",
   fontSize: 10,
@@ -306,6 +312,9 @@ export default function EstimatorClient({
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
   const [scopeNarrative, setScopeNarrative] = useState(initial.scopeNarrative);
   const [quoteBasis, setQuoteBasis] = useState(initial.quoteBasis);
+  const [preparedBy, setPreparedBy] = useState(initial.preparedBy || initial.owner);
+  const [assumptions, setAssumptions] = useState(initial.assumptions);
+  const [termsText, setTermsText] = useState(initial.termsText || DEFAULT_TERMS_TEXT);
   const [revNum, setRevNum] = useState(initial.revNum);
   const [revDateMs, setRevDateMs] = useState(initial.revDateMs);
   const [pdfQty, setPdfQty] = useState(true);
@@ -313,6 +322,9 @@ export default function EstimatorClient({
   const [pdfCover, setPdfCover] = useState(true);
   const [pdfTerms, setPdfTerms] = useState(true);
   const [pdfOptions, setPdfOptions] = useState(true);
+  const [pdfAssumptions, setPdfAssumptions] = useState(true);
+  const [sectionPrices, setSectionPrices] = useState<Record<string, boolean>>({});
+  const [sectionNarratives, setSectionNarratives] = useState<Record<string, boolean>>({});
   const [pdfPrices, setPdfPrices] = useState(true);
   const [detail, setDetail] = useState<"itemized" | "sectioned">("itemized");
   const [activeId, setActiveId] = useState<string | null>(
@@ -443,6 +455,9 @@ export default function EstimatorClient({
         quoteNote: quoteNote || "",
         scopeNarrative: scopeNarrative || "",
         quoteBasis: quoteBasis || "",
+        preparedBy: preparedBy || initial.owner,
+        assumptions: assumptions || "",
+        termsText: termsText || "",
         value: t.grand,
         margin: t.margin,
         status,
@@ -608,6 +623,24 @@ export default function EstimatorClient({
     if (noteTimer.current) clearTimeout(noteTimer.current);
     noteTimer.current = setTimeout(() => persistMeta({ quoteBasis: v }), 500);
   };
+  const onPreparedBy = (v: string) => {
+    setPreparedBy(v);
+    if (!loadedId) return;
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => persistMeta({ preparedBy: v }), 500);
+  };
+  const onAssumptions = (v: string) => {
+    setAssumptions(v);
+    if (!loadedId) return;
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => persistMeta({ assumptions: v }), 500);
+  };
+  const onTermsText = (v: string) => {
+    setTermsText(v);
+    if (!loadedId) return;
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => persistMeta({ termsText: v }), 500);
+  };
 
   /* ---------------- sections & items ---------------- */
   const isExpanded = (id: string) => expanded[id] !== false;
@@ -627,6 +660,14 @@ export default function EstimatorClient({
     let n = parseInt(v, 10);
     if (isNaN(n) || n < 0) n = 0;
     patchItem(id, (it) => ({ ...it, qty: n }));
+  };
+  const setUnitPrice = (id: number, v: string) => {
+    const n = Math.max(0, parseFloat(v.replace(/[^0-9.-]/g, "")) || 0);
+    patchItem(id, (it) => ({ ...it, price: round2(n) }));
+  };
+  const setExtendedPrice = (id: number, v: string) => {
+    const ext = Math.max(0, parseFloat(v.replace(/[^0-9.-]/g, "")) || 0);
+    patchItem(id, (it) => ({ ...it, price: it.qty > 0 ? round2(ext / it.qty) : 0 }));
   };
   const removeItem = (id: number) =>
     setSections((ss) => ss.map((s) => ({ ...s, items: s.items.filter((x) => x.id !== id) })));
@@ -663,6 +704,8 @@ export default function EstimatorClient({
    *  to set one until now. */
   const setSectionMfr = (secId: string, mfr: string) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, mfr } : s)));
+  const setSectionNarrative = (secId: string, narrative: string) =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, narrative } : s)));
   const deleteSystem = (secId: string) => {
     const list = sections.filter((s) => s.id !== secId);
     setSections(list);
@@ -2345,6 +2388,9 @@ export default function EstimatorClient({
                   }}
                   onToggleExpand={() => toggleExpand(sec.id)}
                   onRename={(name) => renameSystem(sec.id, name)}
+                  onSetNarrative={(narrative) => setSectionNarrative(sec.id, narrative)}
+                  onSetUnitPrice={setUnitPrice}
+                  onSetExtendedPrice={setExtendedPrice}
                   onSetMfr={(v) => setSectionMfr(sec.id, v)}
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}
@@ -2482,6 +2528,17 @@ export default function EstimatorClient({
           quoteNote={quoteNote}
           scopeNarrative={scopeNarrative}
           quoteBasis={quoteBasis}
+          preparedBy={preparedBy}
+          assumptions={assumptions}
+          termsText={termsText}
+          onPreparedBy={onPreparedBy}
+          onAssumptions={onAssumptions}
+          onTermsText={onTermsText}
+          pdfAssumptions={pdfAssumptions}
+          sectionPrices={sectionPrices}
+          sectionNarratives={sectionNarratives}
+          toggleSectionPrices={(id) => setSectionPrices((m) => ({ ...m, [id]: m[id] === false }))}
+          toggleSectionNarrative={(id) => setSectionNarratives((m) => ({ ...m, [id]: m[id] === false }))}
           sections={sections}
           t={t}
           taxRatePct={TAX_RATE_PCT}
@@ -2497,6 +2554,7 @@ export default function EstimatorClient({
             if (flag === "pdfQty") setPdfQty((v) => !v);
             else if (flag === "pdfNotes") setPdfNotes((v) => !v);
             else if (flag === "pdfPrices") setPdfPrices((v) => !v);
+            else if (flag === "pdfAssumptions") setPdfAssumptions((v) => !v);
             else if (flag === "pdfCover") setPdfCover((v) => !v);
             else if (flag === "pdfOptions") setPdfOptions((v) => !v);
             else setPdfTerms((v) => !v);

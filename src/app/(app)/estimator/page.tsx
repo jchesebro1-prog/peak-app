@@ -76,6 +76,9 @@ async function initialFrom(
       quoteNote: "",
       scopeNarrative: "",
       quoteBasis: "",
+      preparedBy: userName,
+      assumptions: "",
+      termsText: "",
       owner: userName,
       revNum: 1,
       revDateMs: Date.now(),
@@ -120,6 +123,9 @@ async function initialFrom(
     quoteNote: q.quoteNote != null ? q.quoteNote : FALLBACK.quoteNote,
     scopeNarrative: q.scopeNarrative || "",
     quoteBasis: q.quoteBasis || "",
+    preparedBy: q.preparedBy || q.owner || userName,
+    assumptions: q.assumptions || "",
+    termsText: q.termsText || "",
     owner: q.owner || userName,
     // Real priced revisions (item 24). This used to count `history`, which is
     // the status pipeline — so the printed "Rev N" climbed every time a quote

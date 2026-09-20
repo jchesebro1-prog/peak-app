@@ -46,6 +46,8 @@ export type SpecItem = {
 export type SpecSection = {
   id: string;
   name: string;
+  /** Customer-facing narrative shown beneath this section in the quote. */
+  narrative?: string;
   /** 'materials' | 'labor' */
   kind: string;
   mfr: string;
@@ -166,6 +168,9 @@ export type InitialQuote = {
   quoteNote: string;
   scopeNarrative: string;
   quoteBasis: string;
+  preparedBy: string;
+  assumptions: string;
+  termsText: string;
   owner: string;
   revNum: number;
   revDateMs: number;
