@@ -53,6 +53,7 @@ import type {
 } from "./types";
 import { PAYMENT_TERMS } from "./types";
 import { assemblyDescription } from "@/lib/fixture-assemblies";
+import { defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import SectionCard from "./section-card";
 import AiScopeModal from "./ai-scope-modal";
@@ -142,37 +143,18 @@ const freshFixture = (): FixtureDraft => {
   };
 };
 
-/** New mobilization — defaults to travel rates when the venue is >1h away. */
-function freshMob(t: TravelLite | null): MobDraft {
-  const far = !!(t && t.minutes != null && t.minutes > 60);
-  const rt = t && t.miles != null ? Math.round(t.miles * 2) : null;
-  return {
-    name: "",
-    nameCustom: false,
-    tripType: far ? "travel" : "local",
-    tripAuto: true,
-    people: "4",
-    days: "5",
-    otHrs: "",
-    sup: false,
-    milesRT: far && rt != null ? String(rt) : "",
-    lift: false,
-    comments: "",
-    internalNote: "",
-  };
-}
-
 const freshLabor = (
   t: TravelLite | null,
   /** Tier-seeded margin fraction (item 11, D87); null → the legacy 30. */
-  tierMargin?: number | null
+  tierMargin?: number | null,
+  systemTitle = ""
 ): LaborDraft => ({
-  discipline: "RIG",
+  discipline: disciplineForSystemTitle(systemTitle),
   margin:
     tierMargin != null && tierMargin > 0 && tierMargin < 1
       ? String(Math.round(tierMargin * 100))
       : "30",
-  mobs: [freshMob(t)],
+  mobs: defaultLaborMobs(t),
   pmHrs: "",
   pmAuto: true,
   shopHrs: "",
@@ -302,7 +284,7 @@ export default function EstimatorClient({
   // curtain configurator; refreshed when the meta action re-stamps.
   const [tierMargin, setTierMargin] = useState<number | null>(initial.tierMargin);
   const [laborDraft, setLaborDraft] = useState<LaborDraft>(() =>
-    freshLabor(null, initial.tierMargin)
+    freshLabor(null, initial.tierMargin, (initial.sections ?? freshSections())[0]?.name || "")
   );
   const [, startTransition] = useTransition();
 
@@ -774,7 +756,7 @@ export default function EstimatorClient({
     // customer could otherwise seed the mobilization with no distance and
     // quietly price the trip as local. Cached selections call back inline.
     withTravelFor(customerId, locationId, (est) =>
-      setLaborDraft(freshLabor(est, tierMargin))
+      setLaborDraft(freshLabor(est, tierMargin, sections.find((section) => section.id === id)?.name || ""))
     );
   };
 
@@ -889,7 +871,7 @@ export default function EstimatorClient({
   const resetAutoHrs = (field: "pmHrs" | "drfHrs", flag: "pmAuto" | "drfAuto") =>
     setLaborDraft((d) => ({ ...d, [field]: "", [flag]: true }));
   const addMob = () =>
-    setLaborDraft((d) => ({ ...d, mobs: d.mobs.concat([freshMob(travelEstNow())]) }));
+    setLaborDraft((d) => ({ ...d, mobs: d.mobs.concat([laborMob(travelEstNow())]) }));
   const removeMob = (idx: number) =>
     setLaborDraft((d) =>
       d.mobs.length <= 1 ? d : { ...d, mobs: d.mobs.filter((_, i) => i !== idx) }
@@ -1040,9 +1022,23 @@ export default function EstimatorClient({
         labor: true,
       });
     }
+    if (r.performanceBonus > 0) {
+      const idN = nextId();
+      const skuN = nextId();
+      items.push({
+        id: idN,
+        sku: "LAB-BONUS-" + skuN,
+        desc: "Performance bonus — 5% of labor cost",
+        qty: 1,
+        unit: "lot",
+        cost: round2(r.performanceBonus),
+        price: price(r.performanceBonus),
+        labor: true,
+      });
+    }
     if (items.length) pushItems(secId, items);
     setLaborFor(null);
-    setLaborDraft(freshLabor(travelEstNow(), tierMargin));
+    setLaborDraft(freshLabor(travelEstNow(), tierMargin, sections.find((section) => section.id === secId)?.name || ""));
   };
 
   /* ---------------- review banner view-model ---------------- */

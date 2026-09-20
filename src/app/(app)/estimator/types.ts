@@ -114,10 +114,15 @@ export type MobDraft = {
   tripAuto: boolean;
   people: string;
   days: string;
+  /** Total scheduled hours per person/day; first 8 are regular, the rest OT. */
+  hoursPerDay?: string;
+  /** Legacy manual total OT hours; read only when hoursPerDay is absent. */
   otHrs: string;
   sup: boolean;
   milesRT: string;
   lift: boolean;
+  /** Per-rental lift cost override. Blank uses the live catalog rate. */
+  liftRate?: string;
   comments: string;
   internalNote: string;
 };

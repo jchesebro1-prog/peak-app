@@ -2536,3 +2536,19 @@ Payment terms are one persisted choice: Deposit with terms, 100% prepay, Net
 descriptions, and prices; switching all three off removes the line rows. Quote
 display controls are a left sidebar on desktop and collapse above the document
 on narrow screens.
+
+## D136. Labor uses scheduled days, crew hierarchy, and explicit adders (2026-09-20)
+
+The labor configurator opens with Site Visit 1×1, Install 4×5, Hang 2×3,
+Commissioning 2×3, and Training 1×1. Scope defaults from the system title;
+Audio and Video share one scope, and unmatched systems use Other. Each
+mobilization chooses 8–12 hours/day: the first eight are regular and every
+additional hour is overtime for the full crew.
+
+The first person in every non-empty crew is billed at the supervisor rate and
+the remaining people at the discipline's installer rate; a supervisor is no
+longer added on top of headcount. Site Lift is named Lift rental, uses one
+rental per five scheduled days, and permits a per-mobilization rate override.
+Drafting defaults to 2% of total regular crew hours. A visible 5% performance
+bonus is calculated from pre-bonus labor cost, then added as its own priced
+line so estimate totals and the configurator agree.

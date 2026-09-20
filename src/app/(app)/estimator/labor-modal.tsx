@@ -39,8 +39,8 @@ const TXTAREA: CSSProperties = {
 const DISC_OPTIONS: [string, string][] = [
   ["RIG", "Rigging"],
   ["LIG", "Lighting"],
-  ["AUD", "Audio"],
-  ["VID", "Video"],
+  ["AUD", "Audio / Video"],
+  ["OTH", "Other"],
 ];
 
 /** $50/hr · $52.50/hr, cents only when they exist (fmt()'s always-2 is noise here). */
@@ -146,8 +146,8 @@ export default function LaborModal({
 
   // rate readout (item 54), base installer rate always; OT / supervisor only
   // when the current mobilization toggles actually bill them
-  const anyOt = lr.mobs.some((m) => (parseFloat(m.raw.otHrs) || 0) > 0);
-  const anySup = lr.mobs.some((m) => m.supHrs > 0);
+  const anyOt = lr.mobs.some((m) => m.otHrs > 0);
+  const anySup = lr.mobs.some((m) => m.people > 0);
 
   // travel-derived hints (round-trip mileage + >1h auto trip type, E3/E4)
   const autoRT = travel && travel.miles != null ? Math.round(travel.miles * 2) : null;
@@ -444,7 +444,7 @@ export default function LaborModal({
               {tripHintShow && <span style={tripAutoFar ? pillFar : pillMuted}>{tripHintLabel}</span>}
             </div>
 
-            {/* people / days / OT */}
+            {/* people / days / daily hours */}
             <div
               style={{
                 display: "grid",
@@ -474,14 +474,15 @@ export default function LaborModal({
                 />
               </div>
               <div>
-                <label style={{ ...LBL, marginBottom: 5 }}>OT hrs</label>
-                <input
+                <label style={{ ...LBL, marginBottom: 5 }}>Hours / day</label>
+                <select
                   className="est-input est-field"
-                  value={raw.otHrs}
-                  onChange={(e) => onSetMob(i, "otHrs", e.target.value)}
-                  placeholder="0"
-                  style={MOBFIELD}
-                />
+                  value={raw.hoursPerDay || "8"}
+                  onChange={(e) => onSetMob(i, "hoursPerDay", e.target.value)}
+                  style={{ ...MOBFIELD, cursor: "pointer" }}
+                >
+                  {[8, 9, 10, 11, 12].map((hours) => <option key={hours} value={hours}>{hours} hours{hours > 8 ? ` · ${hours - 8} OT` : " · normal"}</option>)}
+                </select>
               </div>
             </div>
 
@@ -489,7 +490,7 @@ export default function LaborModal({
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr auto auto",
+                gridTemplateColumns: "1fr auto",
                 gap: 10,
                 alignItems: "end",
               }}
@@ -504,13 +505,16 @@ export default function LaborModal({
                   style={MOBFIELD}
                 />
               </div>
-              <button type="button" onClick={() => onToggleMobFlag(i, "sup")} style={segBtn(raw.sup)}>
-                Supervisor
-              </button>
               <button type="button" onClick={() => onToggleMobFlag(i, "lift")} style={segBtn(raw.lift)}>
-                Site lift
+                Lift rental
               </button>
             </div>
+            {raw.lift && (
+              <div style={{ marginTop: 10, maxWidth: 220 }}>
+                <label style={{ ...LBL, marginBottom: 5 }}>Lift rental rate ($)</label>
+                <input className="est-input est-field" value={raw.liftRate || ""} onChange={(e) => onSetMob(i, "liftRate", e.target.value)} placeholder={String(rate("EQP-LIFT"))} style={MOBFIELD} />
+              </div>
+            )}
             <div
               style={{
                 display: "flex",
@@ -521,7 +525,7 @@ export default function LaborModal({
               }}
             >
               <div style={{ fontSize: 10.5, color: "#aab0bb", lineHeight: 1.4 }}>
-                {crewHint} · {travHint}
+                First crew member billed as supervisor · {crewHint} · {travHint}
               </div>
               {autoMilesShow && (
                 <button
@@ -673,7 +677,7 @@ export default function LaborModal({
             />
             <div style={{ marginTop: 4, minHeight: 13, lineHeight: 1, textAlign: "right" }}>
               {lr.drfAuto ? (
-                <span style={{ fontSize: 9, color: "#aab0bb" }}>Auto · {pctLabel} of reg</span>
+                <span style={{ fontSize: 9, color: "#aab0bb" }}>Auto · 2% of total hours</span>
               ) : (
                 <button
                   type="button"
@@ -690,7 +694,7 @@ export default function LaborModal({
                     cursor: "pointer",
                   }}
                 >
-                  ↺ Auto · {pctLabel}
+                  ↺ Auto · 2%
                 </button>
               )}
             </div>
@@ -720,6 +724,9 @@ export default function LaborModal({
             style={MOBFIELD}
           />
         </div>
+      </div>
+      <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: "#f7f8fa", color: "#5b616e", fontSize: 11.5 }}>
+        Performance bonus · 5% of {fmt(lr.baseCost)} cost = <strong style={{ color: "#16181d" }}>{fmt(lr.performanceBonus)}</strong>
       </div>
     </ConfigModal>
   );

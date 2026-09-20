@@ -67,11 +67,27 @@ import {
   resolveFixtureAssemblies,
 } from "@/lib/fixture-assemblies";
 import { parseMaterialCsv } from "@/app/(app)/estimator/material-csv";
+import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
+import { computeLabor, computeMob } from "@/app/(app)/estimator/pricing";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
+
+/* --- Estimator labor defaults and cost rules --- */
+ok(disciplineForSystemTitle("Lighting control") === "LIG", "labor scope defaults from the system title");
+ok(disciplineForSystemTitle("Video projection") === "AUD", "audio and video share one labor scope");
+ok(disciplineForSystemTitle("General conditions") === "OTH", "an unmatched system defaults to Other");
+const defaultMobs = defaultLaborMobs(null);
+ok(defaultMobs.map((mob) => `${mob.name}:${mob.people}x${mob.days}`).join("|") === "Site Visit:1x1|Install:4x5|Hang:2x3|Commissioning:2x3|Training:1x1", "labor opens with the five requested crew/day defaults");
+const testRate = ((sku: string) => ({ "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 75, "DRF-SUB": 50 }[sku] || 0)) as any;
+const day10 = computeMob({ ...defaultMobs[1], hoursPerDay: "10" }, "RIG", testRate);
+ok(day10.reg === 160 && day10.otHrs === 40, "hours beyond 8 per day become crew overtime");
+ok(day10.supHrs === 40 && day10.regCost === 9000, "the first person is the supervisor within the crew, not an added worker");
+const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [defaultMobs[1]], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, testRate);
+ok(laborCalc.drfAutoHrs === 3.2, "drafting defaults to 2% of total regular hours");
+ok(laborCalc.performanceBonus === laborCalc.baseCost * 0.05, "labor adds a 5% performance bonus based on base cost");
 
 /* --- Estimator material/vendor quote CSV --- */
 const materialCsv = parseMaterialCsv(`sku,description,quantity,unit,unit_cost,unit_sell,link

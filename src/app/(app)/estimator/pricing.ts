@@ -247,6 +247,7 @@ export type MobCalc = {
   days: number;
   travel: boolean;
   reg: number;
+  otHrs: number;
   regCost: number;
   otCost: number;
   supHrs: number;
@@ -268,11 +269,16 @@ export function computeMob(m: MobDraft, disc: string, rate: RateFn): MobCalc {
   const people = Math.max(0, parseInt(m.people, 10) || 0);
   const days = Math.max(0, parseFloat(m.days) || 0);
   const travel = m.tripType === "travel";
-  const reg = people * days * 8; // straight-time man-hours
-  const regCost = reg * rate(disc + "-LBR");
-  const otHrs = Math.max(0, parseFloat(m.otHrs) || 0);
+  const scheduled = Math.min(24, Math.max(0, parseFloat(m.hoursPerDay || "8") || 0));
+  const regularPerDay = Math.min(8, scheduled);
+  const reg = people * days * regularPerDay;
+  const supHrs = people > 0 ? days * regularPerDay : 0;
+  const installerHrs = Math.max(0, reg - supHrs);
+  const regCost = installerHrs * rate(disc + "-LBR") + supHrs * rate(disc + "-SUP");
+  const otHrs = m.hoursPerDay == null
+    ? Math.max(0, parseFloat(m.otHrs) || 0)
+    : people * days * Math.max(0, scheduled - 8);
   const otCost = otHrs * rate(disc + "-OT");
-  const supHrs = m.sup ? days * 8 : 0; // one supervisor for the trip
   const supCost = supHrs * rate(disc + "-SUP");
   const vehicles = people > 0 ? Math.ceil(people / 2) : 0; // 2 crew per vehicle/room
   const milesRT = Math.max(0, parseFloat(m.milesRT) || 0);
@@ -280,15 +286,17 @@ export function computeMob(m: MobDraft, disc: string, rate: RateFn): MobCalc {
   const mileCost = (travel ? milesRT * vehicles : milesRT * vehicles * days) * rate("TVL-MIL");
   const hotelCost = travel ? days * vehicles * rate("TVL-HTL") : 0;
   const foodCost = travel ? people * days * rate("TVL-FOD") : 0;
-  const lifts = m.lift && days > 0 ? Math.ceil(days / 5) * Math.max(1, vehicles) : 0;
-  const liftCost = lifts * rate("EQP-LIFT");
-  const labor = regCost + otCost + supCost;
+  const lifts = m.lift && days > 0 ? Math.ceil(days / 5) : 0;
+  const liftRate = Math.max(0, parseFloat(m.liftRate || "") || rate("EQP-LIFT"));
+  const liftCost = lifts * liftRate;
+  const labor = regCost + otCost;
   const trav = mileCost + hotelCost + foodCost + liftCost;
   return {
     people,
     days,
     travel,
     reg,
+    otHrs,
     regCost,
     otCost,
     supHrs,
@@ -322,6 +330,8 @@ export type LaborCalc = {
   drfHrs: number;
   shopCost: number;
   misc: number;
+  baseCost: number;
+  performanceBonus: number;
   totalCost: number;
   margin: number;
   totalPrice: number;
@@ -334,7 +344,7 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
   const totalReg = mobs.reduce((a, x) => a + x.reg, 0); // total straight-time man-hours across mobs
   const pct = LABOR_PCT[disc] != null ? LABOR_PCT[disc] : 0.1;
   const pmAutoHrs = Math.round(totalReg * pct); // PM hrs default = pct of reg hrs
-  const drfAutoHrs = Math.round(totalReg * pct); // drafting hrs default = same equation
+  const drfAutoHrs = Math.round(totalReg * 0.02 * 10) / 10;
   const pmAuto = draft.pmAuto !== false;
   const drfAuto = draft.drfAuto !== false;
   const pmHrs = pmAuto ? pmAutoHrs : Math.max(0, parseFloat(draft.pmHrs) || 0);
@@ -342,7 +352,9 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
   const shopHrs = Math.max(0, parseFloat(draft.shopHrs) || 0); // in-house (fab) hrs — manual
   const shopCost = pmHrs * rate("SHP-PM") + shopHrs * rate("SHP-IN") + drfHrs * rate("DRF-SUB");
   const misc = Math.max(0, parseFloat(draft.misc) || 0);
-  const totalCost = mobCost + shopCost + misc;
+  const baseCost = mobCost + shopCost + misc;
+  const performanceBonus = baseCost * 0.05;
+  const totalCost = baseCost + performanceBonus;
   const margin = Math.min(0.95, Math.max(0, (parseFloat(draft.margin) || 0) / 100));
   const totalPrice = margin < 1 ? totalCost / (1 - margin) : totalCost;
   return {
@@ -361,6 +373,8 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
     drfHrs,
     shopCost,
     misc,
+    baseCost,
+    performanceBonus,
     totalCost,
     margin,
     totalPrice,

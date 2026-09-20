@@ -1,0 +1,47 @@
+import type { MobDraft, TravelLite } from "./types";
+
+const MOB_DEFAULTS = [
+  ["Site Visit", "1", "1"],
+  ["Install", "4", "5"],
+  ["Hang", "2", "3"],
+  ["Commissioning", "2", "3"],
+  ["Training", "1", "1"],
+] as const;
+
+export function disciplineForSystemTitle(title: string): "RIG" | "LIG" | "AUD" | "OTH" {
+  const value = (title || "").toLowerCase();
+  if (/audio|sound|video|projection|\bav\b|a\/v/.test(value)) return "AUD";
+  if (/light|electric|dimmer|control/.test(value)) return "LIG";
+  if (/rig|hoist|hang|curtain|drape|track|lineset|line set/.test(value)) return "RIG";
+  return "OTH";
+}
+
+export function laborMob(
+  travel: TravelLite | null,
+  name = "",
+  people = "1",
+  days = "1"
+): MobDraft {
+  const far = !!(travel && travel.minutes != null && travel.minutes > 60);
+  const roundTrip = travel && travel.miles != null ? Math.round(travel.miles * 2) : null;
+  return {
+    name,
+    nameCustom: false,
+    tripType: far ? "travel" : "local",
+    tripAuto: true,
+    people,
+    days,
+    hoursPerDay: "8",
+    otHrs: "",
+    sup: true,
+    milesRT: far && roundTrip != null ? String(roundTrip) : "",
+    lift: false,
+    liftRate: "",
+    comments: "",
+    internalNote: "",
+  };
+}
+
+export function defaultLaborMobs(travel: TravelLite | null): MobDraft[] {
+  return MOB_DEFAULTS.map(([name, people, days]) => laborMob(travel, name, people, days));
+}

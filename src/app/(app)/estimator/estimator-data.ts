@@ -175,6 +175,7 @@ export const LABOR_RATES_FALLBACK: Record<string, number> = {
   "LIG-LBR": 45, "LIG-OT": 60, "LIG-SUP": 75,
   "AUD-LBR": 48, "AUD-OT": 70, "AUD-SUP": 72,
   "VID-LBR": 48, "VID-OT": 70, "VID-SUP": 72,
+  "OTH-LBR": 50, "OTH-OT": 75, "OTH-SUP": 75,
   "SHP-PM": 90, "SHP-IN": 40, "DRF-SUB": 50,
   "TVL-MIL": 1, "TVL-HTL": 140, "TVL-FOD": 70,
   "EQP-LIFT": 750,
@@ -183,8 +184,9 @@ export const LABOR_RATES_FALLBACK: Record<string, number> = {
 export const DISC_LABEL: Record<string, string> = {
   RIG: "Rigging",
   LIG: "Lighting",
-  AUD: "Audio",
+  AUD: "Audio / Video",
   VID: "Video",
+  OTH: "Other",
 };
 
 /** PM & drafting hours default to a % of total regular labor hours, per scope. */
@@ -193,6 +195,7 @@ export const LABOR_PCT: Record<string, number> = {
   LIG: 0.05,
   AUD: 0.05,
   VID: 0.10,
+  OTH: 0.10,
 };
 
 /** Starter mobilization types — the Label field is an editable combobox. */
