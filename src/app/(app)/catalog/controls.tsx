@@ -139,6 +139,7 @@ export function CatalogImportPanel({
   const [adding, setAdding] = useState(manufacturers.length === 0);
   const [newMfr, setNewMfr] = useState("");
   const [text, setText] = useState("");
+  const [pending, startTransition] = useTransition();
 
   const mfr = (adding ? newMfr : mfrSel).trim();
   const parsed = text.trim() ? parseCatalog(text) : null;
@@ -361,7 +362,16 @@ export function CatalogImportPanel({
 
           {/* PASTE — wired */}
           {method === "paste" && (
-            <form action={importCatalog} style={{ marginTop: 12 }}>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const fd = new FormData(e.currentTarget);
+                startTransition(async () => {
+                  await importCatalog(fd);
+                });
+              }}
+              style={{ marginTop: 12 }}
+            >
               <input type="hidden" name="mfr" value={mfr} />
               <div style={{ fontSize: 11.5, color: "#8c919c", marginBottom: 8, lineHeight: 1.4 }}>
                 One part per line: <span style={{ fontFamily: "var(--font-mono)" }}>SKU, Description, Category, Unit, List, Cost</span>.
@@ -504,7 +514,7 @@ export function CatalogImportPanel({
 
               <button
                 type="submit"
-                disabled={!canImport || !mfr}
+                disabled={!canImport || !mfr || pending}
                 style={{
                   width: "100%",
                   marginTop: 14,
@@ -513,16 +523,18 @@ export function CatalogImportPanel({
                   border: "none",
                   borderRadius: 9,
                   padding: 11,
-                  ...(canImport && mfr
+                  ...(canImport && mfr && !pending
                     ? { color: "#fff", background: accent, cursor: "pointer" }
                     : { color: "#aab0bb", background: "#eef0f3", cursor: "not-allowed" }),
                 }}
               >
-                {!mfr
-                  ? "Name the manufacturer"
-                  : canImport
-                    ? `Import ${parsed!.stats.valid} part${parsed!.stats.valid === 1 ? "" : "s"} →`
-                    : "Paste rows to import"}
+                {pending
+                  ? "Importing…"
+                  : !mfr
+                    ? "Name the manufacturer"
+                    : canImport
+                      ? `Import ${parsed!.stats.valid} part${parsed!.stats.valid === 1 ? "" : "s"} →`
+                      : "Paste rows to import"}
               </button>
             </form>
           )}
