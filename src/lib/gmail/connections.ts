@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { gmailConnections, type GmailConnectionRow } from "@/db/schema";
 import { decryptToken, encryptToken } from "./crypto";
 import { refreshAccessToken, type OAuthTokens } from "./oauth";
+import { isPersonalKey } from "./config";
 
 /**
  * Store for connected Gmail mailboxes (the gmail_connections table). All token
@@ -40,7 +41,10 @@ function toInfo(r: GmailConnectionRow): ConnectionInfo {
 export async function listConnections(): Promise<ConnectionInfo[]> {
   const db = await getDb();
   const rows = await db.select().from(gmailConnections);
-  return rows.map(toInfo);
+  // Shared mailboxes were retired. Keep their rows inert for now so this
+  // cleanup does not destroy historical credentials or audit data, but never
+  // expose or sync them again.
+  return rows.filter((r) => isPersonalKey(r.mailboxKey)).map(toInfo);
 }
 
 export async function getConnectionInfo(
@@ -152,7 +156,7 @@ export async function updateSyncState(
 export async function connectedMailboxKeys(): Promise<string[]> {
   const db = await getDb();
   const rows = await db.select({ k: gmailConnections.mailboxKey }).from(gmailConnections);
-  return rows.map((r) => r.k);
+  return rows.filter((r) => isPersonalKey(r.k)).map((r) => r.k);
 }
 
 /**

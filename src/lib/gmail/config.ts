@@ -63,8 +63,9 @@ export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 export const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 export const GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 
-/** The four connectable mailboxes map to a stable connection key. Personal
- *  boxes are per-user (`personal:<userId>`); shared boxes use their id. */
+/** Connectable mailboxes map to a stable connection key. Personal boxes are
+ *  per-user (`personal:<userId>`). Shared mailboxes were retired; the legacy
+ *  keys remain understood by old records but are no longer connectable. */
 export type MailboxKey = string; // "personal:u1" | "sales" | "installs" | "info"
 
 export function personalKey(userId: string): MailboxKey {
@@ -79,7 +80,7 @@ export function userIdOfKey(key: MailboxKey): string | null {
   return isPersonalKey(key) ? key.slice("personal:".length) : null;
 }
 
-export const SHARED_KEYS = ["sales", "installs", "info"] as const;
+export const SHARED_KEYS: readonly string[] = [];
 
 /** Google sign-in credentials present (shared with Auth.js). */
 export function googleConfigured(): boolean {

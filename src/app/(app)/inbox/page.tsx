@@ -61,7 +61,7 @@ import HomeTabs from "../home-tabs";
 
 export const metadata = { title: "Inbox — Quartzite-6" };
 
-const BOX_IDS = ["personal", "sales", "installs", "info"] as const;
+const BOX_IDS = ["personal"] as const;
 const FOLDER_IDS = [
   "inbox",
   "sent",

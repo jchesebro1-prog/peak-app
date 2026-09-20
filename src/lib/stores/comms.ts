@@ -275,11 +275,10 @@ export type SharedBoxMeta = {
   desc: string;
 };
 
-export const SHARED_BOXES: SharedBoxMeta[] = [
-  { id: "sales",    label: "Sales",    local: "sales",    color: "#3155a8", desc: "Quotes, bids & customer questions" },
-  { id: "installs", label: "Installs", local: "installs", color: "#2f6f4f", desc: "Projects, scheduling & field coordination" },
-  { id: "info",     label: "Info",     local: "info",     color: "#8a6d1f", desc: "General inbound — the address on the website" },
-];
+// Shared mailboxes were retired. The legacy IDs stay in MailboxId so old
+// documents remain readable, but no new mailbox or Inbox view is created for
+// them.
+export const SHARED_BOXES: SharedBoxMeta[] = [];
 
 function sharedMeta(id: string): SharedBoxMeta | null {
   return SHARED_BOXES.find((b) => b.id === id) || null;
@@ -333,14 +332,13 @@ export function forwardAddress(domain = DEFAULT_DOMAIN): string {
 
 // is a thread part of the mailbox `boxId` as seen by `me`?
 function inBox(t: CommThread, boxId: string, me: string): boolean {
-  if (boxId === "personal")
-    return t.mailbox === "personal" && t.mailboxUser === me;
-  return t.mailbox === boxId;
+  return boxId === "personal" && t.mailbox === "personal" && t.mailboxUser === me;
 }
 
-// every thread the current user can see: their own personal + all shared
+// Every thread the current user can see. Legacy shared threads remain stored
+// for audit/history but are no longer part of the active Inbox.
 function visibleTo(t: CommThread, me: string): boolean {
-  return t.mailbox !== "personal" || t.mailboxUser === me;
+  return t.mailbox === "personal" && t.mailboxUser === me;
 }
 
 export type MailboxInfo = {

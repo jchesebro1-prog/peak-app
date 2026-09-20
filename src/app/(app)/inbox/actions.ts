@@ -63,7 +63,7 @@ import {
  * event fan-out.
  */
 
-const MAILBOXES: readonly string[] = ["personal", "sales", "installs", "info"];
+const MAILBOXES: readonly string[] = ["personal"];
 
 function asMailbox(x: string | undefined | null): MailboxId {
   return (MAILBOXES.includes(x || "") ? x : "personal") as MailboxId;
@@ -500,4 +500,3 @@ export async function autoSyncAction() {
   const r = await checkMailIfStale(AUTO_SYNC_MIN_AGE_MS);
   return { ok: true as const, ran: r.ran, changed: r.changed, id: r.id };
 }
-
