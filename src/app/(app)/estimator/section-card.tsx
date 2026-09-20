@@ -68,6 +68,7 @@ export type SectionCardProps = {
 export default function SectionCard(p: SectionCardProps) {
   const [importOpen, setImportOpen] = useState(false);
   const [importMessage, setImportMessage] = useState("");
+  const [showLink, setShowLink] = useState(!!p.customDraft.link);
   const { sec, isInternal, cols } = p;
   const itemsRev = systemItemsRev(sec);
   const itemsCost = systemItemsCost(sec);
@@ -695,10 +696,13 @@ export default function SectionCard(p: SectionCardProps) {
 
                 <div style={{ marginBottom: 12 }}>
                   <label style={LBL}>Description</label>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr minmax(180px,.45fr)", gap: 10 }}>
-                    <input className="est-field" value={cd.desc} onChange={(e) => p.onSetCustomDraft("desc", e.target.value)} placeholder="e.g. Custom-fabricated motor mounting bracket" style={{ ...PORTAL_FIELD, fontFamily: "var(--font-ui)", fontSize: 13, padding: "8px 10px" }} />
-                    <input className="est-field" type="url" value={cd.link} onChange={(e) => p.onSetCustomDraft("link", e.target.value)} placeholder="Product link (optional)" title="Optional vendor or product page" style={{ ...PORTAL_FIELD, fontFamily: "var(--font-ui)", fontSize: 12 }} />
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <input className="est-field" value={cd.desc} onChange={(e) => p.onSetCustomDraft("desc", e.target.value)} placeholder="e.g. Custom-fabricated motor mounting bracket" style={{ ...PORTAL_FIELD, flex: 1, fontFamily: "var(--font-ui)", fontSize: 13, padding: "8px 10px" }} />
+                    {!showLink && addBtn("🔗 Link", () => setShowLink(true))}
                   </div>
+                  {showLink && (
+                    <input className="est-field" type="url" value={cd.link} onChange={(e) => p.onSetCustomDraft("link", e.target.value)} placeholder="Product link (optional)" title="Optional vendor or product page" style={{ ...PORTAL_FIELD, fontFamily: "var(--font-ui)", fontSize: 12, marginTop: 8 }} />
+                  )}
                 </div>
 
                 <div
