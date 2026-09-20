@@ -312,6 +312,7 @@ export async function saveOfficeAction(input: {
   phone?: string;
   lat?: number | string | null;
   lng?: number | string | null;
+  timezone?: string;
 }) {
   await requirePerm("manage_users");
   const name = (input.name || "").trim();
@@ -355,6 +356,7 @@ export async function saveOfficeAction(input: {
     phone: (input.phone || "").trim(),
     lat,
     lng,
+    timezone: (input.timezone || "America/Chicago").trim() || "America/Chicago",
   };
   if (isNew) {
     if (!offices.some((o) => o.quoteDefault)) clean.quoteDefault = true;

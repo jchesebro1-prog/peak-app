@@ -23,6 +23,8 @@ export type Office = {
   lng: number | null;
   /** Explicit travel origin for quote pricing. Exactly one is selected in Settings. */
   quoteDefault?: boolean;
+  /** IANA timezone used for dashboard greetings and local office time. */
+  timezone?: string;
 };
 
 export type AppSettingsData = {

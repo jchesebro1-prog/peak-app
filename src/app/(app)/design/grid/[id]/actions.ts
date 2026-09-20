@@ -46,6 +46,7 @@ import { isFabricRow, priceGridCurtains } from "@/lib/design/grid-curtains";
 import { polygonArea } from "@/lib/design/grid-geometry";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
+import type { AState } from "@/app/(app)/design/quick/engine";
 
 /** The Grid editor server actions (D108). */
 
@@ -84,6 +85,7 @@ export async function saveGridIntakeAction(input: {
   address: string;
   notes: string;
   measurementBased: boolean;
+  autoConfig: AState;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   await requireUser();
   if (!input.venueName.trim() && !input.locationName.trim()) return { ok: false, error: "Add a venue or location to continue." };
@@ -94,6 +96,7 @@ export async function saveGridIntakeAction(input: {
     locationName: input.locationName.trim(),
     address: input.address.trim(),
     notes: input.notes.trim(),
+    autoConfig: input.autoConfig,
   });
   if (!saved) return { ok: false, error: "That design could not be found." };
   revalidatePath(editorPath(input.projectId));

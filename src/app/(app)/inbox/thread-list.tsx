@@ -522,7 +522,7 @@ function Row({
   // only takes up space when it actually has content — a plain read thread
   // with none of these renders as a clean 3-line row.
   const hasMetaChips =
-    r.showBoxTag || r.showStatus || r.showWait || r.showQueued || r.showAssignee;
+    r.showBoxTag || r.showStatus || r.showWait || r.showQueued || r.showAssignee || r.gmailLabels.length > 0;
   return (
     <div
       className="ib-row"
@@ -670,6 +670,11 @@ function Row({
         </span>
         {hasMetaChips && (
         <span style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8 }}>
+          {r.gmailLabels.map((label) => (
+            <span key={label} title={`Gmail label: ${label}`} style={{ maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 9.5, fontWeight: 600, color: "#5b4b8a", background: "#f1ebf7", border: "1px solid #ded3e9", padding: "1px 7px", borderRadius: 20 }}>
+              {label}
+            </span>
+          ))}
           {r.showBoxTag && (
             <span
               style={{

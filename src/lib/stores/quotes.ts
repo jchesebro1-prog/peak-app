@@ -123,6 +123,7 @@ export type Quote = {
   owner: string;
   /** Estimator/Quick Design spec subdoc. */
   spec?: unknown;
+  vendorQuotes?: unknown;
   /** Non-binding portal acceptance (IDEAS #47 P3): a customer accepted this
    *  quote in the portal. Purely a follow-up flag — the team confirms by
    *  marking the quote Won, which runs the normal spawn machinery. */

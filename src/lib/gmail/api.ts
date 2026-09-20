@@ -46,6 +46,19 @@ export async function sendRaw(
 }
 
 export type GmailMessageMeta = { id: string; threadId: string };
+export type GmailLabel = { id: string; name: string; type?: string };
+
+export async function listLabels(mailboxKey: string): Promise<GmailLabel[]> {
+  const r = await gapi<{ labels?: GmailLabel[] }>(mailboxKey, "/labels");
+  return r.labels || [];
+}
+
+export async function createLabel(mailboxKey: string, name: string): Promise<GmailLabel> {
+  return gapi<GmailLabel>(mailboxKey, "/labels", {
+    method: "POST",
+    body: JSON.stringify({ name, labelListVisibility: "labelShow", messageListVisibility: "show" }),
+  });
+}
 
 /** List message ids matching a Gmail search query (e.g. "newer_than:90d"). */
 export async function listMessageIds(

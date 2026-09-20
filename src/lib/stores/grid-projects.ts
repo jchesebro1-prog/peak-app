@@ -8,6 +8,7 @@ import {
 } from "@/db/doc-store";
 import { clamp01, type Calibration, type Point } from "@/lib/annotations";
 import type { GridCurtain } from "@/lib/design/grid-bom";
+import type { AState } from "@/app/(app)/design/quick/engine";
 
 /**
  * The Grid (D108) — system-design projects: plan sheets, painted catalog
@@ -142,6 +143,8 @@ export type GridProject = {
     locationName: string;
     address: string;
     notes: string;
+    /** Shared Quick Design inputs; the Grid editor is their manual-layout workspace. */
+    autoConfig?: AState;
   };
   /** Sheet display order; the docs live in grid_sheets. */
   sheetIds: string[];

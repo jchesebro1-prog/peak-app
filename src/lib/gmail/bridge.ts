@@ -31,7 +31,9 @@ import {
 import {
   getMessage,
   getProfile,
+  createLabel,
   listHistory,
+  listLabels,
   listMessageIds,
   listThreadIds,
   modifyThread,
@@ -78,6 +80,32 @@ async function keyForThread(t: CommThread): Promise<MailboxKey | null> {
 function mailboxOfKey(key: MailboxKey): { mailbox: MailboxId; userName: string | null } {
   if (isPersonalKey(key)) return { mailbox: "personal", userName: null };
   return { mailbox: key as MailboxId, userName: null };
+}
+
+function appLinkFromLabels(labels: string[]): CommThread["link"] {
+  for (const name of labels) {
+    const m = /^Peak\/(customer|opportunity|project)\/([^/]+)$/i.exec(name);
+    if (m) return { type: m[1].toLowerCase(), id: m[2], label: name };
+  }
+  return null;
+}
+
+/** Apply a Peak record link to Gmail as a durable user label. */
+export async function pushLinkLabels(threadId: string): Promise<void> {
+  const t = await getDoc<CommThread>("comms", threadId);
+  if (!t?.gmailThreadId || !t.link) return;
+  const key = t.gmailAccountKey ?? (await keyForThread(t));
+  if (!key) return;
+  const info = await getConnectionInfo(key);
+  if (!info || !info.scope.includes(GMAIL_MODIFY_SCOPE)) return;
+  const name = `Peak/${t.link.type}/${t.link.id}`;
+  const labels = await listLabels(key);
+  let label = labels.find((l) => l.name === name);
+  if (!label) label = await createLabel(key, name);
+  await modifyThread(key, t.gmailThreadId, { addLabelIds: [label.id] });
+  await patchDoc<CommThread>("comms", threadId, (d) => {
+    d.gmailLabels = Array.from(new Set([...(d.gmailLabels || []), name])).sort();
+  });
 }
 
 /* ---- outbound ------------------------------------------------------------- */
@@ -204,6 +232,9 @@ async function recordMessage(
         d.unread = true;
         d.archived = false;
       }
+      d.gmailLabels = Array.from(new Set([...(d.gmailLabels || []), ...(p.labels || [])])).sort();
+      const linked = appLinkFromLabels(d.gmailLabels);
+      if (linked && !d.link) d.link = linked;
     });
     return existing.id;
   }
@@ -227,12 +258,13 @@ async function recordMessage(
     channel: "email",
     status: threadStatusFor(dir),
     assignedTo: "",
-    link: null,
     messages: [msg],
     createdAt: p.at,
     updatedAt: p.at,
     gmailThreadId: p.gmailThreadId,
     gmailAccountKey: key,
+    gmailLabels: p.labels || [],
+    link: appLinkFromLabels(p.labels || []),
     syncState: "synced",
     syncedAt: Date.now(),
     rev: 1,
@@ -411,6 +443,8 @@ async function syncMailboxMessages(
   info: NonNullable<Awaited<ReturnType<typeof getConnectionInfo>>>
 ): Promise<string | null> {
   let last: string | null = null;
+  const labelRows = await listLabels(key);
+  const labelNames = new Map(labelRows.filter((l) => l.type === "user").map((l) => [l.id, l.name]));
 
   if (!info.initialImportDone) {
     // one-time 90-day history import
@@ -420,7 +454,9 @@ async function syncMailboxMessages(
       const page = await listMessageIds(key, query, pageToken);
       for (const meta of page.messages) {
         const full = await getMessage(key, meta.id);
-        const touched = await recordMessage(key, parseInbound(full));
+        const parsed = parseInbound(full);
+        parsed.labels = (full.labelIds || []).map((id) => labelNames.get(id)).filter((x): x is string => !!x);
+        const touched = await recordMessage(key, parsed);
         if (touched) last = touched;
       }
       pageToken = page.nextPageToken;
@@ -449,7 +485,9 @@ async function syncMailboxMessages(
       if (page.historyId) newestHistoryId = page.historyId;
       for (const meta of page.added) {
         const full = await getMessage(key, meta.id);
-        const touched = await recordMessage(key, parseInbound(full));
+        const parsed = parseInbound(full);
+        parsed.labels = (full.labelIds || []).map((id) => labelNames.get(id)).filter((x): x is string => !!x);
+        const touched = await recordMessage(key, parsed);
         if (touched) last = touched;
       }
       pageToken = page.nextPageToken;

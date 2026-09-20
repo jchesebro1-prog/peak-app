@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { AState } from "@/app/(app)/design/quick/engine";
 import {
   type Calibration,
   calibrationScale,
@@ -207,6 +208,7 @@ export type ProjectLite = {
   spaces: GridSpace[];
   routes: GridRoute[];
   revisions: GridRevision[];
+  autoConfig?: AState;
 };
 
 type Pending =
@@ -950,14 +952,15 @@ export default function GridEditor({
       {/* header */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <Link href="/design/grid" style={{ ...BTN, textDecoration: "none" }}>
-          ← The Grid
+          ← Design
         </Link>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#16181d" }}>
-          {project.name}
+          Manual Layout <span style={{ color: "#8c919c", fontWeight: 500 }}>· {project.name}</span>
           {project.customer ? (
             <span style={{ color: "#8c919c", fontWeight: 500 }}> · {project.customer}</span>
           ) : null}
         </div>
+        {project.autoConfig ? <span style={{ fontSize: 11, color: "#6f3b7f", background: "#f1e8f4", borderRadius: 999, padding: "5px 9px", fontWeight: 700 }}>Auto brief saved</span> : null}
         {venues.length > 0 && (
           <select
             value={project.siteId || ""}

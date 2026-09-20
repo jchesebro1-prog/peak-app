@@ -55,7 +55,10 @@ import type {
   SpecMob,
   SpecSection,
   TravelLite,
+  VendorQuote,
+  VendorQuoteLine,
 } from "./types";
+import type { Subassembly } from "@/lib/stores/subassemblies";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import SectionCard from "./section-card";
 import AiScopeModal from "./ai-scope-modal";
@@ -73,10 +76,20 @@ import PreviewDoc from "./preview-doc";
 /** Prototype prop taxRatePct defaulted to 0 — kept as a constant. */
 const TAX_RATE_PCT = 0;
 const INTAKE_CATEGORIES = ["Audio / Video", "Lighting", "Rigging", "Curtains"];
+type VendorDraft = {
+  vendor: string; quoteNumber: string; total: string; lineDescription: string;
+  materialsList: string; materialsSummary: string; terms: string; notes: string;
+  mode: "single" | "multiple"; linesText: string;
+  attachment?: { name: string; mime: string; dataUrl: string };
+};
+const freshVendorDraft = (): VendorDraft => ({
+  vendor: "", quoteNumber: "", total: "", lineDescription: "Vendor quote",
+  materialsList: "", materialsSummary: "", terms: "", notes: "",
+  mode: "single", linesText: "",
+});
 const DEFAULT_TERMS_TEXT = [
   "This quote is valid for 30 days from the issue date.",
   "Pricing reflects current manufacturer list.",
-  "Acceptance generates a sales order in QuickBooks.",
   "Installation is scheduled upon receipt of a signed quote and 40% deposit.",
 ].join("\n");
 const INTAKE_LABEL: CSSProperties = {
@@ -99,6 +112,9 @@ const INTAKE_FIELD: CSSProperties = {
   background: "#fff",
   fontFamily: "var(--font-ui)",
 };
+const SECONDARY_BUTTON: CSSProperties = { border: "1px solid #d7dbe2", borderRadius: 7, padding: "8px 13px", background: "#fff", color: "#5b616e", fontSize: 12, fontWeight: 600, cursor: "pointer" };
+const PRIMARY_BUTTON: CSSProperties = { border: "none", borderRadius: 7, padding: "8px 13px", background: "var(--accent)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" };
+const LBL = INTAKE_LABEL;
 
 const CSS = `
 .est-input { font-family: var(--font-mono); }
@@ -272,6 +288,7 @@ export default function EstimatorClient({
   aiSource,
   people,
   quoteTasks,
+  subassemblies,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   const [sections, setSections] = useState<SpecSection[]>(
@@ -315,6 +332,11 @@ export default function EstimatorClient({
   const [preparedBy, setPreparedBy] = useState(initial.preparedBy || initial.owner);
   const [assumptions, setAssumptions] = useState(initial.assumptions);
   const [termsText, setTermsText] = useState(initial.termsText || DEFAULT_TERMS_TEXT);
+  const [vendorQuotes, setVendorQuotes] = useState<VendorQuote[]>(initial.vendorQuotes || []);
+  const [vendorOpen, setVendorOpen] = useState(false);
+  const [intakeOpen, setIntakeOpen] = useState(false);
+  const [marginSlider, setMarginSlider] = useState(() => Math.round((initial.tierMargin ?? 0.3) * 100));
+  const [vendorDraft, setVendorDraft] = useState<VendorDraft>(freshVendorDraft);
   const [revNum, setRevNum] = useState(initial.revNum);
   const [revDateMs, setRevDateMs] = useState(initial.revDateMs);
   const [pdfQty, setPdfQty] = useState(true);
@@ -323,6 +345,7 @@ export default function EstimatorClient({
   const [pdfTerms, setPdfTerms] = useState(true);
   const [pdfOptions, setPdfOptions] = useState(true);
   const [pdfAssumptions, setPdfAssumptions] = useState(true);
+  const [pdfSeparateBOM, setPdfSeparateBOM] = useState(false);
   const [sectionPrices, setSectionPrices] = useState<Record<string, boolean>>({});
   const [sectionNarratives, setSectionNarratives] = useState<Record<string, boolean>>({});
   const [pdfPrices, setPdfPrices] = useState(true);
@@ -433,6 +456,10 @@ export default function EstimatorClient({
       if (r && typeof r.tierMargin === "number") setTierMargin(r.tierMargin);
     });
   };
+  const saveIntakeEdits = () => {
+    persistMeta({ name: projectName, customer: custName, contactName, quoteBasis, scopeNarrative });
+    setIntakeOpen(false);
+  };
 
   const applySync = (r: ReviewSync) => {
     if (r.review) setReview(r.review);
@@ -463,6 +490,7 @@ export default function EstimatorClient({
         status,
         sections,
         mobs,
+        vendorQuotes,
       });
       if (res.ok && res.id) {
         setLoadedId(res.id);
@@ -669,17 +697,57 @@ export default function EstimatorClient({
     const ext = Math.max(0, parseFloat(v.replace(/[^0-9.-]/g, "")) || 0);
     patchItem(id, (it) => ({ ...it, price: it.qty > 0 ? round2(ext / it.qty) : 0 }));
   };
+  const setLineMargin = (id: number, v: string) => {
+    const pct = Math.min(95, Math.max(0, parseFloat(v) || 0));
+    const m = pct / 100;
+    patchItem(id, (it) => ({ ...it, price: round2(it.cost / (1 - m)) }));
+  };
   const removeItem = (id: number) =>
     setSections((ss) => ss.map((s) => ({ ...s, items: s.items.filter((x) => x.id !== id) })));
 
   const setMarginAll = (v: string) => {
-    const m = parseInt(v, 10) / 100;
+    const m = Math.min(0.95, Math.max(0, parseInt(v, 10) || 0) / 100);
     setSections((ss) =>
       ss.map((s) => ({
         ...s,
         items: s.items.map((it) => ({ ...it, price: round2(it.cost / (1 - m)) })),
       }))
     );
+  };
+  const addVendorQuote = () => {
+    const total = Math.max(0, parseFloat(vendorDraft.total) || 0);
+    if (!total) return;
+    const id = `vq-${Date.now()}`;
+    const lines: VendorQuoteLine[] = vendorDraft.mode === "multiple"
+      ? vendorDraft.linesText.split("\n").map((row, i) => {
+          const [description, qtyRaw, amountRaw] = row.split("|");
+          return { id: nextId(), description: (description || `Vendor line ${i + 1}`).trim(), qty: Math.max(1, parseFloat(qtyRaw) || 1), unit: "ea", amount: Math.max(0, parseFloat(amountRaw) || 0) };
+        }).filter((line) => line.description)
+      : [];
+    const quote: VendorQuote = {
+      id, vendor: vendorDraft.vendor.trim(), quoteNumber: vendorDraft.quoteNumber.trim(),
+      attachment: vendorDraft.attachment, materialsList: vendorDraft.materialsList,
+      materialsSummary: vendorDraft.materialsSummary, terms: vendorDraft.terms,
+      notes: vendorDraft.notes, lineDescription: vendorDraft.lineDescription,
+      mode: vendorDraft.mode, total, lines,
+    };
+    setVendorQuotes((all) => [...all, quote]);
+    const target = activeId || sections[0]?.id;
+    if (target) {
+      const imported = lines.length ? lines : [{ id: nextId(), description: vendorDraft.lineDescription || `${quote.vendor || "Vendor"} quote`, qty: 1, unit: "lot", amount: total }];
+      setSections((all) => all.map((sec) => sec.id !== target ? sec : {
+        ...sec,
+        items: [...sec.items, ...imported.map((line, i) => ({ id: line.id, sku: quote.quoteNumber || "VENDOR-QUOTE", desc: line.description, qty: line.qty, unit: line.unit, cost: i === 0 ? total : 0, price: i === 0 ? total : 0, custom: true, vendorQuoteId: id, comment: quote.materialsSummary || `Vendor quote ${quote.quoteNumber || ""}` }))],
+      }));
+    }
+    setVendorDraft(freshVendorDraft());
+    setVendorOpen(false);
+  };
+  const onVendorFile = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setVendorDraft((d) => ({ ...d, attachment: { name: file.name, mime: file.type || "application/octet-stream", dataUrl: String(reader.result) } }));
+    reader.readAsDataURL(file);
   };
   const setSystemMargin = (secId: string, v: string) => {
     const m = parseFloat(v) / 100; // fractional so a typed sell price hits exactly (punch #37)
@@ -935,14 +1003,41 @@ export default function EstimatorClient({
 
   const setFixture = (field: keyof FixtureDraft, val: string) =>
     setFixtureDraft((d) => ({ ...d, [field]: val }));
+  const subassemblyPrice = (item: Subassembly, options: NonNullable<FixtureDraft["subassemblyOptions"]>) =>
+    item.lightEngineCost + item.lensCost + options.filter((o) => o.selected !== false).reduce((sum, o) => sum + o.cost * o.qty, 0);
+  const setFixtureSubassembly = (id: string) => {
+    const item = subassemblies.find((s) => s.id === id);
+    if (!item) return;
+    const options = (Object.entries(item.options || {}) as ["data" | "power" | "mounting" | "accessories", { sku: string; name: string; cost: number; qty: number }[]][]).flatMap(([category, rows]) => rows.map((row) => ({ ...row, category, selected: true })));
+    setFixtureDraft((d) => ({ ...d, custom: false, model: `subassembly:${id}`, name: item.label, mount: "None", accessories: [], power: [], lamp: item.lamp || "", position: item.position || "", circuit: item.circuit || "", subassemblyId: id, subassemblyOptions: options, price: String(subassemblyPrice(item, options)) }));
+  };
   const setFixtureModel = (sku: string) => {
+    if (sku.startsWith("subassembly:")) {
+      setFixtureSubassembly(sku.slice("subassembly:".length));
+      return;
+    }
     if (sku === "__custom") {
-      setFixtureDraft((d) => ({ ...d, custom: true, model: "__custom", price: "", name: "" }));
+      setFixtureDraft((d) => ({ ...d, custom: true, model: "__custom", price: "", name: "", subassemblyId: undefined, subassemblyOptions: undefined }));
       return;
     }
     const f = FIXTURES.find((x) => x.sku === sku);
-    setFixtureDraft((d) => ({ ...d, custom: false, model: sku, price: f ? String(f.list) : "" }));
+    setFixtureDraft((d) => ({ ...d, custom: false, model: sku, price: f ? String(f.list) : "", subassemblyId: undefined, subassemblyOptions: undefined }));
   };
+  const toggleSubassemblyOption = (sku: string) => setFixtureDraft((d) => {
+    if (!d.subassemblyId || !d.subassemblyOptions) return d;
+    const item = subassemblies.find((s) => s.id === d.subassemblyId);
+    if (!item) return d;
+    const options = d.subassemblyOptions.map((o) => o.sku === sku ? { ...o, selected: o.selected === false } : o);
+    return { ...d, subassemblyOptions: options, price: String(subassemblyPrice(item, options)) };
+  });
+  const setSubassemblyOptionQty = (sku: string, value: string) => setFixtureDraft((d) => {
+    if (!d.subassemblyId || !d.subassemblyOptions) return d;
+    const item = subassemblies.find((s) => s.id === d.subassemblyId);
+    if (!item) return d;
+    const qty = Math.max(1, parseInt(value, 10) || 1);
+    const options = d.subassemblyOptions.map((o) => o.sku === sku ? { ...o, qty } : o);
+    return { ...d, subassemblyOptions: options, price: String(subassemblyPrice(item, options)) };
+  });
   const toggleFixArr = (field: "accessories" | "power", key: string) =>
     setFixtureDraft((d) => {
       const arr = (d[field] || []).slice();
@@ -968,12 +1063,19 @@ export default function EstimatorClient({
   const addFixture = (secId: string) => {
     const d = fixtureDraft;
     const c = computeFixture(d, fixAddOns);
-    const name = d.custom ? (d.name || "").trim() : c.fx.name;
-    if (!name || c.unit <= 0) return;
+    const built = d.subassemblyId ? subassemblies.find((s) => s.id === d.subassemblyId) : null;
+    const builtUnit = built && d.subassemblyOptions ? subassemblyPrice(built, d.subassemblyOptions) : null;
+    const name = built ? built.label : d.custom ? (d.name || "").trim() : c.fx.name;
+    const unitPrice = builtUnit ?? c.unit;
+    if (!name || unitPrice <= 0) return;
     const opts: string[] = [];
     if (d.mount && d.mount !== "None") opts.push(d.mount);
     if ((d.accessories || []).length) opts.push(d.accessories.join(", "));
     if ((d.power || []).length) opts.push(d.power.join("/"));
+    if (built && d.subassemblyOptions) {
+      const selected = d.subassemblyOptions.filter((o) => o.selected !== false).map((o) => `${o.name} ×${o.qty}`);
+      if (selected.length) opts.push(selected.join(", "));
+    }
     if (d.lamp && d.lamp !== "LED") opts.push(d.lamp);
     const pc: string[] = [];
     if ((d.position || "").trim()) pc.push("Pos " + d.position.trim());
@@ -982,9 +1084,9 @@ export default function EstimatorClient({
     if (opts.length) desc += " — " + opts.join("; ");
     if (pc.length) desc += " (" + pc.join(" / ") + ")";
     const idN = nextId();
-    const sku = d.custom ? "FIX-" + nextId() : c.fx.sku;
+    const sku = built ? `SA-${built.id}` : d.custom ? "FIX-" + nextId() : c.fx.sku;
     pushItems(secId, [
-      { id: idN, sku, desc, qty: c.qty, unit: "ea", cost: c.cost, price: c.unit, fixture: true },
+      { id: idN, sku, desc, qty: c.qty, unit: "ea", cost: unitPrice, price: unitPrice, fixture: true },
     ]);
     setFixtureFor(null);
     setFixtureDraft(freshFixture());
@@ -1523,6 +1625,13 @@ export default function EstimatorClient({
               )}
               <button
                 type="button"
+                onClick={() => setVendorOpen(true)}
+                style={{ fontFamily: "var(--font-ui)", fontSize: 13, fontWeight: 600, border: "1px solid #4b505a", borderRadius: 8, padding: "9px 13px", cursor: "pointer", background: "#2b2e35", color: "#cfd3da" }}
+              >
+                Vendor quote
+              </button>
+              <button
+                type="button"
                 onClick={doSave}
                 style={{
                   fontFamily: "var(--font-ui)",
@@ -1632,6 +1741,9 @@ export default function EstimatorClient({
                   </select>
                 </>
               )}
+              <button type="button" onClick={() => setIntakeOpen(true)} style={{ marginLeft: "auto", border: "1px solid #555a64", borderRadius: 7, padding: "6px 10px", background: "transparent", color: "#fff", fontSize: 11.5, cursor: "pointer" }}>
+                Edit intake
+              </button>
             </div>
           </div>
 
@@ -2264,10 +2376,13 @@ export default function EstimatorClient({
                   type="range"
                   min={0}
                   max={55}
-                  value={Math.round(t.margin * 100)}
-                  onChange={(e) => setMarginAll(e.target.value)}
+                  value={marginSlider}
+                  onChange={(e) => setMarginSlider(parseInt(e.target.value, 10))}
                   style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }}
                 />
+                <button type="button" onClick={() => setMarginAll(String(marginSlider))} style={{ marginTop: 9, width: "100%", border: "1px solid var(--accent)", borderRadius: 7, padding: "7px 9px", background: ACCENT_SOFT, color: ACCENT_INK, fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>
+                  Apply {marginSlider}% to all lines
+                </button>
                 <div
                   style={{
                     display: "flex",
@@ -2278,7 +2393,7 @@ export default function EstimatorClient({
                   }}
                 >
                   <span>0%</span>
-                  <span>Reprice every line</span>
+                  <span>Slider sets target</span>
                   <span>55%</span>
                 </div>
               </div>
@@ -2391,6 +2506,7 @@ export default function EstimatorClient({
                   onSetNarrative={(narrative) => setSectionNarrative(sec.id, narrative)}
                   onSetUnitPrice={setUnitPrice}
                   onSetExtendedPrice={setExtendedPrice}
+                  onSetLineMargin={setLineMargin}
                   onSetMfr={(v) => setSectionMfr(sec.id, v)}
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}
@@ -2433,6 +2549,39 @@ export default function EstimatorClient({
           </div>
 
           {/* configurator modals */}
+          {intakeOpen && (
+            <div style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(15,17,21,.58)", display: "grid", placeItems: "center", padding: 20 }}>
+              <div style={{ width: "min(680px, 100%)", maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: 14, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,.25)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><h2 style={{ margin: 0, fontSize: 20 }}>Edit estimate intake</h2><button type="button" onClick={() => setIntakeOpen(false)} style={{ border: 0, background: "transparent", fontSize: 22, cursor: "pointer" }}>×</button></div>
+                <p style={{ margin: "7px 0 18px", color: "#737985", fontSize: 12.5 }}>These details appear in the quote header and cover narrative.</p>
+                <label style={{ ...LBL, color: "#737985" }}>Project / estimate name<input value={projectName} onChange={(e) => setProjectName(e.target.value)} style={{ ...INTAKE_FIELD, marginTop: 5 }} /></label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 13 }}>
+                  <label style={{ ...LBL, color: "#737985" }}>Customer<select value={customerId || ""} onChange={(e) => pickCustomer(e.target.value)} style={{ ...INTAKE_FIELD, marginTop: 5 }}><option value="">Select a customer…</option>{customerList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+                  <label style={{ ...LBL, color: "#737985" }}>Venue / location<select value={locationId || ""} onChange={(e) => pickVenue(e.target.value)} style={{ ...INTAKE_FIELD, marginTop: 5 }}><option value="">Select a venue…</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}</select></label>
+                </div>
+                <label style={{ ...LBL, color: "#737985", marginTop: 13 }}>Customer contact<input value={contactName} onChange={(e) => setContactName(e.target.value)} style={{ ...INTAKE_FIELD, marginTop: 5 }} /></label>
+                <label style={{ ...LBL, color: "#737985", marginTop: 13 }}>What is driving the quote / pricing basis<textarea value={quoteBasis} onChange={(e) => setQuoteBasis(e.target.value)} rows={3} style={{ ...INTAKE_FIELD, marginTop: 5, resize: "vertical" }} /></label>
+                <label style={{ ...LBL, color: "#737985", marginTop: 13 }}>Scope narrative<textarea value={scopeNarrative} onChange={(e) => setScopeNarrative(e.target.value)} rows={4} style={{ ...INTAKE_FIELD, marginTop: 5, resize: "vertical" }} /></label>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}><button type="button" onClick={() => setIntakeOpen(false)} style={{ ...SECONDARY_BUTTON }}>Cancel</button><button type="button" onClick={saveIntakeEdits} style={{ ...PRIMARY_BUTTON }}>Save intake</button></div>
+              </div>
+            </div>
+          )}
+          {vendorOpen && (
+            <div style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(15,17,21,.58)", display: "grid", placeItems: "center", padding: 20 }}>
+              <div style={{ width: "min(760px, 100%)", maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: 14, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,.25)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><h2 style={{ margin: 0, fontSize: 20 }}>Attach vendor quote</h2><button type="button" onClick={() => setVendorOpen(false)} style={{ border: 0, background: "transparent", fontSize: 22, cursor: "pointer" }}>×</button></div>
+                <p style={{ margin: "7px 0 18px", color: "#737985", fontSize: 12.5 }}>Save the quote details with this estimate and add it as one line or several descriptive lines.</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  {([['vendor','Vendor'],['quoteNumber','Quote number'],['total','Vendor quote total'],['lineDescription','Line description']] as const).map(([key, label]) => <label key={key} style={{ ...LBL, color: "#737985" }}>{label}<input value={vendorDraft[key]} onChange={(e) => setVendorDraft((d) => ({ ...d, [key]: e.target.value }))} style={{ ...INTAKE_FIELD, marginTop: 5 }} /></label>)}
+                </div>
+                <label style={{ ...LBL, color: "#737985", marginTop: 13 }}>Attach file<input type="file" onChange={(e) => onVendorFile(e.target.files?.[0])} style={{ display: "block", marginTop: 6, fontSize: 12 }} />{vendorDraft.attachment && <span style={{ display: "block", marginTop: 5, color: "#5b616e", fontSize: 11 }}>{vendorDraft.attachment.name}</span>}</label>
+                <label style={{ ...LBL, color: "#737985", marginTop: 13 }}>Add to estimate as<select value={vendorDraft.mode} onChange={(e) => setVendorDraft((d) => ({ ...d, mode: e.target.value as VendorDraft['mode'] }))} style={{ ...INTAKE_FIELD, marginTop: 5 }}><option value="single">One vendor quote line</option><option value="multiple">Multiple descriptive lines</option></select></label>
+                {vendorDraft.mode === "multiple" && <label style={{ ...LBL, color: "#737985", marginTop: 13 }}>Imported lines <span style={{ textTransform: "none", fontWeight: 400 }}>(one per line: description | quantity | amount; amount is informational and the quote total is counted once)</span><textarea value={vendorDraft.linesText} onChange={(e) => setVendorDraft((d) => ({ ...d, linesText: e.target.value }))} rows={5} style={{ ...INTAKE_FIELD, marginTop: 5, resize: "vertical" }} /></label>}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 13 }}>{([['materialsList','Materials list'],['materialsSummary','Materials summary'],['terms','Terms'],['notes','Notes']] as const).map(([key, label]) => <label key={key} style={{ ...LBL, color: "#737985" }}>{label}<textarea value={vendorDraft[key]} onChange={(e) => setVendorDraft((d) => ({ ...d, [key]: e.target.value }))} rows={3} style={{ ...INTAKE_FIELD, marginTop: 5, resize: "vertical" }} /></label>)}</div>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}><button type="button" onClick={() => setVendorOpen(false)} style={{ ...SECONDARY_BUTTON }}>Cancel</button><button type="button" onClick={addVendorQuote} style={{ ...PRIMARY_BUTTON }}>Attach and add to estimate</button></div>
+              </div>
+            </div>
+          )}
           {curtainFor && (
             <CurtainModal
               secName={curtainSec ? curtainSec.name : ""}
@@ -2449,8 +2598,11 @@ export default function EstimatorClient({
               secName={fixtureSec ? fixtureSec.name : ""}
               draft={fixtureDraft}
               addOns={fixAddOns}
+              subassemblies={subassemblies}
               onSet={setFixture}
               onSetModel={setFixtureModel}
+              onSetSubassemblyQty={setSubassemblyOptionQty}
+              onToggleSubassemblyOption={toggleSubassemblyOption}
               onToggleArr={toggleFixArr}
               onApplyPreset={applyFixturePreset}
               onAdd={() => addFixture(fixtureFor)}
@@ -2535,6 +2687,7 @@ export default function EstimatorClient({
           onAssumptions={onAssumptions}
           onTermsText={onTermsText}
           pdfAssumptions={pdfAssumptions}
+          pdfSeparateBOM={pdfSeparateBOM}
           sectionPrices={sectionPrices}
           sectionNarratives={sectionNarratives}
           toggleSectionPrices={(id) => setSectionPrices((m) => ({ ...m, [id]: m[id] === false }))}
@@ -2557,6 +2710,7 @@ export default function EstimatorClient({
             else if (flag === "pdfAssumptions") setPdfAssumptions((v) => !v);
             else if (flag === "pdfCover") setPdfCover((v) => !v);
             else if (flag === "pdfOptions") setPdfOptions((v) => !v);
+            else if (flag === "pdfSeparateBOM") setPdfSeparateBOM((v) => !v);
             else setPdfTerms((v) => !v);
           }}
         />

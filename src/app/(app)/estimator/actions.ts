@@ -31,7 +31,7 @@ import {
   type InspectionRecord,
 } from "@/lib/stores/inspections";
 import { list as catalogList } from "@/lib/stores/catalog";
-import type { CatalogSearch, SpecMob, SpecSection } from "./types";
+import type { CatalogSearch, SpecMob, SpecSection, VendorQuote } from "./types";
 import type { SuggestPart } from "./estimator-data";
 import { activeUsers } from "@/lib/users";
 import {
@@ -59,6 +59,7 @@ type QuoteExtras = {
   assumptions?: string;
   termsText?: string;
   spec?: { sections: SpecSection[]; mobs: SpecMob[] };
+  vendorQuotes?: VendorQuote[];
 };
 
 type QuotePatch = Partial<Quote> & QuoteExtras;
@@ -80,6 +81,7 @@ export type SavePayload = {
   status: QuoteStatus;
   sections: SpecSection[];
   mobs: SpecMob[];
+  vendorQuotes: VendorQuote[];
 };
 
 export type SaveResult = {
@@ -139,6 +141,7 @@ export async function saveQuoteAction(
     status: payload.status,
     source: "estimator",
     spec: { sections: payload.sections, mobs: payload.mobs },
+    vendorQuotes: payload.vendorQuotes,
   };
   let q: Quote | null = null;
   let statusError: string | undefined;
@@ -175,6 +178,7 @@ export async function saveQuoteAction(
       preparedBy: payload.preparedBy || user.name,
       assumptions: payload.assumptions || "",
       termsText: payload.termsText || "",
+      vendorQuotes: payload.vendorQuotes,
     } as QuotePatch);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand
@@ -206,6 +210,7 @@ export async function saveQuoteAction(
 export async function updateQuoteMetaAction(
   id: string,
   meta: {
+    name?: string;
     customerId?: string | null;
     locationId?: string | null;
     customer?: string;
@@ -226,6 +231,7 @@ export async function updateQuoteMetaAction(
   // bypassing the permission-gated review actions below. Approval/status/price
   // changes have their own checked mutators (approveReviewAction, setStatus…).
   const patch: QuotePatch = {};
+  if (typeof meta.name === "string") patch.name = meta.name;
   if ("customerId" in meta) patch.customerId = meta.customerId;
   if ("locationId" in meta) patch.locationId = meta.locationId;
   if (typeof meta.customer === "string") patch.customer = meta.customer;

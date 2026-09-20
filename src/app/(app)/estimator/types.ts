@@ -1,6 +1,7 @@
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import type { FixtureRates } from "@/lib/stores/pricing";
 import type { TaskRecord } from "@/lib/stores/tasks";
+import type { Subassembly } from "@/lib/stores/subassemblies";
 
 /**
  * Estimator types. The spec shapes (SpecItem / SpecSection / SpecMob) are the
@@ -40,6 +41,23 @@ export type SpecItem = {
   /** internal-only note (never shown to the customer) */
   internalNote?: string;
   mob?: SpecMob;
+  vendorQuoteId?: string;
+};
+
+export type VendorQuoteLine = { id: number; description: string; qty: number; unit: string; amount: number };
+export type VendorQuote = {
+  id: string;
+  vendor: string;
+  quoteNumber: string;
+  attachment?: { name: string; mime: string; dataUrl: string };
+  materialsList: string;
+  materialsSummary: string;
+  terms: string;
+  notes: string;
+  lineDescription: string;
+  mode: "single" | "multiple";
+  total: number;
+  lines: VendorQuoteLine[];
 };
 
 /** One system card. */
@@ -93,6 +111,8 @@ export type FixtureDraft = {
   lamp: string;
   position: string;
   circuit: string;
+  subassemblyId?: string;
+  subassemblyOptions?: { category: "data" | "power" | "mounting" | "accessories"; sku: string; name: string; cost: number; qty: number; selected?: boolean }[];
 };
 
 export type MobDraft = {
@@ -180,6 +200,7 @@ export type InitialQuote = {
   tierMargin: number | null;
   /** Saved builder state (spec.sections) — null falls back to the demo sections. */
   sections: SpecSection[] | null;
+  vendorQuotes: VendorQuote[];
 };
 
 /**
@@ -219,4 +240,5 @@ export type EstimatorProps = {
   /** This quote's rows from the shared tasks collection, keyed by loadedId —
    *  empty for a quote that's never been saved (no id to attach tasks to yet). */
   quoteTasks: TaskRecord[];
+  subassemblies: Subassembly[];
 };

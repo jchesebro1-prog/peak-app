@@ -134,6 +134,20 @@
       "when": 1789864664794,
       "tag": "0018_goofy_terrax",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789875268144,
+      "tag": "0019_talented_night_nurse",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1789876890867,
+      "tag": "0020_good_silhouette",
+      "breakpoints": true
     }
   ]
 }

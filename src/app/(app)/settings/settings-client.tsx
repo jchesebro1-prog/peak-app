@@ -84,6 +84,7 @@ type OfficeVM = {
   phone: string;
   lat: number | null;
   lng: number | null;
+  timezone: string;
   quoteDefault: boolean;
 };
 
@@ -97,6 +98,7 @@ type OfficeDraft = {
   phone: string;
   lat: string;
   lng: string;
+  timezone: string;
   geoMiss: boolean;
 };
 
@@ -340,6 +342,7 @@ export default function SettingsClient({
     phone: "",
     lat: "",
     lng: "",
+    timezone: "America/Chicago",
     geoMiss: false,
   });
 
@@ -359,6 +362,7 @@ export default function SettingsClient({
       phone: o.phone || "",
       lat: o.lat == null ? "" : String(o.lat),
       lng: o.lng == null ? "" : String(o.lng),
+      timezone: o.timezone || "America/Chicago",
       geoMiss: false,
     });
     setOfSearch({ open: false, loading: false, results: [] });
@@ -423,6 +427,7 @@ export default function SettingsClient({
         phone: officeDraft.phone,
         lat: officeDraft.lat,
         lng: officeDraft.lng,
+        timezone: officeDraft.timezone,
       })
     );
     closeOffice();
@@ -1899,6 +1904,25 @@ export default function SettingsClient({
                   value={officeDraft.phone}
                   onChange={(e) => setOf({ phone: e.target.value })}
                 />
+              </div>
+
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ ...labelStyle, marginBottom: 6 }}>Time zone</label>
+                <select
+                  style={inputStyle}
+                  value={officeDraft.timezone}
+                  onChange={(e) => setOf({ timezone: e.target.value })}
+                >
+                  <option value="America/Chicago">Central — America/Chicago</option>
+                  <option value="America/New_York">Eastern — America/New_York</option>
+                  <option value="America/Denver">Mountain — America/Denver</option>
+                  <option value="America/Los_Angeles">Pacific — America/Los_Angeles</option>
+                  <option value="America/Anchorage">Alaska — America/Anchorage</option>
+                  <option value="Pacific/Honolulu">Hawaii — Pacific/Honolulu</option>
+                </select>
+                <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 5 }}>
+                  The dashboard greeting uses the quote-origin location’s time zone.
+                </div>
               </div>
 
               <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>

@@ -15,6 +15,7 @@ import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates } from "@/lib/stores/pricing";
 import { tasksForQuote } from "@/lib/stores/tasks";
+import { list as listSubassemblies } from "@/lib/stores/subassemblies";
 import EstimatorClient from "./estimator-client";
 import type {
   AiSource,
@@ -22,6 +23,7 @@ import type {
   InitialQuote,
   SpecSection,
   TravelLite,
+  VendorQuote,
 } from "./types";
 
 export const metadata = { title: "Estimator — Quartzite-6" };
@@ -85,6 +87,7 @@ async function initialFrom(
       pricingTier: null,
       tierMargin: null,
       sections: null,
+      vendorQuotes: [],
     };
   }
   const cid = q.customerId || (await resolveId(q.customer)) || null;
@@ -136,6 +139,7 @@ async function initialFrom(
     pricingTier: q.pricingTier ?? null,
     tierMargin: q.tierMargin ?? null,
     sections,
+    vendorQuotes: Array.isArray(q.vendorQuotes) ? (q.vendorQuotes as VendorQuote[]) : [],
   };
 }
 
@@ -171,7 +175,7 @@ export default async function EstimatorPage({
   // No quote id means a new estimate. The client presents the intake step
   // before the category workspace rather than silently opening a demo quote.
 
-  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster] =
+  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, subassemblies] =
     await Promise.all([
       byCategory("Fabric"),
       byCategory("Labor"),
@@ -180,6 +184,7 @@ export default async function EstimatorPage({
       getSettings(),
       getFixtureRates(),
       activeUsers(),
+      listSubassemblies(),
     ]);
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
@@ -264,6 +269,7 @@ export default async function EstimatorPage({
       aiSource={aiSource}
       people={roster.map((u) => ({ id: u.id, name: u.name }))}
       quoteTasks={quoteTasks}
+      subassemblies={subassemblies}
     />
   );
 }

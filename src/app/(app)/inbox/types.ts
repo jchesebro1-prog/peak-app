@@ -79,6 +79,7 @@ export type ThreadRowVM = {
   /** category preset color, "" when none */
   categoryColor: string;
   categoryLabel: string;
+  gmailLabels: string[];
   name: string;
   /** count of messages[] on the underlying thread; badge hidden when <= 1 */
   msgCount: number;

@@ -1,5 +1,7 @@
 import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
+import { getUser } from "@/lib/users";
+import { getSettings } from "@/lib/settings";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { money } from "@/lib/format";
 import {
@@ -132,6 +134,7 @@ export default async function HomePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireUser();
+  const [userRecord, appSettings] = await Promise.all([getUser(user.id), getSettings()]);
   const me = user.name;
   const sp = await searchParams;
 
@@ -341,8 +344,19 @@ export default async function HomePage({
 
   /* ---- greeting ---- */
 
-  const hour = new Date().getHours();
+  const office = appSettings.offices.find((o) => o.quoteDefault) || appSettings.offices[0];
+  let timezone = office?.timezone || "America/Chicago";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format();
+  } catch {
+    timezone = "America/Chicago";
+  }
+  const localParts = new Intl.DateTimeFormat("en-US", { timeZone: timezone, hour: "numeric", hour12: false }).formatToParts(new Date());
+  const hour = Number(localParts.find((part) => part.type === "hour")?.value || 0);
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const lastLogin = userRecord?.lastLoginAt
+    ? new Intl.DateTimeFormat("en-US", { timeZone: timezone, dateStyle: "medium", timeStyle: "short" }).format(userRecord.lastLoginAt)
+    : "First login";
   const urgentCount = pipelineRaw.filter((a) => a.urgent).length;
   const standfirst = `${openQuotes.length} open quotes worth ${money(openValue)} · ${urgentCount} need attention`;
 
@@ -512,6 +526,8 @@ export default async function HomePage({
         firstName={firstName(me)}
         standfirst={standfirst}
         openReviewCount={openReviewCount}
+        lastLogin={lastLogin}
+        timezone={timezone}
       />
 
       {/* stat tiles */}

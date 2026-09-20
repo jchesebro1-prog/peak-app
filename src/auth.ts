@@ -81,11 +81,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (account?.provider === "google") {
         const row = await getUserByEmail(user.email || "");
         if (!row || row.status !== "active") return false;
+        await updateUser(row.id, { lastLoginAt: Date.now() });
         if (user.image && user.image !== row.photoUrl) {
           await updateUser(row.id, { photoUrl: user.image });
         }
         return true;
       }
+      if (user.id) await updateUser(user.id, { lastLoginAt: Date.now() });
       return true;
     },
     async jwt({ token, user }) {

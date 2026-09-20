@@ -45,6 +45,7 @@ export const users = pgTable("users", {
   mobile: text("mobile"),
   officeId: text("office_id"),
   certifications: text("certifications"),
+  lastLoginAt: bigint("last_login_at", { mode: "number" }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   photoUrl: text("photo_url"),
 });

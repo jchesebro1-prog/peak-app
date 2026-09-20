@@ -154,6 +154,7 @@ export default async function SettingsPage() {
             lat: o.lat,
             lng: o.lng,
             quoteDefault: !!o.quoteDefault,
+            timezone: o.timezone || "America/Chicago",
           }))}
           users={users.map((u) => ({
             id: u.id,

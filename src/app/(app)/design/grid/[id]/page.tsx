@@ -46,7 +46,7 @@ export default async function GridEditorPage({
   }
 
   if (project.intake && !project.intake.complete) {
-    return <GridIntake projectId={project.id} projectName={project.name} />;
+    return <GridIntake projectId={project.id} projectName={project.name} initialAutoConfig={project.intake.autoConfig} />;
   }
 
   const [sheets, catalog, gridSymbols, engagements, laborHoursPerDevice, settings] = await Promise.all([
@@ -148,6 +148,7 @@ export default async function GridEditorPage({
         spaces: project.spaces || [],
         routes: project.routes || [],
         revisions: project.revisions || [],
+        autoConfig: project.intake?.autoConfig,
       }}
       sheets={sheets.map((s) => ({
         id: s.id,

@@ -31,4 +31,6 @@ export type BoardCardVM = {
   href: string;
   /** Columns this card may be dragged to. Empty (or no moveAction) = read-only. */
   canMoveTo: string[];
+  /** Optional destination columns that must collect details before moving. */
+  promptOnMoveTo?: string[];
 };

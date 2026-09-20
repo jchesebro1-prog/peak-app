@@ -250,6 +250,8 @@ export type CommThread = {
   // filed on the Gmail side → hidden from the Peak inbox (shows in Archived).
   // Distinct from `archived`, which stays the user's local Peak flag.
   gmailInboxed?: boolean;
+  /** Gmail user-label names observed on imported messages in this thread. */
+  gmailLabels?: string[];
 };
 
 function mid(n: number): string {
@@ -355,7 +357,7 @@ export type MailboxInfo = {
 
 export function mailboxes(
   me?: string,
-  opts: { domain?: string; userColor?: string } = {}
+  opts: { domain?: string; userColor?: string; personalAddress?: string } = {}
 ): MailboxInfo[] {
   const user = me || DEFAULT_USER;
   const domain = opts.domain || DEFAULT_DOMAIN;
@@ -367,7 +369,7 @@ export function mailboxes(
       name: user,
       label: firstName(user),
       sub: "me",
-      address: personalAddress(user, domain),
+      address: opts.personalAddress || personalAddress(user, domain),
       color: opts.userColor || DEFAULT_USER_COLOR,
     },
   ];
@@ -647,6 +649,7 @@ export async function threadsIn(
     filter?: FilterKey | null;
     sort?: SortKey | null;
     crmMode?: boolean;
+    gmailLabel?: string | null;
   } = {}
 ): Promise<CommThread[]> {
   const user = me || DEFAULT_USER;
@@ -706,6 +709,7 @@ export async function threadsIn(
       )
     );
   if (opts.filter) base = base.filter(filterPred(opts.filter, user));
+  if (opts.gmailLabel) base = base.filter((t) => (t.gmailLabels || []).includes(opts.gmailLabel!));
 
   // Explicit sort overrides the default waiting-first ordering. Pinned always
   // floats to the top regardless of order (Outlook parity).
@@ -1410,9 +1414,10 @@ export async function checkMailIfStale(
   if (!gmailBridgeActive()) return none;
   try {
     const { listConnections } = await import("@/lib/gmail/connections");
-    const eligible = (await listConnections())
-      .filter((c) => c.initialImportDone)
-      .map((c) => c.mailboxKey);
+    // Include first-time connections here too. The inbox opens immediately
+    // after OAuth, so its mount sync must be able to perform the 90-day
+    // initial import instead of waiting for a manual Get Mail click.
+    const eligible = (await listConnections()).map((c) => c.mailboxKey);
     if (!eligible.length) return none;
     await flushOutbox();
     // pollInbound claims each mailbox atomically right before syncing it,

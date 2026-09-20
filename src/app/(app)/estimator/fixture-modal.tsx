@@ -1,8 +1,11 @@
 "use client";
 
+import { useMemo, useState } from "react";
+
 import { FIX_PRESETS, FIXTURES, type FixtureAddOns } from "./estimator-data";
 import { computeFixture } from "./pricing";
 import type { FixtureDraft } from "./types";
+import type { Subassembly } from "@/lib/stores/subassemblies";
 import { addBtnStyle, chipBtn, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./est-ui";
 
 /**
@@ -17,6 +20,9 @@ export default function FixtureModal({
   addOns,
   onSet,
   onSetModel,
+  subassemblies,
+  onSetSubassemblyQty,
+  onToggleSubassemblyOption,
   onToggleArr,
   onApplyPreset,
   onAdd,
@@ -28,11 +34,23 @@ export default function FixtureModal({
   addOns: FixtureAddOns;
   onSet: (field: keyof FixtureDraft, val: string) => void;
   onSetModel: (sku: string) => void;
+  subassemblies: Subassembly[];
+  onSetSubassemblyQty: (sku: string, qty: string) => void;
+  onToggleSubassemblyOption: (sku: string) => void;
   onToggleArr: (field: "accessories" | "power", key: string) => void;
   onApplyPreset: (index: number) => void;
   onAdd: () => void;
   onClose: () => void;
 }) {
+  const [fixtureSearch, setFixtureSearch] = useState("");
+  const fixtureMatches = useMemo(() => {
+    const tokens = fixtureSearch.toLowerCase().split(/\s+/).filter(Boolean);
+    return FIXTURES.filter((f) => tokens.every((t) => `${f.family} ${f.name} ${f.sku}`.toLowerCase().includes(t)));
+  }, [fixtureSearch]);
+  const savedMatches = useMemo(() => {
+    const tokens = fixtureSearch.toLowerCase().split(/\s+/).filter(Boolean);
+    return subassemblies.filter((f) => tokens.every((t) => `${f.label} ${f.description} ${f.id} ${f.lightEngineSku} ${f.lensSku}`.toLowerCase().includes(t)));
+  }, [fixtureSearch, subassemblies]);
   const c = computeFixture(draft, addOns);
   const valid = (draft.custom ? (draft.name || "").trim().length > 0 : true) && c.unit > 0;
 
@@ -95,23 +113,45 @@ export default function FixtureModal({
         <label style={LBL}>
           Fixture{" "}
           <span style={{ color: "#c4c9d2", textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>
-            · built-in list or custom
+            · built-in list, saved fixture, or custom
           </span>
         </label>
+        <input value={fixtureSearch} onChange={(e) => setFixtureSearch(e.target.value)} placeholder="Search saved fixtures or built-in fixtures…" style={{ ...FIELD, marginBottom: 6 }} />
         <select
           className="est-field"
           value={draft.custom ? "__custom" : draft.model}
           onChange={(e) => onSetModel(e.target.value)}
           style={{ ...FIELD, background: "#fff", cursor: "pointer" }}
         >
-          {FIXTURES.map((f) => (
+          {fixtureMatches.map((f) => (
             <option key={f.sku} value={f.sku}>
               {f.family + " · " + f.name + " · $" + f.list}
             </option>
           ))}
+          {savedMatches.length > 0 && <optgroup label="Saved fixture builders">{savedMatches.map((f) => <option key={f.id} value={`subassembly:${f.id}`}>{f.label} · {f.description || "Fixture"} · ${f.price.toFixed(2)}</option>)}</optgroup>}
           <option value="__custom">— Custom / manual entry —</option>
         </select>
       </div>
+
+      {draft.subassemblyId && draft.subassemblyOptions && (
+        <div style={{ marginBottom: 16, padding: 12, background: "#f7f8fa", borderRadius: 9, border: "1px solid #ececf0" }}>
+          <label style={LBL}>Compatible options</label>
+          <div style={{ display: "grid", gap: 7 }}>
+            {(["data", "power", "mounting", "accessories"] as const).map((category) => {
+              const rows = draft.subassemblyOptions?.filter((o) => o.category === category) || [];
+              if (!rows.length) return null;
+              return <div key={category}><div style={{ fontSize: 10.5, color: "#8c919c", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>{category}</div><div style={{ display: "grid", gap: 4 }}>{rows.map((row) => { const selected = row.selected !== false; return <div key={row.sku} style={{ display: "grid", gridTemplateColumns: "22px minmax(0,1fr) 58px", gap: 6, alignItems: "center", opacity: selected ? 1 : .55 }}><button type="button" onClick={() => onToggleSubassemblyOption(row.sku)} style={{ width: 20, height: 20, borderRadius: 5, border: `1px solid ${selected ? "var(--accent)" : "#cfd3da"}`, background: selected ? "var(--accent)" : "#fff", color: selected ? "#fff" : "#9aa0ab", cursor: "pointer", fontSize: 12 }}>{selected ? "✓" : ""}</button><span style={{ fontSize: 11.5, color: "#3d424e" }}>{row.name}</span><input type="number" min={1} value={row.qty} onChange={(e) => onSetSubassemblyQty(row.sku, e.target.value)} style={{ ...NUMFIELD, padding: "5px 6px", fontSize: 11 }} /></div>; })}</div></div>;
+            })}
+          </div>
+          <div style={{ color: "#8c919c", fontSize: 10.5, marginTop: 8 }}>Options are limited to the compatibility list defined in Subassemblies.</div>
+        </div>
+      )}
+
+      {draft.subassemblyId && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
+        <div><label style={LBL}>Lamp / wattage</label><input value={draft.lamp} onChange={(e) => onSet("lamp", e.target.value)} placeholder="LED" style={FIELD} /></div>
+        <div><label style={LBL}>Hang position</label><input value={draft.position} onChange={(e) => onSet("position", e.target.value)} placeholder="FOH truss 1" style={FIELD} /></div>
+        <div><label style={LBL}>Circuit #</label><input value={draft.circuit} onChange={(e) => onSet("circuit", e.target.value)} placeholder="12" style={FIELD} /></div>
+      </div>}
 
       {/* custom name (manual entry) */}
       {draft.custom && (
@@ -159,7 +199,7 @@ export default function FixtureModal({
       </div>
 
       {/* mounting */}
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 16, display: draft.subassemblyId ? "none" : undefined }}>
         <label style={LBL}>Mounting / rigging</label>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
           {Object.keys(addOns.mounts).map((k) => (
@@ -171,7 +211,7 @@ export default function FixtureModal({
       </div>
 
       {/* accessories (multi-select) */}
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 16, display: draft.subassemblyId ? "none" : undefined }}>
         <label style={LBL}>
           Accessories{" "}
           <span style={{ color: "#c4c9d2", textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>
@@ -193,7 +233,7 @@ export default function FixtureModal({
       </div>
 
       {/* power + data (multi-select) */}
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 16, display: draft.subassemblyId ? "none" : undefined }}>
         <label style={LBL}>
           Power &amp; data{" "}
           <span style={{ color: "#c4c9d2", textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>
@@ -215,7 +255,7 @@ export default function FixtureModal({
       </div>
 
       {/* lamp / wattage */}
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 16, display: draft.subassemblyId ? "none" : undefined }}>
         <label style={LBL}>Lamp / wattage</label>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
           {Object.keys(addOns.lamps).map((k) => (

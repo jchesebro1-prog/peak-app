@@ -284,6 +284,14 @@ export async function setLinkAction(
     await update(id, { customerId: adopt.customerId, customer: adopt.customer });
   }
   await setLink(id, link);
+  if (link) {
+    try {
+      const { pushLinkLabels } = await import("@/lib/gmail/bridge");
+      await pushLinkLabels(id);
+    } catch (err) {
+      console.error("[gmail] link label push failed:", err);
+    }
+  }
   revalidate();
 }
 

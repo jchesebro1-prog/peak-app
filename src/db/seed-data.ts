@@ -60,6 +60,7 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
       lat: 43.032,
       lng: -87.945,
       quoteDefault: true,
+      timezone: "America/Chicago",
     },
     {
       id: "mad",
@@ -71,6 +72,7 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
       phone: "(608) 241-7500",
       lat: 43.085,
       lng: -89.301,
+      timezone: "America/Chicago",
     },
   ],
 };

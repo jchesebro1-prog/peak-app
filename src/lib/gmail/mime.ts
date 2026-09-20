@@ -156,6 +156,7 @@ export type ParsedInbound = {
   body: string;
   at: number; // epoch-ms
   isOutbound: boolean; // labelled SENT (message the account itself sent)
+  labels: string[];
   /** Set when the mail carries X-Peak-Site-Visit — one of the app's own
    *  .ics invite emails; the import poll skips these (D76-F). */
   siteVisitId?: string;
@@ -175,6 +176,7 @@ export function parseInbound(msg: GmailFullMessage): ParsedInbound {
     body: extractBody(msg.payload) || msg.snippet || "",
     at,
     isOutbound: (msg.labelIds || []).includes("SENT"),
+    labels: [],
     siteVisitId: header(hs, "X-Peak-Site-Visit") || undefined,
   };
 }

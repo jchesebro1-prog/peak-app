@@ -580,13 +580,19 @@ export async function logActivity(
 export async function setStage(
   id: string,
   stage: string,
-  me: string = DEFAULT_ME
+  me: string = DEFAULT_ME,
+  details?: Partial<Pick<LeadRecord, "contact" | "email" | "phone" | "interest" | "timeline" | "message">>
 ): Promise<LeadRecord | null> {
   if ((STAGES as readonly string[]).indexOf(stage) < 0) return null;
   const current = await getDoc<LeadRecord>("leads", id);
   if (!current || current.stage === stage) return current;
   return patchDoc<LeadRecord>("leads", id, (l) => {
     const from = l.stage;
+    if (details) {
+      for (const key of ["contact", "email", "phone", "interest", "timeline", "message"] as const) {
+        if (details[key] !== undefined) l[key] = String(details[key] || "").trim();
+      }
+    }
     l.stage = stage as LeadStage;
     if (!l.firstContactAt && stage !== "new") l.firstContactAt = now();
     l.activities = (l.activities || []).concat([

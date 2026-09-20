@@ -2,6 +2,8 @@ import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 import { mergedVisitReasons } from "@/lib/stores/site-visits";
 import { activeUsers } from "@/lib/users";
+import { getConnectionInfo } from "@/lib/gmail/connections";
+import { personalKey } from "@/lib/gmail/config";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { followUpCount } from "@/lib/stores/leads";
 import { crmModeOn } from "@/lib/stores/notif-prefs";
@@ -19,6 +21,7 @@ import {
   companyDomain,
   flaggedCount,
   folderCounts,
+  getAll as allThreads,
   forwardAddress,
   get as getThread,
   hasQueued,
@@ -132,7 +135,8 @@ export default async function InboxPage({
   const me = user.name;
   const settings = await getSettings();
   const domain = companyDomain(settings.companyName);
-  const boxOpts = { domain, userColor: user.color };
+  const connection = await getConnectionInfo(personalKey(user.id));
+  const boxOpts = { domain, userColor: user.color, personalAddress: connection?.address || undefined };
 
   /* ---- resolve nav state from the URL (the URL drives everything) ---- */
   const viewParam = str(params.view);
@@ -144,6 +148,7 @@ export default async function InboxPage({
   const filter: FilterKey | null = FILTER_KEYS.includes(str(params.filter))
     ? (str(params.filter) as FilterKey)
     : null;
+  const gmailLabel = str(params.label).trim();
   // An explicit ?sort= from the Sort dropdown overrides each mode's default
   // ordering (plain = date-desc, CRM = waiting-first — see comms.ts
   // threadsIn). With no param, sortParam is null and both threadsIn and the
@@ -196,6 +201,7 @@ export default async function InboxPage({
     threads,
     roster,
     customers,
+    allThreadsForLabels,
   ] = await Promise.all([
     Promise.resolve(mailboxes(me, boxOpts)),
     folderCounts("personal", me),
@@ -210,9 +216,11 @@ export default async function InboxPage({
       filter,
       sort: sortParam,
       crmMode,
+      gmailLabel: gmailLabel || null,
     }),
     activeUsers(),
     allCustomers(),
+    allThreads(),
   ]);
 
   const countsFor = {
@@ -233,6 +241,11 @@ export default async function InboxPage({
   /* ---- sidebar ---- */
   const folderHref = (b: string, f: string) => `/inbox?box=${b}&folder=${f}`;
   const viewHref = (v: string) => `/inbox?view=${v}`;
+  const labelNames = Array.from(new Set(
+    allThreadsForLabels
+      .filter((t) => t.mailbox === "personal" && t.mailboxUser === me)
+      .flatMap((t) => t.gmailLabels || [])
+  )).sort();
 
   const foldersFor = (boxId: MailboxId): FolderRowVM[] => {
     const counts = countsFor[boxId];
@@ -320,6 +333,15 @@ export default async function InboxPage({
         href: viewHref("calls"),
         icon: "calls",
       },
+      ...labelNames.map((label) => ({
+        key: `label:${label}`,
+        label,
+        active: gmailLabel === label,
+        count: allThreadsForLabels.filter((t) => t.mailbox === "personal" && t.mailboxUser === me && (t.gmailLabels || []).includes(label) && !t.archived && !t.deleted).length,
+        badge: "plain" as const,
+        href: `/inbox?label=${encodeURIComponent(label)}`,
+        icon: "label",
+      })),
     ],
     leadFollowCount: leadFollow,
     forwardAddr: forwardAddress(domain),
@@ -346,6 +368,7 @@ export default async function InboxPage({
       pinned: !!t.pinned,
       categoryColor: cat?.color || "",
       categoryLabel: cat?.label || "",
+      gmailLabels: (t.gmailLabels || []).slice(0, 4),
       name: nm,
       msgCount: (t.messages || []).length,
       participants: participantsFor(t),
@@ -409,8 +432,8 @@ export default async function InboxPage({
   } else {
     const bm = boxMeta(box, me, boxOpts);
     const fl = FOLDERS.find((f) => f[0] === folder);
-    listTitle = bm?.label || firstName(me);
-    listSub = (fl ? fl[1] : "Inbox") + " · " + (bm?.address || "");
+    listTitle = gmailLabel || bm?.label || firstName(me);
+    listSub = gmailLabel ? "Gmail label · " + (bm?.address || "") : (fl ? fl[1] : "Inbox") + " · " + (bm?.address || "");
   }
 
   const isDeleted = !isView && folder === "deleted";

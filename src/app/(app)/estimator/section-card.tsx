@@ -50,6 +50,7 @@ export type SectionCardProps = {
   onSetNarrative: (narrative: string) => void;
   onSetUnitPrice: (id: number, value: string) => void;
   onSetExtendedPrice: (id: number, value: string) => void;
+  onSetLineMargin: (id: number, value: string) => void;
   onSetMfr: (mfr: string) => void;
   onDelete: () => void;
   onSetMargin: (v: string) => void;
@@ -609,16 +610,21 @@ export default function SectionCard(p: SectionCardProps) {
                     </span>
                   )}
                   {isInternal && (
-                    <span
+                    <input
+                      key={`margin-${it.id}-${Math.round(m * 100)}`}
+                      type="text"
+                      inputMode="decimal"
+                      defaultValue={String(Math.round(m * 100))}
+                      onBlur={(e) => p.onSetLineMargin(it.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      title="Edit this line's margin"
                       style={{
-                        fontFamily: "var(--font-mono)",
+                        width: 54, boxSizing: "border-box", fontFamily: "var(--font-mono)",
                         textAlign: "right",
-                        fontSize: 12,
-                        color: marginColor(m),
+                        fontSize: 12, color: marginColor(m), border: "1px solid #e4e7ec",
+                        borderRadius: 6, padding: "4px 4px",
                       }}
-                    >
-                      {Math.round(m * 100)}%
-                    </span>
+                    />
                   )}
                   <input
                     key={`ext-${it.id}-${it.qty * it.price}`}

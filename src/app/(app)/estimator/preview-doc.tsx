@@ -78,6 +78,7 @@ export type PreviewProps = {
   onAssumptions: (v: string) => void;
   onTermsText: (v: string) => void;
   pdfAssumptions: boolean;
+  pdfSeparateBOM: boolean;
   sectionPrices: Record<string, boolean>;
   sectionNarratives: Record<string, boolean>;
   toggleSectionPrices: (id: string) => void;
@@ -93,7 +94,7 @@ export type PreviewProps = {
   pdfCover: boolean;
   pdfTerms: boolean;
   pdfOptions: boolean;
-  togglePdf: (flag: "pdfQty" | "pdfNotes" | "pdfPrices" | "pdfCover" | "pdfTerms" | "pdfOptions" | "pdfAssumptions") => void;
+  togglePdf: (flag: "pdfQty" | "pdfNotes" | "pdfPrices" | "pdfCover" | "pdfTerms" | "pdfOptions" | "pdfAssumptions" | "pdfSeparateBOM") => void;
 };
 
 const DAY_MS = 86400000;
@@ -102,7 +103,6 @@ const DAY_MS = 86400000;
 const TERMS = [
   "This quote is valid for 30 days from the issue date.",
   "Pricing reflects current manufacturer list.",
-  "Acceptance generates a sales order in QuickBooks.",
   "Installation is scheduled upon receipt of a signed quote and 40% deposit.",
 ];
 
@@ -146,7 +146,7 @@ export default function PreviewDoc(p: PreviewProps) {
             ? [
                 {
                   key: "labor",
-                  desc: "Installation, commissioning & project management",
+                desc: p.pdfNotes ? "Installation, commissioning & project management" : "",
                   comment: "",
                   showComment: false,
                   qty: "" as string | number,
@@ -156,7 +156,7 @@ export default function PreviewDoc(p: PreviewProps) {
               ]
             : visible.map((it) => ({
                 key: String(it.id),
-                desc: it.allowance ? "Budget allowance — " + it.desc : it.desc,
+                desc: p.pdfNotes ? (it.allowance ? "Budget allowance — " + it.desc : it.desc) : "",
                 comment: (it.comment || "").trim(),
                 showComment: !!(p.pdfNotes && it.comment && it.comment.trim()),
                 qty: it.qty as string | number,
@@ -181,6 +181,7 @@ export default function PreviewDoc(p: PreviewProps) {
       className="est-screen"
       style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
     >
+      <style>{`@page { size: Letter; margin: 0.55in; } @media print { body { background: #fff !important; } .est-prevhead, .est-edit-sidebar { display: none !important; } .est-docwrap { overflow: visible !important; padding: 0 !important; background: #fff !important; display: block !important; } .est-doc { width: auto !important; box-shadow: none !important; border-radius: 0 !important; padding: 0 !important; } .est-screen { display: block !important; } }`}</style>
       {p.phone && (
         <div
           style={{
@@ -282,7 +283,7 @@ export default function PreviewDoc(p: PreviewProps) {
             {(p.pdfQty ? "✓ " : "") + "Quantities"}
           </button>
           <button type="button" onClick={() => p.togglePdf("pdfNotes")} style={p.pdfNotes ? segOn : segOff}>
-            {(p.pdfNotes ? "✓ " : "") + "Line notes"}
+            {(p.pdfNotes ? "✓ " : "") + "Line descriptions"}
           </button>
           <button type="button" onClick={() => p.togglePdf("pdfPrices")} style={p.pdfPrices ? segOn : segOff} title="Off = client BOM: quantities only, no per-line pricing">
             {(p.pdfPrices ? "✓ " : "") + "Prices"}
@@ -299,12 +300,16 @@ export default function PreviewDoc(p: PreviewProps) {
           <button type="button" onClick={() => p.togglePdf("pdfAssumptions")} style={p.pdfAssumptions ? segOn : segOff}>
             {(p.pdfAssumptions ? "✓ " : "") + "Assumptions"}
           </button>
+          <button type="button" onClick={() => p.togglePdf("pdfSeparateBOM")} style={p.pdfSeparateBOM ? segOn : segOff} title="Narrative cover on page one; BOM begins on the next letter page">
+            {(p.pdfSeparateBOM ? "✓ " : "") + "Cover + BOM pages"}
+          </button>
           <button type="button" onClick={() => setEditDetails((v) => !v)} style={editDetails ? segOn : segOff}>
             {editDetails ? "✓ Done editing" : "✎ Edit quote details"}
           </button>
         </div>
         <button
           type="button"
+          onClick={() => window.print()}
           style={{
             fontFamily: "var(--font-ui)",
             fontSize: 13,
@@ -321,8 +326,10 @@ export default function PreviewDoc(p: PreviewProps) {
         </button>
       </div>
 
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
       {editDetails && p.canBuild && (
-        <div style={{ padding: "12px 22px", background: "#fff", borderBottom: "1px solid #ececf0", display: "grid", gridTemplateColumns: "minmax(180px, .8fr) minmax(220px, 1fr) minmax(260px, 1.4fr)", gap: 12 }}>
+        <aside className="est-edit-sidebar" style={{ width: 260, flexShrink: 0, overflowY: "auto", padding: 16, background: "#fff", borderRight: "1px solid #ececf0" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#737985", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 12 }}>Quote details</div>
           <label style={{ fontSize: 10, fontWeight: 700, color: "#737985", textTransform: "uppercase" }}>
             Prepared by
             <input value={p.preparedBy} onChange={(e) => p.onPreparedBy(e.target.value)} style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: "1px solid #e4e7ec", borderRadius: 7, fontSize: 12, fontWeight: 400, textTransform: "none" }} />
@@ -335,7 +342,11 @@ export default function PreviewDoc(p: PreviewProps) {
             Terms (one per line)
             <textarea value={p.termsText} onChange={(e) => p.onTermsText(e.target.value)} rows={3} style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: "1px solid #e4e7ec", borderRadius: 7, fontSize: 12, fontWeight: 400, textTransform: "none", resize: "vertical" }} />
           </label>
-        </div>
+          <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid #ececf0", color: "#737985", fontSize: 11.5, lineHeight: 1.55 }}>
+            <div style={{ fontWeight: 700, color: "#5b616e", marginBottom: 5 }}>Letter PDF standards</div>
+            US Letter: 8.5 × 11 in. Keep 0.5–0.75 in. margins, avoid orphaned section headers, and use “Cover + BOM pages” when the narrative should stay on page one and the bill of materials begins on page two.
+          </div>
+        </aside>
       )}
 
       <div
@@ -452,7 +463,7 @@ export default function PreviewDoc(p: PreviewProps) {
           </div>
 
           {/* at-a-glance investment band */}
-          <div
+          {!p.pdfSeparateBOM && <div
             style={{
               display: "flex",
               justifyContent: "space-between",
@@ -492,7 +503,7 @@ export default function PreviewDoc(p: PreviewProps) {
               </div>
               <div>Materials, installation &amp; freight included</div>
             </div>
-          </div>
+          </div>}
 
           {showCover && (
             <div
@@ -523,7 +534,7 @@ export default function PreviewDoc(p: PreviewProps) {
 
           {/* sections */}
           {previewSections.map((ps) => (
-            <div key={ps.num + ps.name}>
+            <div key={ps.num + ps.name} style={{ breakBefore: p.pdfSeparateBOM && ps.num === 1 ? "page" : undefined, pageBreakBefore: p.pdfSeparateBOM && ps.num === 1 ? "always" : undefined }}>
               <div
                 style={{
                   display: "flex",
@@ -702,7 +713,7 @@ export default function PreviewDoc(p: PreviewProps) {
                   }}
                 >
                   <span>
-                    {it.desc}
+                    {p.pdfNotes ? it.desc : ""}
                     <span style={{ display: "block", fontSize: 10.5, color: "#9aa0ab", marginTop: 1 }}>
                       {sec}
                     </span>
@@ -807,43 +818,12 @@ export default function PreviewDoc(p: PreviewProps) {
                       lineHeight: 1.75,
                     }}
                   >
-                    {(p.termsText.trim() ? p.termsText.split(/\r?\n/).map((x) => x.trim()).filter(Boolean) : TERMS).map((line) => (
+                    {(p.termsText.trim() ? p.termsText.split(/\r?\n/).map((x) => x.trim()).filter((line) => Boolean(line) && !/\bacceptance\b/i.test(line)) : TERMS).map((line) => (
                       <li key={line}>{line}</li>
                     ))}
                   </ul>
                 </div>
 
-                {/* acceptance */}
-                <div
-                  style={{
-                    borderTop: "1px solid #ececf0",
-                    marginTop: 16,
-                    paddingTop: 14,
-                  }}
-                >
-                  <div style={{ ...microLabel, marginBottom: 2 }}>Acceptance</div>
-                  <div style={{ fontSize: 11.5, color: "#5b616e", lineHeight: 1.6, marginBottom: 18 }}>
-                    To proceed, sign and return this quote — or accept it online through your{" "}
-                    {p.companyName} customer portal.
-                  </div>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "2fr 1.4fr 1fr",
-                      gap: 22,
-                      fontSize: 10.5,
-                      color: "#8c919c",
-                    }}
-                  >
-                    <div style={{ borderTop: "1px solid #9aa0ab", paddingTop: 5 }}>
-                      Signature — accepted for {p.custName}
-                    </div>
-                    <div style={{ borderTop: "1px solid #9aa0ab", paddingTop: 5 }}>
-                      Name &amp; title
-                    </div>
-                    <div style={{ borderTop: "1px solid #9aa0ab", paddingTop: 5 }}>Date</div>
-                  </div>
-                </div>
               </>
             )}
 
@@ -869,6 +849,7 @@ export default function PreviewDoc(p: PreviewProps) {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );
