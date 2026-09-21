@@ -198,10 +198,15 @@ export default function ScopePanel({
     debounceRef.current = setTimeout(() => {
       pendingWriteRef.current = null;
       startTransition(async () => {
-        const r = await setScopeInputsAction(projectId, next);
-        setDirty(false);
-        if (!r.ok) onError(r.error);
-        else onChanged();
+        try {
+          const r = await setScopeInputsAction(projectId, next);
+          if (!r.ok) onError(r.error);
+          else onChanged();
+        } catch (e) {
+          onError(e instanceof Error ? e.message : "Save failed — please try again.");
+        } finally {
+          setDirty(false);
+        }
       });
     }, 400);
   };
