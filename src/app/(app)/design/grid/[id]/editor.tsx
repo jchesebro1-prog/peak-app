@@ -43,6 +43,7 @@ import { curtainPriceEach, type FabricSell, type SellCoeffs } from "@/lib/curtai
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
+import type { FabricOption, QuickScopeInputs } from "@/app/(app)/design/quick/engine";
 import type { GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
   addRouteAction,
@@ -63,6 +64,7 @@ import LayersPanel from "./layers-panel";
 import SpacesPanel from "./spaces-panel";
 import RevisionsPanel from "./revisions-panel";
 import WiresPanel from "./wires-panel";
+import ScopePanel from "./scope-panel";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -207,6 +209,7 @@ export type ProjectLite = {
   spaces: GridSpace[];
   routes: GridRoute[];
   revisions: GridRevision[];
+  scopeInputs: QuickScopeInputs | null;
 };
 
 type Pending =
@@ -219,6 +222,7 @@ export default function GridEditor({
   sheets,
   parts,
   fabrics,
+  engineFabrics,
   curtainCoeffs,
   laborParts,
   laborHoursPerDevice,
@@ -230,6 +234,10 @@ export default function GridEditor({
   parts: PartLite[];
   /** Catalog fabric rows with SELL price/sq ft (punch #49) - never cost. */
   fabrics: FabricSell[];
+  /** Cost-bearing fabric rows for the scope-targets engine
+   *  (D-manual-scope-targets, DECISIONS.md), distinct from the
+   *  SELL-priced `fabrics` above (punch #49). */
+  engineFabrics: FabricOption[];
   /** Sell-side making coefficients for the live curtain price (punch #49). */
   curtainCoeffs: SellCoeffs;
   /** Catalog labor rows (role "labor") for the auto-suggest (D114). */
@@ -525,6 +533,17 @@ export default function GridEditor({
   const spaceRollups = useMemo(
     () => bomBySpace(project.placements, parts, project.spaces || [], curtainPrices),
     [project.placements, parts, project.spaces, curtainPrices]
+  );
+  /** Whole-project placed $/count by scope (D-manual-scope-targets) — feeds
+   *  the Scope panel's "placed" column. Reuses bomBySpace with an EMPTY
+   *  spaces array: every placement falls into the single "Unassigned"
+   *  bucket bomBySpace already produces for placements outside any space,
+   *  which is exactly the whole-project total with no spaces filtering it
+   *  out. Cheap: same inputs spaceRollups already recomputes on, one more
+   *  pass. */
+  const projectScopeRollup = useMemo(
+    () => bomBySpace(project.placements, parts, [], curtainPrices)[0] ?? null,
+    [project.placements, parts, curtainPrices]
   );
 
   const armedPart = armedPartId ? partById.get(armedPartId) : null;
@@ -1257,6 +1276,16 @@ export default function GridEditor({
               </div>
             )}
           </div>
+
+          {/* scope targets (D-manual-scope-targets) */}
+          <ScopePanel
+            projectId={project.id}
+            scopeInputs={project.scopeInputs}
+            byScope={projectScopeRollup?.byScope || []}
+            engineFabrics={engineFabrics}
+            onChanged={() => router.refresh()}
+            onError={(m) => setErr(m)}
+          />
 
           {/* layers (punch #48) - visibility of what's already placed */}
           <LayersPanel
