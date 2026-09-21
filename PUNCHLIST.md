@@ -5397,3 +5397,43 @@ bootstrap inserts for users/settings are now conflict-safe, and a clean
 `db:reset-local` plus the full spec suite pass.
 
 ---
+
+## 95. Gmail Connect never saved a mailbox in production — stale `GMAIL_REDIRECT_BASE` — CONFIG FIXED 2026-09-21; code hardening OPEN
+
+**Reported:** 2026-09-21 (Jeff: "I sign in and it goes back to the page but nothing changes; the
+Inbox still shows my personal gmail").
+
+**Root cause (traced live in the browser):** `GMAIL_REDIRECT_BASE` on Vercel still held the
+pre-rename host `https://peak-app-six.vercel.app`, so every connect sent Google a `redirect_uri`
+on that alias. Google returned the auth code there; the session cookie lives on `quartzite-six`,
+so the callback saw no user and bounced to `/login?callbackUrl=…`. `login-buttons.tsx` hardcodes
+`callbackUrl: "/"`, which discarded the pending code. No connection ever saved; the Inbox address
+fell through `connection → googleEmail → email` to `jchesebro1@gmail.com`.
+
+**Config fixed 2026-09-21:** `GMAIL_REDIRECT_BASE` removed from Vercel Production (callback now
+derives from `AUTH_URL`); production redeployed; Google OAuth client already carried the
+`quartzite-six` redirect URI; `gmail.modify` added to the consent-screen scopes (DEPLOY §5 only
+listed three of the four the app requests).
+
+**Code hardening — OPEN, next batch:**
+- `/login` honours a same-origin `callbackUrl` so an OAuth hop that loses its cookie completes.
+- Settings → Mailboxes shows the redirect URI the app will send and warns when
+  `GMAIL_REDIRECT_BASE` host ≠ `AUTH_URL` host.
+- Inbox address fallback becomes `connection → roster email → googleEmail` (Jeff signs in as Peak).
+- DEPLOY.md §5: four scopes (+ `calendar.events` and Calendar API for the calendar opt-in);
+  document that `CRON_SECRET` is unset on Vercel, so no background sync runs today.
+- Follow-up (Jeff): enable Google Calendar API in `peak-backend` + add `calendar.events` scope.
+
+## 96. Inbox: automatic customer linking, link sidebar, two-way Gmail labels, derived status — SPEC APPROVED 2026-09-21
+
+**Reported:** 2026-09-21 (Jeff). Spec:
+`docs/superpowers/specs/2026-09-21-inbox-customer-linking-and-label-sync-design.md`.
+
+Resolver on ingest (contact → domain → ambiguous → unknown, `customer_domains` table, backfill +
+re-sweep); reader link sidebar with domain-claim prompt and quick-add customer/contact/venue
+(shared `EntityQuickAdd` extracted from the quote intake); `Peak/*` labels written to Gmail and
+interpreted from Gmail (customer, status, assign, route to lead/project); status derived from the
+latest message instead of stamped per import (the "Waiting on us after I replied" defect —
+Brenda thread). §6 status derivation ships with #95's hardening batch; the rest follows.
+
+**Status:** OPEN — spec approved, plan next.
