@@ -1,12 +1,11 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import {
   SHORT,
   SYS_ORDER,
   TIERS,
   scopeTargets,
-  defaultAState,
   type FabricOption,
   type QuickScopeInputs,
   type SysKey,
@@ -42,6 +41,32 @@ import { setScopeInputsAction } from "./actions";
  */
 
 const TRACKABLE_SYS_KEYS: SysKey[] = ["rigging", "curtains", "lighting", "audio", "video"];
+
+/** Neutral empty-state fallback for a fresh project with no scope inputs
+ *  saved yet. Deliberately NOT `defaultAState(0)`: that helper's `.sys`
+ *  comes pre-toggled on (rigging/curtains/lighting/controls/acoustical/pit
+ *  all `true`) which visually contradicts the "Toggle a system above to
+ *  track placed $" empty state below (driven by `scopeInputs?.sys[k]`,
+ *  which stays false-y until a real scopeInputs doc exists), and it also
+ *  carries full `AState`-only fields (`tier`, `placements`, `mode`, …)
+ *  that don't belong on a persisted `QuickScopeInputs` document. */
+const EMPTY_SCOPE_INPUTS: QuickScopeInputs = {
+  venue: "concenter",
+  size: "large",
+  width: 50,
+  depth: 30,
+  grid: 50,
+  wing: 10,
+  ph: 20,
+  sys: { rigging: false, curtains: false, lighting: false, controls: false, audio: false, video: false, acoustical: false, pit: false },
+  rigType: "motorized",
+  drape: {},
+  fixtures: {},
+  fixtureAssemblies: {},
+  ctrl: {},
+  shell: {},
+  pitType: "clearspan",
+};
 
 /** SysKey -> the GridLayer (grid-scopes.ts) it corresponds to — the only
  *  correct key for looking a system up in `byScope` (bomBySpace's rollup,
@@ -115,14 +140,41 @@ export default function ScopePanel({
   const accentHex = useSyncExternalStore(subscribeAccent, getAccentHex, getAccentHexServer);
   const tierDefs = useSyncExternalStore(subscribeTierDefs, getTierDefs, getTierDefsServer);
 
+  // Local optimistic draft (D-manual-scope-targets fix): range-slider
+  // dimension fields fire onChange on every drag step, and since the
+  // panel's rendered `value` came straight from the server `scopeInputs`
+  // prop, the thumb visibly snapped back to the stale server value
+  // between each round-trip. `draft` renders immediately; writes to the
+  // server are debounced so a fast drag only persists its final value.
+  const [draft, setDraft] = useState<QuickScopeInputs | null>(scopeInputs);
+  const [prevScopeInputs, setPrevScopeInputs] = useState<QuickScopeInputs | null>(scopeInputs);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset the draft when the server's scopeInputs changes (derived-state
+  // reset during render — avoids the set-state-in-effect cascade).
+  if (prevScopeInputs !== scopeInputs) {
+    setPrevScopeInputs(scopeInputs);
+    setDraft(scopeInputs);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
   const save = (patch: Partial<QuickScopeInputs>) => {
-    const base: QuickScopeInputs = scopeInputs ?? defaultAState(0);
+    const base: QuickScopeInputs = draft ?? EMPTY_SCOPE_INPUTS;
     const next = { ...base, ...patch };
-    startTransition(async () => {
-      const r = await setScopeInputsAction(projectId, next);
-      if (!r.ok) onError(r.error);
-      else onChanged();
-    });
+    setDraft(next);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      startTransition(async () => {
+        const r = await setScopeInputsAction(projectId, next);
+        if (!r.ok) onError(r.error);
+        else onChanged();
+      });
+    }, 400);
   };
 
   const targets = useMemo(() => {
@@ -161,9 +213,7 @@ export default function ScopePanel({
       </div>
 
       <ScopeInputsPanel
-        value={
-          scopeInputs ?? defaultAState(0)
-        }
+        value={draft ?? EMPTY_SCOPE_INPUTS}
         onChange={save}
         systems={TRACKABLE_SYS_KEYS}
         accentHex={accentHex}
