@@ -67,7 +67,7 @@ function EntityQuickAddImpl({
 }: {
   kind: QuickAddKind;
   value: QuickAddValues[QuickAddKind];
-  onChange: (v: any) => void;
+  onChange: (v: QuickAddValues[QuickAddKind]) => void;
   onCancel?: () => void;
   onSubmit?: () => void;
   submitting?: boolean;
