@@ -2964,6 +2964,13 @@ ok(
   }) || "").includes("peak-app-six.vercel.app"),
   "redirectHostMismatch: different host → warning names the stale host"
 );
+ok(
+  redirectHostMismatch({
+    GMAIL_REDIRECT_BASE: "http://quartzite-six.vercel.app",
+    AUTH_URL: "https://quartzite-six.vercel.app",
+  }) !== null,
+  "redirectHostMismatch: same host, http vs https scheme drift → warning"
+);
 
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();

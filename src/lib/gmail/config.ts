@@ -118,9 +118,13 @@ export function callbackUrl(): string {
 }
 
 /**
- * #95: a stale GMAIL_REDIRECT_BASE (set before a domain rename) sends Google's
- * auth code to a host that has no session cookie, and the connect silently
- * never saves. Surface it in Settings instead of letting it hide.
+ * #95: a stale GMAIL_REDIRECT_BASE (set before a domain rename, or just a
+ * http/https mismatch) sends Google's auth code to an origin that has no
+ * session cookie, and the connect silently never saves. Compares the full
+ * origin (scheme + host), not just the host — a host-only compare misses a
+ * http:// vs https:// drift, which gives no warning here but a Google
+ * `redirect_uri_mismatch` at connect time. Surface it in Settings instead of
+ * letting it hide.
  */
 export function redirectHostMismatch(
   env: { GMAIL_REDIRECT_BASE?: string; AUTH_URL?: string; NEXTAUTH_URL?: string } = process.env as {
@@ -133,12 +137,12 @@ export function redirectHostMismatch(
   const authBase = env.AUTH_URL || env.NEXTAUTH_URL;
   if (!override || !authBase) return null;
   try {
-    const a = new URL(override).host;
-    const b = new URL(authBase).host;
+    const a = new URL(override).origin;
+    const b = new URL(authBase).origin;
     if (a === b) return null;
     return (
       "GMAIL_REDIRECT_BASE points at " + a + " but the app runs at " + b +
-      " — Google will send the sign-in back to the wrong host and the mailbox won't connect. " +
+      " — Google will send the sign-in back to the wrong origin and the mailbox won't connect. " +
       "Remove GMAIL_REDIRECT_BASE (or set it to the app's URL) and redeploy."
     );
   } catch {
