@@ -1,6 +1,7 @@
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
+import { safeCallbackPath } from "@/lib/auth-redirect";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
   msOf as opMsOf,
@@ -2903,6 +2904,22 @@ import { priceBooks } from "../src/lib/catalog-books";
     "#14 priceBooks: sorted by count descending"
   );
 }
+
+/* ---- #95 — login honours a same-origin callbackUrl ---- */
+const O = "https://quartzite-six.vercel.app";
+ok(safeCallbackPath(undefined, O) === "/", "safeCallbackPath: missing → /");
+ok(safeCallbackPath("", O) === "/", "safeCallbackPath: empty → /");
+ok(
+  safeCallbackPath(O + "/api/gmail/callback?code=x&state=y", O) === "/api/gmail/callback?code=x&state=y",
+  "safeCallbackPath: same-origin absolute → path+query"
+);
+ok(
+  safeCallbackPath("/settings?gmail=connected", O) === "/settings?gmail=connected",
+  "safeCallbackPath: relative path kept"
+);
+ok(safeCallbackPath("https://evil.example/steal", O) === "/", "safeCallbackPath: foreign origin → /");
+ok(safeCallbackPath("//evil.example/steal", O) === "/", "safeCallbackPath: protocol-relative → /");
+ok(safeCallbackPath("/login?callbackUrl=/x", O) === "/", "safeCallbackPath: never loops back to /login");
 
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();

@@ -1,12 +1,28 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { auth, devLoginEnabled, googleConfigured } from "@/auth";
 import { getSettings } from "@/lib/settings";
 import { activeUsers } from "@/lib/users";
+import { safeCallbackPath } from "@/lib/auth-redirect";
 import LoginButtons from "./login-buttons";
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await auth();
-  if (session?.user?.active) redirect("/");
+  const params = await searchParams;
+  const h = await headers();
+  const origin =
+    (h.get("x-forwarded-proto") || "https") +
+    "://" +
+    (h.get("x-forwarded-host") || h.get("host") || "localhost:3000");
+  const next = safeCallbackPath(
+    Array.isArray(params.callbackUrl) ? params.callbackUrl[0] : params.callbackUrl,
+    origin
+  );
+  if (session?.user?.active) redirect(next);
 
   const settings = await getSettings();
   const devLogin = devLoginEnabled();
@@ -61,6 +77,7 @@ export default async function LoginPage() {
             google={googleConfigured()}
             devLogin={devLogin}
             roster={roster}
+            next={next}
           />
         </div>
 

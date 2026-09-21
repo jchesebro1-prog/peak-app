@@ -6,6 +6,7 @@ export default function LoginButtons({
   google,
   devLogin,
   roster,
+  next,
 }: {
   google: boolean;
   devLogin: boolean;
@@ -16,6 +17,7 @@ export default function LoginButtons({
     color: string;
     roleLabel: string;
   }>;
+  next: string;
 }) {
   return (
     <div>
@@ -23,7 +25,7 @@ export default function LoginButtons({
         <button
           className="pk-google-btn"
           onClick={() =>
-            signIn("google", { callbackUrl: window.location.origin + "/" })
+            signIn("google", { callbackUrl: window.location.origin + next })
           }
         >
           <svg width="17" height="17" viewBox="0 0 48 48">
@@ -81,7 +83,7 @@ export default function LoginButtons({
                 onClick={() =>
                   signIn("dev-login", {
                     userId: p.id,
-                    callbackUrl: window.location.origin + "/",
+                    callbackUrl: window.location.origin + next,
                   })
                 }
                 style={{
