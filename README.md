@@ -78,6 +78,31 @@ Google sign-in credentials, each with exact values to paste.
 | `npm run db:reset-local` | Wipe the local dev database and start fresh |
 | `npm run db:generate` | (development) create a migration after schema changes |
 
+### Native shell (Capacitor)
+
+The native wrapper is remote/hybrid: iOS and Android load the hosted Quartzite
+web app, so server components, server actions, authentication, and the existing
+offline sync engine remain unchanged. `native-web/index.html` is only the
+offline/fallback asset required by Capacitor; it is not a Next route.
+
+```bash
+npm run cap:add:ios       # first setup on macOS with Xcode
+npm run cap:add:android   # first setup with Android Studio/SDK
+npm run cap:sync
+npm run cap:open:ios
+```
+
+For a physical-device smoke test against a local Next server, use a LAN URL
+that the device can reach:
+
+```bash
+CAPACITOR_SERVER_URL=http://192.168.1.42:3000 npm run cap:sync
+```
+
+The shell's native platform boundary lives in `src/lib/platform.ts`; keep
+native-only integrations behind that boundary so the browser app remains fully
+functional.
+
 Note: run `db:seed`/`db:reset-local` with the dev server stopped when
 targeting the local database — they share the same embedded files.
 
