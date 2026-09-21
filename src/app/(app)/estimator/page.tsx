@@ -80,6 +80,7 @@ async function initialFrom(
       contactName: "",
       quoteNote: FALLBACK.quoteNote,
       paymentTerms: "Unknown",
+      category: "",
       owner: userName,
       revNum: 1,
       revDateMs: Date.now(),
@@ -123,6 +124,7 @@ async function initialFrom(
     contactName: contactName || "",
     quoteNote: q.quoteNote != null ? q.quoteNote : FALLBACK.quoteNote,
     paymentTerms: q.paymentTerms || "Unknown",
+    category: q.category || "",
     owner: q.owner || userName,
     // Real priced revisions (item 24). This used to count `history`, which is
     // the status pipeline — so the printed "Rev N" climbed every time a quote
@@ -148,6 +150,8 @@ export default async function EstimatorPage({
   // Guided intake hand-off (quotes/new): only applies to a fresh builder —
   // an explicit ?id= always wins.
   const preCustomer = rawId ? undefined : one(sp.customer);
+  // #110: the intake's "Custom category" card hands its name over the same way.
+  const preCategory = rawId ? undefined : one(sp.category);
 
   /* ---- Scope draft source (S12/D83 — rules-based): resolve the linked
      survey/inspection. ?surveyId= / ?inspectionId= links the source; we
@@ -232,6 +236,7 @@ export default async function EstimatorPage({
       initial.contactName = primaryContact?.name || "";
     }
   }
+  if (preCategory && preCategory.trim()) initial.category = preCategory.trim();
 
   /* ---- travel estimate for the LOADED quote only (E3/E4, punch #89) ----
      This used to build an entry for every customer AND every venue in the

@@ -192,6 +192,8 @@ export type InitialQuote = {
   contactName: string;
   quoteNote: string;
   paymentTerms: PaymentTerms;
+  /** User-named quote category (#110) — "" when none. */
+  category: string;
   owner: string;
   revNum: number;
   revDateMs: number;

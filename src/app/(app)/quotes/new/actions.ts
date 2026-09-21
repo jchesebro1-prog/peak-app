@@ -53,6 +53,11 @@ export async function createQuoteIntakeAction(
 
   if (!isServiceType(input.type)) return { ok: false, error: "Unknown quote type." };
 
+  // #110: a custom category is just a system quote with a user-named label —
+  // the label is the one thing the card requires.
+  const category = (input.category || "").trim();
+  if (input.type === "custom" && !category) return { ok: false, error: "Name the category." };
+
   const creatingCustomer = input.customerMode === "new";
   const newCustomerName = (input.newCustomerName || "").trim();
   if (creatingCustomer && !newCustomerName) {
@@ -118,5 +123,5 @@ export async function createQuoteIntakeAction(
 
   if (!customerId) return { ok: false, error: "Pick or create a customer first." };
 
-  redirect(builderPath(input.type, customerId));
+  redirect(builderPath(input.type, customerId, category));
 }

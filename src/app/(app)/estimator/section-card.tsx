@@ -60,7 +60,8 @@ export type SectionCardProps = {
   onToggleLabor: () => void;
   onToggleCustom: () => void;
   onAddPart: (cat: SuggestPart) => void;
-  onImportMaterials: (items: ImportedMaterial[]) => void;
+  /** CSV batch-add (#112): resolves SKUs against the catalog, returns how many priced from it vs. landed custom. */
+  onImportMaterials: (items: ImportedMaterial[]) => Promise<{ fromCatalog: number; custom: number }>;
   onSetCustomDraft: (field: keyof CustomDraft, v: string) => void;
   onAddCustomPart: () => void;
   /** Moves this system into a brand-new estimate (sibling of onDelete). */
@@ -802,7 +803,7 @@ export default function SectionCard(p: SectionCardProps) {
             {importOpen && (
               <div style={{ marginTop: 11, background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "15px 16px" }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" }}>Import material list or vendor quote</div>
-                <div style={{ marginTop: 5, fontSize: 12, color: "#777d88" }}>Batch-add catalog or custom materials with unit cost, unit sell, and an optional product link.</div>
+                <div style={{ marginTop: 5, fontSize: 12, color: "#777d88" }}>Batch-add catalog or custom materials. For catalog parts a SKU and quantity are enough: description, cost, and sell come from the catalog unless the file gives its own. Custom rows need a description, unit cost, unit sell, and an optional product link.</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
                   <label style={{ display: "inline-flex", alignItems: "center", borderRadius: 7, padding: "8px 13px", background: "var(--accent)", color: "#fff", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
                     Select CSV file
@@ -814,17 +815,28 @@ export default function SectionCard(p: SectionCardProps) {
                         const input = event.currentTarget;
                         const file = input.files?.[0];
                         if (!file) return;
-                        file.text().then((text) => {
+                        file.text().then(async (text) => {
                           const result = parseMaterialCsv(text);
-                          if (result.items.length) p.onImportMaterials(result.items);
-                          setImportMessage(result.items.length ? `${result.items.length} material${result.items.length === 1 ? "" : "s"} added${result.errors.length ? `; ${result.errors.length} row${result.errors.length === 1 ? "" : "s"} skipped` : ""}.` : result.errors.join(" "));
                           input.value = "";
+                          if (!result.items.length) {
+                            setImportMessage(result.errors.join(" "));
+                            return;
+                          }
+                          setImportMessage("Importing\u2026");
+                          const skipped = result.errors.length ? `; ${result.errors.length} row${result.errors.length === 1 ? "" : "s"} skipped` : "";
+                          try {
+                            const { fromCatalog, custom } = await p.onImportMaterials(result.items);
+                            const n = fromCatalog + custom;
+                            setImportMessage(`${n} material${n === 1 ? "" : "s"} added (${fromCatalog} priced from catalog, ${custom} custom)${skipped}.`);
+                          } catch {
+                            setImportMessage(`Import failed; nothing was added${skipped}.`);
+                          }
                         });
                       }}
                     />
                   </label>
                   <a download="quartzite-material-import-example.csv" href={`data:text/csv;charset=utf-8,${encodeURIComponent(MATERIAL_CSV_TEMPLATE)}`} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>Download example CSV</a>
-                  {importMessage && <span role="status" style={{ fontSize: 12, color: importMessage.includes("added") ? "#1f7a52" : "#b4543a" }}>{importMessage}</span>}
+                  {importMessage && <span role="status" style={{ fontSize: 12, color: /^\d+ materials? added/.test(importMessage) ? "#1f7a52" : importMessage.startsWith("Importing") ? "#777d88" : "#b4543a" }}>{importMessage}</span>}
                 </div>
               </div>
             )}
@@ -868,7 +880,7 @@ export default function SectionCard(p: SectionCardProps) {
                   <label style={LBL}>Description</label>
                   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                     <input className="est-field" value={cd.desc} onChange={(e) => p.onSetCustomDraft("desc", e.target.value)} placeholder="e.g. Custom-fabricated motor mounting bracket" style={{ ...PORTAL_FIELD, flex: 1, fontFamily: "var(--font-ui)", fontSize: 13, padding: "8px 10px" }} />
-                    {!showLink && addBtn("🔗 Link", () => setShowLink(true))}
+                    {!showLink && addBtn("+ Link", () => setShowLink(true))}
                   </div>
                   {showLink && (
                     <input className="est-field" type="url" value={cd.link} onChange={(e) => p.onSetCustomDraft("link", e.target.value)} placeholder="Product link (optional)" title="Optional vendor or product page" style={{ ...PORTAL_FIELD, fontFamily: "var(--font-ui)", fontSize: 12, marginTop: 8 }} />

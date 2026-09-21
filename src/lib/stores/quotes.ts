@@ -107,6 +107,10 @@ export type Quote = {
   source: string;
   /** 'system' (default) | 'flame_test' | 'repair' | 'inspection' | 'consulting' | 'rental' — absent on seed rows. */
   quoteType?: string;
+  /** User-named category for a system quote (#110) — set from the guided
+   *  intake's "Custom category" card or the Estimator header; shown as a
+   *  neutral badge on the Quotes hub. Empty/absent on typed service quotes. */
+  category?: string;
   /** Flame-test engine subdoc (owned by the flame-test module). */
   flameTest?: unknown;
   /** Repair engine subdoc (owned by the repairs module). */
@@ -354,6 +358,7 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     status: "draft",
     source: partial.source || "quick",
     quoteType: partial.quoteType || "system",
+    category: partial.category || "",
     flameTest: partial.flameTest || null,
     repair: partial.repair || null,
     inspection: partial.inspection || null,

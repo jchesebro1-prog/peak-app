@@ -70,6 +70,8 @@ export type SavePayload = {
   contactName: string;
   quoteNote: string;
   paymentTerms: PaymentTerms;
+  /** User-named quote category (#110); "" clears it. */
+  category: string;
   value: number;
   margin: number;
   status: QuoteStatus;
@@ -125,6 +127,7 @@ export async function saveQuoteAction(
     contactName: payload.contactName || "",
     quoteNote: payload.quoteNote || "",
     paymentTerms: payload.paymentTerms,
+    category: (payload.category || "").trim(),
     value: payload.value,
     margin: payload.margin,
     status: payload.status,
@@ -162,6 +165,7 @@ export async function saveQuoteAction(
       contactName: payload.contactName || "",
       quoteNote: payload.quoteNote || "",
       paymentTerms: payload.paymentTerms,
+      category: (payload.category || "").trim(),
     } as QuotePatch);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand
@@ -311,6 +315,7 @@ export async function updateQuoteMetaAction(
     customer?: string;
     contactName?: string;
     quoteNote?: string;
+    category?: string;
   }
 ): Promise<{ ok: boolean; pricingTier?: string; tierMargin?: number }> {
   await requireUser();
@@ -326,6 +331,7 @@ export async function updateQuoteMetaAction(
   if (typeof meta.customer === "string") patch.customer = meta.customer;
   if (typeof meta.contactName === "string") patch.contactName = meta.contactName;
   if (typeof meta.quoteNote === "string") patch.quoteNote = meta.quoteNote;
+  if (typeof meta.category === "string") patch.category = meta.category.trim();
 
   // Item 11 (D87): a customer/contact change re-resolves the pricing tier
   // SERVER-side (never trusted from the client) and re-stamps the quote.
@@ -718,6 +724,43 @@ export async function searchCatalog(
     mfr: p.mfr || "",
   }));
   return { hits, total: scored.length };
+}
+
+export type ResolvedCatalogSku = { sku: string; desc: string; unit: string; cost: number; list: number };
+
+/**
+ * Bulk SKU lookup for the estimator's CSV batch-add (PUNCHLIST #112). Matches
+ * each requested SKU (trimmed, case-insensitive) against the catalog and
+ * returns a map keyed by the SKU string exactly as the caller passed it, so
+ * the importer can price catalog parts from a sku + quantity CSV. Unknown
+ * SKUs are simply absent. Input is capped at 2000 SKUs per call.
+ */
+export async function resolveCatalogSkusAction(
+  skus: string[]
+): Promise<Record<string, ResolvedCatalogSku>> {
+  await requireUser();
+  const wanted = (skus || []).slice(0, 2000).filter((s) => typeof s === "string" && s.trim());
+  const out: Record<string, ResolvedCatalogSku> = {};
+  if (!wanted.length) return out;
+
+  const parts = await catalogList();
+  const bySku = new Map<string, ResolvedCatalogSku>();
+  for (const p of parts) {
+    const key = (p.sku || "").trim().toLowerCase();
+    if (!key || bySku.has(key)) continue;
+    bySku.set(key, {
+      sku: p.sku,
+      desc: p.desc || "",
+      unit: p.unit || "ea",
+      cost: p.cost || 0,
+      list: p.list || 0,
+    });
+  }
+  for (const requested of wanted) {
+    const hit = bySku.get(requested.trim().toLowerCase());
+    if (hit) out[requested] = hit;
+  }
+  return out;
 }
 
 /**

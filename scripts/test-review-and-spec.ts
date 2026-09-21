@@ -73,7 +73,7 @@ import {
   assemblyUnitTotals,
   resolveFixtureAssemblies,
 } from "@/lib/fixture-assemblies";
-import { parseMaterialCsv } from "@/app/(app)/estimator/material-csv";
+import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv } from "@/app/(app)/estimator/material-csv";
 import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
 import { computeLabor, computeMob } from "@/app/(app)/estimator/pricing";
 import { readFileSync } from "node:fs";
@@ -111,7 +111,19 @@ ok(
   "material CSV preserves an optional product link"
 );
 const badMaterialCsv = parseMaterialCsv("description,quantity,unit_sell\nNo price,1,\nBad qty,zero,10");
-ok(badMaterialCsv.items.length === 0 && badMaterialCsv.errors.length === 2, "material CSV rejects rows without a sell price or valid quantity");
+ok(badMaterialCsv.items.length === 0 && badMaterialCsv.errors.length === 2, "material CSV rejects custom rows without a sell price or valid quantity");
+// #112: a catalog row needs only sku + quantity — description/unit/cost/sell
+// stay blank/0 for the estimator to fill from the catalog.
+const skuOnlyCsv = parseMaterialCsv("sku,quantity\nabc-100,4\nXYZ-9,zero");
+ok(skuOnlyCsv.errors.length === 1 && skuOnlyCsv.items.length === 1, "material CSV accepts a sku + quantity row and still rejects a bad quantity");
+ok(
+  skuOnlyCsv.items[0]?.sku === "abc-100" && skuOnlyCsv.items[0]?.qty === 4 && skuOnlyCsv.items[0]?.desc === "" &&
+    skuOnlyCsv.items[0]?.unit === "" && skuOnlyCsv.items[0]?.cost === 0 && skuOnlyCsv.items[0]?.price === 0,
+  "material CSV leaves description, unit, cost and sell blank on a sku-only row"
+);
+const templateCsv = parseMaterialCsv(MATERIAL_CSV_TEMPLATE);
+ok(templateCsv.errors.length === 0 && templateCsv.items.length === 2, "material CSV example template parses both its catalog and custom rows");
+ok(templateCsv.items[0]?.sku === "ABC-100" && templateCsv.items[0]?.price === 0 && templateCsv.items[1]?.price === 142.86, "material CSV example template: catalog row unpriced, custom row priced");
 
 /* --- Offline navigation contract --- */
 const serviceWorkerSource = readFileSync(join(process.cwd(), "public/sw.js"), "utf8");

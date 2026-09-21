@@ -567,6 +567,31 @@ export default async function QuotesPage({
                         {TYPE_BADGE[q.quoteType || ""].label}
                       </span>
                     )}
+                    {/* #110: a system quote with a user-named category wears it
+                        as a neutral badge — the type filter still sees "system". */}
+                    {!TYPE_BADGE[q.quoteType || ""] && !!q.category && (
+                      <span
+                        title="Quote category"
+                        style={{
+                          flexShrink: 0,
+                          fontSize: 9,
+                          fontWeight: 700,
+                          letterSpacing: ".04em",
+                          textTransform: "uppercase",
+                          color: "#3a3f4a",
+                          background: "#f1f2f5",
+                          border: "1px solid #e4e7ec",
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          maxWidth: 160,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {q.category}
+                      </span>
+                    )}
                     {q.portalAcceptance && q.status === "sent" && (
                       <span
                         title={

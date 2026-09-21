@@ -13,9 +13,15 @@ export type MaterialCsvResult = {
   errors: string[];
 };
 
+/**
+ * Two example rows (#112): a catalog part needs only sku + quantity — its
+ * description, unit, cost and sell come from the catalog at import time — and
+ * a custom part carries its own description and numbers.
+ */
 export const MATERIAL_CSV_TEMPLATE =
   "sku,description,quantity,unit,unit_cost,unit_sell,link\n" +
-  "ABC-100,Example catalog or custom part,1,ea,100.00,142.86,https://vendor.example/item\n";
+  "ABC-100,,4,,,,\n" +
+  ",Example custom part,1,ea,100.00,142.86,https://vendor.example/item\n";
 
 const ALIASES = {
   sku: ["sku", "part no", "part number", "part", "model", "item"],
@@ -75,8 +81,8 @@ export function parseMaterialCsv(text: string): MaterialCsvResult {
     price: indexOf(headers, ALIASES.price),
     link: indexOf(headers, ALIASES.link),
   };
-  if (col.desc < 0 || col.price < 0) {
-    return { items: [], errors: ["The CSV needs description and unit_sell columns. Download the example for the supported layout."] };
+  if (col.sku < 0 && col.desc < 0) {
+    return { items: [], errors: ["The CSV needs a sku or description column. Download the example for the supported layout."] };
   }
 
   const items: ImportedMaterial[] = [];
@@ -84,20 +90,33 @@ export function parseMaterialCsv(text: string): MaterialCsvResult {
   lines.slice(1).forEach((line, index) => {
     const cells = splitLine(line, delimiter);
     const row = index + 2;
-    const desc = (cells[col.desc] || "").trim();
+    // #112: a row with a SKU may leave description / cost / sell blank — the
+    // estimator fills those from the catalog. A custom row (no SKU) still
+    // needs a description and a positive sell price, since nothing else can
+    // price it.
+    const sku = col.sku >= 0 ? (cells[col.sku] || "").trim() : "";
+    const desc = col.desc >= 0 ? (cells[col.desc] || "").trim() : "";
     const qty = col.qty >= 0 ? Number(cells[col.qty]) : 1;
-    const price = money(cells[col.price] || "");
+    const price = col.price >= 0 ? money(cells[col.price] || "0") : 0;
     const cost = col.cost >= 0 ? money(cells[col.cost] || "0") : 0;
-    if (!desc || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price <= 0 || !Number.isFinite(cost) || cost < 0) {
-      errors.push(`Row ${row}: description, positive quantity, non-negative unit cost, and positive unit sell are required.`);
+    const numbersOk = Number.isFinite(qty) && qty > 0 && Number.isFinite(price) && price >= 0 && Number.isFinite(cost) && cost >= 0;
+    const identified = sku ? true : !!desc && price > 0;
+    if (!numbersOk || !identified) {
+      errors.push(
+        sku
+          ? `Row ${row}: positive quantity and non-negative unit cost / unit sell are required.`
+          : `Row ${row}: a sku, or a description with a positive unit sell, plus a positive quantity and non-negative unit cost are required.`
+      );
       return;
     }
     const link = col.link >= 0 ? (cells[col.link] || "").trim() : "";
     items.push({
-      sku: col.sku >= 0 ? (cells[col.sku] || "").trim() : "",
+      sku,
       desc,
       qty,
-      unit: col.unit >= 0 ? (cells[col.unit] || "").trim() || "ea" : "ea",
+      // Blank stays blank so a catalog SKU can inherit the part's unit (#112);
+      // the estimator falls back to "ea" for custom rows.
+      unit: col.unit >= 0 ? (cells[col.unit] || "").trim() : "",
       cost,
       price,
       ...(link ? { link } : {}),

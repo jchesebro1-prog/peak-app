@@ -13,6 +13,7 @@ import {
   draftQuoteScopeAction,
   moveSystemToEstimateAction,
   requestChangesAction,
+  resolveCatalogSkusAction,
   saveQuoteAction,
   searchQuotesAction,
   sendToCustomerAction,
@@ -59,6 +60,7 @@ import { assemblyDescription } from "@/lib/fixture-assemblies";
 import { defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import SectionCard from "./section-card";
+import type { ImportedMaterial } from "./material-csv";
 import AiScopeModal from "./ai-scope-modal";
 import CurtainModal from "./curtain-modal";
 import FixtureModal from "./fixture-modal";
@@ -265,6 +267,9 @@ export default function EstimatorClient({
   const [contactName, setContactName] = useState(initial.contactName);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
   const [paymentTerms, setPaymentTerms] = useState(initial.paymentTerms);
+  // #110: user-named quote category — persisted on blur, not per keystroke.
+  const [category, setCategory] = useState(initial.category);
+  const categorySaved = useRef(initial.category);
   const [revNum, setRevNum] = useState(initial.revNum);
   const [revDateMs, setRevDateMs] = useState(initial.revDateMs);
   const [pdfQty, setPdfQty] = useState(true);
@@ -401,6 +406,7 @@ export default function EstimatorClient({
         contactName: contactName || "",
         quoteNote: quoteNote || "",
         paymentTerms,
+        category,
         value: t.grand,
         margin: t.margin,
         status,
@@ -670,6 +676,40 @@ export default function EstimatorClient({
       { id: nextId(), sku: cat.sku, desc: cat.desc, qty: 1, unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
     ]);
     setOpenCatalog(null);
+  };
+
+  /* ---- CSV batch-add (#112) ----
+     Rows carrying a SKU are priced from the catalog: blank description/unit
+     fill from the part, a $0 cost takes the catalog cost, and a $0 sell is
+     seeded from cost with the same margin rule addPart uses. Anything the
+     file states explicitly wins. SKUs the catalog doesn't know keep their
+     CSV numbers and land as custom lines, exactly as before. */
+  const importMaterials = async (
+    secId: string,
+    items: ImportedMaterial[]
+  ): Promise<{ fromCatalog: number; custom: number }> => {
+    const skus = Array.from(new Set(items.map((item) => item.sku.trim()).filter(Boolean)));
+    const resolved = skus.length ? await resolveCatalogSkusAction(skus) : {};
+    const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
+    let fromCatalog = 0;
+    const next: SpecItem[] = items.map((item) => {
+      const hit = item.sku.trim() ? resolved[item.sku.trim()] : undefined;
+      if (!hit) return { ...item, id: nextId(), desc: item.desc || item.sku, unit: item.unit || "ea", custom: true };
+      fromCatalog++;
+      const cost = item.cost > 0 ? item.cost : hit.cost;
+      const price = item.price > 0 ? item.price : cost > 0 ? round2(cost / (1 - margin)) : hit.list;
+      return {
+        ...item,
+        id: nextId(),
+        sku: hit.sku,
+        desc: item.desc || hit.desc,
+        unit: item.unit || hit.unit,
+        cost,
+        price,
+      };
+    });
+    pushItems(secId, next);
+    return { fromCatalog, custom: next.length - fromCatalog };
   };
 
   /* ---- Scope draft from survey/inspection (S12/D83 — rules-based) ----
@@ -1403,6 +1443,21 @@ export default function EstimatorClient({
                   </select>
                 </>
               )}
+              <span style={{ fontSize: 11, color: "#6b7079", flexShrink: 0 }}>category</span>
+              <input
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                onBlur={() => {
+                  const v = category.trim();
+                  if (v !== category) setCategory(v);
+                  if (v === categorySaved.current) return;
+                  categorySaved.current = v;
+                  persistMeta({ category: v });
+                }}
+                placeholder="Category"
+                title="Quote category — shown on the Quotes hub"
+                style={{ ...DARK_SELECT, minWidth: 140, cursor: "text" }}
+              />
             </div>
           </div>
 
@@ -2225,7 +2280,7 @@ export default function EstimatorClient({
                   onToggleLabor={() => toggleLabor(sec.id)}
                   onToggleCustom={() => toggleCustom(sec.id)}
                   onAddPart={(cat) => addPart(sec.id, cat)}
-                  onImportMaterials={(items) => pushItems(sec.id, items.map((item) => ({ ...item, id: nextId(), custom: !item.sku })))}
+                  onImportMaterials={(items) => importMaterials(sec.id, items)}
                   onSetCustomDraft={(field, v) => setCustomDraft((d) => ({ ...d, [field]: v }))}
                   onAddCustomPart={() => addCustomPart(sec.id)}
                   onMoveToNew={() => moveSystem(sec.id, { kind: "new" })}
