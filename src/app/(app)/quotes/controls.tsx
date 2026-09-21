@@ -69,7 +69,7 @@ export function NewQuoteMenu() {
             }}
           >
             <Link
-              href="/estimator"
+              href="/quotes/new?type=system"
               className="qt-menuitem"
               style={{
                 display: "block",
@@ -87,7 +87,7 @@ export function NewQuoteMenu() {
               </div>
             </Link>
             <Link
-              href="/flame-tests"
+              href="/quotes/new?type=flame_test"
               className="qt-menuitem"
               style={{
                 display: "block",
@@ -122,7 +122,7 @@ export function NewQuoteMenu() {
               </div>
             </Link>
             <Link
-              href="/repairs/quote"
+              href="/quotes/new?type=repair"
               className="qt-menuitem"
               style={{
                 display: "block",
@@ -157,7 +157,7 @@ export function NewQuoteMenu() {
               </div>
             </Link>
             <Link
-              href="/inspections/quote"
+              href="/quotes/new?type=inspection"
               className="qt-menuitem"
               style={{
                 display: "block",
@@ -192,7 +192,7 @@ export function NewQuoteMenu() {
               </div>
             </Link>
             <Link
-              href="/design/engagements/quote"
+              href="/quotes/new?type=consulting"
               className="qt-menuitem"
               style={{
                 display: "block",
@@ -227,7 +227,7 @@ export function NewQuoteMenu() {
               </div>
             </Link>
             <Link
-              href="/rentals/quote"
+              href="/quotes/new?type=rental"
               className="qt-menuitem"
               style={{
                 display: "block",

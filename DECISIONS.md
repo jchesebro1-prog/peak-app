@@ -2575,3 +2575,46 @@ persisted there when the user next hits Save. On success the UI does not
 navigate away (the source estimate may hold other unsaved edits); it shows
 a dismissible "Moved to `<name>` — Open `<name>` →" banner instead, mirroring
 the existing action-error banner pattern in `estimator-client.tsx`.
+## D138. Guided "new quote" intake screen (`/quotes/new`)
+
+The "+ New quote" split menu's six links (`quotes/controls.tsx`) now all
+route through a new `/quotes/new?type=<...>` screen instead of straight into
+a blank builder — same six type entries (label/sub-label/badge, ported
+verbatim into `quotes/new/types.ts`'s `SERVICE_TYPES`), no new taxonomy.
+`system` used to go straight to `/estimator` with nothing else pre-set;
+`flame_test` used to go to `/flame-tests` (the dashboard, not even the quote
+builder — an existing inconsistency with its four "Auto"-badged siblings,
+now fixed as a side effect since every type routes through the same intake
+first).
+
+Three-step wizard (customer → venue → contact), reusing the catalog
+manufacturer-picker's known-values-plus-trailing-sentinel `<select>` pattern
+(`catalog/controls.tsx`) rather than building a new picker component:
+- **Customer**: name-substring filter over the full directory (matches
+  today's few-hundred-row customer list; not paginated/debounced — revisit
+  if the directory grows enough for that to matter) plus a "+ Add new
+  customer…" sentinel that reveals inline name + type fields. Picking a
+  customer resets the venue/contact steps back to "skip" (their options
+  depend on which customer is selected).
+- **Venue / Contact**: only rendered once a customer is picked or being
+  created. A customer with zero existing locations/contacts skips straight
+  to the inline add-new fields (no picker with nothing in it). Otherwise the
+  picker's sentinel options are "+ Add new venue…" / "+ Add new contact…"
+  and a "Skip for now" option, selected by default — this flow's whole point
+  is not to force venue/contact entry salespeople don't have yet. Quick-add
+  can be submitted with only the required field filled in (venue label,
+  contact name) — city/state/role/email/phone are all optional, matching
+  the looser bar `saveCustomerAction` already accepts for these fields.
+
+Submit resolves through `saveCustomerAction` (no parallel customer-creation
+code path): existing customer's `locations`/`contacts` arrays are read via
+`stores/customers.get`, any new venue/contact is appended (`primary` only
+when the array was previously empty — never demotes an existing primary),
+and the whole record round-trips through the same upsert the Companies
+screen uses. The action then redirects to the type's builder with
+`?customer=<id>` — same convention the other five builders already read
+(`preCustomer`); `estimator/page.tsx` was the one builder that didn't
+support it yet, so it gained the same handling repairs/quote/page.tsx uses
+(seed `customerId`/primary `locationId`/primary `contactName` into
+`initialFrom`'s `InitialQuote`, only when there's no `?id=` — an explicit
+edit always wins).

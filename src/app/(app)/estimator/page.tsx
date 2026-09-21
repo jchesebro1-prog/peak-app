@@ -145,6 +145,9 @@ export default async function EstimatorPage({
   const sp = await searchParams;
   const rawId = Array.isArray(sp.id) ? sp.id[0] : sp.id;
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+  // Guided intake hand-off (quotes/new): only applies to a fresh builder —
+  // an explicit ?id= always wins.
+  const preCustomer = rawId ? undefined : one(sp.customer);
 
   /* ---- Scope draft source (S12/D83 — rules-based): resolve the linked
      survey/inspection. ?surveyId= / ?inspectionId= links the source; we
@@ -214,6 +217,21 @@ export default async function EstimatorPage({
   }));
 
   const initial = await initialFrom(q, customers, user.name);
+
+  // Seed the customer/venue/contact picked in the guided intake screen
+  // (quotes/new) — venue/contact default to the customer's primary, same
+  // as repairs/quote's preCustomer handling.
+  if (preCustomer) {
+    const cust = customers.find((c) => c.id === preCustomer);
+    if (cust) {
+      const prim = cust.locations.find((l) => l.primary) || cust.locations[0] || null;
+      const primaryContact = cust.contacts.find((c) => c.primary) || cust.contacts[0] || null;
+      initial.customerId = cust.id;
+      initial.custName = cust.name;
+      initial.locationId = prim?.id || null;
+      initial.contactName = primaryContact?.name || "";
+    }
+  }
 
   /* ---- travel estimate for the LOADED quote only (E3/E4, punch #89) ----
      This used to build an entry for every customer AND every venue in the
