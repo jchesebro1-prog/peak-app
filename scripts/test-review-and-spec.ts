@@ -2928,7 +2928,9 @@ ok(resolveSignInRedirect("http://192.168.1.20:3000/inbox", B) === "http://192.16
 ok(resolveSignInRedirect("http://peak.local:3000/", B) === "http://peak.local:3000/", "signInRedirect: .local host honoured");
 ok(resolveSignInRedirect("https://evil.example/x", B) === B, "signInRedirect: foreign origin → baseUrl");
 ok(resolveSignInRedirect("https://quartzite-six.vercel.app.evil.com/x", B) === B, "signInRedirect: suffix-spoofed host → baseUrl");
-ok(resolveSignInRedirect("/settings", B) === "/settings", "signInRedirect: bare path passes through");
+ok(resolveSignInRedirect("/settings", B) === B + "/settings", "signInRedirect: bare path resolves to baseUrl origin");
+ok(resolveSignInRedirect("/\\evil.example/x", B) === B, "signInRedirect: backslash-smuggled protocol-relative → baseUrl");
+ok(resolveSignInRedirect("//evil.example/x", B) === B, "signInRedirect: protocol-relative → baseUrl");
 
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();

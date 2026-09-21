@@ -25,16 +25,15 @@ export function safeCallbackPath(raw: string | undefined, origin: string): strin
  * and query, so an OAuth hop like /api/gmail/callback?code=… completes — or
  * (b) on a local/private host (localhost, LAN IP, <name>.local), so a dev
  * session never bounces to a different origin whose cookie wouldn't apply.
- * A bare "/"-prefixed path is returned as-is. Anything else → baseUrl, so
- * this can never be an open redirect.
+ * A bare "/"-prefixed path is resolved against baseUrl and returned
+ * absolute, same-origin. Anything else → baseUrl, so this can never be an
+ * open redirect. Every input goes through URL resolution — a bare-path fast
+ * path was removed because `new URL("/\\evil.example/x", baseUrl)` resolves
+ * to a foreign origin (backslashes are normalised to slashes by the URL
+ * parser), so a naive `startsWith("/")` check let it slip past the
+ * same-origin check below.
  */
 export function resolveSignInRedirect(url: string, baseUrl: string): string {
-  // A bare "/"-prefixed path (not "//", which is protocol-relative to a
-  // possibly foreign host) is already local — return it before resolving,
-  // since resolving it against baseUrl would always read as same-origin and
-  // fall into the branch below, prepending an origin the caller never asked
-  // for.
-  if (url.startsWith("/") && !url.startsWith("//")) return url;
   try {
     const u = new URL(url, baseUrl);
     const h = u.hostname;
