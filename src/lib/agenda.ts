@@ -12,6 +12,10 @@ import { allVisits } from "@/lib/stores/site-visits";
 
 export type AgendaItem = {
   key: string;
+  /** raw Google event id (source "google") or site-visit id (source
+   *  "visit") — the id half of `key`, broken out so the client doesn't have
+   *  to string-parse it to open the edit modal (S13 full-build). */
+  id: string;
   title: string;
   startMs: number;
   endMs: number;
@@ -57,6 +61,7 @@ export async function loadAgendaRange(
           if (e.iCalUID) fetchedIcal.add(e.iCalUID);
           items.push({
             key: "g-" + e.id,
+            id: e.id,
             title: e.title,
             startMs: e.startMs,
             endMs: e.endMs,
@@ -81,6 +86,7 @@ export async function loadAgendaRange(
     if (fetchedIcal.has("sv-" + v.id + "@peak-app")) continue;
     items.push({
       key: "v-" + v.id,
+      id: v.id,
       title: (v.venue || v.customer) + " — " + v.reason,
       startMs: v.startAt,
       endMs,
