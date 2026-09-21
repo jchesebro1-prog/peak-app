@@ -2,6 +2,7 @@ import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/l
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
 import { safeCallbackPath, resolveSignInRedirect } from "@/lib/auth-redirect";
+import { redirectHostMismatch } from "@/lib/gmail/config";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
   msOf as opMsOf,
@@ -2931,6 +2932,27 @@ ok(resolveSignInRedirect("https://quartzite-six.vercel.app.evil.com/x", B) === B
 ok(resolveSignInRedirect("/settings", B) === B + "/settings", "signInRedirect: bare path resolves to baseUrl origin");
 ok(resolveSignInRedirect("/\\evil.example/x", B) === B, "signInRedirect: backslash-smuggled protocol-relative → baseUrl");
 ok(resolveSignInRedirect("//evil.example/x", B) === B, "signInRedirect: protocol-relative → baseUrl");
+
+/* ---- #95 — Settings warns when GMAIL_REDIRECT_BASE drifts from AUTH_URL ---- */
+ok(redirectHostMismatch({}) === null, "redirectHostMismatch: nothing set → null");
+ok(
+  redirectHostMismatch({ AUTH_URL: "https://quartzite-six.vercel.app" }) === null,
+  "redirectHostMismatch: no override → null"
+);
+ok(
+  redirectHostMismatch({
+    GMAIL_REDIRECT_BASE: "https://quartzite-six.vercel.app",
+    AUTH_URL: "https://quartzite-six.vercel.app/",
+  }) === null,
+  "redirectHostMismatch: same host (trailing slash) → null"
+);
+ok(
+  (redirectHostMismatch({
+    GMAIL_REDIRECT_BASE: "https://peak-app-six.vercel.app",
+    AUTH_URL: "https://quartzite-six.vercel.app",
+  }) || "").includes("peak-app-six.vercel.app"),
+  "redirectHostMismatch: different host → warning names the stale host"
+);
 
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();

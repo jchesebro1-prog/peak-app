@@ -142,7 +142,7 @@ export default function SettingsClient({
 }: {
   meId: string;
   meName: string;
-  gmail: { enabled: boolean; mailboxes: MailboxVM[] };
+  gmail: { enabled: boolean; mailboxes: MailboxVM[]; redirectUri: string; redirectWarning: string | null };
   settings: {
     companyName: string;
     accent: string;
@@ -1050,6 +1050,30 @@ export default function SettingsClient({
             <b style={{ color: "#5b616e", fontFamily: "var(--font-mono)" }}>GMAIL_ENABLED=true</b>{" "}
             — the step-by-step is in <b style={{ color: "#5b616e" }}>DEPLOY.md §5</b>. Until then the
             Inbox stays in simulated mode.
+          </div>
+        )}
+
+        {gmail.enabled && (
+          <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 12, lineHeight: 1.6 }}>
+            Google sends sign-ins back to{" "}
+            <span style={{ fontFamily: "var(--font-mono)", color: "#5b616e" }}>{gmail.redirectUri}</span>
+            {" "}— this exact URL must be listed under the OAuth client’s Authorized redirect URIs.
+          </div>
+        )}
+        {gmail.redirectWarning && (
+          <div
+            style={{
+              marginTop: 10,
+              fontSize: 12,
+              lineHeight: 1.5,
+              color: "#b4543a",
+              background: "#f9ece8",
+              border: "1px solid #f0d6cd",
+              borderRadius: 8,
+              padding: "8px 11px",
+            }}
+          >
+            {gmail.redirectWarning}
           </div>
         )}
 

@@ -8,10 +8,12 @@ import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { resolveFieldDefs } from "@/lib/customer-fields";
 import { allUsers } from "@/lib/users";
 import {
+  callbackUrl,
   GMAIL_MODIFY_SCOPE,
   gmailEnabled,
   hasCalendarScope,
   personalKey,
+  redirectHostMismatch,
   SHARED_KEYS,
 } from "@/lib/gmail/config";
 import { listConnections } from "@/lib/gmail/connections";
@@ -33,6 +35,8 @@ export default async function SettingsPage() {
 
   // ---- Mailboxes (Gmail) — admin surface, env-gated ----
   const gmailOn = gmailEnabled();
+  const redirectUri = callbackUrl();
+  const redirectWarning = gmailOn ? redirectHostMismatch() : null;
   const connections = isAdmin && gmailOn ? await listConnections() : [];
   const connByKey = new Map(connections.map((c) => [c.mailboxKey, c]));
   const myKey = personalKey(me.id);
@@ -127,7 +131,7 @@ export default async function SettingsPage() {
         <SettingsClient
           meId={me.id}
           meName={me.name}
-          gmail={{ enabled: gmailOn, mailboxes: mailboxVMs }}
+          gmail={{ enabled: gmailOn, mailboxes: mailboxVMs, redirectUri, redirectWarning }}
           settings={{
             companyName: settings.companyName,
             accent: settings.accent,
