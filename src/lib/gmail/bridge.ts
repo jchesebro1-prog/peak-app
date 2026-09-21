@@ -9,7 +9,9 @@ import { allUsers } from "@/lib/users";
 import {
   DEFAULT_DOMAIN,
   boxAddress,
+  deriveStatus,
   lastInbound,
+  statusFromDirection,
   type CommMessage,
   type CommThread,
   type Direction,
@@ -154,10 +156,6 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
 
 /* ---- inbound -------------------------------------------------------------- */
 
-function threadStatusFor(dir: Direction): CommThread["status"] {
-  return dir === "in" ? "waiting_us" : "waiting_them";
-}
-
 /** Record one Gmail message into comms, deduped by Gmail message id. Returns
  *  the touched thread id (or null if it was a duplicate). `attempt` guards the
  *  id-collision redo (D73): concurrent syncs can compute the same
@@ -197,7 +195,8 @@ async function recordMessage(
     await patchDoc<CommThread>("comms", existing.id, (d) => {
       d.messages = (d.messages || []).concat([msg]);
       d.updatedAt = Math.max(d.updatedAt || 0, p.at);
-      d.status = threadStatusFor(dir);
+      d.messages.sort((a, b) => (a.at || 0) - (b.at || 0));
+      d.status = deriveStatus(d);
       // Which Gmail account owns this thread id — reconcile scopes by this
       // (thread ids are per-account; display-name lookups can misattribute).
       if (!d.gmailAccountKey) d.gmailAccountKey = key;
@@ -228,7 +227,7 @@ async function recordMessage(
     cc: "",
     subject: p.subject,
     channel: "email",
-    status: threadStatusFor(dir),
+    status: statusFromDirection(dir),
     assignedTo: "",
     link: null,
     messages: [msg],

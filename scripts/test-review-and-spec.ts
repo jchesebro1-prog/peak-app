@@ -1461,7 +1461,7 @@ ok(addressFromHit({ street: "123 Main St", title: "Overture Center" }) === "123 
 ok(addressFromHit({ street: "", title: "Overture Center" }) === "Overture Center", "#32: POI without street falls back to display title");
 
 /* ============ Task 3 — inbox conversation participants (#42) ============ */
-import { participantsFor } from "@/lib/stores/comms";
+import { participantsFor, deriveStatus } from "@/lib/stores/comms";
 const msgsThread = (authors: Array<string | undefined>): any => ({
   messages: authors.map((author, i) => ({
     id: `m${i}`, at: i, direction: "in", channel: "email", author: author || "", body: "",
@@ -1472,6 +1472,38 @@ ok(participantsFor(msgsThread(["Jeff", "Jeff"])) === "", "#42: repeated author d
 ok(participantsFor(msgsThread(["Jeff", "Sarah"])) === "Jeff, Sarah", "#42: two authors joined with comma");
 ok(participantsFor(msgsThread(["Jeff", "Sarah", "Amy", "Ben"])) === "Jeff, Sarah +2", "#42: 4 authors -> first two plus overflow count");
 ok(participantsFor(msgsThread(["Jeff", "", "Sarah", undefined])) === "Jeff, Sarah", "#42: blank/undefined authors filtered out");
+
+/* ---- #96 §6 — thread status derives from the latest message ---- */
+{
+  const m = (direction: "in" | "out", at: number) => ({
+    id: "m" + at, at, direction, channel: "email" as const, author: "", body: "",
+  });
+  // reply imported BEFORE the original (Gmail lists newest first) still ends "waiting_them"
+  ok(
+    deriveStatus({ status: "waiting_us", messages: [m("out", 200), m("in", 100)] }) === "waiting_them",
+    "deriveStatus: latest-by-timestamp wins regardless of array order"
+  );
+  ok(
+    deriveStatus({ status: "waiting_them", messages: [m("out", 100), m("in", 200)] }) === "waiting_us",
+    "deriveStatus: newest inbound → waiting_us"
+  );
+  ok(
+    deriveStatus({ status: "draft", messages: [m("in", 100)] }) === "draft",
+    "deriveStatus: never overrides a draft"
+  );
+  ok(
+    deriveStatus({ status: "closed", messages: [m("in", 100), m("out", 200)] }) === "closed",
+    "deriveStatus: closed stays closed after an outbound"
+  );
+  ok(
+    deriveStatus({ status: "closed", messages: [m("out", 100), m("in", 200)] }) === "waiting_us",
+    "deriveStatus: closed reopens on a new inbound"
+  );
+  ok(
+    deriveStatus({ status: "waiting_us", messages: [] }) === "waiting_us",
+    "deriveStatus: no messages → status unchanged"
+  );
+}
 
 /* ============ Review fix — sort=date must be representable in CRM mode (#42) ============ */
 import { isModeDefaultSort } from "@/app/(app)/inbox/sort-defaults";

@@ -121,6 +121,26 @@ export function statusFromDirection(dir: Direction): ThreadStatus {
   return dir === "in" ? "waiting_us" : "waiting_them";
 }
 
+/**
+ * Thread status DERIVED from the newest message (#96 §6). Replaces the
+ * per-message stamp that let an older inbound overwrite a newer reply when
+ * Gmail's newest-first listing recorded them out of order.
+ *   - draft is never touched by an import
+ *   - closed stays closed until a NEW inbound arrives
+ *   - otherwise waiting_us if the newest message is inbound, else waiting_them
+ */
+export function deriveStatus(
+  t: Pick<CommThread, "status" | "messages">
+): ThreadStatus {
+  const msgs = t.messages || [];
+  if (!msgs.length) return t.status;
+  let latest = msgs[0];
+  for (const m of msgs) if ((m.at || 0) > (latest.at || 0)) latest = m;
+  if (t.status === "draft") return "draft";
+  if (t.status === "closed" && latest.direction === "out") return "closed";
+  return statusFromDirection(latest.direction);
+}
+
 function asChannel(x: string | undefined, fallback: Channel): Channel {
   return (CHANNELS as readonly string[]).includes(x || "")
     ? (x as Channel)
@@ -1165,7 +1185,7 @@ export async function addMessage(
       }
     }
     t.messages = (t.messages || []).concat([msg]);
-    t.status = m.status || statusFromDirection(dir);
+    t.status = m.status || deriveStatus(t);
     if (dir === "in") t.unread = true;
     else t.unread = false;
     if (t.status !== "draft") t.archived = false;
