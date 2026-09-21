@@ -64,6 +64,9 @@ import HomeTabs from "../home-tabs";
 
 export const metadata = { title: "Inbox — Quartzite-6" };
 
+// #97 — the Gmail import/poll can take longer than the platform default
+export const maxDuration = 60;
+
 // One mailbox: the signed-in user's own connected Gmail account. The shared
 // sales/installs/info boxes were retired (see comms.ts SHARED_BOXES).
 const BOX_IDS = ["personal"] as const;

@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { AUTO_SYNC_MIN_AGE_MS } from "@/lib/gmail/config";
 import { checkMailIfStale } from "@/lib/stores/comms";
 
+// #97 — the Gmail import/poll can take longer than the platform default
+export const maxDuration = 60;
+
 /**
  * Cron-triggered Gmail sync (D74) — the serverless half of "sync is server
  * side, always current". Vercel Cron (vercel.json) calls this on a schedule

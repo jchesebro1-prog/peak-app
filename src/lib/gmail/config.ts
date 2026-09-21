@@ -51,6 +51,22 @@ export function hasCalendarScope(scope: string | null | undefined): boolean {
 /** History-import depth on first connect (MASTER-QUESTIONS C3 — last 90 days). */
 export const IMPORT_WINDOW_DAYS = 90;
 
+/** Max NEW messages fetched per sync run during the one-time history import
+ *  (#97). Gmail's per-user quota is 6,000 units/min and messages.get is 5
+ *  units, so a run stays well inside it and inside the serverless duration
+ *  cap; the next sync continues where this one stopped (dedup makes the
+ *  restart cheap). */
+export const IMPORT_BATCH_PER_RUN = 80;
+
+/** Gmail's per-minute quota (403 rateLimitExceeded / 429) — retry on the
+ *  next sync rather than failing the run. Module-private in spirit (only
+ *  bridge.ts's import loop uses it) but exported from this DB-free module so
+ *  the pure test harness can exercise it without importing bridge.ts. */
+export function isRateLimit(err: unknown): boolean {
+  const m = err instanceof Error ? err.message : String(err);
+  return /\b(429|rateLimitExceeded|RATE_LIMIT_EXCEEDED|Quota exceeded)\b/.test(m);
+}
+
 /** How stale a mailbox may get before a background sync actually runs (D73/
  *  D74). Shared by every automatic trigger — the inbox client tick, the
  *  server boot timer, and the /api/gmail/sync cron route — all of which funnel

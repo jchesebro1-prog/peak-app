@@ -2,7 +2,7 @@ import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/l
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
 import { safeCallbackPath, resolveSignInRedirect } from "@/lib/auth-redirect";
-import { redirectHostMismatch } from "@/lib/gmail/config";
+import { redirectHostMismatch, IMPORT_BATCH_PER_RUN, isRateLimit } from "@/lib/gmail/config";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
   msOf as opMsOf,
@@ -2971,6 +2971,13 @@ ok(
   }) !== null,
   "redirectHostMismatch: same host, http vs https scheme drift → warning"
 );
+
+/* ---- #97 — Gmail import chunking + quota detection ---- */
+ok(IMPORT_BATCH_PER_RUN * 5 < 6000 / 2, "import batch stays under half the per-minute quota (5 units per messages.get)");
+ok(isRateLimit(new Error("Gmail API /messages/x?format=full → 403 { \"reason\": \"rateLimitExceeded\" }")), "isRateLimit: 403 rateLimitExceeded");
+ok(isRateLimit(new Error("Gmail API /messages/x → 429 Too Many Requests")), "isRateLimit: 429");
+ok(!isRateLimit(new Error("Gmail API /messages/x → 404 Not Found")), "isRateLimit: 404 is not a rate limit");
+ok(!isRateLimit(new Error("Mailbox not connected: personal:u1")), "isRateLimit: unrelated error");
 
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();

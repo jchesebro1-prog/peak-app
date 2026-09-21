@@ -19,8 +19,10 @@ import {
 } from "@/lib/stores/comms";
 import {
   GMAIL_MODIFY_SCOPE,
+  IMPORT_BATCH_PER_RUN,
   IMPORT_WINDOW_DAYS,
   isPersonalKey,
+  isRateLimit,
   userIdOfKey,
   type MailboxKey,
 } from "./config";
@@ -459,18 +461,51 @@ async function syncMailboxMessages(
   let last: string | null = null;
 
   if (!info.initialImportDone) {
-    // one-time 90-day history import
+    // One-time 90-day history import — resumable, chunked, quota-safe (#97).
+    // Dedup by Gmail message id BEFORE fetching: listing ids is cheap, but a
+    // full messages.get is 5 quota units, so a restart after a partial
+    // import (chunk boundary or rate limit) only re-walks pages instead of
+    // re-fetching messages it already stored.
+    const known = new Set<string>();
+    for (const t of await listDocs<CommThread>("comms")) {
+      for (const m of t.messages || []) {
+        if (m.gmailId) known.add(m.gmailId);
+      }
+    }
     let pageToken: string | undefined;
     const query = "newer_than:" + IMPORT_WINDOW_DAYS + "d";
+    let fetchedThisRun = 0;
     do {
       const page = await listMessageIds(key, query, pageToken);
       for (const meta of page.messages) {
-        const full = await getMessage(key, meta.id);
-        const touched = await recordMessage(key, parseInbound(full));
-        if (touched) last = touched;
+        if (known.has(meta.id)) continue;
+        try {
+          const full = await getMessage(key, meta.id);
+          const touched = await recordMessage(key, parseInbound(full));
+          if (touched) last = touched;
+        } catch (err) {
+          if (isRateLimit(err)) {
+            // Quota hit mid-page — keep everything recorded so far
+            // (initialImportDone stays false) and retry on the next sync.
+            console.warn("[gmail] import paused (quota) for", key);
+            await updateSyncState(key, { lastSyncAt: Date.now() });
+            return last;
+          }
+          throw err;
+        }
+        known.add(meta.id);
+        fetchedThisRun++;
+        if (fetchedThisRun >= IMPORT_BATCH_PER_RUN) {
+          // Chunk boundary — stop paging without marking the import done;
+          // the next sync resumes (cheaply, thanks to `known`).
+          console.info("[gmail] import chunk done for", key, "— more remain");
+          await updateSyncState(key, { lastSyncAt: Date.now() });
+          return last;
+        }
       }
       pageToken = page.nextPageToken;
     } while (pageToken);
+    // Walk finished with no more pages — the whole 90-day window is in.
     const profile = await getProfile(key);
     await updateSyncState(key, {
       initialImportDone: true,
@@ -531,7 +566,15 @@ async function syncMailbox(
   // gap at ~0 so a slow earlier mailbox can't let the slot be re-won mid-run.
   if (!(await claimSyncSlot(key, claimMinAgeMs)))
     return { ran: false, last: null, changed: false };
-  const last = await syncMailboxMessages(key, info);
+  let last: string | null = null;
+  try {
+    last = await syncMailboxMessages(key, info);
+  } catch (err) {
+    // #97 — an unexpected failure in the message sync must not skip the
+    // downstream passes below (reconcile/re-derive/labels still run).
+    console.error("[gmail] message sync failed for", key, err);
+    last = null;
+  }
   let flips = 0;
   try {
     flips = await reconcileInboxState(key);
