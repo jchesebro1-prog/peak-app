@@ -2618,3 +2618,22 @@ support it yet, so it gained the same handling repairs/quote/page.tsx uses
 (seed `customerId`/primary `locationId`/primary `contactName` into
 `initialFrom`'s `InitialQuote`, only when there's no `?id=` — an explicit
 edit always wins).
+
+## D139. Grid Manual mode's Scope panel reuses Quick Design's cost-bearing estimate engine (2026-09-20)
+
+Manual mode's new Scope panel (D-manual-scope-targets spec) computes its
+Good/Better/Best $ targets by running the SAME `compute()`/`tierSystems()`
+pipeline Quick Design's Auto estimate already uses, per the design spec's
+explicit direction ("Both Auto and Manual... run that input through the
+same compute()/tierSystems() engine"). `engine.ts` bakes in cost data
+(`SEED_FABRIC_RATES`, `TIER_SKUS`) at module scope for Quick Design's own
+client bundle already; pulling `ScopeInputsPanel`/`ScopePanel` into the
+Grid editor now ships that same cost data in the Grid bundle too — crossing
+the sell-only boundary `grid/[id]/page.tsx` otherwise deliberately protects
+("SELL numbers only - the margin and the cost basis stay on the server").
+
+Accepted as-is rather than building a parallel sell-safe target engine:
+anyone who can reach Manual mode can already reach `/design/quick` and see
+the same numbers today, so this doesn't create a new exposure, only a
+second place the existing one shows up. Revisit if Manual mode ever gets a
+permission boundary Quick Design doesn't have.
