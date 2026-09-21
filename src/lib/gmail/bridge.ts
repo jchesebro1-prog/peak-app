@@ -46,7 +46,7 @@ import {
   sendRaw,
 } from "./api";
 import { buildRaw, parseAddress, parseInbound, type ParsedInbound } from "./mime";
-import { applyResolution, resolveForThread } from "./linking";
+import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
 
 /**
  * The real Gmail bridge (Phase 7). comms.ts delegates here — but ONLY when the
@@ -649,6 +649,11 @@ async function syncMailbox(
     flips += await rederiveStatuses(key);
   } catch (err) {
     console.error("[gmail] status re-derive failed for", key, err);
+  }
+  try {
+    flips += await backfillMailbox(key);
+  } catch (err) {
+    console.error("[gmail] link backfill failed for", key, err);
   }
   try {
     await syncLabels(key);

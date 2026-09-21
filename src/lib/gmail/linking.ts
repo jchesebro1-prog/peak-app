@@ -2,9 +2,11 @@
  * #96 — wires the pure resolver to real data and stamps threads. Backfill and
  * re-sweep live here too (Task 4).
  */
+import { listDocs, patchDoc } from "@/db/doc-store";
 import { contactByEmail } from "@/lib/identity/lookup";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import type { CommThread } from "@/lib/stores/comms";
+import { domainOf } from "./config";
 import { customersForDomain } from "./domains";
 import { resolveSender, type Resolution } from "./resolve";
 
@@ -43,4 +45,49 @@ export async function applyResolution(t: CommThread, r: Resolution): Promise<voi
     t.suggestedCustomerId = null;
     t.candidates = [];
   }
+}
+
+function matchesFilter(t: CommThread, f?: { email?: string; domain?: string }): boolean {
+  if (!f) return true;
+  const e = (t.contactEmail || "").toLowerCase();
+  if (f.email && e !== f.email.toLowerCase()) return false;
+  if (f.domain && domainOf(e) !== f.domain.toLowerCase()) return false;
+  return true;
+}
+
+/** Re-run the resolver over unlinked threads. Idempotent; patches only when
+ *  something changes. */
+export async function resweepThreads(
+  filter?: { email?: string; domain?: string },
+  onlyAccountKey?: string
+): Promise<number> {
+  const all = await listDocs<CommThread>("comms");
+  let changed = 0;
+  for (const t of all) {
+    if (t.deleted) continue;
+    if (t.customerId && t.resolution === "linked") continue;
+    if (onlyAccountKey && t.gmailAccountKey !== onlyAccountKey) continue;
+    if (!matchesFilter(t, filter)) continue;
+    if (!t.contactEmail) continue;
+    const r = await resolveForThread(t.contactEmail);
+    const before = JSON.stringify([t.customerId, t.resolution, t.suggestedCustomerId, t.candidates]);
+    const next = { ...t };
+    await applyResolution(next, r);
+    const after = JSON.stringify([next.customerId, next.resolution, next.suggestedCustomerId, next.candidates]);
+    if (before === after) continue;
+    await patchDoc<CommThread>("comms", t.id, (d) => {
+      d.customerId = next.customerId;
+      d.customer = next.customer;
+      d.resolvedContactId = next.resolvedContactId ?? null;
+      d.resolution = next.resolution;
+      d.suggestedCustomerId = next.suggestedCustomerId ?? null;
+      d.candidates = next.candidates ?? [];
+    });
+    changed++;
+  }
+  return changed;
+}
+
+export async function backfillMailbox(key: string): Promise<number> {
+  return resweepThreads(undefined, key);
 }
