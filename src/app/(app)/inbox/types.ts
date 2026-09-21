@@ -188,6 +188,37 @@ export type ReaderVM = {
   /** last message body — quoted into Forward */
   lastBody: string;
   forwardFrom: string;
+  /* ---- #96 §2 link sidebar ----
+   * `resolution` is the sidebar's state machine, derived server-side: a
+   * thread with a customer (stored, or resolved through a known contact
+   * address) is "linked" whatever the sync stamped; a dismissed suggestion
+   * is "unknown" (the sidebar must never re-offer it); a stale "suggested"/
+   * "ambiguous" whose customers no longer exist collapses to "unknown". */
+  resolution: "linked" | "suggested" | "ambiguous" | "unknown";
+  /** sender's email domain — "" when the thread has no email */
+  senderDomain: string;
+  /** true when the domain can't identify a customer (public webmail / none) —
+   *  the sidebar never offers "Link domain" for these */
+  senderIsPublicDomain: boolean;
+  /** present only when resolution === "suggested" */
+  suggested: { customerId: string; name: string; contactsAtDomain: number } | null;
+  /** present only when resolution === "ambiguous" */
+  candidates: Array<{ customerId: string; name: string }>;
+  /** present only when resolution === "linked" */
+  customerCard: {
+    id: string;
+    name: string;
+    tier: string;
+    openQuotes: number;
+    openProjects: number;
+    /** the customer's contact whose email matches the sender, "" if none */
+    contactName: string;
+  } | null;
+  /** every customer, for the pickers */
+  customerOptions: Opt[];
+  /** contacts of the linked/suggested customer (value = contact name — the
+   *  doc-shape contact carries no id) */
+  contactOptions: Opt[];
 };
 
 export type CustomerVM = {

@@ -554,7 +554,10 @@ export default function InboxShell({
         height: "100%",
         display: "flex",
         minHeight: 0,
-        overflow: "hidden",
+        // x scrolls only when the reader pane's minWidth floor (below)
+        // overflows a narrow desktop window; y stays with the panes
+        overflowX: "auto",
+        overflowY: "hidden",
         fontFamily: "var(--font-ui)",
         color: "#16181d",
         background: "#f7f8fa",
@@ -939,7 +942,11 @@ export default function InboxShell({
       />
 
       {/* ===== reading pane (desktop) ===== */}
-      <div className="ib-pane" style={{ flex: 1, minWidth: 0, background: "#fff" }}>
+      {/* minWidth 640: the reader now hosts a 300px link sidebar (#96 §2)
+          beside the conversation — side 238 + list 392 leave only ~330px
+          at the 961px desktop breakpoint, so the pane holds a floor and the
+          shell scrolls sideways rather than squeezing the reader unreadable. */}
+      <div className="ib-pane" style={{ flex: 1, minWidth: 640, background: "#fff" }}>
         <ThreadReader
           key={reader ? reader.id : "empty"}
           vm={reader}

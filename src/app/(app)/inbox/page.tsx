@@ -10,7 +10,13 @@ import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { getAll as allInspections } from "@/lib/stores/inspections";
 import { getAllProjects } from "@/lib/stores/projects";
-import { GMAIL_MODIFY_SCOPE, gmailEnabled, personalKey } from "@/lib/gmail/config";
+import {
+  domainOf,
+  GMAIL_MODIFY_SCOPE,
+  gmailEnabled,
+  isPublicDomain,
+  personalKey,
+} from "@/lib/gmail/config";
 import { getConnectionInfo, listCachedLabels } from "@/lib/gmail/connections";
 import {
   boxMeta,
@@ -535,13 +541,19 @@ export default async function InboxPage({
       inspection: [],
       project: [],
     };
+    // Loaded only for a resolved customer (the link picker + the sidebar's
+    // customer card); an unlinked thread has nothing to count.
+    let quotes: Awaited<ReturnType<typeof allQuotes>> = [];
+    let projects: Awaited<ReturnType<typeof getAllProjects>> = [];
     if (resolvedCid) {
-      const [quotes, surveys, inspections, projects] = await Promise.all([
+      const [q, surveys, inspections, p] = await Promise.all([
         allQuotes(),
         allSurveys(),
         allInspections(),
         getAllProjects(),
       ]);
+      quotes = q;
+      projects = p;
       linkOptions = {
         quote: quotes
           .filter(
@@ -596,6 +608,60 @@ export default async function InboxPage({
         me,
       };
     }
+
+    // #96 §2 — link sidebar state. A customer on the thread (stored, or
+    // resolved via a known contact address) wins over whatever the sync
+    // stamped; a dismissed suggestion (resolution back to "unknown",
+    // suggestedCustomerId still set) is never re-offered.
+    const linkedCustomer = resolvedCid
+      ? customers.find((c) => c.id === resolvedCid) || null
+      : null;
+    const senderDomain = domainOf(sel.contactEmail || "");
+    const senderIsPublicDomain = !senderDomain || isPublicDomain(senderDomain);
+    let resolution: ReaderVM["resolution"] = linkedCustomer
+      ? "linked"
+      : sel.resolution && sel.resolution !== "linked"
+        ? sel.resolution
+        : "unknown";
+    const suggestedCustomer =
+      resolution === "suggested" && !sel.suggestionDismissed && sel.suggestedCustomerId
+        ? customers.find((c) => c.id === sel.suggestedCustomerId) || null
+        : null;
+    if (resolution === "suggested" && !suggestedCustomer) resolution = "unknown";
+    const candidates = (sel.candidates || []).filter((c) =>
+      customers.some((x) => x.id === c.customerId)
+    );
+    if (resolution === "ambiguous" && candidates.length === 0) resolution = "unknown";
+    const contactsAtDomain = suggestedCustomer
+      ? (suggestedCustomer.contacts || []).filter(
+          (ct) => domainOf(ct.email || "") === senderDomain
+        ).length
+      : 0;
+    const senderEmailLc = (sel.contactEmail || "").trim().toLowerCase();
+    const customerCard: ReaderVM["customerCard"] = linkedCustomer
+      ? {
+          id: linkedCustomer.id,
+          name: linkedCustomer.name,
+          tier: linkedCustomer.pricingTier || "Base",
+          // "open" mirrors Home's pipeline definition (draft | sent) and
+          // Reports' Installs book (stage !== complete)
+          openQuotes: quotes.filter(
+            (q) =>
+              (q.status === "draft" || q.status === "sent") &&
+              ((q.customerId && q.customerId === linkedCustomer.id) ||
+                nameToId.get((q.customer || "").toLowerCase()) === linkedCustomer.id)
+          ).length,
+          openProjects: projects.filter(
+            (p) => p.customerId === linkedCustomer.id && p.stage !== "complete"
+          ).length,
+          contactName:
+            (senderEmailLc &&
+              (linkedCustomer.contacts || []).find(
+                (ct) => (ct.email || "").trim().toLowerCase() === senderEmailLc
+              )?.name) ||
+            "",
+        }
+      : null;
 
     const messages: MessageVM[] = (sel.messages || []).map((m) => ({
       id: m.id,
@@ -656,6 +722,20 @@ export default async function InboxPage({
       visit,
       lastBody: lastMsg(sel)?.body || "",
       forwardFrom: sel.contactName || sel.contactEmail || "",
+      resolution,
+      senderDomain,
+      senderIsPublicDomain,
+      suggested: suggestedCustomer
+        ? { customerId: suggestedCustomer.id, name: suggestedCustomer.name, contactsAtDomain }
+        : null,
+      candidates: resolution === "ambiguous" ? candidates : [],
+      customerCard,
+      customerOptions: customers
+        .map((c) => ({ value: c.id, label: c.name }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+      contactOptions: ((linkedCustomer || suggestedCustomer)?.contacts || [])
+        .filter((ct) => ct.name)
+        .map((ct) => ({ value: ct.name, label: ct.name })),
     };
   }
 
