@@ -149,10 +149,27 @@ export default function ScopePanel({
   const [draft, setDraft] = useState<QuickScopeInputs | null>(scopeInputs);
   const [prevScopeInputs, setPrevScopeInputs] = useState<QuickScopeInputs | null>(scopeInputs);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True from the moment an edit is made until its debounced write has
+  // actually resolved (success or failure). While true, an incoming
+  // `scopeInputs` prop change (e.g. from one of the ~17 unrelated
+  // `router.refresh()` call sites in editor.tsx) must NOT reset `draft` —
+  // that would snap the just-edited control back to the stale
+  // pre-edit value even though the debounced write is still in flight
+  // and will land correctly a moment later. Plain state (not a ref)
+  // because it's read during render, below.
+  const [dirty, setDirty] = useState(false);
+  // The most recently drafted value that hasn't been sent to the server
+  // yet. Cleared once its write actually fires (normal debounce timeout
+  // or the unmount flush below) so unmount only re-sends a write that
+  // never got a chance to go out. A ref (not state) because it's only
+  // ever read from the unmount effect's cleanup, which needs the latest
+  // value regardless of when that effect instance was set up.
+  const pendingWriteRef = useRef<QuickScopeInputs | null>(null);
 
   // Reset the draft when the server's scopeInputs changes (derived-state
-  // reset during render — avoids the set-state-in-effect cascade).
-  if (prevScopeInputs !== scopeInputs) {
+  // reset during render — avoids the set-state-in-effect cascade), but
+  // only when there's no in-flight/unconfirmed edit to protect.
+  if (prevScopeInputs !== scopeInputs && !dirty) {
     setPrevScopeInputs(scopeInputs);
     setDraft(scopeInputs);
   }
@@ -160,17 +177,29 @@ export default function ScopePanel({
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      // Flush any edit that was drafted but never made it to the server
+      // because the component unmounted inside the debounce window.
+      // Best-effort: unmounted, so don't touch component state
+      // (onChanged/onError) — just fire-and-forget the write.
+      if (pendingWriteRef.current) {
+        setScopeInputsAction(projectId, pendingWriteRef.current).catch(() => {});
+        pendingWriteRef.current = null;
+      }
     };
-  }, []);
+  }, [projectId]);
 
   const save = (patch: Partial<QuickScopeInputs>) => {
     const base: QuickScopeInputs = draft ?? EMPTY_SCOPE_INPUTS;
     const next = { ...base, ...patch };
     setDraft(next);
+    setDirty(true);
+    pendingWriteRef.current = next;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
+      pendingWriteRef.current = null;
       startTransition(async () => {
         const r = await setScopeInputsAction(projectId, next);
+        setDirty(false);
         if (!r.ok) onError(r.error);
         else onChanged();
       });
