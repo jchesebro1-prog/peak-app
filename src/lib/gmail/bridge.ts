@@ -333,6 +333,26 @@ async function reconcileInboxState(key: MailboxKey): Promise<number> {
   return flips;
 }
 
+/* ---- status re-derive (#96 §6) ------------------------------------------- */
+
+/** Recompute every bridged thread's status from its newest message. Cheap
+ *  (one listDocs + patch only on change) and idempotent, so it runs on every
+ *  sync: it is what corrects threads stamped by the old per-message rule. */
+async function rederiveStatuses(key: MailboxKey): Promise<number> {
+  const all = await listDocs<CommThread>("comms");
+  let changed = 0;
+  for (const t of all) {
+    if (t.gmailAccountKey !== key) continue;
+    const next = deriveStatus(t);
+    if (next === t.status) continue;
+    await patchDoc<CommThread>("comms", t.id, (d) => {
+      d.status = deriveStatus(d);
+    });
+    changed++;
+  }
+  return changed;
+}
+
 /* ---- label cache (infra for future label filters/chips) ------------------- */
 
 /** Refresh this mailbox's label cache (names/types/colors) from Gmail. Wholly
@@ -503,6 +523,11 @@ async function syncMailbox(
     flips = await reconcileInboxState(key);
   } catch (err) {
     console.error("[gmail] inbox reconcile failed for", key, err);
+  }
+  try {
+    flips += await rederiveStatuses(key);
+  } catch (err) {
+    console.error("[gmail] status re-derive failed for", key, err);
   }
   try {
     await syncLabels(key);
