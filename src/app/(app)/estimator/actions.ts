@@ -9,6 +9,7 @@ import {
   claimReview,
   create,
   get,
+  getAll,
   requestChanges,
   requireApprovalToAdvance,
   setStatus,
@@ -22,7 +23,7 @@ import {
   type QuoteStatus,
 } from "@/lib/stores/quotes";
 import { travelForId } from "@/lib/stores/customers";
-import type { TravelLite } from "./types";
+import type { QuoteLite, TravelLite } from "./types";
 import type { DraftedLine } from "./ai-scope-modal";
 import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
 import {
@@ -32,6 +33,7 @@ import {
 import { list as catalogList } from "@/lib/stores/catalog";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection } from "./types";
 import type { SuggestPart } from "./estimator-data";
+import { totals } from "./pricing";
 import { activeUsers } from "@/lib/users";
 import {
   createTask,
@@ -185,6 +187,119 @@ export async function saveQuoteAction(
     status: q?.status ?? null,
     ...(statusError ? { error: statusError } : {}),
   };
+}
+
+/**
+ * Search other estimates for the "move system" picker (sibling of the
+ * "delete system" control). Substring match on name/customer, case-
+ * insensitive; excludes the estimate being moved FROM. An empty query
+ * returns the most-recently-updated estimates (getAll() is already
+ * newest-first) rather than nothing, so the picker isn't empty on open.
+ */
+export async function searchQuotesAction(
+  query: string,
+  excludeId: string | null,
+  limit = 20
+): Promise<QuoteLite[]> {
+  await requireUser();
+  const q = (query || "").trim().toLowerCase();
+  const pool = (await getAll()).filter((quote) => quote.id !== excludeId);
+  const matched = q
+    ? pool.filter(
+        (quote) =>
+          quote.name.toLowerCase().includes(q) || quote.customer.toLowerCase().includes(q)
+      )
+    : pool;
+  return matched.slice(0, Math.max(1, limit)).map((quote) => ({
+    id: quote.id,
+    name: quote.name,
+    customer: quote.customer,
+    status: quote.status,
+    updatedAt: quote.updatedAt,
+  }));
+}
+
+export type MoveSystemTarget = { kind: "new" } | { kind: "existing"; quoteId: string };
+
+export type MoveSystemResult =
+  | { ok: true; targetId: string; targetName: string }
+  | { ok: false; error: string };
+
+/**
+ * Moves a system (SpecSection) out of the current estimate and into a new
+ * one or an already-existing one — sibling of "delete system". Never
+ * touches the source quote: removal from the source is purely a client-side
+ * `setSections` change, persisted only when the user hits Save there (same
+ * as delete). The section's id is regenerated so it can never collide with
+ * an id already present in the target quote.
+ */
+export async function moveSystemToEstimateAction(
+  section: SpecSection,
+  target: MoveSystemTarget,
+  sourceContext: {
+    customerId: string | null;
+    locationId: string | null;
+    customer: string;
+    contactName: string;
+  }
+): Promise<MoveSystemResult> {
+  const user = await requireUser();
+  const moved: SpecSection = { ...section, id: "sys" + Date.now() };
+
+  if (target.kind === "existing") {
+    const existing = await get(target.quoteId);
+    if (!existing) {
+      return { ok: false, error: "That estimate could not be found." };
+    }
+    const existingSpec = existing.spec as
+      | { sections?: SpecSection[]; mobs?: SpecMob[] }
+      | null
+      | undefined;
+    const mergedSections = [...(existingSpec?.sections || []), moved];
+    const t = totals(mergedSections, 0);
+    const updated = await update(target.quoteId, {
+      spec: { sections: mergedSections, mobs: existingSpec?.mobs || [] },
+      value: t.grand,
+      margin: t.margin,
+    } as QuotePatch);
+    if (!updated) {
+      return { ok: false, error: "That estimate could not be found." };
+    }
+    refresh();
+    return { ok: true, targetId: updated.id, targetName: updated.name };
+  }
+
+  const t = totals([moved], 0);
+  let created: Quote;
+  try {
+    created = await create({
+      name: moved.name + " (moved)",
+      customer: sourceContext.customer,
+      customerId: sourceContext.customerId,
+      locationId: sourceContext.locationId,
+      source: "estimator",
+      status: "draft",
+      spec: { sections: [moved], mobs: [] },
+      value: t.grand,
+      margin: t.margin,
+      owner: user.name,
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error:
+        e instanceof Error
+          ? e.message
+          : "Could not create the new estimate — please try again.",
+    };
+  }
+  // create() promotes only the declared Quote columns — contactName rides
+  // along on the doc like it does for saveQuoteAction's fresh-create path.
+  const withContact = await update(created.id, {
+    contactName: sourceContext.contactName || "",
+  } as QuotePatch);
+  refresh();
+  return { ok: true, targetId: created.id, targetName: (withContact || created).name };
 }
 
 /** Header fields persisted immediately as they change (prototype behavior). */

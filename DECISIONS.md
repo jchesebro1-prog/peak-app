@@ -2552,3 +2552,26 @@ rental per five scheduled days, and permits a per-mobilization rate override.
 Drafting defaults to 2% of total regular crew hours. A visible 5% performance
 bonus is calculated from pre-bonus labor cost, then added as its own priced
 line so estimate totals and the configurator agree.
+
+## D137. "Move system" — sibling of Delete system on the Estimator (2026-09-20)
+
+Each system card gets a "Move…" control next to "Delete system" that sends
+that one `SpecSection` to a brand-new estimate or an already-saved one, via
+a live-search picker (substring match on name/customer; an empty query
+shows the most-recently-updated estimates rather than nothing, so the
+picker isn't empty on open — same judgment call as elsewhere in the file).
+
+The moved section's id is regenerated (`"sys" + Date.now()`) so it can never
+collide with an id already in the target. A new target estimate is named
+"`<system name>` (moved)", status `draft`, source `estimator`, and carries
+the source estimate's customer/location/contact forward — it does not start
+blank, since that would silently lose which job it belongs to. An existing
+target keeps its own name and mobs; the moved section is appended to its
+`spec.sections` and `value`/`margin` are recomputed from the merged list.
+
+The move never touches the source estimate server-side — removal from the
+source is a local `setSections` change exactly like "Delete system", only
+persisted there when the user next hits Save. On success the UI does not
+navigate away (the source estimate may hold other unsaved edits); it shows
+a dismissible "Moved to `<name>` — Open `<name>` →" banner instead, mirroring
+the existing action-error banner pattern in `estimator-client.tsx`.

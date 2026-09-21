@@ -157,6 +157,15 @@ export type CatalogHit = {
 /** A page of catalog search results (total = matches before the display cap). */
 export type CatalogSearch = { hits: CatalogHit[]; total: number };
 
+/** One estimate hit for the "move system to existing estimate" picker. */
+export type QuoteLite = {
+  id: string;
+  name: string;
+  customer: string;
+  status: QuoteStatus;
+  updatedAt: number;
+};
+
 export type CustomerLite = {
   id: string;
   name: string;

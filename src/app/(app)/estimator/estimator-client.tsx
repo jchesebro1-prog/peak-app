@@ -11,8 +11,10 @@ import {
   attestApprovalAction,
   claimReviewAction,
   draftQuoteScopeAction,
+  moveSystemToEstimateAction,
   requestChangesAction,
   saveQuoteAction,
+  searchQuotesAction,
   sendToCustomerAction,
   setQuoteTaskStatusAction,
   setStatusAction,
@@ -20,6 +22,7 @@ import {
   travelForSelectionAction,
   updateQuoteMetaAction,
   updateQuoteTaskAction,
+  type MoveSystemTarget,
   type ReviewSync,
 } from "./actions";
 import { TasksCard } from "@/components/tasks-card";
@@ -251,6 +254,11 @@ export default function EstimatorClient({
   const [attestOpen, setAttestOpen] = useState(false);
   const [attestNote, setAttestNote] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  /** Result banner for "Move system" — never auto-navigates (the user may
+   *  have other unsaved edits on the CURRENT estimate). */
+  const [moveNotice, setMoveNotice] = useState<
+    { ok: true; targetId: string; targetName: string } | { ok: false; error: string } | null
+  >(null);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
@@ -601,6 +609,35 @@ export default function EstimatorClient({
     setSections(list);
     setActiveId((a) => (a === secId ? (list[0] ? list[0].id : null) : a));
   };
+
+  /** "Move…" — sibling of deleteSystem. Removes the system locally (same as
+   *  delete; only persisted on the source when the user hits Save) once the
+   *  server confirms it landed in the target estimate. */
+  const moveSystem = (secId: string, target: MoveSystemTarget) => {
+    const sec = sections.find((s) => s.id === secId);
+    if (!sec) return;
+    const cname = customerId
+      ? customers.find((c) => c.id === customerId)?.name || custName
+      : custName;
+    setMoveNotice(null);
+    startTransition(async () => {
+      const res = await moveSystemToEstimateAction(sec, target, {
+        customerId: customerId || null,
+        locationId: locationId || null,
+        customer: cname,
+        contactName: contactName || "",
+      });
+      if (res.ok) {
+        const list = sections.filter((s) => s.id !== secId);
+        setSections(list);
+        setActiveId((a) => (a === secId ? (list[0] ? list[0].id : null) : a));
+        setMoveNotice({ ok: true, targetId: res.targetId, targetName: res.targetName });
+      } else {
+        setMoveNotice({ ok: false, error: res.error || "Could not move that system." });
+      }
+    });
+  };
+  const searchQuotes = (q: string) => searchQuotesAction(q, loadedId);
 
   const scrollToCard = (id: string) => {
     const el = cardRefs.current[id];
@@ -1622,6 +1659,59 @@ export default function EstimatorClient({
             </div>
           )}
 
+          {/* "Move system" result banner — success links to the target
+              estimate without auto-navigating (this estimate may have
+              other unsaved edits); failure surfaces the server's reason. */}
+          {moveNotice && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "9px 22px",
+                background: moveNotice.ok ? "#ecf6f0" : "#fdecea",
+                borderBottom: moveNotice.ok ? "1px solid #cce9da" : "1px solid #f3c8c2",
+                color: moveNotice.ok ? "#1f7a52" : "#9a2f22",
+                fontSize: 12.5,
+                fontWeight: 600,
+                flexShrink: 0,
+              }}
+            >
+              <span>
+                {moveNotice.ok ? (
+                  <>
+                    Moved to {moveNotice.targetName} ({moveNotice.targetId}) —{" "}
+                    <a
+                      href={`/estimator?id=${moveNotice.targetId}`}
+                      style={{ color: "inherit", textDecoration: "underline" }}
+                    >
+                      Open {moveNotice.targetName} →
+                    </a>
+                  </>
+                ) : (
+                  moveNotice.error
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => setMoveNotice(null)}
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: "inherit",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "2px 4px",
+                  flexShrink: 0,
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {/* attested-approval modal (punch #60) */}
           {attestOpen && (
             <div
@@ -2138,6 +2228,11 @@ export default function EstimatorClient({
                   onImportMaterials={(items) => pushItems(sec.id, items.map((item) => ({ ...item, id: nextId(), custom: !item.sku })))}
                   onSetCustomDraft={(field, v) => setCustomDraft((d) => ({ ...d, [field]: v }))}
                   onAddCustomPart={() => addCustomPart(sec.id)}
+                  onMoveToNew={() => moveSystem(sec.id, { kind: "new" })}
+                  onMoveToExisting={(targetQuoteId) =>
+                    moveSystem(sec.id, { kind: "existing", quoteId: targetQuoteId })
+                  }
+                  onSearchQuotes={searchQuotes}
                 />
               ))}
 

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { SuggestPart } from "./estimator-data";
 import { fmt, marginColor, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
-import type { CustomDraft, SpecSection } from "./types";
+import type { CustomDraft, QuoteLite, SpecSection } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import CatalogPicker from "./catalog-picker";
 import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, type ImportedMaterial } from "./material-csv";
@@ -63,12 +63,52 @@ export type SectionCardProps = {
   onImportMaterials: (items: ImportedMaterial[]) => void;
   onSetCustomDraft: (field: keyof CustomDraft, v: string) => void;
   onAddCustomPart: () => void;
+  /** Moves this system into a brand-new estimate (sibling of onDelete). */
+  onMoveToNew: () => void;
+  /** Moves this system into an already-existing estimate, by id. */
+  onMoveToExisting: (targetQuoteId: string) => void;
+  /** Live-search other estimates for the "move" picker. */
+  onSearchQuotes: (query: string) => Promise<QuoteLite[]>;
 };
 
 export default function SectionCard(p: SectionCardProps) {
   const [importOpen, setImportOpen] = useState(false);
   const [importMessage, setImportMessage] = useState("");
   const [showLink, setShowLink] = useState(!!p.customDraft.link);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveQuery, setMoveQuery] = useState("");
+  const [moveHits, setMoveHits] = useState<QuoteLite[]>([]);
+  const [moveLoading, startMoveSearch] = useTransition();
+  const moveSeq = useRef(0);
+  // Kept in a ref (not an effect dep) so the debounce below only reruns on
+  // moveOpen/moveQuery — not on every parent render, which recreates
+  // onSearchQuotes as a fresh closure each time.
+  const searchQuotesRef = useRef(p.onSearchQuotes);
+  useEffect(() => {
+    searchQuotesRef.current = p.onSearchQuotes;
+  });
+
+  useEffect(() => {
+    if (!moveOpen) return;
+    const my = ++moveSeq.current;
+    const t = setTimeout(() => {
+      startMoveSearch(async () => {
+        const hits = await searchQuotesRef.current(moveQuery.trim());
+        if (my === moveSeq.current) setMoveHits(hits);
+      });
+    }, 260);
+    return () => clearTimeout(t);
+  }, [moveOpen, moveQuery]);
+
+  const handleMoveToNew = () => {
+    setMoveOpen(false);
+    p.onMoveToNew();
+  };
+  const handleMoveToExisting = (targetQuoteId: string) => {
+    setMoveOpen(false);
+    p.onMoveToExisting(targetQuoteId);
+  };
+
   const { sec, isInternal, cols } = p;
   const itemsRev = systemItemsRev(sec);
   const itemsCost = systemItemsCost(sec);
@@ -330,24 +370,154 @@ export default function SectionCard(p: SectionCardProps) {
                 {fmt(secFreight)}
               </span>
             </div>
-            <button
-              type="button"
-              className="est-delsys"
-              onClick={p.onDelete}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMoveOpen((o) => !o);
+                }}
+                style={{
+                  fontSize: 11.5,
+                  fontWeight: 500,
+                  color: moveOpen ? ACCENT_INK : "#aab0bb",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                Move…
+              </button>
+              <button
+                type="button"
+                className="est-delsys"
+                onClick={p.onDelete}
+                style={{
+                  fontSize: 11.5,
+                  fontWeight: 500,
+                  color: "#aab0bb",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                Delete system
+              </button>
+            </div>
+          </div>
+
+          {/* move-system picker — new sibling estimate or an existing one */}
+          {moveOpen && (
+            <div
               style={{
-                marginLeft: "auto",
-                fontSize: 11.5,
-                fontWeight: 500,
-                color: "#aab0bb",
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                padding: 0,
+                padding: "13px 20px",
+                background: "#fafbfc",
+                borderTop: "1px solid #f3f4f7",
               }}
             >
-              Delete system
-            </button>
-          </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 10,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "#9aa0ab",
+                    letterSpacing: ".05em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Move this system to…
+                </span>
+                {addBtn("Cancel", () => setMoveOpen(false))}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleMoveToNew}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: ACCENT_INK,
+                  background: ACCENT_SOFT,
+                  border: "1px solid transparent",
+                  borderRadius: 8,
+                  padding: "9px 11px",
+                  cursor: "pointer",
+                  marginBottom: 10,
+                }}
+              >
+                + Start a new estimate from this system
+              </button>
+
+              <input
+                value={moveQuery}
+                onChange={(e) => setMoveQuery(e.target.value)}
+                placeholder="Search estimates by name or customer…"
+                style={{ ...PORTAL_FIELD, fontFamily: "var(--font-ui)", fontSize: 12.5 }}
+              />
+
+              <div style={{ marginTop: 6, fontSize: 10.5, color: "#aab0bb" }}>
+                {moveLoading
+                  ? "Searching…"
+                  : moveHits.length === 0
+                  ? "No other estimates match."
+                  : `${moveHits.length} estimate${moveHits.length === 1 ? "" : "s"}`}
+              </div>
+
+              {moveHits.map((hit) => (
+                <button
+                  key={hit.id}
+                  type="button"
+                  onClick={() => handleMoveToExisting(hit.id)}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    marginTop: 6,
+                    padding: "8px 10px",
+                    background: "#fff",
+                    border: "1px solid #eef0f3",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <span style={{ minWidth: 0 }}>
+                    <span
+                      style={{
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        display: "block",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {hit.name}
+                    </span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb" }}>
+                      {hit.id}
+                      {hit.customer ? " · " + hit.customer : ""}
+                      {" · " + (hit.status.charAt(0).toUpperCase() + hit.status.slice(1))}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
 
           <div style={{ overflowX: "auto" }}>
             {/* column header */}
