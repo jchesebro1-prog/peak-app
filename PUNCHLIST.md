@@ -5466,3 +5466,120 @@ the cron route; the auto tick now includes un-imported mailboxes so a paused imp
 **Follow-ups:** `recordMessage` still does a full `comms` scan per message (fine at hundreds, worth a
 map when the directory grows); Hobby-plan cron is daily, so background completion depends on an open
 Inbox tab until `CRON_SECRET` + a Pro-plan schedule (or an external pinger) exist.
+
+---
+
+## REVIEW AUDIT — 2026-09-21 (Jeff's feature-review list, checked against `main` @ 771499b)
+
+Jeff re-sent his full review list (offline, dashboard queue, inbox/calendar, Assembly Builder,
+Estimator, Catalog) and asked which parts were fixed. Every item was checked in code, not the log.
+**Verified shipped** (D133–D138, merged in 45a7614): offline "go back and keep working" model ·
+Assembly Builder with default qty / 0 = option-only, user-defined component labels, single light
+engine + single lens, multi-select checkboxes for power/data/accessories/clamps/safety · Estimator
+fixture configurator selects saved assemblies only (sample fixtures gone), clean description from
+assembly name + labels · new estimate at 30% margin / 2% freight · manufacturer control removed ·
+Unit cost / Unit sell / Ext. sell columns · Vendor quote beside Custom part, `$` price fields, CSV
+import with example download, "Select CSV file" is a button · custom-part link button · Delete +
+Move system · terms select (Deposit with terms / 100% prepay / Net 30 / Net 60 / Unknown) · labor
+defaults 1×1 / 4×5 / 2×3 / 2×3 / 1×1, hours/day dropdown with 8 regular + OT, supervisor billed
+first, Lift rental with editable rate, drafting 2%, 5% performance bonus, scope from system title
+(Audio+Video combined, else Other) · customer preview Quantities/Descriptions/Prices grouped and
+lines vanish when all three are off · quote-details left sidebar · Quick Design BOM buckets pick
+from the assemblies list · intake quick-add venue + contact (`/quotes/new`, D138) · generic info in
+the dark context bar, seeded from the intake.
+
+Numbering skips #98–#106 (used on `wip/2026-08-11-estimator-quote-overhaul`; never landed on main).
+What was **not** done is logged below as #107–#113.
+
+## 107. Home Queue → Google Tasks (two-way) — OPEN, NEEDS DESIGN
+
+**Reported:** 2026-09-21 (Jeff): "Queue to be more like tasks that get loaded based on the quotes
+and projects and then gets assigned like reminders and google tasks. I would like google tasks to
+also be implemented and work that way."
+
+**What exists:** `src/lib/queue.ts` (D93) already derives the queue from quotes, projects,
+engagements, flame tests, inspections and site visits, and `/api/queue` feeds a Mac-side Reminders
+agent. There is no Google Tasks integration anywhere.
+
+**Ask:** mirror queue items into Google Tasks per assignee (Gmail OAuth already holds the Google
+client — add the `tasks` scope), complete-in-either-place closes both, reassign moves the task.
+Open questions for Jeff: one list per person or one shared "Quartzite" list; whether every derived
+item syncs or only assignments/reminders; due-date source. Spec before code.
+
+## 108. Calendar: multiple calendars, slide-out filter rail, shared team calendar — OPEN, NEEDS DESIGN
+
+**Reported:** 2026-09-21 (Jeff): toggle and add calendars to the calendar view; a filter sidebar on
+the right that slides out to expose the different calendars; a shared calendar people can add group
+events to.
+
+**What exists:** `src/app/(app)/calendar/calendar-client.tsx` shows one Google calendar (primary)
+plus Peak site visits, two hard-coded colors, no per-calendar toggle, no filter rail, no shared
+calendar. Google Calendar scope enablement is still the "separate follow-up" noted in the #96 spec.
+
+**Ask:** list the user's Google calendars (`calendarList`), persist per-user visibility toggles,
+right-hand slide-out rail with a color swatch per calendar, plus one shared Peak calendar (a Google
+calendar owned by the shared mailbox, or a Peak-side `events` collection — Jeff's call) with "add to
+shared calendar" in the event modal. Spec before code; pairs with #107's scope work.
+
+## 109. Inbox: label color coding + visual cleanup — OPEN (extends #96)
+
+**Reported:** 2026-09-21 (Jeff): "I still want labels, color coding, and for it to look better and
+cleaner."
+
+**Status:** labels themselves are #96 (`Peak/*` written to and read from Gmail — in flight on
+`feat/inbox-linking`). Color coding of those labels in the list/reader, and a visual pass on the
+three-pane layout, are not in the #96 spec. Log here so they ride the same branch once the label
+plumbing lands: color per label (customer / status / assignee families), chip rendering in
+`thread-list.tsx` + `thread-reader.tsx`, and a density/spacing pass.
+
+## 110. Intake: user-defined quote category — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "I also want to have a service category by default and then a user
+defined category."
+
+**What exists:** `/quotes/new` (D138) offers the six fixed types in `quotes/new/types.ts`. No way
+to add a category of your own.
+
+**Ask:** add "Other / custom…" to the type list that reveals a free-text category; persist it on the
+quote (`category` string, default the type's label), show it on the Quotes hub badge and in the
+estimator header.
+
+## 111. Catalog import: no progress or confirmation on the upload path; raw file inputs — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "There needs to be some sort of confirmation when the price list
+was imported, right now it just seems locked up when you click import." And: "anytime there is a
+select file option it needs to be a button — right now it isn't clear where to click."
+
+**What exists:** `catalog/controls.tsx:293` submits `<form action={importCatalog}>` with a native
+`<input type="file">` and no pending state, so the page sits still until the server action returns;
+the paste path shows "Importing…" but nothing after. `venue-assessments/page.tsx:226` has the other
+remaining native file input. Every other picker is already a hidden input behind a button.
+
+**Ask:** upload + paste both show "Importing N rows…" while pending and a "Imported N parts
+(M updated, K skipped)" status line after; both remaining native file inputs become the
+button-with-filename pattern used in `estimator/section-card.tsx:806`.
+
+## 112. Estimator CSV batch-add should price SKUs from the catalog — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "I still need the ability to batch add catalog parts via a csv
+file."
+
+**What exists:** the D135 material CSV import (`estimator/material-csv.ts`) adds rows verbatim — a
+row needs its own unit cost / unit sell. A CSV of catalog SKUs + quantities imports with $0 prices.
+
+**Ask:** when a row's SKU matches the catalog, fill description / unit / cost from the catalog and
+seed sell from the tier or 30% margin (same path `onAddPart` uses), only falling back to the CSV's
+own numbers when they're present; report "N priced from catalog, M custom" in the status line.
+
+## 113. Emoji regressions since #3 — OPEN
+
+`estimator/section-card.tsx:872` (`🔗 Link`), `design/engagements/view.tsx:1019` (`✏️`),
+`design/engagements/markup/viewer.tsx:471` (`💬`). #3's rule: no pictographs, no U+FE0F; plain
+text or an SVG where the glyph was the only affordance.
+
+## Q — Labor: "shouldn't fill more than a single mobilization" — NEEDS JEFF
+
+The same review list also asks for five default mobilizations (Site Visit 1×1, Install 4×5, Hang
+2×3, Commissioning 2×3, Training 1×1), which D136 ships. Read together, the likely meaning is that
+the configurator should not auto-add a *second copy* of any mobilization or a second labor line per
+system — not that it should open with one row. Left as-is until Jeff confirms.
