@@ -410,8 +410,11 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
 /* Assert the exact keys, not just the count: when a screen is added or moved
  * this reports WHICH child changed. The Fixture Cross-Ref screen joined the
  * group after D97 shipped, which is why a bare `length === 6` went stale. */
+/* "grid" left when The Grid became a layout mode of Designs rather than a
+ * tool of its own (D-grid-merge): the "designs" child is now labelled "The
+ * Grid" and the standalone index it pointed at is gone. */
 const DESIGN_CHILDREN = [
-  "designoverview", "engagements", "designs", "grid",
+  "designoverview", "engagements", "designs",
   "steel", "lineset", "assemblies", "motors", "fixtures",
 ];
 ok(

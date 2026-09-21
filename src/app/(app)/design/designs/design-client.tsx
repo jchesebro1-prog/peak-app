@@ -35,6 +35,7 @@ import {
   approveDesignAction,
   claimDesignReviewAction,
   createManualDesignAction,
+  deleteDesignAction,
   promoteDesignAction,
   requestDesignChangesAction,
   submitDesignReviewAction,
@@ -156,6 +157,7 @@ function NewDesignSplit({
 export default function DesignClient({
   me,
   canApprove,
+  canCreate,
   designs: initialDesigns,
   selectedId,
   roster,
@@ -165,6 +167,8 @@ export default function DesignClient({
 }: {
   me: string;
   canApprove: boolean;
+  /** Gates delete — a Reviewer approves designs but has never made one. */
+  canCreate: boolean;
   designs: DesignRecord[];
   selectedId: string | null;
   roster: RosterEntry[];
@@ -238,6 +242,28 @@ export default function DesignClient({
       }
       setPromotedId(res.quoteId);
       setPromoteToast(true);
+      router.refresh();
+    });
+  };
+
+  /* -------------------------------- delete --------------------------------- */
+
+  // Two-step arm/confirm rather than window.confirm, which this app doesn't
+  // use. Armed state is keyed by id so switching selection disarms it.
+  const [armedDelete, setArmedDelete] = useState<string | null>(null);
+
+  const deleteDesign = (id: string) => {
+    setPromoteError(null);
+    startTransition(async () => {
+      const res = await deleteDesignAction(id);
+      if (!res.ok) {
+        setPromoteError(res.error);
+        return;
+      }
+      setArmedDelete(null);
+      // The deleted record is gone from the server list; clearing ?id= keeps
+      // the detail panel from pointing at a record that no longer exists.
+      router.push("/design/designs");
       router.refresh();
     });
   };
@@ -418,6 +444,22 @@ export default function DesignClient({
                   <button onClick={() => promoteDesign(sel.id)} disabled={pending} className="dd-accent-btn" style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", padding: "9px 14px", borderRadius: 8, cursor: pending ? "default" : "pointer" }}>
                     {sel.quoteId ? "Update quote →" : "Add to Quotes →"}
                   </button>
+                  {canCreate && (
+                    armedDelete === sel.id ? (
+                      <span style={{ display: "inline-flex", gap: 6 }}>
+                        <button onClick={() => deleteDesign(sel.id)} disabled={pending} style={{ fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#fff", background: "#a0442b", border: "1px solid #a0442b", padding: "9px 14px", borderRadius: 8, cursor: pending ? "default" : "pointer" }}>
+                          {pending ? "Deleting…" : "Really delete"}
+                        </button>
+                        <button onClick={() => setArmedDelete(null)} disabled={pending} style={{ fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#3d424e", background: "#fff", border: "1px solid #e4e7ec", padding: "9px 14px", borderRadius: 8, cursor: "pointer" }}>
+                          Keep
+                        </button>
+                      </span>
+                    ) : (
+                      <button onClick={() => setArmedDelete(sel.id)} disabled={pending} title={sel.layoutMode === "manual" ? "Deletes this design and its plan sheets" : "Deletes this design"} style={{ fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#a0442b", background: "#fff", border: "1px solid #e4e7ec", padding: "9px 14px", borderRadius: 8, cursor: pending ? "default" : "pointer" }}>
+                        Delete
+                      </button>
+                    )
+                  )}
                 </div>
                 {promoteError && (
                   <div style={{ marginTop: 9, fontSize: 12, color: "#b4543a", textAlign: "right" }}>{promoteError}</div>

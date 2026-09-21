@@ -51,6 +51,7 @@ import {
   calibrateAction,
   clearCalAction,
   createDraftQuoteAction,
+  deleteProjectAction,
   movePlacementAction,
   placeCurtainAction,
   placeDeviceAction,
@@ -224,6 +225,7 @@ export default function GridEditor({
   laborHoursPerDevice,
   specHref,
   venues,
+  canCreate,
 }: {
   project: ProjectLite;
   sheets: SheetLite[];
@@ -240,8 +242,12 @@ export default function GridEditor({
   specHref: string | null;
   /** The customer's venues, for the picker (D113.6). */
   venues: Array<{ id: string; name: string }>;
+  /** Gates delete — a Reviewer approves designs but has never made one. */
+  canCreate: boolean;
 }) {
   const router = useRouter();
+  // Two-step arm/confirm; this app doesn't use window.confirm.
+  const [armDelete, setArmDelete] = useState(false);
   const [activeSheetId, setActiveSheetId] = useState(sheets[0]?.id || "");
   const sheet = sheets.find((s) => s.id === activeSheetId) || sheets[0];
   const isPdf = sheet?.mime === "application/pdf" || sheet?.name.toLowerCase().endsWith(".pdf");
@@ -1013,6 +1019,41 @@ export default function GridEditor({
         <Link href={`/design/grid/${encodeURIComponent(project.id)}/schedule`} style={{ ...BTN, textDecoration: "none" }}>
           Schedule →
         </Link>
+        {canCreate && (
+          armDelete ? (
+            <>
+              <button
+                style={{ ...BTN, background: "#a0442b", color: "#fff", borderColor: "#a0442b" }}
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  const r = await deleteProjectAction(project.id);
+                  setBusy(false);
+                  if (!r.ok) {
+                    setErr(r.error);
+                    setArmDelete(false);
+                    return;
+                  }
+                  router.push("/design/designs");
+                }}
+              >
+                {busy ? "Deleting…" : "Really delete"}
+              </button>
+              <button style={BTN} disabled={busy} onClick={() => setArmDelete(false)}>
+                Keep
+              </button>
+            </>
+          ) : (
+            <button
+              style={{ ...BTN, color: "#a0442b" }}
+              disabled={busy}
+              onClick={() => setArmDelete(true)}
+              title="Deletes this design and its plan sheets"
+            >
+              Delete
+            </button>
+          )
+        )}
         <input
           ref={fileRef}
           type="file"

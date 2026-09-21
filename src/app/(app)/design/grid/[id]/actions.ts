@@ -14,6 +14,7 @@ import {
   getProject,
   movePlacement,
   removePlacement,
+  removeProject,
   removeRoute,
   removeSpace,
   renameSpace,
@@ -23,6 +24,8 @@ import {
   setSheetCalibration,
   setVenue,
 } from "@/lib/stores/grid-projects";
+import { can } from "@/lib/team";
+import { getAllDesigns, removeDesign } from "@/lib/stores/designs";
 import { docLocId, getSite } from "@/lib/identity/sites";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { isTierPriced } from "@/lib/tier-pricing";
@@ -421,6 +424,34 @@ export async function restoreRevisionAction(
   if (!r.ok)
     return { ok: false, error: r.reason === "no-such-rev" ? "That revision no longer exists." : "Design not found." };
   revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/**
+ * Delete this design from inside its editor — restored from the Grid index's
+ * deleteProjectAction, which the D-grid-merge commit deleted along with the
+ * index page and never replaced.
+ *
+ * The Designs dashboard's deleteDesignAction is the usual route in; this one
+ * exists because a PRE-MERGE Grid project has no design record pointing at it
+ * (the GRD-5001 seed is one), so the dashboard cannot reach it at all. It
+ * cascades the other way for merged records — project first, then whatever
+ * design row points at it — so either entry point leaves the pair consistent.
+ */
+export async function deleteProjectAction(
+  id: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can("create", user.roles)) return { ok: false, error: "You can't delete designs." };
+  const project = await getProject(id);
+  if (!project) return { ok: false, error: "Design not found." };
+  await removeProject(id);
+  // Reverse lookup, not a stored back-pointer — same idiom the Designs
+  // dashboard uses for engagements. Designs number in the hundreds.
+  const linked = (await getAllDesigns()).filter((d) => d.gridProjectId === id);
+  for (const d of linked) await removeDesign(d.id);
+  revalidatePath("/design/designs");
+  revalidatePath("/design");
   return { ok: true };
 }
 

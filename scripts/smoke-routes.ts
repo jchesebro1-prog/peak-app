@@ -53,7 +53,9 @@ const ROUTES = [
   "/projects",
   "/estimator",
   "/design/lineset",
-  "/design/grid",
+  /* No "/design/grid": the standalone Grid index was removed when The Grid
+   * became a layout mode of Designs (D-grid-merge). Its editor route is still
+   * covered below as a dynamic route. */
   "/import",
   "/catalog",
   "/estimating-rules",

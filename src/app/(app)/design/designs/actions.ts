@@ -9,12 +9,13 @@ import {
   createDesign,
   getDesign,
   promoteDesignToQuote,
+  removeDesign,
   requestDesignChanges,
   submitDesignForReview,
   updateDesign,
   type DesignRecord,
 } from "@/lib/stores/designs";
-import { createProject } from "@/lib/stores/grid-projects";
+import { createProject, removeProject as removeGridProject } from "@/lib/stores/grid-projects";
 import { createDraftQuoteAction } from "../grid/[id]/actions";
 
 /**
@@ -73,6 +74,36 @@ export async function promoteDesignAction(
   revalidatePath("/design/designs");
   revalidatePath("/quotes");
   return { ok: true, quoteId: q.id };
+}
+
+/**
+ * Delete a design, cascading to the Grid project behind a manual-layout one
+ * (D-grid-merge). The standalone Grid index owned the only delete control in
+ * the app (design/grid/delete-button.tsx) and the merge removed it without a
+ * replacement, so no design or Grid project could be deleted by any route.
+ * Promotion stopped deleting designs in the same commit, so this is now the
+ * only way the list ever shrinks.
+ *
+ * Gated on `create` rather than `approve`: a Reviewer can approve a design but
+ * has never been able to make one, so it should not be able to destroy one.
+ */
+export async function deleteDesignAction(
+  id: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can("create", user.roles)) return { ok: false, error: "You can't delete designs." };
+  const d = await getDesign(id);
+  if (!d) return { ok: false, error: "Design not found." };
+  // Grid project first: if the design row survives a failure here it still
+  // points at its project, which is recoverable. The reverse leaves an
+  // orphan project with nothing linking to it (#74 — no transactions).
+  if (d.layoutMode === "manual" && d.gridProjectId) {
+    await removeGridProject(d.gridProjectId);
+  }
+  await removeDesign(id);
+  revalidatePath("/design/designs");
+  revalidatePath("/design");
+  return { ok: true };
 }
 
 /* ---- review & approval workflow (sandbox.js parity, session-actored) ---- */

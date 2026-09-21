@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { allEngagements } from "@/lib/stores/engagements";
@@ -28,7 +29,7 @@ export default async function GridEditorPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireUser();
+  const user = await requireUser();
   const { id } = await params;
   const project = await getProject(decodeURIComponent(id));
 
@@ -122,6 +123,7 @@ export default async function GridEditorPage({
 
   return (
     <GridEditor
+      canCreate={can("create", user.roles)}
       project={{
         id: project.id,
         name: project.name,

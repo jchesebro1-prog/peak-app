@@ -48,6 +48,7 @@ export default async function Page({
     <DesignClient
       me={user.name}
       canApprove={can("approve", user.roles)}
+      canCreate={can("create", user.roles)}
       designs={designs}
       selectedId={sp.id || null}
       roster={roster.map((u) => ({ name: u.name, initials: u.initials, color: u.color }))}

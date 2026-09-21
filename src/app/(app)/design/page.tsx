@@ -36,8 +36,38 @@ export default async function DesignOverviewPage({
     .filter(isOpenEngagement)
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
-  const recentDesigns = designs
-    .slice()
+  /* One list, not two (D-grid-merge): The Grid stopped being a standalone
+   * tool, so a manual design is BOTH a design record and a grid project and
+   * was being listed twice here. Rows are design records, plus any grid
+   * project no design record points at — pre-merge projects (the GRD-5001
+   * seed among them) that predate the "a grid project always has a design
+   * record" invariant. Those orphans have no other route into the UI now the
+   * standalone Grid index is gone, so they are adopted into this list rather
+   * than dropped; backfilling real design records for them is a separate job. */
+  const linkedGridIds = new Set(
+    designs.map((d) => d.gridProjectId).filter((id): id is string => !!id)
+  );
+  const recentDesigns = [
+    ...designs.map((d) => ({
+      key: d.id,
+      name: d.name,
+      href: `/design/designs?id=${encodeURIComponent(d.id)}`,
+      meta: [d.customer, d.venue, shortDate(d.updatedAt)].filter(Boolean).join(" · "),
+      updatedAt: d.updatedAt,
+    })),
+    ...gridProjects
+      .filter((p) => !linkedGridIds.has(p.id))
+      .map((p) => {
+        const n = (p.placements || []).length;
+        return {
+          key: p.id,
+          name: p.name || "Untitled design",
+          href: `/design/grid/${encodeURIComponent(p.id)}`,
+          meta: [p.customer || "No customer", `${n} device${n === 1 ? "" : "s"}`, shortDate(p.updatedAt)].join(" · "),
+          updatedAt: p.updatedAt,
+        };
+      }),
+  ]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 8);
 
@@ -90,45 +120,18 @@ export default async function DesignOverviewPage({
             </Link>
           </div>
           {recentDesigns.length === 0 ? (
-            <p style={{ color: "#9aa0ab", fontSize: 13 }}>No designs yet.</p>
+            <p style={{ color: "#9aa0ab", fontSize: 13 }}>
+              No designs yet — start one on a blank canvas or a plan sheet.
+            </p>
           ) : (
             recentDesigns.map((d) => (
               <Link
-                key={d.id}
-                href={`/design/designs?id=${encodeURIComponent(d.id)}`}
+                key={d.key}
+                href={d.href}
                 style={{ display: "block", padding: "9px 0", borderTop: "1px solid #eef0f3", textDecoration: "none", color: "inherit" }}
               >
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{d.name}</div>
-                <div style={{ fontSize: 12, color: "#8c919c" }}>
-                  {d.customer} · {d.venue} · {shortDate(d.updatedAt)}
-                </div>
-              </Link>
-            ))
-          )}
-        </section>
-
-        <section className="pk-card" style={card}>
-          <div style={head}>
-            <strong style={{ fontSize: 14 }}>The Grid</strong>
-            <Link href="/design/grid" style={{ color: "var(--accent)", fontSize: 12.5 }}>
-              Open The Grid →
-            </Link>
-          </div>
-          {gridProjects.length === 0 ? (
-            <p style={{ color: "#9aa0ab", fontSize: 13 }}>
-              No system designs yet — paint devices onto a plan and quote it.
-            </p>
-          ) : (
-            gridProjects.slice(0, 8).map((p) => (
-              <Link
-                key={p.id}
-                href={`/design/grid/${encodeURIComponent(p.id)}`}
-                style={{ display: "block", padding: "9px 0", borderTop: "1px solid #eef0f3", textDecoration: "none", color: "inherit" }}
-              >
-                <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
-                <div style={{ fontSize: 12, color: "#8c919c" }}>
-                  {p.customer || "No customer"} · {(p.placements || []).length} device{(p.placements || []).length === 1 ? "" : "s"} · {shortDate(p.updatedAt)}
-                </div>
+                <div style={{ fontSize: 12, color: "#8c919c" }}>{d.meta}</div>
               </Link>
             ))
           )}
