@@ -274,6 +274,14 @@ export type CommThread = {
   // filed on the Gmail side → hidden from the Peak inbox (shows in Archived).
   // Distinct from `archived`, which stays the user's local Peak flag.
   gmailInboxed?: boolean;
+  /** #96 — how the sender was matched at ingest. `suggested` = a single
+   *  domain owner exists but the thread hasn't adopted it yet. */
+  resolution?: "linked" | "suggested" | "ambiguous" | "unknown";
+  suggestedCustomerId?: string | null;
+  candidates?: Array<{ customerId: string; name: string }>;
+  resolvedContactId?: string | null;
+  /** "Not them" on a suggestion — stop offering it for this thread. */
+  suggestionDismissed?: boolean;
 };
 
 function mid(n: number): string {
@@ -1575,15 +1583,8 @@ export async function resolveCustomerId(
   if (t.customerId) return t.customerId;
   const email = (t.contactEmail || "").trim().toLowerCase();
   if (!email) return null;
-  const { all: allCustomerDocs } = await import("./customers");
-  for (const c of await allCustomerDocs()) {
-    const contacts = c.contacts || [];
-    if (
-      contacts.some((ct) => (ct.email || "").trim().toLowerCase() === email)
-    )
-      return c.id;
-  }
-  return null;
+  const { contactByEmail } = await import("@/lib/identity/lookup");
+  return (await contactByEmail(email))?.customerId ?? null;
 }
 
 /* ---- time formatting -------------------------------------------------------------- */

@@ -45,7 +45,8 @@ import {
   modifyThread,
   sendRaw,
 } from "./api";
-import { buildRaw, parseInbound, type ParsedInbound } from "./mime";
+import { buildRaw, parseAddress, parseInbound, type ParsedInbound } from "./mime";
+import { applyResolution, resolveForThread } from "./linking";
 
 /**
  * The real Gmail bridge (Phase 7). comms.ts delegates here — but ONLY when the
@@ -217,6 +218,10 @@ async function recordMessage(
   // otherwise open a new thread in the mailbox that received it
   const box = mailboxOfKey(key);
   const contactEmail = dir === "in" ? p.from.email : "";
+  // #96: link on arrival. Outbound first-message threads resolve by the
+  // recipient (the "to" header's first address).
+  const senderForResolve = dir === "in" ? p.from.email : parseAddress(p.to.split(",")[0] || "").email;
+  const resolution = await resolveForThread(senderForResolve);
   const id = await nextPrefixedId("comms", "C", 1032);
   const rec: CommThread = {
     id,
@@ -243,6 +248,7 @@ async function recordMessage(
     syncedAt: Date.now(),
     rev: 1,
   };
+  await applyResolution(rec, resolution);
   const inserted = await insertDocIfAbsent<CommThread>("comms", rec);
   if (!inserted) {
     // A concurrent sync won this id. Redo from the top with fresh state: the
