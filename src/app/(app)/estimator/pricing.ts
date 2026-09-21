@@ -5,6 +5,7 @@ import {
   fixtureAddOns,
   LABOR_PCT,
   LABOR_RATES_FALLBACK,
+  STANDARD_LABOR_COSTS,
   type FixtureAddOns,
   type FixtureDef,
 } from "./estimator-data";
@@ -24,6 +25,18 @@ import type {
  */
 
 export const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/** Reverse-pricing helpers (PUNCHLIST #98). Margin is percent units. */
+export function unitSellFromMargin(cost: number, marginPct: number): number {
+  const costSafe = Math.max(0, Number.isFinite(cost) ? cost : 0);
+  const pct = Math.min(95, Math.max(0, Number.isFinite(marginPct) ? marginPct : 0));
+  return round2(costSafe / (1 - pct / 100));
+}
+
+export function unitSellFromExtended(extendedSell: number, qty: number): number {
+  if (!Number.isFinite(qty) || qty <= 0) return 0;
+  return round2(Math.max(0, Number.isFinite(extendedSell) ? extendedSell : 0) / qty);
+}
 
 /** $1,234.56 (prototype fmt). */
 export function fmt(n: number): string {
@@ -58,6 +71,9 @@ export function systemItemsCost(sec: SpecSection): number {
 
 /** Freight is a % of the section's item COST. */
 export function systemFreight(sec: SpecSection): number {
+  if (sec.freightOverride != null && Number.isFinite(sec.freightOverride)) {
+    return round2(Math.max(0, sec.freightOverride));
+  }
   return Math.round(systemItemsCost(sec) * ((sec.freightPct || 0) / 100) * 100) / 100;
 }
 
@@ -214,11 +230,12 @@ export function computeFixture(
 
 /**
  * Where a resolved rate came from:
- *  - `catalog`: a live `catalog_parts` row (category 'Labor')
+ *  - `standard`: Peak's authoritative labor/mileage cost basis
+ *  - `catalog`: a live `catalog_parts` row (lodging/per diem/equipment)
  *  - `fallback`: the hardcoded LABOR_RATES_FALLBACK map (no catalog row)
  *  - `none`: neither; the rate resolves to 0
  */
-export type RateSource = "catalog" | "fallback" | "none";
+export type RateSource = "standard" | "catalog" | "fallback" | "none";
 
 export type RateFn = ((sku: string) => number) & {
   /** Provenance of `rate(sku)`, present on rate fns built by makeLaborRate.
@@ -228,6 +245,7 @@ export type RateFn = ((sku: string) => number) & {
 
 /** Provenance of a single sku against a live catalog rate map. */
 export function rateSource(live: Record<string, number>, sku: string): RateSource {
+  if (STANDARD_LABOR_COSTS[sku] != null) return "standard";
   if (live && live[sku] != null) return "catalog";
   return LABOR_RATES_FALLBACK[sku] != null ? "fallback" : "none";
 }
@@ -235,6 +253,7 @@ export function rateSource(live: Record<string, number>, sku: string): RateSourc
 /** Live catalog rates (sku → cost) with the built-in fallback underneath. */
 export function makeLaborRate(live: Record<string, number>): RateFn {
   const fn: RateFn = (sku: string) => {
+    if (STANDARD_LABOR_COSTS[sku] != null) return STANDARD_LABOR_COSTS[sku];
     if (live && live[sku] != null) return live[sku];
     return LABOR_RATES_FALLBACK[sku] != null ? LABOR_RATES_FALLBACK[sku] : 0;
   };
@@ -251,6 +270,8 @@ export type MobCalc = {
   otCost: number;
   supHrs: number;
   supCost: number;
+  travelHours: number;
+  travelLaborCost: number;
   vehicles: number;
   milesRT: number;
   mileCost: number;
@@ -274,6 +295,12 @@ export function computeMob(m: MobDraft, disc: string, rate: RateFn): MobCalc {
   const otCost = otHrs * rate(disc + "-OT");
   const supHrs = m.sup ? days * 8 : 0; // one supervisor for the trip
   const supCost = supHrs * rate(disc + "-SUP");
+  const oneWayHours = Math.max(0, parseFloat(m.travelMinutesOneWay) || 0) / 60;
+  // Local crews make the round trip each day; travel crews drive out once
+  // and back once. Every person's drive time is paid at the same $75/hour
+  // cost as onsite labor — there is no special travel-labor rate.
+  const travelHours = oneWayHours * 2 * people * (travel ? 1 : days);
+  const travelLaborCost = travelHours * rate(disc + "-LBR");
   const vehicles = people > 0 ? Math.ceil(people / 2) : 0; // 2 crew per vehicle/room
   const milesRT = Math.max(0, parseFloat(m.milesRT) || 0);
   // local = drive round-trip every day; travel = drive there once
@@ -282,7 +309,7 @@ export function computeMob(m: MobDraft, disc: string, rate: RateFn): MobCalc {
   const foodCost = travel ? people * days * rate("TVL-FOD") : 0;
   const lifts = m.lift && days > 0 ? Math.ceil(days / 5) * Math.max(1, vehicles) : 0;
   const liftCost = lifts * rate("EQP-LIFT");
-  const labor = regCost + otCost + supCost;
+  const labor = regCost + otCost + supCost + travelLaborCost;
   const trav = mileCost + hotelCost + foodCost + liftCost;
   return {
     people,
@@ -293,6 +320,8 @@ export function computeMob(m: MobDraft, disc: string, rate: RateFn): MobCalc {
     otCost,
     supHrs,
     supCost,
+    travelHours,
+    travelLaborCost,
     vehicles,
     milesRT,
     mileCost,
@@ -312,6 +341,8 @@ export type LaborCalc = {
   mobs: (MobCalc & { raw: MobDraft })[];
   mobCost: number;
   totalReg: number;
+  /** All paid labor hours: installers, OT, supervisors, PM, shop, and drafting. */
+  totalManHours: number;
   pct: number;
   pmAuto: boolean;
   drfAuto: boolean;
@@ -322,12 +353,17 @@ export type LaborCalc = {
   drfHrs: number;
   shopCost: number;
   misc: number;
+  preBonusCost: number;
+  preBonusPrice: number;
+  qcBonusPct: number;
+  /** Internal employee cost only; folded into labor, never a customer line. */
+  qcBonus: number;
   totalCost: number;
   margin: number;
   totalPrice: number;
 };
 
-export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
+export function computeLabor(draft: LaborDraft, rate: RateFn, quoteSellBeforeLabor = 0): LaborCalc {
   const disc = draft.discipline || "RIG";
   const mobs = (draft.mobs || []).map((m) => ({ ...computeMob(m, disc, rate), raw: m }));
   const mobCost = mobs.reduce((a, x) => a + x.cost, 0);
@@ -340,10 +376,30 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
   const pmHrs = pmAuto ? pmAutoHrs : Math.max(0, parseFloat(draft.pmHrs) || 0);
   const drfHrs = drfAuto ? drfAutoHrs : Math.max(0, parseFloat(draft.drfHrs) || 0);
   const shopHrs = Math.max(0, parseFloat(draft.shopHrs) || 0); // in-house (fab) hrs — manual
+  const totalManHours =
+    totalReg +
+    mobs.reduce(
+      (a, x) =>
+        a + x.supHrs + x.travelHours + Math.max(0, parseFloat(x.raw.otHrs) || 0),
+      0
+    ) +
+    pmHrs +
+    shopHrs +
+    drfHrs;
   const shopCost = pmHrs * rate("SHP-PM") + shopHrs * rate("SHP-IN") + drfHrs * rate("DRF-SUB");
   const misc = Math.max(0, parseFloat(draft.misc) || 0);
-  const totalCost = mobCost + shopCost + misc;
+  const preBonusCost = mobCost + shopCost + misc;
   const margin = Math.min(0.95, Math.max(0, (parseFloat(draft.margin) || 0) / 100));
+  const preBonusPrice = margin < 1 ? preBonusCost / (1 - margin) : preBonusCost;
+  const qcBonusPct = Math.min(10, Math.max(0, parseFloat(draft.qcBonusPct) || 0));
+  // The percentage base is the quote's sell value after adding this labor at
+  // its normal margin, but BEFORE the QC bonus. This avoids a circular total.
+  // No labor work means no employee bonus, even if the rest of the quote has value.
+  const qcBonus =
+    preBonusCost > 0
+      ? round2((Math.max(0, quoteSellBeforeLabor) + preBonusPrice) * (qcBonusPct / 100))
+      : 0;
+  const totalCost = preBonusCost + qcBonus;
   const totalPrice = margin < 1 ? totalCost / (1 - margin) : totalCost;
   return {
     disc,
@@ -351,6 +407,7 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
     mobs,
     mobCost,
     totalReg,
+    totalManHours,
     pct,
     pmAuto,
     drfAuto,
@@ -361,6 +418,10 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
     drfHrs,
     shopCost,
     misc,
+    preBonusCost,
+    preBonusPrice,
+    qcBonusPct,
+    qcBonus,
     totalCost,
     margin,
     totalPrice,

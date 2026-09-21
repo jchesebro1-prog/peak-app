@@ -171,13 +171,24 @@ export const FIX_PRESETS: FixturePreset[] = [
  * 'Labor', sku → cost) win.
  */
 export const LABOR_RATES_FALLBACK: Record<string, number> = {
-  "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 75,
-  "LIG-LBR": 45, "LIG-OT": 60, "LIG-SUP": 75,
-  "AUD-LBR": 48, "AUD-OT": 70, "AUD-SUP": 72,
-  "VID-LBR": 48, "VID-OT": 70, "VID-SUP": 72,
-  "SHP-PM": 90, "SHP-IN": 40, "DRF-SUB": 50,
-  "TVL-MIL": 1, "TVL-HTL": 140, "TVL-FOD": 70,
+  "RIG-LBR": 75, "RIG-OT": 75, "RIG-SUP": 75,
+  "LIG-LBR": 75, "LIG-OT": 75, "LIG-SUP": 75,
+  "AUD-LBR": 75, "AUD-OT": 75, "AUD-SUP": 75,
+  "VID-LBR": 75, "VID-OT": 75, "VID-SUP": 75,
+  "SHP-PM": 75, "SHP-IN": 75, "DRF-SUB": 75,
+  "TVL-MIL": 0.7, "TVL-HTL": 140, "TVL-FOD": 70,
   "EQP-LIFT": 750,
+};
+
+/** Jeff's authoritative cost basis from 2026-08-11. These override stale
+ * catalog seed rows; customer sell is always derived from the quote margin. */
+export const STANDARD_LABOR_COSTS: Readonly<Record<string, number>> = {
+  "RIG-LBR": 75, "RIG-OT": 75, "RIG-SUP": 75,
+  "LIG-LBR": 75, "LIG-OT": 75, "LIG-SUP": 75,
+  "AUD-LBR": 75, "AUD-OT": 75, "AUD-SUP": 75,
+  "VID-LBR": 75, "VID-OT": 75, "VID-SUP": 75,
+  "SHP-PM": 75, "SHP-IN": 75, "DRF-SUB": 75,
+  "TVL-MIL": 0.7,
 };
 
 export const DISC_LABEL: Record<string, string> = {

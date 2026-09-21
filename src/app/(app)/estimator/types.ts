@@ -40,6 +40,9 @@ export type SpecItem = {
   /** internal-only note (never shown to the customer) */
   internalNote?: string;
   mob?: SpecMob;
+  /** Configurator inputs retained so fixture/curtain lines can be edited. */
+  curtainConfig?: CurtainDraft;
+  fixtureConfig?: FixtureDraft;
 };
 
 /** One system card. */
@@ -48,8 +51,12 @@ export type SpecSection = {
   name: string;
   /** 'materials' | 'labor' */
   kind: string;
+  /** Customer-facing scope narrative shown before this section's lines. */
+  narrative?: string;
   mfr: string;
   freightPct: number;
+  /** Manual freight dollars; null/absent means calculate from freightPct. */
+  freightOverride?: number | null;
   items: SpecItem[];
 };
 
@@ -104,6 +111,8 @@ export type MobDraft = {
   otHrs: string;
   sup: boolean;
   milesRT: string;
+  /** Auto-resolved drive time from the selected origin to venue, one way. */
+  travelMinutesOneWay: string;
   lift: boolean;
   comments: string;
   internalNote: string;
@@ -112,6 +121,8 @@ export type MobDraft = {
 export type LaborDraft = {
   discipline: string;
   margin: string;
+  /** Internal employee QC bonus, as percent of pre-bonus quote sell (0–10). */
+  qcBonusPct: string;
   mobs: MobDraft[];
   pmHrs: string;
   pmAuto: boolean;
@@ -171,7 +182,7 @@ export type InitialQuote = {
    *  margins; re-stamped server-side when the customer/contact changes. */
   pricingTier: string | null;
   tierMargin: number | null;
-  /** Saved builder state (spec.sections) — null falls back to the demo sections. */
+  /** Saved builder state (spec.sections) — null opens a blank estimator. */
   sections: SpecSection[] | null;
 };
 

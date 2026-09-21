@@ -76,7 +76,9 @@ function RateChip({ sku, label, rate }: { sku: string; label: string; rate: Rate
       style={{ display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}
       title={
         sku +
-        (src === "catalog"
+        (src === "standard"
+          ? " · Peak standard internal cost; sell is margin-derived"
+          : src === "catalog"
           ? " · live catalog rate (Catalog › Labor)"
           : src === "fallback"
             ? " · built-in default, no catalog row with this SKU"
@@ -94,7 +96,7 @@ function RateChip({ sku, label, rate }: { sku: string; label: string; rate: Rate
       >
         {perHr(rate(sku))}
       </span>
-      {src !== "catalog" && (
+      {src !== "catalog" && src !== "standard" && (
         <span style={CHIP_WARN}>{src === "none" ? "no rate" : "default"}</span>
       )}
     </span>
@@ -105,6 +107,7 @@ export default function LaborModal({
   secName,
   draft,
   rate,
+  quoteSellBeforeLabor,
   travel,
   onSet,
   onSetAutoHrs,
@@ -124,8 +127,12 @@ export default function LaborModal({
   secName: string;
   draft: LaborDraft;
   rate: RateFn;
+  quoteSellBeforeLabor: number;
   travel: TravelLite | null;
-  onSet: (field: "discipline" | "margin" | "shopHrs" | "misc", val: string) => void;
+  onSet: (
+    field: "discipline" | "margin" | "qcBonusPct" | "shopHrs" | "misc",
+    val: string
+  ) => void;
   onSetAutoHrs: (field: "pmHrs" | "drfHrs", flag: "pmAuto" | "drfAuto", val: string) => void;
   onResetAutoHrs: (field: "pmHrs" | "drfHrs", flag: "pmAuto" | "drfAuto") => void;
   onAddMob: () => void;
@@ -140,7 +147,7 @@ export default function LaborModal({
   onAdd: () => void;
   onClose: () => void;
 }) {
-  const lr = computeLabor(draft, rate);
+  const lr = computeLabor(draft, rate, quoteSellBeforeLabor);
   const valid = lr.totalCost > 0;
   const pctLabel = Math.round(lr.pct * 100) + "%";
 
@@ -178,6 +185,7 @@ export default function LaborModal({
       onClose={onClose}
       footerLeft={
         <div style={{ display: "flex", alignItems: "center", gap: 22 }}>
+          <Stat label="Man-hours" value={round2(lr.totalManHours).toLocaleString("en-US")} />
           <Stat label="Cost" value={fmt(lr.totalCost)} color="#8c919c" />
           <Stat
             label="Price · ext"
@@ -277,7 +285,11 @@ export default function LaborModal({
         const raw = m.raw;
         const nameAsCustom = !!(raw.nameCustom === true || (raw.name && MOB_TYPES.indexOf(raw.name) < 0));
         const nameSelectVal = raw.name && MOB_TYPES.indexOf(raw.name) >= 0 ? raw.name : "";
-        const crewHint = m.reg > 0 ? m.reg + " reg hr" + (m.supHrs ? " + " + m.supHrs + " sup" : "") : "—";
+        const crewHint = m.reg > 0
+          ? m.reg + " onsite hr" +
+            (m.travelHours ? " + " + round2(m.travelHours) + " travel" : "") +
+            (m.supHrs ? " + " + m.supHrs + " sup" : "")
+          : "—";
         const travHint = m.travel
           ? m.vehicles + " veh · " + m.days + " nt lodging · per diem"
           : raw.milesRT
@@ -695,6 +707,33 @@ export default function LaborModal({
               )}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* QC employee bonus — internal cost only, never a customer line. */}
+      <div style={{ marginTop: 11, padding: 14, border: "1px solid #efe4c4", borderRadius: 11, background: "#fffdf6" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <label style={{ ...LBL, marginBottom: 0, color: "#9a7d1f" }}>
+            Quality-control employee bonus
+            <span style={{ color: "#c4b173", textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>
+              {" "}· internal only
+            </span>
+          </label>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 700, color: "#6f5a16" }}>
+            {lr.qcBonusPct.toFixed(1)}% · {fmt(lr.qcBonus)}
+          </span>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={10}
+          step={0.5}
+          value={lr.qcBonusPct}
+          onChange={(e) => onSet("qcBonusPct", e.target.value)}
+          style={{ width: "100%", marginTop: 10, accentColor: "var(--accent)", cursor: "pointer" }}
+        />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#a99a65" }}>
+          <span>0%</span><span>Typical 3–7%</span><span>10%</span>
         </div>
       </div>
 

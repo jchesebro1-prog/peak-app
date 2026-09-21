@@ -132,3 +132,32 @@ export async function insertEvent(
   });
   return { id: r.id, htmlLink: r.htmlLink || "" };
 }
+
+export async function updateEvent(
+  mailboxKey: string,
+  eventId: string,
+  ev: { title: string; startMs: number; endMs: number; description?: string; location?: string }
+): Promise<void> {
+  await gcal<GoogleEvent>(mailboxKey, `/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      summary: ev.title,
+      description: ev.description || undefined,
+      location: ev.location || undefined,
+      start: { dateTime: new Date(ev.startMs).toISOString() },
+      end: { dateTime: new Date(ev.endMs).toISOString() },
+    }),
+  });
+}
+
+export async function deleteEvent(mailboxKey: string, eventId: string): Promise<void> {
+  const token = await accessTokenFor(mailboxKey);
+  if (!token) throw new Error("Mailbox not connected: " + mailboxKey);
+  const res = await fetch(`${CAL_BASE}/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+    method: "DELETE",
+    signal: AbortSignal.timeout(5000),
+    headers: { Authorization: "Bearer " + token },
+  });
+  if (!res.ok && res.status !== 404 && res.status !== 410)
+    throw new Error("Calendar delete failed: " + res.status);
+}

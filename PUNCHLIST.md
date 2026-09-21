@@ -5,6 +5,206 @@ implemented until he says so. Statuses: `OPEN` → `IN PROGRESS` → `DONE`.
 
 ---
 
+## 95. Estimator starts blank; categories do not use manufacturer headers; import template options — PARTIAL 2026-08-11
+
+**Reported:** 2026-08-08 (new punch-list batch).
+
+**Ask:** A new `/estimator` session must start blank instead of loading demo quote Q-2041 and its
+demo systems. Manufacturers should not appear in category/system header metadata. Import the
+options from the Peak template using the information prepared on 2026-08-07.
+
+**Status:** PARTIAL 2026-08-11. The no-id/unknown-id route now opens a blank unsaved estimate and
+never falls through to Q-2041; the category card header no longer promotes its manufacturer as a
+header label. Manufacturer remains an editable system attribute because it drives catalog-backed
+quick-add suggestions. **Template source located 2026-08-11:** Jeff identified
+`/Users/sm/Library/CloudStorage/Dropbox/Claude/` as the reference root. The authoritative 8/7
+standalone format is `GET-Fixture-Narrative-2026-08-07.docx`: recommendations narrative, priced
+base recommendation, then a separately titled/priced **Adder**. Map that structure onto the
+existing `option` line model; do not use the superseded `Estimate_7787_Narrative_Peak.docx` draft.
+
+---
+
+## 96. Edit configured fixture and curtain line items — DONE 2026-08-11
+
+**Reported:** 2026-08-08.
+
+**Ask:** Fixture and curtain lines created through their configurators need an Edit action that
+reopens the appropriate configurator with the saved values, then updates the same line instead of
+requiring delete-and-recreate.
+
+**Status:** DONE 2026-08-11. New fixture/curtain lines retain a copy of their complete configurator
+draft. Their Edit action reopens the correct modal, labels the commit button Update, and replaces
+the same line id/SKU instead of deleting and appending. Historical lines saved before this field
+exists remain readable but cannot reconstruct inputs that were never stored; they keep the normal
+direct price/quantity editing path.
+
+---
+
+## 97. Labor: quality-control bonuses, travel audit, man-hours, and scope/mobilization naming — DONE 2026-08-11
+
+**Reported:** 2026-08-08.
+
+**Ask:** Add Jason's quality-control bonuses; verify travel labor; display total man-hours; and name
+labor output as `<scope title>-<mobilization name>` (example: `Lighting-Hang`).
+
+**Status:** DONE 2026-08-11. Labor lines now use `<scope>-<mobilization>` names and the modal
+shows total man-hours across installer, OT, supervisor, PM, in-house, and drafting hours. **QC rule
+answered and built:** 0–10% slider (default 5%, typical 3–7%), calculated against pre-bonus quote
+sell to avoid a circular total. Jeff confirmed it is an internal employee cost: it is folded into
+the labor cost/margin and retained in an internal audit note, never rendered as its own customer
+line. **Cost standard answered and built 2026-08-11:** every paid hour (onsite, drive, OT,
+supervisor, PM, shop, and drafting) costs $75; mileage costs $0.70/mile; sell is derived from the
+selected margin. Route time now adds paid travel man-hours per crew member (daily round trips for
+local work; one outbound/return trip for travel work). These standards override stale catalog seed
+costs so an older database cannot silently revive the former rules.
+
+---
+
+## 98. Estimator line reverse-pricing and manual freight — DONE 2026-08-11
+
+**Reported:** 2026-08-08.
+
+**Ask:** Every line must allow edits to unit sell, margin, or extended sell. Editing any one should
+recalculate the others from quantity and cost. Freight must accept a manual dollar adjustment as
+well as a percentage.
+
+**Status:** DONE 2026-08-11. Internal line rows now edit unit sell, margin, or extended sell; unit
+sell is the stored source and the other two recalculate through shared helpers. Extended sell
+divides by quantity; margin uses cost ÷ (1 − margin), capped below 100%; zero-cost lines remain
+valid and produce zero margin-derived sell until a sell value is entered. Freight accepts manual
+dollars; blank returns to percentage, and changing the percentage clears the override.
+
+---
+
+## 99. Estimate output: Peak template structure, options, and narrative scope — PARTIAL 2026-08-11
+
+**Reported:** 2026-08-08.
+
+**Ask:** Keep the output toggles, but restructure the estimate document to match the approved Peak
+templates. Add a narrative describing what is being provided so narrative quotes are easier to
+generate. Apply the template's option structure from the 2026-08-07 work.
+
+**Status:** PARTIAL 2026-08-11. Ties to #36 and #95. Reference root confirmed as
+`/Users/sm/Library/CloudStorage/Dropbox/Claude/`; the final 8/7 standalone narrative is
+`GET-Fixture-Narrative-2026-08-07.docx` (not the two superseded Estimate_7787 drafts). It establishes
+Recommendations + base price + named/priced Adder. Still decide whether editable narrative is
+stored per system, per line, or as a document-level scope.
+**Build update 2026-08-11:** chose per-system narrative plus the existing document-level quote
+note/recommendations. Each system now has editable customer narrative rendered immediately above
+its lines. The optional block is labeled **Adders / optional additions** and renders each option's
+customer note as its narrative, matching the final GET reference's named/priced Adder structure.
+Remaining work is visual template/letterhead consolidation and final print review, tracked with #103.
+
+---
+
+## 100. “Send to customer” opens a prepared email, or logs a manual send — PARTIAL 2026-08-11
+
+**Reported:** 2026-08-08.
+
+**Ask:** The estimator's send button should open an email composer with recipient, subject, body,
+and estimate attachment prefilled. Also allow logging that it was sent outside Peak.
+
+**Status:** PARTIAL 2026-08-11. Approved quotes now expose two honest paths: **Prepare email** creates
+or reopens one linked Sales-mailbox draft with recipient, subject, quote id/name/value, adders copy,
+and signature prefilled, then opens the real Inbox composer; it does not mark the quote sent.
+**Log sent** is the explicit outside-Quartzite path and advances the quote to Sent. Remaining:
+attach the generated estimate file to the draft once the consolidated #99/#103 server-side document
+renderer exists. Live delivery still depends on Gmail deployment item #69.
+
+---
+
+## 101. Service quotes: searchable customer/venue, travel, naming, and standard travel rates — DONE 2026-08-11
+
+**Reported:** 2026-08-08.
+
+**Ask:** Flame-test quote customer selection should be a typing/autofill search rather than a long
+list; distance must follow the selected venue; flame quote names should be `<venue> <year>`.
+Inspection quotes must also generate travel time and mileage. **Superseding cost rule (Jeff,
+2026-08-11):** labor cost is $75/hour, mileage cost is $0.70/mile, and customer sell is derived from
+margin; disregard the former $1/mile billing rule. Confirm and complete the Venues surface.
+
+**Status:** DONE 2026-08-11. The 2026-08-07 #90 on-demand venue travel path was audited and is
+active for flame, inspection, and repair quotes. Flame quotes now use a type-to-autofill customer
+picker and default to `<selected venue> <current year>`. Flame, inspection, and repair effective
+rates now enforce the company standard of $75 internal labor cost and $0.70 internal mileage cost,
+including over stale saved rate blobs; sell remains margin-derived. The standalone `/venues`
+surface retains company/name search and now pages the real directory 50 venues at a time.
+
+---
+
+## 102. Consulting quotes: architect billing customer, venue, and discipline scopes — DONE 2026-08-11
+
+**Reported:** 2026-08-08.
+
+**Ask:** Store/select a billing customer (Architect) and a venue (Location), both resolved from the
+same company directory, because Peak bills through the architect for venue work. Add selectable
+Audio/Video, Lighting, and Rigging/Curtains scopes.
+
+**Status:** DONE 2026-08-11. The quote's customer is now explicitly labeled Architect / billed
+party. A separate venue organization selector reads from the same company directory and owns the
+venue-site selector; its id is retained in the consulting payload instead of overloading the
+billing `customerId`. One-click scope starters add Audio / Video, Lighting, or Rigging / Curtains.
+Fees remain blank/editable by design until the planned fee brainstorming session.
+
+---
+
+## 103. Standardize every document on Peak letterhead — OPEN
+
+**Reported:** 2026-08-08.
+
+**Ask:** Change all templates/documents to the Peak letterhead and update individual layouts as
+needed.
+
+**Status:** OPEN. Several estimator, service, renewal, consulting, and rental outputs already share
+the uploaded-logo/baked-letterhead fallback, but inspection reports and other routes still use
+different implementations. Inventory every printable/PDF surface, then consolidate the header
+component and verify print/PDF rendering.
+
+---
+
+## 104. The Grid starts with a blank background and gains estimator-style sections — OPEN
+
+**Reported:** 2026-08-08.
+
+**Ask:** The Grid should boot with a blank background and offer sections similar to the design
+estimator.
+
+**Status:** OPEN. Ties directly to #38/#41 and the approved 2026-08-09 design spec
+`docs/superpowers/specs/2026-08-09-grid-base-sheet-estimator-split-design.md`; implement from that
+spec rather than creating a second competing section model.
+
+---
+
+## 105. Default quoting origin and satellite-first sales-site-visit travel — OPEN
+
+**Reported:** 2026-08-08.
+
+**Ask:** Locations need one default quoting origin that drives all calculated distance/travel time.
+Sales site visits should default to satellite routing to maximize/avoid understating travel time.
+
+**Status:** OPEN; routing rule answered 2026-08-11. “Satellite” means any office that is not the
+main shop. Track each person's work location. **Sales site visits** originate from that person's
+assigned office (including a satellite); **installs** always originate from the main office/shop.
+Extend the offices model with an explicit main-shop/default-quoting flag and team members with an
+assigned work location; do not reuse one nearest-office rule for both workflows.
+
+---
+
+## 106. Scheduler events populate each selected person's calendar — DONE (CODE) 2026-08-11
+
+**Reported:** 2026-08-08.
+
+**Ask:** When a person is selected for a scheduled event, automatically put it on that person's
+calendar so their schedule is visible there.
+
+**Status:** DONE (CODE) 2026-08-11. Crew booking now writes to the selected person's connected
+primary Google Calendar, retains the Google event id on the assignment, updates it on reschedule,
+moves it between calendars on reassignment, and deletes it when the booking is removed. Customers
+are not attendees. Calendar failures never discard the Peak booking. Jeff's live mailbox must have
+the Calendar scope connected before the first production write can be verified.
+
+---
+
 ## Build log — 2026-07-22 (working tree, UNCOMMITTED; UI items need a visual check)
 Built this session, all typecheck-clean: **#25** consulting rename (route kept) · **#28** lineset
 default 50×30 · **#32** venue street-autofill fix · **#37** sell-price→margin (per-section margin now
@@ -5367,7 +5567,7 @@ instant locally. It was only found by seeding 1,700 synthetic companies and meas
 
 ---
 
-## 94. Go-live reset doesn't clear `equipment_bookings` — OPEN — found in Rentals module final review
+## 94. Go-live reset doesn't clear `equipment_bookings` — DONE 2026-08-11 — reset now follows the complete document registry
 
 **Reported:** 2026-08-08, whole-branch final review of the new Rentals module.
 
@@ -5386,6 +5586,13 @@ here to avoid scope creep into unrelated collections.
 
 **Ties to:** the Rentals module build (docs/superpowers/plans/2026-08-07-rentals-module.md).
 
-**Status:** flagged as a spawned follow-up task, not fixed in the Rentals branch.
+**Status:** DONE 2026-08-11. `DEMO_COLLECTIONS` now derives from the complete
+`DOC_TABLES` registry instead of `DEMO_SEEDS`, so the reset clears all business-document
+collections, including no-seed children (`equipment_bookings`, `grid_sheets`, `tasks`, `notes`,
+site visits, assignments, generated specs, and future registered document tables). Users, app
+settings, estimating-rate blobs, Gmail connections, and relational identity/config tables remain
+untouched. `test:specs` carries a registry-coverage regression assertion. This changes reset
+coverage only; the item #59 production warning still stands — do not run the destructive reset
+against the already-loaded production database.
 
 ---

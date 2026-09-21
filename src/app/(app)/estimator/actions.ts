@@ -21,7 +21,9 @@ import {
   type QuoteReview,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
-import { travelForId } from "@/lib/stores/customers";
+import { all as allCustomers, travelForId } from "@/lib/stores/customers";
+import { findDraftByLink, saveDraft, updateDraft } from "@/lib/stores/comms";
+import { buildQuoteEmailDraft } from "@/lib/quote-email";
 import type { TravelLite } from "./types";
 import type { DraftedLine } from "./ai-scope-modal";
 import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
@@ -355,6 +357,60 @@ export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
   }
   refresh();
   return syncOf(id);
+}
+
+/**
+ * Prepare an approved quote email in the real Inbox composer. This does NOT
+ * mark the quote sent — opening a draft is not delivery. The existing
+ * sendToCustomerAction is retained as the explicit manual "Log sent" path.
+ */
+export async function prepareQuoteEmailAction(
+  id: string
+): Promise<{ ok: boolean; draftId?: string; error?: string }> {
+  const user = await requireUser();
+  const quote = await get(id);
+  if (!quote) return { ok: false, error: "Quote not found." };
+  const gate = requireApprovalToAdvance(quote.review ?? null, "send");
+  if (!gate.ok) return { ok: false, error: gate.error };
+
+  const extras = quote as Quote & { contactName?: string };
+  const customer = quote.customerId
+    ? (await allCustomers()).find((c) => c.id === quote.customerId) || null
+    : null;
+  const contacts = customer?.contacts || [];
+  const contact =
+    contacts.find((c) => c.name === extras.contactName) ||
+    contacts.find((c) => c.primary) ||
+    contacts[0] ||
+    null;
+  const email = buildQuoteEmailDraft({
+    quote,
+    contact: contact ? { name: contact.name, email: contact.email } : null,
+    userName: user.name,
+  });
+
+  const existing = await findDraftByLink("quote", quote.id);
+  if (existing) {
+    await updateDraft(existing.id, {
+      to: email.to || existing.draft?.to || "",
+      subject: email.subject,
+      body: email.body,
+    });
+    return { ok: true, draftId: existing.id };
+  }
+  const draft = await saveDraft({
+    mailbox: "sales",
+    customerId: quote.customerId,
+    customer: customer?.name || quote.customer,
+    contactName: contact?.name || extras.contactName || "",
+    contactEmail: contact?.email || "",
+    to: email.to,
+    subject: email.subject,
+    body: email.body,
+    link: { type: "quote", id: quote.id, label: quote.name || quote.id },
+    me: user.name,
+  });
+  return { ok: true, draftId: draft.id };
 }
 
 /**

@@ -13,6 +13,7 @@ import { addBtnStyle, chipBtn, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat }
 
 export default function FixtureModal({
   secName,
+  editing = false,
   draft,
   addOns,
   onSet,
@@ -23,6 +24,7 @@ export default function FixtureModal({
   onClose,
 }: {
   secName: string;
+  editing?: boolean;
   draft: FixtureDraft;
   /** Live add-on price/cost tables, resolved from Estimating Rules → fixture group. */
   addOns: FixtureAddOns;
@@ -58,7 +60,7 @@ export default function FixtureModal({
       }
       footerRight={
         <button type="button" onClick={onAdd} disabled={!valid} style={addBtnStyle(valid)}>
-          Add fixture
+          {editing ? "Update fixture" : "Add fixture"}
         </button>
       }
     >

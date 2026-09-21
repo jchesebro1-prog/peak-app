@@ -75,6 +75,7 @@ export default async function ConsultingQuotePage({
         id: q.id,
         name: q.name,
         customerId: q.customerId || "",
+        venueCustomerId: pay?.venueCustomerId || q.customerId || "",
         locationId: q.locationId || "",
         contactName: contact?.name || "",
         contactRole: contact?.role || "",

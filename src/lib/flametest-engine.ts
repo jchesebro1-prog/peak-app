@@ -65,7 +65,8 @@ const RATES_BLOB_ID = "flametest_rates";
 /** Live rates: stored patch merged over FLAMETEST_RATE_DEFAULTS (port of getRates). */
 export async function getRates(): Promise<FlameTestRates> {
   const defaults: FlameTestRates = { ...FLAMETEST_RATE_DEFAULTS };
-  return getBlob<FlameTestRates>(RATES_BLOB_ID, defaults);
+  const saved = await getBlob<FlameTestRates>(RATES_BLOB_ID, defaults);
+  return saved;
 }
 
 /** Merge a patch into the persisted rates; returns the merged rates (port of setRates). */

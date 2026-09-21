@@ -119,6 +119,7 @@ export default function PreviewDoc(p: PreviewProps) {
       return {
         num: i + 1,
         name: sec.name,
+        narrative: (sec.narrative || "").trim(),
         subtotalLabel: fmt(sub),
         hasFreight: secFr > 0,
         freightLabel: fmt(secFr),
@@ -504,6 +505,11 @@ export default function PreviewDoc(p: PreviewProps) {
               </div>
               {isItemized ? (
                 <div style={{ marginBottom: 6 }}>
+                  {ps.narrative && (
+                    <div style={{ padding: "9px 13px", fontSize: 11.5, color: "#5b616e", lineHeight: 1.55, borderBottom: "1px solid #f0f1f4" }}>
+                      {ps.narrative}
+                    </div>
+                  )}
                   {ps.lines.map((ln) => (
                     <div
                       key={ln.key}
@@ -611,7 +617,7 @@ export default function PreviewDoc(p: PreviewProps) {
                 }}
               >
                 <span style={{ fontSize: 12.5, fontWeight: 700, color: ACCENT_INK }}>
-                  Optional additions
+                  Adders / optional additions
                 </span>
                 <span style={{ fontSize: 11, color: "#8c919c" }}>
                   Priced separately — not included in the total
@@ -632,6 +638,11 @@ export default function PreviewDoc(p: PreviewProps) {
                 >
                   <span>
                     {it.desc}
+                    {p.pdfNotes && it.comment && it.comment.trim() && (
+                      <span style={{ display: "block", fontSize: 11, color: "#5b616e", marginTop: 2, lineHeight: 1.4 }}>
+                        {it.comment}
+                      </span>
+                    )}
                     <span style={{ display: "block", fontSize: 10.5, color: "#9aa0ab", marginTop: 1 }}>
                       {sec}
                     </span>

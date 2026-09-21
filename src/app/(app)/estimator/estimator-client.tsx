@@ -11,6 +11,7 @@ import {
   attestApprovalAction,
   claimReviewAction,
   draftQuoteScopeAction,
+  prepareQuoteEmailAction,
   requestChangesAction,
   saveQuoteAction,
   sendToCustomerAction,
@@ -25,7 +26,6 @@ import {
 import { TasksCard } from "@/components/tasks-card";
 import type { DraftedLine } from "./ai-scope-modal";
 import {
-  demoSections,
   DISC_LABEL,
   FIX_PRESETS,
   FIXTURES,
@@ -43,6 +43,8 @@ import {
   systemFreight,
   systemItemsRev,
   totals,
+  unitSellFromExtended,
+  unitSellFromMargin,
 } from "./pricing";
 import type {
   CurtainDraft,
@@ -159,6 +161,7 @@ function freshMob(t: TravelLite | null): MobDraft {
     otHrs: "",
     sup: false,
     milesRT: far && rt != null ? String(rt) : "",
+    travelMinutesOneWay: t?.minutes != null ? String(t.minutes) : "",
     lift: false,
     comments: "",
     internalNote: "",
@@ -175,6 +178,7 @@ const freshLabor = (
     tierMargin != null && tierMargin > 0 && tierMargin < 1
       ? String(Math.round(tierMargin * 100))
       : "30",
+  qcBonusPct: "5",
   mobs: [freshMob(t)],
   pmHrs: "",
   pmAuto: true,
@@ -247,9 +251,7 @@ export default function EstimatorClient({
   quoteTasks,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
-  const [sections, setSections] = useState<SpecSection[]>(
-    () => initial.sections ?? demoSections()
-  );
+  const [sections, setSections] = useState<SpecSection[]>(() => initial.sections ?? []);
   const nidRef = useRef<number | null>(null);
   if (nidRef.current == null) nidRef.current = computeNid(initial.sections);
   const nextId = () => ++(nidRef.current as number);
@@ -286,17 +288,19 @@ export default function EstimatorClient({
   const [pdfPrices, setPdfPrices] = useState(true);
   const [detail, setDetail] = useState<"itemized" | "sectioned">("itemized");
   const [activeId, setActiveId] = useState<string | null>(
-    () => (initial.sections ?? demoSections())[0]?.id ?? null
+    () => initial.sections?.[0]?.id ?? null
   );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [openCatalog, setOpenCatalog] = useState<string | null>(null);
   const [customFor, setCustomFor] = useState<string | null>(null);
   const [customDraft, setCustomDraft] = useState<CustomDraft>(freshCustom);
   const [curtainFor, setCurtainFor] = useState<string | null>(null);
+  const [curtainEditId, setCurtainEditId] = useState<number | null>(null);
   const [curtainDraft, setCurtainDraft] = useState<CurtainDraft>(() =>
     freshCurtain(defaultFabric)
   );
   const [fixtureFor, setFixtureFor] = useState<string | null>(null);
+  const [fixtureEditId, setFixtureEditId] = useState<number | null>(null);
   const [fixtureDraft, setFixtureDraft] = useState<FixtureDraft>(freshFixture);
   const [laborFor, setLaborFor] = useState<string | null>(null);
   // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
@@ -336,8 +340,8 @@ export default function EstimatorClient({
   const isPreview = phone || mode === "preview";
   const isInternal = true; // build mode is the internal view (prototype view: 'internal')
   const cols = isInternal
-    ? "minmax(190px,1fr) 112px 128px 80px 58px 100px 22px"
-    : "minmax(190px,1fr) 112px 128px 100px 22px";
+    ? "minmax(190px,1fr) 112px 128px 80px 58px 100px 58px"
+    : "minmax(190px,1fr) 112px 128px 100px 58px";
 
   /* ---------------- travel (seeded + fetched on demand, punch #89) ----------------
      `travel` used to carry an estimate for every customer AND venue in the
@@ -505,13 +509,26 @@ export default function EstimatorClient({
       applySync(r);
     });
   };
-  const sendCustomer = () => {
+  const prepareCustomerEmail = () => {
+    if (!loadedId) return;
+    const id = loadedId;
+    startTransition(async () => {
+      const r = await prepareQuoteEmailAction(id);
+      if (!r.ok) {
+        setActionError(r.error || "The customer email draft could not be prepared.");
+        return;
+      }
+      setActionError(null);
+      if (r.draftId) window.location.assign(`/inbox?draft=${encodeURIComponent(r.draftId)}`);
+    });
+  };
+  const logCustomerSent = () => {
     if (!loadedId) return;
     const id = loadedId;
     startTransition(async () => {
       const r = await sendToCustomerAction(id);
       if (!r.ok) {
-        setActionError(r.error || "This quote could not be sent to the customer.");
+        setActionError(r.error || "The manual send could not be logged.");
         return;
       }
       setActionError(null);
@@ -584,6 +601,21 @@ export default function EstimatorClient({
     if (isNaN(n) || n < 0) n = 0;
     patchItem(id, (it) => ({ ...it, qty: n }));
   };
+  const setUnitPrice = (id: number, v: string) => {
+    const n = Math.max(0, parseFloat(v) || 0);
+    patchItem(id, (it) => ({ ...it, price: round2(n) }));
+  };
+  const setItemMargin = (id: number, v: string) => {
+    const pct = Math.min(95, Math.max(0, parseFloat(v) || 0));
+    patchItem(id, (it) => ({ ...it, price: unitSellFromMargin(it.cost, pct) }));
+  };
+  const setExtPrice = (id: number, v: string) => {
+    const ext = Math.max(0, parseFloat(v) || 0);
+    patchItem(id, (it) => ({
+      ...it,
+      price: it.qty > 0 ? unitSellFromExtended(ext, it.qty) : it.price,
+    }));
+  };
   const removeItem = (id: number) =>
     setSections((ss) => ss.map((s) => ({ ...s, items: s.items.filter((x) => x.id !== id) })));
 
@@ -610,10 +642,21 @@ export default function EstimatorClient({
     let v = parseFloat(val);
     if (isNaN(v) || v < 0) v = 0;
     if (v > 15) v = 15;
-    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, freightPct: v } : s)));
+    setSections((ss) =>
+      ss.map((s) => (s.id === secId ? { ...s, freightPct: v, freightOverride: null } : s))
+    );
+  };
+  const setFreightOverride = (secId: string, val: string) => {
+    const trimmed = val.trim();
+    const amount = trimmed === "" ? null : Math.max(0, parseFloat(trimmed) || 0);
+    setSections((ss) =>
+      ss.map((s) => (s.id === secId ? { ...s, freightOverride: amount } : s))
+    );
   };
   const renameSystem = (secId: string, name: string) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, name } : s)));
+  const setSectionNarrative = (secId: string, narrative: string) =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, narrative } : s)));
   /** Manufacturer feeds the catalog-backed quick-add suggestions (PUNCHLIST
    *  #14, decision B) — sections start with mfr:"" (addSystem) and had no way
    *  to set one until now. */
@@ -740,6 +783,7 @@ export default function EstimatorClient({
       return;
     }
     setCurtainFor(id);
+    setCurtainEditId(null);
     setOpenCatalog(null);
     setCustomFor(null);
     setLaborFor(null);
@@ -752,6 +796,7 @@ export default function EstimatorClient({
       return;
     }
     setFixtureFor(id);
+    setFixtureEditId(null);
     setOpenCatalog(null);
     setCustomFor(null);
     setCurtainFor(null);
@@ -811,21 +856,24 @@ export default function EstimatorClient({
     let qty = parseInt(d.qty, 10);
     if (isNaN(qty) || qty < 1) qty = 1;
     const dims = (parseFloat(d.width) || 0) + "'W × " + (parseFloat(d.height) || 0) + "'H";
-    const idN = nextId();
-    const skuN = nextId();
-    pushItems(secId, [
-      {
-        id: idN,
-        sku: "CRT-" + skuN,
+    const config: CurtainDraft = { ...d };
+    const next: SpecItem = {
+        id: curtainEditId ?? nextId(),
+        sku: curtainEditId != null
+          ? sections.flatMap((s) => s.items).find((it) => it.id === curtainEditId)?.sku || "CRT-" + nextId()
+          : "CRT-" + nextId(),
         desc: name + " — " + c.fab.name + ", " + dims + ", " + d.fullness + "% fullness",
         qty,
         unit: "ea",
         cost: c.costEach,
         price: c.priceEach,
         curtain: true,
-      },
-    ]);
+        curtainConfig: config,
+      };
+    if (curtainEditId != null) patchItem(curtainEditId, () => next);
+    else pushItems(secId, [next]);
     setCurtainFor(null);
+    setCurtainEditId(null);
     setCurtainDraft(freshCurtain(defaultFabric));
   };
 
@@ -877,17 +925,56 @@ export default function EstimatorClient({
     let desc = name;
     if (opts.length) desc += " — " + opts.join("; ");
     if (pc.length) desc += " (" + pc.join(" / ") + ")";
-    const idN = nextId();
-    const sku = d.custom ? "FIX-" + nextId() : c.fx.sku;
-    pushItems(secId, [
-      { id: idN, sku, desc, qty: c.qty, unit: "ea", cost: c.cost, price: c.unit, fixture: true },
-    ]);
+    const prior = fixtureEditId == null
+      ? null
+      : sections.flatMap((s) => s.items).find((it) => it.id === fixtureEditId) || null;
+    const sku = d.custom ? prior?.sku || "FIX-" + nextId() : c.fx.sku;
+    const next: SpecItem = {
+      id: fixtureEditId ?? nextId(),
+      sku,
+      desc,
+      qty: c.qty,
+      unit: "ea",
+      cost: c.cost,
+      price: c.unit,
+      fixture: true,
+      fixtureConfig: { ...d, accessories: [...d.accessories], power: [...d.power] },
+    };
+    if (fixtureEditId != null) patchItem(fixtureEditId, () => next);
+    else pushItems(secId, [next]);
     setFixtureFor(null);
+    setFixtureEditId(null);
     setFixtureDraft(freshFixture());
   };
 
+  const editConfiguredItem = (secId: string, item: SpecItem) => {
+    setOpenCatalog(null);
+    setCustomFor(null);
+    setLaborFor(null);
+    if (item.curtainConfig) {
+      setFixtureFor(null);
+      setFixtureEditId(null);
+      setCurtainFor(secId);
+      setCurtainEditId(item.id);
+      setCurtainDraft({ ...item.curtainConfig });
+    } else if (item.fixtureConfig) {
+      setCurtainFor(null);
+      setCurtainEditId(null);
+      setFixtureFor(secId);
+      setFixtureEditId(item.id);
+      setFixtureDraft({
+        ...item.fixtureConfig,
+        accessories: [...item.fixtureConfig.accessories],
+        power: [...item.fixtureConfig.power],
+      });
+    }
+  };
+
   /* ---------------- labor configurator handlers ---------------- */
-  const setLabor = (field: "discipline" | "margin" | "shopHrs" | "misc", val: string) =>
+  const setLabor = (
+    field: "discipline" | "margin" | "qcBonusPct" | "shopHrs" | "misc",
+    val: string
+  ) =>
     setLaborDraft((d) => ({ ...d, [field]: val }));
   const setAutoHrs = (field: "pmHrs" | "drfHrs", flag: "pmAuto" | "drfAuto", val: string) =>
     setLaborDraft((d) =>
@@ -980,19 +1067,20 @@ export default function EstimatorClient({
     setLaborDraft((d) => ({
       ...d,
       mobs: d.mobs.map((m) => {
-        if (m.tripAuto === false) return m; // manual override wins
+        const travelMinutesOneWay = est?.minutes != null ? String(est.minutes) : "";
+        if (m.tripAuto === false) return { ...m, travelMinutesOneWay }; // manual trip type wins
         const tt: "local" | "travel" = far ? "travel" : "local";
         const miles =
           tt === "travel" && (m.milesRT === "" || m.milesRT == null) && rt != null
             ? String(rt)
             : m.milesRT;
-        return { ...m, tripType: tt, milesRT: miles };
+        return { ...m, tripType: tt, milesRT: miles, travelMinutesOneWay };
       }),
     }));
   };
 
   const addLabor = (secId: string) => {
-    const r = computeLabor(laborDraft, rate);
+    const r = computeLabor(laborDraft, rate, t.grand);
     if (r.totalCost <= 0) return;
     const discLabel = DISC_LABEL[r.disc] || r.disc;
     const price = (c: number) => (r.margin < 1 ? round2(c / (1 - r.margin)) : c);
@@ -1000,7 +1088,9 @@ export default function EstimatorClient({
     r.mobs.forEach((m, i) => {
       if (m.cost <= 0) return;
       const label = m.raw.name && m.raw.name.trim() ? m.raw.name.trim() : "Mobilization " + (i + 1);
-      const desc = label + " — " + discLabel;
+      // Jeff's labor naming convention: scope first, then mobilization
+      // (for example "Lighting-Hang"), so grouped output scans by discipline.
+      const desc = discLabel + "-" + label;
       const comment = (m.raw.comments || "").trim();
       const internalNote = (m.raw.internalNote || "").trim();
       const idN = nextId();
@@ -1046,6 +1136,16 @@ export default function EstimatorClient({
         price: price(r.misc),
         labor: true,
       });
+    }
+    // QC is an internal employee cost. Fold it into the first labor line so
+    // customer output never gains a separate bonus line, while the saved
+    // internal note preserves the percentage and dollars for audit/review.
+    if (r.qcBonus > 0 && items.length) {
+      const target = items[0];
+      target.cost = round2(target.cost + r.qcBonus);
+      target.price = price(target.cost);
+      const audit = `Internal QC employee bonus: ${r.qcBonusPct}% (${fmt(r.qcBonus)})`;
+      target.internalNote = target.internalNote ? target.internalNote + "\n" + audit : audit;
     }
     if (items.length) pushItems(secId, items);
     setLaborFor(null);
@@ -1575,9 +1675,10 @@ export default function EstimatorClient({
                   </button>
                 )}
                 {rbCanSend && (
+                  <>
                   <button
                     type="button"
-                    onClick={sendCustomer}
+                    onClick={prepareCustomerEmail}
                     style={{
                       fontSize: 12.5,
                       fontWeight: 600,
@@ -1589,8 +1690,17 @@ export default function EstimatorClient({
                       cursor: "pointer",
                     }}
                   >
-                    Send to customer →
+                    Prepare email →
                   </button>
+                  <button
+                    type="button"
+                    onClick={logCustomerSent}
+                    title="Use when the quote was sent outside Quartzite"
+                    style={{ fontSize: 12, fontWeight: 600, color: "#1f7a52", background: "#fff", border: "1px solid #b8ddc8", borderRadius: 8, padding: "8px 12px", cursor: "pointer" }}
+                  >
+                    Log sent
+                  </button>
+                  </>
                 )}
               </div>
             </div>
@@ -2133,13 +2243,19 @@ export default function EstimatorClient({
                   }}
                   onToggleExpand={() => toggleExpand(sec.id)}
                   onRename={(name) => renameSystem(sec.id, name)}
+                  onSetNarrative={(narrative) => setSectionNarrative(sec.id, narrative)}
                   onSetMfr={(v) => setSectionMfr(sec.id, v)}
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}
                   onSetFreight={(v) => setFreightPct(sec.id, v)}
+                  onSetFreightOverride={(v) => setFreightOverride(sec.id, v)}
                   onInc={inc}
                   onDec={dec}
                   onSetQty={setQty}
+                  onSetUnitPrice={setUnitPrice}
+                  onSetItemMargin={setItemMargin}
+                  onSetExtPrice={setExtPrice}
+                  onEditConfiguredItem={(item) => editConfiguredItem(sec.id, item)}
                   onRemoveItem={removeItem}
                   onToggleCatalog={() => toggleCatalog(sec.id)}
                   onToggleCurtain={() => toggleCurtain(sec.id)}
@@ -2178,6 +2294,7 @@ export default function EstimatorClient({
           {curtainFor && (
             <CurtainModal
               secName={curtainSec ? curtainSec.name : ""}
+              editing={curtainEditId != null}
               draft={curtainDraft}
               fabrics={fabrics}
               margin={tierMargin ?? undefined}
@@ -2189,6 +2306,7 @@ export default function EstimatorClient({
           {fixtureFor && (
             <FixtureModal
               secName={fixtureSec ? fixtureSec.name : ""}
+              editing={fixtureEditId != null}
               draft={fixtureDraft}
               addOns={fixAddOns}
               onSet={setFixture}
@@ -2204,6 +2322,7 @@ export default function EstimatorClient({
               secName={laborSec ? laborSec.name : ""}
               draft={laborDraft}
               rate={rate}
+              quoteSellBeforeLabor={t.grand}
               travel={travelEstNow()}
               onSet={setLabor}
               onSetAutoHrs={setAutoHrs}

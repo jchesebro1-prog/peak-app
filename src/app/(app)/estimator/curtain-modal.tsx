@@ -21,6 +21,7 @@ const FULLNESS: [string, string][] = [
 
 export default function CurtainModal({
   secName,
+  editing = false,
   draft,
   fabrics,
   margin,
@@ -29,6 +30,7 @@ export default function CurtainModal({
   onClose,
 }: {
   secName: string;
+  editing?: boolean;
   draft: CurtainDraft;
   fabrics: FabricOpt[];
   /** Tier-seeded margin fraction (item 11, D87); undefined → legacy 38%. */
@@ -63,7 +65,7 @@ export default function CurtainModal({
       }
       footerRight={
         <button type="button" onClick={onAdd} disabled={!valid} style={addBtnStyle(valid)}>
-          Add curtain
+          {editing ? "Update curtain" : "Add curtain"}
         </button>
       }
     >

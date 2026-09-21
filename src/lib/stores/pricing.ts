@@ -49,7 +49,7 @@ export type FlametestRates = {
 /** flametest.js DEFAULTS — seed/fallback for blob `flametest_rates`. */
 export const FLAMETEST_RATE_DEFAULTS: FlametestRates = {
   mileageRate: 0.70,
-  laborRate: 30,
+  laborRate: 75,
   curtainMinutes: 5,
   baseFee: 150,
   margin: 0.30,
@@ -75,7 +75,7 @@ export type RepairRates = {
 
 /** repair.js DEFAULTS — seed/fallback for blob `repair_rates`. */
 export const REPAIR_RATE_DEFAULTS: RepairRates = {
-  laborRate: 95,
+  laborRate: 75,
   mileageRate: 0.70,
   minCallout: 350,
   partsMargin: 0.30,
@@ -107,7 +107,7 @@ export type InspectionRates = {
  *  New under IDEAS #44 (no prototype engine existed); numbers are placeholders
  *  editable in Estimating Rules, same as every other rate. */
 export const INSPECTION_RATE_DEFAULTS: InspectionRates = {
-  laborRate: 95,
+  laborRate: 75,
   mileageRate: 0.70,
   lineSetMinutes: 15,
   baseHours: 2,

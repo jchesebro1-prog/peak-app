@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react";
 import type { SuggestPart } from "./estimator-data";
 import { fmt, marginColor, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
-import type { CustomDraft, SpecSection } from "./types";
+import type { CustomDraft, SpecItem, SpecSection } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import CatalogPicker from "./catalog-picker";
 import SuggestedParts from "./suggested-parts";
@@ -47,13 +47,19 @@ export type SectionCardProps = {
   registerRef: (id: string, el: HTMLDivElement | null) => void;
   onToggleExpand: () => void;
   onRename: (name: string) => void;
+  onSetNarrative: (narrative: string) => void;
   onSetMfr: (mfr: string) => void;
   onDelete: () => void;
   onSetMargin: (v: string) => void;
   onSetFreight: (v: string) => void;
+  onSetFreightOverride: (v: string) => void;
   onInc: (id: number) => void;
   onDec: (id: number) => void;
   onSetQty: (id: number, v: string) => void;
+  onSetUnitPrice: (id: number, v: string) => void;
+  onSetItemMargin: (id: number, v: string) => void;
+  onSetExtPrice: (id: number, v: string) => void;
+  onEditConfiguredItem: (item: SpecItem) => void;
   onRemoveItem: (id: number) => void;
   onToggleCatalog: () => void;
   onToggleCurtain: () => void;
@@ -74,7 +80,6 @@ export default function SectionCard(p: SectionCardProps) {
   const sysMargin = itemsRev > 0 ? Math.round(((itemsRev - itemsCost) / itemsRev) * 100) : 0;
   const visible = sec.items.filter((x) => !x.option);
   const metaParts: string[] = [];
-  if (sec.mfr) metaParts.push(sec.mfr);
   metaParts.push(visible.length + " item" + (visible.length === 1 ? "" : "s"));
   if (sysMargin > 0 && isInternal) metaParts.push(sysMargin + "% margin");
 
@@ -327,6 +332,14 @@ export default function SectionCard(p: SectionCardProps) {
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#9aa0ab" }}>
                 {fmt(secFreight)}
               </span>
+              <input
+                className="est-input"
+                value={sec.freightOverride == null ? "" : String(sec.freightOverride)}
+                onChange={(e) => p.onSetFreightOverride(e.target.value)}
+                placeholder="Manual $"
+                title="Manual freight dollars; leave blank to use the percentage"
+                style={{ width: 92, border: "1px solid #dfe2e8", borderRadius: 7, padding: "5px 7px", fontSize: 12, textAlign: "right" }}
+              />
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
               <span
@@ -377,6 +390,22 @@ export default function SectionCard(p: SectionCardProps) {
           </div>
 
           <div style={{ overflowX: "auto" }}>
+            <div style={{ padding: "0 20px 12px" }}>
+              <label style={LBL}>
+                Customer narrative{" "}
+                <span style={{ color: "#c4c9d2", textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>
+                  · scope / purpose shown above this system on the estimate
+                </span>
+              </label>
+              <textarea
+                className="est-field"
+                value={sec.narrative || ""}
+                onChange={(e) => p.onSetNarrative(e.target.value)}
+                rows={2}
+                placeholder="Describe what this system adds and why it is included…"
+                style={{ width: "100%", resize: "vertical", border: "1px solid #e4e7ec", borderRadius: 7, padding: "8px 10px", fontFamily: "var(--font-ui)", fontSize: 12.5, lineHeight: 1.45 }}
+              />
+            </div>
             {/* column header */}
             <div
               style={{
@@ -569,11 +598,17 @@ export default function SectionCard(p: SectionCardProps) {
                       +
                     </button>
                   </div>
-                  <span
-                    style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#5b616e" }}
-                  >
-                    {it.unit} · {fmt(it.price)}
-                  </span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5 }}>
+                    <span style={{ fontSize: 10.5, color: "#aab0bb" }}>{it.unit}</span>
+                    <input
+                      key={`unit-${it.id}-${it.price}`}
+                      className="est-input"
+                      defaultValue={it.price.toFixed(2)}
+                      onBlur={(e) => p.onSetUnitPrice(it.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      style={{ width: 82, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontFamily: "var(--font-mono)", fontSize: 11.5 }}
+                    />
+                  </div>
                   {isInternal && (
                     <span
                       style={{
@@ -587,40 +622,29 @@ export default function SectionCard(p: SectionCardProps) {
                     </span>
                   )}
                   {isInternal && (
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        textAlign: "right",
-                        fontSize: 12,
-                        color: marginColor(m),
-                      }}
-                    >
-                      {Math.round(m * 100)}%
-                    </span>
+                    <input
+                      key={`margin-${it.id}-${m}`}
+                      className="est-input"
+                      defaultValue={(m * 100).toFixed(1)}
+                      onBlur={(e) => p.onSetItemMargin(it.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      style={{ width: 54, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 5px", fontFamily: "var(--font-mono)", fontSize: 11.5, color: marginColor(m) }}
+                    />
                   )}
-                  <span
-                    style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
-                  >
-                    {fmt(it.qty * it.price)}
-                  </span>
-                  <button
-                    type="button"
-                    className="est-x"
-                    onClick={() => p.onRemoveItem(it.id)}
-                    title="Remove"
-                    style={{
-                      width: 22,
-                      height: 22,
-                      border: "none",
-                      background: "transparent",
-                      color: "#c4c9d2",
-                      fontSize: 15,
-                      cursor: "pointer",
-                      padding: 0,
-                    }}
-                  >
-                    ×
-                  </button>
+                  <input
+                    key={`ext-${it.id}-${it.qty}-${it.price}`}
+                    className="est-input"
+                    defaultValue={(it.qty * it.price).toFixed(2)}
+                    onBlur={(e) => p.onSetExtPrice(it.id, e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    style={{ width: 94, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontFamily: "var(--font-mono)", fontSize: 11.5, fontWeight: 600 }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 2 }}>
+                    {(it.curtainConfig || it.fixtureConfig) && (
+                      <button type="button" onClick={() => p.onEditConfiguredItem(it)} title="Edit configured item" style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 11, fontWeight: 700, cursor: "pointer", padding: "2px 3px" }}>Edit</button>
+                    )}
+                    <button type="button" className="est-x" onClick={() => p.onRemoveItem(it.id)} title="Remove" style={{ width: 20, height: 22, border: "none", background: "transparent", color: "#c4c9d2", fontSize: 15, cursor: "pointer", padding: 0 }}>×</button>
+                  </div>
                 </div>
               );
             })}

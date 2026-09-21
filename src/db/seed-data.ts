@@ -2,7 +2,7 @@ import { users, appSettings } from "./schema";
 import type { Db } from "./index";
 import { IDENTITY, emailFor } from "@/lib/team";
 import { listDocs, upsertDoc, clearCollection, type Doc } from "./doc-store";
-import type { CollectionName } from "./doc-tables";
+import { DOC_TABLES, type CollectionName } from "./doc-tables";
 import { customersSeed } from "./seeds/customers";
 import { quotesSeed } from "./seeds/quotes";
 import { catalogSeed } from "./seeds/catalog";
@@ -128,8 +128,22 @@ export async function seedDemoCollections(): Promise<number> {
   return seeded;
 }
 
-/** Collections filled by the demo seed — the surface a go-live reset wipes. */
-export const DEMO_COLLECTIONS: CollectionName[] = DEMO_SEEDS.map(([coll]) => coll);
+/**
+ * Business-document collections removed by the go-live reset.
+ *
+ * This intentionally comes from the complete document-table registry, not
+ * DEMO_SEEDS. Several collections (bookings, tasks, notes, Grid sheets, etc.)
+ * have no fixture of their own but can still accumulate records while the
+ * demo is exercised. Leaving those rows behind can create dangling links —
+ * or, after an id sequence starts over, links to the wrong real record.
+ *
+ * Users, app settings, estimating-rate blobs, Gmail connections, and the
+ * relational identity/config tables are not document collections and remain
+ * untouched, matching the reset's contract below.
+ */
+export const DEMO_COLLECTIONS: CollectionName[] = Object.keys(
+  DOC_TABLES
+) as CollectionName[];
 
 /**
  * Go-live reset — the inverse of seedDemoCollections. Hard-deletes every
