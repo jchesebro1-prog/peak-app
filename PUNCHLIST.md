@@ -5532,7 +5532,7 @@ three-pane layout, are not in the #96 spec. Log here so they ride the same branc
 plumbing lands: color per label (customer / status / assignee families), chip rendering in
 `thread-list.tsx` + `thread-reader.tsx`, and a density/spacing pass.
 
-## 110. Intake: user-defined quote category — OPEN
+## 110. Intake: user-defined quote category — DONE 2026-09-21 (D141)
 
 **Reported:** 2026-09-21 (Jeff): "I also want to have a service category by default and then a user
 defined category."
@@ -5544,7 +5544,7 @@ to add a category of your own.
 quote (`category` string, default the type's label), show it on the Quotes hub badge and in the
 estimator header.
 
-## 111. Catalog import: no progress or confirmation on the upload path; raw file inputs — OPEN
+## 111. Catalog import: no progress or confirmation on the upload path; raw file inputs — DONE 2026-09-21
 
 **Reported:** 2026-09-21 (Jeff): "There needs to be some sort of confirmation when the price list
 was imported, right now it just seems locked up when you click import." And: "anytime there is a
@@ -5559,7 +5559,7 @@ remaining native file input. Every other picker is already a hidden input behind
 (M updated, K skipped)" status line after; both remaining native file inputs become the
 button-with-filename pattern used in `estimator/section-card.tsx:806`.
 
-## 112. Estimator CSV batch-add should price SKUs from the catalog — OPEN
+## 112. Estimator CSV batch-add should price SKUs from the catalog — DONE 2026-09-21
 
 **Reported:** 2026-09-21 (Jeff): "I still need the ability to batch add catalog parts via a csv
 file."
@@ -5571,7 +5571,7 @@ row needs its own unit cost / unit sell. A CSV of catalog SKUs + quantities impo
 seed sell from the tier or 30% margin (same path `onAddPart` uses), only falling back to the CSV's
 own numbers when they're present; report "N priced from catalog, M custom" in the status line.
 
-## 113. Emoji regressions since #3 — OPEN
+## 113. Emoji regressions since #3 — DONE 2026-09-21
 
 `estimator/section-card.tsx:872` (`🔗 Link`), `design/engagements/view.tsx:1019` (`✏️`),
 `design/engagements/markup/viewer.tsx:471` (`💬`). #3's rule: no pictographs, no U+FE0F; plain
@@ -5583,3 +5583,19 @@ The same review list also asks for five default mobilizations (Site Visit 1×1, 
 2×3, Commissioning 2×3, Training 1×1), which D136 ships. Read together, the likely meaning is that
 the configurator should not auto-add a *second copy* of any mobilization or a second labor line per
 system — not that it should open with one row. Left as-is until Jeff confirms.
+
+## BUILD LOG — 2026-09-21, #110–#113 (branch `punch-2026-09-21-review-audit`)
+
+**#113** 5b97915 · **#111** 91520a4 · **#112 + #110** df95611 (shared estimator files).
+#110 ships as a `system` quote carrying a `category` string (D141) — `/quotes/new` "Custom
+category" card → `/estimator?category=` → editable in the Prepared-for bar (persists on blur via
+`updateQuoteMetaAction`) → neutral badge on the Quotes hub. #111: `importCatalog` redirects with
+`?importError=` on empty/unparseable/zero-valid input; upload submits through a transition with
+"Importing…"; catalog + venue-assessments pickers are button-over-hidden-input. #112:
+`resolveCatalogSkusAction` + sku-only rows in `parseMaterialCsv`; sell seeded by the `addPart`
+margin rule; example CSV shows both row kinds.
+**Gates:** tsc clean · eslint 31→31 warnings, 0 errors on the changed set · test:specs 982→986 PASS
+(the same 5 fresh-datadir seed-race failures at baseline and after) · test:smoke ALL PASSED ·
+cavecrew-reviewer pass, no confirmed findings. Not browser-checked — needs a visual on `/catalog`
+import, `/quotes/new`, and the estimator CSV panel.
+

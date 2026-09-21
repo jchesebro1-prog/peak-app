@@ -2709,3 +2709,16 @@ Decisions taken:
 `scripts/diagnose-prod-migrations.mjs` (read-only) prints what the target
 database believes is applied and whether a pending migration's objects already
 exist — run it before trusting a migration against production.
+
+## D141. A user-defined quote category is a label on a system quote, not a new quoteType (2026-09-21)
+
+Punch #110 asked for "a service category by default and then a user defined
+category" on the intake. The six service types stay the default categories;
+the new "Custom category" card on `/quotes/new` produces an ordinary
+`quoteType: "system"` quote with a free-text `category` on the document.
+Every branch that switches on `quoteType` — edit links, the #22 type filter,
+badges, the service builders — keeps working untouched, and the Quotes hub
+shows the category as a neutral badge only where no service badge applies.
+The field is editable from the Estimator's "Prepared for" bar and persists
+through the same meta path as the customer/venue/contact picks.
+
