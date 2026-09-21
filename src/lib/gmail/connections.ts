@@ -1,8 +1,9 @@
 import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { getDb } from "@/db";
-import { gmailConnections, type GmailConnectionRow } from "@/db/schema";
+import { gmailConnections, gmailLabels, type GmailConnectionRow, type GmailLabelRow } from "@/db/schema";
 import { decryptToken, encryptToken } from "./crypto";
 import { refreshAccessToken, type OAuthTokens } from "./oauth";
+import type { GmailLabelMeta } from "./api";
 
 /**
  * Store for connected Gmail mailboxes (the gmail_connections table). All token
@@ -110,6 +111,38 @@ export async function saveConnection(input: {
 export async function removeConnection(mailboxKey: string): Promise<void> {
   const db = await getDb();
   await db.delete(gmailConnections).where(eq(gmailConnections.mailboxKey, mailboxKey));
+  await db.delete(gmailLabels).where(eq(gmailLabels.mailboxKey, mailboxKey));
+}
+
+/** Cached labels for one mailbox (name/type/color) — refreshed by syncLabels
+ *  on every mailbox sync (gmail/bridge.ts). Empty until the first sync runs. */
+export async function listCachedLabels(mailboxKey: string): Promise<GmailLabelRow[]> {
+  const db = await getDb();
+  return db.select().from(gmailLabels).where(eq(gmailLabels.mailboxKey, mailboxKey));
+}
+
+/** Replace one mailbox's label cache wholesale with what Gmail reports now —
+ *  simplest correct approach for a small (dozens, not thousands) row set, and
+ *  naturally drops labels the user deleted on the Gmail side. */
+export async function replaceLabels(
+  mailboxKey: string,
+  labels: GmailLabelMeta[]
+): Promise<void> {
+  const db = await getDb();
+  const now = Date.now();
+  await db.delete(gmailLabels).where(eq(gmailLabels.mailboxKey, mailboxKey));
+  if (!labels.length) return;
+  await db.insert(gmailLabels).values(
+    labels.map((l) => ({
+      mailboxKey,
+      labelId: l.id,
+      name: l.name,
+      type: l.type,
+      textColor: l.color?.textColor ?? null,
+      backgroundColor: l.color?.backgroundColor ?? null,
+      updatedAt: now,
+    }))
+  );
 }
 
 /**

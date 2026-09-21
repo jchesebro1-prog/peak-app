@@ -129,6 +129,19 @@ export async function getProfile(
   return gapi(mailboxKey, "/profile");
 }
 
+export type GmailLabelMeta = {
+  id: string;
+  name: string;
+  type: "system" | "user";
+  color?: { textColor?: string; backgroundColor?: string };
+};
+
+/** List every label on the mailbox (system + user-created). */
+export async function listLabels(mailboxKey: string): Promise<GmailLabelMeta[]> {
+  const r = await gapi<{ labels?: GmailLabelMeta[] }>(mailboxKey, "/labels");
+  return r.labels || [];
+}
+
 export type GmailHistoryMessageAdded = { message: GmailMessageMeta };
 export type GmailHistoryRecord = { messagesAdded?: GmailHistoryMessageAdded[] };
 

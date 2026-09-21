@@ -10,6 +10,8 @@ import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { getAll as allInspections } from "@/lib/stores/inspections";
 import { getAllProjects } from "@/lib/stores/projects";
+import { personalKey } from "@/lib/gmail/config";
+import { listCachedLabels } from "@/lib/gmail/connections";
 import {
   boxMeta,
   callsCount,
@@ -48,6 +50,7 @@ import type {
   ComposeInit,
   CustomerVM,
   FolderRowVM,
+  LabelOpt,
   ListVM,
   MessageVM,
   Opt,
@@ -89,6 +92,23 @@ const SORT_KEYS: readonly string[] = ["date", "from", "subject"];
 
 function str(v: string | string[] | undefined): string {
   return typeof v === "string" ? v : "";
+}
+
+/** Gmail labels available to filter by, for whichever mailbox `box` resolves
+ *  to for this user. Empty (not an error) when that mailbox has never synced
+ *  — the label cache only exists after gmail/bridge.ts syncLabels has run. */
+async function labelOptionsFor(box: MailboxId, userId: string): Promise<LabelOpt[]> {
+  const key = box === "personal" ? personalKey(userId) : box;
+  const rows = await listCachedLabels(key);
+  return rows
+    .map((r) => ({
+      id: r.labelId,
+      name: r.name,
+      type: r.type,
+      textColor: r.textColor,
+      backgroundColor: r.backgroundColor,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 }
 
 function chanIconOf(channel: string): ChanIcon {
@@ -144,6 +164,7 @@ export default async function InboxPage({
   const filter: FilterKey | null = FILTER_KEYS.includes(str(params.filter))
     ? (str(params.filter) as FilterKey)
     : null;
+  const labelId = str(params.label) || null;
   // An explicit ?sort= from the Sort dropdown overrides each mode's default
   // ordering (plain = date-desc, CRM = waiting-first — see comms.ts
   // threadsIn). With no param, sortParam is null and both threadsIn and the
@@ -196,6 +217,7 @@ export default async function InboxPage({
     threads,
     roster,
     customers,
+    labelOptions,
   ] = await Promise.all([
     Promise.resolve(mailboxes(me, boxOpts)),
     folderCounts("personal", me),
@@ -210,9 +232,11 @@ export default async function InboxPage({
       filter,
       sort: sortParam,
       crmMode,
+      labelId,
     }),
     activeUsers(),
     allCustomers(),
+    labelOptionsFor(box, user.id),
   ]);
 
   const countsFor = {
@@ -431,6 +455,8 @@ export default async function InboxPage({
               : "",
     boxSelValue: view ? view : `${box}:${folder}`,
     filter: filter || "",
+    label: labelId || "",
+    labelOptions,
     sort: sortParam || "",
     isDeleted,
   };

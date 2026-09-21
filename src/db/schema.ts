@@ -1,4 +1,4 @@
-import { pgTable, text, boolean, bigint, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, boolean, bigint, jsonb, index, primaryKey } from "drizzle-orm/pg-core";
 
 export * from "./doc-tables";
 
@@ -89,6 +89,35 @@ export const gmailConnections = pgTable("gmail_connections", {
 
 export type GmailConnectionRow = typeof gmailConnections.$inferSelect;
 export type NewGmailConnectionRow = typeof gmailConnections.$inferInsert;
+
+/**
+ * Gmail label cache (Phase 7 follow-up). One row per (mailbox, Gmail label) —
+ * mirrors labels.list so label names/colors are available locally without a
+ * live API round trip. Purely a read cache: Gmail is the source of truth,
+ * this is refreshed on every mailbox sync (see gmail/bridge.ts syncLabels)
+ * and rows are replaced wholesale per mailbox, never hand-edited. Message-
+ * level label membership lives on CommMessage.labelIds (comms.ts), keyed by
+ * the label ids this table names.
+ */
+export const gmailLabels = pgTable(
+  "gmail_labels",
+  {
+    mailboxKey: text("mailbox_key").notNull(), // same key space as gmail_connections
+    labelId: text("label_id").notNull(), // Gmail's label id, e.g. "Label_12" or "IMPORTANT"
+    name: text("name").notNull(), // display name, e.g. "Follow up"
+    type: text("type", { enum: ["system", "user"] }).notNull(),
+    textColor: text("text_color"),
+    backgroundColor: text("background_color"),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.mailboxKey, t.labelId] }),
+    index("gmail_labels_mailbox_idx").on(t.mailboxKey),
+  ]
+);
+
+export type GmailLabelRow = typeof gmailLabels.$inferSelect;
+export type NewGmailLabelRow = typeof gmailLabels.$inferInsert;
 
 /* ------------------------------------------------------------------ *
  * Identity core (Daylite parity Phase 1, D85).

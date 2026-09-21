@@ -156,6 +156,10 @@ export type ParsedInbound = {
   body: string;
   at: number; // epoch-ms
   isOutbound: boolean; // labelled SENT (message the account itself sent)
+  /** Every Gmail label id on this message (system + user), e.g.
+   *  ["INBOX","IMPORTANT","Label_12"] — raw ids, resolved to names via the
+   *  gmail_labels cache (see gmail/bridge.ts syncLabels). */
+  labelIds: string[];
   /** Set when the mail carries X-Peak-Site-Visit — one of the app's own
    *  .ics invite emails; the import poll skips these (D76-F). */
   siteVisitId?: string;
@@ -175,6 +179,7 @@ export function parseInbound(msg: GmailFullMessage): ParsedInbound {
     body: extractBody(msg.payload) || msg.snippet || "",
     at,
     isOutbound: (msg.labelIds || []).includes("SENT"),
+    labelIds: msg.labelIds || [],
     siteVisitId: header(hs, "X-Peak-Site-Visit") || undefined,
   };
 }

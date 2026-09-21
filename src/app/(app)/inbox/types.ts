@@ -205,6 +205,16 @@ export type ComposeInit = {
 /** A category preset (client-safe copy of CATEGORIES for the pickers). */
 export type CategoryOpt = { key: string; label: string; color: string };
 
+/** A Gmail label available to filter by (client-safe copy of the mailbox's
+ *  cached labels — see gmail/connections.ts listCachedLabels). */
+export type LabelOpt = {
+  id: string;
+  name: string;
+  type: "system" | "user";
+  textColor: string | null;
+  backgroundColor: string | null;
+};
+
 export type ListVM = {
   title: string;
   sub: string;
@@ -215,6 +225,10 @@ export type ListVM = {
   boxSelValue: string;
   /** active command-bar filter key ('' = none) */
   filter: string;
+  /** active Gmail label id filter ('' = none) */
+  label: string;
+  /** labels available to filter by for the current mailbox (possibly empty) */
+  labelOptions: LabelOpt[];
   /** active *explicit* sort key ('' = none chosen — the resulting order then
    *  falls back to whichever mode's default applies, see comms.ts threadsIn
    *  and sort-defaults.ts; punch #42 finding 1) */

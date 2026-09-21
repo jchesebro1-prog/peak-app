@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { CategoryOpt, Opt } from "./types";
+import type { CategoryOpt, LabelOpt, Opt } from "./types";
 import {
   ArchiveIcon,
   ChevronDown,
@@ -58,6 +58,8 @@ export default function CommandBar({
   selectedCount,
   isDeleted,
   filter,
+  label,
+  labelOptions,
   sort,
   categoryOptions,
   crmMode,
@@ -65,12 +67,18 @@ export default function CommandBar({
   modePending,
   onClear,
   onFilter,
+  onLabel,
   onSort,
   bulk,
 }: {
   selectedCount: number;
   isDeleted: boolean;
   filter: string;
+  /** active Gmail label id filter ('' = none) */
+  label: string;
+  /** labels available for the current mailbox — empty hides the dropdown
+   *  entirely (mailbox never synced, or Gmail not connected). */
+  labelOptions: LabelOpt[];
   sort: string;
   categoryOptions: CategoryOpt[];
   /** Punch #42: Inbox/CRM mode — segmented control lives here, left of Filter▾. */
@@ -81,6 +89,7 @@ export default function CommandBar({
   modePending: boolean;
   onClear: () => void;
   onFilter: (key: string) => void;
+  onLabel: (id: string) => void;
   onSort: (key: string) => void;
   bulk: BulkHandlers;
 }) {
@@ -258,6 +267,51 @@ export default function CommandBar({
           </>
         )}
       </Menu>
+      {labelOptions.length > 0 && (
+        <Menu
+          align="right"
+          trigger={
+            <span style={{ ...refineBtn, ...(label ? refineActive : null) }}>
+              <TagIcon size={14} />
+              {label ? labelOptions.find((l) => l.id === label)?.name || "Label" : "Label"}
+              <ChevronDown size={12} />
+            </span>
+          }
+        >
+          {(close) => (
+            <>
+              <MenuItem
+                onClick={() => {
+                  onLabel("");
+                  close();
+                }}
+                active={!label}
+              >
+                All
+              </MenuItem>
+              {labelOptions.map((l) => (
+                <MenuItem
+                  key={l.id}
+                  active={label === l.id}
+                  onClick={() => {
+                    onLabel(l.id);
+                    close();
+                  }}
+                >
+                  <span
+                    style={{
+                      ...dot,
+                      background: l.backgroundColor || "#c4c9d2",
+                      border: l.textColor ? `1.5px solid ${l.textColor}` : undefined,
+                    }}
+                  />
+                  {l.name}
+                </MenuItem>
+              ))}
+            </>
+          )}
+        </Menu>
+      )}
       <Menu
         align="right"
         trigger={

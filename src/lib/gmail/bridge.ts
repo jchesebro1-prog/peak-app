@@ -26,12 +26,14 @@ import {
   claimSyncSlot,
   connectedMailboxKeys,
   getConnectionInfo,
+  replaceLabels,
   updateSyncState,
 } from "./connections";
 import {
   getMessage,
   getProfile,
   listHistory,
+  listLabels,
   listMessageIds,
   listThreadIds,
   modifyThread,
@@ -186,6 +188,7 @@ async function recordMessage(
     gmailId: p.gmailId,
     gmailThreadId: p.gmailThreadId,
     gmailMessageId: p.messageId || undefined,
+    gmailLabelIds: p.labelIds.length ? p.labelIds : undefined,
   };
 
   // attach to an existing thread sharing the Gmail thread id
@@ -329,6 +332,16 @@ async function reconcileInboxState(key: MailboxKey): Promise<number> {
     }
   }
   return flips;
+}
+
+/* ---- label cache (infra for future label filters/chips) ------------------- */
+
+/** Refresh this mailbox's label cache (names/types/colors) from Gmail. Wholly
+ *  separate from message import: labels rarely change, so a wrong/failed
+ *  refresh never blocks mail sync — callers wrap this in their own try/catch. */
+async function syncLabels(key: MailboxKey): Promise<void> {
+  const labels = await listLabels(key);
+  await replaceLabels(key, labels);
 }
 
 /* ---- site-visit invites (D76) --------------------------------------------- */
@@ -491,6 +504,11 @@ async function syncMailbox(
     flips = await reconcileInboxState(key);
   } catch (err) {
     console.error("[gmail] inbox reconcile failed for", key, err);
+  }
+  try {
+    await syncLabels(key);
+  } catch (err) {
+    console.error("[gmail] label sync failed for", key, err);
   }
   return { ran: true, last, changed: last !== null || flips > 0 };
 }

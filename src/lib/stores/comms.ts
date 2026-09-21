@@ -196,6 +196,10 @@ export type CommMessage = {
   gmailId?: string; // Gmail message id (delivered/imported)
   gmailThreadId?: string; // Gmail thread id
   gmailMessageId?: string; // RFC-2822 Message-ID header (for reply threading)
+  /** Raw Gmail label ids on this message at import time (e.g. "INBOX",
+   *  "IMPORTANT", "Label_12") — resolve names via listGmailLabels(). Absent
+   *  for simulated/local-only messages. */
+  gmailLabelIds?: string[];
 };
 
 export type CommDraft = {
@@ -597,6 +601,18 @@ function hasAttachment(t: CommThread): boolean {
   return (t.messages || []).some((m) => (m.attachments || []).length > 0);
 }
 
+/** Every Gmail label id present on any message in the thread, deduped.
+ *  Threads with no Gmail-imported messages (or the gate off) return []. */
+export function threadLabelIds(t: CommThread): string[] {
+  const ids = new Set<string>();
+  for (const m of t.messages || []) for (const id of m.gmailLabelIds || []) ids.add(id);
+  return Array.from(ids);
+}
+
+export function hasLabel(t: CommThread, labelId: string): boolean {
+  return (t.messages || []).some((m) => (m.gmailLabelIds || []).includes(labelId));
+}
+
 /** Predicate for a command-bar filter chip (new Outlook parity). */
 function filterPred(filter: FilterKey, user: string): (t: CommThread) => boolean {
   switch (filter) {
@@ -649,6 +665,9 @@ export async function threadsIn(
     filter?: FilterKey | null;
     sort?: SortKey | null;
     crmMode?: boolean;
+    /** Gmail label id (e.g. "IMPORTANT", "Label_12") — restrict to threads
+     *  carrying this label on at least one message. */
+    labelId?: string | null;
   } = {}
 ): Promise<CommThread[]> {
   const user = me || DEFAULT_USER;
@@ -708,6 +727,7 @@ export async function threadsIn(
       )
     );
   if (opts.filter) base = base.filter(filterPred(opts.filter, user));
+  if (opts.labelId) base = base.filter((t) => hasLabel(t, opts.labelId!));
 
   // Explicit sort overrides the default waiting-first ordering. Pinned always
   // floats to the top regardless of order (Outlook parity).
@@ -743,19 +763,42 @@ export type CommSearchScope =
   | { kind: "all" }
   | { kind: "box"; box: MailboxId; folder?: FolderId | null };
 
+function inScopeFor(t: CommThread, scope: CommSearchScope, user: string): boolean {
+  if (t.deleted) return false;
+  if (scope.kind === "box") {
+    if (!inBox(t, scope.box, user)) return false;
+    if (scope.folder && folderOf(t) !== scope.folder) return false;
+    return true;
+  }
+  return visibleTo(t, user);
+}
+
 /** Global inbox search — every mailbox + folder the user can see (or scoped to
  *  one box/folder). Matches sender name, email, customer, subject, message
  *  BODY, and attachment filenames. Server-side via the SQL candidate pattern
  *  (searchDocs) so it finds mail that isn't currently loaded. Deleted threads
- *  are excluded (Outlook keeps Deleted Items out of default search). */
+ *  are excluded (Outlook keeps Deleted Items out of default search).
+ *
+ *  `labelId` (optional) narrows further to threads carrying that Gmail label
+ *  — combinable with a text query, or pass an empty/whitespace query with a
+ *  labelId set to browse a label with no text filter. */
 export async function searchThreads(
   query: string,
   scope: CommSearchScope,
-  me?: string
+  me?: string,
+  labelId?: string | null
 ): Promise<CommThread[]> {
   const user = me || DEFAULT_USER;
   const q = (query || "").trim().toLowerCase();
-  if (q.length < 2) return [];
+  if (q.length < 2 && !labelId) return [];
+  if (!q.length && labelId) {
+    // Label-only browse — no text query, so skip the FTS candidate path and
+    // scan the mailbox docs directly (same source threadsIn uses).
+    const all = await listDocs<CommThread>("comms");
+    return all
+      .filter((t) => !t.deleted && hasLabel(t, labelId) && inScopeFor(t, scope, user))
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
   const CANDIDATES = 200;
   const candidates = await searchDocs<CommThread>("comms", q, CANDIDATES);
   const hit = (t: CommThread): boolean => {
@@ -768,17 +811,11 @@ export async function searchThreads(
     }
     return false;
   };
-  const inScope = (t: CommThread): boolean => {
-    if (t.deleted) return false;
-    if (scope.kind === "box") {
-      if (!inBox(t, scope.box, user)) return false;
-      if (scope.folder && folderOf(t) !== scope.folder) return false;
-      return true;
-    }
-    return visibleTo(t, user);
-  };
   return candidates
-    .filter((t) => inScope(t) && hit(t))
+    .filter(
+      (t) =>
+        inScopeFor(t, scope, user) && hit(t) && (!labelId || hasLabel(t, labelId))
+    )
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 

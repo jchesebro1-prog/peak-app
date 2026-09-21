@@ -42,6 +42,7 @@ import {
   type MailboxId,
 } from "@/lib/stores/comms";
 import { nameFor } from "@/lib/stores/customers";
+import type { LabelOpt } from "./types";
 import { setCrmMode } from "@/lib/stores/notif-prefs";
 import {
   byRenewalOf,
@@ -219,12 +220,34 @@ const FOLDER_LABEL: Record<FolderId, string> = {
   deleted: "Deleted",
 };
 
+/** Gmail labels available to filter by, for whichever mailbox `box` resolves
+ *  to for the signed-in user. Empty when that mailbox isn't connected yet —
+ *  the label cache only exists after at least one sync (gmail/bridge.ts
+ *  syncLabels). Real-life gate is env/connection state, not a permission. */
+export async function getLabelsAction(box: MailboxId): Promise<LabelOpt[]> {
+  const user = await requireUser();
+  const { personalKey } = await import("@/lib/gmail/config");
+  const { listCachedLabels } = await import("@/lib/gmail/connections");
+  const key = box === "personal" ? personalKey(user.id) : box;
+  const rows = await listCachedLabels(key);
+  return rows
+    .map((r) => ({
+      id: r.labelId,
+      name: r.name,
+      type: r.type,
+      textColor: r.textColor,
+      backgroundColor: r.backgroundColor,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
 export async function searchInboxAction(
   query: string,
-  scope: CommSearchScope
+  scope: CommSearchScope,
+  labelId?: string | null
 ): Promise<{ rows: SearchRow[] }> {
   const user = await requireUser();
-  const hits = await searchThreads(query, scope, user.name);
+  const hits = await searchThreads(query, scope, user.name, labelId);
   const rows: SearchRow[] = hits.slice(0, 100).map((t) => {
     const icon = channelMeta(t.channel).icon;
     return {

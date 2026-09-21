@@ -173,6 +173,7 @@ export default function InboxShell({
   // finding 1), so no mode-aware special-casing is needed here.
   const refineQuery = [
     list.filter ? `filter=${list.filter}` : "",
+    list.label ? `label=${encodeURIComponent(list.label)}` : "",
     list.sort ? `sort=${list.sort}` : "",
   ]
     .filter(Boolean)
@@ -209,9 +210,9 @@ export default function InboxShell({
     router.push(`/inbox?${baseQuery}`);
   }, [router, baseQuery]);
 
-  /* ---- filter / sort (server-driven via the URL) ---- */
+  /* ---- filter / label / sort (server-driven via the URL) ---- */
   const setRefinement = useCallback(
-    (key: "filter" | "sort", value: string | null) => {
+    (key: "filter" | "label" | "sort", value: string | null) => {
       const params = new URLSearchParams();
       if (isView) params.set("view", box);
       else {
@@ -219,8 +220,10 @@ export default function InboxShell({
         params.set("folder", folder);
       }
       const nextFilter = key === "filter" ? value : list.filter;
+      const nextLabel = key === "label" ? value : list.label;
       const nextSort = key === "sort" ? value : list.sort;
       if (nextFilter) params.set("filter", nextFilter);
+      if (nextLabel) params.set("label", nextLabel);
       // Only strip the sort param when it matches the *current mode's*
       // default ordering — plain mode's default is date-desc, so "date"
       // there is redundant; CRM mode's default is waiting-first, so an
@@ -231,7 +234,7 @@ export default function InboxShell({
         params.set("sort", nextSort);
       router.push(`/inbox?${params.toString()}`);
     },
-    [router, isView, box, folder, list.filter, list.sort, crmMode]
+    [router, isView, box, folder, list.filter, list.label, list.sort, crmMode]
   );
 
   /* ---- multi-select ---- */
@@ -245,7 +248,7 @@ export default function InboxShell({
   // Clear the selection whenever the listing changes (nav / filter / sort).
   // React's sanctioned "adjust state during render" pattern (prev-value in
   // useState), so no effect and no cascading render.
-  const listKey = `${isView ? "view" : "box"}:${box}/${folder}/${list.filter}/${list.sort}`;
+  const listKey = `${isView ? "view" : "box"}:${box}/${folder}/${list.filter}/${list.label}/${list.sort}`;
   const [prevListKey, setPrevListKey] = useState(listKey);
   if (prevListKey !== listKey) {
     setPrevListKey(listKey);
@@ -895,6 +898,8 @@ export default function InboxShell({
               selectedCount={selectedIds.size}
               isDeleted={list.isDeleted}
               filter={list.filter}
+              label={list.label}
+              labelOptions={list.labelOptions}
               sort={list.sort}
               categoryOptions={categoryOptions}
               crmMode={crmMode}
@@ -902,6 +907,7 @@ export default function InboxShell({
               modePending={modePending}
               onClear={() => setSelectedIds(new Set())}
               onFilter={(v) => setRefinement("filter", v)}
+              onLabel={(v) => setRefinement("label", v)}
               onSort={(v) => setRefinement("sort", v)}
               bulk={bulk}
             />
