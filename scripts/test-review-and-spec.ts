@@ -1,7 +1,7 @@
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
-import { safeCallbackPath } from "@/lib/auth-redirect";
+import { safeCallbackPath, resolveSignInRedirect } from "@/lib/auth-redirect";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
   msOf as opMsOf,
@@ -2920,6 +2920,15 @@ ok(
 ok(safeCallbackPath("https://evil.example/steal", O) === "/", "safeCallbackPath: foreign origin → /");
 ok(safeCallbackPath("//evil.example/steal", O) === "/", "safeCallbackPath: protocol-relative → /");
 ok(safeCallbackPath("/login?callbackUrl=/x", O) === "/", "safeCallbackPath: never loops back to /login");
+
+/* ---- #95 — Auth.js redirect keeps a same-origin path (production) ---- */
+const B = "https://quartzite-six.vercel.app";
+ok(resolveSignInRedirect(B + "/api/gmail/callback?code=x&state=y", B) === B + "/api/gmail/callback?code=x&state=y", "signInRedirect: same-origin absolute keeps path+query");
+ok(resolveSignInRedirect("http://192.168.1.20:3000/inbox", B) === "http://192.168.1.20:3000/inbox", "signInRedirect: LAN host honoured");
+ok(resolveSignInRedirect("http://peak.local:3000/", B) === "http://peak.local:3000/", "signInRedirect: .local host honoured");
+ok(resolveSignInRedirect("https://evil.example/x", B) === B, "signInRedirect: foreign origin → baseUrl");
+ok(resolveSignInRedirect("https://quartzite-six.vercel.app.evil.com/x", B) === B, "signInRedirect: suffix-spoofed host → baseUrl");
+ok(resolveSignInRedirect("/settings", B) === "/settings", "signInRedirect: bare path passes through");
 
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
