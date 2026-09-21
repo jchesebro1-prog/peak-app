@@ -132,6 +132,35 @@ export type AState = {
   showGen?: boolean;
 };
 
+/**
+ * The basic-info slice of AState shared by Quick Design's inline config
+ * panel and Grid Manual mode's Scope panel (D-manual-scope-targets):
+ * venue/size/dimensions plus the systems-in-scope toggles and their
+ * sub-config (rig type, drape/fixture/control/shell picks, pit type).
+ * Deliberately excludes the fields that only make sense for Quick Design's
+ * own canvas/persistence: `view` (which tab is open), `tier` (Manual's
+ * Scope panel treats tier as a lens, not stored input — see scopeTargets),
+ * `contingency`/`qtyOverrides` (tier-total-only, not per-system), `mode`/
+ * `placements` (Auto's own sandbox canvas state), and the plan-image/door
+ * fields (Auto-canvas-only).
+ */
+export type QuickScopeInputs = Omit<
+  AState,
+  | "view"
+  | "tier"
+  | "contingency"
+  | "qtyOverrides"
+  | "mode"
+  | "placements"
+  | "houseHalfFt"
+  | "doorsL"
+  | "doorsR"
+  | "doorsBack"
+  | "planImage"
+  | "planName"
+  | "showGen"
+>;
+
 /* -------------------------------- constants -------------------------------- */
 
 export const VENUES: VenueDef[] = [
@@ -228,6 +257,24 @@ export const SYSCOLOR: Record<SysKey, string> = {
   acoustical: "#6f6f78",
   pit: "#9a4a6a",
 };
+
+/**
+ * Display order for the "systems to include" toggle list. Mirrors
+ * compute()'s `defs` array order (rigging, curtains, lighting, controls,
+ * acoustical, pit, audio, video) — NOT Object.keys(SHORT)'s declaration
+ * order, which has audio/video before acoustical/pit. Kept as its own
+ * const so ScopeInputsPanel can render the list without running compute().
+ */
+export const SYS_ORDER: SysKey[] = [
+  "rigging",
+  "curtains",
+  "lighting",
+  "controls",
+  "acoustical",
+  "pit",
+  "audio",
+  "video",
+];
 
 /** Per-system sub-configuration. mode 'single' = pick one; 'multi' = pick any. */
 export const SUBCFG: Partial<
@@ -793,6 +840,37 @@ export function tierSystems(
   fabrics: FabricOption[]
 ): SystemBlock[] {
   return applyOverrides(applySkus(applyFabrics(scaleSets(C.systems, C, tierKey, tierDefs), tierKey, tierDefs, fabrics, s), tierKey), s, tierKey);
+}
+
+/**
+ * Good/Better/Best dollar target per in-scope system, for a QuickScopeInputs
+ * basic-info snapshot — the Grid Manual mode Scope panel's goalpost math
+ * (D-manual-scope-targets). Runs the SAME compute()/tierSystems() pipeline
+ * Quick Design's own estimate uses, merged onto defaultAState so every field
+ * compute() reads (rigType/drape/fixtures/ctrl/shell/pitType/tier) is
+ * present even though QuickScopeInputs omits `tier` — the tier comes in as
+ * a parameter here because the Scope panel's tier toggle is a LENS applied
+ * on read, never stored on the project.
+ *
+ * Returns each on-system's `rev` (sell revenue, the same $ basis
+ * bomBySpace/bomLines use for placed $) keyed by SysKey — only keys present
+ * in `inputs.sys` with a truthy value are included.
+ */
+export function scopeTargets(
+  inputs: QuickScopeInputs,
+  tierKey: TierKey,
+  tierDefs: TierDefs,
+  fabrics: FabricOption[],
+  assemblyOptions: Record<string, { name: string; cost: number }> = {}
+): Partial<Record<SysKey, number>> {
+  const merged: AState = { ...defaultAState(0), ...inputs, tier: tierKey };
+  const C = compute(merged, assemblyOptions);
+  const systems = tierSystems(C, merged, tierKey, tierDefs, fabrics);
+  const out: Partial<Record<SysKey, number>> = {};
+  for (const sys of systems) {
+    if (sys.on) out[sys.key] = sys.rev;
+  }
+  return out;
 }
 
 /** same pipeline without overrides (the BOM's base rows). */
