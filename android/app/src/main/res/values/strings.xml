@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Quartzite</string>
+    <string name="title_activity_main">Quartzite</string>
+    <string name="package_name">com.peaksystemsgroup.quartzite</string>
+    <string name="custom_url_scheme">com.peaksystemsgroup.quartzite</string>
+</resources>

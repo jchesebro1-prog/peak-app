@@ -2618,3 +2618,22 @@ support it yet, so it gained the same handling repairs/quote/page.tsx uses
 (seed `customerId`/primary `locationId`/primary `contactName` into
 `initialFrom`'s `InitialQuote`, only when there's no `?id=` — an explicit
 edit always wins).
+## D132. Quartzite native shell — Capacitor remote/hybrid Phase 1 (2026-09-20)
+
+The mobile transition brief confirms a native wrapper via Capacitor, distributed
+through TestFlight/App Store, with full offline-first field capture and mobile
+work starting in parallel with the web roadmap. Phase 1 is now represented in
+the repo as generated iOS + Android projects plus `capacitor.config.ts`.
+
+- The shell loads the hosted Quartzite app (`https://quartzite-six.vercel.app`)
+  through Capacitor's remote/hybrid `server.url` model. This preserves Next
+  server components, server actions, Auth.js cookies, and the existing PWA
+  sync engine; a static-export rewrite is explicitly out of scope.
+- `CAPACITOR_SERVER_URL` is an optional local/preview override. The native
+  fallback in `native-web/index.html` exists only because Capacitor requires a
+  `webDir` with an `index.html`; it is never used while the remote URL is
+  reachable and is not a Next route.
+- The application id is `com.peaksystemsgroup.quartzite` for both platforms.
+  Native-only integrations must stay behind `src/lib/platform.ts` so browser
+  builds remain unchanged. BLE, camera, push, signing, and store submission
+  remain later phases and require device/account decisions.
