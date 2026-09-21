@@ -19,6 +19,13 @@ const eslintConfig = defineConfig([
     // output. Linting anything under public/ is meaningless for the same
     // reason — nothing there is authored here.
     "public/**",
+    // Nested git worktrees. The primary checkout keeps agent worktrees under
+    // .claude/worktrees/, each a FULL copy of this repo, so linting from the
+    // repo root walked into them and reported the same findings several times
+    // over — 41,938 of 42,022 problems there, against source that is not this
+    // working tree's to fix. Invisible from a session worktree, which has no
+    // nested copies; it only shows up in /Users/sm/Downloads/peak-app.
+    ".claude/**",
   ]),
   {
     rules: {
