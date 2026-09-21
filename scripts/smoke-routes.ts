@@ -92,6 +92,25 @@ const ROUTES = [
   "/design/steel",
   "/account",
   "/people",
+  /* Modules that had NO coverage at all until now — /rentals shipped whole
+   * without a single smoked route, and the service lines' letter/report/quote
+   * builders are the customer-facing deliverables. */
+  "/design",
+  "/rentals",
+  "/rentals/board",
+  "/quotes/new",
+  "/flame-tests/scheduling",
+  "/flame-tests/report/options",
+  "/inspections/scheduling",
+  "/inspections/report/options",
+  "/repairs/scheduling",
+  "/repairs/results",
+  "/repairs/report/options",
+  /* Legacy redirect stubs: these assert the hop still resolves, same as the
+   * /customers/lakefront entry below. */
+  "/design-studio",
+  "/consulting/quote",
+  "/flame-tests/today",
 ];
 
 /**
@@ -127,6 +146,20 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   // so this route mints CE-1001 on its own — there is no ordering dependency
   // on the static /design/engagements entry above.
   { route: "/design/engagements/CE-1001" },
+  /* Service-line documents (#78's uncovered half). Each is the artifact a
+   * customer actually receives, and each compiles a different report/letter
+   * module that nothing else in this list pulls in. */
+  { route: "/flame-tests/report?job=FT-3001&variant=certificate" },
+  { route: "/flame-tests/report?job=FT-3001&variant=letter" },
+  { route: "/flame-tests/report?job=FT-3001&variant=summary" },
+  { route: "/flame-tests/results?job=FT-3001" },
+  { route: "/flame-tests/letter?id=FT-3001" },
+  { route: "/repairs/report?job=RP-4001" },
+  { route: "/repairs/results?job=RP-4001" },
+  { route: "/inspections/RI-2042/report" },
+  /* The Grid's derived drawings (D112 riser, device schedule). */
+  { route: "/design/grid/GRD-5001/riser", reject: "no longer exists" },
+  { route: "/design/grid/GRD-5001/schedule", reject: "no longer exists" },
 ];
 
 let fail = 0;
@@ -302,6 +335,12 @@ async function main() {
   const pglitePath = path.join(scratchDir, "pglite");
   fs.mkdirSync(pglitePath, { recursive: true });
 
+  // prefer-const is wrong here: cleanup() closes over `child` and is
+  // registered on exit/SIGINT/SIGTERM BEFORE the spawn, so the binding has to
+  // exist (undefined) first. Making it const would mean registering cleanup
+  // after the spawn, leaving a window where a signal finds no handler and
+  // leaks the scratch datadir and the dev server.
+  // eslint-disable-next-line prefer-const
   let child: ChildProcess | undefined;
   let port: number;
 

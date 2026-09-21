@@ -124,14 +124,19 @@ export default function Nav({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // close overlays on navigation
-  useEffect(() => {
+  // Close every overlay when the route changes. Done during render with the
+  // previous-value comparison React documents for adjusting state on a
+  // changed prop, not in an effect: an effect closes them one paint LATE, so
+  // the open menu visibly lingers over the new page for a frame.
+  const [overlayPath, setOverlayPath] = useState(pathname);
+  if (overlayPath !== pathname) {
+    setOverlayPath(pathname);
     setOpenGroup(null);
     setMenuOpen(false);
     setNotifOpen(false);
     setDrawerOpen(false);
     setSearchOpen(false);
-  }, [pathname]);
+  }
 
   const markLetter = (companyName.trim().charAt(0) || "P").toUpperCase();
   const bellCount = bell.reduce((n, g) => n + g.items.length, 0);

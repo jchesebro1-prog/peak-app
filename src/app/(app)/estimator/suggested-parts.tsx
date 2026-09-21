@@ -22,26 +22,32 @@ export default function SuggestedParts({
   onAdd: (p: SuggestPart) => void;
 }) {
   const [parts, setParts] = useState<SuggestPart[]>([]);
+  // The manufacturer these suggestions belong to — render derives from it
+  // instead of the effect clearing state synchronously, so a previous mfr's
+  // parts never flash during the next one's 220ms debounce.
+  const [resultMfr, setResultMfr] = useState("");
   const [pending, start] = useTransition();
   const seq = useRef(0);
 
   useEffect(() => {
     const m = mfr.trim();
-    if (!m) {
-      setParts([]);
-      return;
-    }
+    if (!m) return;
     const my = ++seq.current;
     const t = setTimeout(() => {
       start(async () => {
         const res = await suggestPartsForMfr(m);
-        if (my === seq.current) setParts(res);
+        if (my === seq.current) {
+          setParts(res);
+          setResultMfr(m);
+        }
       });
     }, 220);
     return () => clearTimeout(t);
   }, [mfr]);
 
-  if (!mfr.trim() || (!pending && parts.length === 0)) return null;
+  // Suggestions are shown only while they still match `mfr` (see resultMfr).
+  const shown = resultMfr === mfr.trim() ? parts : [];
+  if (!mfr.trim() || (!pending && shown.length === 0)) return null;
 
   const wrap: CSSProperties = { marginTop: 11 };
   const label: CSSProperties = {
@@ -56,10 +62,10 @@ export default function SuggestedParts({
   return (
     <div style={wrap}>
       <div style={label}>Quick add · {mfr.trim()}</div>
-      {pending && parts.length === 0 && (
+      {pending && shown.length === 0 && (
         <div style={{ fontSize: 11, color: "#aab0bb" }}>Checking the catalog…</div>
       )}
-      {parts.map((p) => {
+      {shown.map((p) => {
         const margin = p.price > 0 ? (p.price - p.cost) / p.price : 0;
         return (
           <button

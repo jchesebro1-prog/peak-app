@@ -14,7 +14,6 @@ function base64url(buf: Buffer): string {
 /** Strip CR/LF (and other control chars) so a value can't inject extra
  *  header lines into the message. Applied to every interpolated header. */
 function oneLine(value: string): string {
-  // eslint-disable-next-line no-control-regex
   return (value || "").replace(/[\r\n\x00-\x1F\x7F]+/g, " ").trim();
 }
 
@@ -22,7 +21,6 @@ function oneLine(value: string): string {
  *  single-lined first to prevent header injection via embedded CRLF. */
 function encodeHeader(value: string): string {
   const v = oneLine(value);
-  // eslint-disable-next-line no-control-regex
   if (/^[\x00-\x7F]*$/.test(v)) return v;
   return "=?UTF-8?B?" + Buffer.from(v, "utf8").toString("base64") + "?=";
 }

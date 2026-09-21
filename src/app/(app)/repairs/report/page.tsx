@@ -85,6 +85,97 @@ function NotFoundCard({
   );
 }
 
+/** Everything the report chrome needs that varies per request. */
+type ReportChrome = {
+  backHref: string;
+  backLabel: string;
+  variant: ReportVariant;
+  jobId: string;
+  accent: string;
+};
+
+/**
+ * Page chrome (toolbar + variant tabs) around whichever report body renders.
+ * Lives at module scope, not inside the page function: defining a component
+ * during render makes its identity change every render, which is what
+ * react-hooks/static-components flags. The values it used to close over are
+ * passed as `chrome` instead.
+ */
+function ReportFrame({
+  children,
+  showTabs,
+  chrome,
+}: {
+  children: React.ReactNode;
+  showTabs: boolean;
+  chrome: ReportChrome;
+}) {
+  return (
+    <div style={{ minHeight: "100vh", fontFamily: "var(--font-ui)", color: "#16181d" }}>
+      <style>{TOOLBAR_CSS}</style>
+      <div className="rpr-toolbar pk-no-print">
+        <Link
+          href={chrome.backHref}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12.5,
+            fontWeight: 600,
+            color: "#8c919c",
+            textDecoration: "none",
+          }}
+        >
+          {chrome.backLabel}
+        </Link>
+        {showTabs && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                padding: 3,
+                background: "#eceef1",
+                borderRadius: 10,
+              }}
+            >
+              {VARIANTS.map((v) => {
+                const on = v === chrome.variant;
+                const qs = new URLSearchParams();
+                if (chrome.jobId) qs.set("job", chrome.jobId);
+                qs.set("chrome.variant", v);
+                return (
+                  <Link
+                    key={v}
+                    href={"/repairs/report?" + qs.toString()}
+                    scroll={false}
+                    style={{
+                      fontFamily: "var(--font-ui)",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      padding: "7px 13px",
+                      borderRadius: 8,
+                      textDecoration: "none",
+                      background: on ? "#fff" : "transparent",
+                      color: on ? "#16181d" : "#8c919c",
+                      boxShadow: on ? "0 1px 2px rgba(0,0,0,.12)" : "none",
+                    }}
+                  >
+                    {VARIANT_LABEL[v]}
+                  </Link>
+                );
+              })}
+            </div>
+            <PrintButton accent={chrome.accent} />
+          </div>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export default async function RepairReportPage({
   searchParams,
 }: {
@@ -109,75 +200,12 @@ export default async function RepairReportPage({
     : "/repairs";
   const backLabel = jobId ? "← Results" : "← Repairs";
 
-  const Frame = ({ children, showTabs }: { children: React.ReactNode; showTabs: boolean }) => (
-    <div style={{ minHeight: "100vh", fontFamily: "var(--font-ui)", color: "#16181d" }}>
-      <style>{TOOLBAR_CSS}</style>
-      <div className="rpr-toolbar pk-no-print">
-        <Link
-          href={backHref}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 12.5,
-            fontWeight: 600,
-            color: "#8c919c",
-            textDecoration: "none",
-          }}
-        >
-          {backLabel}
-        </Link>
-        {showTabs && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 2,
-                padding: 3,
-                background: "#eceef1",
-                borderRadius: 10,
-              }}
-            >
-              {VARIANTS.map((v) => {
-                const on = v === variant;
-                const qs = new URLSearchParams();
-                if (jobId) qs.set("job", jobId);
-                qs.set("variant", v);
-                return (
-                  <Link
-                    key={v}
-                    href={"/repairs/report?" + qs.toString()}
-                    scroll={false}
-                    style={{
-                      fontFamily: "var(--font-ui)",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      padding: "7px 13px",
-                      borderRadius: 8,
-                      textDecoration: "none",
-                      background: on ? "#fff" : "transparent",
-                      color: on ? "#16181d" : "#8c919c",
-                      boxShadow: on ? "0 1px 2px rgba(0,0,0,.12)" : "none",
-                    }}
-                  >
-                    {VARIANT_LABEL[v]}
-                  </Link>
-                );
-              })}
-            </div>
-            <PrintButton accent={accent} />
-          </div>
-        )}
-      </div>
-      {children}
-    </div>
-  );
+  const chrome: ReportChrome = { backHref, backLabel, variant, jobId, accent };
 
   /* -------- not found -------- */
   if (!job) {
     return (
-      <Frame showTabs={false}>
+      <ReportFrame chrome={chrome} showTabs={false}>
         <NotFoundCard
           accent={accent}
           title="Repair not found"
@@ -185,7 +213,7 @@ export default async function RepairReportPage({
           href="/repairs"
           cta="Go to repairs →"
         />
-      </Frame>
+      </ReportFrame>
     );
   }
 
@@ -193,7 +221,7 @@ export default async function RepairReportPage({
   const logged = job.stage === "completed";
   if (!logged) {
     return (
-      <Frame showTabs={false}>
+      <ReportFrame chrome={chrome} showTabs={false}>
         <NotFoundCard
           accent={accent}
           title="Results not logged yet"
@@ -202,7 +230,7 @@ export default async function RepairReportPage({
           cta="Log results →"
           solid
         />
-      </Frame>
+      </ReportFrame>
     );
   }
 
@@ -216,10 +244,10 @@ export default async function RepairReportPage({
   const model = buildReportModel(job, org);
 
   return (
-    <Frame showTabs>
+    <ReportFrame chrome={chrome} showTabs>
       <div style={{ padding: "26px 16px 60px" }}>
         <ReportBody m={model} variant={variant} />
       </div>
-    </Frame>
+    </ReportFrame>
   );
 }

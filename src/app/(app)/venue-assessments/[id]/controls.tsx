@@ -509,7 +509,6 @@ export default function SurveyEditor({
     });
     secs.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
     return secs;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.assessmentEnabled, draft.venueClass, draft.requestedBy, meta, roster]);
 
   const measFilled = (fields: FieldDef[]): number =>

@@ -212,7 +212,7 @@ export function RequestForm({
         {pending ? "Sending…" : "Send request"}
       </button>
       <div style={{ fontSize: 11.5, color: "#9aa0ab", lineHeight: 1.55, marginTop: -6 }}>
-        Your request goes straight to the team's response queue with your name and venue already
+        Your request goes straight to the team’s response queue with your name and venue already
         attached — no forms to re-fill, no account numbers to look up.
       </div>
     </div>

@@ -803,7 +803,7 @@ export default function SettingsClient({
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Consulting — phase menu</div>
             <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
               The phases offered when building a consulting quote and on the
-              engagement's Phases tab. One per line — engagements pick any
+              engagement’s Phases tab. One per line — engagements pick any
               mix, so keep these generic.
             </div>
           </div>

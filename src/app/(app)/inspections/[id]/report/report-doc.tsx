@@ -124,7 +124,6 @@ export function InspectionReportSheets({
   );
   const foot = <div style={footStyle}>{footerText}</div>;
   const letterhead = logoDark ? (
-    // eslint-disable-next-line @next/next/no-img-element
     <img src={logoDark} alt={companyName} style={{ display: "block", maxHeight: 60, maxWidth: "3.6in", objectFit: "contain" }} />
   ) : (
     <div>
@@ -406,7 +405,6 @@ export function InspectionReportSheets({
         <div className="rp-sheet" style={{ ...sheet, padding: "1in 0.9in", alignItems: "stretch", textAlign: "center", justifyContent: "space-between" }}>
           <div style={{ position: "relative", zIndex: 1 }}>
             {logoDark ? (
-              // eslint-disable-next-line @next/next/no-img-element
               <img src={logoDark} alt={companyName} style={{ display: "block", maxHeight: 72, maxWidth: "4.2in", objectFit: "contain", margin: "0 auto" }} />
             ) : (
               <>

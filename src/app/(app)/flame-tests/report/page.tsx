@@ -86,34 +86,37 @@ function NotFoundCard({
   );
 }
 
-export default async function FlameTestReportPage({
-  searchParams,
+/** Everything the report chrome needs that varies per request. */
+type ReportChrome = {
+  backHref: string;
+  backLabel: string;
+  variant: ReportVariant;
+  jobId: string;
+  accent: string;
+};
+
+/**
+ * Page chrome (toolbar + variant tabs) around whichever report body renders.
+ * Lives at module scope, not inside the page function: defining a component
+ * during render makes its identity change every render, which is what
+ * react-hooks/static-components flags. The values it used to close over are
+ * passed as `chrome` instead.
+ */
+function ReportFrame({
+  children,
+  showTabs,
+  chrome,
 }: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  children: React.ReactNode;
+  showTabs: boolean;
+  chrome: ReportChrome;
 }) {
-  const [, sp, settings, users] = await Promise.all([
-    requireUser(),
-    searchParams,
-    getSettings(),
-    allUsers(),
-  ]);
-  const accent = settings.accent || "#7b3f8a";
-  const jobId = one(sp.job);
-  const variantParam = one(sp.variant) as ReportVariant;
-  const variant: ReportVariant = VARIANTS.includes(variantParam)
-    ? variantParam
-    : "certificate";
-
-  const job = jobId ? await getJob(jobId) : null;
-  const backHref = jobId ? "/flame-tests/results?job=" + encodeURIComponent(jobId) : "/flame-tests";
-  const backLabel = jobId ? "← Results" : "← Flame tests";
-
-  const Frame = ({ children, showTabs }: { children: React.ReactNode; showTabs: boolean }) => (
+  return (
     <div style={{ minHeight: "100vh", fontFamily: "var(--font-ui)", color: "#16181d" }}>
       <style>{TOOLBAR_CSS}</style>
       <div className="ftr-toolbar pk-no-print">
         <Link
-          href={backHref}
+          href={chrome.backHref}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -124,7 +127,7 @@ export default async function FlameTestReportPage({
             textDecoration: "none",
           }}
         >
-          {backLabel}
+          {chrome.backLabel}
         </Link>
         {showTabs && (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -139,10 +142,10 @@ export default async function FlameTestReportPage({
               }}
             >
               {VARIANTS.map((v) => {
-                const on = v === variant;
+                const on = v === chrome.variant;
                 const qs = new URLSearchParams();
-                if (jobId) qs.set("job", jobId);
-                qs.set("variant", v);
+                if (chrome.jobId) qs.set("job", chrome.jobId);
+                qs.set("chrome.variant", v);
                 return (
                   <Link
                     key={v}
@@ -165,18 +168,43 @@ export default async function FlameTestReportPage({
                 );
               })}
             </div>
-            <PrintButton accent={accent} />
+            <PrintButton accent={chrome.accent} />
           </div>
         )}
       </div>
       {children}
     </div>
   );
+}
+
+export default async function FlameTestReportPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const [, sp, settings, users] = await Promise.all([
+    requireUser(),
+    searchParams,
+    getSettings(),
+    allUsers(),
+  ]);
+  const accent = settings.accent || "#7b3f8a";
+  const jobId = one(sp.job);
+  const variantParam = one(sp.variant) as ReportVariant;
+  const variant: ReportVariant = VARIANTS.includes(variantParam)
+    ? variantParam
+    : "certificate";
+
+  const job = jobId ? await getJob(jobId) : null;
+  const backHref = jobId ? "/flame-tests/results?job=" + encodeURIComponent(jobId) : "/flame-tests";
+  const backLabel = jobId ? "← Results" : "← Flame tests";
+
+  const chrome: ReportChrome = { backHref, backLabel, variant, jobId, accent };
 
   /* -------- not found -------- */
   if (!job) {
     return (
-      <Frame showTabs={false}>
+      <ReportFrame chrome={chrome} showTabs={false}>
         <NotFoundCard
           accent={accent}
           title="Flame test not found"
@@ -184,7 +212,7 @@ export default async function FlameTestReportPage({
           href="/flame-tests"
           cta="Go to flame tests →"
         />
-      </Frame>
+      </ReportFrame>
     );
   }
 
@@ -192,7 +220,7 @@ export default async function FlameTestReportPage({
   const logged = job.stage === "completed" && job.results;
   if (!logged) {
     return (
-      <Frame showTabs={false}>
+      <ReportFrame chrome={chrome} showTabs={false}>
         <NotFoundCard
           accent={accent}
           title="Results not logged yet"
@@ -201,7 +229,7 @@ export default async function FlameTestReportPage({
           cta="Log results →"
           solid
         />
-      </Frame>
+      </ReportFrame>
     );
   }
 
@@ -216,10 +244,10 @@ export default async function FlameTestReportPage({
   const model = buildReportModel(job, org);
 
   return (
-    <Frame showTabs>
+    <ReportFrame chrome={chrome} showTabs>
       <div style={{ padding: "26px 16px 60px" }}>
         <ReportBody m={model} variant={variant} />
       </div>
-    </Frame>
+    </ReportFrame>
   );
 }

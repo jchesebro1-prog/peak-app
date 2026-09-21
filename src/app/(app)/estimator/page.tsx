@@ -167,7 +167,7 @@ export default async function EstimatorPage({
     }
   }
 
-  let q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
+  const q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
 
   const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows] =
     await Promise.all([

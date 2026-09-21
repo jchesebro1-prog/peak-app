@@ -188,6 +188,12 @@ async function main() {
   const pglitePath = path.join(scratchDir, "pglite");
   fs.mkdirSync(pglitePath, { recursive: true });
 
+  // prefer-const is wrong here: cleanup() closes over `child` and is
+  // registered on exit/SIGINT/SIGTERM BEFORE the spawn, so the binding has to
+  // exist (undefined) first. Making it const would mean registering cleanup
+  // after the spawn, leaving a window where a signal finds no handler and
+  // leaks the scratch datadir and the dev server.
+  // eslint-disable-next-line prefer-const
   let child: ChildProcess | undefined;
   let port: number;
 

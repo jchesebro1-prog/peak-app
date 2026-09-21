@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 // Client-safe pure helpers that grew up on the leads screen (no store
 // imports, no "use client" needed on avatar.tsx). If a third consumer
@@ -33,10 +33,15 @@ export default function BoardView({
   const [dragId, setDragId] = useState<string | null>(null);
   const [moves, setMoves] = useState<Record<string, string>>({});
 
-  // Once the refresh lands (transition done), server props are fresh — drop overrides.
-  useEffect(() => {
-    if (!isPending) setMoves((m) => (Object.keys(m).length ? {} : m));
-  }, [isPending]);
+  // Once the refresh lands (transition done), server props are fresh — drop
+  // the optimistic overrides. Done during render on the pending→idle edge
+  // (React's adjust-state-on-changed-value pattern) rather than in an effect,
+  // which would paint one frame of stale overrides on top of fresh props.
+  const [wasPending, setWasPending] = useState(isPending);
+  if (wasPending !== isPending) {
+    setWasPending(isPending);
+    if (!isPending && Object.keys(moves).length) setMoves({});
+  }
 
   const colOf = (c: BoardCardVM) => moves[c.id] || c.col;
   const canDrag = (c: BoardCardVM) => !!moveAction && c.canMoveTo.length > 0;

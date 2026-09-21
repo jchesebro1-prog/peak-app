@@ -31,6 +31,11 @@ export default function CatalogPicker({ onAdd }: { onAdd: (p: SuggestPart) => vo
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<CatalogHit[]>([]);
   const [total, setTotal] = useState(0);
+  // The query these results belong to. Rendering is derived from it rather
+  // than the effect clearing state synchronously: results show only while
+  // they still match what is typed, which also keeps the previous query's
+  // hits from flashing during the next query's 220ms debounce.
+  const [resultQ, setResultQ] = useState("");
   const [pending, start] = useTransition();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const seq = useRef(0);
@@ -41,11 +46,7 @@ export default function CatalogPicker({ onAdd }: { onAdd: (p: SuggestPart) => vo
 
   useEffect(() => {
     const query = q.trim();
-    if (!query) {
-      setHits([]);
-      setTotal(0);
-      return;
-    }
+    if (!query) return;
     const my = ++seq.current;
     const t = setTimeout(() => {
       start(async () => {
@@ -53,11 +54,17 @@ export default function CatalogPicker({ onAdd }: { onAdd: (p: SuggestPart) => vo
         if (my === seq.current) {
           setHits(res.hits);
           setTotal(res.total);
+          setResultQ(query);
         }
       });
     }, 220);
     return () => clearTimeout(t);
   }, [q]);
+
+  // Results are shown only while they still match the box (see resultQ).
+  const fresh = resultQ === q.trim();
+  const shownHits = fresh ? hits : [];
+  const shownTotal = fresh ? total : 0;
 
   return (
     <div
@@ -82,14 +89,14 @@ export default function CatalogPicker({ onAdd }: { onAdd: (p: SuggestPart) => vo
           ? "Start typing to search the catalog."
           : pending
           ? "Searching…"
-          : total === 0
+          : shownTotal === 0
           ? "No parts match."
-          : total > hits.length
-          ? `Showing ${hits.length} of ${total} — refine to narrow`
-          : `${total} match${total === 1 ? "" : "es"}`}
+          : shownTotal > shownHits.length
+          ? `Showing ${shownHits.length} of ${shownTotal} — refine to narrow`
+          : `${shownTotal} match${shownTotal === 1 ? "" : "es"}`}
       </div>
 
-      {hits.map((h) => {
+      {shownHits.map((h) => {
         const margin = h.list > 0 ? (h.list - h.cost) / h.list : 0;
         return (
           <button
