@@ -137,11 +137,13 @@ export function CatalogImportPanel({
   const [adding, setAdding] = useState(manufacturers.length === 0);
   const [newMfr, setNewMfr] = useState("");
   const [text, setText] = useState("");
+  const [fileName, setFileName] = useState("");
   const [pending, startTransition] = useTransition();
 
   const mfr = (adding ? newMfr : mfrSel).trim();
   const parsed = text.trim() ? parseCatalog(text) : null;
   const canImport = method === "paste" && !!parsed?.ok && parsed.stats.valid > 0;
+  const canUpload = !!mfr && !!fileName && !pending;
 
   const methods = [
     { id: "upload" as const, icon: "↑", title: "Import CSV / TSV", desc: "Upload a manufacturer or design-program export." },
@@ -291,7 +293,15 @@ export function CatalogImportPanel({
 
           {/* UPLOAD — CSV / TSV for prebuilt systems and design-program exports */}
           {method === "upload" && (
-            <form action={importCatalog}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!canUpload) return;
+                const fd = new FormData(e.currentTarget);
+                startTransition(async () => {
+                  await importCatalog(fd);
+                });
+              }}
               style={{
                 border: "1.5px dashed #cfd4dd",
                 borderRadius: 11,
@@ -337,10 +347,79 @@ export function CatalogImportPanel({
               >
                 ↓ Download CSV template
               </a>
-              <input name="file" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" required style={{ width: "100%", marginTop: 14, fontSize: 12 }} />
-              <button type="submit" disabled={!mfr} style={{ width: "100%", marginTop: 14, border: "none", borderRadius: 9, padding: 11, color: mfr ? "#fff" : "#aab0bb", background: mfr ? accent : "#eef0f3", cursor: mfr ? "pointer" : "not-allowed", fontSize: 13.5, fontWeight: 600 }}>
-                {mfr ? "Import MFR PN file →" : "Name the manufacturer"}
+              {/* button-style picker over a hidden input (punch #111) — the
+                  native file input read as a bare text field with no obvious
+                  click target */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
+                <label
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    borderRadius: 7,
+                    padding: "8px 13px",
+                    background: pending ? "#eef0f3" : accent,
+                    color: pending ? "#aab0bb" : "#fff",
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    cursor: pending ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {fileName ? "Choose a different file" : "Select CSV / TSV file"}
+                  <input
+                    name="file"
+                    type="file"
+                    accept=".csv,.tsv,text/csv,text/tab-separated-values"
+                    required
+                    disabled={pending}
+                    style={{ display: "none" }}
+                    onChange={(e) => setFileName(e.target.files?.[0]?.name || "")}
+                  />
+                </label>
+                {fileName && (
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 11.5,
+                      color: "#3a3f4a",
+                      maxWidth: "100%",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {fileName}
+                  </span>
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={!canUpload}
+                style={{
+                  width: "100%",
+                  marginTop: 14,
+                  border: "none",
+                  borderRadius: 9,
+                  padding: 11,
+                  color: canUpload ? "#fff" : "#aab0bb",
+                  background: canUpload ? accent : "#eef0f3",
+                  cursor: canUpload ? "pointer" : "not-allowed",
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                }}
+              >
+                {pending
+                  ? "Importing…"
+                  : !mfr
+                    ? "Name the manufacturer"
+                    : !fileName
+                      ? "Select a file to import"
+                      : "Import MFR PN file →"}
               </button>
+              {pending && (
+                <div style={{ marginTop: 8, fontSize: 11.5, color: "#8c919c", lineHeight: 1.4 }}>
+                  Reading and matching rows — large price books can take a minute. You will land on the imported list when it finishes.
+                </div>
+              )}
             </form>
           )}
 
@@ -531,7 +610,7 @@ export function CatalogImportPanel({
                 }}
               >
                 {pending
-                  ? "Importing…"
+                  ? `Importing ${parsed?.stats.valid ?? 0} row${parsed?.stats.valid === 1 ? "" : "s"}…`
                   : !mfr
                     ? "Name the manufacturer"
                     : canImport

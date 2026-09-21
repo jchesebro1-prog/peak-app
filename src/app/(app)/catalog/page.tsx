@@ -52,6 +52,7 @@ export default async function CatalogPage({
   const editSku = one(sp.edit);
   const isNew = one(sp.new) === "1";
   const importedN = one(sp.imported);
+  const importError = one(sp.importError);
   const reset = one(sp.reset) === "1";
 
   const mfrOf = (p: CatalogPart) => (p.mfr && p.mfr.trim() ? p.mfr.trim() : UNSPEC);
@@ -193,6 +194,26 @@ export default async function CatalogPage({
           }}
         >
           ✓ Imported {importedN} part{importedN === "1" ? "" : "s"} into the catalog.
+        </div>
+      )}
+
+      {!importedN && importError && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 9,
+            background: "#f7e9e5",
+            border: "1px solid #f0d6cd",
+            borderRadius: 10,
+            padding: "10px 14px",
+            marginBottom: 16,
+            fontSize: 12.5,
+            color: "#b4543a",
+            fontWeight: 600,
+          }}
+        >
+          Import failed — {importError} Nothing was added to the catalog.
         </div>
       )}
 
