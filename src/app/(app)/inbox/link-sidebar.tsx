@@ -119,7 +119,7 @@ export default function LinkSidebar({
     state: "",
   });
 
-  const run = (fn: () => Promise<ActionResult>) =>
+  const run = (fn: () => Promise<ActionResult>, onSuccess?: () => void) =>
     start(async () => {
       setError(null);
       const r = await fn();
@@ -130,16 +130,17 @@ export default function LinkSidebar({
       setAdding(null);
       setChanging(false);
       setPickId("");
+      onSuccess?.();
       router.refresh();
     });
 
-  const linkTo = (customerId: string, claim: boolean) =>
-    run(() => linkThreadToCustomerAction(vm.id, customerId, { remember, claimDomain: claim }));
+  const linkTo = (customerId: string, claim: boolean, rememberAddr: boolean) =>
+    run(() =>
+      linkThreadToCustomerAction(vm.id, customerId, { remember: rememberAddr, claimDomain: claim })
+    );
 
   // the id a quick-add contact/venue lands on
   const targetCustomerId = vm.customerCard?.id || vm.suggested?.customerId || "";
-  // a quick-add form shows the error itself — don't repeat it below
-  const quickAddOpen = adding !== null || pickId === "__new";
   const canClaim = !vm.senderIsPublicDomain;
   const domainTag = <span style={MONO}>@{vm.senderDomain}</span>;
   const emailTag = <span style={MONO}>{vm.contactEmail}</span>;
@@ -228,7 +229,7 @@ export default function LinkSidebar({
               <button
                 style={PRIMARY}
                 disabled={pending}
-                onClick={() => linkTo(vm.customerCard!.id, false)}
+                onClick={() => linkTo(vm.customerCard!.id, false, false)}
               >
                 Save link
               </button>
@@ -247,14 +248,17 @@ export default function LinkSidebar({
           </div>
           {changing && (
             <div style={{ marginTop: 8 }}>
-              {customerPicker(
-                pickId,
-                (v) => {
-                  setPickId(v);
-                  if (v) linkTo(v, false);
-                },
-                false
-              )}
+              {rememberRow(<>Remember {emailTag} on a contact</>)}
+              <div style={{ marginTop: 8 }}>
+                {customerPicker(
+                  pickId,
+                  (v) => {
+                    setPickId(v);
+                    if (v) linkTo(v, false, remember);
+                  },
+                  false
+                )}
+              </div>
             </div>
           )}
           {children && (
@@ -280,7 +284,7 @@ export default function LinkSidebar({
             <button
               style={PRIMARY}
               disabled={pending}
-              onClick={() => linkTo(vm.suggested!.customerId, false)}
+              onClick={() => linkTo(vm.suggested!.customerId, false, remember)}
             >
               Link
             </button>
@@ -289,7 +293,7 @@ export default function LinkSidebar({
                 style={ACCENT_BTN}
                 disabled={pending}
                 title={`Always link @${vm.senderDomain} to ${vm.suggested.name}`}
-                onClick={() => linkTo(vm.suggested!.customerId, true)}
+                onClick={() => linkTo(vm.suggested!.customerId, true, remember)}
               >
                 Always
               </button>
@@ -340,7 +344,7 @@ export default function LinkSidebar({
                   style={BTN}
                   disabled={pending}
                   title="Link just this thread"
-                  onClick={() => linkTo(c.customerId, false)}
+                  onClick={() => linkTo(c.customerId, false, remember)}
                 >
                   This thread
                 </button>
@@ -349,7 +353,7 @@ export default function LinkSidebar({
                     style={ACCENT_BTN}
                     disabled={pending}
                     title={`Always link @${vm.senderDomain} to ${c.name}`}
-                    onClick={() => linkTo(c.customerId, true)}
+                    onClick={() => linkTo(c.customerId, true, remember)}
                   >
                     Always
                   </button>
@@ -393,7 +397,7 @@ export default function LinkSidebar({
               <button
                 style={{ ...PRIMARY, marginTop: 10 }}
                 disabled={pending}
-                onClick={() => linkTo(pickId, canClaim)}
+                onClick={() => linkTo(pickId, canClaim, remember)}
               >
                 {canClaim ? "Link domain + thread" : "Link thread"}
               </button>
@@ -480,7 +484,16 @@ export default function LinkSidebar({
                   setError(null);
                 }}
                 onSubmit={() =>
-                  run(() => quickAddContactAction({ customerId: targetCustomerId, ...newContact }))
+                  run(
+                    () => quickAddContactAction({ customerId: targetCustomerId, ...newContact }),
+                    () =>
+                      setNewContact({
+                        name: vm.contactName,
+                        role: "",
+                        email: vm.contactEmail,
+                        phone: "",
+                      })
+                  )
                 }
               />
             </div>
@@ -498,7 +511,10 @@ export default function LinkSidebar({
                   setError(null);
                 }}
                 onSubmit={() =>
-                  run(() => quickAddVenueAction({ customerId: targetCustomerId, ...newVenue }))
+                  run(
+                    () => quickAddVenueAction({ customerId: targetCustomerId, ...newVenue }),
+                    () => setNewVenue({ label: "", city: "", state: "" })
+                  )
                 }
               />
             </div>
@@ -506,7 +522,7 @@ export default function LinkSidebar({
         </div>
       )}
 
-      {error && !quickAddOpen && <div style={{ fontSize: 12, color: "#b4543a" }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "#b4543a" }}>{error}</div>}
     </aside>
   );
 }
