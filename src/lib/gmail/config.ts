@@ -177,3 +177,23 @@ export function redirectHostMismatch(
     return null;
   }
 }
+
+/* ---- #96 — sender domains ---------------------------------------------- */
+
+/** Webmail/ISP domains that can never identify a customer. */
+export const PUBLIC_EMAIL_DOMAINS: ReadonlySet<string> = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "outlook.com", "hotmail.com",
+  "live.com", "msn.com", "icloud.com", "me.com", "mac.com", "aol.com", "comcast.net",
+  "att.net", "sbcglobal.net", "verizon.net", "charter.net", "protonmail.com", "proton.me",
+  "mail.com", "zoho.com", "gmx.com", "yandex.com",
+]);
+
+export function domainOf(email: string): string {
+  const s = (email || "").trim().toLowerCase();
+  const i = s.lastIndexOf("@");
+  return i < 0 ? "" : s.slice(i + 1);
+}
+
+export function isPublicDomain(domain: string): boolean {
+  return PUBLIC_EMAIL_DOMAINS.has((domain || "").toLowerCase());
+}

@@ -7,6 +7,8 @@ import {
   IMPORT_BATCH_PER_RUN,
   IMPORT_MAX_CHUNKS_PER_RUN,
   isRateLimit,
+  domainOf,
+  isPublicDomain,
 } from "@/lib/gmail/config";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
@@ -2986,6 +2988,12 @@ ok(!isRateLimit(new Error("Mailbox not connected: personal:u1")), "isRateLimit: 
 ok(isRateLimit(new Error('Gmail API /messages/x → 403 { "reason": "userRateLimitExceeded", "message": "User-rate limit exceeded." }')), "isRateLimit: userRateLimitExceeded");
 ok(!isRateLimit(new Error("Gmail API /messages/x → 500 { \"reason\": \"backendError\" }")), "isRateLimit: backendError is not a rate limit");
 ok(IMPORT_MAX_CHUNKS_PER_RUN * IMPORT_BATCH_PER_RUN * 5 <= 6000 * 0.6, "a full run of chunks stays under 60% of the per-minute quota");
+
+/* ---- #96 §1 — domain helpers ---- */
+ok(domainOf("Brenda.Gauchel@Lakefront.K12.MN.US") === "lakefront.k12.mn.us", "domainOf lowercases");
+ok(domainOf("no-at-sign") === "", "domainOf: no @ → empty");
+ok(isPublicDomain("gmail.com") && isPublicDomain("Yahoo.com") && isPublicDomain("icloud.com"), "isPublicDomain: webmail");
+ok(!isPublicDomain("lakefront.k12.mn.us"), "isPublicDomain: district is claimable");
 
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();

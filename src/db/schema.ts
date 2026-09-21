@@ -235,6 +235,25 @@ export const contactPhones = pgTable(
   (t) => [index("contact_phones_contact_idx").on(t.contactId)]
 );
 
+/** #96 — which customer an email DOMAIN belongs to. `manual` rows come from
+ *  the reader's "link this domain" prompt; `learned` rows from "remember this
+ *  address" when the domain wasn't public and wasn't yet claimed. */
+export const customerDomains = pgTable(
+  "customer_domains",
+  {
+    domain: text("domain").notNull(), // lowercased, no @
+    customerId: text("customer_id").notNull(),
+    source: text("source", { enum: ["learned", "manual"] }).notNull(),
+    addedBy: text("added_by").notNull(),
+    at: bigint("at", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.domain, t.customerId] }),
+    index("customer_domains_domain_idx").on(t.domain),
+  ]
+);
+export type CustomerDomainRow = typeof customerDomains.$inferSelect;
+
 export const sites = pgTable(
   "sites",
   {
