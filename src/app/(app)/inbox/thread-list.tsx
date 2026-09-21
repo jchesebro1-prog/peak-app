@@ -76,7 +76,9 @@ export default function ThreadList({
             ? "Nothing flagged"
             : list.emptyKind === "deleted"
               ? "Deleted is empty"
-              : "Nothing here";
+              : list.emptyKind === "unmatched"
+                ? "Everything is linked."
+                : "Nothing here";
   const emptySub =
     list.emptyKind === "drafts"
       ? "Saved drafts show up here."
@@ -86,7 +88,9 @@ export default function ThreadList({
           ? "Flag a message and it shows up here."
           : list.emptyKind === "deleted"
             ? "Deleted messages stay here until you empty them."
-            : "Messages in this folder will appear here.";
+            : list.emptyKind === "unmatched"
+              ? "Every thread is linked to a customer."
+              : "Messages in this folder will appear here.";
 
   return (
     <div

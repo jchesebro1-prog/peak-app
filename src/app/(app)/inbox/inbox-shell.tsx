@@ -53,6 +53,7 @@ const BOX_SEL_OPTIONS: Opt[] = [
   { value: "personal:drafts", label: "Drafts" },
   { value: "needs", label: "Needs reply" },
   { value: "calls", label: "Calls & meetings" },
+  { value: "unmatched", label: "Unmatched" },
 ];
 
 function blankCompose(mailbox: string): ComposeInit {
@@ -534,7 +535,8 @@ export default function InboxShell({
 
   const onBoxSel = useCallback(
     (v: string) => {
-      if (v === "needs" || v === "calls") router.push(`/inbox?view=${v}`);
+      if (v === "needs" || v === "calls" || v === "unmatched")
+        router.push(`/inbox?view=${v}`);
       else {
         const [b, f] = v.split(":");
         router.push(`/inbox?box=${b}&folder=${f || "inbox"}`);

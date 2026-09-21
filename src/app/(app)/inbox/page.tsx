@@ -29,6 +29,7 @@ import {
   folderCounts,
   forwardAddress,
   get as getThread,
+  getAll as allThreads,
   hasQueued,
   lastMsg,
   mailboxes,
@@ -185,8 +186,11 @@ export default async function InboxPage({
 
   /* ---- resolve nav state from the URL (the URL drives everything) ---- */
   const viewParam = str(params.view);
-  const view: SmartView | null =
-    viewParam === "needs" || viewParam === "calls" || viewParam === "flagged"
+  const view: SmartView | "unmatched" | null =
+    viewParam === "needs" ||
+    viewParam === "calls" ||
+    viewParam === "flagged" ||
+    viewParam === "unmatched"
       ? viewParam
       : null;
 
@@ -239,8 +243,9 @@ export default async function InboxPage({
     needsCount,
     callsCnt,
     flaggedCnt,
+    allComms,
     leadFollow,
-    threads,
+    queriedThreads,
     roster,
     customers,
     labelOptions,
@@ -250,8 +255,9 @@ export default async function InboxPage({
     needsReplyCount(me),
     callsCount(me),
     flaggedCount(me),
+    allThreads(),
     followUpCount({ unownedOrMine: true, me }),
-    threadsIn(view ?? box, view ? "inbox" : folder, me, {
+    threadsIn(view === "unmatched" ? box : (view ?? box), view ? "inbox" : folder, me, {
       filter,
       sort: sortParam,
       crmMode,
@@ -261,6 +267,17 @@ export default async function InboxPage({
     allCustomers(),
     labelOptionsFor(box, user.id),
   ]);
+
+  // Threads worth linking to a customer but not yet linked (#96 §5) — any
+  // channel, any mailbox, never deleted, and not already resolved.
+  const isUnmatched = (t: CommThread) =>
+    !t.deleted &&
+    !t.customerId &&
+    (t.resolution === "unknown" ||
+      t.resolution === "ambiguous" ||
+      t.resolution === "suggested");
+  const unmatchedCnt = allComms.filter(isUnmatched).length;
+  const threads = view === "unmatched" ? allComms.filter(isUnmatched) : queriedThreads;
 
   const countsFor = { personal: personalCounts } as const;
 
@@ -393,6 +410,15 @@ export default async function InboxPage({
         href: viewHref("calls"),
         icon: "calls",
       },
+      {
+        key: "unmatched",
+        label: "Unmatched",
+        active: view === "unmatched",
+        count: unmatchedCnt,
+        badge: "plain",
+        href: viewHref("unmatched"),
+        icon: "needs",
+      },
     ],
     leadFollowCount: leadFollow,
     forwardAddr: forwardAddress(domain),
@@ -480,6 +506,9 @@ export default async function InboxPage({
   } else if (view === "calls") {
     listTitle = "Calls & meetings";
     listSub = "Logged phone calls and meetings";
+  } else if (view === "unmatched") {
+    listTitle = "Unmatched";
+    listSub = "Email not yet linked to a customer — link it once and the rest follows";
   } else {
     const bm = boxMeta(box, me, boxOpts);
     const fl = FOLDERS.find((f) => f[0] === folder);
@@ -502,7 +531,9 @@ export default async function InboxPage({
             ? "needs"
             : view === "flagged"
               ? "flagged"
-              : "",
+              : view === "unmatched"
+                ? "unmatched"
+                : "",
     boxSelValue: view ? view : `${box}:${folder}`,
     filter: filter || "",
     label: labelId || "",
