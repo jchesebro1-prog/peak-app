@@ -67,6 +67,7 @@ export async function saveCustomerAction(input: SaveCustomerInput) {
     pricingTier: (input.pricingTier || "").trim() || null,
     locations: (input.locations || []).map((l) => ({
       id: l.id,
+      locationName: (l.locationName || "").trim(),
       label: (l.label || "").trim() || "Venue",
       primary: !!l.primary,
       address: (l.address || "").trim(),

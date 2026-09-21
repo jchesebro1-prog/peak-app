@@ -26,12 +26,15 @@ export default function BoardView({
 }: {
   columns: BoardColumnVM[];
   cards: BoardCardVM[];
-  moveAction?: (id: string, col: string) => Promise<{ ok: boolean }>;
+    moveAction?: (id: string, col: string, details?: Record<string, string>) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [dragId, setDragId] = useState<string | null>(null);
   const [moves, setMoves] = useState<Record<string, string>>({});
+  const [prompt, setPrompt] = useState<{ id: string; col: string } | null>(null);
+  const [details, setDetails] = useState({ contact: "", email: "", phone: "", interest: "", timeline: "", message: "" });
+  const [error, setError] = useState("");
 
   // Once the refresh lands (transition done), server props are fresh — drop
   // the optimistic overrides. Done during render on the pending→idle edge
@@ -46,6 +49,19 @@ export default function BoardView({
   const colOf = (c: BoardCardVM) => moves[c.id] || c.col;
   const canDrag = (c: BoardCardVM) => !!moveAction && c.canMoveTo.length > 0;
 
+  const executeMove = (id: string, col: string, submitted?: Record<string, string>) => {
+    if (!moveAction) return;
+    setMoves((m) => ({ ...m, [id]: col }));
+    startTransition(async () => {
+      const result = await moveAction(id, col, submitted);
+      if (!result.ok) {
+        setMoves((m) => { const next = { ...m }; delete next[id]; return next; });
+        setError(result.error || "That opportunity could not be moved.");
+      }
+      router.refresh();
+    });
+  };
+
   const drop = (col: string) => (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     const id = dragId || e.dataTransfer.getData("text/plain");
@@ -56,14 +72,25 @@ export default function BoardView({
     // Policy gate (targets are declared relative to the card's server-known
     // column; the server action re-validates regardless).
     if (!card.canMoveTo.includes(col)) return;
-    setMoves((m) => ({ ...m, [id]: col }));
-    startTransition(async () => {
-      await moveAction(id, col);
-      router.refresh();
-    });
+    if (card.promptOnMoveTo?.includes(col)) {
+      setDetails({ contact: "", email: "", phone: "", interest: "", timeline: "", message: "" });
+      setError("");
+      setPrompt({ id, col });
+      return;
+    }
+    executeMove(id, col);
   };
 
+  const promptCard = prompt ? cards.find((c) => c.id === prompt.id) : null;
+  const field = (key: keyof typeof details, label: string, required = false, multiline = false) => (
+    <label key={key} style={{ display: "block", marginTop: 12 }}>
+      <span style={{ display: "block", fontSize: 10.5, fontWeight: 700, color: "#737985", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 5 }}>{label}{required ? " *" : ""}</span>
+      {multiline ? <textarea value={details[key]} onChange={(e) => setDetails((d) => ({ ...d, [key]: e.target.value }))} style={{ width: "100%", minHeight: 72, resize: "vertical", boxSizing: "border-box", border: "1px solid #e4e7ec", borderRadius: 8, padding: "9px 10px", font: "13px var(--font-ui)" }} /> : <input value={details[key]} onChange={(e) => setDetails((d) => ({ ...d, [key]: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e4e7ec", borderRadius: 8, padding: "9px 10px", font: "13px var(--font-ui)" }} />}
+    </label>
+  );
+
   return (
+    <>
     <div
       className="lv-hs"
       style={{ flex: 1, minHeight: 0, overflowX: "auto", overflowY: "hidden", padding: "14px 24px 20px" }}
@@ -216,5 +243,25 @@ export default function BoardView({
         })}
       </div>
     </div>
+    {prompt && promptCard && (
+      <div onClick={() => setPrompt(null)} style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "rgba(16,22,30,.42)" }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ width: 440, maxWidth: "100%", maxHeight: "calc(100vh - 40px)", overflowY: "auto", background: "#fff", borderRadius: 14, padding: 22, boxShadow: "0 24px 70px rgba(0,0,0,.28)" }}>
+          <div style={{ fontSize: 17, fontWeight: 650 }}>Collect information</div>
+          <div style={{ color: "#737985", fontSize: 13, lineHeight: 1.5, marginTop: 5 }}>Add the basic details needed before moving <strong>{promptCard.title}</strong> into Collect Info.</div>
+          {field("contact", "Primary contact", true)}
+          {field("email", "Email")}
+          {field("phone", "Phone")}
+          {field("interest", "What are they looking for?", true)}
+          {field("timeline", "Timeline")}
+          {field("message", "Notes", false, true)}
+          {error && <div style={{ color: "#b4543a", fontSize: 12, marginTop: 10 }}>{error}</div>}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 9, marginTop: 18 }}>
+            <button type="button" onClick={() => setPrompt(null)} style={{ border: "1px solid #e4e7ec", background: "#fff", borderRadius: 8, padding: "9px 13px", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            <button type="button" onClick={() => { if (!details.contact.trim() || !details.interest.trim()) { setError("Primary contact and opportunity need are required."); return; } const p = prompt; setPrompt(null); executeMove(p.id, p.col, details); }} style={{ border: "none", background: "var(--accent)", color: "#fff", borderRadius: 8, padding: "9px 14px", fontWeight: 700, cursor: "pointer" }}>Save & move</button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

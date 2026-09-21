@@ -182,6 +182,7 @@ export default async function OpportunitiesPage({
       ageLabel: ageLabel(r.createdAt, nowMs),
       href: r.kind === "lead" ? `/leads?lead=${r.id}` : `/quotes?id=${r.id}`,
       canMoveTo: allowedMoves(r),
+      promptOnMoveTo: r.kind === "lead" ? ["collect"] : [],
     };
   };
   const cards = filtered

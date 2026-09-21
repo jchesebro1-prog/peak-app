@@ -2656,3 +2656,56 @@ the repo as generated iOS + Android projects plus `capacitor.config.ts`.
   Native-only integrations must stay behind `src/lib/platform.ts` so browser
   builds remain unchanged. BLE, camera, push, signing, and store submission
   remain later phases and require device/account decisions.
+
+## D140. Merge-regenerated migrations are written idempotently (2026-09-21)
+
+`0018_clever_maverick` — the migration drizzle-kit regenerated when
+`session/pensive-swift-b0f7` merged into main — failed on the production
+deploy of 45a7614 with a bare `Command failed: npx drizzle-kit migrate`.
+
+Cause: on Vercel, `DATABASE_URL` is scoped to **Production, Preview and
+Development** — one Neon database for all three. Every green preview build
+runs `npm run build`, so it runs `scripts/migrate.mjs` against the live
+production database. The session branch's preview deploys had therefore
+already applied its own `0017_neat_killmonger`…`0021_true_dark_phoenix`,
+creating `grid_catalog`, `subassemblies`, `sites.location_name`,
+`users.last_login_at` and `users.previous_login_at` in production weeks
+before main knew about them. The merge re-expressed that same DDL as one
+new migration with a later `when`, and drizzle selects work by timestamp
+(`drizzle-orm/pg-core/dialect.js`: `created_at < folderMillis`), not by
+content — so it ran `CREATE TABLE "grid_catalog"` against a table that
+already existed and died on 42P07.
+
+Decisions taken:
+
+- **The migration is hand-edited to `IF NOT EXISTS` DDL** rather than
+  repaired by hand-inserting bookkeeping rows into Neon. The same file is
+  then correct against both the production database that already has the
+  objects and a fresh one (`db:reset-local`, CI, a new Neon branch), and it
+  survives the partially-applied state a failed run can leave behind. It is
+  safe to edit in place because the migration was never recorded as applied
+  anywhere: production failed on it, and local PGlite is disposable.
+- **The dropped `seq` triggers are restored in the same migration.**
+  drizzle-kit does not manage triggers, so regenerating these two tables
+  from `schema.ts` silently lost the `BEFORE UPDATE ..._seq_bump` triggers
+  the session branch had written by hand. Any fresh database built from
+  main would have had a stale `seq` on both collections, which breaks
+  pull-sync's `WHERE seq > cursor` exactly as 0012 and 0014 describe —
+  a data bug with no visible symptom until a client silently stops seeing
+  changes. Postgres has no `CREATE TRIGGER IF NOT EXISTS`, so these are
+  written drop-then-create.
+- **`scripts/migrate.mjs` calls drizzle-orm's migrator directly** instead of
+  shelling out to `npx drizzle-kit migrate`. Identical bookkeeping (drizzle-kit
+  drives that same code path), but drizzle-kit renders the failure inside its
+  spinner and exits 1 with empty stdout/stderr — the deploy was undiagnosable
+  for a full cycle. The real Postgres code, message and failing statement now
+  reach the build log.
+- **Not changed, needs Jeff:** preview and development deployments still write
+  to the production database. That sharing is what let an unmerged branch
+  migrate production, and it also means any preview app is reading and writing
+  live records. Giving Preview/Development their own Neon branch is a Vercel
+  environment-variable change on the account, so it is left for Jeff to make.
+
+`scripts/diagnose-prod-migrations.mjs` (read-only) prints what the target
+database believes is applied and whether a pending migration's objects already
+exist — run it before trusting a migration against production.

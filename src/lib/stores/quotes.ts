@@ -85,6 +85,14 @@ export type Quote = {
   /** Canonical Customers-directory link (null when unlinked, e.g. Harbor Rep). */
   customerId: string | null;
   locationId: string | null;
+  /** Customer-facing letter header fields captured by the estimator intake. */
+  contactName?: string;
+  quoteNote?: string;
+  scopeNarrative?: string;
+  quoteBasis?: string;
+  preparedBy?: string;
+  assumptions?: string;
+  termsText?: string;
   value: number;
   margin: number;
   /** Customer pricing tier stamped at creation (item 11, D87) — resolved
@@ -115,6 +123,7 @@ export type Quote = {
   owner: string;
   /** Estimator/Quick Design spec subdoc. */
   spec?: unknown;
+  vendorQuotes?: unknown;
   /** Non-binding portal acceptance (IDEAS #47 P3): a customer accepted this
    *  quote in the portal. Purely a follow-up flag — the team confirms by
    *  marking the quote Won, which runs the normal spawn machinery. */
@@ -331,6 +340,13 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     customer: partial.customer || "",
     customerId: partial.customerId || null,
     locationId: partial.locationId || null,
+    contactName: partial.contactName || "",
+    quoteNote: partial.quoteNote || "",
+    scopeNarrative: partial.scopeNarrative || "",
+    quoteBasis: partial.quoteBasis || "",
+    preparedBy: partial.preparedBy || partial.owner || "",
+    assumptions: partial.assumptions || "",
+    termsText: partial.termsText || "",
     value: Math.round(partial.value || 0),
     margin: partial.margin || 0,
     pricingTier: partial.pricingTier ?? null,

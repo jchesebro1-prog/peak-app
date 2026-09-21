@@ -417,7 +417,7 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
  * Grid" and the standalone index it pointed at is gone. */
 const DESIGN_CHILDREN = [
   "designoverview", "engagements", "designs",
-  "steel", "lineset", "assemblies", "motors", "fixtures",
+  "steel", "lineset", "assemblies", "motors", "fixtures", "subassemblies",
 ];
 ok(
   !!designGroup && designGroup.kind === "group" &&

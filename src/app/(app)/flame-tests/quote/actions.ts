@@ -14,7 +14,7 @@ import { getRates, setRates, compute, type FlameTestVenueInput } from "@/lib/fla
 import { getTravelRates } from "@/lib/stores/pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
-import { coordsOf, nearest } from "@/lib/geo";
+import { coordsOf, quoteOrigin } from "@/lib/geo";
 
 /**
  * Flame-test quote mutations (server port of Flame Test Quote.dc.html
@@ -82,8 +82,7 @@ async function persist(formData: FormData): Promise<string | null> {
 
   const settings = await getSettings();
   const offices = Array.isArray(settings.offices) ? settings.offices : [];
-  const firstCoords = venueInputs.map((v) => v.coords).find((c) => c && c.lat != null) || null;
-  const office = (firstCoords ? nearest(offices, firstCoords) : null) || offices[0] || null;
+  const office = quoteOrigin(offices);
 
   const travelRates = await getTravelRates();
   const r = compute({ office: office || undefined, venues: venueInputs }, rates, travelRates);
@@ -103,7 +102,9 @@ async function persist(formData: FormData): Promise<string | null> {
     : null;
 
   const payload = {
-    name: quoteName || custName + " — Flame test",
+    name:
+      quoteName ||
+      `${venueInputs[0]?.label || custName} — Flame Test ${new Date().getFullYear()}`,
     customer: custName,
     customerId: customerId || null,
     locationId: venueInputs[0].id ?? null,

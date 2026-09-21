@@ -24,7 +24,7 @@ export type CatalogParse = {
 };
 
 const ALIASES: Record<keyof Omit<CatalogRow, "valid">, string[]> = {
-  sku: ["sku", "item", "itemnumber", "item number", "part", "partnumber", "part number", "partno", "itemno", "code", "catalog"],
+  sku: ["sku", "item", "itemnumber", "item number", "part", "partnumber", "part number", "partno", "itemno", "code", "catalog", "mfrpn", "mfr part", "mfrpart", "manufacturer part number", "manufacturer pn"],
   desc: ["description", "desc", "productdescription", "product description", "name", "itemdescription", "item description", "product"],
   category: ["category", "cat", "productfamily", "product family", "family", "group", "class"],
   unit: ["unit", "uom", "units", "u/m", "um"],

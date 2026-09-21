@@ -312,6 +312,7 @@ export async function saveOfficeAction(input: {
   phone?: string;
   lat?: number | string | null;
   lng?: number | string | null;
+  timezone?: string;
 }) {
   await requirePerm("manage_users");
   const name = (input.name || "").trim();
@@ -355,8 +356,10 @@ export async function saveOfficeAction(input: {
     phone: (input.phone || "").trim(),
     lat,
     lng,
+    timezone: (input.timezone || "America/Chicago").trim() || "America/Chicago",
   };
   if (isNew) {
+    if (!offices.some((o) => o.quoteDefault)) clean.quoteDefault = true;
     offices.push(clean);
   } else {
     const i = offices.findIndex((o) => o.id === input.id);
@@ -374,7 +377,21 @@ export async function removeOfficeAction(id: string) {
   const offices = (Array.isArray(settings.offices) ? settings.offices : []).filter(
     (o) => o.id !== id
   );
+  if (offices.length && !offices.some((o) => o.quoteDefault)) offices[0].quoteDefault = true;
   await setSettings({ offices });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+export async function setDefaultQuoteOfficeAction(id: string) {
+  await requirePerm("manage_users");
+  const settings = await getSettings();
+  const current = Array.isArray(settings.offices) ? settings.offices : [];
+  if (!current.some((o) => o.id === id))
+    return { ok: false as const, error: "Location not found." };
+  await setSettings({
+    offices: current.map((o) => ({ ...o, quoteDefault: o.id === id })),
+  });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

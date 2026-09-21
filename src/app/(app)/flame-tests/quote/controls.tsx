@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { venueTravelAction, type VenueTravel } from "../../quote-builder-travel";
 import type { CSSProperties } from "react";
 import { saveFlameQuote, approveFlameQuote } from "./actions";
+import { CustomerCombobox } from "@/components/customer-combobox";
 
 /**
  * QuoteBuilder — the auto-priced flame-test quote estimator (client port of
@@ -38,7 +39,7 @@ export type BuilderCustomer = {
   /** Company-level tier margin fraction (item 11, D88); null → Base/global. */
   tierMargin?: number | null;
 };
-export type BuilderOffice = { name: string; lat: number | null; lng: number | null };
+export type BuilderOffice = { name: string; lat: number | null; lng: number | null; quoteDefault?: boolean };
 export type BuilderRates = {
   mileageRate: number;
   laborRate: number;
@@ -97,19 +98,6 @@ function driveMinutes(a: Coords | BuilderOffice, b: Coords | BuilderOffice): num
   const mi = driveMiles(a, b);
   return mi == null ? null : Math.round((mi / 50) * 60);
 }
-function nearestOffice(offices: BuilderOffice[], target: Coords): BuilderOffice | null {
-  let best: BuilderOffice | null = null;
-  let bestD = Infinity;
-  offices.forEach((o) => {
-    const d = haversine(o, target);
-    if (d != null && d < bestD) {
-      bestD = d;
-      best = o;
-    }
-  });
-  return best;
-}
-
 type PerVenue = { id: string; label: string; curtains: number; laborCost: number };
 type Trip = {
   miles: number;
@@ -243,14 +231,12 @@ export function QuoteBuilder({
   offices,
   rates: baseRates,
   initial,
-  me,
   accent,
 }: {
   customers: BuilderCustomer[];
   offices: BuilderOffice[];
   rates: BuilderRates;
   initial: BuilderInitial;
-  me: string;
   accent: string;
 }) {
   const [customerId, setCustomerId] = useState(initial.customerId);
@@ -258,6 +244,7 @@ export function QuoteBuilder({
     customers.find((c) => c.id === initial.customerId)?.name || ""
   );
   const [quoteName, setQuoteName] = useState(initial.quoteName);
+  const quoteNameManual = useRef(!!initial.editingId);
   const [venueSel, setVenueSel] = useState(initial.venueSel);
   const [contactSel, setContactSel] = useState(initial.contactSel);
   const [contactManual, setContactManual] = useState(initial.contactManual);
@@ -307,6 +294,14 @@ export function QuoteBuilder({
   };
   const contacts = customer?.contacts || [];
 
+  function automaticQuoteName(c: BuilderCustomer | null, sel: Record<string, { on: boolean }>): string {
+    if (!c) return "";
+    const picked = c.locations.filter((l) => sel[l.id]?.on);
+    const venue = picked[0]?.label || c.locations[0]?.label || c.name;
+    const suffix = picked.length > 1 ? ` + ${picked.length - 1} venue${picked.length === 2 ? "" : "s"}` : "";
+    return `${venue}${suffix} — Flame Test ${new Date().getFullYear()}`;
+  }
+
   function pickCustomer(id: string) {
     ensureVenueTravel(id);
     const c = customers.find((x) => x.id === id) || null;
@@ -327,8 +322,8 @@ export function QuoteBuilder({
         setMarginPts(Math.round(seeded * 100));
     }
     setVenueSel(sel);
-    const namedVenue = locs.find((l) => sel[l.id]?.on)?.label || "";
-    setQuoteName(c ? `${namedVenue || c.name} ${new Date().getFullYear()}` : "");
+    quoteNameManual.current = false;
+    setQuoteName(automaticQuoteName(c, sel));
     setContactSel(primary ? primary.name : "");
     setContactManual("");
     setSavedFlag(false);
@@ -336,7 +331,9 @@ export function QuoteBuilder({
   function toggleVenue(locId: string) {
     setVenueSel((prev) => {
       const cur = prev[locId] || { on: false, curtains: "" };
-      return { ...prev, [locId]: { ...cur, on: !cur.on } };
+      const next = { ...prev, [locId]: { ...cur, on: !cur.on } };
+      if (!quoteNameManual.current) setQuoteName(automaticQuoteName(customer, next));
+      return next;
     });
     dirty();
     const loc = locations.find((l) => l.id === locId);
@@ -371,8 +368,7 @@ export function QuoteBuilder({
       oneWayMin: l.oneWayMin,
     }));
   const hasCustomer = !!customer;
-  const firstCoords = selectedVenues.map((v) => v.coords).find((c) => c && c.lat != null) || null;
-  const office = (firstCoords ? nearestOffice(offices, firstCoords) : null) || offices[0] || null;
+  const office = offices.find((o) => o.quoteDefault) || offices[0] || null;
   const r =
     hasCustomer && selectedVenues.length
       ? computePricing(office, selectedVenues, liveRates)
@@ -529,28 +525,20 @@ export function QuoteBuilder({
           >
             <div>
               <label style={LABEL}>Customer</label>
-              <input
-                list="flame-test-customers"
-                value={customerQuery}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setCustomerQuery(value);
-                  const match = customers.find((c) => c.name.toLowerCase() === value.trim().toLowerCase());
-                  if (match && match.id !== customerId) pickCustomer(match.id);
-                  else if (!value.trim()) pickCustomer("");
-                }}
-                onBlur={() => {
-                  const match = customers.find((c) => c.name.toLowerCase() === customerQuery.trim().toLowerCase());
-                  if (match) pickCustomer(match.id);
-                  else if (customerId) setCustomerQuery(customer?.name || "");
-                }}
-                placeholder="Type to find a customer…"
-                autoComplete="off"
-                style={{ ...FIELD, fontWeight: 600 }}
+              <CustomerCombobox
+                options={customers.map((c) => ({
+                  id: c.id,
+                  name: c.name,
+                  detail: c.locations.length
+                    ? c.locations.map((l) => l.label).slice(0, 3).join(" · ")
+                    : "No venues on file",
+                  searchText: c.locations.map((l) => `${l.label} ${l.city} ${l.state}`).join(" "),
+                }))}
+                value={customerId}
+                onChange={pickCustomer}
+                placeholder="Search customer or venue…"
+                inputStyle={{ ...FIELD, fontWeight: 600 }}
               />
-              <datalist id="flame-test-customers">
-                {customers.map((c) => <option key={c.id} value={c.name} />)}
-              </datalist>
             </div>
             <div>
               <label style={LABEL}>Quote name</label>
@@ -558,9 +546,10 @@ export function QuoteBuilder({
                 value={quoteName}
                 onChange={(e) => {
                   setQuoteName(e.target.value);
+                  quoteNameManual.current = true;
                   dirty();
                 }}
-                placeholder="e.g. Lakefront PAC — Annual flame test"
+                placeholder={`Venue — Flame Test ${new Date().getFullYear()}`}
                 style={FIELD}
               />
             </div>

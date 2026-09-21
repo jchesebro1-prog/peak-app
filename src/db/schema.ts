@@ -45,6 +45,8 @@ export const users = pgTable("users", {
   mobile: text("mobile"),
   officeId: text("office_id"),
   certifications: text("certifications"),
+  lastLoginAt: bigint("last_login_at", { mode: "number" }),
+  previousLoginAt: bigint("previous_login_at", { mode: "number" }),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   photoUrl: text("photo_url"),
 });
@@ -239,6 +241,8 @@ export const sites = pgTable(
     id: text("id").primaryKey(), // 'st-<companyId>-<n>' (deterministic in convert)
     companyId: text("company_id").notNull(), // the owning organization (§4.4)
     name: text("name").notNull().default(""),
+    /** Optional campus/building grouping above the venue/space name. */
+    locationName: text("location_name"),
     /** The per-customer location id docs already store ('loc1', …). Composed
      *  CustomerLocation.id returns this when present so stored locationId
      *  values and `${customerId}|${locationId}` keys keep matching (D85). */

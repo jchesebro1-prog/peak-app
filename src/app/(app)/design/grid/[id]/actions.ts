@@ -25,6 +25,7 @@ import {
   setScopeInputs,
   setSheetCalibration,
   setVenue,
+  saveGridIntake,
 } from "@/lib/stores/grid-projects";
 import { can } from "@/lib/team";
 import { getAllDesigns, removeDesign } from "@/lib/stores/designs";
@@ -33,6 +34,8 @@ import { resolveTier } from "@/lib/pricing-tiers";
 import { isTierPriced } from "@/lib/tier-pricing";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
+import { createGridAssembly, listGridSymbols } from "@/lib/stores/grid-catalog";
+import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import {
   bomLines,
   bomTotals,
@@ -48,6 +51,7 @@ import { isFabricRow, priceGridCurtains } from "@/lib/design/grid-curtains";
 import { polygonArea } from "@/lib/design/grid-geometry";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
+import type { AState } from "@/app/(app)/design/quick/engine";
 
 /** The Grid editor server actions (D108). */
 
@@ -55,6 +59,53 @@ type Result = { ok: true } | { ok: false; error: string };
 
 function editorPath(projectId: string): string {
   return `/design/grid/${encodeURIComponent(projectId)}`;
+}
+
+async function partForGrid(id: string) {
+  const priced = await getPart(id);
+  if (priced) return priced;
+  const symbol = await getGridSymbol(id);
+  return symbol ? { ...symbol, sku: symbol.modelNumber || symbol.id, unit: "ea" } : null;
+}
+
+export async function createGridAssemblyAction(input: {
+  name: string;
+  manufacturer: string;
+  modelNumber: string;
+  scope: string;
+  members: Array<{ symbolId: string; qty: number; x: number; y: number }>;
+}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!input.name.trim()) return { ok: false, error: "Name the assembly." };
+  if (!input.members.length) return { ok: false, error: "Choose at least one child symbol." };
+  const assembly = await createGridAssembly({ ...input, by: user.name });
+  revalidatePath("/design/grid");
+  return { ok: true, id: assembly.id };
+}
+
+export async function saveGridIntakeAction(input: {
+  projectId: string;
+  venueName: string;
+  locationName: string;
+  address: string;
+  notes: string;
+  measurementBased: boolean;
+  autoConfig: AState;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  if (!input.venueName.trim() && !input.locationName.trim()) return { ok: false, error: "Add a venue or location to continue." };
+  const saved = await saveGridIntake(input.projectId, {
+    complete: true,
+    measurementBased: !!input.measurementBased,
+    venueName: input.venueName.trim(),
+    locationName: input.locationName.trim(),
+    address: input.address.trim(),
+    notes: input.notes.trim(),
+    autoConfig: input.autoConfig,
+  });
+  if (!saved) return { ok: false, error: "That design could not be found." };
+  revalidatePath(editorPath(input.projectId));
+  return { ok: true };
 }
 
 /** ~8 MB of dataUrl — beyond this a JSONB doc stops being a sane home. */
@@ -329,7 +380,7 @@ export async function addRouteAction(
     return { ok: false, error: "A wire run needs at least two points." };
   if (!(input.aspect > 0) || !Number.isFinite(input.aspect))
     return { ok: false, error: "The sheet hasn't finished loading — try again." };
-  const part = await getPart(input.partId);
+  const part = await partForGrid(input.partId);
   if (!part) return { ok: false, error: "Pick a wire type from the catalog first." };
   if (!isPerLengthUnit(part.unit))
     return { ok: false, error: `${part.sku} is priced per ${part.unit}, not per length — wires need a per-foot part.` };
@@ -349,8 +400,8 @@ export async function addRouteAction(
     const toPlacement = (project.placements || []).find((p) => p.id === input.toPlacementId);
     if (fromPlacement && toPlacement) {
       const [fromPart, toPart] = await Promise.all([
-        getPart(fromPlacement.partId),
-        getPart(toPlacement.partId),
+        partForGrid(fromPlacement.partId),
+        partForGrid(toPlacement.partId),
       ]);
       const bothHavePorts = Boolean(fromPart?.ports?.length && toPart?.ports?.length);
       if (bothHavePorts) {
@@ -512,13 +563,28 @@ export async function createDraftQuoteAction(
   const tier = await resolveTier(project.customerId);
 
   const catalog = await listCatalog();
+  const symbols = await listGridSymbols();
+  const pricingById = new Map(catalog.map((p) => [p.id, p]));
+  // Rebuild a quote-facing catalog from the independent Grid symbols. A
+  // symbol with no pricingPartId is still valid design data; it simply carries
+  // a zero price until someone links a price-book row later.
+  const gridCatalog = symbols.map((s) => {
+    const p = s.pricingPartId ? pricingById.get(s.pricingPartId) : undefined;
+    return p
+      ? { ...p, id: s.id, sku: s.modelNumber || p.sku, desc: s.name }
+      : { id: s.id, sku: s.modelNumber || s.id, desc: s.name, category: s.category, unit: "ea", list: 0, cost: 0, ports: s.ports };
+  });
   // Tier-priced catalog (#63): the same cost ÷ (1 − margin) re-derivation the
   // portal uses for its equipment lines (portal/actions.ts) and
   // customerCatalog() uses for the picker — a part without a usable cost, or
   // a margin outside (0, 1), keeps its plain list price. Devices, wire runs
   // and labor all price off this list below, so the tier margin actually
   // reaches every line, not just curtains.
-  const tierCatalog = catalog.map((p) => ({
+  const tierSource = [
+    ...gridCatalog,
+    ...catalog.filter((p) => (p.role || "").toLowerCase() === "labor"),
+  ];
+  const tierCatalog = tierSource.map((p) => ({
     ...p,
     list: isTierPriced(p.cost, tier.margin)
       ? Math.round((p.cost / (1 - tier.margin)) * 100) / 100
@@ -535,7 +601,7 @@ export async function createDraftQuoteAction(
   // this set — priceGridCurtains prices them straight from cost + margin with
   // no separate "list" to fall back to.
   const fallbackKeys = new Set(
-    catalog.filter((p) => !isTierPriced(p.cost, tier.margin)).flatMap((p) => [p.id, p.sku])
+    gridCatalog.filter((p) => !isTierPriced(p.cost, tier.margin)).flatMap((p) => [p.id, p.sku])
   );
   const isFallbackLine = (l: Pick<BomLine, "partId" | "kind">) =>
     l.kind !== "curtain" && fallbackKeys.has(l.partId);

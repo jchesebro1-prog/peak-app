@@ -79,6 +79,8 @@ export const specSections = docTable("spec_sections"); // CSI bid-spec section t
 export const generatedSpecs = docTable("generated_specs"); // assembled bid specs per engagement (D94)
 export const gridProjects = docTable("grid_projects"); // The Grid system-design projects (D108, no prototype ancestor)
 export const gridSheets = docTable("grid_sheets"); // The Grid plan-sheet backgrounds — heavy dataUrls kept out of the placement-patched project doc (D108)
+export const gridCatalog = docTable("grid_catalog"); // Grid-owned symbols and assemblies, independent of pricing catalog
+export const subassemblies = docTable("subassemblies"); // reusable priced assemblies built from catalog parts
 export const tasks = docTable("tasks"); // cross-record task rows, promoted from embedded ProjectTask[] (#17)
 export const notes = docTable("notes"); // attachable note records — the customer Activity feed's note-taking surface (#21)
 export const equipmentItems = docTable("equipment_items"); // Rentals module — gear catalog + per-location stock (D129, no prototype ancestor)
@@ -105,6 +107,8 @@ export const DOC_TABLES = {
   generated_specs: generatedSpecs,
   grid_projects: gridProjects,
   grid_sheets: gridSheets,
+  grid_catalog: gridCatalog,
+  subassemblies,
   tasks,
   notes,
   equipment_items: equipmentItems,

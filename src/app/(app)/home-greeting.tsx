@@ -12,11 +12,15 @@ export default function HomeGreeting({
   firstName,
   standfirst,
   openReviewCount,
+  lastLogin,
+  timezone,
 }: {
   greeting: string;
   firstName: string;
   standfirst: string;
   openReviewCount: number;
+  lastLogin: string;
+  timezone: string;
 }) {
   return (
     <div
@@ -36,6 +40,10 @@ export default function HomeGreeting({
           {greeting}, {firstName}
         </div>
         <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 4 }}>{standfirst}</div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 7, fontSize: 11.5, color: "#9aa0ab" }}>
+          <span>Last login · {lastLogin}</span>
+          <span>· {timezone}</span>
+        </div>
       </div>
       <div className="pkh-actions" style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <Link

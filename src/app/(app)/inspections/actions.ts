@@ -11,6 +11,7 @@ import {
   unschedule,
 } from "@/lib/stores/inspections";
 import { inspectionRenewalOutreach } from "@/lib/renewal-outreach";
+import { removeServiceCalendar, syncServiceCalendar } from "@/lib/service-calendar";
 
 /**
  * Inspection inbox mutations. `createInspection` mirrors the prototype's
@@ -33,12 +34,26 @@ export async function createInspection(): Promise<void> {
 export async function scheduleInspection(formData: FormData): Promise<void> {
   await requireUser();
   const id = String(formData.get("id") || "");
-  if (!id) return;
+  const assignedTo = String(formData.get("assignedTo") || "");
+  const scheduledDate = String(formData.get("scheduledDate") || "");
+  if (!id || !scheduledDate) return;
+  const rec = await get(id);
+  if (!rec) return;
   await assign(
     id,
-    String(formData.get("assignedTo") || ""),
-    String(formData.get("scheduledDate") || "")
+    assignedTo,
+    scheduledDate
   );
+  await syncServiceCalendar({
+    kind: "inspection",
+    id,
+    assignedTo,
+    previousAssignedTo: rec.assignedTo,
+    date: scheduledDate,
+    title: `${rec.venue || rec.customer} — Rigging inspection`,
+    location: rec.venue || rec.customer,
+    description: `Inspection ${rec.id} · ${rec.customer}`,
+  });
   revalidatePath("/", "layout");
 }
 
@@ -46,6 +61,9 @@ export async function unscheduleInspection(formData: FormData): Promise<void> {
   await requireUser();
   const id = String(formData.get("id") || "");
   if (!id) return;
+  const rec = await get(id);
+  if (!rec) return;
+  await removeServiceCalendar({ kind: "inspection", id, assignedTo: rec.assignedTo });
   await unschedule(id);
   revalidatePath("/", "layout");
 }

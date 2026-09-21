@@ -1,0 +1,122 @@
+import { list as listPricingCatalog, type CatalogPart } from "@/lib/stores/catalog";
+import { listDocs, upsertDoc, insertWithPrefixedId } from "@/db/doc-store";
+import type { Port } from "@/lib/catalog-connect";
+
+/**
+ * Grid's symbol library is intentionally separate from the pricing catalog.
+ * A symbol can exist without a price-book row; `pricingPartId` is only an
+ * optional bridge used when a design is turned into a quote.
+ */
+export type GridAssemblyMember = {
+  symbolId: string;
+  qty: number;
+  x: number;
+  y: number;
+};
+
+export type GridSymbol = {
+  id: string;
+  name: string;
+  manufacturer: string;
+  modelNumber: string;
+  scope: string;
+  category: string;
+  width: number;
+  height: number;
+  ports: Port[];
+  pricingPartId?: string | null;
+  kind?: "device" | "assembly";
+  members?: GridAssemblyMember[];
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+function scopeFor(p: CatalogPart): string {
+  const text = `${p.category} ${p.desc} ${p.discipline || ""}`.toLowerCase();
+  if (text.includes("curtain") || text.includes("fabric")) return "Curtains";
+  if (text.includes("rig") || text.includes("truss")) return "Rigging";
+  if (text.includes("video") || text.includes("sdi") || text.includes("hdmi")) return "Video";
+  if (text.includes("audio") || text.includes("speaker") || text.includes("microphone")) return "Audio";
+  return "Lighting";
+}
+
+function dimensionsFor(p: CatalogPart): { width: number; height: number } {
+  const text = `${p.category} ${p.desc}`.toLowerCase();
+  if (text.includes("speaker") || text.includes("fixture")) return { width: 48, height: 34 };
+  if (text.includes("rack") || text.includes("control")) return { width: 54, height: 38 };
+  return { width: 44, height: 30 };
+}
+
+function fromPricing(p: CatalogPart, by: string): GridSymbol {
+  const d = dimensionsFor(p);
+  return {
+    id: p.id,
+    name: p.desc,
+    manufacturer: p.mfr || "",
+    modelNumber: p.sku,
+    scope: scopeFor(p),
+    category: p.category || "Other",
+    width: d.width,
+    height: d.height,
+    ports: p.ports || [],
+    pricingPartId: p.id,
+    kind: "device",
+    createdBy: by,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+/** Load the independent Grid library, seeding only placeable pricing rows on first use. */
+export async function listGridSymbols(seedBy = "system"): Promise<GridSymbol[]> {
+  const existing = await listDocs<GridSymbol>("grid_catalog");
+  if (existing.length) return existing.sort((a, b) => a.name.localeCompare(b.name));
+  const pricing = await listPricingCatalog();
+  const seed = pricing
+    .filter((p) => p.category !== "Fabric" && p.category !== "Labor")
+    .map((p) => fromPricing(p, seedBy));
+  if (!seed.length) {
+    const t = Date.now();
+    seed.push(
+      { id: "GRID-LGT-PANEL", name: "Lighting control / fixture", manufacturer: "", modelNumber: "GRID-LGT-PANEL", scope: "Lighting", category: "Fixture", width: 48, height: 34, ports: [{ name: "DMX in", direction: "in", connectionType: "DMX512 (5-pin XLR)" }, { name: "DMX thru", direction: "out", connectionType: "DMX512 (5-pin XLR)" }], kind: "device", createdBy: seedBy, createdAt: t, updatedAt: t },
+      { id: "GRID-AUD-SPEAKER", name: "Speaker", manufacturer: "", modelNumber: "GRID-AUD-SPEAKER", scope: "Audio", category: "Speakers", width: 48, height: 34, ports: [{ name: "Audio in", direction: "in", connectionType: "speakON NL4" }], kind: "device", createdBy: seedBy, createdAt: t, updatedAt: t },
+      { id: "GRID-VID-DISPLAY", name: "Video display", manufacturer: "", modelNumber: "GRID-VID-DISPLAY", scope: "Video", category: "Video", width: 54, height: 38, ports: [{ name: "SDI in", direction: "in", connectionType: "SDI/BNC" }, { name: "SDI out", direction: "out", connectionType: "SDI/BNC" }], kind: "device", createdBy: seedBy, createdAt: t, updatedAt: t },
+      { id: "GRID-RIG-MOTOR", name: "Rigging motor", manufacturer: "", modelNumber: "GRID-RIG-MOTOR", scope: "Rigging", category: "Rigging", width: 44, height: 30, ports: [{ name: "Motor power", direction: "in", connectionType: "motor power" }], kind: "device", createdBy: seedBy, createdAt: t, updatedAt: t },
+    );
+  }
+  for (const symbol of seed) await upsertDoc<GridSymbol>("grid_catalog", symbol);
+  return seed.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function getGridSymbol(id: string): Promise<GridSymbol | null> {
+  const symbols = await listGridSymbols();
+  return symbols.find((s) => s.id === id) || null;
+}
+
+export async function createGridAssembly(input: {
+  name: string;
+  manufacturer: string;
+  modelNumber: string;
+  scope: string;
+  members: GridAssemblyMember[];
+  by: string;
+}): Promise<GridSymbol> {
+  const t = Date.now();
+  return insertWithPrefixedId<GridSymbol>("grid_catalog", "GASM", 1, (id) => ({
+    id,
+    name: input.name.trim() || "Untitled assembly",
+    manufacturer: input.manufacturer.trim(),
+    modelNumber: input.modelNumber.trim() || id,
+    scope: input.scope || "Unscoped",
+    category: "Assembly",
+    width: 74,
+    height: 52,
+    ports: [],
+    kind: "assembly",
+    members: input.members,
+    createdBy: input.by,
+    createdAt: t,
+    updatedAt: t,
+  }));
+}

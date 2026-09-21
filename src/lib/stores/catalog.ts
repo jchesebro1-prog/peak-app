@@ -1,4 +1,4 @@
-import { getDoc, listDocs, upsertDoc } from "@/db/doc-store";
+import { clearCollection, getDoc, listDocs, upsertDoc } from "@/db/doc-store";
 import type { Port } from "@/lib/catalog-connect";
 
 /**
@@ -129,4 +129,10 @@ export async function mergeUpsert(
   // the pre-existing `{ ...part, ... } as SpecCatalogPart` pattern in
   // design/engagements/spec/actions.ts.
   return upsert({ ...(existing ?? {}), ...patch, sku } as Omit<CatalogPart, "id"> & { id?: string });
+}
+
+/** Explicit go-live reset for the pricing catalog only. Grid symbols and all
+ * other pricing/rate collections are intentionally untouched. */
+export async function clearCatalogPriceList(): Promise<number> {
+  return clearCollection("catalog_parts");
 }

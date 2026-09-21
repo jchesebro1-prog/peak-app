@@ -28,6 +28,7 @@ const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
 
 type LocRow = {
   id: string;
+  locationName: string;
   label: string;
   primary: boolean;
   address: string;
@@ -92,6 +93,7 @@ function newLoc(primary: boolean): LocRow {
   return {
     id: "l" + Date.now() + "-" + uid,
     label: "",
+    locationName: "",
     primary,
     address: "",
     city: "",
@@ -153,6 +155,7 @@ export default function EditCustomerModal({
     return src.map((l, i) => ({
       id: l.id || "l" + i,
       label: l.label || "",
+      locationName: l.locationName || "",
       primary: i === 0 ? l.primary || !src.some((x) => x.primary) : l.primary,
       address: l.address || "",
       city: l.city || "",
@@ -295,6 +298,7 @@ export default function EditCustomerModal({
         custom,
         locations: locations.map((l) => ({
           id: l.id,
+          locationName: l.locationName,
           label: l.label,
           primary: l.primary,
           address: l.address,
@@ -606,6 +610,14 @@ export default function EditCustomerModal({
 
           {locations.map((l, i) => (
             <div key={l.id} style={cardStyle}>
+              <label style={{ ...microLbl, fontSize: 9.5, marginBottom: 5 }}>Location / campus</label>
+              <input
+                className="cu-m-in"
+                value={l.locationName}
+                onChange={(e) => setLoc(i, { locationName: e.target.value })}
+                placeholder="e.g. High School"
+                style={{ ...inStyle, fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 9 }}
+              />
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
                 <input
                   className="cu-m-in"

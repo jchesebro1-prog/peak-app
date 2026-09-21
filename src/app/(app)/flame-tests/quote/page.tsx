@@ -36,7 +36,7 @@ export default async function FlameTestQuotePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, customerDocs, rates, settings] = await Promise.all([
+  const [, sp, customerDocs, rates, settings] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
@@ -88,6 +88,7 @@ export default async function FlameTestQuotePage({
     name: o.name || "",
     lat: o.lat,
     lng: o.lng,
+    quoteDefault: !!o.quoteDefault,
   }));
 
   /* ---- initial builder state (edit an existing quote, or preselect a customer) ---- */
@@ -148,11 +149,14 @@ export default async function FlameTestQuotePage({
       if (locs.length && !locs.some((l) => venueSel[l.id]?.on)) {
         venueSel[locs[0].id] = { ...venueSel[locs[0].id], on: true };
       }
+      const picked = locs.filter((l) => venueSel[l.id]?.on);
+      const venueName = picked[0]?.label || locs[0]?.label || cust.name;
+      const venueSuffix = picked.length > 1 ? ` + ${picked.length - 1} venue${picked.length === 2 ? "" : "s"}` : "";
       const primary = cust.contacts.find((c) => c.primary) || cust.contacts[0] || null;
       initial = {
         editingId: null,
         customerId: cust.id,
-        quoteName: `${locs.find((l) => venueSel[l.id]?.on)?.label || cust.name} ${new Date().getFullYear()}`,
+        quoteName: `${venueName}${venueSuffix} — Flame Test ${new Date().getFullYear()}`,
         venueSel,
         contactSel: primary ? primary.name : "",
         contactManual: "",
@@ -184,7 +188,6 @@ export default async function FlameTestQuotePage({
       offices={offices}
       rates={rates}
       initial={initial}
-      me={user.name}
       accent={settings.accent || "#7b3f8a"}
     />
   );

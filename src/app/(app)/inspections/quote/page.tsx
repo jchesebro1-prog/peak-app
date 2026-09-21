@@ -97,6 +97,7 @@ export default async function InspectionQuotePage({
     name: o.name || "",
     lat: o.lat,
     lng: o.lng,
+    quoteDefault: !!o.quoteDefault,
   }));
 
   /* ---- initial builder state (edit / preselected customer) ---- */

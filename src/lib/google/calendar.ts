@@ -261,3 +261,65 @@ export async function deleteEvent(mailboxKey: string, eventId: string): Promise<
     throw new Error("Calendar API delete → " + res.status + " " + (await res.text()));
   }
 }
+
+/* ---- app-managed scheduler events -------------------------------------
+ * Idempotent all-day events the app owns end to end (service-calendar.ts
+ * mirrors flame/repair/inspection jobs into Google). Distinct from the CRUD
+ * above, which edits events the user authored in Google Calendar. */
+
+type ManagedEvent = {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD, rendered as an all-day scheduler item
+  description?: string;
+  location?: string;
+};
+
+function nextIsoDay(date: string): string {
+  const d = new Date(date + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Idempotent calendar write for app-managed scheduler records. */
+export async function upsertManagedEvent(mailboxKey: string, ev: ManagedEvent): Promise<void> {
+  const body = {
+    id: ev.id,
+    summary: ev.title,
+    description: ev.description || undefined,
+    location: ev.location || undefined,
+    start: { date: ev.date },
+    end: { date: nextIsoDay(ev.date) },
+  };
+  try {
+    await gcal<GoogleEvent>(mailboxKey, "/calendars/primary/events", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    if ((err as { status?: number }).status !== 409) throw err;
+    const patch = {
+      summary: body.summary,
+      description: body.description,
+      location: body.location,
+      start: body.start,
+      end: body.end,
+    };
+    await gcal<GoogleEvent>(
+      mailboxKey,
+      "/calendars/primary/events/" + encodeURIComponent(ev.id),
+      { method: "PATCH", body: JSON.stringify(patch) }
+    );
+  }
+}
+
+export async function removeManagedEvent(mailboxKey: string, eventId: string): Promise<void> {
+  try {
+    await gcal<void>(mailboxKey, "/calendars/primary/events/" + encodeURIComponent(eventId), {
+      method: "DELETE",
+    });
+  } catch (err) {
+    if ((err as { status?: number }).status !== 404 && (err as { status?: number }).status !== 410)
+      throw err;
+  }
+}

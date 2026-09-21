@@ -84,6 +84,8 @@ export async function addUser(partial: {
     mobile: (partial.mobile || "").trim() || null,
     officeId: (partial.officeId || "").trim() || null,
     certifications: (partial.certifications || "").trim() || null,
+    lastLoginAt: null,
+    previousLoginAt: null,
     createdAt: Date.now(),
     photoUrl: null,
   };
@@ -127,6 +129,8 @@ export async function updateUser(
       | "mobile"
       | "officeId"
       | "certifications"
+      | "lastLoginAt"
+      | "previousLoginAt"
     >
   >
 ): Promise<void> {

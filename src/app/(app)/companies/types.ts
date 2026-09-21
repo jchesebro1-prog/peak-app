@@ -5,6 +5,7 @@
 
 export type LocationInput = {
   id?: string;
+  locationName?: string;
   label: string;
   primary: boolean;
   address: string;

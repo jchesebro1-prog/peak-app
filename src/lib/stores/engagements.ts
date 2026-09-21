@@ -398,8 +398,11 @@ export type ConsultingQuotePayload = {
   assumptions?: string[];
   /** #35 auto-lead: the open lead this proposal logged against / created. */
   leadId?: string | null;
-  /** The venue/location organization; customerId on the quote is the billing architect. */
+  /** The venue/location organization; customerId on the quote is the billing
+   *  architect. venueCustomer is its display name, captured alongside the id
+   *  so the engagement can label the venue without a customers lookup. */
   venueCustomerId?: string | null;
+  venueCustomer?: string;
 };
 
 type QuoteLike = {
@@ -440,7 +443,7 @@ function fromQuote(
   const companyId = pay?.venueCustomerId || q.customerId || null;
   return {
     name: q.name || "Consulting engagement",
-    customer: q.customer || "",
+    customer: pay?.venueCustomer || q.customer || "",
     companyId,
     siteIds: q.locationId ? [q.locationId] : [],
     contactName,
@@ -448,7 +451,7 @@ function fromQuote(
     quoteId: q.id,
     designIds: [],
     installQuoteId: null,
-    architect: null,
+    architect: q.customer ? { company: q.customer, contact: contactName } : null,
     status,
     phases,
     milestones,

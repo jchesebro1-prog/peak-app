@@ -19,7 +19,7 @@ import {
 import { resolveTier } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
-import { coordsOf, nearest, driveMiles, driveMinutes } from "@/lib/geo";
+import { coordsOf, quoteOrigin, driveMiles, driveMinutes } from "@/lib/geo";
 
 /**
  * Inspection quote mutations (inspection twin of the flame-test / repair
@@ -91,8 +91,7 @@ async function persist(formData: FormData): Promise<string | null> {
 
   const settings = await getSettings();
   const offices = Array.isArray(settings.offices) ? settings.offices : [];
-  const firstCoords = venueInputs.map((v) => v.coords).find((c) => c && c.lat != null) || null;
-  const office = (firstCoords ? nearest(offices, firstCoords) : null) || offices[0] || null;
+  const office = quoteOrigin(offices);
 
   // same offline haversine tier the client inlines, so the saved value
   // matches the live preview — but bound to the LIVE Estimating Rules
