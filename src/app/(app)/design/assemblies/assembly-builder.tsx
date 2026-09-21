@@ -6,12 +6,27 @@ import {
   ASSEMBLY_ROLES,
   type AssemblyRole,
   type FixtureAssembly,
+  type FixtureAssemblyComponent,
 } from "@/lib/fixture-assemblies";
 import { saveFixtureAssembliesAction, searchAssemblyCatalogAction } from "./actions";
 
 type Hit = { sku: string; desc: string; category: string; cost: number; list: number };
 
 const input: React.CSSProperties = { width: "100%", border: "1px solid #dfe2e8", borderRadius: 8, padding: "9px 10px", font: "inherit" };
+
+/** Section = one role, picked via its own search box. Light engine/lens are
+ *  exclusive (radio); everything else stacks (checkbox) so a tech can build
+ *  a whole fixture's cabling/hardware without the results list clearing
+ *  between picks. */
+const ROLE_SECTIONS: { role: AssemblyRole; label: string; multi: boolean }[] = [
+  { role: "fixture", label: "Light engine", multi: false },
+  { role: "lens", label: "Lens", multi: false },
+  { role: "power", label: "Power cable", multi: true },
+  { role: "data", label: "Data cable", multi: true },
+  { role: "accessory", label: "Accessories", multi: true },
+  { role: "mount", label: "Clamps", multi: true },
+  { role: "cable", label: "Safety cable", multi: true },
+];
 
 export default function AssemblyBuilder({ initial }: { initial: FixtureAssembly[] }) {
   const [assemblies, setAssemblies] = useState(initial);
@@ -24,10 +39,20 @@ export default function AssemblyBuilder({ initial }: { initial: FixtureAssembly[
     setSaved(false);
     setAssemblies((all) => all.map((assembly) => assembly.id === id ? { ...assembly, ...change } : assembly));
   };
-  const search = (id: string) => startTransition(async () => {
-    const result = await searchAssemblyCatalogAction(query[id] || "");
-    setHits((all) => ({ ...all, [id]: result }));
+  const search = (key: string) => startTransition(async () => {
+    const result = await searchAssemblyCatalogAction(query[key] || "");
+    setHits((all) => ({ ...all, [key]: result }));
   });
+  const toggleSection = (assembly: FixtureAssembly, role: AssemblyRole, hit: Hit, multi: boolean) => {
+    const already = assembly.components.some((c) => c.role === role && c.sku === hit.sku);
+    const kept = multi
+      ? assembly.components.filter((c) => !(c.role === role && c.sku === hit.sku))
+      : assembly.components.filter((c) => c.role !== role);
+    const next: FixtureAssemblyComponent[] = already
+      ? kept
+      : kept.concat({ sku: hit.sku, label: hit.desc, role, defaultQty: 1 });
+    patch(assembly.id, { components: next });
+  };
   const save = () => startTransition(async () => {
     const result = await saveFixtureAssembliesAction(assemblies);
     setAssemblies(result.fixtureAssemblies);
@@ -62,11 +87,66 @@ export default function AssemblyBuilder({ initial }: { initial: FixtureAssembly[
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-            <input value={query[assembly.id] || ""} onChange={(event) => setQuery((all) => ({ ...all, [assembly.id]: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") search(assembly.id); }} placeholder="Search catalog by SKU, item, manufacturer, or category" style={input} />
-            <button className="pk-btn" disabled={pending} onClick={() => search(assembly.id)}>Search</button>
+          <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+            {ROLE_SECTIONS.map((section) => {
+              const key = `${assembly.id}:${section.role}`;
+              const selected = assembly.components.filter((c) => c.role === section.role);
+              return (
+                <div key={section.role} style={{ border: "1px solid #e4e7ec", borderRadius: 9, padding: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 650, marginBottom: 6 }}>
+                    {section.label}
+                    <span style={{ fontWeight: 400, color: "#8c919c" }}>{section.multi ? " · pick any" : " · pick one"}</span>
+                  </div>
+                  {!!selected.length && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+                      {selected.map((c) => (
+                        <span key={c.sku} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#f2f4f7", borderRadius: 999, padding: "3px 8px 3px 10px", fontSize: 11.5 }}>
+                          {c.label}
+                          <button
+                            type="button"
+                            aria-label={`Remove ${c.label}`}
+                            onClick={() => patch(assembly.id, { components: assembly.components.filter((x) => x !== c) })}
+                            style={{ border: 0, background: "none", cursor: "pointer", color: "#8c919c", fontSize: 13, lineHeight: 1 }}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      value={query[key] || ""}
+                      onChange={(event) => setQuery((all) => ({ ...all, [key]: event.target.value }))}
+                      onKeyDown={(event) => { if (event.key === "Enter") search(key); }}
+                      placeholder={`Search ${section.label.toLowerCase()}…`}
+                      style={{ ...input, padding: "7px 9px", fontSize: 12.5 }}
+                    />
+                    <button className="pk-btn" disabled={pending} onClick={() => search(key)} style={{ padding: "7px 10px", fontSize: 12.5 }}>Go</button>
+                  </div>
+                  {!!hits[key]?.length && (
+                    <div style={{ border: "1px solid #eef0f3", borderRadius: 8, marginTop: 6, overflow: "hidden", maxHeight: 220, overflowY: "auto" }}>
+                      {hits[key].map((hit) => {
+                        const checked = selected.some((c) => c.sku === hit.sku);
+                        return (
+                          <label key={hit.sku} style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid #f0f1f4", background: checked ? "#f7f9fc" : "#fff", padding: "7px 9px", cursor: "pointer" }}>
+                            <input
+                              type={section.multi ? "checkbox" : "radio"}
+                              name={section.multi ? undefined : key}
+                              checked={checked}
+                              onChange={() => toggleSection(assembly, section.role, hit, section.multi)}
+                            />
+                            <span style={{ fontSize: 12, flex: 1 }}><b>{hit.sku}</b> · {hit.desc}</span>
+                            <span style={{ fontSize: 11.5, color: "#8c919c" }}>${hit.list.toFixed(2)}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          {!!hits[assembly.id]?.length && <div style={{ border: "1px solid #e4e7ec", borderRadius: 9, marginTop: 8, overflow: "hidden" }}>{hits[assembly.id].map((hit) => <button key={hit.sku} type="button" onClick={() => { patch(assembly.id, { components: assembly.components.concat({ sku: hit.sku, label: hit.desc, role: "accessory", defaultQty: 1 }) }); setHits((all) => ({ ...all, [assembly.id]: [] })); }} style={{ width: "100%", display: "flex", justifyContent: "space-between", gap: 12, border: 0, borderBottom: "1px solid #f0f1f4", background: "#fff", padding: "10px 12px", textAlign: "left", cursor: "pointer" }}><span><b>{hit.sku}</b> · {hit.desc}</span><span style={{ color: "#8c919c" }}>${hit.list.toFixed(2)}</span></button>)}</div>}
         </section>
       ))}
     </div>
