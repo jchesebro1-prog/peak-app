@@ -279,11 +279,11 @@ export type SharedBoxMeta = {
   desc: string;
 };
 
-export const SHARED_BOXES: SharedBoxMeta[] = [
-  { id: "sales",    label: "Sales",    local: "sales",    color: "#3155a8", desc: "Quotes, bids & customer questions" },
-  { id: "installs", label: "Installs", local: "installs", color: "#2f6f4f", desc: "Projects, scheduling & field coordination" },
-  { id: "info",     label: "Info",     local: "info",     color: "#8a6d1f", desc: "General inbound — the address on the website" },
-];
+// Shared mailboxes (sales/installs/info) were retired — the Inbox is one
+// person's real Gmail account, nothing else. The ids stay in MailboxId so
+// legacy threads written against them remain readable, but no mailbox, folder
+// or sidebar entry is created for them any more.
+export const SHARED_BOXES: SharedBoxMeta[] = [];
 
 function sharedMeta(id: string): SharedBoxMeta | null {
   return SHARED_BOXES.find((b) => b.id === id) || null;
@@ -337,14 +337,13 @@ export function forwardAddress(domain = DEFAULT_DOMAIN): string {
 
 // is a thread part of the mailbox `boxId` as seen by `me`?
 function inBox(t: CommThread, boxId: string, me: string): boolean {
-  if (boxId === "personal")
-    return t.mailbox === "personal" && t.mailboxUser === me;
-  return t.mailbox === boxId;
+  return boxId === "personal" && t.mailbox === "personal" && t.mailboxUser === me;
 }
 
-// every thread the current user can see: their own personal + all shared
+// Every thread the current user can see. Legacy shared-mailbox threads stay
+// stored for history but are no longer part of the active Inbox.
 function visibleTo(t: CommThread, me: string): boolean {
-  return t.mailbox !== "personal" || t.mailboxUser === me;
+  return t.mailbox === "personal" && t.mailboxUser === me;
 }
 
 export type MailboxInfo = {
@@ -359,10 +358,16 @@ export type MailboxInfo = {
   desc?: string; // shared only
 };
 
-export function mailboxes(
-  me?: string,
-  opts: { domain?: string; userColor?: string } = {}
-): MailboxInfo[] {
+/** Options for the mailbox helpers. `personalAddress` is the address Google
+ *  actually authorized (gmail_connections.address) — always prefer it over the
+ *  name+domain guess, which is only a placeholder for an unconnected box. */
+export type MailboxOpts = {
+  domain?: string;
+  userColor?: string;
+  personalAddress?: string;
+};
+
+export function mailboxes(me?: string, opts: MailboxOpts = {}): MailboxInfo[] {
   const user = me || DEFAULT_USER;
   const domain = opts.domain || DEFAULT_DOMAIN;
   const list: MailboxInfo[] = [
@@ -373,7 +378,7 @@ export function mailboxes(
       name: user,
       label: firstName(user),
       sub: "me",
-      address: personalAddress(user, domain),
+      address: opts.personalAddress || personalAddress(user, domain),
       color: opts.userColor || DEFAULT_USER_COLOR,
     },
   ];
@@ -394,7 +399,7 @@ export function mailboxes(
 export function boxMeta(
   id: string,
   user?: string,
-  opts: { domain?: string; userColor?: string } = {}
+  opts: MailboxOpts = {}
 ): MailboxInfo | null {
   const domain = opts.domain || DEFAULT_DOMAIN;
   if (id === "personal") {
@@ -402,7 +407,7 @@ export function boxMeta(
       id: "personal",
       kind: "personal",
       label: boxLabel("personal", user),
-      address: boxAddress("personal", user, domain),
+      address: opts.personalAddress || boxAddress("personal", user, domain),
       color: opts.userColor || DEFAULT_USER_COLOR,
     };
   }

@@ -1,6 +1,7 @@
 import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { gmailConnections, gmailLabels, type GmailConnectionRow, type GmailLabelRow } from "@/db/schema";
+import { isPersonalKey } from "./config";
 import { decryptToken, encryptToken } from "./crypto";
 import { refreshAccessToken, type OAuthTokens } from "./oauth";
 import type { GmailLabelMeta } from "./api";
@@ -41,7 +42,9 @@ function toInfo(r: GmailConnectionRow): ConnectionInfo {
 export async function listConnections(): Promise<ConnectionInfo[]> {
   const db = await getDb();
   const rows = await db.select().from(gmailConnections);
-  return rows.map(toInfo);
+  // Rows for retired shared mailboxes may still exist in an older database;
+  // they are inert now, so keep them out of Settings and out of every sync.
+  return rows.filter((r) => isPersonalKey(r.mailboxKey)).map(toInfo);
 }
 
 export async function getConnectionInfo(
@@ -185,7 +188,7 @@ export async function updateSyncState(
 export async function connectedMailboxKeys(): Promise<string[]> {
   const db = await getDb();
   const rows = await db.select({ k: gmailConnections.mailboxKey }).from(gmailConnections);
-  return rows.map((r) => r.k);
+  return rows.map((r) => r.k).filter(isPersonalKey);
 }
 
 /**

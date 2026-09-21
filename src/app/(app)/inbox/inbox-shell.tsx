@@ -22,7 +22,6 @@ import {
   bulkDeleteAction,
   bulkFlagAction,
   bulkMarkReadAction,
-  bulkMoveAction,
   bulkRestoreAction,
   deleteAction,
   flagAction,
@@ -46,13 +45,12 @@ import LogModal from "./log-modal";
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
 
+// Only the signed-in user's own mailbox — the shared sales/installs/info
+// boxes were retired (comms.ts SHARED_BOXES).
 const BOX_SEL_OPTIONS: Opt[] = [
-  { value: "personal:inbox", label: "My Inbox" },
-  { value: "personal:sent", label: "My Sent" },
-  { value: "personal:drafts", label: "My Drafts" },
-  { value: "sales:inbox", label: "Sales" },
-  { value: "installs:inbox", label: "Installs" },
-  { value: "info:inbox", label: "Info" },
+  { value: "personal:inbox", label: "Inbox" },
+  { value: "personal:sent", label: "Sent" },
+  { value: "personal:drafts", label: "Drafts" },
   { value: "needs", label: "Needs reply" },
   { value: "calls", label: "Calls & meetings" },
 ];
@@ -308,7 +306,6 @@ export default function InboxShell({
     onMarkRead: (read) => void runBulk((ids) => bulkMarkReadAction(ids, read)),
     onFlag: (on) => void runBulk((ids) => bulkFlagAction(ids, on)),
     onCategory: (key) => void runBulk((ids) => bulkCategoryAction(ids, key)),
-    onMove: (mb) => void runBulk((ids) => bulkMoveAction(ids, mb)),
   };
 
   /* ---- per-row hover quick actions ---- */
@@ -546,10 +543,8 @@ export default function InboxShell({
     [router]
   );
 
-  const composeDefaultBox = useMemo(
-    () => (box === "sales" || box === "installs" || box === "info" ? box : "personal"),
-    [box]
-  );
+  // Only one mailbox remains, so the composer always sends from it.
+  const composeDefaultBox = "personal";
 
   const showOverlay = narrow && explicitSelected && !!reader && !isDrafts;
 
@@ -674,86 +669,6 @@ export default function InboxShell({
             <FolderRow key={f.key} f={f} indent />
           ))}
 
-          {/* shared mailboxes */}
-          <div style={sectionLabelStyle("15px 8px 5px")}>Shared mailboxes</div>
-          {sidebar.sharedBoxes.map((b) => (
-            <div key={b.id}>
-              <Link
-                href={b.href}
-                style={{
-                  width: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 9,
-                  padding: "8px 10px",
-                  border: "none",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  marginBottom: 1,
-                  background: b.active ? "#eef0f3" : "transparent",
-                  textDecoration: "none",
-                  color: "inherit",
-                  boxSizing: "border-box",
-                }}
-              >
-                <span
-                  style={{
-                    width: 9,
-                    height: 9,
-                    borderRadius: "50%",
-                    flexShrink: 0,
-                    background: b.color,
-                  }}
-                />
-                <span style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
-                  <span
-                    style={{
-                      display: "block",
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      lineHeight: 1.15,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {b.label}
-                  </span>
-                  <span
-                    style={{
-                      display: "block",
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 9.5,
-                      color: "#aab0bb",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {b.address}
-                  </span>
-                </span>
-                {b.unread > 0 && (
-                  <span
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 10.5,
-                      fontWeight: 700,
-                      color: "#fff",
-                      background: "var(--accent)",
-                      padding: "0 6px",
-                      borderRadius: 20,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {b.unread}
-                  </span>
-                )}
-              </Link>
-              {b.active && b.folders.map((f) => <FolderRow key={f.key} f={f} indent />)}
-            </div>
-          ))}
-
           {/* smart views */}
           <div style={sectionLabelStyle("15px 8px 5px")}>Views</div>
           {sidebar.views.map((v) => (
@@ -821,43 +736,92 @@ export default function InboxShell({
             background: "#fff",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
             <span
               style={{
                 width: 9,
                 height: 9,
                 borderRadius: "50%",
                 flexShrink: 0,
-                background: "#3fae74",
+                background: sidebar.connection.color,
               }}
             />
-            <span style={{ fontSize: 11.5, fontWeight: 600, color: "#3a3f4a" }}>Connected</span>
+            <span style={{ fontSize: 11.5, fontWeight: 600, color: "#3a3f4a" }}>
+              {sidebar.connection.label}
+            </span>
           </div>
-          <button
-            onClick={onSendReceive}
-            style={{
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 7,
-              fontFamily: "var(--font-ui)",
-              fontSize: 12,
-              fontWeight: 600,
-              color: ACCENT_INK,
-              background: ACCENT_SOFT,
-              border: `1px solid ${ACCENT_SOFT}`,
-              borderRadius: 9,
-              padding: 8,
-              cursor: "pointer",
-              opacity: sendReceiving ? 0.6 : 1,
-            }}
-          >
-            <RefreshIcon size={13} />
-            {sendReceiving ? "Checking…" : "Send / Receive"}
-          </button>
           <div
-            title="Forward customer emails here and they land in the right mailbox (planned — real email sync isn’t connected yet)."
+            style={{
+              fontFamily:
+                sidebar.connection.state === "ok" || sidebar.connection.state === "stale"
+                  ? "var(--font-mono)"
+                  : "var(--font-ui)",
+              fontSize: 10,
+              color: "#aab0bb",
+              marginBottom: 9,
+              marginLeft: 17,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+            title={sidebar.connection.detail}
+          >
+            {sidebar.connection.detail}
+            {sidebar.connection.lastSync ? ` · synced ${sidebar.connection.lastSync}` : ""}
+          </div>
+          {sidebar.connection.actionHref ? (
+            <a
+              href={sidebar.connection.actionHref}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 7,
+                fontFamily: "var(--font-ui)",
+                fontSize: 12,
+                fontWeight: 600,
+                color: ACCENT_INK,
+                background: ACCENT_SOFT,
+                border: `1px solid ${ACCENT_SOFT}`,
+                borderRadius: 9,
+                padding: 8,
+                textDecoration: "none",
+                boxSizing: "border-box",
+              }}
+            >
+              {sidebar.connection.actionLabel}
+            </a>
+          ) : null}
+          {sidebar.connection.canSync && (
+            <button
+              onClick={onSendReceive}
+              disabled={sendReceiving}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 7,
+                fontFamily: "var(--font-ui)",
+                fontSize: 12,
+                fontWeight: 600,
+                color: ACCENT_INK,
+                background: ACCENT_SOFT,
+                border: `1px solid ${ACCENT_SOFT}`,
+                borderRadius: 9,
+                padding: 8,
+                marginTop: sidebar.connection.actionHref ? 6 : 0,
+                cursor: sendReceiving ? "default" : "pointer",
+                opacity: sendReceiving ? 0.6 : 1,
+              }}
+            >
+              <RefreshIcon size={13} />
+              {sendReceiving ? "Checking…" : "Send / Receive"}
+            </button>
+          )}
+          <div
+            title="Planned: forward a customer email to this address and it lands on the matching record automatically."
             style={{ marginTop: 9, fontSize: 10, color: "#aab0bb", lineHeight: 1.5 }}
           >
             Forward-to-log:{" "}

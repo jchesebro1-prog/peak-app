@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Opt, ReaderVM } from "./types";
+import type { MessageVM, Opt, ReaderVM } from "./types";
 import {
   archiveAction,
   assignAction,
@@ -27,6 +27,327 @@ const LINK_TYPE_OPTIONS: Opt[] = [
   { value: "inspection", label: "Inspection" },
   { value: "project", label: "Project" },
 ];
+
+/* ---- conversation (Gmail-style) ------------------------------------------
+ * Gmail shows the newest message open and everything before it as one-line
+ * stubs you click to expand; when a thread is long it hides the middle ones
+ * behind a "N earlier messages" bar, keeping the very first stub in view.
+ * This mirrors that. Reader is keyed by thread id upstream, so the local
+ * expansion state resets whenever you open a different thread. */
+
+const KB = 1024;
+
+function sizeLabel(bytes: number): string {
+  return bytes >= KB * KB
+    ? (bytes / KB / KB).toFixed(1) + " MB"
+    : Math.max(1, Math.round(bytes / KB)) + " KB";
+}
+
+/** First line of the body, flattened — the grey preview on a collapsed row. */
+function preview(body: string): string {
+  const flat = (body || "").replace(/\s+/g, " ").trim();
+  return flat.length > 140 ? flat.slice(0, 139) + "…" : flat;
+}
+
+function Avatar({ m, size }: { m: MessageVM; size: number }) {
+  return (
+    <span
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size >= 30 ? 9 : 7,
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: size >= 30 ? 11 : 9.5,
+        fontWeight: 600,
+        fontFamily: "var(--font-mono)",
+        ...(m.out
+          ? { background: m.color, color: "#fff" }
+          : { background: "#eef0f3", color: "#5b616e" }),
+      }}
+    >
+      {m.initials}
+    </span>
+  );
+}
+
+function CollapsedMessage({ m, onOpen }: { m: MessageVM; onOpen: () => void }) {
+  return (
+    <div
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      title="Show this message"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 9,
+        marginBottom: 7,
+        padding: "7px 11px",
+        borderRadius: 9,
+        border: "1px solid #eef0f3",
+        background: "#fff",
+        cursor: "pointer",
+      }}
+    >
+      <Avatar m={m} size={24} />
+      <span
+        style={{
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: "#16181d",
+          flexShrink: 0,
+          maxWidth: "30%",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {m.author}
+      </span>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontSize: 12.5,
+          color: "#9aa0ab",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {preview(m.body)}
+      </span>
+      {(m.attachments || []).length > 0 && (
+        <span style={{ color: "#aab0bb", flexShrink: 0, display: "flex" }}>
+          <PaperclipIcon size={12} />
+        </span>
+      )}
+      <span style={{ fontSize: 11, color: "#aab0bb", flexShrink: 0 }}>{m.time}</span>
+    </div>
+  );
+}
+
+function ExpandedMessage({
+  m,
+  collapsible,
+  onCollapse,
+}: {
+  m: MessageVM;
+  collapsible: boolean;
+  onCollapse: () => void;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 11, marginBottom: 16 }}>
+      <Avatar m={m} size={32} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          onClick={collapsible ? onCollapse : undefined}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 5,
+            flexWrap: "wrap",
+            cursor: collapsible ? "pointer" : "default",
+          }}
+          title={collapsible ? "Hide this message" : undefined}
+        >
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>
+            {m.author}
+          </span>
+          <span
+            style={{
+              fontSize: 9.5,
+              fontWeight: 600,
+              letterSpacing: ".03em",
+              textTransform: "uppercase",
+              padding: "1px 7px",
+              borderRadius: 5,
+              ...(m.out
+                ? { color: ACCENT_INK, background: ACCENT_SOFT }
+                : { color: "#5b616e", background: "#f1f2f5" }),
+            }}
+          >
+            {m.tag}
+          </span>
+          {m.queued && (
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: ".04em",
+                textTransform: "uppercase",
+                color: "#8a6d1f",
+                background: "#fbf3dd",
+                border: "1px solid #f0e2bd",
+                padding: "1px 6px",
+                borderRadius: 5,
+              }}
+            >
+              Outbox · sending
+            </span>
+          )}
+          <span style={{ fontSize: 11, color: "#aab0bb" }}>{m.time}</span>
+        </div>
+        <div
+          style={{
+            fontSize: 13,
+            lineHeight: 1.55,
+            color: "#2a2f38",
+            whiteSpace: "pre-wrap",
+            borderRadius: 10,
+            padding: "11px 13px",
+            border: `1px solid ${m.out ? "transparent" : "#eef0f3"}`,
+            background: m.out ? ACCENT_SOFT : "#fff",
+          }}
+        >
+          {m.body}
+          {(m.attachments || []).length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 6,
+                marginTop: 9,
+                whiteSpace: "normal",
+              }}
+            >
+              {(m.attachments || []).map((a, i) => (
+                <a
+                  key={`${a.name}-${i}`}
+                  href={a.dataUrl}
+                  download={a.name}
+                  title="Download attachment"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: "#3a3f4a",
+                    background: "#fff",
+                    border: "1px solid #e4e7ec",
+                    borderRadius: 7,
+                    padding: "5px 9px",
+                    textDecoration: "none",
+                  }}
+                >
+                  <PaperclipIcon size={12} />
+                  {a.name}
+                  <span style={{ color: "#aab0bb", fontWeight: 500 }}>
+                    {sizeLabel(a.size)}
+                  </span>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** How many earlier stubs to show before folding the middle away. */
+const STUBS_BEFORE_FOLD = 3;
+
+function Conversation({ messages }: { messages: MessageVM[] }) {
+  // id -> explicit user choice; anything absent falls back to "newest is open"
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
+  const [showEarlier, setShowEarlier] = useState(false);
+
+  const lastId = messages.length ? messages[messages.length - 1].id : "";
+  const isOpen = (m: MessageVM) => toggled[m.id] ?? m.id === lastId;
+  const toggle = (id: string, open: boolean) =>
+    setToggled((prev) => ({ ...prev, [id]: open }));
+
+  const earlier = messages.slice(0, -1);
+  const newest = messages.length ? messages[messages.length - 1] : null;
+
+  // Fold the middle of a long history, Gmail-style: keep the oldest message
+  // visible, hide the run in between, always keep the one just before the
+  // newest so the thread still reads as a conversation.
+  const folding = !showEarlier && earlier.length > STUBS_BEFORE_FOLD;
+  const head = folding ? earlier.slice(0, 1) : earlier;
+  const tail = folding ? earlier.slice(-1) : [];
+  const hidden = folding ? earlier.length - head.length - tail.length : 0;
+
+  const renderOne = (m: MessageVM) =>
+    isOpen(m) ? (
+      <ExpandedMessage
+        key={m.id}
+        m={m}
+        collapsible
+        onCollapse={() => toggle(m.id, false)}
+      />
+    ) : (
+      <CollapsedMessage key={m.id} m={m} onOpen={() => toggle(m.id, true)} />
+    );
+
+  return (
+    <>
+      {head.map(renderOne)}
+      {hidden > 0 && (
+        <button
+          onClick={() => setShowEarlier(true)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            width: "100%",
+            marginBottom: 7,
+            padding: "6px 11px",
+            borderRadius: 9,
+            border: "1px solid #eef0f3",
+            background: "#f4f5f7",
+            cursor: "pointer",
+            fontFamily: "var(--font-ui)",
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: "#5b616e",
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              letterSpacing: ".08em",
+              color: "#8c919c",
+            }}
+          >
+            ···
+          </span>
+          {hidden} earlier message{hidden === 1 ? "" : "s"}
+        </button>
+      )}
+      {tail.map(renderOne)}
+      {newest &&
+        (isOpen(newest) ? (
+          <ExpandedMessage
+            key={newest.id}
+            m={newest}
+            collapsible={messages.length > 1}
+            onCollapse={() => toggle(newest.id, false)}
+          />
+        ) : (
+          <CollapsedMessage
+            key={newest.id}
+            m={newest}
+            onOpen={() => toggle(newest.id, true)}
+          />
+        ))}
+    </>
+  );
+}
 
 export default function ThreadReader({
   vm,
@@ -530,133 +851,7 @@ export default function ThreadReader({
           className="ib-scroll"
           style={{ flex: 1, overflowY: "auto", padding: "18px 20px", background: "#fafbfc" }}
         >
-          {vm.messages.map((m) => (
-            <div key={m.id} style={{ display: "flex", gap: 11, marginBottom: 16 }}>
-              <span
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 9,
-                  flexShrink: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  fontFamily: "var(--font-mono)",
-                  ...(m.out
-                    ? { background: m.color, color: "#fff" }
-                    : { background: "#eef0f3", color: "#5b616e" }),
-                }}
-              >
-                {m.initials}
-              </span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    marginBottom: 5,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <span style={{ fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>
-                    {m.author}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 9.5,
-                      fontWeight: 600,
-                      letterSpacing: ".03em",
-                      textTransform: "uppercase",
-                      padding: "1px 7px",
-                      borderRadius: 5,
-                      ...(m.out
-                        ? { color: ACCENT_INK, background: ACCENT_SOFT }
-                        : { color: "#5b616e", background: "#f1f2f5" }),
-                    }}
-                  >
-                    {m.tag}
-                  </span>
-                  {m.queued && (
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 9,
-                        fontWeight: 700,
-                        letterSpacing: ".04em",
-                        textTransform: "uppercase",
-                        color: "#8a6d1f",
-                        background: "#fbf3dd",
-                        border: "1px solid #f0e2bd",
-                        padding: "1px 6px",
-                        borderRadius: 5,
-                      }}
-                    >
-                      Outbox · sending
-                    </span>
-                  )}
-                  <span style={{ fontSize: 11, color: "#aab0bb" }}>{m.time}</span>
-                </div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    lineHeight: 1.55,
-                    color: "#2a2f38",
-                    whiteSpace: "pre-wrap",
-                    borderRadius: 10,
-                    padding: "11px 13px",
-                    border: `1px solid ${m.out ? "transparent" : "#eef0f3"}`,
-                    background: m.out ? ACCENT_SOFT : "#fff",
-                  }}
-                >
-                  {m.body}
-                  {(m.attachments || []).length > 0 && (
-                    <div
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: 6,
-                        marginTop: 9,
-                        whiteSpace: "normal",
-                      }}
-                    >
-                      {(m.attachments || []).map((a, i) => (
-                        <a
-                          key={`${a.name}-${i}`}
-                          href={a.dataUrl}
-                          download={a.name}
-                          title="Download attachment"
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                            fontSize: 11.5,
-                            fontWeight: 600,
-                            color: "#3a3f4a",
-                            background: "#fff",
-                            border: "1px solid #e4e7ec",
-                            borderRadius: 7,
-                            padding: "5px 9px",
-                            textDecoration: "none",
-                          }}
-                        >
-                          <PaperclipIcon size={12} />
-                          {a.name}
-                          <span style={{ color: "#aab0bb", fontWeight: 500 }}>
-                            {a.size >= 1024 * 1024
-                              ? (a.size / 1024 / 1024).toFixed(1) + " MB"
-                              : Math.max(1, Math.round(a.size / 1024)) + " KB"}
-                          </span>
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
+          <Conversation messages={vm.messages} />
         </div>
 
         {/* actions + composer */}

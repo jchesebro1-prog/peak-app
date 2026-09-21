@@ -1,7 +1,7 @@
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 import { mergedVisitReasons } from "@/lib/stores/site-visits";
-import { activeUsers } from "@/lib/users";
+import { activeUsers, getUser } from "@/lib/users";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { followUpCount } from "@/lib/stores/leads";
 import { crmModeOn } from "@/lib/stores/notif-prefs";
@@ -10,8 +10,8 @@ import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { getAll as allInspections } from "@/lib/stores/inspections";
 import { getAllProjects } from "@/lib/stores/projects";
-import { personalKey } from "@/lib/gmail/config";
-import { listCachedLabels } from "@/lib/gmail/connections";
+import { GMAIL_MODIFY_SCOPE, gmailEnabled, personalKey } from "@/lib/gmail/config";
+import { getConnectionInfo, listCachedLabels } from "@/lib/gmail/connections";
 import {
   boxMeta,
   callsCount,
@@ -48,6 +48,7 @@ import {
 import type {
   ChanIcon,
   ComposeInit,
+  ConnectionVM,
   CustomerVM,
   FolderRowVM,
   LabelOpt,
@@ -55,7 +56,6 @@ import type {
   MessageVM,
   Opt,
   ReaderVM,
-  SharedBoxVM,
   SidebarVM,
   ThreadRowVM,
 } from "./types";
@@ -64,7 +64,9 @@ import HomeTabs from "../home-tabs";
 
 export const metadata = { title: "Inbox — Quartzite-6" };
 
-const BOX_IDS = ["personal", "sales", "installs", "info"] as const;
+// One mailbox: the signed-in user's own connected Gmail account. The shared
+// sales/installs/info boxes were retired (see comms.ts SHARED_BOXES).
+const BOX_IDS = ["personal"] as const;
 const FOLDER_IDS = [
   "inbox",
   "sent",
@@ -152,7 +154,24 @@ export default async function InboxPage({
   const me = user.name;
   const settings = await getSettings();
   const domain = companyDomain(settings.companyName);
-  const boxOpts = { domain, userColor: user.color };
+  // Whose mailbox this is, in order of how much we actually know:
+  //   1. the address Google authorized for this user's Gmail connection,
+  //   2. the Google account on their roster row (what they sign in with),
+  //   3. their roster email.
+  // Never the name+company-domain guess comms.ts falls back to — that invents
+  // an address for anyone who isn't first-initial+lastname@company.
+  const myKey = personalKey(user.id);
+  const [connection, myRow] = await Promise.all([
+    getConnectionInfo(myKey),
+    getUser(user.id),
+  ]);
+  const myAddress =
+    connection?.address || myRow?.googleEmail || myRow?.email || user.email;
+  const boxOpts = {
+    domain,
+    userColor: user.color,
+    personalAddress: myAddress || undefined,
+  };
 
   /* ---- resolve nav state from the URL (the URL drives everything) ---- */
   const viewParam = str(params.view);
@@ -207,9 +226,6 @@ export default async function InboxPage({
   const [
     boxes,
     personalCounts,
-    salesCounts,
-    installsCounts,
-    infoCounts,
     needsCount,
     callsCnt,
     flaggedCnt,
@@ -221,9 +237,6 @@ export default async function InboxPage({
   ] = await Promise.all([
     Promise.resolve(mailboxes(me, boxOpts)),
     folderCounts("personal", me),
-    folderCounts("sales", me),
-    folderCounts("installs", me),
-    folderCounts("info", me),
     needsReplyCount(me),
     callsCount(me),
     flaggedCount(me),
@@ -239,12 +252,7 @@ export default async function InboxPage({
     labelOptionsFor(box, user.id),
   ]);
 
-  const countsFor = {
-    personal: personalCounts,
-    sales: salesCounts,
-    installs: installsCounts,
-    info: infoCounts,
-  } as const;
+  const countsFor = { personal: personalCounts } as const;
 
   const rosterIdent = new Map(
     roster.map((u) => [u.name, { initials: u.initials, color: u.color }])
@@ -258,7 +266,7 @@ export default async function InboxPage({
   const folderHref = (b: string, f: string) => `/inbox?box=${b}&folder=${f}`;
   const viewHref = (v: string) => `/inbox?view=${v}`;
 
-  const foldersFor = (boxId: MailboxId): FolderRowVM[] => {
+  const foldersFor = (boxId: "personal"): FolderRowVM[] => {
     const counts = countsFor[boxId];
     const rows: FolderRowVM[] = [];
     for (const [key, label] of FOLDERS) {
@@ -292,6 +300,51 @@ export default async function InboxPage({
     return rows;
   };
 
+  /* ---- real Gmail connection state (no more hardcoded "Connected") ---- */
+  const connectionVM: ConnectionVM = !gmailEnabled()
+    ? {
+        state: "off",
+        label: "Local mail only",
+        detail: "Gmail sync is off for this deployment",
+        color: "#aab0bb",
+        actionHref: "",
+        actionLabel: "",
+        canSync: false,
+        lastSync: "",
+      }
+    : !connection
+      ? {
+          state: "none",
+          label: "Not connected",
+          detail: "Authorize your Google account to load mail",
+          color: "#c25a4a",
+          actionHref: "/api/gmail/connect?mailbox=" + encodeURIComponent(myKey),
+          actionLabel: "Connect Gmail",
+          canSync: false,
+          lastSync: "",
+        }
+      : !(connection.scope || "").split(/\s+/).includes(GMAIL_MODIFY_SCOPE)
+        ? {
+            state: "stale",
+            label: "Reconnect needed",
+            detail: connection.address,
+            color: "#c9972f",
+            actionHref: "/api/gmail/connect?mailbox=" + encodeURIComponent(myKey),
+            actionLabel: "Reconnect",
+            canSync: true,
+            lastSync: connection.lastSyncAt ? timeAgo(connection.lastSyncAt) : "",
+          }
+        : {
+            state: "ok",
+            label: "Connected",
+            detail: connection.address,
+            color: "#3fae74",
+            actionHref: "",
+            actionLabel: "",
+            canSync: true,
+            lastSync: connection.lastSyncAt ? timeAgo(connection.lastSyncAt) : "",
+          };
+
   const personalBox = boxes[0];
   const sidebar: SidebarVM = {
     personal: {
@@ -301,21 +354,7 @@ export default async function InboxPage({
       initials: initialsOf(me),
     },
     personalFolders: foldersFor("personal"),
-    sharedBoxes: boxes
-      .filter((b) => b.kind === "shared")
-      .map((b): SharedBoxVM => {
-        const active = !isView && box === b.id;
-        return {
-          id: b.id,
-          label: b.label,
-          address: b.address,
-          color: b.color,
-          active,
-          unread: countsFor[b.id as Exclude<MailboxId, "personal">].inboxUnread,
-          href: folderHref(b.id, "inbox"),
-          folders: active ? foldersFor(b.id) : [],
-        };
-      }),
+    connection: connectionVM,
     views: [
       {
         key: "needs",
@@ -356,9 +395,10 @@ export default async function InboxPage({
     const nm = isDrafts
       ? "To: " + (t.draft?.to || t.contactEmail || "—")
       : t.customer || t.contactName || "Customer";
-    const bm = boxMeta(t.mailbox || "info", t.mailboxUser || undefined, {
+    const bm = boxMeta(t.mailbox || "personal", t.mailboxUser || undefined, {
       domain,
       userColor: t.mailboxUser === me ? user.color : undefined,
+      personalAddress: t.mailboxUser === me ? myAddress : undefined,
     });
     const snip = snippet(t);
     const cat = categoryMeta(t.category);
@@ -471,9 +511,10 @@ export default async function InboxPage({
   if (sel) {
     const sm = statusMeta(sel.status);
     const cm = channelMeta(sel.channel);
-    const bm = boxMeta(sel.mailbox || "info", sel.mailboxUser || undefined, {
+    const bm = boxMeta(sel.mailbox || "personal", sel.mailboxUser || undefined, {
       domain,
       userColor: sel.mailboxUser === me ? user.color : undefined,
+      personalAddress: sel.mailboxUser === me ? myAddress : undefined,
     });
     const resolvedCid = await resolveCustomerId(sel);
     const resolvedCustomer = resolvedCid

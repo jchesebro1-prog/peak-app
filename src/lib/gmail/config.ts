@@ -79,7 +79,10 @@ export function userIdOfKey(key: MailboxKey): string | null {
   return isPersonalKey(key) ? key.slice("personal:".length) : null;
 }
 
-export const SHARED_KEYS = ["sales", "installs", "info"] as const;
+/** Shared mailboxes were retired (see comms.ts SHARED_BOXES). Kept as an empty
+ *  list so the connect route and Settings keep compiling — and so no shared
+ *  box can be authorized any more. */
+export const SHARED_KEYS: readonly string[] = [];
 
 /** Google sign-in credentials present (shared with Auth.js). */
 export function googleConfigured(): boolean {

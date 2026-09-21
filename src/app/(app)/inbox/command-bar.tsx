@@ -8,7 +8,6 @@ import {
   FilterIcon,
   FlagIcon,
   MailOpenIcon,
-  MoveIcon,
   RestoreIcon,
   SortIcon,
   TagIcon,
@@ -44,15 +43,7 @@ export type BulkHandlers = {
   onMarkRead: (read: boolean) => void;
   onFlag: (on: boolean) => void;
   onCategory: (key: string | null) => void;
-  onMove: (mailbox: string) => void;
 };
-
-const MOVE_TARGETS: Opt[] = [
-  { value: "personal", label: "My inbox" },
-  { value: "sales", label: "Sales" },
-  { value: "installs", label: "Installs" },
-  { value: "info", label: "Info" },
-];
 
 export default function CommandBar({
   selectedCount,
@@ -168,25 +159,6 @@ export default function CommandBar({
                       <span style={{ ...dot, background: "transparent", border: "1.5px solid #c4c9d2" }} />
                       None
                     </MenuItem>
-                  </>
-                )}
-              </Menu>
-              <Menu
-                trigger={<ActBtnInner icon={<MoveIcon size={14} />} label="Move" caret />}
-              >
-                {(close) => (
-                  <>
-                    {MOVE_TARGETS.map((m) => (
-                      <MenuItem
-                        key={m.value}
-                        onClick={() => {
-                          bulk.onMove(m.value);
-                          close();
-                        }}
-                      >
-                        {m.label}
-                      </MenuItem>
-                    ))}
                   </>
                 )}
               </Menu>

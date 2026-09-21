@@ -64,7 +64,9 @@ import {
  * event fan-out.
  */
 
-const MAILBOXES: readonly string[] = ["personal", "sales", "installs", "info"];
+// Shared mailboxes were retired — everything lands in the signed-in user's own
+// box, so anything else coerces back to "personal".
+const MAILBOXES: readonly string[] = ["personal"];
 
 function asMailbox(x: string | undefined | null): MailboxId {
   return (MAILBOXES.includes(x || "") ? x : "personal") as MailboxId;
@@ -176,22 +178,6 @@ export async function bulkFlagAction(list: string[], on: boolean) {
 export async function bulkCategoryAction(list: string[], key: string | null) {
   await requireUser();
   for (const id of ids(list)) await setCategory(id, key);
-  revalidate();
-}
-
-export async function bulkMoveAction(list: string[], mailbox: string) {
-  const user = await requireUser();
-  const mb = asMailbox(mailbox);
-  for (const id of ids(list)) {
-    // Personal moves re-own the thread to the current user's personal box;
-    // shared moves just set the mailbox and clear the personal owner.
-    await update(
-      id,
-      mb === "personal"
-        ? { mailbox: mb, mailboxUser: user.name }
-        : { mailbox: mb, mailboxUser: null }
-    );
-  }
   revalidate();
 }
 

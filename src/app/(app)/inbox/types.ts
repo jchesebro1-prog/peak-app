@@ -20,15 +20,26 @@ export type FolderRowVM = {
   icon: string; // folder glyph kind
 };
 
-export type SharedBoxVM = {
-  id: string;
+/** Real Gmail connection state for the signed-in user's mailbox — replaces the
+ *  hardcoded green "Connected" dot, which said the same thing whether or not a
+ *  mailbox had ever been authorized. */
+export type ConnectionVM = {
+  /** off = GMAIL_ENABLED not set (local mail only, nothing to connect);
+   *  none = enabled but this user has never authorized a mailbox;
+   *  stale = authorized, but the grant predates gmail.modify (needs reconnect);
+   *  ok = authorized with full scope. */
+  state: "off" | "none" | "stale" | "ok";
   label: string;
-  address: string;
+  /** second line — the authorized address, or why there isn't one */
+  detail: string;
   color: string;
-  active: boolean;
-  unread: number;
-  href: string;
-  folders: FolderRowVM[]; // populated when expanded (active)
+  /** connect/reconnect link; "" when the state offers no action */
+  actionHref: string;
+  actionLabel: string;
+  /** whether Send / Receive can actually reach Gmail */
+  canSync: boolean;
+  /** "" until the first sync completes */
+  lastSync: string;
 };
 
 export type SidebarVM = {
@@ -39,10 +50,10 @@ export type SidebarVM = {
     initials: string;
   };
   personalFolders: FolderRowVM[];
-  sharedBoxes: SharedBoxVM[];
   views: FolderRowVM[];
   leadFollowCount: number;
   forwardAddr: string;
+  connection: ConnectionVM;
 };
 
 /** A real file on a message (IDEAS #36) — dataUrl doubles as the download href. */

@@ -853,7 +853,10 @@ async function upsertRenewalDraft(opts: {
     return existing.id;
   }
   const thread = await saveDraft({
-    mailbox: "sales",
+    // Lands in the sender's own mailbox — the shared Sales box was retired,
+    // and a draft filed there would now be invisible to everyone.
+    mailbox: "personal",
+    mailboxUser: opts.me,
     customerId: opts.customerId,
     customer: opts.customer,
     contactName: opts.contactName,
