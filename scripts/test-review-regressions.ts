@@ -6,7 +6,7 @@ import { ensureEngagementForQuote } from "@/lib/stores/engagements";
 import { upsertDoc, patchDoc } from "@/db/doc-store";
 import type { Quote } from "@/lib/stores/quotes";
 import { contactByEmail } from "@/lib/identity/lookup";
-import { saveContact, setEmails } from "@/lib/identity/contacts";
+import { emailsFor, saveContact, setEmails } from "@/lib/identity/contacts";
 import { claimDomain, customersForDomain } from "@/lib/gmail/domains";
 import { applyResolution, applyResweepPatch, resolveForThread, resweepThreads } from "@/lib/gmail/linking";
 import type { CommThread } from "@/lib/stores/comms";
@@ -166,6 +166,46 @@ async function main() {
   );
   assert.equal(unlinkedFresh.resolution, "suggested", "#96 applyResweepPatch copies the suggested resolution");
   assert.equal(unlinkedFresh.suggestedCustomerId, "lakefront", "#96 applyResweepPatch copies the suggested customer");
+
+  // #96 Task 5 — rememberAddress creates the contact, learns the domain, links the thread
+  const { rememberAddress, linkThread } = await import("@/lib/gmail/linking");
+  const cid = await rememberAddress("lakefront", "ap.clerk@t96learn.org", "AP Clerk", null, { id: "u1", name: "Test" });
+  assert.ok(cid.startsWith("ct-"), "#96 rememberAddress mints a contact");
+  assert.equal((await customersForDomain("t96learn.org"))[0]?.source, "learned", "#96 unclaimed domain is learned");
+
+  // Re-calling with the minted contactId must not duplicate the email already on it.
+  const cid2 = await rememberAddress("lakefront", "ap.clerk@t96learn.org", "AP Clerk", cid, { id: "u1", name: "Test" });
+  assert.equal(cid2, cid, "#96 rememberAddress reuses the given contactId");
+  assert.equal((await emailsFor(cid)).length, 1, "#96 rememberAddress doesn't duplicate an email already on the contact");
+
+  // A public-domain address must never claim a domain.
+  const cid3 = await rememberAddress("lakefront", "someone@gmail.com", "Someone Else", null, { id: "u1", name: "Test" });
+  assert.equal((await customersForDomain("gmail.com")).length, 0, "#96 rememberAddress never claims a public domain");
+  void cid3;
+
+  await upsertDoc("comms", {
+    id: "C-t96link", mailbox: "personal", unread: true, archived: false,
+    customerId: null, customer: "", contactName: "AP Clerk", contactEmail: "ap.clerk@t96learn.org",
+    subject: "hi", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+    messages: [], createdAt: Date.now(), updatedAt: Date.now(), resolution: "unknown",
+  } as any);
+  await linkThread("C-t96link", "lakefront", cid);
+  const linked = await getDoc<any>("comms", "C-t96link");
+  assert.equal(linked?.resolution, "linked", "#96 linkThread stamps linked");
+  assert.equal(linked?.customerId, "lakefront", "#96 linkThread sets customerId");
+  assert.equal(linked?.resolvedContactId, cid, "#96 linkThread stamps resolvedContactId");
+
+  // #96 Task 5 — the learned claim must be atomic: two concurrent learned
+  // claims on a fresh domain from different customers must never both land.
+  await Promise.all([
+    claimDomain("t96atomic.org", "cust-a", "learned", "test"),
+    claimDomain("t96atomic.org", "cust-b", "learned", "test"),
+  ]);
+  assert.equal(
+    (await customersForDomain("t96atomic.org")).length,
+    1,
+    "#96 concurrent learned claims on a fresh domain never both land"
+  );
 
   console.log("review regression checks passed");
 }

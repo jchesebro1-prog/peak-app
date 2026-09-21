@@ -4,10 +4,12 @@
  */
 import { listDocs, patchDoc } from "@/db/doc-store";
 import { contactByEmail } from "@/lib/identity/lookup";
+import { emailsFor, saveContact, setEmails } from "@/lib/identity/contacts";
+import { mintId } from "@/lib/identity/ids";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import type { CommThread } from "@/lib/stores/comms";
-import { domainOf } from "./config";
-import { customersForDomain } from "./domains";
+import { domainOf, isPublicDomain } from "./config";
+import { claimDomain, customersForDomain } from "./domains";
 import { resolveSender, type Resolution } from "./resolve";
 
 export async function resolveForThread(email: string): Promise<Resolution> {
@@ -106,4 +108,72 @@ export async function resweepThreads(
 
 export async function backfillMailbox(key: string): Promise<number> {
   return resweepThreads(undefined, key);
+}
+
+/** Remember a sender's address on `customerId` — the link sidebar's
+ *  "remember this address" checkbox. Appends to an existing contact
+ *  (`contactId`) or mints a new one on the customer from `displayName`
+ *  (split on the last space). Then, if the address's domain isn't public
+ *  and nobody has claimed it yet, learns the domain for this customer, and
+ *  re-sweeps the backlog for that address. Returns the contact id used. */
+export async function rememberAddress(
+  customerId: string,
+  email: string,
+  displayName: string,
+  contactId: string | null | undefined,
+  addedBy: { id: string; name: string }
+): Promise<string> {
+  const e = (email || "").trim().toLowerCase();
+  if (!e) return "";
+  let cid = contactId || "";
+  if (cid) {
+    const existing = await emailsFor(cid);
+    if (!existing.some((x) => x.email.toLowerCase() === e)) {
+      await setEmails(cid, [
+        ...existing.map((x) => ({ value: x.email, label: x.label, isPrimary: x.isPrimary })),
+        { value: e, label: "work", isPrimary: existing.length === 0 },
+      ]);
+    }
+  } else {
+    const nm = (displayName || "").trim();
+    const sp = nm.lastIndexOf(" ");
+    cid = mintId("ct");
+    await saveContact({
+      id: cid,
+      firstName: sp > 0 ? nm.slice(0, sp) : nm || e.split("@")[0],
+      lastName: sp > 0 ? nm.slice(sp + 1) : "",
+      homeCompanyId: customerId,
+      title: "",
+      pricingTier: null,
+      status: "active",
+      userId: null,
+      ownerUserId: addedBy.id,
+      isPrimary: false,
+      createdAt: Date.now(),
+    });
+    await setEmails(cid, [{ value: e, label: "work", isPrimary: true }]);
+  }
+  const d = domainOf(e);
+  if (d && !isPublicDomain(d) && (await customersForDomain(d)).length === 0) {
+    await claimDomain(d, customerId, "learned", addedBy.name);
+  }
+  await resweepThreads({ email: e });
+  return cid;
+}
+
+/** Stamp a thread as linked to `customerId` (the sidebar's Link / pick). */
+export async function linkThread(
+  threadId: string,
+  customerId: string,
+  contactId?: string | null
+): Promise<void> {
+  const name = await customerNameFor(customerId);
+  await patchDoc<CommThread>("comms", threadId, (d) => {
+    d.customerId = customerId;
+    d.customer = name;
+    d.resolvedContactId = contactId ?? d.resolvedContactId ?? null;
+    d.resolution = "linked";
+    d.suggestedCustomerId = null;
+    d.candidates = [];
+  });
 }

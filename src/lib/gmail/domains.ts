@@ -4,7 +4,7 @@
  * than one customer (two schools sharing a district domain); the resolver
  * treats that as ambiguous and never guesses.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { customerDomains } from "@/db/schema";
 import { isPublicDomain } from "./config";
@@ -35,14 +35,21 @@ export async function claimDomain(
   const db = await getDb();
   if (source === "manual") {
     await db.delete(customerDomains).where(eq(customerDomains.domain, d));
-  } else {
-    const existing = await customersForDomain(d);
-    if (existing.length) return;
+    await db
+      .insert(customerDomains)
+      .values({ domain: d, customerId, source, addedBy, at: Date.now() })
+      .onConflictDoNothing();
+    return;
   }
-  await db
-    .insert(customerDomains)
-    .values({ domain: d, customerId, source, addedBy, at: Date.now() })
-    .onConflictDoNothing();
+  // learned: atomic check-and-insert — a plain check-then-insert races two
+  // concurrent learned claims on the same fresh domain (both see "no rows"
+  // and both insert). The WHERE NOT EXISTS makes the whole thing one
+  // statement, so at most one of two concurrent calls lands.
+  await db.execute(
+    sql`INSERT INTO customer_domains (domain, customer_id, source, added_by, at)
+        SELECT ${d}, ${customerId}, 'learned', ${addedBy}, ${Date.now()}
+        WHERE NOT EXISTS (SELECT 1 FROM customer_domains WHERE domain = ${d})`
+  );
 }
 
 export async function releaseDomain(domain: string, customerId: string): Promise<void> {
