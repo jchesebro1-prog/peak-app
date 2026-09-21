@@ -221,6 +221,41 @@ async function main() {
     "#96 concurrent learned claims on a fresh domain never both land"
   );
 
+  // #96 Task 5 review fix — create() must resolve app-created threads too
+  // (Compose, Log call/meeting, renewal outreach, simulated inbound), not
+  // just Gmail-bridged ones, so Unmatched + suggestions cover them.
+  const { create: createThread } = await import("@/lib/stores/comms");
+  const suggestedThread = await createThread({
+    mailbox: "sales",
+    subject: "Quote follow-up",
+    contactName: "New Person",
+    contactEmail: "new.person@t96sweep.org",
+    channel: "email",
+  });
+  assert.equal(
+    suggestedThread.resolution,
+    "suggested",
+    "#96 create() resolves a claimed domain to a suggestion"
+  );
+  assert.equal(
+    suggestedThread.suggestedCustomerId,
+    "lakefront",
+    "#96 create() names the domain owner as the suggested customer"
+  );
+
+  const unknownThread = await createThread({
+    mailbox: "sales",
+    subject: "General inquiry",
+    contactName: "Nobody",
+    contactEmail: "nobody@gmail.com",
+    channel: "email",
+  });
+  assert.equal(
+    unknownThread.resolution,
+    "unknown",
+    "#96 create() leaves a public-domain contact unresolved"
+  );
+
   console.log("review regression checks passed");
 }
 

@@ -271,11 +271,7 @@ export default async function InboxPage({
   // Threads worth linking to a customer but not yet linked (#96 §5) — any
   // channel, any mailbox, never deleted, and not already resolved.
   const isUnmatched = (t: CommThread) =>
-    !t.deleted &&
-    !t.customerId &&
-    (t.resolution === "unknown" ||
-      t.resolution === "ambiguous" ||
-      t.resolution === "suggested");
+    !t.deleted && !t.customerId && t.resolution !== "linked";
   const unmatchedCnt = allComms.filter(isUnmatched).length;
   const threads = view === "unmatched" ? allComms.filter(isUnmatched) : queriedThreads;
 

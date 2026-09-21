@@ -1140,12 +1140,49 @@ export async function create(
   let rec: CommThread;
   if (partial.id) {
     rec = build(partial.id);
+    await stampResolutionOnCreate(rec);
     await upsertDoc<CommThread>("comms", rec);
   } else {
     rec = await insertWithPrefixedId<CommThread>("comms", "C", 1032, build);
+    await stampResolutionOnCreate(rec, /* alreadyInserted */ true);
   }
   if (dir === "out" && !msg.queued) await dispatchOutbound(rec.id); // GMAIL BRIDGE SEAM
   return rec;
+}
+
+/** #96 — threads created here (Compose, Log call/meeting, renewal outreach,
+ *  simulated inbound) bypass the Gmail bridge's recordMessage(), which is
+ *  the only place a thread's `resolution` used to get stamped. Resolve on
+ *  create too, mirroring bridge.ts, so the Unmatched view and suggestions
+ *  also cover app-created threads. When the thread was already inserted
+ *  (the id-generating path), the resolved fields are written back with a
+ *  patch so they land in the DB, not just the in-memory object. */
+async function stampResolutionOnCreate(
+  rec: CommThread,
+  alreadyInserted = false
+): Promise<void> {
+  try {
+    if (rec.customerId) {
+      rec.resolution = "linked";
+    } else if (rec.contactEmail) {
+      const { resolveForThread, applyResolution } = await import("@/lib/gmail/linking");
+      await applyResolution(rec, await resolveForThread(rec.contactEmail));
+    } else {
+      return;
+    }
+    if (alreadyInserted) {
+      await patchDoc<CommThread>("comms", rec.id, (d) => {
+        d.customerId = rec.customerId;
+        d.customer = rec.customer;
+        d.resolvedContactId = rec.resolvedContactId;
+        d.resolution = rec.resolution;
+        d.suggestedCustomerId = rec.suggestedCustomerId;
+        d.candidates = rec.candidates;
+      });
+    }
+  } catch (err) {
+    console.error("[comms] resolve on create failed", err);
+  }
 }
 
 /** Compose a brand-new email (convenience over create). */
