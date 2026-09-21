@@ -3,30 +3,9 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition, type CSSProperties } from "react";
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
+import EntityQuickAdd, { INPUT, LABEL, type QuickAddValues } from "@/components/entity-quick-add";
 import { createQuoteIntakeAction } from "./actions";
 import { SERVICE_TYPES, type IntakeCustomer, type IntakeSubmit, type ServiceType } from "./types";
-
-const LBL: CSSProperties = {
-  display: "block",
-  fontSize: 11,
-  fontWeight: 600,
-  color: "#9aa0ab",
-  letterSpacing: ".05em",
-  textTransform: "uppercase",
-  margin: "16px 0 6px",
-};
-
-const INPUT: CSSProperties = {
-  width: "100%",
-  border: "1px solid #e4e7ec",
-  borderRadius: 9,
-  padding: "9px 11px",
-  fontSize: 13,
-  fontFamily: "var(--font-ui)",
-  color: "#16181d",
-  background: "#fff",
-  outline: "none",
-};
 
 const ADD_NEW = "__add_new__";
 const SKIP = "__skip__";
@@ -48,21 +27,27 @@ export default function QuoteIntakeForm({
   const [customerQuery, setCustomerQuery] = useState("");
   const [customerMode, setCustomerMode] = useState<"pick" | "new">("pick");
   const [customerId, setCustomerId] = useState("");
-  const [newCustomerName, setNewCustomerName] = useState("");
-  const [newCustomerType, setNewCustomerType] = useState<string>(CUSTOMER_TYPES[0] || "");
+  const [newCustomer, setNewCustomer] = useState<QuickAddValues["customer"]>({
+    name: "",
+    type: CUSTOMER_TYPES[0] || "",
+  });
 
   const [locationMode, setLocationMode] = useState<"pick" | "new" | "skip">("skip");
   const [locationId, setLocationId] = useState("");
-  const [newLocationLabel, setNewLocationLabel] = useState("");
-  const [newLocationCity, setNewLocationCity] = useState("");
-  const [newLocationState, setNewLocationState] = useState("");
+  const [newLocation, setNewLocation] = useState<QuickAddValues["venue"]>({
+    label: "",
+    city: "",
+    state: "",
+  });
 
   const [contactMode, setContactMode] = useState<"pick" | "new" | "skip">("skip");
   const [contactName, setContactName] = useState("");
-  const [newContactName, setNewContactName] = useState("");
-  const [newContactRole, setNewContactRole] = useState("");
-  const [newContactEmail, setNewContactEmail] = useState("");
-  const [newContactPhone, setNewContactPhone] = useState("");
+  const [newContact, setNewContact] = useState<QuickAddValues["contact"]>({
+    name: "",
+    role: "",
+    email: "",
+    phone: "",
+  });
 
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
@@ -123,7 +108,7 @@ export default function QuoteIntakeForm({
 
   const canSubmit =
     (customerMode === "pick" && !!customerId) ||
-    (customerMode === "new" && newCustomerName.trim().length > 0);
+    (customerMode === "new" && newCustomer.name.trim().length > 0);
 
   function submit() {
     if (!canSubmit || pending) return;
@@ -132,19 +117,19 @@ export default function QuoteIntakeForm({
       type,
       customerMode,
       customerId,
-      newCustomerName,
-      newCustomerType,
+      newCustomerName: newCustomer.name,
+      newCustomerType: newCustomer.type,
       locationMode,
       locationId,
-      newLocationLabel,
-      newLocationCity,
-      newLocationState,
+      newLocationLabel: newLocation.label,
+      newLocationCity: newLocation.city,
+      newLocationState: newLocation.state,
       contactMode,
       contactName,
-      newContactName,
-      newContactRole,
-      newContactEmail,
-      newContactPhone,
+      newContactName: newContact.name,
+      newContactRole: newContact.role,
+      newContactEmail: newContact.email,
+      newContactPhone: newContact.phone,
     };
     startTransition(async () => {
       const res = await createQuoteIntakeAction(payload);
@@ -166,7 +151,7 @@ export default function QuoteIntakeForm({
       </p>
 
       {/* ---- service category ---- */}
-      <label style={{ ...LBL, margin: "0 0 8px" }}>Quote type</label>
+      <label style={{ ...LABEL, margin: "0 0 8px" }}>Quote type</label>
       <div style={{ display: "grid", gap: 8 }}>
         {SERVICE_TYPES.map((s) => {
           const active = type === s.key;
@@ -235,7 +220,7 @@ export default function QuoteIntakeForm({
       </div>
 
       {/* ---- customer ---- */}
-      <label style={LBL}>Customer</label>
+      <label style={LABEL}>Customer</label>
       <input
         value={customerQuery}
         onChange={(e) => setCustomerQuery(e.target.value)}
@@ -261,25 +246,13 @@ export default function QuoteIntakeForm({
         </div>
       )}
       {customerMode === "new" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-          <input
-            value={newCustomerName}
-            onChange={(e) => setNewCustomerName(e.target.value)}
-            placeholder="Customer name"
-            style={INPUT}
-          />
-          <select value={newCustomerType} onChange={(e) => setNewCustomerType(e.target.value)} style={INPUT}>
-            {CUSTOMER_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
+        <div style={{ marginTop: 8 }}>
+          <EntityQuickAdd kind="customer" value={newCustomer} onChange={setNewCustomer} />
         </div>
       )}
 
       {/* ---- venue (skippable) ---- */}
-      <label style={LBL}>Venue</label>
+      <label style={LABEL}>Venue</label>
       {!hasCustomerContext && (
         <div style={{ fontSize: 12, color: "#9aa0ab" }}>Pick a customer above first.</div>
       )}
@@ -295,39 +268,16 @@ export default function QuoteIntakeForm({
         </select>
       )}
       {hasCustomerContext && locationMode === "new" && (
-        <div style={{ display: "grid", gap: 8, marginTop: locations.length > 0 ? 8 : 0 }}>
-          <input
-            value={newLocationLabel}
-            onChange={(e) => setNewLocationLabel(e.target.value)}
-            placeholder="Venue name (e.g. Main auditorium)"
-            style={INPUT}
-          />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <input
-              value={newLocationCity}
-              onChange={(e) => setNewLocationCity(e.target.value)}
-              placeholder="City"
-              style={INPUT}
-            />
-            <input
-              value={newLocationState}
-              onChange={(e) => setNewLocationState(e.target.value)}
-              placeholder="State"
-              style={INPUT}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => {
+        <div style={{ marginTop: locations.length > 0 ? 8 : 0 }}>
+          <EntityQuickAdd
+            kind="venue"
+            value={newLocation}
+            onChange={setNewLocation}
+            onCancel={() => {
               setLocationMode("skip");
-              setNewLocationLabel("");
-              setNewLocationCity("");
-              setNewLocationState("");
+              setNewLocation({ label: "", city: "", state: "" });
             }}
-            style={skipLinkStyle}
-          >
-            Skip for now
-          </button>
+          />
         </div>
       )}
       {hasCustomerContext && locationMode === "skip" && locations.length === 0 && (
@@ -341,7 +291,7 @@ export default function QuoteIntakeForm({
       )}
 
       {/* ---- contact (skippable) ---- */}
-      <label style={LBL}>Contact</label>
+      <label style={LABEL}>Contact</label>
       {!hasCustomerContext && (
         <div style={{ fontSize: 12, color: "#9aa0ab" }}>Pick a customer above first.</div>
       )}
@@ -358,48 +308,16 @@ export default function QuoteIntakeForm({
         </select>
       )}
       {hasCustomerContext && contactMode === "new" && (
-        <div style={{ display: "grid", gap: 8, marginTop: contacts.length > 0 ? 8 : 0 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <input
-              value={newContactName}
-              onChange={(e) => setNewContactName(e.target.value)}
-              placeholder="Name"
-              style={INPUT}
-            />
-            <input
-              value={newContactRole}
-              onChange={(e) => setNewContactRole(e.target.value)}
-              placeholder="Role (optional)"
-              style={INPUT}
-            />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <input
-              value={newContactEmail}
-              onChange={(e) => setNewContactEmail(e.target.value)}
-              placeholder="Email (optional)"
-              style={INPUT}
-            />
-            <input
-              value={newContactPhone}
-              onChange={(e) => setNewContactPhone(e.target.value)}
-              placeholder="Phone (optional)"
-              style={INPUT}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => {
+        <div style={{ marginTop: contacts.length > 0 ? 8 : 0 }}>
+          <EntityQuickAdd
+            kind="contact"
+            value={newContact}
+            onChange={setNewContact}
+            onCancel={() => {
               setContactMode("skip");
-              setNewContactName("");
-              setNewContactRole("");
-              setNewContactEmail("");
-              setNewContactPhone("");
+              setNewContact({ name: "", role: "", email: "", phone: "" });
             }}
-            style={skipLinkStyle}
-          >
-            Skip for now
-          </button>
+          />
         </div>
       )}
       {hasCustomerContext && contactMode === "skip" && contacts.length === 0 && (
@@ -456,15 +374,4 @@ const inlineLinkStyle: CSSProperties = {
   fontWeight: 600,
   cursor: "pointer",
   textDecoration: "underline",
-};
-
-const skipLinkStyle: CSSProperties = {
-  justifySelf: "start",
-  background: "none",
-  border: "none",
-  padding: 0,
-  color: "#8c919c",
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: "pointer",
 };
