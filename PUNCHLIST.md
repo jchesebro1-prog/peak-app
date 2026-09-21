@@ -5442,3 +5442,27 @@ latest message instead of stamped per import (the "Waiting on us after I replied
 Brenda thread). §6 status derivation ships with #95's hardening batch; the rest follows.
 
 **Status:** OPEN — spec approved, plan next.
+
+## 97. Gmail 90-day import never completed — quota blow-up restarted it from page 1 on every sync — DONE 2026-09-21
+
+**Reported:** 2026-09-21, from Vercel runtime logs while verifying #95:
+`[gmail] mailbox sync failed for personal:u1 … /messages/<id>?format=full → 403 Quota exceeded … 'Units per minute per user' (6,000)`.
+
+**Root cause:** `syncMailboxMessages` walked every page of the 90-day listing and called `messages.get`
+(5 units) for every id *before* deduping, and set `initialImportDone` only at the very end. A mailbox
+with >~1,200 messages in 90 days exceeded the per-minute quota mid-walk, the run threw, the flag stayed
+false, and every later sync restarted from page 1 re-fetching what it already had. The throw also
+happened before `reconcileInboxState` / `rederiveStatuses` ran, so #95's status fix never got a turn.
+Separately, `checkMailIfStale` skipped un-imported mailboxes, so only the manual button ever retried.
+
+**Fix (branch `fix/gmail-import-quota`, commits edb44ee..62b45ab):** dedup against known Gmail ids
+(comms + site-visit invites) *before* fetching; import in chunks of `IMPORT_BATCH_PER_RUN` = 80 with
+a per-run loop budgeted at 40 s / 8 chunks (≈3,200 units, ~half the quota); rate-limit errors
+(`rateLimitExceeded` / `userRateLimitExceeded` / 429) pause the run with progress kept instead of
+throwing; the incremental history path no longer resets its cursor on a quota error; `syncMailbox`
+runs reconcile / re-derive / labels even when the poll fails; `maxDuration = 60` on the Inbox route and
+the cron route; the auto tick now includes un-imported mailboxes so a paused import resumes unattended.
+
+**Follow-ups:** `recordMessage` still does a full `comms` scan per message (fine at hundreds, worth a
+map when the directory grows); Hobby-plan cron is daily, so background completion depends on an open
+Inbox tab until `CRON_SECRET` + a Pro-plan schedule (or an external pinger) exist.
