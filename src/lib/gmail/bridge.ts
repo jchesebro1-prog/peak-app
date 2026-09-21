@@ -20,6 +20,8 @@ import {
 import {
   GMAIL_MODIFY_SCOPE,
   IMPORT_BATCH_PER_RUN,
+  IMPORT_MAX_CHUNKS_PER_RUN,
+  IMPORT_RUN_BUDGET_MS,
   IMPORT_WINDOW_DAYS,
   isPersonalKey,
   isRateLimit,
@@ -452,12 +454,40 @@ export async function pushInboxState(
   });
 }
 
+/** Dedup set for the one-time history import: every Gmail message id already
+ *  stored on a comms thread, PLUS every Gmail id already stamped on a
+ *  site-visit's own .ics invite (#97). Site-visit invites are recognized and
+ *  skipped by recordMessage() (the X-Peak-Site-Visit header), so without this
+ *  seeding they're never added to `known` there — every sync re-lists and
+ *  re-fetches them (5 quota units each), and enough invites ahead of the
+ *  frontier can strand the import in that skip-only chunk forever. Built once
+ *  per syncMailbox() run (not per chunk) and mutated in place across chunks. */
+async function buildImportDedup(): Promise<Set<string>> {
+  const known = new Set<string>();
+  for (const t of await listDocs<CommThread>("comms")) {
+    for (const m of t.messages || []) {
+      if (m.gmailId) known.add(m.gmailId);
+    }
+  }
+  for (const d of await listDocs<{ id: string; invite?: { gmailId?: string } }>(
+    "site_visits"
+  )) {
+    if (d.invite?.gmailId) known.add(d.invite.gmailId);
+  }
+  return known;
+}
+
 /** Import + poll a single mailbox's messages. Returns the last touched thread
- *  id. (Label/INBOX state is reconciled separately by syncMailbox.) */
+ *  id, and whether it stopped at a chunk boundary with more of the 90-day
+ *  window left to walk (never true on a rate-limit pause or once the import/
+ *  poll has actually finished — syncMailbox uses this to decide whether to
+ *  pull another chunk in the same run). (Label/INBOX state is reconciled
+ *  separately by syncMailbox.) */
 async function syncMailboxMessages(
   key: MailboxKey,
-  info: NonNullable<Awaited<ReturnType<typeof getConnectionInfo>>>
-): Promise<string | null> {
+  info: NonNullable<Awaited<ReturnType<typeof getConnectionInfo>>>,
+  known: Set<string>
+): Promise<{ last: string | null; more: boolean }> {
   let last: string | null = null;
 
   if (!info.initialImportDone) {
@@ -466,12 +496,6 @@ async function syncMailboxMessages(
     // full messages.get is 5 quota units, so a restart after a partial
     // import (chunk boundary or rate limit) only re-walks pages instead of
     // re-fetching messages it already stored.
-    const known = new Set<string>();
-    for (const t of await listDocs<CommThread>("comms")) {
-      for (const m of t.messages || []) {
-        if (m.gmailId) known.add(m.gmailId);
-      }
-    }
     let pageToken: string | undefined;
     const query = "newer_than:" + IMPORT_WINDOW_DAYS + "d";
     let fetchedThisRun = 0;
@@ -479,9 +503,10 @@ async function syncMailboxMessages(
       const page = await listMessageIds(key, query, pageToken);
       for (const meta of page.messages) {
         if (known.has(meta.id)) continue;
+        let touched: string | null = null;
         try {
           const full = await getMessage(key, meta.id);
-          const touched = await recordMessage(key, parseInbound(full));
+          touched = await recordMessage(key, parseInbound(full));
           if (touched) last = touched;
         } catch (err) {
           if (isRateLimit(err)) {
@@ -489,18 +514,23 @@ async function syncMailboxMessages(
             // (initialImportDone stays false) and retry on the next sync.
             console.warn("[gmail] import paused (quota) for", key);
             await updateSyncState(key, { lastSyncAt: Date.now() });
-            return last;
+            return { last, more: false };
           }
           throw err;
         }
+        // Always mark this id seen (a duplicate-thread attach and a skipped
+        // site-visit invite both return null but must never be re-fetched),
+        // but only a message that was ACTUALLY recorded consumes the chunk
+        // budget — a null result costs no quota-worthy write.
         known.add(meta.id);
-        fetchedThisRun++;
+        if (touched !== null) fetchedThisRun++;
         if (fetchedThisRun >= IMPORT_BATCH_PER_RUN) {
           // Chunk boundary — stop paging without marking the import done;
-          // the next sync resumes (cheaply, thanks to `known`).
+          // the next sync (or the next chunk this same run) resumes,
+          // cheaply, thanks to `known`.
           console.info("[gmail] import chunk done for", key, "— more remain");
           await updateSyncState(key, { lastSyncAt: Date.now() });
-          return last;
+          return { last, more: true };
         }
       }
       pageToken = page.nextPageToken;
@@ -512,7 +542,7 @@ async function syncMailboxMessages(
       historyId: profile.historyId,
       lastSyncAt: Date.now(),
     });
-    return last;
+    return { last, more: false };
   }
 
   // incremental: changes since the stored cursor
@@ -520,7 +550,7 @@ async function syncMailboxMessages(
   if (!stored) {
     const profile = await getProfile(key);
     await updateSyncState(key, { historyId: profile.historyId, lastSyncAt: Date.now() });
-    return last;
+    return { last, more: false };
   }
   try {
     let pageToken: string | undefined;
@@ -537,13 +567,21 @@ async function syncMailboxMessages(
     } while (pageToken);
     await updateSyncState(key, { historyId: newestHistoryId, lastSyncAt: Date.now() });
   } catch (err) {
+    if (isRateLimit(err)) {
+      // Quota hit mid-poll — the cursor stays exactly where it was (unlike
+      // the reset below), so the next sync retries these same history
+      // entries instead of silently dropping them.
+      console.warn("[gmail] poll paused (quota) for", key);
+      await updateSyncState(key, { lastSyncAt: Date.now() });
+      return { last, more: false };
+    }
     // cursor too old (404) → reset baseline to now; a manual re-import can
     // widen the window later.
     console.error("[gmail] history sync failed for", key, err);
     const profile = await getProfile(key);
     await updateSyncState(key, { historyId: profile.historyId, lastSyncAt: Date.now() });
   }
-  return last;
+  return { last, more: false };
 }
 
 /** Import + poll one mailbox, then reconcile Gmail-side INBOX state onto its
@@ -568,7 +606,22 @@ async function syncMailbox(
     return { ran: false, last: null, changed: false };
   let last: string | null = null;
   try {
-    last = await syncMailboxMessages(key, info);
+    // Built once for this run (not per chunk) and passed through — a manual
+    // Send/Receive click can drain several chunks back-to-back, and rebuilding
+    // the dedup set every chunk would mean an extra listDocs pass each time
+    // for no benefit (mutations from earlier chunks already live in `known`).
+    const known = info.initialImportDone ? new Set<string>() : await buildImportDedup();
+    const started = Date.now();
+    let chunks = 0;
+    let r: { last: string | null; more: boolean };
+    do {
+      r = await syncMailboxMessages(key, info, known);
+      if (r.last) last = r.last;
+    } while (
+      r.more &&
+      Date.now() - started < IMPORT_RUN_BUDGET_MS &&
+      ++chunks < IMPORT_MAX_CHUNKS_PER_RUN
+    );
   } catch (err) {
     // #97 — an unexpected failure in the message sync must not skip the
     // downstream passes below (reconcile/re-derive/labels still run).

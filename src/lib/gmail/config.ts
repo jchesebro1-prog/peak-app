@@ -59,13 +59,25 @@ export const IMPORT_WINDOW_DAYS = 90;
 export const IMPORT_BATCH_PER_RUN = 80;
 
 /** Gmail's per-minute quota (403 rateLimitExceeded / 429) — retry on the
- *  next sync rather than failing the run. Module-private in spirit (only
- *  bridge.ts's import loop uses it) but exported from this DB-free module so
- *  the pure test harness can exercise it without importing bridge.ts. */
+ *  next sync rather than failing the run. Also matches Gmail's other
+ *  per-user throttle (403 userRateLimitExceeded / dailyLimitExceeded, and
+ *  the human-readable "User-rate limit exceeded" phrase some error bodies
+ *  carry instead of a `reason` field) — same "retry later" handling.
+ *  Module-private in spirit (only bridge.ts's import loop uses it) but
+ *  exported from this DB-free module so the pure test harness can exercise
+ *  it without importing bridge.ts. */
 export function isRateLimit(err: unknown): boolean {
   const m = err instanceof Error ? err.message : String(err);
-  return /\b(429|rateLimitExceeded|RATE_LIMIT_EXCEEDED|Quota exceeded)\b/.test(m);
+  return /\b(429|rateLimitExceeded|RATE_LIMIT_EXCEEDED|Quota exceeded|userRateLimitExceeded|dailyLimitExceeded|User-rate limit exceeded)\b/i.test(
+    m
+  );
 }
+
+/** #97 — a single sync run keeps pulling import chunks while it has time and
+ *  quota headroom: 40 s stays inside the 60 s route cap, and 8 chunks × 80
+ *  messages × 5 units = 3,200 units, about half the per-minute quota. */
+export const IMPORT_RUN_BUDGET_MS = 40_000;
+export const IMPORT_MAX_CHUNKS_PER_RUN = 8;
 
 /** How stale a mailbox may get before a background sync actually runs (D73/
  *  D74). Shared by every automatic trigger — the inbox client tick, the

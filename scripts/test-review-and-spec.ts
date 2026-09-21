@@ -2,7 +2,12 @@ import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/l
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
 import { safeCallbackPath, resolveSignInRedirect } from "@/lib/auth-redirect";
-import { redirectHostMismatch, IMPORT_BATCH_PER_RUN, isRateLimit } from "@/lib/gmail/config";
+import {
+  redirectHostMismatch,
+  IMPORT_BATCH_PER_RUN,
+  IMPORT_MAX_CHUNKS_PER_RUN,
+  isRateLimit,
+} from "@/lib/gmail/config";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
   msOf as opMsOf,
@@ -2978,6 +2983,9 @@ ok(isRateLimit(new Error("Gmail API /messages/x?format=full → 403 { \"reason\"
 ok(isRateLimit(new Error("Gmail API /messages/x → 429 Too Many Requests")), "isRateLimit: 429");
 ok(!isRateLimit(new Error("Gmail API /messages/x → 404 Not Found")), "isRateLimit: 404 is not a rate limit");
 ok(!isRateLimit(new Error("Mailbox not connected: personal:u1")), "isRateLimit: unrelated error");
+ok(isRateLimit(new Error('Gmail API /messages/x → 403 { "reason": "userRateLimitExceeded", "message": "User-rate limit exceeded." }')), "isRateLimit: userRateLimitExceeded");
+ok(!isRateLimit(new Error("Gmail API /messages/x → 500 { \"reason\": \"backendError\" }")), "isRateLimit: backendError is not a rate limit");
+ok(IMPORT_MAX_CHUNKS_PER_RUN * IMPORT_BATCH_PER_RUN * 5 <= 6000 * 0.6, "a full run of chunks stays under 60% of the per-minute quota");
 
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
