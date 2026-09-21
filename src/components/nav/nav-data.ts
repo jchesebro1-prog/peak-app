@@ -82,10 +82,12 @@ export const NAV: NavEntry[] = [
     children: [
       { key: "designoverview", label: "Overview", href: "/design" },
       { key: "engagements", label: "Consulting", href: "/design/engagements" },
-      { key: "designs", label: "Designs", href: "/design/designs" },
-      /* The Grid (D108) — the DaVinci-style system designer: plan sheets,
-       * painted catalog devices, live BOM → draft quote. */
-      { key: "grid", label: "The Grid", href: "/design/grid" },
+      /* Rebranded "The Grid" (D-grid-merge): still the budgetary design
+       * sandbox at the same URL, but a design's editor is now either the
+       * Quick Design canvas or The Grid's plan-sheet/catalog-device painter
+       * (D108), chosen at creation. The standalone Grid index is gone — a
+       * Grid project can no longer exist independent of a design record. */
+      { key: "designs", label: "The Grid", href: "/design/designs" },
       { key: "steel", label: "Steel Calculator", href: "/design/steel" },
       { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
       { key: "assemblies", label: "Assembly Builder", href: "/design/assemblies" },

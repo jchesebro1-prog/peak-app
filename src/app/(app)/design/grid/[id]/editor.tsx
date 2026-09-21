@@ -948,7 +948,7 @@ export default function GridEditor({
     <div style={{ display: "grid", gap: 10 }}>
       {/* header */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <Link href="/design/grid" style={{ ...BTN, textDecoration: "none" }}>
+        <Link href="/design/designs" style={{ ...BTN, textDecoration: "none" }}>
           ← The Grid
         </Link>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#16181d" }}>

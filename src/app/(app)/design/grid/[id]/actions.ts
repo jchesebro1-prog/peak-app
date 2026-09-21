@@ -596,6 +596,7 @@ export async function createDraftQuoteAction(
     await addRevision(projectId, { by: user.name, reason: "quote", note: `Quoted as ${existing.id}` });
     revalidatePath(editorPath(projectId));
     revalidatePath("/quotes");
+    revalidatePath("/design/designs");
     return { ok: true, quoteId: existing.id, updated: true, fallbackLines };
   }
 
@@ -617,6 +618,6 @@ export async function createDraftQuoteAction(
   await addRevision(projectId, { by: user.name, reason: "quote", note: `Quoted as ${q.id}` });
   revalidatePath(editorPath(projectId));
   revalidatePath("/quotes");
-  revalidatePath("/design/grid");
+  revalidatePath("/design/designs");
   return { ok: true, quoteId: q.id, updated: false, fallbackLines };
 }

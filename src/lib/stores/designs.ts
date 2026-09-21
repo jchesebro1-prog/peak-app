@@ -6,7 +6,7 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
-import { create as createQuote, update as updateQuote, type Quote } from "@/lib/stores/quotes";
+import { create as createQuote, update as updateQuote, get as getQuoteById, type Quote } from "@/lib/stores/quotes";
 
 /**
  * SandboxStore — the Design Dashboard's data layer. Port of app/sandbox.js
@@ -95,6 +95,21 @@ export type DesignRecord = {
   revisions?: DesignRevision[];
   /** Opaque drawing/designer state saved by the Quick Design screen. Not interpreted server-side. */
   config?: Record<string, unknown> | null;
+  /** Which editor built this design (D108/D-grid-merge). Missing/undefined
+   *  on every pre-merge record reads as "quick" — the original Quick Design
+   *  canvas. Locked at creation: the two modes store completely different
+   *  shapes (`config` blob vs. `gridProjectId` link) and there is no
+   *  conversion between them. */
+  layoutMode?: "quick" | "manual";
+  /** Linked `grid_projects` row (The Grid's plan-sheet editor) — set only
+   *  when layoutMode is "manual". The project's own store, BOM engine and
+   *  revision log stay untouched; this is a pointer, not a copy. */
+  gridProjectId?: string | null;
+  /** Draft quote this design has been promoted to, if any — mirrors
+   *  `grid_projects.quoteId`'s re-quote-in-place pattern. Promoting again
+   *  updates this same quote (while it's still a draft) instead of minting
+   *  a new one, and the design record itself is never deleted. */
+  quoteId?: string | null;
 };
 
 /** The partial that promotes a budgetary design into a real quote (port of toQuotePartial's return). */
@@ -356,12 +371,18 @@ export async function designToQuotePartial(id: string): Promise<DesignQuoteParti
 }
 
 /**
- * Shared promotion flow (punch #75): all three promote-to-quote call sites
- * (Quick Design's addToQuotesAction, and both promoteDesignAction copies)
- * delegate here for the common build-partial → create-quote → stamp-requote
- * → remove-design steps. Callers retain their own `revalidatePath` targets
- * and response shapes — those differ deliberately per call site and are
- * NOT folded in here (see the actions files' own comments).
+ * Shared promotion flow for Quick-layout designs (punch #75): Quick Design's
+ * addToQuotesAction and the Designs dashboard's promoteDesignAction (quick
+ * records only — manual-layout records delegate to The Grid's own
+ * createDraftQuoteAction instead, see design/designs/actions.ts) both go
+ * through here for the common build-partial → create-or-update-quote steps.
+ *
+ * Re-quote-in-place (D-grid-merge): a design is no longer deleted when
+ * promoted — it stays budgetary/visible, and `quoteId` tracks the linked
+ * draft. A later promote updates that SAME quote in place as long as it's
+ * still a draft (mirrors the pattern `grid_projects.quoteId` already used);
+ * once the quote has moved past draft, promoting again mints a new one
+ * rather than silently rewriting a quote a customer may have seen.
  *
  * Returns null when the design can't be found (mirrors
  * designToQuotePartial); callers decide how to surface that (throw vs.
@@ -371,15 +392,24 @@ export async function promoteDesignToQuote(
   id: string,
   owner: string
 ): Promise<Quote | null> {
+  const d = await getDesign(id);
+  if (!d) return null;
   const partial = await designToQuotePartial(id);
   if (!partial) return null;
+
+  const existing = d.quoteId ? await getQuoteById(d.quoteId) : null;
+  if (existing && existing.status === "draft") {
+    const q = await updateQuote(existing.id, { ...(partial as unknown as Partial<Quote>), owner });
+    return q;
+  }
+
   const q = await createQuote({ ...(partial as unknown as Partial<Quote>), owner });
   // designToQuotePartial's requote is always true by type, but keep the
   // conditional — it's what all three original call sites did.
   if (partial.requote) {
     await updateQuote(q.id, { requote: true } as unknown as Partial<Quote>);
   }
-  await removeDesign(id);
+  await updateDesign(id, { quoteId: q.id });
   return q;
 }
 

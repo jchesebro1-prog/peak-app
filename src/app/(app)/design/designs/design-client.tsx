@@ -3,7 +3,7 @@
 import { useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { IDENTITY, deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import type { DesignRecord, DesignRevision } from "@/lib/stores/designs";
 import {
@@ -34,6 +34,7 @@ import {
 import {
   approveDesignAction,
   claimDesignReviewAction,
+  createManualDesignAction,
   promoteDesignAction,
   requestDesignChangesAction,
   submitDesignReviewAction,
@@ -78,6 +79,80 @@ const REVIEW_PILL: Record<string, { ink: string; soft: string; bd: string; label
 
 type RosterEntry = { name: string; initials: string; color: string };
 
+/** "New design" trigger with a Quick canvas / Manual (Grid) split, in place
+ *  of the old bare link to /design/quick (D-grid-merge). Renders as an
+ *  arbitrary trigger (via `style`/`children`) so each of the three call
+ *  sites keeps its existing look. */
+function NewDesignSplit({
+  style,
+  className,
+  children,
+}: {
+  style: CSSProperties;
+  className?: string;
+  children: ReactNode;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  const startManual = () => {
+    setOpen(false);
+    startTransition(async () => {
+      const res = await createManualDesignAction();
+      if (res.ok) router.push(`/design/grid/${encodeURIComponent(res.gridProjectId)}`);
+    });
+  };
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={className}
+      onClick={() => setOpen((o) => !o)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setOpen((o) => !o);
+        }
+      }}
+      style={{ ...style, position: "relative", cursor: "pointer" }}
+    >
+      {children}
+      {open && (
+        <>
+          <div
+            onClick={(e) => { e.stopPropagation(); setOpen(false); }}
+            style={{ position: "fixed", inset: 0, zIndex: 70 }}
+          />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 212, background: "#fff", border: "1px solid #e4e7ec", borderRadius: 10, boxShadow: "0 10px 26px rgba(0,0,0,.16)", overflow: "hidden", zIndex: 71, textAlign: "left" }}
+          >
+            <Link
+              href="/design/quick"
+              onClick={() => setOpen(false)}
+              style={{ display: "block", padding: "10px 13px", fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#16181d", textDecoration: "none", borderBottom: "1px solid #f0f1f4" }}
+            >
+              Quick canvas
+              <div style={{ fontSize: 11, fontWeight: 500, color: "#9aa0ab", marginTop: 2 }}>Free-form sandbox editor</div>
+            </Link>
+            <button
+              type="button"
+              onClick={startManual}
+              disabled={pending}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 13px", fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#16181d", background: "#fff", border: "none", cursor: pending ? "default" : "pointer" }}
+            >
+              {pending ? "Starting…" : "Manual layout · The Grid"}
+              <div style={{ fontSize: 11, fontWeight: 500, color: "#9aa0ab", marginTop: 2 }}>Paint devices onto a plan sheet</div>
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function DesignClient({
   me,
   canApprove,
@@ -99,20 +174,21 @@ export default function DesignClient({
   engagementsForDesign: Record<string, Array<{ id: string; name: string }>>;
 }) {
   const router = useRouter();
-  const [, startTransition] = useTransition();
+  const [pending, startTransition] = useTransition();
 
-  // Server-fed list with client-side deltas layered on top (promotes remove a
-  // card immediately; review actions patch one record) — derived, no effects.
-  const [removedIds, setRemovedIds] = useState<Record<string, boolean>>({});
+  // Server-fed list with a client-side patch layered on top (review actions
+  // + promote patch one record in place — promoting no longer deletes the
+  // design, see promoteDesignToQuote) — derived, no effects.
   const [patched, setPatched] = useState<Record<string, DesignRecord>>({});
   const designs = useMemo(
-    () => initialDesigns.filter((d) => !removedIds[d.id]).map((d) => patched[d.id] || d),
-    [initialDesigns, removedIds, patched]
+    () => initialDesigns.map((d) => patched[d.id] || d),
+    [initialDesigns, patched]
   );
 
   const [scope, setScope] = useState<string>("all"); // 'mine' | 'all' | owner name
   const [promoteToast, setPromoteToast] = useState(false);
   const [promotedId, setPromotedId] = useState<string | null>(null);
+  const [promoteError, setPromoteError] = useState<string | null>(null);
   const [rcOpen, setRcOpen] = useState(false);
   const [rcNote, setRcNote] = useState("");
   const [reviewerSel, setReviewerSel] = useState("queue");
@@ -153,14 +229,16 @@ export default function DesignClient({
   /* -------------------------------- promote -------------------------------- */
 
   const promoteDesign = (id: string) => {
+    setPromoteError(null);
     startTransition(async () => {
       const res = await promoteDesignAction(id);
-      if (!res.ok) return;
-      setRemovedIds((m) => ({ ...m, [id]: true }));
+      if (!res.ok) {
+        setPromoteError(res.error);
+        return;
+      }
       setPromotedId(res.quoteId);
       setPromoteToast(true);
-      if (selectedId === id) router.replace("/design/designs", { scroll: false });
-      else router.refresh();
+      router.refresh();
     });
   };
 
@@ -256,9 +334,9 @@ export default function DesignClient({
             Budgetary system designs — explored freely, separate from Quotes until you promote them.
           </div>
         </div>
-        <Link href="/design/quick" className="dd-accent-btn" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "#fff", background: ACCENT, padding: "12px 17px", borderRadius: 9, textDecoration: "none", boxShadow: `0 1px 3px ${ACCENT_SOFT}`, flexShrink: 0 }}>
+        <NewDesignSplit className="dd-accent-btn" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "#fff", background: ACCENT, padding: "12px 17px", borderRadius: 9, boxShadow: `0 1px 3px ${ACCENT_SOFT}`, flexShrink: 0 }}>
           <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> New design
-        </Link>
+        </NewDesignSplit>
       </div>
 
       {/* stat tiles */}
@@ -330,13 +408,20 @@ export default function DesignClient({
                   <span style={{ fontSize: 11, color: "#9aa0ab" }}>est. · {(sel.tier || "better").replace(/^./, (c) => c.toUpperCase())}</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
-                  <Link href={`/design/quick?design=${encodeURIComponent(sel.id)}`} className="dd-accent-btn" style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: ACCENT, padding: "9px 14px", borderRadius: 8, textDecoration: "none" }}>
-                    Open in Quick Design
+                  <Link
+                    href={sel.layoutMode === "manual" ? `/design/grid/${encodeURIComponent(sel.gridProjectId || "")}` : `/design/quick?design=${encodeURIComponent(sel.id)}`}
+                    className="dd-accent-btn"
+                    style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: ACCENT, padding: "9px 14px", borderRadius: 8, textDecoration: "none" }}
+                  >
+                    {sel.layoutMode === "manual" ? "Open in The Grid" : "Open in Quick Design"}
                   </Link>
-                  <button onClick={() => promoteDesign(sel.id)} className="dd-accent-btn" style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", padding: "9px 14px", borderRadius: 8, cursor: "pointer" }}>
-                    Add to Quotes →
+                  <button onClick={() => promoteDesign(sel.id)} disabled={pending} className="dd-accent-btn" style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", padding: "9px 14px", borderRadius: 8, cursor: pending ? "default" : "pointer" }}>
+                    {sel.quoteId ? "Update quote →" : "Add to Quotes →"}
                   </button>
                 </div>
+                {promoteError && (
+                  <div style={{ marginTop: 9, fontSize: 12, color: "#b4543a", textAlign: "right" }}>{promoteError}</div>
+                )}
               </div>
             </div>
           </div>
@@ -478,9 +563,9 @@ export default function DesignClient({
           <div style={{ fontSize: 13, color: "#9aa0ab", marginTop: 6, lineHeight: 1.5, maxWidth: 340, marginLeft: "auto", marginRight: "auto" }}>
             Start a budgetary design in the sandbox — explore systems and pricing without touching your quote pipeline.
           </div>
-          <Link href="/design/quick" className="dd-accent-btn" style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 18, fontSize: 13, fontWeight: 600, color: "#fff", background: ACCENT, padding: "11px 18px", borderRadius: 9, textDecoration: "none" }}>
+          <NewDesignSplit className="dd-accent-btn" style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 18, fontSize: 13, fontWeight: 600, color: "#fff", background: ACCENT, padding: "11px 18px", borderRadius: 9 }}>
             <span style={{ fontSize: 14, lineHeight: 1 }}>+</span> New design
-          </Link>
+          </NewDesignSplit>
         </div>
       ) : (
         <div className="dd-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14 }}>
@@ -517,22 +602,26 @@ export default function DesignClient({
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "13px 16px" }}>
-                  <Link href={`/design/quick?design=${encodeURIComponent(d.id)}`} className="dd-open-link" style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", textDecoration: "none", padding: "9px 14px", borderRadius: 8, border: "1px solid #e4e7ec", background: "#fff" }}>
+                  <Link
+                    href={d.layoutMode === "manual" ? `/design/grid/${encodeURIComponent(d.gridProjectId || "")}` : `/design/quick?design=${encodeURIComponent(d.id)}`}
+                    className="dd-open-link"
+                    style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", textDecoration: "none", padding: "9px 14px", borderRadius: 8, border: "1px solid #e4e7ec", background: "#fff" }}
+                  >
                     Open
                   </Link>
-                  <button onClick={() => promoteDesign(d.id)} className="dd-accent-btn" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", padding: "10px 12px", borderRadius: 8, cursor: "pointer" }}>
-                    Add to Quotes →
+                  <button onClick={() => promoteDesign(d.id)} disabled={pending} className="dd-accent-btn" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", padding: "10px 12px", borderRadius: 8, cursor: pending ? "default" : "pointer" }}>
+                    {d.quoteId ? "Update quote →" : "Add to Quotes →"}
                   </button>
                 </div>
               </div>
             );
           })}
 
-          <Link href="/design/quick" className="dd-newtile" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 9, background: "transparent", border: "1.5px dashed #d6d9e0", borderRadius: 12, textDecoration: "none", color: "#9aa0ab", minHeight: 210 }}>
+          <NewDesignSplit className="dd-newtile" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 9, background: "transparent", border: "1.5px dashed #d6d9e0", borderRadius: 12, color: "#9aa0ab", minHeight: 210 }}>
             <span style={{ width: 38, height: 38, borderRadius: 10, background: "#f1f2f5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 21, lineHeight: 1 }}>+</span>
             <span style={{ fontSize: 13.5, fontWeight: 600 }}>New design</span>
-            <span style={{ fontSize: 11.5, textAlign: "center", lineHeight: 1.4, maxWidth: 150 }}>Build &amp; price freely in the sandbox</span>
-          </Link>
+            <span style={{ fontSize: 11.5, textAlign: "center", lineHeight: 1.4, maxWidth: 150 }}>Quick canvas or manual layout in The Grid</span>
+          </NewDesignSplit>
         </div>
       )}
 
@@ -541,10 +630,10 @@ export default function DesignClient({
         <div style={{ position: "fixed", left: "50%", bottom: 26, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 13, background: "#16181d", color: "#fff", padding: "13px 16px", borderRadius: 12, boxShadow: "0 8px 28px rgba(0,0,0,.22)", zIndex: 60, maxWidth: "92vw" }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#5fd29a", flexShrink: 0 }} />
           <span style={{ fontSize: 13, lineHeight: 1.4 }}>
-            Added to Quotes as <b style={{ fontFamily: MONO }}>{promotedId}</b> — flagged for requote
+            Design linked to quote <b style={{ fontFamily: MONO }}>{promotedId}</b>
           </span>
           <Link href={`/estimator?id=${encodeURIComponent(promotedId || "")}`} style={{ fontSize: 13, fontWeight: 600, color: "#fff", textDecoration: "underline", whiteSpace: "nowrap" }}>
-            Requote now
+            Open quote
           </Link>
           <button onClick={() => setPromoteToast(false)} style={{ width: 24, height: 24, border: "none", background: "#2b2e35", borderRadius: 6, color: "#cfd3da", fontSize: 14, cursor: "pointer", flexShrink: 0 }}>
             ×

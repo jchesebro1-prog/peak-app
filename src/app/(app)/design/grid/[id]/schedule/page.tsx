@@ -31,7 +31,7 @@ export default async function SchedulePage({
     return (
       <div style={{ padding: 24, fontSize: 13.5 }}>
         <p style={{ marginBottom: 10 }}>That design no longer exists.</p>
-        <Link href="/design/grid" style={{ color: "#3155a8" }}>← Back to The Grid</Link>
+        <Link href="/design/designs" style={{ color: "#3155a8" }}>← Back to The Grid</Link>
       </div>
     );
   }
