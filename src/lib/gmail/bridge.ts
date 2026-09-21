@@ -335,21 +335,32 @@ async function reconcileInboxState(key: MailboxKey): Promise<number> {
 
 /* ---- status re-derive (#96 §6) ------------------------------------------- */
 
-/** Recompute every bridged thread's status from its newest message. Cheap
- *  (one listDocs + patch only on change) and idempotent, so it runs on every
- *  sync: it is what corrects threads stamped by the old per-message rule.
- *  Legacy threads without a gmailAccountKey stamp resolve to a mailbox by
- *  the same name-derived fallback as reconcileInboxState. */
+/** Per-sync self-heal, restricted to `waiting_*` on BRIDGED threads only —
+ *  mirrors reconcileInboxState's `if (!t.gmailThreadId) continue;` guard so
+ *  never-bridged local threads (demo, logged calls, shared-box threads) are
+ *  never touched. Also fixes message order for threads imported newest-first
+ *  (Gmail's listing order), since deriveStatus and the UI both assume
+ *  chronological order. Manual replied / closed / draft are never touched by
+ *  this bulk pass — those are respected until the next message lands
+ *  (recordMessage), which is what let "Mark replied" and "Close" stick. */
 async function rederiveStatuses(key: MailboxKey): Promise<number> {
   const users = await allUsers();
   const all = await listDocs<CommThread>("comms");
   let changed = 0;
   for (const t of all) {
+    if (!t.gmailThreadId) continue; // never bridged — mirror reconcileInboxState
+    // Only stamps the old per-message rule could have produced. Manual
+    // replied / closed / draft are never touched by the bulk pass — those
+    // are respected until the next message lands (recordMessage).
+    if (t.status !== "waiting_us" && t.status !== "waiting_them") continue;
     if ((t.gmailAccountKey ?? keyForThreadWith(t, users)) !== key) continue;
-    const next = deriveStatus(t);
-    if (next === t.status) continue;
+    const sorted = [...(t.messages || [])].sort((a, b) => (a.at || 0) - (b.at || 0));
+    const next = deriveStatus({ status: t.status, messages: sorted });
+    const orderChanged = sorted.some((m, i) => m !== (t.messages || [])[i]);
+    if (next === t.status && !orderChanged) continue;
     await patchDoc<CommThread>("comms", t.id, (d) => {
-      d.status = deriveStatus(d);
+      d.messages = [...(d.messages || [])].sort((a, b) => (a.at || 0) - (b.at || 0));
+      if (d.status === "waiting_us" || d.status === "waiting_them") d.status = deriveStatus(d);
     });
     changed++;
   }

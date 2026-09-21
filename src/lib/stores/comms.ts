@@ -135,7 +135,7 @@ export function deriveStatus(
   const msgs = t.messages || [];
   if (!msgs.length) return t.status;
   let latest = msgs[0];
-  for (const m of msgs) if ((m.at || 0) > (latest.at || 0)) latest = m;
+  for (const m of msgs) if ((m.at || 0) >= (latest.at || 0)) latest = m;
   if (t.status === "draft") return "draft";
   if (t.status === "closed" && latest.direction === "out") return "closed";
   return statusFromDirection(latest.direction);

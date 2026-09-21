@@ -1505,6 +1505,14 @@ ok(participantsFor(msgsThread(["Jeff", "", "Sarah", undefined])) === "Jeff, Sara
     deriveStatus({ status: "waiting_us", messages: [] }) === "waiting_us",
     "deriveStatus: no messages → status unchanged"
   );
+  ok(
+    deriveStatus({ status: "replied", messages: [m("in", 100)] }) === "waiting_us",
+    "deriveStatus: replied is not a derivable state — callers that must respect it (the bulk pass) skip it"
+  );
+  ok(
+    deriveStatus({ status: "waiting_us", messages: [m("in", 100), m("out", 100)] }) === "waiting_them",
+    "deriveStatus: equal timestamps → later array element wins"
+  );
 }
 
 /* ============ Review fix — sort=date must be representable in CRM mode (#42) ============ */
