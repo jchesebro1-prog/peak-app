@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { findCalibration, type Calibration, type MeasureUnit, type Point } from "@/lib/annotations";
+import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";
 import {
   addCurtainPlacement,
   addPlacement,
@@ -21,6 +22,7 @@ import {
   restoreRevision,
   setPlacementCategory,
   setQuote,
+  setScopeInputs,
   setSheetCalibration,
   setVenue,
 } from "@/lib/stores/grid-projects";
@@ -397,6 +399,20 @@ export async function setVenueAction(
   const site = await getSite(siteId);
   if (!site) return { ok: false, error: "That venue no longer exists." };
   const p = await setVenue(projectId, site.id, site.name || "Unnamed venue");
+  if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/** Live-revisable basic-info snapshot for the Scope panel
+ *  (D-manual-scope-targets) — no validation: any well-typed payload is
+ *  accepted, including partial toggles the caller has already merged. */
+export async function setScopeInputsAction(
+  projectId: string,
+  scopeInputs: QuickScopeInputs,
+): Promise<Result> {
+  await requireUser();
+  const p = await setScopeInputs(projectId, scopeInputs);
   if (!p) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
   return { ok: true };

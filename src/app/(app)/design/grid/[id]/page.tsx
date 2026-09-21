@@ -13,6 +13,7 @@ import { fabricSellPerSqft, sellCoeffs } from "@/lib/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { fabricAreaRate, isFabricRow } from "@/lib/design/grid-curtains";
 import type { FabricSell } from "@/lib/curtain-geom";
+import type { FabricOption } from "@/app/(app)/design/quick/engine";
 import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
 import GridEditor from "./editor";
@@ -106,6 +107,13 @@ export default async function GridEditorPage({
       pricePerSqft: fabricSellPerSqft(fabricAreaRate(p), tier.margin),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
+
+  // Cost-bearing fabric rows for the Scope panel's target $ math
+  // (D-manual-scope-targets, engine.ts scopeTargets — see DECISIONS.md).
+  const engineFabrics: FabricOption[] = catalog
+    .filter((p) => p.category === "Fabric")
+    .map((p) => ({ sku: p.sku, desc: p.desc, costPerSqft: p.costPerSqft ?? null }));
+
   const curtainCoeffs = sellCoeffs(tier.margin);
   const laborParts: LaborPartLite[] = catalog
     .filter((p) => (p.role || "").toLowerCase() === "labor")
@@ -131,6 +139,7 @@ export default async function GridEditorPage({
         siteId: project.siteId || null,
         siteName: project.siteName || "",
         quoteId: project.quoteId,
+        scopeInputs: project.scopeInputs || null,
         placements: project.placements || [],
         calibrations: project.calibrations || [],
         spaces: project.spaces || [],
@@ -147,6 +156,7 @@ export default async function GridEditorPage({
       }))}
       parts={parts}
       fabrics={fabrics}
+      engineFabrics={engineFabrics}
       curtainCoeffs={curtainCoeffs}
       laborParts={laborParts}
       laborHoursPerDevice={laborHoursPerDevice}

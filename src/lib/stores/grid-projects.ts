@@ -8,6 +8,7 @@ import {
 } from "@/db/doc-store";
 import { clamp01, type Calibration, type Point } from "@/lib/annotations";
 import type { GridCurtain } from "@/lib/design/grid-bom";
+import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";
 
 /**
  * The Grid (D108) — system-design projects: plan sheets, painted catalog
@@ -146,6 +147,13 @@ export type GridProject = {
   revisions?: GridRevision[];
   /** Draft quote minted from this design, when one exists. */
   quoteId: string | null;
+  /** Live-revisable basic-info snapshot (D-manual-scope-targets) — venue,
+   *  size, dimensions, systems-in-scope. `null` until the Scope panel's
+   *  inputs are filled in at least once; never a one-time creation step, it
+   *  stays editable for the project's life and target $ is always computed
+   *  fresh from whatever this currently holds. Absent on pre-D-manual-scope
+   *  docs, read as null. */
+  scopeInputs?: QuickScopeInputs | null;
   createdBy: string;
   createdAt: number;
   updatedAt: number;
@@ -201,6 +209,7 @@ export async function createProject(input: {
     spaces: [],
     routes: [],
     quoteId: null,
+    scopeInputs: null,
     createdBy: input.by,
     createdAt: t,
     updatedAt: t,
@@ -452,6 +461,16 @@ export async function setVenue(
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.siteId = siteId;
     p.siteName = siteName;
+    p.updatedAt = Date.now();
+  });
+}
+
+export async function setScopeInputs(
+  projectId: string,
+  scopeInputs: QuickScopeInputs | null
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.scopeInputs = scopeInputs;
     p.updatedAt = Date.now();
   });
 }
