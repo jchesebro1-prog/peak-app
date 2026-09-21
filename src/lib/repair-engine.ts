@@ -47,7 +47,8 @@ export function rateDefaults(): RepairRates {
 
 /** Effective rates = defaults overlaid with the saved blob (port of getRates). */
 export async function getRates(): Promise<RepairRates> {
-  return getBlob<RepairRates>(RATES_BLOB_ID, rateDefaults());
+  const saved = await getBlob<RepairRates>(RATES_BLOB_ID, rateDefaults());
+  return saved;
 }
 
 /** Merge a patch into the saved rates and return the effective result (port of setRates). */

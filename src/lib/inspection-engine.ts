@@ -48,7 +48,8 @@ export function rateDefaults(): InspectionRates {
 
 /** Effective rates = defaults overlaid with the saved blob. */
 export async function getRates(): Promise<InspectionRates> {
-  return getBlob<InspectionRates>(RATES_BLOB_ID, rateDefaults());
+  const saved = await getBlob<InspectionRates>(RATES_BLOB_ID, rateDefaults());
+  return saved;
 }
 
 /** Merge a patch into the saved rates and return the effective result. */

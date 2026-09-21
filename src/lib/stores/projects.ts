@@ -147,6 +147,7 @@ export type CrewAssignment = {
   start: number;
   end: number;
   mobId?: string | null;
+  googleEventId?: string | null;
 };
 
 /** Estimator mobilization rows carried onto the project (spec.mobs). */

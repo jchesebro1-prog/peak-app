@@ -152,7 +152,7 @@ export default async function FlameTestQuotePage({
       initial = {
         editingId: null,
         customerId: cust.id,
-        quoteName: cust.name + " — Flame test",
+        quoteName: `${locs.find((l) => venueSel[l.id]?.on)?.label || cust.name} ${new Date().getFullYear()}`,
         venueSel,
         contactSel: primary ? primary.name : "",
         contactManual: "",

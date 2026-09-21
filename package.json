@@ -28,7 +28,8 @@
     "import:daylite": "tsx scripts/import-daylite.ts",
     "test:specs": "tsx scripts/test-review-and-spec.ts",
     "test:smoke": "tsx scripts/smoke-routes.ts",
-    "test:smoke:upload": "tsx scripts/smoke-upload.ts"
+    "test:smoke:upload": "tsx scripts/smoke-upload.ts",
+    "test:review:regressions": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-review-regressions.ts && tsx scripts/test-quote-email-regression.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",

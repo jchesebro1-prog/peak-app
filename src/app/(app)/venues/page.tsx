@@ -56,6 +56,8 @@ export default async function VenuesPage({
 
   const q = one(sp.q);
   const company = one(sp.company);
+  const page = Math.max(1, Number.parseInt(one(sp.page) || "1", 10) || 1);
+  const pageSize = 50;
 
   /* ---- filter ---- */
   const ql = q.trim().toLowerCase();
@@ -78,6 +80,9 @@ export default async function VenuesPage({
     }
     return a.site.name.localeCompare(b.site.name);
   });
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   /* ---- distinct companies present in the directory, for the filter chips ---- */
   const companyNames = new Map<string, string>();
@@ -88,11 +93,12 @@ export default async function VenuesPage({
     a.name.localeCompare(b.name)
   );
 
-  const linkWith = (patch: { company?: string }) => {
+  const linkWith = (patch: { company?: string; page?: number }) => {
     const p = new URLSearchParams();
     if (q.trim()) p.set("q", q.trim());
     const nextCompany = patch.company !== undefined ? patch.company : company;
     if (nextCompany) p.set("company", nextCompany);
+    if ((patch.page || 1) > 1) p.set("page", String(patch.page));
     const s = p.toString();
     return "/venues" + (s ? "?" + s : "");
   };
@@ -174,7 +180,7 @@ export default async function VenuesPage({
         </div>
       ) : (
         <div className="pk-card" style={{ padding: 0, overflow: "hidden" }}>
-          {filtered.map((row) => (
+          {visible.map((row) => (
             <Link
               key={row.site.id}
               href={"/venues/" + encodeURIComponent(row.site.id)}
@@ -210,6 +216,15 @@ export default async function VenuesPage({
           {filtered.length === 0 && (
             <div style={{ padding: "50px 22px", textAlign: "center", color: "#9aa0ab", fontSize: 13 }}>
               {ql ? `No venues match “${q.trim()}”.` : "No venues match these filters."}
+            </div>
+          )}
+          {filtered.length > 0 && pageCount > 1 && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderTop: "1px solid #eef0f3", fontSize: 12.5 }}>
+              <Link aria-disabled={currentPage === 1} href={linkWith({ page: Math.max(1, currentPage - 1) })}
+                style={{ color: currentPage === 1 ? "#c0c5cd" : "var(--accent)", pointerEvents: currentPage === 1 ? "none" : "auto" }}>← Previous</Link>
+              <span style={{ color: "#8c919c" }}>Page {currentPage} of {pageCount} · {filtered.length} venues</span>
+              <Link aria-disabled={currentPage === pageCount} href={linkWith({ page: Math.min(pageCount, currentPage + 1) })}
+                style={{ color: currentPage === pageCount ? "#c0c5cd" : "var(--accent)", pointerEvents: currentPage === pageCount ? "none" : "auto" }}>Next →</Link>
             </div>
           )}
         </div>

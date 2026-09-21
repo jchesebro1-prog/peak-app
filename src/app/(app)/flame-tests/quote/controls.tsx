@@ -254,6 +254,9 @@ export function QuoteBuilder({
   accent: string;
 }) {
   const [customerId, setCustomerId] = useState(initial.customerId);
+  const [customerQuery, setCustomerQuery] = useState(
+    customers.find((c) => c.id === initial.customerId)?.name || ""
+  );
   const [quoteName, setQuoteName] = useState(initial.quoteName);
   const [venueSel, setVenueSel] = useState(initial.venueSel);
   const [contactSel, setContactSel] = useState(initial.contactSel);
@@ -315,6 +318,7 @@ export function QuoteBuilder({
     if (locs.length && !locs.some((l) => sel[l.id].on)) sel[locs[0].id].on = true;
     const primary = c?.contacts.find((x) => x.primary) || c?.contacts[0] || null;
     setCustomerId(id);
+    setCustomerQuery(c?.name || "");
     // Seed the margin knob from the customer's tier (contact's own tier
     // wins; item 11, D88). Still just a seed — the knob stays editable.
     {
@@ -323,7 +327,8 @@ export function QuoteBuilder({
         setMarginPts(Math.round(seeded * 100));
     }
     setVenueSel(sel);
-    setQuoteName(c ? c.name + " — Flame test" : "");
+    const namedVenue = locs.find((l) => sel[l.id]?.on)?.label || "";
+    setQuoteName(c ? `${namedVenue || c.name} ${new Date().getFullYear()}` : "");
     setContactSel(primary ? primary.name : "");
     setContactManual("");
     setSavedFlag(false);
@@ -334,6 +339,8 @@ export function QuoteBuilder({
       return { ...prev, [locId]: { ...cur, on: !cur.on } };
     });
     dirty();
+    const loc = locations.find((l) => l.id === locId);
+    if (loc && !venueSel[locId]?.on) setQuoteName(`${loc.label} ${new Date().getFullYear()}`);
   }
   function setCurtains(locId: string, val: string) {
     const clean = val === "" ? "" : String(Math.max(0, Math.floor(+val || 0)));
@@ -522,19 +529,28 @@ export function QuoteBuilder({
           >
             <div>
               <label style={LABEL}>Customer</label>
-              <select
-                className="ftq-sel"
-                value={customerId}
-                onChange={(e) => pickCustomer(e.target.value)}
-                style={{ ...FIELD, fontWeight: 600, cursor: "pointer" }}
-              >
-                <option value="">Select a customer…</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <input
+                list="flame-test-customers"
+                value={customerQuery}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setCustomerQuery(value);
+                  const match = customers.find((c) => c.name.toLowerCase() === value.trim().toLowerCase());
+                  if (match && match.id !== customerId) pickCustomer(match.id);
+                  else if (!value.trim()) pickCustomer("");
+                }}
+                onBlur={() => {
+                  const match = customers.find((c) => c.name.toLowerCase() === customerQuery.trim().toLowerCase());
+                  if (match) pickCustomer(match.id);
+                  else if (customerId) setCustomerQuery(customer?.name || "");
+                }}
+                placeholder="Type to find a customer…"
+                autoComplete="off"
+                style={{ ...FIELD, fontWeight: 600 }}
+              />
+              <datalist id="flame-test-customers">
+                {customers.map((c) => <option key={c.id} value={c.name} />)}
+              </datalist>
             </div>
             <div>
               <label style={LABEL}>Quote name</label>

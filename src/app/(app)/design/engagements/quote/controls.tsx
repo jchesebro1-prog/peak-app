@@ -34,6 +34,7 @@ export type BuilderInitial = {
   id: string;
   name: string;
   customerId: string;
+  venueCustomerId: string;
   locationId: string;
   contactName: string;
   contactRole: string;
@@ -94,6 +95,10 @@ export function ConsultingQuoteBuilder({
     initial?.customerId || preCustomerId || ""
   );
   const cust = customers.find((c) => c.id === customerId) || null;
+  const [venueCustomerId, setVenueCustomerId] = useState(
+    initial?.venueCustomerId || initial?.customerId || preCustomerId || ""
+  );
+  const venueCustomer = customers.find((c) => c.id === venueCustomerId) || null;
 
   const [quoteName, setQuoteName] = useState(initial?.name || "");
   const [locationId, setLocationId] = useState(initial?.locationId || "");
@@ -199,12 +204,13 @@ export function ConsultingQuoteBuilder({
       <form action={saveConsultingQuote}>
         {initial && <input type="hidden" name="editingId" value={initial.id} />}
         <input type="hidden" name="customerId" value={customerId} />
+        <input type="hidden" name="venueCustomerId" value={venueCustomerId} />
         <input type="hidden" name="locationId" value={locationId} />
         <input type="hidden" name="scopes" value={JSON.stringify(scopes)} />
         <input type="hidden" name="assumptions" value={JSON.stringify(assumptions)} />
         <input type="hidden" name="phases" value={JSON.stringify(phases)} />
 
-        <label style={LBL}>Customer</label>
+        <label style={LBL}>Customer (architect / billed party)</label>
         <select
           value={customerId}
           onChange={(e) => {
@@ -219,12 +225,25 @@ export function ConsultingQuoteBuilder({
           ))}
         </select>
 
-        {cust && cust.locations.length > 0 && (
+        <label style={LBL}>Venue (location organization)</label>
+        <select
+          value={venueCustomerId}
+          onChange={(e) => {
+            setVenueCustomerId(e.target.value);
+            setLocationId("");
+          }}
+          style={INPUT}
+        >
+          <option value="">Choose a venue…</option>
+          {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+
+        {venueCustomer && venueCustomer.locations.length > 0 && (
           <>
-            <label style={LBL}>Site</label>
+            <label style={LBL}>Venue site</label>
             <select value={locationId} onChange={(e) => setLocationId(e.target.value)} style={INPUT}>
               <option value="">— none —</option>
-              {cust.locations.map((l) => (
+              {venueCustomer.locations.map((l) => (
                 <option key={l.id} value={l.id}>{l.label}</option>
               ))}
             </select>
@@ -260,6 +279,14 @@ export function ConsultingQuoteBuilder({
         </div>
 
         <label style={LBL}>Scopes of work (title · description · fee)</label>
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 9 }}>
+          {["Audio / Video", "Lighting", "Rigging / Curtains"].map((title) => (
+            <button key={title} type="button" onClick={() => setScopeRows([...scopeRows, { id: "", title, description: "", fee: "" }])}
+              style={{ border: "1px solid #dfe2e8", borderRadius: 7, background: "#fff", padding: "6px 9px", fontSize: 12, cursor: "pointer" }}>
+              + {title}
+            </button>
+          ))}
+        </div>
         {scopeRows.map((r, i) => (
           <div key={i} style={{ border: "1px solid #e4e7ec", borderRadius: 10, padding: "10px 12px", marginBottom: 8, background: "#fbfbfc" }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 130px 34px", gap: 8 }}>
