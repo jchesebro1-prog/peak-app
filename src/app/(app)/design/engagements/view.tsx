@@ -1016,7 +1016,7 @@ function PhaseDocs({ eng, phase }: { eng: ConsultingEngagement; phase: Engagemen
             href={`/design/engagements/markup?eng=${encodeURIComponent(eng.id)}&phase=${encodeURIComponent(phase.id)}`}
             style={{ ...SMALL_BTN, textDecoration: "none", display: "inline-block" }}
           >
-            ✏️ Mark up drawings
+            Mark up drawings
           </Link>
           {marks > 0 && (
             <span style={{ fontSize: 11.5, color: "#8c919c" }}>
