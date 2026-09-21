@@ -2933,13 +2933,16 @@ ok(safeCallbackPath("/login?callbackUrl=/x", O) === "/", "safeCallbackPath: neve
 /* ---- #95 — Auth.js redirect keeps a same-origin path (production) ---- */
 const B = "https://quartzite-six.vercel.app";
 ok(resolveSignInRedirect(B + "/api/gmail/callback?code=x&state=y", B) === B + "/api/gmail/callback?code=x&state=y", "signInRedirect: same-origin absolute keeps path+query");
-ok(resolveSignInRedirect("http://192.168.1.20:3000/inbox", B) === "http://192.168.1.20:3000/inbox", "signInRedirect: LAN host honoured");
-ok(resolveSignInRedirect("http://peak.local:3000/", B) === "http://peak.local:3000/", "signInRedirect: .local host honoured");
+ok(resolveSignInRedirect("http://192.168.1.20:3000/inbox", B) === B, "signInRedirect: LAN host not honoured against a production baseUrl");
+ok(resolveSignInRedirect("http://peak.local:3000/", B) === B, "signInRedirect: .local host not honoured against a production baseUrl");
 ok(resolveSignInRedirect("https://evil.example/x", B) === B, "signInRedirect: foreign origin → baseUrl");
 ok(resolveSignInRedirect("https://quartzite-six.vercel.app.evil.com/x", B) === B, "signInRedirect: suffix-spoofed host → baseUrl");
 ok(resolveSignInRedirect("/settings", B) === B + "/settings", "signInRedirect: bare path resolves to baseUrl origin");
 ok(resolveSignInRedirect("/\\evil.example/x", B) === B, "signInRedirect: backslash-smuggled protocol-relative → baseUrl");
 ok(resolveSignInRedirect("//evil.example/x", B) === B, "signInRedirect: protocol-relative → baseUrl");
+ok(resolveSignInRedirect("https://10.evil.example/x", B) === B, "signInRedirect: numeric-prefix public host is not local");
+ok(resolveSignInRedirect("https://192.168.evil.example/x", B) === B, "signInRedirect: 192.168.* prefix spoof → baseUrl");
+ok(resolveSignInRedirect("http://192.168.1.20:3000/inbox", "http://localhost:3000") === "http://192.168.1.20:3000/inbox", "signInRedirect: LAN hop honoured when the app runs locally");
 
 /* ---- #95 — Settings warns when GMAIL_REDIRECT_BASE drifts from AUTH_URL ---- */
 ok(redirectHostMismatch({}) === null, "redirectHostMismatch: nothing set → null");
