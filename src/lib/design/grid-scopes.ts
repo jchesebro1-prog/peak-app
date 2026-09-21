@@ -73,11 +73,13 @@ const TRADE_SCOPES: Partial<Record<Trade, GridScope>> = {
 export type ScopedPartLite = {
   group?: string | null;
   trade?: string | null;
+  gridScope?: string | null;
 };
 
 /** Group first, then trade, then Unscoped. Never throws, never guesses. */
 export function scopeOfPart(part: ScopedPartLite | null | undefined): GridLayer {
   if (!part) return UNSCOPED;
+  if (part.gridScope && GRID_LAYERS.includes(part.gridScope as GridLayer)) return part.gridScope as GridLayer;
   const group = part.group as CatalogGroup | null | undefined;
   if (group && group in GROUP_SCOPES) return GROUP_SCOPES[group];
   const trade = (part.trade as Trade | null | undefined) ?? (group ? GROUP_TRADES[group] : null);

@@ -70,6 +70,8 @@ const TOOLBAR_CSS = `
   .rpl-toolbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 18px; background: rgba(247,248,250,.92); backdrop-filter: blur(8px); border-bottom: 1px solid #e4e7ec; }
 `;
 
+const SANS = 'var(--font-ui, "Public Sans"), system-ui, -apple-system, "Segoe UI", sans-serif';
+
 export default async function RepairLetterPage({
   searchParams,
 }: {
@@ -239,7 +241,7 @@ export default async function RepairLetterPage({
   const label = (t: string) => <span style={{ color: "#6b7079" }}>{t}</span>;
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "var(--font-ui)", color: "#16181d" }}>
+    <div style={{ minHeight: "100vh", fontFamily: SANS, color: "#16181d" }}>
       <style>{TOOLBAR_CSS}</style>
 
       {/* print-hidden toolbar */}
@@ -281,7 +283,7 @@ export default async function RepairLetterPage({
       {/* letter sheet */}
       <div style={{ padding: "26px 16px 60px" }}>
         <div className="pk-doc-page">
-          <div style={{ fontFamily: "var(--font-ui)", fontSize: "11.5pt", lineHeight: 1.55, color: "#1a1c20" }}>
+          <div style={{ fontFamily: SANS, fontSize: "11pt", lineHeight: 1.5, color: "#111" }}>
             {/* letterhead */}
             <div style={{ marginBottom: 26 }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -290,7 +292,7 @@ export default async function RepairLetterPage({
                 alt={companyName}
                 style={
                   settings.logoDark
-                    ? { display: "block", maxHeight: 76, maxWidth: "100%", objectFit: "contain" }
+                    ? { display: "block", maxHeight: 64, maxWidth: "100%", objectFit: "contain" }
                     : { display: "block", width: "100%", height: "auto" }
                 }
               />

@@ -6,6 +6,7 @@ import { list, get, type CatalogPart } from "@/lib/stores/catalog";
 import { money } from "@/lib/format";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { CatalogControls, CatalogImportPanel, PartDatasheetControl } from "./controls";
+import CatalogDangerZone from "./catalog-danger-zone";
 import { TaxonomyCard } from "./taxonomy-card";
 import { upsertPart } from "./actions";
 
@@ -44,12 +45,14 @@ export default async function CatalogPage({
 
   const mfrParam = one(sp.mfr) || "all";
   const catParam = one(sp.cat) || "all";
+  const unitParam = one(sp.unit) || "all";
   const q = one(sp.q).trim();
   const sort = one(sp.sort) || "relevance";
   const importOpen = one(sp.import) === "1";
   const editSku = one(sp.edit);
   const isNew = one(sp.new) === "1";
   const importedN = one(sp.imported);
+  const reset = one(sp.reset) === "1";
 
   const mfrOf = (p: CatalogPart) => (p.mfr && p.mfr.trim() ? p.mfr.trim() : UNSPEC);
 
@@ -60,13 +63,16 @@ export default async function CatalogPage({
   const categories = Array.from(new Set(parts.map((p) => p.category || "Uncategorized"))).sort((a, b) =>
     a.localeCompare(b)
   );
+  const units = Array.from(new Set(parts.map((p) => p.unit || "ea"))).sort();
 
-  const hrefFor = (over: { mfr?: string; cat?: string }) => {
+  const hrefFor = (over: { mfr?: string; cat?: string; unit?: string }) => {
     const qs = new URLSearchParams();
     const m = over.mfr ?? mfrParam;
     const c = over.cat ?? catParam;
+    const u = over.unit ?? unitParam;
     if (m && m !== "all") qs.set("mfr", m);
     if (c && c !== "all") qs.set("cat", c);
+    if (u && u !== "all") qs.set("unit", u);
     if (q) qs.set("q", q);
     if (sort !== "relevance") qs.set("sort", sort);
     if (importOpen) qs.set("import", "1");
@@ -76,18 +82,15 @@ export default async function CatalogPage({
 
   /* ---- filter + sort ---- */
   const ql = q.toLowerCase();
+  const tokens = ql.split(/\s+/).filter(Boolean);
   let rows = parts.filter((p) => {
     if (mfrParam !== "all" && mfrOf(p) !== mfrParam) return false;
     if (catParam !== "all" && (p.category || "Uncategorized") !== catParam) return false;
-    if (
-      ql &&
-      !(
-        (p.desc || "").toLowerCase().includes(ql) ||
-        (p.sku || "").toLowerCase().includes(ql) ||
-        (p.mfr || "").toLowerCase().includes(ql)
-      )
-    )
-      return false;
+    if (unitParam !== "all" && (p.unit || "ea") !== unitParam) return false;
+    if (tokens.length) {
+      const hay = [p.desc, p.sku, p.mfr, p.category].filter(Boolean).join(" ").toLowerCase();
+      if (!tokens.every((token) => hay.includes(token))) return false;
+    }
     return true;
   });
   if (sort === "price") rows = rows.slice().sort((a, b) => (b.list || 0) - (a.list || 0));
@@ -106,6 +109,7 @@ export default async function CatalogPage({
     ` parts` +
     (mfrParam !== "all" ? " · " + mfrParam : "") +
     (catParam !== "all" ? " · " + catParam : "") +
+    (unitParam !== "all" ? " · " + unitParam : "") +
     (truncated ? " · refine with search or filters to narrow" : "");
 
   const editingPart = editSku ? await get(editSku) : null;
@@ -166,8 +170,10 @@ export default async function CatalogPage({
         </div>
       </div>
 
-      {isAdmin && (
-        <TaxonomyCard categories={categories} initialMap={resolveCategoryMap(settings.catalogCategoryMap)} />
+      {reset && (
+        <div style={{ marginBottom: 16, padding: "10px 14px", borderRadius: 10, background: "#eaf6ef", border: "1px solid #cce9da", color: "#1f7a52", fontSize: 12.5, fontWeight: 600 }}>
+          ✓ Current price list cleared. Import a new manufacturer list to start fresh.
+        </div>
       )}
 
       {importedN && (
@@ -208,6 +214,15 @@ export default async function CatalogPage({
           />
           <div style={{ height: 16 }} />
           <FilterGroup
+            title="Unit"
+            active={unitParam}
+            allLabel="All units"
+            allHref={hrefFor({ unit: "all" })}
+            allCount={parts.length}
+            options={units.map((u) => ({ key: u, label: u, href: hrefFor({ unit: u }), count: parts.filter((p) => (p.unit || "ea") === u).length }))}
+          />
+          <div style={{ height: 16 }} />
+          <FilterGroup
             title="Category"
             active={catParam}
             allLabel="All categories"
@@ -243,7 +258,7 @@ export default async function CatalogPage({
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(0,1fr) 110px 60px 84px 96px",
+                  gridTemplateColumns: "150px 150px minmax(220px,1fr) 110px 60px 84px 96px",
                   gap: 12,
                   padding: "8px 18px",
                   fontSize: 10,
@@ -255,7 +270,9 @@ export default async function CatalogPage({
                   background: "#fbfbfc",
                 }}
               >
-                <span>Part</span>
+                <span>Manufacturer</span>
+                <span>MFR Part #</span>
+                <span>Description</span>
                 <span>Category</span>
                 <span style={{ textAlign: "right" }}>Unit</span>
                 <span style={{ textAlign: "right" }}>Cost</span>
@@ -270,7 +287,7 @@ export default async function CatalogPage({
                   className="ct-row"
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "minmax(0,1fr) 110px 60px 84px 96px",
+                    gridTemplateColumns: "150px 150px minmax(220px,1fr) 110px 60px 84px 96px",
                     gap: 12,
                     padding: "11px 18px",
                     alignItems: "center",
@@ -279,6 +296,9 @@ export default async function CatalogPage({
                     color: "#16181d",
                   }}
                 >
+                  <span style={{ minWidth: 0, fontSize: 12, color: "#3a3f4a" }}>
+                    {p.mfr || UNSPEC}
+                  </span>
                   <span style={{ minWidth: 0 }}>
                     <span
                       style={{
@@ -291,12 +311,19 @@ export default async function CatalogPage({
                         textOverflow: "ellipsis",
                       }}
                     >
-                      {p.desc}
-                    </span>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb" }}>
                       {p.sku}
-                      {p.mfr ? " · " + p.mfr : ""}
                     </span>
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{
+                      fontSize: 13,
+                      fontWeight: 500,
+                      display: "block",
+                      lineHeight: 1.3,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}>{p.desc}</span>
                     {(p.note || p.datasheetBlobKey) && (
                       <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
                         {p.note && (
@@ -366,6 +393,13 @@ export default async function CatalogPage({
         )}
       </div>
 
+      {isAdmin && (
+        <>
+          <TaxonomyCard categories={categories} initialMap={resolveCategoryMap(settings.catalogCategoryMap)} />
+          <CatalogDangerZone count={parts.length} />
+        </>
+      )}
+
       {showForm && (
         <PartFormModal
           part={editingPart}
@@ -378,7 +412,7 @@ export default async function CatalogPage({
   );
 }
 
-function hrefForImport(hrefFor: (o: { mfr?: string; cat?: string }) => string, open: boolean): string {
+function hrefForImport(hrefFor: (o: { mfr?: string; cat?: string; unit?: string }) => string, open: boolean): string {
   const base = hrefFor({});
   const url = new URL(base, "http://x");
   if (open) url.searchParams.set("import", "1");

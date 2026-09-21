@@ -63,7 +63,7 @@ export function CatalogControls({
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Search parts, SKUs, manufacturers…"
+          placeholder="Search manufacturer, model #, description, category…"
           style={{
             flex: 1,
             border: "none",
@@ -113,7 +113,7 @@ export function CatalogControls({
           flexShrink: 0,
         }}
       >
-        <option value="relevance">Catalog order</option>
+        <option value="relevance">Master list</option>
         <option value="price">Highest price</option>
         <option value="alpha">Name A–Z</option>
       </select>
@@ -122,10 +122,8 @@ export function CatalogControls({
 }
 
 /**
- * Import-to-catalog side panel. Three methods like the prototype: Upload and
- * Connect are stubbed (no live file/API path in this build) and point users at
- * Paste, which is wired end-to-end: parse locally for the preview, submit the
- * raw text to `importCatalog` for the authoritative upsert.
+ * Import-to-catalog side panel. Upload and paste share the same parser and
+ * authoritative server action, including MFR PN files exported by design tools.
  */
 export function CatalogImportPanel({
   manufacturers,
@@ -134,7 +132,7 @@ export function CatalogImportPanel({
   manufacturers: string[];
   accent: string;
 }) {
-  const [method, setMethod] = useState<"upload" | "api" | "paste">("paste");
+  const [method, setMethod] = useState<"upload" | "api" | "paste">("upload");
   const [mfrSel, setMfrSel] = useState(manufacturers[0] || "");
   const [adding, setAdding] = useState(manufacturers.length === 0);
   const [newMfr, setNewMfr] = useState("");
@@ -146,7 +144,7 @@ export function CatalogImportPanel({
   const canImport = method === "paste" && !!parsed?.ok && parsed.stats.valid > 0;
 
   const methods = [
-    { id: "upload" as const, icon: "↑", title: "Upload a price book", desc: "CSV or Excel list." },
+    { id: "upload" as const, icon: "↑", title: "Import CSV / TSV", desc: "Upload a manufacturer or design-program export." },
     { id: "api" as const, icon: "⇄", title: "Connect a manufacturer", desc: "Live pricing via a dealer account." },
     { id: "paste" as const, icon: "☰", title: "Paste a list", desc: "Rows straight from a spreadsheet." },
   ];
@@ -291,9 +289,9 @@ export function CatalogImportPanel({
             </>
           )}
 
-          {/* UPLOAD — reads the file into the paste pipeline */}
+          {/* UPLOAD — CSV / TSV for prebuilt systems and design-program exports */}
           {method === "upload" && (
-            <div
+            <form action={importCatalog}
               style={{
                 border: "1.5px dashed #cfd4dd",
                 borderRadius: 11,
@@ -303,6 +301,8 @@ export function CatalogImportPanel({
                 marginTop: 12,
               }}
             >
+              <input type="hidden" name="mfr" value={mfr} />
+              <input type="hidden" name="prebuilt" value="1" />
               <div
                 style={{
                   width: 42,
@@ -319,56 +319,29 @@ export function CatalogImportPanel({
               >
                 ↑
               </div>
-              <label
+              <div style={{ fontSize: 13, fontWeight: 600 }}>Upload prebuilt systems or parts</div>
+              <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 3, lineHeight: 1.4 }}>
+                Match rows by Manufacturer Part # (MFR PN). Include Description, plus optional Category, Unit, List, and Cost columns.
+              </div>
+              <a
+                href="/api/catalog/template.csv"
+                download="catalog-import-template.csv"
                 style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  borderRadius: 8,
-                  padding: "9px 16px",
-                  background: accent,
-                  color: "#fff",
-                  fontSize: 12.5,
+                  display: "inline-block",
+                  marginTop: 10,
+                  color: accent,
+                  fontSize: 12,
                   fontWeight: 600,
-                  cursor: "pointer",
+                  textDecoration: "none",
                 }}
               >
-                Select CSV file
-                <input
-                  type="file"
-                  accept=".csv,text/csv,text/tab-separated-values"
-                  style={{ display: "none" }}
-                  onChange={(event) => {
-                    const input = event.currentTarget;
-                    const file = input.files?.[0];
-                    if (!file) return;
-                    file.text().then((fileText) => {
-                      setText(fileText);
-                      setMethod("paste");
-                    });
-                    input.value = "";
-                  }}
-                />
-              </label>
-              <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 10, lineHeight: 1.4 }}>
-                CSV or tab-separated — opens in{" "}
-                <button
-                  type="button"
-                  onClick={() => setMethod("paste")}
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    color: "color-mix(in srgb, var(--accent) 72%, #000)",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    padding: 0,
-                    fontSize: 11.5,
-                  }}
-                >
-                  Paste a list
-                </button>{" "}
-                to review before importing.
-              </div>
-            </div>
+                ↓ Download CSV template
+              </a>
+              <input name="file" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" required style={{ width: "100%", marginTop: 14, fontSize: 12 }} />
+              <button type="submit" disabled={!mfr} style={{ width: "100%", marginTop: 14, border: "none", borderRadius: 9, padding: 11, color: mfr ? "#fff" : "#aab0bb", background: mfr ? accent : "#eef0f3", cursor: mfr ? "pointer" : "not-allowed", fontSize: 13.5, fontWeight: 600 }}>
+                {mfr ? "Import MFR PN file →" : "Name the manufacturer"}
+              </button>
+            </form>
           )}
 
           {/* API — stubbed */}

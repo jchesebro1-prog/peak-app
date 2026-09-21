@@ -14,7 +14,11 @@ import { allowedMoves, leadColumn, leadStageForCol, quoteColumn } from "@/lib/op
  * PO-received flag (the won/lost spawn machinery stays behind setQuoteStatus,
  * which the board never calls).
  */
-export async function moveOpportunityAction(id: string, colKey: string): Promise<{ ok: boolean }> {
+export async function moveOpportunityAction(
+  id: string,
+  colKey: string,
+  details?: { contact?: string; email?: string; phone?: string; interest?: string; timeline?: string; message?: string }
+): Promise<{ ok: boolean; error?: string }> {
   const me = await requireUser();
 
   if (id.startsWith("L-")) {
@@ -24,7 +28,10 @@ export async function moveOpportunityAction(id: string, colKey: string): Promise
     const legal = allowedMoves({ kind: "lead", col, srcStage: l.stage });
     const stage = leadStageForCol(colKey);
     if (!(legal as string[]).includes(colKey) || !stage) return { ok: false };
-    await setStage(id, stage, me.name);
+    if (colKey === "collect" && (!details?.contact?.trim() || !details?.interest?.trim())) {
+      return { ok: false, error: "Contact name and opportunity need are required." };
+    }
+    await setStage(id, stage, me.name, details);
     revalidatePath("/", "layout");
     return { ok: true };
   }

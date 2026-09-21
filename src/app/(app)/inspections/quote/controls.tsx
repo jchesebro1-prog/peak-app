@@ -5,6 +5,7 @@ import { useMemo, useState, useTransition } from "react";
 import { venueTravelAction, type VenueTravel } from "../../quote-builder-travel";
 import type { CSSProperties } from "react";
 import { saveInspectionQuote, approveInspectionQuote } from "./actions";
+import { CustomerCombobox } from "@/components/customer-combobox";
 
 /**
  * QuoteBuilder — the auto-priced rigging-inspection quote estimator
@@ -39,7 +40,7 @@ export type BuilderCustomer = {
   /** Company-level tier margin fraction (item 11, D88); null → Base/global. */
   tierMargin?: number | null;
 };
-export type BuilderOffice = { name: string; lat: number | null; lng: number | null };
+export type BuilderOffice = { name: string; lat: number | null; lng: number | null; quoteDefault?: boolean };
 export type BuilderRates = {
   laborRate: number;
   mileageRate: number;
@@ -103,19 +104,6 @@ function driveMinutes(a: Coords | BuilderOffice, b: Coords | BuilderOffice): num
   const mi = driveMiles(a, b);
   return mi == null ? null : Math.round((mi / 50) * 60);
 }
-function nearestOffice(offices: BuilderOffice[], target: Coords): BuilderOffice | null {
-  let best: BuilderOffice | null = null;
-  let bestD = Infinity;
-  offices.forEach((o) => {
-    const d = haversine(o, target);
-    if (d != null && d < bestD) {
-      bestD = d;
-      best = o;
-    }
-  });
-  return best;
-}
-
 type PerVenue = { id: string; label: string; lineSets: number; laborCost: number };
 type Trip = {
   miles: number;
@@ -387,8 +375,7 @@ export function QuoteBuilder({
       oneWayMin: l.oneWayMin,
     }));
   const hasCustomer = !!customer;
-  const firstCoords = selectedVenues.map((v) => v.coords).find((c) => c && c.lat != null) || null;
-  const office = (firstCoords ? nearestOffice(offices, firstCoords) : null) || offices[0] || null;
+  const office = offices.find((o) => o.quoteDefault) || offices[0] || null;
   const r =
     hasCustomer && selectedVenues.length
       ? computePricing(office, selectedVenues, level, liveRates)
@@ -550,19 +537,20 @@ export function QuoteBuilder({
           >
             <div>
               <label style={LABEL}>Customer</label>
-              <select
-                className="inq-sel"
+              <CustomerCombobox
+                options={customers.map((c) => ({
+                  id: c.id,
+                  name: c.name,
+                  detail: c.locations.length
+                    ? c.locations.map((l) => l.label).slice(0, 3).join(" · ")
+                    : "No venues on file",
+                  searchText: c.locations.map((l) => `${l.label} ${l.city} ${l.state}`).join(" "),
+                }))}
                 value={customerId}
-                onChange={(e) => pickCustomer(e.target.value)}
-                style={{ ...FIELD, fontWeight: 600, cursor: "pointer" }}
-              >
-                <option value="">Select a customer…</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+                onChange={pickCustomer}
+                placeholder="Search customer or venue…"
+                inputStyle={{ ...FIELD, fontWeight: 600 }}
+              />
             </div>
             <div>
               <label style={LABEL}>Quote name</label>

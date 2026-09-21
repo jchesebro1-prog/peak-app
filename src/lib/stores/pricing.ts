@@ -48,7 +48,7 @@ export type FlametestRates = {
 
 /** flametest.js DEFAULTS — seed/fallback for blob `flametest_rates`. */
 export const FLAMETEST_RATE_DEFAULTS: FlametestRates = {
-  mileageRate: 0.70,
+  mileageRate: 1,
   laborRate: 75,
   curtainMinutes: 5,
   baseFee: 150,
@@ -76,7 +76,7 @@ export type RepairRates = {
 /** repair.js DEFAULTS — seed/fallback for blob `repair_rates`. */
 export const REPAIR_RATE_DEFAULTS: RepairRates = {
   laborRate: 75,
-  mileageRate: 0.70,
+  mileageRate: 1,
   minCallout: 350,
   partsMargin: 0.30,
   margin: 0.30,
@@ -108,7 +108,7 @@ export type InspectionRates = {
  *  editable in Estimating Rules, same as every other rate. */
 export const INSPECTION_RATE_DEFAULTS: InspectionRates = {
   laborRate: 75,
-  mileageRate: 0.70,
+  mileageRate: 1,
   lineSetMinutes: 15,
   baseHours: 2,
   level2Mult: 1.75,
@@ -387,8 +387,8 @@ export const GROUPS: PricingGroup[] = [
     sub: "NFPA 705 annual flame testing",
     note: "Live — editing any rate here reprices every flame-test quote immediately (shared with the flame-test engine).",
     items: [
-      rate("mileageRate", "Mileage rate", 0.70, "$/mi", { min: 0, max: 2, step: 0.01, store: "flame", help: "Round-trip miles from the nearest office, shared across venues on one trip." }),
-      rate("laborRate", "Labor rate (testing & travel)", 30, "$/hr", { min: 0, max: 200, step: 1, store: "flame" }),
+      rate("mileageRate", "Mileage rate", 1, "$/mi", { min: 0, max: 2, step: 0.01, store: "flame", help: "Round-trip miles from the default quote origin, shared across venues on one trip." }),
+      rate("laborRate", "Labor rate (testing & travel)", 75, "$/hr", { min: 0, max: 200, step: 1, store: "flame" }),
       rate("curtainMinutes", "Minutes to test one curtain", 5, "min", { min: 1, max: 30, step: 1, store: "flame" }),
       rate("baseFee", "Base minimum (whole job)", 150, "$", { min: 0, max: 1000, step: 5, store: "flame", help: "Floor on the whole job after mileage + travel + testing." }),
       rate("margin", "Flame-test margin", 30, "%", { min: 0, max: 60, step: 1, store: "flame", pctStored: true }),
@@ -401,8 +401,8 @@ export const GROUPS: PricingGroup[] = [
     sub: "Rigging / curtain / motor repair & service calls",
     note: "Live — editing any rate here reprices every repair quote immediately (shared with the repair estimating engine).",
     items: [
-      rate("repair.laborRate", "Labor rate (repair & service)", 95, "$/hr", { min: 0, max: 300, step: 1, store: "repair", key: "laborRate" }),
-      rate("repair.mileageRate", "Mileage rate", 0.70, "$/mi", { min: 0, max: 2, step: 0.01, store: "repair", key: "mileageRate", help: "Round-trip miles from the nearest office, shared across venues on one trip." }),
+      rate("repair.laborRate", "Labor rate (repair & service)", 75, "$/hr", { min: 0, max: 300, step: 1, store: "repair", key: "laborRate" }),
+      rate("repair.mileageRate", "Mileage rate", 1, "$/mi", { min: 0, max: 2, step: 0.01, store: "repair", key: "mileageRate", help: "Round-trip miles from the default quote origin, shared across venues on one trip." }),
       rate("repair.minCallout", "Minimum service call", 350, "$", { min: 0, max: 2000, step: 5, store: "repair", key: "minCallout", help: "Floor on the service sell (labor + travel), before parts." }),
       rate("repair.partsMargin", "Parts margin", 30, "%", { min: 0, max: 60, step: 1, store: "repair", key: "partsMargin", pctStored: true, help: "Markup on parts.  partsSell = partsCost ÷ (1 − partsMargin)" }),
       rate("repair.margin", "Repair margin (labor + travel)", 30, "%", { min: 0, max: 60, step: 1, store: "repair", key: "margin", pctStored: true }),
@@ -416,8 +416,8 @@ export const GROUPS: PricingGroup[] = [
     sub: "Rigging inspections — Level 1 annual · Level 2 every 5 years",
     note: "Live — editing any rate here reprices every inspection quote immediately (shared with the inspection estimating engine). Placeholder numbers — adjust as pricing firms up.",
     items: [
-      rate("inspection.laborRate", "Labor rate (inspection & travel)", 95, "$/hr", { min: 0, max: 300, step: 1, store: "inspection", key: "laborRate" }),
-      rate("inspection.mileageRate", "Mileage rate", 0.70, "$/mi", { min: 0, max: 2, step: 0.01, store: "inspection", key: "mileageRate", help: "Round-trip miles from the nearest office, shared across venues on one trip." }),
+      rate("inspection.laborRate", "Labor rate (inspection & travel)", 75, "$/hr", { min: 0, max: 300, step: 1, store: "inspection", key: "laborRate" }),
+      rate("inspection.mileageRate", "Mileage rate", 1, "$/mi", { min: 0, max: 2, step: 0.01, store: "inspection", key: "mileageRate", help: "Round-trip miles from the default quote origin, shared across venues on one trip." }),
       rate("inspection.lineSetMinutes", "Minutes to inspect one line set", 15, "min", { min: 1, max: 120, step: 1, store: "inspection", key: "lineSetMinutes", help: "Level 1 visual pass, per line set — covers the full component walkthrough." }),
       rate("inspection.baseHours", "Base on-site hours (per visit)", 2, "hr", { min: 0, max: 16, step: 0.5, store: "inspection", key: "baseHours", help: "Setup, venue walkthrough, and findings write-up — charged once per visit." }),
       rate("inspection.level2Mult", "Level 2 (5-year) ×", 1.75, "×", { min: 1, max: 4, step: 0.05, store: "inspection", key: "level2Mult", help: "Multiplies inspection time for the in-depth 5-year inspection." }),

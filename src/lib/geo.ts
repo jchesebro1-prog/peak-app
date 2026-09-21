@@ -171,6 +171,14 @@ export function nearest<T extends GeoPointLike>(
   return best;
 }
 
+/** The admin-selected quote origin, falling back to the first configured location. */
+export function quoteOrigin<T extends GeoPointLike & { quoteDefault?: boolean }>(
+  offices: readonly T[] | null | undefined
+): T | null {
+  const list = offices || [];
+  return list.find((o) => o.quoteDefault) || list[0] || null;
+}
+
 /** Travel origins — the prototype read window.AppSettings.offices(). */
 export async function officesFromSettings(): Promise<Office[]> {
   const s = await getSettings();
@@ -455,7 +463,7 @@ export async function estimate<T extends GeoPointLike>(
   offices: readonly T[] | null | undefined,
   target: EstimateTarget | null | undefined
 ): Promise<TravelEstimate<T>> {
-  const office = nearest(offices, target);
+  const office = quoteOrigin(offices);
   // Same manual > routed(OSRM) > haversine-auto > none chain as before; only
   // the roadFactor/mph knobs feeding the haversine tier now come live from
   // Estimating Rules instead of a hardcoded constant.

@@ -12,6 +12,7 @@ import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
 import { scopesTotal } from "@/lib/consulting-stages";
 import { PrintButton } from "./controls";
+import letterhead from "@/app/(app)/flame-tests/letter/peak-letterhead.jpg";
 
 export const metadata = { title: "Consulting document — Quartzite-6" };
 
@@ -118,6 +119,7 @@ export default async function ConsultingLetterPage({
     phases: [],
   };
   const customer = quote?.customer || eng?.customer || "";
+  const venueCustomer = pay.venueCustomer || eng?.customer || customer;
   const engagementName = quote?.name || eng?.name || "Consulting engagement";
   const contact =
     quote?.contact && typeof quote.contact === "object"
@@ -169,6 +171,15 @@ export default async function ConsultingLetterPage({
       </div>
 
       <div className="pk-doc-page" style={{ maxWidth: 760, margin: "26px auto 60px", background: "#fff", padding: "48px 56px", boxShadow: "0 2px 14px rgba(16,22,30,.09)" }}>
+        {/* Peak letterhead shared by every generated customer document. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={settings.logoDark || letterhead.src}
+          alt={companyName}
+          style={settings.logoDark
+            ? { display: "block", maxHeight: 64, maxWidth: "100%", objectFit: "contain", marginBottom: 16 }
+            : { display: "block", width: "100%", height: "auto", marginBottom: 16 }}
+        />
         {/* header band */}
         <div style={{ borderBottom: `3px solid ${accent}`, paddingBottom: 14, marginBottom: 22 }}>
           <div style={{ fontFamily: SANS, fontSize: 17, fontWeight: 800, letterSpacing: "-.01em" }}>{companyName}</div>
@@ -178,6 +189,7 @@ export default async function ConsultingLetterPage({
           <div style={{ fontFamily: SANS, fontSize: 11.5, color: "#5b616e", marginTop: 8, display: "flex", gap: 18, flexWrap: "wrap" }}>
             <span><b>{kind === "spec" ? "Engagement" : "Quote"}:</b> {kind === "spec" ? eng!.id : quoteId}</span>
             <span><b>Customer:</b> {customer}</span>
+            {venueCustomer !== customer && <span><b>Venue:</b> {venueCustomer}</span>}
             <span><b>Date:</b> {vars.date}</span>
           </div>
         </div>

@@ -31,6 +31,7 @@ export const metadata = { title: "Company — Quartzite-6" };
 import { grantsFor, grantPath } from "@/lib/portal";
 import { PortalAccessCard } from "./portal-access";
 import EditCustomerModal from "../edit-modal";
+import VenueQuickAdd from "../venue-quick-add";
 import {
   ACCENT_INK,
   ACCENT_SOFT,
@@ -97,6 +98,7 @@ export default async function CustomerDetailPage({
   ]);
 
   const edit = one(sp.edit);
+  const addVenue = one(sp.addVenue);
 
   const roster = users.map((u) => ({ name: u.name, initials: u.initials, color: u.color }));
   const identOf = (name: string) => {
@@ -184,6 +186,7 @@ export default async function CustomerDetailPage({
     custom: cust.custom || {},
     locations: (cust.locations || []).map((l) => ({
       id: l.id,
+      locationName: l.locationName || "",
       label: l.label || "",
       primary: !!l.primary,
       address: l.address || "",
@@ -316,10 +319,8 @@ export default async function CustomerDetailPage({
         {/* locations & venues */}
         <div style={card}>
           <div style={cardHead}>
-            <div style={{ fontSize: 14.5, fontWeight: 600 }}>Locations &amp; venues</div>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>
-              {locN} venue{locN === 1 ? "" : "s"}
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ fontSize: 14.5, fontWeight: 600 }}>Locations &amp; venues</div><span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>{locN} venue{locN === 1 ? "" : "s"}</span></div>
+            <Link href={`/companies/${encodeURIComponent(cust.id)}?addVenue=1`} style={{ fontSize: 12, fontWeight: 700, color: ACCENT_INK, background: ACCENT_SOFT, borderRadius: 8, padding: "7px 10px", textDecoration: "none" }}>+ Add venue</Link>
           </div>
           {locations.map((l) => (
             <div key={l.key} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 196px", gap: 16, padding: "15px 18px", borderBottom: "1px solid #f5f6f8", alignItems: "start" }}>
@@ -691,6 +692,7 @@ export default async function CustomerDetailPage({
       {edit === "1" && (
         <EditCustomerModal mode="edit" initial={editInitial} fieldDefs={fieldDefs} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />
       )}
+      {addVenue === "1" && <VenueQuickAdd initial={editInitial} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />}
     </>
   );
 }

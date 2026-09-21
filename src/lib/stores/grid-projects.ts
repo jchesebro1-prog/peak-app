@@ -8,7 +8,7 @@ import {
 } from "@/db/doc-store";
 import { clamp01, type Calibration, type Point } from "@/lib/annotations";
 import type { GridCurtain } from "@/lib/design/grid-bom";
-import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";
+import type { AState, QuickScopeInputs } from "@/app/(app)/design/quick/engine";
 
 /**
  * The Grid (D108) — system-design projects: plan sheets, painted catalog
@@ -135,6 +135,17 @@ export type GridProject = {
   /** Venue link (D113 item 6) — identity sites.id + display name. */
   siteId?: string | null;
   siteName?: string;
+  /** Cover-page intake captured before the drawing workspace opens. */
+  intake?: {
+    complete: boolean;
+    measurementBased: boolean;
+    venueName: string;
+    locationName: string;
+    address: string;
+    notes: string;
+    /** Shared Quick Design inputs; the Grid editor is their manual-layout workspace. */
+    autoConfig?: AState;
+  };
   /** Sheet display order; the docs live in grid_sheets. */
   sheetIds: string[];
   placements: GridPlacement[];
@@ -198,11 +209,12 @@ export async function createProject(input: {
   by: string;
 }): Promise<GridProject> {
   const t = Date.now();
-  return insertWithPrefixedId<GridProject>("grid_projects", "GRD", 5001, (id) => ({
+  const project = await insertWithPrefixedId<GridProject>("grid_projects", "GRD", 5001, (id) => ({
     id,
     name: input.name.trim() || "Untitled system design",
     customer: input.customer.trim(),
     customerId: input.customerId,
+    intake: { complete: false, measurementBased: true, venueName: "", locationName: "", address: "", notes: "" },
     sheetIds: [],
     placements: [],
     calibrations: [],
@@ -214,6 +226,37 @@ export async function createProject(input: {
     createdAt: t,
     updatedAt: t,
   }));
+  // A design should open as a usable drawing surface even before the user has
+  // a PDF. The blank sheet remains a normal independent sheet; a later upload
+  // is appended and never replaces placements made here.
+  const blank = encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="white"/><path d="M40 40H1160V760H40Z" fill="none" stroke="#e5e7eb" stroke-width="2"/><text x="60" y="84" font-family="Arial,sans-serif" font-size="22" fill="#9ca3af">${project.name.replace(/[<>&]/g, "")}</text><text x="60" y="112" font-family="Arial,sans-serif" font-size="14" fill="#c0c4ca">Blank design sheet · upload a plan any time</text></svg>`
+  );
+  const sheet = await addSheet(project.id, {
+    name: "Blank design sheet",
+    mime: "image/svg+xml",
+    dataUrl: `data:image/svg+xml;charset=utf-8,${blank}`,
+    by: input.by,
+  });
+  if (sheet) {
+    // Give a new blank design useful spatial vocabulary immediately. These
+    // are editable starter outlines, including an audience-view area for
+    // sightline and coverage planning; uploaded plans can be redrawn over.
+    await addSpace(project.id, { sheetId: sheet.id, page: 1, name: "Audience view", points: [{ x: 0.08, y: 0.58 }, { x: 0.92, y: 0.58 }, { x: 0.92, y: 0.9 }, { x: 0.08, y: 0.9 }], by: input.by });
+    await addSpace(project.id, { sheetId: sheet.id, page: 1, name: "Stage", points: [{ x: 0.2, y: 0.12 }, { x: 0.8, y: 0.12 }, { x: 0.8, y: 0.4 }, { x: 0.2, y: 0.4 }], by: input.by });
+    await addSpace(project.id, { sheetId: sheet.id, page: 1, name: "FOH / control", points: [{ x: 0.38, y: 0.44 }, { x: 0.62, y: 0.44 }, { x: 0.62, y: 0.53 }, { x: 0.38, y: 0.53 }], by: input.by });
+  }
+  return (await getProject(project.id)) || project;
+}
+
+export async function saveGridIntake(
+  projectId: string,
+  input: GridProject["intake"]
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.intake = input;
+    p.updatedAt = Date.now();
+  });
 }
 
 /** Upload one plan background and append it to the project's sheet order.

@@ -13,7 +13,7 @@ import {
 } from "@/lib/stores/surveys";
 import { VENUE_CLASSES } from "@/lib/stores/venue-classes";
 import { IDENTITY, deriveInitials, fallbackColor } from "@/lib/team";
-import { createSurvey, quoteFromSurvey } from "./actions";
+import { createSurvey, importSurveyCsv, quoteFromSurvey } from "./actions";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import VisitRequests, { type VisitRequestVM } from "./visit-requests";
@@ -186,6 +186,7 @@ export default async function FieldSurveyPage({
   })();
 
   const mineWord = mine ? " assigned to you" : "";
+  const imported = one(sp.imported);
   let emptyTitle: string;
   let emptyBody: string;
   if (stage === "requested") {
@@ -219,6 +220,12 @@ export default async function FieldSurveyPage({
           <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Venue assessments</div>
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 4 }}>{standfirst}</div>
         </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <a href="/api/venue-assessments/template.csv" download style={{ fontSize: 12.5, fontWeight: 600, color: "#3a3f4a", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 9, padding: "10px 12px", textDecoration: "none" }}>↓ Blank CSV</a>
+        <form action={importSurveyCsv} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <input name="file" type="file" accept=".csv,text/csv" required style={{ width: 170, fontSize: 11.5 }} />
+          <button type="submit" style={{ fontSize: 12.5, fontWeight: 600, color: "#3a3f4a", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 9, padding: "10px 12px", cursor: "pointer" }}>↑ Upload CSV</button>
+        </form>
         <form action={createSurvey} style={{ flexShrink: 0 }}>
           <button
             type="submit"
@@ -242,7 +249,10 @@ export default async function FieldSurveyPage({
             <span style={{ fontSize: 17, lineHeight: 1 }}>+</span> New request
           </button>
         </form>
+        </div>
       </div>
+
+      {imported && <div style={{ marginBottom: 16, padding: "10px 14px", borderRadius: 10, background: "#eaf6ef", border: "1px solid #cce9da", color: "#1f7a52", fontSize: 12.5, fontWeight: 600 }}>✓ Imported {imported} field survey row{imported === "1" ? "" : "s"}.</div>}
 
       {/* sync strip */}
       <div

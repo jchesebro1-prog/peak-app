@@ -3,13 +3,21 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requirePerm } from "@/lib/session";
-import { get as getPart, upsert, mergeUpsert } from "@/lib/stores/catalog";
+import { clearCatalogPriceList, get as getPart, upsert, mergeUpsert } from "@/lib/stores/catalog";
 import { parseCatalog } from "./parse";
 import { setSettings } from "@/lib/settings";
 import { GROUPS, TRADES, type CategoryMap } from "@/lib/catalog-taxonomy";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 
 type Result = { ok: true } | { ok: false; error: string };
+
+export async function deleteCatalogPriceListAction(formData: FormData): Promise<void> {
+  await requirePerm("manage_users");
+  if (String(formData.get("confirmation") || "") !== "DELETE") return;
+  await clearCatalogPriceList();
+  revalidatePath("/catalog");
+  redirect("/catalog?reset=1");
+}
 
 /**
  * Catalog mutations. FormData-shaped so forms work without client JS; the SKU
@@ -59,10 +67,12 @@ export async function importCatalog(formData: FormData): Promise<void> {
   await requireUser();
   const mfr = String(formData.get("mfr") || "").trim();
   const defaultCategory = String(formData.get("category") || "").trim();
-  const text = String(formData.get("text") || "");
+  let text = String(formData.get("text") || "");
+  const file = formData.get("file");
+  if (file instanceof File && file.size > 0) text = await file.text();
   if (!text.trim()) return;
 
-  const parsed = parseCatalog(text, defaultCategory);
+  const parsed = parseCatalog(text, defaultCategory || (String(formData.get("prebuilt") || "") === "1" ? "Prebuilt system" : ""));
   if (!parsed.ok) return;
 
   let n = 0;
