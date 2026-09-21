@@ -47,6 +47,26 @@ export async function applyResolution(t: CommThread, r: Resolution): Promise<voi
   }
 }
 
+/** Applies a precomputed `next` resolution onto the fresh doc `d`, unless a
+ *  manual link landed between `listDocs` and `patchDoc` — in which case it
+ *  declines and leaves `d` untouched. Returns whether it patched. Extracted
+ *  from the `resweepThreads` callback so the guard can be unit-tested
+ *  directly (the `patchDoc` callback itself is synchronous, so `next` has to
+ *  be computed outside it, before the fresh doc `d` is even in hand). */
+export function applyResweepPatch(d: CommThread, next: CommThread): boolean {
+  // A manual link landed since we listed — keep it.
+  if (d.customerId && d.resolution === "linked") return false;
+  // Fresh doc has a customer the snapshot didn't — never downgrade.
+  if (d.customerId && !next.customerId) return false;
+  d.customerId = next.customerId;
+  d.customer = next.customer;
+  d.resolvedContactId = next.resolvedContactId ?? null;
+  d.resolution = next.resolution;
+  d.suggestedCustomerId = next.suggestedCustomerId ?? null;
+  d.candidates = next.candidates ?? [];
+  return true;
+}
+
 function matchesFilter(t: CommThread, f?: { email?: string; domain?: string }): boolean {
   if (!f) return true;
   const e = (t.contactEmail || "").toLowerCase();
@@ -75,15 +95,11 @@ export async function resweepThreads(
     await applyResolution(next, r);
     const after = JSON.stringify([next.customerId, next.resolution, next.suggestedCustomerId, next.candidates]);
     if (before === after) continue;
+    let didPatch = false;
     await patchDoc<CommThread>("comms", t.id, (d) => {
-      d.customerId = next.customerId;
-      d.customer = next.customer;
-      d.resolvedContactId = next.resolvedContactId ?? null;
-      d.resolution = next.resolution;
-      d.suggestedCustomerId = next.suggestedCustomerId ?? null;
-      d.candidates = next.candidates ?? [];
+      didPatch = applyResweepPatch(d, next);
     });
-    changed++;
+    if (didPatch) changed++;
   }
   return changed;
 }

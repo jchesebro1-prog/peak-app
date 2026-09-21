@@ -3,12 +3,12 @@ import { setRates as setFlameRates, getRates as getFlameRates } from "@/lib/flam
 import { setRates as setRepairRates, getRates as getRepairRates } from "@/lib/repair-engine";
 import { setRates as setInspectionRates, getRates as getInspectionRates } from "@/lib/inspection-engine";
 import { ensureEngagementForQuote } from "@/lib/stores/engagements";
-import { upsertDoc } from "@/db/doc-store";
+import { upsertDoc, patchDoc } from "@/db/doc-store";
 import type { Quote } from "@/lib/stores/quotes";
 import { contactByEmail } from "@/lib/identity/lookup";
 import { saveContact, setEmails } from "@/lib/identity/contacts";
 import { claimDomain, customersForDomain } from "@/lib/gmail/domains";
-import { applyResolution, resolveForThread, resweepThreads } from "@/lib/gmail/linking";
+import { applyResolution, applyResweepPatch, resolveForThread, resweepThreads } from "@/lib/gmail/linking";
 import type { CommThread } from "@/lib/stores/comms";
 
 async function main() {
@@ -123,6 +123,49 @@ async function main() {
   // #96 — resweep is idempotent: a second pass over the same filter patches nothing
   const n2 = await resweepThreads({ domain: "t96sweep.org" });
   assert.equal(n2, 0, "#96 resweep is idempotent on an already-suggested thread");
+
+  // #96 §? — re-sweep must never clobber a manual link that lands mid-sweep
+  // (setLinkAction's update(id, { customerId }) racing listDocs → patchDoc).
+  await upsertDoc("comms", {
+    id: "C-t96b", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: true, archived: false,
+    customerId: null, customer: "", contactName: "Another Person", contactEmail: "another@t96sweep.org",
+    subject: "hi", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+    messages: [{ id: "m1", at: Date.now(), direction: "in", channel: "email", author: "Another Person", body: "x" }],
+    createdAt: Date.now(), updatedAt: Date.now(), resolution: "unknown",
+  } as any);
+  // Simulate the race: a manual link lands between listDocs and patchDoc.
+  await patchDoc<CommThread>("comms", "C-t96b", (d) => {
+    d.customerId = "other";
+    d.customer = "Other";
+    d.resolution = "linked";
+  });
+  const n3 = await resweepThreads({ domain: "t96sweep.org" });
+  const raced = await getDoc<any>("comms", "C-t96b");
+  assert.equal(raced?.customerId, "other", "#96 resweep must not clobber a link that landed mid-sweep");
+  assert.equal(raced?.resolution, "linked", "#96 resweep must not revert the manual link's resolution");
+  void n3; // resweepThreads' own already-linked filter is what skips C-t96b here
+
+  // #96 — applyResweepPatch guard, exercised directly (the patchDoc callback
+  // is synchronous, so `next` is always precomputed outside it — see linking.ts).
+  const linkedFresh: CommThread = { ...rec, id: "guard-linked", customerId: "manual-owner", resolution: "linked" };
+  const unlinkedNext: CommThread = { ...rec2, id: "guard-linked", customerId: null, resolution: "unknown" };
+  const beforeGuard = JSON.stringify(linkedFresh);
+  assert.equal(
+    applyResweepPatch(linkedFresh, unlinkedNext), false,
+    "#96 applyResweepPatch declines when the fresh doc is already linked"
+  );
+  assert.equal(JSON.stringify(linkedFresh), beforeGuard, "#96 applyResweepPatch leaves an already-linked doc untouched");
+
+  const unlinkedFresh: CommThread = { ...rec, id: "guard-unlinked", customerId: null, resolution: "unknown" };
+  const suggestedNext: CommThread = {
+    ...rec2, id: "guard-unlinked", customerId: null, resolution: "suggested", suggestedCustomerId: "lakefront",
+  };
+  assert.equal(
+    applyResweepPatch(unlinkedFresh, suggestedNext), true,
+    "#96 applyResweepPatch applies when the fresh doc is unlinked"
+  );
+  assert.equal(unlinkedFresh.resolution, "suggested", "#96 applyResweepPatch copies the suggested resolution");
+  assert.equal(unlinkedFresh.suggestedCustomerId, "lakefront", "#96 applyResweepPatch copies the suggested customer");
 
   console.log("review regression checks passed");
 }
