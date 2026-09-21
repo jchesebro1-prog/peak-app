@@ -1460,12 +1460,12 @@ export async function checkMail(): Promise<string | null> {
  * last_sync_at, older-than-maxAgeMs) and syncs only the mailboxes it won — so
  * any number of open clients can call this freely (mount + interval) without
  * overlapping syncs or hammering Gmail, and a failing mailbox still advances
- * its stamp instead of defeating the throttle. Mailboxes whose one-time
- * initial import hasn't run are SKIPPED: the (long) import belongs to the
- * manual Send/Receive button, per the connect flow's "runs lazily on the next
- * Get mail". `changed` is what callers should refresh on — a sync that found
- * nothing new returns changed:false. No-op in simulated mode: the canned
- * queue only moves on the manual button.
+ * its stamp instead of defeating the throttle. Un-imported mailboxes are
+ * included — the chunked, time-budgeted import (#97) makes an automatic tick
+ * safe, so a paused import resumes unattended instead of waiting on the
+ * manual Send/Receive button. `changed` is what callers should refresh on —
+ * a sync that found nothing new returns changed:false. No-op in simulated
+ * mode: the canned queue only moves on the manual button.
  */
 export async function checkMailIfStale(
   maxAgeMs: number
@@ -1474,9 +1474,7 @@ export async function checkMailIfStale(
   if (!gmailBridgeActive()) return none;
   try {
     const { listConnections } = await import("@/lib/gmail/connections");
-    const eligible = (await listConnections())
-      .filter((c) => c.initialImportDone)
-      .map((c) => c.mailboxKey);
+    const eligible = (await listConnections()).map((c) => c.mailboxKey);
     if (!eligible.length) return none;
     await flushOutbox();
     // pollInbound claims each mailbox atomically right before syncing it,

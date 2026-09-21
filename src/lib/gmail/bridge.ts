@@ -613,20 +613,25 @@ async function syncMailbox(
     const known = info.initialImportDone ? new Set<string>() : await buildImportDedup();
     const started = Date.now();
     let chunks = 0;
+    let lastChunkMs = 0;
     let r: { last: string | null; more: boolean };
     do {
+      const chunkStarted = Date.now();
       r = await syncMailboxMessages(key, info, known);
+      lastChunkMs = Date.now() - chunkStarted;
       if (r.last) last = r.last;
     } while (
       r.more &&
-      Date.now() - started < IMPORT_RUN_BUDGET_MS &&
+      Date.now() - started + lastChunkMs < IMPORT_RUN_BUDGET_MS &&
       ++chunks < IMPORT_MAX_CHUNKS_PER_RUN
     );
   } catch (err) {
     // #97 — an unexpected failure in the message sync must not skip the
-    // downstream passes below (reconcile/re-derive/labels still run).
+    // downstream passes below (reconcile/re-derive/labels still run). `last`
+    // is left as-is: it's accumulated from chunks that already completed
+    // successfully, and a later chunk's failure must not lose that progress
+    // (it's what keeps `changed` true for this run).
     console.error("[gmail] message sync failed for", key, err);
-    last = null;
   }
   let flips = 0;
   try {
