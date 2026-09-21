@@ -156,8 +156,9 @@ export default async function InboxPage({
   const domain = companyDomain(settings.companyName);
   // Whose mailbox this is, in order of how much we actually know:
   //   1. the address Google authorized for this user's Gmail connection,
-  //   2. the Google account on their roster row (what they sign in with),
-  //   3. their roster email.
+  //   2. their roster (company) email — what they sign in as since D126,
+  //   3. the alternate Google account on their roster row (googleEmail is a
+  //      sign-in fallback, e.g. a personal Gmail — never the mailbox).
   // Never the name+company-domain guess comms.ts falls back to — that invents
   // an address for anyone who isn't first-initial+lastname@company.
   const myKey = personalKey(user.id);
@@ -166,7 +167,7 @@ export default async function InboxPage({
     getUser(user.id),
   ]);
   const myAddress =
-    connection?.address || myRow?.googleEmail || myRow?.email || user.email;
+    connection?.address || myRow?.email || myRow?.googleEmail || user.email;
   const boxOpts = {
     domain,
     userColor: user.color,
