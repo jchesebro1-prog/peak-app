@@ -5398,7 +5398,7 @@ bootstrap inserts for users/settings are now conflict-safe, and a clean
 
 ---
 
-## 95. Gmail Connect never saved a mailbox in production — stale `GMAIL_REDIRECT_BASE` — CONFIG FIXED 2026-09-21; code hardening OPEN
+## 95. Gmail Connect never saved a mailbox in production — stale `GMAIL_REDIRECT_BASE` — DONE 2026-09-21 (config + code hardening)
 
 **Reported:** 2026-09-21 (Jeff: "I sign in and it goes back to the page but nothing changes; the
 Inbox still shows my personal gmail").
@@ -5415,14 +5415,19 @@ derives from `AUTH_URL`); production redeployed; Google OAuth client already car
 `quartzite-six` redirect URI; `gmail.modify` added to the consent-screen scopes (DEPLOY §5 only
 listed three of the four the app requests).
 
-**Code hardening — OPEN, next batch:**
-- `/login` honours a same-origin `callbackUrl` so an OAuth hop that loses its cookie completes.
-- Settings → Mailboxes shows the redirect URI the app will send and warns when
-  `GMAIL_REDIRECT_BASE` host ≠ `AUTH_URL` host.
-- Inbox address fallback becomes `connection → roster email → googleEmail` (Jeff signs in as Peak).
-- DEPLOY.md §5: four scopes (+ `calendar.events` and Calendar API for the calendar opt-in);
-  document that `CRON_SECRET` is unset on Vercel, so no background sync runs today.
-- Follow-up (Jeff): enable Google Calendar API in `peak-backend` + add `calendar.events` scope.
+**Code hardening — DONE 2026-09-21** (branch `fix/gmail-hardening`, plan
+`docs/superpowers/plans/2026-09-21-gmail-hardening-and-status-derivation.md`; 13 commits
+bac691b..f69d7a0). Final review caught two things the plan itself got wrong: (a) the
+per-sync status re-derive would have reverted manual **Mark replied** / **Close** — it is now
+restricted to `waiting_*` on bridged threads and also fixes newest-first message order; (b) the
+login `callbackUrl` fix needed the Auth.js `redirect` callback to honour same-origin URLs
+(extracted to `resolveSignInRedirect`, which also closed a pre-existing backslash and
+unanchored-private-IP open-redirect shape). Also shipped: `deriveStatus()` (#96 §6),
+`safeCallbackPath`, Settings redirect-URI line + drift warning (origin compare), address
+fallback order, DEPLOY.md §5 (four scopes, rename trap, `AUTH_URL` required for Gmail,
+`CRON_SECRET` gap), `.env.example` `AUTH_URL` note. Specs 960 → 991.
+**Still open (Jeff):** enable Google Calendar API in `peak-backend` + add `calendar.events`
+scope (calendar opt-in only); set `CRON_SECRET` on Vercel for background sync.
 
 ## 96. Inbox: automatic customer linking, link sidebar, two-way Gmail labels, derived status — SPEC APPROVED 2026-09-21
 
