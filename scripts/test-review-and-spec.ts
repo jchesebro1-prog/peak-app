@@ -10,6 +10,7 @@ import {
   domainOf,
   isPublicDomain,
 } from "@/lib/gmail/config";
+import { resolveSender } from "@/lib/gmail/resolve";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
   msOf as opMsOf,
@@ -3006,6 +3007,26 @@ async function xlsxFixture(): Promise<Buffer> {
 }
 
 async function asyncChecks(): Promise<void> {
+  /* ---- #96 §1 — resolver precedence ---- */
+  {
+    const L = {
+      contactByEmail: async (e: string) =>
+        e === "brenda@lakefront.k12.mn.us" ? { contactId: "ct-b", customerId: "lakefront" } : null,
+      customersByDomain: async (d: string) =>
+        d === "lakefront.k12.mn.us" ? ["lakefront"] : d === "shared.org" ? ["a", "b"] : [],
+    };
+    const r1 = await resolveSender("Brenda@Lakefront.K12.MN.US", L);
+    ok(r1.kind === "linked" && r1.via === "contact" && r1.customerId === "lakefront", "resolve: exact contact wins");
+    const r2 = await resolveSender("new.person@lakefront.k12.mn.us", L);
+    ok(r2.kind === "linked" && r2.via === "domain", "resolve: domain fallback");
+    const r3 = await resolveSender("x@shared.org", L);
+    ok(r3.kind === "ambiguous" && r3.candidates.length === 2, "resolve: shared domain → ambiguous");
+    const r4 = await resolveSender("someone@gmail.com", { ...L, customersByDomain: async () => ["oops"] });
+    ok(r4.kind === "unknown", "resolve: public domain never uses the domain step");
+    const r5 = await resolveSender("", L);
+    ok(r5.kind === "unknown", "resolve: empty → unknown");
+  }
+
   const xr = await xlsxToCsv(await xlsxFixture());
   ok(xr.ok, "#81 a well-formed .xlsx converts");
   if (xr.ok) {
