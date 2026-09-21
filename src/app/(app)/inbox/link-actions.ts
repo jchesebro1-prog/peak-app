@@ -14,6 +14,7 @@ import { get as getThread } from "@/lib/stores/comms";
 import type { CommThread } from "@/lib/stores/comms";
 import {
   get as getCustomer,
+  contactsForId,
   type CustomerContact,
   type CustomerLocation,
 } from "@/lib/stores/customers";
@@ -33,6 +34,7 @@ const revalidate = () => revalidatePath("/", "layout");
 function toLocationInput(l: CustomerLocation): LocationInput {
   return {
     id: l.id,
+    locationName: l.locationName || "",
     label: l.label || "",
     primary: !!l.primary,
     address: l.address || "",
@@ -103,6 +105,7 @@ export async function claimDomainAction(domain: string, customerId: string): Pro
 /** Link sidebar's "not them" on a suggested match. */
 export async function dismissSuggestionAction(threadId: string): Promise<R> {
   await requireUser();
+  if (!(await getThread(threadId))) return { ok: false, error: "Thread not found." };
   await patchDoc<CommThread>("comms", threadId, (d) => {
     d.suggestionDismissed = true;
     if (d.resolution === "suggested") d.resolution = "unknown";
@@ -123,6 +126,7 @@ export async function quickAddCustomerAction(input: {
   threadId: string;
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const me = await requireUser();
+  if (!(await getThread(input.threadId))) return { ok: false, error: "Thread not found." };
   const name = (input.name || "").trim();
   if (!name) return { ok: false, error: "Enter a name for the new customer." };
 
@@ -162,7 +166,7 @@ export async function quickAddContactAction(input: {
     homeCompanyId: input.customerId,
     status: "active",
     pricingTier: null,
-    isPrimary: false,
+    isPrimary: ((await contactsForId(input.customerId)) || []).length === 0,
     emails: email ? [{ value: email, label: "work", isPrimary: true }] : [],
     phones: phone ? [{ value: phone, label: "work", isPrimary: true }] : [],
   };

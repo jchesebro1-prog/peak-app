@@ -183,6 +183,20 @@ async function main() {
   assert.equal((await customersForDomain("gmail.com")).length, 0, "#96 rememberAddress never claims a public domain");
   void cid3;
 
+  // #96 Task 5 review fix — rememberAddress must refuse a contactId that
+  // belongs to a different (or nonexistent) customer, minting a fresh
+  // contact on the given customer instead of appending to the foreign one.
+  await saveContact({
+    id: "ct-t96own", firstName: "Foreign", lastName: "Owner", homeCompanyId: "other-company",
+    title: "", pricingTier: null, status: "active", userId: null, ownerUserId: "u1",
+    isPrimary: false, createdAt: Date.now(),
+  });
+  const cid4 = await rememberAddress("lakefront", "x.t96@t96own.org", "X", "ct-t96own", { id: "u1", name: "Test" });
+  assert.notEqual(cid4, "ct-t96own", "#96 rememberAddress must not append to a contact owned by a different customer");
+  const { getContact } = await import("@/lib/identity/contacts");
+  const minted = await getContact(cid4);
+  assert.equal(minted?.homeCompanyId, "lakefront", "#96 rememberAddress mints the fallback contact on the given customer");
+
   await upsertDoc("comms", {
     id: "C-t96link", mailbox: "personal", unread: true, archived: false,
     customerId: null, customer: "", contactName: "AP Clerk", contactEmail: "ap.clerk@t96learn.org",

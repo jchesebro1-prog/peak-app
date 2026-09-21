@@ -4,7 +4,7 @@
  */
 import { listDocs, patchDoc } from "@/db/doc-store";
 import { contactByEmail } from "@/lib/identity/lookup";
-import { emailsFor, saveContact, setEmails } from "@/lib/identity/contacts";
+import { emailsFor, getContact, saveContact, setEmails } from "@/lib/identity/contacts";
 import { mintId } from "@/lib/identity/ids";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import type { CommThread } from "@/lib/stores/comms";
@@ -126,6 +126,10 @@ export async function rememberAddress(
   const e = (email || "").trim().toLowerCase();
   if (!e) return "";
   let cid = contactId || "";
+  if (cid) {
+    const ct = await getContact(cid);
+    if (!ct || ct.homeCompanyId !== customerId) cid = "";
+  }
   if (cid) {
     const existing = await emailsFor(cid);
     if (!existing.some((x) => x.email.toLowerCase() === e)) {
