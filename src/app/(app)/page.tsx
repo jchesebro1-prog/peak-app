@@ -354,8 +354,8 @@ export default async function HomePage({
   const localParts = new Intl.DateTimeFormat("en-US", { timeZone: timezone, hour: "numeric", hour12: false }).formatToParts(new Date());
   const hour = Number(localParts.find((part) => part.type === "hour")?.value || 0);
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  const lastLogin = userRecord?.lastLoginAt
-    ? new Intl.DateTimeFormat("en-US", { timeZone: timezone, dateStyle: "medium", timeStyle: "short" }).format(userRecord.lastLoginAt)
+  const lastLogin = userRecord?.previousLoginAt
+    ? new Intl.DateTimeFormat("en-US", { timeZone: timezone, dateStyle: "medium", timeStyle: "short" }).format(userRecord.previousLoginAt)
     : "First login";
   const urgentCount = pipelineRaw.filter((a) => a.urgent).length;
   const standfirst = `${openQuotes.length} open quotes worth ${money(openValue)} · ${urgentCount} need attention`;

@@ -327,7 +327,7 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
  * group after D97 shipped, which is why a bare `length === 6` went stale. */
 const DESIGN_CHILDREN = [
   "designoverview", "engagements", "designs", "grid",
-  "steel", "lineset", "motors", "fixtures",
+  "steel", "lineset", "motors", "fixtures", "subassemblies",
 ];
 ok(
   !!designGroup && designGroup.kind === "group" &&

@@ -1,14 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/session";
+import { requirePerm } from "@/lib/session";
 import { get as getPart } from "@/lib/stores/catalog";
 import { create, remove, save, type FixtureOptionCategory, type FixtureSubassembly } from "@/lib/stores/subassemblies";
 
 type Input = { id?: string | null; label: string; description: string; lightEngineSku: string; lensSku: string; lamp: string; position: string; circuit: string; options: Record<FixtureOptionCategory, { sku: string; qty: number }[]> };
 
 export async function saveFixtureAction(input: Input): Promise<{ ok: true; item: FixtureSubassembly } | { ok: false; error: string }> {
-  await requireUser();
+  await requirePerm("manage_users");
   const label = input.label.trim();
   const description = input.description.trim();
   if (!label) return { ok: false, error: "Add a label for the fixture." };
@@ -53,7 +53,7 @@ export async function saveFixtureAction(input: Input): Promise<{ ok: true; item:
 }
 
 export async function deleteSubassemblyAction(id: string): Promise<void> {
-  await requireUser();
+  await requirePerm("manage_users");
   await remove(id);
   revalidatePath("/design/subassemblies");
 }

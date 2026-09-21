@@ -49,7 +49,7 @@ export type VendorQuote = {
   id: string;
   vendor: string;
   quoteNumber: string;
-  attachment?: { name: string; mime: string; dataUrl: string };
+  attachment?: { name: string; mime: string; dataUrl?: string; blobPath?: string };
   materialsList: string;
   materialsSummary: string;
   terms: string;

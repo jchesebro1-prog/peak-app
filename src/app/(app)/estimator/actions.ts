@@ -34,6 +34,7 @@ import { list as catalogList } from "@/lib/stores/catalog";
 import type { CatalogSearch, SpecMob, SpecSection, VendorQuote } from "./types";
 import type { SuggestPart } from "./estimator-data";
 import { activeUsers } from "@/lib/users";
+import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import {
   createTask,
   setTaskStatus as setTaskStatusStore,
@@ -109,6 +110,44 @@ function refresh() {
   revalidatePath("/", "layout");
 }
 
+/** Keep vendor files out of quote JSON when private Blob storage is enabled.
+ * Local/dev environments retain the data-URL fallback used by the existing
+ * attachment seam. */
+async function materializeVendorQuotes(
+  quotes: VendorQuote[] | undefined,
+  ownerId: string
+): Promise<VendorQuote[] | undefined> {
+  if (!quotes || !blobEnabled()) return quotes;
+  const stored: VendorQuote[] = [];
+  try {
+    for (const quote of quotes) {
+      const attachment = quote.attachment;
+      if (!attachment?.dataUrl || attachment.blobPath) {
+        stored.push(quote);
+        continue;
+      }
+      const { bytes, mime } = dataUrlToBytes(attachment.dataUrl);
+      const uploaded = await putBlob(
+        `vendor-quotes/${ownerId}/${safeName(`${quote.id}-${attachment.name}`)}`,
+        bytes,
+        attachment.mime || mime
+      );
+      stored.push({
+        ...quote,
+        attachment: {
+          name: attachment.name,
+          mime: attachment.mime || mime,
+          blobPath: uploaded.pathname,
+        },
+      });
+    }
+  } catch (error) {
+    console.error("[estimator] vendor quote attachment upload failed:", error);
+    throw new Error("Vendor quote attachment upload failed — check file storage and try again.");
+  }
+  return stored;
+}
+
 async function syncOf(id: string): Promise<ReviewSync> {
   const q = await get(id);
   return { ok: !!q, review: q?.review ?? null, status: q?.status ?? null };
@@ -124,6 +163,20 @@ export async function saveQuoteAction(
   payload: SavePayload
 ): Promise<SaveResult> {
   const user = await requireUser();
+  let vendorQuotes: VendorQuote[] | undefined;
+  try {
+    vendorQuotes = await materializeVendorQuotes(payload.vendorQuotes, loadedId || "pending");
+  } catch (error) {
+    return {
+      ok: false,
+      id: loadedId,
+      revNum: 1,
+      updatedAt: Date.now(),
+      review: null,
+      status: null,
+      error: error instanceof Error ? error.message : "Could not save the vendor attachment.",
+    };
+  }
   const patch: QuotePatch = {
     name: payload.name,
     customer: payload.customer,
@@ -141,7 +194,7 @@ export async function saveQuoteAction(
     status: payload.status,
     source: "estimator",
     spec: { sections: payload.sections, mobs: payload.mobs },
-    vendorQuotes: payload.vendorQuotes,
+    vendorQuotes,
   };
   let q: Quote | null = null;
   let statusError: string | undefined;
@@ -178,7 +231,7 @@ export async function saveQuoteAction(
       preparedBy: payload.preparedBy || user.name,
       assumptions: payload.assumptions || "",
       termsText: payload.termsText || "",
-      vendorQuotes: payload.vendorQuotes,
+      vendorQuotes,
     } as QuotePatch);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand

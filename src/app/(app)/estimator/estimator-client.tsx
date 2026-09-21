@@ -2441,6 +2441,35 @@ export default function EstimatorClient({
                 </div>
               </div>
 
+              {vendorQuotes.length > 0 && (
+                <div style={{ margin: "6px 14px", padding: 13, background: "#f7f8fa", borderRadius: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 8 }}>
+                    Vendor quotes
+                  </div>
+                  {vendorQuotes.map((vendorQuote) => {
+                    const attachment = vendorQuote.attachment;
+                    const attachmentHref = attachment?.blobPath && loadedId
+                      ? `/api/vendor-quote-attachments/${encodeURIComponent(loadedId)}/${encodeURIComponent(vendorQuote.id)}`
+                      : attachment?.dataUrl;
+                    return (
+                      <div key={vendorQuote.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "7px 0", borderTop: "1px solid #e5e7eb" }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12, color: "#3a3f4a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {vendorQuote.vendor || "Vendor"}{vendorQuote.quoteNumber ? ` · ${vendorQuote.quoteNumber}` : ""}
+                          </div>
+                          <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#737985" }}>{fmt(vendorQuote.total)}</div>
+                        </div>
+                        {attachmentHref && (
+                          <a href={attachmentHref} download={attachment?.name || "vendor-quote"} style={{ color: ACCENT_INK, fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+                            Download
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* Tasks (PUNCHLIST #17 remainder) — needs a saved quote to
                   attach to; a brand-new unsaved draft has nowhere for
                   quoteId to point yet. */}

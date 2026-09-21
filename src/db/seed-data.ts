@@ -2,7 +2,7 @@ import { users, appSettings } from "./schema";
 import type { Db } from "./index";
 import { IDENTITY, emailFor } from "@/lib/team";
 import { listDocs, upsertDoc, clearCollection, type Doc } from "./doc-store";
-import type { CollectionName } from "./doc-tables";
+import { DOC_TABLES, type CollectionName } from "./doc-tables";
 import { customersSeed } from "./seeds/customers";
 import { quotesSeed } from "./seeds/quotes";
 import { catalogSeed } from "./seeds/catalog";
@@ -131,8 +131,10 @@ export async function seedDemoCollections(): Promise<number> {
   return seeded;
 }
 
-/** Collections filled by the demo seed — the surface a go-live reset wipes. */
-export const DEMO_COLLECTIONS: CollectionName[] = DEMO_SEEDS.map(([coll]) => coll);
+/** Every business-document collection is part of the go-live reset surface.
+ * Some collections have no demo seed, but they can still contain records
+ * created during development and must not survive a clean cutover. */
+export const DEMO_COLLECTIONS: CollectionName[] = Object.keys(DOC_TABLES) as CollectionName[];
 
 /**
  * Go-live reset — the inverse of seedDemoCollections. Hard-deletes every
