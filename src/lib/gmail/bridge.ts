@@ -337,12 +337,15 @@ async function reconcileInboxState(key: MailboxKey): Promise<number> {
 
 /** Recompute every bridged thread's status from its newest message. Cheap
  *  (one listDocs + patch only on change) and idempotent, so it runs on every
- *  sync: it is what corrects threads stamped by the old per-message rule. */
+ *  sync: it is what corrects threads stamped by the old per-message rule.
+ *  Legacy threads without a gmailAccountKey stamp resolve to a mailbox by
+ *  the same name-derived fallback as reconcileInboxState. */
 async function rederiveStatuses(key: MailboxKey): Promise<number> {
+  const users = await allUsers();
   const all = await listDocs<CommThread>("comms");
   let changed = 0;
   for (const t of all) {
-    if (t.gmailAccountKey !== key) continue;
+    if ((t.gmailAccountKey ?? keyForThreadWith(t, users)) !== key) continue;
     const next = deriveStatus(t);
     if (next === t.status) continue;
     await patchDoc<CommThread>("comms", t.id, (d) => {
