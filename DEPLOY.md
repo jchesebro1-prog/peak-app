@@ -136,9 +136,10 @@ Cloud project** from step 4.
    | Name | Value |
    | --- | --- |
    | `GMAIL_ENABLED` | `true` |
+   | `AUTH_URL` | `https://YOUR-APP.vercel.app` (required for Gmail — the callback URI derives from it) |
 
    Redeploy. (`AUTH_SECRET`, already set, also encrypts the stored mailbox
-   tokens — nothing else to add.)
+   tokens.)
 5. In the app: **Settings → Mailboxes** now shows **Gmail enabled**. Click
    **Connect** on your own inbox and on each shared box (Sales / Installs /
    Info), signing in with that mailbox's Google account and granting access.
@@ -162,8 +163,7 @@ throttle):
 - Any long-running server (`next start`, the LAN box, `next dev`) starts a
   built-in sync timer at boot — nothing to configure.
 - On Vercel (serverless — no long-running process) **nothing syncs in the background until you
-  add `CRON_SECRET`** (as of 2026-09-21 it is not set — the Inbox only syncs while a tab is
-  open). Add ONE env var:
+  add `CRON_SECRET`** — until then the Inbox only syncs while a tab is open. Add ONE env var:
 
   | Name | Value |
   | --- | --- |
