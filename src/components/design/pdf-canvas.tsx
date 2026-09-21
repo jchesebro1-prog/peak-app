@@ -6,10 +6,16 @@ import { useEffect, useRef, useState } from "react";
  * PDF page renderer (D95). Loads pdf.js lazily on the client and paints one
  * page to a canvas at a chosen zoom.
  *
- * The worker is served from /pdf.worker.min.mjs (copied out of pdfjs-dist at
- * install time) rather than bundled: pdf.js ships its worker as a separate
- * ES module and pointing at a static URL avoids fighting the bundler over
- * worker resolution.
+ * The worker is served from /pdf.worker.min.mjs rather than bundled: pdf.js
+ * ships its worker as a separate ES module and pointing at a static URL
+ * avoids fighting the bundler over worker resolution.
+ *
+ * That file is a COPY of pdfjs-dist's build output, kept in sync by the
+ * `sync:pdf-worker` npm script (run from `postinstall`). It has to be
+ * re-copied whenever pdfjs-dist moves: pdf.js refuses to run a worker whose
+ * version doesn't match the main-thread API, and — the reason this is
+ * wired to postinstall rather than left to memory — a stale copy means a
+ * pdfjs security bump doesn't actually reach the code that opens the PDF.
  *
  * Non-PDF attachments never reach this component — the parent renders images
  * directly (see MarkupViewer).

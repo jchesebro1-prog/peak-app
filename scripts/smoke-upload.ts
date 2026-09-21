@@ -228,6 +228,13 @@ async function main() {
     PGLITE_PATH: pglitePath,
     PORT: String(port),
     NEXT_TELEMETRY_DISABLED: "1",
+    // Self-contained for the same reason smoke-routes.ts is (f92cc1a): a
+    // fresh checkout or CI job may have no .env.local, and without a secret
+    // Auth.js fails the whole run with MissingSecret — which reads as a
+    // broken upload route rather than a missing env var.
+    AUTH_SECRET: "quartzite-smoke-test-secret-not-for-production",
+    AUTH_DEV_LOGIN: "true",
+    AUTH_TRUST_HOST: "true",
   };
   delete env.DATABASE_URL;
 
