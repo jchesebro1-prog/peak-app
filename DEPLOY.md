@@ -103,11 +103,18 @@ Cloud project** from step 4.
 
 1. **Enable the Gmail API:** console.cloud.google.com → **APIs & Services →
    Library** → search **Gmail API** → **Enable**.
-2. **OAuth consent screen → Data access → Add or remove scopes**, add these
-   three, then Save:
+2. **OAuth consent screen → Data access → Add or remove scopes**, add these, then Save:
    - `.../auth/gmail.send`
    - `.../auth/gmail.readonly`
+   - `.../auth/gmail.modify` (two-way archive + `Peak/` labels — requested on every connect)
    - `.../auth/userinfo.email`
+
+   If you also want the calendar opt-in (Settings → Mailboxes → Enable calendar), enable the
+   **Google Calendar API** in the Library and add `.../auth/calendar.events` here too. Gmail
+   works without it.
+
+   Any scope the app requests that is NOT listed here makes Google reject the consent, so keep
+   this list in step with `GMAIL_SCOPES` in `src/lib/gmail/config.ts`.
 
    (These are "sensitive/restricted" scopes. While your app is in **Testing**
    they work immediately for accounts you add under **Audience → Test users**;
@@ -118,6 +125,12 @@ Cloud project** from step 4.
    URIs**, add (replace with your real domain):
    - `https://YOUR-APP.vercel.app/api/gmail/callback`
    - `http://localhost:3000/api/gmail/callback` (for local testing)
+
+   **If the Vercel project or domain is ever renamed:** add the new
+   `https://NEW-DOMAIN/api/gmail/callback` here AND check Vercel for a `GMAIL_REDIRECT_BASE`
+   env var — if it still names the old domain, delete it (the app derives the callback from
+   `AUTH_URL`). Settings → Mailboxes shows the URI the app will send and warns on a mismatch.
+   (This is what broke connect from July to September 2026 — PUNCHLIST #95.)
 4. **Vercel → Settings → Environment Variables**, add:
 
    | Name | Value |
@@ -148,7 +161,9 @@ throttle):
 - Opening the Inbox syncs automatically (built in, nothing to configure).
 - Any long-running server (`next start`, the LAN box, `next dev`) starts a
   built-in sync timer at boot — nothing to configure.
-- On Vercel (serverless — no long-running process), add ONE more env var:
+- On Vercel (serverless — no long-running process) **nothing syncs in the background until you
+  add `CRON_SECRET`** (as of 2026-09-21 it is not set — the Inbox only syncs while a tab is
+  open). Add ONE env var:
 
   | Name | Value |
   | --- | --- |
