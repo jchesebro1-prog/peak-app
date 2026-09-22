@@ -352,6 +352,10 @@ export const sites = pgTable(
     city: text("city"),
     state: text("state"),
     zip: text("zip"),
+    /** #137 — free-text venue category from the venues import ("theatre",
+     *  "school", "church"). `venueKind` stays the controlled vocabulary the
+     *  estimator and the Companies modal use. */
+    kind: text("kind"),
     /** lat/lng/travel* are text: the doc shape allows number|string|null and
      *  "port faithfully" wins — the store seam converts on compose (D85). */
     lat: text("lat"),

@@ -28,6 +28,14 @@ import { saveConnection, replaceLabels } from "@/lib/gmail/connections";
 import { GMAIL_MODIFY_SCOPE } from "@/lib/gmail/config";
 import { get as getLead, getAll as getAllLeads } from "@/lib/stores/leads";
 import { addUser } from "@/lib/users";
+import {
+  upsert as upsertCustomer,
+  get as getCustomer,
+  all as allCustomers,
+  remove as removeCustomer,
+  findCustomerByName,
+  findCustomerById,
+} from "@/lib/stores/customers";
 
 async function main() {
   const flame = await setFlameRates({ laborRate: 123, mileageRate: 1.23 });
@@ -1025,6 +1033,73 @@ async function main() {
     0,
     '#135 { mode: "fixed", amount: 0 } yields zero milestones at the store — the action must guard this itself'
   );
+
+  // #137 T1 — zip / kind / phone / website / mobile plumbing through the customer seam
+  {
+    await upsertCustomer({
+      id: "c-t137-plumb", name: "T137 Plumbing Playhouse", type: "Performing arts",
+      zip: "53703", phone: "(608) 555-0100", website: "t137.example",
+      locations: [{ id: "l-t137-1", label: "Main Stage", primary: true, address: "215 W Main St", city: "Madison", state: "WI", zip: "53703-1234", kind: "theatre" }],
+      contacts: [{ name: "Maria Lopez", email: "maria@t137.example", phone: "(608) 555-0110", mobile: "(608) 555-0111", primary: true }],
+    });
+    const a = await getCustomer("c-t137-plumb");
+    assert.ok(a, "#137 T1 customer written");
+    assert.equal(a!.zip, "53703", "#137 T1 company zip persists (companies.zip)");
+    assert.equal(a!.phone, "(608) 555-0100", "#137 T1 company phone persists (companies.main_phone)");
+    assert.equal(a!.website, "t137.example", "#137 T1 company website persists");
+    assert.equal(a!.locations[0].zip, "53703-1234", "#137 T1 venue zip persists (ZIP+4 kept as typed)");
+    assert.equal(a!.locations[0].kind, "theatre", "#137 T1 venue kind persists (sites.kind)");
+    assert.equal(a!.contacts[0].mobile, "(608) 555-0111", "#137 T1 contact mobile persists as a mobile-labelled phone");
+    assert.equal(a!.contacts[0].phone, "(608) 555-0110", "#137 T1 …and the work phone is still `phone`");
+
+    // A writer that doesn't carry the new fields (the Companies modal shape)
+    // preserves them AND does not register as a change (D83).
+    await upsertCustomer({
+      id: "c-t137-plumb", name: "T137 Plumbing Playhouse", type: "Performing arts",
+      locations: [{ id: "l-t137-1", label: "Main Stage", primary: true, address: "215 W Main St", city: "Madison", state: "WI" }],
+      contacts: [{ name: "Maria Lopez", email: "maria@t137.example", phone: "(608) 555-0110", primary: true }],
+    });
+    const b = await getCustomer("c-t137-plumb");
+    assert.equal(b!.zip, "53703", "#137 T1 company zip preserved when a writer omits it");
+    assert.equal(b!.phone, "(608) 555-0100", "#137 T1 company phone preserved when a writer omits it");
+    assert.equal(b!.locations[0].zip, "53703-1234", "#137 T1 venue zip preserved when a writer omits it");
+    assert.equal(b!.locations[0].kind, "theatre", "#137 T1 venue kind preserved when a writer omits it");
+    assert.equal(b!.contacts[0].mobile, "(608) 555-0111", "#137 T1 contact mobile preserved when a writer omits it");
+    assert.equal(b!.updatedAt, a!.updatedAt, "#137 T1 an omit-everything re-save is a no-change write (updatedAt unchanged)");
+
+    // …and a writer that carries a value writes it.
+    await upsertCustomer({
+      id: "c-t137-plumb", name: "T137 Plumbing Playhouse", type: "Performing arts", zip: "53704",
+      locations: [{ id: "l-t137-1", label: "Main Stage", primary: true, address: "215 W Main St", city: "Madison", state: "WI", zip: "53704" }],
+      contacts: [{ name: "Maria Lopez", email: "maria@t137.example", phone: "(608) 555-0110", primary: true }],
+    });
+    const c = await getCustomer("c-t137-plumb");
+    assert.equal(c!.zip, "53704", "#137 T1 a provided company zip overwrites");
+    assert.equal(c!.locations[0].zip, "53704", "#137 T1 a provided venue zip overwrites");
+    assert.equal(c!.contacts[0].mobile, "(608) 555-0111", "#137 T1 mobile survives a zip-only change");
+
+    assert.equal((await findCustomerByName("t-137 plumbing PLAYHOUSE!"))?.id, "c-t137-plumb", "#137 T1 findCustomerByName matches case/punctuation-insensitively");
+    assert.equal(await findCustomerByName("nobody t137"), null, "#137 T1 findCustomerByName: unknown → null");
+    assert.equal((await findCustomerById("c-t137-plumb"))?.name, "T137 Plumbing Playhouse", "#137 T1 findCustomerById");
+    assert.ok((await allCustomers()).some((x) => x.id === "c-t137-plumb"), "#137 T1 all() lists it");
+
+    // Re-creating a soft-deleted id (Companies "remove" → a later upsert with
+    // the same id, e.g. a re-import) must keep matching the surviving contact
+    // rows by name — softDeleteCompany leaves them on the company — so the
+    // revival neither duplicates them nor drops their phone/mobile channels.
+    await removeCustomer("c-t137-plumb");
+    assert.equal(await getCustomer("c-t137-plumb"), null, "#137 T1 soft-deleted customer no longer composes");
+    assert.equal(await findCustomerByName("T137 Plumbing Playhouse"), null, "#137 T1 findCustomerByName ignores soft-deleted companies");
+    await upsertCustomer({
+      id: "c-t137-plumb", name: "T137 Plumbing Playhouse", type: "Performing arts",
+      locations: [{ id: "l-t137-1", label: "Main Stage", primary: true, city: "Madison", state: "WI" }],
+      contacts: [{ name: "Maria Lopez", email: "maria@t137.example", primary: true }],
+    });
+    const d = await getCustomer("c-t137-plumb");
+    assert.equal(d!.contacts.length, 1, "#137 T1 revived id re-matches the surviving contact by name (no duplicate row)");
+    assert.equal(d!.contacts[0].phone, "(608) 555-0110", "#137 T1 revived contact keeps its work phone");
+    assert.equal(d!.contacts[0].mobile, "(608) 555-0111", "#137 T1 revived contact keeps its mobile channel");
+  }
 
   console.log("review regression checks passed");
 }

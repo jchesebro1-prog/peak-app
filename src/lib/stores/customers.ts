@@ -85,6 +85,11 @@ export type CustomerLocation = {
   address?: string;
   city?: string;
   state?: string;
+  /** #137 — venue zip (sites.zip) and the free-text category from the venues
+   *  import (sites.kind). Both write-when-provided / preserve-when-undefined
+   *  (see writeRecord). */
+  zip?: string;
+  kind?: string;
   lat?: number | string | null;
   lng?: number | string | null;
   venueKind: string;
@@ -96,8 +101,11 @@ export type CustomerContact = {
   name: string;
   role: string;
   email: string;
-  /** Phone number (site visits / calendar invites, D76). */
+  /** Phone number (site visits / calendar invites, D76) — the non-mobile
+   *  channel when the contact has one (#137), else the first phone. */
   phone?: string;
+  /** #137 — the "mobile"-labelled channel (contacts template `Mobile`). */
+  mobile?: string;
   primary: boolean;
 };
 
@@ -108,6 +116,14 @@ export type CustomerDoc = {
   location: string;
   locations: CustomerLocation[];
   contacts: CustomerContact[];
+  /**
+   * #137 — company HQ/billing fields off the companies row (zip, main
+   * phone, website). Write-when-provided / preserve-when-undefined, same
+   * contract as lifecycle/keywords/custom below; pinned in contentKey.
+   */
+  zip?: string;
+  phone?: string;
+  website?: string;
   /**
    * Record metadata (D83, punch item 23 D/E). All optional: records written
    * before this change have none, and there is no way to reconstruct them.
@@ -147,6 +163,8 @@ export type CustomerLocationInput = {
   address?: string;
   city?: string;
   state?: string;
+  zip?: string;
+  kind?: string;
   lat?: number | string | null;
   lng?: number | string | null;
   venueKind?: string;
@@ -159,6 +177,7 @@ export type CustomerContactInput = {
   role?: string;
   email?: string;
   phone?: string;
+  mobile?: string;
   primary?: boolean;
 };
 
@@ -169,6 +188,10 @@ export type CustomerRecordInput = {
   location?: string;
   locations?: CustomerLocationInput[];
   contacts?: CustomerContactInput[];
+  /** #137 — company zip / main phone / website; undefined = preserve. */
+  zip?: string;
+  phone?: string;
+  website?: string;
   owner?: string;
   pricingTier?: string | null;
   /** #23 — optional; undefined = preserve what's stored (legacy writers —
@@ -207,6 +230,11 @@ export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
     address: (l.address || "").trim() || undefined,
     city: l.city,
     state: l.state,
+    // #137 — blank and absent both mean "preserve what's stored" (an import
+    // cell can't clear a zip); a value writes. Keys stay in the literal so
+    // the JSON key order matches composeLocation for the D83 change check.
+    zip: (l.zip || "").trim() || undefined,
+    kind: (l.kind || "").trim() || undefined,
     lat: l.lat,
     lng: l.lng,
     venueKind: l.venueKind || "proscenium",
@@ -227,6 +255,7 @@ export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
       role: ct.role || "",
       email: ct.email || "",
       phone: (ct.phone || "").trim() || undefined,
+      mobile: (ct.mobile || "").trim() || undefined,
       primary: !!ct.primary,
     }));
   if (contacts.length && !contacts.some((ct) => ct.primary)) contacts[0].primary = true;
@@ -242,6 +271,13 @@ export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
   if (owner) doc.owner = owner;
   const tier = (c.pricingTier || "").trim();
   if (tier) doc.pricingTier = tier;
+  // #137 — company HQ fields, only when the caller provided a value.
+  const zip = (c.zip || "").trim();
+  if (zip) doc.zip = zip;
+  const phone = (c.phone || "").trim();
+  if (phone) doc.phone = phone;
+  const website = (c.website || "").trim();
+  if (website) doc.website = website;
   // #23 — carry the Details fields through ONLY when the caller provided
   // them (write-when-provided; validation happened in the server action).
   if (c.lifecycle !== undefined) doc.lifecycle = c.lifecycle;
@@ -273,6 +309,8 @@ function composeLocation(s: SiteRow): CustomerLocation {
     address: s.address ?? undefined,
     city: s.city ?? undefined,
     state: s.state ?? undefined,
+    zip: s.zip ?? undefined,
+    kind: s.kind ?? undefined,
     lat: numOrStr(s.lat),
     lng: numOrStr(s.lng),
     venueKind: s.venueKind || "proscenium",
@@ -287,12 +325,18 @@ function composeContact(
   phones: ContactPhoneRow[] | undefined
 ): CustomerContact {
   const email = (emails ?? [])[0]?.email ?? "";
-  const phone = (phones ?? [])[0]?.phone;
+  const list = phones ?? [];
+  // #137 — `phone` is the (primary-first) non-mobile number and `mobile` the
+  // mobile-labelled one, so a round trip through writeRecord targets the
+  // right row each. A contact with only a mobile still shows it as phone.
+  const phone = (list.find((p) => p.label !== "mobile") ?? list[0])?.phone;
+  const mobile = list.find((p) => p.label === "mobile")?.phone;
   return {
     name: displayName(c),
     role: c.title || "",
     email,
     phone: phone || undefined,
+    mobile: mobile || undefined,
     primary: c.isPrimary,
   };
 }
@@ -325,6 +369,10 @@ function composeDoc(
   };
   if (ownerName) doc.owner = ownerName;
   if (co.pricingTier) doc.pricingTier = co.pricingTier;
+  // #137 — HQ fields straight off the companies row.
+  if (co.zip) doc.zip = co.zip;
+  if (co.mainPhone) doc.phone = co.mainPhone;
+  if (co.website) doc.website = co.website;
   // #23 — always composed (the columns are notNull with defaults).
   doc.lifecycle = co.lifecycle || "none";
   doc.keywords = Array.isArray(co.keywords) ? co.keywords : [];
@@ -418,6 +466,32 @@ export async function byName(
   return m ? get(m.id) : null;
 }
 
+/** Case/punctuation-insensitive name key — the same rule the Import hub's
+ *  `norm()` uses to dedupe, kept local so the store never imports a route
+ *  module. */
+function normName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** #137 — the importers' name match: exact after normalization ("cedar-grove
+ *  SCHOOLS" finds "Cedar Grove Schools"). Never a substring match. */
+export async function findCustomerByName(
+  name: string | null | undefined
+): Promise<CustomerDoc | null> {
+  const key = normName(String(name ?? ""));
+  if (!key) return null;
+  const list = await allCompanies();
+  const m = list.find((c) => normName(c.name || "") === key);
+  return m ? get(m.id) : null;
+}
+
+/** #137 — id lookup under the name the importers use (alias of get()). */
+export async function findCustomerById(
+  id: string | null | undefined
+): Promise<CustomerDoc | null> {
+  return get(id);
+}
+
 /**
  * Resolve {id, name} from either an id or a stored (possibly stale) name,
  * preferring the canonical record. Returns {id, name} — name falls back to
@@ -451,6 +525,13 @@ function contentKey(d: CustomerDoc): string {
   delete rest.lifecycle;
   delete rest.keywords;
   delete rest.custom;
+  // #137 — same pinning for the HQ fields (absent and "" are the same thing).
+  delete rest.zip;
+  delete rest.phone;
+  delete rest.website;
+  rest.zip = d.zip ?? "";
+  rest.phone = d.phone ?? "";
+  rest.website = d.website ?? "";
   rest.lifecycle = d.lifecycle ?? "none";
   rest.keywords = d.keywords ?? [];
   rest.custom = Object.fromEntries(
@@ -477,6 +558,22 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
   const t = Date.now();
   const existingCo = await getCompany(rec.id);
 
+  // Existing sites + contacts are read BEFORE the change check (they used to
+  // be read after the company write) because #137's per-site zip/kind and
+  // per-contact mobile backfill below needs them first. Read unconditionally,
+  // not only when the company row composes: softDeleteCompany leaves contact
+  // rows on the company, so re-creating a soft-deleted id must still match
+  // them by name (else the revival mints duplicates next to the old rows).
+  const existingSites = await sitesForCompany(rec.id);
+  const bySiteKey = new Map<string, SiteRow>();
+  for (const s of existingSites) {
+    if (s.legacyLocId) bySiteKey.set(s.legacyLocId, s);
+    bySiteKey.set(s.id, s);
+  }
+  const existingContacts = await contactsForCompany(rec.id);
+  const byContactName = new Map(existingContacts.map((c) => [displayName(c), c]));
+  const existingPhones = await phonesForContacts(existingContacts.map((c) => c.id));
+
   // #23 WRITE-WHEN-PROVIDED / PRESERVE-WHEN-UNDEFINED, resolved BEFORE the
   // change check: callers that predate the Details fields (lead convert,
   // the CSV importer, seed/setDirectory) pass none of them — backfilling
@@ -486,6 +583,27 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
   if (rec.lifecycle === undefined) rec.lifecycle = existingCo?.lifecycle ?? "none";
   if (rec.keywords === undefined) rec.keywords = existingCo?.keywords ?? [];
   if (rec.custom === undefined) rec.custom = existingCo?.custom ?? {};
+  // #137 — company zip/phone/website, per-site zip/kind and per-contact
+  // mobile follow the same contract. Backfilled here so a writer that
+  // doesn't carry them (the Companies modal, quote intake, inbox quick-add)
+  // neither clears them nor registers a spurious change.
+  if (rec.zip === undefined && existingCo?.zip) rec.zip = existingCo.zip;
+  if (rec.phone === undefined && existingCo?.mainPhone) rec.phone = existingCo.mainPhone;
+  if (rec.website === undefined && existingCo?.website) rec.website = existingCo.website;
+  for (const loc of rec.locations) {
+    const match = loc.id ? bySiteKey.get(loc.id) : undefined;
+    if (!match) continue;
+    if (loc.zip === undefined && match.zip) loc.zip = match.zip;
+    if (loc.kind === undefined && match.kind) loc.kind = match.kind;
+  }
+  for (const ct of rec.contacts) {
+    if (ct.mobile !== undefined) continue;
+    const match = byContactName.get(ct.name);
+    const mob = match
+      ? (existingPhones.get(match.id) ?? []).find((p) => p.label === "mobile")
+      : undefined;
+    if (mob) ct.mobile = mob.phone;
+  }
 
   // D83 semantics: updatedAt only advances when content actually changed.
   if (prev && existingCo && contentKey(rec) === contentKey(prev)) return;
@@ -501,12 +619,12 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
     lifecycle: rec.lifecycle ?? "none",
     keywords: rec.keywords ?? [],
     custom: rec.custom ?? {},
-    website: existingCo?.website ?? null,
-    mainPhone: existingCo?.mainPhone ?? null,
+    website: rec.website ?? existingCo?.website ?? null,
+    mainPhone: rec.phone ?? existingCo?.mainPhone ?? null,
     address: existingCo?.address ?? null,
     city: existingCo?.city ?? null,
     state: existingCo?.state ?? null,
-    zip: existingCo?.zip ?? null,
+    zip: rec.zip ?? existingCo?.zip ?? null,
     pricingTier: rec.pricingTier ?? existingCo?.pricingTier ?? null,
     ownerUserId,
     referredByContactId: existingCo?.referredByContactId ?? null,
@@ -515,12 +633,6 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
   });
 
   // ----- sites (full-replace within this record) -----
-  const existingSites = await sitesForCompany(rec.id);
-  const bySiteKey = new Map<string, SiteRow>();
-  for (const s of existingSites) {
-    if (s.legacyLocId) bySiteKey.set(s.legacyLocId, s);
-    bySiteKey.set(s.id, s);
-  }
   const keptSiteIds = new Set<string>();
   for (const loc of rec.locations) {
     const match = loc.id ? bySiteKey.get(loc.id) : undefined;
@@ -538,6 +650,8 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
       address: loc.address ?? null,
       city: loc.city ?? null,
       state: loc.state ?? null,
+      zip: loc.zip ?? null,
+      kind: loc.kind ?? null,
       lat: loc.lat == null ? null : String(loc.lat),
       lng: loc.lng == null ? null : String(loc.lng),
       venueKind: loc.venueKind || "proscenium",
@@ -560,8 +674,6 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
   }
 
   // ----- contacts (full-replace within this record, matched by name) -----
-  const existingContacts = await contactsForCompany(rec.id);
-  const byContactName = new Map(existingContacts.map((c) => [displayName(c), c]));
   const keptContactIds = new Set<string>();
   for (const ct of rec.contacts) {
     const match = byContactName.get(ct.name);
@@ -602,14 +714,44 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
     const phone = (ct.phone || "").trim();
     if (phone) {
       const current = await phonesFor(id);
-      if (!current.length) {
-        await setPhones(id, [{ value: phone, label: "work", isPrimary: true }]);
-      } else if (current[0].phone !== phone) {
+      // #137 — target the non-mobile row so a work number never overwrites
+      // the mobile channel (and the mobile block below never overwrites this).
+      const work = current.find((p) => p.label !== "mobile");
+      if (!work) {
+        if (!current.some((p) => p.phone === phone)) {
+          await setPhones(id, [
+            ...current.map((p) => ({ value: p.phone, label: p.label, isPrimary: p.isPrimary })),
+            { value: phone, label: "work", isPrimary: current.length === 0 },
+          ]);
+        }
+      } else if (work.phone !== phone) {
         const db = await getDb();
         await db
           .update(contactPhones)
           .set({ phone })
-          .where(eq(contactPhones.id, current[0].id));
+          .where(eq(contactPhones.id, work.id));
+      }
+    }
+    // #137 — a mobile number is a second, "mobile"-labelled channel: added
+    // when the contact has none, updated in place when it changed, never
+    // removed here (blank means "not provided").
+    const mobile = (ct.mobile || "").trim();
+    if (mobile) {
+      const current = await phonesFor(id);
+      const mob = current.find((p) => p.label === "mobile");
+      if (!mob) {
+        if (!current.some((p) => p.phone === mobile)) {
+          await setPhones(id, [
+            ...current.map((p) => ({ value: p.phone, label: p.label, isPrimary: p.isPrimary })),
+            { value: mobile, label: "mobile", isPrimary: current.length === 0 },
+          ]);
+        }
+      } else if (mob.phone !== mobile) {
+        const db = await getDb();
+        await db
+          .update(contactPhones)
+          .set({ phone: mobile })
+          .where(eq(contactPhones.id, mob.id));
       }
     }
   }
