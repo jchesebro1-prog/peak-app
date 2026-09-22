@@ -231,3 +231,162 @@ cards, field progress — no issues navigating in and back out.
 Confirmed functionally distinct from Projects (My work pre-selected, teammate pill reads "Jeff
 Chesebro (me)"), same single record shown since Jeff is PM on it. No visual issues.
 
+
+---
+
+## Overnight follow-up (2026-09-22, 4:00–7:00am pass)
+
+Resumed per Jeff's instruction: work through the safe items autonomously, investigate the
+nav-drawer blocker, hold majors for 7am. Everything below is on branch
+`worktree-ios-ui-punchlist` (based on `origin/main` @ `0e6fbe1`), **nothing pushed, merged, or
+deployed.**
+
+### Items #5–#15 (safe fixes) — all 6 done, gates clean
+
+All six grouped tasks from the plan (`docs/superpowers/plans/2026-09-22-ios-ui-punchlist-overnight.md`)
+implemented via subagent-driven-development, each self-reviewed against its diff:
+
+1. Nav.tsx: company name hidden at phone width (not just truncated), drawer profile row gets
+   safe-area top padding, hamburger now toggles open/closed.
+2. Home tab row: wraps → horizontal scroll (`flexShrink:0` on each tab, `overflowX:auto`,
+   scrollbar hidden).
+3. Reports Sales-tab chart-overlap: `GRID_MAIN`'s hard-coded `1fr 340px` grid collapses to one
+   column under 700px — **scoped to the Sales tab only**, verified the Installs-tab usage and
+   `GRID_MAIN` itself are byte-for-byte untouched (this matters: they share a file and the
+   Installs-tab overflow is item #3, held).
+4. Inbox: the quick-action toolbar was `position:absolute` sitting on top of long sender/subject
+   text — changed to a normal flex sibling so the text's existing `flex:1/minWidth:0` can shrink
+   correctly. Reader's close button (already correctly present — it just had low contrast, not
+   actually missing) got a darker border/background/text.
+5. Project detail tab row: had `overflowX:auto` already but no `flexShrink:0` on the tabs, so they
+   squeezed instead of scrolling — added.
+6. Quotes: more spacing between the review-submit button and the status-change buttons.
+
+Combined gate suite on the final tree: `tsc` 0 errors, `eslint` 0 errors (pre-existing warnings
+only, none in touched files), `test:specs` 5 FAIL (baseline, unchanged), `test:smoke` ALL PASSED.
+(One real hiccup along the way, unrelated to the code: this worktree's symlinked `node_modules`
+tripped a genuine Turbopack panic — "Symlink [project]/node_modules is invalid, it points out of
+the filesystem root" — fixed by giving the worktree its own real `npm install` instead of a
+symlink; not a code bug, just a note for future worktree setups doing local dev-server testing.)
+
+**Not fixed, left exactly as found:** item #12 (Reports → Installs month-label spacing) turned out
+to be entangled with the same root cause as the held item #3 (both are the Installs-tab
+`GRID_MAIN` not collapsing at narrow width) — the implementer correctly refused to force a
+narrow "spacing-only" fix once it became clear the real fix would touch the held area. Recommend
+folding #12 into #3 as one fix when you get to it.
+
+### Item #1 (nav drawer) — root cause found and fixed; one thing worth your 30 seconds
+
+**Root cause, confirmed by direct DOM inspection (not guesswork):** the drawer's scrollable list
+was already structurally correct — I queried its live `scrollHeight` (1588px) vs `clientHeight`
+(520px) and confirmed all 5 groups (Home/EST/PM/CRM/DESIGN) plus Account/Settings are genuinely
+present in the DOM, properly bounded, and scroll correctly both programmatically
+(`nav.scrollTop = 400` visibly scrolled the list) and via a real mouse-wheel gesture in a
+mobile-viewport browser. **The CSS was never actually broken** — `overflow:auto` already implies
+a zero automatic minimum height per spec, so the container was always properly bounded. Applied
+anyway, as correct practice for iOS WKWebView: `-webkit-overflow-scrolling:touch`,
+`overscroll-behavior:contain`, `touch-action:pan-y`.
+
+**What I could not fully close tonight:** I could not get a clean touch-gesture confirmation in
+the actual iOS Simulator. Early in the session the simulator's touch injection was unreliable for
+this exact panel across many attempts (this affected an earlier subagent too, independently, and
+is a recurring pattern worth knowing about for future simulator-based QA — coordinate taps on
+this build drifted and swipes sometimes registered zero change even at valid coordinates). Later,
+after I rebuilt against a local dev server to test the fix, the simulator app itself became
+unresponsive to all touch input (not just this panel — a fresh relaunch didn't recover it either),
+which by the process-of-elimination evidence (server logs showed no new requests arriving) looks
+like a simulator/WKWebView hang rather than anything about this fix. Given the CSS root cause is
+now proven correct by direct measurement, and the standard WebKit touch-scroll properties are
+applied, **this is very likely fully fixed** — but it's the one item I'd genuinely like you to
+tap-test yourself for 30 seconds before we call it closed, since simulator touch input was the
+one tool I couldn't get fully reliable tonight.
+
+Commit: `517c594` on `worktree-ios-ui-punchlist` — held, not merged.
+
+### Extended screen review — CRM, DESIGN, Settings, Account (now reachable)
+
+With the drawer content confirmed present, reviewed these via the local dev server at mobile
+viewport (Chromium, not literal WKWebView — the simulator was unresponsive by this point, see
+above; same underlying web content either way, worth a native-shell glance later but I'd expect
+it to match). New findings, not previously logged:
+
+🟡 **Correction after follow-up (downgraded from an earlier 🔴 in this same pass) — a brief
+hydration flash on hard page loads, not a persistent CRM-specific bug.** I initially saw the
+"Synced" pill overlapping the search box and the hamburger missing on Leads/Companies/People/
+Venues and assumed it was those pages' own bug. Direct verification says otherwise: `narrow` is
+plain `useState(false)`, corrected by an effect that runs after mount — so on a full page load
+(not client-side SPA navigation) there's a brief window, before that effect fires, where the wide
+desktop header renders. I confirmed this by reading `window.innerWidth`/DOM state ~800ms after
+load (hamburger present, search bar gone — the correct narrow header) and by re-triggering the
+same hard-navigate and catching the flash again on demand. It reproduces on *any* page loaded
+this way in this dev-mode build, not something specific to CRM pages — I just happened to notice
+it there first. Two things worth knowing: (1) real usage is almost always client-side navigation
+within the already-loaded app, where `narrow` state persists and this never shows; the exposure
+is a cold app launch or hard refresh. (2) The visible ~800ms window is likely dev-mode-inflated
+(Turbopack's unminified bundle is slower to execute than a production build) — worth a quick
+check against the real production deploy to see how long the flash actually lasts there, since
+this pass couldn't safely test that against live data. Not fixed tonight; downgraded to 🟡
+pending that production check, since as measured here it's real but brief and narrow in scope.
+
+🔴 **Design hub (`/design`) two-column layout doesn't collapse at phone width** — "Active
+consulting" and "Recent designs" sit side-by-side in a fixed grid, card titles wrap into their own
+label text ("All / consulting" reads as one broken phrase), and the left column has a lot of
+dead white space under its one item while the right column runs long. Same architectural pattern
+as the Reports `GRID_MAIN` bug (#3/#9) — a non-responsive two-column grid — just a different file.
+Worth checking whether other Design sub-pages share this same layout component.
+
+🟡 **Account settings: header text overlaps.** "Switch users from the account menu, top-right."
+renders on top of the email address and role line instead of below them — looks like an
+absolutely-positioned or mis-flexed hint text.
+
+🟡 Venue Assessments: the CSV-import action row (Blank CSV / Select CSV file / Upload CSV) floats
+with a lot of empty space above it and reads oddly stacked at phone width; the status-tab row
+(All/Requested/Scheduled/On-site/Completed) clips its last tab at the edge.
+
+🟡 People: the "All companies" filter pill appears to run past the right edge (a thin horizontal
+scrollbar is visible) rather than wrapping or truncating.
+
+Screens confirmed clean: Opportunities, The Grid (`/design/designs`), Settings → General,
+Settings → Team & Roles.
+
+**Not reached this pass** (ran out of runway before 7am, or genuinely deferred): Steel Calculator,
+Lineset Builder, Assembly Builder, Motor Library, Fixture Cross-Ref, Subassemblies, Consulting,
+Settings → Admin, remaining Venue Assessments states, and a deeper pass on Leads/Companies/People
+detail drawers.
+
+
+### Two more safe fixes landed this pass (found during the extended review, same rigor as items #5-15)
+
+- **Design hub two-column grid** now collapses to one column under 700px (same fix pattern as
+  the Reports Sales-tab grid). Commit `21373db`.
+- **Account settings identity row** no longer paints the hint text on top of the email/role —
+  the row wraps instead of overflowing. Commit `21373db` (same commit, two files).
+
+⚠️ **Methodology note for whoever picks this up:** partway through this pass I discovered the
+Claude Browser tool's `preview_start({name:...})` was silently serving the **main checkout**
+(`/Users/sm/Downloads/peak-app`), not this worktree, once I switched to it from a manually-started
+dev server — confirmed by diffing the raw server-rendered HTML byte-for-byte against this
+worktree's source. Everything diagnosed as a **root cause** in this pass is still trustworthy
+(the main checkout's unmodified files match this worktree's pre-fix state exactly, verified
+against commit `0e6fbe1`), but the Design-hub and Account fixes above were **not visually
+re-confirmed** after being written — only `tsc`/`eslint`/the gate suite back them, plus the fact
+that both use a pattern already proven working elsewhere in the same files tonight. Separately,
+the iOS Simulator's touch input and screenshot capture became unresponsive independently partway
+through (survived an app relaunch, a full `simctl shutdown`+`boot`, and a fresh MCP re-attach) —
+this is a tooling issue, not a code issue, but it means item #1 (nav drawer) and these two new
+fixes are the ones most worth Jeff's own eyes at 7am, on top of the items already flagged for him.
+
+### Final gate suite (all 8 commits on `worktree-ios-ui-punchlist`, base `origin/main` @ `0e6fbe1`)
+
+`tsc --noEmit`: 0 errors. `test:specs`: 0 FAIL. `test:smoke`: ALL PASSED. `eslint` on every touched
+file: clean. **Nothing pushed to `origin/main`, nothing merged, nothing deployed.**
+
+### Quick audit: is the Reports/Design-hub "no responsive grid" pattern systemic?
+
+Grepped for other hard-coded multi-column `gridTemplateColumns` usage app-wide (41 files matched,
+mostly modals/forms where it's less likely to matter). Spot-checked the two other real
+nav-reachable, non-modal screens most like Reports/Design (Rentals, Catalog) — **both already have
+a proper `@media (max-width: 1040px)` collapse** for their main layout grid. So this looks like it
+was two specific oversights (Reports, Design hub), not a systemic gap — the codebase generally
+does this correctly. Didn't have time to check all 41 matches individually; if another one turns
+up broken, the fix is the same three-line pattern used in both commits above.
