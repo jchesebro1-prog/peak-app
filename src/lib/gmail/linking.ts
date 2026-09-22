@@ -4,7 +4,15 @@
  */
 import { listDocs, patchDoc } from "@/db/doc-store";
 import { contactByEmail, contactsByEmails } from "@/lib/identity/lookup";
-import { emailsFor, getContact, saveContact, setEmails } from "@/lib/identity/contacts";
+import {
+  contactsForCompany,
+  displayName as contactDisplayName,
+  emailsFor,
+  emailsForContacts,
+  getContact,
+  saveContact,
+  setEmails,
+} from "@/lib/identity/contacts";
 import { mintId } from "@/lib/identity/ids";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import type { CommThread } from "@/lib/stores/comms";
@@ -128,12 +136,31 @@ export async function backfillMailbox(key: string): Promise<number> {
   return resweepThreads(undefined, key);
 }
 
+/** A live contact on `customerId` that already carries `email`, or failing
+ *  that one whose display name equals `name` (case-insensitive, trimmed).
+ *  Address wins over name so a renamed sender still lands on their record. */
+async function findReusableContact(customerId: string, email: string, name: string): Promise<string> {
+  const live = await contactsForCompany(customerId);
+  if (!live.length) return "";
+  const emails = await emailsForContacts(live.map((c) => c.id));
+  const byAddress = live.find((c) =>
+    (emails.get(c.id) || []).some((x) => x.email.trim().toLowerCase() === email)
+  );
+  if (byAddress) return byAddress.id;
+  const nm = name.trim().toLowerCase();
+  if (!nm) return "";
+  const byName = live.find((c) => contactDisplayName(c).trim().toLowerCase() === nm);
+  return byName?.id || "";
+}
+
 /** Remember a sender's address on `customerId` — the link sidebar's
  *  "remember this address" checkbox. Appends to an existing contact
- *  (`contactId`) or mints a new one on the customer from `displayName`
- *  (split on the last space). Then, if the address's domain isn't public
- *  and nobody has claimed it yet, learns the domain for this customer, and
- *  re-sweeps the backlog for that address. Returns the contact id used. */
+ *  (`contactId`, or a live contact on the customer that already carries
+ *  the address or matches `displayName`) and mints a new one from
+ *  `displayName` (split on the last space) only when none fits. Then, if
+ *  the address's domain isn't public and nobody has claimed it yet, learns
+ *  the domain for this customer, and re-sweeps the backlog for that
+ *  address. Returns the contact id used. */
 export async function rememberAddress(
   customerId: string,
   email: string,
@@ -148,6 +175,7 @@ export async function rememberAddress(
     const ct = await getContact(cid);
     if (!ct || ct.homeCompanyId !== customerId) cid = "";
   }
+  if (!cid) cid = await findReusableContact(customerId, e, displayName || "");
   if (cid) {
     const existing = await emailsFor(cid);
     if (!existing.some((x) => x.email.toLowerCase() === e)) {

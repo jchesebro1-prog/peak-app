@@ -64,7 +64,15 @@ function toContactInput(c: CustomerContact): ContactInput {
 export async function linkThreadToCustomerAction(
   threadId: string,
   customerId: string,
-  opts: { remember: boolean; contactId?: string | null; claimDomain?: boolean }
+  opts: {
+    remember: boolean;
+    contactId?: string | null;
+    /** the sidebar's "on contact" pick — an existing contact's display
+     *  name on `customerId`; rememberAddress reuses that contact by name
+     *  (or mints one with this name when it no longer exists) */
+    contactName?: string;
+    claimDomain?: boolean;
+  }
 ): Promise<R> {
   const me = await requireUser();
   const t = await getThread(threadId);
@@ -73,7 +81,8 @@ export async function linkThreadToCustomerAction(
 
   let contactId = opts.contactId ?? null;
   if (opts.remember && t.contactEmail) {
-    contactId = await rememberAddress(customerId, t.contactEmail, t.contactName, contactId, {
+    const nameForContact = (opts.contactName || "").trim() || t.contactName;
+    contactId = await rememberAddress(customerId, t.contactEmail, nameForContact, contactId, {
       id: me.id,
       name: me.name,
     });

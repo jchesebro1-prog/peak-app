@@ -261,6 +261,18 @@ async function main() {
   const minted = await getContact(cid4);
   assert.equal(minted?.homeCompanyId, "lakefront", "#96 rememberAddress mints the fallback contact on the given customer");
 
+  // #96 Wave A fix 4 — remembering a second address for the same display
+  // name on the same customer must reuse the contact, not mint a twin.
+  const same1 = await rememberAddress("lakefront", "pat.t96@t96same.org", "Pat Same", null, { id: "u1", name: "Test" });
+  const same2 = await rememberAddress("lakefront", "pat.same@t96other.org", "  pat SAME ", null, { id: "u1", name: "Test" });
+  assert.equal(same2, same1, "#96 rememberAddress reuses a same-name contact instead of minting a duplicate");
+  assert.equal((await emailsFor(same1)).length, 2, "#96 the reused contact carries both addresses");
+  // …and an address already on a contact of that customer reuses it even
+  // when the display name differs.
+  const same3 = await rememberAddress("lakefront", "PAT.T96@t96same.org", "P. Same (mobile)", null, { id: "u1", name: "Test" });
+  assert.equal(same3, same1, "#96 rememberAddress reuses the contact that already carries the address");
+  assert.equal((await emailsFor(same1)).length, 2, "#96 reusing by address adds no duplicate email");
+
   await upsertDoc("comms", {
     id: "C-t96link", mailbox: "personal", unread: true, archived: false,
     customerId: null, customer: "", contactName: "AP Clerk", contactEmail: "ap.clerk@t96learn.org",

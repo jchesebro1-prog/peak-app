@@ -103,6 +103,9 @@ export default function LinkSidebar({
   // customer picker value on the unknown card ("__new" opens the quick-add)
   const [pickId, setPickId] = useState("");
   const [remember, setRemember] = useState(true);
+  // "on contact" pick for the remembered address — "" = new contact; a
+  // value is an existing contact's display name (vm.contactOptions)
+  const [contactName, setContactName] = useState("");
   const [newCustomer, setNewCustomer] = useState<QuickAddValues["customer"]>({
     name: "",
     type: CUSTOMER_TYPES[0] || "",
@@ -130,13 +133,18 @@ export default function LinkSidebar({
       setAdding(null);
       setChanging(false);
       setPickId("");
+      setContactName("");
       onSuccess?.();
       router.refresh();
     });
 
   const linkTo = (customerId: string, claim: boolean, rememberAddr: boolean) =>
     run(() =>
-      linkThreadToCustomerAction(vm.id, customerId, { remember: rememberAddr, claimDomain: claim })
+      linkThreadToCustomerAction(vm.id, customerId, {
+        remember: rememberAddr,
+        claimDomain: claim,
+        contactName: rememberAddr && contactName ? contactName : undefined,
+      })
     );
 
   // the id a quick-add contact/venue lands on
@@ -145,16 +153,47 @@ export default function LinkSidebar({
   const domainTag = <span style={MONO}>@{vm.senderDomain}</span>;
   const emailTag = <span style={MONO}>{vm.contactEmail}</span>;
 
-  const rememberRow = (label: React.ReactNode) => (
-    <label style={CHECK_ROW}>
-      <input
-        type="checkbox"
-        checked={remember}
-        onChange={(e) => setRemember(e.target.checked)}
-        style={{ marginTop: 2 }}
-      />
-      <span>{label}</span>
-    </label>
+  // withPicker=false on the linked card's "Wrong customer?" — its
+  // contactOptions belong to the customer being left, not the new one.
+  const rememberRow = (label: React.ReactNode, withPicker = true) => (
+    <>
+      <label style={CHECK_ROW}>
+        <input
+          type="checkbox"
+          checked={remember}
+          onChange={(e) => setRemember(e.target.checked)}
+          style={{ marginTop: 2 }}
+        />
+        <span>{label}</span>
+      </label>
+      {withPicker && remember && vm.contactOptions.length > 0 && (
+        <label
+          style={{
+            display: "flex",
+            gap: 7,
+            alignItems: "center",
+            fontSize: 12,
+            color: "#8c919c",
+            marginTop: 6,
+            marginLeft: 20,
+          }}
+        >
+          <span style={{ flexShrink: 0 }}>on contact:</span>
+          <select
+            value={contactName}
+            onChange={(e) => setContactName(e.target.value)}
+            style={{ ...SELECT, padding: "5px 8px", fontSize: 12, minWidth: 0 }}
+          >
+            <option value="">New contact</option>
+            {vm.contactOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+    </>
   );
 
   const customerPicker = (value: string, onChange: (v: string) => void, withNew: boolean) => (
@@ -248,7 +287,7 @@ export default function LinkSidebar({
           </div>
           {changing && (
             <div style={{ marginTop: 8 }}>
-              {rememberRow(<>Remember {emailTag} on a contact</>)}
+              {rememberRow(<>Remember {emailTag} on a contact</>, false)}
               <div style={{ marginTop: 8 }}>
                 {customerPicker(
                   pickId,

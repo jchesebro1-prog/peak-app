@@ -124,6 +124,30 @@ async function labelOptionsFor(box: MailboxId, userId: string): Promise<LabelOpt
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 }
 
+/** The "on contact" picker's options (#96): the contacts of whichever
+ *  customer(s) the sidebar has in play — value = display name, which
+ *  rememberAddress matches case-insensitively. With more than one
+ *  customer (ambiguous) the label carries the customer so the pick is
+ *  unambiguous. */
+function contactOptionsFor(
+  cs: Array<{ name: string; contacts?: Array<{ name?: string }> | null } | null | undefined>
+): Opt[] {
+  const live = cs.filter((c): c is NonNullable<typeof c> => !!c);
+  const out: Opt[] = [];
+  const seen = new Set<string>();
+  for (const c of live) {
+    for (const ct of c.contacts || []) {
+      const nm = (ct.name || "").trim();
+      if (!nm) continue;
+      const key = `${c.name}::${nm.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ value: nm, label: live.length > 1 ? `${nm} · ${c.name}` : nm });
+    }
+  }
+  return out;
+}
+
 function chanIconOf(channel: string): ChanIcon {
   const icon = channelMeta(channel).icon;
   return icon === "phone" ? "phone" : icon === "calendar" ? "calendar" : "mail";
@@ -766,9 +790,13 @@ export default async function InboxPage({
       customerOptions: customers
         .map((c) => ({ value: c.id, label: c.name }))
         .sort((a, b) => a.label.localeCompare(b.label)),
-      contactOptions: ((linkedCustomer || suggestedCustomer)?.contacts || [])
-        .filter((ct) => ct.name)
-        .map((ct) => ({ value: ct.name, label: ct.name })),
+      contactOptions: contactOptionsFor(
+        linkedCustomer || suggestedCustomer
+          ? [linkedCustomer || suggestedCustomer]
+          : resolution === "ambiguous"
+            ? candidates.map((c) => customers.find((x) => x.id === c.customerId))
+            : []
+      ),
     };
   }
 
