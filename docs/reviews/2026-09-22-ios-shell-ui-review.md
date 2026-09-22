@@ -390,3 +390,34 @@ a proper `@media (max-width: 1040px)` collapse** for their main layout grid. So 
 was two specific oversights (Reports, Design hub), not a systemic gap — the codebase generally
 does this correctly. Didn't have time to check all 41 matches individually; if another one turns
 up broken, the fix is the same three-line pattern used in both commits above.
+
+### Rest of DESIGN group — reviewed, one more fix landed
+
+- **Steel Calculator, Assembly Builder, Motor Library, Subassemblies, Consulting, Settings →
+  Admin**: all render cleanly at phone width. Minor, not fixed tonight:
+  - 🟡 Motor Library: table column header "CAPACITY" clips to "CAPACIT" at the exact viewport
+    edge before the table's own horizontal scroll engages — a few px of padding would fix it.
+  - 🟡 Assembly Builder: "+ New assembly" and "Save assemblies" links run together with no visual
+    separator.
+  - 🟡 Subassemblies: the Description textarea's placeholder text overflows its visible area
+    instead of wrapping.
+  - 🟡 Consulting detail (e.g. `/design/engagements/CE-1001`): a red "1 Issue" badge floats at
+    the bottom-left, overlapping the "Site:" and quote-link text behind it. Didn't get far enough
+    to tell if it's meant to be a dismissible toast or a persistent indicator — worth a look
+    before deciding how to fix.
+- 🔴 **Lineset Builder had the same non-responsive two-column grid as Reports/Design-hub** —
+  **fixed tonight**, same pattern, commit `b5ddf0e`.
+- 🟡 **Fixture Cross-Reference**'s comparison tables are wide (5+ columns of real prose, not
+  just numbers) and don't scroll or collapse at all at phone width — content just runs off the
+  right edge. Given the page's own copy says "Internal sales reference; not customer-facing,"
+  this is lower priority than the others, and the right fix is probably horizontal table-scroll
+  (matching Motor Library's existing pattern) rather than trying to collapse a comparison matrix
+  into one column. Not attempted tonight — needs a design call on how much of the table to
+  keep visible vs. scroll.
+
+### Final state
+
+**10 commits** on `worktree-ios-ui-punchlist` (base `origin/main` @ `0e6fbe1`): 1 plan doc + 9 fix
+commits. Final gate suite, run clean after every commit and once more at the very end: `tsc` 0
+errors, `test:specs` 0 FAIL, `test:smoke` ALL PASSED, `eslint` clean on every touched file.
+**Nothing pushed, merged, or deployed** — everything is sitting on the branch for your review.
