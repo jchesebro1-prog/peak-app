@@ -83,6 +83,19 @@ body {
   .pk-content { padding: 16px 14px 56px; }
 }
 
+/* ============ Reports — Sales tab main grid ============ */
+.pk-reports-sales-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 700px) {
+  .pk-reports-sales-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ============ Top nav bar ============ */
 .pk-nav {
   flex-shrink: 0;

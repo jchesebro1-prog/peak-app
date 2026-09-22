@@ -648,7 +648,7 @@ function SalesView({ quotes, range }: { quotes: Quote[]; range: string }) {
         />
       </div>
 
-      <div style={GRID_MAIN}>
+      <div className="pk-reports-sales-grid">
         {/* LEFT */}
         <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
           <ChartCard
