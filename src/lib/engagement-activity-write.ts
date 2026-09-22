@@ -1,5 +1,3 @@
-import "server-only";
-
 import { revalidatePath } from "next/cache";
 import type { SessionUser } from "@/lib/session";
 import { softDeleteDoc } from "@/db/doc-store";
@@ -11,21 +9,20 @@ import { activeUsers } from "@/lib/users";
 import { validateFileRefsForEngagement } from "@/lib/consulting-files-server";
 
 /**
- * #145 D170/D171 — the unified composer's writer core. Deliberately NOT in
- * the `"use server"` actions file: every function exported from a
- * `"use server"` module is reachable via a direct POST request regardless
- * of whether the app's own UI ever calls it (Next 16 docs,
- * data-security.md:279-291) — obscurity of the name is explicitly called
- * out there as insufficient. `performCapture` takes the caller's identity
- * as a plain `me` argument and never authenticates on its own, so it must
- * never itself be a POST-reachable entry point.
- * `src/app/(app)/design/engagements/activity-actions.ts`'s `captureAction`
- * is the ONLY authenticated entry point (it calls `requireUser()` first,
- * then delegates here) and the ONLY thing exported from that file. This
- * is the Data Access Layer pattern those same docs recommend
- * (data-security.md:396-433) — `import "server-only"` above additionally
- * guarantees a client bundle can never pull this module in even by
- * accident, on top of it simply not being marked `"use server"`.
+ * #145 D170/D171 — the unified composer's writer core. SERVER-ONLY (touches
+ * the DB directly; never import from a "use client" file — same lesson as
+ * `customer-feed.ts`). Deliberately NOT in the `"use server"` actions file
+ * either: every function exported from a `"use server"` module is
+ * reachable via a direct POST request regardless of whether the app's own
+ * UI ever calls it (Next 16 docs, data-security.md:279-291) — obscurity of
+ * the name is explicitly called out there as insufficient. `performCapture`
+ * takes the caller's identity as a plain `me` argument and never
+ * authenticates on its own, so it must never itself be a POST-reachable
+ * entry point. `src/app/(app)/design/engagements/activity-actions.ts`'s
+ * `captureAction` is the ONLY authenticated entry point (it calls
+ * `requireUser()` first, then delegates here) and the ONLY thing exported
+ * from that file. This is the Data Access Layer pattern those same docs
+ * recommend (data-security.md:396-433).
  *
  * One capture writes a note plus the (optional) tasks it spawned, linked
  * to each other: `addNoteRecord`'s `taskIds` carries the tasks this note
