@@ -73,7 +73,10 @@ import {
   DriveApiError, DRIVE_API_BASE, DRIVE_UPLOAD_BASE, driveFileLink, driveQuote, ensureFolder, folderQuery,
   uploadFileResumable, type DriveFetch,
 } from "@/lib/google/drive";
-import { engagementFolderPath, fileRefHref, fileRefKey, fileRefName, ownsEngagementFile, type FileRef } from "@/lib/consulting-files";
+import {
+  engagementFolderPath, fileRefHref, fileRefKey, fileRefName, isOwnedBlobPathname, isValidDataRef, ownsEngagementFile, safeMime,
+  type FileRef,
+} from "@/lib/consulting-files";
 import {
   archiveDateStamp, archiveFileName, archiveFolderKey, archiveRecordings, archiveSafeName, extForMime,
   ARCHIVE_MAX_PER_RUN, ARCHIVE_MIN_AGE_MS, ARCHIVE_SKIP_NO_SCOPE, ARCHIVE_SKIP_NOT_CONFIGURED, ARCHIVE_SKIP_NOT_CONNECTED,
@@ -4238,6 +4241,98 @@ async function asyncChecks(): Promise<void> {
       "records stamp the template revision"
     );
   }
+
+  /* ====== #145 round 3: validateFileRefsForEngagement (consulting-files-server.ts) ======
+   * The writer-side half of the ownership fix — Task 7's note-save writer
+   * takes client-supplied FileRef[]; this is where each one gets proven to
+   * belong to the named engagement BEFORE it's ever stored, mirroring the
+   * same rules the download proxy enforces on the way back out. Exercised
+   * against a real (test) engagement record and the real, unconfigured
+   * test-env Drive connection — no fake fetch needed for the "no Drive
+   * connected" case, since that's this environment's actual state. */
+  {
+    const { createManualEngagement: createEng145 } = await import("@/lib/stores/engagements");
+    const { validateFileRefsForEngagement } = await import("@/lib/consulting-files-server");
+    const eng145 = await createEng145(
+      { customerId: "test-customer-145files", customer: "Test Files Co", name: "Test files engagement (#145)", phases: [] },
+      { name: "test-harness" }
+    );
+
+    const goodBlob145: FileRef = {
+      kind: "blob",
+      pathname: `engagement-files/${eng145.id}/plan.pdf`,
+      name: "plan.pdf",
+      mime: "application/pdf",
+      size: 10,
+    };
+    const validated145 = await validateFileRefsForEngagement([goodBlob145], eng145.id);
+    ok(
+      validated145.length === 1 && validated145[0] === goodBlob145,
+      "#145 validateFileRefsForEngagement returns a correctly-scoped blob ref unchanged"
+    );
+
+    const badBlob145: FileRef = {
+      kind: "blob",
+      pathname: "engagement-files/some-other-engagement/plan.pdf",
+      name: "plan.pdf",
+      mime: "application/pdf",
+      size: 10,
+    };
+    let threwBadBlob145 = false;
+    try {
+      await validateFileRefsForEngagement([badBlob145], eng145.id);
+    } catch {
+      threwBadBlob145 = true;
+    }
+    ok(threwBadBlob145, "#145 validateFileRefsForEngagement throws on a blob ref scoped to a DIFFERENT engagement");
+
+    const safeData145: FileRef = { kind: "data", dataUrl: "data:text/plain,hello", name: "note.txt", mime: "text/plain", size: 5 };
+    const validatedData145 = await validateFileRefsForEngagement([safeData145], eng145.id);
+    ok(validatedData145.length === 1, "#145 validateFileRefsForEngagement accepts a safe data-URL ref");
+
+    const dangerousData145: FileRef = {
+      kind: "data",
+      dataUrl: "data:text/html,<script>alert(1)</script>",
+      name: "evil.html",
+      mime: "text/html",
+      size: 30,
+    };
+    let threwDangerousData145 = false;
+    try {
+      await validateFileRefsForEngagement([dangerousData145], eng145.id);
+    } catch {
+      threwDangerousData145 = true;
+    }
+    ok(
+      threwDangerousData145,
+      "#145 validateFileRefsForEngagement refuses a data-URL ref with a renderable-as-HTML mime"
+    );
+
+    const driveRef145: FileRef = { kind: "drive", fileId: "somefile", webViewLink: "x", name: "plan.pdf", mime: "application/pdf", size: 10 };
+    let threwDrive145 = false;
+    try {
+      await validateFileRefsForEngagement([driveRef145], eng145.id);
+    } catch {
+      threwDrive145 = true;
+    }
+    ok(
+      threwDrive145,
+      "#145 validateFileRefsForEngagement throws on a drive ref when there is no live Drive connection to verify it against"
+    );
+
+    ok(
+      (await validateFileRefsForEngagement([], eng145.id)).length === 0,
+      "#145 validateFileRefsForEngagement is a no-op on an empty ref list"
+    );
+
+    let threwMissingEngagement145 = false;
+    try {
+      await validateFileRefsForEngagement([goodBlob145], "CE-does-not-exist-145");
+    } catch {
+      threwMissingEngagement145 = true;
+    }
+    ok(threwMissingEngagement145, "#145 validateFileRefsForEngagement throws when the engagement itself doesn't exist");
+  }
 }
 
 /* --- Venue Assessments: class model --- */
@@ -6011,6 +6106,84 @@ ok(!ownsEngagementFile([dataRef145], "", "CE-1"), "#145 a data-URL ref's empty k
 ok(fileRefHref(dataRef145, "CE-1") === dataRef145.dataUrl, "#145 a data-URL ref's href is the data URL itself — no network round trip");
 ok(fileRefHref(ownedRefs145[0], "CE-1044") === "/api/engagement-files/CE-1044/good", "#145 a drive ref's href routes through the ownership-checked proxy, not a raw Drive link");
 ok(fileRefHref(ownedRefs145[1], "CE-1") === "/api/engagement-files/CE-1/engagement-files%2FCE-1%2Fb.pdf", "#145 a blob ref's href is proxied with its pathname encoded");
+
+/* ====== #145 round 3: positive-shape validation replaces the '..' denylist ======
+ * The reviewer checked @vercel/blob's constructBlobUrl directly: it
+ * interpolates the pathname RAW and UNENCODED into the blob URL, so a
+ * percent-encoded traversal segment carries no literal '..' and would
+ * have sailed through the old denylist while still reaching that URL
+ * construction. isOwnedBlobPathname (which ownsEngagementFile now calls)
+ * validates the remainder POSITIVELY instead — this is the regression
+ * test for exactly that gap. */
+ok(
+  !isOwnedBlobPathname("engagement-files/CE-1/%2e%2e%2f%2e%2e%2fvendor-quotes/x.pdf", "CE-1"),
+  "#145 a percent-encoded traversal segment carries no literal '..' but is refused by the positive shape check — a denylist alone would have let this through"
+);
+ok(
+  !ownsEngagementFile(
+    [{ kind: "blob", pathname: "engagement-files/CE-1/%2e%2e%2f%2e%2e%2fvendor-quotes/x.pdf", name: "x.pdf", mime: "application/pdf", size: 1 }],
+    "engagement-files/CE-1/%2e%2e%2f%2e%2e%2fvendor-quotes/x.pdf",
+    "CE-1"
+  ),
+  "#145 ownsEngagementFile refuses the same percent-encoded traversal case end to end"
+);
+ok(
+  !isOwnedBlobPathname("engagement-files/CE-1/plan.pdf?x=1", "CE-1"),
+  "#145 a '?' in the remainder is refused — it would turn part of the key into a query string against the raw-interpolated blob URL"
+);
+ok(
+  !isOwnedBlobPathname("engagement-files/CE-1/plan.pdf#frag", "CE-1"),
+  "#145 a '#' in the remainder is refused for the same reason"
+);
+ok(
+  isOwnedBlobPathname("engagement-files/CE-1/My_Drawing-Set_v2.pdf", "CE-1"),
+  "#145 an ordinary safeName-shaped filename — the only shape putBlob's writer ever mints — still passes the positive check"
+);
+ok(
+  isOwnedBlobPathname("engagement-files/CE-1/sub/My_Drawing-Set_v2-Ab12Cd34.pdf", "CE-1"),
+  "#145 a filename carrying putBlob's random suffix, one directory segment deep, still passes"
+);
+ok(!isOwnedBlobPathname("", "CE-1"), "#145 an empty pathname is refused");
+ok(!isOwnedBlobPathname("engagement-files/CE-1/plan.pdf", ""), "#145 an empty engagementId is refused even with an otherwise-valid pathname");
+
+/* safeMime — positive validation, not a CR/LF-only denylist. */
+ok(safeMime("application/pdf") === "application/pdf", "#145 safeMime passes through an ordinary mime token");
+ok(safeMime("application/pdf\r\nX-Injected: 1") === "application/octet-stream", "#145 safeMime clamps a value containing CR/LF");
+ok(safeMime("text/plain\x00") === "application/octet-stream", "#145 safeMime clamps a value containing a control byte, not just CR/LF");
+ok(safeMime("app/☺") === "application/octet-stream", "#145 safeMime clamps non-ASCII — a positive check, not a denylist of specific bad bytes");
+ok(safeMime(null) === "application/octet-stream" && safeMime(undefined) === "application/octet-stream" && safeMime("") === "application/octet-stream", "#145 safeMime defaults on absent input");
+
+/* isValidDataRef — the only place a client-supplied dataUrl is ever
+ * inspected at all, since the download proxy never touches a "data" ref
+ * (fileRefKey returns "" for it). */
+ok(
+  isValidDataRef({ kind: "data", dataUrl: "data:text/plain,hello", name: "a.txt", mime: "text/plain", size: 5 }),
+  "#145 isValidDataRef accepts a plain-text data URL"
+);
+ok(
+  isValidDataRef({ kind: "data", dataUrl: "data:application/pdf;base64,JVBERi0xLjQK", name: "a.pdf", mime: "application/pdf", size: 9 }),
+  "#145 isValidDataRef accepts a base64 data URL with a benign declared mime"
+);
+ok(
+  !isValidDataRef({ kind: "data", dataUrl: "data:text/html,<script>alert(1)</script>", name: "evil.html", mime: "text/html", size: 30 }),
+  "#145 isValidDataRef refuses a data URL declaring an HTML-renderable mime — nothing else inspects this before a UI might render it"
+);
+ok(
+  !isValidDataRef({ kind: "data", dataUrl: "data:image/svg+xml,<svg onload=alert(1)></svg>", name: "evil.svg", mime: "image/svg+xml", size: 30 }),
+  "#145 isValidDataRef refuses image/svg+xml the same way — SVG executes script like HTML"
+);
+ok(
+  !isValidDataRef({ kind: "data", dataUrl: "data:text/plain,fine", name: "sneaky.txt", mime: "text/html", size: 4 }),
+  "#145 isValidDataRef checks the ref's OWN declared mime too, not only the data URL's scheme mime — a mismatched pair is refused"
+);
+ok(
+  !isValidDataRef({ kind: "data", dataUrl: "not-a-data-url-at-all", name: "a.txt", mime: "text/plain", size: 5 }),
+  "#145 isValidDataRef refuses a malformed data URL"
+);
+ok(
+  !isValidDataRef({ kind: "data", dataUrl: "data:text/plain;base64," + "A".repeat(3_000_000), name: "a.txt", mime: "text/plain", size: 5 }),
+  "#145 isValidDataRef refuses a payload far beyond the stated ceiling regardless of what a claimed size says"
+);
 
 /* initiateResumableSession itself is exercised indirectly but exactly: the
  * existing uploadFileResumable tests above assert the precise headers

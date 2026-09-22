@@ -2,11 +2,9 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
 import { blobEnabled, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_UPLOAD_MAX_BYTES, VENDOR_UPLOAD_MAX_LABEL } from "@/lib/vendor-quote-file";
-import { DATA_URL_MAX_BYTES, ENGAGEMENT_FILES_BLOB_PREFIX, engagementFolderPath } from "@/lib/consulting-files";
-import { ensureFolderPath, initiateResumableSession, DriveApiError } from "@/lib/google/drive";
-import { getSettings } from "@/lib/settings";
-import { getConnectionInfo, accessTokenFor } from "@/lib/gmail/connections";
-import { hasDriveScope } from "@/lib/gmail/config";
+import { DATA_URL_MAX_BYTES, ENGAGEMENT_FILES_BLOB_PREFIX } from "@/lib/consulting-files";
+import { archiveDriveGrant, resolveEngagementDriveFolderId } from "@/lib/consulting-files-server";
+import { initiateResumableSession, DriveApiError } from "@/lib/google/drive";
 import { getEngagement } from "@/lib/stores/engagements";
 
 /**
@@ -51,20 +49,6 @@ type InitiateBody = { engagementId?: unknown; name?: unknown; mime?: unknown; si
 
 const tooBig = () =>
   `That file is larger than ${VENDOR_UPLOAD_MAX_LABEL}. Connect a Drive archive mailbox in Settings for larger files, or paste a Link instead.`;
-
-/** The archive mailbox's Drive grant, when one is connected and scoped for
- *  Drive — the same connection krisp/archive.ts uses, reused here (see the
- *  judgement-call note above) rather than inventing a second Drive mailbox
- *  concept. */
-async function archiveDriveGrant(): Promise<{ token: string } | null> {
-  const settings = await getSettings();
-  const mailbox = settings.recordingsArchiveMailbox;
-  if (!mailbox) return null;
-  const info = await getConnectionInfo(mailbox);
-  if (!info || !hasDriveScope(info.scope)) return null;
-  const token = await accessTokenFor(mailbox);
-  return token ? { token } : null;
-}
 
 /**
  * `{ mode: "data" }`, or a 413 refusal when the raw size is over
@@ -164,7 +148,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const grant = await archiveDriveGrant();
   if (grant) {
     try {
-      const folderId = await ensureFolderPath(grant.token, engagementFolderPath(engagement.customer, engagement.id));
+      const folderId = await resolveEngagementDriveFolderId(engagement, grant.token);
       const sessionUrl = await initiateResumableSession(grant.token, { name, mime, parentId: folderId, size });
       return NextResponse.json({ mode: "drive", sessionUrl });
     } catch (e) {

@@ -197,6 +197,44 @@ export async function ensureFolderPath(
   return parentId;
 }
 
+/**
+ * Live ownership check for a Drive file id (#145): does `fileId`'s CURRENT
+ * `parents` actually include `expectedFolderId`? A Drive id is opaque and
+ * Google-assigned — nothing about its own shape can prove it belongs to a
+ * given engagement's folder, so unlike a Blob pathname (checked purely and
+ * structurally in `consulting-files.ts`) this has to ask Drive itself.
+ * That is the point: an attacker can forge what a note's stored `FileRef`
+ * claims, but not what Drive reports a file's actual parent to be.
+ *
+ * Fails CLOSED — any error (network, non-2xx, malformed body) returns
+ * `false` rather than throwing, so a caller's "may I stream/validate this"
+ * check never has to choose between "refuse" and "crash"; "couldn't
+ * verify" and "not owned" collapse to the same answer on purpose.
+ *
+ * Extracted so the engagement-files download proxy and
+ * `consulting-files-server.ts`'s `validateFileRefsForEngagement` — the two
+ * places this rule has to hold — share exactly one implementation.
+ */
+export async function driveFileHasParent(
+  token: string,
+  fileId: string,
+  expectedFolderId: string,
+  fetchImpl: DriveFetch = realFetch
+): Promise<boolean> {
+  try {
+    const res = await fetchImpl(`${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?fields=parents`, {
+      method: "GET",
+      headers: { Authorization: "Bearer " + token },
+      signal: AbortSignal.timeout(META_TIMEOUT_MS),
+    });
+    if (!res.ok) return false;
+    const meta = (await res.json()) as { parents?: string[] };
+    return Array.isArray(meta.parents) && meta.parents.includes(expectedFolderId);
+  } catch {
+    return false;
+  }
+}
+
 export type DriveUploadInput = {
   name: string;
   mimeType: string;

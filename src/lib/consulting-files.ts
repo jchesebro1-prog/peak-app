@@ -33,6 +33,54 @@ export function fileRefKey(ref: FileRef): string {
 }
 
 /**
+ * A single path segment as `safeName`'s own output charset allows it
+ * (`src/lib/blob.ts` — `[a-zA-Z0-9._-]`) — a superset of what `safeName`
+ * plus `putBlob`'s random suffix can ever mint. `.` is in that charset
+ * (an ordinary filename has one), so this alone is NOT enough: a segment
+ * of ALL dots (`.`, `..`, `...`) matches it too, which is exactly `..`
+ * traversal wearing a shape this regex would otherwise accept. See
+ * `ALL_DOTS_SEGMENT_RE` below for the second half of that check.
+ */
+const BLOB_KEY_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
+/** A path segment that is nothing but dots — `.`/`..`/`...`/etc. Every one
+ *  of these is a traversal segment on every filesystem and URL resolver
+ *  that treats "/" as a separator; none of them is a shape `safeName` or
+ *  `putBlob`'s random suffix ever produces (both always include at least
+ *  one non-dot character). */
+const ALL_DOTS_SEGMENT_RE = /^\.+$/;
+
+/**
+ * Does this "blob" pathname structurally belong to this exact engagement?
+ * The second half of the ownership check for "blob" keys (see
+ * `ownsEngagementFile`'s doc comment) — also used standalone by
+ * `consulting-files-server.ts`'s `validateFileRefsForEngagement` to check
+ * a ref BEFORE it is ever stored, not just when reading one back.
+ *
+ * This is a POSITIVE allowlist on the remainder's shape, segment by
+ * segment — not a `..` denylist on the raw string: `@vercel/blob`'s
+ * `constructBlobUrl` interpolates the pathname RAW and UNENCODED into the
+ * blob URL, so a percent-encoded traversal segment (`%2e%2e%2f...`)
+ * carries no literal `..` substring and would sail through a denylist
+ * while still reaching that URL construction — `%` isn't in the allowed
+ * charset, so the positive check refuses it directly. This also closes
+ * `?` and `#`, which would otherwise turn part of a key into a query
+ * string or fragment against that same raw-interpolated URL. Whether the
+ * storage host itself would resolve an encoded `..` isn't something this
+ * module can determine without the live service — which is exactly why
+ * the check doesn't depend on that answer.
+ */
+export function isOwnedBlobPathname(pathname: string, engagementId: string): boolean {
+  if (!pathname || !engagementId) return false;
+  const prefix = `${ENGAGEMENT_FILES_BLOB_PREFIX}${engagementId}/`;
+  if (!pathname.startsWith(prefix)) return false;
+  const remainder = pathname.slice(prefix.length);
+  if (!remainder) return false;
+  return remainder
+    .split("/")
+    .every((segment) => BLOB_KEY_SEGMENT_RE.test(segment) && !ALL_DOTS_SEGMENT_RE.test(segment));
+}
+
+/**
  * THE ownership check (mirrors ownsVendorQuoteBlobPath). A client names a
  * file id under a named engagement; this proves that id is BOTH actually
  * stored there AND — where the key has a shape to check — bound to that
@@ -44,23 +92,22 @@ export function fileRefKey(ref: FileRef): string {
  * as trustworthy as whatever wrote that field — and once a writer takes
  * client-supplied FileRef data, as this seam's note attachments will,
  * nothing stops a crafted save from naming ANY object in the private
- * store). This function is the second half for "blob" keys: a `"blob"` ref
- * must sit under `ENGAGEMENT_FILES_BLOB_PREFIX + engagementId + "/"` — the
- * exact prefix the upload route mints — and must never contain `..`. A
- * pathname borrowed from vendor-quotes/, grid-sheets/, recordings/, or
- * another engagement's own slice fails this regardless of what got written
- * to the engagement's notes.
+ * store). This function is the second half for "blob" keys: see
+ * `isOwnedBlobPathname` above. A pathname borrowed from vendor-quotes/,
+ * grid-sheets/, recordings/, or another engagement's own slice fails this
+ * regardless of what got written to the engagement's notes.
  *
  * "drive" keys are opaque Google-assigned ids with no shape to bind — there
  * is no string-level check that can distinguish "a Drive file this
  * engagement's folder legitimately owns" from "any Drive file id an
  * attacker typed in." For that kind, this function can only clear the
- * necessary (is-it-stored) half; the CALLER — the download proxy — MUST
- * additionally re-verify a "drive" ref live against Drive's own metadata
- * (its actual current parent folder) before streaming it. That live check
- * cannot live in this module: it needs a network call, and this module is
- * deliberately pure with zero imports so the ownership check is spec-tested
- * with no DB and no network. See the proxy route for that second half.
+ * necessary (is-it-stored) half; the CALLER — the download proxy, and
+ * `validateFileRefsForEngagement` — MUST additionally re-verify a "drive"
+ * ref live against Drive's own metadata (its actual current parent folder,
+ * via `driveFileHasParent` in `drive.ts`) before streaming or accepting it.
+ * That live check cannot live in this module: it needs a network call, and
+ * this module is deliberately pure with zero imports so the ownership
+ * check is spec-tested with no DB and no network.
  */
 export function ownsEngagementFile(
   refs: readonly FileRef[],
@@ -73,11 +120,7 @@ export function ownsEngagementFile(
     return !!k && k === requestedKey;
   });
   if (!ref) return false;
-  if (ref.kind === "blob") {
-    if (ref.pathname.includes("..")) return false;
-    const prefix = `${ENGAGEMENT_FILES_BLOB_PREFIX}${engagementId}/`;
-    if (!ref.pathname.startsWith(prefix)) return false;
-  }
+  if (ref.kind === "blob") return isOwnedBlobPathname(ref.pathname, engagementId);
   return true;
 }
 
@@ -119,3 +162,55 @@ export function fileRefHref(ref: FileRef, engagementId: string): string {
  * asking this route what to do with it, not just after.
  */
 export const DATA_URL_MAX_BYTES = 700 * 1024;
+
+/**
+ * A syntactically legal MIME token per RFC 6838 (type "/" subtype, each a
+ * restricted-name), or `application/octet-stream` when the input isn't
+ * one. Used everywhere a client-supplied mime gets echoed into a response
+ * header: CR/LF is a header-injection vector, and non-ASCII/control bytes
+ * throw inside the `Response` constructor either way — a clean refusal
+ * would otherwise become a 500. Positive validation, not a denylist of
+ * whichever bad bytes someone thought to test for — same reasoning as
+ * `isOwnedBlobPathname` above.
+ */
+const MIME_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$/;
+
+export function safeMime(mime: string | null | undefined): string {
+  return mime && MIME_TOKEN_RE.test(mime) ? mime : "application/octet-stream";
+}
+
+/** A syntactically well-formed `data:` URL — scheme, an optional mime type
+ *  ("/" subtype), optional `;param=value` segments, an optional `;base64`,
+ *  then the required comma before the payload. */
+const DATA_URL_RE = /^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+)?(;[a-zA-Z0-9-]+=[a-zA-Z0-9-]+)*(;base64)?,/i;
+
+/**
+ * Mime types a "data" ref may never declare — anything a browser would
+ * execute or render as markup rather than treat as an opaque payload. A
+ * "data" ref's bytes are never proxied (there is no server-side gate on
+ * the way OUT — `fileRefKey` returns "" for it, so `ownsEngagementFile`
+ * can never select one to stream): a UI that ever hands `ref.dataUrl` to
+ * an `<a href>`, `<iframe src>`, or a same-origin navigation would let the
+ * browser interpret exactly this content. This is therefore the ONLY gate,
+ * and it has to run at validation time, before the ref is ever stored.
+ */
+const DANGEROUS_DATA_MIME_RE = /^(text\/x?html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml)\b/i;
+
+/**
+ * Is this "data" ref safe to store (and, later, safe for a UI to render)?
+ * Used by `validateFileRefsForEngagement` (consulting-files-server.ts) —
+ * the only place a client-supplied `dataUrl` gets inspected at all.
+ */
+export function isValidDataRef(ref: Extract<FileRef, { kind: "data" }>): boolean {
+  const m = DATA_URL_RE.exec(ref.dataUrl);
+  if (!m) return false;
+  const declaredMime = (m[1] || "text/plain").toLowerCase();
+  if (DANGEROUS_DATA_MIME_RE.test(declaredMime)) return false;
+  if (DANGEROUS_DATA_MIME_RE.test((ref.mime || "").toLowerCase())) return false;
+  // Generous ceiling: base64 inflates by 4/3 and the "data:...;base64,"
+  // header adds a little more on top — this only needs to catch a payload
+  // wildly beyond DATA_URL_MAX_BYTES, not compute the encoding exactly, so
+  // a claimed `ref.size` can never be used to smuggle a bigger one through.
+  if (ref.dataUrl.length > DATA_URL_MAX_BYTES * 2) return false;
+  return true;
+}
