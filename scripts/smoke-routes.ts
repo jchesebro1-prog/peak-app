@@ -85,6 +85,10 @@ const ROUTES = [
   "/design-studio/weights",
   "/design/designs",
   "/design/engagements",
+  // native sign-in hand-off (spec 2026-09-21-native-auth-handoff): bad GET
+  // input redirects to /login rather than 4xx, so both must stay 3xx here.
+  "/api/native/auth/start",
+  "/api/native/auth/handoff",
   "/design/fixtures",
   "/design/assemblies",
   "/design/motors",
@@ -288,10 +292,15 @@ async function tryDevLogin(base: string): Promise<AuthResult> {
  * 404 status, which the status check below already covers — status codes are
  * the trustworthy signal, page body text about "not found" is not.
  */
-function looksLikeErrorPage(status: number, finalPath: string, body: string): string | null {
+function looksLikeErrorPage(
+  status: number,
+  finalPath: string,
+  body: string,
+  allowLoginRedirect = false
+): string | null {
   if (status >= 500) return `HTTP ${status}`;
   if (status === 404) return "HTTP 404";
-  if (finalPath === "/login" || finalPath.startsWith("/login?")) {
+  if (!allowLoginRedirect && (finalPath === "/login" || finalPath.startsWith("/login?"))) {
     return "redirected to /login (session not authenticated for this request)";
   }
   // Belt-and-suspenders: a couple of markers that only ever appear in an
@@ -303,6 +312,14 @@ function looksLikeErrorPage(status: number, finalPath: string, body: string): st
   }
   return null;
 }
+
+/** Routes whose correct behavior in this harness IS a redirect to /login —
+ *  see their ROUTES entry comment. Google isn't configured here, so
+ *  /api/native/auth/start always takes its not-configured branch, and
+ *  /api/native/auth/handoff is hit with no challenge param; both land on
+ *  /login?error=native even with a valid dev-login session, which is the
+ *  route working as designed, not an authentication failure. */
+const LOGIN_REDIRECT_OK = new Set(["/api/native/auth/start", "/api/native/auth/handoff"]);
 
 async function checkRoute(
   base: string,
@@ -317,7 +334,12 @@ async function checkRoute(
     });
     const body = await res.text();
     const finalUrl = new URL(res.url);
-    let problem = looksLikeErrorPage(res.status, finalUrl.pathname + finalUrl.search, body);
+    let problem = looksLikeErrorPage(
+      res.status,
+      finalUrl.pathname + finalUrl.search,
+      body,
+      LOGIN_REDIRECT_OK.has(route)
+    );
     if (!problem && reject && body.includes(reject)) {
       problem = `body contains "${reject}" — the route answered 200 without rendering the record`;
     }
