@@ -283,12 +283,15 @@ export default async function InboxPage({
     flaggedCount(me),
     allThreads(),
     followUpCount({ unownedOrMine: true, me }),
-    threadsIn(view === "unmatched" ? box : (view ?? box), view ? "inbox" : folder, me, {
-      filter,
-      sort: sortParam,
-      crmMode,
-      labelId,
-    }),
+    // Unmatched builds its own list from allComms — skip the query it would discard.
+    view === "unmatched"
+      ? Promise.resolve([] as CommThread[])
+      : threadsIn(view ?? box, view ? "inbox" : folder, me, {
+          filter,
+          sort: sortParam,
+          crmMode,
+          labelId,
+        }),
     activeUsers(),
     allCustomers(),
     labelOptionsFor(box, user.id),

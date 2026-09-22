@@ -148,8 +148,15 @@ export default function LinkSidebar({
       })
     );
 
-  // the id a quick-add contact/venue lands on
-  const targetCustomerId = vm.customerCard?.id || vm.suggested?.customerId || "";
+  // the id a quick-add contact/venue lands on; in the ambiguous state the
+  // user picks which candidate first (quickAddTarget)
+  const [quickAddTarget, setQuickAddTarget] = useState("");
+  const targetCustomerId =
+    vm.customerCard?.id ||
+    vm.suggested?.customerId ||
+    (vm.resolution === "ambiguous" && vm.candidates.some((c) => c.customerId === quickAddTarget)
+      ? quickAddTarget
+      : "");
   const canClaim = !vm.senderIsPublicDomain;
   const domainTag = <span style={MONO}>@{vm.senderDomain}</span>;
   const emailTag = <span style={MONO}>{vm.contactEmail}</span>;
@@ -516,14 +523,35 @@ export default function LinkSidebar({
         </div>
       )}
 
-      {/* ---- quick add (once a customer is in play) ---- */}
-      {targetCustomerId && (vm.resolution === "linked" || vm.resolution === "suggested") && (
+      {/* ---- quick add (once a customer is in play; ambiguous picks one first) ---- */}
+      {(targetCustomerId || vm.resolution === "ambiguous") &&
+        vm.resolution !== "unknown" && (
         <div style={CARD}>
           <div style={H}>Quick add</div>
+          {vm.resolution === "ambiguous" && (
+            <div style={{ marginBottom: 8 }}>
+              <select
+                value={quickAddTarget}
+                onChange={(e) => {
+                  setQuickAddTarget(e.target.value);
+                  setAdding(null);
+                  setError(null);
+                }}
+                style={SELECT}
+              >
+                <option value="">Add to which customer…</option>
+                {vm.candidates.map((c) => (
+                  <option key={c.customerId} value={c.customerId}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <button
               style={adding === "contact" ? ACCENT_BTN : BTN}
-              disabled={pending}
+              disabled={pending || !targetCustomerId}
               onClick={() => {
                 setAdding(adding === "contact" ? null : "contact");
                 setError(null);
@@ -533,7 +561,7 @@ export default function LinkSidebar({
             </button>
             <button
               style={adding === "venue" ? ACCENT_BTN : BTN}
-              disabled={pending}
+              disabled={pending || !targetCustomerId}
               onClick={() => {
                 setAdding(adding === "venue" ? null : "venue");
                 setError(null);
@@ -593,7 +621,10 @@ export default function LinkSidebar({
         </div>
       )}
 
-      {error && <div style={{ fontSize: 12, color: "#b4543a" }}>{error}</div>}
+      {/* EntityQuickAdd renders the error inside an open form — don't repeat it */}
+      {error && !adding && pickId !== "__new" && (
+        <div style={{ fontSize: 12, color: "#b4543a" }}>{error}</div>
+      )}
     </aside>
   );
 }

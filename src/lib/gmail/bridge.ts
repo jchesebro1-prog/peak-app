@@ -221,7 +221,12 @@ async function recordMessage(
   // #96: link on arrival. Outbound first-message threads resolve by the
   // recipient (the "to" header's first address).
   const senderForResolve = dir === "in" ? p.from.email : parseAddress(p.to.split(",")[0] || "").email;
-  const resolution = await resolveForThread(senderForResolve);
+  // A resolver failure (DB hiccup, bad address) must never abort the
+  // import — the thread lands as unknown and the next re-sweep picks it up.
+  const resolution = await resolveForThread(senderForResolve).catch((err: unknown) => {
+    console.error("[gmail] resolve failed", senderForResolve, err);
+    return { kind: "unknown" } as const;
+  });
   const id = await nextPrefixedId("comms", "C", 1032);
   const rec: CommThread = {
     id,
