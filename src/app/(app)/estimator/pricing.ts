@@ -46,6 +46,61 @@ export function marginColor(m: number): string {
   return m >= 0.3 ? "#1f8a5b" : m >= 0.18 ? "#9a7d1f" : "#c0683a";
 }
 
+/**
+ * The margin fraction a priced line is ALREADY carrying, or null when it has
+ * none that can be rescaled (#144, D163). A sell price of 0 has no margin to
+ * read, and a margin of exactly 1 (a real price against a $0 cost) rescales
+ * through a division by zero. A negative margin — a line hand-priced below its
+ * cost — is a real margin and is kept: the caller's job is to preserve what the
+ * user set, not to quietly correct it.
+ */
+export function lineMarginOf(cost: number, price: number): number | null {
+  if (!(price > 0)) return null;
+  const m = (price - cost) / price;
+  return Number.isFinite(m) && m < 1 ? m : null;
+}
+
+/**
+ * A line repriced to a new cost at the margin it is already carrying (#144,
+ * D163) — the rule behind editing a stored vendor quote's total.
+ *
+ * The margin is PRESERVED rather than re-seeded from the customer tier: the
+ * user may have dragged the system margin slider or typed a sell price since
+ * the line was created, and re-seeding would silently undo that. Changing the
+ * vendor's cost should move the sell price the way the slider would.
+ *
+ * An unchanged cost returns the existing price verbatim rather than
+ * round-tripping it through the margin, which could land a cent away. With no
+ * usable margin on the line, `seedMargin` applies — itself guarded, so this can
+ * never emit NaN or Infinity.
+ */
+export function repricedAtLineMargin(
+  cost: number,
+  price: number,
+  newCost: number,
+  seedMargin: number
+): number {
+  if (newCost === cost) return price;
+  const m = lineMarginOf(cost, price);
+  const use = m != null ? m : seedMargin > 0 && seedMargin < 1 ? seedMargin : 0.3;
+  return round2(newCost / (1 - use));
+}
+
+/**
+ * The "Total cost" field a stored vendor quote seeds its EDIT form with (#144).
+ *
+ * Blank when the stored total is just the lines' sum, which is how the field
+ * stood when the quote was entered: a filled field is a TYPED total and wins
+ * over the lines from then on, so seeding it unconditionally would convert
+ * every lines-driven quote on its first edit — and the line a vendor's revision
+ * adds would then sit in the customer's itemized breakdown without being in the
+ * price. A total that genuinely disagrees with its lines is kept as typed, so
+ * an untouched edit re-saves the same number either way.
+ */
+export function vendorTotalSeed(storedTotal: number, linesTotal: number): string {
+  return round2(linesTotal) === round2(storedTotal) ? "" : String(storedTotal);
+}
+
 /* ---------------- section + quote totals ---------------- */
 
 export function systemItemsRev(sec: SpecSection): number {

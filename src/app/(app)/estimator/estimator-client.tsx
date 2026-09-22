@@ -38,12 +38,15 @@ import {
   computeCurtain,
   computeLabor,
   fmt,
+  lineMarginOf,
   makeLaborRate,
+  repricedAtLineMargin,
   round2,
   short,
   systemFreight,
   systemItemsRev,
   totals,
+  vendorTotalSeed,
 } from "./pricing";
 import type {
   CurtainDraft,
@@ -70,7 +73,11 @@ import AiScopeModal from "./ai-scope-modal";
 import CurtainModal from "./curtain-modal";
 import FixtureModal from "./fixture-modal";
 import LaborModal from "./labor-modal";
-import VendorQuoteModal, { vendorDraftTotal, vendorKeptLines } from "./vendor-quote-modal";
+import VendorQuoteModal, {
+  vendorDraftTotal,
+  vendorKeptLines,
+  vendorLinesTotal,
+} from "./vendor-quote-modal";
 import PreviewDoc from "./preview-doc";
 
 /**
@@ -366,6 +373,64 @@ export default function EstimatorClient({
      reload falls back to the proxy, which by then has a saved quote. */
   const [vendorPreviews, setVendorPreviews] = useState<Record<string, string>>({});
   const vendorLineIdRef = useRef(0);
+  /* #144: a pending EDIT seed for the vendor form, handed from the row's Edit
+     control to seedDraft. Editing goes through the SAME coordinator as every
+     other open (D161) rather than a second open path, so this ref is how the
+     record to edit reaches the seed. Consumed and cleared by seedDraft, and
+     cleared by discardDraft, so an abandoned edit can never leak into the next
+     plain "+ Vendor quote". */
+  const vendorEditRef = useRef<string | null>(null);
+  /** A stored vendor quote, back into the form's draft shape (#144). */
+  const vendorDraftFromRecord = (v: VendorQuote): VendorDraft => {
+    /* Line ids are persisted on the record and so outlive the page that minted
+       them, while vendorLineIdRef restarts at 0 — clear the counter past them
+       or the next "+ Add line" mints a duplicate id and typing in one row
+       writes both. */
+    for (const l of v.lines)
+      if (l.id > vendorLineIdRef.current) vendorLineIdRef.current = l.id;
+    const lines: VendorLineDraft[] = v.lines.map((l) => ({
+      id: l.id,
+      description: l.description,
+      qty: String(l.qty),
+      unit: l.unit,
+      amount: String(l.amount),
+    }));
+    return {
+      /* The record's OWN id, never a fresh mint: the attachment is stored under
+         it, so re-minting would orphan the file (#143). */
+      id: v.id,
+      vendor: v.vendor,
+      quoteNumber: v.quoteNumber,
+      description: v.description,
+      link: v.link || "",
+      // Carried as-is, so an untouched attachment survives the round trip.
+      attachment: v.attachment
+        ? {
+            name: v.attachment.name || "quote file",
+            mime: v.attachment.mime || "application/octet-stream",
+            ...(v.attachment.dataUrl ? { dataUrl: v.attachment.dataUrl } : {}),
+            ...(v.attachment.blobPath ? { blobPath: v.attachment.blobPath } : {}),
+          }
+        : null,
+      /* Deliberately NOT seeded from vendorPreviews: the form revokes this
+         object-URL when the file is replaced, and the same URL is still held
+         in that map for the line's own Download link. */
+      attachmentPreview: null,
+      lines,
+      terms: v.terms || "",
+      notes: v.notes || "",
+      /* Blank when the stored total is just the lines' sum — how the field
+         stood when the quote was entered (#144 re-review). Seeding it
+         unconditionally would convert every lines-driven quote into a
+         typed-total one on its first edit, so the line a vendor's revision adds
+         would land in the customer's itemized breakdown without being in the
+         price: the exact invariant #143 installed vendorKeptLines to protect.
+         The rule is vendorTotalSeed, pinned in the spec harness. */
+      total: vendorTotalSeed(v.total, vendorLinesTotal(lines)),
+      includesFreight: !!v.includesFreight,
+      display: v.display,
+    };
+  };
   // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
   // curtain configurator; refreshed when the meta action re-stamps.
   const [tierMargin, setTierMargin] = useState<number | null>(initial.tierMargin);
@@ -899,8 +964,11 @@ export default function EstimatorClient({
     if (kind === "custom") setCustomDraft(freshCustom());
     else if (kind === "curtain") setCurtainDraft(freshCurtain(defaultFabric));
     else if (kind === "fixture") setFixtureDraft(freshFixture());
-    else if (kind === "vendor") setVendorDraft(freshVendor());
-    else if (kind === "labor")
+    else if (kind === "vendor") {
+      // #144: an abandoned edit must not seed the next "+ Vendor quote".
+      vendorEditRef.current = null;
+      setVendorDraft(freshVendor());
+    } else if (kind === "labor")
       setLaborDraft(
         freshLabor(travelEstNow(), tierMargin, sections.find((s) => s.id === secId)?.name || "")
       );
@@ -910,8 +978,15 @@ export default function EstimatorClient({
   const seedDraft = (kind: InputKind, secId: string) => {
     if (kind === "custom") setCustomDraft(freshCustom());
     else if (kind === "curtain") setCurtainDraft(freshCurtain(defaultFabric));
-    else if (kind === "vendor") setVendorDraft(freshVendor());
-    else if (kind === "fixture") {
+    else if (kind === "vendor") {
+      /* #144: the pending edit seed, consumed and CLEARED here so it applies to
+         exactly one open. With none set — or a record since deleted — this is
+         the unchanged blank form. */
+      const editId = vendorEditRef.current;
+      vendorEditRef.current = null;
+      const rec = editId ? vendorQuotes.find((v) => v.id === editId) : undefined;
+      setVendorDraft(rec ? vendorDraftFromRecord(rec) : freshVendor());
+    } else if (kind === "fixture") {
       const first = fixtureAssemblies[0];
       setFixtureDraft({
         ...freshFixture(),
@@ -960,6 +1035,18 @@ export default function EstimatorClient({
     openInputRef.current = { kind, secId };
     setOpenInput({ kind, secId });
     seedDraft(kind, secId);
+  };
+
+  /** Open the vendor form on a STORED quote (#144), so editing participates in
+   *  the exclusivity rule (D161) like any other open. */
+  const openVendorEdit = (secId: string, vqId: string) => {
+    /* Closed first, for two reasons: openInputMethod reads "the method already
+       open on this system" as a toggle and would close the form we are about to
+       seed, and its discard of the outgoing draft would clear the pending seed
+       set below. After closeInput there is nothing open left to discard. */
+    closeInput();
+    vendorEditRef.current = vqId;
+    openInputMethod("vendor", secId);
   };
 
   const addCustomPart = (secId: string) => {
@@ -1024,18 +1111,28 @@ export default function EstimatorClient({
       lines: d.lines.concat(lines.map((l) => ({ ...l, id: ++vendorLineIdRef.current }))),
     }));
 
-  const addVendorQuote = (secId: string) => {
+  /** Create or update (#144). The draft carries the record's id either way —
+   *  minted when a blank form opened, or the stored record's own on an edit —
+   *  so which of the two this is, is a lookup, not a flag. */
+  const commitVendorQuote = (secId: string) => {
     const d = vendorDraft;
     const vendor = (d.vendor || "").trim();
     const quoteNumber = (d.quoteNumber || "").trim();
     const description = (d.description || "").trim();
     const total = vendorDraftTotal(d);
     if (!vendor || !quoteNumber || !description || total <= 0) return;
-    const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
-    /* The id the form was opened with (mintVendorQuoteId) — NOT a second one.
-       With Blob storage on the attachment was already uploaded under it, so a
-       fresh id here would orphan the file (#143). */
+    const seedMargin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
+    /* The id the form was opened with (mintVendorQuoteId, or the record's own
+       on an edit) — NOT a second one. With Blob storage on the attachment was
+       already uploaded under it, so a fresh id here would orphan the file
+       (#143). */
     const vqId = d.id;
+    // #144: an id already on the estimate means this is an edit, not an add.
+    const editing = vendorQuotes.some((v) => v.id === vqId);
+    /* Every part of this is editable, so the line's desc is RESTAMPED on an
+       edit rather than inherited — a stale vendor name on a re-quoted line is
+       the failure this feature exists to prevent. */
+    const lineDesc = vendor + " \u00b7 " + quoteNumber + " \u2014 " + description;
     const record: VendorQuote = {
       id: vqId,
       vendor,
@@ -1059,24 +1156,63 @@ export default function EstimatorClient({
       includesFreight: d.includesFreight,
       display: d.display,
     };
-    setVendorQuotes((vs) => vs.concat([record]));
+    /* Replaced IN PLACE on an edit — same id, same position — so the spawned
+       line keeps resolving against it and the row order does not shuffle. */
+    setVendorQuotes((vs) =>
+      editing ? vs.map((v) => (v.id === vqId ? record : v)) : vs.concat([record])
+    );
     if (d.attachmentPreview)
       setVendorPreviews((m) => ({ ...m, [vqId]: d.attachmentPreview as string }));
-    pushItems(secId, [
-      {
-        id: nextId(),
-        sku: quoteNumber,
-        desc: vendor + " \u00b7 " + quoteNumber + " \u2014 " + description,
-        qty: 1,
-        unit: "lot",
-        cost: total,
-        price: round2(total / (1 - margin)),
-        vendorQuoteId: vqId,
-        // Jeff's exemption: a quote that already includes freight is excluded
-        // from the section freight base (pricing.systemFreightBase).
-        ...(d.includesFreight ? { noFreight: true } : {}),
-      },
-    ]);
+    if (editing) {
+      /* Update the line this quote already spawned, wherever it lives: never
+         push a second one, never leave the old one behind, and never move it to
+         `secId` — the form is opened from the line's own card, but an edit is
+         not a change of system. qty, unit, option, allowance, comment and
+         internalNote are the estimator's, not the vendor's, so they are left
+         exactly as they are. */
+      setSections((ss) =>
+        ss.map((s) => ({
+          ...s,
+          items: s.items.map((it) => {
+            if (it.vendorQuoteId !== vqId) return it;
+            const next: SpecItem = {
+              ...it,
+              sku: quoteNumber,
+              desc: lineDesc,
+              cost: total,
+              /* The line's CURRENT margin, rescaled to the new cost (#144,
+                 D163) — never re-seeded from the tier, which would undo a
+                 margin slider drag or a typed sell price. Shared with the
+                 form's own Sell stat (`vendorFormMargin`) so the number the
+                 user reads before saving is the number that lands. */
+              price: repricedAtLineMargin(it.cost, it.price, total, seedMargin),
+            };
+            /* Must be able to CLEAR the flag, not only set it: this spreads the
+               existing item, so unticking "includes freight" has to delete the
+               key or the line stays out of the freight base forever. */
+            if (d.includesFreight) next.noFreight = true;
+            else delete next.noFreight;
+            return next;
+          }),
+        }))
+      );
+    } else {
+      pushItems(secId, [
+        {
+          id: nextId(),
+          sku: quoteNumber,
+          desc: lineDesc,
+          qty: 1,
+          unit: "lot",
+          cost: total,
+          price: round2(total / (1 - seedMargin)),
+          vendorQuoteId: vqId,
+          // Jeff's exemption: a quote that already includes freight is excluded
+          // from the section freight base (pricing.systemFreightBase).
+          ...(d.includesFreight ? { noFreight: true } : {}),
+        },
+      ]);
+    }
     closeInput();
   };
 
@@ -1404,6 +1540,28 @@ export default function EstimatorClient({
   const fixtureSec = sections.find((s) => s.id === fixtureFor);
   const laborSec = sections.find((s) => s.id === laborFor);
   const vendorSec = sections.find((s) => s.id === vendorFor);
+  /** The stored quote the vendor form is editing, if it is editing one (#144). */
+  const vendorEditingRec = vendorQuotes.find((v) => v.id === vendorDraft.id);
+  /**
+   * The margin the vendor form prices its "Sell" stat at (#144 re-review).
+   *
+   * On an ADD that is the tier seed, the same rule the spawned line is built
+   * with. On an EDIT it has to be the margin the LINE is carrying, because that
+   * is what commitVendorQuote preserves (repricedAtLineMargin): the tier seed
+   * would show a sell price the save then does not write, off by exactly
+   * however far the system margin slider has since been dragged — and the Sell
+   * stat is the one number in the form Jeff reads to decide whether to accept
+   * the vendor's new total.
+   */
+  const vendorFormMargin = (() => {
+    const seed = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
+    if (!vendorEditingRec) return seed;
+    const line = sections
+      .flatMap((s) => s.items)
+      .find((it) => it.vendorQuoteId === vendorDraft.id);
+    const m = line ? lineMarginOf(line.cost, line.price) : null;
+    return m != null ? m : seed;
+  })();
 
   return (
     <div
@@ -2516,6 +2674,7 @@ export default function EstimatorClient({
                   onAddPart={(cat) => addPart(sec.id, cat)}
                   onImportMaterials={(items) => importMaterials(sec.id, items)}
                   onSetVendorDisplay={setVendorDisplay}
+                  onEditVendor={(vqId) => openVendorEdit(sec.id, vqId)}
                   onSetCustomDraft={(field, v) => setCustomDraft((d) => ({ ...d, [field]: v }))}
                   onAddCustomPart={() => addCustomPart(sec.id)}
                   onMoveToNew={() => moveSystem(sec.id, { kind: "new" })}
@@ -2596,18 +2755,38 @@ export default function EstimatorClient({
           )}
           {vendorFor && (
             <VendorQuoteModal
+              /* Keyed by the record id (#144) so switching straight from one
+                 vendor quote to another — an add into an edit, or edit into
+                 edit, which no longer unmounts the modal because the kind is
+                 unchanged — remounts the form. That is what retires the #143
+                 `alive` guard on an upload still in flight, which would
+                 otherwise drop the abandoned file onto the quote now open. */
+              key={vendorDraft.id}
               secName={vendorSec ? vendorSec.name : ""}
               draft={vendorDraft}
               vendors={vendors}
-              margin={tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3}
+              margin={vendorFormMargin}
               blobUploads={blobUploads}
-              attachedChars={vendorAttachmentLoad(vendorQuotes)}
+              /* Lets the form reach the download proxy for a file that is
+                 already stored (#144 re-review): on an edit the object-URL that
+                 minted the in-memory preview died with the page that made it,
+                 so a Blob-only attachment would otherwise show a filename the
+                 user cannot open before replacing it. */
+              savedQuoteId={loadedId}
+              /* The record being EDITED is left out of the budget (#144): its
+                 stored data-URL is about to be replaced by whatever this draft
+                 ends up holding, so counting both would ration the estimate
+                 against its own file twice. */
+              attachedChars={vendorAttachmentLoad(
+                vendorQuotes.filter((v) => v.id !== vendorDraft.id)
+              )}
               onSet={setVendorField}
               onSetLine={setVendorLine}
               onAddLine={addVendorLine}
               onRemoveLine={removeVendorLine}
               onLoadLines={loadVendorLines}
-              onAdd={() => addVendorQuote(vendorFor)}
+              editing={!!vendorEditingRec}
+              onAdd={() => commitVendorQuote(vendorFor)}
               onClose={closeInput}
             />
           )}

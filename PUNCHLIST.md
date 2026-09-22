@@ -6514,8 +6514,44 @@ and a vendor line seeds from the same `tierMargin`-else-30% rule as a catalog pa
 a vendor quote and a custom part both at $1,000 cost, margin dragged to 40% → both **$1,666.67**.
 Margin applies to every line; freight is the only thing `includesFreight` exempts.
 
-**Open, for Jeff:** (1) editing an existing vendor quote means remove and re-add; (2) no blob garbage
+**Open, for Jeff:** (1) editing an existing vendor quote means remove and re-add — **done in #144**; (2) no blob garbage
 collection for a replaced or abandoned file — no prefix in this repo has a sweeper (worth its own
 item); (3) local dev cannot upload to Blob at all — Vercel Blob reports *"OIDC is enabled for this
 project, but not for the development environment"*, so every local attachment takes the data-URL
 fallback. Production is unaffected, but it means the Blob path is untested outside production.
+
+## 144. Estimator: edit a stored vendor quote in place — DONE 2026-09-22 (D163)
+
+**Reported:** 2026-09-22 (Jeff), the gap #143 shipped with: a stored vendor quote could only have its
+Single/Itemized display flipped or be deleted, so changing the vendor, quote number, description,
+total, materials, terms, notes, link, attachment or the "includes freight" flag meant removing the
+line and re-entering everything.
+
+**Shipped:** an `Edit` control on the vendor line, beside Download / Vendor link / Includes freight /
+Display, reopening the #143 form seeded from the stored record; the title reads "Edit vendor quote"
+and the button "Save changes". `addVendorQuote` became `commitVendorQuote` — create-or-update, same
+validation — replacing the record in place and updating the SpecItem it already spawned rather than
+pushing a second one. See D163 for the coordinator seam (one open path, D161 intact), why the draft
+keeps the record's id, the margin-preserving reprice, and the `noFreight` clear.
+
+Four files: `estimator-client.tsx`, `section-card.tsx`, `vendor-quote-modal.tsx` and `pricing.ts`
+(the two pure helpers below). No schema change, no new server action, no change to the
+save/prune/ownership path.
+
+**Re-review caught three, all fixed:** the modal's "Sell" stat still priced at the tier seed while
+editing, so it showed a number the save did not write on any line whose margin had been dragged; the
+Total field seeded from the stored number, which turned a lines-driven quote into a typed-total one on
+its first edit (a vendor revision that adds a line would then bill less than its own itemized
+breakdown); and a Blob-stored attachment had no Download link in the form. The reprice rule and the
+total-seed rule now live in `pricing.ts` as `lineMarginOf` / `repricedAtLineMargin` /
+`vendorTotalSeed` — pure, one implementation for both the stat and the commit, and pinned by twelve
+`#144` assertions in `scripts/test-review-and-spec.ts`.
+
+Gates: `tsc` 0 errors (baseline 0) · `eslint` 120 problems / 0 errors (baseline 120; the estimator
+directory silent) · the new `#144` assertions were run standalone under `npx tsx` against `pricing.ts`
+alone (12/12 pass); the full `test:specs` was not run, because it opens the real dev PGlite database.
+
+**Not done, deliberately:** blob garbage collection for an attachment replaced during an edit (no
+prefix in this repo has a sweeper — still its own item); and a record shared by a live line and an
+older revision is edited for both, since the save-action merge lets the builder's copy win and an
+immune revision would need a copy-on-write id that the attachment/id contract forbids.

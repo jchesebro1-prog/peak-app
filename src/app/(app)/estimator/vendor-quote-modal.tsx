@@ -92,12 +92,17 @@ export default function VendorQuoteModal({
   onClose,
   blobUploads,
   attachedChars,
+  editing,
+  savedQuoteId,
 }: {
   secName: string;
   draft: VendorDraft;
   /** Distinct catalog manufacturers, for the vendor-name datalist. */
   vendors: string[];
-  /** Tier-seeded margin fraction; the spawned line's sell is cost/(1−margin). */
+  /** The fraction the Sell stat prices at: cost/(1−margin). Tier-seeded on an
+   *  add; on an edit the margin the LINE already carries, which is what the
+   *  save preserves (#144) — the form must never quote a price the save then
+   *  does not write. */
   margin: number;
   onSet: <K extends keyof VendorDraft>(field: K, value: VendorDraft[K]) => void;
   onSetLine: (id: number, field: keyof Omit<VendorLineDraft, "id">, value: string) => void;
@@ -114,6 +119,13 @@ export default function VendorQuoteModal({
    *  spend of VENDOR_ATTACHMENT_BUDGET (#143 re-review). Only the data-URL
    *  path spends it — bytes in Blob storage cost the payload nothing. */
   attachedChars: number;
+  /** This draft is a stored quote being changed, not a new one (#144). Passed
+   *  in rather than derived here: the form has no business reading the
+   *  estimate's vendorQuotes. */
+  editing: boolean;
+  /** The saved estimate's id, when it has one — the only way to reach the
+   *  download proxy for an attachment already in Blob storage (#144). */
+  savedQuoteId: string | null;
 }) {
   const [fileNote, setFileNote] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -138,7 +150,11 @@ export default function VendorQuoteModal({
   const total = vendorDraftTotal(draft);
   const typedTotal = (draft.total || "").trim() !== "";
   const disagrees = typedTotal && keptLines.length > 0 && round2(linesTotal) !== total;
-  const sell = total > 0 && margin > 0 && margin < 1 ? round2(total / (1 - margin)) : total;
+  /* `margin < 1` alone, not `> 0 && < 1` (#144): on an edit the margin handed
+     in is the line's own, and a line hand-priced below its cost carries a
+     negative one that the save rescales just the same — the stat has to show
+     what will land, not fall back to the bare cost. */
+  const sell = total > 0 && margin < 1 ? round2(total / (1 - margin)) : total;
   const valid =
     (draft.vendor || "").trim().length > 0 &&
     (draft.quoteNumber || "").trim().length > 0 &&
@@ -261,12 +277,21 @@ export default function VendorQuoteModal({
     else readFile(file);
   };
 
-  /** In-memory first (the data-URL, or this page's object-URL for a file
-   *  already in Blob) — the form has no saved quote id to reach the proxy
-   *  with, so the line's own Download link takes over once the estimate is
-   *  saved. */
+  /** In-memory first (the data-URL, or this page's object-URL for a file just
+   *  put in Blob), then the authenticated proxy — the same three-step
+   *  precedence the line's own Download link uses. The proxy step matters on
+   *  an EDIT (#144): the stored record carries only a `blobPath`, and the
+   *  object-URL that once previewed it died with the page that minted it, so
+   *  without this the form shows a filename with no way to open it while the
+   *  user decides whether to replace it. A file replaced in this session always
+   *  has a preview, which ranks ahead of the proxy — so the link can never
+   *  serve the outgoing file as if it were the new one. */
   const draftAttHref = draft.attachment
-    ? draft.attachment.dataUrl || draft.attachmentPreview || null
+    ? draft.attachment.dataUrl ||
+      draft.attachmentPreview ||
+      (draft.attachment.blobPath && savedQuoteId
+        ? `/api/vendor-quote-attachments/${encodeURIComponent(savedQuoteId)}/${encodeURIComponent(draft.id)}`
+        : null)
     : null;
 
   const readCsv = (file: File) => {
@@ -301,8 +326,8 @@ export default function VendorQuoteModal({
       width={760}
       icon="§"
       iconSize={15}
-      title="Vendor quote"
-      sub={<>Adds to {secName}</>}
+      title={editing ? "Edit vendor quote" : "Vendor quote"}
+      sub={editing ? <>In {secName}</> : <>Adds to {secName}</>}
       onClose={onClose}
       footerLeft={
         <>
@@ -312,7 +337,15 @@ export default function VendorQuoteModal({
             color="#8c919c"
           />
           <Stat label="Vendor total" value={total > 0 ? fmt(total) : "—"} color="#8c919c" />
-          <Stat label="Sell" value={total > 0 ? fmt(sell) : "—"} size={14} weight={700} />
+          {/* #144: named on an edit, because the rate is the LINE's preserved
+              margin rather than the tier seed — a number the user may have set
+              with the margin slider and would otherwise have to infer. */}
+          <Stat
+            label={editing ? "Sell at " + Math.round(margin * 100) + "%" : "Sell"}
+            value={total > 0 ? fmt(sell) : "—"}
+            size={14}
+            weight={700}
+          />
         </>
       }
       footerRight={
@@ -330,7 +363,7 @@ export default function VendorQuoteModal({
           disabled={!valid || uploading}
           style={addBtnStyle(valid && !uploading)}
         >
-          {uploading ? "Uploading\u2026" : "Add vendor quote"}
+          {uploading ? "Uploading\u2026" : editing ? "Save changes" : "Add vendor quote"}
         </button>
       }
     >

@@ -98,6 +98,8 @@ export type SectionCardProps = {
   onAddCustomPart: () => void;
   /** Live Single/Itemized flip on a stored vendor quote (#143). */
   onSetVendorDisplay: (vendorQuoteId: string, display: "single" | "itemized") => void;
+  /** Reopen the vendor form on a stored quote to edit it in place (#144). */
+  onEditVendor: (vendorQuoteId: string) => void;
   /** Moves this system into a brand-new estimate (sibling of onDelete). */
   onMoveToNew: () => void;
   /** Moves this system into an already-existing estimate, by id. */
@@ -722,6 +724,29 @@ export default function SectionCard(p: SectionCardProps) {
                     </div>
                     {!!vq && (
                       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 4 }}>
+                        {/* #144: every field on the quote is editable in place —
+                            before this, changing a total or a quote number meant
+                            deleting the line and re-entering the whole thing. */}
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            p.onEditVendor(vq.id);
+                          }}
+                          title="Edit this vendor quote"
+                          style={{
+                            fontFamily: "var(--font-ui)",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: "var(--accent)",
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            padding: 0,
+                          }}
+                        >
+                          Edit
+                        </button>
                         {attHref && (
                           <a
                             href={attHref}
