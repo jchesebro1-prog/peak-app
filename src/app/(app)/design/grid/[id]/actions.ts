@@ -117,9 +117,15 @@ export async function saveGridIntakeAction(input: {
   // same gate now also seeds the Scope panel's inputs and the linked design
   // record's dims (Spec 1) — a later re-save of venue details changes none
   // of them, so a designer's later Scope edits are never overwritten.
+  // Order matters: `sheetIds` becoming non-empty is the sentinel that marks
+  // this block done, and generateBaseSheet() is what flips it — so it runs
+  // LAST. The other three steps (setScopeInputs, the DesignRecord patch,
+  // renameProject) are idempotent re-applies of the same input, so they run
+  // FIRST: if any of them throws, sheetIds is still empty and the next save
+  // re-runs the whole block instead of leaving the project stuck without
+  // Scope inputs or its rename.
   const isFirstSave = (saved.sheetIds || []).length === 0;
   if (isFirstSave) {
-    await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
     await setScopeInputs(input.projectId, manualScopeInputs(input.autoConfig));
     const patch = designPatchFromIntake({
       projectName: project.name,
@@ -130,6 +136,7 @@ export async function saveGridIntakeAction(input: {
     const linked = (await getAllDesigns()).filter((d) => d.gridProjectId === input.projectId);
     for (const d of linked) await updateDesign(d.id, patch);
     if (patch.name) await renameProject(input.projectId, patch.name);
+    await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
   }
   revalidatePath(editorPath(input.projectId));
   revalidatePath("/design/designs");
