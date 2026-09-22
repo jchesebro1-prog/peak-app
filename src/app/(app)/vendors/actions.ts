@@ -127,7 +127,12 @@ export async function saveVendorProfileAction(
       notes: clip(patch.registration.notes),
     };
   }
-  await saveVendorProfile(id, clean);
+  try {
+    await saveVendorProfile(id, clean);
+  } catch (err) {
+    console.error("saveVendorProfileAction", err);
+    return { ok: false, error: "Couldn't save those vendor details — please try again." };
+  }
   revalidate();
   return { ok: true };
 }
@@ -148,12 +153,25 @@ export async function logPriceListAction(
   if (missing) return missing;
   const dates = parseLedgerDates(input);
   if (!dates.ok) return dates;
-  await logPriceList(
-    vendorId,
-    { receivedAt: dates.receivedAt, effectiveAt: dates.effectiveAt, note: clip(input.note) },
-    me.name
-  );
-  await ensureVendorAssignments(vendorId, me.name);
+  try {
+    await logPriceList(
+      vendorId,
+      { receivedAt: dates.receivedAt, effectiveAt: dates.effectiveAt, note: clip(input.note) },
+      me.name
+    );
+  } catch (err) {
+    console.error("logPriceListAction", err);
+    return { ok: false, error: "Couldn't log that price list — please try again." };
+  }
+  // The ledger entry has LANDED by here, so a failed task check must not
+  // report failure: the user would re-submit and append a duplicate entry.
+  // The task is the cron's job too (ensureVendorAssignments runs daily and is
+  // exactly-once by `source`), so the next run makes it good.
+  try {
+    await ensureVendorAssignments(vendorId, me.name);
+  } catch (err) {
+    console.error("logPriceListAction: owner task deferred to the daily cron", err);
+  }
   revalidate();
   return { ok: true };
 }
@@ -165,7 +183,12 @@ export async function setContactRoleAction(vendorId: string, contactId: string, 
   if (missing) return missing;
   const ct = await getContact(contactId);
   if (!ct || ct.homeCompanyId !== vendorId) return { ok: false, error: "That contact isn't on this vendor." };
-  await setContactRole(vendorId, contactId, clip(role).slice(0, 200));
+  try {
+    await setContactRole(vendorId, contactId, clip(role).slice(0, 200));
+  } catch (err) {
+    console.error("setContactRoleAction", err);
+    return { ok: false, error: "Couldn't save that contact's role — please try again." };
+  }
   revalidate();
   return { ok: true };
 }
@@ -175,7 +198,12 @@ export async function releaseManufacturerAction(vendorId: string, mfr: string): 
   await requirePerm("create");
   const missing = await vendorOr(vendorId);
   if (missing) return missing;
-  await releaseManufacturer(vendorId, mfr);
+  try {
+    await releaseManufacturer(vendorId, mfr);
+  } catch (err) {
+    console.error("releaseManufacturerAction", err);
+    return { ok: false, error: "Couldn't release that manufacturer — please try again." };
+  }
   revalidate();
   return { ok: true };
 }
