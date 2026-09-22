@@ -3400,3 +3400,30 @@ that thrown error — the SAME accepted trade-off already made across this codeb
 action shape (#85: "logged only, no code... the point of this entry is that the decision was made
 knowingly rather than papered over"), so this fix trades a silent wrong-behavior for a loud
 failure without expanding into the five-screens-of-error-UI #85 already declined to build.
+
+## D150. Native shell signs in through a Safari sheet and returns by `quartzite://auth` (2026-09-21)
+
+The Capacitor shell (D132) could not sign in: Capacitor hands any non-app host to the system
+browser, so Auth.js's state/PKCE cookies were set in the WebView while Google's callback landed in
+Safari. Verified on the iOS 27 simulator. Jeff chose to keep OAuth in a real browser context rather
+than spoof the WebView's user agent to satisfy Google's embedded-browser check.
+
+- **The whole round trip runs in an in-app Safari sheet** (`@capacitor/browser`,
+  SFSafariViewController): `GET /api/native/auth/start` calls Auth.js `signIn("google")` with the
+  hand-off route as `redirectTo`, so every Auth.js cookie lives in one jar.
+- **The session moves by copying the Auth.js session cookie verbatim**, chunks included, never by
+  re-encoding a JWT. `GET /api/native/auth/handoff` reads its own session cookie, wraps it in a
+  60-second AES-256-GCM code bound to a PKCE-style challenge, and serves a page that opens
+  `quartzite://auth?code=…`. `POST /api/native/auth/exchange` verifies the app-held verifier and sets
+  the same cookie in the WebView. Expiry and the per-request role refresh are unchanged.
+- **Stateless by design:** the code is encrypted with the existing `lib/gmail/crypto.ts` primitive
+  (key from `AUTH_SECRET`); no table, no migration, no new env var. `encryptWith`/`decryptWith`
+  now take the secret explicitly so the pure module is testable without env.
+- **Custom scheme, not Universal Links** — those need the paid Apple team; they are the upgrade path.
+- **Degrades, never throws:** every native call sits behind `isNativePlatform()` and
+  `Capacitor.isPluginAvailable`; an old binary falls back to the in-WebView `signIn`.
+- Bad GET input redirects to `/login?error=native` (so `test:smoke` covers the routes and a stray
+  visitor lands somewhere sensible); only the POST exchange returns JSON 400/401.
+- Android gets the manifest intent-filter in the same change but is not built or tested yet.
+
+Spec: `docs/superpowers/specs/2026-09-21-native-auth-handoff-design.md`.

@@ -2554,6 +2554,11 @@ or is that prohibitively expensive/complicated?
 installable PWA today; go Capacitor when a native capability (Bluetooth laser, camera, push) justifies
 it — likely alongside item 30.** Not a full rewrite.
 
+- **2026-09-21 — native sign-in works (D150).** Xcode 27 + iOS 27 simulator on the build Mac; the
+  shell opens the hosted app, Google sign-in runs in a Safari sheet and returns via
+  `quartzite://auth`. Still open for "a real app": Apple Developer Program, TestFlight, Phase 2 device
+  features (`docs/superpowers/specs/2026-09-21-native-shell-phase-2-design.md`).
+
 ---
 
 ## 32. Adding a venue: address search doesn't autofill the street on select — DONE (status corrected 2026-07-29 by code audit)
