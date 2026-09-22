@@ -6236,8 +6236,9 @@ optional `Customer ID`; unmatched rows are reported before commit (auto-create v
 call, asked 2026-09-21); zip plumbed through the store; matching exports.
 
 **Shipped:** three cards on the Import hub. **Customers** — `Customer Name*, Category, Address,
-City, State, Zip, Phone, Website`; Category → `type`, the address merges into the primary
-venue (non-destructively — the old writer replaced every venue on "Update existing"), Zip also on
+City, State, Zip, Phone, Website`; Category → `type`, the address lands on the customer's
+unnamed mailing venue — filling it if that slot is empty, appending one if the customer's venues are
+all named, and never overwriting a named venue's own address (C1b) — Zip also on
 the company row, Phone/Website on the company row; the old `Contact Name / Email / Venue` columns
 still import as hidden aliases. **Contacts** — `Customer* | Customer ID, Name*, Email, Phone,
 Mobile, Title, Role, Primary`, matched by customer + email-or-name, `Primary=yes` demotes the

@@ -60,7 +60,9 @@ function one(v: string | string[] | undefined): string {
  *  a browser would follow as a relative path. Give it a scheme; leave an
  *  http/https one alone. Only those two pass through: the field is free text
  *  an import or a typo can fill, and anything else ("javascript:…") must
- *  never become a live href — prefixing makes it an inert relative path. */
+ *  never become a live href. Prefixing yields an ordinary https URL whose
+ *  host is the junk text, which resolves nowhere — the point is that the
+ *  original scheme can never reach the href. */
 function websiteHref(site: string): string {
   const s = site.trim();
   return /^https?:\/\//i.test(s) ? s : `https://${s}`;
