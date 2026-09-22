@@ -1,4 +1,5 @@
 import { insertWithPrefixedId, listDocs, softDeleteDoc } from "@/db/doc-store";
+import type { FileRef } from "@/lib/consulting-files";
 
 /**
  * Notes (#21) — the first REAL note record in the app (the three prior
@@ -19,16 +20,6 @@ import { insertWithPrefixedId, listDocs, softDeleteDoc } from "@/db/doc-store";
  */
 
 export type NoteParentKind = "customer" | "lead" | "project" | "quote" | "engagement";
-
-/** #145 D171 — file reference union, declared locally on purpose: Task 9
- *  creates `@/lib/consulting-files.ts` and replaces this declaration with
- *  `import type { FileRef } from "@/lib/consulting-files";`. Keep this
- *  shape in sync with that module until then. */
-type FileMeta = { name: string; mime: string; size: number };
-export type FileRef =
-  | ({ kind: "drive"; fileId: string; webViewLink: string } & FileMeta)
-  | ({ kind: "blob"; pathname: string } & FileMeta)
-  | ({ kind: "data"; dataUrl: string } & FileMeta);
 
 export type NoteRecord = {
   id: string; // 'N-####' (base 7000)

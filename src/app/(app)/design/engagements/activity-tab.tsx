@@ -3,8 +3,9 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ConsultingEngagement } from "@/lib/stores/engagements";
-import type { FileRef, NoteRecord } from "@/lib/stores/notes";
+import type { NoteRecord } from "@/lib/stores/notes";
 import type { TaskRecord, TaskStatus } from "@/lib/stores/tasks";
+import type { FileRef } from "@/lib/consulting-files";
 import { mergeActivity, type ActivityEntry } from "@/lib/engagement-activity";
 import { captureAction } from "./activity-actions";
 import { Card, EmptyState, Pill } from "@/components/ui";

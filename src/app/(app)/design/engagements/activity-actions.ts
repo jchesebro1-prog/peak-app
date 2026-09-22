@@ -3,10 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { requireUser, type SessionUser } from "@/lib/session";
 import { softDeleteDoc } from "@/db/doc-store";
-import { addNoteRecord, type FileRef } from "@/lib/stores/notes";
+import { addNoteRecord } from "@/lib/stores/notes";
+import type { FileRef } from "@/lib/consulting-files";
 import { createTask } from "@/lib/stores/tasks";
 import { getEngagement } from "@/lib/stores/engagements";
 import { activeUsers } from "@/lib/users";
+import { validateFileRefsForEngagement } from "@/lib/consulting-files-server";
 
 /**
  * #145 D170 — the unified composer's server action. One capture writes a
@@ -83,32 +85,24 @@ export async function performCapture(
     return { ok: false, error: "Nothing to capture." };
   }
 
-  // TODO (#145 D171, blocking on Task 9): validate `attachments` against
-  // this engagement BEFORE any write, so a hand-built FileRef the caller
-  // was never issued (e.g. `{kind:"drive", fileId:"<any id>"}`) can't be
-  // planted here for the download proxy to later trust. Task 9 is adding
-  // `validateFileRefsForEngagement(refs, engagementId): Promise<FileRef[]>`
-  // (throws on the first invalid ref) to a new server-only module,
-  // `src/lib/consulting-files-server.ts` — call it first thing inside the
-  // try below once that module lands:
-  //
-  //   const { validateFileRefsForEngagement } = await import("@/lib/consulting-files-server");
-  //   let validatedAttachments: FileRef[];
-  //   try {
-  //     validatedAttachments = await validateFileRefsForEngagement(attachments, engagementId);
-  //   } catch (err) {
-  //     return { ok: false, error: err instanceof Error ? err.message : "Invalid attachment." };
-  //   }
-  //   // ...then use validatedAttachments in place of `attachments` below.
-  //
-  // Do not invent a different shape here — the module doesn't exist yet in
-  // this worktree (checked: absent both here and on Task 9's own branch as
-  // of this fix), so wiring it now would mean guessing its contract. Left
-  // as this exact call site instead of skipped, so it's a one-line swap
-  // once Task 9 lands and this comment can go.
-
   const createdTaskIds: string[] = [];
   try {
+    // #145 D171 — every attachment must be PROVEN to belong to this
+    // engagement before it is ever stored: a client-supplied FileRef is
+    // otherwise a way to plant a ref the download proxy will later trust
+    // (`ownsEngagementFile` only ever sees refs a writer already stored —
+    // this is the writer-side half of that check). Runs first, before any
+    // task or note write, so a refusal here rolls back cleanly (nothing
+    // has been created yet). The refusal is generic on purpose: the real
+    // validator's per-kind messages name storage paths / Drive folder
+    // internals that a caller has no business seeing.
+    let validatedAttachments: FileRef[];
+    try {
+      validatedAttachments = await validateFileRefsForEngagement(attachments, engagementId);
+    } catch {
+      return { ok: false, error: "One or more attachments couldn't be verified for this engagement and were rejected." };
+    }
+
     let roster: Awaited<ReturnType<typeof activeUsers>> = [];
     if (tasks.some((t) => t.assigneeUserId)) roster = await activeUsers();
 
@@ -138,7 +132,7 @@ export async function performCapture(
         parentId: engagementId,
         customerId: null,
         text,
-        attachments,
+        attachments: validatedAttachments,
         taskIds: createdTaskIds,
       },
       me.name

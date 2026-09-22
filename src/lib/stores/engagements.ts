@@ -260,6 +260,14 @@ export type ConsultingEngagement = {
   meetings: EngagementMeeting[];
   submittals: EngagementSubmittal[];
   documents: EngagementDoc[];
+  /** #145 D171 — Drive folder id this engagement's files upload route
+   *  resolved (`ensureFolderPath(engagementFolderPath(customer, id))`),
+   *  persisted the first time it's needed so a later customer-name edit
+   *  can't silently move where the download proxy expects an already-
+   *  uploaded Drive file to live. Absent/null until the first Drive
+   *  upload or download-proxy check for this engagement re-derives and
+   *  stores it. */
+  driveFolderId?: string | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -383,6 +391,7 @@ export function normalizeEngagementRecord(
   e.meetings = Array.isArray(raw.meetings) ? raw.meetings : [];
   e.submittals = Array.isArray(raw.submittals) ? raw.submittals : [];
   e.documents = Array.isArray(raw.documents) ? raw.documents : [];
+  e.driveFolderId = typeof raw.driveFolderId === "string" && raw.driveFolderId ? raw.driveFolderId : null;
   return e;
 }
 
