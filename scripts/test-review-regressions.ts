@@ -1214,6 +1214,67 @@ async function main() {
     assert.equal(back.errored, 0, "#137 T4 export → re-import errors nothing");
   }
 
+  // #137 T5 — contacts import: link by name + id, primary demotion, one auto-created customer for several rows, idempotent re-import, export round-trip
+  {
+    await upsertCustomer({
+      id: "c-t137-ct", name: "T137 Contacts Co", type: "Education", locations: [],
+      contacts: [{ name: "Old Primary", email: "old@t137ct.example", primary: true }],
+    });
+    const csv1 = [
+      "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary",
+      "t137 contacts co,,Maria Lopez,maria@t137ct.example,(608) 555-0110,(608) 555-0111,Technical Director,,yes",
+      ",c-t137-ct,Sam Ortiz,sam@t137ct.example,,,,billing,no",
+      "T137 Brand New Org,,Pat Doe,pat@t137new.example,,,,,",
+      "t137 BRAND new org,,Lee Park,lee@t137new.example,,,,,",
+    ].join("\n");
+    const r1 = await commitImport("contacts", prepImport("contacts", csv1), "skip");
+    assert.equal(r1.errored, 0, "#137 T5 no errors");
+    assert.equal(r1.created, 4, "#137 T5 four contacts created");
+    assert.equal(r1.customersLinked, 2, "#137 T5 two rows linked to the existing customer (one by name, one by id)");
+    assert.equal(r1.customersCreated, 1, "#137 T5 exactly one customer auto-created for the two unmatched rows");
+    const co = await getCustomer("c-t137-ct");
+    const maria = co!.contacts.find((c) => c.name === "Maria Lopez");
+    const sam = co!.contacts.find((c) => c.name === "Sam Ortiz");
+    const old = co!.contacts.find((c) => c.name === "Old Primary");
+    assert.ok(maria && sam && old, "#137 T5 both imported contacts sit on the customer beside the old one");
+    assert.equal(maria!.primary, true, "#137 T5 Primary=yes promotes Maria");
+    assert.equal(old!.primary, false, "#137 T5 …and demotes the previous primary");
+    assert.equal(sam!.primary, false, "#137 T5 Primary=no stays non-primary");
+    assert.equal(maria!.mobile, "(608) 555-0111", "#137 T5 Mobile persists");
+    assert.equal(maria!.phone, "(608) 555-0110", "#137 T5 Phone persists");
+    assert.equal(maria!.role, "Technical Director", "#137 T5 Title → contact title");
+    assert.equal(sam!.role, "billing", "#137 T5 Role fills the title when Title is blank");
+    const created = (await allCustomers()).filter((c) => norm(c.name) === norm("T137 Brand New Org"));
+    assert.equal(created.length, 1, "#137 T5 the unmatched name created exactly one customer");
+    assert.equal(created[0].name, "T137 Brand New Org", "#137 T5 …named as the first row spelled it");
+    assert.equal(created[0].contacts.length, 2, "#137 T5 both rows landed on that one new customer");
+    assert.equal(created[0].contacts.find((c) => c.name === "Pat Doe")?.primary, true, "#137 T5 the first contact on a new customer becomes primary");
+
+    const r2 = await commitImport("contacts", prepImport("contacts", csv1), "skip");
+    assert.equal(r2.skipped, 4, "#137 T5 re-importing the same file skips every row");
+    assert.equal(r2.customersCreated, 0, "#137 T5 …and creates no customers");
+    assert.equal((await getCustomer("c-t137-ct"))!.updatedAt, co!.updatedAt, "#137 T5 a skipped re-import writes nothing (updatedAt unchanged)");
+    const r3 = await commitImport("contacts", prepImport("contacts", csv1), "update");
+    assert.equal(r3.updated, 4, "#137 T5 update mode re-imports without duplicating");
+    assert.equal((await getCustomer("c-t137-ct"))!.contacts.length, 3, "#137 T5 still three contacts after two re-imports");
+    assert.equal((await allCustomers()).filter((c) => norm(c.name) === norm("T137 Brand New Org")).length, 1, "#137 T5 still one auto-created customer");
+    // The relabel rule from #137 T1 is what makes this converge: saving the
+    // same contacts file twice must be a no-change write, not a churn of the
+    // phone/mobile channels (D83).
+    assert.equal((await getCustomer("c-t137-ct"))!.updatedAt, co!.updatedAt, "#137 T5 saving the same contacts file twice leaves updatedAt unchanged (idempotent)");
+    assert.equal((await getCustomer(created[0].id))!.updatedAt, created[0].updatedAt, "#137 T5 …on the auto-created customer too");
+
+    const csv = await exportCsv("contacts");
+    const exp = parseCsv(csv);
+    assert.equal(exp.headers.join(","), "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary,Notes", "#137 T5 contacts export columns = template columns");
+    const m = exp.objects.find((o) => o.Email === "maria@t137ct.example");
+    assert.ok(m, "#137 T5 exported contact present");
+    assert.ok(m!.Customer === "T137 Contacts Co" && m!["Customer ID"] === "c-t137-ct" && m!.Mobile === "(608) 555-0111" && m!.Phone === "(608) 555-0110" && m!.Title === "Technical Director" && m!.Primary === "yes", "#137 T5 exported contact carries the customer's name + id and its fields");
+    const back = await commitImport("contacts", prepImport("contacts", csv).filter((r) => String(r.values.customer).startsWith("T137")), "skip");
+    assert.equal(back.created, 0, "#137 T5 export → re-import creates nothing (round-trip)");
+    assert.equal(back.errored, 0, "#137 T5 export → re-import errors nothing");
+  }
+
   console.log("review regression checks passed");
 }
 

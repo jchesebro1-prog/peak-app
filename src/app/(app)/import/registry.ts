@@ -19,7 +19,14 @@ import { allUsers, addUser, setRoles } from "@/lib/users";
 import { getTypeMeta, IMPORT_TYPE_KEYS, type ImportTypeMeta } from "./types";
 import { norm, isoToMs, type FieldDef, type PreparedRow } from "./parse";
 import { baseVenueKind } from "@/lib/identity/venue-defaults";
-import { mergeContact, mergeLocation, resolveCustomerForRow, type CustomerRef } from "./link";
+import {
+  matchContact,
+  mergeContact,
+  mergeLocation,
+  parseYesNo,
+  resolveCustomerForRow,
+  type CustomerRef,
+} from "./link";
 
 const YEAR = 365 * 86400000;
 
@@ -258,6 +265,54 @@ function customerRecordFor(
   };
 }
 
+/**
+ * Resolve the customer a contacts / venues row belongs to, creating a bare
+ * one (`{ name, type: Customer Category column ?? "" }`) when neither the
+ * id nor the normalized name matches — and pushing it into the cache so the
+ * rest of the file links to the same record (D159). Returns the customer as
+ * stored right now. Throws (→ the row counts as errored) when the row has
+ * neither a Customer nor a Customer ID.
+ */
+async function linkCustomer(
+  v: Values,
+  cache: Record<string, unknown>[],
+  link: LinkStats
+): Promise<Customers.CustomerDoc> {
+  const docs = cache as unknown as Customers.CustomerDoc[];
+  const r = resolveCustomerForRow({ customerId: v.customerId, customer: v.customer }, docs);
+  if (r.how === "missing") throw new Error("Row has neither a Customer nor a Customer ID");
+  if (r.id) {
+    const fresh = await Customers.get(r.id);
+    if (!fresh) throw new Error(`Customer ${r.id} no longer exists`);
+    // A customer THIS file created a few rows ago is neither "linked to an
+    // existing customer" nor a second create — it was counted when created.
+    if (!link.createdIds.has(r.id)) link.customersLinked++;
+    return fresh;
+  }
+  const id = "c" + Date.now() + "-" + seq();
+  await Customers.upsert({ id, name: r.name, type: str(v.customerType), locations: [], contacts: [] });
+  const created = await Customers.get(id);
+  if (!created) throw new Error(`Customer ${id} could not be created`);
+  docs.push(created);
+  link.createdIds.add(id);
+  link.customersCreated++;
+  return created;
+}
+
+/** One contacts row → the customer's contacts, merged by email then name. */
+async function writeContactRow(cust: Customers.CustomerDoc, v: Values): Promise<void> {
+  const { contacts } = mergeContact(cust.contacts || [], {
+    name: str(v.name),
+    email: str(v.email),
+    phone: str(v.phone),
+    mobile: str(v.mobile),
+    // One free-text slot on the contact row (contacts.title): Title, else Role.
+    title: str(v.title) || str(v.role),
+    primary: parseYesNo(v.primary),
+  });
+  await Customers.upsert({ ...recordInputOf(cust), contacts });
+}
+
 const WRITERS: Record<string, Writer> = {
   customers: {
     count: async () => (await Customers.all()).length,
@@ -300,6 +355,51 @@ const WRITERS: Record<string, Writer> = {
           notes: "",
         };
       });
+    },
+  },
+
+  contacts: {
+    count: async () =>
+      (await Customers.all()).reduce((n, c) => n + (c.contacts || []).length, 0),
+    load: async () => (await Customers.all()) as unknown as Record<string, unknown>[],
+    // Dedupe key: customer (id → normalized name) + email, else name.
+    find: (v, cache) => {
+      const docs = cache as unknown as Customers.CustomerDoc[];
+      const r = resolveCustomerForRow({ customerId: v.customerId, customer: v.customer }, docs);
+      if (!r.id) return null;
+      const cust = docs.find((c) => c.id === r.id);
+      const hit = cust ? matchContact(cust.contacts || [], v.email, v.name) : null;
+      return hit ? { customerId: r.id, name: hit.name } : null;
+    },
+    create: async (v, cache, _ctx, link) => {
+      const cust = await linkCustomer(v, cache, link);
+      await writeContactRow(cust, v);
+      await refreshCache(cache, cust.id);
+    },
+    update: async (ex, v, cache, _ctx, link) => {
+      const id = str(ex.customerId);
+      const cust = await Customers.get(id);
+      if (!cust) throw new Error(`Customer ${id} no longer exists`);
+      if (!link.createdIds.has(id)) link.customersLinked++;
+      await writeContactRow(cust, v);
+      await refreshCache(cache, id);
+    },
+    exportObjects: async () => {
+      const list = await Customers.all();
+      return list.flatMap((rec) =>
+        (rec.contacts || []).map((c) => ({
+          customer: rec.name || "",
+          customerId: rec.id,
+          name: c.name || "",
+          email: c.email || "",
+          phone: c.phone || "",
+          mobile: c.mobile || "",
+          title: c.role || "",
+          role: "",
+          primary: c.primary ? "yes" : "no",
+          notes: "",
+        }))
+      );
     },
   },
 
