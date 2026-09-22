@@ -3923,8 +3923,24 @@ quote at meeting audio or a grid plan sheet and the authenticated proxy would st
 checked in BOTH the save action and the download proxy, so a path planted by any other writer or left
 on a stale document still cannot be served. Twelve cases pin it in the spec harness.
 
-**Open, for Jeff:** a vendor line is marked up by the section margin slider like any other cost line.
-He answered the freight half of the pricing question, not the margin half, so no price lock was added.
-Also not done: editing an existing vendor quote in place (remove and re-add), and carrying the record
-across `moveSystemToEstimateAction` now copies it, but blob garbage collection for a replaced or
-abandoned file does not exist for any prefix in this repo.
+**Margin — settled 2026-09-22.** Jeff: *"Vendor quotes should be affected by margin the same as a
+catalog and manual item."* That is the shipped behaviour, so nothing changed; recording it so the
+question is not reopened and so a future price-lock idea has to argue against an explicit decision.
+There is **no per-item margin exclusion anywhere in the estimator** and none was added: `setMarginAll`
+and `setSystemMargin` (`estimator-client.tsx:680-698`) map over `s.items` with no filter, rewriting
+`price = round2(it.cost / (1 - m))` for every line, and the section's "Sell" target field back-solves
+through the same handler. A vendor line seeds its price with the identical rule `addPart` uses for a
+catalog part — `tierMargin` when it is in (0,1), else 0.30.
+
+Note the asymmetry this creates with freight, which is deliberate and is the whole point of the
+`includesFreight` exemption: **margin applies to every line, freight does not.** `noFreight` is read
+in exactly one place — `systemFreightBase` (`pricing.ts:67`) — and `systemItemsCost` still counts
+every line, so an exempt vendor quote is marked up and reported in cost and margin exactly like
+anything else, and is only left out of the freight base.
+
+Verified in the running app, not only by reading: a vendor quote and a custom part both at $1,000
+cost, section margin dragged to 40% → both lines read **$1,666.67**.
+
+**Still open / not done:** editing an existing vendor quote in place (remove and re-add);
+`moveSystemToEstimateAction` now copies the record across, but blob garbage collection for a replaced
+or abandoned file does not exist for any prefix in this repo.

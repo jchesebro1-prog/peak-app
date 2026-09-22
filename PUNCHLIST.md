@@ -6506,10 +6506,16 @@ every field including the attachment.
 Gates: `tsc` 0 errors (baseline 0) · `eslint` 120 warnings / 0 errors (baseline 120; all new files
 silent) · `test:specs` 1486 PASS / 0 FAIL · `test:smoke` ALL PASSED.
 
-**Open, for Jeff:** (1) a vendor line is marked up by the section margin slider like any other cost
-line — he answered the freight half of the pricing question, not the margin half, so no price lock was
-added; (2) editing an existing vendor quote means remove and re-add; (3) no blob garbage collection
-for a replaced or abandoned file — no prefix in this repo has a sweeper (worth its own item);
-(4) local dev cannot upload to Blob at all — Vercel Blob reports *"OIDC is enabled for this project,
-but not for the development environment"*, so every local attachment takes the data-URL fallback.
-Production is unaffected, but it means the Blob path is untested outside production.
+**Margin — answered 2026-09-22.** Jeff: *"Vendor quotes should be affected by margin the same as a
+catalog and manual item."* Already the behaviour, so no code changed — D162 now records it as a
+decision rather than an open question. There is no per-item margin exclusion in the estimator:
+`setMarginAll` / `setSystemMargin` (`estimator-client.tsx:680-698`) reprice every line with no filter,
+and a vendor line seeds from the same `tierMargin`-else-30% rule as a catalog part. Proved in the app:
+a vendor quote and a custom part both at $1,000 cost, margin dragged to 40% → both **$1,666.67**.
+Margin applies to every line; freight is the only thing `includesFreight` exempts.
+
+**Open, for Jeff:** (1) editing an existing vendor quote means remove and re-add; (2) no blob garbage
+collection for a replaced or abandoned file — no prefix in this repo has a sweeper (worth its own
+item); (3) local dev cannot upload to Blob at all — Vercel Blob reports *"OIDC is enabled for this
+project, but not for the development environment"*, so every local attachment takes the data-URL
+fallback. Production is unaffected, but it means the Blob path is untested outside production.
