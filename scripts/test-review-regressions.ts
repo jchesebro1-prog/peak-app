@@ -16,6 +16,9 @@ import {
   awaitLabelSyncIdle,
 } from "@/lib/gmail/label-sync";
 import type { CommThread } from "@/lib/stores/comms";
+import { interpretLabelEvents } from "@/lib/gmail/label-interpret";
+import { saveConnection, replaceLabels } from "@/lib/gmail/connections";
+import { get as getLead } from "@/lib/stores/leads";
 
 async function main() {
   const flame = await setFlameRates({ laborRate: 123, mileageRate: 1.23 });
@@ -416,6 +419,121 @@ async function main() {
     0,
     "#96 awaitLabelSyncIdle only resolves once the chain (incl. any re-queued trailing sync) is fully drained"
   );
+
+  // #96 §3 Task 11 — Gmail → Peak label interpreter: a status label applies
+  // through the store, and Peak/New lead is idempotent even when the Gmail
+  // label swap it triggers actually round-trips. No .env.local exists in a
+  // fresh worktree (see AUTH_SECRET fallback in smoke-routes.ts) — token
+  // encryption needs SOME secret, so fall back to the same kind of
+  // test-only value those scripts use.
+  process.env.AUTH_SECRET ||= "quartzite-test-secret-not-for-production";
+  {
+    const mailboxKey = "personal:t11interp";
+    await saveConnection({
+      mailboxKey,
+      address: "t11interp@example.com",
+      userId: "t11interp",
+      connectedBy: "Tester",
+      tokens: {
+        accessToken: "fake-access-token",
+        refreshToken: "fake-refresh-token",
+        expiresAt: Date.now() + 3_600_000,
+      },
+    });
+    await replaceLabels(mailboxKey, [
+      { id: "L-t11-newlead", name: "Peak/New lead", type: "user" },
+      { id: "L-t11-statusdone", name: "Peak/Status/Done", type: "user" },
+    ]);
+
+    // Fake Gmail's HTTP surface for the two calls the New-lead swap makes
+    // (create the Peak/Leads/<id> label, then modify the thread) — this
+    // harness has no real Gmail connection or network access.
+    const realFetch = global.fetch;
+    (global as any).fetch = async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      const method = (init?.method || "GET").toUpperCase();
+      if (u.includes("/labels") && method === "POST") {
+        return new Response(JSON.stringify({ id: "L-t11-newleadid", name: "Peak/Leads/fake" }), { status: 200 });
+      }
+      if (u.includes("/modify") && method === "POST") {
+        return new Response(JSON.stringify({}), { status: 200 });
+      }
+      return realFetch(url, init as any);
+    };
+    try {
+      await upsertDoc<any>("comms", {
+        id: "C-t11-newlead",
+        mailbox: "sales",
+        unread: false,
+        archived: false,
+        customerId: null,
+        customer: "",
+        contactName: "Prospect Pat",
+        contactEmail: "pat@t11-newlead.example",
+        subject: "Quote request",
+        channel: "email",
+        status: "waiting_us",
+        assignedTo: "",
+        link: null,
+        messages: [
+          { id: "m1", at: Date.now(), direction: "in", channel: "email", author: "Prospect Pat", body: "Hi", gmailId: "g-t11-m1" },
+        ],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        gmailThreadId: "g-t11-thread-newlead",
+        gmailAccountKey: mailboxKey,
+        resolution: "unknown",
+      } as any);
+
+      const newLeadEvent = [{ messageId: "g-t11-m1", threadId: "g-t11-thread-newlead", added: ["L-t11-newlead"], removed: [] }];
+      const applied1 = await interpretLabelEvents(mailboxKey, newLeadEvent);
+      assert.equal(applied1, 1, "#96 Task 11 a fresh Peak/New lead label applies exactly one command");
+      const t1 = await getDoc<CommThread>("comms", "C-t11-newlead");
+      assert.ok(t1?.link?.type === "lead", "#96 Task 11 Peak/New lead links the thread to a freshly created lead");
+      const leadId = t1!.link!.id;
+      assert.ok(await getLead(leadId), "#96 Task 11 Peak/New lead actually created a lead record");
+
+      const applied2 = await interpretLabelEvents(mailboxKey, newLeadEvent);
+      assert.equal(applied2, 0, "#96 Task 11 a second Peak/New lead event on an already-spawned thread is a no-op");
+      const t2 = await getDoc<CommThread>("comms", "C-t11-newlead");
+      assert.equal(t2?.link?.id, leadId, "#96 Task 11 New-lead idempotency: the thread still points at the SAME lead, never a second one");
+    } finally {
+      (global as any).fetch = realFetch;
+    }
+
+    // Status command — Peak/Status/Done applies through setStatus (no Gmail
+    // call: GMAIL_ENABLED is unset here, so the writer's own queued sync
+    // gates itself off before touching the network).
+    await upsertDoc<any>("comms", {
+      id: "C-t11-status",
+      mailbox: "sales",
+      unread: false,
+      archived: false,
+      customerId: "lakefront",
+      customer: "Lakefront",
+      contactName: "Someone",
+      contactEmail: "someone@t11-status.example",
+      subject: "Status test",
+      channel: "email",
+      status: "waiting_them",
+      assignedTo: "",
+      link: null,
+      messages: [
+        { id: "m1", at: Date.now(), direction: "in", channel: "email", author: "Someone", body: "Hi", gmailId: "g-t11-m2" },
+      ],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      gmailThreadId: "g-t11-thread-status",
+      gmailAccountKey: mailboxKey,
+      resolution: "linked",
+    } as any);
+    const appliedStatus = await interpretLabelEvents(mailboxKey, [
+      { messageId: "g-t11-m2", threadId: "g-t11-thread-status", added: ["L-t11-statusdone"], removed: [] },
+    ]);
+    assert.equal(appliedStatus, 1, "#96 Task 11 a status label applies exactly one command");
+    const statusThread = await getDoc<CommThread>("comms", "C-t11-status");
+    assert.equal(statusThread?.status, "closed", "#96 Task 11 Peak/Status/Done sets the thread status to closed");
+  }
 
   console.log("review regression checks passed");
 }

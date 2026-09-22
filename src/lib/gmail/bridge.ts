@@ -44,10 +44,12 @@ import {
   listThreadIds,
   modifyThread,
   sendRaw,
+  type GmailLabelEvent,
 } from "./api";
 import { buildRaw, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
 import { queueLabelSync } from "./label-sync";
+import { interpretLabelEvents } from "./label-interpret";
 
 /**
  * The real Gmail bridge (Phase 7). comms.ts delegates here — but ONLY when the
@@ -573,6 +575,7 @@ async function syncMailboxMessages(
   try {
     let pageToken: string | undefined;
     let newestHistoryId = stored;
+    const labelEvents: GmailLabelEvent[] = [];
     do {
       const page = await listHistory(key, stored, pageToken);
       if (page.historyId) newestHistoryId = page.historyId;
@@ -581,8 +584,18 @@ async function syncMailboxMessages(
         const touched = await recordMessage(key, parseInbound(full));
         if (touched) last = touched;
       }
+      labelEvents.push(...page.labelEvents);
       pageToken = page.nextPageToken;
     } while (pageToken);
+    // #96 §3 — labels a person applied in Gmail are commands (customer link,
+    // status, assign, work-link, new lead). Never let a bug here abort the
+    // message sync that already succeeded above.
+    try {
+      const applied = await interpretLabelEvents(key, labelEvents);
+      if (applied) last = last || "labels";
+    } catch (err) {
+      console.error("[gmail] label interpret failed for", key, err);
+    }
     await updateSyncState(key, { historyId: newestHistoryId, lastSyncAt: Date.now() });
   } catch (err) {
     if (isRateLimit(err)) {

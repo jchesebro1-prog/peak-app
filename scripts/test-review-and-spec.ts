@@ -12,6 +12,7 @@ import {
 } from "@/lib/gmail/config";
 import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
+import { planLabelCommands } from "@/lib/gmail/label-interpret";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
   msOf as opMsOf,
@@ -3025,6 +3026,21 @@ ok(
   cpln.includes("Peak/Status/Waiting") && cpln.includes("Peak/Customers/X"),
   "currentPeakLabelNames: union across every message that has gmailLabelIds, trailing Peak-only message doesn't blank it"
 );
+
+/* ---- #96 §3 — Gmail → Peak command planning (Task 11) ---- */
+const plan = planLabelCommands(["INBOX", "Peak/Status/Waiting", "Peak/Status/Done", "Peak/Assign/Nic", "Peak/New lead", "Follow up"]);
+ok(plan.filter((c) => c.kind === "status").length === 1 && (plan.find((c) => c.kind === "status") as any).status === "closed", "plan: last status wins");
+ok(plan.some((c) => c.kind === "assign") && plan.some((c) => c.kind === "newLead") && plan.length === 3, "plan: ignores non-Peak labels, keeps one of each independent command");
+const planCustomerAssign = planLabelCommands(["Peak/Customers/A", "Peak/Customers/B", "Peak/Assign/Nic", "Peak/Assign/Jill"]);
+ok(
+  planCustomerAssign.filter((c) => c.kind === "customer").length === 1 &&
+    (planCustomerAssign.find((c) => c.kind === "customer") as any).name === "B" &&
+    planCustomerAssign.filter((c) => c.kind === "assign").length === 1 &&
+    (planCustomerAssign.find((c) => c.kind === "assign") as any).firstName === "Jill",
+  "plan: last customer and last assign each win independently"
+);
+const planWork = planLabelCommands(["Peak/Projects/P-1", "Peak/Leads/L-1", "Peak/Quotes/Q-1"]);
+ok(planWork.length === 3 && planWork.every((c) => c.kind === "work"), "plan: every work-link label is its own independent command");
 
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
