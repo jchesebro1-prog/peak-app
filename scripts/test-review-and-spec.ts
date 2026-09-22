@@ -26,7 +26,9 @@ import {
 import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
-import { normalizeEngagementRecord, type EngagementPhase, createManualEngagement, allEngagements } from "@/lib/stores/engagements";
+import {
+  normalizeEngagementRecord, getEngagement, type EngagementPhase, createManualEngagement, allEngagements,
+} from "@/lib/stores/engagements";
 import { TEMPLATE_RECORD_KINDS, TEMPLATE_RECORD_LABEL } from "@/lib/task-template-kinds";
 import {
   normalizeLine as normalizeTemplateLine,
@@ -178,6 +180,8 @@ import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, s
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { mergeActivity } from "@/lib/engagement-activity";
+import { performCapture, type CaptureDeps } from "@/lib/engagement-activity-write";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -1794,7 +1798,7 @@ ok(legacyEmailFor("Jeff Chesebro") === "jchesebro@peaksystemsgroup.com", "legacy
 /* ============ TASKS (#17) — store pure logic ============ */
 import {
   isOverdue, taskFromLegacy, expandTemplate, taskBellItems, autoTaskId,
-  normalizeTask, tasksForEngagement, tasksForProject, removeTask,
+  normalizeTask, tasksForEngagement, createTask, tasksForProject, removeTask,
   STATUSES, type TaskRecord, type TaskTemplateItem,
 } from "@/lib/stores/tasks";
 import { CATEGORIES } from "@/lib/stores/notif-prefs";
@@ -2125,7 +2129,7 @@ import { blank as surveyBlank } from "@/lib/stores/surveys";
 /* ============ ACTIVITY TIMELINE (#21) ============ */
 /* notes collection — normalize-on-read defaults. normalizeNote is pure
    (no DB touched by importing the store module). */
-import { normalizeNote, type NoteRecord } from "@/lib/stores/notes";
+import { normalizeNote, addNoteRecord, notesForEngagement, type NoteRecord } from "@/lib/stores/notes";
 
 {
   const T = new Date(2026, 5, 30, 10).getTime();
@@ -4188,6 +4192,145 @@ async function asyncChecks(): Promise<void> {
     const p1 = await getProjectByQuote(TEST_INSPECTION_QUOTE_ID);
     const p2 = await getProjectByQuote(TEST_REPAIR_QUOTE_ID);
     ok(!!p1 && !!p2 && p1.id !== p2.id, "#13 the inspection and repair test quotes get DISTINCT linked projects");
+  }
+
+  /* --- #145 D170/D171: captureAction's rollback is exercised for real, not
+   * just read as correct-looking code (review Important #1). A mid-capture
+   * failure is FORCED by injecting a `deps.createTask` that lets the first
+   * task really land in the doc-store, then throws on the second — proving
+   * `performCapture` deletes the first before rethrowing, and never writes
+   * the note. Fixed test id + idempotency check since this writes to the
+   * real persistent dev DB, same as the #13 block above. */
+  const TEST_ROLLBACK_ENG_ID = "test-eng-punch145-rollback";
+  {
+    if (!(await getEngagement(TEST_ROLLBACK_ENG_ID))) {
+      await upsertDoc("consulting_engagements", {
+        id: TEST_ROLLBACK_ENG_ID,
+        name: "PUNCHLIST #145 rollback test engagement",
+        customer: "Test Customer #145",
+        companyId: null,
+        siteIds: [],
+        contactName: "",
+        people: [],
+        quoteId: null,
+        designIds: [],
+        installQuoteId: null,
+        status: "design",
+        phases: [],
+        milestones: [],
+        decisions: [],
+        meetings: [],
+        submittals: [],
+        documents: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
+    const priorTasks = await tasksForEngagement(TEST_ROLLBACK_ENG_ID);
+    const priorNotes = await notesForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(
+      priorTasks.length === 0 && priorNotes.length === 0,
+      "#145 rollback test: no leftover tasks/notes from a prior run (proves the rollback actually cleans up, not just this run's assertions)"
+    );
+
+    /* Minor (round 3 re-review): the "Nothing to capture." guard had no
+     * assertion of its own — only exercised incidentally by the rollback/
+     * refusal tests' non-empty inputs. */
+    const emptyCapture = await performCapture(
+      { engagementId: TEST_ROLLBACK_ENG_ID, text: "   ", attachments: [], tasks: [] },
+      { id: "u1", name: "Test Runner" }
+    );
+    ok(
+      !emptyCapture.ok && emptyCapture.error === "Nothing to capture.",
+      "#145 a capture with no text, no files, and no tasks is refused rather than writing an empty note"
+    );
+
+    let createCalls = 0;
+    const flakyDeps: CaptureDeps = {
+      createTask: async (taskInput, me) => {
+        createCalls++;
+        if (createCalls === 2) throw new Error("simulated task-write failure (#145 rollback test)");
+        return createTask(taskInput, me);
+      },
+      addNoteRecord,
+      softDeleteDoc,
+    };
+
+    let threw = false;
+    try {
+      await performCapture(
+        {
+          engagementId: TEST_ROLLBACK_ENG_ID,
+          text: "This capture must not survive a mid-capture failure",
+          attachments: [],
+          tasks: [
+            { title: "First task — created for real, then rolled back", assigneeUserId: null, dueAt: null },
+            { title: "Second task — the write throws here", assigneeUserId: null, dueAt: null },
+          ],
+        },
+        { id: "u1", name: "Test Runner" },
+        flakyDeps
+      );
+    } catch {
+      threw = true;
+    }
+    ok(threw, "#145 a mid-capture task-write failure rejects the whole capture rather than silently partially succeeding");
+    ok(createCalls === 2, "#145 the forced failure happened on the second task write, after the first really landed in the doc-store");
+
+    const tasksAfter = await tasksForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(tasksAfter.length === 0, "#145 rollback soft-deletes the task(s) already created before the failure");
+
+    const notesAfter = await notesForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(
+      notesAfter.length === 0,
+      "#145 rollback leaves no note behind — a half-written capture must never persist a note pointing at deleted tasks"
+    );
+  }
+
+  /* --- #145 D171: a capture carrying an unverifiable attachment writes
+   * NOTHING — the Critical fix's whole point, and it belongs in this
+   * task's own coverage, not only Task 9's validateFileRefsForEngagement
+   * unit tests (which check the validator; this checks captureAction's
+   * USE of it). A "blob" ref whose own pathname names a different
+   * engagement fails the structural half of the check with no network
+   * call needed, so this is hermetic. Reuses the rollback test's fixed
+   * engagement, with its own before/after empty-state assertions so this
+   * block proves the refusal on its own, independent of the block above. */
+  {
+    const priorTasks = await tasksForEngagement(TEST_ROLLBACK_ENG_ID);
+    const priorNotes = await notesForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(
+      priorTasks.length === 0 && priorNotes.length === 0,
+      "#145 attachment-refusal test: no leftover tasks/notes before this run"
+    );
+
+    const forgedRef: FileRef = {
+      kind: "blob",
+      pathname: "engagement-files/some-other-engagement/secret.pdf",
+      name: "secret.pdf",
+      mime: "application/pdf",
+      size: 1,
+    };
+    const refused = await performCapture(
+      {
+        engagementId: TEST_ROLLBACK_ENG_ID,
+        text: "This must never be saved",
+        attachments: [forgedRef],
+        tasks: [{ title: "This task must never be saved either", assigneeUserId: null, dueAt: null }],
+      },
+      { id: "u1", name: "Test Runner" }
+    );
+    ok(!refused.ok, "#145 a capture carrying an attachment that fails validateFileRefsForEngagement is refused, not silently accepted");
+    ok(
+      !refused.ok && !/engagement-files|Drive|storage path/i.test(refused.error),
+      "#145 the refusal message is generic — it does not leak the validator's internal storage-path/Drive wording to the caller"
+    );
+
+    const tasksAfterRefusal = await tasksForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(tasksAfterRefusal.length === 0, "#145 the refused capture created no task — validation runs before any write, not just before the note");
+
+    const notesAfterRefusal = await notesForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(notesAfterRefusal.length === 0, "#145 the refused capture created no note either");
   }
 
   /* --- Venue Assessments: record migration --- */
@@ -6325,6 +6468,23 @@ async function templateScheduleAsyncChecks(): Promise<void> {
     if (setProjectToClean) await removeTaskTemplateSet(setProjectToClean.id);
   }
 }
+
+/* ====== #145 D170: the Activity feed merges existing records ====== */
+const feed145 = mergeActivity({
+  notes: [
+    { id: "N-1", at: 300, text: "Call with Dana", by: "Jeff", attachments: [], taskIds: ["T-9"], system: false },
+    { id: "N-2", at: 500, text: "Milestone moved", by: "Jeff", attachments: [], taskIds: [], system: true },
+  ],
+  meetings: [{ id: "mt-1", at: 400, title: "Design review", attendees: "Dana, Jeff", minutes: "..." }],
+  decisions: [{ id: "dc-1", at: 200, by: "Jeff", decision: "Fire curtain in scope", context: "" }],
+  phaseAttachments: [{ id: "ed-1", addedAt: 100, name: "as-built.dwg", addedBy: "Chris", phaseName: "DD" }],
+});
+ok(feed145.length === 5, "#145 the feed merges notes, meetings, decisions and phase attachments with nothing new stored");
+ok(feed145[0].at === 500 && feed145[4].at === 100, "#145 the feed is newest first");
+ok(feed145[0].kind === "note" && feed145[0].system === true, "#145 a milestone-move note is marked system so the feed can style it apart");
+ok(feed145.find((e) => e.id === "N-1")?.taskIds.join(",") === "T-9", "#145 a note carries the tasks it spawned so a task's origin stays answerable");
+ok(feed145.filter((e) => e.kind === "meeting").length === 1, "#145 meetings appear without being copied into notes");
+ok(mergeActivity({ notes: [], meetings: [], decisions: [], phaseAttachments: [] }).length === 0, "#145 an empty engagement produces an empty feed, not a crash");
 
 /* ====== #145 D171: the file seam and its ownership check ====== */
 ok(engagementFolderPath("Cedar Grove Schools", "CE-1044") === "Peak Projects/Cedar Grove Schools/CE-1044", "#145 the Drive folder path is customer then engagement id");
