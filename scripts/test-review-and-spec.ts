@@ -8,6 +8,14 @@ import {
   IMPORT_MAX_CHUNKS_PER_RUN,
   isRateLimit,
 } from "@/lib/gmail/config";
+import {
+  pickSessionCookies,
+  challengeFor,
+  isChallenge,
+  mintHandoffCode,
+  redeemHandoffCode,
+  HANDOFF_TTL_MS,
+} from "@/lib/native-auth";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
   msOf as opMsOf,
@@ -3007,6 +3015,49 @@ async function xlsxFixture(): Promise<Buffer> {
   ws.addRow(["CS-40", 'Curtain track, 40" carrier, "heavy" duty', 42, 25.2, "ADC"]);
   ws.addRow(["CS-41", "Multi-line\ndescription", 10, 5, "ADC"]);
   return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+/* ---- native auth hand-off (spec 2026-09-21-native-auth-handoff) ---- */
+{
+  const secret = "spec-secret-not-real";
+  const secureSet = [
+    { name: "__Secure-authjs.callback-url", value: "x" },
+    { name: "__Secure-authjs.session-token.1", value: "part1" },
+    { name: "authjs.session-token", value: "insecure" },
+    { name: "__Secure-authjs.session-token.0", value: "part0" },
+  ];
+  const picked = pickSessionCookies(secureSet);
+  ok(
+    picked.map((c) => c.name).join(",") === "__Secure-authjs.session-token.0,__Secure-authjs.session-token.1",
+    "pickSessionCookies: prefers the __Secure- family, includes chunks in order, drops the insecure twin"
+  );
+  ok(
+    pickSessionCookies([{ name: "authjs.session-token", value: "v" }]).length === 1,
+    "pickSessionCookies: falls back to the plain family on http"
+  );
+  ok(pickSessionCookies([{ name: "other", value: "v" }]).length === 0, "pickSessionCookies: none -> []");
+
+  const verifier = "verifier-abc-123";
+  const challenge = challengeFor(verifier);
+  ok(challenge.length === 43 && /^[A-Za-z0-9_-]+$/.test(challenge), "challengeFor: 43-char base64url");
+  ok(challengeFor(verifier) === challenge, "challengeFor: deterministic");
+  ok(isChallenge(challenge) && !isChallenge("short") && !isChallenge(42), "isChallenge: shape check");
+
+  const cookies = [{ name: "__Secure-authjs.session-token", value: "eyJ.session" }];
+  const now = 1_800_000_000_000;
+  const code = mintHandoffCode({ cookies, challenge, next: "/field-work", now }, secret);
+  ok(!code.includes("eyJ.session"), "mintHandoffCode: cookie value is not visible in the code");
+  const good = redeemHandoffCode(code, verifier, secret, now + 5_000);
+  ok(good.ok && good.cookies[0].value === "eyJ.session" && good.next === "/field-work", "redeem: round trip returns cookies + next");
+  const wrong = redeemHandoffCode(code, "not-the-verifier", secret, now + 5_000);
+  ok(!wrong.ok && wrong.reason === "mismatch", "redeem: wrong verifier -> mismatch");
+  const late = redeemHandoffCode(code, verifier, secret, now + HANDOFF_TTL_MS + 1);
+  ok(!late.ok && late.reason === "expired", "redeem: past ttl -> expired");
+  const flipped = code.slice(0, -2) + (code.endsWith("A") ? "B" : "A") + code.slice(-1);
+  ok(!redeemHandoffCode(flipped, verifier, secret, now).ok, "redeem: tampered code -> not ok");
+  const otherKey = redeemHandoffCode(code, verifier, "another-secret", now);
+  ok(!otherKey.ok && otherKey.reason === "malformed", "redeem: different secret -> malformed");
+  ok(!redeemHandoffCode("garbage", verifier, secret, now).ok, "redeem: garbage -> not ok");
 }
 
 async function asyncChecks(): Promise<void> {
