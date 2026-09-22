@@ -48,6 +48,37 @@ export function hasCalendarScope(scope: string | null | undefined): boolean {
   return (scope || "").split(/\s+/).includes(CALENDAR_SCOPE);
 }
 
+/** Google Tasks scope (D146 — Google Tasks two-way sync for the Home Queue,
+ *  the cloud sibling of the Apple Reminders agent, D93). Same pattern as
+ *  CALENDAR_SCOPE: NOT in GMAIL_SCOPES, opt-in per personal mailbox via
+ *  Settings → Mailboxes → "Enable Google Tasks sync", which re-runs consent
+ *  WITH this scope appended (include_granted_scopes keeps the existing
+ *  Gmail — and Calendar, if granted — scopes). Remember: the Google Cloud
+ *  consent screen must also list this scope — see DEPLOY.md. */
+export const TASKS_SCOPE = "https://www.googleapis.com/auth/tasks";
+
+/** Does a stored grant (space-separated scope string) include Google Tasks? */
+export function hasTasksScope(scope: string | null | undefined): boolean {
+  return (scope || "").split(/\s+/).includes(TASKS_SCOPE);
+}
+
+/**
+ * Read-only Calendar scope for D148's "connect an additional Google account
+ * to subscribe to its calendars" feature (Calendar tab only). Distinct from
+ * CALENDAR_SCOPE above on purpose: that one is calendar.events (read/write)
+ * granted on a mailbox's OWN Gmail connection so the app can WRITE site-visit
+ * events and travel-time blocks to the signed-in user's primary calendar.
+ * This feature only ever reads someone else's calendar to display it — it
+ * never writes an event into an externally-connected account — so the
+ * narrower calendar.readonly scope is requested instead, and the connection
+ * this scope belongs to (calendarConnections) is independent of any mailbox:
+ * it doesn't require GMAIL_ENABLED, only that Google OAuth creds exist
+ * (googleConfigured() below), since it has nothing to do with mail.
+ * Remember: the Google Cloud consent screen must also list this scope — see
+ * DEPLOY.md.
+ */
+export const CALENDAR_READONLY_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+
 /** History-import depth on first connect (MASTER-QUESTIONS C3 — last 90 days). */
 export const IMPORT_WINDOW_DAYS = 90;
 

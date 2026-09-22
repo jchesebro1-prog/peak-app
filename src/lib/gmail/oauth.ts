@@ -74,22 +74,83 @@ export function verifyState(state: string): ConnectState | null {
   }
 }
 
+/* ---- signed state for the calendar-only connect flow (D148) -----------
+ * A SEPARATE state shape from ConnectState above: connecting an additional
+ * Google account for calendar subscriptions has no mailboxKey (it isn't a
+ * mailbox at all, and is often a different Google account than any mailbox
+ * the user has connected). Both flows share the SAME callback route
+ * (/api/gmail/callback) so no new redirect URI needs registering in Google
+ * Cloud Console — the callback tells them apart by trying this shape
+ * first. That disambiguation is a RUNTIME check, not just a TypeScript
+ * cast: both states are signed with the same stateSecret()/HMAC scheme (on
+ * purpose — reused, not reinvented), so a valid gmail ConnectState's bytes
+ * would also pass this function's signature check. The literal `purpose`
+ * field is what actually tells them apart at runtime; verifyCalendarConnect
+ * State rejects anything without it, even if the signature is valid. */
+
+export type CalendarConnectState = {
+  purpose: "calendar-connect";
+  userId: string; // who initiated the connect
+  n: string; // nonce
+};
+
+export function signCalendarConnectState(payload: Omit<CalendarConnectState, "n" | "purpose">): string {
+  const body: CalendarConnectState = {
+    purpose: "calendar-connect",
+    ...payload,
+    n: crypto.randomBytes(8).toString("hex"),
+  };
+  const json = Buffer.from(JSON.stringify(body)).toString("base64url");
+  const sig = crypto
+    .createHmac("sha256", stateSecret())
+    .update(json)
+    .digest("base64url");
+  return json + "." + sig;
+}
+
+export function verifyCalendarConnectState(state: string): CalendarConnectState | null {
+  const [json, sig] = (state || "").split(".");
+  if (!json || !sig) return null;
+  const expected = crypto
+    .createHmac("sha256", stateSecret())
+    .update(json)
+    .digest("base64url");
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(json, "base64url").toString("utf8")) as Partial<CalendarConnectState>;
+    // Runtime discriminator (see block comment above) — a signature match
+    // alone doesn't mean this is OUR shape, since the gmail ConnectState
+    // above is signed with the identical scheme.
+    if (parsed.purpose !== "calendar-connect" || !parsed.userId || !parsed.n) return null;
+    return parsed as CalendarConnectState;
+  } catch {
+    return null;
+  }
+}
+
 /* ---- flow ---- */
 
-/** Build the Google consent URL. `login_hint` pre-selects the mailbox
- *  account; `extraScopes` widens the grant (D77: the calendar opt-in re-runs
- *  consent with CALENDAR_SCOPE appended — include_granted_scopes keeps the
- *  Gmail grant either way). */
+/** Build the Google consent URL. `login_hint` pre-selects the account;
+ *  `extraScopes` widens the grant (D77: the calendar opt-in re-runs consent
+ *  with CALENDAR_SCOPE appended — include_granted_scopes keeps the Gmail
+ *  grant either way). `baseScopes` defaults to GMAIL_SCOPES (every existing
+ *  caller connects a mailbox); D148's calendar-only connect passes a
+ *  different base (just calendar.readonly) so that flow never asks for
+ *  Gmail access at all — it may not even be the same Google account as any
+ *  connected mailbox. */
 export function authorizeUrl(
   state: string,
   loginHint?: string,
-  extraScopes: string[] = []
+  extraScopes: string[] = [],
+  baseScopes: string[] = GMAIL_SCOPES
 ): string {
   const params = new URLSearchParams({
     client_id: googleClientId(),
     redirect_uri: callbackUrl(),
     response_type: "code",
-    scope: [...GMAIL_SCOPES, ...extraScopes].join(" "),
+    scope: [...baseScopes, ...extraScopes].join(" "),
     access_type: "offline", // → refresh token
     prompt: "consent", // force refresh-token issuance every time
     include_granted_scopes: "true",

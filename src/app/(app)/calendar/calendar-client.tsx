@@ -4,6 +4,8 @@ import { useMemo, useState, useSyncExternalStore, type CSSProperties } from "rea
 import Link from "next/link";
 import type { AgendaItem } from "@/lib/agenda";
 import EventModal, { type EventModalTarget } from "./event-modal";
+import CalendarFilterRail from "./calendar-filter-rail";
+import type { CalendarConnectionView } from "../calendar-actions";
 
 /**
  * Full-page calendar (S13 / D81, extended to day/week in the S13
@@ -61,6 +63,15 @@ function isGoogle(it: AgendaItem): boolean {
   return it.source === "google";
 }
 
+/** D148 — an "external" item (a subscribed calendar on an additional Google
+ *  account) renders in its own connection/calendar color rather than the
+ *  two hardcoded google/visit colors below, and is read-only here (no edit
+ *  modal — the app never writes to these accounts); clicking it opens
+ *  Google's own event page in a new tab when a link is available. */
+function isExternal(it: AgendaItem): boolean {
+  return it.source === "external";
+}
+
 /** Greedy interval-overlap column assignment, per connected cluster, so
  *  concurrent events in a day column sit side-by-side instead of stacking. */
 function layoutTimed(items: AgendaItem[]): Array<{ it: AgendaItem; col: number; cols: number }> {
@@ -103,6 +114,8 @@ export default function CalendarClient({
   items,
   calendarOn,
   gmailOn,
+  calendarConnections,
+  canConnectCalendar,
 }: {
   view: "month" | "week" | "day";
   year: number;
@@ -113,6 +126,12 @@ export default function CalendarClient({
   items: AgendaItem[];
   calendarOn: boolean;
   gmailOn: boolean;
+  /** D148 — the signed-in user's additional connected Google accounts +
+   *  their per-calendar visibility/color prefs, for the filter rail. */
+  calendarConnections: CalendarConnectionView[];
+  /** Whether "Connect an account" can be offered at all (googleConfigured()
+   *  server-side) — independent of gmailOn, see calendar-actions.ts. */
+  canConnectCalendar: boolean;
 }) {
   const mounted = useSyncExternalStore(
     emptySubscribe,
@@ -120,6 +139,7 @@ export default function CalendarClient({
     () => false
   );
   const [modalTarget, setModalTarget] = useState<EventModalTarget | null>(null);
+  const [railOpen, setRailOpen] = useState(false);
 
   const byDay = useMemo(() => {
     const map = new Map<string, AgendaItem[]>();
@@ -173,18 +193,35 @@ export default function CalendarClient({
   }
 
   function openItem(it: AgendaItem) {
-    if (!isGoogle(it)) return; // visits with no mirrored Google event have nothing to edit here
+    if (!isGoogle(it)) return; // visits/external items have nothing to edit here
     setModalTarget({ mode: "edit", eventId: it.id });
   }
 
+  /** #rrggbb → rgba(...) at the given alpha, for a light chip background
+   *  derived from an external calendar's own color (D148). Falls back to a
+   *  neutral tint if the color isn't a plain hex string (Google's
+   *  backgroundColor always is, but a hand-set colorOverride is validated
+   *  only to be one of the rail's own swatches, also always hex). */
+  function tint(hex: string, alpha: number): string {
+    const m = /^#([0-9a-f]{6})$/i.exec(hex);
+    if (!m) return `rgba(107,114,128,${alpha})`;
+    const n = parseInt(m[1], 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+  }
+
   function chipStyle(it: AgendaItem): CSSProperties {
+    const color = isExternal(it)
+      ? it.external!.color
+      : it.source === "visit"
+        ? "#1f7a52"
+        : "#3155a8";
     return {
       fontSize: 10.5,
       lineHeight: 1.35,
       fontWeight: 600,
-      color: it.source === "visit" ? "#1f7a52" : "#3155a8",
-      background: it.source === "visit" ? "#e8f3ee" : "#e9eefb",
-      border: `1px solid ${it.source === "visit" ? "#cfe6db" : "#d4ddf3"}`,
+      color,
+      background: isExternal(it) ? tint(color, 0.14) : it.source === "visit" ? "#e8f3ee" : "#e9eefb",
+      border: `1px solid ${isExternal(it) ? tint(color, 0.4) : it.source === "visit" ? "#cfe6db" : "#d4ddf3"}`,
       borderRadius: 5,
       padding: "2px 6px",
       marginBottom: 3,
@@ -210,6 +247,25 @@ export default function CalendarClient({
         <div key={it.key} onClick={(e) => { e.stopPropagation(); openItem(it); }}>
           {chip}
         </div>
+      );
+    }
+    if (isExternal(it)) {
+      // Read-only, and on a different Google account than this app writes
+      // to — clicking opens Google's own event page in a new tab instead of
+      // any in-app edit affordance.
+      return it.href ? (
+        <a
+          key={it.key}
+          href={it.href}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          style={{ display: "block", textDecoration: "none" }}
+        >
+          {chip}
+        </a>
+      ) : (
+        <div key={it.key}>{chip}</div>
       );
     }
     return it.href ? (
@@ -310,7 +366,17 @@ export default function CalendarClient({
                 onClick={() => openCreateAt(d.getFullYear(), d.getMonth(), d.getDate(), null)}
               >
                 {allDayItems.map((it) => (
-                  <div key={it.key} onClick={(e) => { e.stopPropagation(); openItem(it); }}>
+                  <div
+                    key={it.key}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isExternal(it)) {
+                        if (it.href) window.open(it.href, "_blank", "noreferrer");
+                      } else {
+                        openItem(it);
+                      }
+                    }}
+                  >
                     <div style={chipStyle(it)} title={it.title}>{it.title}</div>
                   </div>
                 ))}
@@ -350,10 +416,18 @@ export default function CalendarClient({
                       const endMin = Math.max(startMin + 15, new Date(it.endMs).getHours() * 60 + new Date(it.endMs).getMinutes());
                       const top = ((startMin - HOUR_START * 60) / 60) * HOUR_PX;
                       const h = ((endMin - startMin) / 60) * HOUR_PX;
+                      const extColor = isExternal(it) ? it.external!.color : null;
                       return (
                         <div
                           key={it.key}
-                          onClick={(e) => { e.stopPropagation(); openItem(it); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isExternal(it)) {
+                              if (it.href) window.open(it.href, "_blank", "noreferrer");
+                            } else {
+                              openItem(it);
+                            }
+                          }}
                           title={timeLabel(it) + " · " + it.title + (it.location ? " · " + it.location : "")}
                           style={{
                             position: "absolute",
@@ -361,16 +435,16 @@ export default function CalendarClient({
                             height: Math.max(16, h),
                             left: `calc(${(col / cols) * 100}% + 2px)`,
                             width: `calc(${100 / cols}% - 4px)`,
-                            background: it.source === "visit" ? "#e8f3ee" : "#e9eefb",
-                            border: `1px solid ${it.source === "visit" ? "#cfe6db" : "#d4ddf3"}`,
-                            color: it.source === "visit" ? "#1f7a52" : "#3155a8",
+                            background: extColor ? tint(extColor, 0.14) : it.source === "visit" ? "#e8f3ee" : "#e9eefb",
+                            border: `1px solid ${extColor ? tint(extColor, 0.4) : it.source === "visit" ? "#cfe6db" : "#d4ddf3"}`,
+                            color: extColor || (it.source === "visit" ? "#1f7a52" : "#3155a8"),
                             borderRadius: 5,
                             padding: "2px 5px",
                             fontSize: 10.5,
                             fontWeight: 600,
                             overflow: "hidden",
                             pointerEvents: "auto",
-                            cursor: isGoogle(it) ? "pointer" : "default",
+                            cursor: isGoogle(it) || (isExternal(it) && it.href) ? "pointer" : "default",
                           }}
                         >
                           {timeLabel(it)} {it.title}
@@ -433,10 +507,28 @@ export default function CalendarClient({
               + Add event
             </button>
           )}
+          {/* D148 — opens the filter rail: connect additional Google
+              accounts and toggle/color their calendars. Shows a count badge
+              once at least one is connected so the affordance isn't hidden
+              behind a plain label. */}
+          <button
+            className="pk-btn-outline"
+            style={{ fontSize: 12.5 }}
+            onClick={() => setRailOpen(true)}
+          >
+            Calendars{calendarConnections.length > 0 ? ` (${calendarConnections.length})` : ""}
+          </button>
         </div>
       </div>
 
       {modalTarget && <EventModal target={modalTarget} onClose={() => setModalTarget(null)} />}
+      <CalendarFilterRail
+        open={railOpen}
+        onClose={() => setRailOpen(false)}
+        connections={calendarConnections}
+        canConnect={canConnectCalendar}
+        connectHref="/api/gmail/connect?purpose=calendar-connect"
+      />
 
       {view === "month" ? (
         <div className="pk-card" style={{ overflow: "hidden" }}>

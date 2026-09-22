@@ -1,4 +1,5 @@
 import { accessTokenFor } from "@/lib/gmail/connections";
+import { accessTokenForConnection } from "./calendar-connections";
 import { presetFromRrule, rruleFor } from "./recurrence";
 
 /**
@@ -10,17 +11,26 @@ import { presetFromRrule, rruleFor } from "./recurrence";
  *
  * Everything targets the account's PRIMARY calendar (D76-C: personal
  * calendar; Jeff can share it from Google Calendar itself if he wants).
+ *
+ * D148 adds a SECOND token source (calendarConnections rows, for the
+ * Calendar tab's "subscribe to another account's calendars" feature) that
+ * reads arbitrary calendar ids on arbitrary connected accounts. Rather than
+ * widening every exported function's signature to accept either token
+ * source — which would touch every existing caller across schedule/
+ * actions.ts, service-calendar.ts, visit-invite.ts and calendar-actions.ts
+ * for no behavior change — the low-level fetch/error-handling is factored
+ * into callGoogleCalendarApi(token, ...), and each higher-level path (gcal
+ * for a mailbox, gcalExternal for a calendarConnections row) resolves its
+ * own token before calling it. Existing exports keep their exact signatures.
  */
 
 const CAL_BASE = "https://www.googleapis.com/calendar/v3";
 
-async function gcal<T>(
-  mailboxKey: string,
+async function callGoogleCalendarApi<T>(
+  token: string,
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
-  const token = await accessTokenFor(mailboxKey);
-  if (!token) throw new Error("Mailbox not connected: " + mailboxKey);
   const res = await fetch(CAL_BASE + path, {
     ...init,
     // The dashboard render awaits this — a hung Google endpoint must never
@@ -38,6 +48,29 @@ async function gcal<T>(
     );
   }
   return (await res.json()) as T;
+}
+
+async function gcal<T>(
+  mailboxKey: string,
+  path: string,
+  init: RequestInit = {}
+): Promise<T> {
+  const token = await accessTokenFor(mailboxKey);
+  if (!token) throw new Error("Mailbox not connected: " + mailboxKey);
+  return callGoogleCalendarApi<T>(token, path, init);
+}
+
+/** D148 — same shape as gcal() above, but resolves its token from a
+ *  calendarConnections row (lib/google/calendar-connections.ts) instead of
+ *  a gmail_connections mailbox. */
+async function gcalExternal<T>(
+  connectionId: string,
+  path: string,
+  init: RequestInit = {}
+): Promise<T> {
+  const token = await accessTokenForConnection(connectionId);
+  if (!token) throw new Error("Calendar connection not found or unauthorized: " + connectionId);
+  return callGoogleCalendarApi<T>(token, path, init);
 }
 
 /* ---- types (only the fields the app reads) ---- */
@@ -124,24 +157,11 @@ function toMs(t: GoogleEventTime | undefined, fallback: number): number {
   return fallback;
 }
 
-/** Upcoming events from the primary calendar, normalized and sorted.
- *  singleEvents expands recurring series into concrete instances. */
-export async function listUpcomingEvents(
-  mailboxKey: string,
-  opts: { timeMinMs: number; timeMaxMs: number; maxResults?: number }
-): Promise<CalendarEvent[]> {
-  const params = new URLSearchParams({
-    timeMin: new Date(opts.timeMinMs).toISOString(),
-    timeMax: new Date(opts.timeMaxMs).toISOString(),
-    singleEvents: "true",
-    orderBy: "startTime",
-    maxResults: String(opts.maxResults ?? 50),
-  });
-  const r = await gcal<{ items?: GoogleEvent[] }>(
-    mailboxKey,
-    "/calendars/primary/events?" + params.toString()
-  );
-  return (r.items || [])
+/** Shared items→CalendarEvent[] mapping — used by both listUpcomingEvents
+ *  (a mailbox's own primary calendar) and listEventsForCalendar (D148, an
+ *  arbitrary calendar on a calendarConnections account). */
+function toCalendarEvents(items: GoogleEvent[] | undefined): CalendarEvent[] {
+  return (items || [])
     .filter((e) => e.status !== "cancelled")
     .map((e) => ({
       id: e.id,
@@ -154,6 +174,82 @@ export async function listUpcomingEvents(
       htmlLink: e.htmlLink || "",
     }))
     .filter((e) => e.startMs > 0);
+}
+
+function eventsListParams(opts: { timeMinMs: number; timeMaxMs: number; maxResults?: number }): URLSearchParams {
+  return new URLSearchParams({
+    timeMin: new Date(opts.timeMinMs).toISOString(),
+    timeMax: new Date(opts.timeMaxMs).toISOString(),
+    singleEvents: "true",
+    orderBy: "startTime",
+    maxResults: String(opts.maxResults ?? 50),
+  });
+}
+
+/** Upcoming events from the primary calendar, normalized and sorted.
+ *  singleEvents expands recurring series into concrete instances. */
+export async function listUpcomingEvents(
+  mailboxKey: string,
+  opts: { timeMinMs: number; timeMaxMs: number; maxResults?: number }
+): Promise<CalendarEvent[]> {
+  const r = await gcal<{ items?: GoogleEvent[] }>(
+    mailboxKey,
+    "/calendars/primary/events?" + eventsListParams(opts).toString()
+  );
+  return toCalendarEvents(r.items);
+}
+
+/* ---- D148: an additional connected account's own calendars ------------ */
+
+export type ExternalCalendarListEntry = {
+  id: string;
+  summary: string;
+  primary?: boolean;
+  backgroundColor?: string;
+};
+
+async function fetchCalendarList(token: string): Promise<ExternalCalendarListEntry[]> {
+  const r = await callGoogleCalendarApi<{ items?: ExternalCalendarListEntry[] }>(
+    token,
+    "/users/me/calendarList"
+  );
+  return r.items || [];
+}
+
+/** The connected account's individual calendars (calendarList.list) — used
+ *  on demand from "Refresh calendars" in the management UI. Read-only: this
+ *  feature never writes to calendarList. */
+export async function listCalendarsForConnection(
+  connectionId: string
+): Promise<ExternalCalendarListEntry[]> {
+  const token = await accessTokenForConnection(connectionId);
+  if (!token) throw new Error("Calendar connection not found or unauthorized: " + connectionId);
+  return fetchCalendarList(token);
+}
+
+/** Same call, but with an access token already in hand — used right after
+ *  the OAuth callback exchanges its code, before any calendarConnections row
+ *  exists yet to resolve a token from. */
+export async function listCalendarsWithAccessToken(
+  token: string
+): Promise<ExternalCalendarListEntry[]> {
+  return fetchCalendarList(token);
+}
+
+/** Events from ONE calendar (by id, not necessarily "primary") on a
+ *  connected account — the read side of D148's subscribe feature. Never
+ *  writes; there is no insert/update/delete counterpart for external
+ *  connections (calendar.readonly scope wouldn't allow it anyway). */
+export async function listEventsForExternalCalendar(
+  connectionId: string,
+  calendarId: string,
+  opts: { timeMinMs: number; timeMaxMs: number; maxResults?: number }
+): Promise<CalendarEvent[]> {
+  const r = await gcalExternal<{ items?: GoogleEvent[] }>(
+    connectionId,
+    "/calendars/" + encodeURIComponent(calendarId) + "/events?" + eventsListParams(opts).toString()
+  );
+  return toCalendarEvents(r.items);
 }
 
 /** All-day dates are sent as bare YYYY-MM-DD (UTC-anchored, matching how the

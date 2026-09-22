@@ -12,6 +12,7 @@ import {
   GMAIL_MODIFY_SCOPE,
   gmailEnabled,
   hasCalendarScope,
+  hasTasksScope,
   personalKey,
   redirectHostMismatch,
   SHARED_KEYS,
@@ -73,6 +74,9 @@ export default async function SettingsPage() {
       // Calendar opt-in granted (D77) — drives the dashboard calendar and
       // direct site-visit writes for this mailbox's owner.
       calendarOn: !!c && hasCalendarScope(c.scope),
+      // Google Tasks opt-in granted (D146) — mirrors this mailbox owner's
+      // Home Queue into a "Peak" Google Tasks list, two-way for assignments.
+      tasksOn: !!c && hasTasksScope(c.scope),
     };
   });
 

@@ -18,7 +18,7 @@ export default async function AccountPage() {
   const prefs = await getPrefs(user.name);
   const invites = await invitesOn(user.name);
 
-  // D143 — "Based out of" (self-service; Settings -> Team's admin form
+  // D144 — "Based out of" (self-service; Settings -> Team's admin form
   // edits the same users.officeId field but needs manage_users).
   const [settings, myRow] = await Promise.all([getSettings(), getUser(user.id)]);
   const officeOptions = settings.offices.map((o) => ({ id: o.id, name: o.name }));
@@ -120,7 +120,7 @@ export default async function AccountPage() {
         </span>
       </div>
 
-      {/* ---- based out of (D143 — feeds Calendar's auto travel-time block) ---- */}
+      {/* ---- based out of (D144 — feeds Calendar's auto travel-time block) ---- */}
       <OfficePicker offices={officeOptions} initialOfficeId={myOfficeId} />
 
       {/* ---- to-do notifications ---- */}

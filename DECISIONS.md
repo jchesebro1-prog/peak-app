@@ -2948,3 +2948,333 @@ No schema/migration change — `generateBaseSheet`/`seedBlankSheet`/
 `starterSpaces` write into the existing `grid_projects`/`grid_sheets`
 doc-store collections and the existing `Calibration`/`GridSpace` shapes,
 nothing new.
+
+## D146. Google Tasks two-way sync for the Home Queue (2026-09-21)
+
+Jeff: "This needs to be implemented with google tasks... work that way [like
+the Apple Reminders queue sync]." The Reminders side (D93, punch #115) only
+covers Jeff's Mac; everyone else — and Jeff on days he's not near that
+Mac — gets nothing. Google Tasks has a real cloud REST API, so the same
+Home Queue mirror can run server-side for any team member who opts in.
+
+- **Reuse the personal Gmail connection + incremental scope, not a new
+  connection type.** `src/lib/gmail/config.ts` already has the shape for
+  this exact move (D77's `CALENDAR_SCOPE`/`hasCalendarScope()`, added to an
+  existing `personal:<userId>` `gmail_connections` row via
+  `include_granted_scopes` so re-consenting never drops the Gmail — or
+  Calendar — grant already on file). Google Tasks gets the identical
+  treatment: `TASKS_SCOPE` (`.../auth/tasks`) + `hasTasksScope()`, and
+  `/api/gmail/connect` now accepts `?tasks=1` alongside `?calendar=1` (both
+  may be passed together). No new table, no new mailbox-key scheme — a user
+  who wants Tasks sync re-runs the SAME connect flow their Gmail connection
+  already uses, with one more scope appended. Shared mailboxes (sales/
+  installs/info) don't get this — Tasks sync only makes sense for a person's
+  own queue, and `SHARED_KEYS` is retired anyway (D-whatever retired shared
+  boxes; kept empty in config.ts).
+- **List naming: "Peak", matching the Reminders agent.** `scripts/
+  reminders-agent.ts` defaults `QUEUE_AGENT_LIST` to "Peak". `src/lib/
+  google/tasks.ts` hardcodes the same name (`PEAK_LIST_NAME`) rather than
+  making it configurable — one fewer env var, and a person who ends up using
+  both integrations (unlikely but possible) sees one familiar list name
+  either place.
+- **Two-way restricted to `source: "assignment"` items**, identically to
+  the Reminders agent and for the identical reason: `/api/queue`'s own
+  write-back check only allows completing `assignment:*` keys, so even a
+  bug in the Tasks sync can't approve a review or close a milestone by
+  checking off a mirrored task. `Assignment.doneVia` (`src/lib/stores/
+  assignments.ts`) widens from `"app" | "reminders" | null` to add
+  `"google-tasks"` — a type-only change, no migration; `setAssignmentDone`'s
+  `via` parameter widens to match.
+- **Triggered from the existing Gmail cron, not a new one.**
+  `vercel.json` has exactly one cron entry today (`/api/gmail/sync`, daily
+  at noon, `CRON_SECRET`-gated) — there is no 5-minute Gmail cron in this
+  repo despite older doc comments describing that cadence; whatever's true
+  of a hosting tier's cron limits, adding a second entry is more moving
+  parts than this needs. `syncAllGoogleTasks()` (new,
+  `src/lib/google/tasks-sync.ts`) runs as an extra step inside `/api/gmail/
+  sync`'s existing `GET` handler, wrapped in its own try/catch so a Tasks
+  failure can never fail the Gmail sync that route exists for. It fans out
+  over every `gmail_connections` row with `hasTasksScope(scope)` true,
+  resolving each to a team-member name via `getUser()` (the `assignee`
+  convention `loadQueue()` already keys on) and calling
+  `syncGoogleTasksForUser(userId)`.
+- **Dedupe marker reused verbatim.** Google Tasks' `notes` field gets the
+  same `peak-queue-key: <key>` line `reminders-agent.ts` writes into a
+  Reminders body, re-derived from Google's list on every run — same
+  debugging story across both integrations (grep the task/reminder body for
+  the key).
+- **Known, deliberate gap vs. Reminders: no hand-delete ledger.** The
+  Reminders agent keeps a small local JSON ledger whose only job is telling
+  "hand-deleted, still open" apart from "never created" (Reminders' own
+  state can't distinguish them). This module has no equivalent — deleting a
+  mirrored Google Task outright gets it recreated next run. Building the
+  ledger equivalent here would mean a new doc-store collection (a real
+  schema change) for an edge case nobody asked for; checking a task off
+  (the supported, and expected, way to act on one) works correctly without
+  it. Revisit if hand-deleting mirrored tasks turns out to be a real habit.
+- **No schema/migration change.** Everything needed fits in the existing
+  `gmail_connections.scope` string (the new scope literal) plus the
+  `doneVia` type widening above (TypeScript-only). `db:generate` was not
+  run.
+
+**Files:** `src/lib/gmail/config.ts`, `src/app/api/gmail/connect/route.ts`,
+`src/lib/google/tasks.ts` (new), `src/lib/google/tasks-sync.ts` (new),
+`src/app/api/gmail/sync/route.ts`, `src/lib/stores/assignments.ts`,
+`src/app/(app)/settings/page.tsx`, `src/app/(app)/settings/settings-client.tsx`.
+
+## D147. Grid Task 2 — "generate starting layout from dims" seeds placeholder devices, not guessed SKUs (2026-09-21)
+
+Punch #38 (Task 2 of 6, per
+`docs/superpowers/plans/2026-09-21-grid-generated-base-sheet-plan.md`),
+built on Task 1's generated base sheet (D145). New `seedStartingLayoutAction`
+translates `compute(a)`'s real fixture/curtain quantities — the same numbers
+the Quick Design BOM already prices — into real, editable `GridPlacement`s
+on the base sheet, gated on `project.intake.measurementBased` and confirmed
+before writing (editor.tsx's "Generate starting layout" trigger).
+
+- **No catalog SKU is invented — placeholder placements, exactly per
+  punch #52's rule.** The plan's own recon flagged this as the highest-risk
+  part of the build: there is no reliable mapping from "compute() says 2
+  electrics" to one specific catalog part. The Grid's own device catalog
+  (`grid_catalog`/`GridSymbol`, `src/lib/stores/grid-catalog.ts`) makes this
+  worse, not better — it's normally seeded 1:1 from the ~10.7k real pricing
+  rows, so there is no generic "a Par" symbol to point at either (the four
+  `GRID-*` generic symbols in that file only get created when the pricing
+  catalog is empty, which it never is in practice). Rather than picking an
+  arbitrary specific manufacturer SKU and presenting it as "the" answer,
+  every seeded placement's `partId` is a stable, obviously-non-catalog
+  placeholder (`grid-seed:<system-function>`, `SEED_PART_PREFIX` in the new
+  `src/lib/design/grid-seed.ts`) that can never resolve against
+  `parts`/`grid_catalog`. The placement's real, human label (e.g. "Par",
+  "Grand drape" — reused verbatim from `compute()`'s own BOM item
+  descriptions) rides on the EXISTING `category` field instead — punch
+  #41/#48's "assign now, consume later" field turns out to be exactly the
+  right home for "this needs a part." A user resolves one the same way they
+  always fix a wrong device today: delete the placement and drop a real
+  catalog part in its place (no new "reassign part" action was built — none
+  existed before this task either).
+  - Known, accepted rough edge from this choice: `grid-bom.ts`'s existing
+    "removed part" fallback copy (`` `${partId} (removed part — no longer
+    in the catalog)` ``) will show for any seeded-but-unresolved placement
+    that reaches a BOM/quote screen, worded for a part that used to exist
+    rather than one that never did. Not fixed here — `grid-bom.ts` and
+    `createDraftQuoteAction` are Task 5's extraction target, not Task 2's,
+    and copy-only. The editor's own device marker and detail panel (both
+    touched by this task) DO show the friendly category label and an
+    explicit "delete and drop a real catalog part here" message instead of
+    that fallback — see `isSeedPlaceholder()`.
+  - **Fixed on review, same day:** minting a quote before resolving every
+    seeded placeholder would have gotten $0 BOM lines for them silently
+    (`bomTotals` falls back to `0` for an unresolved `partId`) — the exact
+    "unresolved input silently zeros a real number" shape #64 already ruled
+    out for fabric weight. `createDraftQuoteAction` now hard-fails with a
+    named list of the still-unresolved devices (by their `category` label)
+    instead of pricing them at zero and letting a quote go out short. The
+    Task-5 `grid-bom.ts`/`createDraftQuoteAction` extraction (still open)
+    should carry this guard forward rather than drop it.
+- **Positions reuse `buildPlanProscenium`'s own rigged-electrics/curtain
+  fracs, generalized off `prosGeom`/`churchGeom`'s exported `stage` rect —
+  not re-derived.** Lighting fixtures are spread across the venue's
+  electrics rows at the SAME per-row fraction
+  (`(electrics - j) / (electrics + 1)`) and the same within-row width
+  spacing plan-svg.tsx's decorative dots use, but sized to compute()'s REAL
+  per-type fixture quantity (Par/Front/Cyc/Side/Automated) instead of the
+  cosmetic dot count — this is the actual "quantities become real devices"
+  fix the spec asked for. Curtains reuse the exact fixed fracs
+  `buildPlanProscenium` hardcodes (0.95 grand drape, 0.5 mid traveler,
+  [0.74, 0.48, 0.22] border/legs, 0.05 cyc/scenery) rather than scaling with
+  the BOM's depth-block-multiplied qty — those fracs are a fixed schematic
+  set with no natural extension to "N more of them," and inventing new
+  curtain positions would be exactly the un-founded geometry this task was
+  told to avoid.
+- **Scoped to Lighting + Curtains only.** Audio/Video/Rigging/Acoustical/Pit
+  have no per-device position anywhere in this codebase — `buildPlan()`
+  prices them as lump BOM totals, never draws an individual mark for one.
+  Seeding those would mean inventing brand-new plan-view geometry from
+  scratch, which is the opposite of this task's mandate. Follow-up, not
+  built here.
+- **Three more accepted, low-probability rough edges from review**, in the
+  same spirit as the above (not fixed, since each needs meaningfully more
+  machinery than this task's mandate for a cosmetic or user-recoverable
+  failure mode): the curtain fracs above are copy-pasted literals rather
+  than an imported reference to `plan-svg.tsx`'s own constants, so the two
+  could silently drift apart if that file's schematic positions ever
+  change; a dimension change followed by a re-run only ADDS the delta and
+  never removes now-excess placements from a shrunk quantity (the user
+  deletes the extras by hand, the same as removing any wrong device today);
+  and `addPlacements()`'s single-batch `patchDoc` has no explicit item-count
+  ceiling, bounded in practice only by `compute()`'s own realistic output.
+- **flat/blackbox/gym/arena get a fallback stage rect, not real geometry** —
+  literally the same `{x:0.2,y:0.12,w:0.6,h:0.28}` fraction
+  `starterSpaces()` (D145) already uses for those kinds' "Stage" Space, for
+  the identical reason D145 gave: those `buildPlan*` functions compute their
+  room/platform rect as private locals with no exported equivalent to
+  `prosGeom`/`churchGeom`, and reverse-engineering each one's private
+  margins for a second feature is real geometry work this task didn't scope
+  for either.
+- **Additive re-run is a true per-instance diff, not a coarse "skip if
+  anything's already seeded" guard.** Every `GridPlacement` created by this
+  action carries a new `seededFrom` key (e.g. `"lighting:par:2"`,
+  `"curtains:border:1"`) — stable identity independent of its position, so a
+  hand-dragged seeded device is still recognized as seeded. A re-run (e.g.
+  after the user edits dims and re-saves intake, changing compute()'s
+  counts) diffs the freshly-derived set against every `seededFrom` already
+  on the project and adds only the genuinely new keys. Never auto-deletes:
+  if a dimension change means fewer fixtures are implied, the excess
+  previously-seeded devices stay on the plan for the user to remove by
+  hand — consistent with every other Grid mutation being an explicit,
+  reversible user action (revisions are append-only; nothing here silently
+  discards a prior placement).
+- **New bulk `addPlacements()`, not N calls to `addPlacement()`.** A single
+  seed run can place on the order of a hundred devices (fixture qty maxes
+  are unbounded by the seeding logic itself, though the estimator's own
+  `LIM` dimension clamps keep the real-world ceiling well under that); one
+  `patchDoc` for the whole batch avoids dozens of sequential JSONB rewrites
+  for one user action.
+- **The client-side confirm count runs the SAME pure `deriveSeedPlacements`
+  the server action does** (editor.tsx's `pendingSeed`), so the confirm
+  prompt's "adds N devices" always matches what the click will actually
+  write, and a no-op re-run says "already up to date" instead of silently
+  doing nothing.
+
+No schema/migration change — `GridPlacement.seededFrom` is a new optional
+field inside the existing `grid_projects` JSONB doc, not a relational
+column. `db:generate` was not run.
+
+**Files:** `src/lib/design/grid-seed.ts` (new), `src/lib/stores/
+grid-projects.ts` (`GridPlacement.seededFrom`, `addPlacements`),
+`src/app/(app)/design/grid/[id]/actions.ts` (`seedStartingLayoutAction`),
+`src/app/(app)/design/grid/[id]/editor.tsx` (trigger + confirm, placeholder-
+aware marker/detail-panel labels), `src/app/(app)/design/grid/[id]/page.tsx`
+(`measurementBased` passed to the editor).
+
+## D148. Connect additional Google accounts to subscribe to their calendars — Calendar tab only (2026-09-21)
+
+Punch #117 (new; closes the "multiple calendars" + "slide-out filter rail"
+parts of #108 — the "shared team calendar" part of #108 stays open, see
+below). Jeff: "We need a way to log into multiple google accounts and
+subscribe to other calendars via the calendar tab only so you can sync
+other calendars in one place." Distinct from D77/D76's existing "Enable
+calendar" opt-in, which reads the ONE Google account already tied to a
+mailbox's Gmail connection — this is about connecting EXTRA accounts (a
+personal Gmail, a family calendar, a shared team calendar's owning
+account, ...) purely to view their calendars, with no mail semantics.
+
+- **New `calendar_connections` table, not a row in `gmail_connections`.**
+  That table's primary key (`mailboxKey`) and shape (`historyId`,
+  `initialImportDone`, `lastSyncAt`) are Gmail-inbox-import specific and
+  would be actively misleading here: a calendar-only connection has no
+  inbox, isn't necessarily even the signed-in user's own Peak-login
+  Google account (Google's consent screen is shown with no `login_hint`,
+  on purpose, so the user can pick ANY account), and is always personal to
+  whoever connected it — never a shared mailbox. `calendars` (JSONB) holds
+  the discovered `calendarList.list` entries plus the user's own
+  visible/colorOverride prefs per sub-calendar, on the same row as the
+  connection rather than a separate table: the two are always read and
+  written together, and the list is small (a handful of calendars per
+  account) — nothing ever needs to query one sub-calendar across users.
+- **Read-only scope (`calendar.readonly`), never `calendar.events`.** This
+  feature subscribes/views; it never writes an event into someone else's
+  externally-connected account. `addCalendarEventAction`'s existing
+  travel-time-block feature (D144) is untouched and keeps writing only to
+  the signed-in user's OWN primary mailbox calendar via the existing
+  `CALENDAR_SCOPE`/`gmail_connections` path.
+- **OAuth mechanics reused, not reimplemented — but folded into the
+  EXISTING gmail connect/callback routes with a discriminated state,
+  rather than a new route pair.** `exchangeCode`/`refreshAccessToken`/
+  `fetchAccountEmail` (lib/gmail/oauth.ts) are called verbatim — they were
+  already generic. `authorizeUrl` gained an optional `baseScopes` param
+  (defaults to `GMAIL_SCOPES`, so every existing caller is unaffected) so
+  this flow can request `calendar.readonly` alone instead of the Gmail
+  scope bundle. State signing is a NEW parallel type
+  (`CalendarConnectState`, `signCalendarConnectState`/
+  `verifyCalendarConnectState`) rather than widening the existing
+  `ConnectState` — same HMAC scheme (`stateSecret()`, reused) but a
+  distinct, explicit `purpose: "calendar-connect"` literal that the
+  callback route checks at RUNTIME (not just via a TypeScript cast, since
+  both state shapes are signed with the same secret and a valid
+  gmail-connect state's bytes would otherwise also pass a naive signature
+  check). `/api/gmail/connect?purpose=calendar-connect` and the existing
+  `/api/gmail/callback` (which tries `verifyCalendarConnectState` FIRST,
+  before its `gmailEnabled()` gate) handle both flows — deliberately no
+  new redirect URI, so nothing new needs registering in Google Cloud
+  Console's OAuth client; only the new scope needs adding to the consent
+  screen's scope list (see "Jeff-side" note below).
+- **`lib/google/calendar.ts`'s low-level fetch was generalized; its
+  higher-level exports were NOT.** `gcal()`'s fetch/error-handling was
+  extracted into `callGoogleCalendarApi(token, ...)`, shared by the
+  existing mailbox-keyed `gcal()` and a new `gcalExternal()` that resolves
+  its token from a `calendar_connections` row instead. The existing
+  exported functions (`listUpcomingEvents`, `insertEvent`, `getEvent`,
+  `updateEvent`, `deleteEvent`, `upsertManagedEvent`, `removeManagedEvent`)
+  keep their exact signatures — widening them to accept either token
+  source would have touched every caller across `schedule/actions.ts`,
+  `service-calendar.ts`, `visit-invite.ts` and `calendar-actions.ts` for no
+  behavior change. Instead, two new read-only exports:
+  `listCalendarsForConnection`/`listCalendarsWithAccessToken`
+  (`calendarList.list`) and `listEventsForExternalCalendar` (arbitrary
+  `calendarId`, not hardcoded `primary`) — sharing `toCalendarEvents()`'s
+  mapping logic with `listUpcomingEvents`.
+- **Default visibility on connect: primary calendar on, everything else
+  off.** Same "add noise gradually" reasoning as other opt-in defaults in
+  this codebase — a fresh Google account can have a dozen auto-subscribed
+  holiday/shared calendars, and showing all of them immediately would
+  bury the one calendar the user actually wanted. `refreshCalendarList`
+  (a "Refresh calendars" action in the rail) applies the same rule to any
+  newly-discovered calendar on a later refresh, while calendars the user
+  already toggled keep their prefs.
+- **`loadAgendaRange` (`lib/agenda.ts`) gained a third `AgendaItem.source`,
+  `"external"`,** carrying `{connectionId, calendarId, color}`. No dedup is
+  attempted against `"google"`/`"visit"` — an externally-subscribed
+  calendar is by definition not an account anything else here writes to
+  or mirrors, so there's no id/iCalUID relationship to de-duplicate
+  against. Independent of `gmailEnabled()`/`GMAIL_ENABLED`: a deployment
+  with Gmail off entirely can still have calendar connections, since this
+  feature needs only `googleConfigured()` (the shared Google OAuth client
+  creds), not the Gmail opt-in.
+- **Management UI: a right-side slide-out filter rail on the Calendar tab
+  itself** (`calendar-filter-rail.tsx`, opened from a new "Calendars"
+  button in `calendar-client.tsx`'s header) — not the Account page. Jeff's
+  own phrasing ("via the calendar tab only") and punch #108's original ask
+  (a slide-out filter sidebar) both pointed here directly, and the rail's
+  job (connect/disconnect accounts, toggle each sub-calendar's visibility,
+  pick a color) is naturally scoped to the Calendar tab rather than a
+  general account setting. This closes the "toggle and add calendars" +
+  "filter sidebar that slides out" parts of punch #108.
+- **NOT built: a shared team calendar anyone can add events to.** Punch
+  #108 also asked for "a shared calendar option that allows people to add
+  the event to the shared calendar for group events" — that's a distinct,
+  bigger feature (either a real shared Google Calendar someone owns, or a
+  new Peak-side shared-events collection) with its own write/permission
+  model, not a subscribe-only read feature. Left open; #108's entry is
+  updated to reflect exactly this split.
+- **Jeff-side Google Cloud action needed, same shape as every prior
+  scope addition (Gmail/Calendar-events/Tasks):** the OAuth consent
+  screen's scope list needs `.../auth/calendar.readonly` added before this
+  works in production, the same way `calendar.events` (D77) and
+  `tasks` (D146) each needed adding. No NEW redirect URI is needed (see
+  above) — that part is simpler than the Gmail/Tasks scope additions were.
+  For a non-Workspace ("External" user type) OAuth consent screen still in
+  "Testing" mode, `calendar.readonly` is a non-sensitive/recommended scope
+  Google generally allows without a verification review; if the screen has
+  already gone through verification for the broader `calendar.events`
+  scope, adding the narrower `calendar.readonly` alongside it should not
+  trigger a new review. This is Jeff's action to confirm in his own Cloud
+  console, not something verifiable from this repo.
+
+**Files:** `src/db/schema.ts` (`calendarConnections` table,
+`CalendarSubscription` type; migration `drizzle/0019_sleepy_dust.sql`),
+`src/lib/gmail/oauth.ts` (`authorizeUrl` baseScopes param,
+`signCalendarConnectState`/`verifyCalendarConnectState`),
+`src/lib/gmail/config.ts` (`CALENDAR_READONLY_SCOPE`),
+`src/lib/google/calendar-connections.ts` (new), `src/lib/google/
+calendar.ts` (`callGoogleCalendarApi`/`gcalExternal`,
+`listCalendarsForConnection`/`listCalendarsWithAccessToken`/
+`listEventsForExternalCalendar`), `src/app/api/gmail/connect/route.ts`
+(`startCalendarConnect`), `src/app/api/gmail/callback/route.ts`
+(`finishCalendarConnect`), `src/lib/agenda.ts` (`AgendaItem.source`
+`"external"`), `src/app/(app)/calendar-actions.ts` (connection/visibility/
+color/disconnect/refresh actions), `src/app/(app)/calendar/calendar-
+client.tsx` (external item rendering, "Calendars" button),
+`src/app/(app)/calendar/calendar-filter-rail.tsx` (new),
+`src/app/(app)/calendar/page.tsx` (fetches initial connections).

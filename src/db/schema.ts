@@ -121,6 +121,60 @@ export const gmailLabels = pgTable(
 export type GmailLabelRow = typeof gmailLabels.$inferSelect;
 export type NewGmailLabelRow = typeof gmailLabels.$inferInsert;
 
+/**
+ * One of a connected Google account's individual calendars (calendarList
+ * .list), carrying the connecting user's own visibility + color preference
+ * for it — see calendarConnections below.
+ */
+export type CalendarSubscription = {
+  id: string; // Google calendar id (an email-shaped string, or "primary")
+  summary: string; // display name, as Google reports it
+  backgroundColor?: string; // Google's own swatch color, if it reported one
+  visible: boolean; // user preference — shows on the Calendar tab when true
+  colorOverride?: string; // user-chosen color; takes precedence over backgroundColor
+};
+
+/**
+ * Additional Google Calendar-only connections (D148) — lets a user connect
+ * MORE Google accounts (their own personal Gmail, a family calendar, a
+ * shared team calendar's owning account, ...) purely to subscribe to and
+ * view that account's calendars from the Calendar tab. Deliberately NOT
+ * folded into gmailConnections: that table's primary key (mailboxKey) and
+ * shape (historyId/initialImportDone/lastSyncAt) are Gmail-inbox-import
+ * specific, and this feature has no inbox, no send, and often isn't even
+ * the signed-in user's own address — Google's consent screen accepts
+ * whatever account the user picks, with no login_hint tying it to their
+ * Peak identity. One row per connected external account, always owned by
+ * exactly one Peak user (userId) — an additional account is personal to
+ * whoever connected it, never shared across the team.
+ *
+ * `calendars` is the discovered list of that Google account's individual
+ * calendars, each carrying the user's own visibility + color preference.
+ * Kept on this row rather than a separate table: the two are always read
+ * and written together (toggle a calendar's visibility → rewrite this
+ * JSON), and the list is small (a handful of calendars per account) — no
+ * query ever needs to join against just one sub-calendar across users.
+ */
+export const calendarConnections = pgTable(
+  "calendar_connections",
+  {
+    id: text("id").primaryKey(), // 'cc-' + base36
+    userId: text("user_id").notNull(), // who connected it — always the signed-in user
+    googleEmail: text("google_email").notNull(), // the Google account that authorized (may differ from userId's own login)
+    refreshToken: text("refresh_token").notNull(), // encrypted (lib/gmail/crypto.ts — reused verbatim)
+    accessToken: text("access_token"), // encrypted, cached until expiry
+    expiresAt: bigint("expires_at", { mode: "number" }), // access-token expiry (epoch-ms)
+    scope: text("scope"), // granted scope string (calendar.readonly)
+    calendars: jsonb("calendars").$type<CalendarSubscription[]>().notNull().default([]),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => [index("calendar_connections_user_idx").on(t.userId)]
+);
+
+export type CalendarConnectionRow = typeof calendarConnections.$inferSelect;
+export type NewCalendarConnectionRow = typeof calendarConnections.$inferInsert;
+
 /* ------------------------------------------------------------------ *
  * Identity core (Daylite parity Phase 1, D85).
  * Design: docs/superpowers/specs/2026-07-19-daylite-parity-design.md §4.

@@ -2964,7 +2964,7 @@ field already exist; the work is a sell-price input + deciding A (line distribut
 
 ---
 
-## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — IN PROGRESS 2026-09-21 (Task 1 of 6 shipped, D145) — generated base sheet
+## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — IN PROGRESS 2026-09-21 (Tasks 1–2 of 6 shipped, D145, D147) — generated base sheet + seeding action
 
 **Area:** The Grid (`/design/grid`), sheet handling; shared `VenueDims`.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
@@ -2990,11 +2990,31 @@ prompts for a calibration step; `createProject()` no longer pre-seeds a sheet at
 "I have my own plan, skip measurements" path still gets the old blank fallback
 (`seedBlankSheet()`). Starter Spaces are geometry-derived for proscenium/church venues;
 flat/blackbox/gym keep the old fixed-fraction Spaces (follow-up, not a regression — see D145).
-**Remaining (Tasks 2–6, still OPEN):** seeding action, real-plan-upload as a separate sheet,
+**Task 2 shipped (D147):** an explicit "Generate starting layout" action
+(`seedStartingLayoutAction`, gated on `intake.measurementBased`, confirmed
+client-side before writing) paints real, editable `GridPlacement`s from
+`compute(a)`'s real fixture/curtain quantities, at the same positions
+`buildPlanProscenium` already draws its rigged electrics/curtains at
+(generalized off `prosGeom`/`churchGeom`'s `stage` rect). No catalog SKU is
+guessed (punch #52's rule): seeded devices carry a non-catalog placeholder
+`partId` (`src/lib/design/grid-seed.ts`) and their real human label (e.g.
+"Par", "Grand drape") on the existing `category` field, resolved later the
+same delete-and-replace way any wrong device is fixed today. Scoped to
+Lighting + Curtains — the only two systems with an established per-device
+plan position anywhere in this codebase. Re-running is a true per-instance
+diff (new `GridPlacement.seededFrom` key), never a silent replace, never
+auto-deletes. New bulk `addPlacements()` writes the whole batch in one
+`patchDoc`. See D147 for the full trade-offs, including two accepted rough
+edges: `grid-bom.ts`'s "removed part" copy shows for an unresolved seeded
+placement, and minting a quote before resolving every placeholder currently
+prices those lines at $0 with no guard (flagged for Task 5 or a follow-up,
+not fixed here).
+
+**Remaining (Tasks 3–6, still OPEN):** real-plan-upload as a separate sheet,
 artifact derivation (equipment/lineset schedule + riser), the estimator↔Grid BOM seam, and
 retiring the estimator's own drawing tabs once parity is reached.
 
-**Status:** IN PROGRESS — Task 1 of 6 shipped 2026-09-21 (D145); Tasks 2–6 open per the plan.
+**Status:** IN PROGRESS — Tasks 1–2 of 6 shipped 2026-09-21 (D145, D147); Tasks 3–6 open per the plan.
 
 ---
 
@@ -5546,7 +5566,7 @@ client — add the `tasks` scope), complete-in-either-place closes both, reassig
 Open questions for Jeff: one list per person or one shared "Quartzite" list; whether every derived
 item syncs or only assignments/reminders; due-date source. Spec before code.
 
-## 108. Calendar: multiple calendars, slide-out filter rail, shared team calendar — OPEN, NEEDS DESIGN
+## 108. Calendar: multiple calendars, slide-out filter rail, shared team calendar — PARTIALLY DONE 2026-09-21 (D148, #117); shared calendar still OPEN
 
 **Reported:** 2026-09-21 (Jeff): toggle and add calendars to the calendar view; a filter sidebar on
 the right that slides out to expose the different calendars; a shared calendar people can add group
@@ -5560,6 +5580,18 @@ calendar. Google Calendar scope enablement is still the "separate follow-up" not
 right-hand slide-out rail with a color swatch per calendar, plus one shared Peak calendar (a Google
 calendar owned by the shared mailbox, or a Peak-side `events` collection — Jeff's call) with "add to
 shared calendar" in the event modal. Spec before code; pairs with #107's scope work.
+
+**Shipped 2026-09-21 (see #117, D148):** connect additional Google accounts and subscribe to their
+individual calendars from a right-hand slide-out filter rail on the Calendar tab, with per-calendar
+visibility toggles and color swatches, merged into the same agenda feed as a new `"external"`
+`AgendaItem` source. This closes the "toggle and add calendars" + "filter sidebar that slides out"
+parts of this ask.
+
+**Still OPEN — not built by #117:** the "shared calendar option that allows people to add the event
+to the shared calendar for group events" part. That's a distinct, bigger feature (either a real
+Google Calendar someone owns and the team writes to, or a new Peak-side shared-events collection)
+with its own write/permission model — a subscribe-only read feature doesn't cover it. Needs its own
+spec (design the write/ownership model first) before code, same as this item originally asked.
 
 ## 109. Inbox: label color coding + visual cleanup — OPEN (extends #96)
 
@@ -5686,3 +5718,76 @@ itself (no sibling READMEs exist there).
 
 **Needs from Jeff to go live:** `QUEUE_API_TOKEN` set on the deployed app's env and on the Mac
 that will run this, and the script scheduled locally (launchd or cron) — see the doc comment.
+
+## 116. Google Tasks two-way sync for the Home Queue (D146) — DONE 2026-09-21
+
+Jeff: "This needs to be implemented with google tasks... work that way [like the Apple Reminders
+queue sync]." #115 (Reminders) only reaches Jeff's own Mac; this is the cloud-side equivalent for
+anyone who connects Google Tasks, running as a server-side scheduled sync instead of a local
+script.
+
+**Shipped:** `TASKS_SCOPE`/`hasTasksScope()` in `src/lib/gmail/config.ts`, matching D77's Calendar
+opt-in pattern exactly — `/api/gmail/connect` now takes `?tasks=1` (combinable with `?calendar=1`)
+to re-run consent on a personal mailbox's existing `gmail_connections` row with the Tasks scope
+appended (`include_granted_scopes` keeps Gmail/Calendar). `src/lib/google/tasks.ts` is a thin
+zero-dep Google Tasks v1 REST wrapper (find-or-create the "Peak" list — same name as the Reminders
+agent's list — list/insert/complete/delete tasks), mirroring `google/calendar.ts`'s `gcal` pattern.
+`src/lib/google/tasks-sync.ts` implements the same reconciliation model as
+`scripts/reminders-agent.ts`: mirror every open Home Queue item into "Peak" (dedup via a
+`peak-queue-key: <key>` marker in the task's notes, same convention as the Reminders agent),
+complete the mirror when the server-side item closes, and write back
+`setAssignmentDone(id, true, "google-tasks")` only for `source: "assignment"` items checked off in
+Google Tasks — per `/api/queue`'s own write-back restriction. Triggered from the existing
+`/api/gmail/sync` cron (no new `vercel.json` entry) via `syncAllGoogleTasks()`, isolated in its own
+try/catch. `Assignment.doneVia` widened to add `"google-tasks"` (type-only, no migration). Settings
+→ Mailboxes gained an "Enable Google Tasks sync" toggle beside the existing "Enable calendar" one.
+
+**Known gap (documented, not fixed):** no hand-delete ledger — a Google Task deleted outright (not
+checked off) gets remirrored on the next run, unlike the Reminders agent's local ledger. Building
+that equivalent would need a new doc-store collection for an edge case nobody's hit yet.
+
+**Files:** `src/lib/gmail/config.ts`, `src/app/api/gmail/connect/route.ts`, `src/lib/google/tasks.ts`
+(new), `src/lib/google/tasks-sync.ts` (new), `src/app/api/gmail/sync/route.ts`,
+`src/lib/stores/assignments.ts`, `src/app/(app)/settings/page.tsx`,
+`src/app/(app)/settings/settings-client.tsx`. Decisions: D146. No schema/migration change.
+
+**Needs from Jeff to go live:** the Google Cloud OAuth consent screen must list the
+`https://www.googleapis.com/auth/tasks` scope (same place Calendar's scope was added, DEPLOY.md
+§5) before `?tasks=1` will work in production.
+
+## 117. Calendar: connect multiple Google accounts and subscribe to their calendars — DONE 2026-09-21 (D148)
+
+**Reported:** 2026-09-21 (Jeff): "We need a way to log into multiple google accounts and subscribe
+to other calendars via the calendar tab only so you can sync other calendars in one place."
+
+**What exists:** the ONE Google account tied to a mailbox's Gmail connection can already opt into
+calendar access (D77's "Enable calendar" on Settings/Account) and shows on the Calendar tab as the
+`"google"` source. There was no way to see any OTHER Google account's calendars there.
+
+**Shipped:** a new `calendar_connections` table (separate from `gmail_connections` — no mailbox, no
+Gmail semantics, read-only `calendar.readonly` scope) lets a user connect as many additional Google
+accounts as they want, purely to subscribe to their calendars. Connect flow is folded into the
+existing `/api/gmail/connect` + `/api/gmail/callback` routes via a discriminated signed state
+(`?purpose=calendar-connect`) — no new redirect URI to register. On connect, the account's
+calendars are discovered (`calendarList.list`); the primary calendar starts visible, everything
+else starts hidden. A new right-hand slide-out filter rail on the Calendar tab
+(`calendar-filter-rail.tsx`, opened from a "Calendars" button) lists connected accounts, lets you
+disconnect one, re-check it for new/removed calendars ("Refresh"), and toggle each sub-calendar's
+visibility + pick one of seven preset colors. Visible sub-calendars merge into the same agenda feed
+`loadAgendaRange()` already builds (`lib/agenda.ts`), as a new `"external"` `AgendaItem` source
+rendered in its own color on the month/week/day views — read-only, clicking one opens Google's own
+event page in a new tab rather than any in-app edit affordance. This closes the "multiple
+calendars" + "filter rail" parts of #108 (see that entry — the "shared team calendar" part is a
+separate, still-open ask).
+
+**Files:** `src/db/schema.ts` (`calendarConnections`, `drizzle/0019_sleepy_dust.sql`),
+`src/lib/gmail/oauth.ts`, `src/lib/gmail/config.ts`, `src/lib/google/calendar-connections.ts`
+(new), `src/lib/google/calendar.ts`, `src/app/api/gmail/connect/route.ts`,
+`src/app/api/gmail/callback/route.ts`, `src/lib/agenda.ts`, `src/app/(app)/calendar-actions.ts`,
+`src/app/(app)/calendar/calendar-client.tsx`, `src/app/(app)/calendar/calendar-filter-rail.tsx`
+(new), `src/app/(app)/calendar/page.tsx`. Decisions: D148.
+
+**Needs from Jeff to go live:** the Google Cloud OAuth consent screen must list the
+`https://www.googleapis.com/auth/calendar.readonly` scope before "Connect an account" will
+complete in production — same category of action as the Calendar/Tasks scope additions before it,
+but no new redirect URI this time (the flow reuses the existing Gmail callback URL).

@@ -115,6 +115,9 @@ type MailboxVM = {
   needsReconnect: boolean;
   /** Calendar scope granted (D77) — dashboard calendar + site-visit writes. */
   calendarOn: boolean;
+  /** Google Tasks scope granted (D146) — Home Queue mirrored into a "Peak"
+   *  Google Tasks list, two-way for assignments. */
+  tasksOn: boolean;
 };
 
 const GMAIL_BANNER: Record<string, { msg: string; ok: boolean }> = {
@@ -1154,7 +1157,8 @@ export default function SettingsClient({
                       (mb.needsReconnect
                         ? "  ·  reconnect to enable two-way archive"
                         : "") +
-                      (mb.calendarOn ? "  ·  calendar on" : "")
+                      (mb.calendarOn ? "  ·  calendar on" : "") +
+                      (mb.tasksOn ? "  ·  tasks sync on" : "")
                     : mb.desc}
                 </div>
               </div>
@@ -1187,6 +1191,20 @@ export default function SettingsClient({
                       style={{ flexShrink: 0, textDecoration: "none" }}
                     >
                       Enable calendar
+                    </a>
+                  )}
+                  {mb.kind === "personal" && !mb.tasksOn && (
+                    <a
+                      className="pk-btn-outline"
+                      href={
+                        "/api/gmail/connect?mailbox=" +
+                        encodeURIComponent(mb.key) +
+                        "&tasks=1"
+                      }
+                      title="Re-runs the Google consent with Google Tasks access added — mirrors this mailbox owner's Home Queue into a 'Peak' Google Tasks list, same as the Apple Reminders sync"
+                      style={{ flexShrink: 0, textDecoration: "none" }}
+                    >
+                      Enable Google Tasks sync
                     </a>
                   )}
                   <button
