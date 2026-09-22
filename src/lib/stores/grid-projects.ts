@@ -857,7 +857,7 @@ export async function addOption(
   projectId: string,
   input: { name: string; copyFromOptionId?: string; tier?: TierKey; by: string }
 ): Promise<{ ok: true; option: GridOption } | { ok: false; reason: "not-found" | "empty-name" | "no-such-option" }> {
-  const name = input.name.trim();
+  const name = input.name.trim().slice(0, 40);
   if (!name) return { ok: false, reason: "empty-name" };
   const project = await getProject(projectId);
   if (!project) return { ok: false, reason: "not-found" };
@@ -890,7 +890,7 @@ export async function renameOption(
   optionId: string,
   name: string
 ): Promise<{ ok: true } | { ok: false; reason: "not-found" | "empty-name" | "no-such-option" }> {
-  const clean = name.trim();
+  const clean = name.trim().slice(0, 40);
   if (!clean) return { ok: false, reason: "empty-name" };
   const project = await getProject(projectId);
   if (!project) return { ok: false, reason: "not-found" };
@@ -1019,8 +1019,15 @@ export async function restoreRevision(
     doc.calibrations = [...target.calibrations];
     doc.spaces = [...target.spaces];
     doc.routes = [...(target.routes || [])];
-    doc.options = target.options ? target.options.map((o) => ({ ...o })) : undefined;
+    // Quote links are bookkeeping, not design state: a restore brings back
+    // the option LIST and membership, but every option that still exists
+    // keeps its CURRENT quote link, and the project mirror is re-derived.
+    const currentQuotes = new Map(ensureOptions(doc).options.map((o) => [o.id, o.quoteId]));
+    doc.options = target.options
+      ? target.options.map((o) => ({ ...o, quoteId: currentQuotes.has(o.id) ? currentQuotes.get(o.id)! : o.quoteId }))
+      : undefined;
     ensureOptions(doc);
+    syncQuoteMirror(doc);
     pushRevision(doc, by, "restore", `Recalled v${rev}`);
     doc.updatedAt = Date.now();
   });

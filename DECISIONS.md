@@ -2807,3 +2807,21 @@ from Jeff's 2026-09-21 Grid brainstorm — Auto branch and proposal document fol
   the Auto branch exists (Spec 2), otherwise there'd be no way to auto-estimate a new design.
 - Known, deliberately untouched: `DesignRecord.budget` is still never written for manual
   designs (pre-existing, #38 plan recon item 7).
+- Revisions now snapshot the options list; on restore the option list and membership come
+  back but each surviving option keeps its CURRENT quote link and `project.quoteId` is
+  re-mirrored (quote links are bookkeeping, not design state).
+- The Designs dashboard's "Add to Quotes" (`promoteDesignAction`) quotes the FIRST option;
+  per-option quoting is done from the editor. Stated limitation until Spec 3's proposal
+  document.
+- The delete confirm reads "Removes N devices and their wire runs from X" (device count
+  only; route count isn't tallied in the switcher). Option names are capped at 40
+  characters.
+
+Follow-ups (not blocking): a refused member write (unknown optionId) still bumps the doc's
+rev/seq via `patchDoc`; a guard helper could dedupe the 4 in-callback `hasOption` checks;
+`OPTION_GONE` is duplicated in `grid-quote.ts` (move to `grid-options.ts`); no automated
+coverage of `createDraftQuoteAction`'s branching or the intake's DesignRecord patch
+(session-bound); `optionSlice` mutates its argument (safe today, callers pass normalized
+docs); whole-project device counts on the `/design` orphan list and the revisions panel;
+the Rigging Scope target of $1.8M for a 46 ft Auditorium is pre-existing D139 engine math
+to check.

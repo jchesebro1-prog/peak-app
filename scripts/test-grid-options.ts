@@ -4,6 +4,7 @@
  * mktemp dir). Never point this at .data/pglite.
  */
 import assert from "node:assert/strict";
+import { patchDoc } from "@/db/doc-store";
 import {
   addOption,
   addPlacement,
@@ -19,6 +20,7 @@ import {
   setOptionQuote,
   setScopeInputs,
   setSheetCalibration,
+  type GridProject,
 } from "@/lib/stores/grid-projects";
 import { DEFAULT_OPTION_ID, optionSlice } from "@/lib/design/grid-options";
 import { manualScopeInputs } from "@/lib/design/grid-intake";
@@ -86,6 +88,14 @@ async function main() {
   assert.equal((await getProject(project.id))!.options!.find((o) => o.id === best)!.name, "Premium", "rename trims and persists");
   const renEmpty = await renameOption(project.id, best, "   ");
   assert.ok(!renEmpty.ok && renEmpty.reason === "empty-name", "rename refuses an empty name");
+  const longName = "x".repeat(60);
+  const renLong = await renameOption(project.id, best, longName);
+  assert.ok(renLong.ok, "rename with a long name succeeds");
+  assert.equal(
+    (await getProject(project.id))!.options!.find((o) => o.id === best)!.name.length,
+    40,
+    "option name is capped at 40 characters"
+  );
 
   // quote mirror
   await setOptionQuote(project.id, better, "Q-BETTER");
@@ -105,6 +115,21 @@ async function main() {
   const restored = await restoreRevision(project.id, rev.rev, "tester");
   assert.ok(restored.ok, "restore succeeds");
   assert.equal((await getProject(project.id))!.options!.length, 3, "restore brings the removed option back");
+
+  // restore keeps quote links CURRENT, not rolled back — quote links are
+  // bookkeeping, not design state (D150 clarification, final review)
+  await setOptionQuote(project.id, base, "Q-KEEP");
+  const mintRev = (await addRevision(project.id, { by: "tester", reason: "manual", note: "before mint" }))!;
+  await setOptionQuote(project.id, base, "Q-LATER");
+  const restoredAfterMint = await restoreRevision(project.id, mintRev.rev, "tester");
+  assert.ok(restoredAfterMint.ok, "restore-after-mint succeeds");
+  const afterMintRestore = (await getProject(project.id))!;
+  assert.equal(
+    afterMintRestore.options!.find((o) => o.id === base)!.quoteId,
+    "Q-LATER",
+    "restore keeps an option's current quote link"
+  );
+  assert.equal(afterMintRestore.quoteId, "Q-LATER", "restore re-mirrors project.quoteId");
 
   // remove option deletes its members and refuses the last one
   const rm2 = await removeOption(project.id, better, "tester");
@@ -178,6 +203,43 @@ async function main() {
   assert.equal(withScope.scopeInputs?.venue, "school", "scopeInputs seeded from the intake dims");
   assert.equal(withScope.scopeInputs?.sys.controls, false, "non-trackable systems are off in seeded scopeInputs");
   assert.equal(withScope.name, "Main Hall — Northshore HS", "renameProject persists");
+
+  // ---- restore of a pre-spec revision (no options key) collapses onto a
+  // single default option (D150 clarification, final review). Put LAST:
+  // it collapses `project`'s options down to one. ----
+  const preSpec = (await getProject(project.id))!;
+  const lastRev = preSpec.revisions!.at(-1)!;
+  const preSpecRev = {
+    ...lastRev,
+    rev: lastRev.rev + 1,
+    placements: lastRev.placements.map((pl) => {
+      const rest = { ...pl };
+      delete rest.optionId;
+      return rest;
+    }),
+    routes: [],
+  } as typeof lastRev;
+  delete preSpecRev.options;
+  await patchDoc<GridProject>("grid_projects", project.id, (d) => {
+    d.revisions = [...(d.revisions || []), preSpecRev];
+  });
+  const preSpecRestore = await restoreRevision(project.id, preSpecRev.rev, "tester");
+  assert.ok(preSpecRestore.ok, "restore of a hand-crafted pre-spec revision succeeds");
+  const afterPreSpecRestore = (await getProject(project.id))!;
+  assert.equal(
+    afterPreSpecRestore.options!.length,
+    1,
+    "a pre-spec revision restores as a single default option holding every member"
+  );
+  assert.equal(
+    afterPreSpecRestore.options![0].id,
+    DEFAULT_OPTION_ID,
+    "the collapsed option is the default option id"
+  );
+  assert.ok(
+    afterPreSpecRestore.placements.every((pl) => pl.optionId === DEFAULT_OPTION_ID),
+    "every placement lands on the default option"
+  );
 
   console.log("PASS grid-options store scenario");
 }
