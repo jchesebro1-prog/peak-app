@@ -420,6 +420,60 @@ export async function search(
   }
 }
 
+/**
+ * Structured city lookup — Nominatim's `city=` + `state=` form rather than a
+ * free-text query.
+ *
+ * Free text is wrong often enough to matter when all you have is a city name
+ * (punch #147): "Portage, WI" returns **Portage County**, 64 miles from the
+ * City of Portage, and "LaCrosse, WI" (no space, as 7 of Jeff's records spell
+ * it) returns **Town of Baraboo**, 80 miles from La Crosse. Both are in
+ * Wisconsin, so a state check waves them through, and the resulting travel
+ * silently misprices every quote built against that venue.
+ *
+ * The structured form resolves Portage correctly and returns NOTHING for
+ * "LaCrosse" — an honest miss that gets reported and fixed by hand, which is
+ * the right trade against a confident wrong answer.
+ *
+ * Same fail-soft contract as search(): [] on short input, failure or timeout.
+ */
+export async function searchCity(
+  city: string | null | undefined,
+  state: string | null | undefined,
+  opts?: { limit?: number }
+): Promise<GeoSearchHit[]> {
+  const c = (city || "").trim();
+  if (c.length < 2) return [];
+  if (!online()) return [];
+  const limit = (opts && opts.limit) || 1;
+  const params = new URLSearchParams({
+    format: "jsonv2",
+    addressdetails: "1",
+    countrycodes: "us",
+    limit: String(limit),
+    city: c,
+  });
+  const st = (state || "").trim();
+  if (st) params.set("state", st);
+  try {
+    const res = await fetch(
+      "https://nominatim.openstreetmap.org/search?" + params.toString(),
+      {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "peak-app/1.0 (Peak Systems Group travel estimates)",
+        },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      }
+    );
+    if (!res.ok) return [];
+    const j = (await res.json()) as NominatimHit[] | null;
+    return (j || []).map(normalizeHit).filter((x): x is GeoSearchHit => !!x);
+  } catch {
+    return [];
+  }
+}
+
 /* ---------------- estimate ---------------- */
 
 /**

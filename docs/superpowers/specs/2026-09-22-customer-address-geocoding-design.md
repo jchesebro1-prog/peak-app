@@ -2,7 +2,7 @@
 
 - **Date:** 2026-09-22
 - **Punch:** #147
-- **Decisions:** D175–D180 (allocated below)
+- **Decisions:** D175–D181 (allocated below)
 - **Status:** design approved by Jeff 2026-09-22, awaiting implementation plan
 - **Related:** `daylite-export-audit-checklist.md` (2026-07-21 audit), punch #114 /
   D146 (calendar travel block), punch #137 (import hub people/venues)
@@ -242,10 +242,42 @@ identification requirement.
 
 Query: `"<street>, <city>, <state> <zip>"`.
 
-**Sanity gate.** A hit whose resolved state does not match the row's stated
-state is **rejected and reported, not written**. A wrong geocode that silently
-prices a quote wrong is the one outcome worth engineering against; a reported
-miss costs a minute of manual correction through the existing address picker.
+**Two sanity gates, both proven necessary by the fixture run of 2026-09-22.**
+
+A hit whose resolved **state** does not match the row's stated state is
+rejected and reported, not written.
+
+That is not enough on its own. A fixture built from 11 real rows of Jeff's
+export produced two badly wrong coordinates that *both passed the state gate*,
+because both were in Wisconsin:
+
+| stated | free-text hit | error |
+|---|---|---|
+| `Portage, WI` | **Portage County** | 63.7 mi |
+| `LaCrosse, WI` | **Town of Baraboo** | 79.6 mi |
+
+Travel read 148 mi / 2h58m for Portage (real: ~103 mi) and 116 mi for La Crosse
+(real: ~200 mi). Silently mispriced, with nothing in the output to suggest it.
+
+So a second gate: the resolved **city must be the stated city**, compared after
+normalizing — lowercase, drop a leading "City of" / "Town of" / "Village of",
+strip non-alphanumerics, so `LaCrosse` == `La Crosse` and `St. Paul` ==
+`St Paul`. Deliberately an **exact** comparison, never a prefix test:
+"Portage County" *starts with* "Portage" and is 64 miles away.
+
+**And a better query for city-only rows.** Nominatim's structured form
+(`city=` + `state=`) is markedly more reliable than free text when all you have
+is a place name: it resolves Portage correctly (0.2 mi off) and returns
+**nothing** for "LaCrosse" — an honest miss that gets reported and fixed by
+hand. So rows with a street address use free-text search (that is how you
+resolve a building); city-only rows use `searchCity()`, added to `geo.ts`.
+
+After both changes, all 11 fixture venues geocoded within 0.9 mi or were
+rejected and reported. None were silently wrong.
+
+**D181 — geocoding is gated on state AND city, and city-only rows use
+Nominatim's structured query.** A confident wrong answer misprices a quote; a
+reported miss costs a minute with the existing address picker.
 
 ### 4.6 Route warming
 
