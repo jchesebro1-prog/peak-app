@@ -674,7 +674,8 @@ export async function createManualEngagement(
  *  On success records a provenance decision, mirroring createManualEngagement. */
 export async function attachQuoteToEngagement(
   engId: string,
-  quoteId: string
+  quoteId: string,
+  me: { name: string } = { name: "System" }
 ): Promise<{ ok: true; engagement: ConsultingEngagement } | { ok: false; error: string }> {
   const eng = await getEngagement(engId);
   if (!eng || eng.origin !== "manual") {
@@ -702,7 +703,7 @@ export async function attachQuoteToEngagement(
     d.decisions.unshift({
       id: uid("dc-"),
       at: Date.now(),
-      by: "System",
+      by: me.name,
       decision: `Proposal attached: ${quoteId}`,
       context: "Linked to an existing consulting quote from the Consulting hub (#135).",
     });
