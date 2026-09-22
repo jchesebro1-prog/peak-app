@@ -25,7 +25,7 @@ import {
 import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
-import { normalizeEngagementRecord, type EngagementPhase } from "@/lib/stores/engagements";
+import { normalizeEngagementRecord, getEngagement, type EngagementPhase } from "@/lib/stores/engagements";
 import { TEMPLATE_RECORD_KINDS, TEMPLATE_RECORD_LABEL } from "@/lib/task-template-kinds";
 import {
   msOf as opMsOf,
@@ -167,6 +167,7 @@ import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mergeActivity } from "@/lib/engagement-activity";
+import { performCapture, type CaptureDeps } from "@/app/(app)/design/engagements/activity-actions";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -1783,7 +1784,7 @@ ok(legacyEmailFor("Jeff Chesebro") === "jchesebro@peaksystemsgroup.com", "legacy
 /* ============ TASKS (#17) — store pure logic ============ */
 import {
   isOverdue, taskFromLegacy, expandTemplate, taskBellItems, autoTaskId,
-  normalizeTask, tasksForEngagement,
+  normalizeTask, tasksForEngagement, createTask,
   STATUSES, type TaskRecord, type TaskTemplateItem,
 } from "@/lib/stores/tasks";
 import { CATEGORIES } from "@/lib/stores/notif-prefs";
@@ -2114,7 +2115,7 @@ import { blank as surveyBlank } from "@/lib/stores/surveys";
 /* ============ ACTIVITY TIMELINE (#21) ============ */
 /* notes collection — normalize-on-read defaults. normalizeNote is pure
    (no DB touched by importing the store module). */
-import { normalizeNote, type NoteRecord } from "@/lib/stores/notes";
+import { normalizeNote, addNoteRecord, notesForEngagement, type NoteRecord } from "@/lib/stores/notes";
 
 {
   const T = new Date(2026, 5, 30, 10).getTime();
@@ -3179,7 +3180,7 @@ import { qtyOwned as equipmentQtyOwned } from "../src/lib/stores/equipment-items
  * deliberately minimal structural views), so a fake quote written the same
  * way is a faithful, isolated way to exercise the spawn without going
  * through the real quote builder UI/actions. Asserted inside asyncChecks(). */
-import { upsertDoc } from "../src/db/doc-store";
+import { upsertDoc, softDeleteDoc } from "../src/db/doc-store";
 import { createFromQuote as createInspectionFromQuote, byQuote as inspectionsByQuote } from "../src/lib/stores/inspections";
 import { createFromQuote as createRepairFromQuote, byQuote as repairByQuote } from "../src/lib/stores/repair-jobs";
 import { getProject, getProjectByQuote } from "../src/lib/stores/projects";
@@ -4177,6 +4178,87 @@ async function asyncChecks(): Promise<void> {
     const p1 = await getProjectByQuote(TEST_INSPECTION_QUOTE_ID);
     const p2 = await getProjectByQuote(TEST_REPAIR_QUOTE_ID);
     ok(!!p1 && !!p2 && p1.id !== p2.id, "#13 the inspection and repair test quotes get DISTINCT linked projects");
+  }
+
+  /* --- #145 D170/D171: captureAction's rollback is exercised for real, not
+   * just read as correct-looking code (review Important #1). A mid-capture
+   * failure is FORCED by injecting a `deps.createTask` that lets the first
+   * task really land in the doc-store, then throws on the second — proving
+   * `performCapture` deletes the first before rethrowing, and never writes
+   * the note. Fixed test id + idempotency check since this writes to the
+   * real persistent dev DB, same as the #13 block above. */
+  const TEST_ROLLBACK_ENG_ID = "test-eng-punch145-rollback";
+  {
+    if (!(await getEngagement(TEST_ROLLBACK_ENG_ID))) {
+      await upsertDoc("consulting_engagements", {
+        id: TEST_ROLLBACK_ENG_ID,
+        name: "PUNCHLIST #145 rollback test engagement",
+        customer: "Test Customer #145",
+        companyId: null,
+        siteIds: [],
+        contactName: "",
+        people: [],
+        quoteId: null,
+        designIds: [],
+        installQuoteId: null,
+        status: "design",
+        phases: [],
+        milestones: [],
+        decisions: [],
+        meetings: [],
+        submittals: [],
+        documents: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
+    const priorTasks = await tasksForEngagement(TEST_ROLLBACK_ENG_ID);
+    const priorNotes = await notesForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(
+      priorTasks.length === 0 && priorNotes.length === 0,
+      "#145 rollback test: no leftover tasks/notes from a prior run (proves the rollback actually cleans up, not just this run's assertions)"
+    );
+
+    let createCalls = 0;
+    const flakyDeps: CaptureDeps = {
+      createTask: async (taskInput, me) => {
+        createCalls++;
+        if (createCalls === 2) throw new Error("simulated task-write failure (#145 rollback test)");
+        return createTask(taskInput, me);
+      },
+      addNoteRecord,
+      softDeleteDoc,
+    };
+
+    let threw = false;
+    try {
+      await performCapture(
+        {
+          engagementId: TEST_ROLLBACK_ENG_ID,
+          text: "This capture must not survive a mid-capture failure",
+          attachments: [],
+          tasks: [
+            { title: "First task — created for real, then rolled back", assigneeUserId: null, dueAt: null },
+            { title: "Second task — the write throws here", assigneeUserId: null, dueAt: null },
+          ],
+        },
+        { id: "u1", name: "Test Runner" },
+        flakyDeps
+      );
+    } catch {
+      threw = true;
+    }
+    ok(threw, "#145 a mid-capture task-write failure rejects the whole capture rather than silently partially succeeding");
+    ok(createCalls === 2, "#145 the forced failure happened on the second task write, after the first really landed in the doc-store");
+
+    const tasksAfter = await tasksForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(tasksAfter.length === 0, "#145 rollback soft-deletes the task(s) already created before the failure");
+
+    const notesAfter = await notesForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(
+      notesAfter.length === 0,
+      "#145 rollback leaves no note behind — a half-written capture must never persist a note pointing at deleted tasks"
+    );
   }
 
   /* --- Venue Assessments: record migration --- */

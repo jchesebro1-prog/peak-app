@@ -33,13 +33,16 @@ export default async function ConsultingDetailPage({
   const tab: TabKey = (TABS as readonly string[]).includes(tabRaw)
     ? (tabRaw as TabKey)
     : "overview";
-  // #145 D170 — the Activity tab's composer + feed. Notes and tasks are
-  // per-engagement (not part of the shared ConsultingData loader above),
-  // so they're fetched here, detail-route-only, same as RecordingsCard.
+  // #145 D170 — the Activity tab's composer + feed. Notes are fetched
+  // unconditionally: the tab-bar count (every tab, not just Activity)
+  // needs `notes.length`. Tasks and people are consumed ONLY by
+  // ActivityTab, so — same precedent as `oversightExtra` below — they're
+  // fetched only when that tab is the one being rendered, not on every
+  // Overview/Phases/Milestones/Meetings/Oversight/Documents load.
   const [notes, tasks, users] = await Promise.all([
     notesForEngagement(sel.id),
-    tasksForEngagement(sel.id),
-    activeUsers(),
+    tab === "activity" ? tasksForEngagement(sel.id) : Promise.resolve([]),
+    tab === "activity" ? activeUsers() : Promise.resolve([]),
   ]);
   return (
     <ConsultingView

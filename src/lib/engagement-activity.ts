@@ -19,6 +19,14 @@ export type ActivityEntry = {
   title: string;
   body: string;
   taskIds: string[];
+  /** Load-bearing for `kind: "file"` (the only attachment a phase doc has —
+   *  its name). For `kind: "note"`, this is a NAME-ONLY shadow of the
+   *  note's real `FileRef[]` — enough for the merge to prove attachments
+   *  round-trip (see the #145 D170 spec block below), but the real UI
+   *  (`activity-tab.tsx`'s `ActivityRow`) renders a note's attachments by
+   *  looking the note back up by `id` for the full `FileRef` (download
+   *  link, mime, etc.), not from this field. Kept because collapsing it to
+   *  `[]` for notes would silently break that merge-level guarantee. */
   attachments: Array<{ name: string }>;
   system: boolean;
 };
