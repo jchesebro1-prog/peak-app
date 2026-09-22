@@ -4,7 +4,7 @@ import { getSettings } from "@/lib/settings";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { list as listSubassemblies, type FixtureSubassembly } from "@/lib/stores/subassemblies";
 import { pricesAsOf, sanitizeFixtureAssemblies } from "@/lib/fixture-assemblies";
-import AssemblyBuilder from "./assembly-builder";
+import AssemblyBuilder, { type Hit } from "./assembly-builder";
 import AssembliesTabs from "./tabs";
 import SubassembliesClient from "../subassemblies/subassemblies-client";
 
@@ -27,6 +27,15 @@ export default async function AssemblyBuilderPage({
   const priceDates = Object.fromEntries(
     sanitizeFixtureAssemblies(settings.fixtureAssemblies).map((a) => [a.id, pricesAsOf(a.components.map((c) => c.sku), parts, settings)])
   );
+  // #121: the component picker filters in the browser (Typeahead) — ship
+  // only the slice it renders (never cost), the Subassemblies page's idiom.
+  const builderParts: Hit[] = parts.map((p) => ({
+    sku: p.sku,
+    desc: p.desc,
+    category: p.category,
+    mfr: p.mfr || "",
+    list: p.list,
+  }));
 
   return (
     <div className="pk-content" style={{ maxWidth: 1080 }}>
@@ -37,7 +46,7 @@ export default async function AssemblyBuilderPage({
       </p>
       <AssembliesTabs active={tab} />
       {tab === "assemblies" ? (
-        <AssemblyBuilder initial={settings.fixtureAssemblies || []} priceDates={priceDates} />
+        <AssemblyBuilder initial={settings.fixtureAssemblies || []} parts={builderParts} priceDates={priceDates} />
       ) : (
         <SubassembliesClient parts={parts} initial={saved as FixtureSubassembly[]} priceListEffective={settings.priceListEffective || {}} />
       )}

@@ -1,11 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CatalogPart } from "@/lib/stores/catalog";
 import type { FixtureOptionCategory, FixtureSubassembly } from "@/lib/stores/subassemblies";
 import { resolveSubassembly } from "@/lib/fixture-assemblies";
 import { dateYear } from "@/lib/format";
+import { Typeahead } from "@/components/search/typeahead";
+import { catalogFilter, catalogRank } from "@/lib/search/typeahead-rank";
 import { deleteSubassemblyAction, saveFixtureAction } from "./actions";
 
 const pricesNote = (at: number | null) => (at == null ? "prices as of: unknown" : `prices as of ${dateYear(at)}`);
@@ -18,22 +20,41 @@ const OPTION_CATEGORIES: { key: FixtureOptionCategory; label: string }[] = [
   { key: "mounting", label: "Mounting" }, { key: "accessories", label: "Accessories" },
 ];
 
-function PartPicker({ label, parts, value, onChange }: { label: string; parts: CatalogPart[]; value: string; onChange: (sku: string) => void }) {
-  const [query, setQuery] = useState("");
-  const selected = parts.find((p) => p.sku === value);
-  const matches = useMemo(() => {
-    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-    return parts.filter((p) => tokens.every((t) => `${p.desc} ${p.sku} ${p.mfr || ""} ${p.category}`.toLowerCase().includes(t))).slice(0, 80);
-  }, [parts, query]);
+const partKey = (p: CatalogPart) => p.sku;
+const partLabel = (p: CatalogPart) => `${p.desc} · ${p.sku}`;
+
+/** One results row — SKU · description · manufacturer · list price (#121). */
+function PartRow({ part }: { part: CatalogPart }) {
+  return (
+    <span style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 12.5 }}>
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#5b616e", flexShrink: 0 }}>{part.sku}</span>
+      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{part.desc}</span>
+      <span style={{ fontSize: 11.5, color: "#8c919c", flexShrink: 0 }}>{part.mfr || "—"} · {money(part.list)}</span>
+    </span>
+  );
+}
+
+/** Catalog part picker (#121): results list inline under the box while you
+ *  type — no <select> to open. `clearOnPick` is the add-another mode used by
+ *  the compatible-options lists. */
+function PartPicker({ label, parts, value, onChange, clearOnPick = false }: { label: string; parts: CatalogPart[]; value: string; onChange: (sku: string) => void; clearOnPick?: boolean }) {
+  const selected = parts.find((p) => p.sku === value) || null;
   return (
     <div>
       <label style={LABEL}>{label}</label>
-      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, manufacturer, or part #" style={{ ...FIELD, marginBottom: 6 }} />
-      <select value={value} onChange={(e) => onChange(e.target.value)} style={FIELD} required>
-        <option value="">Select a catalog part…</option>
-        {selected && !matches.some((p) => p.sku === selected.sku) && <option value={selected.sku}>{selected.desc} · {selected.sku}</option>}
-        {matches.map((p) => <option key={p.sku} value={p.sku}>{p.desc} · {p.sku} · {money(p.cost)}</option>)}
-      </select>
+      <Typeahead
+        items={parts}
+        keyOf={partKey}
+        filter={catalogFilter}
+        rank={catalogRank}
+        render={(p) => <PartRow part={p} />}
+        onPick={(p) => onChange(p.sku)}
+        labelOf={clearOnPick ? undefined : partLabel}
+        selectedKey={clearOnPick ? null : value}
+        placeholder="Search name, manufacturer, or part #"
+        ariaLabel={label}
+        inputStyle={FIELD}
+      />
       {selected && <div style={{ color: "#6b7079", fontSize: 11.5, marginTop: 5 }}>{selected.mfr || "Unspecified manufacturer"} · cost {money(selected.cost)}</div>}
     </div>
   );
@@ -92,7 +113,7 @@ export default function SubassembliesClient({ parts, initial, priceListEffective
             {OPTION_CATEGORIES.map(({ key, label: categoryLabel }) => <div key={key} style={{ border: "1px solid #eef0f3", borderRadius: 9, padding: 10 }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{categoryLabel}</div>
               {options[key].map((option, index) => <div key={`${option.sku}-${index}`} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 58px 24px", gap: 5, alignItems: "center", marginBottom: 6 }}><div style={{ fontSize: 11, color: "#5b616e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{parts.find((part) => part.sku === option.sku)?.desc || option.sku}</div><input type="number" min={1} value={option.qty} onChange={(e) => setOptions((all) => ({ ...all, [key]: all[key].map((row, i) => i === index ? { ...row, qty: Math.max(1, parseInt(e.target.value, 10) || 1) } : row) }))} style={{ ...FIELD, padding: "5px 6px", fontSize: 11 }} /><button type="button" onClick={() => setOptions((all) => ({ ...all, [key]: all[key].filter((_, i) => i !== index) }))} style={{ border: 0, background: "transparent", color: "#a0442b", cursor: "pointer" }}>×</button></div>)}
-              <PartPicker label="Add compatible item" parts={parts} value="" onChange={(sku) => { if (!sku) return; const part = parts.find((p) => p.sku === sku); if (!part) return; setOptions((all) => ({ ...all, [key]: [...all[key], { sku, qty: 1 }] })); }} />
+              <PartPicker label="Add compatible item" parts={parts} value="" clearOnPick onChange={(sku) => { if (!sku) return; const part = parts.find((p) => p.sku === sku); if (!part) return; setOptions((all) => ({ ...all, [key]: [...all[key], { sku, qty: 1 }] })); }} />
             </div>)}
           </div>
         </div>
