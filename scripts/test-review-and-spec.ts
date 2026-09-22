@@ -3244,6 +3244,31 @@ ok(sweepIndexesEngagement({ quoteId: "Q-2" }) && sweepIndexesEngagement({ origin
 ok(!sweepIndexesEngagement({ quoteId: "" }) && !sweepIndexesEngagement({ quoteId: null }),
   "#135: a row with no quote id is never indexed");
 
+/* --- #121 typeahead ranking: SKU prefix first, then description contains, then anywhere --- */
+import { catalogFilter, catalogMatches, catalogRank, typeaheadMatches } from "@/lib/search/typeahead-rank";
+
+const t121 = [
+  { sku: "S4LED-S3", desc: "Source Four LED Series 3", mfr: "ETC", category: "Fixtures" },
+  { sku: "LENS-26", desc: "26° lens tube for S4LED", mfr: "ETC", category: "Fixtures" },
+  { sku: "CLAMP-1", desc: "Pipe clamp", mfr: "The Light Source", category: "Hardware" },
+  { sku: "ZZ-1", desc: "Speaker bracket", mfr: "S4LED Mounts Co", category: "Speakers" },
+];
+ok(catalogMatches("s4led", t121).map((p) => p.sku).join(",") === "S4LED-S3,LENS-26,ZZ-1",
+  "#121: SKU prefix first, then description contains, then a match anywhere (case-insensitive)");
+ok(catalogMatches("etc lens", t121).map((p) => p.sku).join(",") === "LENS-26",
+  "#121: every whitespace token must match somewhere in sku/desc/mfr/category");
+ok(catalogMatches("", t121).length === 4 && catalogMatches("", t121, 2).length === 2,
+  "#121: an empty query lists items in their given order, capped at max");
+ok(catalogMatches("nomatch", t121).length === 0, "#121: no hits → empty list");
+ok(catalogRank("S4LED", t121[0]) === 0 && catalogRank("S4LED", t121[1]) === 1 && catalogRank("S4LED", t121[3]) === 2,
+  "#121: catalogRank tiers are 0/1/2");
+ok(catalogFilter("", t121[2]) && !catalogFilter("etc", t121[2]) && catalogFilter("light source", t121[2]),
+  "#121: catalogFilter — empty passes everything, tokens are AND-ed across fields");
+ok(typeaheadMatches("b", ["b1", "a", "b2"], (q, s) => s.startsWith(q), undefined, 8).join(",") === "b1,b2",
+  "#121: typeaheadMatches without a rank keeps input order");
+ok(typeaheadMatches("x", ["x3", "x1", "x2"], () => true, (_q, s) => Number(s.slice(1)), 2).join(",") === "x1,x2",
+  "#121: a rank sorts ascending (stable) and max slices after ranking");
+
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
   {
