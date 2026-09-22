@@ -13,7 +13,7 @@ import {
 import { upsertDoc, patchDoc } from "@/db/doc-store";
 import type { Quote } from "@/lib/stores/quotes";
 import { contactByEmail } from "@/lib/identity/lookup";
-import { emailsFor, saveContact, setEmails, softDeleteContact } from "@/lib/identity/contacts";
+import { contactsForCompany, emailsFor, saveContact, setEmails, softDeleteContact } from "@/lib/identity/contacts";
 import { claimDomain, customersForDomain } from "@/lib/gmail/domains";
 import { applyResolution, applyResweepPatch, resolveForThread, resweepThreads } from "@/lib/gmail/linking";
 import {
@@ -28,7 +28,7 @@ import { saveConnection, replaceLabels } from "@/lib/gmail/connections";
 import { GMAIL_MODIFY_SCOPE } from "@/lib/gmail/config";
 import { get as getLead, getAll as getAllLeads } from "@/lib/stores/leads";
 import { addUser } from "@/lib/users";
-import { saveCompany } from "@/lib/identity/companies";
+import { getCompany, saveCompany } from "@/lib/identity/companies";
 import { sitesForCompany } from "@/lib/identity/sites";
 import { VENDOR_COMPANY_TYPE } from "@/lib/identity/config";
 import {
@@ -1193,6 +1193,52 @@ async function main() {
     assert.equal(fresh.type, VENDOR_COMPANY_TYPE, "#122 …typed as a vendor");
     await claimManufacturer(fresh.id, "Wenger Corp T122");
     assert.equal(await vendorForManufacturer("wenger corp t122"), fresh.id, "#122 …and it owns the claimed manufacturer");
+  }
+
+  // #122 C1 — re-creating a vendor by the name of a SOFT-DELETED one must not
+  // silently revive and overwrite it. The slug is taken by ANY company row,
+  // deleted or not, so "+ New vendor" mints a fresh id; the deleted vendor
+  // keeps its ledger, claims, discounts and contacts (the only history there
+  // is — the profile doc has no versions to recover from).
+  {
+    const made = await createVendorCompany("Deleted Vendor T122");
+    assert.equal(made.id, "v-deletedvendort122", "#122 C1 fixture: the first vendor takes the plain v-<mfrKey> slug");
+    await upsertCustomer({
+      id: made.id,
+      name: "Deleted Vendor T122",
+      type: VENDOR_COMPANY_TYPE,
+      locations: [{ id: "l-t122-c1", label: "Warehouse", primary: true, address: "1 Dock Rd", city: "Madison", state: "WI" }],
+      contacts: [{ name: "Dana Ledger", email: "dana@t122c1.example", primary: true }],
+    });
+    await claimManufacturer(made.id, "T122 C1 Mfr");
+    await logPriceList(made.id, { receivedAt: 1_700_000_000_000, effectiveAt: 1_700_000_000_000, note: "2026 list" }, "Tester");
+    await saveVendorProfile(made.id, { discounts: { note: "Dealer program", percentOffList: 20, terms: "Net 45" } });
+    assert.equal((await contactsForCompany(made.id)).length, 1, "#122 C1 fixture: the vendor carries one contact");
+
+    // The Edit button's Delete — deleteCustomerAction → softDeleteCompany.
+    await removeCustomer(made.id);
+    assert.equal(await getCompany(made.id), null, "#122 C1 fixture: the vendor reads as deleted");
+
+    const again = await createVendorCompany("Deleted Vendor T122");
+    assert.notEqual(again.id, made.id, "#122 C1 a soft-deleted slug is TAKEN — the re-created vendor gets its own id");
+    assert.equal(await getCompany(made.id), null, "#122 C1 …and the deleted vendor is not resurrected by the re-create");
+    const kept = await getVendorProfile(made.id);
+    assert.equal(kept?.priceLists.length, 1, "#122 C1 the deleted vendor's price-list ledger survives");
+    assert.deepEqual(kept?.manufacturers, ["T122 C1 Mfr"], "#122 C1 …its manufacturer claims survive");
+    assert.equal(kept?.discounts.terms, "Net 45", "#122 C1 …and its discount terms survive");
+    assert.equal(
+      (await contactsForCompany(made.id)).length,
+      1,
+      "#122 C1 …and its contacts are not soft-deleted by the re-create's empty contacts list"
+    );
+
+    const born = await getVendorProfile(again.id);
+    assert.ok(born, "#122 C1 the re-created vendor gets its own blank profile");
+    assert.deepEqual(
+      [born?.priceLists.length, born?.manufacturers.length],
+      [0, 0],
+      "#122 C1 …blank, sharing nothing with the deleted vendor's record"
+    );
   }
 
   // #137 T1 — zip / kind / phone / website / mobile plumbing through the customer seam

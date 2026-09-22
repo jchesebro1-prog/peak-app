@@ -37,6 +37,24 @@ export async function getCompany(
   return rows[0] ?? null;
 }
 
+/**
+ * Is this id already in use by ANY company row, soft-deleted included?
+ * Deliberately narrower than `getCompany` (which filters `deleted = false`
+ * and is the app's "does this company exist" question): id-minting must not
+ * hand out a slug a deleted row still holds, because `saveCompany`'s upsert
+ * would revive that row and overwrite its record (#122 C1).
+ */
+export async function companyIdTaken(id: string): Promise<boolean> {
+  if (!id) return false;
+  const db = await getDb();
+  const rows = await db
+    .select({ id: companies.id })
+    .from(companies)
+    .where(eq(companies.id, id))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function getCompanies(
   ids: string[]
 ): Promise<Map<string, CompanyRow>> {

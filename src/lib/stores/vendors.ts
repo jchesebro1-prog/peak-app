@@ -1,6 +1,6 @@
 import { getDoc, listDocs, upsertDoc } from "@/db/doc-store";
 import type { CompanyRow } from "@/db/schema";
-import { allCompanies, getCompany } from "@/lib/identity/companies";
+import { allCompanies, companyIdTaken, getCompany } from "@/lib/identity/companies";
 import { VENDOR_COMPANY_TYPE, isVendorType } from "@/lib/identity/config";
 import { upsert as upsertCustomer } from "@/lib/stores/customers";
 import { mfrKey } from "@/lib/catalog-books";
@@ -211,17 +211,27 @@ export async function releaseManufacturer(vendorId: string, mfr: string): Promis
  * D85 write path: saveCompany, and — because PARTNER_TYPES carries the
  * vendor type — no base venue). Id = "v-" + mfrKey(name), suffixed only on
  * collision, so the seeded/claimed vendors get readable slugs.
+ *
+ * A slug is taken by ANY company row or profile document, soft-deleted
+ * included (#122 C1): reusing a deleted vendor's slug would revive its
+ * company row through saveCompany's upsert, soft-delete every contact and
+ * site the empty lists below don't name, and — the unrecoverable part —
+ * replace its profile document (ledger, claims, discounts, registration,
+ * contact roles) with a blank. Hence a fresh id, and a blank profile written
+ * only where none exists.
  */
 export async function createVendorCompany(name: string): Promise<CompanyRow> {
   const clean = (name || "").trim();
   if (!clean) throw new Error("Vendor name is empty.");
   const base = mfrKey(clean) || "vendor";
   let id = "v-" + base;
-  if (await getCompany(id)) id = "v-" + base + "-" + Date.now().toString(36);
+  if ((await companyIdTaken(id)) || (await getVendorProfile(id))) {
+    id = "v-" + base + "-" + Date.now().toString(36);
+  }
   await upsertCustomer({ id, name: clean, type: VENDOR_COMPANY_TYPE, locations: [], contacts: [] });
   const co = await getCompany(id);
   if (!co) throw new Error("Vendor company was not created.");
-  await writeProfile(blankProfile(id));
+  if (!(await getVendorProfile(id))) await writeProfile(blankProfile(id));
   return co;
 }
 
