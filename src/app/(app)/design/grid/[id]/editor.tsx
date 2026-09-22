@@ -46,11 +46,11 @@ import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geom
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
 import { deriveSeedPlacements, isSeedPlaceholder } from "@/lib/design/grid-seed";
+import { GRID_SHEET_MAX_BYTES, GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
 import type { FabricOption, QuickScopeInputs } from "@/app/(app)/design/quick/engine";
 import type { GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
   addRouteAction,
-  addSheetAction,
   addSpaceAction,
   calibrateAction,
   clearCalAction,
@@ -697,23 +697,47 @@ export default function GridEditor({
     };
   }
 
+  /**
+   * Post the sheet to /api/grid-sheets/upload (#144, D163) rather than through
+   * a server action. The action took the file as a base64 data-URL, which
+   * next.config.ts's 1200kb `serverActions.bodySizeLimit` cut down to a ~900 kB
+   * real ceiling while the code advertised 8 MB — and an over-limit body was
+   * rejected by Next before the action ran, so the user saw an unhandled
+   * rejection instead of a sentence telling them what to do. Route handlers
+   * carry no such cap, and raw multipart bytes skip base64's 4/3 inflation
+   * entirely.
+   *
+   * The response carries only the new sheet id: the stored blob path stays
+   * server-side, so nothing here can name a file for the sheet proxy to read.
+   */
   async function upload(file: File) {
     setErr(null);
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const fr = new FileReader();
-      fr.onload = () => resolve(String(fr.result));
-      fr.onerror = () => reject(new Error("Could not read that file."));
-      fr.readAsDataURL(file);
-    });
+    if (file.size > GRID_SHEET_MAX_BYTES) {
+      // Refuse before the upload so an oversize file costs no uplink time. The
+      // route re-checks: this is the courtesy, not the enforcement.
+      setErr(
+        `That file is larger than ${GRID_SHEET_MAX_LABEL}. Print the drawing to a smaller PDF (one sheet per file) and try again.`
+      );
+      return;
+    }
+    const body = new FormData();
+    body.append("projectId", project.id);
+    body.append("name", file.name);
+    body.append("file", file);
     setBusy(true);
-    const r = await addSheetAction(project.id, {
-      name: file.name,
-      mime: file.type || "application/octet-stream",
-      dataUrl,
-    });
+    type UploadReply = { ok?: boolean; sheetId?: string; error?: string };
+    let r: UploadReply | null = null;
+    try {
+      const res = await fetch("/api/grid-sheets/upload", { method: "POST", body });
+      r = (await res.json()) as UploadReply;
+    } catch {
+      // A dropped connection or a non-JSON reply (a proxy's own 413 page) must
+      // still say something useful rather than leaving the spinner up.
+      r = null;
+    }
     setBusy(false);
-    if (!r.ok) {
-      setErr(r.error);
+    if (!r?.ok || !r.sheetId) {
+      setErr(r?.error || "That sheet could not be uploaded. Check your connection and try again.");
       return;
     }
     setActiveSheetId(r.sheetId);

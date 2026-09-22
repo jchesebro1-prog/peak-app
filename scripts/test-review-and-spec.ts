@@ -150,6 +150,12 @@ import {
 } from "@/lib/fixture-assemblies";
 import { MATERIAL_CSV_TEMPLATE, VENDOR_CSV_TEMPLATE, parseMaterialCsv, parseMoney } from "@/app/(app)/estimator/material-csv";
 import { ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
+import {
+  GRID_SHEET_MAX_BYTES,
+  GRID_SHEET_MAX_LABEL,
+  isAllowedSheetMime,
+  sheetMimeVerdict,
+} from "@/lib/grid-sheet-file";
 import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
 import { computeLabor, computeMob, systemFreight, systemFreightBase, systemItemsCost } from "@/app/(app)/estimator/pricing";
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
@@ -270,6 +276,86 @@ const blobPathCases: [string, string | null, string, boolean][] = [
 ok(
   blobPathCases.every(([, path, id, want]) => ownsVendorQuoteBlobPath(path, id) === want),
   "#143 a vendor quote may claim only its own file under the vendor-quotes prefix"
+);
+
+/* #144 (D163) — the plan-sheet upload cap must stay an HONEST number. It was
+   not: the server action advertised 8 MB while next.config.ts's 1200kb
+   `serverActions.bodySizeLimit` and base64's 4/3 inflation put the real
+   ceiling near 900 kB, so an over-limit sheet had its whole request body
+   rejected by Next before the action ran — an unhandled rejection in place of
+   the action's own sentence. The upload is a route handler now, which carries
+   no such cap, but a route on Vercel still cannot receive a body over ~4.5 MB.
+   These pin both ends: the number must clear the old server-action ceiling by
+   a wide margin (or the move bought nothing) and must sit under the platform
+   ceiling with envelope room (or it is the same lie one layer up). */
+const SERVER_ACTION_BODY_LIMIT = 1200 * 1024;
+const VERCEL_FUNCTION_BODY_LIMIT = 4.5 * 1024 * 1024;
+ok(
+  GRID_SHEET_MAX_BYTES > SERVER_ACTION_BODY_LIMIT * 3 &&
+    GRID_SHEET_MAX_BYTES + 64 * 1024 < VERCEL_FUNCTION_BODY_LIMIT,
+  "#144 the plan-sheet cap clears the old server-action limit and stays under the function body limit"
+);
+ok(
+  GRID_SHEET_MAX_LABEL === `${GRID_SHEET_MAX_BYTES / (1024 * 1024)} MB`,
+  "#144 the cap the picker advertises is the cap the route enforces"
+);
+
+/* A sheet is streamed back INLINE under its stored mime with no
+   content-disposition (the editor paints it as a canvas background), so an
+   accepted `image/svg+xml` would run its own script in the app's origin
+   against the signed-in session. The vendor-quote proxy escapes this by
+   forcing `attachment`; a background image cannot, so the refusal has to live
+   at upload time. The parameter and uppercase rows are the easy regressions —
+   a browser may hand over `image/svg+xml; charset=utf-8`. */
+const sheetMimeCases: [string, string, "ok" | "svg" | "other"][] = [
+  ["a printed drawing", "application/pdf", "ok"],
+  ["a scan", "image/png", "ok"],
+  ["a photo of the plan", "image/jpeg", "ok"],
+  ["a mime with parameters", "image/png; charset=binary", "ok"],
+  ["an uppercase mime", "APPLICATION/PDF", "ok"],
+  ["a scriptable vector", "image/svg+xml", "svg"],
+  ["a vector with parameters", "image/svg+xml; charset=utf-8", "svg"],
+  ["the short svg spelling", "image/svg", "svg"],
+  ["a page", "text/html", "other"],
+  ["a CAD file", "application/acad", "other"],
+  ["a mime that merely starts with pdf", "application/pdfx", "other"],
+  ["no mime at all", "", "other"],
+  ["the unknown-type default", "application/octet-stream", "other"],
+];
+ok(
+  sheetMimeCases.every(([, mime, want]) => sheetMimeVerdict(mime) === want),
+  "#144 plan sheets accept PDFs and raster images, never a scriptable SVG"
+);
+ok(
+  sheetMimeCases.every(([, mime, want]) => isAllowedSheetMime(mime) === (want === "ok")),
+  "#144 isAllowedSheetMime agrees with the verdict it wraps"
+);
+
+/* D163's other half: unlike the vendor-quote route, the plan-sheet route
+   writes the grid_sheets doc itself and returns only a sheet id, so no
+   `blobPath` ever round-trips through the browser and the sheet proxy keeps
+   reading a value only the server wrote. Source-level like the sw.js contract
+   below, because the property being protected is "this value never crosses
+   the wire" — which no unit test of a pure function can observe. */
+const gridUploadRoute = readFileSync(
+  join(process.cwd(), "src/app/api/grid-sheets/upload/route.ts"),
+  "utf8"
+);
+const gridEditorSource = readFileSync(
+  join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"),
+  "utf8"
+);
+ok(
+  !/NextResponse\.json\(\s*\{[^}]*blobPath/.test(gridUploadRoute),
+  "#144 the plan-sheet upload route never hands a blobPath back to the browser"
+);
+ok(
+  !gridEditorSource.includes("blobPath") && !gridEditorSource.includes("addSheetAction"),
+  "#144 the editor uploads through the route and never names a stored path"
+);
+ok(
+  gridUploadRoute.includes('req.headers.get("content-length")'),
+  "#144 an oversize plan sheet is refused before its body is read into memory"
 );
 
 /* --- Offline navigation contract --- */

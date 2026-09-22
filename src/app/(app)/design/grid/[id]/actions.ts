@@ -10,7 +10,6 @@ import {
   addPlacements,
   addRevision,
   addRoute,
-  addSheet,
   addSpace,
   clearSheetCalibration,
   generateBaseSheet,
@@ -36,7 +35,6 @@ import { getAllDesigns, removeDesign } from "@/lib/stores/designs";
 import { docLocId, getSite } from "@/lib/identity/sites";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { isTierPriced } from "@/lib/tier-pricing";
-import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
 import { createGridAssembly, getGridSymbol, listGridSymbols, setGridSymbolShape } from "@/lib/stores/grid-catalog";
 import { isGridShape } from "@/lib/design/grid-symbols";
@@ -193,55 +191,6 @@ export async function seedStartingLayoutAction(
   if (!updated) return { ok: false, error: "That design could not be found." };
   revalidatePath(editorPath(projectId));
   return { ok: true, added: delta.length, skipped: desired.length - delta.length };
-}
-
-/** ~8 MB of dataUrl — beyond this a JSONB doc stops being a sane home. */
-const MAX_SHEET_BYTES = 8 * 1024 * 1024;
-
-export async function addSheetAction(
-  projectId: string,
-  input: { name: string; mime: string; dataUrl: string }
-): Promise<{ ok: true; sheetId: string } | { ok: false; error: string }> {
-  const user = await requireUser();
-  if (!input.dataUrl.startsWith("data:")) return { ok: false, error: "Not a readable file." };
-  if (input.dataUrl.length > MAX_SHEET_BYTES)
-    return {
-      ok: false,
-      error: "That file is over 8 MB. Print the drawing to a smaller PDF (one sheet per file) and try again.",
-    };
-  const okMime = input.mime === "application/pdf" || input.mime.startsWith("image/");
-  if (!okMime) return { ok: false, error: "PDF or image files only — print DWGs to PDF first." };
-
-  // Blob storage when the token exists (D116); in-database data-URL otherwise.
-  let stored: { dataUrl?: string; url?: string; blobPath?: string } = {
-    dataUrl: input.dataUrl,
-  };
-  if (blobEnabled()) {
-    try {
-      const { bytes } = dataUrlToBytes(input.dataUrl);
-      const up = await putBlob(
-        `grid-sheets/${projectId}/${safeName(input.name)}`,
-        bytes,
-        input.mime
-      );
-      stored = { url: up.url, blobPath: up.pathname };
-    } catch (e) {
-      console.error("[grid] blob upload failed:", e);
-      return {
-        ok: false,
-        error: "Upload to file storage failed — check the Blob token, or try again.",
-      };
-    }
-  }
-  const sheet = await addSheet(projectId, {
-    name: input.name,
-    mime: input.mime,
-    ...stored,
-    by: user.name,
-  });
-  if (!sheet) return { ok: false, error: "Design not found." };
-  revalidatePath(editorPath(projectId));
-  return { ok: true, sheetId: sheet.id };
 }
 
 export async function placeDeviceAction(
