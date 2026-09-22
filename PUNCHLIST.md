@@ -4903,7 +4903,7 @@ work — a new type should follow the same pattern, not reopen the vendor-promis
 
 ---
 
-## 82. People need to import as first-class records, not riding along on Customers — OPEN
+## 82. People need to import as first-class records, not riding along on Customers — DONE 2026-09-21 (#137, D158)
 
 **Area:** `src/app/(app)/import/` (no `people` type exists), `src/lib/identity/contacts.ts`,
 `src/app/(app)/people/` (the People surface itself, [[peak-app]] #20)
@@ -4931,11 +4931,13 @@ Building a real `people` importer without #20's decision would mean importing IN
 **Ties to:** #20 (the real blocker), #81/#83 (the same "which collections get a bulk import"
 question, asked three times in one day).
 
-**Status:** OPEN — logged only, no code.
+**Status:** DONE 2026-09-21 — shipped as the `contacts` importer under #137 (D158): one row per
+person, linked to exactly one customer by name or id, unmatched customers auto-created (the
+narrower option in question 1; #20's multi-link model is unchanged).
 
 ---
 
-## 83. Venues need a bulk import — data model / cleanup TBD — OPEN
+## 83. Venues need a bulk import — data model / cleanup TBD — DONE 2026-09-21 (#137, D158)
 
 **Area:** `src/app/(app)/venues/`, `src/lib/identity/sites.ts`, `src/lib/identity/venue-defaults.ts`
 **Reported:** 2026-08-01 (Jeff: "we need to ... sort through the venues portion")
@@ -4962,7 +4964,11 @@ type" once that's seen.
 **Ties to:** #81, #82 (same day, same "no bulk import for this collection" pattern) · #30 (site
 survey / venue measurement, a related but distinct venues-adjacent item already on the list).
 
-**Status:** OPEN — logged only, no code. Needs scoping before it needs building.
+**Status:** DONE 2026-09-21 — shipped as the `venues` importer under #137 (D158): Customer /
+Customer ID, Venue Name, Address, City, State, Zip, Category (free text, new `sites.kind`), one
+row per venue, linked or auto-created. The data-quality walk-through of existing venue records
+(duplicates, conflated site-vs-performance-space) is still a conversation with Jeff, not a punch
+item.
 
 ---
 
@@ -6211,7 +6217,7 @@ developed, but for now those two can live under that tab."
 it's maintained, placeholders for the #56 doctrine/rules items) plus those two entries moved in;
 old URLs redirect.
 
-## 137. Import/Export: separate customers / contacts / venues imports, category column, zip, link-back — OPEN (absorbs #82, #83)
+## 137. Import/Export: separate customers / contacts / venues imports, category column, zip, link-back — DONE 2026-09-21 (D158) (absorbs #82, #83)
 
 **Reported:** 2026-09-21 (Jeff): customers, contacts and venues as separate import options with a
 category column; a zip for the company address; imported contacts and venues link back to the
@@ -6228,6 +6234,27 @@ import types (#82, #83).
 contacts/venues carry a `Customer` column matched by name (case/punctuation-insensitive) with an
 optional `Customer ID`; unmatched rows are reported before commit (auto-create vs reject is Jeff's
 call, asked 2026-09-21); zip plumbed through the store; matching exports.
+
+**Shipped:** three cards on the Import hub. **Customers** — `Customer Name*, Category, Address,
+City, State, Zip, Phone, Website, Notes`; Category → `type`, the address merges into the primary
+venue (non-destructively — the old writer replaced every venue on "Update existing"), Zip also on
+the company row, Phone/Website on the company row; the old `Contact Name / Email / Venue` columns
+still import as hidden aliases. **Contacts** — `Customer* | Customer ID, Name*, Email, Phone,
+Mobile, Title, Role, Primary, Notes`, matched by customer + email-or-name, `Primary=yes` demotes the
+others, re-importing the same file is a no-op. **Venues** — `Customer* | Customer ID, Venue Name*,
+Address, City, State, Zip, Category, Notes`, matched by customer + venue name; the first imported
+venue fills the customer's unnamed base venue. Both link-back types match `Customer ID` → normalized
+name → **create the customer** (Jeff's call), once per name per file; the preview shows a Customer
+column (linked / will create) and "Will create N new customers: …" before commit, and the result
+reports rows linked vs customers created. Exports for all three (customers gains Category + Zip;
+contacts/venues carry the customer's name + id). Store seam: `zip`/`kind` on locations, `mobile` on
+contacts, `zip`/`phone`/`website` on the record, all preserve-when-omitted; new `sites.kind` column
+(migration 0023); one shared `toLocationInput` that keeps `locationName` (the #96 review
+follow-up). Files: `src/app/(app)/import/{types,parse,link,registry,actions,page,controls}.ts(x)`,
+`src/lib/stores/customers.ts`, `src/db/schema.ts` + `drizzle/0023_sites_kind.sql`,
+`src/app/(app)/companies/{types,lib,actions}.ts` + `[id]/page.tsx`, `quotes/new/actions.ts`,
+`inbox/link-actions.ts`. Tests: `test:specs` (#137 T2/T3), `test:review:regressions` (#137
+T1/T4/T5/T6), `test:smoke` (hub + export routes). Decisions: D158.
 
 ## 138. Cron reconcile of Peak/* label drift on dormant threads — OPEN (re-logged; was #98)
 
