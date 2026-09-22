@@ -11,7 +11,7 @@ import {
   isPublicDomain,
 } from "@/lib/gmail/config";
 import { resolveSender } from "@/lib/gmail/resolve";
-import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus } from "@/lib/gmail/peak-labels";
+import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
   msOf as opMsOf,
@@ -3009,6 +3009,22 @@ const wantPeakLabels = desiredPeakLabels({ customer: "Lakefront ISD", status: "w
 ok(wantPeakLabels.includes("Peak/Customers/Lakefront ISD") && wantPeakLabels.includes("Peak/Status/Waiting") && wantPeakLabels.includes("Peak/Assign/Nic") && wantPeakLabels.includes("Peak/Projects/P-3001") && wantPeakLabels.length === 4, "desired set");
 const peakLabelDiff = diffLabels(wantPeakLabels, ["INBOX", "Peak/Status/Needs reply", "Peak/Customers/Lakefront ISD", "Follow up"]);
 ok(peakLabelDiff.add.length === 3 && peakLabelDiff.remove.length === 1 && peakLabelDiff.remove[0] === "Peak/Status/Needs reply", "diff adds missing, removes only stale Peak/* labels");
+
+// #96 §3 review fix (Critical 1) — "current" must be the union across every
+// message that carries gmailLabelIds, not just the newest one, so a
+// trailing Peak-authored message (no gmailLabelIds) never blanks it.
+const cplnIdToName = new Map([
+  ["L1", "Peak/Status/Waiting"],
+  ["L2", "Peak/Customers/X"],
+]);
+const cpln = currentPeakLabelNames(
+  [{ gmailLabelIds: ["L1"] }, { gmailLabelIds: ["L2", "INBOX"] }, {}],
+  cplnIdToName
+);
+ok(
+  cpln.includes("Peak/Status/Waiting") && cpln.includes("Peak/Customers/X"),
+  "currentPeakLabelNames: union across every message that has gmailLabelIds, trailing Peak-only message doesn't blank it"
+);
 
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();

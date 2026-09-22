@@ -9,7 +9,7 @@ import { contactByEmail } from "@/lib/identity/lookup";
 import { emailsFor, saveContact, setEmails, softDeleteContact } from "@/lib/identity/contacts";
 import { claimDomain, customersForDomain } from "@/lib/gmail/domains";
 import { applyResolution, applyResweepPatch, resolveForThread, resweepThreads } from "@/lib/gmail/linking";
-import { syncPeakLabels } from "@/lib/gmail/label-sync";
+import { syncPeakLabels, queueLabelSync, pendingLabelSyncCount } from "@/lib/gmail/label-sync";
 import type { CommThread } from "@/lib/stores/comms";
 
 async function main() {
@@ -366,6 +366,26 @@ async function main() {
   await assert.doesNotReject(
     () => syncPeakLabels("C-t96label-nogmail"),
     "#96 syncPeakLabels on a thread with no gmailThreadId must resolve, never throw"
+  );
+
+  // #96 §3 review fix (Critical 4) — queueLabelSync coalesces a second call
+  // for the same thread while the first is still queued/in-flight, and
+  // never throws even with the Gmail gate off.
+  assert.doesNotThrow(() => {
+    queueLabelSync("x");
+    queueLabelSync("x");
+  }, "#96 queueLabelSync must never throw");
+  assert.equal(
+    pendingLabelSyncCount(),
+    1,
+    "#96 queueLabelSync coalesces a second call for the same thread instead of double-queuing"
+  );
+  // Let the (immediately-resolving, gate-off) chained sync settle and clear.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(
+    pendingLabelSyncCount(),
+    0,
+    "#96 queueLabelSync's pending entry clears once the chained sync settles"
   );
 
   console.log("review regression checks passed");

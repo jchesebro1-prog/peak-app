@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { AUTO_SYNC_MIN_AGE_MS } from "@/lib/gmail/config";
-import { syncPeakLabels } from "@/lib/gmail/label-sync";
 import {
   addMessage,
   archive,
@@ -255,7 +254,6 @@ export async function searchInboxAction(
 export async function setStatusAction(id: string, status: string) {
   await requireUser();
   await setStatus(id, status);
-  void syncPeakLabels(id);
   revalidate();
 }
 
@@ -268,7 +266,6 @@ export async function reopenAction(id: string) {
 export async function assignAction(id: string, name: string) {
   await requireUser();
   await assign(id, name || "");
-  void syncPeakLabels(id);
   revalidate();
 }
 
@@ -296,7 +293,6 @@ export async function setLinkAction(
     await update(id, { customerId: adopt.customerId, customer: adopt.customer });
   }
   await setLink(id, link);
-  void syncPeakLabels(id);
   revalidate();
 }
 

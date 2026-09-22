@@ -1213,7 +1213,9 @@ export async function addMessage(
 ): Promise<CommThread | null> {
   const dir: Direction = m.direction === "in" ? "in" : "out";
   let queued = false;
+  let statusChanged = false;
   const res = await patchDoc<CommThread>("comms", threadId, (t) => {
+    const prevStatus = t.status;
     const channel = asChannel(m.channel, t.channel || "email");
     const me = m.me || DEFAULT_USER;
     const author =
@@ -1236,6 +1238,7 @@ export async function addMessage(
     }
     t.messages = (t.messages || []).concat([msg]);
     t.status = m.status || deriveStatus(t);
+    statusChanged = t.status !== prevStatus;
     if (dir === "in") t.unread = true;
     else t.unread = false;
     if (t.status !== "draft") t.archived = false;
@@ -1245,6 +1248,7 @@ export async function addMessage(
   if (res && dir === "out" && !queued && m.channel !== "call" && m.channel !== "meeting") {
     await dispatchOutbound(threadId);
   }
+  if (res && statusChanged) queuePeakLabelSync(threadId);
   return res;
 }
 
@@ -1545,22 +1549,39 @@ export function hasIncoming(): boolean {
 
 /* ---- lifecycle / linking -------------------------------------------------------- */
 
+/** #96 §3 — after any customer/status/assignedTo/link mutation, queue a
+ *  Peak → Gmail label sync for the thread. Dynamic import: label-sync.ts
+ *  pulls in connections/api (DB-backed), and a static import here would set
+ *  up an import cycle with this module (label-sync imports the CommThread
+ *  type from comms.ts). Never throws — sync failures are already caught and
+ *  logged inside syncPeakLabels itself; the outer catch only guards the
+ *  import/dynamic-dispatch machinery. */
+function queuePeakLabelSync(threadId: string): void {
+  void (async () => {
+    const { queueLabelSync } = await import("@/lib/gmail/label-sync");
+    queueLabelSync(threadId);
+  })().catch(() => {});
+}
+
 export async function setStatus(
   threadId: string,
   status: string
 ): Promise<CommThread | null> {
-  return patchDoc<CommThread>("comms", threadId, (t) => {
+  const res = await patchDoc<CommThread>("comms", threadId, (t) => {
     t.status = (STATUSES as readonly string[]).includes(status)
       ? (status as ThreadStatus)
       : t.status;
     touch(t);
   });
+  if (res) queuePeakLabelSync(threadId);
+  return res;
 }
 
 export async function reopen(threadId: string): Promise<CommThread | null> {
   const t = await get(threadId);
   if (!t) return null;
   const lm = lastMsg(t);
+  // Delegates to setStatus(), which already queues the label sync.
   return setStatus(
     threadId,
     lm ? statusFromDirection(lm.direction) : "waiting_them"
@@ -1571,20 +1592,24 @@ export async function assign(
   threadId: string,
   name?: string | null
 ): Promise<CommThread | null> {
-  return patchDoc<CommThread>("comms", threadId, (t) => {
+  const res = await patchDoc<CommThread>("comms", threadId, (t) => {
     t.assignedTo = name || "";
     touch(t);
   });
+  if (res) queuePeakLabelSync(threadId);
+  return res;
 }
 
 export async function setLink(
   threadId: string,
   link?: CommLink | null
 ): Promise<CommThread | null> {
-  return patchDoc<CommThread>("comms", threadId, (t) => {
+  const res = await patchDoc<CommThread>("comms", threadId, (t) => {
     t.link = link || null;
     touch(t);
   });
+  if (res) queuePeakLabelSync(threadId);
+  return res;
 }
 
 /** Move a thread to a different mailbox (e.g. claim an info@ note into Sales). */

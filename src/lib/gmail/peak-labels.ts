@@ -57,6 +57,26 @@ export function desiredPeakLabels(
   return out;
 }
 
+/** Every distinct label NAME currently on the Gmail side of a thread — the
+ *  union across every message that carries `gmailLabelIds`, not just the
+ *  newest one. Peak-authored messages (replies/notes via addMessage) have no
+ *  `gmailLabelIds` and sort newest — deriving "current" from only the newest
+ *  message silently forgets whatever Peak/* labels Gmail still carries
+ *  whenever the newest message is one of ours, so `remove` came out empty
+ *  and stale Peak/Status/* labels never cleared (Critical 1). Messages
+ *  without `gmailLabelIds` simply contribute nothing to the union, so a
+ *  trailing Peak-only message never blanks what earlier messages carried. */
+export function currentPeakLabelNames(
+  messages: { gmailLabelIds?: string[] }[],
+  idToName: Map<string, string>
+): string[] {
+  const names = new Set<string>();
+  for (const m of messages) {
+    for (const id of m.gmailLabelIds || []) names.add(idToName.get(id) || id);
+  }
+  return Array.from(names);
+}
+
 export function diffLabels(desired: string[], current: string[]): { add: string[]; remove: string[] } {
   const want = new Set(desired);
   const have = new Set(current);

@@ -129,8 +129,8 @@ export async function resweepThreads(
       if (next.resolution === "linked") {
         // Lazy import — label-sync pulls in connections/api, and a static
         // import here would set up an import cycle with those.
-        const { syncPeakLabels } = await import("./label-sync");
-        void syncPeakLabels(t.id);
+        const { queueLabelSync } = await import("./label-sync");
+        queueLabelSync(t.id);
       }
     }
   }

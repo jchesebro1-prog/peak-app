@@ -47,7 +47,7 @@ import {
 } from "./api";
 import { buildRaw, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
-import { syncPeakLabels } from "./label-sync";
+import { queueLabelSync } from "./label-sync";
 
 /**
  * The real Gmail bridge (Phase 7). comms.ts delegates here — but ONLY when the
@@ -213,6 +213,7 @@ async function recordMessage(
         d.archived = false;
       }
     });
+    queueLabelSync(existing.id);
     return existing.id;
   }
 
@@ -269,7 +270,7 @@ async function recordMessage(
     }
     return recordMessage(key, p, attempt + 1);
   }
-  if (rec.resolution === "linked") void syncPeakLabels(id);
+  if (rec.resolution === "linked") queueLabelSync(id);
   return id;
 }
 
@@ -379,6 +380,7 @@ async function rederiveStatuses(key: MailboxKey): Promise<number> {
       d.messages = [...(d.messages || [])].sort((a, b) => (a.at || 0) - (b.at || 0));
       if (d.status === "waiting_us" || d.status === "waiting_them") d.status = deriveStatus(d);
     });
+    queueLabelSync(t.id);
     changed++;
   }
   return changed;
