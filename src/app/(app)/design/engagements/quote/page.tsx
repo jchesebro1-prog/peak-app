@@ -6,7 +6,7 @@ import {
   type ConsultingQuotePayload,
 } from "@/lib/stores/engagements";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
-import { getSettings } from "@/lib/settings";
+import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
 import {
   ConsultingQuoteBuilder,
   type BuilderCustomer,
@@ -61,6 +61,7 @@ export default async function ConsultingQuotePage({
 
   const phaseMenu = mergedConsultingPhases(settings.consultingPhases);
   const assumptionsMenu = mergedConsultingAssumptions(settings.consultingAssumptions);
+  const disciplineMenu = mergedConsultingDisciplines(settings.consultingDisciplines);
 
   let initial: BuilderInitial | null = null;
   if (editId) {
@@ -92,6 +93,7 @@ export default async function ConsultingQuotePage({
         legacyFees: pay?.fees || [],
         terms: pay?.terms || "",
         phases: pay?.phases || [],
+        disciplines: pay?.disciplines || [],
         status: q.status,
       };
     }
@@ -101,6 +103,7 @@ export default async function ConsultingQuotePage({
     <ConsultingQuoteBuilder
       customers={customers}
       phaseMenu={phaseMenu}
+      disciplineMenu={disciplineMenu}
       assumptionsMenu={assumptionsMenu}
       initial={initial}
       preCustomerId={preCustomer}

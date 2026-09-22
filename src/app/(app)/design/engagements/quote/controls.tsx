@@ -49,8 +49,18 @@ export type BuilderInitial = {
   legacyFees: Array<{ name: string; amount: number }>;
   terms: string;
   phases: string[];
+  /** #145 D165 — disciplines bought; seeds the engagement's `disciplines`
+   *  the same way `phases` seeds its phases when the proposal is sent. */
+  disciplines: string[];
   status: string;
 };
+
+/** Display label for a stored (lowercased) discipline — "av" -> "AV",
+ *  everything else title-cased on its first letter only (the vocabulary is
+ *  admin free-text and may not match any known acronym). */
+function disciplineLabel(d: string): string {
+  return d.length <= 2 ? d.toUpperCase() : d.charAt(0).toUpperCase() + d.slice(1);
+}
 
 type ScopeRow = { id: string; title: string; description: string; fee: string };
 
@@ -79,6 +89,7 @@ const INPUT: React.CSSProperties = {
 export function ConsultingQuoteBuilder({
   customers,
   phaseMenu,
+  disciplineMenu,
   assumptionsMenu,
   initial,
   preCustomerId,
@@ -86,6 +97,8 @@ export function ConsultingQuoteBuilder({
 }: {
   customers: BuilderCustomer[];
   phaseMenu: string[];
+  /** #145 D165 — the discipline vocabulary (Settings-editable). */
+  disciplineMenu: string[];
   /** Merged assumptions library (Settings-editable, DRAFT default seed). */
   assumptionsMenu: string[];
   initial: BuilderInitial | null;
@@ -144,6 +157,16 @@ export function ConsultingQuoteBuilder({
   }, [phaseMenu, initial]);
   const [phases, setPhases] = useState<string[]>(
     initial ? initial.phases : phaseMenu.slice()
+  );
+
+  // Discipline menu + any custom disciplines already on the edited quote
+  // (mirrors phaseOptions just above).
+  const disciplineOptions = useMemo(() => {
+    const extra = (initial?.disciplines || []).filter((d) => !disciplineMenu.includes(d));
+    return [...disciplineMenu, ...extra];
+  }, [disciplineMenu, initial]);
+  const [disciplines, setDisciplines] = useState<string[]>(
+    initial ? initial.disciplines : disciplineMenu.slice()
   );
 
   const pickContact = (name: string) => {
@@ -212,6 +235,7 @@ export function ConsultingQuoteBuilder({
         <input type="hidden" name="scopes" value={JSON.stringify(scopes)} />
         <input type="hidden" name="assumptions" value={JSON.stringify(assumptions)} />
         <input type="hidden" name="phases" value={JSON.stringify(phases)} />
+        <input type="hidden" name="disciplines" value={JSON.stringify(disciplines)} />
 
         <label style={LBL}>Customer (Architect / billed party)</label>
         <CustomerCombobox
@@ -427,6 +451,22 @@ export function ConsultingQuoteBuilder({
               </button>
             );
           })}
+        </div>
+
+        <label style={LBL}>Disciplines bought (gates which template tasks apply)</label>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+          {disciplineOptions.map((d) => (
+            <label key={d} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#3a3f4a", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={disciplines.includes(d)}
+                onChange={() =>
+                  setDisciplines(disciplines.includes(d) ? disciplines.filter((x) => x !== d) : [...disciplines, d])
+                }
+              />
+              {disciplineLabel(d)}
+            </label>
+          ))}
         </div>
 
         <label style={LBL}>Terms</label>

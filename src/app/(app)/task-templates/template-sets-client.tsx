@@ -39,12 +39,20 @@ function rid(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
+/** Display label for a stored (lowercased) discipline — "av" -> "AV",
+ *  everything else title-cased on its first letter only, since the
+ *  vocabulary is admin-free-text and may not match any known acronym. */
+function disciplineLabel(d: string): string {
+  return d.length <= 2 ? d.toUpperCase() : d.charAt(0).toUpperCase() + d.slice(1);
+}
+
 function blankLine(): EditableLine {
   return {
+    // #145 — phase/discipline/startPct/lengthPct match normalizeLine's own
+    // defaults (blank phase never expands on a consulting target until one
+    // is picked below; 0/100 covers the whole phase window), so a
+    // never-touched line reads back identically to one saved this way.
     localKey: rid(), key: rid(), title: "", section: "", target: { kind: "team" },
-    // #145 — no scope/unit editor yet here (that lands with the consulting
-    // apply UI); these match normalizeLine's own defaults, so leaving them
-    // out is never distinguishable from a saved line reading them back.
     phase: "", discipline: "", startPct: 0, lengthPct: 100,
   };
 }
@@ -65,10 +73,17 @@ export default function TemplateSetsClient({
   initial,
   people,
   roles,
+  phaseMenu,
+  disciplineMenu,
 }: {
   initial: TaskTemplateSetRecord[];
   people: { id: string; name: string }[];
   roles: readonly string[];
+  /** #145 D165 — the consulting phase/discipline menus, computed server-side
+   *  (settings + engagements are both DB-backed store modules — this file
+   *  must never import them itself; see the 763febd note above). */
+  phaseMenu: string[];
+  disciplineMenu: string[];
 }) {
   const [sets, setSets] = useState<EditableSet[]>(() => initial.map(toEditable));
   const [pending, startTransition] = useTransition();
@@ -224,6 +239,58 @@ export default function TemplateSetsClient({
                 placeholder="Section"
                 onChange={(e) => patchLine(s.localKey, l.localKey, { section: e.target.value })}
               />
+              <select
+                title="Phase — must match the engagement's phase menu to expand (D165)"
+                style={{ ...input, flex: "1 1 140px" }}
+                value={l.phase}
+                onChange={(e) => patchLine(s.localKey, l.localKey, { phase: e.target.value })}
+              >
+                <option value="">— phase —</option>
+                {phaseMenu.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+              <select
+                title="Discipline — blank matches every discipline the engagement bought (D165)"
+                style={{ ...input, flex: "1 1 140px" }}
+                value={l.discipline}
+                onChange={(e) => patchLine(s.localKey, l.localKey, { discipline: e.target.value })}
+              >
+                <option value="">All disciplines</option>
+                {disciplineMenu.map((d) => (
+                  <option key={d} value={d}>
+                    {disciplineLabel(d)}
+                  </option>
+                ))}
+              </select>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 11, color: "#9aa0ab" }}>Start%</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  title="Position within the phase window, 0–100 (D166)"
+                  style={{ ...input, width: 60, flex: "0 0 auto" }}
+                  value={l.startPct}
+                  onChange={(e) => patchLine(s.localKey, l.localKey, { startPct: Number(e.target.value) || 0 })}
+                />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 11, color: "#9aa0ab" }}>Len%</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  title="Length within the phase window, 0–100 (D166)"
+                  style={{ ...input, width: 60, flex: "0 0 auto" }}
+                  value={l.lengthPct}
+                  onChange={(e) => patchLine(s.localKey, l.localKey, { lengthPct: Number(e.target.value) || 0 })}
+                />
+              </div>
               <select
                 style={{ ...input, flex: "1 1 110px" }}
                 value={l.target.kind}

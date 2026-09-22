@@ -437,6 +437,11 @@ export type ConsultingQuotePayload = {
   terms: string;
   /** Phase names chosen at quote time — seeds the engagement's phases. */
   phases: string[];
+  /** #145 D165 — disciplines chosen at quote time (checkbox row against the
+   *  Settings-editable vocabulary) — seeds the engagement's `disciplines`
+   *  the same way `phases` seeds `EngagementPhase[]` on spawn. Optional so a
+   *  pre-#145 quote payload still parses; read `?? []`. */
+  disciplines?: string[];
   /** #35 structured scopes — id: uid('sc-'). */
   scopes?: ConsultingScope[];
   /** #35 ticked assumption texts, frozen at save. */
@@ -499,6 +504,11 @@ function fromQuote(
     installQuoteId: null,
     architect: q.customer ? { company: q.customer, contact: contactName } : null,
     status,
+    // #145 D165 — carried straight from the quote payload (already
+    // allowlisted against the live vocabulary when the quote was saved,
+    // same trust boundary as `phases` just above); normalizeEngagementRecord
+    // re-cleans on every read regardless, same as every other field here.
+    disciplines: pay?.disciplines || [],
     phases,
     milestones,
     decisions: [],

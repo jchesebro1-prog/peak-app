@@ -2,6 +2,8 @@ import { requireUser } from "@/lib/session";
 import { can, ROLES } from "@/lib/team";
 import { activeUsers } from "@/lib/users";
 import { allTaskTemplateSets } from "@/lib/stores/task-templates";
+import { mergedConsultingPhases } from "@/lib/stores/engagements";
+import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
 import TemplateSetsClient from "./template-sets-client";
 
 export const metadata = { title: "Task Templates — Quartzite-6" };
@@ -17,9 +19,17 @@ export default async function TaskTemplatesPage() {
   const user = await requireUser();
   const isAdmin = can("manage_users", user.roles);
 
-  const [sets, roster] = isAdmin
-    ? await Promise.all([allTaskTemplateSets(), activeUsers()])
-    : [[], []];
+  const [sets, roster, settings] = isAdmin
+    ? await Promise.all([allTaskTemplateSets(), activeUsers(), getSettings()])
+    : [[], [], null];
+
+  // #145 D165 — the phase/discipline menus a line's Phase/Discipline
+  // selects offer, computed server-side (same seam as the consulting quote
+  // builder's phaseMenu) so template-sets-client.tsx — a client component —
+  // never imports the settings/engagements store modules itself (see that
+  // file's own comment on the 763febd production-build break).
+  const phaseMenu = settings ? mergedConsultingPhases(settings.consultingPhases) : [];
+  const disciplineMenu = settings ? mergedConsultingDisciplines(settings.consultingDisciplines) : [];
 
   return (
     <div className="pk-content" style={{ maxWidth: 900 }}>
@@ -55,6 +65,8 @@ export default async function TaskTemplatesPage() {
           initial={sets}
           people={roster.map((u) => ({ id: u.id, name: u.name }))}
           roles={ROLES}
+          phaseMenu={phaseMenu}
+          disciplineMenu={disciplineMenu}
         />
       )}
     </div>
