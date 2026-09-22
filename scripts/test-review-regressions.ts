@@ -180,6 +180,35 @@ async function main() {
   assert.equal(raced?.resolution, "linked", "#96 resweep must not revert the manual link's resolution");
   void n3; // resweepThreads' own already-linked filter is what skips C-t96b here
 
+  // #96 Wave A fix 3 — the batched re-sweep resolves every unlinked thread
+  // from one domain in a single pass (one contact query + one domain query).
+  for (const i of [1, 2, 3]) {
+    await upsertDoc("comms", {
+      id: `C-t96batch${i}`, mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: true, archived: false,
+      customerId: null, customer: "", contactName: `Batch ${i}`, contactEmail: `batch${i}@t96batch.org`,
+      subject: "hi", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [], createdAt: Date.now(), updatedAt: Date.now(), resolution: "unknown",
+    } as any);
+  }
+  await claimDomain("t96batch.org", "lakefront", "manual", "test");
+  const nBatch = await resweepThreads({ domain: "t96batch.org" });
+  assert.equal(nBatch, 3, "#96 batched resweep touches all three unlinked threads");
+  for (const i of [1, 2, 3]) {
+    const b = await getDoc<any>("comms", `C-t96batch${i}`);
+    assert.equal(b?.resolution, "suggested", `#96 batched resweep suggests thread ${i}`);
+    assert.equal(b?.suggestedCustomerId, "lakefront", `#96 batched resweep names the owner on thread ${i}`);
+  }
+  // …and a contact address in the same sweep links directly (contact step
+  // still wins inside the batch).
+  await setEmails("ct-t96", [
+    { value: "brenda.t96@lakefront.k12.mn.us", label: "work", isPrimary: true },
+    { value: "batch2@t96batch.org", label: "other", isPrimary: false },
+  ]);
+  await resweepThreads({ domain: "t96batch.org" });
+  const b2 = await getDoc<any>("comms", "C-t96batch2");
+  assert.equal(b2?.resolution, "linked", "#96 batched resweep links a contact address directly");
+  assert.equal(b2?.resolvedContactId, "ct-t96", "#96 batched resweep stamps the matched contact");
+
   // #96 — applyResweepPatch guard, exercised directly (the patchDoc callback
   // is synchronous, so `next` is always precomputed outside it — see linking.ts).
   const linkedFresh: CommThread = { ...rec, id: "guard-linked", customerId: "manual-owner", resolution: "linked" };

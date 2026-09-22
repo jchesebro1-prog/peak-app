@@ -3,13 +3,13 @@
  * re-sweep live here too (Task 4).
  */
 import { listDocs, patchDoc } from "@/db/doc-store";
-import { contactByEmail } from "@/lib/identity/lookup";
+import { contactByEmail, contactsByEmails } from "@/lib/identity/lookup";
 import { emailsFor, getContact, saveContact, setEmails } from "@/lib/identity/contacts";
 import { mintId } from "@/lib/identity/ids";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import type { CommThread } from "@/lib/stores/comms";
 import { domainOf, isPublicDomain } from "./config";
-import { claimDomain, customersForDomain } from "./domains";
+import { claimDomain, customersForDomain, customersForDomains } from "./domains";
 import { resolveSender, type Resolution } from "./resolve";
 
 export async function resolveForThread(email: string): Promise<Resolution> {
@@ -78,20 +78,35 @@ function matchesFilter(t: CommThread, f?: { email?: string; domain?: string }): 
 }
 
 /** Re-run the resolver over unlinked threads. Idempotent; patches only when
- *  something changes. */
+ *  something changes. Resolves in two batched queries (every candidate
+ *  address, every candidate domain) rather than two per thread. */
 export async function resweepThreads(
   filter?: { email?: string; domain?: string },
   onlyAccountKey?: string
 ): Promise<number> {
+  const started = Date.now();
   const all = await listDocs<CommThread>("comms");
+  const candidates = all.filter(
+    (t) =>
+      !t.deleted &&
+      !(t.customerId && t.resolution === "linked") &&
+      !(onlyAccountKey && t.gmailAccountKey !== onlyAccountKey) &&
+      matchesFilter(t, filter) &&
+      !!t.contactEmail
+  );
+  if (!candidates.length) return 0;
+  const addresses = candidates.map((t) => (t.contactEmail || "").trim().toLowerCase());
+  const [contactHits, domainOwners] = await Promise.all([
+    contactsByEmails(addresses),
+    customersForDomains(addresses.map(domainOf)),
+  ]);
+  const lookups = {
+    contactByEmail: async (e: string) => contactHits.get(e) ?? null,
+    customersByDomain: async (d: string) => domainOwners.get(d) ?? [],
+  };
   let changed = 0;
-  for (const t of all) {
-    if (t.deleted) continue;
-    if (t.customerId && t.resolution === "linked") continue;
-    if (onlyAccountKey && t.gmailAccountKey !== onlyAccountKey) continue;
-    if (!matchesFilter(t, filter)) continue;
-    if (!t.contactEmail) continue;
-    const r = await resolveForThread(t.contactEmail);
+  for (const t of candidates) {
+    const r = await resolveSender(t.contactEmail || "", lookups);
     const before = JSON.stringify([t.customerId, t.resolution, t.suggestedCustomerId, t.candidates]);
     const next = { ...t };
     await applyResolution(next, r);
@@ -102,6 +117,9 @@ export async function resweepThreads(
       didPatch = applyResweepPatch(d, next);
     });
     if (didPatch) changed++;
+  }
+  if (changed > 0) {
+    console.info("[gmail] link backfill:", { threads: candidates.length, changed, ms: Date.now() - started });
   }
   return changed;
 }

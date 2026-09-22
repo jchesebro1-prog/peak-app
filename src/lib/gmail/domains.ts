@@ -4,7 +4,7 @@
  * than one customer (two schools sharing a district domain); the resolver
  * treats that as ambiguous and never guesses.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { customerDomains } from "@/db/schema";
 import { isPublicDomain } from "./config";
@@ -20,6 +20,28 @@ export async function customersForDomain(
     .from(customerDomains)
     .where(eq(customerDomains.domain, d));
   return rows;
+}
+
+/** Batched form for the re-sweep (#96): one query for every domain, keyed
+ *  by lowercased domain → claiming customer ids. Public domains are never
+ *  queried. */
+export async function customersForDomains(domains: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const wanted = Array.from(
+    new Set(domains.map((x) => (x || "").toLowerCase()).filter((d) => d && !isPublicDomain(d)))
+  );
+  if (!wanted.length) return out;
+  const db = await getDb();
+  const rows = await db
+    .select({ domain: customerDomains.domain, customerId: customerDomains.customerId })
+    .from(customerDomains)
+    .where(inArray(customerDomains.domain, wanted));
+  for (const r of rows) {
+    const list = out.get(r.domain) ?? [];
+    list.push(r.customerId);
+    out.set(r.domain, list);
+  }
+  return out;
 }
 
 /** manual: replaces every other claim on the domain (single owner).

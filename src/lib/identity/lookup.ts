@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { companies, contactEmails, contacts } from "@/db/schema";
 
@@ -35,6 +35,41 @@ export async function contactByEmail(email: string): Promise<ContactLookup> {
     .orderBy(desc(contacts.updatedAt))
     .limit(10);
   return pickContactHit(rows);
+}
+
+/** Batched form for the re-sweep (#96): one query for every address, same
+ *  deleted filters and newest-first ordering, keyed by lowercased address.
+ *  Addresses with no live row are simply absent from the map. */
+export async function contactsByEmails(emails: string[]): Promise<Map<string, ContactLookup>> {
+  const out = new Map<string, ContactLookup>();
+  const wanted = Array.from(new Set(emails.map((x) => (x || "").trim().toLowerCase()).filter(Boolean)));
+  if (!wanted.length) return out;
+  const db = await getDb();
+  const rows = await db
+    .select({
+      email: sql<string>`lower(${contactEmails.email})`,
+      contactId: contactEmails.contactId,
+      customerId: contacts.homeCompanyId,
+    })
+    .from(contactEmails)
+    .innerJoin(contacts, eq(contacts.id, contactEmails.contactId))
+    .leftJoin(companies, eq(companies.id, contacts.homeCompanyId))
+    .where(
+      and(
+        inArray(sql`lower(${contactEmails.email})`, wanted),
+        eq(contacts.deleted, false),
+        sql`${companies.deleted} IS NOT TRUE`
+      )
+    )
+    .orderBy(desc(contacts.updatedAt));
+  const byEmail = new Map<string, Array<{ contactId: string; customerId: string | null }>>();
+  for (const r of rows) {
+    const list = byEmail.get(r.email) ?? [];
+    list.push({ contactId: r.contactId, customerId: r.customerId });
+    byEmail.set(r.email, list);
+  }
+  for (const [e, list] of byEmail) out.set(e, pickContactHit(list));
+  return out;
 }
 
 /** Shared reducer for the single and batched lookups: newest-first rows for
