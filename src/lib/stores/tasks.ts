@@ -6,10 +6,18 @@ import type { ProjectTask, ProjectStage, ProjectRecord } from "@/lib/stores/proj
 /* ============================================================
    Tasks (#17) — the app's first cross-record task collection,
    promoted from the embedded ProjectTask[] (decision A, 7/19).
-   Parent pointers are nullable (projectId / quoteId); assignee
-   is user-id + denormalized display name (decision C); status
-   is the 4-state enum (decision D). Item-16 sold/completed
+   Parent pointers are nullable (projectId / quoteId / designId);
+   assignee is user-id + denormalized display name (decision C);
+   status is the 4-state enum (decision D). Item-16 sold/completed
    follow-ups are auto-created rows guarded by coverageKey.
+
+   designId (D149, #118): added alongside the reusable task-template
+   feature so a design can carry its own tasks the same way a project
+   or quote does — no design-side task UI or parent pointer existed
+   before this. Same nullable-pointer convention as projectId/quoteId
+   (D85): no FK, exactly one of the three is ever non-null in practice
+   but nothing enforces that at the type level, matching how
+   projectId/quoteId already coexist unenforced.
    ============================================================ */
 
 const now = () => Date.now();
@@ -30,6 +38,7 @@ export type TaskRecord = {
   section: string;               // Field Work grouping; "Install" default, "" for non-project tasks
   projectId: string | null;      // parent pointers — nullable, no FK (D85 convention)
   quoteId: string | null;
+  designId: string | null;       // added D149 — the reusable-template feature's design task-linkage
   coverageKey: string | null;    // stable template/auto key; null for manual tasks
   assigneeUserId: string | null; // users.id ("u1"); null = unassigned or legacy
   assigneeName: string;          // denormalized display name; "" = unassigned
@@ -166,7 +175,7 @@ export function isOverdue(t: Pick<TaskRecord, "dueAt" | "status">, nowMs: number
 export function taskFromLegacy(projectId: string, pt: ProjectTask, at: number): TaskRecord {
   return {
     id: pt.id, title: pt.title, section: pt.section || "Install",
-    projectId, quoteId: null, coverageKey: null,
+    projectId, quoteId: null, designId: null, coverageKey: null,
     assigneeUserId: null, assigneeName: pt.assignee || "",
     dueAt: null, status: pt.done ? "done" : "open", notes: "",
     createdBy: pt.assignee || "", createdAt: at, updatedAt: at,
@@ -212,6 +221,7 @@ function normalizeTask(raw: Partial<TaskRecord> & { id: string }): TaskRecord {
   return {
     id: raw.id, title: raw.title || "New task", section: raw.section ?? "Install",
     projectId: raw.projectId ?? null, quoteId: raw.quoteId ?? null,
+    designId: raw.designId ?? null,
     coverageKey: raw.coverageKey ?? null,
     assigneeUserId: raw.assigneeUserId ?? null, assigneeName: raw.assigneeName ?? "",
     dueAt: raw.dueAt ?? null,
@@ -235,6 +245,11 @@ export async function tasksForProject(projectId: string): Promise<TaskRecord[]> 
  *  it); this is the read half once one exists. */
 export async function tasksForQuote(quoteId: string): Promise<TaskRecord[]> {
   return (await allTasks()).filter((t) => t.quoteId === quoteId);
+}
+
+/** D149 — the reusable-template feature's design side, mirroring tasksForQuote. */
+export async function tasksForDesign(designId: string): Promise<TaskRecord[]> {
+  return (await allTasks()).filter((t) => t.designId === designId);
 }
 
 export async function getTask(id: string): Promise<TaskRecord | null> {

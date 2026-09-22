@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import type { TaskRecord } from "@/lib/stores/tasks";
+import type { TaskTemplateSetRecord } from "@/lib/stores/task-templates";
 import { firstName, deriveInitials, fallbackColor } from "@/lib/team";
 import {
   stagesFor,
@@ -36,8 +37,10 @@ import {
   addTaskAction,
   setTaskStatusAction,
   updateTaskAction,
+  applyProjectTemplateAction,
 } from "./actions";
 import { TasksCard } from "@/components/tasks-card";
+import { ApplyTemplateControl } from "@/components/apply-template-control";
 import { SegmentedToggle } from "@/components/ui";
 import { OwnerSelect } from "@/components/owner-select";
 import BoardView from "@/components/board/board-view";
@@ -202,6 +205,7 @@ export function ProjectsView({
   roster,
   taskRows,
   people,
+  templateSets,
 }: {
   projects: ProjectRecord[];
   pending: QuoteLike[];
@@ -216,6 +220,8 @@ export function ProjectsView({
   roster: string[];
   taskRows: TaskRecord[];
   people: { id: string; name: string }[];
+  /** Reusable task-template sets applicable to projects (D149, #118) — empty on the list view. */
+  templateSets: TaskTemplateSetRecord[];
 }) {
   const custName = (p: { customerId: string | null; customer: string }) =>
     (p.customerId && custById.get(p.customerId)) || p.customer || "—";
@@ -766,6 +772,7 @@ export function ProjectsView({
               roster={roster}
               taskRows={taskRows}
               people={people}
+              templateSets={templateSets}
             />
           ) : (
             <div
@@ -823,6 +830,7 @@ function ProjectDetail({
   roster,
   taskRows,
   people,
+  templateSets,
 }: {
   p: ProjectRecord;
   tab: string;
@@ -834,6 +842,7 @@ function ProjectDetail({
   roster: string[];
   taskRows: TaskRecord[];
   people: { id: string; name: string }[];
+  templateSets: TaskTemplateSetRecord[];
 }) {
   const { colorOf, initialsOf } = makeIdentityLookup(identity);
   const stages = stagesFor(p.kind);
@@ -1118,6 +1127,7 @@ function ProjectDetail({
             initialsOf={initialsOf}
             taskRows={taskRows}
             people={people}
+            templateSets={templateSets}
           />
         )}
         {curTab === "procurement" && <ProcurementTab p={p} />}
@@ -1141,6 +1151,7 @@ function OverviewTab({
   initialsOf,
   taskRows,
   people,
+  templateSets,
 }: {
   p: ProjectRecord;
   isOrder: boolean;
@@ -1148,6 +1159,7 @@ function OverviewTab({
   initialsOf: (n: string) => string;
   taskRows: TaskRecord[];
   people: { id: string; name: string }[];
+  templateSets: TaskTemplateSetRecord[];
 }) {
   const risks = riskFlags(p);
   const cards: Array<{ label: string; value: string; sub: string }> = [];
@@ -1240,6 +1252,12 @@ function OverviewTab({
         </span>
       </div>
       <div style={{ marginBottom: 16 }}>
+        <ApplyTemplateControl
+          parentField="id"
+          parentId={p.id}
+          templateSets={templateSets}
+          action={applyProjectTemplateAction}
+        />
         <TasksCard
           parentField="id"
           parentId={p.id}

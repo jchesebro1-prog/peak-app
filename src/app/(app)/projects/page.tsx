@@ -44,6 +44,7 @@ export default async function ProjectsPage({
       roster={data.roster}
       taskRows={data.taskRows}
       people={data.people}
+      templateSets={data.templateSets}
     />
   );
 }

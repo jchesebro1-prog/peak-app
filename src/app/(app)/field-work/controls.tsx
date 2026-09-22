@@ -271,7 +271,7 @@ export default function FieldWorkDetail({
     // which never reaches the server action, still lands assigned (not just
     // named) once the outboxed doc syncs (#17 review).
     const next: TaskRecord = {
-      id, title, section: "Install", projectId: cur.id, quoteId: null, coverageKey: null,
+      id, title, section: "Install", projectId: cur.id, quoteId: null, designId: null, coverageKey: null,
       assigneeUserId: identity[meName]?.id ?? null, assigneeName: meName, dueAt: null,
       status: "open", notes: "", createdBy: meName, createdAt: at, updatedAt: at, doneAt: null,
     };

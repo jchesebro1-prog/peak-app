@@ -16,6 +16,7 @@ import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates } from "@/lib/stores/pricing";
 import { tasksForQuote } from "@/lib/stores/tasks";
+import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import EstimatorClient from "./estimator-client";
 import type {
   AiSource,
@@ -187,6 +188,9 @@ export default async function EstimatorPage({
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
   const quoteTasks = q ? await tasksForQuote(q.id) : [];
+  // D149/#118 — reusable task-template sets applicable to quotes, for the
+  // "Apply template" control next to the Tasks card.
+  const templateSets = await taskTemplateSetsFor("quote");
 
   // Only catalog fabrics with a real per-sq-ft basis feed the curtain
   // configurator — imported vendor fabric rows (priced per unit, no costPerSqft)
@@ -284,6 +288,7 @@ export default async function EstimatorPage({
       aiSource={aiSource}
       people={roster.map((u) => ({ id: u.id, name: u.name }))}
       quoteTasks={quoteTasks}
+      templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
     />
   );
 }

@@ -23,6 +23,7 @@ export const ADMIN_SCREENS = [
   { label: "Catalog", href: "/catalog", desc: "Price books, parts, and manufacturers." },
   { label: "Templates", href: "/templates", desc: "Document and message wording." },
   { label: "Estimating Rules", href: "/estimating-rules", desc: "Rates and formulas the estimator uses." },
+  { label: "Task Templates", href: "/task-templates", desc: "Reusable checklists for projects, quotes, and designs." },
   { label: "Import / Export", href: "/import", desc: "Move records in and out of Peak." },
 ] as const;
 

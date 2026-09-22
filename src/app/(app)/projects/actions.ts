@@ -29,6 +29,7 @@ import {
   STATUSES,
   type TaskStatus,
 } from "@/lib/stores/tasks";
+import { applyTaskTemplate } from "@/lib/stores/task-templates";
 
 /**
  * Project & sales-order mutations — the ProjectStore calls the prototype makes
@@ -223,5 +224,17 @@ export async function updateTaskAction(formData: FormData) {
   }
   if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
   await updateTask(taskId, patch);
+  revalidatePath("/", "layout");
+}
+
+/** Apply a reusable task-template set (D149, #118) to this project — thin
+ *  FormData wrapper over task-templates.ts's applyTaskTemplate(), mirroring
+ *  addTaskAction's own no-op-on-bad-input convention above. */
+export async function applyProjectTemplateAction(formData: FormData) {
+  const me = await requireUser();
+  const projectId = String(formData.get("id") || "");
+  const setId = String(formData.get("setId") || "");
+  if (!projectId || !setId) return;
+  await applyTaskTemplate(setId, { kind: "project", id: projectId }, me);
   revalidatePath("/", "layout");
 }

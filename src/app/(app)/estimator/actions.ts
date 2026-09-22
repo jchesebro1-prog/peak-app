@@ -42,6 +42,7 @@ import {
   STATUSES as TASK_STATUSES,
   type TaskStatus,
 } from "@/lib/stores/tasks";
+import { applyTaskTemplate } from "@/lib/stores/task-templates";
 
 /**
  * Estimator server actions — thin, session-gated wrappers over the quotes
@@ -878,5 +879,17 @@ export async function updateQuoteTaskAction(formData: FormData) {
   }
   if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
   await updateTaskStore(taskId, patch);
+  revalidatePath("/", "layout");
+}
+
+/** Apply a reusable task-template set (D149, #118) to this quote — thin
+ *  FormData wrapper over task-templates.ts's applyTaskTemplate(), same
+ *  no-op-on-bad-input convention as addQuoteTaskAction above. */
+export async function applyQuoteTemplateAction(formData: FormData) {
+  const me = await requireUser();
+  const quoteId = String(formData.get("quoteId") || "");
+  const setId = String(formData.get("setId") || "");
+  if (!quoteId || !setId) return;
+  await applyTaskTemplate(setId, { kind: "quote", id: quoteId }, me);
   revalidatePath("/", "layout");
 }

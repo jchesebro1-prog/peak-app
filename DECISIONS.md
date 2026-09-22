@@ -3299,3 +3299,104 @@ color/disconnect/refresh actions), `src/app/(app)/calendar/calendar-
 client.tsx` (external item rendering, "Calendars" button),
 `src/app/(app)/calendar/calendar-filter-rail.tsx` (new),
 `src/app/(app)/calendar/page.tsx` (fetches initial connections).
+
+## D149. Reusable task templates for projects, quotes, and designs — assignable by person, role, or "everyone" (#118, 2026-09-21)
+
+Jeff (verbatim): "I want to be able to add template tasks to projects, quotes, and designs that
+can be assigned based on groups, people, or teams." Distinct from tasks.ts's existing
+`TASK_TEMPLATE` constant, which stays completely untouched: that's a hardcoded, per-project-stage
+checklist where every item is unassigned. This is a NEW, admin-editable, cross-record mechanism.
+
+- **New doc-store collection `task_templates`** (`taskTemplates` in db/doc-tables.ts,
+  `TT-###` ids from base 100), holding named, reusable `TaskTemplateSetRecord`s: `name`,
+  `description`, `appliesTo` (`project`/`quote`/`design`, one set can cover more than one),
+  `lines` (`{ key, title, section, target }`), and `archived` (hides a set from "Apply template"
+  pickers without deleting it — a project applied months ago should keep showing where its tasks
+  came from). Migration `drizzle/0020_odd_crusher_hogan.sql`, with the table's `..._seq_bump`
+  trigger hand-added per the note in 0012_seq_bump_trigger.sql (drizzle-kit doesn't manage
+  triggers). Not added to `SYNCABLE_COLLECTIONS`/`FIELD_COLLECTIONS` — this is admin-authored data,
+  not offline field capture.
+- **Assignment-target mapping — person / role / "everyone", not a real department/crew concept.**
+  Grepped the `users` table (`src/db/schema.ts`) and `src/lib/team.ts` before designing this: there
+  is no field grouping users into Sales/Design/Install/Service or any other "team" distinct from
+  the permission-oriented `Role` enum (Admin/Manager/Estimator/Reviewer). So:
+    - **person** = a specific `assigneeUserId`, exactly like a manually created task.
+    - **role** = one task PER active user holding that `Role` — a fan-out, not one shared/
+      unassigned task. An unassigned task shows up nowhere useful for anyone in the existing
+      Home Queue / task-list model, so "assign to the Estimator role" has to mean "give every
+      current Estimator their own copy," not "create one ownerless row."
+    - **team / "everyone"** = the same fan-out to every active user.
+  This is the closest fit to "groups, people, or teams" the real data model supports. **Genuine
+  department/crew grouping is NOT built** — that's a bigger, separate ask (a new grouping field on
+  `users`) and is logged here as an open follow-up needing Jeff's input on what a "team" should
+  mean beyond permission roles, rather than invented silently.
+- **Fan-out reuses tasks.ts's own `expandTemplate()` verbatim** — no signature change, so the
+  existing per-stage project auto-apply call site (`setProjectStage` in projects.ts) is untouched.
+  Each fanned-out instance (one per matching person) gets its own coverage-key: a person-target
+  line keeps the line's own `key`; a role/team line suffixes the user id (`key::userId`) so N
+  people never collide. The `stage` passed to `expandTemplate` is `tpl:<setId>:<kind>:<recordId>`,
+  so re-applying the SAME set to the SAME record is the only case that dedups — applying two
+  different sets, or the same set to two different records, never collides. This makes re-apply
+  additive: a newly-hired Estimator added to a role target after the first apply gets their task
+  on the next apply, and everyone else's rows are untouched (same idiom as the Grid's seeded-layout
+  re-run, D147, and the per-stage project template already in production).
+- **Quote task-linkage already existed** — punch #17's remainder shipped `quoteId` on `TaskRecord`
+  plus a working Tasks card in the estimator (`estimator-client.tsx`, `estimator/actions.ts`)
+  before this task started; the punchlist's audit note calling out "quotes have zero task UI" is
+  stale (dated 2026-07-29, before that remainder landed). Nothing needed adding there beyond the
+  new `applyQuoteTemplateAction` wrapper.
+- **Design task-linkage did NOT exist and was added**: `TaskRecord.designId: string | null` (new
+  nullable pointer, same no-FK convention as `projectId`/`quoteId`, D85) plus `tasksForDesign()`
+  in tasks.ts. No migration needed — `designId` lives inside the existing `tasks` doc's JSONB, not
+  a promoted column. The Design detail page (`design/designs/design-client.tsx`) gained its first
+  Tasks card (reusing the shared `TasksCard` component) and its first task server actions
+  (`design/designs/actions.ts`: `addDesignTaskAction`/`setDesignTaskStatusAction`/
+  `updateDesignTaskAction`), FormData-shaped to match `TasksCard`'s contract even though the rest
+  of that file uses typed-argument actions (`submitDesignReviewAction(id, ...)` etc.) — `TasksCard`
+  requires the FormData shape regardless, same as the estimator's quote-task wrappers already do.
+- **New shared `ApplyTemplateControl` component** (`src/components/apply-template-control.tsx`) —
+  a plain server-action form (name-a-set, hit Apply; renders nothing when no sets apply to that
+  record kind) placed next to the Tasks card on all three entry points: the project detail
+  (`projects/view.tsx`), the quote builder (`estimator/estimator-client.tsx`), and the design
+  detail (`design/designs/design-client.tsx`). Each parent type owns its own thin
+  `applyTaskTemplate()` wrapper action (`applyProjectTemplateAction`, `applyQuoteTemplateAction`,
+  `applyDesignTemplateAction`) — same "each route keeps its own use-server file" convention
+  `TasksCard`'s add/status/update actions already follow. Applying a template requires only being
+  signed in (`requireUser()`), matching every existing manual-task action's permission level — no
+  extra gate beyond what adding a task by hand already requires.
+- **Admin authoring UI lives at `/task-templates`** (new Settings → Admin screen, added to
+  `ADMIN_SCREENS` in `settings-sections.ts` and the nav-highlight map in `nav-data.ts`), gated on
+  `manage_users` — the closest existing permission fit (`Perm` in `lib/team.ts` has no dedicated
+  "manage templates" permission, and this screen edits data every team member's tasks are minted
+  from, the same sensitivity class as Estimating Rules and the team roster). Mirrors the
+  design/assemblies `AssemblyBuilder` pattern (`assembly-builder.tsx`) rather than Estimating
+  Rules' per-field editor: a template set is a small whole document (name/description/appliesTo/
+  lines), edited entirely client-side and saved as one unit via `saveTaskTemplateSetAction`, rather
+  than a form-per-field round trip.
+
+**Files:** `src/db/doc-tables.ts` (`taskTemplates`, `task_templates` in `DOC_TABLES`),
+`drizzle/0020_odd_crusher_hogan.sql` (new, + hand-added trigger), `src/lib/stores/tasks.ts`
+(`TaskRecord.designId`, `tasksForDesign`), `src/lib/stores/task-templates.ts` (new — CRUD +
+`applyTaskTemplate`), `src/components/apply-template-control.tsx` (new),
+`src/app/(app)/task-templates/{page.tsx,actions.ts,template-sets-client.tsx}` (new),
+`src/app/(app)/settings/settings-sections.ts`, `src/components/nav/nav-data.ts`,
+`src/app/(app)/projects/{data.ts,view.tsx,actions.ts,page.tsx,[id]/page.tsx}`,
+`src/app/(app)/estimator/{page.tsx,types.ts,estimator-client.tsx,actions.ts}`,
+`src/app/(app)/design/designs/{page.tsx,design-client.tsx,actions.ts}`,
+`src/app/(app)/field-work/controls.tsx` and `scripts/test-review-and-spec.ts` (fixture/assertion
+updates for the new `designId` field and the fifth Admin screen).
+
+**Open follow-up for Jeff (logged, not built):** a real department/crew grouping distinct from the
+permission `Role` enum, if "team" is meant to mean something narrower than "everyone" or a
+specific role (e.g. a Design crew vs. an Install crew that doesn't map to Estimator/Manager/etc.).
+
+**Fixed on review, same day:** `applyTaskTemplate` minted tasks against whatever `target.id` a
+caller passed without confirming the record actually existed (or was really the kind claimed) —
+a stale/mistyped id would have silently created tasks pointed at nothing anyone would ever read,
+rather than failing. It now loads the project/quote/design first and throws a named "could not be
+found" error if it's missing, before any task is created. The four thin wrapper actions
+(`applyProjectTemplateAction` etc.) are still void `FormData` handlers with no return channel for
+that thrown error — the SAME accepted trade-off already made across this codebase for this exact
+action shape (#85: "logged only, no code... the point of this entry is that the decision was made
+knowingly rather than papered over"), so this fix trades a silent wrong-behavior for a loud
+failure without expanding into the five-screens-of-error-UI #85 already declined to build.

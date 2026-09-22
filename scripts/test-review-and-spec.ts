@@ -539,11 +539,11 @@ ok(
   SETTINGS_SECTIONS.map((s) => s.key).join(",") === "general,team,admin",
   "Settings exposes general, team, admin sections in order",
 );
-ok(ADMIN_SCREENS.length === 4, "Admin lists exactly four screens");
+ok(ADMIN_SCREENS.length === 5, "Admin lists exactly five screens");
 ok(
   ADMIN_SCREENS.map((s) => s.href).join(",") ===
-    "/catalog,/templates,/estimating-rules,/import",
-  "Admin links Catalog, Templates, Estimating Rules, Import — by their own routes",
+    "/catalog,/templates,/estimating-rules,/task-templates,/import",
+  "Admin links Catalog, Templates, Estimating Rules, Task Templates, Import — by their own routes",
 );
 
 // ---- General dissolution (D99): the group is gone ----
@@ -1455,7 +1455,7 @@ import { CATEGORIES } from "@/lib/stores/notif-prefs";
   ok(rerun.length === 1 && rerun[0].coverageKey === "P-3001:signoff:punch", "tasks: coverage-key de-dup skips existing on re-entry");
 
   const mk = (o: Partial<TaskRecord>): TaskRecord => ({
-    id: "T-6000", title: "t", section: "Install", projectId: null, quoteId: null,
+    id: "T-6000", title: "t", section: "Install", projectId: null, quoteId: null, designId: null,
     coverageKey: null, assigneeUserId: null, assigneeName: "", dueAt: null,
     status: "open", notes: "", createdBy: "x", createdAt: NOW, updatedAt: NOW, doneAt: null, ...o,
   });

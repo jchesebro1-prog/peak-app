@@ -2,6 +2,7 @@ import { getAllProjects, pendingConversions, syncProjectsFromQuotes } from "@/li
 import { all as allCustomers } from "@/lib/stores/customers";
 import { activeUsers } from "@/lib/users";
 import { ensureProjectTasksMigrated, allTasks, type TaskRecord } from "@/lib/stores/tasks";
+import { taskTemplateSetsFor, type TaskTemplateSetRecord } from "@/lib/stores/task-templates";
 import type { Identity } from "./view";
 
 /**
@@ -19,13 +20,15 @@ export async function loadProjectsData(): Promise<{
   roster: string[];
   taskRows: TaskRecord[];
   people: { id: string; name: string }[];
+  templateSets: TaskTemplateSetRecord[];
 }> {
   await syncProjectsFromQuotes();
-  const [projects, pending, customers, users] = await Promise.all([
+  const [projects, pending, customers, users, templateSets] = await Promise.all([
     getAllProjects(),
     pendingConversions(),
     allCustomers(),
     activeUsers(),
+    taskTemplateSetsFor("project"),
   ]);
   // #17: promote any project's still-embedded tasks[] into the tasks
   // collection before reading it, so the detail tasks card (and anything
@@ -40,7 +43,7 @@ export async function loadProjectsData(): Promise<{
   }));
   const roster = users.map((u) => u.name);
   const people = users.map((u) => ({ id: u.id, name: u.name }));
-  return { projects, pending, custById, identity, roster, taskRows, people };
+  return { projects, pending, custById, identity, roster, taskRows, people, templateSets };
 }
 
 /** Normalize a searchParams value to a single string. */

@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
 import { IDENTITY, deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import type { DesignRecord, DesignRevision } from "@/lib/stores/designs";
+import type { TaskRecord } from "@/lib/stores/tasks";
+import { TasksCard } from "@/components/tasks-card";
+import { ApplyTemplateControl } from "@/components/apply-template-control";
 import {
   SHORT,
   SYSCOLOR,
@@ -32,13 +35,17 @@ import {
   subscribeTierDefs,
 } from "../quick/tierdefs-store";
 import {
+  addDesignTaskAction,
+  applyDesignTemplateAction,
   approveDesignAction,
   claimDesignReviewAction,
   createManualDesignAction,
   deleteDesignAction,
   promoteDesignAction,
   requestDesignChangesAction,
+  setDesignTaskStatusAction,
   submitDesignReviewAction,
+  updateDesignTaskAction,
 } from "./actions";
 
 /* ---- accent derivations (Design.dc.html values) ---- */
@@ -164,6 +171,9 @@ export default function DesignClient({
   fabrics,
   reviewerNames,
   engagementsForDesign,
+  people,
+  designTasks,
+  templateSets,
 }: {
   me: string;
   canApprove: boolean;
@@ -176,6 +186,14 @@ export default function DesignClient({
   reviewerNames: string[];
   /** Reverse lookup (derived server-side, not stored) — every engagement, if any, this design feeds. */
   engagementsForDesign: Record<string, Array<{ id: string; name: string }>>;
+  /** Active roster for the Tasks card's assignee picker (D149, #118 — new for designs). */
+  people: { id: string; name: string }[];
+  /** The SELECTED design's rows from the shared tasks collection (server-fetched
+   *  by ?id=, same as the estimator's quoteTasks — there's only ever one design
+   *  detail panel open at a time here). */
+  designTasks: TaskRecord[];
+  /** Reusable task-template sets applicable to designs (D149, #118). */
+  templateSets: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -506,6 +524,30 @@ export default function DesignClient({
                 </>
               )}
             </div>
+          </div>
+
+          {/* Tasks (D149, #118) — new for designs; no design task UI or
+              parent pointer existed before this feature (tasks.ts's designId). */}
+          <div style={{ padding: "16px 20px 4px", borderTop: "1px solid #f0f1f4" }}>
+            <div style={{ fontSize: 10.5, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 8 }}>
+              Tasks
+            </div>
+            <ApplyTemplateControl
+              parentField="designId"
+              parentId={sel.id}
+              templateSets={templateSets}
+              action={applyDesignTemplateAction}
+            />
+            <TasksCard
+              parentField="designId"
+              parentId={sel.id}
+              tasks={designTasks}
+              people={people}
+              addAction={addDesignTaskAction}
+              setStatusAction={setDesignTaskStatusAction}
+              updateAction={updateDesignTaskAction}
+              defaultSection="Design"
+            />
           </div>
 
           {/* systems / BOM summary + plan preview */}

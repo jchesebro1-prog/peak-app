@@ -5791,3 +5791,42 @@ separate, still-open ask).
 `https://www.googleapis.com/auth/calendar.readonly` scope before "Connect an account" will
 complete in production — same category of action as the Calendar/Tasks scope additions before it,
 but no new redirect URI this time (the flow reuses the existing Gmail callback URL).
+
+## 118. Reusable task templates for projects, quotes, and designs (D149) — DONE 2026-09-21
+
+**Reported:** 2026-09-21 (Jeff): "I want to be able to add template tasks to projects, quotes, and
+designs that can be assigned based on groups, people, or teams."
+
+**What existed:** `TASK_TEMPLATE` in `src/lib/stores/tasks.ts` — a hardcoded, per-project-stage
+checklist where every item is unassigned, with no quote/design equivalent and no way to author new
+checklists without editing code. `TaskRecord` already had nullable `projectId`/`quoteId` pointers
+and a working Tasks card on projects and (as of an earlier punch #17 remainder) quotes; designs had
+no task linkage or UI at all.
+
+**Shipped:** a NEW, separate, admin-editable mechanism — reusable, named template SETS (new
+`task_templates` doc-store collection) — that leaves `TASK_TEMPLATE` untouched. Each set is tagged
+with which record kinds it applies to (project/quote/design, can be more than one) and holds lines
+with a title, an optional section, and an assignment target: a specific person, a `Role`
+(Admin/Manager/Estimator/Reviewer — the closest real grouping the data model has, since no
+department/crew concept exists), or "everyone." Applying a set to a record fans role/team lines out
+into one real task PER matching active user (so it shows up in that person's own task list, not as
+an ownerless shared row), reusing `tasks.ts`'s own `expandTemplate()` coverage-key dedup so a
+re-apply only ever adds instances that don't already exist — e.g. a newly hired Estimator gets
+their task on the next apply without touching anyone else's.
+
+Designs gained their first task linkage (`TaskRecord.designId`) and their first Tasks card (reusing
+the shared `TasksCard` component) — nothing existed there before. Quotes already had working task
+UI from punch #17's remainder (the punchlist's own audit note calling that out was stale). All
+three entry points (project detail, quote builder, design detail) got a shared "Apply template"
+control next to their Tasks card. Authoring lives at a new admin screen, `/task-templates`
+(Settings → Admin), gated on `manage_users`.
+
+**Not built (logged as an open follow-up):** a real department/crew grouping distinct from the
+permission `Role` enum — if "team" was meant to mean something narrower than "everyone" or a
+specific role, that needs a new field on `users` and Jeff's input on what the groups should be.
+
+**Files:** `src/db/doc-tables.ts`, `drizzle/0020_odd_crusher_hogan.sql`, `src/lib/stores/tasks.ts`,
+`src/lib/stores/task-templates.ts` (new), `src/components/apply-template-control.tsx` (new),
+`src/app/(app)/task-templates/*` (new), `src/app/(app)/settings/settings-sections.ts`,
+`src/components/nav/nav-data.ts`, `src/app/(app)/projects/*`, `src/app/(app)/estimator/*`,
+`src/app/(app)/design/designs/*`. Decisions: D149.

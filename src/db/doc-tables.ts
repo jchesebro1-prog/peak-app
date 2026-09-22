@@ -82,6 +82,7 @@ export const gridSheets = docTable("grid_sheets"); // The Grid plan-sheet backgr
 export const gridCatalog = docTable("grid_catalog"); // Grid-owned symbols and assemblies, independent of pricing catalog
 export const subassemblies = docTable("subassemblies"); // reusable priced assemblies built from catalog parts
 export const tasks = docTable("tasks"); // cross-record task rows, promoted from embedded ProjectTask[] (#17)
+export const taskTemplates = docTable("task_templates"); // reusable, admin-authored task-template sets — assignable by person/role/team, applicable to projects/quotes/designs (D149, #118)
 export const notes = docTable("notes"); // attachable note records — the customer Activity feed's note-taking surface (#21)
 export const equipmentItems = docTable("equipment_items"); // Rentals module — gear catalog + per-location stock (D129, no prototype ancestor)
 export const equipmentLocations = docTable("equipment_locations"); // Rentals module — warehouse/trailer locations gear stock lives at (D129)
@@ -110,6 +111,7 @@ export const DOC_TABLES = {
   grid_catalog: gridCatalog,
   subassemblies,
   tasks,
+  task_templates: taskTemplates,
   notes,
   equipment_items: equipmentItems,
   equipment_locations: equipmentLocations,

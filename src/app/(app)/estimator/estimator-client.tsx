@@ -7,6 +7,7 @@ import { approvedReviewLine } from "@/lib/review-line";
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import {
   addQuoteTaskAction,
+  applyQuoteTemplateAction,
   approveReviewAction,
   attestApprovalAction,
   claimReviewAction,
@@ -27,6 +28,7 @@ import {
   type ReviewSync,
 } from "./actions";
 import { TasksCard } from "@/components/tasks-card";
+import { ApplyTemplateControl } from "@/components/apply-template-control";
 import type { DraftedLine } from "./ai-scope-modal";
 import {
   DISC_LABEL,
@@ -230,6 +232,7 @@ export default function EstimatorClient({
   aiSource,
   people,
   quoteTasks,
+  templateSets,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   const [sections, setSections] = useState<SpecSection[]>(
@@ -2222,16 +2225,24 @@ export default function EstimatorClient({
                   Tasks
                 </div>
                 {loadedId ? (
-                  <TasksCard
-                    parentField="quoteId"
-                    parentId={loadedId}
-                    tasks={quoteTasks}
-                    people={people}
-                    addAction={addQuoteTaskAction}
-                    setStatusAction={setQuoteTaskStatusAction}
-                    updateAction={updateQuoteTaskAction}
-                    defaultSection="Review"
-                  />
+                  <>
+                    <ApplyTemplateControl
+                      parentField="quoteId"
+                      parentId={loadedId}
+                      templateSets={templateSets}
+                      action={applyQuoteTemplateAction}
+                    />
+                    <TasksCard
+                      parentField="quoteId"
+                      parentId={loadedId}
+                      tasks={quoteTasks}
+                      people={people}
+                      addAction={addQuoteTaskAction}
+                      setStatusAction={setQuoteTaskStatusAction}
+                      updateAction={updateQuoteTaskAction}
+                      defaultSection="Review"
+                    />
+                  </>
                 ) : (
                   <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the quote to add tasks.</div>
                 )}
