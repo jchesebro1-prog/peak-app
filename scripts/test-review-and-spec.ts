@@ -441,8 +441,8 @@ ok(designRedirect("/consulting/markup", { eng: "CE-1001", phase: "ph-2", doc: "e
   "markup preserves all three params in order");
 ok(designRedirect("/design-studio", {}) === "/design",
   "design-studio overview redirects to the new Design overview");
-ok(designRedirect("/design-studio/steel", {}) === "/design/steel",
-  "calculators keep their leaf name");
+ok(designRedirect("/design-studio/steel", {}) === "/knowledge/steel",
+  "calculators keep their leaf name — and follow the #136 move to Knowledge in ONE hop");
 ok(designRedirect("/design-studio/lineset", { design: "DS-abc" }) === "/design/lineset?design=DS-abc",
   "lineset preserves its ?design= deep link");
 ok(designRedirect("/design-studio/weights", { design: "DS-abc" }) === "/design/lineset?design=DS-abc",
@@ -463,8 +463,8 @@ ok(activeKeyFor("/design") === "designoverview",
   "the Design overview resolves to the designoverview key");
 ok(activeKeyFor("/design/engagements") === "designoverview",
   "/design/engagements resolves to the designoverview key");
-ok(activeKeyFor("/design/steel") === "designoverview",
-  "/design/steel resolves to the designoverview key (segment-1 matching)");
+ok(activeKeyFor("/design/lineset") === "designoverview",
+  "/design/lineset resolves to the designoverview key (segment-1 matching)");
 ok(NAV.some((e) => e.kind === "group" && e.key === "design"),
   "Design exists as a nav group");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "consulting"),
@@ -477,10 +477,11 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
  * group after D97 shipped, which is why a bare `length === 6` went stale. */
 /* "grid" left when The Grid became a layout mode of Designs rather than a
  * tool of its own (D-grid-merge): the "designs" child is now labelled "The
- * Grid" and the standalone index it pointed at is gone. */
+ * Grid" and the standalone index it pointed at is gone. "steel" and
+ * "fixtures" moved to the KNOWLEDGE group (#136). */
 const DESIGN_CHILDREN = [
   "designoverview", "engagements", "designs",
-  "steel", "lineset", "assemblies", "motors", "fixtures", "subassemblies",
+  "lineset", "assemblies", "motors", "subassemblies",
 ];
 ok(
   !!designGroup && designGroup.kind === "group" &&

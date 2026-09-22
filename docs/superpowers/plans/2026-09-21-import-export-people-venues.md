@@ -243,7 +243,7 @@ In `CustomerLocationInput` (lines 142-155) add after `state?: string;`: `zip?: s
   website?: string;
 ```
 
-- [ ] **Step 5: normalizeRecord** — replace the `locs` map (lines 202-216) and the `contacts` map (220-231), and add the HQ fields after the `tier` block (243-244):
+- [ ] **Step 5: normalizeRecord** — replace the `locs` map (lines 202-216) and the `contacts` `.map(...)` at lines 225-231 (the `.filter(...)` head at 220-224 stays exactly as it is), and add the HQ fields after the `tier` block (243-244):
 
 ```ts
   const locs: CustomerLocation[] = (c.locations || []).map((l) => ({
@@ -363,7 +363,7 @@ export async function findCustomerById(
 }
 ```
 
-- [ ] **Step 8: contentKey** — replace lines 451-459 (from `delete rest.lifecycle;` through the `rest.custom = …` statement) with:
+- [ ] **Step 8: contentKey** — replace lines 451-458 (from `delete rest.lifecycle;` through the closing `);` of the `rest.custom = …` statement; the `return JSON.stringify(rest);` on line 459 stays) with:
 
 ```ts
   delete rest.lifecycle;
@@ -690,7 +690,7 @@ export type ContactInput = {
 };
 ```
 
-- [ ] **Step 4: lib.ts converters** — change line 5 of `src/app/(app)/companies/lib.ts` to `import type { AddressHitVM, ContactInput, LocationInput } from "./types";` and append at the end of the file:
+- [ ] **Step 4: lib.ts converters** — change line 5 of `src/app/(app)/companies/lib.ts` to `import type { AddressHitVM, ContactInput, LocationInput } from "./types";`, change the `@/lib/stores/customers` type import at lines 1-4 to `import type { CustomerContact, CustomerDoc, CustomerLocation } from "@/lib/stores/customers";` (the new `toContactInput` needs `CustomerContact`), and append at the end of the file:
 
 ```ts
 /** CustomerLocation → LocationInput with EVERY field carried — locationName
@@ -814,9 +814,11 @@ import { get as getCustomer, contactsForId } from "@/lib/stores/customers";
 import { saveCustomerAction } from "@/app/(app)/companies/actions";
 import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
 import type { ContactInput, LocationInput } from "@/app/(app)/companies/types";
+import { savePersonAction } from "@/app/(app)/people/actions";
+import type { SavePersonInput } from "@/app/(app)/people/types";
 ```
 
-and delete lines 32-59 (the local `toLocationInput` / `toContactInput` and their comment). Usages at 218 and 233 stay.
+(`savePersonAction` / `SavePersonInput` stay — `quickAddContactAction` at lines 186 and 197 still uses them; only the `CustomerContact` / `CustomerLocation` type imports go, since the local converters that needed them are deleted) and delete lines 32-59 (the local `toLocationInput` / `toContactInput` and their comment). Usages at 218 and 233 stay.
 
 - [ ] **Step 8: Run tests, expect pass** — `npx tsx scripts/test-review-and-spec.ts | grep -E '#137 T2|ALL PASSED'` → 6 PASS + `ALL PASSED`; `npx tsc --noEmit -p . | tail -3` → empty; `npx eslint "src/app/(app)/companies" "src/app/(app)/quotes/new/actions.ts" "src/app/(app)/inbox/link-actions.ts"`.
 
@@ -2590,7 +2592,7 @@ Change the #83 heading (line 4938) to:
 ## 83. Venues need a bulk import — data model / cleanup TBD — DONE 2026-09-21 (#137, D159)
 ```
 
-and append after its last paragraph (`**Open question for Jeff:** …`):
+and replace its last line — `**Status:** OPEN — logged only, no code. Needs scoping before it needs building.` (PUNCHLIST.md:4965; the `**Ties to:**` paragraph above it stays) — with:
 
 ```markdown
 **Status:** DONE 2026-09-21 — shipped as the `venues` importer under #137 (D159): Customer /
