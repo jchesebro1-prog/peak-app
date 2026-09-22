@@ -32,7 +32,8 @@ import {
   updateMeeting,
 } from "@/lib/stores/engagements";
 import { ENGAGEMENT_STAGE_KEYS, manualMilestoneSeeds, type ManualFee } from "@/lib/consulting-stages";
-import { getSettings } from "@/lib/settings";
+import { validateSpan } from "@/lib/consulting-schedule";
+import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
 import type { Annotation, MeasureUnit } from "@/lib/annotations";
 import { linkVisitToEngagement } from "@/lib/stores/site-visits";
 import { get as getQuote } from "@/lib/stores/quotes";
@@ -175,10 +176,21 @@ export async function createManualEngagementAction(input: {
   siteId?: string;
   contactName?: string;
   fee?: ManualFee | null;
+  /** #145 D166 — the schedule span, typed at creation. */
+  startAt: number;
+  endAt: number;
+  /** #145 D165 — disciplines bought; posted keys are allowlisted below
+   *  against the settings vocabulary (actions are public endpoints). */
+  disciplines?: string[];
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const me = await requirePerm("create");
   const name = String(input?.name || "").trim().slice(0, 160);
   if (!name) return { ok: false, error: "Name the project." };
+
+  // #145: the creation-step gate — run before anything is written, same
+  // reasoning as the fee guards just below.
+  const spanError = validateSpan(input?.startAt, input?.endAt);
+  if (spanError) return { ok: false, error: spanError };
 
   // #135 review fix: the modal only ever posts a valid fee or none at all,
   // but actions are public endpoints — refuse a fixed/milestone fee that
@@ -219,6 +231,13 @@ export async function createManualEngagementAction(input: {
   }
 
   const settings = await getSettings();
+  // #145: allowlist the posted disciplines against the settings vocabulary
+  // — same hardening idiom as the stage allowlist above (actions are public
+  // endpoints; the checkbox row only ever renders legal values).
+  const disciplineMenu = mergedConsultingDisciplines(settings.consultingDisciplines);
+  const disciplines = (Array.isArray(input?.disciplines) ? input.disciplines : []).filter(
+    (d) => disciplineMenu.includes(d)
+  );
   const eng = await createManualEngagement(
     {
       customerId,
@@ -232,6 +251,9 @@ export async function createManualEngagementAction(input: {
       contactName: String(input?.contactName || "").trim().slice(0, 120),
       fee,
       phases: mergedConsultingPhases(settings.consultingPhases),
+      startAt: input.startAt,
+      endAt: input.endAt,
+      disciplines,
     },
     me
   );

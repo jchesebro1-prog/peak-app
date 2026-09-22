@@ -1,5 +1,5 @@
 import {
-  generateSchedule, overrunsEnd, phaseWindows, placeTask, selectLines, shiftForMilestone,
+  generateSchedule, overrunsEnd, phaseWindows, placeTask, selectLines, shiftForMilestone, validateSpan,
   type PhaseWeight, type ScheduleLine,
 } from "@/lib/consulting-schedule";
 import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
@@ -6465,3 +6465,10 @@ ok(
  * test was left out here rather than threaded into the file's existing
  * recordingsAsyncChecks()-then-chain (this file has no per-block async
  * runner, and a stray top-level await breaks the tsx/esbuild cjs build). */
+
+/* ====== #145: span validation is pure and blocks at creation ====== */
+ok(validateSpan(OCT6, MAR30) === null, "#145 a normal span validates");
+ok(validateSpan(0, MAR30) !== null, "#145 a missing start is rejected with a message");
+ok(validateSpan(MAR30, OCT6) !== null, "#145 an end before the start is rejected rather than generating a degenerate schedule");
+ok(validateSpan(OCT6, OCT6) !== null, "#145 a zero-length span is rejected — every task would land on one day");
+ok((validateSpan(MAR30, OCT6) || "").toLowerCase().includes("end"), "#145 the rejection message names the field at fault");

@@ -6,6 +6,7 @@ import { CustomerCombobox } from "@/components/customer-combobox";
 import EntityQuickAdd, { INPUT, LABEL, type QuickAddValues } from "@/components/entity-quick-add";
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
 import type { ManualFee } from "@/lib/consulting-stages";
+import { validateSpan } from "@/lib/consulting-schedule";
 import type { CustomerLite } from "./data";
 import { createManualEngagementAction } from "./actions";
 
@@ -37,6 +38,16 @@ const FIELD_ERR: React.CSSProperties = { marginTop: 6, fontSize: 11.5, color: "#
 
 const blankRow = (): MilestoneRow => ({ name: "", date: "", amount: "" });
 
+/** `<input type="date">` value → epoch-ms, noon-anchored so a timezone
+ *  offset never rolls the date to the day before/after (same convention as
+ *  the milestone-row date below). Empty/unparseable → 0 (validateSpan's
+ *  "pick a date" case). */
+const dateToEpoch = (v: string): number => {
+  if (!v) return 0;
+  const t = new Date(v + "T12:00:00").getTime();
+  return Number.isFinite(t) ? t : 0;
+};
+
 /** Matches `cleanFee`'s server-side cap (engagements/actions.ts): it keeps
  *  the first 20 milestone rows and drops the rest, so a longer list could
  *  pass this form's fee check on a row the server never sees and come back
@@ -45,9 +56,13 @@ const MAX_MILESTONES = 20;
 
 export function NewEngagementModal({
   customers,
+  disciplineMenu,
   onClose,
 }: {
   customers: CustomerLite[];
+  /** #145 D165 — the discipline vocabulary (Settings-merged), for the
+   *  checkbox row below. */
+  disciplineMenu: string[];
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -64,6 +79,10 @@ export function NewEngagementModal({
   const [feeMode, setFeeMode] = useState<FeeMode>("none");
   const [fixedAmount, setFixedAmount] = useState("");
   const [rows, setRows] = useState<MilestoneRow[]>([blankRow()]);
+  // #145 D166 — the creation-step schedule gate.
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [disciplines, setDisciplines] = useState<string[]>([]);
 
   const customer = customers.find((c) => c.id === customerId) || null;
   const hasCustomer = newCustomerOpen ? !!newCustomer.name.trim() : !!customerId;
@@ -79,7 +98,11 @@ export function NewEngagementModal({
         ? "Add at least one milestone with an amount."
         : null;
 
-  const canSubmit = !pending && !!name.trim() && hasCustomer && !feeError;
+  const startAtMs = dateToEpoch(startDate);
+  const endAtMs = dateToEpoch(endDate);
+  const spanError = validateSpan(startAtMs, endAtMs);
+
+  const canSubmit = !pending && !!name.trim() && hasCustomer && !feeError && !spanError;
 
   const fee = (): ManualFee | undefined => {
     if (feeMode === "fixed") return { mode: "fixed", amount: Number(fixedAmount) || 0 };
@@ -107,6 +130,9 @@ export function NewEngagementModal({
         siteId: newCustomerOpen ? "" : siteId,
         contactName,
         fee: fee(),
+        startAt: startAtMs,
+        endAt: endAtMs,
+        disciplines,
       });
       if (!r.ok) {
         setError(r.error);
@@ -119,6 +145,9 @@ export function NewEngagementModal({
 
   const patchRow = (i: number, p: Partial<MilestoneRow>) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...p } : r)));
+
+  const toggleDiscipline = (d: string) =>
+    setDisciplines((ds) => (ds.includes(d) ? ds.filter((x) => x !== d) : [...ds, d]));
 
   return (
     <div
@@ -201,6 +230,23 @@ export function NewEngagementModal({
               {customer.contactNames.map((n) => <option key={n} value={n} />)}
             </datalist>
           )}
+
+          <label style={LABEL}>Schedule</label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={INPUT} aria-label="Start date" />
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={INPUT} aria-label="End date" />
+          </div>
+          {spanError && <div style={FIELD_ERR}>{spanError}</div>}
+
+          <label style={LABEL}>Disciplines</label>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {disciplineMenu.map((d) => (
+              <label key={d} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "#3a3f4a", cursor: "pointer" }}>
+                <input type="checkbox" checked={disciplines.includes(d)} onChange={() => toggleDiscipline(d)} />
+                {d}
+              </label>
+            ))}
+          </div>
 
           <label style={LABEL}>Fee</label>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

@@ -209,3 +209,13 @@ export function generateSchedule(input: GenerateInput): {
 
   return { tasks, milestones };
 }
+
+/** #145 — the creation-step gate. Returns null when the span is usable, or
+ *  a message naming the field at fault. Generation is never attempted on a
+ *  degenerate span (spec §6). */
+export function validateSpan(startAt: number, endAt: number): string | null {
+  if (!Number.isFinite(startAt) || startAt <= 0) return "Pick a start date for this engagement.";
+  if (!Number.isFinite(endAt) || endAt <= 0) return "Pick an end date for this engagement.";
+  if (endAt <= startAt) return "The end date must be after the start date.";
+  return null;
+}
