@@ -29,10 +29,12 @@ export type GridOption = {
 export const DEFAULT_OPTION_ID = "opt-base";
 export const DEFAULT_OPTION_NAME = "Design";
 
+type Member = { optionId?: string };
+
 export type OptionsDoc = {
   options?: GridOption[];
-  placements?: readonly (any & { optionId?: string })[];
-  routes?: readonly (any & { optionId?: string })[];
+  placements?: Member[];
+  routes?: Member[];
   quoteId?: string | null;
   createdAt?: number;
 };
@@ -55,14 +57,14 @@ export function ensureOptions<T extends OptionsDoc>(doc: T): T & { options: Grid
       },
     ];
   }
-  (doc as any).options = options;
+  doc.options = options;
   const first = options[0].id;
   const known = new Set(options.map((o) => o.id));
-  for (const pl of (doc as any).placements || []) {
-    (pl as any).optionId = (pl as any).optionId && known.has((pl as any).optionId) ? (pl as any).optionId : first;
+  for (const pl of doc.placements || []) {
+    if (!pl.optionId || !known.has(pl.optionId)) pl.optionId = first;
   }
-  for (const r of (doc as any).routes || []) {
-    (r as any).optionId = (r as any).optionId && known.has((r as any).optionId) ? (r as any).optionId : first;
+  for (const r of doc.routes || []) {
+    if (!r.optionId || !known.has(r.optionId)) r.optionId = first;
   }
   return doc as T & { options: GridOption[] };
 }
@@ -82,7 +84,7 @@ export function resolveOptionId(doc: OptionsDoc, requested: string | null | unde
 }
 
 /** The members of one option. The result arrays are new; the members are not copied. */
-export function optionSlice<P extends { optionId?: string }, R extends { optionId?: string }>(
+export function optionSlice<P extends Member, R extends Member>(
   doc: { placements?: P[]; routes?: R[] } & OptionsDoc,
   optionId: string
 ): { placements: P[]; routes: R[] } {

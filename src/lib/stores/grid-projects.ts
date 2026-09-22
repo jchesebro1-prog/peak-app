@@ -861,7 +861,11 @@ function snapshotOf(
     calibrations: [...(p.calibrations || [])],
     spaces: [...(p.spaces || [])],
     routes: [...(p.routes || [])],
-    options: ensureOptions(p).options.map((o) => ({ ...o })),
+    options: ensureOptions({
+      options: p.options ? p.options.map((o) => ({ ...o })) : undefined,
+      quoteId: p.quoteId,
+      createdAt: p.createdAt,
+    }).options,
   };
 }
 
