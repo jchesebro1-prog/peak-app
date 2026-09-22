@@ -20,6 +20,7 @@ import {
   dismissSuggestionAction,
   linkThreadToCustomerAction,
   quickAddContactAction,
+  releaseDomainAction,
   quickAddCustomerAction,
   quickAddVenueAction,
 } from "./link-actions";
@@ -263,6 +264,25 @@ export default function LinkSidebar({
               Matched by {emailTag} — not saved on this thread yet.
             </div>
           )}
+          {vm.domainClaimedByThisCustomer && !vm.senderIsPublicDomain && (
+            <div style={{ ...MUTED, marginTop: 8, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <span>Emails from {domainTag} link here automatically ·</span>
+              <button
+                type="button"
+                disabled={pending}
+                title={`Stop linking @${vm.senderDomain} to ${vm.customerCard.name}`}
+                onClick={() => run(() => releaseDomainAction(vm.senderDomain, vm.customerCard!.id))}
+                style={{
+                  ...BTN,
+                  padding: "1px 6px",
+                  fontSize: 11,
+                  color: "#8c919c",
+                }}
+              >
+                Stop
+              </button>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
             {vm.needsAdopt && (
               <button
@@ -433,13 +453,25 @@ export default function LinkSidebar({
           {pickId && pickId !== "__new" && (
             <>
               {vm.contactEmail && rememberRow(<>Remember {emailTag} on a contact</>)}
-              <button
-                style={{ ...PRIMARY, marginTop: 10 }}
-                disabled={pending}
-                onClick={() => linkTo(pickId, canClaim, remember)}
-              >
-                {canClaim ? "Link domain + thread" : "Link thread"}
-              </button>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+                <button
+                  style={PRIMARY}
+                  disabled={pending}
+                  onClick={() => linkTo(pickId, canClaim, remember)}
+                >
+                  {canClaim ? "Link domain + thread" : "Link thread"}
+                </button>
+                {canClaim && (
+                  <button
+                    style={BTN}
+                    disabled={pending}
+                    title={`Link this thread without claiming @${vm.senderDomain}`}
+                    onClick={() => linkTo(pickId, false, remember)}
+                  >
+                    Link thread only
+                  </button>
+                )}
+              </div>
             </>
           )}
           {pickId === "__new" && (

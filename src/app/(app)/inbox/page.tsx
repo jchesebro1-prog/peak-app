@@ -18,6 +18,7 @@ import {
   personalKey,
 } from "@/lib/gmail/config";
 import { getConnectionInfo, listCachedLabels } from "@/lib/gmail/connections";
+import { customersForDomain } from "@/lib/gmail/domains";
 import {
   boxMeta,
   callsCount,
@@ -675,6 +676,12 @@ export default async function InboxPage({
       : null;
     const senderDomain = domainOf(sel.contactEmail || "");
     const senderIsPublicDomain = !senderDomain || isPublicDomain(senderDomain);
+    // One query, only when a customer is linked and the domain is claimable
+    // — drives the linked card's "Emails from @domain link here · Stop".
+    const domainClaimedByThisCustomer =
+      !!linkedCustomer && !senderIsPublicDomain
+        ? (await customersForDomain(senderDomain)).some((r) => r.customerId === linkedCustomer.id)
+        : false;
     let resolution: ReaderVM["resolution"] = linkedCustomer
       ? "linked"
       : sel.resolution && sel.resolution !== "linked"
@@ -782,6 +789,7 @@ export default async function InboxPage({
       resolution,
       senderDomain,
       senderIsPublicDomain,
+      domainClaimedByThisCustomer,
       suggested: suggestedCustomer
         ? { customerId: suggestedCustomer.id, name: suggestedCustomer.name, contactsAtDomain }
         : null,

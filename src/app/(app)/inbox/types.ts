@@ -200,6 +200,9 @@ export type ReaderVM = {
   /** true when the domain can't identify a customer (public webmail / none) —
    *  the sidebar never offers "Link domain" for these */
   senderIsPublicDomain: boolean;
+  /** linked only: the sender's domain is currently claimed by the linked
+   *  customer, so future mail from it auto-links (and can be released) */
+  domainClaimedByThisCustomer: boolean;
   /** present only when resolution === "suggested" */
   suggested: { customerId: string; name: string; contactsAtDomain: number } | null;
   /** present only when resolution === "ambiguous" */

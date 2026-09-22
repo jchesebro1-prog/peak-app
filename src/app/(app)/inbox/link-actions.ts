@@ -22,7 +22,7 @@ import { saveCustomerAction } from "@/app/(app)/companies/actions";
 import type { ContactInput, LocationInput } from "@/app/(app)/companies/types";
 import { savePersonAction } from "@/app/(app)/people/actions";
 import type { SavePersonInput } from "@/app/(app)/people/types";
-import { claimDomain } from "@/lib/gmail/domains";
+import { claimDomain, releaseDomain } from "@/lib/gmail/domains";
 import { domainOf, isPublicDomain } from "@/lib/gmail/config";
 import { linkThread, rememberAddress, resweepThreads } from "@/lib/gmail/linking";
 
@@ -106,6 +106,21 @@ export async function claimDomainAction(domain: string, customerId: string): Pro
   if (!d || isPublicDomain(d)) return { ok: false, error: "That domain can't identify a customer." };
   if (!(await getCustomer(customerId))) return { ok: false, error: "Customer not found." };
   await claimDomain(d, customerId, "manual", me.name);
+  await resweepThreads({ domain: d });
+  revalidate();
+  return { ok: true };
+}
+
+/** Linked card's "Stop" on "Emails from @domain link here automatically"
+ *  — drops this customer's claim on the domain and re-sweeps so threads
+ *  that were only suggested by it fall back to unknown. Threads already
+ *  linked stay linked (re-sweep never downgrades). */
+export async function releaseDomainAction(domain: string, customerId: string): Promise<R> {
+  await requireUser();
+  const d = (domain || "").trim().toLowerCase();
+  if (!d || isPublicDomain(d)) return { ok: false, error: "That domain can't identify a customer." };
+  if (!customerId) return { ok: false, error: "Customer not found." };
+  await releaseDomain(d, customerId);
   await resweepThreads({ domain: d });
   revalidate();
   return { ok: true };
