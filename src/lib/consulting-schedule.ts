@@ -209,3 +209,78 @@ export function generateSchedule(input: GenerateInput): {
 
   return { tasks, milestones };
 }
+
+/** #145 — the creation-step gate. Returns null when the span is usable, or
+ *  a message naming the field at fault. Generation is never attempted on a
+ *  degenerate span (spec §6). */
+export function validateSpan(startAt: number, endAt: number): string | null {
+  if (!Number.isFinite(startAt) || startAt <= 0) return "Pick a start date for this engagement.";
+  if (!Number.isFinite(endAt) || endAt <= 0) return "Pick an end date for this engagement.";
+  if (endAt <= startAt) return "The end date must be after the start date.";
+  return null;
+}
+
+/**
+ * Name → id, keyed by the same normalization `norm()` uses everywhere else
+ * in this file (trimmed, case-insensitive). #145 D166/D168 — shared by
+ * `withEngagementPhaseIds` and by a caller defaulting a milestone's phase
+ * (`defaultMilestonePhaseId`), so both use exactly one matching rule.
+ *
+ * A DUPLICATE name collapses to one id (last one wins): phase names are
+ * assumed unique per engagement (nothing else in the app dedupes a rename),
+ * so this is a known, accepted limitation rather than a defended case — two
+ * same-named phases would silently alias one phase's tasks/milestones onto
+ * the other's window.
+ */
+export function phaseIdsByName(phases: readonly { id: string; name: string }[]): Map<string, string> {
+  return new Map(phases.map((p) => [norm(p.name), p.id]));
+}
+
+/**
+ * #145 D166 — re-key a settings-derived weight list (whose ids are
+ * NAME-derived slugs — see `phaseWeightsFor` in settings.ts) onto an
+ * engagement's own phase ids (`uid("ph-")`, assigned once at
+ * phase-creation and referenced everywhere downstream: a milestone's
+ * `phaseId`, a generated task's `schedule.phaseId`, `shiftForMilestone`).
+ * Without this, a task placed by `generateSchedule` and a milestone dated
+ * by `defaultMilestonePhaseId` would carry INCOMPARABLE phase ids even
+ * though they mean the same phase.
+ *
+ * Matched by phase NAME (via `phaseIdsByName`) rather than by array
+ * position: at today's call sites `phaseWeightsFor` is always given
+ * `eng.phases`' own name list, so the two arrays already agree on both
+ * order and length and position would work too — but name matching
+ * survives that agreement breaking later (a caller that builds the weight
+ * list some other way) without silently mislabeling a phase.
+ *
+ * - A weight whose name has no match in `enginePhases` keeps its own slug
+ *   id rather than being dropped — the output is never shorter than
+ *   `weights`.
+ * - An engine phase absent from `weights` simply has no entry in the
+ *   output; this function only re-keys what it's handed, it doesn't invent
+ *   phases the weight list never had an opinion on.
+ * - See `phaseIdsByName`'s doc comment for the duplicate-name caveat.
+ */
+export function withEngagementPhaseIds(
+  weights: readonly PhaseWeight[],
+  enginePhases: readonly { id: string; name: string }[]
+): PhaseWeight[] {
+  const byName = phaseIdsByName(enginePhases);
+  return weights.map((w) => ({ ...w, phaseId: byName.get(norm(w.name)) ?? w.phaseId }));
+}
+
+/**
+ * #145 D168 — a milestone's phase defaults by exact NAME match against the
+ * engagement's own phases (via the caller-built `phasesByName`, from
+ * `phaseIdsByName`) — case-insensitive, trimmed, the same rule
+ * `withEngagementPhaseIds` uses. An already-set `phaseId` is left alone;
+ * no match at all defaults to null rather than guessing, which keeps the
+ * milestone out of the Reports billing forecast until someone sets it by
+ * hand from the dropdown.
+ */
+export function defaultMilestonePhaseId(
+  milestone: { name: string; phaseId?: string | null },
+  phasesByName: ReadonlyMap<string, string>
+): string | null {
+  return milestone.phaseId ?? phasesByName.get(norm(milestone.name)) ?? null;
+}

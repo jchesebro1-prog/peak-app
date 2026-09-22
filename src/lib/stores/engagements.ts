@@ -637,6 +637,14 @@ export type ManualEngagementInput = {
   /** Phase names. The ACTION resolves mergedConsultingPhases(settings) —
    *  the store stays settings-free (the D91 idiom) so it is testable alone. */
   phases: string[];
+  /** #145 D166 — the schedule span, typed at creation. Optional/0 for
+   *  every caller that predates this (including the fixtures in
+   *  scripts/test-review-regressions.ts) — an engagement created without
+   *  a span reads as unscheduled, same as before #145. */
+  startAt?: number;
+  endAt?: number;
+  /** #145 D165 — disciplines bought. Absent/empty reads as none. */
+  disciplines?: string[];
 };
 
 /**
@@ -677,6 +685,9 @@ export async function createManualEngagement(
         ? { company: architectCompany, contact: architectContact }
         : null,
     status: "awarded",
+    startAt: input.startAt || 0,
+    endAt: input.endAt || 0,
+    disciplines: input.disciplines || [],
     phases,
     milestones,
     decisions: [

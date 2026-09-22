@@ -1,5 +1,6 @@
 import {
-  generateSchedule, overrunsEnd, phaseWindows, placeTask, selectLines, shiftForMilestone,
+  generateSchedule, overrunsEnd, phaseWindows, placeTask, selectLines, shiftForMilestone, validateSpan,
+  withEngagementPhaseIds, defaultMilestonePhaseId, phaseIdsByName,
   type PhaseWeight, type ScheduleLine,
 } from "@/lib/consulting-schedule";
 import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
@@ -6625,3 +6626,63 @@ ok(
  * test was left out here rather than threaded into the file's existing
  * recordingsAsyncChecks()-then-chain (this file has no per-block async
  * runner, and a stray top-level await breaks the tsx/esbuild cjs build). */
+
+/* ====== #145: span validation is pure and blocks at creation ====== */
+ok(validateSpan(OCT6, MAR30) === null, "#145 a normal span validates");
+ok(validateSpan(0, MAR30) !== null, "#145 a missing start is rejected with a message");
+ok(validateSpan(MAR30, OCT6) !== null, "#145 an end before the start is rejected rather than generating a degenerate schedule");
+ok(validateSpan(OCT6, OCT6) !== null, "#145 a zero-length span is rejected — every task would land on one day");
+ok((validateSpan(MAR30, OCT6) || "").toLowerCase().includes("end"), "#145 the rejection message names the field at fault");
+
+/* ====== #145 review fix: withEngagementPhaseIds / defaultMilestonePhaseId
+ * are pure and directly testable (moved out of schedule-actions.ts, a
+ * "use server" module the harness can't import — same reason validateSpan
+ * lives here instead of there). ====== */
+{
+  const weights: PhaseWeight[] = [
+    { phaseId: "slug-assessment", name: "Assessment", weight: 1 },
+    { phaseId: "slug-design", name: "Design", weight: 2 },
+  ];
+  const enginePhases = [
+    { id: "ph-real-1", name: "Assessment" },
+    { id: "ph-real-2", name: "Design" },
+  ];
+  const mapped = withEngagementPhaseIds(weights, enginePhases);
+  ok(mapped[0].phaseId === "ph-real-1", "#145 withEngagementPhaseIds maps the first weight onto the engagement's own phase id");
+  ok(mapped[1].phaseId === "ph-real-2", "#145 …and the second, by name — not by having guessed position");
+  ok(mapped[0].name === "Assessment" && mapped[0].weight === 1, "#145 …name and weight pass through untouched");
+
+  // A weight name absent from the engine's phases keeps its own (slug) id
+  // rather than being dropped — the output is never shorter than the input.
+  const orphanWeights: PhaseWeight[] = [{ phaseId: "slug-ghost", name: "Ghost Phase", weight: 1 }];
+  const orphanMapped = withEngagementPhaseIds(orphanWeights, enginePhases);
+  ok(orphanMapped.length === 1 && orphanMapped[0].phaseId === "slug-ghost", "#145 a weight with no matching engine phase keeps its slug id instead of being dropped");
+
+  // An engine phase absent from the weight list has no opinion voiced for
+  // it — it just never appears in the output (which is keyed off `weights`).
+  const shortWeights: PhaseWeight[] = [{ phaseId: "slug-design", name: "Design", weight: 1 }];
+  const shortMapped = withEngagementPhaseIds(shortWeights, enginePhases);
+  ok(shortMapped.length === 1 && shortMapped[0].phaseId === "ph-real-2", "#145 an engine phase with no matching weight simply isn't in the output — nothing invents an entry for it");
+
+  // Case-insensitive, trim-tolerant, matching phaseWindows/generateSchedule's own norm().
+  const looseWeights: PhaseWeight[] = [{ phaseId: "slug-x", name: "  assessment  ", weight: 1 }];
+  const looseMapped = withEngagementPhaseIds(looseWeights, enginePhases);
+  ok(looseMapped[0].phaseId === "ph-real-1", "#145 withEngagementPhaseIds matches case-insensitively and trims whitespace");
+}
+{
+  const byName = phaseIdsByName([{ id: "ph-1", name: "Assessment" }, { id: "ph-2", name: "Design Development" }]);
+  ok(byName.get("assessment") === "ph-1", "#145 phaseIdsByName keys by the normalized (trimmed, lowercased) name");
+
+  ok(
+    defaultMilestonePhaseId({ name: "Assessment", phaseId: "already-set" }, byName) === "already-set",
+    "#145 defaultMilestonePhaseId leaves an already-set phaseId alone even though the name would also match"
+  );
+  ok(
+    defaultMilestonePhaseId({ name: " Design Development ", phaseId: null }, byName) === "ph-2",
+    "#145 defaultMilestonePhaseId assigns by exact (trimmed/case-insensitive) name match when phaseId is unset"
+  );
+  ok(
+    defaultMilestonePhaseId({ name: "No Such Phase", phaseId: undefined }, byName) === null,
+    "#145 defaultMilestonePhaseId defaults to null rather than guessing when nothing matches"
+  );
+}

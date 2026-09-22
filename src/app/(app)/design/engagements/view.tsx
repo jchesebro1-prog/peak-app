@@ -227,7 +227,13 @@ function ConsultingList({ data }: { data: ConsultingData }) {
           </button>
         }
       />
-      {creating && <NewEngagementModal customers={data.customers} onClose={() => setCreating(false)} />}
+      {creating && (
+        <NewEngagementModal
+          customers={data.customers}
+          disciplineMenu={data.disciplineMenu}
+          onClose={() => setCreating(false)}
+        />
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 18 }}>
         <KpiTile label="Active consulting" value={active.length} tone="accent" />
         <KpiTile label="Fee book" value={money(feeBook)} sub="all consulting" tone="blue" />
