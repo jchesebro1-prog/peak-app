@@ -4,6 +4,8 @@ import { allCompanies, getCompany } from "@/lib/identity/companies";
 import { VENDOR_COMPANY_TYPE, isVendorType } from "@/lib/identity/config";
 import { upsert as upsertCustomer } from "@/lib/stores/customers";
 import { mfrKey } from "@/lib/catalog-books";
+import type { PriceListEntry, VendorDiscounts, VendorRegistration } from "@/lib/vendor-status";
+export type { PriceListEntry, VendorDiscounts, VendorRegistration };
 
 /* ============================================================
    Vendor profiles (#122) — docs/superpowers/specs/2026-09-21-vendors-module-design.md §1.
@@ -15,16 +17,6 @@ import { mfrKey } from "@/lib/catalog-books";
    contact id. Document id = company id, so there is at most one profile
    per vendor and a vendor company with no profile yet reads as a blank.
    ============================================================ */
-
-export type PriceListEntry = {
-  id: string;
-  receivedAt: number;
-  effectiveAt: number;
-  note: string;
-  loggedBy: string;
-};
-export type VendorDiscounts = { note: string; percentOffList: number | null; terms: string };
-export type VendorRegistration = { program: string; url: string; accountNumber: string; notes: string };
 
 export type VendorProfile = {
   id: string; // company id
