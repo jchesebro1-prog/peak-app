@@ -5,8 +5,11 @@ import {
   hasCalendarScope,
   personalKey,
 } from "@/lib/gmail/config";
+import { getSettings } from "@/lib/settings";
+import { getUser } from "@/lib/users";
 import NotifControls from "./notif-controls";
 import InviteToggle from "./invite-toggle";
+import OfficePicker from "./office-picker";
 
 export const metadata = { title: "Account settings — Quartzite-6" };
 
@@ -14,6 +17,12 @@ export default async function AccountPage() {
   const user = await requireUser();
   const prefs = await getPrefs(user.name);
   const invites = await invitesOn(user.name);
+
+  // D143 — "Based out of" (self-service; Settings -> Team's admin form
+  // edits the same users.officeId field but needs manage_users).
+  const [settings, myRow] = await Promise.all([getSettings(), getUser(user.id)]);
+  const officeOptions = settings.offices.map((o) => ({ id: o.id, name: o.name }));
+  const myOfficeId = myRow?.officeId || "";
 
   // C7 — self-serve mailbox connect: teammates manage their OWN inbox here
   // (the admin Settings page manages shared boxes). Connection status +
@@ -110,6 +119,9 @@ export default async function AccountPage() {
           Switch users from the account menu, top-right.
         </span>
       </div>
+
+      {/* ---- based out of (D143 — feeds Calendar's auto travel-time block) ---- */}
+      <OfficePicker offices={officeOptions} initialOfficeId={myOfficeId} />
 
       {/* ---- to-do notifications ---- */}
       <NotifControls rows={rows} />
