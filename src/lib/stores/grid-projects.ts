@@ -8,6 +8,8 @@ import {
 } from "@/db/doc-store";
 import { calibrationScale, clamp01, type Calibration, type Point } from "@/lib/annotations";
 import type { GridCurtain } from "@/lib/design/grid-bom";
+import { ensureOptions, type GridOption } from "@/lib/design/grid-options";
+export type { GridOption } from "@/lib/design/grid-options";
 import { compute, VENUES, type AState, type QuickScopeInputs, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
 
@@ -57,6 +59,9 @@ export type GridPlacement = {
    * on the BOM as its own line.
    */
   curtain?: GridCurtain;
+  /** Option membership (Spec 1, options model). Absent on pre-spec
+   *  placements — read as the project's first option (ensureOptions). */
+  optionId?: string;
   /**
    * Set only on a placement created by the "generate starting layout"
    * seeding action (#38 Task 2, D14x) — a stable key identifying which
@@ -111,6 +116,9 @@ export type GridRevision = {
   spaces: GridSpace[];
   /** Absent on pre-D110 snapshots — read as []. */
   routes?: GridRoute[];
+  /** Option list at snapshot time (Spec 1). Absent on older snapshots —
+   *  restore normalizes to a single default option. */
+  options?: GridOption[];
 };
 
 /**
@@ -138,6 +146,8 @@ export type GridRoute = {
   /** Validated shared connectionType (catalog-connect.validateDeviceWire),
    *  stamped only when both endpoint devices carry `ports`. */
   connectionType?: string;
+  /** Option membership (Spec 1) — see GridPlacement.optionId. */
+  optionId?: string;
 };
 
 export type GridProject = {
@@ -169,6 +179,11 @@ export type GridProject = {
   routes?: GridRoute[];
   /** Append-only snapshots (Phase 2) — absent on pre-D109 docs. */
   revisions?: GridRevision[];
+  /** Design options (Spec 1) — variants sharing this project's sheets.
+   *  Absent on pre-spec docs; every read passes through ensureOptions, so
+   *  callers may treat this as always ≥1 entry. `quoteId` below mirrors
+   *  options[0].quoteId. */
+  options?: GridOption[];
   /** Draft quote minted from this design, when one exists. */
   quoteId: string | null;
   /** Live-revisable basic-info snapshot (D-manual-scope-targets) — venue,
@@ -208,11 +223,12 @@ function rid(prefix: string): string {
 /** All live projects, newest activity first. */
 export async function listProjects(): Promise<GridProject[]> {
   const list = await listDocs<GridProject>("grid_projects");
-  return list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return list.map((p) => ensureOptions(p)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
 export async function getProject(id: string): Promise<GridProject | null> {
-  return getDoc<GridProject>("grid_projects", id);
+  const p = await getDoc<GridProject>("grid_projects", id);
+  return p ? ensureOptions(p) : null;
 }
 
 export async function createProject(input: {
@@ -845,6 +861,7 @@ function snapshotOf(
     calibrations: [...(p.calibrations || [])],
     spaces: [...(p.spaces || [])],
     routes: [...(p.routes || [])],
+    options: ensureOptions(p).options.map((o) => ({ ...o })),
   };
 }
 
@@ -896,6 +913,8 @@ export async function restoreRevision(
     doc.calibrations = [...target.calibrations];
     doc.spaces = [...target.spaces];
     doc.routes = [...(target.routes || [])];
+    doc.options = target.options ? target.options.map((o) => ({ ...o })) : undefined;
+    ensureOptions(doc);
     pushRevision(doc, by, "restore", `Recalled v${rev}`);
     doc.updatedAt = Date.now();
   });

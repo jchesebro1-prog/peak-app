@@ -22,6 +22,17 @@ import {
 } from "@/lib/operations-work";
 import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS, battenLenFt, BATTEN_OVERHANG_FT } from "@/lib/design/venue-dims";
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
+import {
+  DEFAULT_OPTION_ID,
+  DEFAULT_OPTION_NAME,
+  copyOptionMembers,
+  defaultOptionId,
+  ensureOptions,
+  hasOption,
+  optionSlice,
+  resolveOptionId,
+  syncQuoteMirror,
+} from "@/lib/design/grid-options";
 import { DEFAULT_SETTINGS, DEMO_COLLECTIONS } from "@/db/seed-data";
 import { DOC_TABLES } from "@/db/doc-tables";
 import { accentContrast } from "@/lib/color";
@@ -3091,6 +3102,68 @@ async function xlsxFixture(): Promise<Buffer> {
   ws.addRow(["CS-40", 'Curtain track, 40" carrier, "heavy" duty', 42, 25.2, "ADC"]);
   ws.addRow(["CS-41", "Multi-line\ndescription", 10, 5, "ADC"]);
   return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+/* --- Grid options (Spec 1, 2026-09-21): normalization + slicing + copy --- */
+{
+  const legacy = {
+    quoteId: "Q-9001",
+    createdAt: 1000,
+    placements: [
+      { id: "gp-a", sheetId: "gs-1", page: 1, x: 0.1, y: 0.1, partId: "p1", by: "t", at: 1 },
+      { id: "gp-b", sheetId: "gs-1", page: 1, x: 0.2, y: 0.2, partId: "p2", by: "t", at: 1 },
+    ],
+    routes: [
+      { id: "wr-a", sheetId: "gs-1", page: 1, partId: "w1", points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], aspect: 1, by: "t", at: 1, fromPlacementId: "gp-a", toPlacementId: "gp-b" },
+    ],
+  };
+  const norm = ensureOptions(structuredClone(legacy));
+  ok(norm.options.length === 1 && norm.options[0].id === DEFAULT_OPTION_ID && norm.options[0].name === DEFAULT_OPTION_NAME, "grid-options: a legacy doc normalizes to one 'Design' option with id opt-base");
+  ok(norm.options[0].quoteId === "Q-9001", "grid-options: the default option inherits the project quoteId");
+  ok(norm.placements!.every((p) => p.optionId === DEFAULT_OPTION_ID) && norm.routes!.every((r) => r.optionId === DEFAULT_OPTION_ID), "grid-options: untagged placements and routes read as members of the first option");
+
+  const two = ensureOptions({
+    createdAt: 1000,
+    quoteId: null,
+    options: [
+      { id: "opt-x", name: "Good", quoteId: null, createdAt: 1 },
+      { id: "opt-y", name: "Better", quoteId: "Q-2", createdAt: 2 },
+    ],
+    placements: [
+      { id: "gp-1", optionId: "opt-x" },
+      { id: "gp-2", optionId: "opt-y" },
+      { id: "gp-3" },
+    ],
+    routes: [{ id: "wr-1", optionId: "opt-y" }],
+  });
+  ok(two.options.length === 2 && two.options[0].id === "opt-x", "grid-options: an existing options list is preserved in order");
+  ok(two.placements![2].optionId === "opt-x", "grid-options: an untagged member on a multi-option doc falls to the FIRST option");
+  ok(defaultOptionId(two) === "opt-x", "grid-options: defaultOptionId is the first option");
+  ok(resolveOptionId(two, "opt-y") === "opt-y" && resolveOptionId(two, "opt-nope") === "opt-x" && resolveOptionId(two, null) === "opt-x", "grid-options: resolveOptionId honours a known id and falls back to the first otherwise");
+  ok(hasOption(two, "opt-y") && !hasOption(two, "opt-z"), "grid-options: hasOption");
+  const sliceY = optionSlice(two, "opt-y");
+  ok(sliceY.placements.length === 1 && sliceY.placements[0].id === "gp-2" && sliceY.routes.length === 1, "grid-options: optionSlice returns only that option's placements and routes");
+  ok(optionSlice(two, "opt-x").placements.map((p) => p.id).join(",") === "gp-1,gp-3", "grid-options: optionSlice of the first option includes formerly-untagged members");
+
+  const mirrored = syncQuoteMirror({ ...two, quoteId: "stale" });
+  ok(mirrored.quoteId === null, "grid-options: syncQuoteMirror copies options[0].quoteId onto the project (null here)");
+  const mirrored2 = syncQuoteMirror({ ...two, options: [two.options[1], two.options[0]] });
+  ok(mirrored2.quoteId === "Q-2", "grid-options: syncQuoteMirror follows whichever option is first");
+
+  let n = 0;
+  const copied = copyOptionMembers({
+    placements: norm.placements!,
+    routes: norm.routes!,
+    fromOptionId: DEFAULT_OPTION_ID,
+    toOptionId: "opt-new",
+    makeId: (prefix) => `${prefix}c${++n}`,
+    by: "copier",
+    at: 5000,
+  });
+  ok(copied.placements.length === 2 && copied.placements.every((p) => p.optionId === "opt-new" && p.by === "copier" && p.at === 5000), "grid-options: copyOptionMembers copies every placement into the target option with new provenance");
+  ok(copied.placements.map((p) => p.id).join(",") === "gp-c1,gp-c2", "grid-options: copied placements get NEW ids");
+  ok(copied.routes.length === 1 && copied.routes[0].id === "wr-c3" && copied.routes[0].fromPlacementId === "gp-c1" && copied.routes[0].toPlacementId === "gp-c2", "grid-options: copied routes get new ids and remapped device-wire endpoints");
+  ok(norm.placements![0].id === "gp-a" && norm.placements![0].optionId === DEFAULT_OPTION_ID, "grid-options: copyOptionMembers never mutates the source members");
 }
 
 async function asyncChecks(): Promise<void> {
