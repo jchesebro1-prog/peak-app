@@ -5441,9 +5441,11 @@ interpreted from Gmail (customer, status, assign, route to lead/project); status
 latest message instead of stamped per import (the "Waiting on us after I replied" defect —
 Brenda thread). §6 status derivation ships with #95's hardening batch; the rest follows.
 
-**Status:** WAVE A SHIPPED 2026-09-21 (Tasks 1–8: resolver, `customer_domains`, ingest stamping +
-backfill/re-sweep, link actions, `EntityQuickAdd`, reader link sidebar, Unmatched view — branch
-`feat/inbox-linking`, D141). Wave B (two-way `Peak/*` labels, Tasks 9–12) OPEN. Follow-ups from the
+**Status:** SHIPPED 2026-09-21 on `feat/inbox-linking`. Wave A (Tasks 1–8, D141): resolver,
+`customer_domains`, ingest stamping + backfill/re-sweep, link actions, `EntityQuickAdd`, reader link
+sidebar, Unmatched view. Wave B (Tasks 9–12, D142, commits 5c0009c…03dc77b): pure `Peak/*` vocabulary,
+lazy label creation + bounded Peak→Gmail writer, Gmail→Peak interpreter (per-thread collapse, echo
+suppression, one-lead `Peak/New lead` swap, unknown/ambiguous skip). Follow-ups from the
 final review: quote intake's own `toLocationInput` still drops `locationName`; ambiguous-card "Always"
 claims the domain even for a contact-level ambiguity (hint copy); duplicate option values when two
 candidate customers share a contact name.

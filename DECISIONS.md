@@ -2738,3 +2738,37 @@ Defaults taken while building Tasks 1–8 (branch `feat/inbox-linking`):
   route budget alongside the #97 import chunks.
 - **Quote intake's `toLocationInput` dropped `locationName`** — fixed in the Inbox copy; the intake's own
   copy still does (follow-up).
+
+## D142 — Inbox two-way Peak/* labels, Wave B (2026-09-21)
+
+PUNCHLIST #96 Wave B, spec `docs/superpowers/specs/2026-09-21-inbox-customer-linking-and-label-sync-design.md`
+(commits 5c0009c…03dc77b on `feat/inbox-linking`). Gmail labels are now a two-way command surface,
+built on Wave A's linking (D141).
+
+- **Namespace.** The app owns everything under `Peak/`; nothing outside it is read or written.
+  `Peak/Customers/<name>`, `Peak/Status/{Needs reply|Waiting|Done}`, `Peak/Assign/<First>`,
+  `Peak/New lead` (command only), `Peak/{Projects|Leads|Quotes}/<id>` (work links). A customer whose
+  name contains `/` is written and matched with `/`→`-`; the interpreter matches back through the
+  **same sanitiser** (sanitised-name comparison, never raw equality).
+- **Peak → Gmail** is derived, not stamped: the "current" label set is the union of `Peak/*` names
+  across every message that carries `gmailLabelIds` (never a single message), so a Peak-side reply
+  can't blank the set and leave a stale `Peak/Status/*`. Labels are created lazily and sequentially
+  per mailbox (one cache load, one refresh after all creates; a 409 → refresh + re-lookup), and one
+  `messages.modify` per thread applies the diff. Every store mutation of customer/status/assign/link —
+  and `linkThread` — funnels through a **bounded serial queue** (`queueLabelSync`) that coalesces
+  repeat calls per thread and dequeues at the start of a turn so a mid-flight change re-queues one
+  trailing sync. Gmail fetches carry a 20 s timeout so one hung socket can't stall the chain.
+- **Gmail → Peak.** The incremental history sync now returns `labelAdded`/`labelRemoved` events;
+  the interpreter **collapses them per thread** (Gmail emits one record per message; added wins over
+  removed) so labelling a whole conversation is one command, then applies it through the same store
+  functions the UI uses. Only additions are commands, except a `Peak/Customers/<name>` **removal**
+  matching the current customer, which unlinks. `Peak/New lead` creates exactly one lead (guarded by
+  the thread's existing `lead` work-link, independent of the label swap's success) and swaps the label
+  to `Peak/Leads/<id>` so it can't fire twice. Unknown/ambiguous customer or assignee → log and skip,
+  never guess (assignee requires exactly one active-user first-name match).
+- **Echo suppression.** An interpreter-applied change stamps `peakLabelsAppliedAt`; the writer's 2-min
+  window then treats the label Gmail echoes back as already-in-sync and skips it. Commands are
+  idempotent to a fixed point, so the window boundary at worst causes a redundant no-op, never a loop.
+- **Conflict rule:** last write wins by timestamp; same-second collisions resolve in Gmail's favour.
+- **Cadence:** the interpreter runs inside the existing sync (open-tab tick ~2 min, cron every 5 min
+  once `CRON_SECRET` is set). Gmail push (Pub/Sub) remains a later phase.

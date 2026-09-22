@@ -106,7 +106,7 @@ Cloud project** from step 4.
 2. **OAuth consent screen → Data access → Add or remove scopes**, add these, then Save:
    - `.../auth/gmail.send`
    - `.../auth/gmail.readonly`
-   - `.../auth/gmail.modify` (two-way archive + `Peak/` labels — requested on every connect)
+   - `.../auth/gmail.modify` (two-way archive AND the Peak/ label sync, D142 — load-bearing, requested on every connect)
    - `.../auth/userinfo.email`
 
    If you also want the calendar opt-in (Settings → Mailboxes → Enable calendar), enable the
