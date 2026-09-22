@@ -1,3 +1,4 @@
+import { barRect, dateFromX, dayColumns, snapToDay } from "@/components/gantt/gantt-lib";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
@@ -5834,4 +5835,17 @@ ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1
   const v12 = mergeLocation(addressedBlank, { label: "", address: "220 E Doty St" }, "l-new12", { preferPrimary: true });
   ok(!v12.created && v12.locations.length === 1 && v12.locations[0].id === "l1" && v12.locations[0].address === "220 E Doty St" && v12.locations[0].primary, "#137 C1b mergeLocation preferPrimary still updates an ADDRESSED but unnamed primary venue in place — that venue is the customers row's own (and the #137 T6 blank-label round-trip)");
   ok(venueKindFromCategory("Church") === "church" && venueKindFromCategory("Black Box") === "blackbox" && venueKindFromCategory("Arena") === "arena" && venueKindFromCategory("Gym") === "flat" && venueKindFromCategory("theatre") === "proscenium" && venueKindFromCategory("") === "proscenium" && venueKindFromCategory("flat") === "flat", "#137 T3 venueKindFromCategory");
+}
+
+/* ====== #145: Gantt geometry ====== */
+{
+  const DAY145 = 86400000;
+  const OCT6 = Date.UTC(2026, 9, 6);
+  ok(dayColumns(OCT6, OCT6 + 6 * DAY145).length === 7, "#145 dayColumns is inclusive of both ends");
+  const rect145 = barRect({ startAt: OCT6 + 2 * DAY145, dueAt: OCT6 + 4 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
+  ok(Math.round(rect145.leftPct) === 20 && Math.round(rect145.widthPct) === 20, "#145 barRect converts a span to percentages of the visible range");
+  ok(barRect({ startAt: OCT6 - DAY145, dueAt: OCT6 + DAY145 }, OCT6, OCT6 + 10 * DAY145).leftPct === 0, "#145 a bar starting before the window is clipped to the left edge, not drawn off-screen");
+  ok(barRect({ startAt: OCT6, dueAt: OCT6 }, OCT6, OCT6 + 10 * DAY145).widthPct > 0, "#145 a zero-length bar still renders a visible sliver rather than vanishing");
+  ok(snapToDay(OCT6 + 3 * DAY145 + 3600000) === OCT6 + 3 * DAY145, "#145 a drop snaps back to the start of its day");
+  ok(dateFromX(50, 100, OCT6, OCT6 + 10 * DAY145) === OCT6 + 5 * DAY145, "#145 dateFromX maps a pixel offset to a date within the range");
 }
