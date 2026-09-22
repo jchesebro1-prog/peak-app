@@ -263,6 +263,14 @@ export default function GridEditor({
   const router = useRouter();
   const pathname = usePathname();
   const [selected, setSelected] = useState<string | null>(null);
+  /** Punch #76 — lines the last successful draft/update quoted at plain list
+   *  price because the part had no usable cost (or the resolved tier margin
+   *  itself was out of range), even though this quote's pricingTier/tierMargin
+   *  stamp implies every line got the tier treatment. Non-blocking, mirrors
+   *  the Lineset Builder's fabric-unresolved banner (#64): names the lines,
+   *  impossible to miss, never refuses the quote. Cleared on every new
+   *  mint/update so a fixed catalog makes the warning go away on its own. */
+  const [tierFallbackLines, setTierFallbackLines] = useState<string[]>([]);
   /** Members of the ACTIVE option only (Spec 1). Every read below goes
    *  through this slice; the whole-project arrays are used only for the
    *  switcher's per-option counts. */
@@ -278,6 +286,7 @@ export default function GridEditor({
   const switchOption = useCallback(
     (id: string) => {
       setSelected(null);
+      setTierFallbackLines([]);
       router.replace(`${pathname}?option=${encodeURIComponent(id)}`, { scroll: false });
     },
     [pathname, router]
@@ -294,14 +303,6 @@ export default function GridEditor({
   const [size, setSize] = useState({ w: 900, h: 1200 });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  /** Punch #76 — lines the last successful draft/update quoted at plain list
-   *  price because the part had no usable cost (or the resolved tier margin
-   *  itself was out of range), even though this quote's pricingTier/tierMargin
-   *  stamp implies every line got the tier treatment. Non-blocking, mirrors
-   *  the Lineset Builder's fabric-unresolved banner (#64): names the lines,
-   *  impossible to miss, never refuses the quote. Cleared on every new
-   *  mint/update so a fixed catalog makes the warning go away on its own. */
-  const [tierFallbackLines, setTierFallbackLines] = useState<string[]>([]);
 
   const [search, setSearch] = useState("");
   // Palette SCOPE filter (punch #48, replacing Task #39's group filter):
@@ -556,7 +557,7 @@ export default function GridEditor({
     Record<string, { hours?: number; included: boolean }>
   >({});
   const laborRows = laborSuggestions.map((s) => {
-    const o = laborOverrides[s.partId];
+    const o = laborOverrides[`${activeOptionId}:${s.partId}`];
     const hours = o?.hours !== undefined && o.hours >= 0 ? o.hours : s.hours;
     return { ...s, hours, included: o ? o.included : true, ext: hours * s.rate };
   });
@@ -1672,7 +1673,7 @@ export default function GridEditor({
                           onChange={(e) =>
                             setLaborOverrides((prev) => ({
                               ...prev,
-                              [l.partId]: { ...prev[l.partId], included: e.target.checked },
+                              [`${activeOptionId}:${l.partId}`]: { ...prev[`${activeOptionId}:${l.partId}`], included: e.target.checked },
                             }))
                           }
                           style={{ margin: 0 }}
@@ -1689,8 +1690,8 @@ export default function GridEditor({
                             const v = Number(e.target.value);
                             setLaborOverrides((prev) => ({
                               ...prev,
-                              [l.partId]: {
-                                included: prev[l.partId]?.included ?? true,
+                              [`${activeOptionId}:${l.partId}`]: {
+                                included: prev[`${activeOptionId}:${l.partId}`]?.included ?? true,
                                 hours: Number.isFinite(v) && v >= 0 ? v : 0,
                               },
                             }));
