@@ -80,6 +80,24 @@ export type DrawerDetailVM = {
 
 export type SourceOptionVM = { value: string; label: string };
 
+/** #12 — customer-directory view-model for the New Lead form's "pick an
+    existing customer" prefill. Reduced/serializable, same shape family as
+    quotes/new's IntakeCustomer — includes email/phone (that form's doesn't)
+    since prefilling those onto the lead is the whole point here. */
+export type LeadCustomerContactVM = {
+  name: string;
+  role: string;
+  email: string;
+  phone: string;
+  primary: boolean;
+};
+
+export type LeadCustomerLiteVM = {
+  id: string;
+  name: string;
+  contacts: LeadCustomerContactVM[];
+};
+
 /** #34 — the lead's visit/survey thread, server-built with chip colors
     precomputed (the client drawer must not value-import the stores).
     visit is the lead's ACTIVE visit (activeVisitForLead already excludes

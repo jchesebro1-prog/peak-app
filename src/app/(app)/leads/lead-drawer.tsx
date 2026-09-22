@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -15,7 +15,7 @@ import {
   setNextActionAction,
   setStageAction,
 } from "./actions";
-import type { DrawerDetailVM, LeadThreadVM, SourceOptionVM } from "./types";
+import type { DrawerDetailVM, LeadCustomerLiteVM, LeadThreadVM, SourceOptionVM } from "./types";
 
 /**
  * Lead Detail.dc.html — the right-hand drawer. mode "new" is the quick-add
@@ -258,6 +258,23 @@ type NewForm = {
   value: string;
 };
 
+// #12 — New Lead's "pick an existing customer" sentinel, same idiom as
+// quotes/new/intake-form.tsx's ADD_NEW: the select's own default option
+// value means "no pick / new customer", never a real customer id.
+const NO_CUSTOMER = "";
+
+/** Primary contact, falling back to the first contact — same fallback rule
+    as CustomerStore.primaryContact (customers.ts), applied here client-side
+    since the drawer already has the full contacts array in hand. Returns
+    null when the customer has zero contacts, so the fields are left blank
+    rather than prefilled with nothing meaningful. */
+function primaryOrFirstContact(
+  c: LeadCustomerLiteVM | undefined
+): LeadCustomerLiteVM["contacts"][number] | null {
+  if (!c || c.contacts.length === 0) return null;
+  return c.contacts.find((ct) => ct.primary) || c.contacts[0] || null;
+}
+
 export default function LeadDrawer({
   mode,
   vm,
@@ -267,6 +284,7 @@ export default function LeadDrawer({
   sourceOptions,
   thread,
   visitReasons,
+  customers,
 }: {
   mode: "new" | "detail";
   vm: DrawerDetailVM | null;
@@ -276,6 +294,7 @@ export default function LeadDrawer({
   sourceOptions: SourceOptionVM[];
   thread: LeadThreadVM;
   visitReasons: string[];
+  customers: LeadCustomerLiteVM[];
 }) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
@@ -302,6 +321,24 @@ export default function LeadDrawer({
     value: "",
   }));
   const [nfErr, setNfErr] = useState("");
+
+  // #12 — New Lead's "pick an existing customer" prefill. customerId is the
+  // only thing that rides to createLeadAction; the query is local UI state
+  // for narrowing the <select>, mirroring quotes/new/intake-form.tsx.
+  const [customerId, setCustomerId] = useState(NO_CUSTOMER);
+  const [customerQuery, setCustomerQuery] = useState("");
+
+  const filteredCustomers = useMemo(() => {
+    const q = customerQuery.trim().toLowerCase();
+    const base = !q ? customers : customers.filter((c) => c.name.toLowerCase().includes(q));
+    // Keep the currently-picked customer in the list even if a later search
+    // filters it out, so the <select>'s value never goes stale.
+    if (customerId && !base.some((c) => c.id === customerId)) {
+      const sel = customers.find((c) => c.id === customerId);
+      if (sel) return [sel, ...base];
+    }
+    return base;
+  }, [customers, customerQuery, customerId]);
 
   // #34 — request-visit form + convert gate
   const [reqReason, setReqReason] = useState(() => visitReasons[0] || "Site survey / measure");
@@ -331,6 +368,26 @@ export default function LeadDrawer({
     setNfErr("");
   };
 
+  const pickCustomer = (id: string) => {
+    setCustomerId(id);
+    if (!id) {
+      // Switching back to "no customer" clears the prefill so a stale
+      // customer's contact info can't linger under a null customerId.
+      setNfField({ contact: "", email: "", phone: "" });
+      return;
+    }
+    // Prefill-and-override (Decision A default): overwrite the plain-text
+    // fields from the customer's primary contact (fallback: first contact;
+    // blank if none). No lock — freely editable afterward, no write-back.
+    const c = customers.find((x) => x.id === id);
+    const ct = primaryOrFirstContact(c);
+    setNfField({
+      contact: ct?.name || "",
+      email: ct?.email || "",
+      phone: ct?.phone || "",
+    });
+  };
+
   const doCreate = () => {
     if (!nf.org.trim()) {
       setNfErr("Add an organization or venue name.");
@@ -348,6 +405,7 @@ export default function LeadDrawer({
         interest: nf.interest.trim(),
         owner: nf.owner || undefined,
         value: parseInt(nf.value.replace(/[^0-9]/g, ""), 10) || 0,
+        customerId: customerId || null,
       });
       // #80: the create can now come back as a typed failure (id-mint
       // collision). Show it where the validation error already goes and keep
@@ -517,6 +575,34 @@ export default function LeadDrawer({
                   placeholder="e.g. Riverside Playhouse"
                   style={inStyle}
                 />
+              </div>
+              <div>
+                <div style={lbl}>Existing customer</div>
+                <input
+                  className="ldw-in"
+                  value={customerQuery}
+                  onChange={(e) => setCustomerQuery(e.target.value)}
+                  placeholder="Search customers…"
+                  style={{ ...inStyle, marginBottom: 8 }}
+                />
+                <select
+                  className="ldw-in"
+                  value={customerId}
+                  onChange={(e) => pickCustomer(e.target.value)}
+                  style={selStyle}
+                >
+                  <option value={NO_CUSTOMER}>— or pick an existing customer —</option>
+                  {filteredCustomers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                {customerQuery.trim() && filteredCustomers.length === 0 && (
+                  <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 6 }}>
+                    No matches for “{customerQuery.trim()}”.
+                  </div>
+                )}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div>

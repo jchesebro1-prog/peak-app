@@ -34,7 +34,8 @@ import { getSettings } from "@/lib/settings";
 import { activeVisitForLead, mergedVisitReasons } from "@/lib/stores/site-visits";
 import { stageMeta as surveyStageMeta, surveysForLead } from "@/lib/stores/surveys";
 import { VISIT_STAGE_META, type VisitStage } from "@/lib/lead-thread";
-import type { AvatarVM, ChipVM, LeadThreadVM, WorklistRowVM } from "./types";
+import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
+import type { AvatarVM, ChipVM, LeadCustomerLiteVM, LeadThreadVM, WorklistRowVM } from "./types";
 import type { BoardCardVM } from "@/components/board/types";
 
 /**
@@ -309,6 +310,27 @@ export default async function LeadsPage({
       : "detail"
     : null;
   const sourceOptions = SOURCES.map((s) => ({ value: s as string, label: SOURCE_META[s].label }));
+
+  // #12 — the New Lead form's "pick an existing customer" prefill. Only
+  // fetched when the new-lead form is actually open, same as the thread
+  // fetch below being gated on leadRec.
+  let leadCustomers: LeadCustomerLiteVM[] = [];
+  if (drawerMode === "new") {
+    const customerDocs = await allCustomers();
+    leadCustomers = customerDocs
+      .map((c: CustomerDoc) => ({
+        id: c.id,
+        name: c.name,
+        contacts: (c.contacts || []).map((ct) => ({
+          name: ct.name,
+          role: ct.role || "",
+          email: ct.email || "",
+          phone: ct.phone || "",
+          primary: !!ct.primary,
+        })),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
 
   // #34 thread — drawer-scoped: two targeted store calls for the ONE open
   // lead only, never a per-row scan.
@@ -801,6 +823,7 @@ export default async function LeadsPage({
           sourceOptions={sourceOptions}
           thread={thread}
           visitReasons={mergedVisitReasons(settings.visitReasons)}
+          customers={leadCustomers}
         />
       )}
     </>
