@@ -18,6 +18,7 @@ import {
 import type { CommThread } from "@/lib/stores/comms";
 import { interpretLabelEvents } from "@/lib/gmail/label-interpret";
 import { saveConnection, replaceLabels } from "@/lib/gmail/connections";
+import { GMAIL_MODIFY_SCOPE } from "@/lib/gmail/config";
 import { get as getLead, getAll as getAllLeads } from "@/lib/stores/leads";
 import { addUser } from "@/lib/users";
 
@@ -439,6 +440,10 @@ async function main() {
         accessToken: "fake-access-token",
         refreshToken: "fake-refresh-token",
         expiresAt: Date.now() + 3_600_000,
+        // gmail.modify scope: interpretLabelEvents gates its best-effort
+        // New-lead label swap on this (mirrors syncPeakLabels' own gate) —
+        // this mailbox's tests below rely on the swap actually firing.
+        scope: GMAIL_MODIFY_SCOPE,
       },
     });
     await replaceLabels(mailboxKey, [
@@ -649,6 +654,84 @@ async function main() {
       assert.equal(appliedAmbiguous, 0, "#96 an ambiguous Peak/Assign/<firstName> (two active users share it) applies no command");
       const ambiguousThread = await getDoc<CommThread>("comms", "C-t11-assign-ambiguous");
       assert.equal(ambiguousThread?.assignedTo, "", "#96 an ambiguous assign never guesses — assignedTo stays unset");
+    }
+
+    // #96 echo-window regression — a label event that just reports back our
+    // OWN write (writer stamped peakLabelsAppliedAt and wrote the label the
+    // thread's current status already wants) must be suppressed, not
+    // reprocessed. Without this guard, setStatus -> queuePeakLabelSync ->
+    // write Peak/Status/Done -> Gmail echoes labelAdded -> setStatus again is
+    // an infinite ping-pong. The command here (setStatus to "closed" on an
+    // already-closed thread) would be a silent no-op on status alone, so the
+    // real proof is `rev`: touch() bumps it on every patchDoc, suppressed or
+    // not — an unchanged rev proves setStatus never ran a second time.
+    {
+      const doneLabelId = "L-t11-statusdone";
+      await upsertDoc<any>("comms", {
+        id: "C-t11-echo",
+        mailbox: "sales",
+        unread: false,
+        archived: false,
+        customerId: "lakefront",
+        customer: "Lakefront",
+        contactName: "Echo Tester",
+        contactEmail: "echo@t11-echo.example",
+        subject: "Echo test",
+        channel: "email",
+        status: "closed",
+        assignedTo: "",
+        link: null,
+        messages: [
+          {
+            id: "m1",
+            at: Date.now(),
+            direction: "in",
+            channel: "email",
+            author: "Echo Tester",
+            body: "Hi",
+            gmailId: "g-t11-echo-m1",
+            // The writer already applied Peak/Status/Done to this message —
+            // this is what makes the upcoming labelAdded event an echo of
+            // our own write rather than a person's action.
+            gmailLabelIds: [doneLabelId],
+          },
+        ],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        rev: 1,
+        gmailThreadId: "g-t11-thread-echo",
+        gmailAccountKey: mailboxKey,
+        resolution: "linked",
+        // Within the 2-minute echo window.
+        peakLabelsAppliedAt: Date.now(),
+      } as any);
+
+      const appliedEcho = await interpretLabelEvents(mailboxKey, [
+        { messageId: "g-t11-echo-m1", threadId: "g-t11-thread-echo", added: [doneLabelId], removed: [] },
+      ]);
+      assert.equal(appliedEcho, 0, "#96 echo window: a labelAdded event matching our own recent write applies no command");
+      const echoThread = await getDoc<CommThread>("comms", "C-t11-echo");
+      assert.equal(echoThread?.status, "closed", "#96 echo window: thread status did not change");
+      assert.equal((echoThread as any)?.rev, 1, "#96 echo window: setStatus never ran a second time (rev unchanged) — proves the echo was actually suppressed, not just naturally idempotent");
+
+      // A genuinely new label — one the thread does NOT currently want — on
+      // the same recently-synced thread must still be processed, proving the
+      // suppression is scoped to matching echoes, not a blanket window mute.
+      // Uses a fresh, unambiguous assignee/label pair (Chris Alpha/Beta above
+      // are deliberately ambiguous for the earlier test).
+      await addUser({ name: "Dana Echo" });
+      await replaceLabels(mailboxKey, [
+        { id: "L-t11-newlead", name: "Peak/New lead", type: "user" },
+        { id: "L-t11-statusdone", name: "Peak/Status/Done", type: "user" },
+        { id: "L-t11-assignchris", name: "Peak/Assign/Chris", type: "user" },
+        { id: "L-t11-assigndana", name: "Peak/Assign/Dana", type: "user" },
+      ]);
+      const appliedGenuine = await interpretLabelEvents(mailboxKey, [
+        { messageId: "g-t11-echo-m1", threadId: "g-t11-thread-echo", added: ["L-t11-assigndana"], removed: [] },
+      ]);
+      assert.equal(appliedGenuine, 1, "#96 echo window: a genuinely new label on the same thread is still processed, not swallowed by the window");
+      const genuineThread = await getDoc<CommThread>("comms", "C-t11-echo");
+      assert.equal(genuineThread?.assignedTo, "Dana Echo", "#96 echo window: the genuine assign command actually applied");
     }
   }
 

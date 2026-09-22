@@ -6,7 +6,9 @@
  * Every command applies through the store first; any best-effort mirror back
  * to Gmail (currently only the New-lead label swap) is wrapped in its own
  * try/catch so a Gmail hiccup never loses or duplicates the Peak-side effect
- * — same philosophy as label-sync.ts's syncPeakLabels.
+ * — same philosophy as label-sync.ts's syncPeakLabels. That mirror also
+ * checks the connection's gmail.modify scope first (same check as
+ * syncPeakLabels) so a read-only mailbox never attempts a Gmail write.
  */
 import { listDocs, patchDoc } from "@/db/doc-store";
 import { assign, setLink, setStatus, type CommThread } from "@/lib/stores/comms";
@@ -15,8 +17,8 @@ import { create as createLead } from "@/lib/stores/leads";
 import { activeUsers } from "@/lib/users";
 import type { GmailLabelEvent } from "./api";
 import { modifyThread } from "./api";
-import { listCachedLabels } from "./connections";
-import { type MailboxKey, userIdOfKey } from "./config";
+import { getConnectionInfo, listCachedLabels } from "./connections";
+import { GMAIL_MODIFY_SCOPE, type MailboxKey, userIdOfKey } from "./config";
 import { linkThread, rememberAddress } from "./linking";
 import { desiredPeakLabels, parsePeakLabel, type PeakCommand } from "./peak-labels";
 import { ensureLabelId } from "./label-sync";
@@ -120,6 +122,8 @@ export function collapseLabelEventsByThread(events: GmailLabelEvent[]): Collapse
  */
 export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEvent[]): Promise<number> {
   if (!events.length) return 0;
+  const conn = await getConnectionInfo(key);
+  const canModify = !!conn && (conn.scope || "").includes(GMAIL_MODIFY_SCOPE);
   const cache = await listCachedLabels(key);
   const idToName = new Map(cache.map((l) => [l.labelId, l.name]));
   const all = await listDocs<CommThread>("comms");
@@ -207,15 +211,17 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
         // (quota, revoked scope, transient 5xx) must never re-surface as a
         // duplicate lead — the idempotency guard above already covers that
         // on the next pass, so this is logged, not thrown.
-        try {
-          const newLeadId = cache.find((l) => l.name === "Peak/New lead")?.labelId;
-          const leadLabelId = await ensureLabelId(key, "Peak/Leads/" + lead.id, cache);
-          await modifyThread(key, ev.threadId, {
-            addLabelIds: [leadLabelId],
-            removeLabelIds: newLeadId ? [newLeadId] : [],
-          });
-        } catch (err) {
-          console.error("[gmail] new-lead label swap failed for", t.id, err);
+        if (canModify) {
+          try {
+            const newLeadId = cache.find((l) => l.name === "Peak/New lead")?.labelId;
+            const leadLabelId = await ensureLabelId(key, "Peak/Leads/" + lead.id, cache);
+            await modifyThread(key, ev.threadId, {
+              addLabelIds: [leadLabelId],
+              removeLabelIds: newLeadId ? [newLeadId] : [],
+            });
+          } catch (err) {
+            console.error("[gmail] new-lead label swap failed for", t.id, err);
+          }
         }
       }
     }

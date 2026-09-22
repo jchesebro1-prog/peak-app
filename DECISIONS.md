@@ -2758,6 +2758,9 @@ built on Wave A's linking (D140).
   and `linkThread` — funnels through a **bounded serial queue** (`queueLabelSync`) that coalesces
   repeat calls per thread and dequeues at the start of a turn so a mid-flight change re-queues one
   trailing sync. Gmail fetches carry a 20 s timeout so one hung socket can't stall the chain.
+  Label writes queued from server actions are best-effort on serverless (no `waitUntil`); a
+  dropped write self-heals on the thread's next mutation, and a blanket cron reconcile of label
+  drift on dormant linked threads is a logged follow-up (#98).
 - **Gmail → Peak.** The incremental history sync now returns `labelAdded`/`labelRemoved` events;
   the interpreter **collapses them per thread** (Gmail emits one record per message; added wins over
   removed) so labelling a whole conversation is one command, then applies it through the same store
