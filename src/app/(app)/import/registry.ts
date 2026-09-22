@@ -436,6 +436,8 @@ type TaskTemplateBag = TaskTemplates.TaskTemplateSetRecord[] & {
   __ttCreatedThisCommit?: Set<string>;
   __ttUsers?: Array<{ id: string; name: string }>;
   __ttLive?: { phases: string[]; disciplines: string[] };
+  __ttOriginalAppliesTo?: Map<string, TaskTemplates.TemplateRecordKind[]>;
+  __ttAppliesAccum?: Map<string, Set<TaskTemplates.TemplateRecordKind>>;
 };
 
 /** Sets whose `lines`/`appliesTo` this commit has already started rebuilding
@@ -457,6 +459,29 @@ function ttCreatedThisCommit(cache: Record<string, unknown>[]): Set<string> {
   const c = cache as TaskTemplateBag;
   if (!c.__ttCreatedThisCommit) c.__ttCreatedThisCommit = new Set<string>();
   return c.__ttCreatedThisCommit;
+}
+
+/** #145 D169 — the set's `appliesTo` exactly as it stood before this commit
+ *  touched it, captured once per set on first touch. A file whose rows for
+ *  a set NEVER carry anything in Applies To falls back to this rather than
+ *  wiping the set to `[]` — a blank column is "the file doesn't say," not
+ *  "clear it," and `[]` silently drops the set from every "Apply template"
+ *  picker (review finding, Important 3). */
+function ttOriginalAppliesTo(cache: Record<string, unknown>[]): Map<string, TaskTemplates.TemplateRecordKind[]> {
+  const c = cache as TaskTemplateBag;
+  if (!c.__ttOriginalAppliesTo) c.__ttOriginalAppliesTo = new Map();
+  return c.__ttOriginalAppliesTo;
+}
+
+/** The TRUE running union of what THIS FILE's rows specify for a set's
+ *  Applies To — separate from `rec.appliesTo` itself, so a later non-blank
+ *  row replaces wholesale (decision 1) rather than merging onto whatever
+ *  `ttOriginalAppliesTo`'s fallback last persisted. Starts empty per set;
+ *  only grows from row values, never from the set's pre-commit state. */
+function ttAppliesAccum(cache: Record<string, unknown>[]): Map<string, Set<TaskTemplates.TemplateRecordKind>> {
+  const c = cache as TaskTemplateBag;
+  if (!c.__ttAppliesAccum) c.__ttAppliesAccum = new Map();
+  return c.__ttAppliesAccum;
 }
 
 async function ttActiveUsers(cache: Record<string, unknown>[]): Promise<Array<{ id: string; name: string }>> {
@@ -515,19 +540,37 @@ async function ttApplyRow(
   const line = taskTemplateLineFromRow(v, users);
   const rowApplies = parseAppliesTo(v.appliesTo);
   const touched = ttTouched(cache);
+  const originals = ttOriginalAppliesTo(cache);
   if (!touched.has(rec.id)) {
     touched.add(rec.id);
+    originals.set(rec.id, rec.appliesTo); // capture BEFORE anything below touches it
     rec.lines = [line];
-    rec.appliesTo = rowApplies;
   } else {
     rec.lines = [...rec.lines, line];
-    rec.appliesTo = Array.from(new Set([...rec.appliesTo, ...rowApplies]));
   }
+  const accum = ttAppliesAccum(cache);
+  let acc = accum.get(rec.id);
+  if (!acc) {
+    acc = new Set<TaskTemplates.TemplateRecordKind>();
+    accum.set(rec.id, acc);
+  }
+  for (const k of rowApplies) acc.add(k);
+  // Important 3 — if NONE of this set's rows (so far, in this file) carried
+  // anything in Applies To, keep whatever the set already had rather than
+  // persisting an empty array (which would drop it from every "Apply
+  // template" picker). The moment any row DOES specify one, `acc` — which
+  // only ever grows from row values, never from the set's pre-commit state
+  // — replaces wholesale, matching decision 1's replace-by-set for `lines`.
+  const appliesToToSave = acc.size ? Array.from(acc) : originals.get(rec.id) ?? [];
   const saved = await TaskTemplates.updateTaskTemplateSet(rec.id, {
     lines: rec.lines,
-    appliesTo: rec.appliesTo,
+    appliesTo: appliesToToSave,
   });
-  if (saved) Object.assign(rec, saved);
+  // Minor 1 — a null here means the record was deleted out from under this
+  // commit (soft-deleted by someone else mid-import); that must count as a
+  // failed row, not a silent no-op that still reports as created/updated.
+  if (!saved) throw new Error(`Template set ${rec.id} no longer exists`);
+  Object.assign(rec, saved);
   return ttRowWarnings(v, await ttLiveLists(cache));
 }
 
@@ -1050,15 +1093,26 @@ const WRITERS: Record<string, Writer> = {
       const sets = cache as unknown as TaskTemplates.TaskTemplateSetRecord[];
       return sets.find((s) => norm(s.name) === key && !created.has(s.id)) ?? null;
     },
-    // Reached for a genuinely new set name AND (matching the catalog writer's
-    // "Create new on an existing SKU is a merge" precedent) for mode="create"
-    // against a name `find` deliberately hid or that already existed —
-    // either way this file's rows for that name replace its lines wholesale.
+    // #145 D169 review (Critical) — "create" must NEVER merge into a set
+    // that pre-existed before this file was opened: unlike the catalog
+    // writer's SKU (the document id itself, so two SKU-identical parts are
+    // structurally impossible and a merge is forced), `createTaskTemplateSet`
+    // mints an independent sequential id unrelated to `name` — a second set
+    // with the same name is a perfectly ordinary, distinct record, the same
+    // way "create" against an existing org name mints a second lead above.
+    // So this ONLY ever merges into a record THIS SAME COMMIT already
+    // started (multi-row file building one brand-new set) — `find`'s own
+    // `!created.has(s.id)` filter guarantees a genuinely pre-existing set
+    // never reaches here as `match`, but the same filter is re-asserted
+    // below so this stays correct even if `find`'s contract ever changes.
     create: async (v, cache, ctx) => {
       const key = norm(str(v.set));
       const sets = cache as unknown as TaskTemplates.TaskTemplateSetRecord[];
-      const match = key ? sets.find((s) => norm(s.name) === key) : undefined;
-      if (match) return ttApplyRow(match, v, cache);
+      const createdThisCommit = ttCreatedThisCommit(cache);
+      const inProgress = key
+        ? sets.find((s) => createdThisCommit.has(s.id) && norm(s.name) === key)
+        : undefined;
+      if (inProgress) return ttApplyRow(inProgress, v, cache);
 
       const users = await ttActiveUsers(cache);
       const line = taskTemplateLineFromRow(v, users);
@@ -1068,7 +1122,7 @@ const WRITERS: Record<string, Writer> = {
         ctx.me ?? { name: "Import" }
       );
       ttTouched(cache).add(created.id);
-      ttCreatedThisCommit(cache).add(created.id);
+      createdThisCommit.add(created.id);
       sets.push(created);
       return ttRowWarnings(v, await ttLiveLists(cache));
     },

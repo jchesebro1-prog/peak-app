@@ -125,8 +125,11 @@ import {
   venueKindFromCategory,
 } from "@/app/(app)/import/link";
 import type { CustomerContact, CustomerLocation } from "@/lib/stores/customers";
-// Pure (no store access, no DB) — see the note on catalogPatch itself.
-import { catalogPatch, templateCsv as importTemplateCsv } from "@/app/(app)/import/registry";
+// catalogPatch/templateCsv are pure (no store access, no DB) — see the note
+// on catalogPatch itself. commitImport/exportCsv are NOT — #145 D169 review
+// (Important 1) exercises the task_templates writer for real, DB-backed,
+// with cleanup (see asyncChecks()).
+import { catalogPatch, templateCsv as importTemplateCsv, commitImport, exportCsv } from "@/app/(app)/import/registry";
 import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
 
 import {
@@ -4484,6 +4487,190 @@ async function asyncChecks(): Promise<void> {
       threwMissingEngagement145 = true;
     }
     ok(threwMissingEngagement145, "#145 validateFileRefsForEngagement throws when the engagement itself doesn't exist");
+  }
+
+  /* ---- #145 D169 review (Important 1) — the task_templates CSV writer,
+   * for real: commitImport/exportCsv actually write and read the store, so
+   * this cleans up every fixture it creates on every exit path (success OR
+   * a mid-test throw) — this repo shares one database across Production,
+   * Preview and Development (AGENTS.md). Fixture names are prefixed
+   * "ZZ-TEST-145-T10" so they can't collide with real data or another
+   * agent's fixtures in a sibling worktree. */
+  {
+    const ttType10 = getTypeMeta("task_templates");
+    if (!ttType10) throw new Error("#145 T10 setup: task_templates import type not registered");
+    const SET_A_145T10 = "ZZ-TEST-145-T10 Round Trip";
+    const SET_B_145T10 = "ZZ-TEST-145-T10 Collision";
+    const SET_SKIP_145T10 = "ZZ-TEST-145-T10 Skip New";
+    const SET_APPLIES_145T10 = "ZZ-TEST-145-T10 Applies";
+    const SET_RT_145T10 = "ZZ-TEST-145-T10 Round Trip Targets";
+    const ALL_SETS_145T10 = [SET_A_145T10, SET_B_145T10, SET_SKIP_145T10, SET_APPLIES_145T10, SET_RT_145T10];
+    const rowsFor145T10 = (csv: string) => {
+      const parsed = parseImportCsv(csv);
+      if (!parsed.ok) throw new Error("#145 T10 setup: csv did not parse — " + parsed.error);
+      const mapping = autoMap(parsed.headers, ttType10.fields);
+      return prepareRows(parsed.rows, mapping, ttType10.fields).rows;
+    };
+    try {
+      /* -- replace-by-set: re-import must not double, and must shrink when a line is dropped -- */
+      const csv2Lines145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_A_145T10},consulting,Assessment,rigging,Line One,Assessment,team,0,50`,
+        `${SET_A_145T10},consulting,Assessment,,Line Two,Assessment,team,50,50`,
+      ].join("\n");
+      const created145t10 = await commitImport("task_templates", rowsFor145T10(csv2Lines145T10), "create", { effectiveAt: Date.now() });
+      ok(
+        created145t10.created === 2 && created145t10.errored === 0,
+        "#145 T10 a 2-line file for a brand-new set commits both rows through create() (row 2 finds row 1's fresh record via the in-commit accumulator, not the generic dedupe)"
+      );
+      const afterCreate145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_A_145T10);
+      ok(!!afterCreate145t10 && afterCreate145t10.lines.length === 2, "#145 T10 the new set holds both lines");
+
+      const updated145t10 = await commitImport("task_templates", rowsFor145T10(csv2Lines145T10), "update", { effectiveAt: Date.now() });
+      ok(updated145t10.updated === 2 && updated145t10.errored === 0, "#145 T10 re-importing the identical file in update mode touches both rows");
+      const afterReimport145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_A_145T10);
+      ok(
+        afterReimport145t10?.lines.length === 2,
+        "#145 T10 replace-by-set: re-importing the SAME rows does not double the lines (still 2, not 4 — the append-on-reimport bug this decision exists to prevent)"
+      );
+
+      const csv1Line145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_A_145T10},consulting,Assessment,rigging,Line One,Assessment,team,0,50`,
+      ].join("\n");
+      await commitImport("task_templates", rowsFor145T10(csv1Line145T10), "update", { effectiveAt: Date.now() });
+      const afterDrop145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_A_145T10);
+      ok(
+        afterDrop145t10?.lines.length === 1 && afterDrop145t10.lines[0]?.title === "Line One",
+        "#145 T10 replace-by-set: dropping a line from the file shrinks the stored set to match — wholesale replace, not merge"
+      );
+
+      /* -- create mode against an EXISTING name mints a SECOND, distinct set (Critical fix) -- */
+      const csvB145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_B_145T10},project,,,Original Line,,team,0,100`,
+      ].join("\n");
+      await commitImport("task_templates", rowsFor145T10(csvB145T10), "create", { effectiveAt: Date.now() });
+      const original145t10 = (await allTaskTemplateSets()).filter((s) => s.name === SET_B_145T10);
+      ok(original145t10.length === 1 && original145t10[0].lines.length === 1, "#145 T10 setup: the first Collision set exists with its one original line");
+
+      const csvBCollide145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_B_145T10},project,,,Second Set Line One,,team,0,50`,
+        `${SET_B_145T10},project,,,Second Set Line Two,,team,50,50`,
+      ].join("\n");
+      const collideRes145t10 = await commitImport("task_templates", rowsFor145T10(csvBCollide145T10), "create", { effectiveAt: Date.now() });
+      ok(
+        collideRes145t10.created === 2 && collideRes145t10.errored === 0,
+        "#145 T10 create mode against a colliding name still reports success for both rows (one NEW set minted, its second row appended to it — not the original)"
+      );
+      const afterCollide145t10 = (await allTaskTemplateSets()).filter((s) => s.name === SET_B_145T10);
+      ok(
+        afterCollide145t10.length === 2,
+        "#145 T10 Critical fix: create mode against an existing set name mints a SECOND, distinct set — it never merges into (and so never destroys) the original"
+      );
+      const untouchedOriginal145t10 = afterCollide145t10.find((s) => s.lines.length === 1 && s.lines[0]?.title === "Original Line");
+      ok(!!untouchedOriginal145t10, "#145 T10 the ORIGINAL Collision set's line is untouched by the colliding create");
+      const newSecondSet145t10 = afterCollide145t10.find((s) => s.lines.length === 2);
+      ok(
+        !!newSecondSet145t10 && newSecondSet145t10.lines.every((l) => l.title.startsWith("Second Set Line")),
+        "#145 T10 the newly-minted second set holds exactly the colliding file's own 2 lines"
+      );
+
+      /* -- skip mode against a BRAND-NEW multi-line set creates every row, not just the first -- */
+      const csvSkipNew145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_SKIP_145T10},project,,,Skip Line One,,team,0,50`,
+        `${SET_SKIP_145T10},project,,,Skip Line Two,,team,50,50`,
+      ].join("\n");
+      const skipNewRes145t10 = await commitImport("task_templates", rowsFor145T10(csvSkipNew145T10), "skip", { effectiveAt: Date.now() });
+      ok(
+        skipNewRes145t10.created === 2 && skipNewRes145t10.skipped === 0,
+        "#145 T10 skip mode against a BRAND-NEW multi-line set still creates every row (find() hides this-commit creations, so row 2 can't find-and-skip row 1's fresh record)"
+      );
+      const skipNewSet145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_SKIP_145T10);
+      ok(skipNewSet145t10?.lines.length === 2, "#145 T10 ...and the set ends up holding both lines");
+
+      const skipAgainRes145t10 = await commitImport("task_templates", rowsFor145T10(csvSkipNew145T10), "skip", { effectiveAt: Date.now() });
+      ok(skipAgainRes145t10.skipped === 2 && skipAgainRes145t10.created === 0, "#145 T10 skip mode against that NOW pre-existing set skips every row on the next import");
+
+      /* -- a blank Applies To column preserves what the set already has (Important 3) -- */
+      const csvAppliesSet145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_APPLIES_145T10},"consulting, project",,,Has Applies,,team,0,100`,
+      ].join("\n");
+      await commitImport("task_templates", rowsFor145T10(csvAppliesSet145T10), "create", { effectiveAt: Date.now() });
+      const beforeBlank145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_APPLIES_145T10);
+      ok(
+        !!beforeBlank145t10 &&
+          beforeBlank145t10.appliesTo.length === 2 &&
+          beforeBlank145t10.appliesTo.includes("consulting") &&
+          beforeBlank145t10.appliesTo.includes("project"),
+        "#145 T10 setup: the Applies set starts out applying to both consulting and project"
+      );
+      const csvAppliesBlank145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_APPLIES_145T10},,,,Has Applies,,team,0,100`,
+      ].join("\n");
+      await commitImport("task_templates", rowsFor145T10(csvAppliesBlank145T10), "update", { effectiveAt: Date.now() });
+      const afterBlank145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_APPLIES_145T10);
+      ok(
+        !!afterBlank145t10 &&
+          afterBlank145t10.appliesTo.length === 2 &&
+          afterBlank145t10.appliesTo.includes("consulting") &&
+          afterBlank145t10.appliesTo.includes("project"),
+        "#145 T10 Important 3 fix: re-importing with a BLANK Applies To column preserves the set's existing appliesTo instead of wiping it to nothing (which would drop it from every \"Apply template\" picker)"
+      );
+
+      /* -- export -> re-import round trip reproduces role/person targets exactly (decision 4) -- */
+      const users145t10 = await activeUsers();
+      const person145t10 = users145t10[0];
+      if (!person145t10) throw new Error("#145 T10 setup: no active user in seed data to round-trip a person target against");
+      const csvRT145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_RT_145T10},consulting,Assessment,rigging,Role Line,Assessment,role:Estimator,10,30`,
+        `${SET_RT_145T10},consulting,Assessment,,Person Line,Assessment,person:${person145t10.name},40,60`,
+      ].join("\n");
+      await commitImport("task_templates", rowsFor145T10(csvRT145T10), "create", { effectiveAt: Date.now() });
+      const beforeRT145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_RT_145T10);
+      ok(!!beforeRT145t10 && beforeRT145t10.lines.length === 2, "#145 T10 setup: the round-trip-targets set has its 2 lines");
+
+      const exportedAll145t10 = await exportCsv("task_templates");
+      const exportedHeader145t10 = exportedAll145t10.split("\n")[0];
+      const exportedRTLines145t10 = exportedAll145t10.split("\n").filter((l) => l.startsWith(SET_RT_145T10 + ","));
+      ok(exportedRTLines145t10.length === 2, "#145 T10 export emits one row per line, including the role/person target lines");
+      ok(
+        exportedRTLines145t10.some((l) => l.includes("role:Estimator")) &&
+          exportedRTLines145t10.some((l) => l.includes(`person:${person145t10.name}`)),
+        "#145 T10 export reproduces the role: and person:<name> cells exactly — assignTargetToCell is the true reverse of parseAssignTarget"
+      );
+
+      const miniRT145t10 = [exportedHeader145t10, ...exportedRTLines145t10].join("\n");
+      const rtRes145t10 = await commitImport("task_templates", rowsFor145T10(miniRT145t10), "update", { effectiveAt: Date.now() });
+      ok(rtRes145t10.updated === 2 && rtRes145t10.errored === 0, "#145 T10 re-importing the exported round-trip rows commits cleanly");
+      const afterRT145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_RT_145T10);
+      const roleLineRT145t10 = afterRT145t10?.lines.find((l) => l.title === "Role Line");
+      const personLineRT145t10 = afterRT145t10?.lines.find((l) => l.title === "Person Line");
+      ok(
+        roleLineRT145t10?.target.kind === "role" && roleLineRT145t10.target.role === "Estimator",
+        "#145 T10 export -> re-import round-trips a role target to the SAME role"
+      );
+      ok(
+        personLineRT145t10?.target.kind === "person" && personLineRT145t10.target.userId === person145t10.id,
+        "#145 T10 export -> re-import round-trips a person target to the SAME user id, re-resolved by name"
+      );
+    } finally {
+      // Teardown: re-queried by fixed fixture names rather than trusting
+      // local variables to have survived an early throw, so cleanup is
+      // complete no matter how far setup got — same idiom as the #145 T3
+      // cleanup above, applied to every fixture this block can create
+      // (including the SECOND Collision set the Critical-fix test mints).
+      for (const name of ALL_SETS_145T10) {
+        for (const s of (await allTaskTemplateSets()).filter((s) => s.name === name)) {
+          await removeTaskTemplateSet(s.id);
+        }
+      }
+    }
   }
 }
 
