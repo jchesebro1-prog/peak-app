@@ -176,7 +176,7 @@ export default async function HomePage({
     catalogList(),
     loadQueue(me),
   ]);
-  const books = priceBooks(catalogParts);
+  const books = priceBooks(catalogParts, appSettings);
 
   const ident = new Map(roster.map((u) => [u.name, { initials: u.initials, color: u.color }]));
   const initialsOf = (n: string) => ident.get(n)?.initials || deriveInitials(n);
