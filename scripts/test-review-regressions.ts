@@ -773,17 +773,75 @@ async function main() {
   const t135Still = await getEngagement(manual.id);
   assert.equal(t135Still?.status, "awarded", "#135 the sweep leaves the manual row's stage alone");
   assert.equal(t135Still?.milestones.length, 1, "#135 the sweep leaves the manual row's milestones alone");
-  // Attach a (draft, so the sweep has nothing to do) consulting proposal.
-  await upsertDoc("quotes", { ...quote, id: "Q-t135-attach", status: "draft" } as Quote & Record<string, unknown>);
-  await attachQuoteToEngagement(manual.id, "Q-t135-attach");
-  const t135Attached = await getEngagement(manual.id);
-  assert.equal(t135Attached?.quoteId, "Q-t135-attach", "#135 attach sets quoteId");
-  assert.equal(t135Attached?.origin, "manual", "#135 attach keeps origin=manual (provenance)");
-  assert.equal(t135Attached?.milestones.length, 1, "#135 attach never rewrites milestones");
+  // Attach a WON consulting proposal (#135 review fix) — won, not draft, so
+  // engagementSyncAction has a real action to compute for "Q-t135-attach"
+  // and the next sweep actually exercises the index: a broken/missing
+  // sweepIndexesEngagement would fail to find this row by quoteId, see
+  // current=null, and mint a duplicate awarded engagement
+  // (engagementSyncAction("won", null) => create). A draft quote can never
+  // surface that bug — engagementSyncAction("draft", …) is always null, so
+  // the assertions below would pass whether or not the index worked. The
+  // quote is created only now (after the earlier settling sweeps), so no
+  // sweep-born row exists yet to collide with the id.
+  await upsertDoc("quotes", { ...quote, id: "Q-t135-attach", status: "won" } as Quote & Record<string, unknown>);
+  const attachResult = await attachQuoteToEngagement(manual.id, "Q-t135-attach");
+  assert.equal(attachResult.ok, true, "#135 attach succeeds on a manual row with no proposal yet");
+  if (!attachResult.ok) throw new Error("unreachable: attachResult.ok was just asserted true");
+  assert.equal(attachResult.engagement.quoteId, "Q-t135-attach", "#135 attach sets quoteId");
+  assert.equal(attachResult.engagement.origin, "manual", "#135 attach keeps origin=manual (provenance)");
+  assert.equal(attachResult.engagement.milestones.length, 1, "#135 attach never rewrites milestones");
+  const t135AttachedUpdatedAt = attachResult.engagement.updatedAt;
   await syncEngagementsFromQuotes();
   const t135Twice = await allEngagements();
-  assert.equal(t135Twice.filter((e) => e.quoteId === "Q-t135-attach").length, 1, "#135 the sweep never mints a second engagement for an attached proposal");
-  assert.equal((await getEngagement(manual.id))?.status, "awarded", "#135 an awarded manual row is never demoted by the sweep");
+  assert.equal(t135Twice.filter((e) => e.quoteId === "Q-t135-attach").length, 1, "#135 the sweep never mints a second engagement for an attached (won) proposal");
+  const t135AfterSweep = await getEngagement(manual.id);
+  assert.equal(t135AfterSweep?.id, manual.id, "#135 the sweep leaves the manual row's id unchanged");
+  assert.equal(t135AfterSweep?.origin, "manual", "#135 the sweep leaves the manual row's origin unchanged");
+  assert.equal(t135AfterSweep?.status, "awarded", "#135 an awarded manual row is never demoted by the sweep");
+  assert.deepEqual(
+    t135AfterSweep?.milestones.map((m) => [m.name, m.amount, m.targetDate]),
+    [["Fee", 8000, 0]],
+    "#135 the sweep leaves the manual row's milestones unchanged"
+  );
+  assert.equal(
+    t135AfterSweep?.updatedAt,
+    t135AttachedUpdatedAt,
+    "#135 the sweep does not re-save the manual row at all — won+awarded computes no action"
+  );
+
+  // Negative paths (#135 review fix) — attachQuoteToEngagement now enforces
+  // the one-engagement-per-quote invariant instead of patching blindly.
+  const alreadyAttached = await attachQuoteToEngagement(manual.id, "Q-t135-second");
+  assert.equal(alreadyAttached.ok, false, "#135 attach refuses a project that already has a proposal");
+  if (alreadyAttached.ok) throw new Error("unreachable: alreadyAttached.ok was just asserted false");
+  assert.equal(
+    alreadyAttached.error,
+    "This project already has a proposal attached.",
+    "#135 already-attached refusal carries a plain-English error"
+  );
+
+  const secondManual = await createManualEngagement(
+    {
+      customerId: "t135b-co",
+      customer: "T135b School District",
+      name: "T135b Gym study",
+      fee: null,
+      phases: ["Assessment"],
+    },
+    { name: "Tester" }
+  );
+  await upsertDoc("quotes", { ...quote, id: "Q-t135-notconsulting", quoteType: "flame" } as Quote & Record<string, unknown>);
+  const nonConsulting = await attachQuoteToEngagement(secondManual.id, "Q-t135-notconsulting");
+  assert.equal(nonConsulting.ok, false, "#135 attach refuses a quote that is not quoteType 'consulting'");
+
+  const claimed = await attachQuoteToEngagement(secondManual.id, "Q-t135-attach");
+  assert.equal(claimed.ok, false, "#135 attach refuses a quote already claimed by another engagement");
+  if (claimed.ok) throw new Error("unreachable: claimed.ok was just asserted false");
+  assert.equal(
+    claimed.error,
+    "That proposal already belongs to T135 Auditorium study.",
+    "#135 already-claimed refusal names the owning engagement"
+  );
 
   console.log("review regression checks passed");
 }

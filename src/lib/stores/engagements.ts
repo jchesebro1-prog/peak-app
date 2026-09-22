@@ -666,15 +666,52 @@ export async function createManualEngagement(
 
 /** Link an existing consulting quote to a manual project. Milestones are
  *  NOT touched — the fee was entered by hand and stays as entered; from here
- *  the quote's status changes follow the normal sweep rules. Validation
- *  (quote exists, is consulting, is unclaimed) is the action's job. */
+ *  the quote's status changes follow the normal sweep rules. Enforces the
+ *  one-engagement-per-quote invariant that the sweep's index
+ *  (sweepIndexesEngagement) and getEngagementByQuote both assume: only a
+ *  manual row with no proposal yet may attach, the quote must be a live
+ *  consulting quote, and it must not already belong to another engagement.
+ *  On success records a provenance decision, mirroring createManualEngagement. */
 export async function attachQuoteToEngagement(
   engId: string,
   quoteId: string
-): Promise<void> {
+): Promise<{ ok: true; engagement: ConsultingEngagement } | { ok: false; error: string }> {
+  const eng = await getEngagement(engId);
+  if (!eng || eng.origin !== "manual") {
+    return {
+      ok: false,
+      error: "Only a manually added project can have a proposal attached.",
+    };
+  }
+  if (eng.quoteId) {
+    return { ok: false, error: "This project already has a proposal attached." };
+  }
+  const q = await getDoc<QuoteLike>("quotes", quoteId);
+  if (!q || q.quoteType !== "consulting") {
+    return { ok: false, error: "That quote is not a consulting proposal." };
+  }
+  const claimedBy = await getEngagementByQuote(quoteId);
+  if (claimedBy) {
+    return {
+      ok: false,
+      error: `That proposal already belongs to ${claimedBy.name}.`,
+    };
+  }
   await patchEngagement(engId, (d) => {
     d.quoteId = quoteId;
+    d.decisions.unshift({
+      id: uid("dc-"),
+      at: Date.now(),
+      by: "System",
+      decision: `Proposal attached: ${quoteId}`,
+      context: "Linked to an existing consulting quote from the Consulting hub (#135).",
+    });
   });
+  const updated = await getEngagement(engId);
+  if (!updated) {
+    return { ok: false, error: "The project could not be found after attaching the proposal." };
+  }
+  return { ok: true, engagement: updated };
 }
 
 /** Attach a document to the engagement (phaseId null) or to one phase's
