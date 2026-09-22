@@ -200,7 +200,7 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "unit", header: "Unit", label: "Unit", aliases: ["unit", "uom", "u/m", "um"], example: "ea" },
       { key: "list", header: "List Price", label: "List price", kind: "number", aliases: ["list", "list price", "msrp", "retail", "srp", "suggested retail", "price"], example: "1899.50" },
       { key: "cost", header: "Cost", label: "Dealer cost", kind: "number", aliases: ["cost", "dealer", "dealer net", "dealer price", "dealer cost", "net", "net price", "wholesale", "our cost"], example: "1139.70" },
-      { key: "mfr", header: "Manufacturer", label: "Manufacturer", aliases: ["mfr", "manufacturer", "brand", "mfg", "vendor", "make"], example: "ETC" },
+      { key: "mfr", header: "Manufacturer", label: "Manufacturer", required: true, aliases: ["mfr", "manufacturer", "brand", "mfg", "vendor", "make"], example: "ETC" },
     ],
   },
   {

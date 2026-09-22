@@ -49,6 +49,10 @@ export type ImportResult = {
   total: number;
 };
 
+/** #133 — per-commit context handed to every writer; only the catalog
+ *  writer reads it (the price list's effective date for `pricedAt`). */
+export type CommitContext = { effectiveAt: number };
+
 /**
  * One writer per type. `find` dedupes against `cache` (a mutable array loaded
  * once per commit so rows created earlier in the same file are seen); `create`
@@ -58,8 +62,8 @@ type Writer = {
   count: () => Promise<number>;
   load: () => Promise<Record<string, unknown>[]>;
   find: (values: Values, cache: Record<string, unknown>[]) => Record<string, unknown> | null;
-  create: (values: Values, cache: Record<string, unknown>[]) => Promise<void>;
-  update?: (existing: Record<string, unknown>, values: Values) => Promise<void>;
+  create: (values: Values, cache: Record<string, unknown>[], ctx: CommitContext) => Promise<void>;
+  update?: (existing: Record<string, unknown>, values: Values, ctx: CommitContext) => Promise<void>;
   exportObjects: () => Promise<Values[]>;
 };
 
@@ -488,17 +492,18 @@ const WRITERS: Record<string, Writer> = {
     count: async () => (await Catalog.list()).length,
     load: async () => (await Catalog.list()) as unknown as Record<string, unknown>[],
     find: (v, cache) => cache.find((p) => ci(p.sku, v.sku)) || null,
-    create: async (v, cache) => {
+    create: async (v, cache, ctx) => {
       const sku = str(v.sku);
       // mergeUpsert is the same entry point scripts/import-catalog.ts uses —
       // it preserves fields a price sheet doesn't carry (ports, trade, spec
-      // text, datasheet attachments) when a SKU is re-imported.
-      await Catalog.mergeUpsert(sku, catalogPatch(v, null, sku));
+      // text, datasheet attachments) when a SKU is re-imported. pricedAt
+      // (#133) lands only when the price actually changes.
+      await Catalog.mergeUpsert(sku, catalogPatch(v, null, sku), { pricedAt: ctx.effectiveAt });
       cache.push({ id: sku, sku });
     },
-    update: async (ex, v) => {
+    update: async (ex, v, ctx) => {
       const sku = str(ex.sku);
-      await Catalog.mergeUpsert(sku, catalogPatch(v, ex, sku));
+      await Catalog.mergeUpsert(sku, catalogPatch(v, ex, sku), { pricedAt: ctx.effectiveAt });
     },
     exportObjects: async () => {
       const list = await Catalog.list();
@@ -602,12 +607,15 @@ export async function allCounts(): Promise<Record<string, number>> {
 
 /**
  * Write prepared rows into the type's store per `mode`. Invalid rows are
- * counted as errored (never written). Mirrors importkit.commit.
+ * counted as errored (never written). Mirrors importkit.commit. `ctx`
+ * carries the price list's effective date for the catalog writer (#133);
+ * every other writer ignores it.
  */
 export async function commitImport(
   key: string,
   rows: PreparedRow[],
-  mode: ImportMode
+  mode: ImportMode,
+  ctx: CommitContext = { effectiveAt: Date.now() }
 ): Promise<ImportResult> {
   const w = WRITERS[key];
   const res: ImportResult = { created: 0, updated: 0, skipped: 0, errored: 0, total: rows.length };
@@ -625,11 +633,11 @@ export async function commitImport(
         continue;
       }
       if (existing && mode === "update" && w.update) {
-        await w.update(existing, r.values);
+        await w.update(existing, r.values, ctx);
         res.updated++;
         continue;
       }
-      await w.create(r.values, cache);
+      await w.create(r.values, cache, ctx);
       res.created++;
     } catch {
       res.errored++;

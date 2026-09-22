@@ -3384,6 +3384,13 @@ async function asyncChecks(): Promise<void> {
     ok(vprep.stats.invalid === 1, "#81 …and is counted as needing attention");
     ok(Number(vprep.rows[0].values.list) === 1899.5, "#81 list price coerces to a number");
 
+    const noMfr = parseImportCsv(["Part Number,Description,MSRP", "S4LED-S2,Source Four LED Series 2,1899.50"].join("\n"));
+    const noMfrPrep = prepareRows(noMfr.rows, autoMap(noMfr.headers, catType.fields), catType.fields);
+    ok(
+      !noMfrPrep.rows[0].valid && noMfrPrep.rows[0].errors.includes("Missing Manufacturer"),
+      "#132 a hub catalog row without a manufacturer fails validation with the per-row error"
+    );
+
     /* ---- punch #81: re-importing a price sheet must not zero stored prices ----
      * The writer itself (commitImport → WRITERS.catalog.update → mergeUpsert)
      * needs a database, and this script never opens one. `catalogPatch` is the

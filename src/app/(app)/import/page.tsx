@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
+import { isoDateOf } from "@/lib/catalog-books";
 import { IMPORT_TYPES, getTypeMeta } from "./types";
 import { allCounts } from "./registry";
 import { PastePreview } from "./controls";
@@ -699,6 +700,7 @@ function ImportFlowModal({
                   fields={type.fields}
                   dedupeLabel={type.dedupeLabel}
                   accent="var(--accent)"
+                  today={isoDateOf(Date.now())}
                 />
               </>
             )}

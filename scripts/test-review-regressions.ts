@@ -790,6 +790,33 @@ async function main() {
     assert.ok(!big.ok && /1 MB/.test(big.error), "#134 an over-size upload is refused before parsing");
   }
 
+  // #132/#133 — the Import hub's catalog writer stamps the commit's effective date
+  {
+    const { commitImport } = await import("@/app/(app)/import/registry");
+    const { parseCsv, autoMap, prepareRows } = await import("@/app/(app)/import/parse");
+    const { getTypeMeta } = await import("@/app/(app)/import/types");
+    const { get: getPart } = await import("@/lib/stores/catalog");
+    const t = getTypeMeta("catalog");
+    assert.ok(t, "#132 catalog import type exists");
+    const D1 = new Date(2026, 0, 15).getTime();
+    const D2 = new Date(2026, 5, 1).getTime();
+    const prepOf = (csv: string) => {
+      const p = parseCsv(csv);
+      return prepareRows(p.rows, autoMap(p.headers, t!.fields), t!.fields);
+    };
+    const created = await commitImport("catalog", prepOf("SKU,Description,List Price,Cost,Manufacturer\nT133-H1,Hub part,50,30,T133 Hub\n").rows, "update", { effectiveAt: D1 });
+    assert.equal(created.created, 1, "#133 hub create path wrote the row");
+    assert.equal((await getPart("T133-H1"))?.pricedAt, D1, "#133 the hub stamps the commit's effective date on a new part");
+    const same = await commitImport("catalog", prepOf("SKU,Description,List Price,Cost,Manufacturer\nT133-H1,Hub part renamed,50,30,T133 Hub\n").rows, "update", { effectiveAt: D2 });
+    assert.equal(same.updated, 1, "#133 hub update path ran");
+    assert.equal((await getPart("T133-H1"))?.pricedAt, D1, "#133 an unchanged price through the hub keeps its date");
+    await commitImport("catalog", prepOf("SKU,Description,List Price,Cost,Manufacturer\nT133-H1,Hub part,55,30,T133 Hub\n").rows, "update", { effectiveAt: D2 });
+    assert.equal((await getPart("T133-H1"))?.pricedAt, D2, "#133 a changed price through the hub stamps the new date");
+    const invalid = await commitImport("catalog", prepOf("SKU,Description,List Price,Cost\nT133-H2,No manufacturer,50,30\n").rows, "update", { effectiveAt: D2 });
+    assert.equal(invalid.errored, 1, "#132 a hub row without a manufacturer is never written");
+    assert.equal(await getPart("T133-H2"), null, "#132 …and does not exist afterwards");
+  }
+
   console.log("review regression checks passed");
 }
 
