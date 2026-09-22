@@ -788,6 +788,10 @@ type DoneResult = {
   total: number;
   customersCreated: number;
   customersLinked: number;
+  /** #145 D169 review (Important 2) — non-blocking per-row notices (right
+   *  now: task_templates only, an unrecognized Phase/Discipline). A count,
+   *  not the messages themselves — see actions.ts's comment on why. */
+  warnings: number;
 };
 
 function parseResult(raw: string): DoneResult | null {
@@ -803,6 +807,8 @@ function parseResult(raw: string): DoneResult | null {
     // #137 — absent on links minted before the link-back counts existed.
     customersCreated: p[5] ?? 0,
     customersLinked: p[6] ?? 0,
+    // #145 — absent on every URL shape minted before this field existed.
+    warnings: p[7] ?? 0,
   };
 }
 
@@ -912,6 +918,32 @@ function DonePanel({
         >
           {r.errored} row{r.errored === 1 ? "" : "s"} couldn’t be imported — usually a missing
           required field. Fix them in your source and import again.
+        </div>
+      )}
+      {/* #145 D169 review (Important 2) — a set with an unrecognized Phase or
+       *  Discipline still commits (decision 3), but that must not be
+       *  invisible: this is the one place every import type's result
+       *  reaches a human. */}
+      {r.warnings > 0 && (
+        <div
+          style={{
+            marginTop: 14,
+            background: "#fdf6e3",
+            border: "1px solid #efe0ae",
+            borderRadius: 10,
+            padding: "10px 12px",
+            fontSize: 12,
+            color: "#8a6d1f",
+            lineHeight: 1.5,
+          }}
+        >
+          {r.warnings} row{r.warnings === 1 ? "" : "s"} referenced a Phase or Discipline that isn’t
+          in the current settings and {r.warnings === 1 ? "was" : "were"} imported as written
+          anyway.{" "}
+          <Link href="/task-templates" style={{ color: "#8a6d1f", fontWeight: 600, textDecoration: "none" }}>
+            Check them in Task templates
+          </Link>
+          .
         </div>
       )}
     </>

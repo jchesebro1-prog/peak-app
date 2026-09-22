@@ -88,6 +88,11 @@ export async function importRecords(formData: FormData): Promise<void> {
     res.total,
     res.customersCreated,
     res.customersLinked,
+    // #145 D169 review (Important 2) — a count only (never the message text
+    // itself: warnings can carry a row's own free-text Phase/Discipline
+    // value, and this is a URL query param). Absent on every writer but
+    // task_templates; DonePanel defaults it to 0 for the pre-#145 URL shape.
+    res.warnings.length,
   ].join(".");
   redirect(`/import?tab=import&type=${encodeURIComponent(key)}&r=${r}`);
 }

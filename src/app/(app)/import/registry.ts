@@ -15,7 +15,11 @@ import * as Quotes from "@/lib/stores/quotes";
 import * as Projects from "@/lib/stores/projects";
 import * as Catalog from "@/lib/stores/catalog";
 import * as Equipment from "@/lib/stores/equipment-items";
-import { allUsers, addUser, setRoles } from "@/lib/users";
+import * as TaskTemplates from "@/lib/stores/task-templates";
+import { allUsers, addUser, setRoles, activeUsers } from "@/lib/users";
+import type { Role } from "@/lib/team";
+import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
+import { mergedConsultingPhases } from "@/lib/stores/engagements";
 import { getTypeMeta, IMPORT_TYPE_KEYS, type ImportTypeMeta } from "./types";
 import { norm, isoToMs, visibleColumns, type FieldDef, type PreparedRow } from "./parse";
 import { baseVenueKind } from "@/lib/identity/venue-defaults";
@@ -68,11 +72,19 @@ export type ImportResult = {
    *  rows, and rows that linked to an existing customer. */
   customersCreated: number;
   customersLinked: number;
+  /** #145 D169 — non-blocking per-row notices. Only the task_templates
+   *  writer populates this (an unrecognized Phase or Discipline against the
+   *  live consulting lists) — the row still commits; nothing here excludes
+   *  it. Every other writer leaves this empty. */
+  warnings: string[];
 };
 
-/** #133 — per-commit context handed to every writer; only the catalog
- *  writer reads it (the price list's effective date for `pricedAt`). */
-export type CommitContext = { effectiveAt: number };
+/** #133 — per-commit context handed to every writer; the catalog writer
+ *  reads `effectiveAt` (the price list's effective date for `pricedAt`);
+ *  the task_templates writer reads `me` for `createdBy` on a set it mints
+ *  (#145 D169) — optional because scripts/regression callers (and the
+ *  catalog path, which never creates a set) have no session to hand it. */
+export type CommitContext = { effectiveAt: number; me?: { name: string } };
 
 /** The link-back tally a contacts/venues writer keeps for one commit.
  *  `createdIds` remembers the customers THIS file created, so a later row
@@ -96,19 +108,22 @@ type Writer = {
   count: () => Promise<number>;
   load: () => Promise<Record<string, unknown>[]>;
   find: (values: Values, cache: Record<string, unknown>[]) => Record<string, unknown> | null;
+  /** A writer may return a list of non-blocking warning strings for the row
+   *  it just wrote (#145 D169) — `void`/nothing (every writer but
+   *  task_templates) means "nothing to report." */
   create: (
     values: Values,
     cache: Record<string, unknown>[],
     ctx: CommitContext,
     link: LinkStats
-  ) => Promise<void>;
+  ) => Promise<void | string[]>;
   update?: (
     existing: Record<string, unknown>,
     values: Values,
     cache: Record<string, unknown>[],
     ctx: CommitContext,
     link: LinkStats
-  ) => Promise<void>;
+  ) => Promise<void | string[]>;
   exportObjects: () => Promise<Values[]>;
 };
 
@@ -344,6 +359,219 @@ async function writeVenueRow(cust: Customers.CustomerDoc, v: Values): Promise<vo
     { preferPrimary: true, claimBlank: "unaddressed" }
   );
   await Customers.upsert({ ...recordInputOf(cust), locations });
+}
+
+/* ---------------- #145 D169 task-templates CSV plumbing ---------------- */
+
+/** #145 D169 — "team" | "role:<Role>" | "person:<Name>". An unresolvable
+ *  person falls back to team: a task assigned to nobody is worse than a
+ *  task assigned to everybody, because nobody notices it. */
+export function parseAssignTarget(
+  raw: string,
+  users: ReadonlyArray<{ id: string; name: string }>
+): TaskTemplates.TemplateAssignTarget {
+  const v = String(raw || "").trim();
+  if (!v || v.toLowerCase() === "team") return { kind: "team" };
+  const [head, ...rest] = v.split(":");
+  const tail = rest.join(":").trim();
+  if (head.trim().toLowerCase() === "role" && tail) return { kind: "role", role: tail as Role };
+  if (head.trim().toLowerCase() === "person" && tail) {
+    const u = users.find((u) => u.name.trim().toLowerCase() === tail.toLowerCase());
+    return u ? { kind: "person", userId: u.id } : { kind: "team" };
+  }
+  return { kind: "team" };
+}
+
+/** The reverse of `parseAssignTarget`, for `exportObjects` (round-trip). */
+function assignTargetToCell(
+  target: TaskTemplates.TemplateAssignTarget,
+  nameById: Map<string, string>
+): string {
+  if (target.kind === "role") return "role:" + target.role;
+  if (target.kind === "person") return "person:" + (nameById.get(target.userId) || "");
+  return "team";
+}
+
+/** "Applies To" is one cell but the store wants `TemplateRecordKind[]` —
+ *  same join/split idiom as the `team` writer's Roles column. Unrecognized
+ *  tokens are dropped rather than rejected (#145 D169 decision 3: match the
+ *  registry's existing leniency for enum-ish free text rather than invent
+ *  stricter handling). */
+function parseAppliesTo(raw: unknown): TaskTemplates.TemplateRecordKind[] {
+  const picked = String(raw ?? "")
+    .split(/[,;/|]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .filter((s): s is TaskTemplates.TemplateRecordKind =>
+      (TaskTemplates.TEMPLATE_RECORD_KINDS as readonly string[]).includes(s)
+    );
+  return Array.from(new Set(picked));
+}
+
+/** One CSV row -> one template line. `normalizeLine` clamps the percents,
+ *  lowercases the discipline, and mints the line's stable `key` — the same
+ *  helper the admin editor and the spec harness use (Task 3). */
+function taskTemplateLineFromRow(
+  v: Values,
+  users: ReadonlyArray<{ id: string; name: string }>
+): TaskTemplates.TaskTemplateLine {
+  return TaskTemplates.normalizeLine({
+    title: str(v.task),
+    section: str(v.section),
+    target: parseAssignTarget(str(v.assignTo), users),
+    phase: str(v.phase),
+    discipline: str(v.discipline),
+    startPct: num(v.startPct),
+    lengthPct: num(v.lengthPct),
+  });
+}
+
+/** Per-commit scratch state stashed directly on the `cache` array the
+ *  generic `commitImport` loop already threads through every `find` /
+ *  `create` / `update` call for this writer — the same idiom `refreshCache`
+ *  and `LinkStats.createdIds` use elsewhere in this file, just local to this
+ *  writer instead of shared through the generic `Writer` signature. */
+type TaskTemplateBag = TaskTemplates.TaskTemplateSetRecord[] & {
+  __ttTouched?: Set<string>;
+  __ttCreatedThisCommit?: Set<string>;
+  __ttUsers?: Array<{ id: string; name: string }>;
+  __ttLive?: { phases: string[]; disciplines: string[] };
+  __ttOriginalAppliesTo?: Map<string, TaskTemplates.TemplateRecordKind[]>;
+  __ttAppliesAccum?: Map<string, Set<TaskTemplates.TemplateRecordKind>>;
+};
+
+/** Sets whose `lines`/`appliesTo` this commit has already started rebuilding
+ *  from scratch — the first row for a set (new OR pre-existing) wipes; every
+ *  later row for the same set in the same file appends. */
+function ttTouched(cache: Record<string, unknown>[]): Set<string> {
+  const c = cache as TaskTemplateBag;
+  if (!c.__ttTouched) c.__ttTouched = new Set<string>();
+  return c.__ttTouched;
+}
+
+/** Sets minted DURING this commit. `find` hides these from the generic
+ *  skip/update dispatch (below) so "skip" mode skips only a set that
+ *  existed before the file was opened — never a multi-line set this same
+ *  file is still in the middle of creating (which `find` would otherwise
+ *  also match on row 2+, since the fresh record is already sitting in
+ *  `cache`). */
+function ttCreatedThisCommit(cache: Record<string, unknown>[]): Set<string> {
+  const c = cache as TaskTemplateBag;
+  if (!c.__ttCreatedThisCommit) c.__ttCreatedThisCommit = new Set<string>();
+  return c.__ttCreatedThisCommit;
+}
+
+/** #145 D169 — the set's `appliesTo` exactly as it stood before this commit
+ *  touched it, captured once per set on first touch. A file whose rows for
+ *  a set NEVER carry anything in Applies To falls back to this rather than
+ *  wiping the set to `[]` — a blank column is "the file doesn't say," not
+ *  "clear it," and `[]` silently drops the set from every "Apply template"
+ *  picker (review finding, Important 3). */
+function ttOriginalAppliesTo(cache: Record<string, unknown>[]): Map<string, TaskTemplates.TemplateRecordKind[]> {
+  const c = cache as TaskTemplateBag;
+  if (!c.__ttOriginalAppliesTo) c.__ttOriginalAppliesTo = new Map();
+  return c.__ttOriginalAppliesTo;
+}
+
+/** The TRUE running union of what THIS FILE's rows specify for a set's
+ *  Applies To — separate from `rec.appliesTo` itself, so a later non-blank
+ *  row replaces wholesale (decision 1) rather than merging onto whatever
+ *  `ttOriginalAppliesTo`'s fallback last persisted. Starts empty per set;
+ *  only grows from row values, never from the set's pre-commit state. */
+function ttAppliesAccum(cache: Record<string, unknown>[]): Map<string, Set<TaskTemplates.TemplateRecordKind>> {
+  const c = cache as TaskTemplateBag;
+  if (!c.__ttAppliesAccum) c.__ttAppliesAccum = new Map();
+  return c.__ttAppliesAccum;
+}
+
+async function ttActiveUsers(cache: Record<string, unknown>[]): Promise<Array<{ id: string; name: string }>> {
+  const c = cache as TaskTemplateBag;
+  if (!c.__ttUsers) c.__ttUsers = (await activeUsers()).map((u) => ({ id: u.id, name: u.name }));
+  return c.__ttUsers;
+}
+
+/** #145 D169 decision 3 — the live phase (engagements settings) and
+ *  discipline (app settings) lists, fetched once per commit. Used only to
+ *  produce a non-blocking warning; nothing here can fail a row. */
+async function ttLiveLists(cache: Record<string, unknown>[]): Promise<{ phases: string[]; disciplines: string[] }> {
+  const c = cache as TaskTemplateBag;
+  if (!c.__ttLive) {
+    const settings = await getSettings();
+    c.__ttLive = {
+      phases: mergedConsultingPhases(settings.consultingPhases).map((p) => p.toLowerCase()),
+      disciplines: mergedConsultingDisciplines(settings.consultingDisciplines).map((d) => d.toLowerCase()),
+    };
+  }
+  return c.__ttLive;
+}
+
+/** Non-blocking notices for one row: an unrecognized Phase or Discipline
+ *  against the live lists. Blank is never unknown — blank Discipline means
+ *  "every discipline" and blank Phase means the line just doesn't expand
+ *  into a schedule; neither is a typo to flag. The row is written either
+ *  way (#145 D169 decision 3). */
+function ttRowWarnings(v: Values, live: { phases: string[]; disciplines: string[] }): string[] {
+  const warnings: string[] = [];
+  const phase = str(v.phase);
+  if (phase && !live.phases.includes(phase.toLowerCase())) {
+    warnings.push(`unknown phase "${phase}" — not in the current consulting phase list`);
+  }
+  const discipline = str(v.discipline);
+  if (discipline && !live.disciplines.includes(discipline.toLowerCase())) {
+    warnings.push(`unknown discipline "${discipline}" — not in the current consulting discipline list`);
+  }
+  return warnings;
+}
+
+/** Wipe-on-first-touch, append-after, for both `lines` and `appliesTo` — the
+ *  shared body of `create` and `update` below (#145 D169 decision 1: import
+ *  is replace-by-set, so a set's DB-stored lines that aren't in this file
+ *  must not survive the commit). Mutates `rec` in place (same idiom as
+ *  `refreshCache`) so the NEXT row for the same set sees the accumulated
+ *  result via the shared `cache` array, and persists the whole accumulated
+ *  array on every row — the last row for a set leaves the DB holding
+ *  exactly the file's lines for it, no more, no less. */
+async function ttApplyRow(
+  rec: TaskTemplates.TaskTemplateSetRecord,
+  v: Values,
+  cache: Record<string, unknown>[]
+): Promise<string[]> {
+  const users = await ttActiveUsers(cache);
+  const line = taskTemplateLineFromRow(v, users);
+  const rowApplies = parseAppliesTo(v.appliesTo);
+  const touched = ttTouched(cache);
+  const originals = ttOriginalAppliesTo(cache);
+  if (!touched.has(rec.id)) {
+    touched.add(rec.id);
+    originals.set(rec.id, rec.appliesTo); // capture BEFORE anything below touches it
+    rec.lines = [line];
+  } else {
+    rec.lines = [...rec.lines, line];
+  }
+  const accum = ttAppliesAccum(cache);
+  let acc = accum.get(rec.id);
+  if (!acc) {
+    acc = new Set<TaskTemplates.TemplateRecordKind>();
+    accum.set(rec.id, acc);
+  }
+  for (const k of rowApplies) acc.add(k);
+  // Important 3 — if NONE of this set's rows (so far, in this file) carried
+  // anything in Applies To, keep whatever the set already had rather than
+  // persisting an empty array (which would drop it from every "Apply
+  // template" picker). The moment any row DOES specify one, `acc` — which
+  // only ever grows from row values, never from the set's pre-commit state
+  // — replaces wholesale, matching decision 1's replace-by-set for `lines`.
+  const appliesToToSave = acc.size ? Array.from(acc) : originals.get(rec.id) ?? [];
+  const saved = await TaskTemplates.updateTaskTemplateSet(rec.id, {
+    lines: rec.lines,
+    appliesTo: appliesToToSave,
+  });
+  // Minor 1 — a null here means the record was deleted out from under this
+  // commit (soft-deleted by someone else mid-import); that must count as a
+  // failed row, not a silent no-op that still reports as created/updated.
+  if (!saved) throw new Error(`Template set ${rec.id} no longer exists`);
+  Object.assign(rec, saved);
+  return ttRowWarnings(v, await ttLiveLists(cache));
 }
 
 const WRITERS: Record<string, Writer> = {
@@ -846,6 +1074,78 @@ const WRITERS: Record<string, Writer> = {
       }));
     },
   },
+
+  // #145 D169 — dedupe/write granularity is the SET (by normalized name),
+  // not the row: many rows make one set, and every writer above dedupes at
+  // the same grain it writes at. `find` only ever matches a set that
+  // existed before this commit opened the file (see `ttCreatedThisCommit`
+  // in `find` below) — a set this same file is still building stays hidden
+  // from it, so "skip" mode's "found → skip, continue" can't truncate a
+  // brand-new multi-line set after its first row.
+  task_templates: {
+    count: async () =>
+      (await TaskTemplates.allTaskTemplateSets()).reduce((n, s) => n + s.lines.length, 0),
+    load: async () => (await TaskTemplates.allTaskTemplateSets()) as unknown as Record<string, unknown>[],
+    find: (v, cache) => {
+      const key = norm(str(v.set));
+      if (!key) return null;
+      const created = ttCreatedThisCommit(cache);
+      const sets = cache as unknown as TaskTemplates.TaskTemplateSetRecord[];
+      return sets.find((s) => norm(s.name) === key && !created.has(s.id)) ?? null;
+    },
+    // #145 D169 review (Critical) — "create" must NEVER merge into a set
+    // that pre-existed before this file was opened: unlike the catalog
+    // writer's SKU (the document id itself, so two SKU-identical parts are
+    // structurally impossible and a merge is forced), `createTaskTemplateSet`
+    // mints an independent sequential id unrelated to `name` — a second set
+    // with the same name is a perfectly ordinary, distinct record, the same
+    // way "create" against an existing org name mints a second lead above.
+    // So this ONLY ever merges into a record THIS SAME COMMIT already
+    // started (multi-row file building one brand-new set) — `find`'s own
+    // `!created.has(s.id)` filter guarantees a genuinely pre-existing set
+    // never reaches here as `match`, but the same filter is re-asserted
+    // below so this stays correct even if `find`'s contract ever changes.
+    create: async (v, cache, ctx) => {
+      const key = norm(str(v.set));
+      const sets = cache as unknown as TaskTemplates.TaskTemplateSetRecord[];
+      const createdThisCommit = ttCreatedThisCommit(cache);
+      const inProgress = key
+        ? sets.find((s) => createdThisCommit.has(s.id) && norm(s.name) === key)
+        : undefined;
+      if (inProgress) return ttApplyRow(inProgress, v, cache);
+
+      const users = await ttActiveUsers(cache);
+      const line = taskTemplateLineFromRow(v, users);
+      const appliesTo = parseAppliesTo(v.appliesTo);
+      const created = await TaskTemplates.createTaskTemplateSet(
+        { name: str(v.set), appliesTo, lines: [line] },
+        ctx.me ?? { name: "Import" }
+      );
+      ttTouched(cache).add(created.id);
+      createdThisCommit.add(created.id);
+      sets.push(created);
+      return ttRowWarnings(v, await ttLiveLists(cache));
+    },
+    update: async (existing, v, cache) => ttApplyRow(existing as TaskTemplates.TaskTemplateSetRecord, v, cache),
+    exportObjects: async () => {
+      const sets = await TaskTemplates.allTaskTemplateSets();
+      const users = await allUsers();
+      const nameById = new Map(users.map((u) => [u.id, u.name] as const));
+      return sets.flatMap((s) =>
+        s.lines.map((l) => ({
+          set: s.name,
+          appliesTo: s.appliesTo.join(", "),
+          phase: l.phase,
+          discipline: l.discipline,
+          task: l.title,
+          section: l.section,
+          assignTo: assignTargetToCell(l.target, nameById),
+          startPct: l.startPct,
+          lengthPct: l.lengthPct,
+        }))
+      );
+    },
+  },
 };
 
 function isoOf(ms: number): string {
@@ -908,10 +1208,14 @@ export async function commitImport(
     failed: [],
     customersCreated: 0,
     customersLinked: 0,
+    warnings: [],
   };
   if (!w) return res;
   const cache = await w.load();
   const link: LinkStats = { customersCreated: 0, customersLinked: 0, createdIds: new Set<string>() };
+  const noteWarnings = (rowIndex: number, warn: void | string[]) => {
+    if (warn?.length) res.warnings.push(...warn.map((m) => `Row ${rowIndex + 1}: ${m}`));
+  };
   for (const r of rows) {
     if (!r.valid) {
       res.errored++;
@@ -925,12 +1229,12 @@ export async function commitImport(
         continue;
       }
       if (existing && mode === "update" && w.update) {
-        await w.update(existing, r.values, cache, ctx, link);
+        noteWarnings(r.i, await w.update(existing, r.values, cache, ctx, link));
         res.updated++;
         res.written.push(r);
         continue;
       }
-      await w.create(r.values, cache, ctx, link);
+      noteWarnings(r.i, await w.create(r.values, cache, ctx, link));
       res.created++;
       res.written.push(r);
     } catch {

@@ -4082,3 +4082,78 @@ exercised in production.
 **Not done:** `src/app/(app)/catalog/actions.ts` carries the identical defect —
 `MAX_DATASHEET_BYTES = 8 * 1024 * 1024` in a server action, with a comment saying it mirrors the
 Grid's cap. It is logged as its own item rather than folded in here.
+
+## D174. Task-template CSV import replaces a set's lines wholesale — it never appends (#145, D169, 2026-09-22)
+
+D169 (spec, `docs/superpowers/specs/2026-09-22-consulting-project-management-design.md`) says
+task templates import through the existing Import hub registry (`src/app/(app)/import/`), which
+already had a "skip / update / create" mode for every other type. That contract does not by itself
+say what "update" means for a type where MANY ROWS make ONE record — every existing writer in the
+registry dedupes at the same grain it writes (one row = one contact, one venue, one catalog SKU),
+so "update" always meant "patch this one row's fields." A task-template set has no such
+per-row identity to patch.
+
+**Default taken: the uploaded file is the source of truth for a set's `lines` (and, see D177,
+`appliesTo`).** `find` matches an existing set by normalized name; `update` REPLACES that set's
+`lines` with exactly the rows this file carries for it — not merged, not appended. Re-importing the
+same file twice leaves the set exactly as it was; dropping a line from the file and re-importing
+shrinks the stored set to match. The alternative (append every row that doesn't exactly match an
+existing line) was rejected: a template set has no stable natural key for a line to append against
+across two different uploads of "the same" spreadsheet (edited row order, a retyped title), so
+append-by-default silently doubles every line on the second import of an otherwise-unchanged file —
+worse than doing nothing, because nothing flags it. `WRITERS.task_templates.update` /
+`ttApplyRow` in `registry.ts`.
+
+## D175. A CSV-minted task-template set's `createdBy` defaults to the fixed string "Import" (#145, D169, 2026-09-22)
+
+`createTaskTemplateSet(input, me)` stamps `createdBy` from `me.name` — the admin editor
+(`task-templates/actions.ts`) passes the real signed-in `requireUser()`. The Import hub's server
+action (`import/actions.ts`) never captured that value for any existing writer, because no other
+type stamps an author from the importing session at all (customers/contacts/venues never touch
+`owner` from the admin who ran the import either).
+
+**Default taken: `CommitContext` grew an optional `me?: { name: string }`; when absent (which is
+every call today, since `import/actions.ts` was left unchanged), the task_templates writer stamps
+`createdBy: "Import"`** rather than threading the real session user through — matching the
+existing precedent (no writer attributes authorship from the import session) rather than making
+this one type the first exception. `CommitContext.me` is there, unused by `import/actions.ts`,
+for a follow-up that wants the real name instead.
+
+## D176. "Create" mode against a colliding task-template-set name always mints a second, distinct set (#145, D169, 2026-09-22)
+
+The catalog writer's "Create new" on an existing SKU is a merge, because a SKU IS the document id —
+two documents sharing one SKU is structurally impossible, so a merge is the only thing "create" CAN
+mean there. A first pass at the task_templates writer copied that shape (re-look-up the set by name
+on `create`, merge into whatever it found) without checking whether the same constraint holds — it
+doesn't: `createTaskTemplateSet` mints an independent sequential `TT-###` id unrelated to `name`, so
+two sets sharing a name is a perfectly ordinary, distinct pair of records (review, 2026-09-22:
+flagged as the round's one Critical finding — an admin re-uploading an old export, or two people
+naming a set the same thing, silently destroyed the existing set's lines with no error and nothing
+distinguishing it from a normal successful create).
+
+**Default taken: "create" mode never merges into a set that pre-existed before the file was
+opened.** It ONLY ever merges into a record this SAME commit already started (the multi-row case —
+several rows for one brand-new set in one file) — tracked by `ttCreatedThisCommit`, a set of ids
+minted during the current `commitImport` call. That same set is also why `find` hides a
+just-created id from the generic skip/update dispatch: without it, row 2 of a brand-new multi-line
+set would "find" row 1's fresh record and — under "skip" mode — skip every row after the first,
+truncating a set the file never asked to be partial. Verified for all three modes (skip/update/
+create) against both a brand-new and a pre-existing set name, DB-backed, in
+`scripts/test-review-and-spec.ts` (`#145 T10`).
+
+## D177. A blank "Applies To" column on re-import preserves the set's existing value (#145, D169, 2026-09-22)
+
+Decision D174's replace-by-set default extends naturally to `appliesTo` (also set-level, also
+recomputed from the file's rows) — but unconditionally wiping it to `rec.appliesTo = []` whenever a
+row's Applies To cell was blank meant a file exported for one purpose (e.g. bulk-editing every
+line's Phase) and re-imported without remembering to fill in Applies To on every row silently
+disabled the set: it stops appearing in every "Apply template" picker, and the failure is invisible
+until someone goes looking for a set that used to be there (review, 2026-09-22, Important 3).
+
+**Default taken: a blank Applies To column means "the file doesn't say," not "clear it."** A
+per-commit accumulator (`ttAppliesAccum`, separate from the set's own `appliesTo` field) unions only
+what the file's rows actually specify; if that union is still empty once a set's rows are all
+processed, the set's Applies To is left exactly as it was before the commit
+(`ttOriginalAppliesTo`, captured once per set before anything is touched). The moment any row in
+the file DOES specify one, that replaces wholesale as D174 already does for `lines` — this only
+protects the "the file never mentions it at all" case, not "the file says something different."
