@@ -76,6 +76,16 @@ const SPARSE_HEADER_H = 34;
  *  scroll escape hatch (it fills whatever width its container gives it),
  *  so it needs a slightly safer floor before it commits to per-day cells. */
 const MIN_DAY_CELL_PX = 24;
+/** #145 review fix: below this many px per week, the "OCT 4"-style label
+ *  (9.5px mono, 600 weight, .04em tracking — the widest strings are
+ *  6 characters, e.g. "SEP 30"/"NOV 22") starts overlapping the label
+ *  after it, since every week start renders one unconditionally with no
+ *  regard for how many weeks are actually in view. A long engagement (the
+ *  live-verification round used ~8 months, 34 weeks) packed them
+ *  tightly enough to turn the header into an unreadable jumble. Mirrors
+ *  MIN_DAY_CELL_PX's own range-adaptive idiom: measure, then thin rather
+ *  than render something illegible.  */
+const MIN_WEEK_LABEL_PX = 46;
 const MARKER_STRIP_H = 24;
 const GROUP_HEADER_H = 24;
 const BAR_H = 28;
@@ -129,12 +139,32 @@ export function GanttGrid({
 
   const days = dayColumns(startAt, endAt);
   const weekStarts = days.filter((d) => weekdayOf(d) === 0);
-  const hasToday = typeof now === "number" && now >= startAt && now <= endAt;
+  // #145 review fix (round 4): compared by LOCAL CALENDAR DAY, not raw
+  // instant — `startAt`/`endAt` are local-noon-anchored (every date input
+  // in this app is), so a raw `now >= startAt` / `now <= endAt` hid the
+  // today line for the morning of the engagement's first day (now before
+  // that day's noon) and the afternoon of its last day (now after that
+  // day's noon), even though "today" is genuinely within the engagement's
+  // span on both. `snapToDay` (already imported, identical definition to
+  // consulting-schedule.ts's `startOfLocalDay`) floors all three to their
+  // own local day before comparing, so only the CALENDAR day matters.
+  const hasToday = typeof now === "number" && snapToDay(now) >= snapToDay(startAt) && snapToDay(now) <= snapToDay(endAt);
   const todayStart = hasToday ? snapToDay(now as number) : 0;
 
   const dayWidthPx = trackWidthPx != null ? trackWidthPx / Math.max(1, days.length) : 0;
   const showDayCells = dayWidthPx >= MIN_DAY_CELL_PX;
   const headerH = showDayCells ? DENSE_HEADER_H : SPARSE_HEADER_H;
+
+  /* #145 review fix: thin the week-start LABELS (not the divider lines —
+   * those stay one per week regardless, they're 1px with no text to
+   * overlap) once there isn't enough width per week to print one without
+   * colliding with its neighbor. Unmeasured (trackWidthPx null) falls
+   * back to showing every label — the same "never guess, wait for the
+   * real measurement" posture MIN_DAY_CELL_PX already takes, and on the
+   * very first frame there's nothing yet to overlap. */
+  const weekWidthPx = trackWidthPx != null && weekStarts.length > 0 ? trackWidthPx / weekStarts.length : 0;
+  const weekLabelStride = weekWidthPx > 0 ? Math.max(1, Math.ceil(MIN_WEEK_LABEL_PX / weekWidthPx)) : 1;
+  const visibleWeekStarts = weekStarts.filter((_, i) => i % weekLabelStride === 0);
 
   /* per-row track packing + cumulative layout, with an optional group
      header strip inserted whenever a row's `group` differs from the row
@@ -209,7 +239,7 @@ export function GanttGrid({
       <div style={{ display: "flex", borderBottom: "1px solid #e7e9ee" }}>
         <div style={{ width: LABEL_W, flexShrink: 0, borderRight: "1px solid #e7e9ee", background: "#fff" }} />
         <div style={{ position: "relative", flex: 1, height: headerH }}>
-          {weekStarts.map((w) => (
+          {visibleWeekStarts.map((w) => (
             <div
               key={"wl" + w}
               style={{

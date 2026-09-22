@@ -344,6 +344,27 @@ export async function removeTask(id: string): Promise<void> {
   await softDeleteDoc("tasks", id);
 }
 
+/**
+ * #145 — a general-purpose task patch for callers that need to mutate more
+ * than updateTask's fixed field list (the Schedule tab's drag persistence
+ * and milestone-shift both need startAt/dueAt/handScheduled together). Not
+ * itself a server action and not exported from a "use server" file, so it
+ * is NOT directly POST-reachable (see AGENTS.md's Next 16 note) — every
+ * caller that touches storage from a "use server" module must call
+ * requireUser() before reaching this, same as every other action in
+ * schedule-actions.ts already does.
+ */
+export async function patchTask(
+  id: string,
+  mutate: (t: TaskRecord) => TaskRecord | void
+): Promise<TaskRecord | null> {
+  return patchDoc<TaskRecord>("tasks", id, (t) => {
+    const next = (mutate(t) as TaskRecord) || t;
+    next.updatedAt = now();
+    return next;
+  });
+}
+
 /** One-way, idempotent: copy any project's embedded tasks[] into the tasks
     collection (preserving tk- ids), then blank the embedded array. Runs on
     read from the pages that render tasks, so dev seeds, prod data, and field

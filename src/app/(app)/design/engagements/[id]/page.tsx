@@ -6,7 +6,10 @@ import { TABS, type TabKey } from "../tabs";
 import { RecordingsCard } from "@/components/recordings/recordings-card";
 import { notesForEngagement } from "@/lib/stores/notes";
 import { tasksForEngagement } from "@/lib/stores/tasks";
+import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { activeUsers } from "@/lib/users";
+import { getSettings, phaseWeightsFor } from "@/lib/settings";
+import { withEngagementPhaseIds, phaseWindows, type PhaseWindow } from "@/lib/consulting-schedule";
 
 export const metadata = { title: "Consulting — Quartzite-6" };
 
@@ -35,15 +38,37 @@ export default async function ConsultingDetailPage({
     : "overview";
   // #145 D170 — the Activity tab's composer + feed. Notes are fetched
   // unconditionally: the tab-bar count (every tab, not just Activity)
-  // needs `notes.length`. Tasks and people are consumed ONLY by
-  // ActivityTab, so — same precedent as `oversightExtra` below — they're
-  // fetched only when that tab is the one being rendered, not on every
-  // Overview/Phases/Milestones/Meetings/Oversight/Documents load.
-  const [notes, tasks, users] = await Promise.all([
+  // needs `notes.length`. Tasks are consumed by ActivityTab AND (#145) the
+  // Schedule tab's Gantt rows; people (the assignee dropdown) is
+  // ActivityTab-only. Template sets are the Schedule tab's unscheduled-
+  // engagement picker. Same precedent as `oversightExtra` below — each is
+  // fetched only when the tab that needs it is the one being rendered, not
+  // on every Overview/Phases/Milestones/Meetings/Oversight/Documents load.
+  // #145 spec ruling — the Schedule tab renders each phase's ACTUAL
+  // proportional window (phaseWindows), not just a text grouping label.
+  // phaseWeightsFor/getSettings live in @/lib/settings, which pulls in
+  // drizzle/getDb — safe to call HERE (a server component) but never as a
+  // value import from the client schedule-tab.tsx (same rule tasks-card.tsx
+  // and this file's own tasks/templateSets fetch already follow), so the
+  // computed, fully-serializable PhaseWindow[] is what crosses the
+  // server/client boundary, not the functions that produced it.
+  const [notes, tasks, users, templateSets, settings] = await Promise.all([
     notesForEngagement(sel.id),
-    tab === "activity" ? tasksForEngagement(sel.id) : Promise.resolve([]),
+    tab === "activity" || tab === "schedule" ? tasksForEngagement(sel.id) : Promise.resolve([]),
     tab === "activity" ? activeUsers() : Promise.resolve([]),
+    tab === "schedule" ? taskTemplateSetsFor("consulting") : Promise.resolve([]),
+    tab === "schedule" ? getSettings() : Promise.resolve(null),
   ]);
+  const phaseBands: PhaseWindow[] = settings
+    ? phaseWindows(
+        sel.startAt || 0,
+        sel.endAt || 0,
+        withEngagementPhaseIds(
+          phaseWeightsFor(settings.consultingPhaseWeights, sel.phases.map((p) => p.name)),
+          sel.phases
+        )
+      )
+    : [];
   return (
     <ConsultingView
       data={data}
@@ -52,6 +77,8 @@ export default async function ConsultingDetailPage({
       notes={notes}
       tasks={tasks}
       people={users.map((u) => ({ id: u.id, name: u.name }))}
+      templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
+      phaseBands={phaseBands}
       // Recordings spec §6 — server-rendered card slotted under Oversight.
       oversightExtra={tab === "oversight" ? <RecordingsCard parentKind="engagement" parentId={sel.id} /> : null}
     />

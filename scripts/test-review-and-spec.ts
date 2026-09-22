@@ -1,11 +1,12 @@
 import {
   generateSchedule, overrunsEnd, phaseWindows, placeTask, selectLines, shiftForMilestone, validateSpan,
-  withEngagementPhaseIds, defaultMilestonePhaseId, phaseIdsByName,
+  withEngagementPhaseIds, defaultMilestonePhaseId, phaseIdsByName, startOfLocalDay,
   type PhaseWeight, type ScheduleLine,
 } from "@/lib/consulting-schedule";
 import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
+import { TABS } from "@/app/(app)/design/engagements/tabs";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
 import { safeCallbackPath, resolveSignInRedirect } from "@/lib/auth-redirect";
 import {
@@ -5829,6 +5830,10 @@ async function writeBackAsyncChecks(): Promise<void> {
   ok(rateLimited, "pollKrispImport: 429 propagates as KrispRateLimitError (reconcile stops that account)");
 }
 
+/* ====== #145: the schedule tab is a real tab key ====== */
+ok((TABS as readonly string[]).includes("schedule"), "#145 schedule is a valid engagement tab (?tab= validation depends on it)");
+ok((TABS as readonly string[]).includes("activity"), "#145 activity is a valid engagement tab");
+
 recordingsAsyncChecks()
   .then(() => writeBackAsyncChecks())
   .then(() => archiveAsyncChecks())
@@ -6397,8 +6402,28 @@ ok(pw145[0].name === "Assessment" && typeof pw145[0].phaseId === "string" && pw1
 ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exported for the consulting side of the collection");
 /* ====== #145: Gantt geometry ====== */
 {
+  // #145 review fix (round 2): pinned for this whole block. Under
+  // TZ=UTC, "local day" and "UTC day" are the SAME day by definition —
+  // no assertion phrased in terms of that distinction can discriminate
+  // the bug there, because there is no bug to find (offset 0 has nothing
+  // to drift across). Pinning to a real, DST-observing zone (this app's
+  // actual deployment, per AGENTS.md) is what keeps these assertions
+  // meaningful on a CI box that happens to run in UTC, rather than
+  // silently passing against a reintroduced UTC-epoch implementation.
+  // Node re-resolves `process.env.TZ` on the next Date call (verified on
+  // the Node version this repo runs), so this takes effect immediately
+  // and the `finally` below undoes it before any later test observes it.
+  const savedTZ145 = process.env.TZ;
+  process.env.TZ = "America/Chicago";
+  try {
   const DAY145 = 86400000;
-  const OCT6 = Date.UTC(2026, 9, 6);
+  // LOCAL midnight, October 6 2026 — not Date.UTC(...). #145 review fix:
+  // snapToDay/dateFromX now floor to the LOCAL calendar day (see gantt-lib.ts's
+  // doc comment), matching every date this app actually writes (every
+  // `<input type="date">` anchors at LOCAL NOON). A UTC anchor would make
+  // these assertions pass or fail depending on the test runner's timezone
+  // offset instead of proving anything about the implementation.
+  const OCT6 = new Date(2026, 9, 6).getTime();
   ok(dayColumns(OCT6, OCT6 + 6 * DAY145).length === 7, "#145 dayColumns is inclusive of both ends");
   const rect145 = barRect({ startAt: OCT6 + 2 * DAY145, dueAt: OCT6 + 4 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
   ok(Math.round(rect145.leftPct) === 20 && Math.round(rect145.widthPct) === 20, "#145 barRect converts a span to percentages of the visible range");
@@ -6406,6 +6431,138 @@ ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exporte
   ok(barRect({ startAt: OCT6, dueAt: OCT6 }, OCT6, OCT6 + 10 * DAY145).widthPct > 0, "#145 a zero-length bar still renders a visible sliver rather than vanishing");
   ok(snapToDay(OCT6 + 3 * DAY145 + 3600000) === OCT6 + 3 * DAY145, "#145 a drop snaps back to the start of its day");
   ok(dateFromX(50, 100, OCT6, OCT6 + 10 * DAY145) === OCT6 + 5 * DAY145, "#145 dateFromX maps a pixel offset to a date within the range");
+
+  /* ====== #145 review fix (live-verification round): the drag-vs-endAt
+   * false-overrun bug, and the invisible-sliver bug, both surfaced by
+   * actually rendering the Gantt for the first time. ====== */
+
+  // snapToDay must floor to the LOCAL day, not the UTC one. Proven with an
+  // arbitrary sub-day offset compared against a manually-computed local
+  // midnight — this is the implementation's actual contract, and it is
+  // the contract every caller (dateFromX, the drag handlers) depends on.
+  const arbitrary145 = OCT6 + 3 * DAY145 + 7 * 3600000 + 41 * 60000; // Oct 9, some odd hour:minute
+  const expectedLocalMidnight145 = new Date(arbitrary145);
+  expectedLocalMidnight145.setHours(0, 0, 0, 0);
+  ok(
+    snapToDay(arbitrary145) === expectedLocalMidnight145.getTime(),
+    "#145 review fix: snapToDay floors to the LOCAL calendar day — the day boundary every date input in this app actually uses"
+  );
+
+  // overrunsEnd compares LOCAL CALENDAR DAYS, not raw instants. endAt is
+  // always local-noon-anchored (every date input in this app goes through
+  // "T12:00:00"), so a task due later the SAME local day must not read as
+  // an overrun just because its clock time falls after noon — this is the
+  // exact false positive a live drag produced (dragged onto the
+  // engagement's own end date; the drop's midnight-ish snap plus the
+  // task's own sub-day-length duration landed a few hours after that
+  // day's noon endAt).
+  const noonOct10_145 = new Date(2026, 9, 10, 12, 0, 0).getTime();
+  const eveningOct10_145 = new Date(2026, 9, 10, 19, 12, 0).getTime();
+  ok(
+    !overrunsEnd({ dueAt: eveningOct10_145 }, noonOct10_145),
+    "#145 review fix: due later the SAME local day as endAt is not an overrun, even though its raw timestamp is after endAt's noon anchor"
+  );
+  const justAfterMidnightOct11_145 = new Date(2026, 9, 11, 0, 30, 0).getTime();
+  ok(
+    overrunsEnd({ dueAt: justAfterMidnightOct11_145 }, noonOct10_145),
+    "#145 review fix: …but due on the NEXT local day is an overrun, even by only half an hour past midnight"
+  );
+
+  // #145 review fix (round 3): startOfLocalDay, now exported so the
+  // milestone-reschedule dialog (schedule-tab.tsx) and moveMilestoneAction
+  // can compare a milestone's stored targetDate (an arbitrary
+  // phase-window-end instant — generateSchedule dates it to a
+  // phaseWindow's `endAt`, never noon-anchored) against a freshly
+  // re-picked, noon-anchored date at DAY granularity instead of by raw
+  // instant. Without this, confirming the dialog with NO real change
+  // (the ordinary case) produced a non-zero delta whenever the stored
+  // instant fell after noon — a live sweep of realistic phase-window
+  // ends found this on 66% of them. The reviewer's own worked case:
+  const phaseWindowEnd145 = new Date(2027, 1, 23, 21, 17, 0).getTime(); // Tue Feb 23 2027 21:17
+  const reconfirmedNoon145 = new Date(2027, 1, 23, 12, 0, 0).getTime(); // same local day, re-picked
+  ok(
+    startOfLocalDay(phaseWindowEnd145) === startOfLocalDay(reconfirmedNoon145),
+    "#145 review fix: an arbitrary phase-window-end instant and a same-day noon-anchored re-pick floor to the identical local day — a no-op confirm must compute a zero delta, not a false 'moved' note"
+  );
+  const nextDayNoon145 = new Date(2027, 1, 24, 12, 0, 0).getTime();
+  ok(
+    startOfLocalDay(phaseWindowEnd145) !== startOfLocalDay(nextDayNoon145),
+    "#145 review fix: …but a genuinely different local day still floors differently, so a real reschedule still registers"
+  );
+
+  // barRect: a bar ENTIRELY past the visible end used to collapse to the
+  // same ~0.6%-wide sliver as a same-day zero-length bar, sitting right at
+  // the container's edge — easy to miss completely. It now anchors to the
+  // right edge sized by its own real duration, so it stays a legible bar.
+  const farPast145 = barRect({ startAt: OCT6 + 15 * DAY145, dueAt: OCT6 + 18 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
+  ok(farPast145.widthPct === 30, "#145 review fix: a bar entirely past the visible end is sized by its own 3-day duration over the 10-day span (30%), not clamped to a hairline");
+  ok(farPast145.leftPct === 70, "#145 review fix: …and anchored flush against the right edge (leftPct + widthPct === 100)");
+  const barelyPast145 = barRect({ startAt: OCT6 + 10 * DAY145, dueAt: OCT6 + 10 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
+  ok(barelyPast145.leftPct + barelyPast145.widthPct === 100, "#145 review fix: even a zero-length bar exactly at the boundary stays anchored flush right, not drawn past the edge");
+  // A very long overrun (duration bigger than the whole visible span) caps
+  // at 100% width rather than reporting something the caller would need to
+  // clamp itself.
+  const massivelyPast145 = barRect({ startAt: OCT6 + 15 * DAY145, dueAt: OCT6 + 45 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
+  ok(massivelyPast145.widthPct === 100 && massivelyPast145.leftPct === 0, "#145 review fix: an overrun longer than the whole visible span caps at 100% width instead of overflowing it");
+
+  // #145 review fix (found live, not in review): dayColumns must walk by
+  // LOCAL CALENDAR DAY, not by adding a raw 86400000ms each step — a DST
+  // transition among the walked days is 23 or 25 real hours, and adding a
+  // flat 24h drifts every later "day" out of alignment with true local
+  // midnight. This is what actually produced the header's overlapping
+  // week labels on an 8-month span: two labels that should have been 21
+  // real days apart ended up rendered only ~14 apart. Nov 1, 2026 is when
+  // US clocks "fall back" — Oct 25 and Nov 8, 2026 are the Sundays a week
+  // either side of it.
+  const beforeDst145 = new Date(2026, 9, 25).getTime();
+  const afterDst145 = new Date(2026, 10, 8).getTime();
+  const spanningDst145 = dayColumns(beforeDst145, afterDst145);
+  ok(
+    spanningDst145.length === 15,
+    "#145 review fix: dayColumns across a DST transition still returns exactly 15 days (Oct 25 – Nov 8 inclusive), not one short/long from the fall-back hour"
+  );
+  // Note: the LENGTH assertion above does not by itself discriminate the
+  // bug on FALL-BACK — a raw-ms walk also happens to total 15 here (it
+  // drifts the LAST element's clock time by the fall-back hour without
+  // dropping/duplicating a day). The next assertion is the one that
+  // actually catches it.
+  ok(
+    spanningDst145[spanningDst145.length - 1] === afterDst145,
+    "#145 review fix: …and the LAST column lands exactly on the real local midnight of the end date, not an hour off"
+  );
+
+  // …and the OTHER direction: Mar 14, 2027 is when US clocks "spring
+  // forward" (a 23-hour local day). Mar 7 and Mar 21, 2027 are the
+  // Sundays a week either side of it. Unlike fall-back, a raw-ms walk
+  // breaks the COUNT itself here (it comes up one day short — 14 instead
+  // of 15 — because the 23-hour transition day makes the walk's running
+  // total fall behind by an hour, and by the far end that hour is enough
+  // to make the loop's `<=` cutoff exclude the real last day). Nothing
+  // covered this direction before; only the fall-back case was tested.
+  const beforeSpring145 = new Date(2027, 2, 7).getTime();
+  const afterSpring145 = new Date(2027, 2, 21).getTime();
+  const spanningSpring145 = dayColumns(beforeSpring145, afterSpring145);
+  ok(
+    spanningSpring145.length === 15,
+    "#145 review fix: dayColumns across the SPRING-FORWARD transition also returns exactly 15 days (Mar 7 – Mar 21 inclusive), not one short from the lost hour"
+  );
+  ok(
+    spanningSpring145[spanningSpring145.length - 1] === afterSpring145,
+    "#145 review fix: …and the LAST column lands exactly on the real local midnight of the end date"
+  );
+  } finally {
+    // #145 review fix (round 4) — `process.env.TZ = undefined` does NOT
+    // delete the key: Node coerces it to the STRING "undefined", which
+    // resolves as a (nonexistent) zone name and falls back to UTC. Since
+    // this suite normally runs with no TZ set at all, `savedTZ145` here
+    // IS `undefined`, and the naive restore silently switched every
+    // assertion and async suite after this block — 53 sync assertions
+    // plus all four async suites deferred to the promise chain at the
+    // bottom of this file — from local time to UTC. `delete` is the only
+    // way to genuinely restore "unset".
+    if (savedTZ145 === undefined) delete process.env.TZ;
+    else process.env.TZ = savedTZ145;
+  }
 }
 
 /* ====== #145: packTracks (review fix — relocated from gantt-grid.tsx into
