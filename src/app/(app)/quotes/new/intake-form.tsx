@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition, type CSSProperties } from "react";
+import { Fragment, useMemo, useState, useTransition, type CSSProperties } from "react";
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
 import EntityQuickAdd, { INPUT, LABEL, type QuickAddValues } from "@/components/entity-quick-add";
 import { createQuoteIntakeAction } from "./actions";
@@ -23,6 +23,8 @@ export default function QuoteIntakeForm({
   initialType: ServiceType;
 }) {
   const [type, setType] = useState<ServiceType>(initialType);
+  // #110: the user-named category behind the trailing "Custom category" card.
+  const [category, setCategory] = useState("");
 
   const [customerQuery, setCustomerQuery] = useState("");
   const [customerMode, setCustomerMode] = useState<"pick" | "new">("pick");
@@ -106,15 +108,18 @@ export default function QuoteIntakeForm({
     }
   }
 
-  const canSubmit =
+  const customerReady =
     (customerMode === "pick" && !!customerId) ||
     (customerMode === "new" && newCustomer.name.trim().length > 0);
+  // A custom category needs its name before the builder can be seeded with it.
+  const canSubmit = customerReady && (type !== "custom" || category.trim().length > 0);
 
   function submit() {
     if (!canSubmit || pending) return;
     setError("");
     const payload: IntakeSubmit = {
       type,
+      category: type === "custom" ? category.trim() : "",
       customerMode,
       customerId,
       newCustomerName: newCustomer.name,
@@ -156,65 +161,77 @@ export default function QuoteIntakeForm({
         {SERVICE_TYPES.map((s) => {
           const active = type === s.key;
           return (
-            <button
-              key={s.key}
-              type="button"
-              onClick={() => setType(s.key)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                width: "100%",
-                textAlign: "left",
-                background: "#fff",
-                border: `1.5px solid ${active ? "var(--accent)" : "#ececf0"}`,
-                borderRadius: 11,
-                padding: "11px 13px",
-                cursor: "pointer",
-              }}
-            >
-              <span style={{ minWidth: 0, flex: 1 }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#16181d" }}>{s.label}</span>
-                  {s.badge && (
-                    <span
-                      style={{
-                        fontSize: 8.5,
-                        fontWeight: 700,
-                        letterSpacing: ".04em",
-                        textTransform: "uppercase",
-                        color: s.badgeInk,
-                        background: s.badgeSoft,
-                        border: `1px solid ${s.badgeBd}`,
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                      }}
-                    >
-                      {s.badge}
-                    </span>
-                  )}
-                </span>
-                <span style={{ fontSize: 11.5, color: "#9aa0ab", display: "block", marginTop: 2 }}>
-                  {s.sub}
-                </span>
-              </span>
-              <span
+            <Fragment key={s.key}>
+              <button
+                type="button"
+                onClick={() => setType(s.key)}
                 style={{
-                  width: 17,
-                  height: 17,
-                  borderRadius: "50%",
-                  border: `1.7px solid ${active ? "var(--accent)" : "#cfd4dd"}`,
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
+                  gap: 12,
+                  width: "100%",
+                  textAlign: "left",
+                  background: "#fff",
+                  border: `1.5px solid ${active ? "var(--accent)" : "#ececf0"}`,
+                  borderRadius: 11,
+                  padding: "11px 13px",
+                  cursor: "pointer",
                 }}
               >
-                {active && (
-                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)" }} />
-                )}
-              </span>
-            </button>
+                <span style={{ minWidth: 0, flex: 1 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#16181d" }}>{s.label}</span>
+                    {s.badge && (
+                      <span
+                        style={{
+                          fontSize: 8.5,
+                          fontWeight: 700,
+                          letterSpacing: ".04em",
+                          textTransform: "uppercase",
+                          color: s.badgeInk,
+                          background: s.badgeSoft,
+                          border: `1px solid ${s.badgeBd}`,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                        }}
+                      >
+                        {s.badge}
+                      </span>
+                    )}
+                  </span>
+                  <span style={{ fontSize: 11.5, color: "#9aa0ab", display: "block", marginTop: 2 }}>
+                    {s.sub}
+                  </span>
+                </span>
+                <span
+                  style={{
+                    width: 17,
+                    height: 17,
+                    borderRadius: "50%",
+                    border: `1.7px solid ${active ? "var(--accent)" : "#cfd4dd"}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  {active && (
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)" }} />
+                  )}
+                </span>
+              </button>
+              {s.key === "custom" && active && (
+                <div>
+                  <label style={{ ...LABEL, margin: "0 0 6px" }}>Category name</label>
+                  <input
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    placeholder="Acoustic treatment"
+                    style={INPUT}
+                  />
+                </div>
+              )}
+            </Fragment>
           );
         })}
       </div>

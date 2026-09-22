@@ -24,6 +24,8 @@ import {
   saveLogoAction,
   saveSettingsAction,
   searchAddressAction,
+  setRecordingsArchiveMailboxAction,
+  setRecordingsBetaUsersAction,
   setRolesAction,
   setUserStatusAction,
   updateMemberAction,
@@ -37,6 +39,7 @@ import { SegmentedToggle } from "@/components/ui";
 import {
   SETTINGS_SECTIONS,
   ADMIN_SCREENS,
+  INTEGRATION_CARDS,
   resolveSettingsSection,
 } from "./settings-sections";
 import { accentContrast } from "@/lib/color";
@@ -115,7 +118,26 @@ type MailboxVM = {
   needsReconnect: boolean;
   /** Calendar scope granted (D77) — dashboard calendar + site-visit writes. */
   calendarOn: boolean;
+  /** Google Tasks scope granted (D146) — Home Queue mirrored into a "Peak"
+   *  Google Tasks list, two-way for assignments. */
+  tasksOn: boolean;
 };
+
+/** Recordings → Drive archive (Krisp recordings spec §1.3 / §5.1). */
+type RecordingsVM = {
+  archiveMailbox: string | null;
+  rootFolderCached: boolean;
+  customerFolders: number;
+  lastRun: { at: number; archived: number; failed: number; skipped: string | null } | null;
+  betaUsers: string[];
+  /** Every connected mailbox — the picklist; `driveOn` = grant carries drive.file. */
+  mailboxes: { key: string; address: string; connectedBy: string; driveOn: boolean }[];
+};
+
+const INTEGRATION_ANCHOR = Object.fromEntries(INTEGRATION_CARDS.map((c) => [c.key, c.key])) as Record<
+  (typeof INTEGRATION_CARDS)[number]["key"],
+  string
+>;
 
 const GMAIL_BANNER: Record<string, { msg: string; ok: boolean }> = {
   connected: { msg: "Mailbox connected. Use “Get mail” in the Inbox to import history and receive new mail.", ok: true },
@@ -131,6 +153,7 @@ export default function SettingsClient({
   meId,
   meName,
   gmail,
+  recordings,
   settings,
   intakeCatalog,
   visitReasons,
@@ -143,6 +166,7 @@ export default function SettingsClient({
   meId: string;
   meName: string;
   gmail: { enabled: boolean; mailboxes: MailboxVM[]; redirectUri: string; redirectWarning: string | null };
+  recordings: RecordingsVM;
   settings: {
     companyName: string;
     accent: string;
@@ -210,6 +234,13 @@ export default function SettingsClient({
 
   const saveSetting = (patch: Parameters<typeof saveSettingsAction>[0]) =>
     run(() => saveSettingsAction(patch));
+
+  // ---- Recordings archive account + pilot gate (spec §1.3 / §5.1) ----
+  const [archiveMailbox, setArchiveMailbox] = useState<string>(recordings.archiveMailbox ?? "");
+  const archiveDirty = (recordings.archiveMailbox ?? "") !== archiveMailbox;
+  const [betaUsers, setBetaUsers] = useState<string[]>(recordings.betaUsers);
+  const betaDirty =
+    [...betaUsers].sort().join(",") !== [...recordings.betaUsers].sort().join(",");
 
   // ---- Go-live: clear demo data ----
   const [clearOpen, setClearOpen] = useState(false);
@@ -1017,7 +1048,7 @@ export default function SettingsClient({
       </section>
 
       {/* ---- Mailboxes (Gmail) ---- */}
-      <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
+      <section id={INTEGRATION_ANCHOR.mailboxes} className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
           <div>
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Mailboxes</div>
@@ -1154,7 +1185,8 @@ export default function SettingsClient({
                       (mb.needsReconnect
                         ? "  ·  reconnect to enable two-way archive"
                         : "") +
-                      (mb.calendarOn ? "  ·  calendar on" : "")
+                      (mb.calendarOn ? "  ·  calendar on" : "") +
+                      (mb.tasksOn ? "  ·  tasks sync on" : "")
                     : mb.desc}
                 </div>
               </div>
@@ -1189,6 +1221,20 @@ export default function SettingsClient({
                       Enable calendar
                     </a>
                   )}
+                  {mb.kind === "personal" && !mb.tasksOn && (
+                    <a
+                      className="pk-btn-outline"
+                      href={
+                        "/api/gmail/connect?mailbox=" +
+                        encodeURIComponent(mb.key) +
+                        "&tasks=1"
+                      }
+                      title="Re-runs the Google consent with Google Tasks access added — mirrors this mailbox owner's Home Queue into a 'Peak' Google Tasks list, same as the Apple Reminders sync"
+                      style={{ flexShrink: 0, textDecoration: "none" }}
+                    >
+                      Enable Google Tasks sync
+                    </a>
+                  )}
                   <button
                     className="pk-btn-outline"
                     style={{ color: "#8c919c" }}
@@ -1212,6 +1258,116 @@ export default function SettingsClient({
               )}
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* ---- Recordings → Drive archive (Krisp recordings spec §5.1) ---- */}
+      <section id={INTEGRATION_ANCHOR.recordings} className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 14.5, fontWeight: 600 }}>Recordings</div>
+            <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3, lineHeight: 1.5 }}>
+              Site-visit audio is staged in Blob, transcribed in the recorder’s own Krisp, then
+              archived nightly to <b style={{ color: "#5b616e" }}>Peak Recordings / &lt;Customer&gt;</b> in
+              the Google Drive of the account picked here — the shared sales box is the recommended
+              owner, so recordings stay company-owned.
+            </div>
+          </div>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              padding: "3px 10px",
+              borderRadius: 20,
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+              color: recordings.archiveMailbox ? "#1f7a52" : "#a06a2b",
+              background: recordings.archiveMailbox ? "#e8f3ee" : "#f7efe2",
+              border: `1px solid ${recordings.archiveMailbox ? "#cfe6db" : "#ecdcc2"}`,
+            }}
+          >
+            {recordings.archiveMailbox ? "Archive on" : "Archive waiting"}
+          </span>
+        </div>
+
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7" }}>
+          <label style={labelStyle}>Archive account</label>
+          {recordings.mailboxes.length === 0 ? (
+            <div style={{ fontSize: 12, color: "#9aa0ab", lineHeight: 1.5 }}>
+              No connected mailboxes yet — connect one under Mailboxes above, then pick it here.
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <select
+                value={archiveMailbox}
+                onChange={(e) => setArchiveMailbox(e.target.value)}
+                style={{ ...inputStyle, maxWidth: 420, cursor: "pointer" }}
+              >
+                <option value="">— not configured (archive waits) —</option>
+                {recordings.mailboxes.map((mb) => (
+                  <option key={mb.key} value={mb.key}>
+                    {mb.address}
+                    {mb.connectedBy ? ` (${mb.connectedBy})` : ""}
+                    {mb.driveOn ? " · Drive scope" : " · needs Drive scope"}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="pk-btn-accent"
+                disabled={!archiveDirty}
+                style={!archiveDirty ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+                onClick={() => run(() => setRecordingsArchiveMailboxAction(archiveMailbox || null))}
+              >
+                Save
+              </button>
+            </div>
+          )}
+          {recordings.mailboxes.some((mb) => !mb.driveOn) && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+              {recordings.mailboxes
+                .filter((mb) => !mb.driveOn)
+                .map((mb) => (
+                  <div
+                    key={mb.key}
+                    style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "#8c919c" }}
+                  >
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>{mb.address}</span>
+                    <span>needs the Drive scope before it can hold the archive</span>
+                    <a
+                      className="pk-btn-outline"
+                      href={"/api/gmail/connect?mailbox=" + encodeURIComponent(mb.key) + "&drive=1"}
+                      title="Re-runs the Google consent with Drive (app-created files only) added"
+                      style={{ flexShrink: 0, textDecoration: "none" }}
+                    >
+                      Enable Drive archive
+                    </a>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7", fontSize: 12, color: "#8c919c", lineHeight: 1.7 }}>
+          <div>
+            Archive folder:{" "}
+            <b style={{ color: "#5b616e" }}>
+              {recordings.rootFolderCached
+                ? `Peak Recordings (cached · ${recordings.customerFolders} customer folder${recordings.customerFolders === 1 ? "" : "s"})`
+                : "not created yet — created on the first archive run"}
+            </b>
+          </div>
+          <div>
+            Last run:{" "}
+            {recordings.lastRun ? (
+              <b style={{ color: recordings.lastRun.failed ? "#b4543a" : "#5b616e" }}>
+                {new Date(recordings.lastRun.at).toLocaleString()} · {recordings.lastRun.archived} archived
+                {recordings.lastRun.failed ? ` · ${recordings.lastRun.failed} failed` : ""}
+                {recordings.lastRun.skipped ? ` · skipped: ${recordings.lastRun.skipped}` : ""}
+              </b>
+            ) : (
+              <b style={{ color: "#5b616e" }}>never</b>
+            )}
+          </div>
         </div>
       </section>
 
@@ -1317,6 +1473,51 @@ export default function SettingsClient({
               {clearDone}
             </div>
           )}
+        </div>
+
+        {/* Recordings pilot gate (spec §1.3 / §7) */}
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 13.5, fontWeight: 600 }}>Recordings pilot</div>
+              <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2, maxWidth: 460 }}>
+                Who sees the Record button on site visits, surveys, inspections and jobs.
+                Nobody checked = everyone with a Krisp key.
+              </div>
+            </div>
+            <button
+              className="pk-btn-accent"
+              disabled={!betaDirty}
+              style={!betaDirty ? { opacity: 0.5, cursor: "not-allowed", whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}
+              onClick={() => run(() => setRecordingsBetaUsersAction(betaUsers))}
+            >
+              Save
+            </button>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 10 }}>
+            {users
+              .filter((u) => u.status === "active")
+              .map((u) => {
+                const on = betaUsers.includes(u.id);
+                return (
+                  <label
+                    key={u.id}
+                    style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, cursor: "pointer" }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={(e) =>
+                        setBetaUsers((prev) =>
+                          e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)
+                        )
+                      }
+                    />
+                    {u.name}
+                  </label>
+                );
+              })}
+          </div>
         </div>
 
         <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7", maxWidth: 380 }}>

@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { loadAgendaRange } from "@/lib/agenda";
+import { googleConfigured } from "@/lib/gmail/config";
 import CalendarClient from "./calendar-client";
 import HomeTabs from "../home-tabs";
 
@@ -60,7 +61,18 @@ export default async function CalendarPage({
     maxMs = dateAnchor.getTime() + 2 * DAY;
   }
 
-  const { gmailOn, calendarOn, items } = await loadAgendaRange(user.id, user.name, minMs, maxMs);
+  const [{ gmailOn, calendarOn, items }, calendarConnections] = await Promise.all([
+    loadAgendaRange(user.id, user.name, minMs, maxMs),
+    // D148 — the filter rail's initial data; loadAgendaRange already fetched
+    // the same connections internally to build `items`, but it doesn't
+    // return the raw list (it only needs it to build agenda items), so the
+    // rail fetches its own lean view via the same store module.
+    (async () => {
+      const { listConnectionsForUser } = await import("@/lib/google/calendar-connections");
+      const rows = await listConnectionsForUser(user.id);
+      return rows.map((r) => ({ id: r.id, googleEmail: r.googleEmail, calendars: r.calendars }));
+    })(),
+  ]);
 
   return (
     <HomeTabs active="calendar" maxWidth={1120} style={{ padding: "24px 30px 64px" }}>
@@ -77,6 +89,8 @@ export default async function CalendarPage({
         items={items}
         calendarOn={calendarOn}
         gmailOn={gmailOn}
+        calendarConnections={calendarConnections}
+        canConnectCalendar={googleConfigured()}
       />
     </HomeTabs>
   );

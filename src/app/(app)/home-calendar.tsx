@@ -10,6 +10,7 @@ import {
 import { useRouter } from "next/navigation";
 import { addCalendarEventAction } from "./calendar-actions";
 import type { AgendaItem } from "@/lib/agenda";
+import { RecordControlLink } from "@/components/recordings/record-control-link";
 
 /**
  * Dashboard calendar card (D77) — the user's next two weeks, merged from
@@ -85,12 +86,19 @@ export default function HomeCalendar({
   items,
   calendarOn,
   gmailOn,
+  recordVisitIds,
 }: {
   items: AgendaItem[];
   calendarOn: boolean;
   gmailOn: boolean;
+  /** Site-visit ids that get a Record control (Recordings spec §6) — the
+   *  page computes them server-side via `recordableParentIds("site_visit",
+   *  ids)` (app/(app)/recordings/data.ts) so the beta gate + Krisp
+   *  connection are read once, not per row. Omitted = no controls. */
+  recordVisitIds?: string[];
 }) {
   const router = useRouter();
+  const recordSet = new Set(recordVisitIds ?? []);
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
   // Defaults from LOCAL time, one hour ahead (rolls the date past midnight).
@@ -332,19 +340,35 @@ export default function HomeCalendar({
                   </span>
                 </div>
               );
-              return it.href ? (
+              const main = it.href ? (
                 <a
-                  key={it.key}
                   href={it.href}
                   target={it.source === "google" ? "_blank" : undefined}
                   rel={it.source === "google" ? "noreferrer" : undefined}
                   title={it.source === "google" ? "Open in Google Calendar" : "Open the customer record"}
-                  style={{ display: "block", textDecoration: "none" }}
+                  style={{ display: "block", textDecoration: "none", flex: 1, minWidth: 0 }}
                 >
                   {row}
                 </a>
               ) : (
-                <div key={it.key}>{row}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>{row}</div>
+              );
+              // Recordings spec §6 — Record control on visit rows, outside the
+              // row's own anchor (a link can't nest a link).
+              const record =
+                it.source === "visit" && recordSet.has(it.id) ? (
+                  <RecordControlLink
+                    parentKind="site_visit"
+                    parentId={it.id}
+                    size="sm"
+                    style={{ alignSelf: "center", marginRight: 17 }}
+                  />
+                ) : null;
+              return (
+                <div key={it.key} style={{ display: "flex", alignItems: "stretch" }}>
+                  {main}
+                  {record}
+                </div>
               );
             })}
           </div>

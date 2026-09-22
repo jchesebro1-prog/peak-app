@@ -362,6 +362,7 @@ account, does:
 - Browser check at 375, 820 and 1440 px on the six screens in section 5 (manual, using the browser
   pane; recorded as a checklist in the plan).
 - Device (Task 12, human): TestFlight build opens the hosted app and keeps the session across relaunch;
+  Google sign-in opens the Safari sheet and returns through quartzite://auth (D153);
   Add photo opens the camera; DISTO pairs and a reading fills the armed field; a push arrives within
   one sweep of a task assignment and tapping it opens `/field-work`.
 

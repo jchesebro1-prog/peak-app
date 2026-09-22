@@ -133,6 +133,7 @@ export function activeKeyFor(pathname: string): string {
     "/reports": "reports",
     "/templates": "settings",
     "/estimating-rules": "settings",
+    "/task-templates": "settings",
     "/import": "settings",
     "/settings": "settings",
     "/account": "account",

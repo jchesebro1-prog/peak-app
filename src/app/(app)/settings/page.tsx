@@ -12,6 +12,8 @@ import {
   GMAIL_MODIFY_SCOPE,
   gmailEnabled,
   hasCalendarScope,
+  hasDriveScope,
+  hasTasksScope,
   personalKey,
   redirectHostMismatch,
   SHARED_KEYS,
@@ -73,8 +75,28 @@ export default async function SettingsPage() {
       // Calendar opt-in granted (D77) — drives the dashboard calendar and
       // direct site-visit writes for this mailbox's owner.
       calendarOn: !!c && hasCalendarScope(c.scope),
+      // Google Tasks opt-in granted (D146) — mirrors this mailbox owner's
+      // Home Queue into a "Peak" Google Tasks list, two-way for assignments.
+      tasksOn: !!c && hasTasksScope(c.scope),
     };
   });
+
+  // Recordings → Drive archive (Krisp recordings spec §1.3 / §5.1): the
+  // archive-account picklist runs over every connected mailbox, flagged by
+  // whether its grant already carries drive.file.
+  const recordings = {
+    archiveMailbox: settings.recordingsArchiveMailbox ?? null,
+    rootFolderCached: !!settings.recordingsArchiveFolderId,
+    customerFolders: Object.keys(settings.recordingsArchiveFolders || {}).length,
+    lastRun: settings.recordingsArchiveLastRun ?? null,
+    betaUsers: Array.isArray(settings.recordingsBetaUsers) ? settings.recordingsBetaUsers : [],
+    mailboxes: connections.map((c) => ({
+      key: c.mailboxKey,
+      address: c.address,
+      connectedBy: c.connectedBy,
+      driveOn: hasDriveScope(c.scope),
+    })),
+  };
 
   return (
     <div className="pk-content" style={{ maxWidth: 1080, padding: "26px 30px 64px" }}>
@@ -132,6 +154,7 @@ export default async function SettingsPage() {
           meId={me.id}
           meName={me.name}
           gmail={{ enabled: gmailOn, mailboxes: mailboxVMs, redirectUri, redirectWarning }}
+          recordings={recordings}
           settings={{
             companyName: settings.companyName,
             accent: settings.accent,

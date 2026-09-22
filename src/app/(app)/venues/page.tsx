@@ -8,8 +8,10 @@ import { cityState, mono } from "../companies/lib";
  * Venues directory (D101) — mirrors the Companies list's server-component +
  * searchParams-driven filter idiom (src/app/(app)/companies/page.tsx), but
  * stays single-file since this task only touches this new page: the search
- * box and company chips are a plain GET <form>/<Link> pair instead of the
- * companies page's separate client controls.tsx (no debounced client state).
+ * box and company filter are a plain GET <form> (text input + native
+ * <datalist>) instead of the companies page's separate client controls.tsx
+ * (no debounced client state). Result-count cap + label follow /catalog's
+ * own PAGE=200 pattern (punch #92, D142).
  */
 
 export const metadata = { title: "Venues — Quartzite-6" };
@@ -25,28 +27,6 @@ const CSS = `
   }
 `;
 
-const chipBase: React.CSSProperties = {
-  fontSize: 11.5,
-  padding: "5px 11px",
-  borderRadius: 20,
-  textDecoration: "none",
-  whiteSpace: "nowrap",
-};
-const chipActive: React.CSSProperties = {
-  ...chipBase,
-  fontWeight: 600,
-  border: "1px solid var(--accent)",
-  background: "color-mix(in srgb, var(--accent) 12%, #fff)",
-  color: "color-mix(in srgb, var(--accent) 68%, #000)",
-};
-const chipIdle: React.CSSProperties = {
-  ...chipBase,
-  fontWeight: 500,
-  border: "1px solid #e4e7ec",
-  background: "#fff",
-  color: "#5b616e",
-};
-
 export default async function VenuesPage({
   searchParams,
 }: {
@@ -55,9 +35,33 @@ export default async function VenuesPage({
   const [, sp, rows] = await Promise.all([requireUser(), searchParams, loadVenueDirectory()]);
 
   const q = one(sp.q);
-  const company = one(sp.company);
-  const page = Math.max(1, Number.parseInt(one(sp.page) || "1", 10) || 1);
-  const pageSize = 50;
+
+  /* ---- distinct companies present in the directory, for the company
+   *  typeahead below (D142 — replaces a per-company chip list, which
+   *  doesn't scale past a few dozen companies). ---- */
+  const companyNames = new Map<string, string>();
+  for (const r of rows) {
+    if (!companyNames.has(r.site.companyId)) companyNames.set(r.site.companyId, r.companyName);
+  }
+  const companyOptions = Array.from(companyNames, ([id, name]) => ({ id, name })).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+
+  // The company field accepts either a company id (old links, e.g. from a
+  // venue or company record) or free-typed text picked from the datalist
+  // below. A typed name that doesn't resolve to a known company fails open
+  // to "no filter" rather than silently matching zero venues.
+  const companyParam = one(sp.company).trim();
+  let company = "";
+  if (companyParam) {
+    if (companyNames.has(companyParam)) {
+      company = companyParam;
+    } else {
+      const byName = companyOptions.find((c) => c.name.toLowerCase() === companyParam.toLowerCase());
+      company = byName ? byName.id : "";
+    }
+  }
+  const activeCompanyName = company ? companyNames.get(company) : "";
 
   /* ---- filter ---- */
   const ql = q.trim().toLowerCase();
@@ -80,25 +84,27 @@ export default async function VenuesPage({
     }
     return a.site.name.localeCompare(b.site.name);
   });
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const currentPage = Math.min(page, pageCount);
-  const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-  /* ---- distinct companies present in the directory, for the filter chips ---- */
-  const companyNames = new Map<string, string>();
-  for (const r of rows) {
-    if (!companyNames.has(r.site.companyId)) companyNames.set(r.site.companyId, r.companyName);
-  }
-  const companyOptions = Array.from(companyNames, ([id, name]) => ({ id, name })).sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
+  // The directory can hold thousands of venues; render only a page of them
+  // so the DOM stays light (punch #92 — same cap-with-count-label default
+  // already established by /catalog's PAGE constant, D142). Filters +
+  // search narrow the set before the cap is applied.
+  const PAGE = 200;
+  const matchCount = filtered.length;
+  const truncated = matchCount > PAGE;
+  const visible = filtered.slice(0, PAGE);
+  const resultLabel =
+    (truncated ? `Showing ${PAGE} of ${matchCount}` : `${matchCount} of ${rows.length}`) +
+    ` venue${matchCount === 1 ? "" : "s"}` +
+    (activeCompanyName ? " · " + activeCompanyName : "") +
+    (ql ? ` · “${q.trim()}”` : "") +
+    (truncated ? " · refine with search or filters to narrow" : "");
 
-  const linkWith = (patch: { company?: string; page?: number }) => {
+  const linkWith = (patch: { company?: string }) => {
     const p = new URLSearchParams();
     if (q.trim()) p.set("q", q.trim());
     const nextCompany = patch.company !== undefined ? patch.company : company;
     if (nextCompany) p.set("company", nextCompany);
-    if ((patch.page || 1) > 1) p.set("page", String(patch.page));
     const s = p.toString();
     return "/venues" + (s ? "?" + s : "");
   };
@@ -116,58 +122,85 @@ export default async function VenuesPage({
 
       {hasVenues && (
         <div style={{ marginBottom: 14 }}>
-          <form
-            action="/venues"
-            method="GET"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 9,
-              background: "#fff",
-              border: "1px solid #e4e7ec",
-              borderRadius: 9,
-              padding: "9px 12px",
-            }}
-          >
-            {company && <input type="hidden" name="company" value={company} />}
-            <button
-              type="submit"
-              aria-label="Search"
+          <form action="/venues" method="GET" style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+            <div
               style={{
-                width: 14,
-                height: 14,
-                border: "1.7px solid #aab0bb",
-                borderRadius: "50%",
-                flexShrink: 0,
-                position: "relative",
-                background: "transparent",
-                padding: 0,
-                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 9,
+                background: "#fff",
+                border: "1px solid #e4e7ec",
+                borderRadius: 9,
+                padding: "9px 12px",
               }}
             >
-              <span style={{ position: "absolute", right: -3, bottom: -3, width: 6, height: 1.7, background: "#aab0bb", transform: "rotate(45deg)" }} />
-            </button>
-            <input
-              type="text"
-              name="q"
-              defaultValue={q}
-              placeholder="Search venues…"
-              style={{ flex: 1, border: "none", background: "transparent", fontSize: 13.5, fontFamily: "var(--font-ui)", color: "#16181d", outline: "none" }}
-            />
+              <button
+                type="submit"
+                aria-label="Search"
+                style={{
+                  width: 14,
+                  height: 14,
+                  border: "1.7px solid #aab0bb",
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  position: "relative",
+                  background: "transparent",
+                  padding: 0,
+                  cursor: "pointer",
+                }}
+              >
+                <span style={{ position: "absolute", right: -3, bottom: -3, width: 6, height: 1.7, background: "#aab0bb", transform: "rotate(45deg)" }} />
+              </button>
+              <input
+                type="text"
+                name="q"
+                defaultValue={q}
+                placeholder="Search venues…"
+                style={{ flex: 1, border: "none", background: "transparent", fontSize: 13.5, fontFamily: "var(--font-ui)", color: "#16181d", outline: "none" }}
+              />
+            </div>
+
+            {/* Company filter (D142) — a typeahead bound to a native
+             *  <datalist> rather than one option/chip per company, which
+             *  doesn't scale past a few dozen. Submits through the same
+             *  ?company= param as before; see the resolution above for how
+             *  a typed name (vs. an id from an old link) is handled. */}
+            {companyOptions.length > 1 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <input
+                  type="text"
+                  name="company"
+                  defaultValue={activeCompanyName}
+                  list="ve-companies"
+                  placeholder="Filter by company…"
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    fontSize: 13,
+                    fontFamily: "var(--font-ui)",
+                    color: "#16181d",
+                    border: "1px solid #e4e7ec",
+                    borderRadius: 9,
+                    padding: "9px 12px",
+                    outline: "none",
+                    background: "#fff",
+                  }}
+                />
+                <datalist id="ve-companies">
+                  {companyOptions.map((c) => (
+                    <option key={c.id} value={c.name} />
+                  ))}
+                </datalist>
+                {company && (
+                  <Link href={linkWith({ company: "" })} style={{ fontSize: 12, fontWeight: 600, color: "#5b616e", whiteSpace: "nowrap", flexShrink: 0 }}>
+                    Clear
+                  </Link>
+                )}
+              </div>
+            )}
           </form>
 
-          {companyOptions.length > 1 && (
-            <div style={{ display: "flex", gap: 6, marginTop: 11, flexWrap: "wrap" }}>
-              <Link href={linkWith({ company: "" })} style={company ? chipIdle : chipActive}>
-                All companies
-              </Link>
-              {companyOptions.map((c) => (
-                <Link key={c.id} href={linkWith({ company: c.id })} style={company === c.id ? chipActive : chipIdle}>
-                  {c.name}
-                </Link>
-              ))}
-            </div>
-          )}
+          <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 11 }}>{resultLabel}</div>
         </div>
       )}
 
@@ -216,15 +249,6 @@ export default async function VenuesPage({
           {filtered.length === 0 && (
             <div style={{ padding: "50px 22px", textAlign: "center", color: "#9aa0ab", fontSize: 13 }}>
               {ql ? `No venues match “${q.trim()}”.` : "No venues match these filters."}
-            </div>
-          )}
-          {filtered.length > 0 && pageCount > 1 && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderTop: "1px solid #eef0f3", fontSize: 12.5 }}>
-              <Link aria-disabled={currentPage === 1} href={linkWith({ page: Math.max(1, currentPage - 1) })}
-                style={{ color: currentPage === 1 ? "#c0c5cd" : "var(--accent)", pointerEvents: currentPage === 1 ? "none" : "auto" }}>← Previous</Link>
-              <span style={{ color: "#8c919c" }}>Page {currentPage} of {pageCount} · {filtered.length} venues</span>
-              <Link aria-disabled={currentPage === pageCount} href={linkWith({ page: Math.min(pageCount, currentPage + 1) })}
-                style={{ color: currentPage === pageCount ? "#c0c5cd" : "var(--accent)", pointerEvents: currentPage === pageCount ? "none" : "auto" }}>Next →</Link>
             </div>
           )}
         </div>

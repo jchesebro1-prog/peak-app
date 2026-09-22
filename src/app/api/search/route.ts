@@ -3,6 +3,8 @@ import { auth } from "@/auth";
 import { searchDocs } from "@/db/doc-store";
 import { allCompanies, getCompanies } from "@/lib/identity/companies";
 import { allContacts, displayName, emailsForContacts } from "@/lib/identity/contacts";
+import { normalizeRecording, recordingStatusChip, type RecordingRecord } from "@/lib/stores/recordings";
+import { summarySearchText } from "@/lib/krisp/derive";
 
 /**
  * Global nav search (⌘K) — port of Nav.dc.html's search sources:
@@ -44,7 +46,7 @@ export async function GET(req: Request) {
   // the doc), then apply the precise per-field filter below. Avoids
   // materializing whole tables — the catalog alone is ~10.7k rows.
   const CANDIDATES = 100;
-  const [quotes, designs, surveys, inspections, comms, companies, people, parts] =
+  const [quotes, designs, surveys, inspections, comms, companies, people, parts, recordings] =
     await Promise.all([
       searchDocs("quotes", q, CANDIDATES),
       searchDocs("designs", q, CANDIDATES),
@@ -54,6 +56,7 @@ export async function GET(req: Request) {
       allCompanies(),
       allContacts(),
       searchDocs("catalog_parts", q, CANDIDATES),
+      searchDocs<RecordingRecord>("recordings", q, CANDIDATES),
     ]);
 
   const groups: Group[] = [];
@@ -167,6 +170,26 @@ export async function GET(req: Request) {
         letter: "P",
         color: "#1f7a52",
       }))
+    );
+  }
+  // Recordings (Krisp spec §4.5): id / title / customer / venue / joined
+  // summary text. The transcript sits in the JSONB candidate scan above but
+  // is never the label or the sub.
+  {
+    const now = Date.now();
+    add(
+      "Recordings",
+      recordings
+        .map((d) => normalizeRecording(d))
+        .filter((r) => matches(q, r.id, r.title, r.customer, r.venue, summarySearchText(r)))
+        .map((r) => ({
+          id: r.id,
+          title: r.title || r.id,
+          sub: `${recordingStatusChip(r, now)} · ${r.customer || r.venue || r.parentId}`,
+          href: `/recordings/${encodeURIComponent(r.id)}`,
+          letter: "R",
+          color: "#6b4fa1",
+        }))
     );
   }
   add(

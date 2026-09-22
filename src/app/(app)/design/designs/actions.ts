@@ -17,6 +17,9 @@ import {
 } from "@/lib/stores/designs";
 import { createProject, removeProject as removeGridProject } from "@/lib/stores/grid-projects";
 import { createDraftQuoteAction } from "../grid/[id]/actions";
+import { activeUsers } from "@/lib/users";
+import { createTask, setTaskStatus as setTaskStatusStore, updateTask as updateTaskStore, STATUSES as TASK_STATUSES, type TaskStatus } from "@/lib/stores/tasks";
+import { applyTaskTemplate } from "@/lib/stores/task-templates";
 
 /**
  * Design dashboard server actions — promote-to-quote plus the design
@@ -158,4 +161,71 @@ export async function requestDesignChangesAction(
 export async function getDesignAction(id: string): Promise<DesignRecord | null> {
   await requireUser();
   return getDesign(id);
+}
+
+/* ---- design tasks (D149, #118) ----
+   Designs never had a task UI or a parent pointer before this feature
+   (tasks.ts's new designId, alongside projectId/quoteId). FormData-shaped
+   thin wrappers over the shared tasks store, mirroring projects/actions.ts's
+   addTaskAction/setTaskStatusAction/updateTaskAction exactly — TasksCard
+   requires this shape regardless of the rest of this file's typed-argument
+   convention (submitDesignReviewAction et al.), same as the estimator's
+   quote-task wrappers. */
+
+export async function addDesignTaskAction(formData: FormData) {
+  const me = await requireUser();
+  const designId = String(formData.get("designId") || "");
+  const title = String(formData.get("title") || "").trim();
+  const section = String(formData.get("section") || "Design");
+  const assigneeUserId = String(formData.get("assigneeUserId") || "") || null;
+  const due = String(formData.get("dueAt") || "");
+  if (!designId || !title) return;
+  const assigneeName = assigneeUserId
+    ? (await activeUsers()).find((u) => u.id === assigneeUserId)?.name || ""
+    : "";
+  await createTask(
+    { title, section, designId, assigneeUserId, assigneeName,
+      dueAt: due ? new Date(due + "T12:00:00").getTime() : null },
+    me,
+  );
+  revalidatePath("/design/designs");
+}
+
+export async function setDesignTaskStatusAction(formData: FormData) {
+  await requireUser();
+  const taskId = String(formData.get("taskId") || "");
+  const status = String(formData.get("status") || "");
+  if (!taskId || !(TASK_STATUSES as readonly string[]).includes(status)) return;
+  await setTaskStatusStore(taskId, status as TaskStatus);
+  revalidatePath("/design/designs");
+}
+
+export async function updateDesignTaskAction(formData: FormData) {
+  await requireUser();
+  const taskId = String(formData.get("taskId") || "");
+  if (!taskId) return;
+  const patch: Record<string, unknown> = {};
+  if (formData.has("assigneeUserId")) {
+    const uid = String(formData.get("assigneeUserId") || "") || null;
+    patch.assigneeUserId = uid;
+    patch.assigneeName = uid ? (await activeUsers()).find((u) => u.id === uid)?.name || "" : "";
+  }
+  if (formData.has("dueAt")) {
+    const d = String(formData.get("dueAt") || "");
+    patch.dueAt = d ? new Date(d + "T12:00:00").getTime() : null;
+  }
+  if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
+  await updateTaskStore(taskId, patch);
+  revalidatePath("/design/designs");
+}
+
+/** Apply a reusable task-template set (D149, #118) to this design — thin
+ *  FormData wrapper over task-templates.ts's applyTaskTemplate(). */
+export async function applyDesignTemplateAction(formData: FormData) {
+  const me = await requireUser();
+  const designId = String(formData.get("designId") || "");
+  const setId = String(formData.get("setId") || "");
+  if (!designId || !setId) return;
+  await applyTaskTemplate(setId, { kind: "design", id: designId }, me);
+  revalidatePath("/design/designs");
 }

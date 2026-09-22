@@ -16,6 +16,7 @@ import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates } from "@/lib/stores/pricing";
 import { tasksForQuote } from "@/lib/stores/tasks";
+import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import EstimatorClient from "./estimator-client";
 import type {
   AiSource,
@@ -80,6 +81,7 @@ async function initialFrom(
       contactName: "",
       quoteNote: FALLBACK.quoteNote,
       paymentTerms: "Unknown",
+      category: "",
       owner: userName,
       revNum: 1,
       revDateMs: Date.now(),
@@ -123,6 +125,7 @@ async function initialFrom(
     contactName: contactName || "",
     quoteNote: q.quoteNote != null ? q.quoteNote : FALLBACK.quoteNote,
     paymentTerms: q.paymentTerms || "Unknown",
+    category: q.category || "",
     owner: q.owner || userName,
     // Real priced revisions (item 24). This used to count `history`, which is
     // the status pipeline — so the printed "Rev N" climbed every time a quote
@@ -148,6 +151,8 @@ export default async function EstimatorPage({
   // Guided intake hand-off (quotes/new): only applies to a fresh builder —
   // an explicit ?id= always wins.
   const preCustomer = rawId ? undefined : one(sp.customer);
+  // #110: the intake's "Custom category" card hands its name over the same way.
+  const preCategory = rawId ? undefined : one(sp.category);
 
   /* ---- Scope draft source (S12/D83 — rules-based): resolve the linked
      survey/inspection. ?surveyId= / ?inspectionId= links the source; we
@@ -183,6 +188,9 @@ export default async function EstimatorPage({
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
   const quoteTasks = q ? await tasksForQuote(q.id) : [];
+  // D149/#118 — reusable task-template sets applicable to quotes, for the
+  // "Apply template" control next to the Tasks card.
+  const templateSets = await taskTemplateSetsFor("quote");
 
   // Only catalog fabrics with a real per-sq-ft basis feed the curtain
   // configurator — imported vendor fabric rows (priced per unit, no costPerSqft)
@@ -232,6 +240,7 @@ export default async function EstimatorPage({
       initial.contactName = primaryContact?.name || "";
     }
   }
+  if (preCategory && preCategory.trim()) initial.category = preCategory.trim();
 
   /* ---- travel estimate for the LOADED quote only (E3/E4, punch #89) ----
      This used to build an entry for every customer AND every venue in the
@@ -279,6 +288,7 @@ export default async function EstimatorPage({
       aiSource={aiSource}
       people={roster.map((u) => ({ id: u.id, name: u.name }))}
       quoteTasks={quoteTasks}
+      templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
     />
   );
 }

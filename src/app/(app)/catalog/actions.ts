@@ -70,10 +70,20 @@ export async function importCatalog(formData: FormData): Promise<void> {
   let text = String(formData.get("text") || "");
   const file = formData.get("file");
   if (file instanceof File && file.size > 0) text = await file.text();
-  if (!text.trim()) return;
+
+  // Every failure path redirects with a human message (punch #111) — a silent
+  // return left the upload form looking frozen. redirect() throws, so these
+  // stay outside any try/catch.
+  const fail = (message: string): never => {
+    const qs = new URLSearchParams();
+    if (mfr) qs.set("mfr", mfr);
+    qs.set("importError", message);
+    redirect("/catalog?" + qs.toString());
+  };
+  if (!text.trim()) fail("No rows found in that file.");
 
   const parsed = parseCatalog(text, defaultCategory || (String(formData.get("prebuilt") || "") === "1" ? "Prebuilt system" : ""));
-  if (!parsed.ok) return;
+  if (!parsed.ok) fail(parsed.error || "No rows found in that file.");
 
   let n = 0;
   for (const r of parsed.rows) {
@@ -88,6 +98,7 @@ export async function importCatalog(formData: FormData): Promise<void> {
     });
     n++;
   }
+  if (n === 0) fail("No valid rows — check the header names.");
 
   revalidatePath("/", "layout");
   const qs = new URLSearchParams();

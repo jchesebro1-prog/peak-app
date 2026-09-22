@@ -82,10 +82,12 @@ export const gridSheets = docTable("grid_sheets"); // The Grid plan-sheet backgr
 export const gridCatalog = docTable("grid_catalog"); // Grid-owned symbols and assemblies, independent of pricing catalog
 export const subassemblies = docTable("subassemblies"); // reusable priced assemblies built from catalog parts
 export const tasks = docTable("tasks"); // cross-record task rows, promoted from embedded ProjectTask[] (#17)
+export const taskTemplates = docTable("task_templates"); // reusable, admin-authored task-template sets — assignable by person/role/team, applicable to projects/quotes/designs (D149, #118)
 export const notes = docTable("notes"); // attachable note records — the customer Activity feed's note-taking surface (#21)
 export const equipmentItems = docTable("equipment_items"); // Rentals module — gear catalog + per-location stock (D129, no prototype ancestor)
 export const equipmentLocations = docTable("equipment_locations"); // Rentals module — warehouse/trailer locations gear stock lives at (D129)
 export const equipmentBookings = docTable("equipment_bookings"); // Rentals module — booking/reservation records against equipment items (D129, Task 2)
+export const recordings = docTable("recordings"); // in-app site-visit audio → Krisp transcription → write-back (docs/superpowers/specs/2026-09-21-krisp-recordings-design.md §1.1; migration 0021)
 
 export const DOC_TABLES = {
   quotes,
@@ -110,10 +112,12 @@ export const DOC_TABLES = {
   grid_catalog: gridCatalog,
   subassemblies,
   tasks,
+  task_templates: taskTemplates,
   notes,
   equipment_items: equipmentItems,
   equipment_locations: equipmentLocations,
   equipment_bookings: equipmentBookings,
+  recordings,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;
@@ -135,6 +139,10 @@ export type CollectionName = keyof typeof DOC_TABLES;
  * directory is now relational (companies/sites/contacts) and
  * server-authoritative — field staff don't create contacts offline. The
  * customers doc table remains registered read-only as rollback history.
+ *
+ * "recordings" is syncable (Krisp recordings spec §1.1): an offline device
+ * creates the REC doc through the outbox; the audio bytes never travel
+ * through doc sync (they go device → Blob via a scoped upload token).
  */
 export const SYNCABLE_COLLECTIONS: CollectionName[] = [
   "surveys",
@@ -143,6 +151,7 @@ export const SYNCABLE_COLLECTIONS: CollectionName[] = [
   "repair_jobs",
   "projects",
   "tasks",
+  "recordings",
 ];
 export const SYNCABLE_SET: ReadonlySet<string> = new Set(SYNCABLE_COLLECTIONS);
 

@@ -38,9 +38,11 @@ export type Assignment = {
   done: boolean;
   doneAt: number | null;
   /** Which surface completed it. `reminders` is written by the Mac-side sync
-   *  agent through /api/queue, and is why write-back is restricted to this
-   *  record type: a phone checkbox must never approve a review. */
-  doneVia: "app" | "reminders" | null;
+   *  agent through /api/queue; `google-tasks` is written by the Google Tasks
+   *  sync (D146, src/lib/google/tasks-sync.ts) the same way. Both are why
+   *  write-back is restricted to this record type: a phone checkbox must
+   *  never approve a review. */
+  doneVia: "app" | "reminders" | "google-tasks" | null;
   /** Provenance when a pipeline suggested it (iMessage/Krisp) and a human
    *  confirmed — free text, e.g. "iMessage from Jena, 2026-07-19". */
   source: string;
@@ -90,7 +92,7 @@ export async function createAssignment(input: {
 export async function setAssignmentDone(
   id: string,
   done: boolean,
-  via: "app" | "reminders" = "app"
+  via: "app" | "reminders" | "google-tasks" = "app"
 ): Promise<void> {
   await patchDoc<Assignment>("assignments", id, (d) => {
     d.done = done;

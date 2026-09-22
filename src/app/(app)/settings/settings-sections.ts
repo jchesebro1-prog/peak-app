@@ -23,6 +23,7 @@ export const ADMIN_SCREENS = [
   { label: "Catalog", href: "/catalog", desc: "Price books, parts, and manufacturers." },
   { label: "Templates", href: "/templates", desc: "Document and message wording." },
   { label: "Estimating Rules", href: "/estimating-rules", desc: "Rates and formulas the estimator uses." },
+  { label: "Task Templates", href: "/task-templates", desc: "Reusable checklists for projects, quotes, and designs." },
   { label: "Import / Export", href: "/import", desc: "Move records in and out of Peak." },
 ] as const;
 
@@ -35,3 +36,15 @@ export function resolveSettingsSection(
     ? (v as SettingsSection)
     : "general";
 }
+
+/**
+ * Integration cards inside the General section (Mailboxes, Recordings). Each
+ * card's `id` is its anchor, so deep links like `/settings#recordings` land
+ * on it; the Account page's "Enable Drive archive" hint points there.
+ */
+export const INTEGRATION_CARDS = [
+  { key: "mailboxes", label: "Mailboxes", desc: "Gmail connections — send, receive, calendar, tasks." },
+  { key: "recordings", label: "Recordings", desc: "Where site-visit audio is archived once transcribed." },
+] as const;
+
+export type IntegrationCard = (typeof INTEGRATION_CARDS)[number]["key"];

@@ -4,6 +4,8 @@ import { getAllDesigns } from "@/lib/stores/designs";
 import { allEngagements } from "@/lib/stores/engagements";
 import { byCategory } from "@/lib/stores/catalog";
 import { activeUsers, reviewers } from "@/lib/users";
+import { tasksForDesign } from "@/lib/stores/tasks";
+import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import DesignClient from "./design-client";
 import "./design.css";
 
@@ -23,13 +25,18 @@ export default async function Page({
   const user = await requireUser();
   const sp = await searchParams;
 
-  const [designs, engagements, roster, fabricParts, reviewerRows] = await Promise.all([
+  const [designs, engagements, roster, fabricParts, reviewerRows, templateSets] = await Promise.all([
     getAllDesigns(),
     allEngagements(),
     activeUsers(),
     byCategory("Fabric"),
     reviewers(),
+    taskTemplateSetsFor("design"),
   ]);
+  // D149/#118 — the selected design's rows from the shared tasks collection
+  // (tasks.ts's designId pointer, added alongside this feature — no design
+  // task UI existed before it). Mirrors the estimator page's tasksForQuote.
+  const designTasks = sp.id ? await tasksForDesign(sp.id) : [];
 
   // Derived, not stored: the design record carries no back-pointer, so the
   // reverse lookup is built here by scanning engagements each load — the two
@@ -59,6 +66,9 @@ export default async function Page({
       }))}
       reviewerNames={reviewerRows.map((u) => u.name)}
       engagementsForDesign={engagementsForDesign}
+      people={roster.map((u) => ({ id: u.id, name: u.name }))}
+      designTasks={designTasks}
+      templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
     />
   );
 }

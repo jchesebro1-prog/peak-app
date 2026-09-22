@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -164,13 +164,18 @@ export function ConsultingView({
   data,
   sel,
   tab,
+  oversightExtra,
 }: {
   data: ConsultingData;
   sel: ConsultingEngagement | null;
   tab: TabKey;
+  /** Server-rendered slot under the Oversight tab (Recordings spec §6:
+   *  <RecordingsCard parentKind="engagement">) — a server component can't be
+   *  imported into this client view, so the [id] page passes it in. */
+  oversightExtra?: ReactNode;
 }) {
   if (!sel) return <ConsultingList data={data} />;
-  return <EngagementDetail data={data} eng={sel} tab={tab} />;
+  return <EngagementDetail data={data} eng={sel} tab={tab} oversightExtra={oversightExtra} />;
 }
 
 /* ============================ list ================================ */
@@ -303,10 +308,12 @@ function EngagementDetail({
   data,
   eng,
   tab,
+  oversightExtra,
 }: {
   data: ConsultingData;
   eng: ConsultingEngagement;
   tab: TabKey;
+  oversightExtra?: ReactNode;
 }) {
   const router = useRouter();
   const q = data.quotesById[eng.quoteId];
@@ -381,7 +388,7 @@ function EngagementDetail({
       {tab === "phases" && <PhasesTab data={data} eng={eng} />}
       {tab === "milestones" && <MilestonesTab eng={eng} quoteValue={q?.value || 0} />}
       {tab === "meetings" && <MeetingsTab eng={eng} />}
-      {tab === "oversight" && <OversightTab data={data} eng={eng} />}
+      {tab === "oversight" && <OversightTab data={data} eng={eng} extra={oversightExtra} />}
       {tab === "documents" && <DocumentsTab eng={eng} />}
     </div>
   );
@@ -1016,7 +1023,7 @@ function PhaseDocs({ eng, phase }: { eng: ConsultingEngagement; phase: Engagemen
             href={`/design/engagements/markup?eng=${encodeURIComponent(eng.id)}&phase=${encodeURIComponent(phase.id)}`}
             style={{ ...SMALL_BTN, textDecoration: "none", display: "inline-block" }}
           >
-            ✏️ Mark up drawings
+            Mark up drawings
           </Link>
           {marks > 0 && (
             <span style={{ fontSize: 11.5, color: "#8c919c" }}>
@@ -1224,7 +1231,7 @@ function MeetingsTab({ eng }: { eng: ConsultingEngagement }) {
 
 /* ---------------------------- oversight --------------------------- */
 
-function OversightTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngagement }) {
+function OversightTab({ data, eng, extra }: { data: ConsultingData; eng: ConsultingEngagement; extra?: ReactNode }) {
   const router = useRouter();
   const [kind, setKind] = useState<"submittal" | "rfi">("submittal");
   const [ref, setRef] = useState("");
@@ -1305,6 +1312,7 @@ function OversightTab({ data, eng }: { data: ConsultingData; eng: ConsultingEnga
           </div>
         )}
       </Card>
+      {extra}
     </div>
   );
 }

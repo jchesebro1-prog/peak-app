@@ -2776,7 +2776,782 @@ built on Wave A's linking (D140).
 - **Cadence:** the interpreter runs inside the existing sync (open-tab tick ~2 min, cron every 5 min
   once `CRON_SECRET` is set). Gmail push (Pub/Sub) remains a later phase.
 
-## D150. Grid options are a tag on placements/routes, not nested documents; Manual intake asks venue + dims only (2026-09-21)
+## D143. A user-defined quote category is a label on a system quote, not a new quoteType (2026-09-21)
+
+Punch #110 asked for "a service category by default and then a user defined
+category" on the intake. The six service types stay the default categories;
+the new "Custom category" card on `/quotes/new` produces an ordinary
+`quoteType: "system"` quote with a free-text `category` on the document.
+Every branch that switches on `quoteType` — edit links, the #22 type filter,
+badges, the service builders — keeps working untouched, and the Quotes hub
+shows the category as a neutral badge only where no service badge applies.
+The field is editable from the Estimator's "Prepared for" bar and persists
+through the same meta path as the customer/venue/contact picks.
+
+
+## D144. `/venues` adopts the catalog page's own cap-at-200 + typeahead pattern (2026-09-21)
+
+Punch #92 found `/venues` rendering every venue and every company with no
+limit — 8.5 s / 10 MiB at 1,700 companies / 3,400 sites — and left three UX
+questions open for Jeff (paginate vs. infinite-scroll vs. virtualize; a
+typeahead vs. a huge company picker; whether the directory should list
+everything by default at all). Rather than invent a new answer, `/venues`
+takes the default this codebase already established for the identical
+problem on `/catalog` (`const PAGE = 200`): existing `?q=`/`?company=`
+filters narrow the set first, the result is capped to 200 rows, and a
+"Showing X of Y venues" label (matching catalog's own wording) distinguishes
+the truncated case from the untruncated one. No page-number links were
+added — catalog's own accepted behavior is "narrow with filters," not
+"click through pages" — so this stays reversible with no schema or URL-
+contract change once Jeff picks a real answer.
+
+The company filter (previously one `<Link>` chip per company, unbounded)
+is now a text `<input>` bound to a native `<datalist>` of company names,
+still submitting through the existing `?company=` param — no new client
+component or search dependency. Because a `<datalist>` fills the typed
+name rather than an id, the page resolves `?company=` against either a
+known company id (old links keep working) or a case-insensitive company
+name match; an unresolved value fails open to "no filter" instead of
+matching zero venues or erroring.
+
+Also removed: an unreviewed 50-per-page `?page=` paginator that had been
+committed to this file from the 2026-08-11 wip snapshot (`1391cdd`) but was
+never part of any reviewed change — it predates this decision and duplicated
+exactly the surface #92 asks Jeff to choose between.
+
+## D145. Punch #16 — quote-won and project-complete notify as a Home Queue task, not email (2026-09-21)
+
+Punch #16 asked for the company to be notified when a project is sold and
+when it's completed. Jeff's own alternative to automated email — "it becomes
+a task/lead for an employee to follow up... for an install sale the PM
+reaches out; for a project close, the salesperson follows up" — is now
+built, using the existing `assignments` collection (D93, the Home Queue's
+one non-derived source) rather than any email path. No new UI: an assignment
+created here shows up in the Home Queue and `/api/queue` (Mac Reminders
+sync) automatically.
+
+**Assignee default: the record's `owner`.** There is no distinct PM or
+salesperson role separate from `owner` anywhere in the data model (quotes
+and projects both carry only `owner: string`, per PUNCHLIST #16 decision E),
+so both hooks assign to the record's `owner`. This sidesteps all five of
+#16's email risks (an unaudited send channel already live on a 5-minute
+cron, guessed roster addresses with no correction UI, no dedupe/idempotency
+marker, no email log or audit trail, and silent send failures) while still
+satisfying Jeff's task-first alternative.
+
+**Hook 1 — quote won (`src/lib/stores/quotes.ts`, `setStatus`):** fires
+inside the existing one-shot guard (`if (!q || q.status === status) return
+q;`), so it only runs the moment a quote actually transitions into "won,"
+never on a re-save of an already-won quote. This is a genuine fix, not a
+duplicate: the only prior "sold" signal (`item16:sold:<id>` in
+`stores/projects.ts`, added 2026-07-25 under `724016c`) is a tasks-collection
+row created lazily when a project is converted (on Projects-page load or
+"Convert to project") and, per that commit, is created with **no
+assignee** — invisible in the Home Queue, whose task-source filters on
+`assigneeName === me`. It's left in place (still useful as a team-visible
+checklist row on the project's own Tasks tab) since it never collides with
+the new assignment in any shared view. The new hook is scoped to quote
+types that actually become an Installs project — excludes `flame_test`,
+`repair`, `inspection`, `consulting` (mirrors `syncProjectsFromQuotes`' own
+exclusion list) — so a won flame-test/repair/inspection quote, which also
+calls `setStatus(..., "won", ...)`, doesn't spawn a bogus "install sold"
+task.
+
+**Hook 2 — project complete (`src/app/(app)/projects/actions.ts`,
+`signoffAction`):** guarded by checking the project's stage *before*
+calling `setProjectStage` (`setProjectStage` has no early-return guard for
+an unchanged stage the way `setStatus` does — `recordStageChange`'s
+internal no-op doesn't stop the caller's side effects — so the guard lives
+in the caller instead of restructuring the store function). Unlike the sold
+hook, this one **replaced** rather than added to the prior mechanism: the
+same `724016c` commit already spawned a tasks-collection row
+(`item16:completed:<id>`) assigned to the quote's owner on entering
+"complete" via `setProjectStage`, which — being assigned — already rendered
+in that owner's Home Queue. Adding the new assignment alongside it would
+have put two rows for the same event in front of the same person, so the
+old spawn was removed from `setProjectStage` in favor of the one created by
+`signoffAction`. Known trade-off: a direct stage jump to "complete" via
+`setStageAction` (bypassing sign-off) no longer spawns any follow-up. That
+path is PUNCHLIST #16 decision D's still-open gap — Jeff's own answer there
+is that "a project must not be able to reach complete without a signoff" —
+so losing notification coverage on a path that shouldn't be reachable is
+preferred over duplicating it on the path that is. Enforcing that gate
+(blocking `setStageAction` from setting "complete" directly) remains
+unbuilt and is a natural companion to whoever picks up decision D.
+
+**Also fixed in passing:** an assignment's Home Queue row only linked
+anywhere for `link.kind === "engagement"`; `"project"` and `"quote"` fell
+through to `/queue` itself. `src/lib/queue.ts` now routes `"project"` to
+`/projects/<id>` and `"quote"` to `/quotes?id=<id>` (the app's existing link
+convention for a quote), so both new hooks land on the actual record instead
+of a dead end.
+
+PUNCHLIST.md #16 is updated to DONE; no email, no new stores, nothing under
+`src/lib/gmail/` or `src/lib/stores/comms.ts` touched.
+
+## D146. Calendar "based out of" + auto travel-time block on scheduled meetings (2026-09-21)
+
+Jeff: "In Calendar settings there should be an option for where you are
+based out of ... when scheduling meetings with physical address it auto
+adds travel time to the calendar as an event that you can remove."
+
+- **Reused `users.officeId`** (already on the `users` table, already
+  editable by an Admin in Settings -> Team) instead of a new column or a
+  separate preference table. Settings -> Team's `updateMemberAction` is
+  gated on `manage_users`, which most roles don't have for their own
+  record, so a new self-service action — `updateMyOfficeAction` in
+  `src/app/(app)/account/actions.ts` — writes `officeId` on the
+  SIGNED-IN user's own row only, ever. Surfaced as a small "Based out of"
+  card (`account/office-picker.tsx`) on `/account` — personal preferences
+  live there, company-wide config lives in Settings.
+- **Address heuristic** (`looksLikePhysicalAddress` in
+  `calendar-actions.ts`): a real street address usually carries a digit
+  (street number) and/or a comma (separating street/city/state); a Zoom
+  link, Meet/Teams URL, or bare room name usually has neither and is
+  rejected outright by an `http(s)://` / known-meeting-domain check first.
+  Loose by design — false positives just mean an extra (freely-deletable)
+  travel block; false negatives just mean none gets added.
+- **Fallback office**: if the signed-in user has no `officeId` set, the
+  travel block falls back to the quote-default office
+  (`quoteOrigin()`, same office Estimating/pricing already treats as the
+  default travel origin). If there is truly no office configured anywhere,
+  the travel block is skipped with no error — the meeting still saves.
+- **Free-text address -> coordinates**: `estimate()`'s target wants
+  lat/lng, not a string, so the location is geocoded first via `geo.ts`'s
+  existing `search()` (Nominatim) before calling `estimate([office],
+  {lat, lng})`. `search()` already fails soft (empty array) on a network
+  hiccup or an unresolvable address, which is exactly the "skip silently"
+  behavior this feature needs.
+- **Create only, not update.** `addCalendarEventAction` adds the travel
+  block; `updateCalendarEventAction` does not regenerate one when
+  `location` changes, to avoid piling up a new block on every edit with no
+  reliable way to tell an address change from an unrelated edit, and no
+  link from a travel block back to its meeting to find/replace the old
+  one (by design — it's an ordinary, unlinked, freely-removable event).
+  Logged as a known limitation, not fixed here.
+- **Failure is always silent and non-blocking.** `addTravelBlock` runs
+  after the real meeting event is already saved and is wrapped in its own
+  try/catch — a missing office, a geocoding miss, or a Calendar API error
+  never fails or blocks meeting creation.
+- **`schedule/actions.ts` (crew/install board) is out of scope.** Its
+  `calendarEvent()` never sets a `location` at all — those are crew shift
+  bookings ("Peak crew booking for <person>. Project <id>."), not
+  "meetings with a physical address" in Jeff's sense. Left untouched.
+
+No schema/migration change — `users.officeId` already existed.
+
+## D147. Grid Task 1 — generated base sheet (2026-09-21)
+
+Punch #38 (Task 1 of 6, per
+`docs/superpowers/plans/2026-09-21-grid-generated-base-sheet-plan.md`):
+replaces the dims-blind blank-rectangle default sheet with one rendered
+from the venue's actual `VenueDims`/`AState`, correctly scaled, with zero
+calibration step before painting.
+
+- **String-builder serializer, not React SSR.** New `renderPlanSvgMarkup()`
+  in `plan-svg.tsx` walks the same `rects`/`lines`/`circles`/`texts`/`paths`
+  arrays `<PlanSvg>` already renders and hand-builds the `<svg>…</svg>`
+  markup string. Rejected `react-dom/server`'s `renderToStaticMarkup`: the
+  caller is `grid-projects.ts`, a doc-store module with no request/render
+  context, invoked from a plain server action at intake-save time — there's
+  no natural place to renderToString into, and pulling `react-dom/server`
+  into a lib module for one static `<svg>` is a heavier dependency than a
+  ~40-line serializer over five already-typed primitive arrays. `handles`
+  (wall/door drag affordances) are deliberately excluded — a generated base
+  sheet is a static background image, like an uploaded plan; nothing on it
+  drags. `var(--font-mono)` (the interactive renderer's font) can't resolve
+  inside an `<img src="data:image/svg+xml…">` — that paints in its own
+  isolated context with no access to the host document's CSS custom
+  properties — so the static markup names `IBM Plex Mono, monospace`
+  directly instead.
+- **"First intake save" = `project.sheetIds.length === 0`.** `createProject()`
+  no longer pre-seeds any sheet/Space at all (previously unconditional,
+  before any dims existed — the literal cause of the old default being
+  dims-blind); every new project now opens straight into `GridIntake`
+  (`intake.complete` starts false) with an empty `sheetIds`. `saveGridIntakeAction`
+  checks `sheetIds.length` on the project as it stood *before* this save:
+  zero means this is the first completion, and it generates exactly one
+  starting sheet — `generateBaseSheet()` (measurementBased: true) or
+  `seedBlankSheet()` (measurementBased: false, "I have my own plan, skip
+  measurements" — no `VenueDims` yet to render, a real upload is expected
+  next). `GridIntake` has no re-entry path once `intake.complete` is true
+  (confirmed by grep — `saveGridIntakeAction` has exactly one caller), so in
+  practice this only ever fires once per project; the `sheetIds` check is a
+  belt-and-suspenders guard rather than a state machine this build needed to
+  invent.
+- **Auto-calibration reuses `calibrationScale()`**, the same function the
+  manual "measure a known reference" flow uses, rather than hand-deriving
+  each venue kind's private pixel-per-foot constant. Every `buildPlan*`
+  function's FIRST `rects[]` entry is the outer room/house floor — for a
+  proscenium house that's `width + 2×wing` (the house is wider than just the
+  proscenium opening); for every other kind it's exactly `width` — a
+  reference that holds across venue kinds without reaching into each
+  builder's private margin constants (`ML`/`MR`, not exported). The
+  resulting `Calibration` is written straight onto the new sheet, so
+  `findCalibration` short-circuits and nothing downstream ever prompts for
+  a calibration step on it.
+- **Geometry-derived starter Spaces for proscenium and church only.**
+  `prosGeom()`/`churchGeom()` are already exported specifically for reuse
+  (drag math), so building "Stage"/"Audience view"/"FOH · control" from
+  their `.stage`/house/booth fields — normalized by the same plan `W`/`H` —
+  was a genuinely small addition, and lands those three Spaces roughly where
+  the real stage/house/booth actually are instead of arbitrary fixed
+  fractions. The other buildable kinds (flat/conference, blackbox, gym)
+  compute their room/booth geometry as private local variables inside their
+  own `buildPlanFlat`/`buildPlanBlackbox`/`buildPlanGym` — there's no
+  exported equivalent to reuse, and adding one for three more kinds is real
+  geometry work, not a small addition. They keep the pre-existing
+  fixed-fraction Spaces. **Follow-up, not built here:** export a geometry
+  helper (or promote a `.stage`/room field onto `PlanData` itself) for
+  flat/blackbox/gym so their starter Spaces can be geometry-derived too.
+- Church's booth bottom edge (`y1 + boothH`) is recomputed locally in the
+  new `starterSpaces()` rather than added to `churchGeom()`'s return shape —
+  `churchGeom` already computes it as a local `yBoothBottom` it just never
+  returned; changing plan-svg.tsx's own geometry function's public shape for
+  one external caller felt like more churn than repeating one addition.
+
+No schema/migration change — `generateBaseSheet`/`seedBlankSheet`/
+`starterSpaces` write into the existing `grid_projects`/`grid_sheets`
+doc-store collections and the existing `Calibration`/`GridSpace` shapes,
+nothing new.
+
+**Addendum (Task 3, same plan, 2026-09-21):** "real-plan-upload creates a
+separate sheet" turned out to be pure UI copy, exactly as the plan's own
+recon predicted — no new decision number warranted. `addSheet()`/
+`addSheetAction` already append to `sheetIds` without ever touching
+`placements`, and the sheet-`<select>` in `editor.tsx` already lists every
+sheet by its own `name` (an uploaded sheet is already named from
+`file.name` in the client's `upload()`, a generated base sheet is named
+`"Generated base plan"` per `generateBaseSheet()`'s `addSheet()` call) — so
+switching between a generated base sheet and an uploaded one already
+worked correctly before this task touched anything. The only real gap: the
+"+ Plan sheet" button gave no indication that clicking it, once a project
+already has one or more sheets, adds an ADDITIONAL sheet rather than
+replacing what's open. Fixed with copy only: the button now reads
+"+ Additional sheet" (vs. "+ Plan sheet" when the project has none yet) and
+carries a `title` tooltip spelling out that upload is additive and leaves
+existing sheets/placements untouched; the sheet `<select>` gained a
+`title` tooltip to the same effect once there's more than one sheet to
+switch between. No stale "replace the plan" copy was found anywhere in the
+Grid editor to correct — there wasn't one. No files besides `editor.tsx`
+touched; no schema change.
+
+## D148. Google Tasks two-way sync for the Home Queue (2026-09-21)
+
+Jeff: "This needs to be implemented with google tasks... work that way [like
+the Apple Reminders queue sync]." The Reminders side (D93, punch #115) only
+covers Jeff's Mac; everyone else — and Jeff on days he's not near that
+Mac — gets nothing. Google Tasks has a real cloud REST API, so the same
+Home Queue mirror can run server-side for any team member who opts in.
+
+- **Reuse the personal Gmail connection + incremental scope, not a new
+  connection type.** `src/lib/gmail/config.ts` already has the shape for
+  this exact move (D77's `CALENDAR_SCOPE`/`hasCalendarScope()`, added to an
+  existing `personal:<userId>` `gmail_connections` row via
+  `include_granted_scopes` so re-consenting never drops the Gmail — or
+  Calendar — grant already on file). Google Tasks gets the identical
+  treatment: `TASKS_SCOPE` (`.../auth/tasks`) + `hasTasksScope()`, and
+  `/api/gmail/connect` now accepts `?tasks=1` alongside `?calendar=1` (both
+  may be passed together). No new table, no new mailbox-key scheme — a user
+  who wants Tasks sync re-runs the SAME connect flow their Gmail connection
+  already uses, with one more scope appended. Shared mailboxes (sales/
+  installs/info) don't get this — Tasks sync only makes sense for a person's
+  own queue, and `SHARED_KEYS` is retired anyway (D-whatever retired shared
+  boxes; kept empty in config.ts).
+- **List naming: "Peak", matching the Reminders agent.** `scripts/
+  reminders-agent.ts` defaults `QUEUE_AGENT_LIST` to "Peak". `src/lib/
+  google/tasks.ts` hardcodes the same name (`PEAK_LIST_NAME`) rather than
+  making it configurable — one fewer env var, and a person who ends up using
+  both integrations (unlikely but possible) sees one familiar list name
+  either place.
+- **Two-way restricted to `source: "assignment"` items**, identically to
+  the Reminders agent and for the identical reason: `/api/queue`'s own
+  write-back check only allows completing `assignment:*` keys, so even a
+  bug in the Tasks sync can't approve a review or close a milestone by
+  checking off a mirrored task. `Assignment.doneVia` (`src/lib/stores/
+  assignments.ts`) widens from `"app" | "reminders" | null` to add
+  `"google-tasks"` — a type-only change, no migration; `setAssignmentDone`'s
+  `via` parameter widens to match.
+- **Triggered from the existing Gmail cron, not a new one.**
+  `vercel.json` has exactly one cron entry today (`/api/gmail/sync`, daily
+  at noon, `CRON_SECRET`-gated) — there is no 5-minute Gmail cron in this
+  repo despite older doc comments describing that cadence; whatever's true
+  of a hosting tier's cron limits, adding a second entry is more moving
+  parts than this needs. `syncAllGoogleTasks()` (new,
+  `src/lib/google/tasks-sync.ts`) runs as an extra step inside `/api/gmail/
+  sync`'s existing `GET` handler, wrapped in its own try/catch so a Tasks
+  failure can never fail the Gmail sync that route exists for. It fans out
+  over every `gmail_connections` row with `hasTasksScope(scope)` true,
+  resolving each to a team-member name via `getUser()` (the `assignee`
+  convention `loadQueue()` already keys on) and calling
+  `syncGoogleTasksForUser(userId)`.
+- **Dedupe marker reused verbatim.** Google Tasks' `notes` field gets the
+  same `peak-queue-key: <key>` line `reminders-agent.ts` writes into a
+  Reminders body, re-derived from Google's list on every run — same
+  debugging story across both integrations (grep the task/reminder body for
+  the key).
+- **Known, deliberate gap vs. Reminders: no hand-delete ledger.** The
+  Reminders agent keeps a small local JSON ledger whose only job is telling
+  "hand-deleted, still open" apart from "never created" (Reminders' own
+  state can't distinguish them). This module has no equivalent — deleting a
+  mirrored Google Task outright gets it recreated next run. Building the
+  ledger equivalent here would mean a new doc-store collection (a real
+  schema change) for an edge case nobody asked for; checking a task off
+  (the supported, and expected, way to act on one) works correctly without
+  it. Revisit if hand-deleting mirrored tasks turns out to be a real habit.
+- **No schema/migration change.** Everything needed fits in the existing
+  `gmail_connections.scope` string (the new scope literal) plus the
+  `doneVia` type widening above (TypeScript-only). `db:generate` was not
+  run.
+
+**Files:** `src/lib/gmail/config.ts`, `src/app/api/gmail/connect/route.ts`,
+`src/lib/google/tasks.ts` (new), `src/lib/google/tasks-sync.ts` (new),
+`src/app/api/gmail/sync/route.ts`, `src/lib/stores/assignments.ts`,
+`src/app/(app)/settings/page.tsx`, `src/app/(app)/settings/settings-client.tsx`.
+
+## D149. Grid Task 2 — "generate starting layout from dims" seeds placeholder devices, not guessed SKUs (2026-09-21)
+
+Punch #38 (Task 2 of 6, per
+`docs/superpowers/plans/2026-09-21-grid-generated-base-sheet-plan.md`),
+built on Task 1's generated base sheet (D147). New `seedStartingLayoutAction`
+translates `compute(a)`'s real fixture/curtain quantities — the same numbers
+the Quick Design BOM already prices — into real, editable `GridPlacement`s
+on the base sheet, gated on `project.intake.measurementBased` and confirmed
+before writing (editor.tsx's "Generate starting layout" trigger).
+
+- **No catalog SKU is invented — placeholder placements, exactly per
+  punch #52's rule.** The plan's own recon flagged this as the highest-risk
+  part of the build: there is no reliable mapping from "compute() says 2
+  electrics" to one specific catalog part. The Grid's own device catalog
+  (`grid_catalog`/`GridSymbol`, `src/lib/stores/grid-catalog.ts`) makes this
+  worse, not better — it's normally seeded 1:1 from the ~10.7k real pricing
+  rows, so there is no generic "a Par" symbol to point at either (the four
+  `GRID-*` generic symbols in that file only get created when the pricing
+  catalog is empty, which it never is in practice). Rather than picking an
+  arbitrary specific manufacturer SKU and presenting it as "the" answer,
+  every seeded placement's `partId` is a stable, obviously-non-catalog
+  placeholder (`grid-seed:<system-function>`, `SEED_PART_PREFIX` in the new
+  `src/lib/design/grid-seed.ts`) that can never resolve against
+  `parts`/`grid_catalog`. The placement's real, human label (e.g. "Par",
+  "Grand drape" — reused verbatim from `compute()`'s own BOM item
+  descriptions) rides on the EXISTING `category` field instead — punch
+  #41/#48's "assign now, consume later" field turns out to be exactly the
+  right home for "this needs a part." A user resolves one the same way they
+  always fix a wrong device today: delete the placement and drop a real
+  catalog part in its place (no new "reassign part" action was built — none
+  existed before this task either).
+  - Known, accepted rough edge from this choice: `grid-bom.ts`'s existing
+    "removed part" fallback copy (`` `${partId} (removed part — no longer
+    in the catalog)` ``) will show for any seeded-but-unresolved placement
+    that reaches a BOM/quote screen, worded for a part that used to exist
+    rather than one that never did. Not fixed here — `grid-bom.ts` and
+    `createDraftQuoteAction` are Task 5's extraction target, not Task 2's,
+    and copy-only. The editor's own device marker and detail panel (both
+    touched by this task) DO show the friendly category label and an
+    explicit "delete and drop a real catalog part here" message instead of
+    that fallback — see `isSeedPlaceholder()`.
+  - **Fixed on review, same day:** minting a quote before resolving every
+    seeded placeholder would have gotten $0 BOM lines for them silently
+    (`bomTotals` falls back to `0` for an unresolved `partId`) — the exact
+    "unresolved input silently zeros a real number" shape #64 already ruled
+    out for fabric weight. `createDraftQuoteAction` now hard-fails with a
+    named list of the still-unresolved devices (by their `category` label)
+    instead of pricing them at zero and letting a quote go out short. The
+    Task-5 `grid-bom.ts`/`createDraftQuoteAction` extraction (still open)
+    should carry this guard forward rather than drop it.
+- **Positions reuse `buildPlanProscenium`'s own rigged-electrics/curtain
+  fracs, generalized off `prosGeom`/`churchGeom`'s exported `stage` rect —
+  not re-derived.** Lighting fixtures are spread across the venue's
+  electrics rows at the SAME per-row fraction
+  (`(electrics - j) / (electrics + 1)`) and the same within-row width
+  spacing plan-svg.tsx's decorative dots use, but sized to compute()'s REAL
+  per-type fixture quantity (Par/Front/Cyc/Side/Automated) instead of the
+  cosmetic dot count — this is the actual "quantities become real devices"
+  fix the spec asked for. Curtains reuse the exact fixed fracs
+  `buildPlanProscenium` hardcodes (0.95 grand drape, 0.5 mid traveler,
+  [0.74, 0.48, 0.22] border/legs, 0.05 cyc/scenery) rather than scaling with
+  the BOM's depth-block-multiplied qty — those fracs are a fixed schematic
+  set with no natural extension to "N more of them," and inventing new
+  curtain positions would be exactly the un-founded geometry this task was
+  told to avoid.
+- **Scoped to Lighting + Curtains only.** Audio/Video/Rigging/Acoustical/Pit
+  have no per-device position anywhere in this codebase — `buildPlan()`
+  prices them as lump BOM totals, never draws an individual mark for one.
+  Seeding those would mean inventing brand-new plan-view geometry from
+  scratch, which is the opposite of this task's mandate. Follow-up, not
+  built here.
+- **Three more accepted, low-probability rough edges from review**, in the
+  same spirit as the above (not fixed, since each needs meaningfully more
+  machinery than this task's mandate for a cosmetic or user-recoverable
+  failure mode): the curtain fracs above are copy-pasted literals rather
+  than an imported reference to `plan-svg.tsx`'s own constants, so the two
+  could silently drift apart if that file's schematic positions ever
+  change; a dimension change followed by a re-run only ADDS the delta and
+  never removes now-excess placements from a shrunk quantity (the user
+  deletes the extras by hand, the same as removing any wrong device today);
+  and `addPlacements()`'s single-batch `patchDoc` has no explicit item-count
+  ceiling, bounded in practice only by `compute()`'s own realistic output.
+- **flat/blackbox/gym/arena get a fallback stage rect, not real geometry** —
+  literally the same `{x:0.2,y:0.12,w:0.6,h:0.28}` fraction
+  `starterSpaces()` (D147) already uses for those kinds' "Stage" Space, for
+  the identical reason D147 gave: those `buildPlan*` functions compute their
+  room/platform rect as private locals with no exported equivalent to
+  `prosGeom`/`churchGeom`, and reverse-engineering each one's private
+  margins for a second feature is real geometry work this task didn't scope
+  for either.
+- **Additive re-run is a true per-instance diff, not a coarse "skip if
+  anything's already seeded" guard.** Every `GridPlacement` created by this
+  action carries a new `seededFrom` key (e.g. `"lighting:par:2"`,
+  `"curtains:border:1"`) — stable identity independent of its position, so a
+  hand-dragged seeded device is still recognized as seeded. A re-run (e.g.
+  after the user edits dims and re-saves intake, changing compute()'s
+  counts) diffs the freshly-derived set against every `seededFrom` already
+  on the project and adds only the genuinely new keys. Never auto-deletes:
+  if a dimension change means fewer fixtures are implied, the excess
+  previously-seeded devices stay on the plan for the user to remove by
+  hand — consistent with every other Grid mutation being an explicit,
+  reversible user action (revisions are append-only; nothing here silently
+  discards a prior placement).
+- **New bulk `addPlacements()`, not N calls to `addPlacement()`.** A single
+  seed run can place on the order of a hundred devices (fixture qty maxes
+  are unbounded by the seeding logic itself, though the estimator's own
+  `LIM` dimension clamps keep the real-world ceiling well under that); one
+  `patchDoc` for the whole batch avoids dozens of sequential JSONB rewrites
+  for one user action.
+- **The client-side confirm count runs the SAME pure `deriveSeedPlacements`
+  the server action does** (editor.tsx's `pendingSeed`), so the confirm
+  prompt's "adds N devices" always matches what the click will actually
+  write, and a no-op re-run says "already up to date" instead of silently
+  doing nothing.
+
+No schema/migration change — `GridPlacement.seededFrom` is a new optional
+field inside the existing `grid_projects` JSONB doc, not a relational
+column. `db:generate` was not run.
+
+**Files:** `src/lib/design/grid-seed.ts` (new), `src/lib/stores/
+grid-projects.ts` (`GridPlacement.seededFrom`, `addPlacements`),
+`src/app/(app)/design/grid/[id]/actions.ts` (`seedStartingLayoutAction`),
+`src/app/(app)/design/grid/[id]/editor.tsx` (trigger + confirm, placeholder-
+aware marker/detail-panel labels), `src/app/(app)/design/grid/[id]/page.tsx`
+(`measurementBased` passed to the editor).
+
+## D150. Connect additional Google accounts to subscribe to their calendars — Calendar tab only (2026-09-21)
+
+Punch #117 (new; closes the "multiple calendars" + "slide-out filter rail"
+parts of #108 — the "shared team calendar" part of #108 stays open, see
+below). Jeff: "We need a way to log into multiple google accounts and
+subscribe to other calendars via the calendar tab only so you can sync
+other calendars in one place." Distinct from D77/D76's existing "Enable
+calendar" opt-in, which reads the ONE Google account already tied to a
+mailbox's Gmail connection — this is about connecting EXTRA accounts (a
+personal Gmail, a family calendar, a shared team calendar's owning
+account, ...) purely to view their calendars, with no mail semantics.
+
+- **New `calendar_connections` table, not a row in `gmail_connections`.**
+  That table's primary key (`mailboxKey`) and shape (`historyId`,
+  `initialImportDone`, `lastSyncAt`) are Gmail-inbox-import specific and
+  would be actively misleading here: a calendar-only connection has no
+  inbox, isn't necessarily even the signed-in user's own Peak-login
+  Google account (Google's consent screen is shown with no `login_hint`,
+  on purpose, so the user can pick ANY account), and is always personal to
+  whoever connected it — never a shared mailbox. `calendars` (JSONB) holds
+  the discovered `calendarList.list` entries plus the user's own
+  visible/colorOverride prefs per sub-calendar, on the same row as the
+  connection rather than a separate table: the two are always read and
+  written together, and the list is small (a handful of calendars per
+  account) — nothing ever needs to query one sub-calendar across users.
+- **Read-only scope (`calendar.readonly`), never `calendar.events`.** This
+  feature subscribes/views; it never writes an event into someone else's
+  externally-connected account. `addCalendarEventAction`'s existing
+  travel-time-block feature (D146) is untouched and keeps writing only to
+  the signed-in user's OWN primary mailbox calendar via the existing
+  `CALENDAR_SCOPE`/`gmail_connections` path.
+- **OAuth mechanics reused, not reimplemented — but folded into the
+  EXISTING gmail connect/callback routes with a discriminated state,
+  rather than a new route pair.** `exchangeCode`/`refreshAccessToken`/
+  `fetchAccountEmail` (lib/gmail/oauth.ts) are called verbatim — they were
+  already generic. `authorizeUrl` gained an optional `baseScopes` param
+  (defaults to `GMAIL_SCOPES`, so every existing caller is unaffected) so
+  this flow can request `calendar.readonly` alone instead of the Gmail
+  scope bundle. State signing is a NEW parallel type
+  (`CalendarConnectState`, `signCalendarConnectState`/
+  `verifyCalendarConnectState`) rather than widening the existing
+  `ConnectState` — same HMAC scheme (`stateSecret()`, reused) but a
+  distinct, explicit `purpose: "calendar-connect"` literal that the
+  callback route checks at RUNTIME (not just via a TypeScript cast, since
+  both state shapes are signed with the same secret and a valid
+  gmail-connect state's bytes would otherwise also pass a naive signature
+  check). `/api/gmail/connect?purpose=calendar-connect` and the existing
+  `/api/gmail/callback` (which tries `verifyCalendarConnectState` FIRST,
+  before its `gmailEnabled()` gate) handle both flows — deliberately no
+  new redirect URI, so nothing new needs registering in Google Cloud
+  Console's OAuth client; only the new scope needs adding to the consent
+  screen's scope list (see "Jeff-side" note below).
+- **`lib/google/calendar.ts`'s low-level fetch was generalized; its
+  higher-level exports were NOT.** `gcal()`'s fetch/error-handling was
+  extracted into `callGoogleCalendarApi(token, ...)`, shared by the
+  existing mailbox-keyed `gcal()` and a new `gcalExternal()` that resolves
+  its token from a `calendar_connections` row instead. The existing
+  exported functions (`listUpcomingEvents`, `insertEvent`, `getEvent`,
+  `updateEvent`, `deleteEvent`, `upsertManagedEvent`, `removeManagedEvent`)
+  keep their exact signatures — widening them to accept either token
+  source would have touched every caller across `schedule/actions.ts`,
+  `service-calendar.ts`, `visit-invite.ts` and `calendar-actions.ts` for no
+  behavior change. Instead, two new read-only exports:
+  `listCalendarsForConnection`/`listCalendarsWithAccessToken`
+  (`calendarList.list`) and `listEventsForExternalCalendar` (arbitrary
+  `calendarId`, not hardcoded `primary`) — sharing `toCalendarEvents()`'s
+  mapping logic with `listUpcomingEvents`.
+- **Default visibility on connect: primary calendar on, everything else
+  off.** Same "add noise gradually" reasoning as other opt-in defaults in
+  this codebase — a fresh Google account can have a dozen auto-subscribed
+  holiday/shared calendars, and showing all of them immediately would
+  bury the one calendar the user actually wanted. `refreshCalendarList`
+  (a "Refresh calendars" action in the rail) applies the same rule to any
+  newly-discovered calendar on a later refresh, while calendars the user
+  already toggled keep their prefs.
+- **`loadAgendaRange` (`lib/agenda.ts`) gained a third `AgendaItem.source`,
+  `"external"`,** carrying `{connectionId, calendarId, color}`. No dedup is
+  attempted against `"google"`/`"visit"` — an externally-subscribed
+  calendar is by definition not an account anything else here writes to
+  or mirrors, so there's no id/iCalUID relationship to de-duplicate
+  against. Independent of `gmailEnabled()`/`GMAIL_ENABLED`: a deployment
+  with Gmail off entirely can still have calendar connections, since this
+  feature needs only `googleConfigured()` (the shared Google OAuth client
+  creds), not the Gmail opt-in.
+- **Management UI: a right-side slide-out filter rail on the Calendar tab
+  itself** (`calendar-filter-rail.tsx`, opened from a new "Calendars"
+  button in `calendar-client.tsx`'s header) — not the Account page. Jeff's
+  own phrasing ("via the calendar tab only") and punch #108's original ask
+  (a slide-out filter sidebar) both pointed here directly, and the rail's
+  job (connect/disconnect accounts, toggle each sub-calendar's visibility,
+  pick a color) is naturally scoped to the Calendar tab rather than a
+  general account setting. This closes the "toggle and add calendars" +
+  "filter sidebar that slides out" parts of punch #108.
+- **NOT built: a shared team calendar anyone can add events to.** Punch
+  #108 also asked for "a shared calendar option that allows people to add
+  the event to the shared calendar for group events" — that's a distinct,
+  bigger feature (either a real shared Google Calendar someone owns, or a
+  new Peak-side shared-events collection) with its own write/permission
+  model, not a subscribe-only read feature. Left open; #108's entry is
+  updated to reflect exactly this split.
+- **Jeff-side Google Cloud action needed, same shape as every prior
+  scope addition (Gmail/Calendar-events/Tasks):** the OAuth consent
+  screen's scope list needs `.../auth/calendar.readonly` added before this
+  works in production, the same way `calendar.events` (D77) and
+  `tasks` (D148) each needed adding. No NEW redirect URI is needed (see
+  above) — that part is simpler than the Gmail/Tasks scope additions were.
+  For a non-Workspace ("External" user type) OAuth consent screen still in
+  "Testing" mode, `calendar.readonly` is a non-sensitive/recommended scope
+  Google generally allows without a verification review; if the screen has
+  already gone through verification for the broader `calendar.events`
+  scope, adding the narrower `calendar.readonly` alongside it should not
+  trigger a new review. This is Jeff's action to confirm in his own Cloud
+  console, not something verifiable from this repo.
+
+**Files:** `src/db/schema.ts` (`calendarConnections` table,
+`CalendarSubscription` type; migration `drizzle/0019_sleepy_dust.sql`),
+`src/lib/gmail/oauth.ts` (`authorizeUrl` baseScopes param,
+`signCalendarConnectState`/`verifyCalendarConnectState`),
+`src/lib/gmail/config.ts` (`CALENDAR_READONLY_SCOPE`),
+`src/lib/google/calendar-connections.ts` (new), `src/lib/google/
+calendar.ts` (`callGoogleCalendarApi`/`gcalExternal`,
+`listCalendarsForConnection`/`listCalendarsWithAccessToken`/
+`listEventsForExternalCalendar`), `src/app/api/gmail/connect/route.ts`
+(`startCalendarConnect`), `src/app/api/gmail/callback/route.ts`
+(`finishCalendarConnect`), `src/lib/agenda.ts` (`AgendaItem.source`
+`"external"`), `src/app/(app)/calendar-actions.ts` (connection/visibility/
+color/disconnect/refresh actions), `src/app/(app)/calendar/calendar-
+client.tsx` (external item rendering, "Calendars" button),
+`src/app/(app)/calendar/calendar-filter-rail.tsx` (new),
+`src/app/(app)/calendar/page.tsx` (fetches initial connections).
+
+## D151. Reusable task templates for projects, quotes, and designs — assignable by person, role, or "everyone" (#118, 2026-09-21)
+
+Jeff (verbatim): "I want to be able to add template tasks to projects, quotes, and designs that
+can be assigned based on groups, people, or teams." Distinct from tasks.ts's existing
+`TASK_TEMPLATE` constant, which stays completely untouched: that's a hardcoded, per-project-stage
+checklist where every item is unassigned. This is a NEW, admin-editable, cross-record mechanism.
+
+- **New doc-store collection `task_templates`** (`taskTemplates` in db/doc-tables.ts,
+  `TT-###` ids from base 100), holding named, reusable `TaskTemplateSetRecord`s: `name`,
+  `description`, `appliesTo` (`project`/`quote`/`design`, one set can cover more than one),
+  `lines` (`{ key, title, section, target }`), and `archived` (hides a set from "Apply template"
+  pickers without deleting it — a project applied months ago should keep showing where its tasks
+  came from). Migration `drizzle/0020_odd_crusher_hogan.sql`, with the table's `..._seq_bump`
+  trigger hand-added per the note in 0012_seq_bump_trigger.sql (drizzle-kit doesn't manage
+  triggers). Not added to `SYNCABLE_COLLECTIONS`/`FIELD_COLLECTIONS` — this is admin-authored data,
+  not offline field capture.
+- **Assignment-target mapping — person / role / "everyone", not a real department/crew concept.**
+  Grepped the `users` table (`src/db/schema.ts`) and `src/lib/team.ts` before designing this: there
+  is no field grouping users into Sales/Design/Install/Service or any other "team" distinct from
+  the permission-oriented `Role` enum (Admin/Manager/Estimator/Reviewer). So:
+    - **person** = a specific `assigneeUserId`, exactly like a manually created task.
+    - **role** = one task PER active user holding that `Role` — a fan-out, not one shared/
+      unassigned task. An unassigned task shows up nowhere useful for anyone in the existing
+      Home Queue / task-list model, so "assign to the Estimator role" has to mean "give every
+      current Estimator their own copy," not "create one ownerless row."
+    - **team / "everyone"** = the same fan-out to every active user.
+  This is the closest fit to "groups, people, or teams" the real data model supports. **Genuine
+  department/crew grouping is NOT built** — that's a bigger, separate ask (a new grouping field on
+  `users`) and is logged here as an open follow-up needing Jeff's input on what a "team" should
+  mean beyond permission roles, rather than invented silently.
+- **Fan-out reuses tasks.ts's own `expandTemplate()` verbatim** — no signature change, so the
+  existing per-stage project auto-apply call site (`setProjectStage` in projects.ts) is untouched.
+  Each fanned-out instance (one per matching person) gets its own coverage-key: a person-target
+  line keeps the line's own `key`; a role/team line suffixes the user id (`key::userId`) so N
+  people never collide. The `stage` passed to `expandTemplate` is `tpl:<setId>:<kind>:<recordId>`,
+  so re-applying the SAME set to the SAME record is the only case that dedups — applying two
+  different sets, or the same set to two different records, never collides. This makes re-apply
+  additive: a newly-hired Estimator added to a role target after the first apply gets their task
+  on the next apply, and everyone else's rows are untouched (same idiom as the Grid's seeded-layout
+  re-run, D149, and the per-stage project template already in production).
+- **Quote task-linkage already existed** — punch #17's remainder shipped `quoteId` on `TaskRecord`
+  plus a working Tasks card in the estimator (`estimator-client.tsx`, `estimator/actions.ts`)
+  before this task started; the punchlist's audit note calling out "quotes have zero task UI" is
+  stale (dated 2026-07-29, before that remainder landed). Nothing needed adding there beyond the
+  new `applyQuoteTemplateAction` wrapper.
+- **Design task-linkage did NOT exist and was added**: `TaskRecord.designId: string | null` (new
+  nullable pointer, same no-FK convention as `projectId`/`quoteId`, D85) plus `tasksForDesign()`
+  in tasks.ts. No migration needed — `designId` lives inside the existing `tasks` doc's JSONB, not
+  a promoted column. The Design detail page (`design/designs/design-client.tsx`) gained its first
+  Tasks card (reusing the shared `TasksCard` component) and its first task server actions
+  (`design/designs/actions.ts`: `addDesignTaskAction`/`setDesignTaskStatusAction`/
+  `updateDesignTaskAction`), FormData-shaped to match `TasksCard`'s contract even though the rest
+  of that file uses typed-argument actions (`submitDesignReviewAction(id, ...)` etc.) — `TasksCard`
+  requires the FormData shape regardless, same as the estimator's quote-task wrappers already do.
+- **New shared `ApplyTemplateControl` component** (`src/components/apply-template-control.tsx`) —
+  a plain server-action form (name-a-set, hit Apply; renders nothing when no sets apply to that
+  record kind) placed next to the Tasks card on all three entry points: the project detail
+  (`projects/view.tsx`), the quote builder (`estimator/estimator-client.tsx`), and the design
+  detail (`design/designs/design-client.tsx`). Each parent type owns its own thin
+  `applyTaskTemplate()` wrapper action (`applyProjectTemplateAction`, `applyQuoteTemplateAction`,
+  `applyDesignTemplateAction`) — same "each route keeps its own use-server file" convention
+  `TasksCard`'s add/status/update actions already follow. Applying a template requires only being
+  signed in (`requireUser()`), matching every existing manual-task action's permission level — no
+  extra gate beyond what adding a task by hand already requires.
+- **Admin authoring UI lives at `/task-templates`** (new Settings → Admin screen, added to
+  `ADMIN_SCREENS` in `settings-sections.ts` and the nav-highlight map in `nav-data.ts`), gated on
+  `manage_users` — the closest existing permission fit (`Perm` in `lib/team.ts` has no dedicated
+  "manage templates" permission, and this screen edits data every team member's tasks are minted
+  from, the same sensitivity class as Estimating Rules and the team roster). Mirrors the
+  design/assemblies `AssemblyBuilder` pattern (`assembly-builder.tsx`) rather than Estimating
+  Rules' per-field editor: a template set is a small whole document (name/description/appliesTo/
+  lines), edited entirely client-side and saved as one unit via `saveTaskTemplateSetAction`, rather
+  than a form-per-field round trip.
+
+**Files:** `src/db/doc-tables.ts` (`taskTemplates`, `task_templates` in `DOC_TABLES`),
+`drizzle/0020_odd_crusher_hogan.sql` (new, + hand-added trigger), `src/lib/stores/tasks.ts`
+(`TaskRecord.designId`, `tasksForDesign`), `src/lib/stores/task-templates.ts` (new — CRUD +
+`applyTaskTemplate`), `src/components/apply-template-control.tsx` (new),
+`src/app/(app)/task-templates/{page.tsx,actions.ts,template-sets-client.tsx}` (new),
+`src/app/(app)/settings/settings-sections.ts`, `src/components/nav/nav-data.ts`,
+`src/app/(app)/projects/{data.ts,view.tsx,actions.ts,page.tsx,[id]/page.tsx}`,
+`src/app/(app)/estimator/{page.tsx,types.ts,estimator-client.tsx,actions.ts}`,
+`src/app/(app)/design/designs/{page.tsx,design-client.tsx,actions.ts}`,
+`src/app/(app)/field-work/controls.tsx` and `scripts/test-review-and-spec.ts` (fixture/assertion
+updates for the new `designId` field and the fifth Admin screen).
+
+**Open follow-up for Jeff (logged, not built):** a real department/crew grouping distinct from the
+permission `Role` enum, if "team" is meant to mean something narrower than "everyone" or a
+specific role (e.g. a Design crew vs. an Install crew that doesn't map to Estimator/Manager/etc.).
+
+**Fixed on review, same day:** `applyTaskTemplate` minted tasks against whatever `target.id` a
+caller passed without confirming the record actually existed (or was really the kind claimed) —
+a stale/mistyped id would have silently created tasks pointed at nothing anyone would ever read,
+rather than failing. It now loads the project/quote/design first and throws a named "could not be
+found" error if it's missing, before any task is created. The four thin wrapper actions
+(`applyProjectTemplateAction` etc.) are still void `FormData` handlers with no return channel for
+that thrown error — the SAME accepted trade-off already made across this codebase for this exact
+action shape (#85: "logged only, no code... the point of this entry is that the decision was made
+knowingly rather than papered over"), so this fix trades a silent wrong-behavior for a loud
+failure without expanding into the five-screens-of-error-UI #85 already declined to build.
+
+## D152. Recordings — in-app site-visit audio → Krisp transcription → write-back → Drive archive (#119, 2026-09-21)
+
+**Ask (Jeff, "Krisp API Integration Brief — Peak App Site Visits", 2026-09-21):** a rep records a
+site visit and the recording, transcript, summary, and action items land on that visit's record
+with no manual upload. Brainstormed and approved the same evening; the full design is
+`docs/superpowers/specs/2026-09-21-krisp-recordings-design.md`. Numbered D152 (not D150) because
+the main checkout already holds uncommitted D150/D151.
+
+**Defaults taken, and why:**
+
+1. **Generic parent, not site-visit-only.** New `recordings` doc collection (`REC-####`, base
+   9000) with `parentKind` ∈ site_visit | survey | inspection | flame_job | repair_job | project |
+   engagement. Jeff chose "any field record" over the brief's site-visit scope — same room, same
+   walkthrough. The D91 `recordingUrl` link on engagements is untouched.
+2. **Per-rep Krisp keys** (`krisp_connections`, AES-GCM via the Gmail `encryptToken`), pasted on
+   the Account page. Krisp keys are personal; the rate limit and the one-import-in-flight rule are
+   per account. `/me` cannot distinguish Read from Write scope, so the card says "must be a Write
+   key" and a Read key fails at first import with Krisp's 403 rather than at connect.
+3. **Approach A — Blob-staged single upload, server relay, poll-driven.** The phone uploads once,
+   straight to Vercel Blob via `@vercel/blob/client` (`/api/recordings/upload` brokers a scoped
+   token; middleware-exempt because Vercel's completion callback carries no session, so the
+   token branch authenticates itself via `auth()` + ownership). The server then `POST /import`s
+   and streams the Blob to Krisp's pre-signed URL. Results come back by polling (20 s client poll
+   on the detail page, a Home-load stale check, a step on the daily cron route) — Krisp webhooks
+   are static-header-only, per-rep manual setup, undocumented payload, so they are a follow-up
+   accelerator, not the delivery path. Jeff will upgrade Vercel for cron cadence if the pilot
+   works; nothing in the code depends on it.
+4. **Blob is staging; Drive is retention.** Nightly `archiveRecordings()` (≤5 per run, ≥6 h after
+   ready) uploads to Google Drive under `Peak Recordings/<Customer>/`, saves the link, and only
+   then deletes the Blob. Jeff's explicit ask ("minimize the amount of storage"). The archive
+   account is a Settings picklist over connected mailboxes with the new `drive.file` scope
+   (`?drive=1` on the connect route); recommended default is the shared sales box so recordings
+   stay company-owned. Dates in file names use America/Chicago.
+5. **Confirm-first, insert-on-tap.** Krisp action items land `pending`; Accept creates a Home
+   Queue assignment (source `Krisp REC-#### · <title>`, company link) that the existing Google
+   Tasks / Reminders syncs carry onward; nothing enters the queue untouched. Summary sections
+   route to Survey/Inspection fields by the deterministic `PREFILL_RULES` title table and are
+   appended only on Insert with a `[from REC-####]` marker — no silent writes, no numeric
+   extraction (D89: the app stays rules-based; Krisp is the only summariser).
+6. **Summary → customer feed note** posted once (`feedNoteId` guard) when a customer is known.
+7. **Native recorder:** `@capgo/capacitor-audio-recorder` (file output, iOS background audio) +
+   `@capawesome-team/capacitor-android-foreground-service`; web MediaRecorder is the desktop
+   fallback only (WKWebView mutes the mic on lock). Native project edits are documented in
+   DEPLOY.md §6, not applied to ios/ or android/.
+8. **Pilot gate:** `recordingsBetaUsers` (Settings → Beta) limits the Record button to named
+   users; empty = everyone.
+
+**Follow-ups (not built):** Krisp webhooks; numeric extraction into typed fields; in-app audio
+playback; pull-and-match backfill of Jeff's existing Krisp mobile recordings; per-rep Drive
+archives; a PGlite-backed end-to-end test (the `deps` injection points exist).
+
+## D153. Native shell signs in through a Safari sheet and returns by `quartzite://auth` (2026-09-21)
+
+The Capacitor shell (D132) could not sign in: Capacitor hands any non-app host to the system
+browser, so Auth.js's state/PKCE cookies were set in the WebView while Google's callback landed in
+Safari. Verified on the iOS 27 simulator. Jeff chose to keep OAuth in a real browser context rather
+than spoof the WebView's user agent to satisfy Google's embedded-browser check.
+
+- **The whole round trip runs in an in-app Safari sheet** (`@capacitor/browser`,
+  SFSafariViewController): `GET /api/native/auth/start` calls Auth.js `signIn("google")` with the
+  hand-off route as `redirectTo`, so every Auth.js cookie lives in one jar.
+- **The session moves by copying the Auth.js session cookie verbatim**, chunks included, never by
+  re-encoding a JWT. `GET /api/native/auth/handoff` reads its own session cookie, wraps it in a
+  60-second AES-256-GCM code bound to a PKCE-style challenge, and serves a page that opens
+  `quartzite://auth?code=…`. `POST /api/native/auth/exchange` verifies the app-held verifier and sets
+  the same cookie in the WebView. Expiry and the per-request role refresh are unchanged.
+- **Stateless by design:** the code is encrypted with the existing `lib/gmail/crypto.ts` primitive
+  (key from `AUTH_SECRET`); no table, no migration, no new env var. `encryptWith`/`decryptWith`
+  now take the secret explicitly so the pure module is testable without env.
+- **Custom scheme, not Universal Links** — those need the paid Apple team; they are the upgrade path.
+- **Degrades, never throws:** every native call sits behind `isNativePlatform()` and
+  `Capacitor.isPluginAvailable`; an old binary falls back to the in-WebView `signIn`.
+- Bad GET input redirects to `/login?error=native` (so `test:smoke` covers the routes and a stray
+  visitor lands somewhere sensible); only the POST exchange returns JSON 400/401.
+- Android gets the manifest intent-filter in the same change but is not built or tested yet.
+- **Final review hardening:** the hand-off is bound to a flow that started at `/api/native/auth/start`
+  (a 5-minute `qz_native_challenge` cookie set there and required to match at handoff, so a drive-by
+  link to handoff can't mint a code over a visitor's session), and the exchange requires
+  `Content-Type: application/json` plus a same-origin `Origin` header (so a cross-site form can't set
+  a session cookie). Universal Links, once the paid Apple team lands, remove the duplicate-scheme risk
+  these two mitigate and are the eventual resolution.
+
+Spec: `docs/superpowers/specs/2026-09-21-native-auth-handoff-design.md`.
+
+## D154. Grid options are a tag on placements/routes, not nested documents; Manual intake asks venue + dims only (2026-09-21)
 
 Spec `docs/superpowers/specs/2026-09-21-grid-options-and-intake-branch-design.md` (Spec 1 of 3
 from Jeff's 2026-09-21 Grid brainstorm — Auto branch and proposal document follow).
@@ -2794,7 +3569,7 @@ from Jeff's 2026-09-21 Grid brainstorm — Auto branch and proposal document fol
   project has more than one option. Pricing moved verbatim into
   `src/lib/design/grid-quote.ts` (`buildGridQuote`) so it can be tested per option on a
   scratch DB (`npm run test:grid-options`).
-- **"Generate starting layout" removed from the editor** (D147's UI). It painted placeholder
+- **"Generate starting layout" removed from the editor** (D149's UI). It painted placeholder
   devices and ignored the chosen tier — the thing Jeff hit on 2026-09-21. `grid-seed.ts`
   and its action stay for Spec 2's real generator; the quote guard against unresolved
   placeholders stays because the punch branch's preview deploy may have written some.

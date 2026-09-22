@@ -10,6 +10,14 @@ import {
   domainOf,
   isPublicDomain,
 } from "@/lib/gmail/config";
+import {
+  pickSessionCookies,
+  challengeFor,
+  isChallenge,
+  mintHandoffCode,
+  redeemHandoffCode,
+  HANDOFF_TTL_MS,
+} from "@/lib/native-auth";
 import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
@@ -34,7 +42,40 @@ import {
   syncQuoteMirror,
 } from "@/lib/design/grid-options";
 import { DEFAULT_SETTINGS, DEMO_COLLECTIONS } from "@/db/seed-data";
-import { DOC_TABLES } from "@/db/doc-tables";
+import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "@/db/doc-tables";
+import { FIELD_COLLECTIONS } from "@/lib/sync/engine";
+import { canRecord } from "@/lib/settings";
+import {
+  blankAudio, blankKrisp, isArchivable, mergeActionItems, needsKrispCheck, normalizeRecording,
+  recordingParentLabel, recordingStatusChip,
+  type AudioState, type KrispNoteBlock, type KrispStatus, type RecordingActionItem, type RecordingRecord,
+} from "@/lib/stores/recordings";
+import {
+  buildRecordingTitle, extensionForMime, formatElapsed, recordingBlobPathname, uploadBackoffMs,
+  RECORDING_TITLE_MAX, UPLOAD_BACKOFF_MAX_MS,
+} from "@/lib/recorder/helpers";
+import {
+  actionItemKey, deriveSummary, matchAssignee, prefillInsertText, routePrefill, summarySearchText, summarySectionKey,
+} from "@/lib/krisp/derive";
+import {
+  createKrispClient, krispErrorFor, krispMeetingUrl, putToPresignedUrl,
+  KrispApiError, KrispAuthError, KrispBusyError, KrispForbiddenError, KrispNotReadyError, KrispRateLimitError,
+  type KrispTransport,
+} from "@/lib/krisp/client";
+import { hasDriveScope, DRIVE_SCOPE } from "@/lib/gmail/config";
+import {
+  DriveApiError, DRIVE_API_BASE, DRIVE_UPLOAD_BASE, driveFileLink, driveQuote, ensureFolder, folderQuery,
+  uploadFileResumable, type DriveFetch,
+} from "@/lib/google/drive";
+import {
+  archiveDateStamp, archiveFileName, archiveFolderKey, archiveRecordings, archiveSafeName, extForMime,
+  ARCHIVE_MAX_PER_RUN, ARCHIVE_MIN_AGE_MS, ARCHIVE_SKIP_NO_SCOPE, ARCHIVE_SKIP_NOT_CONFIGURED, ARCHIVE_SKIP_NOT_CONNECTED,
+  type ArchiveDeps,
+} from "@/lib/krisp/archive";
+import { INTEGRATION_CARDS } from "@/app/(app)/settings/settings-sections";
+import { applyPrefillToRecord, feedNoteText, summarySectionsWithKeys } from "@/lib/krisp/write-back";
+import { pollKrispImport, readyPayloadFromMeeting } from "@/lib/krisp/check";
+import { selectForReconcile } from "@/lib/krisp/reconcile";
 import { accentContrast } from "@/lib/color";
 import { emailFor, legacyEmailFor } from "@/lib/team";
 import { gridProjectsSeed } from "@/db/seeds/grid-projects";
@@ -89,7 +130,7 @@ import {
   assemblyUnitTotals,
   resolveFixtureAssemblies,
 } from "@/lib/fixture-assemblies";
-import { parseMaterialCsv } from "@/app/(app)/estimator/material-csv";
+import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv } from "@/app/(app)/estimator/material-csv";
 import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
 import { computeLabor, computeMob } from "@/app/(app)/estimator/pricing";
 import { readFileSync } from "node:fs";
@@ -127,7 +168,19 @@ ok(
   "material CSV preserves an optional product link"
 );
 const badMaterialCsv = parseMaterialCsv("description,quantity,unit_sell\nNo price,1,\nBad qty,zero,10");
-ok(badMaterialCsv.items.length === 0 && badMaterialCsv.errors.length === 2, "material CSV rejects rows without a sell price or valid quantity");
+ok(badMaterialCsv.items.length === 0 && badMaterialCsv.errors.length === 2, "material CSV rejects custom rows without a sell price or valid quantity");
+// #112: a catalog row needs only sku + quantity — description/unit/cost/sell
+// stay blank/0 for the estimator to fill from the catalog.
+const skuOnlyCsv = parseMaterialCsv("sku,quantity\nabc-100,4\nXYZ-9,zero");
+ok(skuOnlyCsv.errors.length === 1 && skuOnlyCsv.items.length === 1, "material CSV accepts a sku + quantity row and still rejects a bad quantity");
+ok(
+  skuOnlyCsv.items[0]?.sku === "abc-100" && skuOnlyCsv.items[0]?.qty === 4 && skuOnlyCsv.items[0]?.desc === "" &&
+    skuOnlyCsv.items[0]?.unit === "" && skuOnlyCsv.items[0]?.cost === 0 && skuOnlyCsv.items[0]?.price === 0,
+  "material CSV leaves description, unit, cost and sell blank on a sku-only row"
+);
+const templateCsv = parseMaterialCsv(MATERIAL_CSV_TEMPLATE);
+ok(templateCsv.errors.length === 0 && templateCsv.items.length === 2, "material CSV example template parses both its catalog and custom rows");
+ok(templateCsv.items[0]?.sku === "ABC-100" && templateCsv.items[0]?.price === 0 && templateCsv.items[1]?.price === 142.86, "material CSV example template: catalog row unpriced, custom row priced");
 
 /* --- Offline navigation contract --- */
 const serviceWorkerSource = readFileSync(join(process.cwd(), "public/sw.js"), "utf8");
@@ -543,11 +596,11 @@ ok(
   SETTINGS_SECTIONS.map((s) => s.key).join(",") === "general,team,admin",
   "Settings exposes general, team, admin sections in order",
 );
-ok(ADMIN_SCREENS.length === 4, "Admin lists exactly four screens");
+ok(ADMIN_SCREENS.length === 5, "Admin lists exactly five screens");
 ok(
   ADMIN_SCREENS.map((s) => s.href).join(",") ===
-    "/catalog,/templates,/estimating-rules,/import",
-  "Admin links Catalog, Templates, Estimating Rules, Import — by their own routes",
+    "/catalog,/templates,/estimating-rules,/task-templates,/import",
+  "Admin links Catalog, Templates, Estimating Rules, Task Templates, Import — by their own routes",
 );
 
 // ---- General dissolution (D99): the group is gone ----
@@ -1461,7 +1514,7 @@ import { CATEGORIES } from "@/lib/stores/notif-prefs";
   ok(rerun.length === 1 && rerun[0].coverageKey === "P-3001:signoff:punch", "tasks: coverage-key de-dup skips existing on re-entry");
 
   const mk = (o: Partial<TaskRecord>): TaskRecord => ({
-    id: "T-6000", title: "t", section: "Install", projectId: null, quoteId: null,
+    id: "T-6000", title: "t", section: "Install", projectId: null, quoteId: null, designId: null,
     coverageKey: null, assigneeUserId: null, assigneeName: "", dueAt: null,
     status: "open", notes: "", createdBy: "x", createdAt: NOW, updatedAt: NOW, doneAt: null, ...o,
   });
@@ -3183,6 +3236,47 @@ async function xlsxFixture(): Promise<Buffer> {
   ok(designPatchFromIntake({ projectName: "Already named", venueName: "X", locationName: "", a }).name === undefined, "grid-intake: a named design keeps its name");
   ok(designPatchFromIntake({ projectName: "Untitled system design", venueName: "", locationName: "Only campus", a }).name === "Only campus", "grid-intake: falls back to whichever cover field is filled");
   ok(TRACKABLE_SYS_KEYS.join(",") === "rigging,curtains,lighting,audio,video", "grid-scopes: TRACKABLE_SYS_KEYS is exported in the Scope panel's order");
+/* ---- native auth hand-off (spec 2026-09-21-native-auth-handoff) ---- */
+{
+  const secret = "spec-secret-not-real";
+  const secureSet = [
+    { name: "__Secure-authjs.callback-url", value: "x" },
+    { name: "__Secure-authjs.session-token.1", value: "part1" },
+    { name: "authjs.session-token", value: "insecure" },
+    { name: "__Secure-authjs.session-token.0", value: "part0" },
+  ];
+  const picked = pickSessionCookies(secureSet);
+  ok(
+    picked.map((c) => c.name).join(",") === "__Secure-authjs.session-token.0,__Secure-authjs.session-token.1",
+    "pickSessionCookies: prefers the __Secure- family, includes chunks in order, drops the insecure twin"
+  );
+  ok(
+    pickSessionCookies([{ name: "authjs.session-token", value: "v" }]).length === 1,
+    "pickSessionCookies: falls back to the plain family on http"
+  );
+  ok(pickSessionCookies([{ name: "other", value: "v" }]).length === 0, "pickSessionCookies: none -> []");
+
+  const verifier = "verifier-abc-123";
+  const challenge = challengeFor(verifier);
+  ok(challenge.length === 43 && /^[A-Za-z0-9_-]+$/.test(challenge), "challengeFor: 43-char base64url");
+  ok(challengeFor(verifier) === challenge, "challengeFor: deterministic");
+  ok(isChallenge(challenge) && !isChallenge("short") && !isChallenge(42), "isChallenge: shape check");
+
+  const cookies = [{ name: "__Secure-authjs.session-token", value: "eyJ.session" }];
+  const now = 1_800_000_000_000;
+  const code = mintHandoffCode({ cookies, challenge, next: "/field-work", now }, secret);
+  ok(!code.includes("eyJ.session"), "mintHandoffCode: cookie value is not visible in the code");
+  const good = redeemHandoffCode(code, verifier, secret, now + 5_000);
+  ok(good.ok && good.cookies[0].value === "eyJ.session" && good.next === "/field-work", "redeem: round trip returns cookies + next");
+  const wrong = redeemHandoffCode(code, "not-the-verifier", secret, now + 5_000);
+  ok(!wrong.ok && wrong.reason === "mismatch", "redeem: wrong verifier -> mismatch");
+  const late = redeemHandoffCode(code, verifier, secret, now + HANDOFF_TTL_MS + 1);
+  ok(!late.ok && late.reason === "expired", "redeem: past ttl -> expired");
+  const flipped = code.slice(0, -2) + (code.endsWith("A") ? "B" : "A") + code.slice(-1);
+  ok(!redeemHandoffCode(flipped, verifier, secret, now).ok, "redeem: tampered code -> not ok");
+  const otherKey = redeemHandoffCode(code, verifier, "another-secret", now);
+  ok(!otherKey.ok && otherKey.reason === "malformed", "redeem: different secret -> malformed");
+  ok(!redeemHandoffCode("garbage", verifier, secret, now).ok, "redeem: garbage -> not ok");
 }
 
 async function asyncChecks(): Promise<void> {
@@ -3935,7 +4029,761 @@ for (const venueClass of VENUE_CLASSES.map((item) => item.key)) {
   );
 }
 
-asyncChecks()
+
+/* ============================================================
+   Recordings (Krisp) — spec docs/superpowers/specs/2026-09-21-krisp-
+   recordings-design.md §1, §4, §6, §7. Pure rules + the store's DB-free
+   helpers; the REST client's error mapping runs through a fake transport
+   inside recordingsAsyncChecks() below.
+   ============================================================ */
+
+/* --- registration: doc table, sync allowlist mirror, settings defaults --- */
+ok("recordings" in DOC_TABLES, "recordings is a registered doc collection");
+ok(SYNCABLE_COLLECTIONS.includes("recordings"), "recordings is syncable (spec §1.1)");
+ok(
+  [...FIELD_COLLECTIONS].sort().join(",") === [...SYNCABLE_COLLECTIONS].sort().join(","),
+  "FIELD_COLLECTIONS mirrors SYNCABLE_COLLECTIONS (engine.ts ↔ doc-tables.ts)"
+);
+ok(
+  DEFAULT_SETTINGS.recordingsArchiveMailbox === null &&
+    DEFAULT_SETTINGS.recordingsArchiveFolderId === null &&
+    JSON.stringify(DEFAULT_SETTINGS.recordingsArchiveFolders) === "{}" &&
+    Array.isArray(DEFAULT_SETTINGS.recordingsBetaUsers) &&
+    (DEFAULT_SETTINGS.recordingsBetaUsers as string[]).length === 0,
+  "recordings settings defaults are declared (spec §1.3)"
+);
+ok(canRecord("u1", { recordingsBetaUsers: [] }), "canRecord: empty beta list → everyone");
+ok(canRecord("u1", { recordingsBetaUsers: ["u1", "u3"] }), "canRecord: listed user passes the gate");
+ok(!canRecord("u2", { recordingsBetaUsers: ["u1", "u3"] }), "canRecord: unlisted user is gated");
+
+/* Capture side (spec §2.2 / §2.3) — pure helpers behind the recorder page + upload queue (lib/recorder/helpers.ts). */
+{
+  const at = new Date(2026, 8, 21, 14, 5).getTime(); // local 2026-09-21
+  ok(
+    buildRecordingTitle({ parentId: "SV-5012", venue: "Hortonville HS", customer: "Hortonville Area SD", parentLabel: "Site visit", at }) ===
+      "SV-5012 · Hortonville HS · Site visit · 2026-09-21",
+    "buildRecordingTitle: id · venue · label · date"
+  );
+  ok(
+    buildRecordingTitle({ parentId: "P-7001", venue: "", customer: "Acme Theatre", parentLabel: "Project", remember: "  rigging   walkthrough ", at }) ===
+      "P-7001 · Acme Theatre · Project · rigging walkthrough · 2026-09-21",
+    "buildRecordingTitle: venue falls back to customer; remember is squashed and slotted before the date"
+  );
+  const long = buildRecordingTitle({ parentId: "INS-4001", venue: "V", customer: "C", parentLabel: "Inspection", remember: "x".repeat(400), at });
+  ok(long.length === RECORDING_TITLE_MAX && long.endsWith(" · 2026-09-21"), "buildRecordingTitle: caps at 200 by trimming the remember text, never the date");
+  ok(
+    uploadBackoffMs(0) === 0 && uploadBackoffMs(1) === 5_000 && uploadBackoffMs(2) === 15_000 && uploadBackoffMs(3) === 45_000 &&
+      uploadBackoffMs(40) === UPLOAD_BACKOFF_MAX_MS,
+    "uploadBackoffMs: 5s ×3 per attempt, capped at 15 min"
+  );
+  ok(
+    recordingBlobPathname("REC-9001", "audio/mp4") === "recordings/REC-9001/REC-9001.m4a" &&
+      extensionForMime("audio/webm;codecs=opus") === "webm" && extensionForMime("audio/x-wav") === "wav" && extensionForMime("nope/x") === "bin",
+    "recordingBlobPathname keeps the route's recordings/<id>/ prefix and maps mimes to extensions"
+  );
+  ok(formatElapsed(0) === "00:00" && formatElapsed(65) === "01:05" && formatElapsed(3725) === "1:02:05", "formatElapsed mm:ss and h:mm:ss");
+}
+ok(
+  recordingParentLabel("site_visit") === "Site visit" &&
+    recordingParentLabel("survey") === "Field survey" &&
+    recordingParentLabel("inspection") === "Inspection" &&
+    recordingParentLabel("flame_job") === "Flame test" &&
+    recordingParentLabel("repair_job") === "Repair" &&
+    recordingParentLabel("project") === "Project" &&
+    recordingParentLabel("engagement") === "Engagement",
+  "recordingParentLabel covers every parent kind"
+);
+
+/* --- deriveSummary on the Hortonville-shaped fixture (spec §4.1) --- */
+const hortonvilleNotes: { blocks: KrispNoteBlock[] } = {
+  blocks: [
+    {
+      type: "heading",
+      text: "Venue Identification and Address",
+      children: [{ type: "paragraph", text: "Hortonville High School, 246 N Olk St, Hortonville WI 54944" }],
+    },
+    {
+      type: "heading",
+      text: "Rigging System",
+      children: [
+        { type: "bullet", text: "Counterweight fly system, 18 linesets" },
+        {
+          type: "bullet",
+          text: "Arbor pit accessible",
+          children: [{ type: "bullet", text: "Locking rail on stage left" }],
+        },
+      ],
+    },
+    {
+      type: "heading",
+      text: "Stage and Room Measurements",
+      children: [
+        { type: "paragraph", text: "Proscenium 42' wide x 20' high" },
+        { type: "paragraph", text: "Grid height 58'" },
+      ],
+    },
+    {
+      type: "heading",
+      text: "Next Steps",
+      children: [
+        {
+          type: "action_item",
+          text: "Send lineset quote",
+          completed: false,
+          assignee: { first_name: "Jeff", last_name: "Chesebro" },
+          due_date: "2026-09-28",
+        },
+        { type: "action_item", text: "Confirm grid load rating", completed: false },
+        { type: "action_item", text: "Schedule flame test", completed: false },
+      ],
+    },
+    {
+      type: "heading",
+      text: "Key Points",
+      children: [
+        { type: "bullet", text: "Existing curtains are 20+ years old" },
+        { type: "bullet", text: "Fly system last inspected 2019" },
+        { type: "bullet", text: "Budget approval expected Q1" },
+      ],
+    },
+    { type: "mystery_block", text: "Principal mentioned a 2027 auditorium renovation bond." },
+  ],
+};
+const derived = deriveSummary(hortonvilleNotes);
+ok(derived.summary.length === 4, `deriveSummary: 4 sections (got ${derived.summary.length})`);
+ok(
+  derived.summary.map((s) => s.title).join("|") ===
+    "Venue Identification and Address|Rigging System|Stage and Room Measurements|Notes",
+  "deriveSummary: section titles in order, Next Steps + Key Points not sections"
+);
+ok(
+  derived.summary[1].description === "Counterweight fly system, 18 linesets\nArbor pit accessible\n- Locking rail on stage left",
+  "deriveSummary: children joined by newline, nested children as '- ' bullets"
+);
+ok(derived.keyPoints.length === 3, "deriveSummary: 3 key points");
+ok(derived.keyPoints[1] === "Fly system last inspected 2019", "deriveSummary: key points carry plain text");
+ok(derived.actionItems.length === 3, `deriveSummary: 3 action items (got ${derived.actionItems.length})`);
+ok(
+  derived.actionItems[0].title === "Send lineset quote" &&
+    derived.actionItems[0].assigneeName === "Jeff Chesebro" &&
+    derived.actionItems[0].dueDate === "2026-09-28",
+  "deriveSummary: action item keeps Krisp's assignee name + due date"
+);
+ok(derived.actionItems[1].assigneeName === null, "deriveSummary: unassigned action item → null assignee");
+ok(
+  derived.summary[3].title === "Notes" &&
+    derived.summary[3].description.includes("2027 auditorium renovation bond"),
+  "deriveSummary: unknown block type lands under 'Notes' as prose"
+);
+ok(
+  new Set(derived.actionItems.map((a) => a.key)).size === 3 &&
+    derived.actionItems.every((a) => /^[0-9a-f]{10}$/.test(a.key)),
+  "deriveSummary: action keys are distinct 10-hex hashes"
+);
+ok(
+  JSON.stringify(deriveSummary(hortonvilleNotes)) === JSON.stringify(derived),
+  "deriveSummary: rerun over the same notes is byte-identical (stable keys)"
+);
+const derivedNull = deriveSummary(null);
+ok(
+  derivedNull.summary.length === 0 && derivedNull.keyPoints.length === 0 && derivedNull.actionItems.length === 0,
+  "deriveSummary(null) → empty arrays"
+);
+const derivedEmpty = deriveSummary({ blocks: [] });
+ok(derivedEmpty.summary.length === 0 && derivedEmpty.actionItems.length === 0, "deriveSummary({blocks:[]}) → empty arrays");
+let derivedNoThrow = true;
+let derivedOdd: ReturnType<typeof deriveSummary> | null = null;
+try {
+  derivedOdd = deriveSummary({
+    blocks: [
+      { type: "divider" },
+      { type: "heading" },
+      { type: "heading", children: [{ type: "paragraph" }] },
+      null as unknown as KrispNoteBlock,
+      "junk" as unknown as KrispNoteBlock,
+      { type: 42 as unknown as string, text: "typed with a number" },
+      { type: "checkbox", text: "  Untyped checkbox task  ", assignee: "Sam" },
+    ],
+  });
+} catch {
+  derivedNoThrow = false;
+}
+ok(derivedNoThrow, "deriveSummary never throws on textless / malformed / unknown blocks");
+ok(
+  !!derivedOdd && derivedOdd.summary.length === 1 && derivedOdd.summary[0].title === "Notes",
+  "deriveSummary: textless headings emit no section; prose still lands under Notes"
+);
+ok(
+  !!derivedOdd &&
+    derivedOdd.actionItems.length === 1 &&
+    derivedOdd.actionItems[0].title === "Untyped checkbox task" &&
+    derivedOdd.actionItems[0].assigneeName === "Sam",
+  "deriveSummary: checkbox-typed block with a string assignee → action item"
+);
+const derivedCompleted = deriveSummary({
+  blocks: [
+    { type: "heading", text: "Rigging System", children: [{ type: "paragraph", text: "Replace arbor", completed: true }] },
+  ],
+});
+ok(
+  derivedCompleted.actionItems.length === 1 && derivedCompleted.summary.length === 1,
+  "deriveSummary: `completed` defined → action item, even inside an ordinary section"
+);
+const derivedFlat = deriveSummary({
+  blocks: [
+    { type: "heading_1", text: "Stage and Room Measurements" },
+    { type: "paragraph", text: "Proscenium 42' wide" },
+    { type: "paragraph", text: "Grid 58'" },
+    { type: "heading_1", text: "Key points" },
+    { type: "bullet", text: "Only one" },
+  ],
+});
+ok(
+  derivedFlat.summary.length === 1 &&
+    derivedFlat.summary[0].description === "Proscenium 42' wide\nGrid 58'" &&
+    derivedFlat.keyPoints.length === 1,
+  "deriveSummary: a childless heading adopts the flat siblings that follow it"
+);
+
+/* --- action-item key stability --- */
+const dupTitles = deriveSummary({
+  blocks: [
+    { type: "task", text: "Call the principal" },
+    { type: "task", text: "Call the principal" },
+    { type: "task", text: "call the principal." },
+  ],
+});
+ok(
+  dupTitles.actionItems.length === 3 && new Set(dupTitles.actionItems.map((a) => a.key)).size === 3,
+  "action keys: same title repeated → distinct keys by ordinal"
+);
+ok(
+  actionItemKey("Call the principal", 0) === dupTitles.actionItems[0].key &&
+    actionItemKey("CALL THE PRINCIPAL  ", 1) === dupTitles.actionItems[1].key &&
+    actionItemKey("Call the principal", 2) === dupTitles.actionItems[2].key,
+  "action keys: normalized (case/space/trailing punctuation) title + ordinal reproduces the key"
+);
+ok(actionItemKey("a", 0) !== actionItemKey("b", 0), "action keys: different titles differ");
+
+/* --- matchAssignee (same rule as the Peak/Assign label interpreter, #96) --- */
+const roster = [
+  { id: "u1", name: "Jeff Chesebro" },
+  { id: "u2", name: "Jack Reilly" },
+  { id: "u3", name: "Jack Morgan" },
+  { id: "u4", name: "Sam" },
+];
+ok(matchAssignee("Jeff Chesebro", roster)?.id === "u1", "matchAssignee: exact full name");
+ok(matchAssignee("  jeff   chesebro ", roster)?.id === "u1", "matchAssignee: exact match is case/space-insensitive");
+ok(matchAssignee("Jeff", roster)?.id === "u1", "matchAssignee: unique first-word match");
+ok(matchAssignee("Jack", roster) === null, "matchAssignee: ambiguous first name → null (never guess)");
+ok(matchAssignee("Jack Reilly", roster)?.id === "u2", "matchAssignee: full name disambiguates a shared first name");
+ok(matchAssignee("Jack R.", roster) === null, "matchAssignee: partial surname doesn't rescue an ambiguous first name");
+ok(matchAssignee("sam", roster)?.id === "u4", "matchAssignee: single-word roster name matches exactly");
+ok(matchAssignee(null, roster) === null && matchAssignee("", roster) === null, "matchAssignee: null/empty → null");
+ok(matchAssignee("Nobody Here", roster) === null, "matchAssignee: no match → null");
+
+/* --- PREFILL_RULES routing (spec §4.4 table) --- */
+const route = (t: string) => JSON.stringify(routePrefill(t));
+const measureRoute = (t: string) =>
+  JSON.stringify({
+    survey: { kind: "map", field: "measurements", key: `From recording · ${t}` },
+    inspection: { kind: "map", field: "measurements", key: `From recording · ${t}` },
+  });
+const riggingRoute = JSON.stringify({ survey: { kind: "text", field: "notes" }, inspection: { kind: "text", field: "narrative" } });
+const softGoodsRoute = JSON.stringify({ survey: { kind: "text", field: "scopeOfWork" }, inspection: { kind: "text", field: "narrative" } });
+const accessRoute = JSON.stringify({ survey: { kind: "text", field: "notes" }, inspection: { kind: "map", field: "venueInfo", key: "Access" } });
+const skipRoute = JSON.stringify({ survey: { kind: "skip" }, inspection: { kind: "skip" } });
+const defaultRoute = riggingRoute; // notes / narrative
+ok(route("Stage and Room Measurements") === measureRoute("Stage and Room Measurements"), "routePrefill: Measurements → measurements map (both)");
+ok(route("Proscenium Opening") === measureRoute("Proscenium Opening"), "routePrefill: Proscenium → measurements");
+ok(route("Grid Height") === measureRoute("Grid Height"), "routePrefill: Grid/height → measurements");
+ok(route("Rigging System") === riggingRoute, "routePrefill: Rigging → survey notes / inspection narrative");
+ok(route("Lineset Schedule") === riggingRoute, "routePrefill: Lineset → notes / narrative");
+ok(route("Fly System Condition") === riggingRoute, "routePrefill: Fly → notes / narrative");
+ok(route("Curtain Condition") === softGoodsRoute, "routePrefill: Curtain → scopeOfWork / narrative");
+ok(route("Soft Goods Inventory") === softGoodsRoute, "routePrefill: Soft goods → scopeOfWork / narrative");
+ok(route("Valance and Borders") === softGoodsRoute, "routePrefill: Valance/border → scopeOfWork / narrative");
+ok(route("Loading Dock Access") === accessRoute, "routePrefill: Access/dock → survey notes / inspection venueInfo[Access]");
+ok(route("Parking and Hours") === accessRoute, "routePrefill: Parking/hours → access rule");
+ok(route("Next Steps") === skipRoute, "routePrefill: Next Steps → skipped (handled by §4.2)");
+ok(route("Follow-up Items") === skipRoute && route("Action Items") === skipRoute, "routePrefill: Follow-up / Action → skipped");
+ok(route("Venue Identification and Address") === defaultRoute, "routePrefill: default → notes / narrative");
+ok(route("Key Points") === defaultRoute && route("Notes") === defaultRoute, "routePrefill: Key Points / Notes fall to the default");
+ok(route("Curtain Track Height") === measureRoute("Curtain Track Height"), "routePrefill: first matching rule wins (height beats track)");
+ok(route("Rigging Access Door") === riggingRoute, "routePrefill: rigging rule precedes access rule");
+ok(
+  prefillInsertText("REC-9001", "Rigging System", "18 linesets") === "\n\n[from REC-9001] Rigging System: 18 linesets",
+  "prefillInsertText format"
+);
+ok(
+  summarySearchText({ summary: [{ title: "Rigging System", description: "18 linesets" }, { title: "Notes", description: "" }] }) ===
+    "Rigging System 18 linesets Notes",
+  "summarySearchText joins titles + descriptions"
+);
+
+/* --- recordingStatusChip: every audio × krisp combination (spec §6) --- */
+const chipAt = 1_800_000_000_000;
+const chipRec = (
+  audioState: AudioState,
+  krispStatus: KrispStatus,
+  extra: { uploadError?: string | null; lastCheckedAt?: number | null; updatedAt?: number } = {}
+) =>
+  recordingStatusChip(
+    {
+      audio: { ...blankAudio(), state: audioState, uploadError: extra.uploadError ?? null },
+      krisp: { ...blankKrisp(), status: krispStatus, lastCheckedAt: extra.lastCheckedAt === undefined ? chipAt - 60_000 : extra.lastCheckedAt },
+      updatedAt: extra.updatedAt ?? chipAt - 60_000,
+    },
+    chipAt
+  );
+const chipExpect: Record<AudioState, Record<KrispStatus, string>> = {
+  on_device: { pending: "Uploading", importing: "Uploading", processing: "Uploading", ready: "Uploading", failed: "Failed" },
+  uploaded: { pending: "Transcribing", importing: "Transcribing", processing: "Transcribing", ready: "Ready", failed: "Failed" },
+  archived: { pending: "Archived", importing: "Transcribing", processing: "Transcribing", ready: "Archived", failed: "Failed" },
+};
+for (const a of Object.keys(chipExpect) as AudioState[]) {
+  for (const k of Object.keys(chipExpect[a]) as KrispStatus[]) {
+    const got = chipRec(a, k);
+    ok(got === chipExpect[a][k], `recordingStatusChip(${a}, ${k}) = ${chipExpect[a][k]} (got ${got})`);
+  }
+}
+ok(chipRec("on_device", "pending", { uploadError: "network" }) === "On device", "recordingStatusChip: upload error while on device → On device");
+ok(
+  chipRec("uploaded", "processing", { lastCheckedAt: chipAt - 25 * 60 * 60_000 }) === "Stalled",
+  "recordingStatusChip: processing untouched 25h → Stalled"
+);
+ok(
+  chipRec("uploaded", "processing", { lastCheckedAt: null, updatedAt: chipAt - 25 * 60 * 60_000 }) === "Stalled",
+  "recordingStatusChip: stall falls back to updatedAt when never checked"
+);
+ok(
+  chipRec("uploaded", "processing", { lastCheckedAt: chipAt - 23 * 60 * 60_000 }) === "Transcribing",
+  "recordingStatusChip: processing checked 23h ago is still Transcribing"
+);
+ok(
+  chipRec("uploaded", "importing", { lastCheckedAt: chipAt - 25 * 60 * 60_000 }) === "Transcribing",
+  "recordingStatusChip: only processing stalls, importing does not"
+);
+
+/* --- store helpers that need no DB --- */
+const stale = { krisp: { ...blankKrisp(), status: "processing" as KrispStatus, lastCheckedAt: chipAt - 3 * 60_000 } };
+ok(needsKrispCheck(stale, 2 * 60_000, chipAt), "needsKrispCheck: processing, checked 3 min ago, window 2 min → check");
+ok(!needsKrispCheck(stale, 5 * 60_000, chipAt), "needsKrispCheck: checked inside the window → skip");
+ok(needsKrispCheck({ krisp: { ...blankKrisp(), status: "importing" } }, 2 * 60_000, chipAt), "needsKrispCheck: never checked counts as stale");
+ok(!needsKrispCheck({ krisp: { ...blankKrisp(), status: "ready" } }, undefined, chipAt), "needsKrispCheck: ready is never checked");
+const archCandidate = {
+  audio: { ...blankAudio(), state: "uploaded" as AudioState, blobPathname: "recordings/REC-9001/a.m4a" },
+  krisp: { ...blankKrisp(), status: "ready" as KrispStatus, readyAt: chipAt - 7 * 60 * 60_000 },
+  updatedAt: chipAt - 60_000,
+};
+ok(isArchivable(archCandidate, 6 * 60 * 60_000, chipAt), "isArchivable: uploaded + ready 7h ago → archive");
+ok(!isArchivable({ ...archCandidate, krisp: { ...archCandidate.krisp, readyAt: chipAt - 60_000 } }, 6 * 60 * 60_000, chipAt), "isArchivable: ready 1 min ago → wait (same-day retries)");
+ok(
+  isArchivable({ ...archCandidate, krisp: { ...blankKrisp(), status: "failed" }, updatedAt: chipAt - 7 * 60 * 60_000 }, 6 * 60 * 60_000, chipAt),
+  "isArchivable: failed import still archives its audio (via updatedAt)"
+);
+ok(!isArchivable({ ...archCandidate, krisp: { ...blankKrisp(), status: "processing" } }, 0, chipAt), "isArchivable: processing keeps the Blob for Retry");
+ok(!isArchivable({ ...archCandidate, audio: { ...archCandidate.audio, state: "archived" } }, 0, chipAt), "isArchivable: already archived is skipped");
+
+const bare = normalizeRecording({ id: "rec-0f3a" });
+ok(
+  bare.audio.state === "on_device" && bare.krisp.status === "pending" && bare.summary.length === 0 &&
+    bare.actionItems.length === 0 && bare.prefill.insertedKeys.length === 0 && bare.notes === null && bare.title === "rec-0f3a",
+  "normalizeRecording backfills a bare offline-minted doc"
+);
+ok(
+  normalizeRecording({ id: "x", audio: { state: "bogus" } as unknown as RecordingRecord["audio"] }).audio.state === "on_device",
+  "normalizeRecording coerces an unknown audio state"
+);
+
+/* --- markKrispReady's merge (pure helper) preserves dispositions by key (spec §4.1/§7) --- */
+const existingItems: RecordingActionItem[] = [
+  { key: "k-a", title: "Send lineset quote", assigneeName: "Jeff", dueDate: null, disposition: "accepted", assignmentId: "AS-3001" },
+  { key: "k-b", title: "Confirm grid load rating", assigneeName: null, dueDate: null, disposition: "pending", assignmentId: null },
+  { key: "k-c", title: "Old dismissed item", assigneeName: null, dueDate: null, disposition: "dismissed", assignmentId: null },
+  { key: "k-e", title: "Vanished pending item", assigneeName: null, dueDate: null, disposition: "pending", assignmentId: null },
+];
+const mergedItems = mergeActionItems(existingItems, [
+  { key: "k-a", title: "Send lineset quote", assigneeName: "Jeff Chesebro", dueDate: "2026-09-28" },
+  { key: "k-b", title: "Confirm grid load rating", assigneeName: null, dueDate: null },
+  { key: "k-d", title: "Schedule flame test", assigneeName: null, dueDate: null },
+]);
+ok(mergedItems.map((a) => a.key).join(",") === "k-a,k-b,k-d,k-c", "mergeActionItems: incoming order, then stateful leftovers");
+ok(
+  mergedItems[0].disposition === "accepted" && mergedItems[0].assignmentId === "AS-3001" &&
+    mergedItems[0].assigneeName === "Jeff Chesebro" && mergedItems[0].dueDate === "2026-09-28",
+  "mergeActionItems: accepted disposition + assignmentId survive; title fields refresh from Krisp"
+);
+ok(mergedItems[1].disposition === "pending" && mergedItems[2].disposition === "pending" && mergedItems[2].assignmentId === null, "mergeActionItems: new/pending items start pending");
+ok(mergedItems[3].disposition === "dismissed", "mergeActionItems: a dismissed item missing from the rerun is retained");
+ok(!mergedItems.some((a) => a.key === "k-e"), "mergeActionItems: a pending item missing from the rerun is dropped");
+ok(
+  JSON.stringify(mergeActionItems(mergedItems, mergedItems)) === JSON.stringify(mergedItems),
+  "mergeActionItems is idempotent"
+);
+
+ok(
+  krispMeetingUrl("abc/123") === "https://app.krisp.ai/m/abc%2F123?active_tab=ai_notes",
+  "krispMeetingUrl deep-links to AI notes"
+);
+ok(krispErrorFor(500, "boom") instanceof KrispApiError && !(krispErrorFor(500, "boom") instanceof KrispBusyError), "krispErrorFor: unknown status → plain KrispApiError");
+
+/** Krisp REST client against a fake transport (spec §7 "fake transports"). */
+async function recordingsAsyncChecks(): Promise<void> {
+  type Seen = { url: string; init: RequestInit };
+  const seen: Seen[] = [];
+  const fake =
+    (status: number, body: unknown, contentType = "application/json"): KrispTransport =>
+    async (url, init) => {
+      seen.push({ url, init });
+      const text = typeof body === "string" ? body : JSON.stringify(body);
+      return new Response(text, { status, headers: { "Content-Type": contentType } });
+    };
+  const expectErr = async (p: Promise<unknown>, cls: new (...a: never[]) => Error, label: string, msgIncludes?: string) => {
+    try {
+      await p;
+      ok(false, `${label}: expected ${cls.name}, resolved instead`);
+    } catch (e) {
+      const good = e instanceof cls && (!msgIncludes || (e as Error).message.includes(msgIncludes));
+      ok(good, `${label}: ${cls.name}${msgIncludes ? ` carrying "${msgIncludes}"` : ""}${good ? "" : ` (got ${(e as Error).name}: ${(e as Error).message})`}`);
+    }
+  };
+
+  await expectErr(createKrispClient("k", fake(401, { message: "Unauthorized" })).me(), KrispAuthError, "krisp client 401");
+  await expectErr(
+    createKrispClient("k", fake(403, { message: "Storage limit reached" })).startImport({ title: "t" }),
+    KrispForbiddenError,
+    "krisp client 403",
+    "Storage limit reached"
+  );
+  await expectErr(
+    createKrispClient("k", fake(400, { message: "Action is still in process" })).startImport({ title: "t" }),
+    KrispBusyError,
+    "krisp client 400 still-in-process"
+  );
+  await expectErr(
+    createKrispClient("k", fake(400, { error: "size must be positive" })).startImport({ title: "t" }),
+    KrispApiError,
+    "krisp client other 400",
+    "size must be positive"
+  );
+  try {
+    await createKrispClient("k", fake(400, { error: "size must be positive" })).startImport({ title: "t" });
+  } catch (e) {
+    ok(!(e instanceof KrispBusyError) && (e as KrispApiError).status === 400, "krisp client other 400 is NOT busy and keeps status 400");
+  }
+  await expectErr(createKrispClient("k", fake(429, "Too Many Requests", "text/plain")).importStatus("imp_1"), KrispRateLimitError, "krisp client 429");
+  await expectErr(createKrispClient("k", fake(409, { message: "processing" })).meeting("m_1"), KrispNotReadyError, "krisp client 409");
+  await expectErr(createKrispClient("k", fake(502, "<html>bad gateway</html>", "text/html")).me(), KrispApiError, "krisp client 502 → KrispApiError", "bad gateway");
+
+  seen.length = 0;
+  const me = await createKrispClient(
+    "krsp_u_test",
+    fake(200, { id: 77, email: "jeff@peak.test", first_name: "Jeff", last_name: "Chesebro", team_id: 5 })
+  ).me();
+  ok(me.id === 77 && me.email === "jeff@peak.test" && me.name === "Jeff Chesebro" && me.teamId === 5, "krisp client me() maps snake_case fields");
+  ok(
+    seen[0].url === "https://meeting-api.krisp.ai/v1/me" &&
+      (seen[0].init.headers as Record<string, string>).Authorization === "Bearer krsp_u_test" &&
+      seen[0].init.method === "GET",
+    "krisp client sends Bearer auth to the v1 base"
+  );
+
+  seen.length = 0;
+  const started = await createKrispClient(
+    "k",
+    fake(201, { import_id: "imp_9", url: "https://s3.example/put?sig=1", expires_at: "2026-09-21T23:00:00Z" })
+  ).startImport({ title: "SV-5012 · Hortonville HS", language: "auto", size: 1234 });
+  ok(started.importId === "imp_9" && started.url === "https://s3.example/put?sig=1" && started.expiresAt === "2026-09-21T23:00:00Z", "krisp client startImport maps the 201 body");
+  ok(
+    seen[0].url.endsWith("/import") && seen[0].init.method === "POST" &&
+      JSON.stringify(JSON.parse(String(seen[0].init.body))) === JSON.stringify({ title: "SV-5012 · Hortonville HS", language: "auto", size: 1234 }),
+    "krisp client startImport POSTs the JSON body"
+  );
+  await expectErr(createKrispClient("k", fake(201, { ok: true })).startImport({}), KrispApiError, "krisp client startImport without import_id/url", "lacked");
+
+  const st = await createKrispClient("k", fake(200, { data: { import_id: "imp_9", status: "ready", meeting_id: "m_42", error: null } })).importStatus("imp_9");
+  ok(st.status === "ready" && st.meetingId === "m_42" && st.error === null, "krisp client importStatus unwraps a {data} envelope");
+  const stOdd = await createKrispClient("k", fake(200, { import_id: "imp_9", status: "queued" })).importStatus("imp_9");
+  ok(stOdd.status === "processing" && stOdd.meetingId === null, "krisp client importStatus: unknown status reads as processing");
+
+  seen.length = 0;
+  const mtg = await createKrispClient(
+    "k",
+    fake(200, {
+      id: "m_42",
+      title: "Hortonville",
+      started_at: "2026-09-21T15:00:00Z",
+      duration: 1810,
+      status: "ready",
+      participants: { "0": { name: "Jeff" } },
+      transcript: { language: "en", speakers: { "0": { name: "Jeff" } }, segments: [{ speaker: 0, text: "hi", start: 0, end: 1 }] },
+      notes: hortonvilleNotes,
+    })
+  ).meeting("m_42");
+  ok(
+    mtg.id === "m_42" && mtg.duration === 1810 && mtg.transcript?.segments.length === 1 &&
+      JSON.stringify(mtg.notes) === JSON.stringify(hortonvilleNotes),
+    "krisp client meeting() keeps notes RAW and maps the scalar fields"
+  );
+  ok(
+    decodeURIComponent(seen[0].url) === "https://meeting-api.krisp.ai/v1/meetings/m_42?fields=title,started_at,duration,status,participants,transcript,notes",
+    "krisp client meeting() requests the spec's field list"
+  );
+
+  seen.length = 0;
+  await putToPresignedUrl("https://s3.example/put?sig=1", Buffer.from("audio"), "audio/mp4", fake(200, ""));
+  ok(
+    seen[0].init.method === "PUT" &&
+      (seen[0].init.headers as Record<string, string>)["Content-Type"] === "audio/mp4" &&
+      !("Authorization" in (seen[0].init.headers as Record<string, string>)),
+    "putToPresignedUrl PUTs with the audio mime and NO Authorization header"
+  );
+  await expectErr(putToPresignedUrl("https://s3.example/put", Buffer.from("x"), "audio/mp4", fake(403, "<Error>SignatureDoesNotMatch</Error>", "application/xml")), KrispApiError, "putToPresignedUrl non-2xx", "SignatureDoesNotMatch");
+}
+
+/* ------------------------------------------------------------------
+   Recordings Task 2A — write-back, check, reconcile (spec §3, §4, §7).
+   Pure helpers + the Krisp-facing poll with a fake transport; nothing
+   here opens the database.
+   ------------------------------------------------------------------ */
+
+const wbBase: RecordingRecord = normalizeRecording({
+  id: "REC-9001",
+  parentKind: "site_visit",
+  parentId: "SV-5012",
+  customerId: "c1",
+  customer: "Hortonville Area School District",
+  venue: "Hortonville HS",
+  title: "SV-5012 · Hortonville HS · Site survey · 2026-09-21",
+  recordedByUserId: "u1",
+  recordedByName: "Jeff Chesebro",
+  startedAt: new Date(2026, 8, 21, 12, 0, 0).getTime(),
+  summary: [
+    { title: "Rigging System", description: "Counterweight fly system, 18 linesets\nArbor pit accessible" },
+    { title: "Stage and Room Measurements", description: "Proscenium 42' wide" },
+    { title: "Loading Dock", description: "" },
+  ],
+});
+
+/* --- feedNoteText (spec §4.3) --- */
+const noteTxt = feedNoteText(wbBase);
+ok(
+  noteTxt.split("\n")[0] === "Recorded Site visit · REC-9001 · Hortonville HS · 2026-09-21",
+  `feedNoteText: header line is 'Recorded <parent> · id · venue · date' (got '${noteTxt.split("\n")[0]}')`
+);
+ok(
+  noteTxt.includes("\nRigging System: Counterweight fly system, 18 linesets\nArbor pit accessible\n") &&
+    noteTxt.includes("\nStage and Room Measurements: Proscenium 42' wide\n"),
+  "feedNoteText: each summary section reads 'Title: description'"
+);
+ok(noteTxt.includes("\nLoading Dock\n"), "feedNoteText: a section with no description is just its title");
+ok(noteTxt.endsWith("\n→ /recordings/REC-9001"), "feedNoteText: ends with the → /recordings/<id> deep link");
+ok(
+  feedNoteText({ ...wbBase, summary: [] }) === "Recorded Site visit · REC-9001 · Hortonville HS · 2026-09-21\n\n→ /recordings/REC-9001",
+  "feedNoteText: no sections → header + link only"
+);
+ok(
+  feedNoteText({ ...wbBase, parentKind: "inspection", venue: "" }).startsWith("Recorded Inspection · REC-9001 · 2026-09-21"),
+  "feedNoteText: empty venue is dropped from the header, parent label follows the kind"
+);
+
+/* --- summarySectionsWithKeys: same ordinal rule as action items --- */
+const dupSections = summarySectionsWithKeys({
+  summary: [
+    { title: "Notes", description: "a" },
+    { title: "Rigging", description: "b" },
+    { title: "notes ", description: "c" },
+  ],
+});
+ok(
+  dupSections.length === 3 && new Set(dupSections.map((s) => s.key)).size === 3,
+  "summarySectionsWithKeys: repeated titles get distinct keys by ordinal"
+);
+ok(
+  dupSections[0].key === summarySectionKey("Notes", 0) && dupSections[2].key === summarySectionKey("Notes", 1),
+  "summarySectionsWithKeys: keys equal summarySectionKey(title, ordinal), normalized"
+);
+
+/* --- applyPrefillToRecord (spec §4.4) on survey + inspection objects --- */
+const surveyObj = { ...surveyBlank(), notes: "", scopeOfWork: "Existing scope.", measurements: { "Proscenium width": "40'" } } as Record<string, unknown>;
+const surveyMapRoute = routePrefill("Stage and Room Measurements").survey;
+const surveyMapPatch = applyPrefillToRecord(surveyObj, surveyMapRoute, "Stage and Room Measurements", "Proscenium 42' wide", "REC-9001");
+ok(
+  JSON.stringify(surveyMapPatch) ===
+    JSON.stringify({ measurements: { "Proscenium width": "40'", "From recording · Stage and Room Measurements": "Proscenium 42' wide" } }),
+  "applyPrefillToRecord: survey map target creates measurements['From recording · <title>'] and keeps existing keys"
+);
+ok(
+  JSON.stringify((surveyObj as { measurements: Record<string, string> }).measurements) === JSON.stringify({ "Proscenium width": "40'" }),
+  "applyPrefillToRecord: never mutates the record"
+);
+const surveyMapAgain = applyPrefillToRecord(
+  { ...surveyObj, ...surveyMapPatch },
+  surveyMapRoute,
+  "Stage and Room Measurements",
+  "Grid height 58'",
+  "REC-9001"
+) as { measurements: Record<string, string> };
+ok(
+  surveyMapAgain.measurements["From recording · Stage and Room Measurements"] === "Proscenium 42' wide\nGrid height 58'",
+  "applyPrefillToRecord: a second insert into an existing map entry joins with a newline"
+);
+const surveyTextEmpty = applyPrefillToRecord(surveyObj, routePrefill("Rigging System").survey, "Rigging System", "18 linesets", "REC-9001") as { notes: string };
+ok(surveyTextEmpty.notes === "[from REC-9001] Rigging System: 18 linesets", "applyPrefillToRecord: text target on an empty field has no leading blank lines");
+const surveyTextAppend = applyPrefillToRecord(surveyObj, routePrefill("Curtain track").survey, "Curtain track", "Replace carriers", "REC-9001") as { scopeOfWork: string };
+ok(
+  surveyTextAppend.scopeOfWork === "Existing scope." + prefillInsertText("REC-9001", "Curtain track", "Replace carriers"),
+  "applyPrefillToRecord: text target appends prefillInsertText to existing scopeOfWork"
+);
+ok(applyPrefillToRecord(surveyObj, routePrefill("Next Steps").survey, "Next Steps", "x", "REC-9001") === null, "applyPrefillToRecord: skip route → null");
+
+const inspectionObj = { narrative: "Walkthrough complete.", venueInfo: {}, measurements: undefined } as Record<string, unknown>;
+const inspAccess = applyPrefillToRecord(inspectionObj, routePrefill("Loading Dock and Access").inspection, "Loading Dock and Access", "Dock on the north side", "REC-9001");
+ok(
+  JSON.stringify(inspAccess) === JSON.stringify({ venueInfo: { Access: "Dock on the north side" } }),
+  "applyPrefillToRecord: inspection access route lands in venueInfo['Access']"
+);
+const inspMeasure = applyPrefillToRecord(inspectionObj, routePrefill("Grid height").inspection, "Grid height", "58'", "REC-9001");
+ok(
+  JSON.stringify(inspMeasure) === JSON.stringify({ measurements: { "From recording · Grid height": "58'" } }),
+  "applyPrefillToRecord: inspection map target creates the measurements map when the field is undefined"
+);
+const inspText = applyPrefillToRecord(inspectionObj, routePrefill("Rigging System").inspection, "Rigging System", "18 linesets", "REC-9001") as { narrative: string };
+ok(
+  inspText.narrative === "Walkthrough complete.\n\n[from REC-9001] Rigging System: 18 linesets",
+  "applyPrefillToRecord: inspection text target appends to narrative"
+);
+
+/* --- readyPayloadFromMeeting → markKrispReady shape; merged items start pending --- */
+const readyPayload = readyPayloadFromMeeting({
+  id: "m_42",
+  title: "Hortonville",
+  startedAt: null,
+  duration: 1810,
+  status: "ready",
+  participants: null,
+  transcript: { language: "en", speakers: {}, segments: [] },
+  notes: hortonvilleNotes,
+});
+ok(
+  readyPayload.meetingId === "m_42" &&
+    readyPayload.meetingUrl === krispMeetingUrl("m_42") &&
+    readyPayload.summary.length === 4 &&
+    readyPayload.keyPoints.length === 3 &&
+    readyPayload.actionItems.length === 3 &&
+    JSON.stringify(readyPayload.notes) === JSON.stringify(hortonvilleNotes),
+  "readyPayloadFromMeeting: derives summary/keyPoints/actionItems and keeps notes RAW"
+);
+ok(
+  mergeActionItems([], readyPayload.actionItems).every((a) => a.disposition === "pending" && a.assignmentId === null),
+  "readyPayloadFromMeeting: merged action items land pending with no assignment (spec §4.2)"
+);
+
+/* --- selectForReconcile (spec §3.2 caps) --- */
+const selAt = Date.now();
+const mkSel = (id: string, user: string, krisp: Partial<RecordingRecord["krisp"]>, audio: Partial<RecordingRecord["audio"]> = {}, createdAt = selAt): RecordingRecord =>
+  normalizeRecording({
+    id,
+    recordedByUserId: user,
+    createdAt,
+    audio: { ...blankAudio(), state: "uploaded", blobPathname: `recordings/${id}/a.m4a`, ...audio },
+    krisp: { ...blankKrisp(), ...krisp },
+  });
+const selList: RecordingRecord[] = [
+  ...Array.from({ length: 7 }, (_, i) => mkSel(`REC-91${i}`, "u1", { status: "processing", lastCheckedAt: selAt - (10 - i) * 60_000 })),
+  mkSel("REC-920", "u1", { status: "pending" }),
+  mkSel("REC-921", "u2", { status: "pending" }),
+  mkSel("REC-922", "u2", { status: "pending" }, { state: "on_device", blobPathname: null }),
+  mkSel("REC-923", "u2", { status: "processing", lastCheckedAt: selAt - 30_000 }),
+  mkSel("REC-924", "u2", { status: "ready" }),
+  mkSel("REC-925", "u2", { status: "importing", lastCheckedAt: null }),
+];
+const sel = selectForReconcile(selList, { staleMs: 2 * 60_000, cap: 5 }, selAt);
+ok(sel.size === 2, `selectForReconcile: grouped by recorder (got ${sel.size} users)`);
+ok((sel.get("u1") ?? []).length === 5, `selectForReconcile: capped at 5 per recorder (got ${(sel.get("u1") ?? []).length})`);
+ok(
+  (sel.get("u1") ?? []).map((r) => r.id).join(",") === "REC-910,REC-911,REC-912,REC-913,REC-914",
+  "selectForReconcile: oldest-checked processing first, so a capped pass rotates"
+);
+ok(
+  (sel.get("u2") ?? []).map((r) => r.id).sort().join(",") === "REC-921,REC-925",
+  "selectForReconcile: includes pending+uploaded and never-checked importing; excludes on-device pending, recently-checked and ready"
+);
+ok(selectForReconcile([], {}, selAt).size === 0, "selectForReconcile: empty list → nothing");
+
+async function writeBackAsyncChecks(): Promise<void> {
+  // Scripted fake Krisp: routes by URL so one transport serves status + meeting.
+  type Step = { match: RegExp; status: number; body: unknown };
+  const scripted =
+    (steps: Step[]): KrispTransport =>
+    async (url) => {
+      const s = steps.find((x) => x.match.test(url));
+      if (!s) return new Response(JSON.stringify({ message: `unexpected ${url}` }), { status: 500 });
+      return new Response(JSON.stringify(s.body), { status: s.status, headers: { "Content-Type": "application/json" } });
+    };
+  const meetingBody = {
+    id: "m_42", title: "Hortonville", started_at: "2026-09-21T15:00:00Z", duration: 1810, status: "ready",
+    participants: null, transcript: { language: "en", speakers: {}, segments: [] }, notes: hortonvilleNotes,
+  };
+
+  const ready = await pollKrispImport(
+    createKrispClient("k", scripted([
+      { match: /\/import\/imp_9\/status$/, status: 200, body: { import_id: "imp_9", status: "ready", meeting_id: "m_42", error: null } },
+      { match: /\/meetings\/m_42/, status: 200, body: meetingBody },
+    ])),
+    "imp_9"
+  );
+  ok(
+    ready.kind === "ready" && ready.payload.meetingId === "m_42" && ready.payload.summary.length === 4 && ready.payload.actionItems.length === 3,
+    "pollKrispImport: status ready → fetches the meeting → derived payload"
+  );
+
+  const failed = await pollKrispImport(
+    createKrispClient("k", scripted([{ match: /status$/, status: 200, body: { import_id: "imp_9", status: "failed", error: "Unsupported codec" } }])),
+    "imp_9"
+  );
+  ok(failed.kind === "failed" && failed.error === "Unsupported codec", "pollKrispImport: status failed carries Krisp's error text");
+
+  const processing = await pollKrispImport(
+    createKrispClient("k", scripted([{ match: /status$/, status: 200, body: { import_id: "imp_9", status: "processing", meeting_id: null } }])),
+    "imp_9"
+  );
+  ok(processing.kind === "processing", "pollKrispImport: status processing → processing (no meeting call)");
+
+  const readyNoMeeting = await pollKrispImport(
+    createKrispClient("k", scripted([{ match: /status$/, status: 200, body: { import_id: "imp_9", status: "ready", meeting_id: null } }])),
+    "imp_9"
+  );
+  ok(readyNoMeeting.kind === "processing", "pollKrispImport: ready without a meeting_id is treated as still processing");
+
+  let notReady = false;
+  try {
+    await pollKrispImport(
+      createKrispClient("k", scripted([
+        { match: /status$/, status: 200, body: { import_id: "imp_9", status: "ready", meeting_id: "m_42" } },
+        { match: /\/meetings\//, status: 409, body: { message: "still processing" } },
+      ])),
+      "imp_9"
+    );
+  } catch (e) {
+    notReady = e instanceof KrispNotReadyError;
+  }
+  ok(notReady, "pollKrispImport: meeting 409 propagates as KrispNotReadyError (checkRecording → touchChecked)");
+
+  let rateLimited = false;
+  try {
+    await pollKrispImport(createKrispClient("k", scripted([{ match: /status$/, status: 429, body: {} }])), "imp_9");
+  } catch (e) {
+    rateLimited = e instanceof KrispRateLimitError;
+  }
+  ok(rateLimited, "pollKrispImport: 429 propagates as KrispRateLimitError (reconcile stops that account)");
+}
+
+recordingsAsyncChecks()
+  .then(() => writeBackAsyncChecks())
+  .then(() => archiveAsyncChecks())
+  .then(() => asyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -3944,3 +4792,268 @@ asyncChecks()
     console.error(err);
     process.exit(1);
   });
+
+/* ======================================================================
+   Recordings — Drive archive (Task 2C; spec §1.3, §5, §6, §7). Pure name /
+   scope rules run synchronously here; the Drive REST helpers and the whole
+   archive pass run against a fake fetch inside archiveAsyncChecks().
+   ====================================================================== */
+
+ok(DRIVE_SCOPE === "https://www.googleapis.com/auth/drive.file", "DRIVE_SCOPE is drive.file — app-created files only (spec §5.1)");
+ok(hasDriveScope("https://www.googleapis.com/auth/gmail.send " + DRIVE_SCOPE), "hasDriveScope: granted scope string is detected");
+ok(!hasDriveScope("https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events"), "hasDriveScope: Gmail + Calendar only → false");
+ok(!hasDriveScope(null) && !hasDriveScope(""), "hasDriveScope: null / empty → false");
+ok(!hasDriveScope("https://www.googleapis.com/auth/drive"), "hasDriveScope: the broader drive scope is not mistaken for drive.file");
+
+ok(extForMime("audio/mp4") === "m4a" && extForMime("audio/x-m4a") === "m4a", "extForMime: mp4 family → m4a");
+ok(extForMime("audio/wav") === "wav" && extForMime("audio/webm") === "webm" && extForMime("audio/mpeg") === "mp3", "extForMime: wav / webm / mpeg");
+ok(extForMime("audio/opus; codecs=opus") === "opus", "extForMime: unknown audio subtype falls back to the subtype, params stripped");
+ok(extForMime("") === "bin" && extForMime("application/octet-stream") === "bin", "extForMime: non-audio → bin");
+ok(archiveSafeName('Hortonville HS / Main Stage: "Gym"') === "Hortonville HS _ Main Stage_ _Gym", "archiveSafeName keeps spaces, replaces the rest like safeName, trims edge underscores");
+ok(archiveSafeName("   ") === "recording", "archiveSafeName: blank → recording");
+ok(archiveDateStamp(Date.UTC(2026, 8, 22, 2, 30), "America/Chicago") === "2026-09-21", "archiveDateStamp: 02:30Z on the 22nd is still the 21st in Central");
+ok(archiveDateStamp(Date.UTC(2026, 8, 21, 15, 0), "UTC") === "2026-09-21", "archiveDateStamp: explicit zone honoured");
+{
+  const rec = { startedAt: Date.UTC(2026, 8, 21, 15, 0), parentId: "SV-5012", venue: "Hortonville HS", mime: "audio/mp4" };
+  ok(archiveFileName(rec, "UTC") === "2026-09-21 SV-5012 Hortonville HS.m4a", "archiveFileName: <YYYY-MM-DD> <parentId> <venue>.<ext> (spec §5.2)");
+  ok(archiveFileName({ ...rec, venue: "" }, "UTC") === "2026-09-21 SV-5012.m4a", "archiveFileName: no venue → no trailing space");
+  ok(archiveFileName({ ...rec, venue: "Gym/Stage", mime: "audio/webm" }, "UTC") === "2026-09-21 SV-5012 Gym_Stage.webm", "archiveFileName sanitises the venue and follows the mime");
+}
+ok(archiveFolderKey({ customerId: "c1" }) === "c1" && archiveFolderKey({ customerId: null }) === "unfiled", "archiveFolderKey: customerId, else unfiled (spec §5.2)");
+ok(ARCHIVE_MIN_AGE_MS === 6 * 60 * 60 * 1000 && ARCHIVE_MAX_PER_RUN === 5, "archive pass: 6 h settle window and ≤ 5 per run (spec §5.2 / §7)");
+ok(driveQuote("Bob's \"Venue\"") === "'Bob\\'s \"Venue\"'", "driveQuote escapes single quotes for a Drive q literal");
+ok(
+  folderQuery("Peak Recordings", null) === "name = 'Peak Recordings' and mimeType = 'application/vnd.google-apps.folder' and 'root' in parents and trashed = false",
+  "folderQuery: root-level folder search (name + folder mime + root parent + not trashed)"
+);
+ok(folderQuery("Unfiled", "root1").includes("'root1' in parents"), "folderQuery scopes to the given parent id");
+ok(driveFileLink("abc 1") === "https://drive.google.com/file/d/abc%201/view", "driveFileLink builds the canonical view url");
+ok(INTEGRATION_CARDS.map((c) => c.key).join(",") === "mailboxes,recordings", "Settings registers the Recordings integration card beside Mailboxes");
+
+async function archiveAsyncChecks(): Promise<void> {
+  type Req = { url: string; init: RequestInit };
+  const reqs: Req[] = [];
+  const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
+  const SESSION = "https://upload.test/session/1";
+
+  /** A Drive that has no folders yet and accepts every upload. */
+  const emptyDrive: DriveFetch = async (url, init) => {
+    reqs.push({ url, init });
+    const method = (init.method || "GET").toUpperCase();
+    if (url.startsWith(DRIVE_UPLOAD_BASE)) return new Response("", { status: 200, headers: { Location: SESSION } });
+    if (url === SESSION) return json({ id: "file1", webViewLink: "https://drive.google.com/file/d/file1/view" });
+    if (method === "GET") return json({ files: [] });
+    if (method === "POST") {
+      const body = JSON.parse(String(init.body)) as { name: string; parents?: string[] };
+      return json({ id: body.name === "Peak Recordings" ? "root1" : "cust1" });
+    }
+    return new Response("unexpected", { status: 500 });
+  };
+
+  /* ---- ensureFolder ---- */
+  reqs.length = 0;
+  const hit = await ensureFolder("tok", "Peak Recordings", null, {
+    fetch: async (url, init) => { reqs.push({ url, init }); return json({ files: [{ id: "existing1", name: "Peak Recordings" }] }); },
+  });
+  ok(hit === "existing1" && reqs.length === 1 && reqs[0].url.startsWith(DRIVE_API_BASE + "/files?"), "ensureFolder: search hit returns the existing id with one GET");
+  ok(
+    (reqs[0].init.headers as Record<string, string>).Authorization === "Bearer tok" &&
+      (new URL(reqs[0].url).searchParams.get("q") || "").includes("'root' in parents"),
+    "ensureFolder: bearer token + root-parent query"
+  );
+
+  reqs.length = 0;
+  const cache = new Map<string, string>();
+  const made = await ensureFolder("tok", "Hortonville Area SD", "root1", { fetch: emptyDrive, cache });
+  ok(made === "cust1" && reqs.length === 2 && (reqs[1].init.method || "").toUpperCase() === "POST", "ensureFolder: miss → POST create, returns the new id");
+  ok(
+    JSON.parse(String(reqs[1].init.body)).parents?.[0] === "root1" &&
+      JSON.parse(String(reqs[1].init.body)).mimeType === "application/vnd.google-apps.folder",
+    "ensureFolder: create carries the parent + folder mime"
+  );
+  reqs.length = 0;
+  const again = await ensureFolder("tok", "Hortonville Area SD", "root1", { fetch: emptyDrive, cache });
+  ok(again === "cust1" && reqs.length === 0, "ensureFolder: per-run cache short-circuits the search");
+
+  for (const [status, needle] of [[403, "Enable Drive archive"], [401, "reconnect the archive mailbox"]] as const) {
+    try {
+      await ensureFolder("tok", "X", null, { fetch: async () => new Response('{"error":{"message":"insufficient"}}', { status }) });
+      ok(false, `ensureFolder ${status}: expected DriveApiError`);
+    } catch (e) {
+      ok(
+        e instanceof DriveApiError && e.status === status && e.message.includes(needle),
+        `ensureFolder ${status} → DriveApiError carrying "${needle}"`
+      );
+    }
+  }
+
+  /* ---- uploadFileResumable ---- */
+  reqs.length = 0;
+  const up = await uploadFileResumable(
+    "tok",
+    { name: "2026-09-21 SV-5012 Hortonville HS.m4a", mimeType: "audio/mp4", parentId: "cust1", size: 5, body: Buffer.from("audio") },
+    { fetch: emptyDrive }
+  );
+  ok(up.id === "file1" && up.webViewLink === "https://drive.google.com/file/d/file1/view", "uploadFileResumable returns id + webViewLink");
+  ok(
+    reqs.length === 2 &&
+      reqs[0].url.startsWith(DRIVE_UPLOAD_BASE + "/files?uploadType=resumable") &&
+      (reqs[0].init.headers as Record<string, string>)["X-Upload-Content-Length"] === "5" &&
+      (reqs[0].init.headers as Record<string, string>)["X-Upload-Content-Type"] === "audio/mp4",
+    "uploadFileResumable: initiate POST declares the byte length + mime"
+  );
+  ok(
+    reqs[1].url === SESSION &&
+      (reqs[1].init.method || "").toUpperCase() === "PUT" &&
+      (reqs[1].init.headers as Record<string, string>)["Content-Length"] === "5" &&
+      (reqs[1].init.headers as Record<string, string>)["Content-Type"] === "audio/mp4",
+    "uploadFileResumable: bytes PUT to the session url with Content-Length + mime"
+  );
+  ok(JSON.parse(String(reqs[0].init.body)).parents?.[0] === "cust1", "uploadFileResumable: metadata carries the parent folder");
+  const noLink = await uploadFileResumable(
+    "tok",
+    { name: "x.m4a", mimeType: "audio/mp4", parentId: "cust1", size: 1, body: Buffer.from("a") },
+    { fetch: async (url) => (url === SESSION ? json({ id: "f9" }) : new Response("", { status: 200, headers: { Location: SESSION } })) }
+  );
+  ok(noLink.webViewLink === driveFileLink("f9"), "uploadFileResumable: missing webViewLink falls back to driveFileLink");
+  try {
+    await uploadFileResumable(
+      "tok",
+      { name: "x.m4a", mimeType: "audio/mp4", parentId: "cust1", size: 1, body: Buffer.from("a") },
+      { fetch: async () => new Response("forbidden", { status: 403 }) }
+    );
+    ok(false, "uploadFileResumable 403: expected DriveApiError");
+  } catch (e) {
+    ok(e instanceof DriveApiError && e.status === 403 && e.message.includes("Enable Drive archive"), "uploadFileResumable 403 → DriveApiError with the enable-scope hint");
+  }
+
+  /* ---- archiveRecordings — the whole pass against injected stores ---- */
+  const readyAt = Date.UTC(2026, 8, 21, 15, 0);
+  const rec: RecordingRecord = normalizeRecording({
+    id: "REC-9001",
+    parentKind: "site_visit",
+    parentId: "SV-5012",
+    customerId: "c1",
+    customer: "Hortonville Area SD",
+    venue: "Hortonville HS",
+    startedAt: readyAt - 3_600_000,
+    mime: "audio/mp4",
+    sizeBytes: 5,
+    audio: { ...blankAudio(), state: "uploaded", blobPathname: "recordings/REC-9001.m4a" },
+    krisp: { ...blankKrisp(), status: "ready", readyAt },
+    createdAt: readyAt,
+    updatedAt: readyAt,
+  });
+
+  type ArchiveSettingsShape = Awaited<ReturnType<ArchiveDeps["settings"]>>;
+  function harness(over: Partial<ArchiveDeps> = {}, opts: { drive?: DriveFetch; settingsOver?: Partial<ArchiveSettingsShape> } = {}) {
+    const calls: string[] = [];
+    const saved: Record<string, unknown>[] = [];
+    const errors: Record<string, string> = {};
+    const deps: ArchiveDeps = {
+      settings: async () => ({
+        recordingsArchiveMailbox: "personal:u1",
+        recordingsArchiveFolderId: null,
+        recordingsArchiveFolders: {},
+        ...(opts.settingsOver || {}),
+      }),
+      saveSettings: async (patch) => { calls.push("saveSettings"); saved.push(patch); },
+      tokenFor: async () => ({ token: "tok", scope: "https://www.googleapis.com/auth/gmail.send " + DRIVE_SCOPE }),
+      candidates: async () => [rec],
+      blobStream: async () => new Response("audio").body,
+      deleteBlob: async () => { calls.push("deleteBlob"); },
+      markArchived: async () => { calls.push("markArchived"); },
+      markArchiveError: async (id, msg) => { calls.push("markArchiveError"); errors[id] = msg; },
+      fetch: opts.drive ?? emptyDrive,
+      now: () => 1_700_000_000_000,
+      log: () => undefined,
+      ...over,
+    };
+    return { deps, calls, saved, errors };
+  }
+
+  // happy path
+  reqs.length = 0;
+  {
+    const h = harness();
+    const r = await archiveRecordings(h.deps);
+    ok(r.archived === 1 && r.failed === 0 && r.skipped === null, "archiveRecordings: one candidate archived");
+    ok(
+      h.calls.indexOf("markArchived") !== -1 && h.calls.indexOf("markArchived") < h.calls.indexOf("deleteBlob"),
+      "archiveRecordings: markArchived happens BEFORE deleteBlob (spec §5.2 step 4 / §7)"
+    );
+    ok(!h.calls.includes("markArchiveError"), "archiveRecordings: no error stamped on success");
+    const patch = h.saved[0] || {};
+    ok(patch.recordingsArchiveFolderId === "root1", "archiveRecordings caches the root folder id in settings");
+    ok(JSON.stringify(patch.recordingsArchiveFolders) === JSON.stringify({ c1: "cust1" }), "archiveRecordings caches the customer subfolder id by customerId");
+    const last = patch.recordingsArchiveLastRun as { at: number; archived: number; failed: number; skipped: string | null };
+    ok(last && last.at === 1_700_000_000_000 && last.archived === 1 && last.failed === 0 && last.skipped === null, "archiveRecordings records the last run on settings");
+    const initiate = reqs.find((q) => q.url.startsWith(DRIVE_UPLOAD_BASE));
+    ok(!!initiate && JSON.parse(String(initiate!.init.body)).name.endsWith(" SV-5012 Hortonville HS.m4a"), "archiveRecordings names the Drive file from the recording");
+  }
+
+  // cached folders → no folder lookups at all
+  reqs.length = 0;
+  {
+    const h = harness({}, { settingsOver: { recordingsArchiveFolderId: "root1", recordingsArchiveFolders: { c1: "cust1" } } });
+    const r = await archiveRecordings(h.deps);
+    ok(r.archived === 1 && reqs.length === 2 && reqs.every((q) => q.url.startsWith(DRIVE_UPLOAD_BASE) || q.url === SESSION), "archiveRecordings: cached folder ids → only initiate + PUT hit Drive");
+    const patch = h.saved[0] || {};
+    ok(!("recordingsArchiveFolderId" in patch) && !("recordingsArchiveFolders" in patch), "archiveRecordings: unchanged folder caches are not rewritten");
+  }
+
+  // Drive failure on the PUT → blob untouched, error stamped
+  {
+    const failingDrive: DriveFetch = async (url, init) => (url === SESSION ? new Response("boom", { status: 500 }) : emptyDrive(url, init));
+    const h = harness({}, { drive: failingDrive });
+    const r = await archiveRecordings(h.deps);
+    ok(r.archived === 0 && r.failed === 1 && r.skipped === null, "archiveRecordings: Drive failure counts as failed, pass continues");
+    ok(!h.calls.includes("deleteBlob") && !h.calls.includes("markArchived"), "archiveRecordings: a Drive failure leaves the Blob untouched (spec §5.2 step 5)");
+    ok(h.errors["REC-9001"]?.includes("500"), "archiveRecordings: the Drive error is stored as archiveError");
+    ok((h.saved[0]?.recordingsArchiveLastRun as { failed: number }).failed === 1, "archiveRecordings: last run reflects the failure");
+  }
+
+  // Blob delete failure AFTER archive → stays archived, error notes it
+  {
+    const h = harness({ deleteBlob: async () => { throw new Error("blob gone wrong"); } });
+    const r = await archiveRecordings(h.deps);
+    ok(r.archived === 1 && r.failed === 0, "archiveRecordings: a failed Blob delete after Drive succeeded still counts as archived");
+    ok(h.calls.includes("markArchived") && h.errors["REC-9001"]?.includes("blob gone wrong"), "archiveRecordings: the Blob-delete failure is logged onto the record without undoing the archive");
+  }
+
+  // gates
+  reqs.length = 0;
+  {
+    const h = harness({}, { settingsOver: { recordingsArchiveMailbox: null } });
+    const r = await archiveRecordings(h.deps);
+    ok(r.skipped === ARCHIVE_SKIP_NOT_CONFIGURED && r.archived === 0 && r.failed === 0, "archiveRecordings: no archive mailbox → skipped 'Archive not configured'");
+    ok(reqs.length === 0 && !h.calls.includes("deleteBlob"), "archiveRecordings: not configured → Drive never called, Blob kept");
+    ok(h.errors["REC-9001"] === ARCHIVE_SKIP_NOT_CONFIGURED, "archiveRecordings: the gate message is stamped on the waiting record (spec §5.2 step 1)");
+  }
+  {
+    const h = harness({ tokenFor: async () => ({ token: "tok", scope: "https://www.googleapis.com/auth/gmail.send" }) });
+    const r = await archiveRecordings(h.deps);
+    ok(r.skipped === ARCHIVE_SKIP_NO_SCOPE && h.errors["REC-9001"] === ARCHIVE_SKIP_NO_SCOPE, "archiveRecordings: grant without drive.file → skipped 'Archive account missing Drive scope'");
+  }
+  {
+    const h = harness({ tokenFor: async () => null });
+    const r = await archiveRecordings(h.deps);
+    ok(r.skipped === ARCHIVE_SKIP_NOT_CONNECTED, "archiveRecordings: archive mailbox not connected → skipped");
+  }
+  // never throws
+  {
+    const h = harness({ candidates: async () => { throw new Error("db down"); } });
+    const r = await archiveRecordings(h.deps);
+    ok(r.archived === 0 && r.failed === 0 && (r.skipped || "").includes("db down"), "archiveRecordings never throws — a store failure becomes a skipped reason");
+  }
+  // ≤ 5 per run
+  {
+    const many = Array.from({ length: 7 }, (_, i) => normalizeRecording({ ...rec, id: `REC-90${10 + i}` }));
+    let uploads = 0;
+    const counting: DriveFetch = async (url, init) => { if (url === SESSION) uploads++; return emptyDrive(url, init); };
+    const h = harness({ candidates: async () => many }, { drive: counting });
+    const r = await archiveRecordings(h.deps);
+    ok(r.archived === 5 && uploads === 5, "archiveRecordings caps a run at 5 uploads (spec §5.2)");
+  }
+}

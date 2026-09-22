@@ -468,7 +468,7 @@ export default function MarkupViewer({
               )}
               {selectedAnn.commentId && commentById[selectedAnn.commentId] ? (
                 <div style={{ fontSize: 11.5, color: "#5b616e", marginTop: 6 }}>
-                  💬 “{commentById[selectedAnn.commentId].body}” ({commentById[selectedAnn.commentId].state})
+                  “{commentById[selectedAnn.commentId].body}” ({commentById[selectedAnn.commentId].state})
                 </div>
               ) : (
                 <div style={{ marginTop: 8 }}>

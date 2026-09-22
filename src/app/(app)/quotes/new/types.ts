@@ -10,11 +10,14 @@ export type ServiceType =
   | "repair"
   | "inspection"
   | "consulting"
-  | "rental";
+  | "rental"
+  | "custom";
 
 /** Same six entries as the "+ New quote" split menu (quotes/controls.tsx) —
  *  label/sub-label/badge content ported verbatim so the picker on this
- *  screen reads identically to the menu that links here. */
+ *  screen reads identically to the menu that links here — plus a trailing
+ *  "custom" card (#110): a user-named category for a system quote that
+ *  builds in the Estimator like the default "system" entry does. */
 export const SERVICE_TYPES: Array<{
   key: ServiceType;
   label: string;
@@ -78,18 +81,34 @@ export const SERVICE_TYPES: Array<{
     badgeSoft: "#e6f4ec",
     badgeBd: "#cde7d8",
   },
+  {
+    key: "custom",
+    label: "Custom category",
+    sub: "Name your own — builds in the Estimator",
+    badge: null,
+    badgeInk: "",
+    badgeSoft: "",
+    badgeBd: "",
+  },
 ];
 
 export function isServiceType(v: string | null | undefined): v is ServiceType {
   return !!v && SERVICE_TYPES.some((s) => s.key === v);
 }
 
-/** Where each service type's builder lives, matching NewQuoteMenu's six hrefs. */
-export function builderPath(type: ServiceType, customerId: string): string {
+/** Where each service type's builder lives, matching NewQuoteMenu's six hrefs.
+ *  `category` only applies to the "custom" type (#110): it rides to the
+ *  Estimator as ?category= and is seeded onto the new quote. */
+export function builderPath(type: ServiceType, customerId: string, category?: string): string {
   const qs = customerId ? "?customer=" + encodeURIComponent(customerId) : "";
   switch (type) {
     case "system":
       return "/estimator" + qs;
+    case "custom": {
+      const cat = (category || "").trim();
+      if (!cat) return "/estimator" + qs;
+      return "/estimator" + (qs ? qs + "&" : "?") + "category=" + encodeURIComponent(cat);
+    }
     case "flame_test":
       return "/flame-tests/quote" + qs;
     case "repair":
@@ -131,6 +150,8 @@ export type IntakeCustomer = {
  *  own convention), not FormData. */
 export type IntakeSubmit = {
   type: ServiceType;
+  /** User-named quote category — only read when `type` is "custom" (#110). */
+  category?: string;
   customerMode: "pick" | "new";
   customerId: string;
   newCustomerName: string;

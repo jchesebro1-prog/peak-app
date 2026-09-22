@@ -192,6 +192,8 @@ export type InitialQuote = {
   contactName: string;
   quoteNote: string;
   paymentTerms: PaymentTerms;
+  /** User-named quote category (#110) — "" when none. */
+  category: string;
   owner: string;
   revNum: number;
   revDateMs: number;
@@ -241,4 +243,7 @@ export type EstimatorProps = {
   /** This quote's rows from the shared tasks collection, keyed by loadedId —
    *  empty for a quote that's never been saved (no id to attach tasks to yet). */
   quoteTasks: TaskRecord[];
+  /** Reusable task-template sets applicable to quotes (D149, #118), for the
+   *  "Apply template" control next to the Tasks card. */
+  templateSets: { id: string; name: string }[];
 };

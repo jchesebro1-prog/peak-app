@@ -202,6 +202,12 @@ export async function createLeadAction(input: {
   interest: string;
   owner?: string;
   value: number;
+  /** #12 — set when the New Lead form's "pick an existing customer" picker
+   *  was used; null (the default) keeps current behavior exactly — every
+   *  lead from this form has customerId: null unless a customer was picked.
+   *  Minting a new customer eagerly from this form stays out of scope
+   *  (Decision D default) — that's convert()'s job, unchanged. */
+  customerId?: string | null;
 }): Promise<
   { ok: true; id: string } | { ok: false; id: null; error: string }
 > {
@@ -226,6 +232,7 @@ export async function createLeadAction(input: {
         // exactly like the prototype's `owner: nf.owner || undefined`.
         owner: input.owner || undefined,
         value: input.value || 0,
+        customerId: input.customerId || null,
       },
       me.name
     );

@@ -1300,7 +1300,7 @@ queued to build later per Jeff. The per-scope default *rules* are still to be de
 
 ---
 
-## 16. Notify the company when a project is sold and when it's completed — PARTIAL (corrected 2026-08-08)
+## 16. Notify the company when a project is sold and when it's completed — DONE 2026-09-21 (D145) — Home Queue task, not email
 
 **Area:** `src/app/(app)/quotes/actions.ts:25-43` (won), `src/app/(app)/projects/actions.ts:100-111`
 (signoff), `src/lib/gmail/bridge.ts`, `src/lib/stores/comms.ts`, `src/lib/stores/notif-prefs.ts`
@@ -1401,6 +1401,24 @@ direct stage change from reaching `complete` without a signoff — `setStageActi
 **decision E** (the project-roles model — tasks still spawn unassigned, per D87). Both are
 unbuilt, both real, and both worth a look together with item 20 Phase 2 (the roles model's stated
 home) whenever that's picked up — not built here, this is a documentation correction only.
+
+**DONE 2026-09-21 (D145).** Built Jeff's task-first alternative on the `assignments` collection
+(D93 — the Home Queue's one non-derived source) instead of extending the tasks-collection
+mechanism above. Two hooks, both assigning to the record's `owner` (still no separate PM/
+salesperson role — decision E's identity gap, addressed with the only assignee reliably present):
+`stores/quotes.ts` `setStatus` creates "Install sold — reach out" the moment a quote transitions
+into `won` (scoped to quote types that actually become an Installs project, so flame-test/repair/
+inspection/consulting wins don't get a bogus install task) — a real fix over the 7/25 `sold` task
+above, which spawns unassigned and only on project conversion, not the sale itself; that old task
+is left in place since it's still a useful team-visible checklist row and never collides with the
+new one in any shared view. `projects/actions.ts` `signoffAction` creates "Project complete —
+check in" guarded on the project's prior stage (not yet "complete") before calling
+`setProjectStage` — this one *replaces* the 7/25 `completed` task, which was already owner-assigned
+and would otherwise show twice in the same person's Home Queue for the same event. Decision D
+(direct stage jump to "complete" via `setStageAction`, bypassing sign-off) is still open and now
+also means that path spawns no follow-up — deliberate, per Jeff's own answer that sign-off should
+gate completion, not a silent gap. No email; nothing under `lib/gmail/` or `stores/comms.ts`
+touched. Full reasoning in DECISIONS.md D145.
 
 ---
 
@@ -2536,6 +2554,11 @@ or is that prohibitively expensive/complicated?
 installable PWA today; go Capacitor when a native capability (Bluetooth laser, camera, push) justifies
 it — likely alongside item 30.** Not a full rewrite.
 
+- **2026-09-21 — native sign-in works (D153).** Xcode 27 + iOS 27 simulator on the build Mac; the
+  shell opens the hosted app, Google sign-in runs in a Safari sheet and returns via
+  `quartzite://auth`. Still open for "a real app": Apple Developer Program, TestFlight, Phase 2 device
+  features (`docs/superpowers/specs/2026-09-21-native-shell-phase-2-design.md`).
+
 ---
 
 ## 32. Adding a venue: address search doesn't autofill the street on select — DONE (status corrected 2026-07-29 by code audit)
@@ -2946,11 +2969,13 @@ field already exist; the work is a sell-price input + deciding A (line distribut
 
 ---
 
-## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — OPEN
+## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — IN PROGRESS 2026-09-21 (Tasks 1–3 of 6 shipped, D147, D149, D147-addendum) — generated base sheet + seeding action + separate-sheet upload copy
 
 **Area:** The Grid (`/design/grid`), sheet handling; shared `VenueDims`.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
-**Spec:** `docs/superpowers/specs/2026-07-25-grid-base-sheet-and-estimator-split-design.md` (wave 2)
+**Spec:** `docs/superpowers/specs/2026-08-09-grid-base-sheet-estimator-split-design.md` (supersedes
+the 2026-07-25 spec for this build); plan:
+`docs/superpowers/plans/2026-09-21-grid-generated-base-sheet-plan.md`.
 
 **Ask (Jeff):** *"we need to have a base plan sheet be default, so the user doesn't need to
 upload something right away, they can just start dropping items in"* — refined same day:
@@ -2963,7 +2988,38 @@ calibration step on the base sheet**.
 wall-to-wall; the generated sheet must be explicit about which drives it. Open: when a real
 plan uploads later, do base-sheet markers carry over or arrive as a separate sheet?
 
-**Status:** OPEN — spec written, rides wave 2 (part of #41's architecture).
+**Task 1 shipped (D147):** the first intake save now generates a real base sheet from
+`VenueDims` (`generateBaseSheet()`, `plan-svg.tsx`'s new `renderPlanSvgMarkup()`
+string-builder) instead of a blank rectangle, auto-calibrated so nothing downstream ever
+prompts for a calibration step; `createProject()` no longer pre-seeds a sheet at all. The
+"I have my own plan, skip measurements" path still gets the old blank fallback
+(`seedBlankSheet()`). Starter Spaces are geometry-derived for proscenium/church venues;
+flat/blackbox/gym keep the old fixed-fraction Spaces (follow-up, not a regression — see D147).
+**Task 2 shipped (D149):** an explicit "Generate starting layout" action
+(`seedStartingLayoutAction`, gated on `intake.measurementBased`, confirmed
+client-side before writing) paints real, editable `GridPlacement`s from
+`compute(a)`'s real fixture/curtain quantities, at the same positions
+`buildPlanProscenium` already draws its rigged electrics/curtains at
+(generalized off `prosGeom`/`churchGeom`'s `stage` rect). No catalog SKU is
+guessed (punch #52's rule): seeded devices carry a non-catalog placeholder
+`partId` (`src/lib/design/grid-seed.ts`) and their real human label (e.g.
+"Par", "Grand drape") on the existing `category` field, resolved later the
+same delete-and-replace way any wrong device is fixed today. Scoped to
+Lighting + Curtains — the only two systems with an established per-device
+plan position anywhere in this codebase. Re-running is a true per-instance
+diff (new `GridPlacement.seededFrom` key), never a silent replace, never
+auto-deletes. New bulk `addPlacements()` writes the whole batch in one
+`patchDoc`. See D149 for the full trade-offs, including two accepted rough
+edges: `grid-bom.ts`'s "removed part" copy shows for an unresolved seeded
+placement, and minting a quote before resolving every placeholder currently
+prices those lines at $0 with no guard (flagged for Task 5 or a follow-up,
+not fixed here).
+
+**Remaining (Tasks 3–6, still OPEN):** real-plan-upload as a separate sheet,
+artifact derivation (equipment/lineset schedule + riser), the estimator↔Grid BOM seam, and
+retiring the estimator's own drawing tabs once parity is reached.
+
+**Status:** IN PROGRESS — Tasks 1–2 of 6 shipped 2026-09-21 (D147, D149); Tasks 3–6 open per the plan.
 
 ---
 
@@ -5333,7 +5389,7 @@ calling it.
 
 ---
 
-## 92. `/venues` renders every venue and every company in one page — 10 MiB, 8.5 s — OPEN
+## 92. `/venues` renders every venue and every company in one page — 10 MiB, 8.5 s — DONE 2026-09-21 — render capped at 200 (catalog's own pattern), company filter is now a typeahead (D144)
 
 **Area:** `src/app/(app)/venues/page.tsx`
 **Reported:** 2026-08-07 (found while fixing #91 — it is what #91's fix left behind)
@@ -5363,7 +5419,16 @@ instant locally. It was only found by seeding 1,700 synthetic companies and meas
 
 **Ties to:** #91, #89, #59 (real data is what makes this bite).
 
-**Status:** OPEN — logged only, no code. Needs a UX decision before anything is built.
+**Resolved 2026-09-21:** rather than pick among the three open pagination options, `/venues` takes
+the default already established for exactly this problem on `/catalog` (D144) — existing `?q=`/
+`?company=` filters narrow first, then the list is capped at 200 rows (`const PAGE = 200`) with a
+"Showing X of Y venues" label, no page-number links. The company filter is now a text input bound to
+a native `<datalist>` of company names (submits through the same `?company=` param; a typed name that
+doesn't resolve to a known company id fails open to no filter) instead of one `<Link>` chip per
+company. Also removed an unreviewed 50-per-page paginator that had leaked into this file from the
+2026-08-11 wip snapshot commit — it duplicated the exact surface this punch item asks Jeff to decide.
+
+**Status:** DONE 2026-09-21.
 
 ---
 
@@ -5429,7 +5494,7 @@ fallback order, DEPLOY.md §5 (four scopes, rename trap, `AUTH_URL` required for
 **Still open (Jeff):** enable Google Calendar API in `peak-backend` + add `calendar.events`
 scope (calendar opt-in only); set `CRON_SECRET` on Vercel for background sync.
 
-## 96. Inbox: automatic customer linking, link sidebar, two-way Gmail labels, derived status — SPEC APPROVED 2026-09-21
+## 96. Inbox: automatic customer linking, link sidebar, two-way Gmail labels, derived status — DONE 2026-09-21 (D140, D142)
 
 **Reported:** 2026-09-21 (Jeff). Spec:
 `docs/superpowers/specs/2026-09-21-inbox-customer-linking-and-label-sync-design.md`.
@@ -5449,6 +5514,9 @@ suppression, one-lead `Peak/New lead` swap, unknown/ambiguous skip). Follow-ups 
 final review: quote intake's own `toLocationInput` still drops `locationName`; ambiguous-card "Always"
 claims the domain even for a contact-level ambiguity (hint copy); duplicate option values when two
 candidate customers share a contact name.
+
+The wiring was reverted on `main` by a later merge and re-landed — see #120; the label-drift cron
+reconcile follow-up is #138.
 
 ## 97. Gmail 90-day import never completed — quota blow-up restarted it from page 1 on every sync — DONE 2026-09-21
 
@@ -5477,6 +5545,659 @@ Inbox tab until `CRON_SECRET` + a Pro-plan schedule (or an external pinger) exis
 ---
 
 ## 98. Cron reconcile of Peak/* label drift on dormant threads — OPEN
+
+D142's Peak→Gmail writer (`queueLabelSync`) is fire-and-forget: it's queued from the store mutation
+inside a server action, with no `waitUntil`, so on serverless the process can freeze or recycle before
+the queued write actually lands. That's fine for an active thread — the next mutation re-queues a
+sync that picks up the current desired set — but a link/assign/status change on a thread that then
+goes quiet can leave it permanently unlabelled (or stale-labelled) on the Gmail side if that one
+queued write was the one that got dropped: nothing else re-queues a sync for a thread nobody touches
+again.
+
+The per-sync passes (open-tab tick, cron) only re-queue threads whose status just flipped or that
+just linked — they don't sweep everything else. A cron-only reconcile pass that, for every linked
+thread, loads its current label set + computes `desiredPeakLabels` and queues a sync whenever they
+differ would close this: bounded cost (one `getDoc` + one label-cache read per linked thread), and it
+only needs to run on the cron path, not the interactive one, since interactive traffic already
+self-heals via the next mutation. Reference D142.
+
+---
+
+## REVIEW AUDIT — 2026-09-21 (Jeff's feature-review list, checked against `main` @ 771499b)
+
+Jeff re-sent his full review list (offline, dashboard queue, inbox/calendar, Assembly Builder,
+Estimator, Catalog) and asked which parts were fixed. Every item was checked in code, not the log.
+**Verified shipped** (D133–D138, merged in 45a7614): offline "go back and keep working" model ·
+Assembly Builder with default qty / 0 = option-only, user-defined component labels, single light
+engine + single lens, multi-select checkboxes for power/data/accessories/clamps/safety · Estimator
+fixture configurator selects saved assemblies only (sample fixtures gone), clean description from
+assembly name + labels · new estimate at 30% margin / 2% freight · manufacturer control removed ·
+Unit cost / Unit sell / Ext. sell columns · Vendor quote beside Custom part, `$` price fields, CSV
+import with example download, "Select CSV file" is a button · custom-part link button · Delete +
+Move system · terms select (Deposit with terms / 100% prepay / Net 30 / Net 60 / Unknown) · labor
+defaults 1×1 / 4×5 / 2×3 / 2×3 / 1×1, hours/day dropdown with 8 regular + OT, supervisor billed
+first, Lift rental with editable rate, drafting 2%, 5% performance bonus, scope from system title
+(Audio+Video combined, else Other) · customer preview Quantities/Descriptions/Prices grouped and
+lines vanish when all three are off · quote-details left sidebar · Quick Design BOM buckets pick
+from the assemblies list · intake quick-add venue + contact (`/quotes/new`, D138) · generic info in
+the dark context bar, seeded from the intake.
+
+Numbering skips #98–#106 (used on `wip/2026-08-11-estimator-quote-overhaul`; never landed on main).
+What was **not** done is logged below as #107–#113.
+
+## 107. Home Queue → Google Tasks (two-way) — OPEN, NEEDS DESIGN
+
+**Reported:** 2026-09-21 (Jeff): "Queue to be more like tasks that get loaded based on the quotes
+and projects and then gets assigned like reminders and google tasks. I would like google tasks to
+also be implemented and work that way."
+
+**What exists:** `src/lib/queue.ts` (D93) already derives the queue from quotes, projects,
+engagements, flame tests, inspections and site visits, and `/api/queue` feeds a Mac-side Reminders
+agent. There is no Google Tasks integration anywhere.
+
+**Ask:** mirror queue items into Google Tasks per assignee (Gmail OAuth already holds the Google
+client — add the `tasks` scope), complete-in-either-place closes both, reassign moves the task.
+Open questions for Jeff: one list per person or one shared "Quartzite" list; whether every derived
+item syncs or only assignments/reminders; due-date source. Spec before code.
+
+## 108. Calendar: multiple calendars, slide-out filter rail, shared team calendar — PARTIALLY DONE 2026-09-21 (D150, #117); shared calendar still OPEN
+
+**Reported:** 2026-09-21 (Jeff): toggle and add calendars to the calendar view; a filter sidebar on
+the right that slides out to expose the different calendars; a shared calendar people can add group
+events to.
+
+**What exists:** `src/app/(app)/calendar/calendar-client.tsx` shows one Google calendar (primary)
+plus Peak site visits, two hard-coded colors, no per-calendar toggle, no filter rail, no shared
+calendar. Google Calendar scope enablement is still the "separate follow-up" noted in the #96 spec.
+
+**Ask:** list the user's Google calendars (`calendarList`), persist per-user visibility toggles,
+right-hand slide-out rail with a color swatch per calendar, plus one shared Peak calendar (a Google
+calendar owned by the shared mailbox, or a Peak-side `events` collection — Jeff's call) with "add to
+shared calendar" in the event modal. Spec before code; pairs with #107's scope work.
+
+**Shipped 2026-09-21 (see #117, D150):** connect additional Google accounts and subscribe to their
+individual calendars from a right-hand slide-out filter rail on the Calendar tab, with per-calendar
+visibility toggles and color swatches, merged into the same agenda feed as a new `"external"`
+`AgendaItem` source. This closes the "toggle and add calendars" + "filter sidebar that slides out"
+parts of this ask.
+
+**Still OPEN — not built by #117:** the "shared calendar option that allows people to add the event
+to the shared calendar for group events" part. That's a distinct, bigger feature (either a real
+Google Calendar someone owns and the team writes to, or a new Peak-side shared-events collection)
+with its own write/permission model — a subscribe-only read feature doesn't cover it. Needs its own
+spec (design the write/ownership model first) before code, same as this item originally asked.
+
+## 109. Inbox: label color coding + visual cleanup — OPEN (extends #96)
+
+**Reported:** 2026-09-21 (Jeff): "I still want labels, color coding, and for it to look better and
+cleaner."
+
+**Status:** labels themselves are #96 (`Peak/*` written to and read from Gmail — in flight on
+`feat/inbox-linking`). Color coding of those labels in the list/reader, and a visual pass on the
+three-pane layout, are not in the #96 spec. Log here so they ride the same branch once the label
+plumbing lands: color per label (customer / status / assignee families), chip rendering in
+`thread-list.tsx` + `thread-reader.tsx`, and a density/spacing pass.
+
+## 110. Intake: user-defined quote category — DONE 2026-09-21 (D143)
+
+**Reported:** 2026-09-21 (Jeff): "I also want to have a service category by default and then a user
+defined category."
+
+**What exists:** `/quotes/new` (D138) offers the six fixed types in `quotes/new/types.ts`. No way
+to add a category of your own.
+
+**Ask:** add "Other / custom…" to the type list that reveals a free-text category; persist it on the
+quote (`category` string, default the type's label), show it on the Quotes hub badge and in the
+estimator header.
+
+## 111. Catalog import: no progress or confirmation on the upload path; raw file inputs — DONE 2026-09-21
+
+**Reported:** 2026-09-21 (Jeff): "There needs to be some sort of confirmation when the price list
+was imported, right now it just seems locked up when you click import." And: "anytime there is a
+select file option it needs to be a button — right now it isn't clear where to click."
+
+**What exists:** `catalog/controls.tsx:293` submits `<form action={importCatalog}>` with a native
+`<input type="file">` and no pending state, so the page sits still until the server action returns;
+the paste path shows "Importing…" but nothing after. `venue-assessments/page.tsx:226` has the other
+remaining native file input. Every other picker is already a hidden input behind a button.
+
+**Ask:** upload + paste both show "Importing N rows…" while pending and a "Imported N parts
+(M updated, K skipped)" status line after; both remaining native file inputs become the
+button-with-filename pattern used in `estimator/section-card.tsx:806`.
+
+## 112. Estimator CSV batch-add should price SKUs from the catalog — DONE 2026-09-21
+
+**Reported:** 2026-09-21 (Jeff): "I still need the ability to batch add catalog parts via a csv
+file."
+
+**What exists:** the D135 material CSV import (`estimator/material-csv.ts`) adds rows verbatim — a
+row needs its own unit cost / unit sell. A CSV of catalog SKUs + quantities imports with $0 prices.
+
+**Ask:** when a row's SKU matches the catalog, fill description / unit / cost from the catalog and
+seed sell from the tier or 30% margin (same path `onAddPart` uses), only falling back to the CSV's
+own numbers when they're present; report "N priced from catalog, M custom" in the status line.
+
+## 113. Emoji regressions since #3 — DONE 2026-09-21
+
+`estimator/section-card.tsx:872` (`🔗 Link`), `design/engagements/view.tsx:1019` (`✏️`),
+`design/engagements/markup/viewer.tsx:471` (`💬`). #3's rule: no pictographs, no U+FE0F; plain
+text or an SVG where the glyph was the only affordance.
+
+## Q — Labor: "shouldn't fill more than a single mobilization" — NEEDS JEFF
+
+The same review list also asks for five default mobilizations (Site Visit 1×1, Install 4×5, Hang
+2×3, Commissioning 2×3, Training 1×1), which D136 ships. Read together, the likely meaning is that
+the configurator should not auto-add a *second copy* of any mobilization or a second labor line per
+system — not that it should open with one row. Left as-is until Jeff confirms.
+
+## BUILD LOG — 2026-09-21, #110–#113 (branch `punch-2026-09-21-review-audit`)
+
+**#113** 5b97915 · **#111** 91520a4 · **#112 + #110** df95611 (shared estimator files).
+#110 ships as a `system` quote carrying a `category` string (D143) — `/quotes/new` "Custom
+category" card → `/estimator?category=` → editable in the Prepared-for bar (persists on blur via
+`updateQuoteMetaAction`) → neutral badge on the Quotes hub. #111: `importCatalog` redirects with
+`?importError=` on empty/unparseable/zero-valid input; upload submits through a transition with
+"Importing…"; catalog + venue-assessments pickers are button-over-hidden-input. #112:
+`resolveCatalogSkusAction` + sku-only rows in `parseMaterialCsv`; sell seeded by the `addPart`
+margin rule; example CSV shows both row kinds.
+**Gates:** tsc clean · eslint 31→31 warnings, 0 errors on the changed set · test:specs 982→986 PASS
+(the same 5 fresh-datadir seed-race failures at baseline and after) · test:smoke ALL PASSED ·
+cavecrew-reviewer pass, no confirmed findings. Not browser-checked — needs a visual on `/catalog`
+import, `/quotes/new`, and the estimator CSV panel.
+
+
+## 114. Calendar: based-out-of setting + auto travel-time block on scheduled meetings — DONE 2026-09-21 (D146)
+
+**Reported:** Jeff: "In Calendar settings there should be an option for where you are based out
+of. I would like when scheduling meetings with physical address it auto adds travel time to the
+calendar as an event that you can remove but has time dedicated to traveling to the site from
+where the person is based out of."
+
+**Shipped:** a "Based out of" picker on `/account` (self-service `updateMyOfficeAction`, reuses
+the existing `users.officeId` field Settings -> Team already edits for admins) and an auto
+travel-time block on `addCalendarEventAction` (Calendar's own meeting-create flow) — when a new
+event's location looks like a real street address (has a digit or comma, isn't a meeting-link
+URL), it geocodes the address (`geo.ts` `search()`), estimates drive time from the signed-in
+user's office (falling back to the quote-default office, then skipping silently if none exists),
+and inserts a second, ordinary, freely-removable "Drive to `<title>` (auto)" event ending at the
+meeting's start. Create-only — editing an existing meeting's location does not regenerate a
+travel block (known limitation, see D146). The crew/install Schedule board (`schedule/actions.ts`)
+is untouched — its bookings never carry a `location` and aren't "meetings with a physical
+address" in Jeff's sense.
+
+**Files:** `src/app/(app)/account/actions.ts`, `src/app/(app)/account/office-picker.tsx` (new),
+`src/app/(app)/account/page.tsx`, `src/app/(app)/calendar-actions.ts`. No schema/migration change.
+
+## 115. Apple Reminders sync agent (D93) — DONE 2026-09-21
+
+The Mac-side half of the work-queue/Reminders design
+(`docs/superpowers/specs/2026-07-19-work-queue-reminders-sync-design.md`) had never been built —
+only the server contract (`src/app/api/queue/route.ts`) existed. Apple publishes no cloud API for
+Reminders, so nothing hosted can ever write one; it has to run locally via osascript.
+
+**Shipped:** `scripts/reminders-agent.ts` — a standalone, mac-only (`process.platform !== "darwin"`
+guard) script that GETs `/api/queue?who=` with `x-queue-token`, reconciles the open items into a
+"Peak" list in Reminders.app via JXA (`osascript -l JavaScript`, chosen over AppleScript so
+argv-passed strings never need source-level quoting/escaping and list reads come back as JSON),
+and POSTs completions back to `/api/queue` for `source: "assignment"` items only, per the route's
+own write-back restriction. Dedupe is a `peak-queue-key: <key>` marker line in each reminder's
+notes, re-derived from Reminders' live state every run; a small ledger
+(`~/.peak-reminders-agent-ledger.json` by default) remembers only which keys were hand-deleted so
+they are never resurrected. Per-item osascript/POST failures are logged and skipped, not fatal;
+a bad token or unreachable host is fatal (non-zero exit). No new dependency — `child_process` +
+`fetch` only. Full usage (required env — `QUEUE_API_BASE_URL`, `QUEUE_API_TOKEN`,
+`QUEUE_AGENT_WHO` — manual run, and a launchd `.plist`/cron sample for the every-few-minutes
+schedule) is in the file's top-of-file doc comment, matching how the rest of `scripts/` documents
+itself (no sibling READMEs exist there).
+
+**Needs from Jeff to go live:** `QUEUE_API_TOKEN` set on the deployed app's env and on the Mac
+that will run this, and the script scheduled locally (launchd or cron) — see the doc comment.
+
+## 116. Google Tasks two-way sync for the Home Queue (D148) — DONE 2026-09-21
+
+Jeff: "This needs to be implemented with google tasks... work that way [like the Apple Reminders
+queue sync]." #115 (Reminders) only reaches Jeff's own Mac; this is the cloud-side equivalent for
+anyone who connects Google Tasks, running as a server-side scheduled sync instead of a local
+script.
+
+**Shipped:** `TASKS_SCOPE`/`hasTasksScope()` in `src/lib/gmail/config.ts`, matching D77's Calendar
+opt-in pattern exactly — `/api/gmail/connect` now takes `?tasks=1` (combinable with `?calendar=1`)
+to re-run consent on a personal mailbox's existing `gmail_connections` row with the Tasks scope
+appended (`include_granted_scopes` keeps Gmail/Calendar). `src/lib/google/tasks.ts` is a thin
+zero-dep Google Tasks v1 REST wrapper (find-or-create the "Peak" list — same name as the Reminders
+agent's list — list/insert/complete/delete tasks), mirroring `google/calendar.ts`'s `gcal` pattern.
+`src/lib/google/tasks-sync.ts` implements the same reconciliation model as
+`scripts/reminders-agent.ts`: mirror every open Home Queue item into "Peak" (dedup via a
+`peak-queue-key: <key>` marker in the task's notes, same convention as the Reminders agent),
+complete the mirror when the server-side item closes, and write back
+`setAssignmentDone(id, true, "google-tasks")` only for `source: "assignment"` items checked off in
+Google Tasks — per `/api/queue`'s own write-back restriction. Triggered from the existing
+`/api/gmail/sync` cron (no new `vercel.json` entry) via `syncAllGoogleTasks()`, isolated in its own
+try/catch. `Assignment.doneVia` widened to add `"google-tasks"` (type-only, no migration). Settings
+→ Mailboxes gained an "Enable Google Tasks sync" toggle beside the existing "Enable calendar" one.
+
+**Known gap (documented, not fixed):** no hand-delete ledger — a Google Task deleted outright (not
+checked off) gets remirrored on the next run, unlike the Reminders agent's local ledger. Building
+that equivalent would need a new doc-store collection for an edge case nobody's hit yet.
+
+**Files:** `src/lib/gmail/config.ts`, `src/app/api/gmail/connect/route.ts`, `src/lib/google/tasks.ts`
+(new), `src/lib/google/tasks-sync.ts` (new), `src/app/api/gmail/sync/route.ts`,
+`src/lib/stores/assignments.ts`, `src/app/(app)/settings/page.tsx`,
+`src/app/(app)/settings/settings-client.tsx`. Decisions: D148. No schema/migration change.
+
+**Needs from Jeff to go live:** the Google Cloud OAuth consent screen must list the
+`https://www.googleapis.com/auth/tasks` scope (same place Calendar's scope was added, DEPLOY.md
+§5) before `?tasks=1` will work in production.
+
+## 117. Calendar: connect multiple Google accounts and subscribe to their calendars — DONE 2026-09-21 (D150)
+
+**Reported:** 2026-09-21 (Jeff): "We need a way to log into multiple google accounts and subscribe
+to other calendars via the calendar tab only so you can sync other calendars in one place."
+
+**What exists:** the ONE Google account tied to a mailbox's Gmail connection can already opt into
+calendar access (D77's "Enable calendar" on Settings/Account) and shows on the Calendar tab as the
+`"google"` source. There was no way to see any OTHER Google account's calendars there.
+
+**Shipped:** a new `calendar_connections` table (separate from `gmail_connections` — no mailbox, no
+Gmail semantics, read-only `calendar.readonly` scope) lets a user connect as many additional Google
+accounts as they want, purely to subscribe to their calendars. Connect flow is folded into the
+existing `/api/gmail/connect` + `/api/gmail/callback` routes via a discriminated signed state
+(`?purpose=calendar-connect`) — no new redirect URI to register. On connect, the account's
+calendars are discovered (`calendarList.list`); the primary calendar starts visible, everything
+else starts hidden. A new right-hand slide-out filter rail on the Calendar tab
+(`calendar-filter-rail.tsx`, opened from a "Calendars" button) lists connected accounts, lets you
+disconnect one, re-check it for new/removed calendars ("Refresh"), and toggle each sub-calendar's
+visibility + pick one of seven preset colors. Visible sub-calendars merge into the same agenda feed
+`loadAgendaRange()` already builds (`lib/agenda.ts`), as a new `"external"` `AgendaItem` source
+rendered in its own color on the month/week/day views — read-only, clicking one opens Google's own
+event page in a new tab rather than any in-app edit affordance. This closes the "multiple
+calendars" + "filter rail" parts of #108 (see that entry — the "shared team calendar" part is a
+separate, still-open ask).
+
+**Files:** `src/db/schema.ts` (`calendarConnections`, `drizzle/0019_sleepy_dust.sql`),
+`src/lib/gmail/oauth.ts`, `src/lib/gmail/config.ts`, `src/lib/google/calendar-connections.ts`
+(new), `src/lib/google/calendar.ts`, `src/app/api/gmail/connect/route.ts`,
+`src/app/api/gmail/callback/route.ts`, `src/lib/agenda.ts`, `src/app/(app)/calendar-actions.ts`,
+`src/app/(app)/calendar/calendar-client.tsx`, `src/app/(app)/calendar/calendar-filter-rail.tsx`
+(new), `src/app/(app)/calendar/page.tsx`. Decisions: D150.
+
+**Needs from Jeff to go live:** the Google Cloud OAuth consent screen must list the
+`https://www.googleapis.com/auth/calendar.readonly` scope before "Connect an account" will
+complete in production — same category of action as the Calendar/Tasks scope additions before it,
+but no new redirect URI this time (the flow reuses the existing Gmail callback URL).
+
+## 118. Reusable task templates for projects, quotes, and designs (D151) — DONE 2026-09-21
+
+**Reported:** 2026-09-21 (Jeff): "I want to be able to add template tasks to projects, quotes, and
+designs that can be assigned based on groups, people, or teams."
+
+**What existed:** `TASK_TEMPLATE` in `src/lib/stores/tasks.ts` — a hardcoded, per-project-stage
+checklist where every item is unassigned, with no quote/design equivalent and no way to author new
+checklists without editing code. `TaskRecord` already had nullable `projectId`/`quoteId` pointers
+and a working Tasks card on projects and (as of an earlier punch #17 remainder) quotes; designs had
+no task linkage or UI at all.
+
+**Shipped:** a NEW, separate, admin-editable mechanism — reusable, named template SETS (new
+`task_templates` doc-store collection) — that leaves `TASK_TEMPLATE` untouched. Each set is tagged
+with which record kinds it applies to (project/quote/design, can be more than one) and holds lines
+with a title, an optional section, and an assignment target: a specific person, a `Role`
+(Admin/Manager/Estimator/Reviewer — the closest real grouping the data model has, since no
+department/crew concept exists), or "everyone." Applying a set to a record fans role/team lines out
+into one real task PER matching active user (so it shows up in that person's own task list, not as
+an ownerless shared row), reusing `tasks.ts`'s own `expandTemplate()` coverage-key dedup so a
+re-apply only ever adds instances that don't already exist — e.g. a newly hired Estimator gets
+their task on the next apply without touching anyone else's.
+
+Designs gained their first task linkage (`TaskRecord.designId`) and their first Tasks card (reusing
+the shared `TasksCard` component) — nothing existed there before. Quotes already had working task
+UI from punch #17's remainder (the punchlist's own audit note calling that out was stale). All
+three entry points (project detail, quote builder, design detail) got a shared "Apply template"
+control next to their Tasks card. Authoring lives at a new admin screen, `/task-templates`
+(Settings → Admin), gated on `manage_users`.
+
+**Not built (logged as an open follow-up):** a real department/crew grouping distinct from the
+permission `Role` enum — if "team" was meant to mean something narrower than "everyone" or a
+specific role, that needs a new field on `users` and Jeff's input on what the groups should be.
+
+**Files:** `src/db/doc-tables.ts`, `drizzle/0020_odd_crusher_hogan.sql`, `src/lib/stores/tasks.ts`,
+`src/lib/stores/task-templates.ts` (new), `src/components/apply-template-control.tsx` (new),
+`src/app/(app)/task-templates/*` (new), `src/app/(app)/settings/settings-sections.ts`,
+`src/components/nav/nav-data.ts`, `src/app/(app)/projects/*`, `src/app/(app)/estimator/*`,
+`src/app/(app)/design/designs/*`. Decisions: D151.
+
+## 119. Recordings: in-app site-visit audio → Krisp → write-back → Drive archive (D152) — BUILT 2026-09-21, pilot pending
+
+**Reported:** 2026-09-21 (Jeff): the Krisp API Integration Brief — recording, transcript, summary
+and action items should land on the visit's record automatically.
+
+**Shipped on `feat/recordings` (worktree `.claude/worktrees/recordings`):** `recordings`
+collection + `krisp_connections` table (migration 0021); Krisp REST client, import relay, status
+check, reconcile, write-back (feed note, confirm-first action items, insert-on-tap prefill);
+recorder seam (native Capgo + web fallback), device upload queue, `/api/recordings/upload` Blob
+broker, `/recordings/new` recorder page and `/recordings/[id]` detail page (Summary / Action items
+/ Transcript / Audio); Drive archive job + `drive.file` scope; Account Krisp card; Settings →
+Recordings (archive account) and Beta (pilot users); Record control + recordings strip on Venue
+Assessments, Survey/Inspection/Flame/Repair editors, Field Work, Home agenda, customer record,
+Engagement Oversight; "From recording" panel in the Survey and Inspection editors; ⌘K search.
+
+**Jeff-gated before the pilot:** Core/Advanced Krisp seats; a Write key on his seat;
+`BLOB_READ_WRITE_TOKEN` in Vercel prod; Drive scope on the archive mailbox; the native build with
+the DEPLOY.md §6 plist/manifest edits. Device-only checks: recording through screen lock, Android
+foreground-service notification, multipart upload of a >50 MB take, Vercel's upload-completed
+callback (prod only).
+
+## 120. `main` after the review-audit merge: #96 wiring reverted, build broken, migrations non-convergent — DONE 2026-09-21 (branch `punch-2026-09-21-round-2`)
+
+**Found:** 2026-09-21 23:00, starting the round-2 branch. `056e0d4` ("Merge origin/main into
+punch-2026-09-21-review-audit") resolved every conflicting file by keeping its own side, so `main`
+@ 763febd had #96's integration reverted (`thread-reader.tsx` sidebar mount, `page.tsx` resolution
+VM + Unmatched view, `comms.ts` `queueLabelSync` hooks + resolution fields, `bridge.ts`
+resolve-on-ingest + label-event feed, `api.ts`, `config.ts`), `customerDomains` dropped from
+`schema.ts` and both snapshots, `0019_long_the_enforcers` off the journal, D140/D142 overwritten,
+the #96 status and old #98 lost. The other session's close-out (`b05aff6`…`6ba6220`) then re-landed
+the wiring, the schema, the journal entry and the D140/D142 numbering itself — so by the time this
+branch was rebuilt on 6ba6220, three things were still wrong on `main`:
+
+1. **The build fails.** `task-templates/template-sets-client.tsx` (a client component, #118)
+   value-imported `@/lib/stores/task-templates`, which pulls `doc-store → db → postgres` into the
+   browser bundle ("Module not found: Can't resolve 'fs'/'net'/'tls'/'perf_hooks'").
+2. **Migrations don't converge.** Preview builds of the review-audit branch had already applied its
+   original `0019_sleepy_dust` (calendar_connections) and `0020_odd_crusher_hogan` (task_templates)
+   to the one shared Neon DB (D141 warns about exactly this). The close-out then renamed them into a
+   merged `0020_brave_avengers` that is NOT idempotent, so the 6ba6220 production build died at
+   `CREATE TABLE "calendar_connections"` → *relation already exists*. Worse, because drizzle-orm
+   selects work by `created_at < when` only, prod's high-water mark may have passed
+   `0019_long_the_enforcers` (when 22:28Z) via those previews (01:14Z / 01:28Z) before cddf37b's
+   production build ran (01:41Z) — in which case **`customer_domains` was never created in prod**
+   and the live sidebar's domain claims fail. Cannot be read without `DATABASE_URL`; the fix below
+   makes the question moot.
+3. **The newest snapshot lacked `customer_domains`**, so the next `db:generate` would have emitted
+   `DROP TABLE customer_domains`.
+
+**Fix (this branch, first commit):** the two constants the client needs moved to a DB-free
+`src/lib/task-template-kinds.ts` (store re-exports them); `0020_brave_avengers.sql` and
+`0021_krisp_recordings.sql` rewritten idempotently (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF
+NOT EXISTS`, `CREATE OR REPLACE TRIGGER` — PG14+, fine on Neon and PGlite 17); a new custom
+`0022_customer_domains_repair` re-issues `customer_domains` idempotently with a fresh timestamp so
+every database converges; the `customer_domains` block restored to `0021_snapshot.json` and carried
+into `0022_snapshot.json`. `quotes/new/intake-form.tsx` deliberately NOT restored to the #96 shape —
+#110 landed on top of it and my change there was only the `EntityQuickAdd` extraction (folds into
+the Grid intake spec §5).
+
+**Proof:** `drizzle-kit generate` → "No schema changes". A scratch-PGlite convergence script
+(three databases: fresh; prod-worst = original sleepy_dust + odd_crusher applied, high-water mark
+past 0019, no `customer_domains`; prod-best = same plus 0019) migrates all three without error,
+ends with `customer_domains` + `calendar_connections` + `task_templates` + `recordings` +
+`krisp_connections` present and both seq-bump triggers in place; a second run is a no-op.
+**Gates:** tsc 0 errors · test:specs ALL PASSED · test:review:regressions passed · test:smoke ALL
+PASSED · eslint clean on touched files · `next build` exit 0.
+
+**Lesson (adds to D141):** a merge that "keeps ours" for every conflict is a revert of the other
+branch, and a regenerated migration is only safe if it is actually idempotent — the "106 baseline"
+type errors the review-audit branch reported were this breakage. When two sessions land on `main`
+the same day: diff the merged files against `main` before branching, run the four gates on the
+merge commit itself, and never push a journal change without a convergence run.
+
+## ROUND 2 — 2026-09-21 (Jeff's list, branch `punch-2026-09-21-round-2`)
+
+Logged as #121–#137. "What exists" is from a code read of `main` @ 763febd (+ the #120 repair);
+items marked NEEDS SPEC get a design doc before code, the rest get a scoped plan each.
+
+## 121. Search bars: filter dropdown and results on the same line as the search box — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "Anytime a search bar is present, especially with catalog, the
+dropdown and the search bar need to be the same line — it is confusing to have the dropdown be
+separate and not see your search results."
+
+**What exists:** no shared search component (`src/components` has none; 24 screens each roll their
+own `<input placeholder="Search…">`). Patterns in the wild: Catalog page has search + sort on one row
+(`catalog/controls.tsx:48`) but manufacturer/category/unit facets in a separate left rail
+(`catalog/page.tsx:220-259`); People and Companies put their filter `<select>`s on a second row
+(`people/controls.tsx:69-91`, `companies/controls.tsx:111-131`); the Subassemblies part picker
+filters a `<select>`'s own options, so the results ARE a detached dropdown you have to open
+(`design/subassemblies/subassemblies-client.tsx:27-28`); the estimator catalog picker is the one
+place results list inline under the input (`estimator/catalog-picker.tsx:79-99`).
+
+**Ask:** one shared control — `SearchFilterBar` (input + its filter selects in a single row) and a
+`Typeahead` variant where results render inline under the input (the estimator picker pattern) — and
+adopt it on the catalog-facing pickers first (Subassemblies/Assemblies part pickers, Catalog page,
+Grid device palette), then the People/Companies/Venues filter rows. Which screens Jeff means most is
+the open question (asked 2026-09-21).
+
+## 122. Vendors module — OPEN, NEEDS SPEC
+
+**Reported:** 2026-09-21 (Jeff): a vendor portion of the app that mostly references the catalog's
+vendors; tracks when we last received a price list and whether the catalog matches it — if not, add a
+task for Jena; vendor contacts and what to contact them for; discounts and project-registration
+information; log interactions with the vendor via the Inbox.
+
+**What exists:** vendor identity is free text everywhere — `CatalogPart.mfr` (`lib/stores/catalog.ts:32`),
+`ProcurementLine.vendor` / `ProjectDelivery.vendor` (`lib/stores/projects.ts:122,137`), a static
+`VENDORS` map (`projects.ts:106-112`); no vendors table. The company model already has a type picker
+value `"vendor/manufacturer"` (`lib/identity/config.ts:17`) and `PARTNER_TYPES` checks a literal
+`"Vendor"` (`identity/venue-defaults.ts:16-24`) — casing mismatch. No price-list/import history record
+of any kind; the only freshness signal is per-row `updatedAt` rolled up by `priceBooks()`
+(`lib/catalog-books.ts:20-46`) for the Home "Catalog glance" card. Tasks for a teammate = the Home
+Queue `assignments` store (`lib/stores/assignments.ts:67-90`, `link.kind` already includes
+`"company"`; assignee is a display name). Inbox linking to any company works unmodified
+(`inbox/link-actions.ts:64`) and the customer feed loader (`lib/customer-feed.ts:37`) is what a vendor
+page would reuse for interactions.
+
+**Ask:** a Vendors screen over companies of kind vendor (reusing contacts, feed, Inbox linking),
+matched to catalog manufacturers by name with an explicit alias list; a price-list ledger per vendor
+(received date + effective date, file/notes) that #133's per-line price dates are checked against —
+mismatch or staleness spawns an assignment for the catalog owner (a setting, default Jena); discount
+terms + project-registration fields on the vendor record. Spec before code — pairs with #133 (price
+dates) and #132/#134 (import).
+
+## 123. Inbox: "Link to work" above the customer picker in the link sidebar, plus quick-add quote — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "I want link to work to populate on the left side directly above
+the pick the customer. I want the ability to quick add quote from the link to work."
+
+**What exists:** the sidebar (`inbox/link-sidebar.tsx`, re-landed by main's close-out; see #120) renders the customer card
+first and nests the work picker (`thread-reader.tsx:670-847`, types quote/survey/inspection/project —
+no lead) inside/after it. `/quotes/new?customer=` pre-seeds a quote (`quotes/new/page.tsx:12`) but
+nothing in the Inbox links to it.
+
+**Ask:** move "Link to work" to the top of the sidebar; add "+ New quote" there that opens the quote
+intake pre-filled with the thread's customer/contact and links the thread to the created quote on
+save; add `lead` to the work-link types (the interpreter already writes `type:"lead"`).
+
+## 124. Inbox: link a venue through the selected customer — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "The Venue should also be linkable via the customer when selected."
+
+**What exists:** `CommThread` has no site/venue field (`lib/stores/comms.ts:235-277`); quick-add venue
+appends a `CustomerLocation` to the customer but never attaches it to the thread.
+
+**Ask:** once a customer is linked, a venue select (that customer's sites + quick-add) that stamps
+`siteId` on the thread; work links created from the thread (quote, survey, inspection) inherit it.
+
+## 125. Inbox: per-message picker to link from a specific message (in or out) — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "a dropdown menu for a thread and select that message in the thread,
+both incoming and outgoing, to link quicker."
+
+**What exists:** linking is whole-thread only (`setLinkAction`, `linkThread`); messages have no
+affordance beyond expand/collapse (`thread-reader.tsx:76-258`); the resolver keys off the thread's
+counterpart address, so a multi-party or forwarded thread suggests from the wrong person.
+
+**Ask:** a message picker in the sidebar (From/To · direction · date) that sets which message's
+addresses the resolver and quick-add use; exact semantics (identity source vs message-level link)
+confirmed with Jeff 2026-09-21 before the spec.
+
+## 126. Inbox: resizable list/reader panes + collapsible menu — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "the ability to resize the preview window, inbox, and collapse the
+menu."
+
+**What exists:** fixed widths — nav sidebar 238px (`inbox-shell.tsx:567`), list 392px
+(`thread-list.tsx:95`), reader `flex:1`; no splitter component anywhere in `src/`; no persisted
+layout prefs (the one Inbox pref, `crmMode`, is a server-side notif pref). The app nav is a top bar
+with a mobile drawer, not a rail.
+
+**Ask:** drag handles between folder rail / list / reader, a collapse toggle on the Inbox folder rail,
+widths remembered per user (localStorage, with sane min/max), and — if Jeff means the app nav — a
+compact mode for the top bar.
+
+## 127. Inbox: email signatures, auto-appended — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "There needs an ability to add signatures so they automatically get
+added."
+
+**What exists:** no signature field anywhere (`users`, `gmail_connections`, Account); the composer
+starts Reply/Reply-all with an empty body (`thread-reader.tsx:430-452`) and `buildRaw()` sends
+`text/plain` verbatim (`gmail/mime.ts:58-104`). Every live thread is `mailbox:"personal"` per user.
+
+**Ask:** a per-user signature (Account → Signature; plain text, optional per-mailbox override once
+shared boxes return) inserted into the composer on new/reply/forward below a `-- ` separator, editable
+before send; forward and reply quoting unchanged.
+
+## 128. Inbox: list row shows the last person who responded (Gmail-style); "waiting on them" badge stays — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "The name in the inbox preview should be who responded last,
+organized similar to how Gmail works, and if I responded last ignore that and hold the last person to
+respond, but hold the badge that says waiting on them."
+
+**What exists:** row name = `participants` (unique authors joined, `comms.ts:564-571`) or
+`customer || contactName` (`page.tsx:399-419`); the status pill and the "waiting" chip come from
+`deriveStatus` (`comms.ts:132-142`).
+
+**Ask:** primary name = author of the newest message that isn't the signed-in user (fallback: the
+counterpart), Gmail-style "Brenda, me (3)" secondary; status/waiting badge unchanged.
+
+## 129. Assembly Builder: assemblies re-price when price lists update — OPEN (verify + fix Subassemblies)
+
+**Reported:** 2026-09-21 (Jeff): "make sure that as we update the price lists it auto-updates the
+assemblies prices based on what we selected."
+
+**What exists:** Assemblies already resolve live — `resolveFixtureAssemblies()` joins each component
+SKU against the current catalog on every read (`lib/fixture-assemblies.ts:60-89`), so a price-list
+import changes them immediately. Subassemblies do NOT: `saveFixtureAction` snapshots `cost`/`price`
+at save time (`design/subassemblies/actions.ts:45-46`) and never re-resolves.
+
+**Ask:** make Subassemblies resolve live too (store SKUs, compute on read; keep the snapshot only as a
+"priced as of" display), and show a "prices as of <catalog date>" stamp on both builders. Rides with
+#130.
+
+## 130. Assembly Builder + Subassemblies on one tab — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "Can we combine this and Subassemblies to the same tab rather than
+two separate tabs?"
+
+**What exists:** two nav entries and routes — `/design/assemblies` and `/design/subassemblies`
+(`nav-data.ts:93,96`); assemblies live on `settings.fixtureAssemblies` (`lib/settings.ts:89`),
+subassemblies in their own doc collection.
+
+**Ask:** one "Assembly Builder" entry with an in-page Assemblies | Subassemblies switch (URL param so
+deep links keep working); `/design/subassemblies` redirects.
+
+## 131. The Grid: selectable symbol per placed item type — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "on the plans a select symbol for different items that get placed,
+so it is easier for people to distinguish between different objects."
+
+**What exists:** every placed device is the same rounded rect, colored by a hash of its category
+(`grid/[id]/editor.tsx:123-127, 2035-2094`); curtains are the one special glyph. `GridSymbol`
+(`lib/stores/grid-catalog.ts:17-33`) has size fields but no shape/glyph.
+
+**Ask:** a small curated symbol set (rect, circle, triangle, diamond, hexagon, speaker/light/camera
+glyphs…) selectable per grid-catalog entry (and overridable per category), rendered on the plan,
+in the riser and in the legend; default mapping by category so existing designs change sensibly.
+
+## 132. Catalog import: mandatory manufacturer + wrong-manufacturer double check — OPEN
+
+**Reported:** 2026-09-21 (Jeff): imports need a mandatory manufacturer; if the chosen manufacturer
+already exists, check whether the file's parts overlap the existing ones — overlap means it's the same
+manufacturer's list (allow it); no overlap means the wrong manufacturer was picked (error).
+
+**What exists:** two importers disagree — the Catalog page stamps ONE manufacturer over the whole
+file (`catalog/actions.ts:97`, picker at `controls.tsx:242-290`, optional), the Import hub takes it
+per row with a fallback to the existing part's value (`import/registry.ts:111-126`). Upsert key is
+SKU alone in both, so a wrong manufacturer silently relabels existing parts.
+
+**Ask:** manufacturer required on both paths; when it already exists, compute SKU overlap against
+that manufacturer's parts — ≥1 match allows, zero matches rejects with "none of these SKUs belong to
+<mfr>"; a brand-new manufacturer name that is a near-duplicate of an existing one (case/punctuation)
+is normalized to the existing one.
+
+## 133. Catalog: per-line price date, 18-month outdated banner by manufacturer, editable effective date — OPEN
+
+**Reported:** 2026-09-21 (Jeff): every price tracks when it was last updated per line item; past 18
+months the catalog shows a banner flagging those manufacturers as outdated (like the dashboard shows
+them) but editable; and we can set the effective date of a price list on import — a one-time backfill
+during development, then ongoing.
+
+**What exists:** `CatalogPart.updatedAt` is a last-write stamp on ANY edit, not a price date
+(`lib/stores/catalog.ts:75,101`); the Home "Catalog glance" card shows raw age per manufacturer
+(`home-catalog.tsx`, `catalog-books.ts:20-46`) and hides it entirely if one part lacks a stamp; no
+threshold, no effective date anywhere.
+
+**Ask:** `pricedAt` (effective date) per part, set from an "effective date" field on both importers
+(default today) and only when the price actually changes; a per-manufacturer "price list effective"
+override editable from the banner (the one-time backfill); an 18-month rule surfaced as a Catalog
+banner + the dashboard card; feeds #122's ledger.
+
+## 134. Catalog import: 1 MB cap with a clear error — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "There needs to be a cap on the import of 1mb or it errors and it
+needs to sense that."
+
+**What exists:** the Catalog page importer only checks `file.size > 0` (`catalog/actions.ts:72`); the
+xlsx route caps at 10 MB (`api/import/xlsx/route.ts:15`), datasheets at 8 MB; no
+`serverActions.bodySizeLimit` in `next.config.ts`.
+
+**Ask:** a 1 MB cap on the catalog CSV/TSV/xlsx paths, checked client-side before upload AND
+server-side, surfaced through the existing `importError` banner (#111) — never a silent failure.
+
+## 135. Consulting: add a project + fee manually from the hub — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "Consulting needs the ability to add a project and fee and such from
+this screen; normally it would get autogenerated by a fee proposal but should have the option to
+include a project that may have skipped a fee or proposal."
+
+**What exists:** engagements are created only by `syncEngagementsFromQuotes()` when a consulting quote
+goes sent/won (`lib/stores/engagements.ts:527-573`); the hub (`design/engagements/view.tsx`) has "+
+Add milestone" on an existing engagement but no "+ New engagement"; `ensureEngagementForQuote()` is
+dead code (`engagements.ts:495`).
+
+**Ask:** "+ New consulting project" on the hub — customer (pick/quick-add), name, architect, venue,
+optional fee (fixed amount or milestones) — creating an engagement with no quote, marked
+`origin:"manual"` so the sweep never overwrites it; a later fee proposal can attach to it.
+
+## 136. Knowledge & Information tab: move Steel Calculator + Fixture Cross-Ref — OPEN (first slice of #27/#56)
+
+**Reported:** 2026-09-21 (Jeff): "Move Steel Calculator, Fixture Cross Ref to a Knowledge and
+information tab. The tab needs more information on how we get information into it and how it is
+developed, but for now those two can live under that tab."
+
+**What exists:** both live under the DESIGN group (`nav-data.ts:91,95`, pages
+`design/steel`, `design/fixtures`); no Knowledge route exists; #27 and #56 are logged-only.
+
+**Ask:** a KNOWLEDGE nav group with a landing page (short intro on where the data comes from and how
+it's maintained, placeholders for the #56 doctrine/rules items) plus those two entries moved in;
+old URLs redirect.
+
+## 137. Import/Export: separate customers / contacts / venues imports, category column, zip, link-back — OPEN (absorbs #82, #83)
+
+**Reported:** 2026-09-21 (Jeff): customers, contacts and venues as separate import options with a
+category column; a zip for the company address; imported contacts and venues link back to the
+customer account.
+
+**What exists:** one `customers` importer with a single embedded contact + venue per row
+(`import/registry.ts:129-186`; template `import/types.ts:38-49`, no Zip); match is by normalized
+name only (`registry.ts:132`); `zip` exists on the `companies` and `sites` tables (`schema.ts:210,308`)
+but nothing in `CustomerLocation`/`writeRecord()` can set it (`customers.ts:497-515`); category ≈
+`type`/`lifecycle`/`keywords` on `CustomerDoc`, none set by the importer. No `people` or `venues`
+import types (#82, #83).
+
+**Ask:** three import types — customers (adds Category → `type`, Zip), contacts, venues — where
+contacts/venues carry a `Customer` column matched by name (case/punctuation-insensitive) with an
+optional `Customer ID`; unmatched rows are reported before commit (auto-create vs reject is Jeff's
+call, asked 2026-09-21); zip plumbed through the store; matching exports.
+
+## 138. Cron reconcile of Peak/* label drift on dormant threads — OPEN (re-logged; was #98)
 
 D142's Peak→Gmail writer (`queueLabelSync`) is fire-and-forget: it's queued from the store mutation
 inside a server action, with no `waitUntil`, so on serverless the process can freeze or recycle before

@@ -21,6 +21,7 @@ import {
 import { all as allCustomers } from "@/lib/stores/customers";
 import { activeUsers } from "@/lib/users";
 import InspectionEditor, { type EditorMeta, type EditorCustomer } from "./controls";
+import { loadPrefillPanels, loadRecordingsStrip } from "../../recordings/data";
 
 export const metadata = { title: "Inspection — Quartzite-6" };
 
@@ -37,6 +38,12 @@ export default async function InspectionEditorPage({
     activeUsers(),
   ]);
   if (!rec) notFound();
+  // Recordings (spec §4.4/§6): header strip + "From recording" prefill
+  // panels — server half computed here, rendered inside the client editor.
+  const [recordings, fromRecording] = await Promise.all([
+    loadRecordingsStrip("inspection", rec.id),
+    loadPrefillPanels("inspection", rec.id),
+  ]);
 
   const editorCustomers: EditorCustomer[] = customers.map((c) => {
     const contacts = c.contacts || [];
@@ -74,5 +81,15 @@ export default async function InspectionEditorPage({
 
   const roster = users.map((u) => u.name);
 
-  return <InspectionEditor record={rec} customers={editorCustomers} roster={roster} meta={meta} />;
+  return (
+    <InspectionEditor
+      record={rec}
+      customers={editorCustomers}
+      roster={roster}
+      meta={meta}
+      recordings={recordings.recordings}
+      canShowRecord={recordings.canRecord}
+      fromRecording={fromRecording}
+    />
+  );
 }

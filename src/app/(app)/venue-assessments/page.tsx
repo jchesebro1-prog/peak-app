@@ -13,10 +13,14 @@ import {
 } from "@/lib/stores/surveys";
 import { VENUE_CLASSES } from "@/lib/stores/venue-classes";
 import { IDENTITY, deriveInitials, fallbackColor } from "@/lib/team";
-import { createSurvey, importSurveyCsv, quoteFromSurvey } from "./actions";
+import { createSurvey, quoteFromSurvey } from "./actions";
+import CsvUploadForm from "./csv-upload-form";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import VisitRequests, { type VisitRequestVM } from "./visit-requests";
+import { RecordControl } from "@/components/recordings/record-control";
+import { RecordingCountBadge } from "@/components/recordings/record-control-link";
+import { recordingCountByParent } from "../recordings/data";
 
 export const metadata = { title: "Venue assessments — Quartzite-6" };
 
@@ -92,6 +96,8 @@ export default async function FieldSurveyPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [user, sp, all, visits] = await Promise.all([requireUser(), searchParams, getAll(), allVisits()]);
+  // Recordings spec §6 — one pass over the collection for every card's count + Record control.
+  const recCounts = await recordingCountByParent("survey", all.map((s) => s.id));
 
   // Cross-screen deep links (Home, Inbox, Customers) use /venue-assessments?id=<id>;
   // the capture editor lives at /venue-assessments/[id]. Redirect to keep both working.
@@ -222,10 +228,7 @@ export default async function FieldSurveyPage({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
         <a href="/api/venue-assessments/template.csv" download style={{ fontSize: 12.5, fontWeight: 600, color: "#3a3f4a", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 9, padding: "10px 12px", textDecoration: "none" }}>↓ Blank CSV</a>
-        <form action={importSurveyCsv} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <input name="file" type="file" accept=".csv,text/csv" required style={{ width: 170, fontSize: 11.5 }} />
-          <button type="submit" style={{ fontSize: 12.5, fontWeight: 600, color: "#3a3f4a", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 9, padding: "10px 12px", cursor: "pointer" }}>↑ Upload CSV</button>
-        </form>
+        <CsvUploadForm />
         <form action={createSurvey} style={{ flexShrink: 0 }}>
           <button
             type="submit"
@@ -576,6 +579,9 @@ export default async function FieldSurveyPage({
                   </div>
                 </Link>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 15px", borderTop: "1px solid #f2f3f5" }}>
+                  {/* Recordings spec §6 — count badge + Record control per worklist card */}
+                  <RecordingCountBadge count={recCounts.get(s.id) ?? 0} />
+                  <RecordControl parentKind="survey" parentId={s.id} size="sm" hasRecordings={(recCounts.get(s.id) ?? 0) > 0} style={{ minHeight: 42, padding: "0 10px" }} />
                   <Link
                     href={`/venue-assessments/${encodeURIComponent(s.id)}`}
                     className="fs-open"

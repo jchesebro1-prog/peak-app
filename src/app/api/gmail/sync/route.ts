@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { AUTO_SYNC_MIN_AGE_MS } from "@/lib/gmail/config";
 import { checkMailIfStale } from "@/lib/stores/comms";
+import { syncAllGoogleTasks } from "@/lib/google/tasks-sync";
+import { reconcileRecordings } from "@/lib/krisp/reconcile";
+import { archiveRecordings } from "@/lib/krisp/archive";
 
 // #97 — the Gmail import/poll can take longer than the platform default
 export const maxDuration = 60;
@@ -14,6 +17,21 @@ export const maxDuration = 60;
  * secret is the ONLY auth — the route is disabled entirely (503) until
  * CRON_SECRET is configured. The sync itself is throttled by atomic
  * per-mailbox claims, so an aggressive schedule is safe.
+ *
+ * D146 rides this same trigger for the Google Tasks Home Queue sync: rather
+ * than add a second vercel.json cron entry (a second scheduling mechanism
+ * for what's conceptually the same "poll Google on a timer" job this route
+ * already exists for), syncAllGoogleTasks() runs as an extra step here. It's
+ * wrapped in its own try/catch so a Tasks-side failure can never fail the
+ * Gmail sync this route was built for; a hiccup is reported in the response
+ * body, not thrown.
+ *
+ * The Recordings feature (spec §3.2 + §5.2) adds two more steps on the same
+ * pattern: `reconcileRecordings()` polls Krisp for transcripts that are
+ * still processing (≤ 5 per Krisp account per pass), and
+ * `archiveRecordings()` moves settled audio from Blob to the Drive archive
+ * (≤ 5 per run). Both are own-try/catch and never throw; on Hobby this
+ * makes them daily, and the Vercel upgrade only shortens the cadence.
  */
 export async function GET(req: Request): Promise<NextResponse> {
   const secret = process.env.CRON_SECRET;
@@ -24,5 +42,27 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const r = await checkMailIfStale(AUTO_SYNC_MIN_AGE_MS);
-  return NextResponse.json(r);
+
+  let googleTasks: Awaited<ReturnType<typeof syncAllGoogleTasks>> | { error: string };
+  try {
+    googleTasks = await syncAllGoogleTasks();
+  } catch (err) {
+    googleTasks = { error: (err as Error).message };
+  }
+
+  let recordings: Awaited<ReturnType<typeof reconcileRecordings>> | { error: string };
+  try {
+    recordings = await reconcileRecordings();
+  } catch (err) {
+    recordings = { error: (err as Error).message };
+  }
+
+  let recordingsArchive: Awaited<ReturnType<typeof archiveRecordings>> | { error: string };
+  try {
+    recordingsArchive = await archiveRecordings();
+  } catch (err) {
+    recordingsArchive = { error: (err as Error).message };
+  }
+
+  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive });
 }
