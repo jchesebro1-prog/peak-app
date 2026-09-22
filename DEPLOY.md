@@ -113,8 +113,18 @@ Cloud project** from step 4.
    **Google Calendar API** in the Library and add `.../auth/calendar.events` here too. Gmail
    works without it.
 
+   Two more opt-in features, each its own scope, each independent of the ones above — add
+   whichever you're turning on:
+   - **Google Tasks sync** (Home Queue ↔ Google Tasks, Settings → Mailboxes → Enable Google
+     Tasks): enable the **Google Tasks API** in the Library, add `.../auth/tasks` here.
+   - **Connect additional calendars** (Calendar tab → Calendars → Connect another account —
+     a DIFFERENT Google account than your mailbox, read-only subscribe): the same **Google
+     Calendar API** as above, but add `.../auth/calendar.readonly` (not `calendar.events` —
+     this flow only ever reads).
+
    Any scope the app requests that is NOT listed here makes Google reject the consent, so keep
-   this list in step with `GMAIL_SCOPES` in `src/lib/gmail/config.ts`.
+   this list in step with `GMAIL_SCOPES` (plus `CALENDAR_SCOPE`/`TASKS_SCOPE`/
+   `CALENDAR_READONLY_SCOPE`) in `src/lib/gmail/config.ts`.
 
    (These are "sensitive/restricted" scopes. While your app is in **Testing**
    they work immediately for accounts you add under **Audience → Test users**;
