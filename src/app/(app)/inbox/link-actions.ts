@@ -25,6 +25,7 @@ import type { SavePersonInput } from "@/app/(app)/people/types";
 import { claimDomain, releaseDomain } from "@/lib/gmail/domains";
 import { domainOf, isPublicDomain } from "@/lib/gmail/config";
 import { linkThread, rememberAddress, resweepThreads } from "@/lib/gmail/linking";
+import { syncPeakLabels } from "@/lib/gmail/label-sync";
 
 type R = { ok: true } | { ok: false; error: string };
 const revalidate = () => revalidatePath("/", "layout");
@@ -95,6 +96,7 @@ export async function linkThreadToCustomerAction(
     }
   }
   await linkThread(threadId, customerId, contactId);
+  void syncPeakLabels(threadId);
   revalidate();
   return { ok: true };
 }
@@ -165,6 +167,7 @@ export async function quickAddCustomerAction(input: {
     });
   }
   await linkThread(input.threadId, res.id, contactId);
+  void syncPeakLabels(input.threadId);
   revalidate();
   return { ok: true, id: res.id };
 }

@@ -142,6 +142,31 @@ export async function listLabels(mailboxKey: string): Promise<GmailLabelMeta[]> 
   return r.labels || [];
 }
 
+/** #96 §3 — create a user label (nesting on "/"). Returns Gmail's id. */
+export async function createLabel(
+  mailboxKey: string,
+  name: string
+): Promise<{ id: string; name: string }> {
+  return gapi(mailboxKey, "/labels", {
+    method: "POST",
+    body: JSON.stringify({ name, labelListVisibility: "labelShow", messageListVisibility: "show" }),
+  });
+}
+
+/** Add/remove labels on a single message (used where a thread-level change
+ *  isn't appropriate). Requires the gmail.modify scope — callers must check
+ *  the connection's stored grant first. */
+export async function modifyMessage(
+  mailboxKey: string,
+  messageId: string,
+  change: { addLabelIds?: string[]; removeLabelIds?: string[] }
+): Promise<void> {
+  await gapi(mailboxKey, "/messages/" + messageId + "/modify", {
+    method: "POST",
+    body: JSON.stringify(change),
+  });
+}
+
 export type GmailHistoryMessageAdded = { message: GmailMessageMeta };
 export type GmailHistoryRecord = { messagesAdded?: GmailHistoryMessageAdded[] };
 

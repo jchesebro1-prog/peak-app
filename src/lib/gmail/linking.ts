@@ -124,7 +124,15 @@ export async function resweepThreads(
     await patchDoc<CommThread>("comms", t.id, (d) => {
       didPatch = applyResweepPatch(d, next);
     });
-    if (didPatch) changed++;
+    if (didPatch) {
+      changed++;
+      if (next.resolution === "linked") {
+        // Lazy import — label-sync pulls in connections/api, and a static
+        // import here would set up an import cycle with those.
+        const { syncPeakLabels } = await import("./label-sync");
+        void syncPeakLabels(t.id);
+      }
+    }
   }
   if (changed > 0) {
     console.info("[gmail] link backfill:", { threads: candidates.length, changed, ms: Date.now() - started });

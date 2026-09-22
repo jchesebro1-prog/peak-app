@@ -47,6 +47,7 @@ import {
 } from "./api";
 import { buildRaw, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
+import { syncPeakLabels } from "./label-sync";
 
 /**
  * The real Gmail bridge (Phase 7). comms.ts delegates here — but ONLY when the
@@ -268,6 +269,7 @@ async function recordMessage(
     }
     return recordMessage(key, p, attempt + 1);
   }
+  if (rec.resolution === "linked") void syncPeakLabels(id);
   return id;
 }
 

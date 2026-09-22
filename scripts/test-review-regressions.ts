@@ -9,6 +9,7 @@ import { contactByEmail } from "@/lib/identity/lookup";
 import { emailsFor, saveContact, setEmails, softDeleteContact } from "@/lib/identity/contacts";
 import { claimDomain, customersForDomain } from "@/lib/gmail/domains";
 import { applyResolution, applyResweepPatch, resolveForThread, resweepThreads } from "@/lib/gmail/linking";
+import { syncPeakLabels } from "@/lib/gmail/label-sync";
 import type { CommThread } from "@/lib/stores/comms";
 
 async function main() {
@@ -330,6 +331,41 @@ async function main() {
     unknownThread.resolution,
     "unknown",
     "#96 create() leaves a public-domain contact unresolved"
+  );
+
+  // #96 §3 — the Peak → Gmail label writer must never throw out of a fire-
+  // and-forget caller: a nonexistent thread id resolves cleanly...
+  await assert.doesNotReject(
+    () => syncPeakLabels("no-such-thread"),
+    "#96 syncPeakLabels on an unknown thread id must resolve, never throw"
+  );
+
+  // ...and a real thread with no gmailThreadId is skipped before any Gmail
+  // call (the regression harness has no network access and GMAIL_ENABLED is
+  // unset here, so gmailEnabled() alone already guarantees the immediate
+  // return — this pins that behavior).
+  await upsertDoc<any>("comms", {
+    id: "C-t96label-nogmail",
+    mailbox: "sales",
+    unread: false,
+    archived: false,
+    customerId: "lakefront",
+    customer: "Lakefront",
+    contactName: "No Gmail",
+    contactEmail: "no-gmail@t96label.example",
+    subject: "No Gmail thread id",
+    channel: "email",
+    status: "waiting_us",
+    assignedTo: "",
+    link: null,
+    messages: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    resolution: "linked",
+  } as any);
+  await assert.doesNotReject(
+    () => syncPeakLabels("C-t96label-nogmail"),
+    "#96 syncPeakLabels on a thread with no gmailThreadId must resolve, never throw"
   );
 
   console.log("review regression checks passed");

@@ -282,6 +282,10 @@ export type CommThread = {
   resolvedContactId?: string | null;
   /** "Not them" on a suggestion — stop offering it for this thread. */
   suggestionDismissed?: boolean;
+  /** #96 §3 — last time the Peak → Gmail label writer applied a real change
+   *  (add/remove) for this thread. Echo-suppression stamp; unset until the
+   *  first successful sync. */
+  peakLabelsAppliedAt?: number;
 };
 
 function mid(n: number): string {
