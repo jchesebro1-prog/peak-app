@@ -88,7 +88,7 @@ export const equipmentItems = docTable("equipment_items"); // Rentals module —
 export const equipmentLocations = docTable("equipment_locations"); // Rentals module — warehouse/trailer locations gear stock lives at (D129)
 export const equipmentBookings = docTable("equipment_bookings"); // Rentals module — booking/reservation records against equipment items (D129, Task 2)
 export const recordings = docTable("recordings"); // in-app site-visit audio → Krisp transcription → write-back (docs/superpowers/specs/2026-09-21-krisp-recordings-design.md §1.1; migration 0021)
-export const vendorProfiles = docTable("vendor_profiles"); // Vendors module (#122) — one profile per vendor company, id = company id; migration 0023_vendor_profiles
+export const vendorProfiles = docTable("vendor_profiles"); // Vendors module (#122) — one profile per vendor company, id = company id; migration 0024_vendor_profiles
 
 export const DOC_TABLES = {
   quotes,

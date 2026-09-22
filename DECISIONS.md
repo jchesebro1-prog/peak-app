@@ -3707,7 +3707,7 @@ building:
   typed the legacy way do NOT appear on `/vendors` — retype them in the Companies edit modal, whose
   type select now keeps a stored type that isn't one of the five prototype venue segments (it used
   to render blank for any Daylite-imported type).
-- **One doc per vendor, id = company id** (`vendor_profiles`, migration `00NN_vendor_profiles`,
+- **One doc per vendor, id = company id** (`vendor_profiles`, migration `0024_vendor_profiles`,
   written idempotently per D141). Manufacturer claims are `mfr` spellings matched by `mfrKey()`;
   one owner per key — claiming moves it. Not sync-pushable.
 - **Status** (`lib/vendor-status.ts`, pure): `no-list` beats everything; `newer-list` when the
@@ -3721,8 +3721,11 @@ building:
   re-opened. Runs after a ledger save and inside the daily `/api/gmail/sync` cron (own try/catch,
   reported as `vendors` in the JSON). Assignee = `settings.catalogOwner.userId` if active, else the
   user named Jena Tolksdorf, else the first active Admin; nobody → no task. `link.kind` stays
-  `"company"` (the Krisp write-back precedent: `AssignmentLink` kinds are not extended), so the
-  queue row lands on `/queue`; a `/vendors/<id>` deep link from the queue is a follow-up.
+  `"company"` (the Krisp write-back precedent: `AssignmentLink` kinds are not extended); the queue
+  row deep-links to `/vendors/<id>` anyway, gated on the source prefix — `assignmentHref()`
+  (`lib/queue.ts:43,61`) sends a `"company"` link to `/vendors/<id>` only when its `source` starts
+  with `"auto: vendor "`, and every other `"company"` link (which may be a customer, and that route
+  404s on one) still lands on `/queue`.
 - **Settings → Catalog** is the admin card on `/catalog` (Settings' Admin section only links
   there); `setCatalogOwnerAction` is gated on `manage_users` like every other Settings write.
 - **"+ New vendor" is a name-only quick-add** through the customers-store upsert with the type
@@ -3740,7 +3743,8 @@ building:
   so dev shows "Newer list received" and the first cron creates the owner's task.
 
 Out of scope, logged as follow-ups: procurement lines linking to vendor records
-(`ProcurementLine.vendor` stays free text); queue → vendor deep link; multi-vendor manufacturers.
+(`ProcurementLine.vendor` stays free text); a `"vendor"` `AssignmentLink` kind of its own (the
+source-prefix gate above covers the one case that exists); multi-vendor manufacturers.
 ## D158. Import hub — customers / contacts / venues as three importers, unmatched customers auto-created (#137, closes #82 + #83, 2026-09-21)
 
 Jeff's decision (brainstorm 2026-09-21): a contacts or venues row whose customer isn't in Peak

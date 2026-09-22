@@ -5994,7 +5994,7 @@ dates) and #132/#134 (import).
 
 **Shipped:** spec `docs/superpowers/specs/2026-09-21-vendors-module-design.md`, plan
 `docs/superpowers/plans/2026-09-21-vendors-module.md`. `vendor_profiles` doc collection (id = company
-id; migration `00NN_vendor_profiles`, idempotent) + `lib/stores/vendors.ts`; pure
+id; migration `0024_vendor_profiles`, idempotent) + `lib/stores/vendors.ts`; pure
 `lib/vendor-status.ts` (status, owner-task specs, catalog effective date over `mfrKey` aliases,
 manufacturer directory, owner resolution) and `lib/vendor-tasks.ts` (one catalog read + one
 profiles read; exactly-once assignments by `source` key; daily cron step); `/vendors` (table,
@@ -6330,3 +6330,30 @@ data on `main` today.
 **Ask:** four one-line additions to `PARTNER_TYPES`, the same pattern #122 used for vendors (keep the
 legacy literal, add the exact `COMPANY_TYPES` spelling): `"architect"`, `"general contractor"`,
 `"electrical contractor"`, `"engineer or AV consultant"`.
+
+## 140. A vendor with a price list but NO claimed manufacturers is permanently "Newer list received" — OPEN
+
+**Reported:** found during the #122 (Vendors module) final review, 2026-09-21. Not a defect against
+the spec — the spec says this and the regression harness asserts it — so it is Jeff's call, not a
+default anyone should take while he isn't looking.
+
+**What exists:** `vendorStatus()` (`src/lib/vendor-status.ts:87-97`) compares the newest ledger entry
+against `catalogEffectiveAt`, and `catalogEffectiveAtFor()` (`:67-77`) returns `null` when the vendor
+claims no manufacturers (no keys, nothing to date). The comparison is then
+`lastList.effectiveAt > (catalogEffectiveAt ?? 0)`, which any real date wins, so such a vendor reads
+`newer-list` forever: it can never reach `current` or `outdated`, and `vendorTasks()` (`:106-124`)
+mints an "Update catalog: X price list effective …" task for the catalog owner for every distinct
+effective date logged. The task is honest for a vendor whose catalog lines are waiting on an import,
+but the vendor kept purely for its contacts, discount terms and registration — no catalog presence at
+all, which is most of the "partner" rows Jeff is likeliest to add by hand — produces the same nag with
+nothing for the owner to actually do, and no way to clear it except completing the task by hand each
+time. A vendor with no ledger entry at all is unaffected (`no-list` short-circuits first).
+
+**Ask:** pick one. (a) Leave it — logging a price list for a vendor with no claimed manufacturers is
+arguably a data-entry mistake and the task is the prompt to fix it. (b) A fifth status key,
+`no-claims`, shown as its own chip and minting no task, so the Vendors list says plainly why the
+vendor is outside the freshness rule. (c) Return `no-list` when there are no manufacturers, which
+mints no task but hides the fact that a list was logged. (b) is the only one of the three that keeps
+the ledger visible AND the queue quiet, at the cost of one more chip in `VENDOR_STATUS_META` and the
+`/vendors` status filter. Whichever is picked, the spec §2 status table, `DECISIONS.md` D160 and the
+`#122` harness assertions move with it. Reference #122 / D160.
