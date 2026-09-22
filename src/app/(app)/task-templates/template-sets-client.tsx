@@ -40,7 +40,13 @@ function rid(): string {
 }
 
 function blankLine(): EditableLine {
-  return { localKey: rid(), key: rid(), title: "", section: "", target: { kind: "team" } };
+  return {
+    localKey: rid(), key: rid(), title: "", section: "", target: { kind: "team" },
+    // #145 — no scope/unit editor yet here (that lands with the consulting
+    // apply UI); these match normalizeLine's own defaults, so leaving them
+    // out is never distinguishable from a saved line reading them back.
+    phase: "", discipline: "", startPct: 0, lengthPct: 100,
+  };
 }
 
 function blankSet(): EditableSet {
@@ -108,7 +114,10 @@ export default function TemplateSetsClient({
         name: s.name,
         description: s.description,
         appliesTo: s.appliesTo,
-        lines: s.lines.map((l) => ({ key: l.key, title: l.title, section: l.section, target: l.target })),
+        lines: s.lines.map((l) => ({
+          key: l.key, title: l.title, section: l.section, target: l.target,
+          phase: l.phase, discipline: l.discipline, startPct: l.startPct, lengthPct: l.lengthPct,
+        })),
       });
       if (!result.ok) {
         setStatus((m) => ({ ...m, [setKey]: result.error }));
