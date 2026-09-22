@@ -2927,54 +2927,108 @@ import { rateLimit, rateLimitRefund } from "../src/lib/rate-limit";
   ok(rateLimit(k3, 1, 60_000).ok, "#88 rateLimitRefund: refunding an untouched key is a safe no-op");
 }
 
-/* --- #14: catalog price-book age pills --- pure, asserted here at top level. */
-import { priceBooks } from "../src/lib/catalog-books";
+/* --- #14/#133: catalog price books + price-date model --- pure, asserted at top level. */
+import {
+  OUTDATED_AFTER_MS,
+  effectivePriceDate,
+  isOutdated,
+  isoDateOf,
+  mfrKey,
+  nextPricedAt,
+  parseEffectiveDate,
+  priceBooks,
+} from "@/lib/catalog-books";
 
 {
   const now = Date.now();
   const DAY = 86400000;
+  const MONTH = 30.4375 * DAY;
 
-  const fullyFresh = priceBooks([
-    { mfr: "Acme", updatedAt: now - 3 * DAY },
-    { mfr: "Acme", updatedAt: now - 5 * DAY },
-  ]);
   ok(
-    fullyFresh[0]?.ageDays === Math.floor((Date.now() - (now - 5 * DAY)) / DAY),
-    "#14 priceBooks: age pill is the OLDEST updatedAt in a fully-covered book, not the newest"
+    mfrKey("Meyer Sound") === "meyersound" && mfrKey("meyer-sound") === "meyersound" && mfrKey(" MEYER  SOUND ") === "meyersound",
+    "#133 mfrKey: case, spaces and punctuation collapse"
+  );
+  ok(mfrKey("") === "" && mfrKey(undefined) === "" && mfrKey("---") === "", "#133 mfrKey: blank/punctuation-only → empty key");
+
+  ok(OUTDATED_AFTER_MS === 548 * DAY, "#133 OUTDATED_AFTER_MS is 548 days (18 months)");
+  ok(!isOutdated(now - 17 * MONTH, now), "#133 isOutdated: 17 months → current");
+  ok(!isOutdated(now - 547 * DAY, now), "#133 isOutdated: one day short of the boundary → current");
+  ok(isOutdated(now - 548 * DAY, now), "#133 isOutdated: exactly 548 days (18 months) → outdated");
+  ok(isOutdated(now - 19 * MONTH, now), "#133 isOutdated: 19 months → outdated");
+
+  const S = { priceListEffective: { meyersound: now - 100 * DAY } };
+  ok(
+    effectivePriceDate({ mfr: "Meyer Sound", pricedAt: now - 10 * DAY }, S) === now - 10 * DAY,
+    "#133 effectivePriceDate: a newer per-line date wins over the book date"
+  );
+  ok(
+    effectivePriceDate({ mfr: "Meyer Sound", pricedAt: now - 400 * DAY }, S) === now - 100 * DAY,
+    "#133 effectivePriceDate: a newer book date (list confirmed later) wins over an older per-line date (D156)"
+  );
+  ok(
+    effectivePriceDate({ mfr: "meyer-sound" }, S) === now - 100 * DAY,
+    "#133 effectivePriceDate: no per-line date → the book date, matched through mfrKey"
+  );
+  ok(effectivePriceDate({ mfr: "ETC" }, S) === null, "#133 effectivePriceDate: no date anywhere → null");
+  ok(effectivePriceDate({ pricedAt: now - 5 * DAY }, S) === now - 5 * DAY, "#133 effectivePriceDate: unbranded parts still use their own date");
+
+  const D1 = now - 200 * DAY;
+  const D2 = now - 20 * DAY;
+  ok(nextPricedAt(null, { list: 10, cost: 5 }, D1) === D1, "#133 nextPricedAt: a new part is stamped with the write's date");
+  ok(
+    nextPricedAt({ list: 10, cost: 5, pricedAt: D1 }, { list: 10, cost: 5, pricedAt: D1 }, D2) === D1,
+    "#133 nextPricedAt: unchanged list+cost keep the old date"
+  );
+  ok(nextPricedAt({ list: 10, cost: 5, pricedAt: D1 }, { list: 12, cost: 5, pricedAt: D1 }, D2) === D2, "#133 nextPricedAt: a list change stamps the new date");
+  ok(nextPricedAt({ list: 10, cost: 5, pricedAt: D1 }, { list: 10, cost: 6, pricedAt: D1 }, D2) === D2, "#133 nextPricedAt: a cost change stamps the new date");
+  ok(
+    nextPricedAt({ list: 10, cost: 5 }, { list: 10, cost: 5 }, D2) === undefined,
+    "#133 nextPricedAt: legacy part, unchanged price → still undated (no fake date)"
   );
 
-  const partialCoverage = priceBooks([
-    { mfr: "Beta", updatedAt: now },
-    { mfr: "Beta" }, // never touched
-  ]);
-  ok(
-    partialCoverage[0]?.count === 2 && partialCoverage[0]?.ageDays === undefined,
-    "#14 priceBooks: one touched row out of two does NOT produce an age pill for the whole book " +
-      "(a partial edit must not make a mostly-untouched book read as fresh)"
-  );
+  ok(isoDateOf(new Date(2026, 0, 15).getTime()) === "2026-01-15", "#133 isoDateOf renders a local YYYY-MM-DD");
+  ok(parseEffectiveDate("2026-01-15", now) === new Date(2026, 0, 15).getTime(), "#133 parseEffectiveDate: a date input parses to local midnight");
+  ok(parseEffectiveDate("", now) === now && parseEffectiveDate("nope", now) === now, "#133 parseEffectiveDate: blank/invalid → the fallback");
 
-  const neverTouched = priceBooks([{ mfr: "Gamma" }, { mfr: "Gamma" }]);
+  const fresh = priceBooks([{ mfr: "Acme", pricedAt: now - 3 * DAY }, { mfr: "Acme", pricedAt: now - 5 * DAY }], {}, { now });
   ok(
-    neverTouched[0]?.ageDays === undefined,
-    "#14 priceBooks: a book with no updatedAt anywhere gets no pill (honest unknown, not a fake 0d)"
+    fresh[0]?.effectiveAt === now - 5 * DAY && !fresh[0].outdated && !fresh[0].unknown,
+    "#14/#133 priceBooks: effectiveAt is the OLDEST date in a fully-dated book, not the newest"
   );
-
-  const unbranded = priceBooks([{ updatedAt: now }, { mfr: "  " }]);
+  const partial = priceBooks([{ mfr: "Beta", pricedAt: now }, { mfr: "Beta" }], {}, { now });
   ok(
-    unbranded.some((b) => b.name === "Unbranded" && b.count === 2),
-    "#14 priceBooks: blank/whitespace-only mfr groups under 'Unbranded'"
+    partial[0]?.count === 2 && partial[0].effectiveAt === null && partial[0].unknown,
+    "#14/#133 priceBooks: one dated row out of two does NOT date the book (unknown is older than anything — decision A)"
   );
-
-  const capped = priceBooks(
-    Array.from({ length: 8 }, (_, i) => ({ mfr: `Mfr${i}`, updatedAt: now })).flatMap((p, i) =>
-      Array.from({ length: 8 - i }, () => p)
-    )
-  );
-  ok(capped.length === 6, `#14 priceBooks: caps at the top 6 books by count (got ${capped.length})`);
+  const covered = priceBooks([{ mfr: "Beta", pricedAt: now }, { mfr: "Beta" }], { priceListEffective: { beta: now - 30 * DAY } }, { now });
   ok(
-    capped[0]?.name === "Mfr0" && capped[0]?.count === 8,
-    "#14 priceBooks: sorted by count descending"
+    covered[0]?.effectiveAt === now - 30 * DAY && !covered[0].unknown,
+    "#133 priceBooks: the book date covers the undated row, and oldest still wins"
   );
+  const stale = priceBooks([{ mfr: "Gamma", pricedAt: now - 600 * DAY }], {}, { now });
+  ok(stale[0]?.outdated && !stale[0].unknown, "#133 priceBooks: a 600-day-old book is outdated");
+  const never = priceBooks([{ mfr: "Delta" }, { mfr: "Delta" }], {}, { now });
+  ok(never[0]?.unknown && never[0].effectiveAt === null && !never[0].outdated, "#14/#133 priceBooks: no date anywhere → unknown, never outdated");
+  const merged = priceBooks(
+    [{ mfr: "Meyer Sound", pricedAt: now }, { mfr: "meyer-sound", pricedAt: now }, { mfr: "Meyer Sound" }],
+    { priceListEffective: { meyersound: now - DAY } },
+    { now }
+  );
+  ok(
+    merged.length === 1 && merged[0].name === "Meyer Sound" && merged[0].key === "meyersound" && merged[0].count === 3,
+    "#133 priceBooks: spellings merge by mfrKey and the most common spelling names the book"
+  );
+  const unbranded = priceBooks([{ pricedAt: now }, { mfr: "  " }], {}, { now });
+  ok(
+    unbranded.some((b) => b.name === "Unbranded" && b.key === "" && b.count === 2),
+    "#14 priceBooks: blank/whitespace-only mfr groups under 'Unbranded' with an empty key"
+  );
+  const eight = Array.from({ length: 8 }, (_, i) => ({ mfr: `Mfr${i}`, pricedAt: now })).flatMap((p, i) =>
+    Array.from({ length: 8 - i }, () => p)
+  );
+  ok(priceBooks(eight, {}, { now }).length === 6, "#14 priceBooks: caps at the top 6 books by count by default");
+  ok(priceBooks(eight, {}, { now, limit: Infinity }).length === 8, "#133 priceBooks: limit: Infinity returns every book (the Catalog banner)");
+  ok(priceBooks(eight, {}, { now })[0]?.name === "Mfr0", "#14 priceBooks: sorted by count descending");
 }
 
 /* ---- #95 — login honours a same-origin callbackUrl ---- */
