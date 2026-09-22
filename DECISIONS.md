@@ -3400,3 +3400,54 @@ that thrown error — the SAME accepted trade-off already made across this codeb
 action shape (#85: "logged only, no code... the point of this entry is that the decision was made
 knowingly rather than papered over"), so this fix trades a silent wrong-behavior for a loud
 failure without expanding into the five-screens-of-error-UI #85 already declined to build.
+
+## D152. Recordings — in-app site-visit audio → Krisp transcription → write-back → Drive archive (#119, 2026-09-21)
+
+**Ask (Jeff, "Krisp API Integration Brief — Peak App Site Visits", 2026-09-21):** a rep records a
+site visit and the recording, transcript, summary, and action items land on that visit's record
+with no manual upload. Brainstormed and approved the same evening; the full design is
+`docs/superpowers/specs/2026-09-21-krisp-recordings-design.md`. Numbered D152 (not D150) because
+the main checkout already holds uncommitted D150/D151.
+
+**Defaults taken, and why:**
+
+1. **Generic parent, not site-visit-only.** New `recordings` doc collection (`REC-####`, base
+   9000) with `parentKind` ∈ site_visit | survey | inspection | flame_job | repair_job | project |
+   engagement. Jeff chose "any field record" over the brief's site-visit scope — same room, same
+   walkthrough. The D91 `recordingUrl` link on engagements is untouched.
+2. **Per-rep Krisp keys** (`krisp_connections`, AES-GCM via the Gmail `encryptToken`), pasted on
+   the Account page. Krisp keys are personal; the rate limit and the one-import-in-flight rule are
+   per account. `/me` cannot distinguish Read from Write scope, so the card says "must be a Write
+   key" and a Read key fails at first import with Krisp's 403 rather than at connect.
+3. **Approach A — Blob-staged single upload, server relay, poll-driven.** The phone uploads once,
+   straight to Vercel Blob via `@vercel/blob/client` (`/api/recordings/upload` brokers a scoped
+   token; middleware-exempt because Vercel's completion callback carries no session, so the
+   token branch authenticates itself via `auth()` + ownership). The server then `POST /import`s
+   and streams the Blob to Krisp's pre-signed URL. Results come back by polling (20 s client poll
+   on the detail page, a Home-load stale check, a step on the daily cron route) — Krisp webhooks
+   are static-header-only, per-rep manual setup, undocumented payload, so they are a follow-up
+   accelerator, not the delivery path. Jeff will upgrade Vercel for cron cadence if the pilot
+   works; nothing in the code depends on it.
+4. **Blob is staging; Drive is retention.** Nightly `archiveRecordings()` (≤5 per run, ≥6 h after
+   ready) uploads to Google Drive under `Peak Recordings/<Customer>/`, saves the link, and only
+   then deletes the Blob. Jeff's explicit ask ("minimize the amount of storage"). The archive
+   account is a Settings picklist over connected mailboxes with the new `drive.file` scope
+   (`?drive=1` on the connect route); recommended default is the shared sales box so recordings
+   stay company-owned. Dates in file names use America/Chicago.
+5. **Confirm-first, insert-on-tap.** Krisp action items land `pending`; Accept creates a Home
+   Queue assignment (source `Krisp REC-#### · <title>`, company link) that the existing Google
+   Tasks / Reminders syncs carry onward; nothing enters the queue untouched. Summary sections
+   route to Survey/Inspection fields by the deterministic `PREFILL_RULES` title table and are
+   appended only on Insert with a `[from REC-####]` marker — no silent writes, no numeric
+   extraction (D89: the app stays rules-based; Krisp is the only summariser).
+6. **Summary → customer feed note** posted once (`feedNoteId` guard) when a customer is known.
+7. **Native recorder:** `@capgo/capacitor-audio-recorder` (file output, iOS background audio) +
+   `@capawesome-team/capacitor-android-foreground-service`; web MediaRecorder is the desktop
+   fallback only (WKWebView mutes the mic on lock). Native project edits are documented in
+   DEPLOY.md §6, not applied to ios/ or android/.
+8. **Pilot gate:** `recordingsBetaUsers` (Settings → Beta) limits the Record button to named
+   users; empty = everyone.
+
+**Follow-ups (not built):** Krisp webhooks; numeric extraction into typed fields; in-app audio
+playback; pull-and-match backfill of Jeff's existing Krisp mobile recordings; per-rep Drive
+archives; a PGlite-backed end-to-end test (the `deps` injection points exist).

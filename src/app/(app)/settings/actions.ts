@@ -494,3 +494,44 @@ export async function saveCustomerFieldDefsAction(
   await setSettings({ customerFieldDefs: defs });
   revalidatePath("/", "layout");
 }
+
+/* ---- Recordings (Krisp recordings spec §1.3 / §5.1) ---- */
+
+/**
+ * Pick the mailbox whose Google account owns the Drive archive (null =
+ * unset — the nightly job waits). The key must be a currently connected
+ * mailbox; the Drive scope itself is NOT required here (Settings shows
+ * "needs Drive scope" + an Enable link), so an admin can pick the account
+ * first and grant the scope second in either order. Changing the account
+ * drops the cached folder ids — they belong to the previous Drive.
+ */
+export async function setRecordingsArchiveMailboxAction(mailboxKey: string | null) {
+  await requirePerm("manage_users");
+  const clean = (mailboxKey || "").trim() || null;
+  const current = await getSettings();
+  if (clean) {
+    const { getConnectionInfo } = await import("@/lib/gmail/connections");
+    const info = await getConnectionInfo(clean);
+    if (!info) return { ok: false as const, error: "That mailbox isn't connected." };
+  }
+  const patch: Record<string, unknown> = { recordingsArchiveMailbox: clean };
+  if (clean !== current.recordingsArchiveMailbox) {
+    patch.recordingsArchiveFolderId = null;
+    patch.recordingsArchiveFolders = {};
+  }
+  await setSettings(patch);
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** Pilot gate (Settings → Beta): user ids allowed to see Record; [] = everyone. */
+export async function setRecordingsBetaUsersAction(userIds: string[]) {
+  await requirePerm("manage_users");
+  const known = new Set((await allUsers()).map((u) => u.id));
+  const clean = Array.from(
+    new Set((Array.isArray(userIds) ? userIds : []).filter((id) => typeof id === "string" && known.has(id)))
+  );
+  await setSettings({ recordingsBetaUsers: clean });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}

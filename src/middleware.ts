@@ -10,11 +10,16 @@ import { authConfig } from "./auth.config";
  * exempted here so customers never see the team login. /api/gmail/sync is the
  * cron endpoint (D74) — no session exists on a cron call, so it is exempted
  * here and guards itself with a CRON_SECRET bearer check instead.
+ * /api/recordings/upload is the Vercel Blob client-upload broker (Recordings
+ * spec §2.3): Vercel's own infra POSTs the `upload-completed` callback there
+ * with no session, so it is exempted and authenticates per-event itself —
+ * `auth()` for the device's token request, the Blob signature for the
+ * callback (see the route).
  */
 export default NextAuth(authConfig).auth;
 
 export const config = {
   matcher: [
-    "/((?!api/auth|api/leads/intake|api/gmail/sync|login|lead-intake|portal|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
+    "/((?!api/auth|api/leads/intake|api/gmail/sync|api/recordings/upload|login|lead-intake|portal|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
   ],
 };

@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/session";
+import { reconcileRecordingsIfStale } from "@/lib/krisp/reconcile";
 import { activeUsers } from "@/lib/users";
 import { getUser } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
@@ -41,6 +42,7 @@ import HomeCalendar from "./home-calendar";
 import HomeQueue, { type QueueRow } from "./home-queue";
 import HomeTabs from "./home-tabs";
 import { loadHomeAgenda } from "@/lib/agenda";
+import { recordableParentIds } from "@/app/(app)/recordings/data";
 import { loadQueue, queueNow, queueCardCounts, queueDueLabel } from "@/lib/queue";
 import { list as catalogList } from "@/lib/stores/catalog";
 import { priceBooks } from "@/lib/catalog-books";
@@ -182,6 +184,16 @@ export default async function HomePage({
 
   /* ---- dashboard calendar (D77) — next 14 days via the shared loader ---- */
   const { gmailOn, calendarOn, items: agenda } = await loadHomeAgenda(user.id, me);
+  let recordVisitIds: string[] = [];
+  try {
+    recordVisitIds = await recordableParentIds(
+      "site_visit",
+      agenda.filter((i) => i.source === "visit").map((i) => i.id)
+    );
+  } catch {
+    recordVisitIds = [];
+  }
+  void reconcileRecordingsIfStale().catch(() => {});
 
   /* ---- my queue (D98) — the queue had no dashboard presence before this
    *  card; `now` is read once here (queueNow(), impure by design) so the
@@ -570,7 +582,12 @@ export default async function HomePage({
         {/* RIGHT: calendar + surveys + team activity + needs attention */}
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           {/* calendar (D77) */}
-          <HomeCalendar items={agenda} calendarOn={calendarOn} gmailOn={gmailOn} />
+          <HomeCalendar
+            items={agenda}
+            calendarOn={calendarOn}
+            gmailOn={gmailOn}
+            recordVisitIds={recordVisitIds}
+          />
 
           {/* field surveys */}
           <HomeVenueAssessments surveyCards={surveyCards} surveyPendingCount={surveyPendingCount} />

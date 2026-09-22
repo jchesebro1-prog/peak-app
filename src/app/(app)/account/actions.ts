@@ -11,6 +11,8 @@ import {
 } from "@/lib/stores/notif-prefs";
 import { getSettings } from "@/lib/settings";
 import { updateUser } from "@/lib/users";
+import { createKrispClient, KrispAuthError, KrispApiError } from "@/lib/krisp/client";
+import { deleteKrispConnection, saveKrispConnection } from "@/lib/krisp/connections";
 
 /**
  * Personal account actions. Notification prefs are stored per user NAME
@@ -61,6 +63,48 @@ export async function updateMyOfficeAction(officeId: string) {
       return { ok: false as const, error: "Unknown office." };
   }
   await updateUser(me.id, { officeId: clean || null });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/**
+ * Recordings spec §1.2 — connect the SIGNED-IN user's own Krisp account.
+ * Validates the pasted key with `GET /me` server-side, then stores it
+ * encrypted (lib/krisp/connections). The key never goes back to the browser.
+ * Read-vs-Write scope is NOT detectable from `/me` (both answer), so it is
+ * not checked here — the card copy says "must be a Write key" and a Read key
+ * fails at the first import with Krisp's own 403 text.
+ */
+export async function connectKrispAction(apiKey: string) {
+  const me = await requireUser();
+  const clean = (apiKey || "").trim();
+  if (!clean) return { ok: false as const, error: "Paste your Krisp API key first." };
+  if (/\s/.test(clean) || clean.length < 12)
+    return { ok: false as const, error: "That doesn't look like a Krisp API key." };
+  try {
+    const who = await createKrispClient(clean).me();
+    await saveKrispConnection(me.id, clean, who);
+  } catch (e) {
+    if (e instanceof KrispAuthError) return { ok: false as const, error: "Key rejected by Krisp." };
+    if (e instanceof KrispApiError)
+      return { ok: false as const, error: `Krisp answered ${e.status}: ${e.message}` };
+    return {
+      ok: false as const,
+      error: "Couldn't reach Krisp — check your connection and try again.",
+    };
+  }
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** Disconnect = delete the row (spec §1.2). Only ever the signed-in user's own. */
+export async function disconnectKrispAction() {
+  const me = await requireUser();
+  try {
+    await deleteKrispConnection(me.id);
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : "Couldn't disconnect." };
+  }
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

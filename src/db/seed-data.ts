@@ -48,6 +48,11 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
   federalHolidays: true,
   seedDemo: false,
   feedbackEmail: "",
+  // Recordings → Drive archive + pilot gate (Krisp recordings spec §1.3).
+  recordingsArchiveMailbox: null,
+  recordingsArchiveFolderId: null,
+  recordingsArchiveFolders: {},
+  recordingsBetaUsers: [],
   offices: [
     {
       id: "hq",

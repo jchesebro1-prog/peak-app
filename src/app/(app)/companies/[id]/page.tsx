@@ -6,6 +6,9 @@ import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor } from "@/lib/team";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
+import { CustomerRecordingsCard } from "@/components/recordings/recordings-card";
+import { RecordingCountBadge } from "@/components/recordings/record-control-link";
+import { recordingCountByParent } from "../../recordings/data";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAllProjects, riskFlags, stageIndex, stagesFor } from "@/lib/stores/projects";
@@ -163,6 +166,8 @@ export default async function CustomerDetailPage({
 
   /* ---- site visits (D76) ---- */
   const visits = await visitsForCustomer(cust.id);
+  // Recordings spec §6 — per-visit recording count on the Site visits card (one pass).
+  const visitRecCounts = await recordingCountByParent("site_visit", visits.map((v) => v.id));
 
   /* ---- portal access grants (IDEAS #47) ---- */
   const portalGrants = (await grantsFor(cust.id)).map((g) => ({
@@ -672,6 +677,7 @@ export default async function CustomerDetailPage({
                         >
                           {sm.label}
                         </span>
+                        <RecordingCountBadge count={visitRecCounts.get(v.id) ?? 0} />
                       </div>
                       <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
                         {v.startAt != null
@@ -685,6 +691,11 @@ export default async function CustomerDetailPage({
                 })}
               </div>
             )}
+
+            {/* ---- recordings (Krisp spec §6) — every recording under this customer ---- */}
+            <CustomerRecordingsCard customerId={cust.id} />
+
+
           </div>
         </div>
       </div>

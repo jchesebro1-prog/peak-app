@@ -18,6 +18,7 @@ import { getSettings } from "@/lib/settings";
 import SurveyEditor, { type EditorMeta, type EditorCustomer } from "./controls";
 import { resolveCerts } from "@/lib/venue-assessment-certs";
 import { resolveVenueDoctrine } from "@/lib/venue-doctrine";
+import { loadPrefillPanels, loadRecordingsStrip } from "../../recordings/data";
 
 export const metadata = { title: "Site survey — Quartzite-6" };
 
@@ -35,7 +36,14 @@ export default async function SurveyEditorPage({
     getSettings(),
   ]);
   if (!rec) notFound();
-  const autoCerts = await resolveCerts(rec.customerId, rec.locationId);
+  // Recordings (spec §4.4/§6): header strip + "From recording" prefill
+  // panels. Both are client-rendered inside the editor, so the server half
+  // (store reads + record gate) is computed here and passed down.
+  const [autoCerts, recordings, fromRecording] = await Promise.all([
+    resolveCerts(rec.customerId, rec.locationId),
+    loadRecordingsStrip("survey", rec.id),
+    loadPrefillPanels("survey", rec.id),
+  ]);
 
   const editorCustomers: EditorCustomer[] = customers.map((cst) => {
     const contacts = cst.contacts || [];
@@ -75,5 +83,15 @@ export default async function SurveyEditorPage({
 
   const roster = users.map((u) => u.name);
 
-  return <SurveyEditor record={rec} customers={editorCustomers} roster={roster} meta={meta} />;
+  return (
+    <SurveyEditor
+      record={rec}
+      customers={editorCustomers}
+      roster={roster}
+      meta={meta}
+      recordings={recordings.recordings}
+      canShowRecord={recordings.canRecord}
+      fromRecording={fromRecording}
+    />
+  );
 }
