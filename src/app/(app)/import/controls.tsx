@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { checkSize, type GroupCheck } from "@/lib/catalog-import-guard";
 import { useClientToday } from "@/lib/use-client-today";
-import { autoMap, parseCsv, prepareRows, type FieldDef } from "./parse";
+import { autoMap, parseCsv, prepareRows, visibleColumns, type FieldDef } from "./parse";
+import { linksCustomer, previewLinks, type CustomerRef, type RowLink } from "./link";
 import { catalogGroups } from "./catalog-groups";
 import { checkCatalogImportAction, importRecords } from "./actions";
 
@@ -33,6 +34,10 @@ const errorBox: React.CSSProperties = {
  * picker posts to `/api/import/xlsx`, which converts the file to CSV server-side,
  * and the result lands in the same `text` state the textarea binds to — so it
  * funnels through this same paste flow unchanged.
+ *
+ * #137: for the types whose rows link back to a customer (contacts, venues)
+ * the preview also resolves each row against `customerIndex` — the same rule
+ * the commit runs — and lists the customers the import will create.
  */
 export function PastePreview({
   typeKey,
@@ -40,8 +45,12 @@ export function PastePreview({
   dedupeLabel,
   accent,
   today,
+  customerIndex,
 }: {
   typeKey: string;
+  /** EVERY field of the type, hidden ones included: auto-mapping must still
+   *  absorb a legacy file's columns. Only what the user is SHOWN is filtered
+   *  (visibleColumns — the placeholder). */
   fields: FieldDef[];
   dedupeLabel: string;
   accent: string;
@@ -50,6 +59,9 @@ export function PastePreview({
    *  day (useClientToday — a UTC server's "today" runs a day ahead of a US
    *  user's evening). */
   today: string;
+  /** #137 — every customer already in Peak ({id, name}), for the Customer
+   *  column. Empty for the types that don't link back. */
+  customerIndex: CustomerRef[];
 }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"skip" | "update" | "create">("skip");
@@ -69,14 +81,42 @@ export function PastePreview({
   const mapping = parsed && parsed.ok ? autoMap(parsed.headers, fields) : null;
   const prep = parsed && parsed.ok && mapping ? prepareRows(parsed.rows, mapping, fields) : null;
 
+  // #137 — the preview draws VISIBLE columns only. A hidden field is still
+  // mapped and still imported (that's the point of keeping it), but the
+  // preview is the same advertisement the template and the placeholder are,
+  // and those don't carry hidden columns either.
   const mappedFields = mapping
-    ? fields.filter((f) => mapping[f.key] != null && mapping[f.key] >= 0)
+    ? visibleColumns(fields).filter((f) => mapping[f.key] != null && mapping[f.key] >= 0)
     : [];
   const reqMissing = mapping
-    ? fields.filter((f) => f.required && !(mapping[f.key] >= 0)).map((f) => f.label)
+    ? fields
+        .filter(
+          (f) =>
+            f.required &&
+            !(mapping[f.key] >= 0) &&
+            // #137 — `Customer` is satisfied by a `Customer ID` column.
+            !(f.requiredUnless && mapping[f.requiredUnless] >= 0)
+        )
+        .map((f) => f.label)
     : [];
-  const previewFields = (mappedFields.length ? mappedFields : fields.slice(0, 3)).slice(0, 4);
+  const previewFields = (
+    mappedFields.length ? mappedFields : visibleColumns(fields).slice(0, 3)
+  ).slice(0, 4);
   const previewRows = (prep?.rows || []).slice(0, 5);
+
+  // #137 — link-back preview for contacts / venues, resolved over the WHOLE
+  // table (a create on row 40 still belongs in the "will create" list) even
+  // though only the first rows are drawn.
+  const linkable = linksCustomer(fields);
+  const links = linkable && prep ? previewLinks(prep.rows, customerIndex) : null;
+  const willCreate = links?.willCreate ?? [];
+  const linkText = (l: RowLink | undefined): { text: string; color: string } => {
+    if (!l || l.how === "skip") return { text: "—", color: "#aab0bb" };
+    if (l.how === "create") return { text: "will create", color: "color-mix(in srgb, var(--accent) 70%, #000)" };
+    if (l.how === "missing") return { text: "no customer", color: "#b4543a" };
+    return { text: "linked", color: "#5b616e" };
+  };
+  const previewCols = previewFields.length + (linkable ? 1 : 0);
 
   // #134 — the catalog type is capped at 1 MB of pasted/converted text.
   const size = isCatalog ? checkSize(new TextEncoder().encode(text).length) : ({ ok: true } as const);
@@ -237,7 +277,7 @@ export function PastePreview({
         value={text}
         onChange={(e) => setText(e.target.value)}
         spellCheck={false}
-        placeholder={fields.map((f) => f.header).join(",")}
+        placeholder={visibleColumns(fields).map((f) => f.header).join(",")}
         style={{
           width: "100%",
           height: 150,
@@ -413,11 +453,11 @@ export function PastePreview({
               overflowX: "auto",
             }}
           >
-            <div style={{ minWidth: Math.max(320, previewFields.length * 130) }}>
+            <div style={{ minWidth: Math.max(320, previewCols * 130) }}>
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: gridCols(previewFields.length),
+                  gridTemplateColumns: gridCols(previewCols),
                   gap: 10,
                   padding: "8px 12px",
                   fontSize: 10,
@@ -437,42 +477,64 @@ export function PastePreview({
                     {f.label}
                   </span>
                 ))}
+                {linkable && (
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    Customer
+                  </span>
+                )}
               </div>
-              {previewRows.map((r) => (
-                <div
-                  key={r.i}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: gridCols(previewFields.length),
-                    gap: 10,
-                    padding: "9px 12px",
-                    fontSize: 12,
-                    alignItems: "center",
-                    borderBottom: "1px solid #f5f6f8",
-                  }}
-                >
-                  {previewFields.map((f, ci) => {
-                    const raw = r.values[f.key];
-                    const txt = raw === "" || raw == null ? "—" : String(raw);
-                    const mono = f.kind === "number" || f.kind === "date";
-                    return (
+              {previewRows.map((r) => {
+                const link = linkText(links?.links[r.i]);
+                return (
+                  <div
+                    key={r.i}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: gridCols(previewCols),
+                      gap: 10,
+                      padding: "9px 12px",
+                      fontSize: 12,
+                      alignItems: "center",
+                      borderBottom: "1px solid #f5f6f8",
+                    }}
+                  >
+                    {previewFields.map((f, ci) => {
+                      const raw = r.values[f.key];
+                      const txt = raw === "" || raw == null ? "—" : String(raw);
+                      const mono = f.kind === "number" || f.kind === "date" || f.kind === "zip";
+                      return (
+                        <span
+                          key={f.key}
+                          style={{
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            fontFamily: mono ? "var(--font-mono)" : undefined,
+                            fontWeight: ci === 0 ? 600 : 400,
+                            color: ci === 0 ? (r.valid ? "#16181d" : "#b4543a") : "#5b616e",
+                          }}
+                        >
+                          {txt}
+                        </span>
+                      );
+                    })}
+                    {linkable && (
                       <span
-                        key={f.key}
                         style={{
                           whiteSpace: "nowrap",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
-                          fontFamily: mono ? "var(--font-mono)" : undefined,
-                          fontWeight: ci === 0 ? 600 : 400,
-                          color: ci === 0 ? (r.valid ? "#16181d" : "#b4543a") : "#5b616e",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: link.color,
                         }}
                       >
-                        {txt}
+                        {link.text}
                       </span>
-                    );
-                  })}
-                </div>
-              ))}
+                    )}
+                  </div>
+                );
+              })}
               {prep && prep.stats.total > previewRows.length && (
                 <div style={{ padding: "8px 12px", fontSize: 11, color: "#aab0bb" }}>
                   + {prep.stats.total - previewRows.length} more rows
@@ -481,6 +543,28 @@ export function PastePreview({
             </div>
           </div>
         </>
+      )}
+
+      {/* #137 — customers this file will create (listed before commit) */}
+      {willCreate.length > 0 && (
+        <div
+          style={{
+            marginTop: 12,
+            background: "var(--accent-soft)",
+            border: "1px solid color-mix(in srgb, var(--accent) 30%, #fff)",
+            borderRadius: 9,
+            padding: "10px 12px",
+            fontSize: 12,
+            color: "color-mix(in srgb, var(--accent) 70%, #000)",
+            lineHeight: 1.45,
+          }}
+        >
+          Will create {willCreate.length} new customer{willCreate.length === 1 ? "" : "s"}:{" "}
+          {willCreate.slice(0, 6).join(", ")}
+          {willCreate.length > 6 ? ` and ${willCreate.length - 6} more` : ""}
+          . Rows whose customer isn’t in Peak yet link to these; fix the spelling in your source
+          first if one of them should be an existing customer.
+        </div>
       )}
 
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>

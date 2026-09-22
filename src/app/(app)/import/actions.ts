@@ -80,7 +80,15 @@ export async function importRecords(formData: FormData): Promise<void> {
   }
 
   revalidatePath("/", "layout");
-  const r = [res.created, res.updated, res.skipped, res.errored, res.total].join(".");
+  const r = [
+    res.created,
+    res.updated,
+    res.skipped,
+    res.errored,
+    res.total,
+    res.customersCreated,
+    res.customersLinked,
+  ].join(".");
   redirect(`/import?tab=import&type=${encodeURIComponent(key)}&r=${r}`);
 }
 

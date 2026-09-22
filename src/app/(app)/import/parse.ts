@@ -21,15 +21,32 @@ export type FieldDef = {
   /** #137 — a required field that another field may satisfy instead
    *  (contacts / venues: `Customer` OR `Customer ID`). */
   requiredUnless?: string;
-  /** #137 — accepted on import (auto-mapped by alias) but not a template or
-   *  export column: legacy embedded columns kept for one release, and the
-   *  optional Customer ID match on the customers type. */
+  /** #137 — accepted on import (auto-mapped by alias) but never advertised:
+   *  not a template column, not an export column, not in the paste box's
+   *  placeholder. Three kinds of field live here — the legacy embedded
+   *  columns kept for one release, the optional Customer ID match on the
+   *  customers type, and columns the stores have nowhere to put (Notes on
+   *  customers / contacts / venues). Absorbing a header instead of dropping
+   *  the field keeps an old file importing AND stops a fuzzy alias from
+   *  claiming that column for some other field. */
   hidden?: boolean;
   kind?: FieldKind;
   aliases: string[];
   example?: string;
   options?: string[];
 };
+
+/**
+ * #137 — the fields a user is ever TOLD about: the downloadable template's
+ * columns, the export header, and the paste box's placeholder. Hidden fields
+ * stay accepted on import (autoMap still maps them) — they are simply not
+ * advertised. One definition, shared by the server CSV builders
+ * (registry.columnsOf) and the client paste box, so the hub can't offer a
+ * column it doesn't honour.
+ */
+export function visibleColumns(fields: readonly FieldDef[]): FieldDef[] {
+  return fields.filter((f) => !f.hidden);
+}
 
 export type ParsedTable = {
   ok: boolean;

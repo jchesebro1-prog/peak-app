@@ -44,7 +44,13 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "zip", header: "Zip", label: "Zip", kind: "zip", aliases: ["zip", "zip code", "zipcode", "postal", "postal code", "postcode"], example: "53703" },
       { key: "phone", header: "Phone", label: "Phone", aliases: ["phone", "telephone", "tel", "main phone", "phonenumber", "company phone"], example: "(608) 555-0110" },
       { key: "website", header: "Website", label: "Website", aliases: ["website", "web", "url", "homepage", "www"], example: "riversideplayhouse.org" },
-      { key: "notes", header: "Notes", label: "Notes", aliases: ["notes", "note", "comments", "remarks"], example: "Referred by North Ridge HS" },
+      // #137 — a customer record has nowhere to store free-text notes
+      // (CustomerRecordInput has no such field), so the importer dropped
+      // every Notes cell it was handed and the export always wrote "". Kept
+      // as a hidden field: an old file's Notes column is still absorbed
+      // (and can't be fuzzy-claimed by another field), but the hub no longer
+      // offers a column it would silently discard.
+      { key: "notes", header: "Notes", label: "Notes", hidden: true, aliases: ["notes", "note", "comments", "remarks"] },
       // #137 — legacy embedded columns: accepted for one more release so
       // pre-#137 files keep working, but no longer template/export columns.
       { key: "contactName", header: "Contact Name", label: "Contact name", hidden: true, aliases: ["contact", "contact name", "primary contact", "attn", "contactperson"] },
@@ -74,7 +80,9 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "title", header: "Title", label: "Title", aliases: ["title", "job title", "position"], example: "Technical Director" },
       { key: "role", header: "Role", label: "Role", aliases: ["role", "function"], example: "billing" },
       { key: "primary", header: "Primary", label: "Primary", aliases: ["primary", "is primary", "primary contact", "main contact"], example: "yes" },
-      { key: "notes", header: "Notes", label: "Notes", aliases: ["notes", "note", "comments", "remarks"], example: "" },
+      // #137 — CustomerContact has no notes field: nothing read this and the
+      // export hardcoded "". Hidden, like the customers Notes column above.
+      { key: "notes", header: "Notes", label: "Notes", hidden: true, aliases: ["notes", "note", "comments", "remarks"] },
       // #137 — category for a customer this file has to CREATE (D159);
       // never a template column.
       { key: "customerType", header: "Customer Category", label: "Customer category", hidden: true, aliases: ["customer category", "customer type", "company type", "company category", "account type"] },
@@ -102,7 +110,9 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "state", header: "State", label: "State", aliases: ["state", "province", "st"], example: "WI" },
       { key: "zip", header: "Zip", label: "Zip", kind: "zip", aliases: ["zip", "zip code", "zipcode", "postal", "postal code", "postcode"], example: "53703" },
       { key: "kind", header: "Category", label: "Category", aliases: ["category", "venue type", "venuetype", "type", "kind", "venue kind"], example: "theatre" },
-      { key: "notes", header: "Notes", label: "Notes", aliases: ["notes", "note", "comments", "remarks"], example: "" },
+      // #137 — CustomerLocation has no notes field either; same treatment as
+      // the customers / contacts Notes columns.
+      { key: "notes", header: "Notes", label: "Notes", hidden: true, aliases: ["notes", "note", "comments", "remarks"] },
       { key: "customerType", header: "Customer Category", label: "Customer category", hidden: true, aliases: ["customer category", "customer type", "company type", "company category", "account type"] },
     ],
   },

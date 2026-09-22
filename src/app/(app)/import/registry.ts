@@ -17,7 +17,7 @@ import * as Catalog from "@/lib/stores/catalog";
 import * as Equipment from "@/lib/stores/equipment-items";
 import { allUsers, addUser, setRoles } from "@/lib/users";
 import { getTypeMeta, IMPORT_TYPE_KEYS, type ImportTypeMeta } from "./types";
-import { norm, isoToMs, type FieldDef, type PreparedRow } from "./parse";
+import { norm, isoToMs, visibleColumns, type FieldDef, type PreparedRow } from "./parse";
 import { baseVenueKind } from "@/lib/identity/venue-defaults";
 import {
   matchContact,
@@ -375,7 +375,6 @@ const WRITERS: Record<string, Writer> = {
           zip: rec.zip || loc?.zip || "",
           phone: rec.phone || "",
           website: rec.website || "",
-          notes: "",
         };
       });
     },
@@ -420,7 +419,6 @@ const WRITERS: Record<string, Writer> = {
           title: c.role || "",
           role: "",
           primary: c.primary ? "yes" : "no",
-          notes: "",
         }))
       );
     },
@@ -468,7 +466,6 @@ const WRITERS: Record<string, Writer> = {
             state: l.state || "",
             zip: l.zip || "",
             kind: l.kind || "",
-            notes: "",
           }))
       );
     },
@@ -956,9 +953,11 @@ function csvCell(s: unknown): string {
 
 /** The template / export columns: every field that isn't a hidden alias (#137).
  *  Hidden fields stay accepted on import (autoMap still maps them) — they are
- *  simply not advertised as columns to fill in or to export. */
+ *  simply not advertised as columns to fill in or to export. Shares ONE
+ *  definition with the client paste box's placeholder (parse.visibleColumns),
+ *  so template, export header and placeholder can never drift apart. */
 function columnsOf(type: ImportTypeMeta): FieldDef[] {
-  return type.fields.filter((f) => !f.hidden);
+  return visibleColumns(type.fields);
 }
 
 /** Blank template: header row + one example row (importkit.templateCSV). */

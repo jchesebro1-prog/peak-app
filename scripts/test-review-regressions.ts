@@ -1201,7 +1201,10 @@ async function main() {
     // Export round-trip: Category + Zip present, same values, re-import creates nothing.
     const csv = await exportCsv("customers");
     const exp = parseCsv(csv);
-    assert.equal(exp.headers.join(","), "Customer Name,Category,Address,City,State,Zip,Phone,Website,Notes", "#137 T4 customers export columns = template columns (hidden aliases excluded)");
+    // #137 T7 — no Notes column: nothing on a customer record stores it, so
+    // the hub stopped advertising it (the input file above still carries one,
+    // and it is still absorbed without erroring).
+    assert.equal(exp.headers.join(","), "Customer Name,Category,Address,City,State,Zip,Phone,Website", "#137 T4 customers export columns = template columns (hidden aliases excluded)");
     const row = exp.objects.find((o) => o["Customer Name"] === "T137 Import Playhouse");
     assert.ok(row, "#137 T4 exported row present");
     assert.equal(row!.Category, "Performing arts", "#137 T4 export Category");
@@ -1266,7 +1269,7 @@ async function main() {
 
     const csv = await exportCsv("contacts");
     const exp = parseCsv(csv);
-    assert.equal(exp.headers.join(","), "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary,Notes", "#137 T5 contacts export columns = template columns");
+    assert.equal(exp.headers.join(","), "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary", "#137 T5 contacts export columns = template columns (no Notes — a contact has nowhere to store it)");
     const m = exp.objects.find((o) => o.Email === "maria@t137ct.example");
     assert.ok(m, "#137 T5 exported contact present");
     assert.ok(m!.Customer === "T137 Contacts Co" && m!["Customer ID"] === "c-t137-ct" && m!.Mobile === "(608) 555-0111" && m!.Phone === "(608) 555-0110" && m!.Title === "Technical Director" && m!.Primary === "yes", "#137 T5 exported contact carries the customer's name + id and its fields");
@@ -1322,7 +1325,7 @@ async function main() {
 
     const csv = await exportCsv("venues");
     const exp = parseCsv(csv);
-    assert.equal(exp.headers.join(","), "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category,Notes", "#137 T6 venues export columns = template columns");
+    assert.equal(exp.headers.join(","), "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category", "#137 T6 venues export columns = template columns (no Notes — a venue has nowhere to store it)");
     const row = exp.objects.find((o) => o["Customer ID"] === "c-t137-vn" && o["Venue Name"] === "Black Box");
     assert.ok(row, "#137 T6 exported venue present");
     assert.ok(row!.Zip === "54913-1234" && row!.Category === "black box" && row!.Customer === "T137 Venues District" && row!.Address === "5000 N Ballard Rd", "#137 T6 exported venue carries the customer's name + id and its fields");

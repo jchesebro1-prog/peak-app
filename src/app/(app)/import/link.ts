@@ -7,9 +7,21 @@
  * create" column and the result banner agree by construction.
  */
 import type { CustomerContact, CustomerLocation } from "@/lib/stores/customers";
-import { norm } from "./parse";
+import { norm, type FieldDef } from "./parse";
 
 export type CustomerRef = { id: string; name: string };
+
+/**
+ * Do this import type's rows link BACK to a customer record (contacts,
+ * venues)? Deliberately narrow: half the types carry a plain `customer`
+ * column they only copy onto their own record, and none of those ever link
+ * or create a customer. Only a `Customer` that a `Customer ID` may satisfy
+ * marks the link-back types — so the preview's Customer column and the
+ * result's linked/created line appear exactly where the commit links.
+ */
+export function linksCustomer(fields: readonly FieldDef[]): boolean {
+  return fields.some((f) => f.key === "customer" && f.requiredUnless === "customerId");
+}
 
 export type CustomerResolution =
   | { how: "id"; id: string; name: string }

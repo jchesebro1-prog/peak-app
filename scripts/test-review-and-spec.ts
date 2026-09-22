@@ -71,14 +71,16 @@ import { gridProjectsSeed } from "@/db/seeds/grid-projects";
 import { quotesSeed } from "@/db/seeds/quotes";
 import ExcelJS from "exceljs";
 import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
-import { getTypeMeta, type ImportTypeMeta } from "@/app/(app)/import/types";
+import { IMPORT_TYPES, getTypeMeta, type ImportTypeMeta } from "@/app/(app)/import/types";
 import {
   autoMap,
   normalizeZip,
   parseCsv as parseImportCsv,
   prepareRows,
+  visibleColumns,
 } from "@/app/(app)/import/parse";
 import {
+  linksCustomer,
   matchContact,
   matchLocation,
   mergeContact,
@@ -90,7 +92,7 @@ import {
 } from "@/app/(app)/import/link";
 import type { CustomerContact, CustomerLocation } from "@/lib/stores/customers";
 // Pure (no store access, no DB) — see the note on catalogPatch itself.
-import { catalogPatch } from "@/app/(app)/import/registry";
+import { catalogPatch, templateCsv as importTemplateCsv } from "@/app/(app)/import/registry";
 import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
 
 import {
@@ -5330,10 +5332,24 @@ async function archiveAsyncChecks(): Promise<void> {
   const vn = getTypeMeta("venues");
   ok(!!cu && !!ct && !!vn, "#137 T3 customers / contacts / venues types are registered");
   if (cu && ct && vn) {
-    const visible = (t: ImportTypeMeta) => t.fields.filter((f) => !f.hidden).map((f) => f.header).join(",");
-    ok(visible(cu) === "Customer Name,Category,Address,City,State,Zip,Phone,Website,Notes", "#137 T3 customers template columns (embedded contact/venue columns gone)");
-    ok(visible(ct) === "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary,Notes", "#137 T3 contacts template columns");
-    ok(visible(vn) === "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category,Notes", "#137 T3 venues template columns");
+    const visible = (t: ImportTypeMeta) => visibleColumns(t.fields).map((f) => f.header).join(",");
+    ok(visible(cu) === "Customer Name,Category,Address,City,State,Zip,Phone,Website", "#137 T3 customers template columns (embedded contact/venue columns gone)");
+    ok(visible(ct) === "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary", "#137 T3 contacts template columns");
+    ok(visible(vn) === "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category", "#137 T3 venues template columns");
+    // #137 T7 — the hub may only advertise what it honours. No customer,
+    // contact or venue record has a notes field: every Notes cell was
+    // dropped on import and the export wrote "". Hidden, so an old file's
+    // column is still absorbed (and can't be fuzzy-claimed by another
+    // field) but nothing offers it any more.
+    ok(
+      !visible(cu).includes("Notes") && !visible(ct).includes("Notes") && !visible(vn).includes("Notes"),
+      "#137 T7 Notes is advertised nowhere — no store field holds it"
+    );
+    ok(autoMap(["Customer", "Name", "Notes"], ct.fields).notes === 2, "#137 T7 …but a pre-#137 file's Notes column is still absorbed");
+    // The template header, the export header (both columnsOf) and the paste
+    // box's placeholder (visibleFields) are ONE list.
+    ok(importTemplateCsv("contacts").split("\n")[0] === visible(ct), "#137 T7 the contacts template header is exactly the visible columns");
+    ok(importTemplateCsv("venues").split("\n")[0] === visible(vn), "#137 T7 the venues template header is exactly the visible columns");
 
     const legacy = parseImportCsv("Customer Name,Type,Contact Name,Email,Phone,Venue,Address,City,State,Notes\nRiverside Playhouse,Performing arts,Maria Lopez,maria@riverside.org,(608) 555-0110,Main Stage,215 W Main St,Madison,WI,");
     const lm = autoMap(legacy.headers, cu.fields);
@@ -5374,6 +5390,14 @@ ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1
   const pv = previewLinks(rows, cache);
   ok(pv.links.map((l) => l.how).join(",") === "create,create,name,skip", "#137 T3 previewLinks: the second row reuses the first row's pending create; invalid rows are skipped");
   ok(pv.willCreate.length === 1 && pv.willCreate[0] === "Brand New Org", "#137 T3 previewLinks: one customer to create, counted once");
+}
+{
+  // #137 T7 — the preview's Customer column / "will create" list and the
+  // result's linked-vs-created line appear on exactly the types whose commit
+  // actually links a customer. Five other types carry a plain `customer`
+  // column they only copy onto their own record; `customers` IS the record.
+  const linked = IMPORT_TYPES.filter((t) => linksCustomer(t.fields)).map((t) => t.key).join(",");
+  ok(linked === "contacts,venues", "#137 T7 linksCustomer marks the link-back types only (not customers, not flame tests / inspections / surveys / quotes / projects)");
 }
 {
   const contacts: CustomerContact[] = [
