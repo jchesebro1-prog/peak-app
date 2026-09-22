@@ -108,6 +108,19 @@ body {
   }
 }
 
+/* ============ Lineset Builder — input rail / schedule ============ */
+.pk-lineset-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 700px) {
+  .pk-lineset-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ============ Top nav bar ============ */
 .pk-nav {
   flex-shrink: 0;

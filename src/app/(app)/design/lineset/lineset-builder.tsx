@@ -549,7 +549,7 @@ export function LinesetBuilder({
           Saving creates a combined design; the old record stays until you delete it.
         </div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 300px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+      <div className="pk-lineset-grid">
         {/* ---- input rail ---- */}
         <div style={card}>
           {/* Three venue dimensions, and only three (#50): PRO width, PRO
