@@ -8,6 +8,7 @@ import {
 } from "@/db/doc-store";
 import { quotesSeed } from "@/db/seeds/quotes";
 import { canSetPoReceived } from "@/lib/opportunities";
+import { createAssignment } from "@/lib/stores/assignments";
 
 /**
  * QuoteStore — server port of app/store.js (localStorage key rss_pipeline_v2).
@@ -601,7 +602,7 @@ export async function setStatus(
   if (!q || q.status === status) return q;
   const gate = resolveStatusGate(status, q.review, opts);
   if (!gate.ok) throw new Error(gate.error);
-  return patchDoc<Quote>("quotes", id, (doc) => {
+  const result = await patchDoc<Quote>("quotes", id, (doc) => {
     const t = Date.now();
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
@@ -611,6 +612,35 @@ export async function setStatus(
     }
     doc.updatedAt = t;
   });
+
+  // Punch #16 (D14x): an install sale notifies the company as a Home Queue
+  // task, not email — see PUNCHLIST.md #16 for the five findings against an
+  // automated send. The early-return above (`q.status === status`) means
+  // this only runs the moment a quote actually transitions INTO "won", never
+  // on a no-op re-save of an already-won quote. Scoped to the quote types
+  // that actually become an Installs project (mirrors syncProjectsFromQuotes'
+  // own exclusion list) — flame-test/repair/inspection/consulting wins run
+  // their own service workflows and dashboards, so an "install sold" task
+  // for those would be noise. There is no separate PM role (D87) — `owner`
+  // is the only reliably-present assignee at this hook point.
+  if (
+    result &&
+    status === "won" &&
+    q.quoteType !== "flame_test" &&
+    q.quoteType !== "repair" &&
+    q.quoteType !== "inspection" &&
+    q.quoteType !== "consulting"
+  ) {
+    await createAssignment({
+      title: `Install sold — reach out: ${result.name || result.customer || id}`,
+      assignee: result.owner || DEFAULT_ACTOR,
+      createdBy: by || DEFAULT_ACTOR,
+      link: { kind: "quote", id, label: result.name || result.customer || id },
+      source: "auto: quote won (#16)",
+    });
+  }
+
+  return result;
 }
 
 /**

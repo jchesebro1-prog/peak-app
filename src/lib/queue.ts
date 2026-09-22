@@ -1,4 +1,4 @@
-import { allAssignments, type Assignment } from "@/lib/stores/assignments";
+import { allAssignments, type Assignment, type AssignmentLink } from "@/lib/stores/assignments";
 import { allEngagements, openChecklistItems } from "@/lib/stores/engagements";
 import { getAllProjects } from "@/lib/stores/projects";
 import { allTasks, ensureProjectTasksMigrated } from "@/lib/stores/tasks";
@@ -38,6 +38,23 @@ function due(ts: number | null | undefined): number {
   return n > 0 ? n : 0;
 }
 
+/** Where an assignment's Home Queue row links to (punch #16, D14x — the
+ *  "quote"/"project" kinds only started getting created once #16's sold/
+ *  complete hooks landed; "company" has no single-record screen to land on). */
+function assignmentHref(link: AssignmentLink): string {
+  if (!link) return "/queue";
+  switch (link.kind) {
+    case "engagement":
+      return `/design/engagements/${link.id}`;
+    case "project":
+      return `/projects/${link.id}`;
+    case "quote":
+      return `/quotes?id=${encodeURIComponent(link.id)}`;
+    default:
+      return "/queue";
+  }
+}
+
 /**
  * Assemble one person's open queue. `me` is a team-member NAME (the app's
  * convention for ownership across quotes, projects, and engagements).
@@ -75,7 +92,7 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
       title: a.title,
       context: a.link?.label || (a.createdBy === me ? "Self" : `from ${a.createdBy}`),
       due: a.dueDate,
-      href: a.link?.kind === "engagement" ? `/design/engagements/${a.link.id}` : "/queue",
+      href: assignmentHref(a.link),
       writable: true,
     });
   }

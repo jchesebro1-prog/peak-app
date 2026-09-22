@@ -447,21 +447,14 @@ export async function setProjectStage(
       await createAutoTask({ ...item, projectId: id, title: item.title });
     }
 
-    // Item 16: completion spawns the salesperson's how-did-it-go follow-up.
-    // "Lead Sales" ≈ the originating quote's owner until roles exist (D87).
-    if (stage === "complete") {
-      let owner = "";
-      if (result.quoteId) {
-        const q = await getDoc<QuoteLike>("quotes", result.quoteId);
-        owner = q?.owner || "";
-      }
-      await createAutoTask({
-        coverageKey: `item16:completed:${id}`,
-        title: `Completed — follow up with customer on ${result.name}`,
-        projectId: id, quoteId: result.quoteId, section: "Follow-up",
-        assigneeName: owner,
-      });
-    }
+    // Item 16 completion follow-up used to be spawned here as an unassigned-
+    // capable tasks-collection row (item16:completed:<id>). It now lives as
+    // a Home Queue assignment created by signoffAction (D14x) — the only
+    // caller that reaches "complete" through the sign-off Jeff requires
+    // (decision D) — so it isn't duplicated here. A direct stage jump to
+    // "complete" via setStageAction (bypassing sign-off, the still-open
+    // decision D gap) does not spawn a follow-up; that's intentional until
+    // the signoff gate is enforced, not a silent regression.
   }
 
   return result;

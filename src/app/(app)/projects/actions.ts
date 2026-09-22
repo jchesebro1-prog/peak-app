@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
+import { createAssignment } from "@/lib/stores/assignments";
 import {
   getProject,
   setProjectStage,
@@ -125,7 +126,24 @@ export async function signoffAction(formData: FormData): Promise<void> {
   const role = str(formData, "role").trim() || "Customer";
   const note = str(formData, "note").trim();
   await setSignoff(id, { name, role, note }, user.name);
+  // Punch #16 (D14x): narrow idempotency guard — setProjectStage has no
+  // "already at this stage" early return (recordStageChange() is a no-op
+  // internally but doesn't stop the caller's side effects), so this checks
+  // the stage we fetched BEFORE the transition rather than restructuring
+  // setProjectStage itself. Only fires the very first time a project reaches
+  // "complete", the one caller (signoffAction) reaching it through the
+  // sign-off Jeff requires (decision D) for a real completion.
+  const wasComplete = p.stage === "complete";
   await setProjectStage(id, "complete", user.name);
+  if (!wasComplete) {
+    await createAssignment({
+      title: `Project complete — check in: ${p.name || p.customer || id}`,
+      assignee: p.owner || "Jeff Chesebro",
+      createdBy: user.name,
+      link: { kind: "project", id, label: p.name || p.customer || id },
+      source: "auto: project complete (#16)",
+    });
+  }
   revalidatePath("/", "layout");
 }
 
