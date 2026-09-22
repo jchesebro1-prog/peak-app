@@ -71,12 +71,24 @@ import { gridProjectsSeed } from "@/db/seeds/grid-projects";
 import { quotesSeed } from "@/db/seeds/quotes";
 import ExcelJS from "exceljs";
 import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
-import { getTypeMeta } from "@/app/(app)/import/types";
+import { getTypeMeta, type ImportTypeMeta } from "@/app/(app)/import/types";
 import {
   autoMap,
+  normalizeZip,
   parseCsv as parseImportCsv,
   prepareRows,
 } from "@/app/(app)/import/parse";
+import {
+  matchContact,
+  matchLocation,
+  mergeContact,
+  mergeLocation,
+  parseYesNo,
+  previewLinks,
+  resolveCustomerForRow,
+  venueKindFromCategory,
+} from "@/app/(app)/import/link";
+import type { CustomerContact, CustomerLocation } from "@/lib/stores/customers";
 // Pure (no store access, no DB) — see the note on catalogPatch itself.
 import { catalogPatch } from "@/app/(app)/import/registry";
 import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
@@ -5305,4 +5317,96 @@ async function archiveAsyncChecks(): Promise<void> {
   const ci = toContactInput({ name: "Maria Lopez", role: "TD", email: "m@x.org", phone: "1", mobile: "2", primary: true });
   ok(ci.mobile === "2" && ci.phone === "1" && ci.role === "TD" && ci.primary, "#137 T2 toContactInput carries mobile");
   ok(toContactInput({ name: "S", role: "", email: "", primary: false }).mobile === undefined, "#137 T2 toContactInput: absent mobile stays undefined");
+}
+
+/* ======================================================================
+   #137 T3 — three import types: template columns, alias resolution, hidden
+   legacy columns, Customer* OR Customer ID, zip cells, and the pure
+   link-back helpers (import/link.ts).
+   ====================================================================== */
+{
+  const cu = getTypeMeta("customers");
+  const ct = getTypeMeta("contacts");
+  const vn = getTypeMeta("venues");
+  ok(!!cu && !!ct && !!vn, "#137 T3 customers / contacts / venues types are registered");
+  if (cu && ct && vn) {
+    const visible = (t: ImportTypeMeta) => t.fields.filter((f) => !f.hidden).map((f) => f.header).join(",");
+    ok(visible(cu) === "Customer Name,Category,Address,City,State,Zip,Phone,Website,Notes", "#137 T3 customers template columns (embedded contact/venue columns gone)");
+    ok(visible(ct) === "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary,Notes", "#137 T3 contacts template columns");
+    ok(visible(vn) === "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category,Notes", "#137 T3 venues template columns");
+
+    const legacy = parseImportCsv("Customer Name,Type,Contact Name,Email,Phone,Venue,Address,City,State,Notes\nRiverside Playhouse,Performing arts,Maria Lopez,maria@riverside.org,(608) 555-0110,Main Stage,215 W Main St,Madison,WI,");
+    const lm = autoMap(legacy.headers, cu.fields);
+    ok(lm.name === 0 && lm.type === 1 && lm.contactName === 2 && lm.email === 3 && lm.phone === 4 && lm.venue === 5 && lm.address === 6 && lm.notes === 9, "#137 T3 a pre-#137 customers file maps every column, embedded ones via hidden aliases");
+    const nm = autoMap(["Customer Name", "Category", "Address", "City", "State", "Zip", "Phone", "Website"], cu.fields);
+    ok(nm.type === 1 && nm.zip === 5 && nm.phone === 6 && nm.website === 7, "#137 T3 Category / Zip / Phone / Website map on the new customers template");
+    const cm = autoMap(["Company", "Customer ID", "Full Name", "E-mail", "Cell", "Job Title", "Primary Contact"], ct.fields);
+    ok(cm.customer === 0 && cm.customerId === 1 && cm.name === 2 && cm.email === 3 && cm.mobile === 4 && cm.title === 5 && cm.primary === 6, "#137 T3 contacts aliases: Company / Customer ID / Full Name / E-mail / Cell / Job Title / Primary Contact");
+    const vm = autoMap(["Customer", "Venue", "Street", "City", "State", "Zip Code", "Type"], vn.fields);
+    ok(vm.customer === 0 && vm.venue === 1 && vm.address === 2 && vm.zip === 5 && vm.kind === 6, "#137 T3 venues aliases: Venue / Street / Zip Code / Type");
+
+    const onlyId = prepareRows([["c-1", "Pat Doe"]], autoMap(["Customer ID", "Name"], ct.fields), ct.fields);
+    ok(onlyId.rows[0].valid, "#137 T3 a contacts row with only a Customer ID is valid (requiredUnless)");
+    const neither = prepareRows([["", "", "Pat Doe"]], autoMap(["Customer", "Customer ID", "Name"], ct.fields), ct.fields);
+    ok(!neither.rows[0].valid && neither.rows[0].errors.includes("Missing Customer"), "#137 T3 a row with neither Customer nor Customer ID fails validation");
+    const z = prepareRows([["A", "V", " 53703 "], ["B", "W", "53703-1234"], ["C", "X", "2134"]], autoMap(["Customer", "Venue Name", "Zip"], vn.fields), vn.fields);
+    ok(z.rows[0].values.zip === "53703" && z.rows[1].values.zip === "53703-1234" && z.rows[2].values.zip === "02134", "#137 T3 zip cells: trimmed, ZIP+4 kept as typed, Excel-stripped leading zero restored");
+  }
+}
+ok(normalizeZip(" 53703 ") === "53703" && normalizeZip("53703-1234") === "53703-1234" && normalizeZip(2134) === "02134" && normalizeZip("") === "" && normalizeZip(null) === "", "#137 T3 normalizeZip");
+ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1") && parseYesNo("x") && !parseYesNo("no") && !parseYesNo("") && !parseYesNo("0") && !parseYesNo(undefined), "#137 T3 parseYesNo");
+{
+  const cache = [{ id: "lakefront", name: "Lakefront Performing Arts Center" }, { id: "c-2", name: "Cedar Grove Schools" }];
+  const r1 = resolveCustomerForRow({ customerId: "c-2", customer: "Something Else" }, cache);
+  ok(r1.how === "id" && r1.id === "c-2", "#137 T3 resolve: Customer ID wins over the name");
+  const r2 = resolveCustomerForRow({ customer: "cedar-grove SCHOOLS" }, cache);
+  ok(r2.how === "name" && r2.id === "c-2" && r2.name === "Cedar Grove Schools", "#137 T3 resolve: normalized-name match returns the stored name");
+  const r3 = resolveCustomerForRow({ customerId: "nope", customer: "Brand New Org" }, cache);
+  ok(r3.how === "create" && r3.id === null && r3.name === "Brand New Org", "#137 T3 resolve: unknown id + unknown name → create");
+  const r4 = resolveCustomerForRow({ customerId: "", customer: "  " }, cache);
+  ok(r4.how === "missing" && r4.id === null, "#137 T3 resolve: neither → missing");
+  const rows = [
+    { values: { customer: "Brand New Org", name: "A" }, valid: true },
+    { values: { customer: "brand new org!", name: "B" }, valid: true },
+    { values: { customer: "Cedar Grove Schools", name: "C" }, valid: true },
+    { values: { customer: "", name: "" }, valid: false },
+  ];
+  const pv = previewLinks(rows, cache);
+  ok(pv.links.map((l) => l.how).join(",") === "create,create,name,skip", "#137 T3 previewLinks: the second row reuses the first row's pending create; invalid rows are skipped");
+  ok(pv.willCreate.length === 1 && pv.willCreate[0] === "Brand New Org", "#137 T3 previewLinks: one customer to create, counted once");
+}
+{
+  const contacts: CustomerContact[] = [
+    { name: "Maria Lopez", role: "TD", email: "maria@r.org", phone: "1", primary: true },
+    { name: "Sam Ortiz", role: "", email: "", primary: false },
+  ];
+  ok(matchContact(contacts, "MARIA@R.ORG", "Somebody")?.name === "Maria Lopez", "#137 T3 matchContact: email first, case-insensitive");
+  ok(matchContact(contacts, "", "sam ORTIZ")?.name === "Sam Ortiz", "#137 T3 matchContact: normalized name when no email");
+  ok(matchContact(contacts, "new@r.org", "New Person") === null && matchContact(contacts, "", "") === null, "#137 T3 matchContact: no hit / nothing to match");
+  const m1 = mergeContact(contacts, { name: "maria lopez", email: "maria@r.org", mobile: "9", primary: false });
+  ok(!m1.created && m1.contacts[0].name === "Maria Lopez" && m1.contacts[0].mobile === "9" && m1.contacts[0].role === "TD" && m1.contacts[0].phone === "1" && m1.contacts[0].primary, "#137 T3 mergeContact: a hit keeps the stored name/title/phone/primary and gains the mobile");
+  const m2 = mergeContact(contacts, { name: "Sam Ortiz", email: "sam@r.org", primary: true });
+  ok(!m2.created && m2.contacts[1].email === "sam@r.org" && m2.contacts[1].primary && !m2.contacts[0].primary, "#137 T3 mergeContact: primary:true promotes the hit and demotes the previous primary");
+  const m3 = mergeContact([], { name: "First Person", primary: false });
+  ok(m3.created && m3.contacts[0].primary, "#137 T3 mergeContact: the first contact on a record is primary even when the file says no");
+  const m4 = mergeContact(contacts, { name: "Third Person", title: "Billing", primary: false });
+  ok(m4.created && m4.contacts.length === 3 && m4.contacts[2].role === "Billing" && !m4.contacts[2].primary && m4.contacts[0].primary, "#137 T3 mergeContact: a new non-primary contact appends without touching the primary");
+  ok(contacts[0].mobile === undefined && contacts.length === 2 && contacts[1].email === "", "#137 T3 mergeContact never mutates its input");
+
+  const locs: CustomerLocation[] = [
+    { id: "l1", label: "", primary: true, venueKind: "proscenium", travelMiles: null, travelMin: null },
+  ];
+  const v1 = mergeLocation(locs, { label: "Main Stage", address: "215 W Main St", city: "Madison", state: "WI", zip: "53703", kind: "theatre" }, "l-new", { preferPrimary: false });
+  ok(!v1.created && v1.locations.length === 1 && v1.locations[0].id === "l1" && v1.locations[0].label === "Main Stage" && v1.locations[0].zip === "53703" && v1.locations[0].kind === "theatre" && v1.locations[0].primary, "#137 T3 mergeLocation claims the unnamed D85 base venue instead of adding a second venue");
+  ok(matchLocation(v1.locations, "main-stage")?.id === "l1" && matchLocation(v1.locations, "") === null, "#137 T3 matchLocation: normalized label; blank never matches");
+  const v2 = mergeLocation(v1.locations, { label: "MAIN stage", zip: "53704" }, "l-new2", { preferPrimary: false });
+  ok(!v2.created && v2.locations[0].zip === "53704" && v2.locations[0].address === "215 W Main St" && v2.locations[0].label === "MAIN stage", "#137 T3 mergeLocation: a normalized-label hit updates zip, keeps fields the row omits, takes the row's label spelling");
+  const v3 = mergeLocation(v1.locations, { label: "Black Box", kind: "black box" }, "l-new3", { preferPrimary: false });
+  ok(v3.created && v3.locations.length === 2 && v3.locations[1].id === "l-new3" && !v3.locations[1].primary && v3.locations[1].venueKind === "blackbox" && v3.locations[1].kind === "black box", "#137 T3 mergeLocation appends a non-primary venue whose venueKind derives from Category");
+  const v4 = mergeLocation(v1.locations, { label: "", address: "1 HQ Way", zip: "53705" }, "l-new4", { preferPrimary: true });
+  ok(!v4.created && v4.locations[0].label === "Main Stage" && v4.locations[0].address === "1 HQ Way" && v4.locations[0].zip === "53705", "#137 T3 mergeLocation preferPrimary: a customers row without a Venue column updates the primary venue's address without renaming it");
+  const v5 = mergeLocation([], { label: "", address: "1 HQ Way" }, "l-new5", { preferPrimary: true, venueKind: "church" });
+  ok(v5.created && v5.locations[0].primary && v5.locations[0].label === "" && v5.locations[0].venueKind === "church" && v5.locations[0].id === "l-new5", "#137 T3 mergeLocation: the first venue on a new customer is primary and takes the caller's venueKind");
+  ok(locs[0].label === "" && locs.length === 1, "#137 T3 mergeLocation never mutates its input");
+  ok(venueKindFromCategory("Church") === "church" && venueKindFromCategory("Black Box") === "blackbox" && venueKindFromCategory("Arena") === "arena" && venueKindFromCategory("Gym") === "flat" && venueKindFromCategory("theatre") === "proscenium" && venueKindFromCategory("") === "proscenium" && venueKindFromCategory("flat") === "flat", "#137 T3 venueKindFromCategory");
 }
