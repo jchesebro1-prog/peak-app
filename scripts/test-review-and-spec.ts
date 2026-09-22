@@ -6215,7 +6215,13 @@ ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exporte
 /* ====== #145: Gantt geometry ====== */
 {
   const DAY145 = 86400000;
-  const OCT6 = Date.UTC(2026, 9, 6);
+  // LOCAL midnight, October 6 2026 — not Date.UTC(...). #145 review fix:
+  // snapToDay/dateFromX now floor to the LOCAL calendar day (see gantt-lib.ts's
+  // doc comment), matching every date this app actually writes (every
+  // `<input type="date">` anchors at LOCAL NOON). A UTC anchor would make
+  // these assertions pass or fail depending on the test runner's timezone
+  // offset instead of proving anything about the implementation.
+  const OCT6 = new Date(2026, 9, 6).getTime();
   ok(dayColumns(OCT6, OCT6 + 6 * DAY145).length === 7, "#145 dayColumns is inclusive of both ends");
   const rect145 = barRect({ startAt: OCT6 + 2 * DAY145, dueAt: OCT6 + 4 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
   ok(Math.round(rect145.leftPct) === 20 && Math.round(rect145.widthPct) === 20, "#145 barRect converts a span to percentages of the visible range");
@@ -6223,6 +6229,78 @@ ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exporte
   ok(barRect({ startAt: OCT6, dueAt: OCT6 }, OCT6, OCT6 + 10 * DAY145).widthPct > 0, "#145 a zero-length bar still renders a visible sliver rather than vanishing");
   ok(snapToDay(OCT6 + 3 * DAY145 + 3600000) === OCT6 + 3 * DAY145, "#145 a drop snaps back to the start of its day");
   ok(dateFromX(50, 100, OCT6, OCT6 + 10 * DAY145) === OCT6 + 5 * DAY145, "#145 dateFromX maps a pixel offset to a date within the range");
+
+  /* ====== #145 review fix (live-verification round): the drag-vs-endAt
+   * false-overrun bug, and the invisible-sliver bug, both surfaced by
+   * actually rendering the Gantt for the first time. ====== */
+
+  // snapToDay must floor to the LOCAL day, not the UTC one. Proven with an
+  // arbitrary sub-day offset compared against a manually-computed local
+  // midnight — this is the implementation's actual contract, and it is
+  // the contract every caller (dateFromX, the drag handlers) depends on.
+  const arbitrary145 = OCT6 + 3 * DAY145 + 7 * 3600000 + 41 * 60000; // Oct 9, some odd hour:minute
+  const expectedLocalMidnight145 = new Date(arbitrary145);
+  expectedLocalMidnight145.setHours(0, 0, 0, 0);
+  ok(
+    snapToDay(arbitrary145) === expectedLocalMidnight145.getTime(),
+    "#145 review fix: snapToDay floors to the LOCAL calendar day — the day boundary every date input in this app actually uses"
+  );
+
+  // overrunsEnd compares LOCAL CALENDAR DAYS, not raw instants. endAt is
+  // always local-noon-anchored (every date input in this app goes through
+  // "T12:00:00"), so a task due later the SAME local day must not read as
+  // an overrun just because its clock time falls after noon — this is the
+  // exact false positive a live drag produced (dragged onto the
+  // engagement's own end date; the drop's midnight-ish snap plus the
+  // task's own sub-day-length duration landed a few hours after that
+  // day's noon endAt).
+  const noonOct10_145 = new Date(2026, 9, 10, 12, 0, 0).getTime();
+  const eveningOct10_145 = new Date(2026, 9, 10, 19, 12, 0).getTime();
+  ok(
+    !overrunsEnd({ dueAt: eveningOct10_145 }, noonOct10_145),
+    "#145 review fix: due later the SAME local day as endAt is not an overrun, even though its raw timestamp is after endAt's noon anchor"
+  );
+  const justAfterMidnightOct11_145 = new Date(2026, 9, 11, 0, 30, 0).getTime();
+  ok(
+    overrunsEnd({ dueAt: justAfterMidnightOct11_145 }, noonOct10_145),
+    "#145 review fix: …but due on the NEXT local day is an overrun, even by only half an hour past midnight"
+  );
+
+  // barRect: a bar ENTIRELY past the visible end used to collapse to the
+  // same ~0.6%-wide sliver as a same-day zero-length bar, sitting right at
+  // the container's edge — easy to miss completely. It now anchors to the
+  // right edge sized by its own real duration, so it stays a legible bar.
+  const farPast145 = barRect({ startAt: OCT6 + 15 * DAY145, dueAt: OCT6 + 18 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
+  ok(farPast145.widthPct === 30, "#145 review fix: a bar entirely past the visible end is sized by its own 3-day duration over the 10-day span (30%), not clamped to a hairline");
+  ok(farPast145.leftPct === 70, "#145 review fix: …and anchored flush against the right edge (leftPct + widthPct === 100)");
+  const barelyPast145 = barRect({ startAt: OCT6 + 10 * DAY145, dueAt: OCT6 + 10 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
+  ok(barelyPast145.leftPct + barelyPast145.widthPct === 100, "#145 review fix: even a zero-length bar exactly at the boundary stays anchored flush right, not drawn past the edge");
+  // A very long overrun (duration bigger than the whole visible span) caps
+  // at 100% width rather than reporting something the caller would need to
+  // clamp itself.
+  const massivelyPast145 = barRect({ startAt: OCT6 + 15 * DAY145, dueAt: OCT6 + 45 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
+  ok(massivelyPast145.widthPct === 100 && massivelyPast145.leftPct === 0, "#145 review fix: an overrun longer than the whole visible span caps at 100% width instead of overflowing it");
+
+  // #145 review fix (found live, not in review): dayColumns must walk by
+  // LOCAL CALENDAR DAY, not by adding a raw 86400000ms each step — a DST
+  // transition among the walked days is 23 or 25 real hours, and adding a
+  // flat 24h drifts every later "day" out of alignment with true local
+  // midnight. This is what actually produced the header's overlapping
+  // week labels on an 8-month span: two labels that should have been 21
+  // real days apart ended up rendered only ~14 apart. Nov 1, 2026 is when
+  // US clocks "fall back" — Oct 25 and Nov 8, 2026 are the Sundays a week
+  // either side of it.
+  const beforeDst145 = new Date(2026, 9, 25).getTime();
+  const afterDst145 = new Date(2026, 10, 8).getTime();
+  const spanningDst145 = dayColumns(beforeDst145, afterDst145);
+  ok(
+    spanningDst145.length === 15,
+    "#145 review fix: dayColumns across a DST transition still returns exactly 15 days (Oct 25 – Nov 8 inclusive), not one short/long from the fall-back hour"
+  );
+  ok(
+    spanningDst145[spanningDst145.length - 1] === afterDst145,
+    "#145 review fix: …and the LAST column lands exactly on the real local midnight of the end date, not an hour off"
+  );
 }
 
 /* ====== #145: packTracks (review fix — relocated from gantt-grid.tsx into

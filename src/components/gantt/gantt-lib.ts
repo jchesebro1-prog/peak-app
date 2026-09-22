@@ -3,15 +3,46 @@
 
 export const DAY = 86400000;
 
+/**
+ * Floor to the start of the LOCAL calendar day containing `ms` (#145
+ * review fix, live-verification round). Previously floored to the
+ * UTC-epoch day (`Math.floor(ms/DAY)*DAY`), which disagrees with every
+ * date this app actually writes: every `<input type="date">` in this
+ * codebase (schedule-tab.tsx, new-engagement-modal.tsx, the Milestones
+ * tab, …) anchors a day at LOCAL NOON (`new Date(v+"T12:00:00")`). West
+ * of UTC, a UTC-midnight floor lands in the EVENING of the previous
+ * local day — so dragging a bar onto the same calendar day as a
+ * committed `endAt` could snap to a value numerically past that
+ * local-noon `endAt` and register a false overrun. This is exactly what
+ * a live drag-and-drop test surfaced (see DECISIONS.md).
+ * `overrunsEnd` (consulting-schedule.ts) floors the same way, duplicated
+ * rather than imported — that file is zero-import by design.
+ */
 export function snapToDay(ms: number): number {
-  return Math.floor(ms / DAY) * DAY;
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
 }
 
 export function dayColumns(startAt: number, endAt: number): number[] {
   const out: number[] = [];
   const s = snapToDay(startAt);
   const e = snapToDay(endAt);
-  for (let d = s; d <= e; d += DAY) out.push(d);
+  // #145 review fix: walk by LOCAL calendar day (`setDate`), not by adding
+  // a raw `DAY` (86400000ms) each step. Found live, not in review: an
+  // 8-month span crosses two US DST transitions, and a 23- or 25-hour
+  // local day among 24-hour ones drifted every later "day" out of
+  // alignment with true local midnight by an hour per transition —
+  // visibly, two of the week-thinned header labels ended up only ~14
+  // real days apart instead of 21, close enough to overlap. `snapToDay`
+  // already switched to local-day semantics (see above); this makes the
+  // walk agree with it instead of silently reintroducing a UTC-shaped
+  // assumption one line later.
+  const cursor = new Date(s);
+  while (cursor.getTime() <= e) {
+    out.push(cursor.getTime());
+    cursor.setDate(cursor.getDate() + 1);
+  }
   return out;
 }
 
@@ -23,6 +54,19 @@ export function barRect(
   endAt: number
 ): { leftPct: number; widthPct: number } {
   const span = Math.max(1, endAt - startAt);
+  // #145 review fix: a bar ENTIRELY past the visible end used to clamp
+  // both its edges to `endAt`, collapsing to the same ~0.6%-wide sliver
+  // as a same-day zero-length bar — sitting right at the container's
+  // edge, easy to miss entirely. That is exactly the case a person most
+  // needs to see (a task that has slipped past the committed date is
+  // information, not noise — spec §5.2), so anchor it to the right edge
+  // instead, sized by its OWN real duration relative to the visible
+  // span, capped at the full width. It stays a legible bar rather than a
+  // hairline, and reads as "pinned against the boundary it blew past."
+  if (bar.startAt >= endAt) {
+    const widthPct = Math.min(100, Math.max(0.6, ((bar.dueAt - bar.startAt) / span) * 100));
+    return { leftPct: Math.max(0, 100 - widthPct), widthPct };
+  }
   const s = Math.max(startAt, Math.min(endAt, bar.startAt));
   const e = Math.max(s, Math.min(endAt, bar.dueAt));
   const leftPct = ((s - startAt) / span) * 100;

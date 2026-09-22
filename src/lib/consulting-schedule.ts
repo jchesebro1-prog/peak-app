@@ -113,9 +113,32 @@ export function placeTask(
   return { startAt, dueAt };
 }
 
-/** Work past the committed end date is flagged, never blocked. */
+/** Floor to the start of the LOCAL calendar day containing `ms` — the same
+ *  definition gantt-lib.ts's `snapToDay` uses, duplicated rather than
+ *  imported (this file is zero-import by design; see the file header). */
+function startOfLocalDay(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * Work past the committed end date is flagged, never blocked.
+ *
+ * Compared by LOCAL CALENDAR DAY, not raw instant (#145 review fix,
+ * live-verification round). Every date this module's callers write is
+ * anchored at LOCAL NOON (every `<input type="date">` in this app goes
+ * through `new Date(v+"T12:00:00")`), so comparing raw timestamps flagged
+ * a task due later the SAME local day as `endAt` purely because its clock
+ * time fell after noon — a false positive a live drag-and-drop test
+ * surfaced. A day-granular comparison is also just the right semantics:
+ * "the committed end date" names a calendar day, not an instant — a task
+ * due at 11pm on that day has not overrun it; one due 12:01am the next
+ * day has.
+ */
 export function overrunsEnd(task: { dueAt: number | null }, endAt: number): boolean {
-  return typeof task.dueAt === "number" && task.dueAt > endAt;
+  if (typeof task.dueAt !== "number") return false;
+  return startOfLocalDay(task.dueAt) > startOfLocalDay(endAt);
 }
 
 export type ShiftCandidate = {
