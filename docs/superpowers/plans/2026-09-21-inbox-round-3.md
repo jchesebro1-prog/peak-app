@@ -59,7 +59,7 @@
 - `src/lib/stores/notif-prefs.ts` — `signatureFor` / `setSignature`.
 - `src/app/(app)/account/actions.ts` — `saveSignatureAction`; `src/app/(app)/account/page.tsx` — renders `SignatureCard`.
 - `scripts/test-review-and-spec.ts`, `scripts/test-review-regressions.ts`, `scripts/smoke-routes.ts`.
-- `DECISIONS.md` (D158), `PUNCHLIST.md` (#123–#128 → DONE), `docs/superpowers/specs/2026-09-21-inbox-round-3-design.md` (implementation notes).
+- `DECISIONS.md` (D159), `PUNCHLIST.md` (#123–#128 → DONE), `docs/superpowers/specs/2026-09-21-inbox-round-3-design.md` (implementation notes).
 
 ---
 
@@ -3286,19 +3286,19 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Docs — D158, PUNCHLIST #123–#128 → DONE, spec implementation notes
+### Task 8: Docs — D159, PUNCHLIST #123–#128 → DONE, spec implementation notes
 
 **Files:**
-- Modify: `DECISIONS.md` (append `## D158`), `PUNCHLIST.md:5998-6073` (the six headings + a `**Shipped:**` paragraph each), `docs/superpowers/specs/2026-09-21-inbox-round-3-design.md` (append "Implementation notes")
+- Modify: `DECISIONS.md` (append `## D159`), `PUNCHLIST.md:5998-6073` (the six headings + a `**Shipped:**` paragraph each), `docs/superpowers/specs/2026-09-21-inbox-round-3-design.md` (append "Implementation notes")
 
-**Interfaces:** none — documentation only. Before committing, verify the D-number is still free on `main`: `git fetch origin && git show origin/main:DECISIONS.md | grep -c "^## D158"` must print `0` (numbers collided today; if it prints `1`, take the next free number and use it everywhere below).
+**Interfaces:** none — documentation only. Before committing, verify the D-number is still free on `main`: `git fetch origin && git show origin/main:DECISIONS.md | grep -c "^## D159"` must print `0` (numbers collided today; if it prints `1`, take the next free number and use it everywhere below).
 
 - [ ] **Step 1: Full gate**, one at a time: `npx tsc --noEmit -p .` (empty), `npx eslint src scripts` (0 errors), `npx tsx scripts/test-review-and-spec.ts | tail -1` (`ALL PASSED`), `npm run test:review:regressions 2>&1 | tail -3` (`review regression checks passed`). The controller runs `npm run test:smoke` and the browser pass.
 
 - [ ] **Step 2: DECISIONS.md** — append:
 
 ```markdown
-## D158. Inbox round 3: identity source (not message-level links), per-device pane layout, and the defaults the spec left open (#123–#128, 2026-09-21)
+## D159. Inbox round 3: identity source (not message-level links), per-device pane layout, and the defaults the spec left open (#123–#128, 2026-09-21)
 
 Spec: `docs/superpowers/specs/2026-09-21-inbox-round-3-design.md`; plan
 `docs/superpowers/plans/2026-09-21-inbox-round-3.md`.
@@ -3363,7 +3363,7 @@ Spec: `docs/superpowers/specs/2026-09-21-inbox-round-3-design.md`; plan
 
 - [ ] **Step 3: PUNCHLIST.md** — change each heading and add a `**Shipped:**` paragraph after the item's `**Ask:**` paragraph:
 
-`## 123. … — OPEN` → `## 123. Inbox: "Link to work" above the customer picker in the link sidebar, plus quick-add quote — DONE 2026-09-21 (D158)` with:
+`## 123. … — OPEN` → `## 123. Inbox: "Link to work" above the customer picker in the link sidebar, plus quick-add quote — DONE 2026-09-21 (D159)` with:
 
 ```markdown
 **Shipped:** `WorkLinkCard` (`inbox/work-link-card.tsx`) is the sidebar's first card — chip,
@@ -3373,7 +3373,7 @@ thread and returns to it (`quotes/new/actions.ts`, `linkThreadToNewQuote`). Orde
 Customer → Venue → Linking from → Quick add.
 ```
 
-`## 124. … — OPEN` → `## 124. Inbox: link a venue through the selected customer — DONE 2026-09-21 (D158)` with:
+`## 124. … — OPEN` → `## 124. Inbox: link a venue through the selected customer — DONE 2026-09-21 (D159)` with:
 
 ```markdown
 **Shipped:** `CommThread.siteId` + a Venue card (select over the linked customer's venues, "+ New
@@ -3381,7 +3381,7 @@ venue…" through `quickAddVenueAction` which now attaches the new site); `setTh
 cleared on any customer change; the quote intake receives it as `site=`.
 ```
 
-`## 125. … — OPEN` → `## 125. Inbox: per-message picker to link from a specific message (in or out) — DONE 2026-09-21 (D158)` with:
+`## 125. … — OPEN` → `## 125. Inbox: per-message picker to link from a specific message (in or out) — DONE 2026-09-21 (D159)` with:
 
 ```markdown
 **Shipped:** decided as an identity source, not message-level links: `identityMessageId` + the
@@ -3390,7 +3390,7 @@ cleared on any customer change; the quote intake receives it as `site=`.
 actions and quick-add; the bridge stamps `fromEmail`/`to` on imported messages.
 ```
 
-`## 126. … — OPEN` → `## 126. Inbox: resizable list/reader panes + collapsible menu — DONE 2026-09-21 (D158)` with:
+`## 126. … — OPEN` → `## 126. Inbox: resizable list/reader panes + collapsible menu — DONE 2026-09-21 (D159)` with:
 
 ```markdown
 **Shipped:** `SplitHandle` (`components/split-handle.tsx`) between rail/list and list/reader,
@@ -3399,7 +3399,7 @@ rail collapse to a 48px icon column, `{rail, list}` remembered per device in
 the app nav is untouched.
 ```
 
-`## 127. … — OPEN` → `## 127. Inbox: email signatures, auto-appended — DONE 2026-09-21 (D158)` with:
+`## 127. … — OPEN` → `## 127. Inbox: email signatures, auto-appended — DONE 2026-09-21 (D159)` with:
 
 ```markdown
 **Shipped:** Account → "Email signature" (plain text, 2,000 chars, preview), stored in the
@@ -3407,7 +3407,7 @@ per-user prefs row; the composer seeds `-- ` + signature on Reply / Reply all / 
 Forward block) with an "Add/Remove signature" toggle (`lib/inbox-signature.ts`).
 ```
 
-`## 128. … — OPEN` → `## 128. Inbox: list row shows the last person who responded (Gmail-style); "waiting on them" badge stays — DONE 2026-09-21 (D158)` with:
+`## 128. … — OPEN` → `## 128. Inbox: list row shows the last person who responded (Gmail-style); "waiting on them" badge stays — DONE 2026-09-21 (D159)` with:
 
 ```markdown
 **Shipped:** `rowName` (`lib/inbox-rows.ts`) → `ThreadRowVM.primaryName` (newest non-me author,
@@ -3418,7 +3418,7 @@ waiting chip and count badge unchanged.
 - [ ] **Step 4: Spec implementation notes** — append to `docs/superpowers/specs/2026-09-21-inbox-round-3-design.md`:
 
 ```markdown
-## Implementation notes (2026-09-21, D158)
+## Implementation notes (2026-09-21, D159)
 
 - `LINK_TYPES` did not exist; `lead` was added to `LINK_TYPE_OPTIONS`, now in `lib/inbox-links.ts`.
 - `resolveForThread` takes an address, not a thread; the thread → address rule is
@@ -3426,7 +3426,7 @@ waiting chip and count badge unchanged.
   (stamped by the bridge) — messages stored only `author` before.
 - The work picker lived at `thread-reader.tsx:502-648`, not 670-847.
 - `/quotes/new` did **not** read `customer=`; and the intake never created a quote — with
-  `thread=` it now mints the draft itself (§1 above, D158) so there is something to link.
+  `thread=` it now mints the draft itself (§1 above, D159) so there is something to link.
 - Venue options come from the linked customer's composed `locations` (the same rows as
   `sitesForCompany`, already loaded), value = `CustomerLocation.id`.
 - The handles follow the Inbox's own 960 px breakpoint, not 860 (§4).
@@ -3438,7 +3438,7 @@ waiting chip and count badge unchanged.
 
 ```bash
 git add DECISIONS.md PUNCHLIST.md docs/superpowers/specs/2026-09-21-inbox-round-3-design.md
-git commit -m "docs: D158 Inbox round 3 — identity source, venue link, quote hand-off, pane layout, signatures, row names; close #123–#128
+git commit -m "docs: D159 Inbox round 3 — identity source, venue link, quote hand-off, pane layout, signatures, row names; close #123–#128
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 git push origin punch-2026-09-21-round-2
@@ -3453,7 +3453,7 @@ git push origin punch-2026-09-21-round-2
 | Spec section | Requirement | Task |
 |---|---|---|
 | §1 Data model | `siteId`, `identityMessageId` on `CommThread` (JSON, no hot column) | 1 |
-| §1 | `LINK_TYPES` gains `lead`; `LINK_TYPE_OPTIONS` lists it | 3 (no `LINK_TYPES` exists — `LINK_TYPE_OPTIONS` + href + colour; noted in D158) |
+| §1 | `LINK_TYPES` gains `lead`; `LINK_TYPE_OPTIONS` lists it | 3 (no `LINK_TYPES` exists — `LINK_TYPE_OPTIONS` + href + colour; noted in D159) |
 | §1 | `signature` in the per-user prefs doc; layout in `localStorage` `pk.inbox.layout.v1` `{rail, list}` | 7, 6 |
 | §2 Resolver | `identityAddressFor(t)` pure + tested; inbound → From, outbound → first recipient, fallback to `contactEmail`; re-sweeps use it; "Linking from: name, in/out, date" | 1 (helper, `resolveAddressFor`, resweep, `setIdentityMessage`), 3 (the sidebar line) |
 | §3.1 Work | picker moved into `WorkLinkCard`, same `setLinkAction`; "+ New quote" → `/quotes/new?customer&contact&site&thread`; intake reads them, links the thread on save, returns to `/inbox?thread=` | 3, 4 |
@@ -3462,7 +3462,7 @@ git push origin punch-2026-09-21-round-2
 | §3.4 Linking from | select of messages newest-first, default "Thread contact" → `setIdentityMessageAction` re-resolves that thread | 1 (store), 2 (action), 3 (card) |
 | §3.5 Quick add | unchanged | 3 (kept; sender now the identity address) |
 | §3 Actions | both `requireUser` + `visibleTo` + revalidate; `quickAddVenueAction` keeps `locationName` | 2 |
-| §4 Panes | `SplitHandle` (6px, pointer capture, arrows 16px, `role="separator"` vertical, no dependency); shell layout state read once / debounced 150ms / clamped (rail 180–320 or 0, list 300–640); `thread-list` `width` prop; rail chevron → 48px icon column with badges; `clampLayout` tested; handles hidden below the breakpoint | 6 (breakpoint is the Inbox's 960 — D158) |
+| §4 Panes | `SplitHandle` (6px, pointer capture, arrows 16px, `role="separator"` vertical, no dependency); shell layout state read once / debounced 150ms / clamped (rail 180–320 or 0, list 300–640); `thread-list` `width` prop; rail chevron → 48px icon column with badges; `clampLayout` tested; handles hidden below the breakpoint | 6 (breakpoint is the Inbox's 960 — D159) |
 | §5 Signatures | Account textarea (≤2,000, preview) via `saveSignatureAction`; `openMode` seeds `"\n\n-- \n" + sig` for Reply/Reply-all/New, Forward keeps its block below; toggle matched on `\n-- \n`; `doSend` unchanged; per user | 7 |
 | §6 Row name | `rowName(t, meName)` → primary (newest non-me author / counterpart), secondary chain "Brenda, me (3)"; `ThreadRowVM.primaryName/chain`; `thread-list` renders them; status/wait untouched | 5 |
 | §7 test:specs | `identityAddressFor` (3 cases + more), `rowName` (4 cases + more), `clampLayout` | 1, 5, 6 (+ `toLocationInput`, `newQuoteHref`, `quoteNameFromSubject`, `intakeInitialState`, signature helpers in 2, 3, 4, 7) |
