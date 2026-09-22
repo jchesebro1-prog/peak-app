@@ -18,7 +18,17 @@ import { insertWithPrefixedId, listDocs, softDeleteDoc } from "@/db/doc-store";
  * on collision instead of one writer's note silently replacing another's.
  */
 
-export type NoteParentKind = "customer" | "lead" | "project" | "quote";
+export type NoteParentKind = "customer" | "lead" | "project" | "quote" | "engagement";
+
+/** #145 D171 — file reference union, declared locally on purpose: Task 9
+ *  creates `@/lib/consulting-files.ts` and replaces this declaration with
+ *  `import type { FileRef } from "@/lib/consulting-files";`. Keep this
+ *  shape in sync with that module until then. */
+type FileMeta = { name: string; mime: string; size: number };
+export type FileRef =
+  | ({ kind: "drive"; fileId: string; webViewLink: string } & FileMeta)
+  | ({ kind: "blob"; pathname: string } & FileMeta)
+  | ({ kind: "data"; dataUrl: string } & FileMeta);
 
 export type NoteRecord = {
   id: string; // 'N-####' (base 7000)
@@ -30,6 +40,13 @@ export type NoteRecord = {
   by: string; // team-member NAME (app convention)
   at: number; // epoch-ms — the feed timestamp
   text: string;
+  /** #145 D170 — files captured with this note. */
+  attachments: FileRef[];
+  /** #145 D170 — tasks this note spawned, so a task's origin stays answerable. */
+  taskIds: string[];
+  /** #145 — true for an app-written note (a milestone move), so the feed can
+   *  style it differently and the composer never claims authorship. */
+  system: boolean;
   createdAt: number;
   updatedAt: number;
 };
@@ -40,6 +57,9 @@ export function normalizeNote(n: NoteRecord): NoteRecord {
   n.text = n.text ?? "";
   n.by = n.by ?? "";
   n.at = n.at ?? n.createdAt ?? 0;
+  n.attachments = Array.isArray(n.attachments) ? n.attachments : [];
+  n.taskIds = Array.isArray(n.taskIds) ? n.taskIds : [];
+  n.system = !!n.system;
   return n;
 }
 
@@ -55,7 +75,15 @@ export async function notesForCustomer(customerId: string): Promise<NoteRecord[]
 }
 
 export async function addNoteRecord(
-  input: { parentKind: NoteParentKind; parentId: string; customerId: string | null; text: string },
+  input: {
+    parentKind: NoteParentKind;
+    parentId: string;
+    customerId: string | null;
+    text: string;
+    attachments?: FileRef[];
+    taskIds?: string[];
+    system?: boolean;
+  },
   me: string
 ): Promise<NoteRecord> {
   const t = Date.now();
@@ -67,6 +95,9 @@ export async function addNoteRecord(
     by: me,
     at: t,
     text: input.text.trim(),
+    attachments: input.attachments ?? [],
+    taskIds: input.taskIds ?? [],
+    system: input.system ?? false,
     createdAt: t,
     updatedAt: t,
   }));

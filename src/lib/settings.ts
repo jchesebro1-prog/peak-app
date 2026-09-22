@@ -43,6 +43,10 @@ export type AppSettingsData = {
   /** Consulting phase-menu overrides (D90) — see DEFAULT_CONSULTING_PHASES
    *  in stores/engagements.ts; empty/absent means use the defaults. */
   consultingPhases?: string[];
+  /** #145 D165/D166 — phase weight by phase NAME; absent reads as 1. */
+  consultingPhaseWeights?: Record<string, number>;
+  /** #145 D165 — the discipline vocabulary; whole-list override. */
+  consultingDisciplines?: string[];
   /** Consulting proposal assumptions library (#35) — see
    *  DEFAULT_CONSULTING_ASSUMPTIONS in lib/consulting-stages.ts;
    *  empty/absent means use the (DRAFT-seed) defaults. The estimator's
@@ -138,6 +142,33 @@ export function canRecord(
 ): boolean {
   const allowed = Array.isArray(settings.recordingsBetaUsers) ? settings.recordingsBetaUsers : [];
   return allowed.length === 0 || allowed.includes(userId);
+}
+
+/** #145 — the intake four (survey-intake.ts DISCIPLINE_GROUPS) as defaults. */
+export const DEFAULT_CONSULTING_DISCIPLINES = ["rigging", "curtain", "lighting", "av"];
+
+export function mergedConsultingDisciplines(stored?: string[] | null): string[] {
+  const list = (stored || []).map((s) => s.trim()).filter(Boolean);
+  return list.length ? list : DEFAULT_CONSULTING_DISCIPLINES;
+}
+
+/**
+ * #145 — pair each phase NAME with its stored weight (absent/invalid → 1)
+ * and a stable id. The id is the phase name slugged, so it survives a
+ * settings edit that reorders the list and matches across regenerations.
+ */
+export function phaseWeightsFor(
+  stored: Record<string, number> | null | undefined,
+  phaseNames: readonly string[]
+): Array<{ phaseId: string; name: string; weight: number }> {
+  return phaseNames.map((name) => {
+    const w = Number(stored?.[name]);
+    return {
+      phaseId: "ph-" + name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+      name,
+      weight: Number.isFinite(w) && w > 0 ? w : 1,
+    };
+  });
 }
 
 export async function getSettingsPatch(): Promise<Record<string, unknown>> {

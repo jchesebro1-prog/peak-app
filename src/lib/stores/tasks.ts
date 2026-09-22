@@ -39,10 +39,20 @@ export type TaskRecord = {
   projectId: string | null;      // parent pointers — nullable, no FK (D85 convention)
   quoteId: string | null;
   designId: string | null;       // added D149 — the reusable-template feature's design task-linkage
+  /** #145 — the fourth nullable parent pointer (D85 convention). */
+  engagementId: string | null;
   coverageKey: string | null;    // stable template/auto key; null for manual tasks
   assigneeUserId: string | null; // users.id ("u1"); null = unassigned or legacy
   assigneeName: string;          // denormalized display name; "" = unassigned
   dueAt: number | null;          // epoch-ms
+  /** #145 — Gantt bar start; dueAt is the bar end. */
+  startAt: number | null;
+  /** #145 — template provenance: which phase window placed this task, and
+   *  at what percentages. Null for a manually added task. */
+  schedule: { phaseId: string; startPct: number; lengthPct: number } | null;
+  /** #145 D168 — set when a human drags the bar. Excluded from every
+   *  milestone-shift pre-tick thereafter. */
+  handScheduled: boolean;
   status: TaskStatus;
   notes: string;
   createdBy: string;             // display name
@@ -175,9 +185,10 @@ export function isOverdue(t: Pick<TaskRecord, "dueAt" | "status">, nowMs: number
 export function taskFromLegacy(projectId: string, pt: ProjectTask, at: number): TaskRecord {
   return {
     id: pt.id, title: pt.title, section: pt.section || "Install",
-    projectId, quoteId: null, designId: null, coverageKey: null,
+    projectId, quoteId: null, designId: null, engagementId: null, coverageKey: null,
     assigneeUserId: null, assigneeName: pt.assignee || "",
-    dueAt: null, status: pt.done ? "done" : "open", notes: "",
+    dueAt: null, startAt: null, schedule: null, handScheduled: false,
+    status: pt.done ? "done" : "open", notes: "",
     createdBy: pt.assignee || "", createdAt: at, updatedAt: at,
     doneAt: pt.done ? (pt.doneAt ?? at) : null,
   };
@@ -216,19 +227,31 @@ export function taskBellItems(all: TaskRecord[], me: string, nowMs: number): Tas
 
 /* ---------- normalize + CRUD ---------- */
 
-function normalizeTask(raw: Partial<TaskRecord> & { id: string }): TaskRecord {
+export function normalizeTask(raw: Partial<TaskRecord> & { id: string }): TaskRecord {
   const at = raw.createdAt ?? now();
-  return {
+  const t: TaskRecord = {
     id: raw.id, title: raw.title || "New task", section: raw.section ?? "Install",
     projectId: raw.projectId ?? null, quoteId: raw.quoteId ?? null,
     designId: raw.designId ?? null,
+    engagementId: raw.engagementId ?? null,
     coverageKey: raw.coverageKey ?? null,
     assigneeUserId: raw.assigneeUserId ?? null, assigneeName: raw.assigneeName ?? "",
     dueAt: raw.dueAt ?? null,
+    startAt: typeof raw.startAt === "number" ? raw.startAt : null,
+    schedule:
+      raw.schedule && typeof raw.schedule === "object" && typeof raw.schedule.phaseId === "string"
+        ? {
+            phaseId: raw.schedule.phaseId,
+            startPct: Number(raw.schedule.startPct) || 0,
+            lengthPct: Number(raw.schedule.lengthPct) || 0,
+          }
+        : null,
+    handScheduled: !!raw.handScheduled,
     status: (STATUSES as readonly string[]).includes(raw.status as string) ? (raw.status as TaskStatus) : "open",
     notes: raw.notes ?? "", createdBy: raw.createdBy ?? "",
     createdAt: at, updatedAt: raw.updatedAt ?? at, doneAt: raw.doneAt ?? null,
   };
+  return t;
 }
 
 export async function allTasks(): Promise<TaskRecord[]> {
@@ -250,6 +273,11 @@ export async function tasksForQuote(quoteId: string): Promise<TaskRecord[]> {
 /** D149 — the reusable-template feature's design side, mirroring tasksForQuote. */
 export async function tasksForDesign(designId: string): Promise<TaskRecord[]> {
   return (await allTasks()).filter((t) => t.designId === designId);
+}
+
+/** #145 — the consulting side of the collection. */
+export async function tasksForEngagement(engagementId: string): Promise<TaskRecord[]> {
+  return (await allTasks()).filter((t) => t.engagementId === engagementId);
 }
 
 export async function getTask(id: string): Promise<TaskRecord | null> {
