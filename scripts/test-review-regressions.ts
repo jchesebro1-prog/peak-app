@@ -847,6 +847,40 @@ async function main() {
     assert.equal(afterCreate?.list, 55, "item 3: hub create mode keeps the stored list price when the file has no List column");
     assert.equal(afterCreate?.cost, 30, "item 3: …and the stored cost when it has no Cost column");
     assert.equal(afterCreate?.pricedAt, D2, "item 3: …so pricedAt does not move");
+
+    // Final review item 1 (D156) — the hub's manufacturer book date is
+    // stamped per manufacturer group, only for groups the commit actually
+    // wrote: "Skip duplicates" compares nothing, so it confirms nothing.
+    // commitCatalogImport is importRecords' body (guard → normalize →
+    // commitImport → stamp), split out so it runs here without a session.
+    const { commitCatalogImport } = await import("@/app/(app)/import/catalog-commit");
+    const { getSettings } = await import("@/lib/settings");
+    assert.equal((await getSettings()).priceListEffective?.t133hub, undefined, "item 1: precondition — T133 Hub has no book date yet");
+    const skipped = await commitCatalogImport({ rows: prepOf("SKU,Description,List Price,Cost,Manufacturer\nT133-H1,Hub part,55,30,T133 Hub\n").rows, mode: "skip", effectiveAt: D3, priced: true });
+    assert.ok(skipped.ok && skipped.res.skipped === 1 && skipped.stamped.length === 0, "item 1: skip mode skips the existing SKU and stamps no book");
+    assert.equal((await getSettings()).priceListEffective?.t133hub, undefined, "item 1: a skip-mode commit leaves priceListEffective[key] undefined");
+    const updated = await commitCatalogImport({ rows: prepOf("SKU,Description,List Price,Cost,Manufacturer\nT133-H1,Hub part,55,30,t133-hub\n").rows, mode: "update", effectiveAt: D3, priced: true });
+    assert.ok(updated.ok && updated.res.updated === 1 && updated.res.written.length === 1, "item 1: update mode writes the row (commitImport reports the written rows)");
+    assert.deepEqual(updated.ok ? updated.stamped : [], ["t133hub"], "item 1: …and stamps exactly that manufacturer's book, keyed through mfrKey");
+    assert.equal((await getSettings()).priceListEffective?.t133hub, D3, "item 1: an update-mode commit sets priceListEffective[key] to the effective date (an unchanged price still confirms the list)");
+    assert.equal((await getPart("T133-H1"))?.pricedAt, D2, "item 1: …while the unchanged line keeps its own pricedAt");
+    const D4 = new Date(2026, 8, 15).getTime();
+    const unpriced = await commitCatalogImport({ rows: prepOf("SKU,Description,Manufacturer\nT133-H1,Hub part (desc only),T133 Hub\n").rows, mode: "update", effectiveAt: D4, priced: false });
+    assert.ok(unpriced.ok && unpriced.res.updated === 1 && unpriced.stamped.length === 0, "item 1/3: a price-less file writes the description but confirms no price");
+    assert.equal((await getSettings()).priceListEffective?.t133hub, D3, "item 1/3: …so the hub does not re-date the book either");
+    const mixed = await commitCatalogImport({
+      rows: prepOf("SKU,Description,List Price,Cost,Manufacturer\n,Blank SKU,1,1,T133 Hub\nT133-H1,Hub part,55,30,T133 Hub\nT133-H3,Other maker's part,10,5,T133 Hub Two\n").rows,
+      mode: "update",
+      effectiveAt: D4,
+      priced: true,
+    });
+    assert.ok(mixed.ok && mixed.res.errored === 1 && mixed.res.updated === 1 && mixed.res.created === 1 && mixed.res.failed.length === 1, "item 1: a file with one bad row still writes the good rows");
+    assert.deepEqual(mixed.ok ? mixed.stamped : [], ["t133hubtwo"], "item 1: per-group — the clean manufacturer is stamped, the one with an errored row is not");
+    assert.equal((await getSettings()).priceListEffective?.t133hub, D3, "item 1: …so T133 Hub keeps its earlier date");
+    assert.equal((await getSettings()).priceListEffective?.t133hubtwo, D4, "item 1: …and T133 Hub Two gets the file's date");
+    const foreign = await commitCatalogImport({ rows: prepOf("SKU,Description,List Price,Cost,Manufacturer\nT133-H1,Hub part,99,30,T133 Other\n").rows, mode: "update", effectiveAt: D4, priced: true });
+    assert.ok(!foreign.ok && /T133 Other: .*T133-H1 is filed under T133 Hub/.test(foreign.error), "item 1: the guard still runs first and names the manufacturer + SKU");
+    assert.equal((await getPart("T133-H1"))?.list, 55, "item 1: …and a rejected commit writes nothing");
   }
 
   console.log("review regression checks passed");

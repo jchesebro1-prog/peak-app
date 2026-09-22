@@ -4,8 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePerm } from "@/lib/session";
 import { list as listCatalog } from "@/lib/stores/catalog";
-import { setPriceListEffective } from "@/lib/settings";
-import { mfrKey, parseEffectiveDate } from "@/lib/catalog-books";
+import { parseEffectiveDate } from "@/lib/catalog-books";
 import {
   checkManufacturerGroups,
   checkSize,
@@ -13,17 +12,12 @@ import {
   type ManufacturerGroup,
 } from "@/lib/catalog-import-guard";
 import { parseCsv, autoMap, prepareRows } from "./parse";
-import { catalogGroups } from "./catalog-groups";
 import { getTypeMeta } from "./types";
-import { commitImport, type ImportMode } from "./registry";
-
-/** #132 — a failing group's message, prefixed with the manufacturer it checked. */
-function guardMessage(c: GroupCheck): string {
-  return c.result.ok ? "" : (c.mfr ? `${c.mfr}: ` : "") + c.result.detail;
-}
+import { commitImport, type ImportMode, type ImportResult } from "./registry";
+import { commitCatalogImport } from "./catalog-commit";
 
 // #132 — `catalogGroups` (prepared rows → manufacturer groups) lives in
-// ./catalog-groups so the client preview and this server commit share ONE
+// ./catalog-groups so the client preview and the server commit share ONE
 // implementation (pre-flight finding: the block was duplicated).
 
 /**
@@ -36,11 +30,14 @@ function guardMessage(c: GroupCheck): string {
  * idiom as the success path's `r=`) so the page can render the failure
  * instead of silently doing nothing.
  *
- * The `catalog` type additionally: refuses text over 1 MB (#134), runs the
- * wrong-manufacturer guard per manufacturer in the file and normalizes each
- * group to its existing spelling (#132), stamps the form's effective date on
- * rows whose price changes and records it as each manufacturer's price-list
- * date once rows were written (#133, D156).
+ * The `catalog` type additionally: refuses text over 1 MB (#134), then hands
+ * off to `commitCatalogImport` (./catalog-commit — session-free so the
+ * regression harness can drive it): the wrong-manufacturer guard per
+ * manufacturer in the file, normalization to each manufacturer's existing
+ * spelling (#132), the form's effective date as `pricedAt` on rows whose
+ * price changes, and the manufacturer book date — stamped per manufacturer
+ * group that was actually written, never in "skip" mode and never for a
+ * file with no price column (#133, D156).
  */
 export async function importRecords(formData: FormData): Promise<void> {
   await requirePerm("manage_users");
@@ -69,31 +66,17 @@ export async function importRecords(formData: FormData): Promise<void> {
   }
 
   const mapping = autoMap(parsed.headers, type.fields);
-  const prepared = prepareRows(parsed.rows, mapping, type.fields);
-  let rows = prepared.rows;
-  let checks: GroupCheck[] = [];
+  const { rows } = prepareRows(parsed.rows, mapping, type.fields);
   const effectiveAt = parseEffectiveDate(String(formData.get("effectiveDate") || ""), Date.now());
 
+  let res: ImportResult;
   if (key === "catalog") {
-    checks = checkManufacturerGroups(catalogGroups(rows), await listCatalog());
-    const bad = checks.find((c) => !c.result.ok);
-    if (bad) redirect(`${backTo}&err=${encodeURIComponent(guardMessage(bad))}`);
-    const spelling = new Map(checks.map((c) => [mfrKey(c.mfr), c.result.ok ? c.result.normalizedMfr : c.mfr]));
-    rows = rows.map((r) => {
-      if (!r.valid) return r;
-      const mfr = String(r.values.mfr ?? "");
-      return { ...r, values: { ...r.values, mfr: spelling.get(mfrKey(mfr)) ?? mfr } };
-    });
-  }
-
-  const res = await commitImport(key, rows, mode, { effectiveAt });
-
-  // "skip" never compares prices, so it confirms nothing; update/create do
-  // once at least one row was written.
-  if (key === "catalog" && res.created + res.updated > 0) {
-    for (const c of checks) {
-      if (c.result.ok) await setPriceListEffective(mfrKey(c.result.normalizedMfr), effectiveAt);
-    }
+    const priced = (mapping.list ?? -1) >= 0 || (mapping.cost ?? -1) >= 0;
+    const out = await commitCatalogImport({ rows, mode, effectiveAt, priced });
+    if (!out.ok) redirect(`${backTo}&err=${encodeURIComponent(out.error)}`);
+    res = out.res;
+  } else {
+    res = await commitImport(key, rows, mode, { effectiveAt });
   }
 
   revalidatePath("/", "layout");

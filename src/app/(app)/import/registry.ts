@@ -47,6 +47,13 @@ export type ImportResult = {
   skipped: number;
   errored: number;
   total: number;
+  /** The rows behind `created + updated` — what this commit actually wrote.
+   *  The catalog commit stamps each manufacturer's book date from these
+   *  (D156, final review item 1), so a group nothing was written for is
+   *  never confirmed. References to the caller's own rows, no copies. */
+  written: PreparedRow[];
+  /** The rows behind `errored` (invalid, or the write threw). */
+  failed: PreparedRow[];
 };
 
 /** #133 — per-commit context handed to every writer; only the catalog
@@ -630,12 +637,13 @@ export async function commitImport(
   ctx: CommitContext = { effectiveAt: Date.now() }
 ): Promise<ImportResult> {
   const w = WRITERS[key];
-  const res: ImportResult = { created: 0, updated: 0, skipped: 0, errored: 0, total: rows.length };
+  const res: ImportResult = { created: 0, updated: 0, skipped: 0, errored: 0, total: rows.length, written: [], failed: [] };
   if (!w) return res;
   const cache = await w.load();
   for (const r of rows) {
     if (!r.valid) {
       res.errored++;
+      res.failed.push(r);
       continue;
     }
     try {
@@ -647,12 +655,15 @@ export async function commitImport(
       if (existing && mode === "update" && w.update) {
         await w.update(existing, r.values, ctx);
         res.updated++;
+        res.written.push(r);
         continue;
       }
       await w.create(r.values, cache, ctx);
       res.created++;
+      res.written.push(r);
     } catch {
       res.errored++;
+      res.failed.push(r);
     }
   }
   return res;
