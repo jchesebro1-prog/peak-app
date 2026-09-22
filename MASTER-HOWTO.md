@@ -281,10 +281,11 @@ specs for every screen live in `docs/specs/` and the original prototype in
 
 ## 9. Vercel Blob — plan sheets (and datasheets) out of the database
 
-**Why.** The Grid stores every uploaded plan sheet as a base64 blob inside
-the database (one doc per sheet, 8 MB cap). Fine for the beta; wrong at
-production scale — file bytes don't belong in Postgres, and datasheet PDFs
-(§10) will multiply the problem. Decision D113 item 2: **Vercel Blob at
+**Why.** Without a Blob token the Grid stores every uploaded plan sheet as a
+base64 blob inside the database (one doc per sheet, 4 MB cap — see #146/D173;
+it read 8 MB until then, but a server action could only ever carry ~900 kB of
+it). Fine for the beta; wrong at production scale — file bytes don't belong
+in Postgres, and datasheet PDFs (§10) will multiply the problem. Decision D113 item 2: **Vercel Blob at
 deploy time.** The app already deploys on Vercel, so this adds no new vendor.
 
 **What you do (10 minutes, one time):**
@@ -305,7 +306,8 @@ deploy time.** The app already deploys on Vercel, so this adds no new vendor.
 
 **What's built (2026-07-24, D116) — active the moment the token exists:**
 
-- `addSheet` uploads to Blob (`@vercel/blob` `put()`, **private access** —
+- `POST /api/grid-sheets/upload` uploads to Blob (`@vercel/blob` `put()`,
+  **private access** —
   the store you created is private, which is right for customer drawings)
   and stores the blob pathname instead of the base64 payload; browsers read
   sheets through the signed-in-only proxy `/api/grid-sheets/<sheetId>`,
@@ -315,8 +317,12 @@ deploy time.** The app already deploys on Vercel, so this adds no new vendor.
   keep working.
 - A one-shot backfill script moves existing sheets up and rewrites their
   docs (dev-DB discipline per AGENTS.md: server stopped, `.data` backed up).
-- The 8 MB upload cap rises (Blob takes much larger files; the practical
-  limit becomes what a browser upload tolerates).
+- The upload cap does NOT rise on its own. Blob takes much larger files, but
+  the bytes still travel through a Vercel Function, which rejects a request
+  body over ~4.5 MB before our handler sees it — so the cap is 4 MB either
+  way (#146/D173). Lifting it needs the client-upload broker Recordings uses
+  (`handleUpload`), whose bytes bypass the function entirely; that is a
+  deliberate, still-open follow-up, not something the token switches on.
 - §10's datasheet PDFs land in the same store under `datasheets/`.
 
 **Cost reality check:** plan sheets are ~0.5–5 MB PDFs. Hundreds of designs

@@ -4018,3 +4018,67 @@ sweeper (D162's open item, unchanged). And where a record is referenced by both 
 older revision, the save action's merge lets the builder's copy win, so an edit also changes what that
 revision renders; making revisions immune would need a copy-on-write id, which the attachment/id
 contract above forbids. Flagged rather than changed.
+
+## D173. Plan sheets upload through a route handler, capped at an honest 4 MB (#146, 2026-09-22)
+
+`addSheetAction` declared `MAX_SHEET_BYTES = 8 * 1024 * 1024` and took the sheet as a base64 data-URL
+inside a SERVER ACTION payload. `next.config.ts` pins `serverActions.bodySizeLimit` at 1200kb and
+base64 inflates by 4/3, so the real ceiling was a **~900 kB file, not 8 MB** — and going over it was
+not the action returning its careful sentence: Next rejected the whole request body before the action
+ran, so the user got an unhandled rejection and the entire save died, not just the upload. This is
+exactly the #143/D162 defect one module over; the same reasoning and the same shapes apply.
+
+**The upload is now `POST /api/grid-sheets/upload`.** Route handlers are not bound by
+`serverActions.bodySizeLimit`, and multipart carries raw bytes, so base64's 4/3 tax is gone too.
+`addSheetAction` is deleted rather than kept as a second path — one transport, one cap.
+
+**The cap is 4 MB (`src/lib/grid-sheet-file.ts`), in one constant the route, its refusal text and the
+picker's pre-check all read.** Not 8 MB: Vercel Functions reject a request body over ~4.5 MB before
+the handler runs, so a larger number would be the same lie one layer up, with the browser getting a
+platform error in place of this route's JSON. It is still a 4.4x rise on what the code actually
+allowed yesterday.
+
+**Why not the client-upload broker.** `handleUpload` from `@vercel/blob/client` (the recordings
+module, `src/app/api/recordings/upload/route.ts`) has no body ceiling at all and is the right answer
+for a genuinely large sheet — it was weighed and deliberately not taken here, because for the Grid it
+costs more than it buys:
+
+- Recordings can scope its upload token to `recordings/<REC-id>/` because the record already exists
+  when the upload starts. A plan sheet is CREATED by its upload, so the broker needs a pre-minted
+  empty sheet doc plus a client callback to finish it — a half-created-sheet failure state the
+  action never had.
+- That callback is the problem. Vercel cannot reach localhost, so `upload-completed` never fires in
+  dev and the client has to confirm the write — which means the client names the stored path. See
+  below for why that is the one thing this change refuses to introduce.
+- It cannot be exercised on a dev machine at all (Vercel Blob refuses writes from a development
+  environment: "OIDC is enabled for this project, but not for the development environment").
+
+The broker stays the documented upgrade path, Jeff-gated, for when a real drawing exceeds 4 MB often
+enough to be worth that complexity.
+
+**The Grid has no untrusted-`blobPath` problem, and this change keeps it that way.** #143 had to add
+`ownsVendorQuoteBlobPath` because a vendor quote's path round-trips through the browser. It was
+checked here: the Grid's `blobPath` is minted by `putBlob` inside the server and read back off the
+`grid_sheets` doc by the proxy, it never crosses the wire, and `grid_sheets` is not in `SYNCABLE_SET`
+so `/api/sync/push` cannot plant one either. So the route does the WHOLE job — bytes to storage and
+the doc written server-side — and returns only a sheet id. Copying #143's shape literally (route
+returns a path, save action re-validates it) would have *created* an arbitrary-read primitive over
+the private Blob store in order to fix an unrelated size bug. Three spec assertions pin the property.
+
+**SVG plan sheets are refused.** Found while rewriting the type gate: `/api/grid-sheets/<id>` streams
+a sheet INLINE under its stored mime with no `content-disposition` — it has to, the editor paints it
+as a canvas background — so an accepted `image/svg+xml` sheet opened top-level would have run its own
+script in the app's origin against the signed-in session. The vendor-quote proxy escapes this by
+forcing `attachment`; a background image cannot, so the refusal lives at upload time with its own
+message rather than the generic one.
+
+**Verification.** `scripts/smoke-grid-sheet-upload.ts` (`npm run test:smoke:grid-sheet`) posts real
+multi-megabyte bodies at a real `next dev` on a scratch datadir: a 2 MB sheet is accepted and read
+back byte-identical, a sheet just under the cap is accepted, 5 MB is refused with our own 413, an SVG
+with our own 415, and every refusal is proven to have written nothing. Only the in-database data-URL
+FALLBACK branch is exercised — the Blob branch cannot be run locally (see above) and is first
+exercised in production.
+
+**Not done:** `src/app/(app)/catalog/actions.ts` carries the identical defect —
+`MAX_DATASHEET_BYTES = 8 * 1024 * 1024` in a server action, with a comment saying it mirrors the
+Grid's cap. It is logged as its own item rather than folded in here.
