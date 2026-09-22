@@ -44,8 +44,12 @@ import {
   listThreadIds,
   modifyThread,
   sendRaw,
+  type GmailLabelEvent,
 } from "./api";
-import { buildRaw, parseInbound, type ParsedInbound } from "./mime";
+import { buildRaw, parseAddress, parseInbound, type ParsedInbound } from "./mime";
+import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
+import { queueLabelSync } from "./label-sync";
+import { interpretLabelEvents } from "./label-interpret";
 
 /**
  * The real Gmail bridge (Phase 7). comms.ts delegates here — but ONLY when the
@@ -196,11 +200,14 @@ async function recordMessage(
   // attach to an existing thread sharing the Gmail thread id
   const existing = all.find((t) => t.gmailThreadId === p.gmailThreadId);
   if (existing) {
+    let statusChanged = false;
     await patchDoc<CommThread>("comms", existing.id, (d) => {
+      const prevStatus = d.status;
       d.messages = (d.messages || []).concat([msg]);
       d.updatedAt = Math.max(d.updatedAt || 0, p.at);
       d.messages.sort((a, b) => (a.at || 0) - (b.at || 0));
       d.status = deriveStatus(d);
+      statusChanged = d.status !== prevStatus;
       // Which Gmail account owns this thread id — reconcile scopes by this
       // (thread ids are per-account; display-name lookups can misattribute).
       if (!d.gmailAccountKey) d.gmailAccountKey = key;
@@ -211,12 +218,22 @@ async function recordMessage(
         d.archived = false;
       }
     });
+    if (statusChanged) queueLabelSync(existing.id);
     return existing.id;
   }
 
   // otherwise open a new thread in the mailbox that received it
   const box = mailboxOfKey(key);
   const contactEmail = dir === "in" ? p.from.email : "";
+  // #96: link on arrival. Outbound first-message threads resolve by the
+  // recipient (the "to" header's first address).
+  const senderForResolve = dir === "in" ? p.from.email : parseAddress(p.to.split(",")[0] || "").email;
+  // A resolver failure (DB hiccup, bad address) must never abort the
+  // import — the thread lands as unknown and the next re-sweep picks it up.
+  const resolution = await resolveForThread(senderForResolve).catch((err: unknown) => {
+    console.error("[gmail] resolve failed", senderForResolve, err);
+    return { kind: "unknown" } as const;
+  });
   const id = await nextPrefixedId("comms", "C", 1032);
   const rec: CommThread = {
     id,
@@ -243,6 +260,7 @@ async function recordMessage(
     syncedAt: Date.now(),
     rev: 1,
   };
+  await applyResolution(rec, resolution);
   const inserted = await insertDocIfAbsent<CommThread>("comms", rec);
   if (!inserted) {
     // A concurrent sync won this id. Redo from the top with fresh state: the
@@ -257,6 +275,7 @@ async function recordMessage(
     }
     return recordMessage(key, p, attempt + 1);
   }
+  if (rec.resolution === "linked") queueLabelSync(id);
   return id;
 }
 
@@ -366,6 +385,7 @@ async function rederiveStatuses(key: MailboxKey): Promise<number> {
       d.messages = [...(d.messages || [])].sort((a, b) => (a.at || 0) - (b.at || 0));
       if (d.status === "waiting_us" || d.status === "waiting_them") d.status = deriveStatus(d);
     });
+    queueLabelSync(t.id);
     changed++;
   }
   return changed;
@@ -487,8 +507,12 @@ async function syncMailboxMessages(
   key: MailboxKey,
   info: NonNullable<Awaited<ReturnType<typeof getConnectionInfo>>>,
   known: Set<string>
-): Promise<{ last: string | null; more: boolean }> {
+): Promise<{ last: string | null; more: boolean; labelsChanged: boolean }> {
   let last: string | null = null;
+  // Tracked separately from `last` (#96 review Minor 2): `last` must stay a
+  // real Gmail thread id or null (pollInbound's `id` return is documented as
+  // one), never a sentinel string standing in for "something changed".
+  let labelsChanged = false;
 
   if (!info.initialImportDone) {
     // One-time 90-day history import — resumable, chunked, quota-safe (#97).
@@ -514,7 +538,7 @@ async function syncMailboxMessages(
             // (initialImportDone stays false) and retry on the next sync.
             console.warn("[gmail] import paused (quota) for", key);
             await updateSyncState(key, { lastSyncAt: Date.now() });
-            return { last, more: false };
+            return { last, more: false, labelsChanged };
           }
           throw err;
         }
@@ -530,7 +554,7 @@ async function syncMailboxMessages(
           // cheaply, thanks to `known`.
           console.info("[gmail] import chunk done for", key, "— more remain");
           await updateSyncState(key, { lastSyncAt: Date.now() });
-          return { last, more: true };
+          return { last, more: true, labelsChanged };
         }
       }
       pageToken = page.nextPageToken;
@@ -542,7 +566,7 @@ async function syncMailboxMessages(
       historyId: profile.historyId,
       lastSyncAt: Date.now(),
     });
-    return { last, more: false };
+    return { last, more: false, labelsChanged };
   }
 
   // incremental: changes since the stored cursor
@@ -550,11 +574,12 @@ async function syncMailboxMessages(
   if (!stored) {
     const profile = await getProfile(key);
     await updateSyncState(key, { historyId: profile.historyId, lastSyncAt: Date.now() });
-    return { last, more: false };
+    return { last, more: false, labelsChanged };
   }
   try {
     let pageToken: string | undefined;
     let newestHistoryId = stored;
+    const labelEvents: GmailLabelEvent[] = [];
     do {
       const page = await listHistory(key, stored, pageToken);
       if (page.historyId) newestHistoryId = page.historyId;
@@ -563,8 +588,18 @@ async function syncMailboxMessages(
         const touched = await recordMessage(key, parseInbound(full));
         if (touched) last = touched;
       }
+      labelEvents.push(...page.labelEvents);
       pageToken = page.nextPageToken;
     } while (pageToken);
+    // #96 §3 — labels a person applied in Gmail are commands (customer link,
+    // status, assign, work-link, new lead). Never let a bug here abort the
+    // message sync that already succeeded above.
+    try {
+      const applied = await interpretLabelEvents(key, labelEvents);
+      if (applied) labelsChanged = true;
+    } catch (err) {
+      console.error("[gmail] label interpret failed for", key, err);
+    }
     await updateSyncState(key, { historyId: newestHistoryId, lastSyncAt: Date.now() });
   } catch (err) {
     if (isRateLimit(err)) {
@@ -573,7 +608,7 @@ async function syncMailboxMessages(
       // entries instead of silently dropping them.
       console.warn("[gmail] poll paused (quota) for", key);
       await updateSyncState(key, { lastSyncAt: Date.now() });
-      return { last, more: false };
+      return { last, more: false, labelsChanged };
     }
     // cursor too old (404) → reset baseline to now; a manual re-import can
     // widen the window later.
@@ -581,7 +616,7 @@ async function syncMailboxMessages(
     const profile = await getProfile(key);
     await updateSyncState(key, { historyId: profile.historyId, lastSyncAt: Date.now() });
   }
-  return { last, more: false };
+  return { last, more: false, labelsChanged };
 }
 
 /** Import + poll one mailbox, then reconcile Gmail-side INBOX state onto its
@@ -605,6 +640,7 @@ async function syncMailbox(
   if (!(await claimSyncSlot(key, claimMinAgeMs)))
     return { ran: false, last: null, changed: false };
   let last: string | null = null;
+  let labelsChanged = false;
   try {
     // Built once for this run (not per chunk) and passed through — a manual
     // Send/Receive click can drain several chunks back-to-back, and rebuilding
@@ -614,12 +650,13 @@ async function syncMailbox(
     const started = Date.now();
     let chunks = 0;
     let lastChunkMs = 0;
-    let r: { last: string | null; more: boolean };
+    let r: { last: string | null; more: boolean; labelsChanged: boolean };
     do {
       const chunkStarted = Date.now();
       r = await syncMailboxMessages(key, info, known);
       lastChunkMs = Date.now() - chunkStarted;
       if (r.last) last = r.last;
+      if (r.labelsChanged) labelsChanged = true;
     } while (
       r.more &&
       Date.now() - started + lastChunkMs < IMPORT_RUN_BUDGET_MS &&
@@ -645,11 +682,16 @@ async function syncMailbox(
     console.error("[gmail] status re-derive failed for", key, err);
   }
   try {
+    flips += await backfillMailbox(key);
+  } catch (err) {
+    console.error("[gmail] link backfill failed for", key, err);
+  }
+  try {
     await syncLabels(key);
   } catch (err) {
     console.error("[gmail] label sync failed for", key, err);
   }
-  return { ran: true, last, changed: last !== null || flips > 0 };
+  return { ran: true, last, changed: last !== null || flips > 0 || labelsChanged };
 }
 
 /** Read the persisted Gmail history cursor for a mailbox. */

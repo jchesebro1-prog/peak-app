@@ -3,13 +3,16 @@ import { CATEGORIES, getPrefs, invitesOn } from "@/lib/stores/notif-prefs";
 import {
   gmailEnabled,
   hasCalendarScope,
+  hasDriveScope,
   personalKey,
 } from "@/lib/gmail/config";
+import { getKrispConnectionInfo } from "@/lib/krisp/connections";
 import { getSettings } from "@/lib/settings";
 import { getUser } from "@/lib/users";
 import NotifControls from "./notif-controls";
 import InviteToggle from "./invite-toggle";
 import OfficePicker from "./office-picker";
+import KrispCard, { type KrispCardInfo } from "./krisp-card";
 
 export const metadata = { title: "Account settings — Quartzite-6" };
 
@@ -29,7 +32,7 @@ export default async function AccountPage() {
   // calendar grant for MY personal mailbox only.
   const gmailOn = gmailEnabled();
   const myKey = personalKey(user.id);
-  let conn: { address: string; initialImportDone: boolean; calendarOn: boolean } | null = null;
+  let conn: { address: string; initialImportDone: boolean; calendarOn: boolean; driveOn: boolean } | null = null;
   if (gmailOn) {
     const { getConnectionInfo } = await import("@/lib/gmail/connections");
     const info = await getConnectionInfo(myKey);
@@ -38,8 +41,23 @@ export default async function AccountPage() {
         address: info.address,
         initialImportDone: info.initialImportDone,
         calendarOn: hasCalendarScope(info.scope),
+        // Recordings spec §5.1 — drive.file granted, so this account can be
+        // picked as the recordings archive in Settings → Recordings.
+        driveOn: hasDriveScope(info.scope),
       };
   }
+
+  // Recordings spec §1.2 — my own Krisp key (encrypted; the card never sees it).
+  const krispRow = await getKrispConnectionInfo(user.id);
+  const krisp: KrispCardInfo | null = krispRow
+    ? {
+        krispEmail: krispRow.krispEmail,
+        krispName: krispRow.krispName,
+        connectedAt: krispRow.connectedAt,
+        lastUsedAt: krispRow.lastUsedAt,
+        lastError: krispRow.lastError,
+      }
+    : null;
   const rows = CATEGORIES.map((c) => ({
     key: c.key,
     label: c.label,
@@ -137,7 +155,8 @@ export default async function AccountPage() {
                 : conn
                   ? conn.address +
                     (conn.initialImportDone ? " · history imported" : " · use Send / Receive in the Inbox to import history") +
-                    (conn.calendarOn ? " · calendar on" : "")
+                    (conn.calendarOn ? " · calendar on" : "") +
+                    (conn.driveOn ? " · Drive archive on" : "")
                   : "Connect your own Gmail so the Inbox sends and receives as you — and your dashboard calendar lights up."}
             </div>
           </div>
@@ -160,6 +179,21 @@ export default async function AccountPage() {
               Enable calendar
             </a>
           )}
+          {gmailOn && conn && !conn.driveOn && (
+            <a
+              className="pk-btn-outline"
+              href={"/api/gmail/connect?mailbox=" + encodeURIComponent(myKey) + "&drive=1"}
+              title="Re-runs the Google consent with Drive (app-created files only) added — lets this Google account hold the site-visit recordings archive"
+              style={{ flexShrink: 0, textDecoration: "none" }}
+            >
+              Enable Drive archive
+            </a>
+          )}
+          {gmailOn && conn && conn.driveOn && (
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#1f7a52", background: "#e8f3ee", border: "1px solid #cfe6db", padding: "3px 10px", borderRadius: 20, flexShrink: 0 }}>
+              Drive archive on
+            </span>
+          )}
           {gmailOn && conn && conn.calendarOn && (
             <span style={{ fontSize: 11, fontWeight: 600, color: "#1f7a52", background: "#e8f3ee", border: "1px solid #cfe6db", padding: "3px 10px", borderRadius: 20, flexShrink: 0 }}>
               Connected
@@ -167,6 +201,9 @@ export default async function AccountPage() {
           )}
         </div>
       </div>
+
+      {/* ---- my Krisp key (Recordings spec §1.2 / §6) ---- */}
+      <KrispCard info={krisp} />
 
       {/* ---- site-visit calendar invites (D76) ---- */}
       <InviteToggle initialOn={invites} />

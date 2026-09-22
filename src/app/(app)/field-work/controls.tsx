@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
+import { RecordingsStrip, type RecordingStripItem } from "@/components/recordings/recordings-strip";
 import { firstName } from "@/lib/team";
 import type { ProjectRecord, ProjectStage } from "@/lib/stores/projects";
 import type { TaskRecord } from "@/lib/stores/tasks";
@@ -41,6 +42,10 @@ export type FieldWorkDetailProps = {
   meName: string;
   identity: Record<string, FieldIdentity>;
   initialTab: string;
+  /** Recordings on this project — header strip (Recordings spec §6). */
+  recordings?: RecordingStripItem[];
+  /** spec §6 Record-control visibility, computed by the page. */
+  canShowRecord?: boolean;
 };
 
 /* ---- palettes & formatters (ported from page.tsx / projects.ts — pure) ---- */
@@ -135,6 +140,8 @@ export default function FieldWorkDetail({
   meName,
   identity,
   initialTab,
+  recordings = [],
+  canShowRecord = false,
 }: FieldWorkDetailProps) {
   const [p, setP] = useState<ProjectRecord>(project);
   // Latest record for building the whole-doc offline payload, synchronously —
@@ -442,6 +449,28 @@ export default function FieldWorkDetail({
           </Link>
         </div>
       </div>
+
+      {/* recordings (spec §6) — Record control + list for this project */}
+      {(canShowRecord || recordings.length > 0) && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+            background: "#fff",
+            border: "1px solid #e7e9ee",
+            borderRadius: 12,
+            padding: "8px 14px",
+            marginBottom: 14,
+          }}
+        >
+          <span style={{ fontSize: 10.5, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", flexShrink: 0 }}>
+            Recordings
+          </span>
+          <RecordingsStrip parentKind="project" parentId={p.id} recordings={recordings} canRecord={canShowRecord} />
+        </div>
+      )}
 
       {/* segmented tabs — local state so switching works with no signal */}
       <div

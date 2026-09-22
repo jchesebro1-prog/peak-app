@@ -1,4 +1,4 @@
-import { get, put } from "@vercel/blob";
+import { del, get, put } from "@vercel/blob";
 
 /**
  * Vercel Blob seam (D116, MASTER-HOWTO §9) — file bytes out of the
@@ -42,6 +42,15 @@ export async function getBlobStream(
 ): Promise<ReadableStream | null> {
   const res = await get(pathname, { access: "private" });
   return (res && (res.stream as unknown as ReadableStream)) || null;
+}
+
+/**
+ * Delete a blob by pathname (Recordings archive, spec §5.2 step 4): called
+ * strictly AFTER Drive has returned a file id, never before. `del` resolves
+ * even when the blob is already gone, so a retried archive pass is safe.
+ */
+export async function deleteBlob(pathname: string): Promise<void> {
+  await del(pathname);
 }
 
 /** Decode a data-URL's payload to bytes (the upload transport is still the

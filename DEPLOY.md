@@ -106,7 +106,7 @@ Cloud project** from step 4.
 2. **OAuth consent screen → Data access → Add or remove scopes**, add these, then Save:
    - `.../auth/gmail.send`
    - `.../auth/gmail.readonly`
-   - `.../auth/gmail.modify` (two-way archive + `Peak/` labels — requested on every connect)
+   - `.../auth/gmail.modify` (two-way archive AND the Peak/ label sync, D142 — load-bearing, requested on every connect)
    - `.../auth/userinfo.email`
 
    If you also want the calendar opt-in (Settings → Mailboxes → Enable calendar), enable the
@@ -191,6 +191,70 @@ Scopes**, make sure `gmail.send`, `gmail.readonly`, `gmail.modify`, and
 the **Google Calendar API** for the project), or consent will fail. If Google
 shows `Error 400: invalid_request`, click "error details" first — it is
 usually a malformed redirect_uri, not a scope problem.
+
+## 6) Recordings (native build)
+
+In-app audio capture (`/recordings/new`, spec
+`docs/superpowers/specs/2026-09-21-krisp-recordings-design.md` §2) records
+to a file on the phone with `@capgo/capacitor-audio-recorder` and, on
+Android, keeps the process alive with
+`@capawesome-team/capacitor-android-foreground-service`. The plugins are
+already in `package.json`; the native projects need these declarations
+(the plugin is a no-op without them, and iOS will crash on first mic use
+without the usage string). After editing, run `npx cap sync`.
+
+**Server:** the upload path needs `BLOB_READ_WRITE_TOKEN` in Vercel
+(`/api/recordings/upload` answers `503 {reason:"blob-disabled"}` without it,
+and recordings stay on the device). The route is exempt from the auth
+middleware because Vercel's `upload-completed` callback carries no session —
+it authenticates each request itself.
+
+**iOS — `ios/App/App/Info.plist`:**
+
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>Peak records site visits so they can be transcribed and summarized.</string>
+<key>UIBackgroundModes</key>
+<array>
+  <string>audio</string>
+</array>
+```
+
+(or tick *Signing & Capabilities → Background Modes → Audio, AirPlay, and
+Picture in Picture* in Xcode — same result).
+
+**Android — `android/app/src/main/AndroidManifest.xml`:**
+
+```xml
+<!-- before/after the <application> tag -->
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+<uses-permission android:name="android.permission.WAKE_LOCK" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+<!-- inside the <application> tag -->
+<receiver android:name="io.capawesome.capacitorjs.plugins.foregroundservice.NotificationActionBroadcastReceiver" />
+<service
+  android:name="io.capawesome.capacitorjs.plugins.foregroundservice.AndroidForegroundService"
+  android:foregroundServiceType="microphone" />
+```
+
+The recorder starts that service (type *Microphone*, notification
+"Recording — Peak is recording this visit.") before the take and stops it
+after; the notification icon it references is `ic_stat_icon_config_sample`
+in `res/drawable` — add any small monochrome PNG under that name (or change
+`smallIcon` in `src/lib/recorder/native-recorder.ts`).
+
+Then:
+
+```bash
+npx cap sync
+```
+
+In a plain browser the app falls back to `MediaRecorder` (desktop testing
+only — a locked iPhone mutes the web mic, which is the whole reason for the
+native plugin).
 
 ## Afterwards
 

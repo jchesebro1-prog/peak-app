@@ -62,6 +62,21 @@ export function hasTasksScope(scope: string | null | undefined): boolean {
   return (scope || "").split(/\s+/).includes(TASKS_SCOPE);
 }
 
+/** Google Drive scope for the Recordings audio archive (Krisp recordings
+ *  spec §5.1). `drive.file` = only files this app created — the nightly
+ *  archive job can create `Peak Recordings/<Customer>/` folders and upload
+ *  into them, and can never see the rest of the account's Drive. Same
+ *  pattern as CALENDAR_SCOPE / TASKS_SCOPE: NOT in GMAIL_SCOPES, opt-in per
+ *  mailbox via "Enable Drive archive" (Account page + Settings), which
+ *  re-runs consent WITH this scope appended. Remember: the Google Cloud
+ *  consent screen must also list this scope — see DEPLOY.md. */
+export const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+
+/** Does a stored grant (space-separated scope string) include Drive (drive.file)? */
+export function hasDriveScope(scope: string | null | undefined): boolean {
+  return (scope || "").split(/\s+/).includes(DRIVE_SCOPE);
+}
+
 /**
  * Read-only Calendar scope for D148's "connect an additional Google account
  * to subscribe to its calendars" feature (Calendar tab only). Distinct from
@@ -207,4 +222,24 @@ export function redirectHostMismatch(
   } catch {
     return null;
   }
+}
+
+/* ---- #96 — sender domains ---------------------------------------------- */
+
+/** Webmail/ISP domains that can never identify a customer. */
+export const PUBLIC_EMAIL_DOMAINS: ReadonlySet<string> = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "outlook.com", "hotmail.com",
+  "live.com", "msn.com", "icloud.com", "me.com", "mac.com", "aol.com", "comcast.net",
+  "att.net", "sbcglobal.net", "verizon.net", "charter.net", "protonmail.com", "proton.me",
+  "mail.com", "zoho.com", "gmx.com", "yandex.com",
+]);
+
+export function domainOf(email: string): string {
+  const s = (email || "").trim().toLowerCase();
+  const i = s.lastIndexOf("@");
+  return i < 0 ? "" : s.slice(i + 1);
+}
+
+export function isPublicDomain(domain: string): boolean {
+  return PUBLIC_EMAIL_DOMAINS.has((domain || "").toLowerCase());
 }

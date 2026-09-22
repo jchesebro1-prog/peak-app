@@ -141,7 +141,7 @@ location.replace(next)  → signed in; WKWebView persists cookies across relaunc
 
 ### Docs
 
-- `DECISIONS.md` D150 (next free number after D149) recording decisions 1–7 above and why the
+- `DECISIONS.md` D153 (next free number after D152) recording decisions 1–7 above and why the
   in-WebView alternative was rejected.
 - `PUNCHLIST.md` #31 gains a line: native sign-in works via Safari hand-off; TestFlight remains.
 - `docs/superpowers/specs/2026-09-21-native-shell-phase-2-design.md` §6 device check list gains

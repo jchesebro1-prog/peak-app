@@ -41,7 +41,7 @@
 | `ios/App/App/Info.plist`, `android/app/src/main/AndroidManifest.xml` (modify) | Register the `quartzite` scheme |
 | `package.json`, `package-lock.json`, `ios/App/CapApp-SPM/Package.swift`, `android/app/capacitor.build.gradle`, `android/capacitor.settings.gradle` (modify) | Add `@capacitor/app` + `@capacitor/browser`; `cap sync` output |
 | `scripts/test-review-and-spec.ts`, `scripts/smoke-routes.ts` (modify) | Tests |
-| `DECISIONS.md`, `PUNCHLIST.md`, `docs/superpowers/specs/2026-09-21-native-shell-phase-2-design.md` (modify) | D150, #31 note, device checklist line |
+| `DECISIONS.md`, `PUNCHLIST.md`, `docs/superpowers/specs/2026-09-21-native-shell-phase-2-design.md` (modify) | D153, #31 note, device checklist line |
 
 ---
 
@@ -781,7 +781,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - [ ] **Step 1: DECISIONS.md.** Append at the end of the file:
 
 ```markdown
-## D150. Native shell signs in through a Safari sheet and returns by `quartzite://auth` (2026-09-21)
+## D153. Native shell signs in through a Safari sheet and returns by `quartzite://auth` (2026-09-21)
 
 The Capacitor shell (D132) could not sign in: Capacitor hands any non-app host to the system
 browser, so Auth.js's state/PKCE cookies were set in the WebView while Google's callback landed in
@@ -812,19 +812,19 @@ Spec: `docs/superpowers/specs/2026-09-21-native-auth-handoff-design.md`.
 - [ ] **Step 2: PUNCHLIST.md.** Under `## 31.` add, as the last bullet of that item:
 
 ```markdown
-- **2026-09-21 — native sign-in works (D150).** Xcode 27 + iOS 27 simulator on the build Mac; the
+- **2026-09-21 — native sign-in works (D153).** Xcode 27 + iOS 27 simulator on the build Mac; the
   shell opens the hosted app, Google sign-in runs in a Safari sheet and returns via
   `quartzite://auth`. Still open for "a real app": Apple Developer Program, TestFlight, Phase 2 device
   features (`docs/superpowers/specs/2026-09-21-native-shell-phase-2-design.md`).
 ```
 
-- [ ] **Step 3: Phase 2 spec.** In `docs/superpowers/specs/2026-09-21-native-shell-phase-2-design.md`, extend the `Device (Task 12, human)` bullet: after `keeps the session across relaunch;` insert `Google sign-in opens the Safari sheet and returns through quartzite://auth (D150);`.
+- [ ] **Step 3: Phase 2 spec.** In `docs/superpowers/specs/2026-09-21-native-shell-phase-2-design.md`, extend the `Device (Task 12, human)` bullet: after `keeps the session across relaunch;` insert `Google sign-in opens the Safari sheet and returns through quartzite://auth (D153);`.
 
 - [ ] **Step 4: Commit.**
 
 ```bash
 git add DECISIONS.md PUNCHLIST.md docs/superpowers/specs/2026-09-21-native-shell-phase-2-design.md
-git commit -m "docs: D150 native sign-in hand-off; punchlist #31 + phase-2 device checklist
+git commit -m "docs: D153 native sign-in hand-off; punchlist #31 + phase-2 device checklist
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```

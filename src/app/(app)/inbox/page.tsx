@@ -10,8 +10,15 @@ import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { getAll as allInspections } from "@/lib/stores/inspections";
 import { getAllProjects } from "@/lib/stores/projects";
-import { GMAIL_MODIFY_SCOPE, gmailEnabled, personalKey } from "@/lib/gmail/config";
+import {
+  domainOf,
+  GMAIL_MODIFY_SCOPE,
+  gmailEnabled,
+  isPublicDomain,
+  personalKey,
+} from "@/lib/gmail/config";
 import { getConnectionInfo, listCachedLabels } from "@/lib/gmail/connections";
+import { customersForDomain } from "@/lib/gmail/domains";
 import {
   boxMeta,
   callsCount,
@@ -23,6 +30,7 @@ import {
   folderCounts,
   forwardAddress,
   get as getThread,
+  getAll as allThreads,
   hasQueued,
   lastMsg,
   mailboxes,
@@ -35,6 +43,7 @@ import {
   threadsIn,
   timeAgo,
   timeFull,
+  visibleTo,
   waitingSince,
   waitLabel,
   type CommMessage,
@@ -116,6 +125,30 @@ async function labelOptionsFor(box: MailboxId, userId: string): Promise<LabelOpt
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 }
 
+/** The "on contact" picker's options (#96): the contacts of whichever
+ *  customer(s) the sidebar has in play — value = display name, which
+ *  rememberAddress matches case-insensitively. With more than one
+ *  customer (ambiguous) the label carries the customer so the pick is
+ *  unambiguous. */
+function contactOptionsFor(
+  cs: Array<{ name: string; contacts?: Array<{ name?: string }> | null } | null | undefined>
+): Opt[] {
+  const live = cs.filter((c): c is NonNullable<typeof c> => !!c);
+  const out: Opt[] = [];
+  const seen = new Set<string>();
+  for (const c of live) {
+    for (const ct of c.contacts || []) {
+      const nm = (ct.name || "").trim();
+      if (!nm) continue;
+      const key = `${c.name}::${nm.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ value: nm, label: live.length > 1 ? `${nm} · ${c.name}` : nm });
+    }
+  }
+  return out;
+}
+
 function chanIconOf(channel: string): ChanIcon {
   const icon = channelMeta(channel).icon;
   return icon === "phone" ? "phone" : icon === "calendar" ? "calendar" : "mail";
@@ -179,8 +212,11 @@ export default async function InboxPage({
 
   /* ---- resolve nav state from the URL (the URL drives everything) ---- */
   const viewParam = str(params.view);
-  const view: SmartView | null =
-    viewParam === "needs" || viewParam === "calls" || viewParam === "flagged"
+  const view: SmartView | "unmatched" | null =
+    viewParam === "needs" ||
+    viewParam === "calls" ||
+    viewParam === "flagged" ||
+    viewParam === "unmatched"
       ? viewParam
       : null;
 
@@ -233,8 +269,9 @@ export default async function InboxPage({
     needsCount,
     callsCnt,
     flaggedCnt,
+    allComms,
     leadFollow,
-    threads,
+    queriedThreads,
     roster,
     customers,
     labelOptions,
@@ -244,17 +281,33 @@ export default async function InboxPage({
     needsReplyCount(me),
     callsCount(me),
     flaggedCount(me),
+    allThreads(),
     followUpCount({ unownedOrMine: true, me }),
-    threadsIn(view ?? box, view ? "inbox" : folder, me, {
-      filter,
-      sort: sortParam,
-      crmMode,
-      labelId,
-    }),
+    // Unmatched builds its own list from allComms — skip the query it would discard.
+    view === "unmatched"
+      ? Promise.resolve([] as CommThread[])
+      : threadsIn(view ?? box, view ? "inbox" : folder, me, {
+          filter,
+          sort: sortParam,
+          crmMode,
+          labelId,
+        }),
     activeUsers(),
     allCustomers(),
     labelOptionsFor(box, user.id),
   ]);
+
+  // Threads worth linking to a customer but not yet linked (#96 §5) — any
+  // channel, but only the mailbox the signed-in user can see (same rule as
+  // every other view), never deleted, never a draft, not already resolved.
+  const isUnmatched = (t: CommThread) =>
+    visibleTo(t, me) &&
+    !t.deleted &&
+    t.status !== "draft" &&
+    !t.customerId &&
+    t.resolution !== "linked";
+  const unmatchedCnt = allComms.filter(isUnmatched).length;
+  const threads = view === "unmatched" ? allComms.filter(isUnmatched) : queriedThreads;
 
   const countsFor = { personal: personalCounts } as const;
 
@@ -387,6 +440,15 @@ export default async function InboxPage({
         href: viewHref("calls"),
         icon: "calls",
       },
+      {
+        key: "unmatched",
+        label: "Unmatched",
+        active: view === "unmatched",
+        count: unmatchedCnt,
+        badge: "plain",
+        href: viewHref("unmatched"),
+        icon: "needs",
+      },
     ],
     leadFollowCount: leadFollow,
     forwardAddr: forwardAddress(domain),
@@ -474,6 +536,9 @@ export default async function InboxPage({
   } else if (view === "calls") {
     listTitle = "Calls & meetings";
     listSub = "Logged phone calls and meetings";
+  } else if (view === "unmatched") {
+    listTitle = "Unmatched";
+    listSub = "Email not yet linked to a customer — link it once and the rest follows";
   } else {
     const bm = boxMeta(box, me, boxOpts);
     const fl = FOLDERS.find((f) => f[0] === folder);
@@ -496,7 +561,9 @@ export default async function InboxPage({
             ? "needs"
             : view === "flagged"
               ? "flagged"
-              : "",
+              : view === "unmatched"
+                ? "unmatched"
+                : "",
     boxSelValue: view ? view : `${box}:${folder}`,
     filter: filter || "",
     label: labelId || "",
@@ -535,13 +602,19 @@ export default async function InboxPage({
       inspection: [],
       project: [],
     };
+    // Loaded only for a resolved customer (the link picker + the sidebar's
+    // customer card); an unlinked thread has nothing to count.
+    let quotes: Awaited<ReturnType<typeof allQuotes>> = [];
+    let projects: Awaited<ReturnType<typeof getAllProjects>> = [];
     if (resolvedCid) {
-      const [quotes, surveys, inspections, projects] = await Promise.all([
+      const [q, surveys, inspections, p] = await Promise.all([
         allQuotes(),
         allSurveys(),
         allInspections(),
         getAllProjects(),
       ]);
+      quotes = q;
+      projects = p;
       linkOptions = {
         quote: quotes
           .filter(
@@ -596,6 +669,66 @@ export default async function InboxPage({
         me,
       };
     }
+
+    // #96 §2 — link sidebar state. A customer on the thread (stored, or
+    // resolved via a known contact address) wins over whatever the sync
+    // stamped; a dismissed suggestion (resolution back to "unknown",
+    // suggestedCustomerId still set) is never re-offered.
+    const linkedCustomer = resolvedCid
+      ? customers.find((c) => c.id === resolvedCid) || null
+      : null;
+    const senderDomain = domainOf(sel.contactEmail || "");
+    const senderIsPublicDomain = !senderDomain || isPublicDomain(senderDomain);
+    // One query, only when a customer is linked and the domain is claimable
+    // — drives the linked card's "Emails from @domain link here · Stop".
+    const domainClaimedByThisCustomer =
+      !!linkedCustomer && !senderIsPublicDomain
+        ? (await customersForDomain(senderDomain)).some((r) => r.customerId === linkedCustomer.id)
+        : false;
+    let resolution: ReaderVM["resolution"] = linkedCustomer
+      ? "linked"
+      : sel.resolution && sel.resolution !== "linked"
+        ? sel.resolution
+        : "unknown";
+    const suggestedCustomer =
+      resolution === "suggested" && !sel.suggestionDismissed && sel.suggestedCustomerId
+        ? customers.find((c) => c.id === sel.suggestedCustomerId) || null
+        : null;
+    if (resolution === "suggested" && !suggestedCustomer) resolution = "unknown";
+    const candidates = (sel.candidates || []).filter((c) =>
+      customers.some((x) => x.id === c.customerId)
+    );
+    if (resolution === "ambiguous" && candidates.length === 0) resolution = "unknown";
+    const contactsAtDomain = suggestedCustomer
+      ? (suggestedCustomer.contacts || []).filter(
+          (ct) => domainOf(ct.email || "") === senderDomain
+        ).length
+      : 0;
+    const senderEmailLc = (sel.contactEmail || "").trim().toLowerCase();
+    const customerCard: ReaderVM["customerCard"] = linkedCustomer
+      ? {
+          id: linkedCustomer.id,
+          name: linkedCustomer.name,
+          tier: linkedCustomer.pricingTier || "Base",
+          // "open" mirrors Home's pipeline definition (draft | sent) and
+          // Reports' Installs book (stage !== complete)
+          openQuotes: quotes.filter(
+            (q) =>
+              (q.status === "draft" || q.status === "sent") &&
+              ((q.customerId && q.customerId === linkedCustomer.id) ||
+                nameToId.get((q.customer || "").toLowerCase()) === linkedCustomer.id)
+          ).length,
+          openProjects: projects.filter(
+            (p) => p.customerId === linkedCustomer.id && p.stage !== "complete"
+          ).length,
+          contactName:
+            (senderEmailLc &&
+              (linkedCustomer.contacts || []).find(
+                (ct) => (ct.email || "").trim().toLowerCase() === senderEmailLc
+              )?.name) ||
+            "",
+        }
+      : null;
 
     const messages: MessageVM[] = (sel.messages || []).map((m) => ({
       id: m.id,
@@ -656,6 +789,25 @@ export default async function InboxPage({
       visit,
       lastBody: lastMsg(sel)?.body || "",
       forwardFrom: sel.contactName || sel.contactEmail || "",
+      resolution,
+      senderDomain,
+      senderIsPublicDomain,
+      domainClaimedByThisCustomer,
+      suggested: suggestedCustomer
+        ? { customerId: suggestedCustomer.id, name: suggestedCustomer.name, contactsAtDomain }
+        : null,
+      candidates: resolution === "ambiguous" ? candidates : [],
+      customerCard,
+      customerOptions: customers
+        .map((c) => ({ value: c.id, label: c.name }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+      contactOptions: contactOptionsFor(
+        linkedCustomer || suggestedCustomer
+          ? [linkedCustomer || suggestedCustomer]
+          : resolution === "ambiguous"
+            ? candidates.map((c) => customers.find((x) => x.id === c.customerId))
+            : []
+      ),
     };
   }
 

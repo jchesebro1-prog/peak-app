@@ -21,6 +21,8 @@ import type {
 } from "@/lib/stores/inspections";
 import { saveInspection, advanceInspectionStage, deleteInspection, type InspectionPatch } from "./actions";
 import { saveThroughOutbox } from "@/lib/sync/save";
+import { RecordingsStrip, type RecordingStripItem } from "@/components/recordings/recordings-strip";
+import { FromRecordingPanel, type FromRecordingPanelData } from "@/components/recordings/from-recording-panel";
 
 /* ============================================================
  * Serializable props from the server (the store is DB-backed and
@@ -155,15 +157,38 @@ export default function InspectionEditor({
   customers,
   roster,
   meta,
+  recordings = [],
+  canShowRecord = false,
+  fromRecording = [],
 }: {
   record: InspectionRecord;
   customers: EditorCustomer[];
   roster: string[];
   meta: EditorMeta;
+  /** Recordings on this inspection — header strip (spec §6). */
+  recordings?: RecordingStripItem[];
+  /** spec §6 Record-control visibility, computed by the page. */
+  canShowRecord?: boolean;
+  /** "From recording" prefill panels, one per ready recording (spec §4.4). */
+  fromRecording?: FromRecordingPanelData[];
 }) {
   const initial = useMemo<Draft>(() => toDraft(record), [record]);
   const [draft, setDraft] = useState<Draft>(initial);
   const [dirty, setDirty] = useState(false);
+  // A "From recording" Insert (spec §4.4) writes into the SAVED inspection
+  // and refreshes the route. Adopt the refreshed record so the appended
+  // text shows and the next Save doesn't overwrite it with this stale
+  // draft — scoped to that flow only (sync pulls never reset a draft) and
+  // to a clean draft (the panel disables Insert while dirty).
+  const [seenInitial, setSeenInitial] = useState(initial);
+  const [adoptNextRecord, setAdoptNextRecord] = useState(false);
+  if (initial !== seenInitial) {
+    setSeenInitial(initial);
+    if (adoptNextRecord) {
+      setAdoptNextRecord(false);
+      if (!dirty) setDraft(initial);
+    }
+  }
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [toast, setToast] = useState<string | null>(null);
@@ -874,6 +899,7 @@ export default function InspectionEditor({
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: savePillInk, background: savePillBg }}>{savePillLabel}</span>
             </div>
           </div>
+          <RecordingsStrip parentKind="inspection" parentId={record.id} recordings={recordings} canRecord={canShowRecord} />
           {canReport && (
             <>
               <Link href={`/inspections/${encodeURIComponent(record.id)}/report`} style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER_LT}`, borderRadius: 9, padding: "10px 14px", textDecoration: "none", minHeight: 42, boxSizing: "border-box" }}>
@@ -1008,6 +1034,24 @@ export default function InspectionEditor({
               </div>
             </div>
           </div>
+
+          {/* "From recording" prefill (spec §4.4) — collapsed; one per ready recording */}
+          {fromRecording.length > 0 && (
+            <div style={{ display: "grid", gap: 8 }}>
+              {fromRecording.map((p) => (
+                <FromRecordingPanel
+                  key={p.recordingId}
+                  recordingId={p.recordingId}
+                  title={p.title}
+                  sections={p.sections}
+                  target="inspection"
+                  disabled={dirty}
+                  disabledHint="Save your changes first — Insert appends to the saved inspection."
+                  onInserted={() => setAdoptNextRecord(true)}
+                />
+              ))}
+            </div>
+          )}
 
           {/* Venue information & measurements */}
           <div style={{ ...cardStyle, padding: "16px 18px 20px" }}>

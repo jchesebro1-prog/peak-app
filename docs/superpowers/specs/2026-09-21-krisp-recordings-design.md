@@ -216,8 +216,10 @@ Separate from the doc-sync outbox (payloads are tens of MB). Persistence: Capaci
 `Preferences` (native) / IndexedDB (web) list of `{recordingId, file, mime, sizeBytes,
 attempts, lastError}`. Drains on app foreground, on `online`, and after each Stop:
 
-1. `POST /api/recordings/upload` (session-authenticated route, **not** in the middleware
-   exemption list) with `{recordingId}` → the route checks the recording belongs to the
+1. `POST /api/recordings/upload` (middleware-exempt like the cron route, because Vercel's
+   upload-completed callback carries no session; the token-generation branch authenticates
+   the caller itself via `auth()` and checks recording ownership, the completed branch is
+   verified by `handleUpload`'s signed token) with `{recordingId}` → the route checks the recording belongs to the
    caller and returns a **Vercel Blob client-upload token** via `handleUpload` from
    `@vercel/blob/client`, restricted to pathname `recordings/<REC-id>/<safeName>`, allowed
    content types = the Krisp-supported audio types, `maximumSizeInBytes` 1 GB, `access:

@@ -29,6 +29,8 @@ import {
 import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, printSurveySheet, type SurveyPatch } from "./actions";
 import Venue3D from "./venue-3d";
 import { saveThroughOutbox } from "@/lib/sync/save";
+import { RecordingsStrip, type RecordingStripItem } from "@/components/recordings/recordings-strip";
+import { FromRecordingPanel, type FromRecordingPanelData } from "@/components/recordings/from-recording-panel";
 import type { Draft, EditorCustomer, EditorMeta, FieldDef, SectionDef } from "./sections/types";
 import {
   ACCENT,
@@ -173,15 +175,38 @@ export default function SurveyEditor({
   customers,
   roster,
   meta,
+  recordings = [],
+  canShowRecord = false,
+  fromRecording = [],
 }: {
   record: SurveyRecord;
   customers: EditorCustomer[];
   roster: string[];
   meta: EditorMeta;
+  /** Recordings on this survey (+ its linked site visits) — header strip (spec §6). */
+  recordings?: RecordingStripItem[];
+  /** spec §6 Record-control visibility, computed by the page. */
+  canShowRecord?: boolean;
+  /** "From recording" prefill panels, one per ready recording (spec §4.4). */
+  fromRecording?: FromRecordingPanelData[];
 }) {
   const initial = useMemo<Draft>(() => toDraft(record), [record]);
   const [draft, setDraft] = useState<Draft>(initial);
   const [dirty, setDirty] = useState(false);
+  // A "From recording" Insert (spec §4.4) writes into the SAVED survey and
+  // refreshes the route. Adopt the refreshed record so the appended text
+  // shows and the next Save doesn't overwrite it with this stale draft —
+  // scoped to that flow only (sync pulls never reset a draft) and to a
+  // clean draft (the panel disables Insert while dirty).
+  const [seenInitial, setSeenInitial] = useState(initial);
+  const [adoptNextRecord, setAdoptNextRecord] = useState(false);
+  if (initial !== seenInitial) {
+    setSeenInitial(initial);
+    if (adoptNextRecord) {
+      setAdoptNextRecord(false);
+      if (!dirty) setDraft(initial);
+    }
+  }
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [toast, setToast] = useState<string | null>(null);
@@ -859,6 +884,7 @@ export default function SurveyEditor({
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>{intakeMeta.label}</span>
             </div>
           </div>
+          <RecordingsStrip parentKind="survey" parentId={record.id} recordings={recordings} canRecord={canShowRecord} />
           <button onClick={onPrintSheet} disabled={saving} style={{ flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 9, padding: "10px 14px", cursor: saving ? "default" : "pointer", minHeight: 42 }}>
             Print sheet
           </button>
@@ -1030,6 +1056,22 @@ export default function SurveyEditor({
                           toggleBtn={toggleBtn}
                           boxStyle={boxStyle}
                         />
+                      )}
+                      {sec.id === "notes" && fromRecording.length > 0 && (
+                        <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+                          {fromRecording.map((p) => (
+                            <FromRecordingPanel
+                              key={p.recordingId}
+                              recordingId={p.recordingId}
+                              title={p.title}
+                              sections={p.sections}
+                              target="survey"
+                              disabled={dirty}
+                              disabledHint="Save your changes first — Insert appends to the saved survey."
+                              onInserted={() => setAdoptNextRecord(true)}
+                            />
+                          ))}
+                        </div>
                       )}
                       {sec.kind === "tier1" && (
                         <div>

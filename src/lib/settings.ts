@@ -87,7 +87,42 @@ export type AppSettingsData = {
   venueDoctrine?: import("@/lib/venue-doctrine").VenueDoctrinePatch;
   /** User-authored catalog-backed fixture assemblies. Full replacement. */
   fixtureAssemblies?: import("@/lib/fixture-assemblies").FixtureAssembly[];
+  /** Recordings → Drive archive (Krisp recordings spec §1.3). Connection key
+   *  of the mailbox whose Google account owns the archive; null = not
+   *  configured, the nightly archive job waits. */
+  recordingsArchiveMailbox: string | null;
+  /** Cached Drive id of the root `Peak Recordings` folder (spec §5.2). */
+  recordingsArchiveFolderId: string | null;
+  /** Cached per-customer Drive subfolder ids, keyed by customerId (spec §5.2). */
+  recordingsArchiveFolders: Record<string, string>;
+  /** Pilot gate (spec §1.3, Settings → Beta): user ids allowed to see the
+   *  Record button. Empty = everyone. See canRecord(). */
+  recordingsBetaUsers: string[];
+  /** Outcome of the last nightly archive pass (lib/krisp/archive.ts) — shown
+   *  on Settings → Recordings. Optional: absent until the job has run once. */
+  recordingsArchiveLastRun?: RecordingsArchiveLastRun | null;
 };
+
+export type RecordingsArchiveLastRun = {
+  at: number;
+  archived: number;
+  failed: number;
+  skipped: string | null;
+};
+
+/**
+ * Pilot gate for the Record button (Recordings spec §1.3 / §7): an empty
+ * `recordingsBetaUsers` list means the feature is open to everyone; a
+ * non-empty list restricts it to those user ids. Pure — settings come from
+ * getSettings() so the caller can gate a whole render in one read.
+ */
+export function canRecord(
+  userId: string,
+  settings: Pick<AppSettingsData, "recordingsBetaUsers">
+): boolean {
+  const allowed = Array.isArray(settings.recordingsBetaUsers) ? settings.recordingsBetaUsers : [];
+  return allowed.length === 0 || allowed.includes(userId);
+}
 
 export async function getSettingsPatch(): Promise<Record<string, unknown>> {
   try {
