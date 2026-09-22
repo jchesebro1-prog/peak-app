@@ -52,6 +52,10 @@ async function closeSheet(): Promise<void> {
   }
 }
 
+function isSafeNext(path: string): boolean {
+  return path.startsWith("/") && !path.startsWith("//") && !path.startsWith("/\\");
+}
+
 /**
  * Handle a URL the OS delivered to the app. Non-auth URLs are "ignored".
  * On "done" the page has been navigated to `next`; on "failed" the caller
@@ -59,15 +63,15 @@ async function closeSheet(): Promise<void> {
  */
 export async function handleNativeAuthUrl(url: string): Promise<"ignored" | "done" | "failed"> {
   if (!url.startsWith(NATIVE_AUTH_SCHEME_PREFIX)) return "ignored";
+  const verifier = localStorage.getItem(VERIFIER_KEY);
+  localStorage.removeItem(VERIFIER_KEY);
+  void closeSheet();
   let code: string | null = null;
   try {
     code = new URL(url).searchParams.get("code");
   } catch {
     return "failed";
   }
-  const verifier = localStorage.getItem(VERIFIER_KEY);
-  localStorage.removeItem(VERIFIER_KEY);
-  void closeSheet();
   if (!code || !verifier) return "failed";
   try {
     const res = await fetch("/api/native/auth/exchange", {
@@ -78,7 +82,7 @@ export async function handleNativeAuthUrl(url: string): Promise<"ignored" | "don
     });
     if (!res.ok) return "failed";
     const { next } = (await res.json()) as { next?: string };
-    window.location.replace(typeof next === "string" && next.startsWith("/") ? next : "/");
+    window.location.replace(typeof next === "string" && isSafeNext(next) ? next : "/");
     return "done";
   } catch {
     return "failed";

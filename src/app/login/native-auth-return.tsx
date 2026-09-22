@@ -16,12 +16,13 @@ export default function NativeAuthReturn() {
   useEffect(() => {
     if (!isNativePlatform() || !Capacitor.isPluginAvailable("App")) return;
     let remove: (() => Promise<void>) | undefined;
-    let cancelled = false;
+    let disposed = false;
 
     const handle = async (url: string) => {
+      if (disposed) return;
       setState("busy");
       const result = await handleNativeAuthUrl(url);
-      if (cancelled) return;
+      if (disposed) return;
       if (result === "failed") setState("failed");
       else if (result === "ignored") setState("idle");
     };
@@ -29,6 +30,10 @@ export default function NativeAuthReturn() {
     (async () => {
       const { App } = await import("@capacitor/app");
       const listener = await App.addListener("appUrlOpen", ({ url }) => void handle(url));
+      if (disposed) {
+        void listener.remove();
+        return;
+      }
       remove = () => listener.remove();
       const launch = await App.getLaunchUrl();
       if (launch?.url) void handle(launch.url);
@@ -37,7 +42,7 @@ export default function NativeAuthReturn() {
     });
 
     return () => {
-      cancelled = true;
+      disposed = true;
       void remove?.();
     };
   }, []);
