@@ -4,14 +4,18 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { getEngagement, patchEngagement } from "@/lib/stores/engagements";
 import { getTaskTemplateSet, applyTaskTemplate } from "@/lib/stores/task-templates";
+import { patchTask, tasksForEngagement } from "@/lib/stores/tasks";
+import { addNoteRecord } from "@/lib/stores/notes";
 import { getSettings, phaseWeightsFor } from "@/lib/settings";
 import { TEMPLATE_RECORD_LABEL } from "@/lib/task-template-kinds";
+import { shortDate as fmtDate } from "@/lib/format";
 import {
   generateSchedule,
   validateSpan,
   withEngagementPhaseIds,
   defaultMilestonePhaseId,
   phaseIdsByName,
+  shiftForMilestone,
   type ScheduleLine,
 } from "@/lib/consulting-schedule";
 
@@ -183,4 +187,85 @@ export async function setEngagementSpanAction(
   });
   revalidatePath(`/design/engagements/${engagementId}`);
   return { ok: true };
+}
+
+/** #145 D168 — a human drag. Sets handScheduled so nothing the app does
+ *  later moves this bar again. */
+export async function moveTaskAction(
+  taskId: string,
+  startAt: number,
+  dueAt: number
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  if (!Number.isFinite(startAt) || !Number.isFinite(dueAt) || dueAt < startAt) {
+    return { ok: false, error: "That drop produced an invalid date range." };
+  }
+  const t = await patchTask(taskId, (task) => {
+    task.startAt = startAt;
+    task.dueAt = dueAt;
+    task.handScheduled = true;
+    return task;
+  });
+  if (!t) return { ok: false, error: "That task no longer exists." };
+  if (t.engagementId) revalidatePath(`/design/engagements/${t.engagementId}`);
+  revalidatePath("/schedule");
+  return { ok: true };
+}
+
+/**
+ * #145 D167/D168 — a deliberate milestone edit from the main screen. The
+ * caller has already been shown shiftForMilestone's pre-ticked set and
+ * passes back exactly the task ids the user confirmed. A system-authored
+ * note records the move for the Activity feed (D170).
+ */
+export async function moveMilestoneAction(
+  engagementId: string,
+  milestoneId: string,
+  targetDate: number,
+  alsoMoveTaskIds: string[]
+): Promise<{ ok: true; moved: number } | { ok: false; error: string }> {
+  const me = await requireUser();
+  const eng = await getEngagement(engagementId);
+  if (!eng) return { ok: false, error: "That engagement could not be found." };
+  const ms = eng.milestones.find((m) => m.id === milestoneId);
+  if (!ms) return { ok: false, error: "That milestone could not be found." };
+
+  const delta = targetDate - (ms.targetDate || targetDate);
+  await patchEngagement(engagementId, (e) => {
+    e.milestones = e.milestones.map((m) => (m.id === milestoneId ? { ...m, targetDate } : m));
+    return e;
+  });
+
+  let moved = 0;
+  if (delta !== 0 && alsoMoveTaskIds.length) {
+    const tasks = await tasksForEngagement(engagementId);
+    const { moved: shifts } = shiftForMilestone({ phaseId: ms.phaseId ?? null }, delta, tasks);
+    const allowed = new Set(alsoMoveTaskIds);
+    for (const s of shifts) {
+      if (!allowed.has(s.id)) continue;
+      await patchTask(s.id, (t) => {
+        t.startAt = s.startAt;
+        t.dueAt = s.dueAt;
+        return t; // NOT handScheduled — this was a milestone move, not a drag
+      });
+      moved++;
+    }
+  }
+
+  await addNoteRecord(
+    {
+      parentKind: "engagement",
+      parentId: engagementId,
+      customerId: eng.companyId,
+      text: `Milestone moved — ${ms.name}: ${fmtDate(ms.targetDate)} → ${fmtDate(targetDate)}${moved ? ` · ${moved} task${moved === 1 ? "" : "s"} moved with it` : ""}`,
+      attachments: [],
+      taskIds: [],
+      system: true,
+    },
+    me.name
+  );
+
+  revalidatePath(`/design/engagements/${engagementId}`);
+  revalidatePath("/schedule");
+  return { ok: true, moved };
 }

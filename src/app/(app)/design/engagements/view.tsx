@@ -50,6 +50,7 @@ import { Card, EmptyState, KpiTile, Mono, PageHeader, Pill, StatusPill } from "@
 import { money } from "@/lib/format";
 import { NewEngagementModal } from "./new-engagement-modal";
 import { ActivityTab, type ActivityPerson } from "./activity-tab";
+import { ScheduleTab, type TemplateSetLite } from "./schedule-tab";
 
 /**
  * Consulting module view (D90) — list + detail-with-tabs, the Projects-module
@@ -61,6 +62,7 @@ import { TABS, type TabKey } from "./tabs";
 
 const TAB_LABEL: Record<TabKey, string> = {
   overview: "Overview",
+  schedule: "Schedule",
   phases: "Phases & Reviews",
   milestones: "Milestones & Billing",
   meetings: "Meetings & Decisions",
@@ -174,6 +176,7 @@ export function ConsultingView({
   notes,
   tasks,
   people,
+  templateSets,
 }: {
   data: ConsultingData;
   sel: ConsultingEngagement | null;
@@ -186,8 +189,14 @@ export function ConsultingView({
    *  of ConsultingData), fetched by the [id] page detail-route-only; absent
    *  on the list route, where the Activity tab never mounts. */
   notes?: NoteRecord[];
+  /** #145 — also the Schedule tab's task rows (only fetched by the [id]
+   *  page when tab is "activity" or "schedule"). */
   tasks?: TaskRecord[];
   people?: ActivityPerson[];
+  /** #145 — Consulting-applicable task template sets, for the Schedule
+   *  tab's unscheduled-engagement template picker. Fetched only for
+   *  tab === "schedule", same precedent as tasks/people above. */
+  templateSets?: TemplateSetLite[];
 }) {
   if (!sel) return <ConsultingList data={data} />;
   return (
@@ -199,6 +208,7 @@ export function ConsultingView({
       notes={notes || []}
       tasks={tasks || []}
       people={people || []}
+      templateSets={templateSets || []}
     />
   );
 }
@@ -352,6 +362,7 @@ function EngagementDetail({
   notes,
   tasks,
   people,
+  templateSets,
 }: {
   data: ConsultingData;
   eng: ConsultingEngagement;
@@ -360,6 +371,7 @@ function EngagementDetail({
   notes: NoteRecord[];
   tasks: TaskRecord[];
   people: ActivityPerson[];
+  templateSets: TemplateSetLite[];
 }) {
   const router = useRouter();
   const q = eng.quoteId ? data.quotesById[eng.quoteId] : undefined;
@@ -434,6 +446,7 @@ function EngagementDetail({
       </div>
 
       {tab === "overview" && <OverviewTab data={data} eng={eng} />}
+      {tab === "schedule" && <ScheduleTab eng={eng} tasks={tasks} templateSets={templateSets} />}
       {tab === "phases" && <PhasesTab data={data} eng={eng} />}
       {tab === "milestones" && <MilestonesTab eng={eng} quoteValue={q?.value || 0} />}
       {tab === "meetings" && <MeetingsTab eng={eng} />}

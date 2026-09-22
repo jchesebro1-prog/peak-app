@@ -6,6 +6,7 @@ import {
 import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
+import { TABS } from "@/app/(app)/design/engagements/tabs";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
 import { safeCallbackPath, resolveSignInRedirect } from "@/lib/auth-redirect";
 import {
@@ -5640,6 +5641,10 @@ async function writeBackAsyncChecks(): Promise<void> {
   }
   ok(rateLimited, "pollKrispImport: 429 propagates as KrispRateLimitError (reconcile stops that account)");
 }
+
+/* ====== #145: the schedule tab is a real tab key ====== */
+ok((TABS as readonly string[]).includes("schedule"), "#145 schedule is a valid engagement tab (?tab= validation depends on it)");
+ok((TABS as readonly string[]).includes("activity"), "#145 activity is a valid engagement tab");
 
 recordingsAsyncChecks()
   .then(() => writeBackAsyncChecks())

@@ -182,6 +182,7 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   // on the static /design/engagements entry above.
   { route: "/design/engagements/CE-1001" },
   { route: "/design/engagements/CE-1001?tab=activity" },
+  { route: "/design/engagements/CE-1001?tab=schedule" },
   /* Service-line documents (#78's uncovered half). Each is the artifact a
    * customer actually receives, and each compiles a different report/letter
    * module that nothing else in this list pulls in. */
