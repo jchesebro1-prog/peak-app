@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requirePerm } from "@/lib/session";
 import { clearCatalogPriceList, get as getPart, upsert, mergeUpsert } from "@/lib/stores/catalog";
+import { mfrKey } from "@/lib/catalog-books";
 import { parseCatalog } from "./parse";
-import { setSettings } from "@/lib/settings";
+import { setPriceListEffective, setSettings } from "@/lib/settings";
 import { GROUPS, TRADES, type CategoryMap } from "@/lib/catalog-taxonomy";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 
@@ -218,5 +219,20 @@ export async function removePartDatasheetAction(sku: string): Promise<Result> {
   const { datasheetBlobKey: _key, datasheetName: _name, ...rest } = part;
   await upsert(rest);
   revalidatePath("/catalog");
+  return { ok: true };
+}
+
+/**
+ * #133 — the Catalog banner's inline date input: record (or clear) the date
+ * a manufacturer's price list is effective. `mfr` is the display name; it is
+ * keyed through mfrKey so every spelling of the manufacturer shares one date.
+ */
+export async function setPriceListEffectiveAction(mfr: string, at: number | null): Promise<Result> {
+  await requireUser();
+  const key = mfrKey(mfr);
+  if (!key) return { ok: false, error: "Pick a manufacturer." };
+  if (at != null && (!Number.isFinite(at) || at <= 0)) return { ok: false, error: "Enter a valid date." };
+  await setPriceListEffective(key, at);
+  revalidatePath("/", "layout");
   return { ok: true };
 }

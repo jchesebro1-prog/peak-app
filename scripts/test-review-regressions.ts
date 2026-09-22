@@ -735,6 +735,30 @@ async function main() {
     }
   }
 
+  // #133 — pricedAt moves only when list/cost change; the book date round-trips
+  {
+    const { get: getPart, mergeUpsert } = await import("@/lib/stores/catalog");
+    const { getSettings, setPriceListEffective } = await import("@/lib/settings");
+    const D1 = new Date(2026, 0, 15).getTime();
+    const D2 = new Date(2026, 5, 1).getTime();
+    await mergeUpsert("T133-STAMP", { desc: "Stamp test", category: "Test", unit: "ea", list: 100, cost: 60, mfr: "T133 Stamp" }, { pricedAt: D1 });
+    assert.equal((await getPart("T133-STAMP"))?.pricedAt, D1, "#133 a new part is stamped with the write's effective date");
+    await mergeUpsert("T133-STAMP", { desc: "Stamp test (renamed)", list: 100, cost: 60 }, { pricedAt: D2 });
+    assert.equal((await getPart("T133-STAMP"))?.pricedAt, D1, "#133 an unchanged price keeps its date — a description edit doesn't move it");
+    await mergeUpsert("T133-STAMP", { list: 110 }, { pricedAt: D2 });
+    assert.equal((await getPart("T133-STAMP"))?.pricedAt, D2, "#133 a list change stamps the effective date that was passed");
+    const before = Date.now();
+    await mergeUpsert("T133-STAMP", { cost: 70 });
+    const stamped = (await getPart("T133-STAMP"))?.pricedAt ?? 0;
+    assert.ok(stamped >= before, "#133 a price change through any other path stamps now");
+    assert.equal((await getPart("T133-STAMP"))?.desc, "Stamp test (renamed)", "#133 mergeUpsert still preserves fields the patch doesn't carry");
+
+    await setPriceListEffective("t133stamp", D1);
+    assert.equal((await getSettings()).priceListEffective?.t133stamp, D1, "#133 setPriceListEffective round-trips through settings");
+    await setPriceListEffective("t133stamp", null);
+    assert.equal((await getSettings()).priceListEffective?.t133stamp, undefined, "#133 setPriceListEffective(null) clears the key");
+  }
+
   console.log("review regression checks passed");
 }
 
