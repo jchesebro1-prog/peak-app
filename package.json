@@ -26,7 +26,7 @@
     "audit:daylite": "tsx scripts/audit-daylite-export.ts",
     "pull:daylite": "tsx scripts/pull-daylite.ts",
     "import:daylite": "tsx scripts/import-daylite.ts",
-    "test:specs": "tsx scripts/test-review-and-spec.ts",
+    "test:specs": "tsx --conditions=react-server scripts/test-review-and-spec.ts",
     "test:smoke": "tsx scripts/smoke-routes.ts",
     "test:smoke:upload": "tsx scripts/smoke-upload.ts",
     "test:smoke:grid-sheet": "tsx scripts/smoke-grid-sheet-upload.ts",
@@ -55,6 +55,7 @@
     "postgres": "^3.4.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "server-only": "^0.0.1",
     "three": "^0.185.1",
     "zod": "^4.4.3"
   },

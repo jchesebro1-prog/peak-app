@@ -181,7 +181,7 @@ import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mergeActivity } from "@/lib/engagement-activity";
-import { performCapture, type CaptureDeps } from "@/app/(app)/design/engagements/activity-actions";
+import { performCapture, type CaptureDeps } from "@/lib/engagement-activity-write";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -4231,6 +4231,18 @@ async function asyncChecks(): Promise<void> {
     ok(
       priorTasks.length === 0 && priorNotes.length === 0,
       "#145 rollback test: no leftover tasks/notes from a prior run (proves the rollback actually cleans up, not just this run's assertions)"
+    );
+
+    /* Minor (round 3 re-review): the "Nothing to capture." guard had no
+     * assertion of its own — only exercised incidentally by the rollback/
+     * refusal tests' non-empty inputs. */
+    const emptyCapture = await performCapture(
+      { engagementId: TEST_ROLLBACK_ENG_ID, text: "   ", attachments: [], tasks: [] },
+      { id: "u1", name: "Test Runner" }
+    );
+    ok(
+      !emptyCapture.ok && emptyCapture.error === "Nothing to capture.",
+      "#145 a capture with no text, no files, and no tasks is refused rather than writing an empty note"
     );
 
     let createCalls = 0;
