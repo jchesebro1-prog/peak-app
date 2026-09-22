@@ -716,7 +716,17 @@ export default function Nav({
 
             <SyncChip variant="drawer" />
 
-            <nav style={{ flex: 1, overflowY: "auto", padding: "0 10px" }}>
+            <nav
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
+                WebkitOverflowScrolling: "touch",
+                overscrollBehavior: "contain",
+                touchAction: "pan-y",
+                padding: "0 10px",
+              }}
+            >
               {NAV.map((entry) =>
                 entry.kind === "link" ? (
                   <DrawerLink
