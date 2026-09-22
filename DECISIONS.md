@@ -3627,3 +3627,65 @@ effective date on price lists (2026-09-21). Spec: `docs/superpowers/specs/2026-0
   default to a 1 MB request body, which multipart overhead pushes a ~1 MB file past, so Next would
   reject it with an opaque error before the app's check runs. The headroom makes the app's clear
   error win; anything larger still fails closed at Next's limit.
+
+## D154. The Grid draws a symbol per placed item type — eight curated shapes, per-entry override, per-category defaults in Settings (#131, 2026-09-21)
+
+Every placed device was the same rounded rect coloured by a category hash; curtains were the one
+special glyph. Jeff asked for selectable symbols so people can tell objects apart on a plan.
+
+- **Vocabulary is curated, not uploaded:** `rect | circle | triangle | diamond | hexagon | speaker |
+  light | camera` (`GRID_SHAPES` in `src/lib/design/grid-symbols.ts`). The last three are a rounded
+  rect with a small white path glyph inside; everything else is an outline. Symbol images/uploads
+  stay out of scope.
+- **Resolution is `part.shape ?? default[category] ?? "rect"`** (`shapeFor`, pure). The per-entry
+  override is `GridSymbol.shape` on the `grid_catalog` document — placements resolve their part
+  live, so changing an entry redraws every instance on every design. Category defaults live in
+  `settings.gridCategoryShapes`.
+- **The category map is FULL REPLACEMENT** (the `wireTypes` idiom, not a per-key merge over the
+  seed): absent = the seed `Speakers→speaker, Lighting→light, Cameras→camera, Rigging→diamond,
+  Control→hexagon`; present = exactly what Settings holds, and a category left off draws as a
+  rectangle. Category names match trimmed and case-insensitive because `CatalogPart.category` is
+  free text (~40 imported values).
+- **One renderer:** `<SymbolShape>` (`src/components/design/symbol-shape.tsx`) draws the plan
+  marker, the riser's group glyphs, the riser legend and the palette rows, so the palette shows
+  what the plan will draw. It takes `w`/`h` (the symbol's existing `symbolWidth`/`symbolHeight`),
+  not a single `size`, so the 44×30 footprint is unchanged. Curtains keep their drape glyph; the
+  selection ring and label placement are untouched. `markerColor` moved from the editor into the
+  pure module so the riser and Settings colour a category exactly like the plan.
+- **Where it is edited:** the placed item's context panel ("Symbol" select — per-entry, labelled
+  "applies to every placed X") and the Assemblies "+ Build" form (the only grid-catalog entry
+  editor that exists — entries are otherwise seeded from the pricing catalog). The category
+  defaults card lives under **Settings → Admin** (the spec harness pins the sections to
+  General/Team/Admin; a fourth "Grid" section is out of scope).
+- **The legend** lives on the riser page (the printable derived drawing); no legend existed
+  before this change.
+
+Spec: `docs/superpowers/specs/2026-09-21-round-2-standalone-design.md` §#131.
+
+## D155. Manual consulting engagements are never overwritten by the quote sweep (#135, 2026-09-21)
+
+Engagements were only ever minted by `syncEngagementsFromQuotes()` from sent/won consulting
+quotes; a project that skipped the fee proposal had no way in. "+ New consulting project" on the
+hub now creates one by hand, and the sweep's contract was extended rather than bypassed:
+
+- **Model:** `ConsultingEngagement.origin?: "quote" | "manual"` (absent on pre-#135 docs = quote)
+  and `quoteId: string | null` (null on a manual project until a proposal is attached). A manual
+  project is born `awarded`, with milestones from the fee — a fixed fee is ONE unscheduled "Fee"
+  milestone carrying the amount, a schedule keeps its rows — and every phase from the Settings
+  phase menu pending, exactly as a won quote seeds them. The creation is logged as a decision
+  ("Project added manually", by the creator) so provenance is visible on the record.
+- **Sweep rule (`sweepIndexesEngagement`, pure):** the sweep indexes rows by quote and skips any
+  row with no quote — so a manual project is invisible to it: never created, advanced, closed or
+  reopened. "Attach proposal" sets `quoteId` (validated: exists, is a consulting quote, is not
+  another engagement's); from then on the row is keyed by that quote and follows
+  `engagementSyncAction` like any other. Those rules only move `proposal_sent` and `closed` rows,
+  so an awarded manual project is never demoted, and because the row is now indexed the sweep can
+  never mint a duplicate engagement for the attached quote. Attaching never rewrites milestones.
+- **Creation is `requirePerm("create")`** (the rentals-create gate); a customer is picked or
+  quick-added (`EntityQuickAdd`, minted with the `c<ms>` id convention), the venue must belong to
+  that customer or is dropped, and the phase menu is resolved in the action so the store stays
+  settings-free (the D91 idiom).
+- **Not changed:** `ensureEngagementForQuote` (the regression harness uses it), the on-win fan-out,
+  the Reports billing forecast (`targetDate > 0` still gates it), consulting fee proposals (#35).
+
+Spec: `docs/superpowers/specs/2026-09-21-round-2-standalone-design.md` §#135.
