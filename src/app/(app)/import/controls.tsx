@@ -81,20 +81,26 @@ export function PastePreview({
   // #134 — the catalog type is capped at 1 MB of pasted/converted text.
   const size = isCatalog ? checkSize(new TextEncoder().encode(text).length) : ({ ok: true } as const);
   // #132 — wrong-manufacturer findings from the server-side preview check.
-  // Treated as empty once the catalog type isn't active or the box is
-  // empty — the effect below stops scheduling checks in that case too, so
-  // deriving it here (rather than an effect calling setGuard(null)) keeps
-  // stale results from an emptied textarea off the screen without setting
-  // state synchronously from inside an effect body.
-  const guardFailures = !isCatalog || !trimmed ? [] : (guard || []).filter((g) => !g.result.ok);
+  // Treated as empty once the catalog type isn't active, the box is empty,
+  // or the paste is over the 1 MB cap — the effect below stops scheduling
+  // checks in those cases too, so deriving it here (rather than an effect
+  // calling setGuard(null)) keeps stale results from an emptied textarea
+  // off the screen without setting state synchronously from inside an
+  // effect body.
+  const guardFailures = !isCatalog || !trimmed || !size.ok ? [] : (guard || []).filter((g) => !g.result.ok);
 
   const canImport = !!prep && prep.stats.valid > 0 && reqMissing.length === 0 && size.ok && guardFailures.length === 0;
 
   /* #132 — debounce the pasted table into {mfr, skus} groups and ask the
      server whether each manufacturer checks out; the same guard runs again
-     on commit, this is the early warning. */
+     on commit, this is the early warning. An over-cap paste (#134) is
+     neither parsed client-side nor sent — the size error already blocks the
+     button. The `cancelled` flag drops a response that lands after the text
+     changed again (a slower earlier RPC must not overwrite a newer result).
+     */
   useEffect(() => {
-    if (!isCatalog || !trimmed) return;
+    if (!isCatalog || !trimmed || !size.ok) return;
+    let cancelled = false;
     const timer = setTimeout(() => {
       const p = parseCsv(text);
       if (!p.ok) return;
@@ -105,11 +111,18 @@ export function PastePreview({
         return;
       }
       checkCatalogImportAction(groups)
-        .then(setGuard)
-        .catch(() => setGuard(null));
+        .then((r) => {
+          if (!cancelled) setGuard(r);
+        })
+        .catch(() => {
+          if (!cancelled) setGuard(null);
+        });
     }, 400);
-    return () => clearTimeout(timer);
-  }, [text, trimmed, isCatalog, fields]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [text, trimmed, isCatalog, fields, size.ok]);
 
   const modeTabs: Array<{ id: "skip" | "update" | "create"; label: string }> = [
     { id: "skip", label: "Skip duplicates" },
