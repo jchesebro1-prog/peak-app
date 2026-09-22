@@ -12,7 +12,15 @@ import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, type ImportedMaterial } from "
  * One system card — header (badge / rename / cost / price), per-system margin
  * + freight sliders, line-item grid, freight line, and the add-part row with
  * the catalog + custom-part portals. Pixel port of Estimator.dc.html.
+ *
+ * Which of the six add-part input methods is open is NOT decided here: the
+ * estimator owns one exclusive descriptor for the whole quote and hands this
+ * card the answer for its own system (see `openMethod`).
  */
+
+/** The six mutually-exclusive add-part input methods. Declared here rather than
+ *  in the estimator client so the card can name them without a cyclic import. */
+export type InputKind = "catalog" | "custom" | "curtain" | "fixture" | "labor" | "import";
 
 const LBL: CSSProperties = {
   display: "block",
@@ -23,6 +31,12 @@ const LBL: CSSProperties = {
   letterSpacing: ".04em",
   marginBottom: 5,
 };
+
+/** Green for a completed import, grey while it runs, red for a parse failure or
+ *  a rejected round trip. Shared by the in-panel banner and the notice that
+ *  stands in for it once the panel has closed. */
+const importMsgColor = (msg: string) =>
+  /^\d+ materials? added/.test(msg) ? "#1f7a52" : msg.startsWith("Importing") ? "#777d88" : "#b4543a";
 
 const PORTAL_FIELD: CSSProperties = {
   width: "100%",
@@ -43,6 +57,10 @@ export type SectionCardProps = {
   cols: string;
   catalogOpen: boolean;
   customOpen: boolean;
+  importOpen: boolean;
+  /** Which input method is open on THIS system, if any — drives the accent flag
+   *  on the add-part row so the exclusivity is visible. */
+  openMethod: InputKind | null;
   customDraft: CustomDraft;
   registerRef: (id: string, el: HTMLDivElement | null) => void;
   onToggleExpand: () => void;
@@ -59,6 +77,7 @@ export type SectionCardProps = {
   onToggleFixture: () => void;
   onToggleLabor: () => void;
   onToggleCustom: () => void;
+  onToggleImport: () => void;
   onAddPart: (cat: SuggestPart) => void;
   /** CSV batch-add (#112): resolves SKUs against the catalog, returns how many priced from it vs. landed custom. */
   onImportMaterials: (items: ImportedMaterial[]) => Promise<{ fromCatalog: number; custom: number }>;
@@ -73,9 +92,8 @@ export type SectionCardProps = {
 };
 
 export default function SectionCard(p: SectionCardProps) {
-  const [importOpen, setImportOpen] = useState(false);
   const [importMessage, setImportMessage] = useState("");
-  const [showLink, setShowLink] = useState(!!p.customDraft.link);
+  const [linkRevealed, setLinkRevealed] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveQuery, setMoveQuery] = useState("");
   const [moveHits, setMoveHits] = useState<QuoteLite[]>([]);
@@ -100,6 +118,21 @@ export default function SectionCard(p: SectionCardProps) {
     }, 260);
     return () => clearTimeout(t);
   }, [moveOpen, moveQuery]);
+
+  /* These two scraps belong to ONE open of their portal, not to the card, which
+     stays mounted for the life of the system. Each portal can only be opened
+     from its own button below, so clearing them there covers every open — and
+     keeps the reset out of an effect. The import banner is cleared on the way
+     IN rather than on the way out on purpose: an import whose panel is closed
+     mid-flight still has a result to report (see the notice below). */
+  const handleToggleImport = () => {
+    setImportMessage(""); // a stale "12 materials added" must not greet the next open
+    p.onToggleImport();
+  };
+  const handleToggleCustom = () => {
+    setLinkRevealed(false); // the draft is reseeded on open; the URL field goes with it
+    p.onToggleCustom();
+  };
 
   const handleMoveToNew = () => {
     setMoveOpen(false);
@@ -127,6 +160,8 @@ export default function SectionCard(p: SectionCardProps) {
   const cdCost = parseFloat(cd.cost) || 0;
   const cdMargin = cdPrice > 0 ? (cdPrice - cdCost) / cdPrice : 0;
   const cdValid = (cd.desc || "").trim().length > 0 && cdPrice > 0;
+  const showLink = linkRevealed || !!cd.link;
+  const openMethod = p.openMethod;
 
   const addBtn = (label: string, onClick: () => void, accent = false) => (
     <button
@@ -790,17 +825,39 @@ export default function SectionCard(p: SectionCardProps) {
           {/* add part */}
           <div style={{ borderTop: "1px solid #f3f4f7", padding: "11px 20px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-              {addBtn("+ Add part from catalog", p.onToggleCatalog, true)}
-              {addBtn("+ Configure curtain", p.onToggleCurtain)}
-              {addBtn("+ Configure fixture", p.onToggleFixture)}
-              {addBtn("+ Configure labor", p.onToggleLabor)}
-              {addBtn("+ Build custom part", p.onToggleCustom)}
-              {addBtn("+ Vendor quote / CSV", () => { setImportOpen((open) => !open); setImportMessage(""); })}
+              {/* Only the open method reads as accented; with nothing open the
+                  catalog stays the highlighted default, as in the prototype. */}
+              {addBtn("+ Add part from catalog", p.onToggleCatalog, openMethod === "catalog" || openMethod === null)}
+              {addBtn("+ Configure curtain", p.onToggleCurtain, openMethod === "curtain")}
+              {addBtn("+ Configure fixture", p.onToggleFixture, openMethod === "fixture")}
+              {addBtn("+ Configure labor", p.onToggleLabor, openMethod === "labor")}
+              {addBtn("+ Build custom part", handleToggleCustom, openMethod === "custom")}
+              {addBtn("+ Vendor quote / CSV", handleToggleImport, openMethod === "import")}
             </div>
+
+            {/* An import outlives its panel: the file is read and resolved
+                against the catalog over the wire, and opening any other input
+                method closes the panel while that is still in flight. The
+                outcome — "Import failed; nothing was added" above all — has to
+                land somewhere the user can still see it, so it stands here
+                until dismissed or until the panel is reopened. */}
+            {!p.importOpen && importMessage && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
+                <span role="status" style={{ fontSize: 12, color: importMsgColor(importMessage) }}>{importMessage}</span>
+                <button
+                  type="button"
+                  onClick={() => setImportMessage("")}
+                  title="Dismiss"
+                  style={{ border: 0, background: "none", cursor: "pointer", fontSize: 12, color: "#aab0bb", padding: 0, lineHeight: 1 }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             {p.catalogOpen && <CatalogPicker onAdd={p.onAddPart} />}
 
-            {importOpen && (
+            {p.importOpen && (
               <div style={{ marginTop: 11, background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "15px 16px" }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" }}>Import material list or vendor quote</div>
                 <div style={{ marginTop: 5, fontSize: 12, color: "#777d88" }}>Batch-add catalog or custom materials. For catalog parts a SKU and quantity are enough: description, cost, and sell come from the catalog unless the file gives its own. Custom rows need a description, unit cost, unit sell, and an optional product link.</div>
@@ -836,7 +893,7 @@ export default function SectionCard(p: SectionCardProps) {
                     />
                   </label>
                   <a download="quartzite-material-import-example.csv" href={`data:text/csv;charset=utf-8,${encodeURIComponent(MATERIAL_CSV_TEMPLATE)}`} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>Download example CSV</a>
-                  {importMessage && <span role="status" style={{ fontSize: 12, color: /^\d+ materials? added/.test(importMessage) ? "#1f7a52" : importMessage.startsWith("Importing") ? "#777d88" : "#b4543a" }}>{importMessage}</span>}
+                  {importMessage && <span role="status" style={{ fontSize: 12, color: importMsgColor(importMessage) }}>{importMessage}</span>}
                 </div>
               </div>
             )}
@@ -880,7 +937,7 @@ export default function SectionCard(p: SectionCardProps) {
                   <label style={LBL}>Description</label>
                   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                     <input className="est-field" value={cd.desc} onChange={(e) => p.onSetCustomDraft("desc", e.target.value)} placeholder="e.g. Custom-fabricated motor mounting bracket" style={{ ...PORTAL_FIELD, flex: 1, fontFamily: "var(--font-ui)", fontSize: 13, padding: "8px 10px" }} />
-                    {!showLink && addBtn("+ Link", () => setShowLink(true))}
+                    {!showLink && addBtn("+ Link", () => setLinkRevealed(true))}
                   </div>
                   {showLink && (
                     <input className="est-field" type="url" value={cd.link} onChange={(e) => p.onSetCustomDraft("link", e.target.value)} placeholder="Product link (optional)" title="Optional vendor or product page" style={{ ...PORTAL_FIELD, fontFamily: "var(--font-ui)", fontSize: 12, marginTop: 8 }} />
@@ -1037,7 +1094,7 @@ export default function SectionCard(p: SectionCardProps) {
                   <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                     <button
                       type="button"
-                      onClick={p.onToggleCustom}
+                      onClick={handleToggleCustom}
                       style={{
                         fontFamily: "var(--font-ui)",
                         fontSize: 12.5,

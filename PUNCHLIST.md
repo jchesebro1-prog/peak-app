@@ -6389,3 +6389,54 @@ only by concurrent POSTs); and `vendorForManufacturer` (`:143-148`) still reads
 `allVendorProfiles()` unfiltered, so it would hand back a soft-deleted vendor's id — no `src/`
 caller does today, but it is the same shape as the stranded-claims bug that fix wave closed, and a
 future link-rendering caller would reintroduce it. Reference #122 / D160.
+
+## ROUND 3 — 2026-09-22 (Jeff's Estimator list)
+
+Five items. **#4 and #5 were already shipped** as #135 (Consulting manual project + fee, D155) and
+#136 (Knowledge & Information tab) on 2026-09-21 — both demoed back to Jeff rather than rebuilt.
+The remaining three are #142 below, and #143 (which absorbs Jeff's items 2 and 3 into one change,
+per his answer that the CSV importer belongs with the catalog and the vendor quote wants its own
+form).
+
+## 142. Estimator: clicking a different input method must close and discard the last — DONE 2026-09-22 (D161)
+
+**Reported:** 2026-09-22 (Jeff): "Estimator: When clicking a different input method it needs to close
+and discard the last one."
+
+**What existed:** six add-part methods, three ownership models. `openCatalog` / `customFor` /
+`curtainFor` / `fixtureFor` / `laborFor` were nullable section ids on `EstimatorClient` that
+cross-cleared each other by hand (`estimator-client.tsx:781-840`), except `toggleCatalog`
+(`:782`), which cleared nothing. The sixth — the "+ Vendor quote / CSV" importer — was
+`useState(false)` inside `SectionCard` (`section-card.tsx:76`), coordinated with nothing, so one
+could be open per system. Every draft was reseeded on **open**, never discarded on **close**, so a
+closed portal kept its typed values in memory. `showLink` (`:78`) was initialized once at card mount
+and never reset, so a card that had revealed the optional URL field kept showing it forever.
+
+Reproduced before the fix: open "+ Build custom part" on System 01 and type; click "+ Add part from
+catalog" on System 02 → both panels open, the typed draft alive. Three clicks in one card (catalog →
+vendor/CSV → custom) → three panels stacked.
+
+**Shipped:** D161 — one `openInput: { kind, secId } | null` descriptor and one
+`openInputMethod(kind, secId)` coordinator replace the five ids and the card-local boolean. Switching
+discards the outgoing draft and seeds the incoming one; `closeInput()` is the only close path, so the
+second click on the same button, a modal's × and its scrim all discard. The open method is accented
+in the add-part row so exclusivity is visible. Also fixed in the same pass: the CSV result banner now
+outlives its panel (another method can close the importer mid-flight, which would have swallowed
+`Import failed; nothing was added`); the labor travel fetch is generation-stamped so a resolve from a
+previous open cannot overwrite the current draft; and `showLink` resets per open.
+
+Two files only — `estimator-client.tsx`, `section-card.tsx`. No schema, no server action, no change
+to `types.ts` / `pricing.ts` / `actions.ts` / `preview-doc.tsx` / the three modal components.
+
+**Verified** at 1440×900 against the running app, not just the gates: (a) custom → catalog closes the
+portal and the reopened draft is empty; (b) catalog → vendor/CSV; (c) an inline panel → the labor
+modal; (d) three clicks in one card leave one panel; (e) a panel open on System 01 closes System 02's;
+(f) "+ Link" reveal is gone after a switch; (g) the modal × closes and discards.
+Gates: `tsc` 0 errors (baseline 0), `eslint` 120 warnings / 0 errors (baseline 120, both estimator
+files clean), `test:specs` 1478 PASS / 0 FAIL, `test:smoke` ALL PASSED.
+
+**Not done, for Jeff:** "+ Add system" now closes whatever input method was open (inherent to one
+exclusive descriptor while still opening the catalog picker on the new system — nothing recoverable
+is lost, since the draft was reseeded on the next open before this change too). And there is still no
+confirm-before-discard anywhere; a scrim misclick on a long labor configuration discards it, as it
+effectively did before. Both are product calls, logged in D161.

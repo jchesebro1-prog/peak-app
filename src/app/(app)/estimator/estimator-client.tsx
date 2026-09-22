@@ -61,7 +61,7 @@ import { PAYMENT_TERMS } from "./types";
 import { assemblyDescription } from "@/lib/fixture-assemblies";
 import { defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
-import SectionCard from "./section-card";
+import SectionCard, { type InputKind } from "./section-card";
 import type { ImportedMaterial } from "./material-csv";
 import AiScopeModal from "./ai-scope-modal";
 import CurtainModal from "./curtain-modal";
@@ -286,16 +286,34 @@ export default function EstimatorClient({
     () => (initial.sections ?? freshSections())[0]?.id ?? null
   );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [openCatalog, setOpenCatalog] = useState<string | null>(null);
-  const [customFor, setCustomFor] = useState<string | null>(null);
+  /* The add-part row is exclusive: at most ONE input method is open across the
+     whole estimate, named by this one descriptor. Opening a different method
+     closes and discards the last one (see openInputMethod). Five per-method
+     section ids used to be cross-cleared by hand — and the sixth, the CSV
+     importer, lived inside SectionCard and was coordinated with nothing, so one
+     could sit open per section. A seventh method is now one entry in InputKind
+     rather than five more setter calls. */
+  const [openInput, setOpenInput] = useState<{ kind: InputKind; secId: string } | null>(null);
+  /** Mirrors `openInput` for callbacks that land later (the labor travel fetch
+   *  below). openInputMethod/closeInput are its only writers. */
+  const openInputRef = useRef<{ kind: InputKind; secId: string } | null>(null);
+  /** Stamps each open with its own number. The descriptor alone can't tell
+   *  "still the same open" from "closed and reopened on the same method and
+   *  system", so a travel fetch issued by the earlier open would pass a
+   *  kind+secId check and overwrite what the user has since typed. */
+  const openSeqRef = useRef(0);
+  const openFor = (kind: InputKind) =>
+    openInput && openInput.kind === kind ? openInput.secId : null;
+  const isOpenFor = (kind: InputKind, secId: string) =>
+    !!openInput && openInput.kind === kind && openInput.secId === secId;
+  const curtainFor = openFor("curtain");
+  const fixtureFor = openFor("fixture");
+  const laborFor = openFor("labor");
   const [customDraft, setCustomDraft] = useState<CustomDraft>(freshCustom);
-  const [curtainFor, setCurtainFor] = useState<string | null>(null);
   const [curtainDraft, setCurtainDraft] = useState<CurtainDraft>(() =>
     freshCurtain(defaultFabric)
   );
-  const [fixtureFor, setFixtureFor] = useState<string | null>(null);
   const [fixtureDraft, setFixtureDraft] = useState<FixtureDraft>(freshFixture);
-  const [laborFor, setLaborFor] = useState<string | null>(null);
   // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
   // curtain configurator; refreshed when the meta action re-stamps.
   const [tierMargin, setTierMargin] = useState<number | null>(initial.tierMargin);
@@ -664,7 +682,7 @@ export default function EstimatorClient({
       { id, name: "New System", kind: "materials", mfr: "", freightPct: 2, items: [] },
     ]);
     setActiveId(id);
-    setOpenCatalog(id);
+    openInputMethod("catalog", id);
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToCard(id)));
   };
 
@@ -678,7 +696,7 @@ export default function EstimatorClient({
     pushItems(secId, [
       { id: nextId(), sku: cat.sku, desc: cat.desc, qty: 1, unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
     ]);
-    setOpenCatalog(null);
+    closeInput();
   };
 
   /* ---- CSV batch-add (#112) ----
@@ -778,66 +796,80 @@ export default function EstimatorClient({
     setAiAdded((m) => ({ ...m, [index]: true }));
   };
 
-  /* ---------------- add-flows (portals + modals) ---------------- */
-  const toggleCatalog = (id: string) => setOpenCatalog((cur) => (cur === id ? null : id));
-  const toggleCustom = (id: string) => {
-    if (customFor === id) {
-      setCustomFor(null);
-      return;
-    }
-    setCustomFor(id);
-    setOpenCatalog(null);
-    setCurtainFor(null);
-    setLaborFor(null);
-    setFixtureFor(null);
-    setCustomDraft(freshCustom());
+  /* ---------------- add-flows (portals + modals) ----------------
+     One coordinator for all six input methods, so "click a different input
+     method" is a single, uniform transition: discard the OUTGOING draft, seed
+     the INCOMING one, write the descriptor. Every close path — the same button
+     clicked again, a modal's × or scrim, a successful add — goes through
+     closeInput(), so none of them leave a typed draft alive in memory. */
+
+  /** Reset one method's draft to its fresh seed. Catalog owns no shared draft
+   *  (CatalogPicker unmounts, taking its query with it). Import has no draft
+   *  either — only SectionCard's result banner, which deliberately OUTLIVES the
+   *  panel: an import closed mid-flight still has to report what it did. */
+  const discardDraft = (kind: InputKind, secId: string) => {
+    if (kind === "custom") setCustomDraft(freshCustom());
+    else if (kind === "curtain") setCurtainDraft(freshCurtain(defaultFabric));
+    else if (kind === "fixture") setFixtureDraft(freshFixture());
+    else if (kind === "labor")
+      setLaborDraft(
+        freshLabor(travelEstNow(), tierMargin, sections.find((s) => s.id === secId)?.name || "")
+      );
   };
-  const toggleCurtain = (id: string) => {
-    if (curtainFor === id) {
-      setCurtainFor(null);
-      return;
+
+  /** Seed the incoming method's draft (the prototype defaults each had). */
+  const seedDraft = (kind: InputKind, secId: string) => {
+    if (kind === "custom") setCustomDraft(freshCustom());
+    else if (kind === "curtain") setCurtainDraft(freshCurtain(defaultFabric));
+    else if (kind === "fixture") {
+      const first = fixtureAssemblies[0];
+      setFixtureDraft({
+        ...freshFixture(),
+        assemblyId: first?.id || "",
+        componentQty: Object.fromEntries((first?.components || []).map((part) => [part.sku, String(part.defaultQty)])),
+      });
+    } else if (kind === "labor") {
+      // Resolve travel before seeding the draft (punch #89): the estimate is
+      // fetched on selection now, so opening this immediately after picking a
+      // customer could otherwise seed the mobilization with no distance and
+      // quietly price the trip as local. Cached selections call back inline.
+      const seq = openSeqRef.current;
+      withTravelFor(customerId, locationId, (est) => {
+        // A slow resolve must not write into a draft the user has already left,
+        // nor into the NEXT open of the same method on the same system — hence
+        // the sequence number rather than a kind/secId comparison.
+        if (openSeqRef.current !== seq) return;
+        setLaborDraft(
+          freshLabor(est, tierMargin, sections.find((section) => section.id === secId)?.name || "")
+        );
+      });
     }
-    setCurtainFor(id);
-    setOpenCatalog(null);
-    setCustomFor(null);
-    setLaborFor(null);
-    setFixtureFor(null);
-    setCurtainDraft(freshCurtain(defaultFabric));
   };
-  const toggleFixture = (id: string) => {
-    if (fixtureFor === id) {
-      setFixtureFor(null);
-      return;
-    }
-    setFixtureFor(id);
-    setOpenCatalog(null);
-    setCustomFor(null);
-    setCurtainFor(null);
-    setLaborFor(null);
-    const first = fixtureAssemblies[0];
-    setFixtureDraft({
-      ...freshFixture(),
-      assemblyId: first?.id || "",
-      componentQty: Object.fromEntries((first?.components || []).map((part) => [part.sku, String(part.defaultQty)])),
-    });
+
+  /** Close whatever input method is open, discarding its draft. */
+  const closeInput = () => {
+    const cur = openInputRef.current;
+    openInputRef.current = null;
+    openSeqRef.current++; // retires any callback still in flight for that open
+    setOpenInput(null);
+    if (cur) discardDraft(cur.kind, cur.secId);
   };
-  const toggleLabor = (id: string) => {
-    if (laborFor === id) {
-      setLaborFor(null);
+
+  /** Open one input method on one system, exclusively. Clicking the method that
+   *  is already open on that system closes it — which discards it too. */
+  const openInputMethod = (kind: InputKind, secId: string) => {
+    const cur = openInputRef.current;
+    if (cur && cur.kind === kind && cur.secId === secId) {
+      closeInput();
       return;
     }
-    setLaborFor(id);
-    setOpenCatalog(null);
-    setCustomFor(null);
-    setCurtainFor(null);
-    setFixtureFor(null);
-    // Resolve travel before seeding the draft (punch #89): the estimate is
-    // fetched on selection now, so opening this immediately after picking a
-    // customer could otherwise seed the mobilization with no distance and
-    // quietly price the trip as local. Cached selections call back inline.
-    withTravelFor(customerId, locationId, (est) =>
-      setLaborDraft(freshLabor(est, tierMargin, sections.find((section) => section.id === id)?.name || ""))
-    );
+    if (cur) discardDraft(cur.kind, cur.secId);
+    // Stamped before seeding so the labor fetch captures THIS open's number,
+    // including when withTravelFor resolves from cache, inline.
+    openSeqRef.current++;
+    openInputRef.current = { kind, secId };
+    setOpenInput({ kind, secId });
+    seedDraft(kind, secId);
   };
 
   const addCustomPart = (secId: string) => {
@@ -863,8 +895,7 @@ export default function EstimatorClient({
         allowance: d.allowance ? true : undefined,
       },
     ]);
-    setCustomFor(null);
-    setCustomDraft(freshCustom());
+    closeInput(); // closing discards, so the draft reseed happens there
   };
 
   const addCurtain = (secId: string) => {
@@ -889,8 +920,7 @@ export default function EstimatorClient({
         curtain: true,
       },
     ]);
-    setCurtainFor(null);
-    setCurtainDraft(freshCurtain(defaultFabric));
+    closeInput();
   };
 
   const setFixture = (field: "qty" | "position" | "circuit", val: string) =>
@@ -937,8 +967,7 @@ export default function EstimatorClient({
     pushItems(secId, [
       { id: nextId(), sku: assembly.id, desc, qty, unit: "ea", cost: unitCost, price: unitSell, fixture: true, components },
     ]);
-    setFixtureFor(null);
-    setFixtureDraft(freshFixture());
+    closeInput();
   };
 
   /* ---------------- labor configurator handlers ---------------- */
@@ -1117,8 +1146,7 @@ export default function EstimatorClient({
       });
     }
     if (items.length) pushItems(secId, items);
-    setLaborFor(null);
-    setLaborDraft(freshLabor(travelEstNow(), tierMargin, sections.find((section) => section.id === secId)?.name || ""));
+    closeInput(); // discards → reseeds freshLabor for this system
   };
 
   /* ---------------- review banner view-model ---------------- */
@@ -2270,8 +2298,10 @@ export default function EstimatorClient({
                   expanded={isExpanded(sec.id)}
                   isInternal={isInternal}
                   cols={cols}
-                  catalogOpen={openCatalog === sec.id}
-                  customOpen={customFor === sec.id}
+                  catalogOpen={isOpenFor("catalog", sec.id)}
+                  customOpen={isOpenFor("custom", sec.id)}
+                  importOpen={isOpenFor("import", sec.id)}
+                  openMethod={openInput && openInput.secId === sec.id ? openInput.kind : null}
                   customDraft={customDraft}
                   registerRef={(id, el) => {
                     cardRefs.current[id] = el;
@@ -2285,11 +2315,12 @@ export default function EstimatorClient({
                   onDec={dec}
                   onSetQty={setQty}
                   onRemoveItem={removeItem}
-                  onToggleCatalog={() => toggleCatalog(sec.id)}
-                  onToggleCurtain={() => toggleCurtain(sec.id)}
-                  onToggleFixture={() => toggleFixture(sec.id)}
-                  onToggleLabor={() => toggleLabor(sec.id)}
-                  onToggleCustom={() => toggleCustom(sec.id)}
+                  onToggleCatalog={() => openInputMethod("catalog", sec.id)}
+                  onToggleCurtain={() => openInputMethod("curtain", sec.id)}
+                  onToggleFixture={() => openInputMethod("fixture", sec.id)}
+                  onToggleLabor={() => openInputMethod("labor", sec.id)}
+                  onToggleCustom={() => openInputMethod("custom", sec.id)}
+                  onToggleImport={() => openInputMethod("import", sec.id)}
                   onAddPart={(cat) => addPart(sec.id, cat)}
                   onImportMaterials={(items) => importMaterials(sec.id, items)}
                   onSetCustomDraft={(field, v) => setCustomDraft((d) => ({ ...d, [field]: v }))}
@@ -2333,7 +2364,7 @@ export default function EstimatorClient({
               margin={tierMargin ?? undefined}
               onSet={(field, val) => setCurtainDraft((d) => ({ ...d, [field]: val }))}
               onAdd={() => addCurtain(curtainFor)}
-              onClose={() => setCurtainFor(null)}
+              onClose={closeInput}
             />
           )}
           {fixtureFor && (
@@ -2345,7 +2376,7 @@ export default function EstimatorClient({
               onAssembly={setFixtureAssembly}
               onComponentQty={setFixtureComponentQty}
               onAdd={() => addFixture(fixtureFor)}
-              onClose={() => setFixtureFor(null)}
+              onClose={closeInput}
             />
           )}
           {laborFor && (
@@ -2367,7 +2398,7 @@ export default function EstimatorClient({
               onToggleMobFlag={toggleMobFlag}
               onApplyAutoMiles={applyAutoMiles}
               onAdd={() => addLabor(laborFor)}
-              onClose={() => setLaborFor(null)}
+              onClose={closeInput}
             />
           )}
           {aiSource && aiOpen && (

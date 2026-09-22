@@ -3817,3 +3817,45 @@ implementing it:
   and drops the embedded contact/venue columns; an unnamed, address-less placeholder venue is not
   exported (it would only produce a row that fails re-import). `Notes` columns are accepted and
   ignored on all three types, as the customers importer always did.
+
+## D161. The Estimator add-part row is exclusive: one input method open at a time, switching discards the last (#142, 2026-09-22)
+
+The six add-part methods on a system card — catalog, curtain, fixture, labor, custom part, vendor
+quote / CSV — had three different ownership models. Five were nullable section ids on
+`EstimatorClient` that cross-cleared each other by hand; `toggleCatalog` cleared **nothing**; and the
+sixth, the CSV importer, was a local `useState` inside `SectionCard`, so one could sit open per
+system and no other method could close it. Three panels could stack in one card, and every draft was
+reseeded on *open* rather than discarded on *close*, so a half-typed custom part stayed alive in
+memory behind a closed portal.
+
+All six now share **one descriptor** — `openInput: { kind: InputKind; secId: string } | null` — and
+one coordinator, `openInputMethod(kind, secId)`, which discards the outgoing method's draft, seeds
+the incoming one, and writes the descriptor. `closeInput()` is the single close path, so the same
+button clicked twice, a modal's × and its scrim all discard too. A seventh input method is now one
+entry in `InputKind`, not five more setter calls — which is the point, because two more are queued
+(#143).
+
+Consequences worth naming:
+
+- **`+ Add system` closes whatever was open.** It opens the catalog picker on the new system (kept —
+  it is load-bearing UX), and under one exclusive descriptor that necessarily closes an open portal
+  elsewhere. The draft was reseeded on the next open before this change too, so nothing recoverable
+  is lost; what changed is that the portal now closes instead of lingering.
+- **No confirm-before-discard.** Jeff asked for "close and discard", and four of the six methods
+  already behaved that way. A dirty-draft guard would need a z-index ladder first — all three
+  configurator modals share `zIndex: 50` (`est-ui.tsx:149`) — so it is a separate item if wanted.
+- **The CSV import banner outlives its panel.** Another method can now close the importer mid-flight,
+  which would have swallowed `Import failed; nothing was added`. The terminal result renders as a
+  dismissible card-level notice outside the panel; the banner still clears on the way in, so a stale
+  count never greets the next open.
+- **The labor travel fetch is generation-stamped.** `withTravelFor` (#89 ordering untouched) resolves
+  after the user may have moved on; an `openSeqRef` bumped in `openInputMethod`/`closeInput` retires
+  callbacks from a previous open, which a bare kind+secId comparison could not do (close → reopen on
+  the same method and system is indistinguishable without it).
+- `showLink` in `SectionCard` was `useState(!!p.customDraft.link)` — set once at card mount, never
+  reset — so a card that had ever revealed the optional URL field kept showing it against a reseeded
+  draft. It is now derived from a `linkRevealed` flag cleared on each open.
+
+The two resets are handler wrappers rather than `useEffect`s: `react-hooks/set-state-in-effect` is on
+and **errors** in this repo, and each portal can only be opened from its own button on its own card,
+so clearing on entry covers every open path.
