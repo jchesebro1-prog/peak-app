@@ -86,11 +86,15 @@ const ROUTES = [
   "/design-studio/weights",
   "/design/designs",
   "/design/engagements",
-  "/design/fixtures",
+  "/design/fixtures", // #136 redirect stub → /knowledge/fixtures (the harness follows it)
   "/design/assemblies",
   "/design/motors",
   "/design/quick",
-  "/design/steel",
+  "/design/steel", // #136 redirect stub → /knowledge/steel
+  /* #136 Knowledge & Information tab — landing page + the two moved tools. */
+  "/knowledge",
+  "/knowledge/steel",
+  "/knowledge/fixtures",
   "/account",
   "/people",
   /* Modules that had NO coverage at all until now — /rentals shipped whole
