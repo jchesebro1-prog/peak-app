@@ -25,7 +25,8 @@ import {
 import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
-import type { EngagementPhase } from "@/lib/stores/engagements";
+import { normalizeEngagementRecord, type EngagementPhase } from "@/lib/stores/engagements";
+import { TEMPLATE_RECORD_KINDS, TEMPLATE_RECORD_LABEL } from "@/lib/task-template-kinds";
 import {
   msOf as opMsOf,
   serviceToWorkItems,
@@ -49,7 +50,7 @@ import {
   toDateInput as vendorToDateInput,
 } from "@/app/(app)/vendors/dates";
 import { FIELD_COLLECTIONS } from "@/lib/sync/engine";
-import { canRecord } from "@/lib/settings";
+import { canRecord, mergedConsultingDisciplines, phaseWeightsFor } from "@/lib/settings";
 import {
   blankAudio, blankKrisp, isArchivable, mergeActionItems, needsKrispCheck, normalizeRecording,
   recordingParentLabel, recordingStatusChip,
@@ -1781,6 +1782,7 @@ ok(legacyEmailFor("Jeff Chesebro") === "jchesebro@peaksystemsgroup.com", "legacy
 /* ============ TASKS (#17) — store pure logic ============ */
 import {
   isOverdue, taskFromLegacy, expandTemplate, taskBellItems, autoTaskId,
+  normalizeTask, tasksForEngagement,
   STATUSES, type TaskRecord, type TaskTemplateItem,
 } from "@/lib/stores/tasks";
 import { CATEGORIES } from "@/lib/stores/notif-prefs";
@@ -1815,7 +1817,8 @@ import { CATEGORIES } from "@/lib/stores/notif-prefs";
 
   const mk = (o: Partial<TaskRecord>): TaskRecord => ({
     id: "T-6000", title: "t", section: "Install", projectId: null, quoteId: null, designId: null,
-    coverageKey: null, assigneeUserId: null, assigneeName: "", dueAt: null,
+    engagementId: null, coverageKey: null, assigneeUserId: null, assigneeName: "", dueAt: null,
+    startAt: null, schedule: null, handScheduled: false,
     status: "open", notes: "", createdBy: "x", createdAt: NOW, updatedAt: NOW, doneAt: null, ...o,
   });
   const bell = taskBellItems([
@@ -2135,6 +2138,9 @@ import { normalizeNote, type NoteRecord } from "@/lib/stores/notes";
     by: "Dana Whitmer",
     at: T,
     text: "Called about the valance",
+    attachments: [],
+    taskIds: [],
+    system: false,
     createdAt: T,
     updatedAt: T,
   });
@@ -5924,3 +5930,31 @@ ok(gen145.tasks.length === 3, "#145 generateSchedule expands exactly the in-scop
 ok(gen145.tasks.every((t) => t.startAt >= OCT6 && t.dueAt <= MAR30), "#145 every generated task lands inside the project span");
 ok(gen145.milestones.find((m) => m.id === "ms-1")?.targetDate === win145[3].endAt, "#145 a phase-matched milestone is dated to its phase window's end");
 ok(gen145.milestones.find((m) => m.id === "ms-2")?.targetDate === 0, "#145 a milestone with no phase stays unscheduled and out of the billing forecast");
+/* ====== #145: record shapes normalize absent fields ====== */
+const bareEng145 = normalizeEngagementRecord({ id: "CE-1043", name: "North HS", status: "design" } as never);
+ok(bareEng145.startAt === 0 && bareEng145.endAt === 0, "#145 an engagement written before this feature reads as unscheduled, not NaN");
+ok(Array.isArray(bareEng145.disciplines) && bareEng145.disciplines.length === 0, "#145 absent disciplines read as an empty list");
+ok(bareEng145.milestones.every((m) => m.phaseId === null), "#145 absent milestone phaseId reads as null");
+
+const bareTask145 = normalizeTask({ id: "T-6001", title: "x" } as never);
+ok(bareTask145.engagementId === null && bareTask145.startAt === null, "#145 a pre-existing task reads with null engagement and no bar start");
+ok(bareTask145.schedule === null && bareTask145.handScheduled === false, "#145 a pre-existing task is not hand-scheduled and carries no template provenance");
+
+const bareNote145 = normalizeNote({ id: "N-7001", parentKind: "customer", parentId: "c1" } as never);
+ok(Array.isArray(bareNote145.attachments) && bareNote145.attachments.length === 0, "#145 a pre-existing note reads with no attachments");
+ok(Array.isArray(bareNote145.taskIds) && bareNote145.taskIds.length === 0, "#145 a pre-existing note reads with no spawned tasks");
+
+ok(TEMPLATE_RECORD_KINDS.includes("consulting"), "#145 consulting is a template target kind (D172)");
+ok(TEMPLATE_RECORD_LABEL.consulting === "Consulting", "#145 the consulting kind has a label for the apply picker");
+
+/* phase weights + disciplines merge like every other settings list */
+ok(mergedConsultingDisciplines([]).join(",") === "rigging,curtain,lighting,av", "#145 disciplines default to the four intake groups");
+ok(mergedConsultingDisciplines(["rigging", " AV "]).join(",") === "rigging,AV", "#145 a stored discipline list overrides wholesale and is trimmed");
+const pw145 = phaseWeightsFor({ "Design Development": 6 }, ["Assessment", "Design Development"]);
+ok(pw145[0].weight === 1 && pw145[1].weight === 6, "#145 phaseWeightsFor defaults an unweighted phase to 1 and honours a stored weight");
+ok(pw145[0].name === "Assessment" && typeof pw145[0].phaseId === "string" && pw145[0].phaseId.length > 0, "#145 phaseWeightsFor carries a stable id per phase name");
+
+/* tasksForEngagement is exported for the consulting side of the collection
+ * (Task 3+ exercises it against real records; this only proves the store
+ * compiles and exports it, with no DB touch here). */
+ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exported for the consulting side of the collection");
