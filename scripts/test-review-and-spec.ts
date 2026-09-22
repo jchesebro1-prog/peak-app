@@ -157,7 +157,7 @@ import {
   sheetMimeVerdict,
 } from "@/lib/grid-sheet-file";
 import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
-import { computeLabor, computeMob, systemFreight, systemFreightBase, systemItemsCost } from "@/app/(app)/estimator/pricing";
+import { computeLabor, computeMob, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev } from "@/app/(app)/estimator/pricing";
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -249,6 +249,18 @@ const freightSec: EstimatorSpecSection = {
 ok(
   systemItemsCost(freightSec) === 1200 && systemFreightBase(freightSec) === 200 && systemFreight(freightSec) === 20,
   "#143 (D162) a vendor quote that includes freight leaves the freight base but still counts as cost"
+);
+/* D162, settled by Jeff 2026-09-22: "Vendor quotes should be affected by margin
+   the same as a catalog and manual item." So `noFreight` must stay a
+   FREIGHT-only flag — the moment it (or vendorQuoteId) is consulted by revenue
+   or cost, an exempt vendor line stops being marked up like everything else and
+   the blended margin silently drifts. This pins the asymmetry: freight sees
+   only the freight base, revenue and cost see every line. The repricing
+   handlers themselves (setMarginAll / setSystemMargin, estimator-client.tsx)
+   map over s.items with no filter and are covered by the UI walkthrough. */
+ok(
+  systemItemsRev(freightSec) === 1728.57 && systemItemsCost(freightSec) === 1200,
+  "#143 (D162) margin and cost count a freight-exempt vendor line exactly like a catalog line"
 );
 
 /* #143 re-review — `blobPath` reaches the server from the BROWSER (the upload
