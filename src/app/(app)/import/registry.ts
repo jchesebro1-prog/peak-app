@@ -21,6 +21,7 @@ import { norm, isoToMs, type FieldDef, type PreparedRow } from "./parse";
 import { baseVenueKind } from "@/lib/identity/venue-defaults";
 import {
   matchContact,
+  matchLocation,
   mergeContact,
   mergeLocation,
   parseYesNo,
@@ -313,6 +314,25 @@ async function writeContactRow(cust: Customers.CustomerDoc, v: Values): Promise<
   await Customers.upsert({ ...recordInputOf(cust), contacts });
 }
 
+/** One venues row → the customer's locations, merged by normalized label
+ *  (a labelled row claims the unnamed base venue first, see mergeLocation). */
+async function writeVenueRow(cust: Customers.CustomerDoc, v: Values): Promise<void> {
+  const { locations } = mergeLocation(
+    cust.locations || [],
+    {
+      label: str(v.venue),
+      address: str(v.address),
+      city: str(v.city),
+      state: str(v.state),
+      zip: str(v.zip),
+      kind: str(v.kind),
+    },
+    "l" + cust.id + "-" + seq(),
+    { preferPrimary: false }
+  );
+  await Customers.upsert({ ...recordInputOf(cust), locations });
+}
+
 const WRITERS: Record<string, Writer> = {
   customers: {
     count: async () => (await Customers.all()).length,
@@ -399,6 +419,54 @@ const WRITERS: Record<string, Writer> = {
           primary: c.primary ? "yes" : "no",
           notes: "",
         }))
+      );
+    },
+  },
+
+  venues: {
+    count: async () =>
+      (await Customers.all()).reduce((n, c) => n + (c.locations || []).length, 0),
+    load: async () => (await Customers.all()) as unknown as Record<string, unknown>[],
+    // Dedupe key: customer (id → normalized name) + normalized venue name.
+    find: (v, cache) => {
+      const docs = cache as unknown as Customers.CustomerDoc[];
+      const r = resolveCustomerForRow({ customerId: v.customerId, customer: v.customer }, docs);
+      if (!r.id) return null;
+      const cust = docs.find((c) => c.id === r.id);
+      const hit = cust ? matchLocation(cust.locations || [], v.venue) : null;
+      return hit ? { customerId: r.id, locationId: hit.id ?? "" } : null;
+    },
+    create: async (v, cache, _ctx, link) => {
+      const cust = await linkCustomer(v, cache, link);
+      await writeVenueRow(cust, v);
+      await refreshCache(cache, cust.id);
+    },
+    update: async (ex, v, cache, _ctx, link) => {
+      const id = str(ex.customerId);
+      const cust = await Customers.get(id);
+      if (!cust) throw new Error(`Customer ${id} no longer exists`);
+      if (!link.createdIds.has(id)) link.customersLinked++;
+      await writeVenueRow(cust, v);
+      await refreshCache(cache, id);
+    },
+    exportObjects: async () => {
+      const list = await Customers.all();
+      return list.flatMap((rec) =>
+        (rec.locations || [])
+          // An unnamed, address-less D85 placeholder is an app artifact, not
+          // data — exporting it would only produce a row that fails re-import.
+          .filter((l) => (l.label || "").trim() || (l.address || "").trim())
+          .map((l) => ({
+            customer: rec.name || "",
+            customerId: rec.id,
+            venue: l.label || "",
+            address: l.address || "",
+            city: l.city || "",
+            state: l.state || "",
+            zip: l.zip || "",
+            kind: l.kind || "",
+            notes: "",
+          }))
       );
     },
   },

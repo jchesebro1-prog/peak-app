@@ -1275,6 +1275,62 @@ async function main() {
     assert.equal(back.errored, 0, "#137 T5 export → re-import errors nothing");
   }
 
+  // #137 T6 — venues import: link by name + id, zip + category persist, the first venue claims the unnamed base venue, auto-create, idempotent, export round-trip
+  {
+    await upsertCustomer({ id: "c-t137-vn", name: "T137 Venues District", type: "Education", locations: [], contacts: [] });
+    assert.equal((await getCustomer("c-t137-vn"))!.locations.length, 1, "#137 T6 fixture: a new customer starts with its unnamed D85 base venue");
+    const csv1 = [
+      "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category,Notes",
+      "T137 Venues District,,Main Auditorium,5000 N Ballard Rd,Appleton,WI,54913,theatre,",
+      ",c-t137-vn,Black Box,5000 N Ballard Rd,Appleton,WI,54913-1234,black box,",
+      "T137 Venue Church,,Sanctuary,1 Church St,Oshkosh,WI,54901,church,",
+    ].join("\n");
+    const r1 = await commitImport("venues", prepImport("venues", csv1), "skip");
+    assert.equal(r1.errored, 0, "#137 T6 no errors");
+    assert.equal(r1.created, 3, "#137 T6 three venues created");
+    assert.equal(r1.customersLinked, 2, "#137 T6 two rows linked (one by name, one by id)");
+    assert.equal(r1.customersCreated, 1, "#137 T6 one customer auto-created");
+    const d = await getCustomer("c-t137-vn");
+    assert.equal(d!.locations.length, 2, "#137 T6 the first venue claimed the unnamed base venue; the second appended");
+    const main = d!.locations.find((l) => l.label === "Main Auditorium");
+    const bb = d!.locations.find((l) => l.label === "Black Box");
+    assert.ok(main && bb, "#137 T6 both venues on the customer");
+    assert.equal(main!.zip, "54913", "#137 T6 venue zip persists");
+    assert.equal(main!.kind, "theatre", "#137 T6 venue Category → kind");
+    assert.equal(main!.address, "5000 N Ballard Rd", "#137 T6 venue address persists");
+    assert.equal(main!.primary, true, "#137 T6 the claimed base venue stays primary");
+    assert.equal(bb!.zip, "54913-1234", "#137 T6 ZIP+4 kept");
+    assert.equal(bb!.kind, "black box", "#137 T6 category kept as typed");
+    assert.equal(bb!.venueKind, "blackbox", "#137 T6 a new venue's venueKind derives from Category");
+    assert.equal(bb!.primary, false, "#137 T6 an appended venue is not primary");
+    const church = (await allCustomers()).find((c) => c.name === "T137 Venue Church");
+    assert.ok(church, "#137 T6 unmatched customer auto-created");
+    assert.equal(church!.locations.length, 1, "#137 T6 …with exactly one venue (the row's, on the base venue)");
+    assert.equal(church!.locations[0].label, "Sanctuary", "#137 T6 …named from the row");
+    assert.equal(church!.locations[0].zip, "54901", "#137 T6 …with its zip");
+
+    const r2 = await commitImport("venues", prepImport("venues", csv1), "skip");
+    assert.equal(r2.skipped, 3, "#137 T6 re-import skips all three");
+    assert.equal((await getCustomer("c-t137-vn"))!.updatedAt, d!.updatedAt, "#137 T6 a skipped re-import writes nothing (updatedAt unchanged)");
+    const r3 = await commitImport("venues", prepImport("venues", csv1), "update");
+    assert.equal(r3.updated, 3, "#137 T6 update mode re-imports without duplicating");
+    assert.equal((await getCustomer("c-t137-vn"))!.locations.length, 2, "#137 T6 no duplicate venues after re-imports");
+    // Same D83 contract the contacts file relies on above: re-importing an
+    // unchanged venues file is a no-change write, not a churn of the sites.
+    assert.equal((await getCustomer("c-t137-vn"))!.updatedAt, d!.updatedAt, "#137 T6 saving the same venues file twice leaves updatedAt unchanged (idempotent)");
+    assert.equal((await getCustomer(church!.id))!.updatedAt, church!.updatedAt, "#137 T6 …on the auto-created customer too");
+
+    const csv = await exportCsv("venues");
+    const exp = parseCsv(csv);
+    assert.equal(exp.headers.join(","), "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category,Notes", "#137 T6 venues export columns = template columns");
+    const row = exp.objects.find((o) => o["Customer ID"] === "c-t137-vn" && o["Venue Name"] === "Black Box");
+    assert.ok(row, "#137 T6 exported venue present");
+    assert.ok(row!.Zip === "54913-1234" && row!.Category === "black box" && row!.Customer === "T137 Venues District" && row!.Address === "5000 N Ballard Rd", "#137 T6 exported venue carries the customer's name + id and its fields");
+    const back = await commitImport("venues", prepImport("venues", csv).filter((r) => String(r.values.customer).startsWith("T137")), "skip");
+    assert.equal(back.created, 0, "#137 T6 export → re-import creates nothing (round-trip)");
+    assert.equal(back.errored, 0, "#137 T6 export → re-import errors nothing");
+  }
+
   console.log("review regression checks passed");
 }
 
