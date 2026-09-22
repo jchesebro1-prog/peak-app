@@ -81,6 +81,8 @@ import { accentContrast } from "@/lib/color";
 import { emailFor, legacyEmailFor } from "@/lib/team";
 import { gridProjectsSeed } from "@/db/seeds/grid-projects";
 import { quotesSeed } from "@/db/seeds/quotes";
+import { customersSeed } from "@/db/seeds/customers";
+import { vendorProfilesSeed } from "@/db/seeds/vendors";
 import ExcelJS from "exceljs";
 import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
 import { getTypeMeta } from "@/app/(app)/import/types";
@@ -584,17 +586,17 @@ ok(
 // Opportunities joined as the first child (#18) — six children as of plan 02.
 const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "crm");
 ok(
-  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 7),
-  "CRM has seven children — Quotes and Reviews moved to EST (D117), Opportunities added (#18), My Leads added (#22)",
+  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 8),
+  "CRM has eight children — Quotes and Reviews moved to EST (D117), Opportunities added (#18), My Leads added (#22), Vendors added (#122)",
 );
 ok(
   !!(
     d99Sales &&
     d99Sales.kind === "group" &&
     d99Sales.children.map((c) => c.key).join(",") ===
-      "opportunities,leads,myleads,companies,people,venues,field"
+      "opportunities,leads,myleads,companies,vendors,people,venues,field"
   ),
-  "CRM children are opportunities, leads, myleads, companies, people, venues, field in order",
+  "CRM children are opportunities, leads, myleads, companies, vendors, people, venues, field in order",
 );
 ok(
   parentGroupOf("companies") === "crm" &&
@@ -3168,6 +3170,17 @@ ok(vendorFromDateInput("2026-09-21") === new Date(2026, 8, 21).getTime() && vend
   ok(groups.length === 2 && groups[0].label === "Customers" && groups[1].label === "Vendors", "#122 groupCompanyOptions: Customers first, then Vendors");
   ok(groups[0].options.map((o) => o.value).join(",") === "badger,lakefront" && groups[1].options[0].value === "rose-brand", "#122 groupCompanyOptions: name-sorted within a group, vendors by exact type");
   ok(groupCompanyOptions([{ id: "x", name: "X", type: "Civic" }]).length === 1, "#122 groupCompanyOptions: an empty group is dropped");
+}
+
+/* ---- #122 §3 — nav + seed ---- */
+ok(activeKeyFor("/vendors") === "vendors" && activeKeyFor("/vendors/rose-brand") === "vendors" && parentGroupOf("vendors") === "crm", "#122 /vendors lights CRM › Vendors");
+ok(NAV.some((e) => e.kind === "group" && e.key === "crm" && e.children.some((c) => c.key === "vendors" && c.href === "/vendors")), "#122 Vendors sits in the CRM group");
+{
+  const vendorDocs = customersSeed().filter((c) => c.type === VENDOR_COMPANY_TYPE);
+  const seededProfiles = vendorProfilesSeed();
+  ok(vendorDocs.length === 1 && vendorDocs[0].id === "rose-brand" && vendorDocs[0].locations.length === 0, "#122 seed: one vendor company, no venues");
+  ok(seededProfiles.length === 1 && seededProfiles[0].id === "rose-brand" && seededProfiles[0].manufacturers.includes("Rose Brand"), "#122 seed: the profile claims the seeded catalog's manufacturer");
+  ok(seededProfiles[0].priceLists.length === 1 && seededProfiles[0].priceLists[0].effectiveAt <= Date.now(), "#122 seed: one ledger entry in the past so the pages have content");
 }
 
 /* --- final review item 3: the Catalog page parser reports which price columns the file carried --- pure */

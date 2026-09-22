@@ -1,4 +1,5 @@
 import type { CustomerDoc } from "@/lib/stores/customers";
+import { VENDOR_COMPANY_TYPE } from "@/lib/identity/config";
 
 /**
  * Customer directory seed — verbatim port of dirSeed() from app/customers.js
@@ -83,6 +84,19 @@ export function customersSeed(): CustomerDoc[] {
       ],
       contacts: [
         { name: "Derek Cole", role: "Venue Operations", email: "dcole@bayfrontarena.com", primary: true },
+      ],
+    },
+    // #122 — one seeded VENDOR so /vendors has content in dev: the
+    // manufacturer with the most seeded catalog parts (catalog.ts "Rose
+    // Brand"). No locations → the identity converter mints no venue.
+    {
+      id: "rose-brand",
+      name: "Rose Brand",
+      type: VENDOR_COMPANY_TYPE,
+      location: "Secaucus, NJ",
+      locations: [],
+      contacts: [
+        { name: "Marisol Vega", role: "Inside Sales, Midwest", email: "mvega@rosebrand.example", primary: true },
       ],
     },
   ];

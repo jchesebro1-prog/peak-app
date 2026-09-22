@@ -66,6 +66,8 @@ const ROUTES = [
   "/customers",
   "/companies",
   "/venues",
+  "/vendors", // #122 Vendors module
+  "/vendors?status=no-list&q=rose",
   "/leads",
   "/opportunities",
   "/schedule",
@@ -152,6 +154,13 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/customers/lakefront" }, // the legacy path — this entry tests that the redirect to /companies/[id] still resolves
   { route: "/venues/st-lakefront-1" }, // identity convert: st-${docId}-${n}
   { route: "/people/ct-lakefront-1" }, // identity convert: ct-${docId}-${m}
+  // #122 Vendors: the seeded vendor (seeds/customers.ts rose-brand → identity convert) and its tabs
+  { route: "/vendors/rose-brand" },
+  { route: "/vendors/rose-brand?tab=contacts" },
+  { route: "/vendors/rose-brand?tab=prices" },
+  { route: "/vendors/rose-brand?tab=activity" },
+  { route: "/inbox?customer=rose-brand" },
+  { route: "/inbox?customer=rose-brand&log=1" },
   { route: "/estimator?id=Q-2041" },
   { route: "/design/grid/GRD-5001", reject: "no longer exists" },
   // CE-1001 is not seeded directly: it is lazily minted by
