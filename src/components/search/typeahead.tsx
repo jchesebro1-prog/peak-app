@@ -80,12 +80,20 @@ export function Typeahead<T>({
   const pick = (item: T) => {
     onPick(item);
     setActive(0);
-    setQuery(labelOf ? labelOf(item) : "");
-    if (!stayOpen) setOpen(false);
+    if (!stayOpen) {
+      setQuery(labelOf ? labelOf(item) : "");
+      setOpen(false);
+    }
   };
 
   return (
-    <div ref={wrapRef} style={{ position: "relative" }}>
+    <div
+      ref={wrapRef}
+      style={{ position: "relative" }}
+      onBlur={(e) => {
+        if (!wrapRef.current?.contains(e.relatedTarget as Node)) setOpen(false);
+      }}
+    >
       <input
         role="combobox"
         aria-autocomplete="list"

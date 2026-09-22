@@ -125,6 +125,7 @@ export default function AssemblyBuilder({ initial, parts, priceDates }: { initia
                     filter={catalogFilter}
                     rank={catalogRank}
                     stayOpen={section.multi}
+                    max={20}
                     placeholder={`Search ${section.label.toLowerCase()}…`}
                     ariaLabel={`Search ${section.label.toLowerCase()}`}
                     inputStyle={{ ...input, padding: "7px 9px", fontSize: 12.5 }}
