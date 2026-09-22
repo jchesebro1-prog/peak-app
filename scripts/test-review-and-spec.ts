@@ -455,6 +455,8 @@ ok(designRedirect("/quotes", {}) === null,
   "unrelated paths are not redirected");
 ok(designRedirect("/consulting/CE-1001", { tab: "bogus" }) === "/design/engagements/CE-1001?tab=bogus",
   "unknown tab values pass through — the destination validates, not the redirect");
+ok(designRedirect("/design/subassemblies", {}) === "/design/assemblies?tab=subassemblies",
+  "#130 /design/subassemblies redirects to the Subassemblies tab of the Assembly Builder");
 
 /* --- design module nav (D97) --- */
 import { activeKeyFor, NAV, parentGroupOf } from "@/components/nav/nav-data";
@@ -465,6 +467,10 @@ ok(activeKeyFor("/design/engagements") === "designoverview",
   "/design/engagements resolves to the designoverview key");
 ok(activeKeyFor("/design/steel") === "designoverview",
   "/design/steel resolves to the designoverview key (segment-1 matching)");
+ok(activeKeyFor("/design/assemblies") === "assemblies",
+  "#130 /design/assemblies lights the Assembly Builder child");
+ok(activeKeyFor("/design/subassemblies") === "assemblies",
+  "#130 the old Subassemblies path lights the Assembly Builder child too");
 ok(NAV.some((e) => e.kind === "group" && e.key === "design"),
   "Design exists as a nav group");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "consulting"),
@@ -478,9 +484,11 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
 /* "grid" left when The Grid became a layout mode of Designs rather than a
  * tool of its own (D-grid-merge): the "designs" child is now labelled "The
  * Grid" and the standalone index it pointed at is gone. */
+/* "subassemblies" left the group when it became a tab of the Assembly
+ * Builder (#130) — /design/subassemblies redirects there. */
 const DESIGN_CHILDREN = [
   "designoverview", "engagements", "designs",
-  "steel", "lineset", "assemblies", "motors", "fixtures", "subassemblies",
+  "steel", "lineset", "assemblies", "motors", "fixtures",
 ];
 ok(
   !!designGroup && designGroup.kind === "group" &&

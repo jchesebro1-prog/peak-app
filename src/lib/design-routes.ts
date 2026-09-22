@@ -41,6 +41,9 @@ export function designRedirect(
     return "/design/engagements/" + rest + qs(pathname, query);
   }
 
+  // Subassemblies became a tab of the Assembly Builder (#130).
+  if (pathname === "/design/subassemblies") return "/design/assemblies?tab=subassemblies";
+
   if (pathname === "/design-studio") return "/design";
 
   // Weights was folded into the lineset builder — it has no standalone
