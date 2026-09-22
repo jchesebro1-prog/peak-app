@@ -3215,6 +3215,35 @@ async function xlsxFixture(): Promise<Buffer> {
   ok(!redeemHandoffCode("garbage", verifier, secret, now).ok, "redeem: garbage -> not ok");
 }
 
+/* --- #135 manual consulting projects (D155) --- */
+import { manualMilestoneSeeds, sweepIndexesEngagement } from "@/lib/consulting-stages";
+
+ok(JSON.stringify(manualMilestoneSeeds({ mode: "fixed", amount: 12000 })) === JSON.stringify([{ name: "Fee", targetDate: 0, amount: 12000 }]),
+  "#135: a fixed fee becomes ONE unscheduled 'Fee' milestone carrying the amount");
+ok(manualMilestoneSeeds({ mode: "fixed", amount: 0 }).length === 0 && manualMilestoneSeeds(null).length === 0 && manualMilestoneSeeds(undefined).length === 0,
+  "#135: no fee (or a zero fixed fee) seeds no milestones");
+const t135 = manualMilestoneSeeds({
+  mode: "milestones",
+  milestones: [
+    { name: " Schematic design ", targetDate: 1700000000000, amount: 5000 },
+    { name: "", targetDate: -5, amount: 2500 },
+    { name: "", targetDate: 0, amount: 0 },
+  ],
+});
+ok(t135.length === 2, `#135: rows with neither a name nor an amount are dropped (${t135.length})`);
+ok(t135[0].name === "Schematic design" && t135[0].targetDate === 1700000000000 && t135[0].amount === 5000,
+  "#135: milestone names are trimmed, dates and amounts kept");
+ok(t135[1].name === "Milestone" && t135[1].targetDate === 0 && t135[1].amount === 2500,
+  "#135: a blank name defaults to 'Milestone'; a negative date is unscheduled (0)");
+ok(!sweepIndexesEngagement({ origin: "manual", quoteId: null }),
+  "#135 (D155): the sweep skips a manual project that has no proposal");
+ok(sweepIndexesEngagement({ origin: "manual", quoteId: "Q-1" }),
+  "#135 (D155): once a proposal is attached the sweep tracks the row by that quote");
+ok(sweepIndexesEngagement({ quoteId: "Q-2" }) && sweepIndexesEngagement({ origin: "quote", quoteId: "Q-3" }),
+  "#135: quote-born rows (origin absent on pre-#135 docs, or 'quote') are indexed by their quote");
+ok(!sweepIndexesEngagement({ quoteId: "" }) && !sweepIndexesEngagement({ quoteId: null }),
+  "#135: a row with no quote id is never indexed");
+
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
   {

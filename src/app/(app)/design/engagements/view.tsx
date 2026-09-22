@@ -183,7 +183,7 @@ export function ConsultingView({
 function ConsultingList({ data }: { data: ConsultingData }) {
   const active = data.engagements.filter(isOpenEngagement);
   const feeBook = data.engagements.reduce(
-    (a, e) => a + feeTotals(e, data.quotesById[e.quoteId]?.value || 0).total,
+    (a, e) => a + feeTotals(e, (e.quoteId ? data.quotesById[e.quoteId]?.value : 0) || 0).total,
     0
   );
   const soon = data.engagements
@@ -219,7 +219,7 @@ function ConsultingList({ data }: { data: ConsultingData }) {
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
           {data.engagements.map((e) => {
-            const q = data.quotesById[e.quoteId];
+            const q = e.quoteId ? data.quotesById[e.quoteId] : undefined;
             const fees = feeTotals(e, q?.value || 0);
             const ph = activePhase(e);
             const ms = nextMilestone(e);
@@ -316,7 +316,7 @@ function EngagementDetail({
   oversightExtra?: ReactNode;
 }) {
   const router = useRouter();
-  const q = data.quotesById[eng.quoteId];
+  const q = eng.quoteId ? data.quotesById[eng.quoteId] : undefined;
   const tabHref = (t: TabKey) => `/design/engagements/${encodeURIComponent(eng.id)}?tab=${t}`;
   const counts: Partial<Record<TabKey, number>> = {
     phases: eng.phases.length,
@@ -355,9 +355,11 @@ function EngagementDetail({
             Quote {q.id} · {money(q.value)} ({q.status})
           </Link>
         )}
-        <Link href={`/design/engagements/letter?id=${encodeURIComponent(eng.quoteId)}&kind=proposal`} style={{ color: "var(--accent)" }}>
-          Proposal / agreement
-        </Link>
+        {eng.quoteId && (
+          <Link href={`/design/engagements/letter?id=${encodeURIComponent(eng.quoteId)}&kind=proposal`} style={{ color: "var(--accent)" }}>
+            Proposal / agreement
+          </Link>
+        )}
         <Link href={`/design/engagements/letter?id=${encodeURIComponent(eng.id)}&kind=spec`} style={{ color: "var(--accent)" }}>
           Spec package
         </Link>
@@ -415,12 +417,14 @@ function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngag
             <div>Company: <b>{eng.customer || "—"}</b></div>
             <div>Contact: <b>{eng.contactName || "—"}</b></div>
             <div>Site{eng.siteIds.length === 1 ? "" : "s"}: <b>{eng.siteIds.length ? eng.siteIds.join(", ") : "—"}</b></div>
-            <div>
-              Source quote:{" "}
-              <Link href={`/design/engagements/quote?id=${encodeURIComponent(eng.quoteId)}`} style={{ color: "var(--accent)" }}>
-                {eng.quoteId}
-              </Link>
-            </div>
+            {eng.quoteId && (
+              <div>
+                Source quote:{" "}
+                <Link href={`/design/engagements/quote?id=${encodeURIComponent(eng.quoteId)}`} style={{ color: "var(--accent)" }}>
+                  {eng.quoteId}
+                </Link>
+              </div>
+            )}
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span>Install quote:</span>
               <input

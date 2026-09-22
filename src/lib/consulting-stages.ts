@@ -188,6 +188,61 @@ export function milestoneSeeds(pay: {
   return [];
 }
 
+/* ---------- manual projects (#135, D155) ---------- */
+
+/** A manually entered fee — one fixed amount, or a milestone schedule.
+ *  Dates are epoch-ms; 0 = not scheduled yet (the Reports billing forecast
+ *  only counts targetDate > 0, exactly like quote-born milestones). */
+export type ManualFee =
+  | { mode: "fixed"; amount: number }
+  | {
+      mode: "milestones";
+      milestones: Array<{ name: string; targetDate: number; amount: number }>;
+    };
+
+/**
+ * What a manual engagement's milestones seed from — the pure half of
+ * createManualEngagement, mirroring milestoneSeeds above. A fixed fee becomes
+ * ONE unscheduled "Fee" milestone carrying the amount; a schedule keeps its
+ * rows (trimmed names, "Milestone" when blank, missing/negative dates → 0,
+ * negative amounts → 0) and drops rows that have neither a name nor an
+ * amount. Nothing here reads settings or the store.
+ */
+export function manualMilestoneSeeds(
+  fee: ManualFee | null | undefined
+): Array<{ name: string; targetDate: number; amount: number }> {
+  if (!fee) return [];
+  if (fee.mode === "fixed") {
+    const amount = Number(fee.amount) || 0;
+    return amount > 0 ? [{ name: "Fee", targetDate: 0, amount }] : [];
+  }
+  return (fee.milestones || [])
+    .map((m) => ({
+      name: String(m.name || "").trim(),
+      targetDate: Number(m.targetDate) > 0 ? Number(m.targetDate) : 0,
+      amount: Number(m.amount) > 0 ? Number(m.amount) : 0,
+    }))
+    .filter((m) => m.name || m.amount > 0)
+    .map((m) => ({ ...m, name: m.name || "Milestone" }));
+}
+
+/**
+ * Which engagement rows the quotes→engagements sweep indexes (D155). A
+ * manual project has no proposal until one is attached, so there is nothing
+ * for the sweep to reconcile — it must never create, advance, close or
+ * reopen such a row. Once a quote is attached the row is keyed by that quote
+ * and follows engagementSyncAction like any other; those rules only ever
+ * move proposal_sent and closed rows, so an awarded manual project is never
+ * demoted, and indexing it means the sweep can never mint a duplicate for
+ * the attached quote either.
+ */
+export function sweepIndexesEngagement<
+  T extends { origin?: string | null; quoteId?: string | null },
+>(e: T): e is T & { quoteId: string } {
+  if (e.origin === "manual" && !e.quoteId) return false;
+  return typeof e.quoteId === "string" && e.quoteId.length > 0;
+}
+
 /* ---------- assumptions library (#35) ---------- */
 
 /** DRAFT seed — replace from Peak's real consulting letter (Jeff homework,

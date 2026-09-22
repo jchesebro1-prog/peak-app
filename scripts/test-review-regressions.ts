@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { setRates as setFlameRates, getRates as getFlameRates } from "@/lib/flametest-engine";
 import { setRates as setRepairRates, getRates as getRepairRates } from "@/lib/repair-engine";
 import { setRates as setInspectionRates, getRates as getInspectionRates } from "@/lib/inspection-engine";
-import { ensureEngagementForQuote } from "@/lib/stores/engagements";
+import {
+  allEngagements,
+  attachQuoteToEngagement,
+  createManualEngagement,
+  ensureEngagementForQuote,
+  getEngagement,
+  syncEngagementsFromQuotes,
+} from "@/lib/stores/engagements";
 import { upsertDoc, patchDoc } from "@/db/doc-store";
 import type { Quote } from "@/lib/stores/quotes";
 import { contactByEmail } from "@/lib/identity/lookup";
@@ -734,6 +741,49 @@ async function main() {
       assert.equal(genuineThread?.assignedTo, "Dana Echo", "#96 echo window: the genuine assign command actually applied");
     }
   }
+
+  // #135 (D155) — a manual consulting project: created by hand, listed by
+  // the hub, ignored by the sweep, and later linked to a proposal without
+  // its milestones changing.
+  await syncEngagementsFromQuotes(); // settle any quote-born rows first
+  const manual = await createManualEngagement(
+    {
+      customerId: "t135-co",
+      customer: "T135 School District",
+      name: "T135 Auditorium study",
+      architect: { company: "T135 Architects", contact: "Pat" },
+      siteId: "t135-site",
+      contactName: "Sam",
+      fee: { mode: "fixed", amount: 8000 },
+      phases: ["Assessment", "Schematic Design"],
+    },
+    { name: "Tester" }
+  );
+  assert.equal(manual.origin, "manual", "#135 manual row is stamped origin=manual");
+  assert.equal(manual.quoteId, null, "#135 manual row has no quote");
+  assert.equal(manual.status, "awarded", "#135 manual row is born awarded");
+  assert.deepEqual(manual.milestones.map((m) => [m.name, m.amount, m.targetDate]), [["Fee", 8000, 0]], "#135 fixed fee → one unscheduled Fee milestone");
+  assert.deepEqual(manual.phases.map((p) => p.name), ["Assessment", "Schematic Design"], "#135 phases come from the menu the action resolved");
+  assert.deepEqual(manual.siteIds, ["t135-site"], "#135 venue link kept");
+  const t135Before = (await allEngagements()).length;
+  await syncEngagementsFromQuotes();
+  const t135After = await allEngagements();
+  assert.equal(t135After.length, t135Before, "#135 the sweep neither duplicates nor drops the manual row");
+  assert.ok(t135After.some((e) => e.id === manual.id), "#135 the manual row is in the hub list");
+  const t135Still = await getEngagement(manual.id);
+  assert.equal(t135Still?.status, "awarded", "#135 the sweep leaves the manual row's stage alone");
+  assert.equal(t135Still?.milestones.length, 1, "#135 the sweep leaves the manual row's milestones alone");
+  // Attach a (draft, so the sweep has nothing to do) consulting proposal.
+  await upsertDoc("quotes", { ...quote, id: "Q-t135-attach", status: "draft" } as Quote & Record<string, unknown>);
+  await attachQuoteToEngagement(manual.id, "Q-t135-attach");
+  const t135Attached = await getEngagement(manual.id);
+  assert.equal(t135Attached?.quoteId, "Q-t135-attach", "#135 attach sets quoteId");
+  assert.equal(t135Attached?.origin, "manual", "#135 attach keeps origin=manual (provenance)");
+  assert.equal(t135Attached?.milestones.length, 1, "#135 attach never rewrites milestones");
+  await syncEngagementsFromQuotes();
+  const t135Twice = await allEngagements();
+  assert.equal(t135Twice.filter((e) => e.quoteId === "Q-t135-attach").length, 1, "#135 the sweep never mints a second engagement for an attached proposal");
+  assert.equal((await getEngagement(manual.id))?.status, "awarded", "#135 an awarded manual row is never demoted by the sweep");
 
   console.log("review regression checks passed");
 }
