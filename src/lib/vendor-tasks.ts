@@ -82,7 +82,13 @@ async function loadContext(onlyId?: string): Promise<Context> {
         openTask: open ? { id: open.id, title: open.title, assignee: open.assignee } : null,
       };
     });
-  const directory = manufacturerDirectory(parts, profiles).map((m) => ({
+  // Only LIVE vendors own a manufacturer (#122 I1): nothing cascades from
+  // softDeleteCompany to vendor_profiles, so a deleted vendor's claims would
+  // otherwise keep the manufacturer out of the "Unclaimed manufacturers"
+  // panel — hiding the one path that gives it back to a real vendor — and
+  // label it with a raw id pointing at a /vendors/<id> that 404s.
+  const live = profiles.filter((p) => nameById.has(p.id));
+  const directory = manufacturerDirectory(parts, live).map((m) => ({
     ...m,
     vendorName: m.vendorId ? (nameById.get(m.vendorId) ?? m.vendorId) : "",
   }));

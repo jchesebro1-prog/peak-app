@@ -53,7 +53,10 @@ export default async function CatalogPage({
   const isAdmin = can("manage_users", user.roles);
   const catalogOwner = resolveCatalogOwner(settings.catalogOwner, users);
   const vendorNameById = new Map(vendorCos.map((c) => [c.id, c.name]));
-  const vendorByKey = claimOwnerByKey(profiles);
+  // A soft-deleted vendor's profile keeps its claims (#122 I1) — count only
+  // LIVE vendors as owners, or the facet tooltip and the banner would link to
+  // a /vendors/<id> that 404s, labelled with the raw id.
+  const vendorByKey = claimOwnerByKey(profiles.filter((p) => vendorNameById.has(p.id)));
   /** #122 — the vendor that claims a manufacturer spelling, or null. */
   const vendorFor = (m: string): { id: string; name: string } | null => {
     const id = vendorByKey.get(mfrKey(m));

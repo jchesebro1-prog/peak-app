@@ -1241,6 +1241,30 @@ async function main() {
     );
   }
 
+  // #122 I1 — nothing cascades from softDeleteCompany to vendor_profiles, so a
+  // deleted vendor's claims must stop counting as ownership: the manufacturer
+  // returns to "Unclaimed manufacturers" (the only path back to a real vendor)
+  // instead of labelling the Catalog link with a raw id that 404s.
+  {
+    await upsertDoc("catalog_parts", {
+      id: "T122-I1", sku: "T122-I1", desc: "T122 I1 part", category: "Rigging", unit: "ea", list: 10, cost: 5, mfr: "T122 I1 Mfr",
+    });
+    const co = await createVendorCompany("Stranded Vendor T122");
+    await claimManufacturer(co.id, "T122 I1 Mfr");
+    const claimed = (await loadVendors(co.id)).directory.find((m) => m.name === "T122 I1 Mfr");
+    assert.equal(claimed?.vendorId, co.id, "#122 I1 fixture: a live vendor owns the manufacturer");
+    assert.equal(claimed?.vendorName, "Stranded Vendor T122", "#122 I1 fixture: …labelled by name, not by raw id");
+
+    await removeCustomer(co.id);
+    const after = (await loadVendors()).directory.find((m) => m.name === "T122 I1 Mfr");
+    assert.equal(after?.vendorId, null, "#122 I1 a soft-deleted vendor's manufacturer reappears as unclaimed");
+    assert.equal(after?.vendorName, "", "#122 I1 …with no dangling vendor link to label");
+    assert.ok(
+      (await getVendorProfile(co.id))?.manufacturers.includes("T122 I1 Mfr"),
+      "#122 I1 …while the deleted vendor's own profile keeps the claim (C1: nothing blanks it)"
+    );
+  }
+
   // #137 T1 — zip / kind / phone / website / mobile plumbing through the customer seam
   {
     await upsertCustomer({
