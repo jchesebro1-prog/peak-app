@@ -2,12 +2,9 @@
 
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
-import {
-  get as getCustomer,
-  type CustomerContact,
-  type CustomerLocation,
-} from "@/lib/stores/customers";
+import { get as getCustomer } from "@/lib/stores/customers";
 import { saveCustomerAction } from "@/app/(app)/companies/actions";
+import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
 import type { ContactInput, LocationInput } from "@/app/(app)/companies/types";
 import { builderPath, isServiceType, type IntakeSubmit } from "./types";
 
@@ -19,32 +16,6 @@ import { builderPath, isServiceType, type IntakeSubmit } from "./types";
  * directly is fine here: both files are server-only ("use server"), so this
  * is a plain function call, not a client import.
  */
-
-function toLocationInput(l: CustomerLocation): LocationInput {
-  return {
-    id: l.id,
-    label: l.label || "",
-    primary: !!l.primary,
-    address: l.address || "",
-    city: l.city || "",
-    state: l.state || "",
-    lat: l.lat == null || l.lat === "" ? null : Number(l.lat),
-    lng: l.lng == null || l.lng === "" ? null : Number(l.lng),
-    venueKind: l.venueKind || "proscenium",
-    travelMiles: l.travelMiles,
-    travelMin: l.travelMin,
-  };
-}
-
-function toContactInput(c: CustomerContact): ContactInput {
-  return {
-    name: c.name,
-    role: c.role || "",
-    email: c.email || "",
-    phone: c.phone || "",
-    primary: !!c.primary,
-  };
-}
 
 export async function createQuoteIntakeAction(
   input: IntakeSubmit

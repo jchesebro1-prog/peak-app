@@ -79,6 +79,7 @@ import {
 } from "@/app/(app)/import/parse";
 // Pure (no store access, no DB) — see the note on catalogPatch itself.
 import { catalogPatch } from "@/app/(app)/import/registry";
+import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
 
 import {
   VENUE_CLASSES, SUBTYPES, VISIT_PURPOSES, classMeasureFields,
@@ -5284,4 +5285,24 @@ async function archiveAsyncChecks(): Promise<void> {
     const r = await archiveRecordings(h.deps);
     ok(r.archived === 5 && uploads === 5, "archiveRecordings caps a run at 5 uploads (spec §5.2)");
   }
+}
+
+/* ======================================================================
+   #137 T2 — shared CustomerLocation / CustomerContact → input converters
+   (companies/lib.ts). Every field carries through so a save that starts
+   from a stored record never drops what the record holds.
+   ====================================================================== */
+{
+  const li = toLocationInput({
+    id: "lf1", locationName: "Campus", label: "Main Hall", primary: true, address: "1 Main", city: "Milwaukee", state: "WI",
+    zip: "53202", kind: "theatre", lat: "43.04", lng: null, venueKind: "proscenium", travelMiles: null, travelMin: 12,
+  });
+  ok(li.locationName === "Campus", "#137 T2 toLocationInput keeps locationName (the #96 review follow-up)");
+  ok(li.zip === "53202" && li.kind === "theatre", "#137 T2 toLocationInput carries zip + kind");
+  ok(li.lat === 43.04 && li.lng === null && li.travelMin === 12, "#137 T2 toLocationInput numbers lat, nulls blank lng, keeps travel");
+  const li2 = toLocationInput({ primary: false, venueKind: "church", travelMiles: null, travelMin: null });
+  ok(li2.zip === undefined && li2.kind === undefined && li2.label === "" && li2.locationName === "" && li2.venueKind === "church", "#137 T2 toLocationInput: absent zip/kind stay undefined (= preserve), text fields blank");
+  const ci = toContactInput({ name: "Maria Lopez", role: "TD", email: "m@x.org", phone: "1", mobile: "2", primary: true });
+  ok(ci.mobile === "2" && ci.phone === "1" && ci.role === "TD" && ci.primary, "#137 T2 toContactInput carries mobile");
+  ok(toContactInput({ name: "S", role: "", email: "", primary: false }).mobile === undefined, "#137 T2 toContactInput: absent mobile stays undefined");
 }

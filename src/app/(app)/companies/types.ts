@@ -11,6 +11,10 @@ export type LocationInput = {
   address: string;
   city: string;
   state: string;
+  /** #137 — carried through so a modal / quick-add save never drops an
+   *  imported zip or venue category (absent = preserve, see writeRecord). */
+  zip?: string;
+  kind?: string;
   lat: number | null;
   lng: number | null;
   venueKind: string;
@@ -23,6 +27,8 @@ export type ContactInput = {
   role: string;
   email: string;
   phone: string;
+  /** #137 — mobile channel; absent = preserve. */
+  mobile?: string;
   primary: boolean;
 };
 

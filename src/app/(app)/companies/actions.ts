@@ -73,6 +73,9 @@ export async function saveCustomerAction(input: SaveCustomerInput) {
       address: (l.address || "").trim(),
       city: (l.city || "").trim(),
       state: (l.state || "").trim(),
+      // #137 — undefined stays undefined (= preserve); normalizeRecord trims.
+      zip: l.zip,
+      kind: l.kind,
       lat: l.lat,
       lng: l.lng,
       venueKind: l.venueKind || "proscenium",
@@ -86,6 +89,7 @@ export async function saveCustomerAction(input: SaveCustomerInput) {
         role: (c.role || "").trim(),
         email: (c.email || "").trim(),
         phone: (c.phone || "").trim(),
+        mobile: c.mobile,
         primary: !!c.primary,
       })),
     ...extras,

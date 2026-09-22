@@ -1,8 +1,5 @@
-import type {
-  CustomerDoc,
-  CustomerLocation,
-} from "@/lib/stores/customers";
-import type { AddressHitVM } from "./types";
+import type { CustomerContact, CustomerDoc, CustomerLocation } from "@/lib/stores/customers";
+import type { AddressHitVM, ContactInput, LocationInput } from "./types";
 
 /**
  * Customers — shared, client-safe view helpers (ports of the display logic in
@@ -122,4 +119,38 @@ export function moneyK(n: number | null | undefined): string {
     picker in settings-client.tsx applies (`r.street || r.title`). */
 export function addressFromHit(h: Pick<AddressHitVM, "street" | "title">): string {
   return h.street || h.title;
+}
+
+/** CustomerLocation → LocationInput with EVERY field carried — locationName
+ *  (the #96 review follow-up: the quote-intake copy dropped it and cleared
+ *  the campus name on save) and #137's zip/kind included. Absent zip/kind
+ *  stay undefined, which writeRecord reads as "preserve". */
+export function toLocationInput(l: CustomerLocation): LocationInput {
+  return {
+    id: l.id,
+    locationName: l.locationName || "",
+    label: l.label || "",
+    primary: !!l.primary,
+    address: l.address || "",
+    city: l.city || "",
+    state: l.state || "",
+    zip: l.zip,
+    kind: l.kind,
+    lat: l.lat == null || l.lat === "" ? null : Number(l.lat),
+    lng: l.lng == null || l.lng === "" ? null : Number(l.lng),
+    venueKind: l.venueKind || "proscenium",
+    travelMiles: l.travelMiles,
+    travelMin: l.travelMin,
+  };
+}
+
+export function toContactInput(c: CustomerContact): ContactInput {
+  return {
+    name: c.name,
+    role: c.role || "",
+    email: c.email || "",
+    phone: c.phone || "",
+    mobile: c.mobile,
+    primary: !!c.primary,
+  };
 }
