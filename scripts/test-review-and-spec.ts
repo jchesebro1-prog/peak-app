@@ -12,7 +12,7 @@ import {
 } from "@/lib/gmail/config";
 import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
-import { planLabelCommands } from "@/lib/gmail/label-interpret";
+import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
   msOf as opMsOf,
@@ -3041,6 +3041,47 @@ ok(
 );
 const planWork = planLabelCommands(["Peak/Projects/P-1", "Peak/Leads/L-1", "Peak/Quotes/Q-1"]);
 ok(planWork.length === 3 && planWork.every((c) => c.kind === "work"), "plan: every work-link label is its own independent command");
+
+/* ---- #96 §3 review fix (Critical) — collapse per-message history records
+ * into one event per thread, so a thread-wide Gmail label doesn't plan (and
+ * apply) its command once per message on a multi-message thread. ---- */
+const collapsed = collapseLabelEventsByThread([
+  { messageId: "m1", threadId: "T1", added: ["L-newlead"], removed: [] },
+  { messageId: "m2", threadId: "T1", added: ["L-newlead", "L-done"], removed: [] },
+  { messageId: "m3", threadId: "T1", added: [], removed: [] },
+]);
+ok(collapsed.length === 1, "collapse: three same-thread events become one");
+ok(
+  collapsed[0].messageIds.join(",") === "m1,m2,m3",
+  "collapse: keeps every message id that contributed to the thread"
+);
+ok(
+  [...collapsed[0].added].sort().join(",") === "L-done,L-newlead",
+  "collapse: unions and dedupes added label ids across the thread's messages"
+);
+const collapsedPlan = planLabelCommands(
+  collapsed[0].added.filter((id) => id === "L-newlead").map(() => "Peak/New lead")
+);
+ok(collapsedPlan.length === 1, "collapse: the New-lead command plans exactly once from a collapsed thread event");
+
+const collapsedTwoThreads = collapseLabelEventsByThread([
+  { messageId: "m1", threadId: "T1", added: ["L-a"], removed: [] },
+  { messageId: "m2", threadId: "T2", added: ["L-b"], removed: [] },
+]);
+ok(collapsedTwoThreads.length === 2, "collapse: distinct threads never merge");
+
+const collapsedAddWinsOverRemove = collapseLabelEventsByThread([
+  { messageId: "m1", threadId: "T1", added: [], removed: ["L-x"] },
+  { messageId: "m2", threadId: "T1", added: ["L-x"], removed: [] },
+]);
+ok(
+  collapsedAddWinsOverRemove[0].added.includes("L-x") && !collapsedAddWinsOverRemove[0].removed.includes("L-x"),
+  "collapse: a label id added by one message and removed by another nets to added (added wins)"
+);
+ok(
+  collapseLabelEventsByThread([]).length === 0,
+  "collapse: an empty events array collapses to no threads"
+);
 
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();

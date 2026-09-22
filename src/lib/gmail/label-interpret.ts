@@ -60,6 +60,56 @@ async function findCustomerBySanitizedName(name: string): Promise<{ id: string; 
   return matches.length === 1 ? { id: matches[0].id, name: matches[0].name } : null;
 }
 
+/** One collapsed Peak/* label change per Gmail thread — see
+ *  collapseLabelEventsByThread below. */
+export type CollapsedLabelEvent = {
+  threadId: string;
+  messageIds: string[];
+  added: string[];
+  removed: string[];
+};
+
+/**
+ * Pure: collapse Gmail's per-MESSAGE history records into one event per
+ * THREAD. Gmail's history API returns a separate labelAdded/labelRemoved
+ * record for every message when a label is applied to a whole thread from
+ * the Gmail UI, and api.ts's history walk flattens those into one
+ * GmailLabelEvent per message — all sharing the same threadId. Without this
+ * collapse, interpretLabelEvents iterated one command-plan per message, so a
+ * `Peak/New lead` applied to an N-message thread spawned N duplicate leads
+ * (the guard reads a single in-memory thread snapshot whose `.link` never
+ * reflects an earlier iteration's own setLink patch within the same call).
+ *
+ * added/removed label ids are unioned and deduped across every message event
+ * for the same thread. If a label id shows up in both sets for a thread
+ * (e.g. one message's record adds it, another's removes it — order isn't
+ * guaranteed), added wins: it's a net add, mirroring the writer's
+ * thread-wide-set approach (commit 2414a04) rather than the two canceling
+ * out and silently doing nothing.
+ */
+export function collapseLabelEventsByThread(events: GmailLabelEvent[]): CollapsedLabelEvent[] {
+  const byThread = new Map<
+    string,
+    { threadId: string; messageIds: string[]; added: Set<string>; removed: Set<string> }
+  >();
+  for (const ev of events) {
+    let c = byThread.get(ev.threadId);
+    if (!c) {
+      c = { threadId: ev.threadId, messageIds: [], added: new Set(), removed: new Set() };
+      byThread.set(ev.threadId, c);
+    }
+    c.messageIds.push(ev.messageId);
+    for (const id of ev.added) c.added.add(id);
+    for (const id of ev.removed) c.removed.add(id);
+  }
+  return Array.from(byThread.values()).map((c) => ({
+    threadId: c.threadId,
+    messageIds: c.messageIds,
+    added: Array.from(c.added),
+    removed: Array.from(c.removed).filter((id) => !c.added.has(id)),
+  }));
+}
+
 /**
  * Interpret Gmail-side Peak/* label changes for one mailbox's incremental
  * history page. `events` are keyed by Gmail thread id (label ids, resolved
@@ -78,7 +128,7 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
   );
   let applied = 0;
 
-  for (const ev of events) {
+  for (const ev of collapseLabelEventsByThread(events)) {
     const t = byGmailThread.get(ev.threadId);
     if (!t) continue;
     const addedNames = ev.added.map((id) => idToName.get(id) || "").filter((n) => n.startsWith("Peak/"));
@@ -103,14 +153,18 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
         await setStatus(t.id, cmd.status);
         applied++;
       } else if (cmd.kind === "assign") {
-        const u = (await activeUsers()).find(
+        // Ambiguous -> skip, never guess (mirrors the customer path's
+        // length === 1 requirement below). Two active users can share a
+        // first name; picking the first Array.find() happens to return is
+        // a coin flip on who gets assigned, so require exactly one match.
+        const matches = (await activeUsers()).filter(
           (x) => x.name.split(" ")[0].toLowerCase() === cmd.firstName.toLowerCase()
         );
-        if (u) {
-          await assign(t.id, u.name);
+        if (matches.length === 1) {
+          await assign(t.id, matches[0].name);
           applied++;
         } else {
-          console.warn("[gmail] Peak/Assign/" + cmd.firstName + " matched no active user — skipped", t.id);
+          console.warn("[gmail] ambiguous/unknown assignee, skipping:", cmd.firstName, t.id);
         }
       } else if (cmd.kind === "customer") {
         const c = await findCustomerBySanitizedName(cmd.name);
@@ -181,10 +235,14 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
     }
 
     // Record what Gmail now holds so the writer's next pass sees "already
-    // in sync" instead of echoing this change straight back.
+    // in sync" instead of echoing this change straight back. A collapsed
+    // event can span every message in the thread (Gmail stamps the label on
+    // each one), so update every message this event actually touched, not
+    // just one.
+    const touchedMessageIds = new Set(ev.messageIds);
     await patchDoc<CommThread>("comms", t.id, (d) => {
       d.messages = (d.messages || []).map((m) =>
-        m.gmailId === ev.messageId
+        m.gmailId && touchedMessageIds.has(m.gmailId)
           ? {
               ...m,
               gmailLabelIds: Array.from(

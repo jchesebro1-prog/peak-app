@@ -507,8 +507,12 @@ async function syncMailboxMessages(
   key: MailboxKey,
   info: NonNullable<Awaited<ReturnType<typeof getConnectionInfo>>>,
   known: Set<string>
-): Promise<{ last: string | null; more: boolean }> {
+): Promise<{ last: string | null; more: boolean; labelsChanged: boolean }> {
   let last: string | null = null;
+  // Tracked separately from `last` (#96 review Minor 2): `last` must stay a
+  // real Gmail thread id or null (pollInbound's `id` return is documented as
+  // one), never a sentinel string standing in for "something changed".
+  let labelsChanged = false;
 
   if (!info.initialImportDone) {
     // One-time 90-day history import — resumable, chunked, quota-safe (#97).
@@ -534,7 +538,7 @@ async function syncMailboxMessages(
             // (initialImportDone stays false) and retry on the next sync.
             console.warn("[gmail] import paused (quota) for", key);
             await updateSyncState(key, { lastSyncAt: Date.now() });
-            return { last, more: false };
+            return { last, more: false, labelsChanged };
           }
           throw err;
         }
@@ -550,7 +554,7 @@ async function syncMailboxMessages(
           // cheaply, thanks to `known`.
           console.info("[gmail] import chunk done for", key, "— more remain");
           await updateSyncState(key, { lastSyncAt: Date.now() });
-          return { last, more: true };
+          return { last, more: true, labelsChanged };
         }
       }
       pageToken = page.nextPageToken;
@@ -562,7 +566,7 @@ async function syncMailboxMessages(
       historyId: profile.historyId,
       lastSyncAt: Date.now(),
     });
-    return { last, more: false };
+    return { last, more: false, labelsChanged };
   }
 
   // incremental: changes since the stored cursor
@@ -570,7 +574,7 @@ async function syncMailboxMessages(
   if (!stored) {
     const profile = await getProfile(key);
     await updateSyncState(key, { historyId: profile.historyId, lastSyncAt: Date.now() });
-    return { last, more: false };
+    return { last, more: false, labelsChanged };
   }
   try {
     let pageToken: string | undefined;
@@ -592,7 +596,7 @@ async function syncMailboxMessages(
     // message sync that already succeeded above.
     try {
       const applied = await interpretLabelEvents(key, labelEvents);
-      if (applied) last = last || "labels";
+      if (applied) labelsChanged = true;
     } catch (err) {
       console.error("[gmail] label interpret failed for", key, err);
     }
@@ -604,7 +608,7 @@ async function syncMailboxMessages(
       // entries instead of silently dropping them.
       console.warn("[gmail] poll paused (quota) for", key);
       await updateSyncState(key, { lastSyncAt: Date.now() });
-      return { last, more: false };
+      return { last, more: false, labelsChanged };
     }
     // cursor too old (404) → reset baseline to now; a manual re-import can
     // widen the window later.
@@ -612,7 +616,7 @@ async function syncMailboxMessages(
     const profile = await getProfile(key);
     await updateSyncState(key, { historyId: profile.historyId, lastSyncAt: Date.now() });
   }
-  return { last, more: false };
+  return { last, more: false, labelsChanged };
 }
 
 /** Import + poll one mailbox, then reconcile Gmail-side INBOX state onto its
@@ -636,6 +640,7 @@ async function syncMailbox(
   if (!(await claimSyncSlot(key, claimMinAgeMs)))
     return { ran: false, last: null, changed: false };
   let last: string | null = null;
+  let labelsChanged = false;
   try {
     // Built once for this run (not per chunk) and passed through — a manual
     // Send/Receive click can drain several chunks back-to-back, and rebuilding
@@ -645,12 +650,13 @@ async function syncMailbox(
     const started = Date.now();
     let chunks = 0;
     let lastChunkMs = 0;
-    let r: { last: string | null; more: boolean };
+    let r: { last: string | null; more: boolean; labelsChanged: boolean };
     do {
       const chunkStarted = Date.now();
       r = await syncMailboxMessages(key, info, known);
       lastChunkMs = Date.now() - chunkStarted;
       if (r.last) last = r.last;
+      if (r.labelsChanged) labelsChanged = true;
     } while (
       r.more &&
       Date.now() - started + lastChunkMs < IMPORT_RUN_BUDGET_MS &&
@@ -685,7 +691,7 @@ async function syncMailbox(
   } catch (err) {
     console.error("[gmail] label sync failed for", key, err);
   }
-  return { ran: true, last, changed: last !== null || flips > 0 };
+  return { ran: true, last, changed: last !== null || flips > 0 || labelsChanged };
 }
 
 /** Read the persisted Gmail history cursor for a mailbox. */

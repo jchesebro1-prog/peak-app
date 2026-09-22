@@ -18,7 +18,8 @@ import {
 import type { CommThread } from "@/lib/stores/comms";
 import { interpretLabelEvents } from "@/lib/gmail/label-interpret";
 import { saveConnection, replaceLabels } from "@/lib/gmail/connections";
-import { get as getLead } from "@/lib/stores/leads";
+import { get as getLead, getAll as getAllLeads } from "@/lib/stores/leads";
+import { addUser } from "@/lib/users";
 
 async function main() {
   const flame = await setFlameRates({ laborRate: 123, mileageRate: 1.23 });
@@ -533,6 +534,122 @@ async function main() {
     assert.equal(appliedStatus, 1, "#96 Task 11 a status label applies exactly one command");
     const statusThread = await getDoc<CommThread>("comms", "C-t11-status");
     assert.equal(statusThread?.status, "closed", "#96 Task 11 Peak/Status/Done sets the thread status to closed");
+
+    // #96 §3 review fix (Critical) — Gmail's history API returns a SEPARATE
+    // labelAdded record per MESSAGE when a label is applied to the whole
+    // thread from the Gmail UI; api.ts flattens those into one
+    // GmailLabelEvent per message, all sharing the same threadId. Feed
+    // interpretLabelEvents exactly that shape (3 events, same thread, same
+    // label) and prove it collapses them into a single New-lead command
+    // instead of spawning one duplicate lead per message.
+    await replaceLabels(mailboxKey, [
+      { id: "L-t11-newlead", name: "Peak/New lead", type: "user" },
+      { id: "L-t11-statusdone", name: "Peak/Status/Done", type: "user" },
+      { id: "L-t11-assignchris", name: "Peak/Assign/Chris", type: "user" },
+    ]);
+    {
+      const realFetch = global.fetch;
+      let modifyCalls = 0;
+      (global as any).fetch = async (url: string, init?: RequestInit) => {
+        const u = String(url);
+        const method = (init?.method || "GET").toUpperCase();
+        if (u.includes("/labels") && method === "POST") {
+          return new Response(JSON.stringify({ id: "L-t11-newleadid-multi", name: "Peak/Leads/fake" }), { status: 200 });
+        }
+        if (u.includes("/modify") && method === "POST") {
+          modifyCalls++;
+          return new Response(JSON.stringify({}), { status: 200 });
+        }
+        return realFetch(url, init as any);
+      };
+      try {
+        await upsertDoc<any>("comms", {
+          id: "C-t11-newlead-multi",
+          mailbox: "sales",
+          unread: false,
+          archived: false,
+          customerId: null,
+          customer: "",
+          contactName: "Multi Message",
+          contactEmail: "multi@t11-newlead.example",
+          subject: "Quote request (multi)",
+          channel: "email",
+          status: "waiting_us",
+          assignedTo: "",
+          link: null,
+          messages: [
+            { id: "m1", at: Date.now(), direction: "in", channel: "email", author: "Multi Message", body: "Hi 1", gmailId: "g-t11-mm-1" },
+            { id: "m2", at: Date.now(), direction: "in", channel: "email", author: "Multi Message", body: "Hi 2", gmailId: "g-t11-mm-2" },
+            { id: "m3", at: Date.now(), direction: "out", channel: "email", author: "Peak", body: "Reply", gmailId: "g-t11-mm-3" },
+          ],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          gmailThreadId: "g-t11-thread-newlead-multi",
+          gmailAccountKey: mailboxKey,
+          resolution: "unknown",
+        } as any);
+
+        const multiMessageEvent = [
+          { messageId: "g-t11-mm-1", threadId: "g-t11-thread-newlead-multi", added: ["L-t11-newlead"], removed: [] },
+          { messageId: "g-t11-mm-2", threadId: "g-t11-thread-newlead-multi", added: ["L-t11-newlead"], removed: [] },
+          { messageId: "g-t11-mm-3", threadId: "g-t11-thread-newlead-multi", added: ["L-t11-newlead"], removed: [] },
+        ];
+        const leadsBefore = (await getAllLeads()).length;
+        const appliedMulti = await interpretLabelEvents(mailboxKey, multiMessageEvent);
+        assert.equal(appliedMulti, 1, "#96 Task 11 collapse: a multi-message thread's repeated label applies the New-lead command exactly once");
+        const leadsAfter = (await getAllLeads()).length;
+        assert.equal(leadsAfter, leadsBefore + 1, "#96 Task 11 collapse: a 3-message thread spawns exactly one lead, not three");
+        assert.equal(modifyCalls, 1, "#96 Task 11 collapse: the Gmail label swap fires exactly once for the thread, not once per message");
+        const multiThread = await getDoc<CommThread>("comms", "C-t11-newlead-multi");
+        assert.ok(multiThread?.link?.type === "lead", "#96 Task 11 collapse: the thread links to the spawned lead");
+
+        // Re-delivery of the SAME already-collapsed thread event (a retry,
+        // or a later sync page) must still be a no-op — idempotency holds
+        // whether the duplicate arrives within one call (collapse) or
+        // across calls (the guard).
+        const appliedMultiAgain = await interpretLabelEvents(mailboxKey, multiMessageEvent);
+        assert.equal(appliedMultiAgain, 0, "#96 Task 11 collapse: redelivering the same multi-message event a second time is a no-op");
+      } finally {
+        (global as any).fetch = realFetch;
+      }
+    }
+
+    // #96 review fix — ambiguous assignee: two active users sharing a first
+    // name must never let a bare Array.find() pick winner-take-first; the
+    // assign command is skipped entirely rather than guessing.
+    {
+      await addUser({ name: "Chris Alpha" });
+      await addUser({ name: "Chris Beta" });
+      await upsertDoc<any>("comms", {
+        id: "C-t11-assign-ambiguous",
+        mailbox: "sales",
+        unread: false,
+        archived: false,
+        customerId: null,
+        customer: "",
+        contactName: "Someone Else",
+        contactEmail: "someone-else@t11-assign.example",
+        subject: "Assign test",
+        channel: "email",
+        status: "waiting_us",
+        assignedTo: "",
+        link: null,
+        messages: [
+          { id: "m1", at: Date.now(), direction: "in", channel: "email", author: "Someone Else", body: "Hi", gmailId: "g-t11-assign-m1" },
+        ],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        gmailThreadId: "g-t11-thread-assign",
+        gmailAccountKey: mailboxKey,
+        resolution: "unknown",
+      } as any);
+      const appliedAmbiguous = await interpretLabelEvents(mailboxKey, [
+        { messageId: "g-t11-assign-m1", threadId: "g-t11-thread-assign", added: ["L-t11-assignchris"], removed: [] },
+      ]);
+      assert.equal(appliedAmbiguous, 0, "#96 an ambiguous Peak/Assign/<firstName> (two active users share it) applies no command");
+      const ambiguousThread = await getDoc<CommThread>("comms", "C-t11-assign-ambiguous");
+      assert.equal(ambiguousThread?.assignedTo, "", "#96 an ambiguous assign never guesses — assignedTo stays unset");
+    }
   }
 
   console.log("review regression checks passed");
