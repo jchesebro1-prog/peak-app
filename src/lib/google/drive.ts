@@ -17,16 +17,21 @@ export const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
 export const DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
 export const DRIVE_FOLDER_MIME = "application/vnd.google-apps.folder";
 
-/** Metadata calls (search / create / initiate) — same budget as tasks.ts. */
-const META_TIMEOUT_MS = 10_000;
+/** Metadata calls (search / create / initiate) — same budget as tasks.ts.
+ *  Exported so other Drive-touching routes (the engagement-files download
+ *  proxy's live parent-folder check, #145) carry the same budget instead of
+ *  inventing their own. */
+export const META_TIMEOUT_MS = 10_000;
 /**
- * The byte PUT. A single PUT of the whole file is fine for our sizes (the
- * client-upload token caps audio at 1 GB, spec §7) but it has to finish
- * inside the 60 s function budget the nightly cron runs under — hence the
- * ≤ 5-per-run cap in lib/krisp/archive.ts. Chunked resumable PUTs across
- * runs are a follow-up if a real venue walkthrough ever times out here.
+ * The byte PUT/GET. A single PUT of the whole file is fine for our sizes
+ * (the client-upload token caps audio at 1 GB, spec §7) but it has to
+ * finish inside the 60 s function budget the nightly cron runs under —
+ * hence the ≤ 5-per-run cap in lib/krisp/archive.ts. Chunked resumable PUTs
+ * across runs are a follow-up if a real venue walkthrough ever times out
+ * here. Also reused for the engagement-files proxy's `alt=media` download
+ * (#145) — same byte-transfer scale, same budget.
  */
-const UPLOAD_TIMEOUT_MS = 55_000;
+export const UPLOAD_TIMEOUT_MS = 55_000;
 
 export type DriveFetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -166,6 +171,70 @@ export async function ensureFolder(
   return id;
 }
 
+/**
+ * Walk a "A/B/C" path (as `engagementFolderPath` builds one, #145) into
+ * nested Drive folders via `ensureFolder`, creating whichever segments
+ * don't exist yet and returning the LEAF folder's id. Idempotent —
+ * `ensureFolder` searches before creating, so calling this again for the
+ * same path resolves the same folder id without creating a duplicate.
+ *
+ * That idempotency is also what makes this safe to call a SECOND time at
+ * READ time (the engagement-files download proxy re-resolves the same
+ * path to get an authoritative folder id to check a file's live `parents`
+ * against, rather than trusting anything stored) as well as at upload
+ * time.
+ */
+export async function ensureFolderPath(
+  token: string,
+  path: string,
+  opts: { fetch?: DriveFetch; cache?: FolderCache } = {}
+): Promise<string> {
+  let parentId: string | null = null;
+  for (const segment of path.split("/").filter(Boolean)) {
+    parentId = await ensureFolder(token, segment, parentId, opts);
+  }
+  if (!parentId) throw new DriveApiError(500, `Empty Drive folder path: "${path}"`);
+  return parentId;
+}
+
+/**
+ * Live ownership check for a Drive file id (#145): does `fileId`'s CURRENT
+ * `parents` actually include `expectedFolderId`? A Drive id is opaque and
+ * Google-assigned — nothing about its own shape can prove it belongs to a
+ * given engagement's folder, so unlike a Blob pathname (checked purely and
+ * structurally in `consulting-files.ts`) this has to ask Drive itself.
+ * That is the point: an attacker can forge what a note's stored `FileRef`
+ * claims, but not what Drive reports a file's actual parent to be.
+ *
+ * Fails CLOSED — any error (network, non-2xx, malformed body) returns
+ * `false` rather than throwing, so a caller's "may I stream/validate this"
+ * check never has to choose between "refuse" and "crash"; "couldn't
+ * verify" and "not owned" collapse to the same answer on purpose.
+ *
+ * Extracted so the engagement-files download proxy and
+ * `consulting-files-server.ts`'s `validateFileRefsForEngagement` — the two
+ * places this rule has to hold — share exactly one implementation.
+ */
+export async function driveFileHasParent(
+  token: string,
+  fileId: string,
+  expectedFolderId: string,
+  fetchImpl: DriveFetch = realFetch
+): Promise<boolean> {
+  try {
+    const res = await fetchImpl(`${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?fields=parents`, {
+      method: "GET",
+      headers: { Authorization: "Bearer " + token },
+      signal: AbortSignal.timeout(META_TIMEOUT_MS),
+    });
+    if (!res.ok) return false;
+    const meta = (await res.json()) as { parents?: string[] };
+    return Array.isArray(meta.parents) && meta.parents.includes(expectedFolderId);
+  } catch {
+    return false;
+  }
+}
+
 export type DriveUploadInput = {
   name: string;
   mimeType: string;
@@ -176,6 +245,50 @@ export type DriveUploadInput = {
 };
 
 export type DriveUploadResult = { id: string; webViewLink: string };
+
+/** Metadata needed to OPEN a resumable session — everything `initiateResumableSession`
+ *  needs before any byte has moved. */
+export type ResumableSessionInput = {
+  name: string;
+  mime: string;
+  parentId: string;
+  /** Exact byte length — Drive requires it up front for a resumable session. */
+  size: number;
+};
+
+/**
+ * #145 — initiate only, split out of `uploadFileResumable` below so a
+ * caller (the engagement-files upload route) can hand the returned session
+ * URL straight to the BROWSER, which then PUTs the bytes itself: the file
+ * never rides this app's request body, so a multi-megabyte drawing set
+ * never has to fit under a server action's ~1200kb cap or a Vercel
+ * function's ~4.5MB one.
+ *
+ * `uploadFileResumable` calls this and then performs the PUT itself, so its
+ * behaviour (headers sent, error mapping) is unchanged — see its own tests.
+ */
+export async function initiateResumableSession(
+  token: string,
+  input: ResumableSessionInput,
+  fetchImpl: DriveFetch = realFetch
+): Promise<string> {
+  const what = `starting an upload of "${input.name}"`;
+  const initiate = await fetchImpl(`${DRIVE_UPLOAD_BASE}/files?uploadType=resumable&fields=id,webViewLink`, {
+    method: "POST",
+    signal: AbortSignal.timeout(META_TIMEOUT_MS),
+    headers: {
+      Authorization: "Bearer " + token,
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-Upload-Content-Type": input.mime,
+      "X-Upload-Content-Length": String(input.size),
+    },
+    body: JSON.stringify({ name: input.name, mimeType: input.mime, parents: [input.parentId] }),
+  });
+  if (!initiate.ok) throw driveErrorFor(initiate.status, what, await bodyText(initiate));
+  const sessionUrl = initiate.headers.get("location") || initiate.headers.get("Location");
+  if (!sessionUrl) throw new DriveApiError(502, `Drive opened no upload session (missing Location) while ${what}.`);
+  return sessionUrl;
+}
 
 /**
  * Resumable upload (`uploadType=resumable`): one POST with the metadata to
@@ -191,20 +304,11 @@ export async function uploadFileResumable(
   const f = opts.fetch ?? realFetch;
   const what = `uploading "${input.name}"`;
 
-  const initiate = await f(`${DRIVE_UPLOAD_BASE}/files?uploadType=resumable&fields=id,webViewLink`, {
-    method: "POST",
-    signal: AbortSignal.timeout(META_TIMEOUT_MS),
-    headers: {
-      Authorization: "Bearer " + token,
-      "Content-Type": "application/json; charset=UTF-8",
-      "X-Upload-Content-Type": input.mimeType,
-      "X-Upload-Content-Length": String(input.size),
-    },
-    body: JSON.stringify({ name: input.name, mimeType: input.mimeType, parents: [input.parentId] }),
-  });
-  if (!initiate.ok) throw driveErrorFor(initiate.status, `starting ${what}`, await bodyText(initiate));
-  const sessionUrl = initiate.headers.get("location") || initiate.headers.get("Location");
-  if (!sessionUrl) throw new DriveApiError(502, `Drive opened no upload session (missing Location) while starting ${what}.`);
+  const sessionUrl = await initiateResumableSession(
+    token,
+    { name: input.name, mime: input.mimeType, parentId: input.parentId, size: input.size },
+    f
+  );
 
   const isStream = typeof ReadableStream !== "undefined" && input.body instanceof ReadableStream;
   const putInit: RequestInit & { duplex?: "half" } = {
