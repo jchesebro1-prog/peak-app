@@ -9,7 +9,12 @@ import { contactByEmail } from "@/lib/identity/lookup";
 import { emailsFor, saveContact, setEmails, softDeleteContact } from "@/lib/identity/contacts";
 import { claimDomain, customersForDomain } from "@/lib/gmail/domains";
 import { applyResolution, applyResweepPatch, resolveForThread, resweepThreads } from "@/lib/gmail/linking";
-import { syncPeakLabels, queueLabelSync, pendingLabelSyncCount } from "@/lib/gmail/label-sync";
+import {
+  syncPeakLabels,
+  queueLabelSync,
+  pendingLabelSyncCount,
+  awaitLabelSyncIdle,
+} from "@/lib/gmail/label-sync";
 import type { CommThread } from "@/lib/stores/comms";
 
 async function main() {
@@ -380,12 +385,36 @@ async function main() {
     1,
     "#96 queueLabelSync coalesces a second call for the same thread instead of double-queuing"
   );
-  // Let the (immediately-resolving, gate-off) chained sync settle and clear.
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  // Task 10 fix — the pending entry is removed at the START of its turn (not
+  // in a trailing `finally`), so a mutation landing mid-flight re-queues one
+  // trailing sync instead of being coalesced into a turn that already read
+  // the doc. awaitLabelSyncIdle() resolves only once the whole chain —
+  // including any such trailing sync — has drained.
+  await awaitLabelSyncIdle();
   assert.equal(
     pendingLabelSyncCount(),
     0,
     "#96 queueLabelSync's pending entry clears once the chained sync settles"
+  );
+
+  // Re-queue semantics: calling queueLabelSync twice back-to-back always
+  // yields exactly one pending entry before the first turn starts, and the
+  // chain always drains back to zero — whether or not a second call arrives
+  // while the first turn is already running.
+  assert.doesNotThrow(() => {
+    queueLabelSync("y");
+    queueLabelSync("y");
+  }, "#96 queueLabelSync must never throw on repeat calls");
+  assert.equal(
+    pendingLabelSyncCount(),
+    1,
+    "#96 queueLabelSync reflects exactly one pending entry before the first turn starts"
+  );
+  await awaitLabelSyncIdle();
+  assert.equal(
+    pendingLabelSyncCount(),
+    0,
+    "#96 awaitLabelSyncIdle only resolves once the chain (incl. any re-queued trailing sync) is fully drained"
   );
 
   console.log("review regression checks passed");

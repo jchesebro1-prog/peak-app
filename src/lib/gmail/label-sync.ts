@@ -112,18 +112,43 @@ let syncChain: Promise<void> = Promise.resolve();
  *  queued/in-flight (a no-op Set check), and chains every sync onto one
  *  serial promise so concurrent hooks across different threads never race
  *  each other's label-cache read/refresh. `syncPeakLabels` stays exported
- *  directly for tests. */
+ *  directly for tests.
+ *
+ *  The thread id is removed from `pendingSyncs` at the START of its turn —
+ *  immediately before `syncPeakLabels` runs — not in a `finally` after. That
+ *  way a mutation that lands mid-flight (after this turn already read the
+ *  doc) re-queues one trailing sync that picks up the fresh doc, instead of
+ *  being coalesced away by a still-pending Set entry. `.catch(() => {})` on
+ *  the chain assignment keeps a rejection from ever wedging `syncChain` for
+ *  every thread queued after it (syncPeakLabels already catches its own
+ *  errors, but this is belt-and-suspenders against the chain itself). */
 export function queueLabelSync(threadId: string): void {
   if (pendingSyncs.has(threadId)) return;
   pendingSyncs.add(threadId);
-  syncChain = syncChain.then(() =>
-    syncPeakLabels(threadId).finally(() => pendingSyncs.delete(threadId))
-  );
+  syncChain = syncChain
+    .then(() => {
+      pendingSyncs.delete(threadId);
+      return syncPeakLabels(threadId);
+    })
+    .catch(() => {});
 }
 
 /** Test hook — number of thread syncs currently queued or in flight. */
 export function pendingLabelSyncCount(): number {
   return pendingSyncs.size;
+}
+
+/** Test hook — resolves once the serial chain has fully drained (including
+ *  any trailing sync queued by a mutation that landed mid-flight). Reads
+ *  `syncChain` AFTER awaiting it once, in a loop, since a re-queue during the
+ *  await reassigns `syncChain` to a new, not-yet-awaited promise. */
+export async function awaitLabelSyncIdle(): Promise<void> {
+  let chain = syncChain;
+  for (;;) {
+    await chain;
+    if (chain === syncChain) return;
+    chain = syncChain;
+  }
 }
 
 export { PEAK_PREFIX };

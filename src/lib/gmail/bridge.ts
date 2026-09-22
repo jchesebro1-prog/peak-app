@@ -198,11 +198,14 @@ async function recordMessage(
   // attach to an existing thread sharing the Gmail thread id
   const existing = all.find((t) => t.gmailThreadId === p.gmailThreadId);
   if (existing) {
+    let statusChanged = false;
     await patchDoc<CommThread>("comms", existing.id, (d) => {
+      const prevStatus = d.status;
       d.messages = (d.messages || []).concat([msg]);
       d.updatedAt = Math.max(d.updatedAt || 0, p.at);
       d.messages.sort((a, b) => (a.at || 0) - (b.at || 0));
       d.status = deriveStatus(d);
+      statusChanged = d.status !== prevStatus;
       // Which Gmail account owns this thread id — reconcile scopes by this
       // (thread ids are per-account; display-name lookups can misattribute).
       if (!d.gmailAccountKey) d.gmailAccountKey = key;
@@ -213,7 +216,7 @@ async function recordMessage(
         d.archived = false;
       }
     });
-    queueLabelSync(existing.id);
+    if (statusChanged) queueLabelSync(existing.id);
     return existing.id;
   }
 

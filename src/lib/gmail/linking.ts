@@ -219,7 +219,12 @@ export async function rememberAddress(
   return cid;
 }
 
-/** Stamp a thread as linked to `customerId` (the sidebar's Link / pick). */
+/** Stamp a thread as linked to `customerId` (the sidebar's Link / pick).
+ *  Queues the Peak → Gmail label mirror so every link path (sidebar actions,
+ *  re-sweep, Task 11) goes through the same bounded queue — never calls
+ *  `syncPeakLabels` directly. Lazy import: label-sync pulls in
+ *  connections/api, and a static import here would set up an import cycle
+ *  with those (mirrors resweepThreads' own lazy import below). */
 export async function linkThread(
   threadId: string,
   customerId: string,
@@ -234,4 +239,6 @@ export async function linkThread(
     d.suggestedCustomerId = null;
     d.candidates = [];
   });
+  const { queueLabelSync } = await import("./label-sync");
+  queueLabelSync(threadId);
 }

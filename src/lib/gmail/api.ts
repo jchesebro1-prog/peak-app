@@ -21,6 +21,7 @@ async function gapi<T>(
       "Content-Type": "application/json",
       ...(init.headers || {}),
     },
+    signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) {
     throw new Error(
