@@ -18,8 +18,9 @@ import {
 import { loadServiceWork } from "@/lib/operations-work-server";
 import { WORK_TYPE_META, type WorkType } from "@/lib/operations-work";
 import { allEngagements, syncEngagementsFromQuotes } from "@/lib/stores/engagements";
+import { OPEN_ENGAGEMENT_STAGES } from "@/lib/consulting-stages";
 import { tasksForEngagement } from "@/lib/stores/tasks";
-import { groupByPerson } from "./people-lib";
+import { groupByPerson, mergeBookingsIntoPersonRows, UNASSIGNED_LABEL } from "./people-lib";
 import { PortfolioGantt } from "./portfolio-gantt";
 import type { GanttBar, GanttRow } from "@/components/gantt/gantt-grid";
 
@@ -165,7 +166,7 @@ export default async function SchedulePage({
   // consulting engagements" here even though one is really pending.
   if (view === "timeline" || view === "people") await syncEngagementsFromQuotes();
   const engagements = view === "timeline" || view === "people" ? await allEngagements() : [];
-  const openEngagements = engagements.filter((e) => e.status !== "closed");
+  const openEngagements = engagements.filter((e) => OPEN_ENGAGEMENT_STAGES.includes(e.status));
   const consultingTasks =
     view === "people"
       ? (await Promise.all(openEngagements.map((e) => tasksForEngagement(e.id)))).flat()
@@ -230,8 +231,13 @@ export default async function SchedulePage({
      Synthesized as Booking-shaped entries so the crew board's roster building,
      track packing and row rendering (below) handle them for free. Appended
      after onSiteNow/standfirst are computed so those project-only stats are
-     unaffected. */
-  const UNASSIGNED_LANE = "Unassigned";
+     unaffected.
+     #145 review fix: this used to be its own locally-declared "Unassigned"
+     string, agreeing with people-lib.ts's UNASSIGNED_LABEL only by
+     coincidence of an identical literal — an independent edit to either one
+     would silently break the By person view's Unassigned-lane merge (see
+     mergeBookingsIntoPersonRows' own doc comment). Import the one real
+     sentinel instead of restating it. */
   serviceWork.forEach((w) => {
     bookings.push({
       projectId: w.id,
@@ -241,7 +247,7 @@ export default async function SchedulePage({
       completed: false,
       crewId: w.id,
       mobId: null,
-      person: w.assignee || UNASSIGNED_LANE,
+      person: w.assignee || UNASSIGNED_LABEL,
       role: WORK_TYPE_META[w.type].label,
       start: w.startMs,
       end: w.endMs, // inclusive single day — do not add a day
@@ -508,42 +514,13 @@ export default async function SchedulePage({
           sortedUsersByName.map((u) => ({ id: u.id, name: u.name }))
         )
       : [];
-  const personRows: GanttRow[] = (() => {
-    if (view !== "people") return [];
-    const known = personBaseRows
-      .filter((r) => r.label !== UNASSIGNED_LANE)
-      .map((r) => ({ ...r, bars: r.bars.slice() }));
-    const unassignedBase = personBaseRows.find((r) => r.label === UNASSIGNED_LANE);
-    const unassignedBars: GanttBar[] = unassignedBase ? unassignedBase.bars.slice() : [];
-    const byLabel = new Map(known.map((r) => [r.label, r]));
-    const extras: GanttRow[] = [];
-    bookings.forEach((b) => {
-      const bar: GanttBar = {
-        id: "install:" + b.crewId,
-        label: b.projectName,
-        startAt: b.start,
-        dueAt: b.end,
-        tone: b.color,
-        draggable: false,
-        overrun: false,
-      };
-      if (b.person === UNASSIGNED_LANE) {
-        unassignedBars.push(bar);
-        return;
-      }
-      const row = byLabel.get(b.person);
-      if (row) {
-        row.bars.push(bar);
-      } else {
-        const extra: GanttRow = { id: "person:" + b.person, label: b.person, group: "", bars: [bar] };
-        byLabel.set(b.person, extra);
-        extras.push(extra);
-      }
-    });
-    const merged = [...known, ...extras];
-    if (unassignedBase) merged.push({ ...unassignedBase, bars: unassignedBars });
-    return merged;
-  })();
+  // #145 review fix: the merge itself is now a pure, exported helper
+  // (people-lib.ts's mergeBookingsIntoPersonRows) — same reason
+  // groupByPerson was pulled out on its own, and the merge needed the same
+  // treatment (it was previously exercised only by a live browser session
+  // and an HTTP-200 smoke check, neither of which asserts anything about
+  // rows/bars/draggability).
+  const personRows: GanttRow[] = view === "people" ? mergeBookingsIntoPersonRows(personBaseRows, bookings) : [];
   const peopleRange = ganttRange(
     personRows.flatMap((r) => r.bars),
     now

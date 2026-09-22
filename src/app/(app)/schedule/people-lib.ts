@@ -10,18 +10,19 @@ import type { GanttBar, GanttRow } from "@/components/gantt/gantt-grid";
  * Zero imports beyond the Gantt row/bar TYPES (erased at compile time, no
  * runtime cost) — same discipline as consulting-schedule.ts/gantt-lib.ts, so
  * the spec harness (scripts/test-review-and-spec.ts) can exercise this with
- * plain fixture objects and no DB. Two things this module deliberately does
- * NOT do, left to its caller (page.tsx):
- *  - Sort `users` — rows are emitted in the given order ("in name order"
- *    means the CALLER passes a name-sorted list; the fixture this function
- *    is tested against intentionally does not sort alphabetically, so the
- *    contract this function itself upholds is "preserve input order").
- *  - Merge in install/service work — those come from a DB read (project
- *    crew bookings, flame/repair/inspection jobs) this module can't see.
- *    page.tsx merges those bars onto the rows this returns, by matching a
- *    booking's person name against a row's label (falling back to
- *    "Unassigned" for the exact same sentinel string this module uses, and
- *    to a synthesized extra row for a booked name with no matching user).
+ * plain fixture objects and no DB.
+ *
+ * Two functions, two pure stages: `groupByPerson` builds the rows from
+ * consulting tasks alone; `mergeBookingsIntoPersonRows` (below) merges in
+ * install/service work afterward — that data comes from a DB read (project
+ * crew bookings, flame/repair/inspection jobs) neither function can see
+ * itself, so page.tsx reads it and passes it in as plain data.
+ *
+ * One thing `groupByPerson` deliberately does NOT do, left to its caller:
+ * sort `users` — rows are emitted in the given order ("in name order" means
+ * the CALLER passes a name-sorted list; the fixture this function is tested
+ * against intentionally does not sort alphabetically, so the contract this
+ * function itself upholds is "preserve input order").
  */
 
 export type PersonLite = { id: string; name: string };
@@ -112,4 +113,93 @@ export function groupByPerson(
   });
 
   return rows;
+}
+
+/** The booking fields the merge below actually reads — a structural subset
+ *  of page.tsx's own `Booking` type (project crew + flame/repair/inspection
+ *  work), copied rather than imported for the same zero-import reason as
+ *  `PersonScheduleTask` above. `person` carries the exact sentinel string
+ *  `UNASSIGNED_LABEL` for unassigned service work (page.tsx's own
+ *  `UNASSIGNED_LANE`, which MUST be this module's `UNASSIGNED_LABEL` and
+ *  nothing else — see mergeBookingsIntoPersonRows' own doc comment). */
+export type PersonBooking = {
+  crewId: string;
+  projectName: string;
+  person: string;
+  start: number;
+  end: number;
+  color: string;
+};
+
+/**
+ * Merges install/service work (page.tsx's own `bookings` — project crew
+ * plus flame/repair/inspection jobs, none of which this module can read
+ * itself; see the file header) onto the rows `groupByPerson` already built
+ * from consulting tasks. Every merged bar is non-draggable (D172 — install
+ * tasks are not in this scheduling model) and matched to a row by exact
+ * person-name equality against `personRows[].label`.
+ *
+ * Three things this exists specifically to get right (#145 review, D172):
+ *  - A booking whose `person` is the UNASSIGNED_LABEL sentinel — not a
+ *    per-row match at all — is added to the SAME Unassigned row
+ *    `groupByPerson` already returned, identified by that exact constant
+ *    (never a locally re-typed "Unassigned" string — two independently
+ *    edited copies of that sentinel agreeing only by coincidence is
+ *    exactly the bug this function is pinned against: a caller that
+ *    renamed one copy would silently stop finding `unassignedBase` below,
+ *    dropping every unassigned booking on the floor and misfiling the
+ *    real Unassigned row as though no booking ever matched it).
+ *  - A booking whose person matches no row at all (a name-only crew
+ *    booking for someone not in the active-users list passed to
+ *    `groupByPerson`) gets its own synthesized row instead of being
+ *    dropped — same "an empty/extra lane beats invisible work" rule as
+ *    everywhere else in this module.
+ *  - `personRows` is never mutated — every row/bars array in the returned
+ *    list is a fresh copy, including the Unassigned row (which otherwise
+ *    all three merge cases above end up needing to append onto).
+ *
+ * Row order in the result: every input row first (in the order given),
+ * then a synthesized extra row per unmatched booking person (in the order
+ * first encountered), then the Unassigned row last — mirroring
+ * groupByPerson's own "Unassigned is always last" contract.
+ */
+export function mergeBookingsIntoPersonRows(
+  personRows: readonly GanttRow[],
+  bookings: readonly PersonBooking[]
+): GanttRow[] {
+  const known = personRows
+    .filter((r) => r.label !== UNASSIGNED_LABEL)
+    .map((r) => ({ ...r, bars: r.bars.slice() }));
+  const unassignedBase = personRows.find((r) => r.label === UNASSIGNED_LABEL);
+  const unassignedBars: GanttBar[] = unassignedBase ? unassignedBase.bars.slice() : [];
+  const byLabel = new Map(known.map((r) => [r.label, r]));
+  const extras: GanttRow[] = [];
+
+  bookings.forEach((b) => {
+    const bar: GanttBar = {
+      id: "install:" + b.crewId,
+      label: b.projectName,
+      startAt: b.start,
+      dueAt: b.end,
+      tone: b.color,
+      draggable: false,
+      overrun: false,
+    };
+    if (b.person === UNASSIGNED_LABEL) {
+      unassignedBars.push(bar);
+      return;
+    }
+    const row = byLabel.get(b.person);
+    if (row) {
+      row.bars.push(bar);
+    } else {
+      const extra: GanttRow = { id: "person:" + b.person, label: b.person, group: "", bars: [bar] };
+      byLabel.set(b.person, extra);
+      extras.push(extra);
+    }
+  });
+
+  const merged = [...known, ...extras];
+  if (unassignedBase) merged.push({ ...unassignedBase, bars: unassignedBars });
+  return merged;
 }
