@@ -843,6 +843,42 @@ async function main() {
     "#135 already-claimed refusal names the owning engagement"
   );
 
+  // Fee validation (#135 review fix) — createManualEngagementAction is the
+  // guard; the STORE stays permissive so a project with no fee at all still
+  // creates cleanly. These two pin the store half of that contract: no fee
+  // yields zero milestones (already true — asserted here for the first
+  // time), and a fixed fee of 0 ALSO yields zero milestones, documenting
+  // why the action must reject `{ mode: "fixed", amount: 0 }` itself rather
+  // than trust manualMilestoneSeeds' silence to catch it. The action can't
+  // be called from this harness (requirePerm needs a session), so these
+  // stay at the store layer.
+  const noFeeManual = await createManualEngagement(
+    {
+      customerId: "t135c-co",
+      customer: "T135c School District",
+      name: "T135c No-fee study",
+      phases: ["Assessment"],
+    },
+    { name: "Tester" }
+  );
+  assert.equal(noFeeManual.milestones.length, 0, "#135 fee: undefined yields zero milestones at the store");
+
+  const zeroFixedManual = await createManualEngagement(
+    {
+      customerId: "t135d-co",
+      customer: "T135d School District",
+      name: "T135d Zero-fee study",
+      fee: { mode: "fixed", amount: 0 },
+      phases: ["Assessment"],
+    },
+    { name: "Tester" }
+  );
+  assert.equal(
+    zeroFixedManual.milestones.length,
+    0,
+    '#135 { mode: "fixed", amount: 0 } yields zero milestones at the store — the action must guard this itself'
+  );
+
   console.log("review regression checks passed");
 }
 

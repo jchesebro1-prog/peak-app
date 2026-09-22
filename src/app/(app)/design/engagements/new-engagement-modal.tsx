@@ -33,6 +33,7 @@ const SMALL_BTN: React.CSSProperties = {
 
 const SEG: React.CSSProperties = { ...SMALL_BTN, borderRadius: 7 };
 const SEG_ON: React.CSSProperties = { ...SEG, background: "#16181d", color: "#fff", borderColor: "#16181d" };
+const FIELD_ERR: React.CSSProperties = { marginTop: 6, fontSize: 11.5, color: "#b4543a" };
 
 const blankRow = (): MilestoneRow => ({ name: "", date: "", amount: "" });
 
@@ -60,9 +61,21 @@ export function NewEngagementModal({
 
   const customer = customers.find((c) => c.id === customerId) || null;
   const hasCustomer = newCustomerOpen ? !!newCustomer.name.trim() : !!customerId;
-  const canSubmit = !pending && !!name.trim() && hasCustomer;
 
-  const fee = (): ManualFee | null => {
+  // #135 review fix: "No fee yet" is an explicit, always-valid choice — the
+  // other two modes must actually carry a fee before they can submit. A
+  // blank/zero amount or an all-blank milestone list used to submit
+  // silently with no fee and no error (manualMilestoneSeeds just drops it).
+  const feeError =
+    feeMode === "fixed" && !(Number(fixedAmount) > 0)
+      ? "Enter the fee amount."
+      : feeMode === "milestones" && !rows.some((r) => r.name.trim() && Number(r.amount) > 0)
+        ? "Add at least one milestone with an amount."
+        : null;
+
+  const canSubmit = !pending && !!name.trim() && hasCustomer && !feeError;
+
+  const fee = (): ManualFee | undefined => {
     if (feeMode === "fixed") return { mode: "fixed", amount: Number(fixedAmount) || 0 };
     if (feeMode === "milestones") {
       return {
@@ -74,7 +87,7 @@ export function NewEngagementModal({
         })),
       };
     }
-    return null;
+    return undefined;
   };
 
   const submit = () =>
@@ -213,6 +226,7 @@ export function NewEngagementModal({
               </button>
             </div>
           )}
+          {feeError && <div style={FIELD_ERR}>{feeError}</div>}
           <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 8 }}>
             A fee proposal can be attached later from the engagement page; the project opens at Awarded.
           </div>

@@ -31,7 +31,7 @@ import {
   submitPhaseReview,
   updateMeeting,
 } from "@/lib/stores/engagements";
-import { ENGAGEMENT_STAGE_KEYS, type ManualFee } from "@/lib/consulting-stages";
+import { ENGAGEMENT_STAGE_KEYS, manualMilestoneSeeds, type ManualFee } from "@/lib/consulting-stages";
 import { getSettings } from "@/lib/settings";
 import type { Annotation, MeasureUnit } from "@/lib/annotations";
 import { linkVisitToEngagement } from "@/lib/stores/site-visits";
@@ -200,6 +200,18 @@ export async function createManualEngagementAction(input: {
     if (!locs.some((l) => l.id === siteId)) siteId = null; // never link a venue that isn't the customer's
   }
 
+  // #135 review fix: the modal only ever posts a valid fee or none at all,
+  // but actions are public endpoints — refuse a fixed/milestone fee that
+  // would otherwise seed zero milestones silently (no fee, no error).
+  // fee === null ("no fee yet") stays allowed.
+  const fee = cleanFee(input?.fee);
+  if (fee?.mode === "fixed" && !(fee.amount > 0)) {
+    return { ok: false, error: "Enter the fee amount." };
+  }
+  if (fee?.mode === "milestones" && manualMilestoneSeeds(fee).length === 0) {
+    return { ok: false, error: "Add at least one milestone with an amount." };
+  }
+
   const settings = await getSettings();
   const eng = await createManualEngagement(
     {
@@ -212,7 +224,7 @@ export async function createManualEngagementAction(input: {
       },
       siteId,
       contactName: String(input?.contactName || "").trim().slice(0, 120),
-      fee: cleanFee(input?.fee),
+      fee,
       phases: mergedConsultingPhases(settings.consultingPhases),
     },
     me
