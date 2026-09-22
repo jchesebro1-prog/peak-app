@@ -92,7 +92,11 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     fields: [
       { key: "customer", header: "Customer", label: "Customer", required: true, requiredUnless: "customerId", aliases: ["customer", "customer name", "company", "organization", "org", "account", "client"], example: "Riverside Playhouse" },
       { key: "customerId", header: "Customer ID", label: "Customer ID", aliases: ["customer id", "customerid", "customer_id", "company id", "account id"], example: "" },
-      { key: "venue", header: "Venue Name", label: "Venue name", required: true, aliases: ["venue", "venue name", "name", "location", "site", "space", "room", "hall", "building"], example: "Main Stage" },
+      // #137 T6 review — a blank Venue Name means "this customer's primary
+      // (base) venue" when the row still carries an address to write there
+      // (exactly what the venues export emits for an addressed, unnamed D85
+      // base venue); keep it required when a row has nothing else to target.
+      { key: "venue", header: "Venue Name", label: "Venue name", required: true, requiredUnless: "address", aliases: ["venue", "venue name", "name", "location", "site", "space", "room", "hall", "building"], example: "Main Stage" },
       { key: "address", header: "Address", label: "Address", aliases: ["address", "street", "street address", "addr", "address1"], example: "215 W Main St" },
       { key: "city", header: "City", label: "City", aliases: ["city", "town"], example: "Madison" },
       { key: "state", header: "State", label: "State", aliases: ["state", "province", "st"], example: "WI" },

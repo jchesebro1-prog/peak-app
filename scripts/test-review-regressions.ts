@@ -1329,6 +1329,112 @@ async function main() {
     const back = await commitImport("venues", prepImport("venues", csv).filter((r) => String(r.values.customer).startsWith("T137")), "skip");
     assert.equal(back.created, 0, "#137 T6 export → re-import creates nothing (round-trip)");
     assert.equal(back.errored, 0, "#137 T6 export → re-import errors nothing");
+
+    // #137 T6 review (punch #137 fix) — a customers import with Address/
+    // City/State/Zip but no Venue leaves an ADDRESSED, UNNAMED primary venue
+    // (D85 base venue); the venues export emits it with a blank Venue Name;
+    // committing that exact row back must not error, must target the SAME
+    // venue in place, and must never invent a name for it.
+    await upsertCustomer({
+      id: "c-t137-vn-addr",
+      name: "T137 Venue Addressed Only",
+      type: "Education",
+      locations: [
+        { id: "l-t137-vn-addr-1", label: "", primary: true, address: "9 Probe St", city: "Neenah", state: "WI", zip: "54956" },
+      ],
+      contacts: [],
+    });
+    const addrBefore = await getCustomer("c-t137-vn-addr");
+    assert.equal(addrBefore!.locations.length, 1, "#137 T6 fix fixture: exactly one venue — unnamed, addressed");
+    // Blank labels read back as undefined (composeLocation: `s.name || undefined`), not "".
+    assert.ok(!addrBefore!.locations[0].label, "#137 T6 fix fixture: the venue has no name");
+
+    const csvAddr = await exportCsv("venues");
+    const expAddr = parseCsv(csvAddr);
+    const addrRow = expAddr.objects.find((o) => o["Customer ID"] === "c-t137-vn-addr");
+    assert.ok(addrRow, "#137 T6 fix: the addressed unnamed venue is exported");
+    assert.equal(addrRow!["Venue Name"], "", "#137 T6 fix: exported with a blank Venue Name");
+    assert.equal(addrRow!.Address, "9 Probe St", "#137 T6 fix: exported with its address");
+
+    const addrRowsBack = prepImport("venues", csvAddr).filter((r) => String(r.values.customerId) === "c-t137-vn-addr");
+    assert.equal(addrRowsBack.length, 1, "#137 T6 fix: exactly one prepared row for this customer");
+    assert.equal(
+      addrRowsBack[0].valid,
+      true,
+      "#137 T6 fix: a blank Venue Name is VALID when the row carries an address (requiredUnless: address)"
+    );
+
+    const rt1 = await commitImport("venues", addrRowsBack, "update");
+    assert.equal(rt1.errored, 0, "#137 T6 fix: committing the exported blank-label row errors nothing");
+    // matchLocation never matches a blank label (by design — see link.ts), so
+    // WRITERS.venues.find() can't report this row as "existing"; it always
+    // takes the create() path. That's fine: create() re-links the SAME
+    // customer and writeVenueRow's mergeLocation (preferPrimary: true)
+    // targets the existing primary venue in place rather than appending.
+    assert.equal(rt1.created + rt1.updated, 1, "#137 T6 fix: the row is written exactly once");
+    const addrAfter1 = await getCustomer("c-t137-vn-addr");
+    assert.equal(addrAfter1!.locations.length, 1, "#137 T6 fix: still exactly one venue — no second unnamed venue created");
+    assert.ok(!addrAfter1!.locations[0].label, "#137 T6 fix: still unnamed — no name was invented for it");
+    assert.equal(addrAfter1!.locations[0].primary, true, "#137 T6 fix: still the primary venue");
+    assert.equal(addrAfter1!.locations[0].address, "9 Probe St", "#137 T6 fix: address unchanged");
+    assert.equal(
+      addrAfter1!.updatedAt,
+      addrBefore!.updatedAt,
+      "#137 T6 fix: round-tripping identical content is a no-op (updatedAt unchanged)"
+    );
+
+    const rt2 = await commitImport("venues", addrRowsBack, "update");
+    assert.equal(rt2.errored, 0, "#137 T6 fix: a second identical re-import still errors nothing");
+    const addrAfter2 = await getCustomer("c-t137-vn-addr");
+    assert.equal(addrAfter2!.locations.length, 1, "#137 T6 fix: still no duplicate venue on a second re-import");
+    assert.equal(
+      addrAfter2!.updatedAt,
+      addrBefore!.updatedAt,
+      "#137 T6 fix: …and updatedAt still hasn't moved (idempotent)"
+    );
+
+    // A blank-label row for a customer with NO venue at all: a partner-type
+    // customer (D85 venue-defaults) gets no auto base venue, so there is
+    // nothing to claim — mergeLocation's existing fallback (opts.preferPrimary
+    // with an empty list) appends the customer's first venue, still unnamed
+    // rather than erroring or inventing a name.
+    await upsertCustomer({ id: "c-t137-vn-novenue", name: "T137 Venue Partner Co", type: "Vendor", locations: [], contacts: [] });
+    assert.equal(
+      (await getCustomer("c-t137-vn-novenue"))!.locations.length,
+      0,
+      "#137 T6 fix fixture: a partner-type customer has no venue at all"
+    );
+    const csvNoVenue = [
+      ["Customer", "Customer ID", "Venue Name", "Address", "City", "State", "Zip", "Category", "Notes"],
+      ["", "c-t137-vn-novenue", "", "200 Vendor Way", "Neenah", "WI", "54956", "warehouse", ""],
+    ]
+      .map((r) => r.join(","))
+      .join("\n");
+    const rNoVenue = await commitImport("venues", prepImport("venues", csvNoVenue), "skip");
+    assert.equal(rNoVenue.errored, 0, "#137 T6 fix: a blank-label row on a venueless customer does not error");
+    assert.equal(rNoVenue.created, 1, "#137 T6 fix: it creates the customer's first venue");
+    const novenue = await getCustomer("c-t137-vn-novenue");
+    assert.equal(novenue!.locations.length, 1, "#137 T6 fix: exactly one venue now exists");
+    assert.ok(!novenue!.locations[0].label, "#137 T6 fix: still no invented name");
+    assert.equal(novenue!.locations[0].primary, true, "#137 T6 fix: the sole venue is primary");
+    assert.equal(novenue!.locations[0].address, "200 Vendor Way", "#137 T6 fix: its address persists");
+
+    // A row with NEITHER a Venue Name NOR anything else to target (no
+    // address/city/state/zip either) is still invalid: required-unless
+    // doesn't mean "always optional" — keep it required when there is
+    // nothing else for the row to target.
+    const csvNothing = [
+      ["Customer", "Customer ID", "Venue Name", "Address", "City", "State", "Zip", "Category", "Notes"],
+      ["", "c-t137-vn-novenue", "", "", "", "", "", "", ""],
+    ]
+      .map((r) => r.join(","))
+      .join("\n");
+    const nothingRows = prepImport("venues", csvNothing);
+    assert.equal(
+      nothingRows[0].valid,
+      false,
+      "#137 T6 fix: a blank Venue Name with no address either is still invalid (nothing to target)"
+    );
   }
 
   console.log("review regression checks passed");

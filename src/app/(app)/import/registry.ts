@@ -315,7 +315,10 @@ async function writeContactRow(cust: Customers.CustomerDoc, v: Values): Promise<
 }
 
 /** One venues row → the customer's locations, merged by normalized label
- *  (a labelled row claims the unnamed base venue first, see mergeLocation). */
+ *  (a labelled row claims the unnamed base venue first; a blank-label row —
+ *  #137 T6 review, a round-tripped export of an addressed D85 base venue —
+ *  targets the primary venue directly via mergeLocation's preferPrimary,
+ *  the same claiming path a customers-import row uses). */
 async function writeVenueRow(cust: Customers.CustomerDoc, v: Values): Promise<void> {
   const { locations } = mergeLocation(
     cust.locations || [],
@@ -328,7 +331,7 @@ async function writeVenueRow(cust: Customers.CustomerDoc, v: Values): Promise<vo
       kind: str(v.kind),
     },
     "l" + cust.id + "-" + seq(),
-    { preferPrimary: false }
+    { preferPrimary: true }
   );
   await Customers.upsert({ ...recordInputOf(cust), locations });
 }
