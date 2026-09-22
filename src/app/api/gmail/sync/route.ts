@@ -4,6 +4,7 @@ import { checkMailIfStale } from "@/lib/stores/comms";
 import { syncAllGoogleTasks } from "@/lib/google/tasks-sync";
 import { reconcileRecordings } from "@/lib/krisp/reconcile";
 import { archiveRecordings } from "@/lib/krisp/archive";
+import { ensureVendorAssignments } from "@/lib/vendor-tasks";
 
 // #97 — the Gmail import/poll can take longer than the platform default
 export const maxDuration = 60;
@@ -32,6 +33,9 @@ export const maxDuration = 60;
  * `archiveRecordings()` moves settled audio from Blob to the Drive archive
  * (≤ 5 per run). Both are own-try/catch and never throw; on Hobby this
  * makes them daily, and the Vercel upgrade only shortens the cadence.
+ *
+ * #122 adds ensureVendorAssignments() the same way — the vendor spec's
+ * "daily cron" is this route.
  */
 export async function GET(req: Request): Promise<NextResponse> {
   const secret = process.env.CRON_SECRET;
@@ -64,5 +68,15 @@ export async function GET(req: Request): Promise<NextResponse> {
     recordingsArchive = { error: (err as Error).message };
   }
 
-  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive });
+  // #122 — vendor price-list freshness (spec §4): one catalog read, one
+  // profiles read, at most one new Home Queue task per (vendor, status,
+  // date) key. Own try/catch like the other riders on this daily trigger.
+  let vendors: Awaited<ReturnType<typeof ensureVendorAssignments>> | { error: string };
+  try {
+    vendors = await ensureVendorAssignments(undefined, "Quartzite (daily check)");
+  } catch (err) {
+    vendors = { error: (err as Error).message };
+  }
+
+  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, vendors });
 }

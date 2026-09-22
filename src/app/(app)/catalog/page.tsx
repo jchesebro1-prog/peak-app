@@ -11,6 +11,9 @@ import CatalogDangerZone from "./catalog-danger-zone";
 import { TaxonomyCard } from "./taxonomy-card";
 import { PriceDateBanner } from "./price-date-banner";
 import { upsertPart } from "./actions";
+import { activeUsers } from "@/lib/users";
+import { resolveCatalogOwner } from "@/lib/vendor-status";
+import { CatalogOwnerCard } from "./catalog-owner-card";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
 
@@ -37,13 +40,15 @@ export default async function CatalogPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, parts, settings] = await Promise.all([
+  const [user, sp, parts, settings, users] = await Promise.all([
     requireUser(),
     searchParams,
     list(),
     getSettings(),
+    activeUsers(),
   ]);
   const isAdmin = can("manage_users", user.roles);
+  const catalogOwner = resolveCatalogOwner(settings.catalogOwner, users);
 
   const mfrParam = one(sp.mfr) || "all";
   const catParam = one(sp.cat) || "all";
@@ -427,6 +432,11 @@ export default async function CatalogPage({
       {isAdmin && (
         <>
           <TaxonomyCard categories={categories} initialMap={resolveCategoryMap(settings.catalogCategoryMap)} />
+          <CatalogOwnerCard
+            value={settings.catalogOwner?.userId || ""}
+            options={users.map((u) => ({ value: u.id, label: u.name }))}
+            effectiveName={catalogOwner?.name || ""}
+          />
           <CatalogDangerZone count={parts.length} />
         </>
       )}

@@ -35,6 +35,9 @@ import {
   claimManufacturer, createVendorCompany, getVendorProfile, logPriceList, saveVendorProfile,
   setContactRole, vendorForManufacturer,
 } from "@/lib/stores/vendors";
+import { setSettings } from "@/lib/settings";
+import { allAssignments, setAssignmentDone } from "@/lib/stores/assignments";
+import { ensureVendorAssignments, loadVendors } from "@/lib/vendor-tasks";
 
 async function main() {
   const flame = await setFlameRates({ laborRate: 123, mileageRate: 1.23 });
@@ -1081,6 +1084,54 @@ async function main() {
     assert.equal(made.type, VENDOR_COMPANY_TYPE, "#122 createVendorCompany presets the vendor type");
     assert.equal((await sitesForCompany(made.id)).length, 0, "#122 a new vendor gets NO base venue (PARTNER_TYPES fix)");
     assert.ok(await getVendorProfile(made.id), "#122 createVendorCompany mints the blank profile");
+  }
+
+  // #122 — owner tasks are exactly-once per (vendor, status, date); done ones never reopen
+  {
+    const part = (sku: string) => ({ id: sku, sku, desc: "T122 cron part " + sku, category: "Rigging", unit: "ea", list: 10, cost: 5, mfr: "T122 Cron Mfr" });
+    await upsertDoc("catalog_parts", part("T122-C1"));
+    await upsertDoc("catalog_parts", part("T122-C2"));
+    await saveCompany({ id: "v-t122c", name: "Vendor C T122", type: VENDOR_COMPANY_TYPE });
+    await claimManufacturer("v-t122c", "T122 Cron Mfr");
+    const owner = await addUser({ name: "Catalog Owner T122", roles: ["Admin"] });
+    await setSettings({ catalogOwner: { userId: owner.id } });
+
+    const before = (await loadVendors("v-t122c")).rows[0];
+    assert.equal(before?.status, "no-list", "#122 a vendor with no ledger entry reads no-list");
+    assert.equal(before?.partCount, 2, "#122 loadVendors counts the claimed manufacturer's parts");
+    assert.equal((await ensureVendorAssignments("v-t122c", "Tester")).created, 0, "#122 no-list creates no task");
+
+    const E = Date.now() - 5 * 86_400_000;
+    await logPriceList("v-t122c", { receivedAt: Date.now(), effectiveAt: E, note: "2026 list" }, "Tester");
+    const key = `auto: vendor v-t122c newer-list ${E}`;
+    const withKey = async () => (await allAssignments()).filter((a) => a.source === key);
+
+    const first = await ensureVendorAssignments("v-t122c", "Tester");
+    assert.equal(first.created, 1, "#122 a newer list creates exactly one owner task");
+    assert.equal(first.owner, "Catalog Owner T122", "#122 the owner comes from settings.catalogOwner");
+    const made = await withKey();
+    assert.equal(made.length, 1, "#122 the task is keyed by source");
+    assert.equal(made[0].assignee, "Catalog Owner T122", "#122 the task is addressed to the owner by display name");
+    assert.equal(made[0].link?.kind, "company", "#122 the task links to the vendor company");
+    assert.ok(made[0].title.startsWith("Update catalog: Vendor C T122 price list effective "), "#122 newer-list title");
+    assert.equal((await loadVendors("v-t122c")).rows[0]?.openTask?.id, made[0].id, "#122 loadVendors surfaces the open task");
+
+    assert.equal((await ensureVendorAssignments("v-t122c", "Tester")).created, 0, "#122 a second pass doesn't duplicate the open task");
+    await setAssignmentDone(made[0].id, true);
+    assert.equal((await ensureVendorAssignments("v-t122c", "Tester")).created, 0, "#122 a done task is never re-opened or re-created");
+    assert.equal((await withKey()).length, 1, "#122 still exactly one assignment for the key");
+    assert.equal((await loadVendors("v-t122c")).rows[0]?.openTask, null, "#122 a done task is no longer the open task");
+
+    // a later import stamps pricedAt ≥ effectiveAt → current, nothing new
+    await upsertDoc("catalog_parts", { ...part("T122-C1"), pricedAt: E });
+    await upsertDoc("catalog_parts", { ...part("T122-C2"), pricedAt: E + 1 });
+    assert.equal((await loadVendors("v-t122c")).rows[0]?.status, "current", "#122 pricedAt ≥ effectiveAt flips the status to current");
+    assert.equal((await ensureVendorAssignments("v-t122c", "Tester")).created, 0, "#122 current creates nothing");
+    assert.equal((await withKey()).length, 1, "#122 the done task stays done and alone");
+
+    // the cron path with zero vendors in scope
+    const none = await ensureVendorAssignments("v-t122-does-not-exist", "Tester");
+    assert.deepEqual([none.checked, none.created], [0, 0], "#122 the cron path runs with zero vendors");
   }
 
   console.log("review regression checks passed");

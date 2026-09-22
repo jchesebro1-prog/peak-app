@@ -113,6 +113,10 @@ export type AppSettingsData = {
   /** Outcome of the last nightly archive pass (lib/krisp/archive.ts) — shown
    *  on Settings → Recordings. Optional: absent until the job has run once. */
   recordingsArchiveLastRun?: RecordingsArchiveLastRun | null;
+  /** #122 — Settings → Catalog: who receives the vendor price-list tasks
+   *  (spec §1). null/absent = the default rule in resolveCatalogOwner()
+   *  (the user named "Jena Tolksdorf" if present, else the first Admin). */
+  catalogOwner?: { userId: string } | null;
 };
 
 export type RecordingsArchiveLastRun = {
