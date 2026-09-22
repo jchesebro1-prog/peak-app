@@ -916,7 +916,7 @@ function SelectedPanel({
           gap: 10,
           rowGap: 10,
           flexWrap: "wrap",
-          marginTop: 12,
+          marginTop: 16,
         }}
       >
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>
@@ -961,7 +961,7 @@ function SelectedPanel({
             marginLeft: "auto",
             display: "flex",
             alignItems: "center",
-            gap: 8,
+            gap: 12,
             flexWrap: "wrap",
           }}
         >
@@ -976,7 +976,7 @@ function SelectedPanel({
           >
             Status
           </span>
-          <form action={setQuoteStatus} style={{ display: "flex", gap: 6 }}>
+          <form action={setQuoteStatus} style={{ display: "flex", gap: 10 }}>
             <input type="hidden" name="id" value={q.id} />
             <input type="hidden" name="back" value={backHref} />
             {STAGES.map((s) => {
