@@ -23,9 +23,9 @@ import {
   removeRoute,
   removeSpace,
   renameOption,
+  renameProject,
   renameSpace,
   restoreRevision,
-  seedBlankSheet,
   setOptionQuote,
   setPlacementCategory,
   setScopeInputs,
@@ -34,10 +34,11 @@ import {
   saveGridIntake,
 } from "@/lib/stores/grid-projects";
 import { hasOption, resolveOptionId } from "@/lib/design/grid-options";
+import { designPatchFromIntake, manualScopeInputs } from "@/lib/design/grid-intake";
 import { buildGridQuote } from "@/lib/design/grid-quote";
 import { deriveSeedPlacements } from "@/lib/design/grid-seed";
 import { can } from "@/lib/team";
-import { getAllDesigns, removeDesign } from "@/lib/stores/designs";
+import { getAllDesigns, removeDesign, updateDesign } from "@/lib/stores/designs";
 import { getSite } from "@/lib/identity/sites";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { get as getPart } from "@/lib/stores/catalog";
@@ -89,20 +90,22 @@ export async function createGridAssemblyAction(input: {
 
 export async function saveGridIntakeAction(input: {
   projectId: string;
+  mode: "manual";
   venueName: string;
   locationName: string;
   address: string;
   notes: string;
-  measurementBased: boolean;
   autoConfig: AState;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!input.venueName.trim() && !input.locationName.trim()) return { ok: false, error: "Add a venue or location to continue." };
+  if (input.mode !== "manual") return { ok: false, error: "Auto-estimate lands in the next release — choose Manual placement for now." };
   const project = await getProject(input.projectId);
   if (!project) return { ok: false, error: "That design could not be found." };
   const saved = await saveGridIntake(input.projectId, {
     complete: true,
-    measurementBased: !!input.measurementBased,
+    measurementBased: true,
+    mode: input.mode,
     venueName: input.venueName.trim(),
     locationName: input.locationName.trim(),
     address: input.address.trim(),
@@ -110,34 +113,26 @@ export async function saveGridIntakeAction(input: {
     autoConfig: input.autoConfig,
   });
   if (!saved) return { ok: false, error: "That design could not be found." };
-  // First-save gate (Task 1, #38): a base sheet is generated exactly once —
-  // the first time intake completes — never on a later re-save of venue
-  // details. `sheetIds` is empty until then because createProject() no
-  // longer pre-seeds a sheet at all (see grid-projects.ts createProject).
-  // Re-checked on `saved` (the just-written doc) rather than the earlier
-  // `project` read, to narrow — the doc-store has no transactions (#74),
-  // so a true double-submit race isn't fully closed here, only shortened
-  // from "the whole saveGridIntake write" to "this one re-read" — an
-  // accepted, user-recoverable residual risk (delete the extra sheet),
-  // consistent with this codebase's existing #74/#80/#85/#86 judgment
-  // calls on low-probability concurrency edge cases.
+  // First-save gate (D145): the base sheet is generated exactly once. The
+  // same gate now also seeds the Scope panel's inputs and the linked design
+  // record's dims (Spec 1) — a later re-save of venue details changes none
+  // of them, so a designer's later Scope edits are never overwritten.
   const isFirstSave = (saved.sheetIds || []).length === 0;
   if (isFirstSave) {
-    if (input.measurementBased) {
-      // A generated base sheet is stored as a static artifact, same as an
-      // uploaded plan — it must never bake in the live, user-configurable
-      // accent (AGENTS.md: "never hardcode accent-colored UI"), or every
-      // sheet generated before a branding change goes stale forever. Use a
-      // fixed neutral drawing-line ink instead of settings.accent.
-      await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
-    } else {
-      // "I have my own plan, skip measurements" — no VenueDims to render
-      // from yet; seed the same blank fallback createProject() used to
-      // create unconditionally, and let the user upload a real plan next.
-      await seedBlankSheet(input.projectId, project.name, user.name);
-    }
+    await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
+    await setScopeInputs(input.projectId, manualScopeInputs(input.autoConfig));
+    const patch = designPatchFromIntake({
+      projectName: project.name,
+      venueName: input.venueName,
+      locationName: input.locationName,
+      a: input.autoConfig,
+    });
+    const linked = (await getAllDesigns()).filter((d) => d.gridProjectId === input.projectId);
+    for (const d of linked) await updateDesign(d.id, patch);
+    if (patch.name) await renameProject(input.projectId, patch.name);
   }
   revalidatePath(editorPath(input.projectId));
+  revalidatePath("/design/designs");
   return { ok: true };
 }
 

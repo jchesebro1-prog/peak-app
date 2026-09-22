@@ -26,6 +26,12 @@ import {
   type CatalogGroup,
   type Trade,
 } from "@/lib/catalog-taxonomy";
+import type { SysKey } from "@/app/(app)/design/quick/engine";
+
+/** The Quick Design systems the Grid can actually track against placed
+ *  catalog parts (Jeff's five scopes). Controls/Acoustical/Pit have no
+ *  scope of their own. Order = Scope panel display order. */
+export const TRACKABLE_SYS_KEYS: SysKey[] = ["rigging", "curtains", "lighting", "audio", "video"];
 
 export const GRID_SCOPES = ["Lighting", "Rigging", "Curtains", "Audio", "Video"] as const;
 export type GridScope = (typeof GRID_SCOPES)[number];

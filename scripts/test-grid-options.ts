@@ -14,17 +14,21 @@ import {
   getProject,
   removeOption,
   renameOption,
+  renameProject,
   restoreRevision,
   setOptionQuote,
+  setScopeInputs,
   setSheetCalibration,
 } from "@/lib/stores/grid-projects";
 import { DEFAULT_OPTION_ID, optionSlice } from "@/lib/design/grid-options";
+import { manualScopeInputs } from "@/lib/design/grid-intake";
 import { buildGridQuote } from "@/lib/design/grid-quote";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { getDb } from "@/db";
 import { seedIfEmpty } from "@/db/seed-data";
 import { upsert as upsertCatalogPart } from "@/lib/stores/catalog";
+import { defaultAState } from "@/app/(app)/design/quick/engine";
 
 async function main() {
   if (!process.env.PGLITE_PATH) throw new Error("Refusing to run without PGLITE_PATH (scratch db).");
@@ -165,6 +169,15 @@ async function main() {
   const qpAfterEmpty = (await getProject(q0.id))!;
   const empty = await buildGridQuote(qpAfterEmpty, emptyOptionId);
   assert.ok(!empty.ok && /Place a device/.test(empty.error), "an option with no members refuses to price");
+
+  // ---- intake side effects (Task 6): scope inputs + rename via the store ----
+  const a = { ...defaultAState(0), venue: "school", width: 36, depth: 26, grid: 24, wing: 12, ph: 18 };
+  await setScopeInputs(q0.id, manualScopeInputs(a));
+  await renameProject(q0.id, "Main Hall — Northshore HS");
+  const withScope = (await getProject(q0.id))!;
+  assert.equal(withScope.scopeInputs?.venue, "school", "scopeInputs seeded from the intake dims");
+  assert.equal(withScope.scopeInputs?.sys.controls, false, "non-trackable systems are off in seeded scopeInputs");
+  assert.equal(withScope.name, "Main Hall — Northshore HS", "renameProject persists");
 
   console.log("PASS grid-options store scenario");
 }

@@ -21,7 +21,7 @@ import {
 } from "@/app/(app)/design/quick/tierdefs-store";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
 import type { RollupSlice } from "@/lib/design/grid-bom";
-import { scopeColor } from "@/lib/design/grid-scopes";
+import { scopeColor, TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import { setScopeInputsAction } from "./actions";
 
 /**
@@ -39,8 +39,6 @@ import { setScopeInputsAction } from "./actions";
  * Audio, Video); Controls/Acoustical/Pit have no scope of their own and
  * are never toggleable here.
  */
-
-const TRACKABLE_SYS_KEYS: SysKey[] = ["rigging", "curtains", "lighting", "audio", "video"];
 
 /** Neutral empty-state fallback for a fresh project with no scope inputs
  *  saved yet. Deliberately NOT `defaultAState(0)`: that helper's `.sys`

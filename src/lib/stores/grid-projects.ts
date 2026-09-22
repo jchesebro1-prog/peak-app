@@ -168,6 +168,9 @@ export type GridProject = {
   intake?: {
     complete: boolean;
     measurementBased: boolean;
+    /** Chosen at intake (Spec 1). Absent on pre-spec docs. Only "manual" is
+     *  reachable until Spec 2. */
+    mode?: "auto" | "manual";
     venueName: string;
     locationName: string;
     address: string;
@@ -265,44 +268,12 @@ export async function createProject(input: {
   // new project opens straight into GridIntake (intake.complete starts
   // false) before anything is ever painted, so generating a starting sheet
   // here — before VenueDims exist — is exactly what made the old default
-  // dims-blind. The first intake save decides what to generate instead: a
-  // dims-derived plan via generateBaseSheet() when "Generate from
-  // measurements as I work" is checked, or the blank fallback via
-  // seedBlankSheet() when it isn't (saveGridIntakeAction).
+  // dims-blind. The first intake save generates the dims-derived plan
+  // instead, via generateBaseSheet() (saveGridIntakeAction). Manual is the
+  // only reachable mode until Spec 2's Auto-estimate lands, so the old
+  // "I have my own plan, skip measurements" blank-sheet path (seedBlankSheet)
+  // is gone (Spec 1, Task 6).
   return project;
-}
-
-/**
- * The pre-Task-1 default: a blank white rectangle with no venue geometry,
- * plus three arbitrary fixed-fraction starter Spaces. Used now only for the
- * "I have my own plan, skip measurements" intake path (measurementBased:
- * false) — there's no VenueDims yet to render a real plan from, and a real
- * upload is expected to follow. Called once, from saveGridIntakeAction, the
- * first time intake completes with that box unchecked.
- */
-export async function seedBlankSheet(
-  projectId: string,
-  projectName: string,
-  by: string
-): Promise<GridSheet | null> {
-  const blank = encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="white"/><path d="M40 40H1160V760H40Z" fill="none" stroke="#e5e7eb" stroke-width="2"/><text x="60" y="84" font-family="Arial,sans-serif" font-size="22" fill="#9ca3af">${projectName.replace(/[<>&]/g, "")}</text><text x="60" y="112" font-family="Arial,sans-serif" font-size="14" fill="#c0c4ca">Blank design sheet · upload a plan any time</text></svg>`
-  );
-  const sheet = await addSheet(projectId, {
-    name: "Blank design sheet",
-    mime: "image/svg+xml",
-    dataUrl: `data:image/svg+xml;charset=utf-8,${blank}`,
-    by,
-  });
-  if (sheet) {
-    // Give a blank design useful spatial vocabulary immediately. These are
-    // editable starter outlines, including an audience-view area for
-    // sightline and coverage planning; uploaded plans can be redrawn over.
-    await addSpace(projectId, { sheetId: sheet.id, page: 1, name: "Audience view", points: [{ x: 0.08, y: 0.58 }, { x: 0.92, y: 0.58 }, { x: 0.92, y: 0.9 }, { x: 0.08, y: 0.9 }], by });
-    await addSpace(projectId, { sheetId: sheet.id, page: 1, name: "Stage", points: [{ x: 0.2, y: 0.12 }, { x: 0.8, y: 0.12 }, { x: 0.8, y: 0.4 }, { x: 0.2, y: 0.4 }], by });
-    await addSpace(projectId, { sheetId: sheet.id, page: 1, name: "FOH / control", points: [{ x: 0.38, y: 0.44 }, { x: 0.62, y: 0.44 }, { x: 0.62, y: 0.53 }, { x: 0.38, y: 0.53 }], by });
-  }
-  return sheet;
 }
 
 /**
@@ -746,6 +717,15 @@ export async function setVenue(
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.siteId = siteId;
     p.siteName = siteName;
+    p.updatedAt = Date.now();
+  });
+}
+
+export async function renameProject(projectId: string, name: string): Promise<GridProject | null> {
+  const clean = name.trim();
+  if (!clean) return getProject(projectId);
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.name = clean;
     p.updatedAt = Date.now();
   });
 }
