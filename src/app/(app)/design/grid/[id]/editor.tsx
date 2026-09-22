@@ -69,6 +69,7 @@ import RevisionsPanel from "./revisions-panel";
 import WiresPanel from "./wires-panel";
 import ScopePanel from "./scope-panel";
 import AssembliesPanel from "./assemblies-panel";
+import { SearchFilterBar } from "@/components/search/search-filter-bar";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -1195,19 +1196,17 @@ export default function GridEditor({
           {/* device palette */}
           <div style={PANEL}>
             <div style={PANEL_LABEL}>Devices</div>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search names or Manufacturer #"
-              style={INPUT}
-            />
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 7 }}>
-              {["", ...GRID_LAYERS].map((s) => {
-                const count = s ? parts.filter((p) => scopeOfPart(p) === s).length : parts.length;
-                const on = scopeFilter === s;
-                return <button key={s || "all"} type="button" onClick={() => setScopeFilter(s)} style={{ ...BTN, padding: "4px 7px", fontSize: 10.5, background: on ? "#16181d" : "#fff", color: on ? "#fff" : "#5b616e", borderColor: on ? "#16181d" : "#dfe2e8" }}>{s || "All"} <span style={{ opacity: .65 }}>{count}</span></button>;
-              })}
-            </div>
+            {/* #121: search + scope filter on ONE row (SearchFilterBar; the
+                buttons wrap under the box inside this 252px column). */}
+            <SearchFilterBar value={search} onChange={setSearch} placeholder="Search names or Manufacturer #" ariaLabel="Search devices">
+              <div className="pk-searchbar-group">
+                {["", ...GRID_LAYERS].map((s) => {
+                  const count = s ? parts.filter((p) => scopeOfPart(p) === s).length : parts.length;
+                  const on = scopeFilter === s;
+                  return <button key={s || "all"} type="button" onClick={() => setScopeFilter(s)} style={{ ...BTN, padding: "4px 7px", fontSize: 10.5, background: on ? "#16181d" : "#fff", color: on ? "#fff" : "#5b616e", borderColor: on ? "#16181d" : "#dfe2e8" }}>{s || "All"} <span style={{ opacity: .65 }}>{count}</span></button>;
+                })}
+              </div>
+            </SearchFilterBar>
             {armedPart && hiddenSet.has(scopeLayerKey(scopeOfPart(armedPart))) && (
               <div style={{ marginTop: 6, fontSize: 10.5, color: "#a0442b", lineHeight: 1.4 }}>
                 The {scopeOfPart(armedPart)} layer is hidden, so what you place
