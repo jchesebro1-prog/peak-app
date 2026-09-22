@@ -3741,3 +3741,75 @@ building:
 
 Out of scope, logged as follow-ups: procurement lines linking to vendor records
 (`ProcurementLine.vendor` stays free text); queue → vendor deep link; multi-vendor manufacturers.
+## D158. Import hub — customers / contacts / venues as three importers, unmatched customers auto-created (#137, closes #82 + #83, 2026-09-21)
+
+Jeff's decision (brainstorm 2026-09-21): a contacts or venues row whose customer isn't in Peak
+**creates** the customer rather than failing. Spec:
+`docs/superpowers/specs/2026-09-21-import-export-people-venues-design.md`. Defaults taken while
+implementing it:
+
+- **Link-back order** is `Customer ID` exact match → normalized-name match (the hub's `norm`:
+  lowercase, alphanumerics only) → create `{ name, type: hidden "Customer Category" column ?? "" }`.
+  A created customer is pushed into the commit cache, so every later row in the same file links to
+  it — one file, one new record per distinct name. The preview lists "Will create N new customers"
+  from the same pure resolver (`import/link.ts`), so what it shows is what commits.
+- **`Customer` OR `Customer ID`** — `FieldDef.requiredUnless` lets either column satisfy the
+  requirement; a row with neither fails validation before commit.
+- **Embedded columns stay as hidden aliases** (`FieldDef.hidden`: auto-mapped on import, absent from
+  template and export) so pre-#137 customers files keep working for one release. On such a row,
+  `Phone` is the embedded contact's; on a new-format row it is the company's main phone.
+- **Where a customers row's address goes:** Address/City/State/Zip merge into the customer's
+  **unnamed mailing venue** — the primary venue on a customer that has no named one, which is the
+  address the record page, travel estimates and quotes use, and what this importer always did —
+  but now as a merge (`mergeLocation`), never the old replace-all-venues, and never onto a *named*
+  venue (see the base-venue bullet below for the full symmetric rule).
+  Zip also stamps `companies.zip` (the spec's "company HQ/billing" zip); Phone/Website stamp
+  `companies.main_phone` / `website`. The companies row's own address/city/state columns are left
+  for the Daylite import. A blank Category writes `""` (the old importer invented "Performing arts").
+- **Venue category is a new nullable `sites.kind`** (hand-written migration `0023_sites_kind`): the
+  spec allowed "the site row's existing free-text kind column, else the location document", but
+  `venue_kind` is the controlled vocabulary the estimator and Companies modal switch on, and sites
+  are relational rows, not documents. `kind` is stored as typed and shown as a pill on the customer
+  record; a venue the import **creates** derives `venueKind` from it (`venueKindFromCategory`:
+  church/blackbox/arena/flat, default proscenium); an existing venue keeps its `venueKind`.
+- **The first imported venue claims the unnamed D85 base venue** instead of leaving an empty twin
+  (a labelled row with no name match takes the first blank-label location) — but only a TRUE
+  placeholder, one carrying no address/city/state/zip of its own (`mergeLocation`'s `claimBlank`,
+  tightened in the final review). The customers template has no Venue column, so a customer
+  imported with an Address owns an unnamed but *addressed* primary venue: that is its mailing
+  address, which the companies row does not duplicate (see above), so a labelled venues row
+  appends beside it rather than overwriting it. Only the customers writer claims a blank-label
+  venue whatever it holds, because its own row IS that venue. **The rule is symmetric** (final
+  review, round 2): a customers row with no Venue column addresses an *unnamed* venue — the
+  primary one when it has no name of its own, else the unnamed one sitting beside a named venue —
+  and never renames what it addresses. When every venue is named there is nothing it may address,
+  so it appends its mailing address as a new unnamed location instead of overwriting a named
+  venue's street address, which nothing else in the app holds. **The customer's first named venue
+  becomes the primary one**, demoting that mailing placeholder (which stays, as a second
+  location): `primaryLoc` feeds the record page's location line, travel estimates and quote
+  defaults, and those belong on the venue where the work happens. So a customer that appears in
+  both customers.csv and venues.csv ends up with the venue primary and the mailing address kept as
+  a second, unnamed location.
+- **Contacts:** matched by primary email, else normalized name; a hit **keeps its stored name**
+  (writeRecord matches contacts by display name — renaming would mint a second row). `Title`, else
+  `Role`, fills the one free-text slot (`contacts.title`, the Daylite precedent). `Mobile` is a
+  second, "mobile"-labelled phone channel; `CustomerContact.phone` now composes as the non-mobile
+  number (falling back to the first phone) and `mobile` as the mobile one, so a round trip through
+  writeRecord targets the right row each. `Primary` = yes/y/true/1/x promotes and demotes the others;
+  anything else leaves flags alone, except that the first contact on a record is always primary.
+- **"Create new" never duplicates** a contact or venue — the writers are upserts; the mode only
+  matters for the customers type.
+- **Store seam:** `zip`/`kind` (locations), `mobile` (contacts) and `zip`/`phone`/`website` (doc)
+  are write-when-provided / preserve-when-undefined, backfilled before the D83 change check exactly
+  like #23's lifecycle/keywords/custom, so the Companies modal, quote intake and inbox quick-add —
+  which don't carry them — neither clear them nor bump `updatedAt`. `LocationInput`/`ContactInput`
+  and `saveCustomerAction` carry them anyway, and the quote-intake / inbox `toLocationInput` copies
+  are replaced by one shared converter in `companies/lib.ts` that keeps `locationName` (the #96
+  review follow-up: the intake copy was clearing the campus name on every save).
+- **Zip cells** are trimmed; 5-digit and ZIP+4 kept as typed; a 4-digit value gets its
+  Excel-stripped leading zero back.
+- **Exports:** contacts and venues export one row per record with the customer's name and id (so
+  export → edit → re-import links by id even after a rename); customers export gains Category + Zip
+  and drops the embedded contact/venue columns; an unnamed, address-less placeholder venue is not
+  exported (it would only produce a row that fails re-import). `Notes` columns are accepted and
+  ignored on all three types, as the customers importer always did.

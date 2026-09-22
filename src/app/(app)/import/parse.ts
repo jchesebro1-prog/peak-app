@@ -11,18 +11,42 @@
  * same paste path this module parses.
  */
 
-export type FieldKind = "text" | "number" | "date" | "email" | "enum";
+export type FieldKind = "text" | "number" | "date" | "email" | "enum" | "zip";
 
 export type FieldDef = {
   key: string;
   header: string;
   label: string;
   required?: boolean;
+  /** #137 — a required field that another field may satisfy instead
+   *  (contacts / venues: `Customer` OR `Customer ID`). */
+  requiredUnless?: string;
+  /** #137 — accepted on import (auto-mapped by alias) but never advertised:
+   *  not a template column, not an export column, not in the paste box's
+   *  placeholder. Three kinds of field live here — the legacy embedded
+   *  columns kept for one release, the optional Customer ID match on the
+   *  customers type, and columns the stores have nowhere to put (Notes on
+   *  customers / contacts / venues). Absorbing a header instead of dropping
+   *  the field keeps an old file importing AND stops a fuzzy alias from
+   *  claiming that column for some other field. */
+  hidden?: boolean;
   kind?: FieldKind;
   aliases: string[];
   example?: string;
   options?: string[];
 };
+
+/**
+ * #137 — the fields a user is ever TOLD about: the downloadable template's
+ * columns, the export header, and the paste box's placeholder. Hidden fields
+ * stay accepted on import (autoMap still maps them) — they are simply not
+ * advertised. One definition, shared by the server CSV builders
+ * (registry.columnsOf) and the client paste box, so the hub can't offer a
+ * column it doesn't honour.
+ */
+export function visibleColumns(fields: readonly FieldDef[]): FieldDef[] {
+  return fields.filter((f) => !f.hidden);
+}
 
 export type ParsedTable = {
   ok: boolean;
@@ -163,11 +187,19 @@ export function isoToMs(iso: string): number | null {
   return m ? new Date(+m[1], +m[2] - 1, +m[3]).getTime() : null;
 }
 
+/** #137 — zip cells: trimmed, 5-digit and ZIP+4 kept as typed; a 4-digit
+ *  value gets its Excel-stripped leading zero back ("2134" → "02134"). */
+export function normalizeZip(v: unknown): string {
+  const s = v == null ? "" : String(v).trim();
+  return /^\d{4}$/.test(s) ? "0" + s : s;
+}
+
 export function coerce(field: FieldDef, v: unknown): string | number {
   const s = v == null ? "" : String(v).trim();
   if (field.kind === "number") return toNum(s);
   if (field.kind === "date") return toISO(s);
   if (field.kind === "email") return s.toLowerCase();
+  if (field.kind === "zip") return normalizeZip(s);
   return s;
 }
 
@@ -245,9 +277,12 @@ export function prepareRows(
       values[f.key] = coerce(f, v);
     });
     const errors: string[] = [];
+    const has = (k: string) => String(values[k] == null ? "" : values[k]).trim() !== "";
     fields.forEach((f) => {
-      if (f.required && !String(values[f.key] == null ? "" : values[f.key]).trim())
-        errors.push("Missing " + f.label);
+      if (!f.required || has(f.key)) return;
+      // #137 — `Customer` is satisfied by a `Customer ID` (and vice versa).
+      if (f.requiredUnless && has(f.requiredUnless)) return;
+      errors.push("Missing " + f.label);
     });
     return { i, values, valid: errors.length === 0, errors };
   });

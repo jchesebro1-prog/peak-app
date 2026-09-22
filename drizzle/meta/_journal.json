@@ -166,8 +166,15 @@
     {
       "idx": 23,
       "version": "7",
-      "when": 1790085511957,
-      "tag": "0023_vendor_profiles",
+      "when": 1790064147450,
+      "tag": "0023_sites_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1790064148450,
+      "tag": "0024_vendor_profiles",
       "breakpoints": true
     }
   ]

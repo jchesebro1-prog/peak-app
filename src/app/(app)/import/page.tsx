@@ -2,7 +2,9 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { isoDateOf } from "@/lib/catalog-books";
+import { all as allCustomers } from "@/lib/stores/customers";
 import { IMPORT_TYPES, getTypeMeta } from "./types";
+import { linksCustomer, type CustomerRef } from "./link";
 import { allCounts } from "./registry";
 import { PastePreview } from "./controls";
 
@@ -134,6 +136,14 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
   const resultRaw = one(sp.r);
   const errRaw = tab === "import" ? one(sp.err) : "";
   const counts = await allCounts();
+
+  // #137 — the contacts / venues previews resolve each row's customer
+  // client-side against this index, with the same rule the commit uses
+  // (./link). Only the link-back types pay for it.
+  const customerIndex: CustomerRef[] =
+    openType && linksCustomer(openType.fields)
+      ? (await allCustomers()).map((c) => ({ id: c.id, name: c.name }))
+      : [];
 
   const hrefFor = (over: { tab?: string; type?: string | null; r?: string | null }) => {
     const qs = new URLSearchParams();
@@ -526,6 +536,7 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
           errRaw={errRaw}
           closeHref={hrefFor({ type: null, r: null })}
           anotherHref={hrefFor({ type: openType.key, r: null })}
+          customerIndex={customerIndex}
         />
       )}
     </>
@@ -538,12 +549,14 @@ function ImportFlowModal({
   errRaw,
   closeHref,
   anotherHref,
+  customerIndex,
 }: {
   type: NonNullable<ReturnType<typeof getTypeMeta>>;
   resultRaw: string;
   errRaw: string;
   closeHref: string;
   anotherHref: string;
+  customerIndex: CustomerRef[];
 }) {
   const done = parseResult(resultRaw);
 
@@ -701,6 +714,7 @@ function ImportFlowModal({
                   dedupeLabel={type.dedupeLabel}
                   accent="var(--accent)"
                   today={isoDateOf(Date.now())}
+                  customerIndex={customerIndex}
                 />
               </>
             )}
@@ -766,13 +780,30 @@ function ImportFlowModal({
   );
 }
 
-type DoneResult = { created: number; updated: number; skipped: number; errored: number; total: number };
+type DoneResult = {
+  created: number;
+  updated: number;
+  skipped: number;
+  errored: number;
+  total: number;
+  customersCreated: number;
+  customersLinked: number;
+};
 
 function parseResult(raw: string): DoneResult | null {
   if (!raw) return null;
   const p = raw.split(".").map((n) => parseInt(n, 10));
   if (p.length < 5 || p.some((n) => isNaN(n))) return null;
-  return { created: p[0], updated: p[1], skipped: p[2], errored: p[3], total: p[4] };
+  return {
+    created: p[0],
+    updated: p[1],
+    skipped: p[2],
+    errored: p[3],
+    total: p[4],
+    // #137 — absent on links minted before the link-back counts existed.
+    customersCreated: p[5] ?? 0,
+    customersLinked: p[6] ?? 0,
+  };
 }
 
 function DonePanel({
@@ -784,6 +815,10 @@ function DonePanel({
 }) {
   const totalIn = r.created + r.updated;
   const hasErrors = r.errored > 0;
+  // #137 — contacts / venues carry a Customer column; report how the rows
+  // that were actually written linked back (a duplicate the run skipped
+  // wrote nothing, so it counts in neither figure).
+  const linkable = linksCustomer(type.fields);
   // Zero rows written must never read as a green success — split "nothing to
   // do" (everything was already a duplicate, no errors) from "it failed"
   // (rows errored out) so the panel can't imply records changed when none did.
@@ -848,6 +883,20 @@ function DonePanel({
           </div>
         ))}
       </div>
+      {linkable && r.customersLinked + r.customersCreated > 0 && (
+        <div
+          style={{
+            marginTop: 12,
+            textAlign: "center",
+            fontSize: 12,
+            color: "#5b616e",
+            lineHeight: 1.5,
+          }}
+        >
+          {r.customersLinked} row{r.customersLinked === 1 ? "" : "s"} linked to existing customers ·{" "}
+          {r.customersCreated} new customer{r.customersCreated === 1 ? "" : "s"} created
+        </div>
+      )}
       {r.errored > 0 && (
         <div
           style={{

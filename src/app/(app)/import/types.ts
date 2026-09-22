@@ -28,24 +28,92 @@ export type ImportTypeMeta = {
 export const IMPORT_TYPES: ImportTypeMeta[] = [
   {
     key: "customers",
-    label: "Customers & contacts",
+    label: "Customers",
     mono: "CU",
     color: "#7b3f8a",
-    blurb: "Venues & accounts with their primary contact, address and venue.",
+    blurb: "Accounts — name, category, address with zip, phone and website. People and venues import separately.",
     dedupeLabel: "customer name",
     viewHref: "/companies",
     viewLabel: "View in Customers",
     fields: [
       { key: "name", header: "Customer Name", label: "Customer name", required: true, aliases: ["customer", "company", "organization", "org", "account", "client", "name", "venue name"], example: "Riverside Playhouse" },
-      { key: "type", header: "Type", label: "Type", aliases: ["type", "category", "segment", "industry", "kind"], example: "Performing arts" },
-      { key: "contactName", header: "Contact Name", label: "Contact name", aliases: ["contact", "contact name", "primary contact", "attn", "contactperson"], example: "Maria Lopez" },
-      { key: "email", header: "Email", label: "Email", kind: "email", aliases: ["email", "e-mail", "contact email", "emailaddress"], example: "maria@riverside.org" },
-      { key: "phone", header: "Phone", label: "Phone", aliases: ["phone", "telephone", "tel", "contact phone", "phonenumber"], example: "(608) 555-0110" },
-      { key: "venue", header: "Venue", label: "Primary venue", aliases: ["venue", "location", "venue name", "room", "hall", "space", "site"], example: "Main Stage" },
+      { key: "type", header: "Category", label: "Category", aliases: ["category", "type", "segment", "industry", "kind"], example: "Performing arts" },
       { key: "address", header: "Address", label: "Street address", aliases: ["address", "street", "street address", "addr", "address1"], example: "215 W Main St" },
       { key: "city", header: "City", label: "City", aliases: ["city", "town"], example: "Madison" },
       { key: "state", header: "State", label: "State", aliases: ["state", "province", "st"], example: "WI" },
-      { key: "notes", header: "Notes", label: "Notes", aliases: ["notes", "note", "comments", "remarks"], example: "Referred by North Ridge HS" },
+      { key: "zip", header: "Zip", label: "Zip", kind: "zip", aliases: ["zip", "zip code", "zipcode", "postal", "postal code", "postcode"], example: "53703" },
+      { key: "phone", header: "Phone", label: "Phone", aliases: ["phone", "telephone", "tel", "main phone", "phonenumber", "company phone"], example: "(608) 555-0110" },
+      { key: "website", header: "Website", label: "Website", aliases: ["website", "web", "url", "homepage", "www"], example: "riversideplayhouse.org" },
+      // #137 — a customer record has nowhere to store free-text notes
+      // (CustomerRecordInput has no such field), so the importer dropped
+      // every Notes cell it was handed and the export always wrote "". Kept
+      // as a hidden field: an old file's Notes column is still absorbed
+      // (and can't be fuzzy-claimed by another field), but the hub no longer
+      // offers a column it would silently discard.
+      { key: "notes", header: "Notes", label: "Notes", hidden: true, aliases: ["notes", "note", "comments", "remarks"] },
+      // #137 — legacy embedded columns: accepted for one more release so
+      // pre-#137 files keep working, but no longer template/export columns.
+      { key: "contactName", header: "Contact Name", label: "Contact name", hidden: true, aliases: ["contact", "contact name", "primary contact", "attn", "contactperson"] },
+      { key: "email", header: "Email", label: "Email", kind: "email", hidden: true, aliases: ["email", "e-mail", "contact email", "emailaddress"] },
+      { key: "venue", header: "Venue", label: "Primary venue", hidden: true, aliases: ["venue", "venue name", "room", "hall", "space"] },
+      // Optional exact match on an existing record's id — wins over the
+      // name match when a file carries one (customers exports don't).
+      { key: "customerId", header: "Customer ID", label: "Customer ID", hidden: true, aliases: ["customer id", "customerid", "customer_id", "company id", "account id", "id"] },
+    ],
+  },
+  {
+    key: "contacts",
+    label: "Contacts",
+    mono: "CT",
+    color: "#8a3f5f",
+    blurb: "People at a customer — linked to the account by customer name or id; unmatched customers are created.",
+    dedupeLabel: "customer + email or name",
+    viewHref: "/people",
+    viewLabel: "View in People",
+    fields: [
+      { key: "customer", header: "Customer", label: "Customer", required: true, requiredUnless: "customerId", aliases: ["customer", "customer name", "company", "organization", "org", "account", "client"], example: "Riverside Playhouse" },
+      { key: "customerId", header: "Customer ID", label: "Customer ID", aliases: ["customer id", "customerid", "customer_id", "company id", "account id"], example: "" },
+      { key: "name", header: "Name", label: "Name", required: true, aliases: ["name", "full name", "contact", "contact name", "person"], example: "Maria Lopez" },
+      { key: "email", header: "Email", label: "Email", kind: "email", aliases: ["email", "e-mail", "emailaddress", "work email"], example: "maria@riverside.org" },
+      { key: "phone", header: "Phone", label: "Phone", aliases: ["phone", "telephone", "tel", "work phone", "office phone", "phonenumber"], example: "(608) 555-0110" },
+      { key: "mobile", header: "Mobile", label: "Mobile", aliases: ["mobile", "cell", "cell phone", "mobile phone", "cellphone"], example: "(608) 555-0111" },
+      { key: "title", header: "Title", label: "Title", aliases: ["title", "job title", "position"], example: "Technical Director" },
+      { key: "role", header: "Role", label: "Role", aliases: ["role", "function"], example: "billing" },
+      { key: "primary", header: "Primary", label: "Primary", aliases: ["primary", "is primary", "primary contact", "main contact"], example: "yes" },
+      // #137 — CustomerContact has no notes field: nothing read this and the
+      // export hardcoded "". Hidden, like the customers Notes column above.
+      { key: "notes", header: "Notes", label: "Notes", hidden: true, aliases: ["notes", "note", "comments", "remarks"] },
+      // #137 — category for a customer this file has to CREATE (D158);
+      // never a template column.
+      { key: "customerType", header: "Customer Category", label: "Customer category", hidden: true, aliases: ["customer category", "customer type", "company type", "company category", "account type"] },
+    ],
+  },
+  {
+    key: "venues",
+    label: "Venues",
+    mono: "VN",
+    color: "#1f7a6f",
+    blurb: "Performance spaces and sites — linked to the customer, with address, zip and category.",
+    dedupeLabel: "customer + venue name",
+    viewHref: "/venues",
+    viewLabel: "View in Venues",
+    fields: [
+      { key: "customer", header: "Customer", label: "Customer", required: true, requiredUnless: "customerId", aliases: ["customer", "customer name", "company", "organization", "org", "account", "client"], example: "Riverside Playhouse" },
+      { key: "customerId", header: "Customer ID", label: "Customer ID", aliases: ["customer id", "customerid", "customer_id", "company id", "account id"], example: "" },
+      // #137 T6 review — a blank Venue Name means "this customer's primary
+      // (base) venue" when the row still carries an address to write there
+      // (exactly what the venues export emits for an addressed, unnamed D85
+      // base venue); keep it required when a row has nothing else to target.
+      { key: "venue", header: "Venue Name", label: "Venue name", required: true, requiredUnless: "address", aliases: ["venue", "venue name", "name", "location", "site", "space", "room", "hall", "building"], example: "Main Stage" },
+      { key: "address", header: "Address", label: "Address", aliases: ["address", "street", "street address", "addr", "address1"], example: "215 W Main St" },
+      { key: "city", header: "City", label: "City", aliases: ["city", "town"], example: "Madison" },
+      { key: "state", header: "State", label: "State", aliases: ["state", "province", "st"], example: "WI" },
+      { key: "zip", header: "Zip", label: "Zip", kind: "zip", aliases: ["zip", "zip code", "zipcode", "postal", "postal code", "postcode"], example: "53703" },
+      { key: "kind", header: "Category", label: "Category", aliases: ["category", "venue type", "venuetype", "type", "kind", "venue kind"], example: "theatre" },
+      // #137 — CustomerLocation has no notes field either; same treatment as
+      // the customers / contacts Notes columns.
+      { key: "notes", header: "Notes", label: "Notes", hidden: true, aliases: ["notes", "note", "comments", "remarks"] },
+      { key: "customerType", header: "Customer Category", label: "Customer category", hidden: true, aliases: ["customer category", "customer type", "company type", "company category", "account type"] },
     ],
   },
   {

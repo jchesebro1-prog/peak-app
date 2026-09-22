@@ -16,8 +16,18 @@ import * as Projects from "@/lib/stores/projects";
 import * as Catalog from "@/lib/stores/catalog";
 import * as Equipment from "@/lib/stores/equipment-items";
 import { allUsers, addUser, setRoles } from "@/lib/users";
-import { getTypeMeta, IMPORT_TYPE_KEYS } from "./types";
-import { norm, isoToMs, type PreparedRow } from "./parse";
+import { getTypeMeta, IMPORT_TYPE_KEYS, type ImportTypeMeta } from "./types";
+import { norm, isoToMs, visibleColumns, type FieldDef, type PreparedRow } from "./parse";
+import { baseVenueKind } from "@/lib/identity/venue-defaults";
+import {
+  matchContact,
+  matchLocation,
+  mergeContact,
+  mergeLocation,
+  parseYesNo,
+  resolveCustomerForRow,
+  type CustomerRef,
+} from "./link";
 
 const YEAR = 365 * 86400000;
 
@@ -54,23 +64,51 @@ export type ImportResult = {
   written: PreparedRow[];
   /** The rows behind `errored` (invalid, or the write threw). */
   failed: PreparedRow[];
+  /** #137 — contacts/venues link-back: customers auto-created for unmatched
+   *  rows, and rows that linked to an existing customer. */
+  customersCreated: number;
+  customersLinked: number;
 };
 
 /** #133 — per-commit context handed to every writer; only the catalog
  *  writer reads it (the price list's effective date for `pricedAt`). */
 export type CommitContext = { effectiveAt: number };
 
+/** The link-back tally a contacts/venues writer keeps for one commit.
+ *  `createdIds` remembers the customers THIS file created, so a later row
+ *  that lands on one of them is neither "linked to an existing customer"
+ *  nor a second create. */
+export type LinkStats = {
+  customersCreated: number;
+  customersLinked: number;
+  createdIds: Set<string>;
+};
+
 /**
  * One writer per type. `find` dedupes against `cache` (a mutable array loaded
  * once per commit so rows created earlier in the same file are seen); `create`
- * appends a lightweight marker back into that cache.
+ * appends a lightweight marker back into that cache (the customers writer
+ * re-reads the written record instead, so later rows merge into it). `ctx` is
+ * the commit's context (#133); `link` is its running link-back tally — only
+ * the #137 link-back writers touch it.
  */
 type Writer = {
   count: () => Promise<number>;
   load: () => Promise<Record<string, unknown>[]>;
   find: (values: Values, cache: Record<string, unknown>[]) => Record<string, unknown> | null;
-  create: (values: Values, cache: Record<string, unknown>[], ctx: CommitContext) => Promise<void>;
-  update?: (existing: Record<string, unknown>, values: Values, ctx: CommitContext) => Promise<void>;
+  create: (
+    values: Values,
+    cache: Record<string, unknown>[],
+    ctx: CommitContext,
+    link: LinkStats
+  ) => Promise<void>;
+  update?: (
+    existing: Record<string, unknown>,
+    values: Values,
+    cache: Record<string, unknown>[],
+    ctx: CommitContext,
+    link: LinkStats
+  ) => Promise<void>;
   exportObjects: () => Promise<Values[]>;
 };
 
@@ -138,87 +176,308 @@ export function catalogPatch(
   };
 }
 
+/* ---------------- #137 customers / contacts / venues plumbing ---------------- */
+
+/** The record input that re-saves a customer exactly as it is: every field
+ *  the seam composes goes back in, so writeRecord's change check sees "no
+ *  change" unless the caller overrides something. lifecycle / keywords /
+ *  custom are omitted on purpose — undefined = preserve. */
+function recordInputOf(c: Customers.CustomerDoc): Customers.CustomerRecordInput {
+  return {
+    id: c.id,
+    name: c.name,
+    type: c.type,
+    location: c.location,
+    owner: c.owner,
+    pricingTier: c.pricingTier ?? null,
+    zip: c.zip,
+    phone: c.phone,
+    website: c.website,
+    locations: c.locations,
+    contacts: c.contacts,
+  };
+}
+
+/** Re-read one customer into the commit cache so later rows in the same
+ *  file dedupe against what this row just wrote. */
+async function refreshCache(cache: Record<string, unknown>[], id: string): Promise<void> {
+  const fresh = await Customers.get(id);
+  if (!fresh) return;
+  const row = fresh as unknown as Record<string, unknown>;
+  const i = cache.findIndex((c) => c.id === id);
+  if (i >= 0) cache[i] = row;
+  else cache.push(row);
+}
+
+/** True when a customers row carries anything for its address venue. */
+function hasVenueColumns(v: Values): boolean {
+  return !!(str(v.venue) || str(v.address) || str(v.city) || str(v.state) || str(v.zip));
+}
+
+/**
+ * The record one customers row writes. `prev` is the customer as stored
+ * (null on the create path). Company fields come from the row; the row's
+ * Address/City/State/Zip merge into the customer's UNNAMED mailing venue —
+ * the primary venue on a customer that has no named one, i.e. the address
+ * the UI, travel and quotes use, as this importer always did — but without
+ * replacing the customer's other venues, and never onto a NAMED venue, whose
+ * street address nothing else holds (#137 C1b; `mergeLocation` appends a new
+ * unnamed venue instead). Zip also stamps the company row; and the legacy
+ * embedded Contact Name / Email / Phone columns still land as a contact
+ * (D158).
+ */
+function customerRecordFor(
+  id: string,
+  v: Values,
+  prev: Customers.CustomerDoc | null
+): Customers.CustomerRecordInput {
+  const name = str(v.name) || prev?.name || "";
+  const type = str(v.type) || prev?.type || "";
+  const contactName = str(v.contactName);
+  let locations: Customers.CustomerLocation[] = prev?.locations ?? [];
+  if (hasVenueColumns(v)) {
+    locations = mergeLocation(
+      locations,
+      { label: str(v.venue), address: str(v.address), city: str(v.city), state: str(v.state), zip: str(v.zip) },
+      "l" + id + "-" + seq(),
+      // claimBlank "any": unlike a venues row, this row genuinely IS the
+      // customer's address venue, so a legacy file's Venue column may name
+      // the unnamed primary venue even once it carries an address (#137 C1).
+      { preferPrimary: true, claimBlank: "any", venueKind: baseVenueKind(type, name) ?? "proscenium" }
+    ).locations;
+  }
+  let contacts: Customers.CustomerContact[] = prev?.contacts ?? [];
+  if (contactName) {
+    contacts = mergeContact(contacts, {
+      name: contactName,
+      email: str(v.email),
+      phone: str(v.phone),
+      primary: true,
+    }).contacts;
+  }
+  return {
+    ...(prev ? recordInputOf(prev) : {}),
+    id,
+    name,
+    type,
+    // Company HQ fields: the row's value, else what's stored, else absent
+    // (= preserve, which writeRecord also guarantees).
+    zip: str(v.zip) || prev?.zip || undefined,
+    // A legacy row's Phone is the embedded contact's; otherwise it's the
+    // company's main line.
+    phone: contactName ? prev?.phone || undefined : str(v.phone) || prev?.phone || undefined,
+    website: str(v.website) || prev?.website || undefined,
+    locations,
+    contacts,
+  };
+}
+
+/**
+ * Resolve the customer a contacts / venues row belongs to, creating a bare
+ * one (`{ name, type: Customer Category column ?? "" }`) when neither the
+ * id nor the normalized name matches — and pushing it into the cache so the
+ * rest of the file links to the same record (D158). Returns the customer as
+ * stored right now. Throws (→ the row counts as errored) when the row has
+ * neither a Customer nor a Customer ID.
+ */
+async function linkCustomer(
+  v: Values,
+  cache: Record<string, unknown>[],
+  link: LinkStats
+): Promise<Customers.CustomerDoc> {
+  const docs = cache as unknown as Customers.CustomerDoc[];
+  const r = resolveCustomerForRow({ customerId: v.customerId, customer: v.customer }, docs);
+  if (r.how === "missing") throw new Error("Row has neither a Customer nor a Customer ID");
+  if (r.id) {
+    const fresh = await Customers.get(r.id);
+    if (!fresh) throw new Error(`Customer ${r.id} no longer exists`);
+    // A customer THIS file created a few rows ago is neither "linked to an
+    // existing customer" nor a second create — it was counted when created.
+    if (!link.createdIds.has(r.id)) link.customersLinked++;
+    return fresh;
+  }
+  const id = "c" + Date.now() + "-" + seq();
+  await Customers.upsert({ id, name: r.name, type: str(v.customerType), locations: [], contacts: [] });
+  const created = await Customers.get(id);
+  if (!created) throw new Error(`Customer ${id} could not be created`);
+  docs.push(created);
+  link.createdIds.add(id);
+  link.customersCreated++;
+  return created;
+}
+
+/** One contacts row → the customer's contacts, merged by email then name. */
+async function writeContactRow(cust: Customers.CustomerDoc, v: Values): Promise<void> {
+  const { contacts } = mergeContact(cust.contacts || [], {
+    name: str(v.name),
+    email: str(v.email),
+    phone: str(v.phone),
+    mobile: str(v.mobile),
+    // One free-text slot on the contact row (contacts.title): Title, else Role.
+    title: str(v.title) || str(v.role),
+    primary: parseYesNo(v.primary),
+  });
+  await Customers.upsert({ ...recordInputOf(cust), contacts });
+}
+
+/** One venues row → the customer's locations, merged by normalized label
+ *  (a labelled row claims the unnamed base venue first, but only a TRUE
+ *  placeholder — `claimBlank: "unaddressed"`, #137 C1: an unnamed venue that
+ *  already carries an address is the customer's mailing address, so the row
+ *  appends beside it instead of overwriting it, and that appended venue —
+ *  the customer's first named one — takes primary from the placeholder,
+ *  #137 I3; a blank-label row — #137 T6 review, a round-tripped export of an
+ *  addressed D85 base venue — targets the unnamed primary venue directly via
+ *  mergeLocation's preferPrimary). */
+async function writeVenueRow(cust: Customers.CustomerDoc, v: Values): Promise<void> {
+  const { locations } = mergeLocation(
+    cust.locations || [],
+    {
+      label: str(v.venue),
+      address: str(v.address),
+      city: str(v.city),
+      state: str(v.state),
+      zip: str(v.zip),
+      kind: str(v.kind),
+    },
+    "l" + cust.id + "-" + seq(),
+    { preferPrimary: true, claimBlank: "unaddressed" }
+  );
+  await Customers.upsert({ ...recordInputOf(cust), locations });
+}
+
 const WRITERS: Record<string, Writer> = {
   customers: {
     count: async () => (await Customers.all()).length,
     load: async () => (await Customers.all()) as unknown as Record<string, unknown>[],
-    find: (v, cache) => cache.find((c) => ci(c.name, v.name)) || null,
+    // #137 — Customer ID when the file carries one, else normalized name
+    // (the dedupe label stays "customer name").
+    find: (v, cache) => {
+      const r = resolveCustomerForRow(
+        { customerId: v.customerId, customer: v.name },
+        cache as unknown as CustomerRef[]
+      );
+      return r.id ? (cache.find((c) => c.id === r.id) ?? null) : null;
+    },
     create: async (v, cache) => {
       const id = "c" + Date.now() + "-" + seq();
-      await Customers.upsert({
-        id,
-        name: str(v.name),
-        type: str(v.type) || "Performing arts",
-        locations: [
-          {
-            id: "l" + id,
-            label: str(v.venue) || "Main Venue",
-            primary: true,
-            address: str(v.address),
-            city: str(v.city),
-            state: str(v.state),
-          },
-        ],
-        contacts: v.contactName
-          ? [
-              {
-                name: str(v.contactName),
-                email: str(v.email),
-                phone: str(v.phone),
-                primary: true,
-              },
-            ]
-          : [],
-      });
-      cache.push({ id, name: str(v.name) });
+      await Customers.upsert(customerRecordFor(id, v, null));
+      await refreshCache(cache, id);
     },
-    update: async (ex, v) => {
-      await Customers.upsert({
-        id: str(ex.id),
-        name: str(v.name) || str(ex.name),
-        type: str(v.type) || str(ex.type),
-        locations: [
-          {
-            id: "l" + str(ex.id),
-            label: str(v.venue) || "Main Venue",
-            primary: true,
-            address: str(v.address),
-            city: str(v.city),
-            state: str(v.state),
-          },
-        ],
-        contacts: v.contactName
-          ? [
-              {
-                name: str(v.contactName),
-                email: str(v.email),
-                phone: str(v.phone),
-                primary: true,
-              },
-            ]
-          : [],
-      });
+    update: async (ex, v, cache) => {
+      const id = str(ex.id);
+      const prev = await Customers.get(id);
+      if (!prev) throw new Error(`Customer ${id} no longer exists`);
+      await Customers.upsert(customerRecordFor(id, v, prev));
+      await refreshCache(cache, id);
     },
     exportObjects: async () => {
       const list = await Customers.all();
       return list.map((rec) => {
         const loc =
           (rec.locations || []).find((l) => l.primary) || (rec.locations || [])[0] || null;
-        const c =
-          (rec.contacts || []).find((x) => x.primary) || (rec.contacts || [])[0] || null;
         return {
           name: rec.name || "",
           type: rec.type || "",
-          contactName: c?.name || "",
-          email: c?.email || "",
-          phone: c?.phone || "",
-          venue: loc?.label || "",
           address: loc?.address || "",
           city: loc?.city || "",
           state: loc?.state || "",
-          notes: "",
+          zip: rec.zip || loc?.zip || "",
+          phone: rec.phone || "",
+          website: rec.website || "",
         };
       });
+    },
+  },
+
+  contacts: {
+    count: async () =>
+      (await Customers.all()).reduce((n, c) => n + (c.contacts || []).length, 0),
+    load: async () => (await Customers.all()) as unknown as Record<string, unknown>[],
+    // Dedupe key: customer (id → normalized name) + email, else name.
+    find: (v, cache) => {
+      const docs = cache as unknown as Customers.CustomerDoc[];
+      const r = resolveCustomerForRow({ customerId: v.customerId, customer: v.customer }, docs);
+      if (!r.id) return null;
+      const cust = docs.find((c) => c.id === r.id);
+      const hit = cust ? matchContact(cust.contacts || [], v.email, v.name) : null;
+      return hit ? { customerId: r.id, name: hit.name } : null;
+    },
+    create: async (v, cache, _ctx, link) => {
+      const cust = await linkCustomer(v, cache, link);
+      await writeContactRow(cust, v);
+      await refreshCache(cache, cust.id);
+    },
+    update: async (ex, v, cache, _ctx, link) => {
+      const id = str(ex.customerId);
+      const cust = await Customers.get(id);
+      if (!cust) throw new Error(`Customer ${id} no longer exists`);
+      if (!link.createdIds.has(id)) link.customersLinked++;
+      await writeContactRow(cust, v);
+      await refreshCache(cache, id);
+    },
+    exportObjects: async () => {
+      const list = await Customers.all();
+      return list.flatMap((rec) =>
+        (rec.contacts || []).map((c) => ({
+          customer: rec.name || "",
+          customerId: rec.id,
+          name: c.name || "",
+          email: c.email || "",
+          phone: c.phone || "",
+          mobile: c.mobile || "",
+          title: c.role || "",
+          role: "",
+          primary: c.primary ? "yes" : "no",
+        }))
+      );
+    },
+  },
+
+  venues: {
+    count: async () =>
+      (await Customers.all()).reduce((n, c) => n + (c.locations || []).length, 0),
+    load: async () => (await Customers.all()) as unknown as Record<string, unknown>[],
+    // Dedupe key: customer (id → normalized name) + normalized venue name.
+    find: (v, cache) => {
+      const docs = cache as unknown as Customers.CustomerDoc[];
+      const r = resolveCustomerForRow({ customerId: v.customerId, customer: v.customer }, docs);
+      if (!r.id) return null;
+      const cust = docs.find((c) => c.id === r.id);
+      const hit = cust ? matchLocation(cust.locations || [], v.venue) : null;
+      return hit ? { customerId: r.id, locationId: hit.id ?? "" } : null;
+    },
+    create: async (v, cache, _ctx, link) => {
+      const cust = await linkCustomer(v, cache, link);
+      await writeVenueRow(cust, v);
+      await refreshCache(cache, cust.id);
+    },
+    update: async (ex, v, cache, _ctx, link) => {
+      const id = str(ex.customerId);
+      const cust = await Customers.get(id);
+      if (!cust) throw new Error(`Customer ${id} no longer exists`);
+      if (!link.createdIds.has(id)) link.customersLinked++;
+      await writeVenueRow(cust, v);
+      await refreshCache(cache, id);
+    },
+    exportObjects: async () => {
+      const list = await Customers.all();
+      return list.flatMap((rec) =>
+        (rec.locations || [])
+          // An unnamed, address-less D85 placeholder is an app artifact, not
+          // data — exporting it would only produce a row that fails re-import.
+          .filter((l) => (l.label || "").trim() || (l.address || "").trim())
+          .map((l) => ({
+            customer: rec.name || "",
+            customerId: rec.id,
+            venue: l.label || "",
+            address: l.address || "",
+            city: l.city || "",
+            state: l.state || "",
+            zip: l.zip || "",
+            kind: l.kind || "",
+          }))
+      );
     },
   },
 
@@ -520,7 +779,9 @@ const WRITERS: Record<string, Writer> = {
       if (ex) Object.assign(ex, patch);
       else cache.push({ id: sku, sku, ...patch });
     },
-    update: async (ex, v, ctx) => {
+    // `_cache` is the #137 link-back cache slot every writer now carries —
+    // the catalog update path dedupes through `find` alone and reads only ctx.
+    update: async (ex, v, _cache, ctx) => {
       const sku = str(ex.sku);
       await Catalog.mergeUpsert(sku, catalogPatch(v, ex, sku), { pricedAt: ctx.effectiveAt });
     },
@@ -637,9 +898,20 @@ export async function commitImport(
   ctx: CommitContext = { effectiveAt: Date.now() }
 ): Promise<ImportResult> {
   const w = WRITERS[key];
-  const res: ImportResult = { created: 0, updated: 0, skipped: 0, errored: 0, total: rows.length, written: [], failed: [] };
+  const res: ImportResult = {
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    errored: 0,
+    total: rows.length,
+    written: [],
+    failed: [],
+    customersCreated: 0,
+    customersLinked: 0,
+  };
   if (!w) return res;
   const cache = await w.load();
+  const link: LinkStats = { customersCreated: 0, customersLinked: 0, createdIds: new Set<string>() };
   for (const r of rows) {
     if (!r.valid) {
       res.errored++;
@@ -653,12 +925,12 @@ export async function commitImport(
         continue;
       }
       if (existing && mode === "update" && w.update) {
-        await w.update(existing, r.values, ctx);
+        await w.update(existing, r.values, cache, ctx, link);
         res.updated++;
         res.written.push(r);
         continue;
       }
-      await w.create(r.values, cache, ctx);
+      await w.create(r.values, cache, ctx, link);
       res.created++;
       res.written.push(r);
     } catch {
@@ -666,6 +938,8 @@ export async function commitImport(
       res.failed.push(r);
     }
   }
+  res.customersCreated = link.customersCreated;
+  res.customersLinked = link.customersLinked;
   return res;
 }
 
@@ -687,12 +961,22 @@ function csvCell(s: unknown): string {
   return /[",\n]/.test(str2) ? '"' + str2.replace(/"/g, '""') + '"' : str2;
 }
 
+/** The template / export columns: every field that isn't a hidden alias (#137).
+ *  Hidden fields stay accepted on import (autoMap still maps them) — they are
+ *  simply not advertised as columns to fill in or to export. Shares ONE
+ *  definition with the client paste box's placeholder (parse.visibleColumns),
+ *  so template, export header and placeholder can never drift apart. */
+function columnsOf(type: ImportTypeMeta): FieldDef[] {
+  return visibleColumns(type.fields);
+}
+
 /** Blank template: header row + one example row (importkit.templateCSV). */
 export function templateCsv(key: string): string {
   const type = getTypeMeta(key);
   if (!type) return "";
-  const header = type.fields.map((f) => csvCell(f.header)).join(",");
-  const example = type.fields.map((f) => csvCell(f.example || "")).join(",");
+  const cols = columnsOf(type);
+  const header = cols.map((f) => csvCell(f.header)).join(",");
+  const example = cols.map((f) => csvCell(f.example || "")).join(",");
   return header + "\n" + example + "\n";
 }
 
@@ -701,7 +985,8 @@ export async function exportCsv(key: string): Promise<string> {
   const type = getTypeMeta(key);
   if (!type) return "";
   const objs = await exportObjectsFor(key);
-  const header = type.fields.map((f) => csvCell(f.header)).join(",");
-  const lines = objs.map((o) => type.fields.map((f) => csvCell(o[f.key] ?? "")).join(","));
+  const cols = columnsOf(type);
+  const header = cols.map((f) => csvCell(f.header)).join(",");
+  const lines = objs.map((o) => cols.map((f) => csvCell(o[f.key] ?? "")).join(","));
   return header + "\n" + lines.join("\n") + (lines.length ? "\n" : "");
 }
