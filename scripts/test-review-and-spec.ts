@@ -3112,10 +3112,10 @@ async function xlsxFixture(): Promise<Buffer> {
     placements: [
       { id: "gp-a", sheetId: "gs-1", page: 1, x: 0.1, y: 0.1, partId: "p1", by: "t", at: 1 },
       { id: "gp-b", sheetId: "gs-1", page: 1, x: 0.2, y: 0.2, partId: "p2", by: "t", at: 1 },
-    ],
+    ] as Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; by: string; at: number; optionId?: string }>,
     routes: [
       { id: "wr-a", sheetId: "gs-1", page: 1, partId: "w1", points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], aspect: 1, by: "t", at: 1, fromPlacementId: "gp-a", toPlacementId: "gp-b" },
-    ],
+    ] as Array<{ id: string; sheetId: string; page: number; partId: string; points: { x: number; y: number }[]; aspect: number; by: string; at: number; fromPlacementId?: string; toPlacementId?: string; optionId?: string }>,
   };
   const norm = ensureOptions(structuredClone(legacy));
   ok(norm.options.length === 1 && norm.options[0].id === DEFAULT_OPTION_ID && norm.options[0].name === DEFAULT_OPTION_NAME, "grid-options: a legacy doc normalizes to one 'Design' option with id opt-base");
@@ -3133,8 +3133,8 @@ async function xlsxFixture(): Promise<Buffer> {
       { id: "gp-1", optionId: "opt-x" },
       { id: "gp-2", optionId: "opt-y" },
       { id: "gp-3" },
-    ],
-    routes: [{ id: "wr-1", optionId: "opt-y" }],
+    ] as Array<{ id: string; optionId?: string }>,
+    routes: [{ id: "wr-1", optionId: "opt-y" }] as Array<{ id: string; optionId?: string }>,
   });
   ok(two.options.length === 2 && two.options[0].id === "opt-x", "grid-options: an existing options list is preserved in order");
   ok(two.placements![2].optionId === "opt-x", "grid-options: an untagged member on a multi-option doc falls to the FIRST option");
