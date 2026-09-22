@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
 import { blobEnabled, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_UPLOAD_MAX_BYTES, VENDOR_UPLOAD_MAX_LABEL } from "@/lib/vendor-quote-file";
-import { engagementFolderPath } from "@/lib/consulting-files";
-import { ensureFolder, initiateResumableSession, DriveApiError, type DriveFetch } from "@/lib/google/drive";
+import { DATA_URL_MAX_BYTES, ENGAGEMENT_FILES_BLOB_PREFIX, engagementFolderPath } from "@/lib/consulting-files";
+import { ensureFolderPath, initiateResumableSession, DriveApiError } from "@/lib/google/drive";
 import { getSettings } from "@/lib/settings";
 import { getConnectionInfo, accessTokenFor } from "@/lib/gmail/connections";
 import { hasDriveScope } from "@/lib/gmail/config";
@@ -66,20 +66,26 @@ async function archiveDriveGrant(): Promise<{ token: string } | null> {
   return token ? { token } : null;
 }
 
-/** Walk `engagementFolderPath`'s "A/B/C" into nested Drive folders, creating
- *  whichever segments don't exist yet. `ensureFolder` itself searches before
- *  creating, so a retried request never produces a duplicate folder. */
-async function ensureFolderPath(
-  token: string,
-  path: string,
-  fetchImpl: DriveFetch
-): Promise<string> {
-  let parentId: string | null = null;
-  for (const segment of path.split("/").filter(Boolean)) {
-    parentId = await ensureFolder(token, segment, parentId, { fetch: fetchImpl });
+/**
+ * `{ mode: "data" }`, or a 413 refusal when the raw size is over
+ * `DATA_URL_MAX_BYTES` — that ceiling exists because whatever saves a
+ * "data" ref carries the base64 dataUrl inside ITS OWN payload (a note-save
+ * server action, capped ~1200kb per AGENTS.md), and base64 inflates by
+ * 4/3. Refusing here means the client hears this route's own JSON error
+ * instead of a platform-level failure surfacing downstream at save time.
+ */
+function dataModeOrTooBig(size: number, warning?: string): NextResponse {
+  if (size > DATA_URL_MAX_BYTES) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `That file is too large to store without Drive or Blob configured (limit ${Math.round(DATA_URL_MAX_BYTES / 1024)}KB). Connect a Drive archive mailbox or Blob storage in Settings, or paste a Link instead.`,
+        maxBytes: DATA_URL_MAX_BYTES,
+      },
+      { status: 413 }
+    );
   }
-  if (!parentId) throw new DriveApiError(500, `Empty Drive folder path: "${path}"`);
-  return parentId;
+  return NextResponse.json(warning ? { mode: "data", warning } : { mode: "data" });
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
@@ -118,7 +124,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     const bytes = Buffer.from(await file.arrayBuffer());
     try {
       const stored = await putBlob(
-        `engagement-files/${engagementId}/${safeName(file.name || "file")}`,
+        `${ENGAGEMENT_FILES_BLOB_PREFIX}${engagementId}/${safeName(file.name || "file")}`,
         bytes,
         mime
       );
@@ -158,11 +164,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const grant = await archiveDriveGrant();
   if (grant) {
     try {
-      const folderId = await ensureFolderPath(
-        grant.token,
-        engagementFolderPath(engagement.customer, engagement.id),
-        (url, init) => fetch(url, init)
-      );
+      const folderId = await ensureFolderPath(grant.token, engagementFolderPath(engagement.customer, engagement.id));
       const sessionUrl = await initiateResumableSession(grant.token, { name, mime, parentId: folderId, size });
       return NextResponse.json({ mode: "drive", sessionUrl });
     } catch (e) {
@@ -170,10 +172,10 @@ export async function POST(req: Request): Promise<NextResponse> {
       console.error("[engagement-files] initiate failed:", e);
       // Fall through to Blob/data rather than failing the whole request —
       // a Drive hiccup should not block someone attaching a file to a note.
-      if (!blobEnabled()) return NextResponse.json({ mode: "data", warning: msg });
+      if (!blobEnabled()) return dataModeOrTooBig(size, msg);
     }
   }
 
   if (blobEnabled()) return NextResponse.json({ mode: "blob" });
-  return NextResponse.json({ mode: "data" });
+  return dataModeOrTooBig(size);
 }

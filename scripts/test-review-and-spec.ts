@@ -5967,22 +5967,50 @@ ok(fileRefName({ kind: "drive", fileId: "f1", webViewLink: "x", name: "set.pdf",
 
 const ownedRefs145: FileRef[] = [
   { kind: "drive" as const, fileId: "good", webViewLink: "x", name: "a.pdf", mime: "application/pdf", size: 1 },
-  { kind: "blob" as const, pathname: "eng/CE-1/b.pdf", name: "b.pdf", mime: "application/pdf", size: 1 },
+  { kind: "blob" as const, pathname: "engagement-files/CE-1/b.pdf", name: "b.pdf", mime: "application/pdf", size: 1 },
 ];
-ok(ownsEngagementFile(ownedRefs145, "good"), "#145 a Drive id stored on the engagement is streamable");
-ok(ownsEngagementFile(ownedRefs145, "eng/CE-1/b.pdf"), "#145 a Blob pathname stored on the engagement is streamable");
-ok(!ownsEngagementFile(ownedRefs145, "someone-elses-file"), "#145 an id NOT stored on this engagement is refused — the vendor-quote arbitrary-read lesson");
-ok(!ownsEngagementFile([], "good"), "#145 an engagement with no files streams nothing");
-ok(!ownsEngagementFile(ownedRefs145, ""), "#145 an empty id is refused rather than matching a falsy field");
+ok(ownsEngagementFile(ownedRefs145, "good", "CE-1"), "#145 a Drive id stored on the engagement is streamable (DB-level half only — the proxy's live Drive parents re-check is the other half, not spec-testable here with no network)");
+ok(ownsEngagementFile(ownedRefs145, "engagement-files/CE-1/b.pdf", "CE-1"), "#145 a Blob pathname stored on the engagement, under ITS OWN engagement prefix, is streamable");
+ok(!ownsEngagementFile(ownedRefs145, "someone-elses-file", "CE-1"), "#145 an id NOT stored on this engagement is refused — the vendor-quote arbitrary-read lesson");
+ok(!ownsEngagementFile([], "good", "CE-1"), "#145 an engagement with no files streams nothing");
+ok(!ownsEngagementFile(ownedRefs145, "", "CE-1"), "#145 an empty id is refused rather than matching a falsy field");
+ok(!ownsEngagementFile(ownedRefs145, "good", ""), "#145 an empty engagementId is refused even if the key is stored somewhere");
+
+/* The vendor-quote precedent (ownsVendorQuoteBlobPath) is TWO checks: is it
+ * stored, AND does the path's own shape belong to this exact record. A
+ * writer that takes client-supplied FileRef data (this seam's note
+ * attachments) makes the "is it stored" half attacker-controlled, so a
+ * "blob" key must ALSO structurally sit under THIS engagement's own
+ * upload prefix — closing the hole a forged attachment on the attacker's
+ * OWN engagement would otherwise open onto another engagement's, or
+ * another feature's, private files. */
+const crossEngRef145: FileRef = { kind: "blob", pathname: "engagement-files/CE-2/other.pdf", name: "other.pdf", mime: "application/pdf", size: 1 };
+ok(
+  !ownsEngagementFile([crossEngRef145], "engagement-files/CE-2/other.pdf", "CE-1"),
+  "#145 a blob ref whose OWN pathname prefix names a DIFFERENT engagement is refused, even though the key is 'stored' on this one — the exact shape of the attack once a note-save writer takes client-supplied FileRefs"
+);
+const traversalRef145: FileRef = { kind: "blob", pathname: "engagement-files/CE-1/../../vendor-quotes/secret.pdf", name: "secret.pdf", mime: "application/pdf", size: 1 };
+ok(
+  !ownsEngagementFile([traversalRef145], "engagement-files/CE-1/../../vendor-quotes/secret.pdf", "CE-1"),
+  "#145 a blob pathname containing '..' is refused even when its literal prefix matches this engagement"
+);
+ok(
+  !ownsEngagementFile(
+    [{ kind: "blob", pathname: "vendor-quotes/vq123-secret.pdf", name: "secret.pdf", mime: "application/pdf", size: 1 }],
+    "vendor-quotes/vq123-secret.pdf",
+    "CE-1"
+  ),
+  "#145 a blob pathname borrowed from an unrelated feature's own prefix (vendor-quotes/) is refused"
+);
 
 /* fileRefKey / fileRefHref — not in the brief's floor, added for coverage
  * of the two other exports consulting-files.ts produces. */
 const dataRef145: FileRef = { kind: "data", dataUrl: "data:text/plain,hi", name: "c.txt", mime: "text/plain", size: 2 };
 ok(fileRefKey(dataRef145) === "", "#145 a data-URL ref has no storage key");
-ok(!ownsEngagementFile([dataRef145], ""), "#145 a data-URL ref's empty key never matches an empty request either");
+ok(!ownsEngagementFile([dataRef145], "", "CE-1"), "#145 a data-URL ref's empty key never matches an empty request either");
 ok(fileRefHref(dataRef145, "CE-1") === dataRef145.dataUrl, "#145 a data-URL ref's href is the data URL itself — no network round trip");
 ok(fileRefHref(ownedRefs145[0], "CE-1044") === "/api/engagement-files/CE-1044/good", "#145 a drive ref's href routes through the ownership-checked proxy, not a raw Drive link");
-ok(fileRefHref(ownedRefs145[1], "CE-1") === "/api/engagement-files/CE-1/eng%2FCE-1%2Fb.pdf", "#145 a blob ref's href is proxied with its pathname encoded");
+ok(fileRefHref(ownedRefs145[1], "CE-1") === "/api/engagement-files/CE-1/engagement-files%2FCE-1%2Fb.pdf", "#145 a blob ref's href is proxied with its pathname encoded");
 
 /* initiateResumableSession itself is exercised indirectly but exactly: the
  * existing uploadFileResumable tests above assert the precise headers

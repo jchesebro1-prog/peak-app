@@ -17,16 +17,21 @@ export const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
 export const DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
 export const DRIVE_FOLDER_MIME = "application/vnd.google-apps.folder";
 
-/** Metadata calls (search / create / initiate) — same budget as tasks.ts. */
-const META_TIMEOUT_MS = 10_000;
+/** Metadata calls (search / create / initiate) — same budget as tasks.ts.
+ *  Exported so other Drive-touching routes (the engagement-files download
+ *  proxy's live parent-folder check, #145) carry the same budget instead of
+ *  inventing their own. */
+export const META_TIMEOUT_MS = 10_000;
 /**
- * The byte PUT. A single PUT of the whole file is fine for our sizes (the
- * client-upload token caps audio at 1 GB, spec §7) but it has to finish
- * inside the 60 s function budget the nightly cron runs under — hence the
- * ≤ 5-per-run cap in lib/krisp/archive.ts. Chunked resumable PUTs across
- * runs are a follow-up if a real venue walkthrough ever times out here.
+ * The byte PUT/GET. A single PUT of the whole file is fine for our sizes
+ * (the client-upload token caps audio at 1 GB, spec §7) but it has to
+ * finish inside the 60 s function budget the nightly cron runs under —
+ * hence the ≤ 5-per-run cap in lib/krisp/archive.ts. Chunked resumable PUTs
+ * across runs are a follow-up if a real venue walkthrough ever times out
+ * here. Also reused for the engagement-files proxy's `alt=media` download
+ * (#145) — same byte-transfer scale, same budget.
  */
-const UPLOAD_TIMEOUT_MS = 55_000;
+export const UPLOAD_TIMEOUT_MS = 55_000;
 
 export type DriveFetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -164,6 +169,32 @@ export async function ensureFolder(
   }
   opts.cache?.set(key, id);
   return id;
+}
+
+/**
+ * Walk a "A/B/C" path (as `engagementFolderPath` builds one, #145) into
+ * nested Drive folders via `ensureFolder`, creating whichever segments
+ * don't exist yet and returning the LEAF folder's id. Idempotent —
+ * `ensureFolder` searches before creating, so calling this again for the
+ * same path resolves the same folder id without creating a duplicate.
+ *
+ * That idempotency is also what makes this safe to call a SECOND time at
+ * READ time (the engagement-files download proxy re-resolves the same
+ * path to get an authoritative folder id to check a file's live `parents`
+ * against, rather than trusting anything stored) as well as at upload
+ * time.
+ */
+export async function ensureFolderPath(
+  token: string,
+  path: string,
+  opts: { fetch?: DriveFetch; cache?: FolderCache } = {}
+): Promise<string> {
+  let parentId: string | null = null;
+  for (const segment of path.split("/").filter(Boolean)) {
+    parentId = await ensureFolder(token, segment, parentId, opts);
+  }
+  if (!parentId) throw new DriveApiError(500, `Empty Drive folder path: "${path}"`);
+  return parentId;
 }
 
 export type DriveUploadInput = {
