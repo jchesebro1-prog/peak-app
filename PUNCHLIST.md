@@ -5544,25 +5544,6 @@ Inbox tab until `CRON_SECRET` + a Pro-plan schedule (or an external pinger) exis
 
 ---
 
-## 98. Cron reconcile of Peak/* label drift on dormant threads — OPEN
-
-D142's Peak→Gmail writer (`queueLabelSync`) is fire-and-forget: it's queued from the store mutation
-inside a server action, with no `waitUntil`, so on serverless the process can freeze or recycle before
-the queued write actually lands. That's fine for an active thread — the next mutation re-queues a
-sync that picks up the current desired set — but a link/assign/status change on a thread that then
-goes quiet can leave it permanently unlabelled (or stale-labelled) on the Gmail side if that one
-queued write was the one that got dropped: nothing else re-queues a sync for a thread nobody touches
-again.
-
-The per-sync passes (open-tab tick, cron) only re-queue threads whose status just flipped or that
-just linked — they don't sweep everything else. A cron-only reconcile pass that, for every linked
-thread, loads its current label set + computes `desiredPeakLabels` and queues a sync whenever they
-differ would close this: bounded cost (one `getDoc` + one label-cache read per linked thread), and it
-only needs to run on the cron path, not the interactive one, since interactive traffic already
-self-heals via the next mutation. Reference D142.
-
----
-
 ## REVIEW AUDIT — 2026-09-21 (Jeff's feature-review list, checked against `main` @ 771499b)
 
 Jeff re-sent his full review list (offline, dashboard queue, inbox/calendar, Assembly Builder,
