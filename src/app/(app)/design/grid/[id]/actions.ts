@@ -12,6 +12,7 @@ import {
   addSheet,
   addSpace,
   clearSheetCalibration,
+  generateBaseSheet,
   getProject,
   movePlacement,
   removePlacement,
@@ -20,6 +21,7 @@ import {
   removeSpace,
   renameSpace,
   restoreRevision,
+  seedBlankSheet,
   setPlacementCategory,
   setQuote,
   setScopeInputs,
@@ -92,8 +94,10 @@ export async function saveGridIntakeAction(input: {
   measurementBased: boolean;
   autoConfig: AState;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  await requireUser();
+  const user = await requireUser();
   if (!input.venueName.trim() && !input.locationName.trim()) return { ok: false, error: "Add a venue or location to continue." };
+  const project = await getProject(input.projectId);
+  if (!project) return { ok: false, error: "That design could not be found." };
   const saved = await saveGridIntake(input.projectId, {
     complete: true,
     measurementBased: !!input.measurementBased,
@@ -104,6 +108,33 @@ export async function saveGridIntakeAction(input: {
     autoConfig: input.autoConfig,
   });
   if (!saved) return { ok: false, error: "That design could not be found." };
+  // First-save gate (Task 1, #38): a base sheet is generated exactly once —
+  // the first time intake completes — never on a later re-save of venue
+  // details. `sheetIds` is empty until then because createProject() no
+  // longer pre-seeds a sheet at all (see grid-projects.ts createProject).
+  // Re-checked on `saved` (the just-written doc) rather than the earlier
+  // `project` read, to narrow — the doc-store has no transactions (#74),
+  // so a true double-submit race isn't fully closed here, only shortened
+  // from "the whole saveGridIntake write" to "this one re-read" — an
+  // accepted, user-recoverable residual risk (delete the extra sheet),
+  // consistent with this codebase's existing #74/#80/#85/#86 judgment
+  // calls on low-probability concurrency edge cases.
+  const isFirstSave = (saved.sheetIds || []).length === 0;
+  if (isFirstSave) {
+    if (input.measurementBased) {
+      // A generated base sheet is stored as a static artifact, same as an
+      // uploaded plan — it must never bake in the live, user-configurable
+      // accent (AGENTS.md: "never hardcode accent-colored UI"), or every
+      // sheet generated before a branding change goes stale forever. Use a
+      // fixed neutral drawing-line ink instead of settings.accent.
+      await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
+    } else {
+      // "I have my own plan, skip measurements" — no VenueDims to render
+      // from yet; seed the same blank fallback createProject() used to
+      // create unconditionally, and let the user upload a real plan next.
+      await seedBlankSheet(input.projectId, project.name, user.name);
+    }
+  }
   revalidatePath(editorPath(input.projectId));
   return { ok: true };
 }
