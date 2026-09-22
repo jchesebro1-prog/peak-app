@@ -6,7 +6,7 @@ import { ensureEngagementForQuote } from "@/lib/stores/engagements";
 import { upsertDoc, patchDoc } from "@/db/doc-store";
 import type { Quote } from "@/lib/stores/quotes";
 import { contactByEmail } from "@/lib/identity/lookup";
-import { emailsFor, saveContact, setEmails } from "@/lib/identity/contacts";
+import { emailsFor, saveContact, setEmails, softDeleteContact } from "@/lib/identity/contacts";
 import { claimDomain, customersForDomain } from "@/lib/gmail/domains";
 import { applyResolution, applyResweepPatch, resolveForThread, resweepThreads } from "@/lib/gmail/linking";
 import type { CommThread } from "@/lib/stores/comms";
@@ -71,9 +71,44 @@ async function main() {
   });
   await setEmails("ct-t96", [{ value: "brenda.t96@lakefront.k12.mn.us", label: "work", isPrimary: true }]);
   const hit = await contactByEmail("Brenda.T96@Lakefront.K12.MN.US");
-  assert.equal(hit?.customerId, "lakefront", "#96 contactByEmail joins to the home company");
+  assert.equal(hit && !("ambiguous" in hit) ? hit.customerId : null, "lakefront", "#96 contactByEmail joins to the home company");
   const r1 = await resolveForThread("brenda.t96@lakefront.k12.mn.us");
   assert.equal(r1.kind, "linked", "#96 exact contact links");
+
+  // #96 Wave A fix 1 — a soft-deleted contact must never resolve a sender,
+  // and two live contacts on different customers sharing one address is
+  // ambiguous, never a silent pick.
+  await saveContact({
+    id: "ct-t96gone", firstName: "Gone", lastName: "Person", homeCompanyId: "lakefront",
+    title: "", pricingTier: null, status: "active", userId: null, ownerUserId: "u1",
+    isPrimary: false, createdAt: Date.now(),
+  });
+  await setEmails("ct-t96gone", [{ value: "gone.t96@t96gone.org", label: "work", isPrimary: true }]);
+  const gone = await contactByEmail("gone.t96@t96gone.org");
+  assert.equal(gone && !("ambiguous" in gone) ? gone.contactId : null, "ct-t96gone", "#96 live contact resolves before deletion");
+  await softDeleteContact("ct-t96gone");
+  assert.equal(await contactByEmail("gone.t96@t96gone.org"), null, "#96 contactByEmail ignores a soft-deleted contact");
+  await saveContact({
+    id: "ct-t96dupA", firstName: "Dup", lastName: "A", homeCompanyId: "lakefront",
+    title: "", pricingTier: null, status: "active", userId: null, ownerUserId: "u1",
+    isPrimary: false, createdAt: Date.now(),
+  });
+  await saveContact({
+    id: "ct-t96dupB", firstName: "Dup", lastName: "B", homeCompanyId: "other",
+    title: "", pricingTier: null, status: "active", userId: null, ownerUserId: "u1",
+    isPrimary: false, createdAt: Date.now(),
+  });
+  await setEmails("ct-t96dupA", [{ value: "shared.t96@t96dup.org", label: "work", isPrimary: true }]);
+  await setEmails("ct-t96dupB", [{ value: "shared.t96@t96dup.org", label: "work", isPrimary: true }]);
+  const dup = await contactByEmail("shared.t96@t96dup.org");
+  assert.ok(dup && "ambiguous" in dup, "#96 contactByEmail reports two live customers as ambiguous");
+  assert.deepEqual(
+    dup && "ambiguous" in dup ? [...dup.ambiguous].sort() : [],
+    ["lakefront", "other"],
+    "#96 contactByEmail lists both live customers"
+  );
+  const rDup = await resolveForThread("shared.t96@t96dup.org");
+  assert.equal(rDup.kind, "ambiguous", "#96 resolver treats a two-customer contact hit as ambiguous");
   assert.equal(r1.kind === "linked" && r1.via, "contact", "#96 exact contact links via contact match");
   await claimDomain("t96district.org", "lakefront", "manual", "test");
   await claimDomain("t96district.org", "other", "learned", "test"); // learned never overwrites

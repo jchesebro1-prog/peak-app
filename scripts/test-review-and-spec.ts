@@ -3025,6 +3025,11 @@ async function asyncChecks(): Promise<void> {
     ok(r4.kind === "unknown", "resolve: public domain never uses the domain step");
     const r5 = await resolveSender("", L);
     ok(r5.kind === "unknown", "resolve: empty → unknown");
+    const r6 = await resolveSender("dup@shared.org", {
+      ...L,
+      contactByEmail: async () => ({ ambiguous: ["a", "b"] }),
+    });
+    ok(r6.kind === "ambiguous" && r6.candidates.length === 2, "resolve: two live customers on one address → ambiguous");
   }
 
   const xr = await xlsxToCsv(await xlsxFixture());

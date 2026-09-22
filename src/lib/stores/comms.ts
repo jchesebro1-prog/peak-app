@@ -1621,7 +1621,9 @@ export async function resolveCustomerId(
   const email = (t.contactEmail || "").trim().toLowerCase();
   if (!email) return null;
   const { contactByEmail } = await import("@/lib/identity/lookup");
-  return (await contactByEmail(email))?.customerId ?? null;
+  const hit = await contactByEmail(email);
+  // Two live customers on one address is never a silent pick (#96).
+  return hit && !("ambiguous" in hit) ? hit.customerId : null;
 }
 
 /* ---- time formatting -------------------------------------------------------------- */
