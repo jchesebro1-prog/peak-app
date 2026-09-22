@@ -548,6 +548,50 @@ async function userIdForName(name: string | undefined): Promise<string | null> {
 }
 
 /**
+ * Upsert one phone channel for a contact — `label: "work"` targets the
+ * (primary-first) non-mobile row, `label: "mobile"` the mobile-labelled one,
+ * matching the two call sites' original find() predicates exactly.
+ *
+ * A row already carrying `label` is updated in place when its value differs
+ * (unchanged when equal — no write). Otherwise, when some OTHER row already
+ * holds this exact number under a different label, that row is RELABELLED
+ * to `label` rather than the write being skipped or a duplicate row being
+ * inserted — skipping used to drop the label silently even though the
+ * caller's value was kept in `rec`, so composeContact never reported it and
+ * the record never converged (#137 T1 review). Only a genuinely new number
+ * inserts a new row. `current` must come from `phonesFor` (primary-first)
+ * so ties resolve to the primary channel, same as before this was a helper.
+ */
+async function upsertPhoneChannel(
+  contactId: string,
+  value: string,
+  label: "work" | "mobile",
+  current: ContactPhoneRow[]
+): Promise<void> {
+  const target =
+    label === "mobile"
+      ? current.find((p) => p.label === "mobile")
+      : current.find((p) => p.label !== "mobile");
+  if (target) {
+    if (target.phone !== value) {
+      const db = await getDb();
+      await db.update(contactPhones).set({ phone: value }).where(eq(contactPhones.id, target.id));
+    }
+    return;
+  }
+  const dupe = current.find((p) => p.phone === value);
+  if (dupe) {
+    const db = await getDb();
+    await db.update(contactPhones).set({ label }).where(eq(contactPhones.id, dupe.id));
+    return;
+  }
+  await setPhones(contactId, [
+    ...current.map((p) => ({ value: p.phone, label: p.label, isPrimary: p.isPrimary })),
+    { value, label, isPrimary: current.length === 0 },
+  ]);
+}
+
+/**
  * Write one normalized record through to the identity tables.
  * Site matching: incoming location id against legacyLocId THEN site id;
  * unmatched incoming ids are treated as legacy ids so existing doc
@@ -713,46 +757,22 @@ async function writeRecord(rec: CustomerDoc, prev: CustomerDoc | null): Promise<
     }
     const phone = (ct.phone || "").trim();
     if (phone) {
-      const current = await phonesFor(id);
       // #137 — target the non-mobile row so a work number never overwrites
       // the mobile channel (and the mobile block below never overwrites this).
-      const work = current.find((p) => p.label !== "mobile");
-      if (!work) {
-        if (!current.some((p) => p.phone === phone)) {
-          await setPhones(id, [
-            ...current.map((p) => ({ value: p.phone, label: p.label, isPrimary: p.isPrimary })),
-            { value: phone, label: "work", isPrimary: current.length === 0 },
-          ]);
-        }
-      } else if (work.phone !== phone) {
-        const db = await getDb();
-        await db
-          .update(contactPhones)
-          .set({ phone })
-          .where(eq(contactPhones.id, work.id));
-      }
+      // A value equal to the current mobile number relabels that row instead
+      // of vanishing (#137 T1 review) — the symmetric case is rare (the
+      // contacts backfill above already keeps rec.mobile in sync), but the
+      // shared helper closes it for both channels in one place.
+      await upsertPhoneChannel(id, phone, "work", await phonesFor(id));
     }
     // #137 — a mobile number is a second, "mobile"-labelled channel: added
-    // when the contact has none, updated in place when it changed, never
-    // removed here (blank means "not provided").
+    // when the contact has none, updated in place when it changed, or
+    // relabelled from whatever channel already holds this number instead of
+    // silently vanishing (#137 T1 review); never removed here (blank means
+    // "not provided").
     const mobile = (ct.mobile || "").trim();
     if (mobile) {
-      const current = await phonesFor(id);
-      const mob = current.find((p) => p.label === "mobile");
-      if (!mob) {
-        if (!current.some((p) => p.phone === mobile)) {
-          await setPhones(id, [
-            ...current.map((p) => ({ value: p.phone, label: p.label, isPrimary: p.isPrimary })),
-            { value: mobile, label: "mobile", isPrimary: current.length === 0 },
-          ]);
-        }
-      } else if (mob.phone !== mobile) {
-        const db = await getDb();
-        await db
-          .update(contactPhones)
-          .set({ phone: mobile })
-          .where(eq(contactPhones.id, mob.id));
-      }
+      await upsertPhoneChannel(id, mobile, "mobile", await phonesFor(id));
     }
   }
   for (const c of existingContacts) {

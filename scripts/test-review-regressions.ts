@@ -1099,6 +1099,46 @@ async function main() {
     assert.equal(d!.contacts.length, 1, "#137 T1 revived id re-matches the surviving contact by name (no duplicate row)");
     assert.equal(d!.contacts[0].phone, "(608) 555-0110", "#137 T1 revived contact keeps its work phone");
     assert.equal(d!.contacts[0].mobile, "(608) 555-0111", "#137 T1 revived contact keeps its mobile channel");
+
+    // #137 T1 review — a supplied phone/mobile that matches an existing
+    // number under a different label relabels that row instead of vanishing
+    // (else rec.mobile never matches the composed side and D83 never converges).
+    await upsertCustomer({
+      id: "c-t137-dupphone", name: "T137 Dup Phone Co", type: "Vendor",
+      contacts: [{ name: "Sam Duplicate", email: "sam@t137.example", phone: "555-1000", mobile: "555-1000", primary: true }],
+    });
+    const e = await getCustomer("c-t137-dupphone");
+    assert.equal(e!.contacts[0].phone, "555-1000", "#137 T1 review: phone==mobile on first save — phone reads back");
+    assert.equal(e!.contacts[0].mobile, "555-1000", "#137 T1 review: phone==mobile on first save — mobile relabelled, not dropped (one row)");
+    await upsertCustomer({
+      id: "c-t137-dupphone", name: "T137 Dup Phone Co", type: "Vendor",
+      contacts: [{ name: "Sam Duplicate", email: "sam@t137.example", phone: "555-1000", mobile: "555-1000", primary: true }],
+    });
+    const e2 = await getCustomer("c-t137-dupphone");
+    assert.equal(e2!.updatedAt, e!.updatedAt, "#137 T1 review: identical phone==mobile re-save leaves updatedAt unchanged (D83)");
+
+    // A genuinely distinct mobile is unaffected: two separate rows, phone unchanged.
+    await upsertCustomer({
+      id: "c-t137-2phones", name: "T137 Two Phones Co", type: "Vendor",
+      contacts: [{ name: "Dana Separate", email: "dana@t137.example", phone: "555-3000", mobile: "555-4000", primary: true }],
+    });
+    const f = await getCustomer("c-t137-2phones");
+    assert.equal(f!.contacts[0].phone, "555-3000", "#137 T1 review: distinct phone/mobile — phone unchanged");
+    assert.equal(f!.contacts[0].mobile, "555-4000", "#137 T1 review: distinct phone/mobile — a separate mobile row exists");
+
+    // phone only, mobile never supplied: re-saving identically does not churn.
+    await upsertCustomer({
+      id: "c-t137-onlyphone", name: "T137 Only Phone Co", type: "Vendor",
+      contacts: [{ name: "Pat Phoneonly", email: "pat@t137.example", phone: "555-5000", primary: true }],
+    });
+    const g = await getCustomer("c-t137-onlyphone");
+    assert.equal(g!.contacts[0].mobile, undefined, "#137 T1 review: phone-only contact has no mobile");
+    await upsertCustomer({
+      id: "c-t137-onlyphone", name: "T137 Only Phone Co", type: "Vendor",
+      contacts: [{ name: "Pat Phoneonly", email: "pat@t137.example", phone: "555-5000", primary: true }],
+    });
+    const g2 = await getCustomer("c-t137-onlyphone");
+    assert.equal(g2!.updatedAt, g!.updatedAt, "#137 T1 review: identical phone-only re-save leaves updatedAt unchanged (D83)");
   }
 
   console.log("review regression checks passed");
