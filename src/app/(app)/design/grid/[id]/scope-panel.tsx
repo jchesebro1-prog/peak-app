@@ -123,6 +123,7 @@ export default function ScopePanel({
   scopeInputs,
   byScope,
   engineFabrics,
+  defaultTier,
   onChanged,
   onError,
 }: {
@@ -132,10 +133,12 @@ export default function ScopePanel({
    *  parts, []) — computed once in editor.tsx. */
   byScope: RollupSlice[];
   engineFabrics: FabricOption[];
+  /** Active option's tier (Spec 1) — the lens' initial value, never a gate. */
+  defaultTier?: TierKey;
   onChanged: () => void;
   onError: (msg: string) => void;
 }) {
-  const [tierKey, setTierKey] = useState<TierKey>("better");
+  const [tierKey, setTierKey] = useState<TierKey>(defaultTier ?? "better");
   const [pending, startTransition] = useTransition();
   const accentHex = useSyncExternalStore(subscribeAccent, getAccentHex, getAccentHexServer);
   const tierDefs = useSyncExternalStore(subscribeTierDefs, getTierDefs, getTierDefsServer);

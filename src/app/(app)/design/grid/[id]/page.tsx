@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
+import { resolveOptionId } from "@/lib/design/grid-options";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { allEngagements } from "@/lib/stores/engagements";
@@ -29,11 +30,14 @@ export const dynamic = "force-dynamic";
  */
 export default async function GridEditorPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ option?: string }>;
 }) {
   const user = await requireUser();
   const { id } = await params;
+  const { option: requestedOption } = await searchParams;
   const project = await getProject(decodeURIComponent(id));
 
   if (!project) {
@@ -50,6 +54,8 @@ export default async function GridEditorPage({
   if (project.intake && !project.intake.complete) {
     return <GridIntake projectId={project.id} projectName={project.name} initialAutoConfig={project.intake.autoConfig} />;
   }
+
+  const activeOptionId = resolveOptionId(project, requestedOption);
 
   const [sheets, catalog, gridSymbols, engagements, laborHoursPerDevice, settings] = await Promise.all([
     listSheets(project.id),
@@ -146,6 +152,7 @@ export default async function GridEditorPage({
   return (
     <GridEditor
       canCreate={can("create", user.roles)}
+      activeOptionId={activeOptionId}
       project={{
         id: project.id,
         name: project.name,
@@ -160,8 +167,6 @@ export default async function GridEditorPage({
         spaces: project.spaces || [],
         routes: project.routes || [],
         revisions: project.revisions || [],
-        autoConfig: project.intake?.autoConfig,
-        measurementBased: !!project.intake?.measurementBased,
       }}
       sheets={sheets.map((s) => ({
         id: s.id,
