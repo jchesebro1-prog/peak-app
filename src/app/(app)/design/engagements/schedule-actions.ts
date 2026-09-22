@@ -5,35 +5,29 @@ import { requireUser } from "@/lib/session";
 import { getEngagement, patchEngagement } from "@/lib/stores/engagements";
 import { getTaskTemplateSet, applyTaskTemplate } from "@/lib/stores/task-templates";
 import { getSettings, phaseWeightsFor } from "@/lib/settings";
-import { generateSchedule, validateSpan, type PhaseWeight, type ScheduleLine } from "@/lib/consulting-schedule";
+import { TEMPLATE_RECORD_LABEL } from "@/lib/task-template-kinds";
+import {
+  generateSchedule,
+  validateSpan,
+  withEngagementPhaseIds,
+  defaultMilestonePhaseId,
+  phaseIdsByName,
+  type ScheduleLine,
+} from "@/lib/consulting-schedule";
 
-/**
- * #145 D166 — `phaseWeightsFor` (settings.ts) pairs a phase NAME with a
- * weight and a slug id derived from that name — stable across a settings
- * reorder, but NOT the id the engagement's own phases carry (`uid("ph-")`,
- * assigned once at phase-creation and referenced everywhere downstream: a
- * milestone's `phaseId`, a generated task's `schedule.phaseId`,
- * `shiftForMilestone`). This re-keys the weight list onto those real ids
- * so a generated task's phase and a milestone's phase are comparable.
- *
- * Matched by phase NAME (case-insensitive, trimmed) rather than by array
- * position: `phaseWeightsFor` is always called here with `eng.phases`'
- * own name list, so today the two arrays are already same-length/same-order
- * and position would work too — but name matching survives that
- * assumption breaking later (a settings edit reordering the weight map,
- * for instance) without silently mislabeling a phase. A name with no
- * matching engagement phase (shouldn't happen given the call sites below)
- * keeps the slug id rather than dropping the phase.
- */
-function withEngagementPhaseIds(
-  weights: ReturnType<typeof phaseWeightsFor>,
-  enginePhases: readonly { id: string; name: string }[]
-): PhaseWeight[] {
-  const byName = new Map(enginePhases.map((p) => [p.name.trim().toLowerCase(), p.id]));
-  return weights.map((w) => ({
-    ...w,
-    phaseId: byName.get(w.name.trim().toLowerCase()) ?? w.phaseId,
-  }));
+/** #145 review fix — both actions below need "does this set exist, and can
+ *  it apply to a consulting engagement" checked BEFORE any write, since
+ *  `applyTaskTemplate` (the only other place that checks) throws instead of
+ *  returning an error. Shared so preview and commit report identically. */
+async function loadConsultingTemplateSet(
+  setId: string
+): Promise<{ ok: true; set: NonNullable<Awaited<ReturnType<typeof getTaskTemplateSet>>> } | { ok: false; error: string }> {
+  const set = await getTaskTemplateSet(setId);
+  if (!set) return { ok: false, error: "That template could not be found." };
+  if (!set.appliesTo.includes("consulting")) {
+    return { ok: false, error: `"${set.name}" isn't set up to apply to ${TEMPLATE_RECORD_LABEL.consulting.toLowerCase()}.` };
+  }
+  return { ok: true, set };
 }
 
 /**
@@ -56,8 +50,9 @@ export async function previewScheduleAction(input: {
 
   const eng = await getEngagement(input.engagementId);
   if (!eng) return { ok: false, error: "That engagement could not be found." };
-  const set = await getTaskTemplateSet(input.setId);
-  if (!set) return { ok: false, error: "That template could not be found." };
+  const loaded = await loadConsultingTemplateSet(input.setId);
+  if (!loaded.ok) return loaded;
+  const { set } = loaded;
 
   const settings = await getSettings();
   const phases = withEngagementPhaseIds(
@@ -97,6 +92,14 @@ export async function previewScheduleAction(input: {
  * #145 — commit. Stamps the span, dates the phase-matched milestones, and
  * applies the template through the store's own coverage-key dedup, so a
  * second run is additive rather than duplicative.
+ *
+ * #145 review fix: the template set is validated (exists + applies to
+ * "consulting") BEFORE anything is written. This action is directly
+ * POST-reachable, not just reachable through a UI that only ever offers a
+ * live setId — a bad/stale id used to leave the engagement's span and
+ * milestone dates committed with zero tasks created, because the only
+ * other check (inside `applyTaskTemplate`) throws and ran AFTER the
+ * `patchEngagement` write below.
  */
 export async function generateScheduleAction(
   engagementId: string,
@@ -110,6 +113,8 @@ export async function generateScheduleAction(
 
   const eng = await getEngagement(engagementId);
   if (!eng) return { ok: false, error: "That engagement could not be found." };
+  const loaded = await loadConsultingTemplateSet(setId);
+  if (!loaded.ok) return loaded;
 
   const settings = await getSettings();
   const phases = withEngagementPhaseIds(
@@ -118,12 +123,12 @@ export async function generateScheduleAction(
   );
 
   // Date the phase-matched milestones (D168 defaulting rule) and stamp the span.
-  const byName = new Map(eng.phases.map((p) => [p.name.trim().toLowerCase(), p.id]));
+  const byName = phaseIdsByName(eng.phases);
   const gen = generateSchedule({
     startAt, endAt, phases, disciplines: eng.disciplines || [], lines: [],
     milestones: eng.milestones.map((m) => ({
       id: m.id,
-      phaseId: m.phaseId ?? byName.get(m.name.trim().toLowerCase()) ?? null,
+      phaseId: defaultMilestonePhaseId(m, byName),
       targetDate: m.targetDate,
     })),
   });
@@ -134,17 +139,27 @@ export async function generateScheduleAction(
     e.endAt = endAt;
     e.milestones = e.milestones.map((m) => ({
       ...m,
-      phaseId: m.phaseId ?? byName.get(m.name.trim().toLowerCase()) ?? null,
+      phaseId: defaultMilestonePhaseId(m, byName),
       targetDate: dated.get(m.id) ?? m.targetDate,
     }));
   });
 
-  const res = await applyTaskTemplate(
-    setId,
-    { kind: "consulting", id: engagementId },
-    { name: me.name },
-    { startAt, endAt, phases, disciplines: eng.disciplines || [] }
-  );
+  // Belt-and-braces: the check above is what actually prevents the partial
+  // write in the ordinary case. applyTaskTemplate re-validates (and
+  // re-fetches) the set itself and still throws on failure — this catch is
+  // only for the narrow race where the set is removed between the check
+  // above and here, so that race surfaces as {ok:false} too, not a crash.
+  let res;
+  try {
+    res = await applyTaskTemplate(
+      setId,
+      { kind: "consulting", id: engagementId },
+      { name: me.name },
+      { startAt, endAt, phases, disciplines: eng.disciplines || [] }
+    );
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Could not apply the template." };
+  }
 
   revalidatePath(`/design/engagements/${engagementId}`);
   revalidatePath("/schedule");
