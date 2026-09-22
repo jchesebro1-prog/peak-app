@@ -6072,7 +6072,12 @@ respond, but hold the badge that says waiting on them."
 **Ask:** primary name = author of the newest message that isn't the signed-in user (fallback: the
 counterpart), Gmail-style "Brenda, me (3)" secondary; status/waiting badge unchanged.
 
-## 129. Assembly Builder: assemblies re-price when price lists update — OPEN (verify + fix Subassemblies)
+## 129. Assembly Builder: assemblies re-price when price lists update — DONE 2026-09-21 (D156)
+
+**Shipped:** Subassemblies resolve live through `resolveSubassembly()` (`lib/fixture-assemblies.ts`),
+the same engine + lens + options formula `saveFixtureAction` used to freeze; the record keeps a
+build-time `snapshot` for "was $X when built". Both builders show "prices as of" (newest effective
+price date among their parts). Assemblies were already live; no pricing change there.
 
 **Reported:** 2026-09-21 (Jeff): "make sure that as we update the price lists it auto-updates the
 assemblies prices based on what we selected."
@@ -6086,7 +6091,12 @@ at save time (`design/subassemblies/actions.ts:45-46`) and never re-resolves.
 "priced as of" display), and show a "prices as of <catalog date>" stamp on both builders. Rides with
 #130.
 
-## 130. Assembly Builder + Subassemblies on one tab — OPEN
+## 130. Assembly Builder + Subassemblies on one tab — DONE 2026-09-21 (D156)
+
+**Shipped:** `/design/assemblies?tab=assemblies|subassemblies` renders either builder under a
+two-link switch (URL param, so deep links and the nav key work); `/design/subassemblies` redirects
+to the tab (`designRedirect`); the Subassemblies nav entry is gone and `activeKeyFor` maps both
+paths to `assemblies`. Smoke covers both tab URLs and the redirect.
 
 **Reported:** 2026-09-21 (Jeff): "Can we combine this and Subassemblies to the same tab rather than
 two separate tabs?"
@@ -6111,7 +6121,13 @@ so it is easier for people to distinguish between different objects."
 glyphs…) selectable per grid-catalog entry (and overridable per category), rendered on the plan,
 in the riser and in the legend; default mapping by category so existing designs change sensibly.
 
-## 132. Catalog import: mandatory manufacturer + wrong-manufacturer double check — OPEN
+## 132. Catalog import: mandatory manufacturer + wrong-manufacturer double check — DONE 2026-09-21 (D157)
+
+**Shipped:** manufacturer required on both importers; a pure guard (`lib/catalog-import-guard.ts`
+`checkManufacturer`) normalizes near-duplicate names to the existing spelling, rejects a file whose
+SKUs are filed under another manufacturer (named, up to 10) or that overlaps none of an existing
+manufacturer's parts, and accepts new manufacturers. Runs before any upsert on the Catalog page and
+in the Import hub's preview (server action) + commit.
 
 **Reported:** 2026-09-21 (Jeff): imports need a mandatory manufacturer; if the chosen manufacturer
 already exists, check whether the file's parts overlap the existing ones — overlap means it's the same
@@ -6127,7 +6143,12 @@ that manufacturer's parts — ≥1 match allows, zero matches rejects with "none
 <mfr>"; a brand-new manufacturer name that is a near-duplicate of an existing one (case/punctuation)
 is normalized to the existing one.
 
-## 133. Catalog: per-line price date, 18-month outdated banner by manufacturer, editable effective date — OPEN
+## 133. Catalog: per-line price date, 18-month outdated banner by manufacturer, editable effective date — DONE 2026-09-21 (D156)
+
+**Shipped:** `CatalogPart.pricedAt` stamped only on a price change; an effective-date field (default
+today) on both importers; `settings.priceListEffective[mfrKey]` as the manufacturer's book date,
+editable inline on the new `/catalog` banner (outdated ≥ 548 days + undated books, facet links); the
+Home card shows Outdated / Unknown / age; the edit modal shows the line's effective date.
 
 **Reported:** 2026-09-21 (Jeff): every price tracks when it was last updated per line item; past 18
 months the catalog shows a banner flagging those manufacturers as outdated (like the dashboard shows
@@ -6144,7 +6165,13 @@ threshold, no effective date anywhere.
 override editable from the banner (the one-time backfill); an 18-month rule surfaced as a Catalog
 banner + the dashboard card; feeds #122's ledger.
 
-## 134. Catalog import: 1 MB cap with a clear error — OPEN
+## 134. Catalog import: 1 MB cap with a clear error — DONE 2026-09-21 (D157)
+
+**Shipped:** `MAX_CATALOG_IMPORT_BYTES` (1,048,576) checked client-side on the file and the paste
+box before upload, in the Catalog page action, in `importRecords` for the catalog type and in
+`/api/import/xlsx` for `type=catalog` (10 MB kept for other types); failures go through the existing
+`importError=` / `err=` banners. `serverActions.bodySizeLimit` raised to 1200 kB so the app's error
+wins over Next's opaque body-limit rejection.
 
 **Reported:** 2026-09-21 (Jeff): "There needs to be a cap on the import of 1mb or it errors and it
 needs to sense that."
