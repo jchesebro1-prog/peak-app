@@ -1,11 +1,11 @@
 /**
- * Plan-sheet upload rules (#144) — the storage prefix, the upload ceiling and
+ * Plan-sheet upload rules (#146) — the storage prefix, the upload ceiling and
  * the accepted file types for a Grid plan sheet.
  *
  * Shared deliberately by the upload route and the editor's file picker: the
  * cap the UI advertises and the cap the route enforces drifting apart is how a
  * user ends up reading a refusal that names the wrong reason. That is exactly
- * what #144 was — the action promised 8 MB while the platform allowed ~900 kB.
+ * what #146 was — the action promised 8 MB while the platform allowed ~900 kB.
  *
  * Pure, with no server imports: the editor is a client component and
  * src/lib/blob.ts (which holds the Blob token) must never reach that bundle.
@@ -30,13 +30,13 @@ export const GRID_SHEET_BLOB_PREFIX = "grid-sheets/";
  *  - Vercel Functions — the deploy target (DEPLOY.md) — reject a request body
  *    over ~4.5 MB before the handler runs. A larger cap here would be a
  *    promise the host overrides, and the browser would get a platform error in
- *    place of this route's JSON: #144 again, one layer up. 4 MB leaves room
+ *    place of this route's JSON: #146 again, one layer up. 4 MB leaves room
  *    for the multipart envelope.
  *
  * A genuinely bigger sheet needs the client-upload broker the recordings
  * module already uses (`handleUpload` from @vercel/blob/client, see
  * src/app/api/recordings/upload/route.ts), whose bytes never traverse a
- * function. That is a real upgrade path, not a workaround — see D163 for why
+ * function. That is a real upgrade path, not a workaround — see D173 for why
  * it was not taken here — and it is Jeff-gated.
  */
 export const GRID_SHEET_MAX_BYTES = 4 * 1024 * 1024;

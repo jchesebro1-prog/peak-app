@@ -157,7 +157,7 @@ import {
   sheetMimeVerdict,
 } from "@/lib/grid-sheet-file";
 import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
-import { computeLabor, computeMob, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev } from "@/app/(app)/estimator/pricing";
+import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev, vendorTotalSeed } from "@/app/(app)/estimator/pricing";
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -290,7 +290,83 @@ ok(
   "#143 a vendor quote may claim only its own file under the vendor-quotes prefix"
 );
 
-/* #144 (D163) — the plan-sheet upload cap must stay an HONEST number. It was
+/* --- #144 (D163): editing a stored vendor quote ---
+
+   Two pure rules carry the whole feature's money, and both are easy to regress
+   into something that looks right in the form and writes something else.
+
+   1. repricedAtLineMargin — an edited quote's new total reprices the line at
+      the margin it is ALREADY carrying, not the tier seed. The user may have
+      dragged the system margin slider or typed a sell price since the quote was
+      added; re-seeding would silently undo that. The vendor form's "Sell" stat
+      is handed the same margin (vendorFormMargin, estimator-client.tsx), so
+      these cases also pin the stat against the number the save commits.
+   2. vendorTotalSeed — a quote whose total came from its material lines must
+      still come from them after an edit, or the line a vendor's revision adds
+      rides in the itemized breakdown without being in the price. */
+ok(
+  repricedAtLineMargin(10000, 16666.67, 10000, 0.3) === 16666.67,
+  "#144 an unchanged cost leaves the line's price untouched, to the cent"
+);
+// A 40% line (the slider's doing) stays 40% when the vendor's total moves.
+ok(
+  repricedAtLineMargin(10000, 16666.67, 12000, 0.3) === 20000 &&
+    Math.abs((lineMarginOf(10000, 16666.67) ?? 0) - 0.4) < 1e-6,
+  "#144 a line dragged to 40% is repriced at 40%, not re-seeded from the tier"
+);
+/* The regression this exists to catch: the tier seed would write 12000/0.7 =
+   $17,142.86 over a line the user had set to 40% — $2,857 of margin gone with
+   no control touched. */
+ok(
+  repricedAtLineMargin(10000, 16666.67, 12000, 0.3) !== round2(12000 / 0.7),
+  "#144 the tier seed is NOT what an edited line reprices at"
+);
+ok(
+  repricedAtLineMargin(10000, 18181.82, 12000, 0.3) === 21818.18,
+  "#144 a 45% line reprices at 45% (the all-systems slider's margin survives an edit)"
+);
+/* The Sell stat and the commit read the same margin, so the form can never
+   quote a price the save does not write (#144 re-review). */
+const statMargin = lineMarginOf(10000, 18181.82) ?? 0.3;
+ok(
+  round2(12000 / (1 - statMargin)) === repricedAtLineMargin(10000, 18181.82, 12000, 0.3),
+  "#144 the form's Sell stat and the saved price come out of one margin"
+);
+// No usable margin on the line — a $0 sell, or a $0 cost whose margin is
+// exactly 1 and would divide by zero — falls back to the seed rule.
+ok(lineMarginOf(1000, 0) === null && lineMarginOf(0, 500) === null, "#144 a $0 price and a $0 cost carry no rescalable margin");
+ok(
+  repricedAtLineMargin(1000, 0, 2000, 0.3) === 2857.14 &&
+    repricedAtLineMargin(0, 500, 2000, 0.3) === 2857.14,
+  "#144 a line with no usable margin reprices at the tier-else-30% seed"
+);
+// A line hand-priced BELOW its cost is carrying a real, if unhappy, margin:
+// preserved (100/50 is half cost, so $200 of cost stays $100 of sell), never
+// quietly corrected up to the seed.
+ok(repricedAtLineMargin(100, 50, 200, 0.3) === 100, "#144 a line priced below its cost keeps that ratio");
+// A nonsense seed cannot reach the division either.
+ok(
+  repricedAtLineMargin(1000, 0, 2000, 1) === 2857.14 && repricedAtLineMargin(1000, 0, 2000, 0) === 2857.14,
+  "#144 an out-of-range seed margin falls back to 30% rather than dividing by zero"
+);
+const repriceGrid: [number, number, number, number][] = [
+  [0, 0, 0, 0.3], [0, 0, 1000, 0.3], [-100, -50, 500, 0.3], [1000, 1000, 2000, 0.3],
+  [1000, 1e9, 2000, 0.3], [1000, 500, 0, 0.3], [1000, 2000, -500, 0.3], [0.01, 0.02, 0.03, 0.3],
+];
+ok(
+  repriceGrid.every(([c, p, nc, s]) => Number.isFinite(repricedAtLineMargin(c, p, nc, s))),
+  "#144 repricing never emits NaN or Infinity, whatever the line carries"
+);
+ok(
+  vendorTotalSeed(3000, 3000) === "" && vendorTotalSeed(12450, 12450) === "",
+  "#144 a quote priced off its material lines seeds a BLANK total, so the lines still drive it"
+);
+ok(
+  vendorTotalSeed(12450, 13450) === "12450" && vendorTotalSeed(3000, 0) === "3000",
+  "#144 a total that genuinely disagrees with its lines round-trips as typed"
+);
+
+/* #146 (D173) — the plan-sheet upload cap must stay an HONEST number. It was
    not: the server action advertised 8 MB while next.config.ts's 1200kb
    `serverActions.bodySizeLimit` and base64's 4/3 inflation put the real
    ceiling near 900 kB, so an over-limit sheet had its whole request body
@@ -305,11 +381,11 @@ const VERCEL_FUNCTION_BODY_LIMIT = 4.5 * 1024 * 1024;
 ok(
   GRID_SHEET_MAX_BYTES > SERVER_ACTION_BODY_LIMIT * 3 &&
     GRID_SHEET_MAX_BYTES + 64 * 1024 < VERCEL_FUNCTION_BODY_LIMIT,
-  "#144 the plan-sheet cap clears the old server-action limit and stays under the function body limit"
+  "#146 the plan-sheet cap clears the old server-action limit and stays under the function body limit"
 );
 ok(
   GRID_SHEET_MAX_LABEL === `${GRID_SHEET_MAX_BYTES / (1024 * 1024)} MB`,
-  "#144 the cap the picker advertises is the cap the route enforces"
+  "#146 the cap the picker advertises is the cap the route enforces"
 );
 
 /* A sheet is streamed back INLINE under its stored mime with no
@@ -336,14 +412,14 @@ const sheetMimeCases: [string, string, "ok" | "svg" | "other"][] = [
 ];
 ok(
   sheetMimeCases.every(([, mime, want]) => sheetMimeVerdict(mime) === want),
-  "#144 plan sheets accept PDFs and raster images, never a scriptable SVG"
+  "#146 plan sheets accept PDFs and raster images, never a scriptable SVG"
 );
 ok(
   sheetMimeCases.every(([, mime, want]) => isAllowedSheetMime(mime) === (want === "ok")),
-  "#144 isAllowedSheetMime agrees with the verdict it wraps"
+  "#146 isAllowedSheetMime agrees with the verdict it wraps"
 );
 
-/* D163's other half: unlike the vendor-quote route, the plan-sheet route
+/* D173's other half: unlike the vendor-quote route, the plan-sheet route
    writes the grid_sheets doc itself and returns only a sheet id, so no
    `blobPath` ever round-trips through the browser and the sheet proxy keeps
    reading a value only the server wrote. Source-level like the sw.js contract
@@ -359,15 +435,15 @@ const gridEditorSource = readFileSync(
 );
 ok(
   !/NextResponse\.json\(\s*\{[^}]*blobPath/.test(gridUploadRoute),
-  "#144 the plan-sheet upload route never hands a blobPath back to the browser"
+  "#146 the plan-sheet upload route never hands a blobPath back to the browser"
 );
 ok(
   !gridEditorSource.includes("blobPath") && !gridEditorSource.includes("addSheetAction"),
-  "#144 the editor uploads through the route and never names a stored path"
+  "#146 the editor uploads through the route and never names a stored path"
 );
 ok(
   gridUploadRoute.includes('req.headers.get("content-length")'),
-  "#144 an oversize plan sheet is refused before its body is read into memory"
+  "#146 an oversize plan sheet is refused before its body is read into memory"
 );
 
 /* --- Offline navigation contract --- */

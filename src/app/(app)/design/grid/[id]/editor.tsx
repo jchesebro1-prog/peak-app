@@ -698,7 +698,7 @@ export default function GridEditor({
   }
 
   /**
-   * Post the sheet to /api/grid-sheets/upload (#144, D163) rather than through
+   * Post the sheet to /api/grid-sheets/upload (#146, D173) rather than through
    * a server action. The action took the file as a base64 data-URL, which
    * next.config.ts's 1200kb `serverActions.bodySizeLimit` cut down to a ~900 kB
    * real ceiling while the code advertised 8 MB — and an over-limit body was

@@ -3941,11 +3941,85 @@ anything else, and is only left out of the freight base.
 Verified in the running app, not only by reading: a vendor quote and a custom part both at $1,000
 cost, section margin dragged to 40% → both lines read **$1,666.67**.
 
-**Still open / not done:** editing an existing vendor quote in place (remove and re-add);
+**Still open / not done:** editing an existing vendor quote in place — **closed by D163 (#144)**;
 `moveSystemToEstimateAction` now copies the record across, but blob garbage collection for a replaced
 or abandoned file does not exist for any prefix in this repo.
 
-## D163. Plan sheets upload through a route handler, capped at an honest 4 MB (#144, 2026-09-22)
+## D163. A vendor quote is editable in place; editing preserves the line's current margin (#144, 2026-09-22)
+
+Jeff, 2026-09-22: a stored vendor quote could only have its Single/Itemized display flipped or be
+deleted. Changing the vendor, quote number, description, total, materials, terms, notes, link,
+attachment or the freight flag meant removing the line and re-entering the whole thing — the gap D162
+logged as "still open".
+
+**Editing is an open of the same form, through the same coordinator.** There is no second open path:
+the row's `Edit` sets a pending id on `vendorEditRef` and calls `openInputMethod("vendor", secId)`;
+`seedDraft`'s vendor branch consumes and clears that ref, seeding the draft from the record when it is
+set and `freshVendor()` when it is not. So editing obeys D161 exactly like any other method — opening
+it discards whatever else was open, and closing it (×, scrim, Cancel) discards the edit draft and
+leaves the stored record untouched. `discardDraft` clears the ref too, so an abandoned edit cannot
+leak into the next plain `+ Vendor quote`. `openVendorEdit` closes first and seeds second, because
+`openInputMethod` reads "the method already open on this system" as a toggle and would otherwise close
+the form it was asked to open.
+
+**The draft keeps the record's own id.** Never a fresh mint: with Blob on, the attachment is stored
+under that id (and `ownsVendorQuoteBlobPath` binds it there), so a second id would orphan the file and
+break the download. `commitVendorQuote` therefore needs no create/update flag — an id already present
+in `vendorQuotes` IS the edit case. The record is replaced in place, at its position, and the SpecItem
+it spawned is found by `vendorQuoteId` across all sections and updated: never a second line, never a
+stale one, and never moved to the section the form happened to be opened from. `sku` and `desc` are
+restamped (all three parts of `vendor · quote# — description` are editable, so a stale desc was the
+likeliest bug); `qty`, `unit`, `option`, `allowance`, `comment` and `internalNote` are the
+estimator's, not the vendor's, and are left alone.
+
+**Price: the line's CURRENT margin is preserved and rescaled to the new cost.** `m = (price − cost) /
+price`, new price = `cost′ / (1 − m)`, falling back to the `tierMargin`-else-30% seed rule only when
+the line has no usable margin. The user may have dragged the system margin slider or typed a sell
+price since the quote was added; re-seeding from the tier would silently undo that. Editing the
+vendor's cost should move the price the way the slider would, not reset the margin. An unchanged cost
+returns the price verbatim rather than round-tripping it, so a re-save can never move it by a cent.
+This is not a per-item margin exclusion — D162 stands: margin applies to every line.
+
+**`noFreight` can now be cleared, not only set.** The add path spreads `...(includesFreight ?
+{ noFreight: true } : {})` onto a fresh item; the update path spreads an EXISTING item, so unticking
+"includes freight" has to `delete` the key or the line would stay out of the freight base forever.
+
+**Two smaller consequences, handled.** The attachment budget leaves the record being edited out of
+`vendorAttachmentLoad` — its stored data-URL is about to be replaced by the draft's, so counting both
+would ration the estimate against its own file twice. And the modal is keyed by the draft id: an add
+switching into an edit no longer changes `InputKind`, so without a key the form would not remount and
+the #143 `alive` guard would not retire an upload still in flight, dropping an abandoned file onto the
+quote now open.
+
+**Re-review (same day), three fixes.** (1) *The form's "Sell" stat now prices at the same margin the
+save uses.* It was handed the tier seed unconditionally, so on a line whose margin had since been
+dragged the footer showed one number and `Save changes` wrote another — $17,142.86 read against
+$20,000.01 written on a 40% line, and with the total left alone the stat quoted a price the save
+deliberately does not move at all. The Sell stat is the one figure Jeff reads to decide whether to
+accept a vendor's new total, so it is now `vendorFormMargin`: the line's own margin when editing, the
+tier seed otherwise, and it is labelled with the rate ("Sell at 40%") so a preserved margin is visible
+rather than inferred. The rule itself moved into `pricing.ts` as `lineMarginOf` /
+`repricedAtLineMargin`, one implementation the stat and the commit both call, and is pinned in the
+spec harness. (2) *The Total field seeds blank when the stored total is just the lines' sum*
+(`vendorTotalSeed`). A filled Total is a TYPED total and outranks the lines from then on, so seeding
+it unconditionally converted every lines-driven quote on its first edit: the archetypal case — a
+vendor revision that ADDS a line — would have left the itemized breakdown adding to more than the
+customer was charged, the invariant #143 installed `vendorKeptLines` to protect. A total that
+genuinely disagrees with its lines is still kept as typed, so an untouched edit re-saves the same
+number either way. (3) *The form can open an attachment it did not upload*: with Blob on, a stored
+record carries only a `blobPath` and the object-URL that once previewed it died with the page that
+minted it, so the Download link fell away exactly when the user wanted to check which PDF they were
+about to replace. The form now falls through to the authenticated proxy, the same three-step
+precedence the line's own link uses — with the in-session preview still ranking ahead of it, so a
+replaced file can never serve the outgoing one.
+
+**Known and not fixed:** replacing an attachment orphans the old blob — no prefix in this repo has a
+sweeper (D162's open item, unchanged). And where a record is referenced by both a live line and an
+older revision, the save action's merge lets the builder's copy win, so an edit also changes what that
+revision renders; making revisions immune would need a copy-on-write id, which the attachment/id
+contract above forbids. Flagged rather than changed.
+
+## D173. Plan sheets upload through a route handler, capped at an honest 4 MB (#146, 2026-09-22)
 
 `addSheetAction` declared `MAX_SHEET_BYTES = 8 * 1024 * 1024` and took the sheet as a base64 data-URL
 inside a SERVER ACTION payload. `next.config.ts` pins `serverActions.bodySizeLimit` at 1200kb and

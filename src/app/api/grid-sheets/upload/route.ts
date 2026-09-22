@@ -11,7 +11,7 @@ import {
 } from "@/lib/grid-sheet-file";
 
 /**
- * Plan-sheet upload (#144, D163). Shape copied from
+ * Plan-sheet upload (#146, D173). Shape copied from
  * /api/vendor-quote-attachments/upload (#143) — multipart in,
  * NextResponse.json out.
  *
@@ -25,7 +25,7 @@ import {
  *
  * Unlike the vendor-quote route this does the WHOLE job — bytes to storage and
  * the `grid_sheets` doc written here — and returns only the new sheet id. That
- * is the deliberate difference (D163): a vendor quote hangs off an estimate
+ * is the deliberate difference (D173): a vendor quote hangs off an estimate
  * that may not be saved yet, so its `blobPath` has to round-trip through the
  * browser and be re-validated on the way back (ownsVendorQuoteBlobPath). A
  * plan sheet belongs to a project that already exists, so the path never

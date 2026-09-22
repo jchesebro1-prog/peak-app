@@ -1,5 +1,5 @@
 /**
- * Plan-sheet upload smoke test (PUNCHLIST #144, D163).
+ * Plan-sheet upload smoke test (PUNCHLIST #146, D173).
  *
  * `addSheetAction` carried the sheet as a base64 data-URL inside a SERVER
  * ACTION payload and advertised an 8 MB ceiling, but next.config.ts caps a
@@ -27,7 +27,7 @@
  * ("OIDC is enabled for this project, but not for the development
  * environment") — so it is only ever proven in production. What this script
  * does cover for both branches is everything before the storage call: the
- * transport, the caps, the type gate and the auth gate, which is where #144
+ * transport, the caps, the type gate and the auth gate, which is where #146
  * actually lived.
  *
  * Safety: never touches .data/pglite. Uses its own scratch datadir under the
