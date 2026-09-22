@@ -192,6 +192,27 @@ Estimating Rules — these just need real values before go-live)
   ones (Import → Catalog). ☐ real price book file exists: ______
 - **E5.** Quick Design tier pricing + system-sizing factors: keep demo
   values until real ones supplied. ☐ notes: ______
+- **E6.** Catalog price dates (D156, built 2026-09-21) — two model choices
+  taken by default, both easy to change:
+  **(a) A partial file re-dates the whole book.** An import that passes the
+  manufacturer guard (one overlapping SKU is enough) sets that manufacturer's
+  "price list effective" date, and with the later-of rule every part of that
+  manufacturer — including lines the file never mentioned — then reads as
+  effective on the file's date. Right for the yearly full-list re-import;
+  over-claims for a supplement (a "new products" sheet, one category).
+  ✦ keep — the yearly book is the normal case; fix a date by hand in the
+  Catalog banner when a supplement was imported
+  ☐ add a "this is the complete price list" checkbox to both importers (only
+  a ticked import moves the book date; a supplement moves only the lines it
+  carries) ☐ coverage gate — only stamp when the file covers ≥ ____ % of the
+  manufacturer's parts ☐ other: ______
+  **(b) "Prices as of" on the assembly/subassembly builders is newest-wins;
+  the price books are oldest-wins.** A builder's note shows the NEWEST
+  effective date among its parts ("nothing here is newer than …"); the
+  Home card / Catalog banner date a book by its OLDEST part (one stale line
+  makes the book outdated — decision A from #14). ✦ keep both as built
+  ☐ builders should show the oldest date too (a build with one stale part
+  reads as stale) ☐ show both ("as of … / oldest line …") ☐ other: ______
 
 ## F. Service-line product decisions (from IDEAS.md)
 

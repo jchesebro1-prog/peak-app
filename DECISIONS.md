@@ -3561,9 +3561,25 @@ effective date on price lists (2026-09-21). Spec: `docs/superpowers/specs/2026-0
   importers pass the file's effective date, every other write stamps now. `updatedAt` keeps its
   last-write meaning. Parts that predate the field stay undated; nothing invents a date.
 - **`settings.priceListEffective[mfrKey]` is the manufacturer's book date.** Set by the Catalog
-  banner's inline date input (the one-time backfill) AND by both importers whenever an import writes
+  banner's inline date input (the one-time backfill) AND by both importers when an import writes
   rows (the file's effective date IS the list's effective date, and it confirms the unchanged rows
-  too). The Import hub's "skip duplicates" mode compares nothing, so it confirms nothing.
+  too). Precisely (final review, 2026-09-22): the Import hub's "Skip duplicates" mode compares
+  nothing, so it never stamps; a file that carries no List/Cost column confirmed no price, so it
+  updates descriptions but neither stamps the book nor touches stored prices (both importers, and
+  the hub's "Create new" on an existing SKU preserves prices exactly like "Update existing"); the
+  hub stamps per manufacturer group, only a group at least one of whose rows was written and none
+  of whose rows errored (`commitCatalogImport` in `import/catalog-commit.ts`).
+- **Partial-file caveat (open — Jeff's call).** The guard only requires that a file overlap the
+  manufacturer's book by one SKU (D157), so any file that passes it re-dates the manufacturer's
+  WHOLE book: with the later-of rule above, every part of that manufacturer — including the ones
+  the file never mentioned — reads as effective on the file's date. That is exactly right for a
+  full price-list re-import (the common case: the yearly book, most prices unchanged) but
+  over-claims for a supplement — a 40-row "new products" sheet or a single-category update
+  confirms nothing about the other 1,960 lines, yet they stop reading as outdated. Mitigations, none
+  taken by default: (a) a "this is the complete price list" checkbox on both importers, stamping
+  the book only when ticked (else only the written lines' `pricedAt` move); (b) a coverage gate —
+  stamp only when the file overlaps ≥ N % of the manufacturer's parts; (c) accept the over-claim and
+  rely on the banner to correct a date by hand. Logged as MASTER-QUESTIONS E6.
 - **A line's effective date is the LATER of its own `pricedAt` and the book date** (`effectivePriceDate`
   in `lib/catalog-books.ts`). The spec's wording calls the book date a "fallback"; the later-of rule
   is what makes the banner's edit actually clear an outdated book whose lines carry old `pricedAt`
