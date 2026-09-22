@@ -38,6 +38,12 @@ import {
   catalogEffectiveAtFor, manufacturerDirectory, partCountFor, resolveCatalogOwner, unclaimedManufacturers,
   vendorStatus, vendorTasks, type PriceListEntry as VendorPriceListEntry,
 } from "@/lib/vendor-status";
+import { VENDOR_TABS, resolveVendorTab } from "@/app/(app)/vendors/tabs";
+import {
+  fromDateInput as vendorFromDateInput,
+  parseLedgerDates as vendorParseLedgerDates,
+  toDateInput as vendorToDateInput,
+} from "@/app/(app)/vendors/dates";
 import { FIELD_COLLECTIONS } from "@/lib/sync/engine";
 import { canRecord } from "@/lib/settings";
 import {
@@ -3130,6 +3136,26 @@ ok(baseVenueKind(VENDOR_COMPANY_TYPE, "Rose Brand Church Supply") === null, "#12
   ok(dir.length === 2 && dir[0].name === "Rose Brand" && dir[0].count === 3 && dir[0].vendorId === "v1" && dir[1].name === "Other" && dir[1].vendorId === null, "#122 manufacturerDirectory: grouped by mfrKey, first spelling wins, count-desc, claim owner attached");
   ok(unclaimedManufacturers(parts, [{ id: "v1", manufacturers: ["rose-brand"] }]).map((m) => m.name).join(",") === "Other", "#122 unclaimedManufacturers: only keys no vendor claims");
   ok(manufacturerDirectory([{ mfr: "" }, { mfr: "  " }, {}], []).length === 0, "#122 manufacturerDirectory: unbranded parts are not a manufacturer");
+}
+
+/* ---- #122 §3 — tab keys + date bridge ---- */
+ok(VENDOR_TABS.join(",") === "overview,contacts,prices,activity", "#122 vendor tabs are the spec's four");
+ok(resolveVendorTab("prices") === "prices" && resolveVendorTab("") === "overview" && resolveVendorTab("nope") === "overview", "#122 resolveVendorTab validates ?tab= (default overview)");
+ok(vendorToDateInput(new Date(2026, 8, 21, 15).getTime()) === "2026-09-21", "#122 toDateInput renders local Y-M-D");
+ok(vendorFromDateInput("2026-09-21") === new Date(2026, 8, 21).getTime() && vendorFromDateInput("") === null && vendorFromDateInput("2026-09") === null, "#122 fromDateInput → local midnight, null on blank/malformed");
+
+/* The ledger dates are validated at the ACTION boundary: logPriceList()'s
+ * store normalizer DROPS an entry whose effectiveAt isn't finite, so an
+ * unvalidated action would report success over a write that never happened. */
+{
+  const good = vendorParseLedgerDates({ receivedAt: 1_700_000_000_000, effectiveAt: 1_700_000_001_000 });
+  ok(good.ok && good.receivedAt === 1_700_000_000_000 && good.effectiveAt === 1_700_000_001_000, "#122 parseLedgerDates passes two finite epoch-ms dates through");
+  for (const bad of [NaN, Infinity, -Infinity, 0, -1, null, undefined, "2026-09-21", {}] as unknown[]) {
+    ok(!vendorParseLedgerDates({ receivedAt: bad, effectiveAt: 1_700_000_000_000 }).ok, `#122 parseLedgerDates rejects a non-finite receivedAt (${String(bad)})`);
+    ok(!vendorParseLedgerDates({ receivedAt: 1_700_000_000_000, effectiveAt: bad }).ok, `#122 parseLedgerDates rejects a non-finite effectiveAt (${String(bad)})`);
+  }
+  const rejected = vendorParseLedgerDates({ receivedAt: NaN, effectiveAt: NaN });
+  ok(!rejected.ok && rejected.error === "Both dates are required.", "#122 parseLedgerDates returns the action's error copy");
 }
 
 /* --- final review item 3: the Catalog page parser reports which price columns the file carried --- pure */

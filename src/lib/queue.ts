@@ -38,10 +38,18 @@ function due(ts: number | null | undefined): number {
   return n > 0 ? n : 0;
 }
 
+/** The source key vendorTaskSource() (lib/vendor-status.ts) mints for the
+ *  #122 vendor price-list tasks. Their company link is a VENDOR company, so
+ *  it resolves to /vendors/<id>; a "company" link from anywhere else may be a
+ *  customer, which that route would 404 on. */
+const VENDOR_TASK_SOURCE = "auto: vendor ";
+
 /** Where an assignment's Home Queue row links to (punch #16, D14x — the
  *  "quote"/"project" kinds only started getting created once #16's sold/
- *  complete hooks landed; "company" has no single-record screen to land on). */
-function assignmentHref(link: AssignmentLink): string {
+ *  complete hooks landed). #122 added the "company" kind: the vendor
+ *  price-list task lands on /vendors/<id>, where the Price lists tab is the
+ *  screen that clears it. */
+function assignmentHref(link: AssignmentLink, source: string): string {
   if (!link) return "/queue";
   switch (link.kind) {
     case "engagement":
@@ -50,6 +58,8 @@ function assignmentHref(link: AssignmentLink): string {
       return `/projects/${link.id}`;
     case "quote":
       return `/quotes?id=${encodeURIComponent(link.id)}`;
+    case "company":
+      return source.startsWith(VENDOR_TASK_SOURCE) ? `/vendors/${encodeURIComponent(link.id)}` : "/queue";
     default:
       return "/queue";
   }
@@ -92,7 +102,7 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
       title: a.title,
       context: a.link?.label || (a.createdBy === me ? "Self" : `from ${a.createdBy}`),
       due: a.dueDate,
-      href: assignmentHref(a.link),
+      href: assignmentHref(a.link, a.source || ""),
       writable: true,
     });
   }

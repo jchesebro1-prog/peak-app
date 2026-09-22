@@ -13,7 +13,19 @@ import { getUser } from "@/lib/users";
 import { setSettings } from "@/lib/settings";
 import { getCompany } from "@/lib/identity/companies";
 import { isVendorType } from "@/lib/identity/config";
-import { claimManufacturer, createVendorCompany, vendorCompanyNamed } from "@/lib/stores/vendors";
+import { getContact } from "@/lib/identity/contacts";
+import {
+  claimManufacturer,
+  createVendorCompany,
+  logPriceList,
+  releaseManufacturer,
+  saveVendorProfile,
+  setContactRole,
+  vendorCompanyNamed,
+} from "@/lib/stores/vendors";
+import type { VendorDiscounts, VendorRegistration } from "@/lib/vendor-status";
+import { ensureVendorAssignments } from "@/lib/vendor-tasks";
+import { parseLedgerDates } from "./dates";
 
 type R = { ok: true } | { ok: false; error: string };
 const revalidate = () => revalidatePath("/", "layout");
@@ -74,4 +86,96 @@ export async function claimManufacturerAction(
     console.error("claimManufacturerAction", err);
     return { ok: false, error: "Couldn't claim that manufacturer — please try again." };
   }
+}
+
+const TEXT_MAX = 2000;
+const clip = (v: unknown) => (typeof v === "string" ? v.trim().slice(0, TEXT_MAX) : "");
+
+/** Every vendor-record write is scoped to a company of the vendor type — a
+ *  customer id must never reach the vendor profile collection. */
+async function vendorOr(id: string): Promise<{ ok: false; error: string } | null> {
+  const co = await getCompany(id);
+  if (!co || !isVendorType(co.type)) return { ok: false, error: "Vendor not found." };
+  return null;
+}
+
+/** Overview tab — discounts + project registration (spec §3). */
+export async function saveVendorProfileAction(
+  id: string,
+  patch: { discounts?: VendorDiscounts; registration?: VendorRegistration }
+): Promise<R> {
+  await requirePerm("create");
+  const missing = await vendorOr(id);
+  if (missing) return missing;
+  const clean: { discounts?: VendorDiscounts; registration?: VendorRegistration } = {};
+  if (patch.discounts) {
+    const pct = patch.discounts.percentOffList;
+    if (pct != null && (typeof pct !== "number" || !Number.isFinite(pct) || pct < 0 || pct > 100)) {
+      return { ok: false, error: "% off list must be between 0 and 100." };
+    }
+    clean.discounts = {
+      note: clip(patch.discounts.note),
+      percentOffList: pct == null ? null : pct,
+      terms: clip(patch.discounts.terms),
+    };
+  }
+  if (patch.registration) {
+    clean.registration = {
+      program: clip(patch.registration.program),
+      url: clip(patch.registration.url),
+      accountNumber: clip(patch.registration.accountNumber),
+      notes: clip(patch.registration.notes),
+    };
+  }
+  await saveVendorProfile(id, clean);
+  revalidate();
+  return { ok: true };
+}
+
+/** Price lists tab — log a ledger entry, then re-evaluate the status and the
+ *  owner task immediately (spec §3, §4), so a newer list spawns the catalog
+ *  owner's task on save rather than waiting for the daily cron.
+ *
+ *  The dates are validated HERE (parseLedgerDates): the store's normalizer
+ *  drops an entry whose effectiveAt isn't a finite number, so forwarding an
+ *  unvalidated value would report success over a write that never landed. */
+export async function logPriceListAction(
+  vendorId: string,
+  input: { receivedAt: number; effectiveAt: number; note: string }
+): Promise<R> {
+  const me = await requirePerm("create");
+  const missing = await vendorOr(vendorId);
+  if (missing) return missing;
+  const dates = parseLedgerDates(input);
+  if (!dates.ok) return dates;
+  await logPriceList(
+    vendorId,
+    { receivedAt: dates.receivedAt, effectiveAt: dates.effectiveAt, note: clip(input.note) },
+    me.name
+  );
+  await ensureVendorAssignments(vendorId, me.name);
+  revalidate();
+  return { ok: true };
+}
+
+/** Contacts tab — "Contact for…" per contact; blank clears. */
+export async function setContactRoleAction(vendorId: string, contactId: string, role: string): Promise<R> {
+  await requirePerm("create");
+  const missing = await vendorOr(vendorId);
+  if (missing) return missing;
+  const ct = await getContact(contactId);
+  if (!ct || ct.homeCompanyId !== vendorId) return { ok: false, error: "That contact isn't on this vendor." };
+  await setContactRole(vendorId, contactId, clip(role).slice(0, 200));
+  revalidate();
+  return { ok: true };
+}
+
+/** Overview tab — drop a claimed manufacturer. */
+export async function releaseManufacturerAction(vendorId: string, mfr: string): Promise<R> {
+  await requirePerm("create");
+  const missing = await vendorOr(vendorId);
+  if (missing) return missing;
+  await releaseManufacturer(vendorId, mfr);
+  revalidate();
+  return { ok: true };
 }

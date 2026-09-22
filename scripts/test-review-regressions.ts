@@ -38,6 +38,7 @@ import {
 import { setSettings } from "@/lib/settings";
 import { allAssignments, setAssignmentDone } from "@/lib/stores/assignments";
 import { ensureVendorAssignments, loadVendors } from "@/lib/vendor-tasks";
+import { loadQueue } from "@/lib/queue";
 
 async function main() {
   const flame = await setFlameRates({ laborRate: 123, mileageRate: 1.23 });
@@ -1132,6 +1133,34 @@ async function main() {
     // the cron path with zero vendors in scope
     const none = await ensureVendorAssignments("v-t122-does-not-exist", "Tester");
     assert.deepEqual([none.checked, none.created], [0, 0], "#122 the cron path runs with zero vendors");
+  }
+
+  // #122 §3 — a ledger save spawns the owner task immediately, and that task's
+  // Home Queue row lands on the vendor's own screen (not back on /queue).
+  {
+    const part = { id: "T122-D1", sku: "T122-D1", desc: "T122 detail part", category: "Rigging", unit: "ea", list: 10, cost: 5, mfr: "T122 Detail Mfr" };
+    await upsertDoc("catalog_parts", part);
+    await saveCompany({ id: "v-t122d", name: "Vendor D T122", type: VENDOR_COMPANY_TYPE });
+    await claimManufacturer("v-t122d", "T122 Detail Mfr");
+
+    const eff = Date.now() - 3 * 86_400_000;
+    const key = `auto: vendor v-t122d newer-list ${eff}`;
+    const withKey = async () => (await allAssignments()).filter((a) => a.source === key);
+
+    // what logPriceListAction does: append the entry, then re-derive at once
+    await logPriceList("v-t122d", { receivedAt: Date.now(), effectiveAt: eff, note: "2027 list" }, "Tester");
+    assert.equal((await ensureVendorAssignments("v-t122d", "Tester")).created, 1, "#122 §3 a ledger save spawns the catalog-owner task right away, not just on the cron");
+    assert.equal((await withKey()).length, 1, "#122 §3 …exactly one");
+
+    // re-saving the SAME entry must not spawn a second task
+    await logPriceList("v-t122d", { receivedAt: Date.now(), effectiveAt: eff, note: "2027 list again" }, "Tester");
+    assert.equal((await ensureVendorAssignments("v-t122d", "Tester")).created, 0, "#122 §3 re-logging the same effective date spawns no second task");
+    assert.equal((await withKey()).length, 1, "#122 §3 …still exactly one");
+
+    const taskId = (await withKey())[0].id;
+    const queued = (await loadQueue("Catalog Owner T122")).filter((i) => i.key === `assignment:${taskId}`);
+    assert.equal(queued.length, 1, "#122 §3 the owner task shows on the owner's Home Queue");
+    assert.equal(queued[0].href, "/vendors/v-t122d", "#122 §3 a company-linked assignment links to the vendor record, not back to /queue");
   }
 
   // #122 — claim from the unclaimed panel: reuse a vendor by normalized name, else create one
