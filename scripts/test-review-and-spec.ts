@@ -27,6 +27,7 @@ import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentP
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
 import { normalizeEngagementRecord, type EngagementPhase } from "@/lib/stores/engagements";
 import { TEMPLATE_RECORD_KINDS, TEMPLATE_RECORD_LABEL } from "@/lib/task-template-kinds";
+import { normalizeLine as normalizeTemplateLine } from "@/lib/stores/task-templates";
 import {
   msOf as opMsOf,
   serviceToWorkItems,
@@ -5958,3 +5959,11 @@ ok(pw145[0].name === "Assessment" && typeof pw145[0].phaseId === "string" && pw1
  * (Task 3+ exercises it against real records; this only proves the store
  * compiles and exports it, with no DB touch here). */
 ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exported for the consulting side of the collection");
+
+/* ====== #145: template lines carry scope + units ====== */
+const bareLine145 = normalizeTemplateLine({ title: "Do the thing" });
+ok(bareLine145.phase === "" && bareLine145.discipline === "", "#145 a pre-#145 template line reads with no phase and no discipline");
+ok(bareLine145.startPct === 0 && bareLine145.lengthPct === 100, "#145 an unmeasured line defaults to spanning its whole phase window");
+const clampedLine145 = normalizeTemplateLine({ title: "x", startPct: -5, lengthPct: 500 });
+ok(clampedLine145.startPct === 0 && clampedLine145.lengthPct === 100, "#145 out-of-range template percentages are clamped at normalize, not at render");
+ok(normalizeTemplateLine({ title: "x", discipline: " Rigging " }).discipline === "rigging", "#145 a discipline is stored lowercased and trimmed so selectLines matches it");

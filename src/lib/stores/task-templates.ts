@@ -4,12 +4,14 @@ import {
 import { activeUsers } from "@/lib/users";
 import type { Role } from "@/lib/team";
 import {
-  createAutoTask, expandTemplate, tasksForProject, tasksForQuote, tasksForDesign,
+  createAutoTask, expandTemplate, tasksForProject, tasksForQuote, tasksForDesign, tasksForEngagement,
   type TaskRecord, type TaskTemplateItem,
 } from "@/lib/stores/tasks";
 import { getProject } from "@/lib/stores/projects";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { getDesign } from "@/lib/stores/designs";
+import { getEngagement } from "@/lib/stores/engagements";
+import { generateSchedule, type PhaseWeight, type ScheduleLine } from "@/lib/consulting-schedule";
 
 /* ============================================================
    Task template sets (D149, #118) — Jeff's ask: "add template tasks
@@ -60,6 +62,13 @@ export type TaskTemplateLine = {
   title: string;
   section: string;
   target: TemplateAssignTarget;
+  /** #145 D165 — phase name; must match the phase menu to expand. */
+  phase: string;
+  /** #145 D165 — "" matches every discipline. Stored lowercased. */
+  discipline: string;
+  /** #145 D166 — position and length WITHIN the phase window, 0–100. */
+  startPct: number;
+  lengthPct: number;
 };
 
 export type TaskTemplateSetRecord = {
@@ -85,13 +94,24 @@ function normalizeTarget(raw: unknown): TemplateAssignTarget {
   return { kind: "team" };
 }
 
-function normalizeLine(raw: unknown): TaskTemplateLine {
+const pct = (v: unknown, fallback: number): number => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(100, Math.max(0, n));
+};
+
+/** Exported for the spec harness — pure. */
+export function normalizeLine(raw: unknown): TaskTemplateLine {
   const l = (raw && typeof raw === "object" ? raw : {}) as Partial<TaskTemplateLine>;
   return {
     key: l.key || Math.random().toString(36).slice(2, 10),
     title: l.title || "Untitled task",
     section: l.section || "",
     target: normalizeTarget(l.target),
+    phase: String(l.phase || "").trim(),
+    discipline: String(l.discipline || "").trim().toLowerCase(),
+    startPct: pct(l.startPct, 0),
+    lengthPct: pct(l.lengthPct, 100),
   };
 }
 
@@ -173,9 +193,20 @@ export async function removeTaskTemplateSet(id: string): Promise<void> {
 
 export type ApplyTemplateTarget = { kind: TemplateRecordKind; id: string };
 
+/** #145 — the caller-assembled span + scope for a consulting engagement.
+ *  Omitted (undefined) for project/quote/design targets, which never date
+ *  their tasks. */
+export type ApplyTemplateSchedule = {
+  startAt: number;
+  endAt: number;
+  phases: PhaseWeight[];
+  disciplines: string[];
+};
+
 async function tasksForTarget(target: ApplyTemplateTarget): Promise<TaskRecord[]> {
   if (target.kind === "project") return tasksForProject(target.id);
   if (target.kind === "quote") return tasksForQuote(target.id);
+  if (target.kind === "consulting") return tasksForEngagement(target.id);
   return tasksForDesign(target.id);
 }
 
@@ -201,6 +232,7 @@ export async function applyTaskTemplate(
   setId: string,
   target: ApplyTemplateTarget,
   appliedBy: { name: string },
+  schedule?: ApplyTemplateSchedule,
 ): Promise<ApplyTemplateResult> {
   const set = await getTaskTemplateSet(setId);
   if (!set) throw new Error("Template set not found: " + setId);
@@ -210,10 +242,12 @@ export async function applyTaskTemplate(
   // Confirm the target actually exists (and is the kind claimed) before
   // minting any tasks against it — a bad id (mistyped, or a caller passing
   // a quote id under a "project" target) must fail here, not create tasks
-  // pointed at a projectId/quoteId/designId nothing else will ever read.
+  // pointed at a projectId/quoteId/designId/engagementId nothing else will
+  // ever read.
   const record =
     target.kind === "project" ? await getProject(target.id)
     : target.kind === "quote" ? await getQuote(target.id)
+    : target.kind === "consulting" ? await getEngagement(target.id)
     : await getDesign(target.id);
   if (!record) {
     throw new Error(`That ${TEMPLATE_RECORD_LABEL[target.kind].toLowerCase()} could not be found.`);
@@ -226,7 +260,7 @@ export async function applyTaskTemplate(
   // keep the line's own key (one instance, same as a manual task);
   // role/team lines suffix the user id so N users never collide.
   type Instance = { key: string; title: string; section: string; assigneeUserId: string | null; assigneeName: string };
-  const instances: Instance[] = [];
+  let instances: Instance[] = [];
   for (const line of set.lines) {
     if (line.target.kind === "person") {
       const userId = line.target.userId;
@@ -253,6 +287,27 @@ export async function applyTaskTemplate(
     }
   }
 
+  // #145: when the caller hands us a span, every instance gets dated by the
+  // engine. The scope gate runs FIRST, so a line whose phase the engagement
+  // doesn't have, or whose discipline it didn't buy, never becomes a task.
+  let placement = new Map<string, { phaseId: string; startPct: number; lengthPct: number; startAt: number; dueAt: number }>();
+  if (schedule) {
+    const scheduleLines: ScheduleLine[] = set.lines.map((l) => ({
+      key: l.key, title: l.title, section: l.section,
+      phase: l.phase, discipline: l.discipline,
+      startPct: l.startPct, lengthPct: l.lengthPct,
+    }));
+    const gen = generateSchedule({
+      startAt: schedule.startAt, endAt: schedule.endAt,
+      phases: schedule.phases, disciplines: schedule.disciplines,
+      lines: scheduleLines, milestones: [],
+    });
+    placement = new Map(gen.tasks.map((t) => [t.key, t]));
+    // Only in-scope lines survive generation — drop every instance whose
+    // line was gated out.
+    instances = instances.filter((i) => placement.has(i.key.split("::")[0]));
+  }
+
   const byKey = new Map(instances.map((i) => [i.key, i]));
   const items: TaskTemplateItem[] = instances.map((i) => ({ key: i.key, title: i.title, section: i.section }));
 
@@ -267,7 +322,9 @@ export async function applyTaskTemplate(
 
   const created: TaskRecord[] = [];
   for (const item of toCreate) {
-    const inst = byKey.get(item.coverageKey.slice(stage.length + 1));
+    const key = item.coverageKey.slice(stage.length + 1);
+    const inst = byKey.get(key);
+    const place = placement.get(key.split("::")[0]);
     const t = await createAutoTask({
       title: item.title,
       section: item.section,
@@ -275,6 +332,13 @@ export async function applyTaskTemplate(
       projectId: target.kind === "project" ? target.id : null,
       quoteId: target.kind === "quote" ? target.id : null,
       designId: target.kind === "design" ? target.id : null,
+      engagementId: target.kind === "consulting" ? target.id : null,
+      startAt: place?.startAt ?? null,
+      dueAt: place?.dueAt ?? null,
+      schedule: place
+        ? { phaseId: place.phaseId, startPct: place.startPct, lengthPct: place.lengthPct }
+        : null,
+      handScheduled: false,
       assigneeUserId: inst?.assigneeUserId ?? null,
       assigneeName: inst?.assigneeName ?? "",
       createdBy: appliedBy.name,
