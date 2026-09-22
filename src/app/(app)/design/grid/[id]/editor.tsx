@@ -1759,6 +1759,7 @@ export default function GridEditor({
                 setBusy(true);
                 const r = await createDraftQuoteAction(
                   project.id,
+                  project.options[0].id,
                   includedLabor.map((l) => ({ partId: l.partId, hours: l.hours }))
                 );
                 setBusy(false);

@@ -28,35 +28,28 @@ import {
   seedBlankSheet,
   setOptionQuote,
   setPlacementCategory,
-  setQuote,
   setScopeInputs,
   setSheetCalibration,
   setVenue,
   saveGridIntake,
 } from "@/lib/stores/grid-projects";
 import { hasOption, resolveOptionId } from "@/lib/design/grid-options";
-import { deriveSeedPlacements, isSeedPlaceholder } from "@/lib/design/grid-seed";
+import { buildGridQuote } from "@/lib/design/grid-quote";
+import { deriveSeedPlacements } from "@/lib/design/grid-seed";
 import { can } from "@/lib/team";
 import { getAllDesigns, removeDesign } from "@/lib/stores/designs";
-import { docLocId, getSite } from "@/lib/identity/sites";
-import { resolveTier } from "@/lib/pricing-tiers";
-import { isTierPriced } from "@/lib/tier-pricing";
+import { getSite } from "@/lib/identity/sites";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
-import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
-import { createGridAssembly, listGridSymbols } from "@/lib/stores/grid-catalog";
+import { get as getPart } from "@/lib/stores/catalog";
+import { createGridAssembly } from "@/lib/stores/grid-catalog";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import {
-  bomLines,
-  bomTotals,
-  curtainLines,
   GRID_CURTAIN_TYPES,
   GRID_FULLNESS,
   isPerLengthUnit,
-  routeLines,
-  type BomLine,
   type GridCurtain,
 } from "@/lib/design/grid-bom";
-import { isFabricRow, priceGridCurtains } from "@/lib/design/grid-curtains";
+import { isFabricRow } from "@/lib/design/grid-curtains";
 import { polygonArea } from "@/lib/design/grid-geometry";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
@@ -685,6 +678,7 @@ export async function deleteProjectAction(
  */
 export async function createDraftQuoteAction(
   projectId: string,
+  optionId: string | null,
   laborLines?: Array<{ partId: string; hours: number }>
 ): Promise<
   | { ok: true; quoteId: string; updated: boolean; fallbackLines: string[] }
@@ -693,206 +687,52 @@ export async function createDraftQuoteAction(
   const user = await requireUser();
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
-  const placements = project.placements || [];
-  const routes = project.routes || [];
-  if (!placements.length && !routes.length)
-    return { ok: false, error: "Place a device or route a wire first." };
-  // Hard-fail on unresolved seed placeholders (Task 2, #38) rather than
-  // let them silently price at $0 — the same "unresolved input must not
-  // silently zero a real number" call already made for fabric weight
-  // (#64). A placeholder's BOM line even LOOKS like a resolved-then-removed
-  // catalog part ("removed part — no longer in the catalog"), which is
-  // actively misleading here, not just missing. Naming the placement's own
-  // label (its `category`, the human name deriveSeedPlacements gave it,
-  // e.g. "Par") lets the user find and fix each one from the canvas.
-  const unresolvedSeeds = placements.filter((p) => isSeedPlaceholder(p.partId));
-  if (unresolvedSeeds.length) {
-    const names = Array.from(new Set(unresolvedSeeds.map((p) => p.category || p.partId))).sort();
-    return {
-      ok: false,
-      error:
-        `${unresolvedSeeds.length} seeded device${unresolvedSeeds.length === 1 ? "" : "s"} ` +
-        `still need${unresolvedSeeds.length === 1 ? "s" : ""} a real catalog part before this can ` +
-        `price: ${names.join(", ")}. Delete and re-drop each from the catalog, then try again.`,
-    };
-  }
+  const resolvedOptionId = resolveOptionId(project, optionId);
+  if (optionId && resolvedOptionId !== optionId) return { ok: false, error: OPTION_GONE };
+  const option = project.options!.find((o) => o.id === resolvedOptionId)!;
 
-  // Venue + tier stamp (D113.6): same resolution as estimator quotes (D87);
-  // re-stamped on every mint/update while the quote is still a draft. The
-  // tier margin is resolved BEFORE pricing because it applies to every line
-  // category on this quote — curtains, devices, wire runs and labor alike
-  // (#63) — exactly as the estimator and the portal do.
-  const tier = await resolveTier(project.customerId);
+  const built = await buildGridQuote(project, resolvedOptionId, laborLines);
+  if (!built.ok) return built;
+  const { build } = built;
 
-  const catalog = await listCatalog();
-  const symbols = await listGridSymbols();
-  const pricingById = new Map(catalog.map((p) => [p.id, p]));
-  // Rebuild a quote-facing catalog from the independent Grid symbols. A
-  // symbol with no pricingPartId is still valid design data; it simply carries
-  // a zero price until someone links a price-book row later.
-  const gridCatalog = symbols.map((s) => {
-    const p = s.pricingPartId ? pricingById.get(s.pricingPartId) : undefined;
-    return p
-      ? { ...p, id: s.id, sku: s.modelNumber || p.sku, desc: s.name }
-      : { id: s.id, sku: s.modelNumber || s.id, desc: s.name, category: s.category, unit: "ea", list: 0, cost: 0, ports: s.ports };
-  });
-  // Tier-priced catalog (#63): the same cost ÷ (1 − margin) re-derivation the
-  // portal uses for its equipment lines (portal/actions.ts) and
-  // customerCatalog() uses for the picker — a part without a usable cost, or
-  // a margin outside (0, 1), keeps its plain list price. Devices, wire runs
-  // and labor all price off this list below, so the tier margin actually
-  // reaches every line, not just curtains.
-  const tierSource = [
-    ...gridCatalog,
-    ...catalog.filter((p) => (p.role || "").toLowerCase() === "labor"),
-  ];
-  const tierCatalog = tierSource.map((p) => ({
-    ...p,
-    list: isTierPriced(p.cost, tier.margin)
-      ? Math.round((p.cost / (1 - tier.margin)) * 100) / 100
-      : p.list,
-  }));
-  // Punch #76: the fallback above is silent — a part with no usable cost (a
-  // bulk import that only carried list prices, say) keeps its plain list
-  // price while everything around it gets tier-priced, and nothing on the
-  // quote said so even though pricingTier/tierMargin implies every line got
-  // the tier treatment. Track which parts fell back, by BOTH id and SKU:
-  // device/wire lines key off the catalog id, but the labor lines built below
-  // key off the part's SKU instead (see the `labor.push` below), so a single
-  // id-only set would silently miss labor fallbacks. Curtains are never in
-  // this set — priceGridCurtains prices them straight from cost + margin with
-  // no separate "list" to fall back to.
-  const fallbackKeys = new Set(
-    gridCatalog.filter((p) => !isTierPriced(p.cost, tier.margin)).flatMap((p) => [p.id, p.sku])
-  );
-  const isFallbackLine = (l: Pick<BomLine, "partId" | "kind">) =>
-    l.kind !== "curtain" && fallbackKeys.has(l.partId);
-  const devLines = bomLines(placements, tierCatalog);
-  const devTotals = bomTotals(placements, tierCatalog);
-  const wires = routeLines(routes, tierCatalog, project.calibrations || []);
-
-  // Curtains (punch #49) - priced HERE, server-side, from the authoritative
-  // cost model. The editor's sidebar price is a customer-safe mirror of this
-  // same math and matches to the cent; this is the number that gets quoted.
-  const curtainPrices = priceGridCurtains(placements, catalog, tier.margin);
-  const fabricNames = new Map(
-    catalog.filter(isFabricRow).map((p) => [p.id, p.desc] as const)
-  );
-  const curtains = curtainLines(
-    placements,
-    new Map([...curtainPrices].map(([id, v]) => [id, v.priceEach])),
-    fabricNames
-  );
-  const curtainValue = curtains.reduce((a, l) => a + l.ext, 0);
-  const curtainCostTotal = [...curtainPrices.values()].reduce((a, v) => a + v.costEach, 0);
-
-  // Labor rides in only as hours against real catalog labor rows — the
-  // client proposes, the server prices (D114). Priced off the tier catalog
-  // (#63) so labor carries the same margin as everything else on the quote.
-  const labor: Array<{ sku: string; desc: string; qty: number; unit: string; price: number; ext: number; cost: number }> = [];
-  for (const l of laborLines || []) {
-    const part = tierCatalog.find((p) => p.id === l.partId);
-    const hours = Number(l.hours);
-    if (!part || (part.role || "").toLowerCase() !== "labor") continue;
-    if (!(hours > 0) || hours > 10000) continue;
-    labor.push({
-      sku: part.sku,
-      desc: part.desc,
-      qty: hours,
-      unit: part.unit || "hr",
-      price: part.list,
-      ext: hours * part.list,
-      cost: hours * part.cost,
-    });
-  }
-
-  const lines: BomLine[] = [
-    ...devLines,
-    ...wires.lines,
-    ...curtains,
-    ...labor.map((l) => ({ partId: l.sku, desc: l.desc, unit: l.unit, qty: l.qty, list: l.price, ext: l.ext })),
-  ];
-  const value =
-    devTotals.value + wires.value + curtainValue + labor.reduce((a, l) => a + l.ext, 0);
-  const cost =
-    devTotals.cost + wires.cost + curtainCostTotal + labor.reduce((a, l) => a + l.cost, 0);
-  const totals = { value, margin: value > 0 ? (value - cost) / value : 0 };
-
-  // Punch #76: which of the assembled lines actually landed on a
-  // fallback-priced part — computed once here so the flag on the spec below
-  // and the list handed back to the caller (for the editor's banner) can
-  // never disagree.
-  const fallbackLines = lines.filter(isFallbackLine).map((l) => l.desc);
-
-  const site = project.siteId ? await getSite(project.siteId) : null;
-  const locationId = site ? docLocId(site) : null;
-  const spec = {
-    kind: "grid",
-    gridProjectId: project.id,
-    lines: lines.map((l) => ({
-      // A curtain line's partId is its PLACEMENT id, not a catalog id (#49):
-      // it has no SKU because it isn't a stocked part, and putting "gp-4f2a…"
-      // in front of a customer would be nonsense. The description carries the
-      // name, type, dimensions, fullness and fabric.
-      sku: l.kind === "curtain" ? "CURTAIN" : l.partId,
-      desc: l.desc,
-      qty: l.qty,
-      unit: l.unit,
-      price: l.list,
-      ext: l.ext,
-      // Punch #76: this line's part had no usable cost (or the tier margin
-      // itself was out of range) and so kept its plain list price while its
-      // tier stamp (pricingTier/tierMargin, below) implies every line got
-      // the tier treatment. Never a price change — a fallback line keeps its
-      // list price — only a marker so the mix is visible on the document
-      // instead of silent. Omitted (not `false`) on every ordinary line so
-      // existing quotes/specs with no such lines are untouched.
-      ...(isFallbackLine(l) ? { tierFallback: true as const } : {}),
-    })),
-  };
-
-  const existing = project.quoteId ? await getQuote(project.quoteId) : null;
+  const existing = option.quoteId ? await getQuote(option.quoteId) : null;
   if (existing) {
     if (existing.status !== "draft")
-      return {
-        ok: false,
-        error: `${existing.id} is already ${existing.status} — cut a revision from the quote screen instead.`,
-      };
+      return { ok: false, error: `${existing.id} is already ${existing.status} — cut a revision from the quote screen instead.` };
     await updateQuote(existing.id, {
-      name: `${project.name} — The Grid design`,
-      value: totals.value,
-      margin: totals.margin,
-      locationId,
-      pricingTier: tier.tier,
-      tierMargin: tier.margin,
-      spec,
+      name: build.quoteName,
+      value: build.value,
+      margin: build.margin,
+      locationId: build.locationId,
+      pricingTier: build.tier.tier,
+      tierMargin: build.tier.margin,
+      spec: build.spec,
     });
-    // The revision records exactly what was quoted (D109).
-    await addRevision(projectId, { by: user.name, reason: "quote", note: `Quoted as ${existing.id}` });
+    await addRevision(projectId, { by: user.name, reason: "quote", note: `${option.name} quoted as ${existing.id}` });
     revalidatePath(editorPath(projectId));
     revalidatePath("/quotes");
     revalidatePath("/design/designs");
-    return { ok: true, quoteId: existing.id, updated: true, fallbackLines };
+    return { ok: true, quoteId: existing.id, updated: true, fallbackLines: build.fallbackLines };
   }
 
   const q = await createQuote({
-    name: `${project.name} — The Grid design`,
+    name: build.quoteName,
     customer: project.customer,
     customerId: project.customerId,
-    locationId,
-    value: totals.value,
-    margin: totals.margin,
-    pricingTier: tier.tier,
-    tierMargin: tier.margin,
+    locationId: build.locationId,
+    value: build.value,
+    margin: build.margin,
+    pricingTier: build.tier.tier,
+    tierMargin: build.tier.margin,
     source: "grid",
     quoteType: "system",
     owner: user.name,
-    spec,
+    spec: build.spec,
   });
-  await setQuote(project.id, q.id);
-  await addRevision(projectId, { by: user.name, reason: "quote", note: `Quoted as ${q.id}` });
+  await setOptionQuote(project.id, resolvedOptionId, q.id);
+  await addRevision(projectId, { by: user.name, reason: "quote", note: `${option.name} quoted as ${q.id}` });
   revalidatePath(editorPath(projectId));
   revalidatePath("/quotes");
   revalidatePath("/design/designs");
-  return { ok: true, quoteId: q.id, updated: false, fallbackLines };
+  return { ok: true, quoteId: q.id, updated: false, fallbackLines: build.fallbackLines };
 }

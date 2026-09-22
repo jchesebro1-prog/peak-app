@@ -61,7 +61,7 @@ export async function promoteDesignAction(
 
   if (d.layoutMode === "manual") {
     if (!d.gridProjectId) return { ok: false, error: "This design has no linked Grid project." };
-    const result = await createDraftQuoteAction(d.gridProjectId);
+    const result = await createDraftQuoteAction(d.gridProjectId, null);
     if (!result.ok) return { ok: false, error: result.error };
     await updateDesign(id, { quoteId: result.quoteId });
     revalidatePath("/design/designs");

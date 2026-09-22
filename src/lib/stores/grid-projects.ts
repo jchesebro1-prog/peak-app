@@ -738,13 +738,6 @@ export async function setOptionQuote(
   });
 }
 
-/** TEMPORARY alias until Task 4 rewrites createDraftQuoteAction — stores on the first option. */
-export async function setQuote(projectId: string, quoteId: string): Promise<GridProject | null> {
-  const project = await getProject(projectId);
-  if (!project) return null;
-  return setOptionQuote(projectId, ensureOptions(project).options[0].id, quoteId);
-}
-
 export async function setVenue(
   projectId: string,
   siteId: string | null,

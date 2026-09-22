@@ -19,9 +19,21 @@ import {
   setSheetCalibration,
 } from "@/lib/stores/grid-projects";
 import { DEFAULT_OPTION_ID, optionSlice } from "@/lib/design/grid-options";
+import { buildGridQuote } from "@/lib/design/grid-quote";
+import { list as listCatalog } from "@/lib/stores/catalog";
+import { listGridSymbols } from "@/lib/stores/grid-catalog";
+import { getDb } from "@/db";
+import { seedIfEmpty } from "@/db/seed-data";
+import { upsert as upsertCatalogPart } from "@/lib/stores/catalog";
 
 async function main() {
   if (!process.env.PGLITE_PATH) throw new Error("Refusing to run without PGLITE_PATH (scratch db).");
+
+  // getDb() also fires an un-awaited background auto-seed (src/db/index.ts);
+  // awaiting it explicitly here — same call scripts/seed.ts makes — makes
+  // the catalog/Grid-symbol fixtures the pricing checks below depend on
+  // deterministic instead of a race against that background seed.
+  await seedIfEmpty(await getDb());
 
   const p0 = await createProject({ name: "Options scenario", customer: "Test Co", customerId: null, by: "tester" });
   const project = (await getProject(p0.id))!;
@@ -107,6 +119,52 @@ async function main() {
   const rmFirst = await removeOption(project.id, base, "tester");
   assert.ok(rmFirst.ok, "removing the first option is allowed when another exists");
   assert.equal((await getProject(project.id))!.quoteId, "Q-SECOND", "quoteId mirror follows the new first option");
+
+  // ---- per-option pricing (Task 4) ----
+  // The demo catalog seed (src/db/seeds/catalog.ts) is Fabric + Labor rows
+  // only — no priced devices — so listGridSymbols()'s first-touch derivation
+  // would otherwise fall back to its zero-priced hardcoded fixtures. Add two
+  // priced device parts before that first touch so the Grid symbol library
+  // derives real priced symbols, the same way it does once a price book is
+  // imported.
+  await upsertCatalogPart({ sku: "TEST-GRID-DEV-A", desc: "Test Grid Device A", category: "Lighting", unit: "ea", list: 500, cost: 300 });
+  await upsertCatalogPart({ sku: "TEST-GRID-DEV-B", desc: "Test Grid Device B", category: "Audio", unit: "ea", list: 800, cost: 480 });
+  const catalog = await listCatalog();
+  const pricingById = new Map(catalog.map((c) => [c.id, c]));
+  const symbols = await listGridSymbols();
+  const priced = symbols.filter((s) => s.pricingPartId && (pricingById.get(s.pricingPartId)?.list || 0) > 0);
+  assert.ok(priced.length >= 2, "the seed catalog exposes at least two priced Grid symbols");
+  const [symA, symB] = priced;
+
+  const q0 = await createProject({ name: "Priced options", customer: "Test Co", customerId: null, by: "tester" });
+  const qSheet = (await addSheet(q0.id, { name: "Sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E", by: "tester" }))!;
+  const qBase = (await getProject(q0.id))!.options![0].id;
+  const qGood = await addOption(q0.id, { name: "Good", by: "tester" });
+  const goodId = qGood.ok ? qGood.option.id : "";
+  await addPlacement(q0.id, { sheetId: qSheet.id, page: 1, x: 0.2, y: 0.2, partId: symA.id, optionId: qBase, by: "tester" });
+  await addPlacement(q0.id, { sheetId: qSheet.id, page: 1, x: 0.3, y: 0.2, partId: symA.id, optionId: qBase, by: "tester" });
+  await addPlacement(q0.id, { sheetId: qSheet.id, page: 1, x: 0.2, y: 0.4, partId: symB.id, optionId: goodId, by: "tester" });
+
+  const qp = (await getProject(q0.id))!;
+  const bBase = await buildGridQuote(qp, qBase);
+  const bGood = await buildGridQuote(qp, goodId);
+  assert.ok(bBase.ok && bGood.ok, "buildGridQuote prices both options");
+  if (bBase.ok && bGood.ok) {
+    assert.equal(bBase.build.lines.length, 1, "base option prices one grouped device line (2× symA)");
+    assert.equal(bBase.build.lines[0].qty, 2, "base option line qty is 2");
+    assert.equal(bGood.build.lines.length, 1, "good option prices its own single line");
+    assert.equal(bGood.build.lines[0].partId, symB.id, "good option line is symB, not symA");
+    assert.equal(bBase.build.spec.gridOptionId, qBase, "spec carries the option id");
+    assert.ok(bBase.build.quoteName.endsWith(" · Design — The Grid design"), `quote name carries the option name when >1 option (got ${bBase.build.quoteName})`);
+  }
+  // (Fetch the project fresh after adding "Empty" — buildGridQuote's
+  // hasOption check runs against the project object passed in, and the
+  // stale `qp` snapshot from above doesn't know about this option yet.)
+  const addedEmpty = await addOption(q0.id, { name: "Empty", by: "tester" });
+  const emptyOptionId = addedEmpty.ok ? addedEmpty.option.id : "";
+  const qpAfterEmpty = (await getProject(q0.id))!;
+  const empty = await buildGridQuote(qpAfterEmpty, emptyOptionId);
+  assert.ok(!empty.ok && /Place a device/.test(empty.error), "an option with no members refuses to price");
 
   console.log("PASS grid-options store scenario");
 }
