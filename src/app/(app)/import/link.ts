@@ -39,7 +39,7 @@ function txt(v: unknown): string {
  * `norm` the dedupe uses) → create a customer from the name → missing when
  * the row carries neither. `cache` is whatever list the caller keeps for one
  * file — the server pushes newly created customers into it so later rows
- * link to the same record (D159).
+ * link to the same record (D158).
  */
 export function resolveCustomerForRow(
   row: { customerId?: unknown; customer?: unknown },
@@ -153,13 +153,37 @@ export type MergeLocationOpts = {
   preferPrimary: boolean;
   /** venueKind for a venue this merge CREATES; default derives from `kind`. */
   venueKind?: string;
+  /**
+   * Which blank-label venue a LABELLED row may claim (#137 C1).
+   * `"unaddressed"` — the default, so an un-passed option can never destroy
+   * stored data — claims only a true D85 placeholder: blank label AND no
+   * address/city/state/zip of its own. `"any"` claims a blank-label venue
+   * whatever it holds, which only the customers writer may do, because its
+   * own row IS that venue.
+   *
+   * The customers template has no Venue column, so every customer imported
+   * with an Address owns an unnamed but ADDRESSED primary venue — its
+   * mailing address. A labelled venues row must append beside that venue
+   * rather than claim it: `or()` below would let the incoming address win,
+   * and D158 leaves `companies.address/city/state` to the Daylite import, so
+   * nothing else holds the mailing address and it would be unrecoverable.
+   */
+  claimBlank?: "any" | "unaddressed";
 };
+
+/** A blank-label venue with nothing of its own to lose: the D85 base venue a
+ *  labelled row may safely claim, as opposed to the addressed-but-unnamed
+ *  primary venue a customers import leaves behind (#137 C1). */
+function isBlankPlaceholder(l: CustomerLocation): boolean {
+  return !norm(l.label) && !txt(l.address) && !txt(l.city) && !txt(l.state) && !txt(l.zip);
+}
 
 /**
  * Upsert one venue into a record's locations (new array, input untouched):
  * normalized-label match → a labelled row claims the unnamed D85 base venue
- * (so the first imported venue fills it instead of leaving an empty twin) →
- * a `preferPrimary` row without a label merges into the primary venue →
+ * (so the first imported venue fills it instead of leaving an empty twin —
+ * `claimBlank` decides whether an ADDRESSED unnamed venue counts) → a
+ * `preferPrimary` row without a label merges into the primary venue →
  * append. Blank incoming fields never clear stored ones; an existing venue
  * keeps its venueKind, lat/lng and travel figures.
  */
@@ -172,7 +196,11 @@ export function mergeLocation(
   const list = locations.map((l) => ({ ...l }));
   const label = txt(incoming.label);
   let hit: CustomerLocation | null = matchLocation(list, label);
-  if (!hit && label) hit = list.find((l) => !norm(l.label)) ?? null;
+  if (!hit && label) {
+    const claimable =
+      opts.claimBlank === "any" ? (l: CustomerLocation) => !norm(l.label) : isBlankPlaceholder;
+    hit = list.find(claimable) ?? null;
+  }
   if (!hit && !label && opts.preferPrimary) hit = list.find((l) => l.primary) ?? list[0] ?? null;
   const or = (next: string | undefined, prev: string | undefined) => txt(next) || prev;
   if (hit) {

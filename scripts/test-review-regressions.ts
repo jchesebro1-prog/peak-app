@@ -1440,6 +1440,85 @@ async function main() {
     );
   }
 
+  // #137 C1 (final review — data loss) — the go-live order in MASTER-HOWTO §7
+  // is customers.csv → contacts.csv → venues.csv. The customers template has
+  // no Venue column, so every customer it writes ends up owning an UNNAMED
+  // but ADDRESSED primary venue: the company's mailing address. A labelled
+  // venues row for that customer must APPEND a second venue — claiming the
+  // addressed slot would overwrite the mailing address with the venue's, and
+  // D158 leaves companies.address/city/state to the Daylite import, so
+  // nothing else holds it and it is unrecoverable.
+  {
+    const cRes = await commitImport("customers", prepImport("customers", [
+      "Customer Name,Category,Address,City,State,Zip",
+      "T137 C1 Mailing Co,Education,215 W Main St,Madison,WI,53703",
+    ].join("\n")), "skip");
+    assert.equal(cRes.errored, 0, "#137 C1 fixture: the customers row errors nothing");
+    assert.equal(cRes.created, 1, "#137 C1 fixture: the customers row creates the customer");
+    const c1 = await findCustomerByName("T137 C1 Mailing Co");
+    assert.equal(c1!.locations.length, 1, "#137 C1 fixture: one venue — the unnamed mailing venue");
+    assert.ok(!c1!.locations[0].label, "#137 C1 fixture: …unnamed (the template has no Venue column)");
+    assert.equal(c1!.locations[0].address, "215 W Main St", "#137 C1 fixture: …carrying the mailing address");
+
+    const vRes = await commitImport("venues", prepImport("venues", [
+      "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category",
+      "T137 C1 Mailing Co,,Main Auditorium,5000 N Ballard Rd,Appleton,WI,54913,theatre",
+    ].join("\n")), "skip");
+    assert.equal(vRes.errored, 0, "#137 C1 the venues row errors nothing");
+    assert.equal(vRes.created, 1, "#137 C1 the venues row writes one venue");
+    const c2 = await findCustomerByName("T137 C1 Mailing Co");
+    assert.equal(c2!.locations.length, 2, "#137 C1 a labelled venues row APPENDS — it never claims a blank-label venue that already has an address");
+    const mail = c2!.locations.find((l) => !l.label);
+    const aud = c2!.locations.find((l) => l.label === "Main Auditorium");
+    assert.ok(mail && aud, "#137 C1 both the mailing venue and the named venue exist");
+    assert.equal(mail!.address, "215 W Main St", "#137 C1 the customer's mailing address survives the venues import");
+    assert.equal(mail!.city, "Madison", "#137 C1 …and its city");
+    assert.equal(mail!.primary, true, "#137 C1 …and it is still the primary venue");
+    assert.equal(aud!.address, "5000 N Ballard Rd", "#137 C1 the appended venue keeps its own address");
+    assert.equal(aud!.city, "Appleton", "#137 C1 …and its city");
+    assert.equal(aud!.primary, false, "#137 C1 …and it is not primary");
+
+    // The mirror, the same slot from the other side: re-running the customers
+    // file (go-live re-runs it in "Update existing") must land on the primary
+    // mailing venue it owns and leave the venues file's named venue alone.
+    const cRes2 = await commitImport("customers", prepImport("customers", [
+      "Customer Name,Category,Address,City,State,Zip",
+      "T137 C1 Mailing Co,Education,220 E Doty St,Madison,WI,53703",
+    ].join("\n")), "update");
+    assert.equal(cRes2.errored, 0, "#137 C1 mirror: the second customers file errors nothing");
+    assert.equal(cRes2.updated, 1, "#137 C1 mirror: it matches by name and updates");
+    const c3 = await findCustomerByName("T137 C1 Mailing Co");
+    assert.equal(c3!.locations.length, 2, "#137 C1 mirror: still exactly two venues");
+    assert.equal(
+      c3!.locations.find((l) => l.label === "Main Auditorium")!.address,
+      "5000 N Ballard Rd",
+      "#137 C1 mirror: a customers row with no Venue never overwrites an existing named venue's address"
+    );
+    assert.equal(
+      c3!.locations.find((l) => !l.label)!.address,
+      "220 E Doty St",
+      "#137 C1 mirror: it updates the unnamed primary mailing venue it owns instead"
+    );
+
+    // And the claim that C1 narrows stays intact: when the blank-label venue
+    // is a TRUE D85 placeholder (no address of its own), a labelled venues
+    // row still fills it rather than leaving an empty twin behind.
+    await upsertCustomer({ id: "c-t137-c1-bare", name: "T137 C1 Bare Co", type: "Education", locations: [], contacts: [] });
+    const bare = await getCustomer("c-t137-c1-bare");
+    assert.equal(bare!.locations.length, 1, "#137 C1 fixture: a new customer starts with its unnamed D85 base venue");
+    assert.ok(!bare!.locations[0].address, "#137 C1 fixture: …with no address of its own");
+    const vBare = await commitImport("venues", prepImport("venues", [
+      "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category",
+      ",c-t137-c1-bare,Recital Hall,12 Bare St,Neenah,WI,54956,theatre",
+    ].join("\n")), "skip");
+    assert.equal(vBare.errored, 0, "#137 C1 the placeholder row errors nothing");
+    const bare2 = await getCustomer("c-t137-c1-bare");
+    assert.equal(bare2!.locations.length, 1, "#137 C1 an unaddressed base venue is still claimed — no empty twin");
+    assert.equal(bare2!.locations[0].label, "Recital Hall", "#137 C1 …and it takes the row's name");
+    assert.equal(bare2!.locations[0].address, "12 Bare St", "#137 C1 …and the row's address");
+    assert.equal(bare2!.locations[0].primary, true, "#137 C1 …and it stays primary");
+  }
+
   console.log("review regression checks passed");
 }
 

@@ -83,7 +83,7 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       // #137 — CustomerContact has no notes field: nothing read this and the
       // export hardcoded "". Hidden, like the customers Notes column above.
       { key: "notes", header: "Notes", label: "Notes", hidden: true, aliases: ["notes", "note", "comments", "remarks"] },
-      // #137 — category for a customer this file has to CREATE (D159);
+      // #137 — category for a customer this file has to CREATE (D158);
       // never a template column.
       { key: "customerType", header: "Customer Category", label: "Customer category", hidden: true, aliases: ["customer category", "customer type", "company type", "company category", "account type"] },
     ],

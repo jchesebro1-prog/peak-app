@@ -3658,8 +3658,14 @@ implementing it:
   record; a venue the import **creates** derives `venueKind` from it (`venueKindFromCategory`:
   church/blackbox/arena/flat, default proscenium); an existing venue keeps its `venueKind`.
 - **The first imported venue claims the unnamed D85 base venue** instead of leaving an empty twin
-  (any labelled row with no name match takes the first blank-label location); a customers row with
-  no Venue column addresses the primary venue without renaming it.
+  (a labelled row with no name match takes the first blank-label location) — but only a TRUE
+  placeholder, one carrying no address/city/state/zip of its own (`mergeLocation`'s `claimBlank`,
+  tightened in the final review). The customers template has no Venue column, so a customer
+  imported with an Address owns an unnamed but *addressed* primary venue: that is its mailing
+  address, which the companies row does not duplicate (see above), so a labelled venues row
+  appends beside it rather than overwriting it. Only the customers writer claims a blank-label
+  venue whatever it holds, because its own row IS that venue; a customers row with no Venue column
+  addresses the primary venue without renaming it.
 - **Contacts:** matched by primary email, else normalized name; a hit **keeps its stored name**
   (writeRecord matches contacts by display name — renaming would mint a second row). `Title`, else
   `Role`, fills the one free-text slot (`contacts.title`, the Daylite precedent). `Mobile` is a

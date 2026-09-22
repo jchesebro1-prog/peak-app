@@ -5432,5 +5432,23 @@ ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1
   const v5 = mergeLocation([], { label: "", address: "1 HQ Way" }, "l-new5", { preferPrimary: true, venueKind: "church" });
   ok(v5.created && v5.locations[0].primary && v5.locations[0].label === "" && v5.locations[0].venueKind === "church" && v5.locations[0].id === "l-new5", "#137 T3 mergeLocation: the first venue on a new customer is primary and takes the caller's venueKind");
   ok(locs[0].label === "" && locs.length === 1, "#137 T3 mergeLocation never mutates its input");
+
+  // #137 C1 (final review — data loss) — claimBlank. A labelled row may only
+  // claim a blank-label venue that carries NO address of its own: the
+  // customers template has no Venue column, so every customer it writes owns
+  // an unnamed but addressed primary venue (the mailing address), and
+  // claiming that slot overwrites it with the venue's address.
+  const addressedBlank: CustomerLocation[] = [
+    { id: "l1", label: "", primary: true, address: "215 W Main St", city: "Madison", zip: "53703", venueKind: "proscenium", travelMiles: null, travelMin: null },
+  ];
+  const v6 = mergeLocation(addressedBlank, { label: "Main Auditorium", address: "5000 N Ballard Rd", city: "Appleton", zip: "54913" }, "l-new6", { preferPrimary: true, claimBlank: "unaddressed" });
+  ok(v6.created && v6.locations.length === 2 && v6.locations[0].id === "l1" && !v6.locations[0].label && v6.locations[0].address === "215 W Main St" && v6.locations[0].city === "Madison" && v6.locations[0].primary && v6.locations[1].label === "Main Auditorium" && v6.locations[1].address === "5000 N Ballard Rd" && !v6.locations[1].primary, "#137 C1 mergeLocation claimBlank 'unaddressed': a labelled venues row APPENDS rather than claiming an addressed blank-label venue, so the customer's mailing address survives");
+  const v7 = mergeLocation(addressedBlank, { label: "Main Stage", address: "5000 N Ballard Rd" }, "l-new7", { preferPrimary: true, claimBlank: "any" });
+  ok(!v7.created && v7.locations.length === 1 && v7.locations[0].id === "l1" && v7.locations[0].label === "Main Stage" && v7.locations[0].address === "5000 N Ballard Rd", "#137 C1 mergeLocation claimBlank 'any': the customers writer still names the address venue its own row owns");
+  const v8 = mergeLocation(addressedBlank, { label: "Main Auditorium", address: "5000 N Ballard Rd" }, "l-new8", { preferPrimary: true });
+  ok(v8.created && v8.locations.length === 2 && v8.locations[0].address === "215 W Main St", "#137 C1 mergeLocation: the DEFAULT claimBlank is the safe one — an un-passed option never overwrites a stored address");
+  const v9 = mergeLocation(locs, { label: "Main Stage", address: "215 W Main St" }, "l-new9", { preferPrimary: false, claimBlank: "unaddressed" });
+  ok(!v9.created && v9.locations.length === 1 && v9.locations[0].id === "l1" && v9.locations[0].label === "Main Stage" && v9.locations[0].address === "215 W Main St", "#137 C1 mergeLocation claimBlank 'unaddressed' still claims a TRUE placeholder — the unnamed D85 base venue with no address of its own");
+  ok(addressedBlank.length === 1 && !addressedBlank[0].label && addressedBlank[0].address === "215 W Main St", "#137 C1 mergeLocation never mutates its input on the append path either");
   ok(venueKindFromCategory("Church") === "church" && venueKindFromCategory("Black Box") === "blackbox" && venueKindFromCategory("Arena") === "arena" && venueKindFromCategory("Gym") === "flat" && venueKindFromCategory("theatre") === "proscenium" && venueKindFromCategory("") === "proscenium" && venueKindFromCategory("flat") === "flat", "#137 T3 venueKindFromCategory");
 }

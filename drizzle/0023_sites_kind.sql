@@ -1,4 +1,4 @@
--- #137 (D159): free-text venue category from the venues import. The spec's
+-- #137 (D158): free-text venue category from the venues import. The spec's
 -- "persist on the site row's existing free-text kind column, else in the
 -- location document" has no home — venue_kind is the controlled vocabulary
 -- (proscenium/church/flat/blackbox/arena) and sites are relational rows, not

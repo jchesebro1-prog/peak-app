@@ -221,7 +221,7 @@ function hasVenueColumns(v: Values): boolean {
  * UI, travel and quotes use, as this importer always did, but without
  * replacing the customer's other venues; Zip also stamps the company row;
  * and the legacy embedded Contact Name / Email / Phone columns still land as
- * a contact (D159).
+ * a contact (D158).
  */
 function customerRecordFor(
   id: string,
@@ -237,7 +237,10 @@ function customerRecordFor(
       locations,
       { label: str(v.venue), address: str(v.address), city: str(v.city), state: str(v.state), zip: str(v.zip) },
       "l" + id + "-" + seq(),
-      { preferPrimary: true, venueKind: baseVenueKind(type, name) ?? "proscenium" }
+      // claimBlank "any": unlike a venues row, this row genuinely IS the
+      // customer's address venue, so a legacy file's Venue column may name
+      // the unnamed primary venue even once it carries an address (#137 C1).
+      { preferPrimary: true, claimBlank: "any", venueKind: baseVenueKind(type, name) ?? "proscenium" }
     ).locations;
   }
   let contacts: Customers.CustomerContact[] = prev?.contacts ?? [];
@@ -270,7 +273,7 @@ function customerRecordFor(
  * Resolve the customer a contacts / venues row belongs to, creating a bare
  * one (`{ name, type: Customer Category column ?? "" }`) when neither the
  * id nor the normalized name matches — and pushing it into the cache so the
- * rest of the file links to the same record (D159). Returns the customer as
+ * rest of the file links to the same record (D158). Returns the customer as
  * stored right now. Throws (→ the row counts as errored) when the row has
  * neither a Customer nor a Customer ID.
  */
@@ -315,10 +318,12 @@ async function writeContactRow(cust: Customers.CustomerDoc, v: Values): Promise<
 }
 
 /** One venues row → the customer's locations, merged by normalized label
- *  (a labelled row claims the unnamed base venue first; a blank-label row —
- *  #137 T6 review, a round-tripped export of an addressed D85 base venue —
- *  targets the primary venue directly via mergeLocation's preferPrimary,
- *  the same claiming path a customers-import row uses). */
+ *  (a labelled row claims the unnamed base venue first, but only a TRUE
+ *  placeholder — `claimBlank: "unaddressed"`, #137 C1: an unnamed venue that
+ *  already carries an address is the customer's mailing address, so the row
+ *  appends beside it instead of overwriting it; a blank-label row — #137 T6
+ *  review, a round-tripped export of an addressed D85 base venue — targets
+ *  the primary venue directly via mergeLocation's preferPrimary). */
 async function writeVenueRow(cust: Customers.CustomerDoc, v: Values): Promise<void> {
   const { locations } = mergeLocation(
     cust.locations || [],
@@ -331,7 +336,7 @@ async function writeVenueRow(cust: Customers.CustomerDoc, v: Values): Promise<vo
       kind: str(v.kind),
     },
     "l" + cust.id + "-" + seq(),
-    { preferPrimary: true }
+    { preferPrimary: true, claimBlank: "unaddressed" }
   );
   await Customers.upsert({ ...recordInputOf(cust), locations });
 }
