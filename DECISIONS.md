@@ -2775,3 +2775,35 @@ built on Wave A's linking (D140).
 - **Conflict rule:** last write wins by timestamp; same-second collisions resolve in Gmail's favour.
 - **Cadence:** the interpreter runs inside the existing sync (open-tab tick ~2 min, cron every 5 min
   once `CRON_SECRET` is set). Gmail push (Pub/Sub) remains a later phase.
+
+## D150. Grid options are a tag on placements/routes, not nested documents; Manual intake asks venue + dims only (2026-09-21)
+
+Spec `docs/superpowers/specs/2026-09-21-grid-options-and-intake-branch-design.md` (Spec 1 of 3
+from Jeff's 2026-09-21 Grid brainstorm — Auto branch and proposal document follow).
+
+- **Options as first-class variants.** A Grid project holds `options[]` (Good/Better/Best or
+  user-named); placements and wire routes carry `optionId`; sheets, calibration, spaces,
+  intake, scope inputs and revisions are shared. Chosen over revisions (history, not variants)
+  and sibling projects (no way to send three as one document). Tagging beats nesting: every
+  existing store function, BOM/riser/schedule library and revision snapshot keeps its shape;
+  consumers filter by `optionSlice()`.
+- **Read-side migration only.** Legacy docs normalize to one option `opt-base` named
+  "Design" that inherits `project.quoteId`; untagged members belong to it. `project.quoteId`
+  stays as a mirror of the first option's quote so pre-spec readers are untouched.
+- **One draft quote per option**, named `<project> · <option> — The Grid design` when the
+  project has more than one option. Pricing moved verbatim into
+  `src/lib/design/grid-quote.ts` (`buildGridQuote`) so it can be tested per option on a
+  scratch DB (`npm run test:grid-options`).
+- **"Generate starting layout" removed from the editor** (D147's UI). It painted placeholder
+  devices and ignored the chosen tier — the thing Jeff hit on 2026-09-21. `grid-seed.ts`
+  and its action stay for Spec 2's real generator; the quote guard against unresolved
+  placeholders stays because the punch branch's preview deploy may have written some.
+- **Manual intake = venue type + dimensions, then mode + cover page.** Systems/tier/brief
+  and the "Generate from measurements" checkbox are gone; the base sheet is always generated
+  from dims; the first save also seeds `scopeInputs` (venue preset ∩ the five trackable
+  systems) and patches the linked DesignRecord's name/venue/size/dims. Auto-estimate is
+  shown greyed ("Next release") so the flow's shape is visible before Spec 2 enables it.
+- **Entry points unchanged for now** — "New design" keeps Quick canvas / Manual layout until
+  the Auto branch exists (Spec 2), otherwise there'd be no way to auto-estimate a new design.
+- Known, deliberately untouched: `DesignRecord.budget` is still never written for manual
+  designs (pre-existing, #38 plan recon item 7).
