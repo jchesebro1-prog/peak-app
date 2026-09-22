@@ -5909,8 +5909,9 @@ branch was rebuilt on 6ba6220, three things were still wrong on `main`:
    selects work by `created_at < when` only, prod's high-water mark may have passed
    `0019_long_the_enforcers` (when 22:28Z) via those previews (01:14Z / 01:28Z) before cddf37b's
    production build ran (01:41Z) — in which case **`customer_domains` was never created in prod**
-   and the live sidebar's domain claims fail. Cannot be read without `DATABASE_URL`; the fix below
-   makes the question moot.
+   and the live sidebar's domain claims fail. Settled by the 0e6fbe1 production migrate log:
+   `relation "customer_domains" already exists, skipping` — cddf37b's deploy had created it, so
+   the repair migration was a clean no-op in prod (the fix below made the answer irrelevant).
 3. **The newest snapshot lacked `customer_domains`**, so the next `db:generate` would have emitted
    `DROP TABLE customer_domains`.
 
@@ -5931,6 +5932,10 @@ ends with `customer_domains` + `calendar_connections` + `task_templates` + `reco
 `krisp_connections` present and both seq-bump triggers in place; a second run is a no-op.
 **Gates:** tsc 0 errors · test:specs ALL PASSED · test:review:regressions passed · test:smoke ALL
 PASSED · eslint clean on touched files · `next build` exit 0.
+**Deployed:** pushed to `main` as 0e6fbe1 (Jeff's call, 23:26 CDT); Vercel production build
+Ready at 23:30 — `[migrate] done.` with `calendar_connections` / `task_templates` / their indexes
+and `customer_domains` all reported "already exists, skipping", `recordings` + `krisp_connections`
+created. First successful production deploy since cddf37b; main now serves both sessions' work.
 
 **Lesson (adds to D141):** a merge that "keeps ours" for every conflict is a revert of the other
 branch, and a regenerated migration is only safe if it is actually idempotent — the "106 baseline"
