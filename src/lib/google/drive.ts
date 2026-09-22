@@ -177,6 +177,50 @@ export type DriveUploadInput = {
 
 export type DriveUploadResult = { id: string; webViewLink: string };
 
+/** Metadata needed to OPEN a resumable session — everything `initiateResumableSession`
+ *  needs before any byte has moved. */
+export type ResumableSessionInput = {
+  name: string;
+  mime: string;
+  parentId: string;
+  /** Exact byte length — Drive requires it up front for a resumable session. */
+  size: number;
+};
+
+/**
+ * #145 — initiate only, split out of `uploadFileResumable` below so a
+ * caller (the engagement-files upload route) can hand the returned session
+ * URL straight to the BROWSER, which then PUTs the bytes itself: the file
+ * never rides this app's request body, so a multi-megabyte drawing set
+ * never has to fit under a server action's ~1200kb cap or a Vercel
+ * function's ~4.5MB one.
+ *
+ * `uploadFileResumable` calls this and then performs the PUT itself, so its
+ * behaviour (headers sent, error mapping) is unchanged — see its own tests.
+ */
+export async function initiateResumableSession(
+  token: string,
+  input: ResumableSessionInput,
+  fetchImpl: DriveFetch = realFetch
+): Promise<string> {
+  const what = `starting an upload of "${input.name}"`;
+  const initiate = await fetchImpl(`${DRIVE_UPLOAD_BASE}/files?uploadType=resumable&fields=id,webViewLink`, {
+    method: "POST",
+    signal: AbortSignal.timeout(META_TIMEOUT_MS),
+    headers: {
+      Authorization: "Bearer " + token,
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-Upload-Content-Type": input.mime,
+      "X-Upload-Content-Length": String(input.size),
+    },
+    body: JSON.stringify({ name: input.name, mimeType: input.mime, parents: [input.parentId] }),
+  });
+  if (!initiate.ok) throw driveErrorFor(initiate.status, what, await bodyText(initiate));
+  const sessionUrl = initiate.headers.get("location") || initiate.headers.get("Location");
+  if (!sessionUrl) throw new DriveApiError(502, `Drive opened no upload session (missing Location) while ${what}.`);
+  return sessionUrl;
+}
+
 /**
  * Resumable upload (`uploadType=resumable`): one POST with the metadata to
  * open a session, then a single PUT of every byte to the session URL. Drive
@@ -191,20 +235,11 @@ export async function uploadFileResumable(
   const f = opts.fetch ?? realFetch;
   const what = `uploading "${input.name}"`;
 
-  const initiate = await f(`${DRIVE_UPLOAD_BASE}/files?uploadType=resumable&fields=id,webViewLink`, {
-    method: "POST",
-    signal: AbortSignal.timeout(META_TIMEOUT_MS),
-    headers: {
-      Authorization: "Bearer " + token,
-      "Content-Type": "application/json; charset=UTF-8",
-      "X-Upload-Content-Type": input.mimeType,
-      "X-Upload-Content-Length": String(input.size),
-    },
-    body: JSON.stringify({ name: input.name, mimeType: input.mimeType, parents: [input.parentId] }),
-  });
-  if (!initiate.ok) throw driveErrorFor(initiate.status, `starting ${what}`, await bodyText(initiate));
-  const sessionUrl = initiate.headers.get("location") || initiate.headers.get("Location");
-  if (!sessionUrl) throw new DriveApiError(502, `Drive opened no upload session (missing Location) while starting ${what}.`);
+  const sessionUrl = await initiateResumableSession(
+    token,
+    { name: input.name, mime: input.mimeType, parentId: input.parentId, size: input.size },
+    f
+  );
 
   const isStream = typeof ReadableStream !== "undefined" && input.body instanceof ReadableStream;
   const putInit: RequestInit & { duplex?: "half" } = {
