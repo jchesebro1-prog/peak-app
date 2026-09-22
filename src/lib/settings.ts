@@ -94,6 +94,11 @@ export type AppSettingsData = {
    *  an import writes rows. A part's effective date is the LATER of its own
    *  `pricedAt` and this — see effectivePriceDate. Absent = no book dates. */
   priceListEffective?: Record<string, number>;
+  /** Grid symbol per catalog category (#131, D154) — FULL REPLACEMENT on
+   *  save (the wireTypes idiom): resolveCategoryShapes in
+   *  lib/design/grid-symbols returns the seed when absent and exactly the
+   *  stored map when present. Edited in Settings → Admin → Grid symbols. */
+  gridCategoryShapes?: Record<string, import("@/lib/design/grid-symbols").GridShape>;
   /** Recordings → Drive archive (Krisp recordings spec §1.3). Connection key
    *  of the mailbox whose Google account owns the archive; null = not
    *  configured, the nightly archive job waits. */

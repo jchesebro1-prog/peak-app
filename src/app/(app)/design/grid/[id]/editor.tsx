@@ -39,6 +39,8 @@ import {
   scopeOfPart,
   type GridLayer,
 } from "@/lib/design/grid-scopes";
+import { GRID_SHAPES, GRID_SHAPE_LABEL, markerColor, shapeFor, type GridShape } from "@/lib/design/grid-symbols";
+import { SymbolIcon, SymbolShape } from "@/components/design/symbol-shape";
 import { curtainPriceEach, type FabricSell, type SellCoeffs } from "@/lib/curtain-geom";
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire } from "@/lib/catalog-connect";
@@ -60,6 +62,7 @@ import {
   removePlacementAction,
   seedStartingLayoutAction,
   setPlacementCategoryAction,
+  setSymbolShapeAction,
   setVenueAction,
 } from "./actions";
 import CurtainDrop from "./curtain-drop";
@@ -69,6 +72,7 @@ import RevisionsPanel from "./revisions-panel";
 import WiresPanel from "./wires-panel";
 import ScopePanel from "./scope-panel";
 import AssembliesPanel from "./assemblies-panel";
+import { SearchFilterBar } from "@/components/search/search-filter-bar";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -120,13 +124,6 @@ const PANEL_LABEL: React.CSSProperties = {
   marginBottom: 7,
 };
 
-/** Stable marker color per category — device dots read as families on a plan. */
-const MARK_COLORS = ["#3155a8", "#2e9e6b", "#d5342a", "#6b4fa1", "#e08b1f", "#0e7f8c", "#b0367c"];
-function markerColor(category: string): string {
-  let h = 0;
-  for (let i = 0; i < category.length; i++) h = (h * 31 + category.charCodeAt(i)) | 0;
-  return MARK_COLORS[Math.abs(h) % MARK_COLORS.length];
-}
 /** Device marker hit-test radius (normalized 0..1 x-units; the existing
  *  selection test below divides by aspect for y, keeping the on-screen
  *  target circular on tall pages) — same value the click-to-select test
@@ -239,6 +236,7 @@ export default function GridEditor({
   specHref,
   venues,
   canCreate,
+  categoryShapes,
 }: {
   project: ProjectLite;
   sheets: SheetLite[];
@@ -261,6 +259,8 @@ export default function GridEditor({
   venues: Array<{ id: string; name: string }>;
   /** Gates delete — a Reviewer approves designs but has never made one. */
   canCreate: boolean;
+  /** Category → symbol defaults (#131), resolved server-side from settings. */
+  categoryShapes: Record<string, GridShape>;
 }) {
   const router = useRouter();
   // Two-step arm/confirm; this app doesn't use window.confirm.
@@ -371,6 +371,8 @@ export default function GridEditor({
   }, [project.measurementBased, project.autoConfig, project.placements]);
 
   const partById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
+  /** shapeFor() takes a settings-shaped object; built once per prop change. */
+  const shapeSettings = useMemo(() => ({ gridCategoryShapes: categoryShapes }), [categoryShapes]);
   const filteredParts = useMemo(() => {
     const q = search.trim().toLowerCase();
     return parts
@@ -586,6 +588,10 @@ export default function GridEditor({
    *  race a refresh. */
   const selectedPlacement =
     project.placements.find((pl) => pl.id === selected && placementVisible(pl)) || null;
+  /** The catalog entry behind the selected device (curtains and seed
+   *  placeholders have none) — what the Symbol select edits (#131). */
+  const selectedPart =
+    selectedPlacement && !selectedPlacement.curtain ? partById.get(selectedPlacement.partId) ?? null : null;
   /** Where a placement is being SHOWN right now (optimistic ⟶ server). */
   const shownAt = useCallback(
     (pl: GridPlacement): Point => {
@@ -932,6 +938,15 @@ export default function GridEditor({
     else router.refresh();
   }
 
+  /** Persist a catalog ENTRY's symbol override (#131). "" clears it. */
+  async function saveSymbolShape(symbolId: string, shape: string) {
+    setBusy(true);
+    const r = await setSymbolShapeAction(project.id, symbolId, shape);
+    setBusy(false);
+    if (!r.ok) setErr(r.error);
+    else router.refresh();
+  }
+
   /** Persist a dropped curtain (punch #49). The server re-validates every
    *  field and prices the line from the cost basis it alone holds. */
   async function dropCurtain(curtain: GridCurtain) {
@@ -1195,19 +1210,17 @@ export default function GridEditor({
           {/* device palette */}
           <div style={PANEL}>
             <div style={PANEL_LABEL}>Devices</div>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search names or Manufacturer #"
-              style={INPUT}
-            />
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 7 }}>
-              {["", ...GRID_LAYERS].map((s) => {
-                const count = s ? parts.filter((p) => scopeOfPart(p) === s).length : parts.length;
-                const on = scopeFilter === s;
-                return <button key={s || "all"} type="button" onClick={() => setScopeFilter(s)} style={{ ...BTN, padding: "4px 7px", fontSize: 10.5, background: on ? "#16181d" : "#fff", color: on ? "#fff" : "#5b616e", borderColor: on ? "#16181d" : "#dfe2e8" }}>{s || "All"} <span style={{ opacity: .65 }}>{count}</span></button>;
-              })}
-            </div>
+            {/* #121: search + scope filter on ONE row (SearchFilterBar; the
+                buttons wrap under the box inside this 252px column). */}
+            <SearchFilterBar value={search} onChange={setSearch} placeholder="Search names or Manufacturer #" ariaLabel="Search devices">
+              <div className="pk-searchbar-group">
+                {["", ...GRID_LAYERS].map((s) => {
+                  const count = s ? parts.filter((p) => scopeOfPart(p) === s).length : parts.length;
+                  const on = scopeFilter === s;
+                  return <button key={s || "all"} type="button" onClick={() => setScopeFilter(s)} style={{ ...BTN, padding: "4px 7px", fontSize: 10.5, background: on ? "#16181d" : "#fff", color: on ? "#fff" : "#5b616e", borderColor: on ? "#16181d" : "#dfe2e8" }}>{s || "All"} <span style={{ opacity: .65 }}>{count}</span></button>;
+                })}
+              </div>
+            </SearchFilterBar>
             {armedPart && hiddenSet.has(scopeLayerKey(scopeOfPart(armedPart))) && (
               <div style={{ marginTop: 6, fontSize: 10.5, color: "#a0442b", lineHeight: 1.4 }}>
                 The {scopeOfPart(armedPart)} layer is hidden, so what you place
@@ -1261,12 +1274,7 @@ export default function GridEditor({
                       }}
                     >
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span
-                          style={{
-                            width: 9, height: 9, borderRadius: "50%",
-                            background: markerColor(p.category), flex: "0 0 auto",
-                          }}
-                        />
+                        <SymbolIcon shape={shapeFor(p, shapeSettings)} color={markerColor(p.category)} size={16} />
                         <strong style={{ fontSize: 11.5 }}>{p.desc}</strong>
                         <span style={{ marginLeft: "auto", fontSize: 11 }}>{moneyFmt(p.list)}</span>
                       </span>
@@ -1533,6 +1541,35 @@ export default function GridEditor({
                       <span>{port.name} · {port.direction}</span><span style={{ fontFamily: "var(--font-mono)", color: "#8c6d3d" }}>{port.connectionType}</span>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* Symbol (#131, D154) — the per-ENTRY override: every placed
+                  instance of this catalog entry redraws, on the plan and the
+                  riser. The category default itself lives in Settings. */}
+              {selectedPart && (
+                <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #f0dcbb" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#5b616e" }}>
+                    <SymbolIcon shape={shapeFor(selectedPart, shapeSettings)} color={markerColor(selectedPart.category)} size={16} />
+                    <span style={{ flexShrink: 0 }}>Symbol</span>
+                    <select
+                      value={selectedPart.shape || ""}
+                      disabled={busy}
+                      onChange={(e) => saveSymbolShape(selectedPart.id, e.target.value)}
+                      aria-label="Symbol"
+                      style={{ ...INPUT, fontSize: 11.5, padding: "3px 6px" }}
+                    >
+                      <option value="">
+                        Category default ({GRID_SHAPE_LABEL[shapeFor({ category: selectedPart.category }, shapeSettings)]})
+                      </option>
+                      {GRID_SHAPES.map((s) => (
+                        <option key={s} value={s}>{GRID_SHAPE_LABEL[s]}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div style={{ fontSize: 10.5, color: "#8c919c", marginTop: 3 }}>
+                    Applies to every placed {selectedPart.desc}.
+                  </div>
                 </div>
               )}
 
@@ -2070,13 +2107,24 @@ export default function GridEditor({
                             const h = part?.symbolHeight || 30;
                             return (
                               <>
-                                <rect x={x - w / 2} y={y - h / 2} width={w} height={h} rx={4} fill={c} opacity={0.92} />
-                                <rect x={x - w / 2} y={y - h / 2} width={w} height={h} rx={4} fill="none" stroke="#fff" strokeWidth={1.5} />
+                                {/* #131: the shape replaces the bare rect; ring + label below are unchanged. */}
+                                <SymbolShape shape={shapeFor(part, shapeSettings)} x={x} y={y} w={w} h={h} color={c} />
                                 {part?.kind === "assembly" && (part.assemblyMembers || []).map((member) => {
                                   const child = partById.get(member.symbolId);
                                   const cx = x + (member.x - 0.5) * w;
                                   const cy = y + (member.y - 0.5) * h;
-                                  return <rect key={member.symbolId} x={cx - 5} y={cy - 4} width={10} height={8} rx={1.5} fill={markerColor(child?.category || "Child")} stroke="#fff" strokeWidth={1} />;
+                                  return (
+                                    <SymbolShape
+                                      key={member.symbolId}
+                                      shape={shapeFor(child, shapeSettings)}
+                                      x={cx}
+                                      y={cy}
+                                      w={10}
+                                      h={8}
+                                      color={markerColor(child?.category || "Child")}
+                                      opacity={1}
+                                    />
+                                  );
                                 })}
                               </>
                             );

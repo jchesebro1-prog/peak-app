@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { SearchFilterBar } from "@/components/search/search-filter-bar";
 
 /**
  * Client bits for the People directory (identity core, D85): the search /
@@ -53,46 +54,14 @@ export function PeopleFilterBar({
     timer.current = setTimeout(() => pushWith({ q: v }), 300);
   };
 
-  const select: React.CSSProperties = {
-    fontSize: 12.5,
-    fontWeight: 600,
-    color: "#3a3f4a",
-    background: "#fff",
-    border: "1px solid #e4e7ec",
-    borderRadius: 8,
-    padding: "8px 10px",
-    fontFamily: "var(--font-ui)",
-  };
-
   return (
     <div style={{ marginBottom: 14 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 9,
-          background: "#fff",
-          border: "1px solid #e4e7ec",
-          borderRadius: 9,
-          padding: "9px 12px",
-        }}
-      >
-        <span style={{ width: 14, height: 14, border: "1.7px solid #aab0bb", borderRadius: "50%", flexShrink: 0, position: "relative" }}>
-          <span style={{ position: "absolute", right: -3, bottom: -3, width: 6, height: 1.7, background: "#aab0bb", transform: "rotate(45deg)" }} />
-        </span>
-        <input
-          value={text}
-          onChange={(e) => onSearch(e.target.value)}
-          placeholder="Search people…"
-          style={{ flex: 1, border: "none", background: "transparent", fontSize: 13.5, fontFamily: "var(--font-ui)", color: "#16181d", outline: "none" }}
-        />
-      </div>
-
-      <div style={{ display: "flex", gap: 8, marginTop: 11, flexWrap: "wrap" }}>
+      {/* #121: the filter selects ride on the search row. */}
+      <SearchFilterBar value={text} onChange={onSearch} placeholder="Search people…" ariaLabel="Search people">
         <select
+          className="pk-searchbar-select"
           value={status}
           onChange={(e) => pushWith({ status: e.target.value })}
-          style={select}
           aria-label="Status filter"
         >
           {statusOptions.map((o) => (
@@ -102,9 +71,9 @@ export function PeopleFilterBar({
           ))}
         </select>
         <select
+          className="pk-searchbar-select"
           value={company}
           onChange={(e) => pushWith({ company: e.target.value })}
-          style={select}
           aria-label="Company filter"
         >
           <option value="all">All companies</option>
@@ -114,7 +83,7 @@ export function PeopleFilterBar({
             </option>
           ))}
         </select>
-      </div>
+      </SearchFilterBar>
     </div>
   );
 }

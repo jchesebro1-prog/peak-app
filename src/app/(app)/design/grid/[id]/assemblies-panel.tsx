@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { PartLite } from "@/lib/design/grid-bom";
 import { GRID_LAYERS } from "@/lib/design/grid-scopes";
+import { GRID_SHAPES, GRID_SHAPE_LABEL } from "@/lib/design/grid-symbols";
 import { createGridAssemblyAction } from "./actions";
 
 const FIELD: React.CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 8px", font: "inherit", fontSize: 12, color: "#16181d", background: "#fff" };
@@ -15,6 +16,7 @@ export default function AssembliesPanel({ parts, onChanged }: { parts: PartLite[
   const [manufacturer, setManufacturer] = useState("");
   const [modelNumber, setModelNumber] = useState("");
   const [scope, setScope] = useState("Lighting");
+  const [shape, setShape] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,10 +24,10 @@ export default function AssembliesPanel({ parts, onChanged }: { parts: PartLite[
   const submit = async () => {
     setPending(true); setError(null);
     const members = picked.map((symbolId, i) => ({ symbolId, qty: 1, x: 0.25 + (i % 3) * 0.25, y: 0.35 + Math.floor(i / 3) * 0.25 }));
-    const r = await createGridAssemblyAction({ name, manufacturer, modelNumber, scope, members });
+    const r = await createGridAssemblyAction({ name, manufacturer, modelNumber, scope, members, shape });
     setPending(false);
     if (!r.ok) { setError(r.error); return; }
-    setName(""); setManufacturer(""); setModelNumber(""); setPicked([]); setOpen(false); onChanged();
+    setName(""); setManufacturer(""); setModelNumber(""); setShape(""); setPicked([]); setOpen(false); onChanged();
   };
 
   return (
@@ -44,6 +46,11 @@ export default function AssembliesPanel({ parts, onChanged }: { parts: PartLite[
             <input value={modelNumber} onChange={(e) => setModelNumber(e.target.value)} placeholder="Model #" style={FIELD} />
           </div>
           <select value={scope} onChange={(e) => setScope(e.target.value)} style={FIELD}>{GRID_LAYERS.map((s) => <option key={s}>{s}</option>)}</select>
+          {/* #131: the entry's symbol — "" leaves it to the category default (Settings). */}
+          <select value={shape} onChange={(e) => setShape(e.target.value)} aria-label="Symbol" style={FIELD}>
+            <option value="">Symbol: category default</option>
+            {GRID_SHAPES.map((s) => <option key={s} value={s}>Symbol: {GRID_SHAPE_LABEL[s]}</option>)}
+          </select>
           <div style={{ fontSize: 10, fontWeight: 700, color: "#9aa0ab", textTransform: "uppercase", letterSpacing: ".05em" }}>Child symbols</div>
           <div style={{ maxHeight: 150, overflowY: "auto", display: "grid", gap: 3 }}>
             {devices.map((p) => {

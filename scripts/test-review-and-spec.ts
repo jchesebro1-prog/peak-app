@@ -441,8 +441,8 @@ ok(designRedirect("/consulting/markup", { eng: "CE-1001", phase: "ph-2", doc: "e
   "markup preserves all three params in order");
 ok(designRedirect("/design-studio", {}) === "/design",
   "design-studio overview redirects to the new Design overview");
-ok(designRedirect("/design-studio/steel", {}) === "/design/steel",
-  "calculators keep their leaf name");
+ok(designRedirect("/design-studio/steel", {}) === "/knowledge/steel",
+  "calculators keep their leaf name — and follow the #136 move to Knowledge in ONE hop");
 ok(designRedirect("/design-studio/lineset", { design: "DS-abc" }) === "/design/lineset?design=DS-abc",
   "lineset preserves its ?design= deep link");
 ok(designRedirect("/design-studio/weights", { design: "DS-abc" }) === "/design/lineset?design=DS-abc",
@@ -465,8 +465,8 @@ ok(activeKeyFor("/design") === "designoverview",
   "the Design overview resolves to the designoverview key");
 ok(activeKeyFor("/design/engagements") === "designoverview",
   "/design/engagements resolves to the designoverview key");
-ok(activeKeyFor("/design/steel") === "designoverview",
-  "/design/steel resolves to the designoverview key (segment-1 matching)");
+ok(activeKeyFor("/design/lineset") === "designoverview",
+  "/design/lineset resolves to the designoverview key (segment-1 matching)");
 ok(activeKeyFor("/design/assemblies") === "assemblies",
   "#130 /design/assemblies lights the Assembly Builder child");
 ok(activeKeyFor("/design/subassemblies") === "assemblies",
@@ -483,17 +483,43 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
  * group after D97 shipped, which is why a bare `length === 6` went stale. */
 /* "grid" left when The Grid became a layout mode of Designs rather than a
  * tool of its own (D-grid-merge): the "designs" child is now labelled "The
- * Grid" and the standalone index it pointed at is gone. */
+ * Grid" and the standalone index it pointed at is gone. "steel" and
+ * "fixtures" moved to the KNOWLEDGE group (#136). */
 /* "subassemblies" left the group when it became a tab of the Assembly
  * Builder (#130) — /design/subassemblies redirects there. */
 const DESIGN_CHILDREN = [
   "designoverview", "engagements", "designs",
-  "steel", "lineset", "assemblies", "motors", "fixtures",
+  "lineset", "assemblies", "motors",
 ];
 ok(
   !!designGroup && designGroup.kind === "group" &&
     JSON.stringify(designGroup.children.map((c) => c.key)) === JSON.stringify(DESIGN_CHILDREN),
   `Design's children are exactly [${DESIGN_CHILDREN.join(", ")}]`);
+
+/* --- Knowledge & Information tab (#136) --- */
+ok(designRedirect("/design/steel", {}) === "/knowledge/steel",
+  "#136: /design/steel redirects to /knowledge/steel");
+ok(designRedirect("/design/fixtures", {}) === "/knowledge/fixtures",
+  "#136: /design/fixtures redirects to /knowledge/fixtures");
+ok(designRedirect("/design/lineset", {}) === null,
+  "#136: the other Design tools are NOT redirected");
+const knowledgeGroup = NAV.find((e) => e.kind === "group" && e.key === "knowledge");
+const KNOWLEDGE_CHILDREN = ["knowledgeoverview", "steel", "fixtures"];
+ok(
+  !!knowledgeGroup && knowledgeGroup.kind === "group" &&
+    JSON.stringify(knowledgeGroup.children.map((c) => c.key)) === JSON.stringify(KNOWLEDGE_CHILDREN),
+  `#136: KNOWLEDGE's children are exactly [${KNOWLEDGE_CHILDREN.join(", ")}]`);
+ok(NAV.findIndex((e) => e.key === "knowledge") === NAV.findIndex((e) => e.key === "design") + 1,
+  "#136: KNOWLEDGE sits immediately after DESIGN");
+ok(knowledgeGroup?.kind === "group" && knowledgeGroup.children.map((c) => c.href).join(",") === "/knowledge,/knowledge/steel,/knowledge/fixtures",
+  "#136: KNOWLEDGE hrefs are the new routes");
+ok(activeKeyFor("/knowledge") === "knowledgeoverview" && activeKeyFor("/knowledge/steel") === "knowledgeoverview" && activeKeyFor("/knowledge/fixtures") === "knowledgeoverview",
+  "#136: every /knowledge route lights the KNOWLEDGE pill (segment-1 matching)");
+ok(parentGroupOf("knowledgeoverview") === "knowledge" && parentGroupOf("steel") === "knowledge",
+  "#136: knowledge children resolve to the knowledge group");
+const NAV_KEYS = NAV.flatMap((e) => (e.kind === "group" ? [e.key, ...e.children.map((c) => c.key)] : [e.key]));
+ok(new Set(NAV_KEYS).size === NAV_KEYS.length,
+  `#136: no two nav entries share a key (${NAV_KEYS.length} keys)`);
 
 /* --- home tabbed hub (D98) ---
  * homeTabFor() was deleted (final-review Fix 2): every hub route is a
@@ -516,7 +542,7 @@ ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab"
 // Punch #55 (D124) REVERSES the D117 shape: Jeff asked for Home back as a real tab
 // on web and mobile, so the header is five groups and Home is the first. The five
 // hub routes stay CHILDREN of that group (they are not top-level links).
-ok(NAV.length === 5, "the header has 5 top-level items: Home joined the chips (#55, D124)");
+ok(NAV.length === 6, "the header has 6 top-level items: Home joined the chips (#55, D124); KNOWLEDGE joined after DESIGN (#136)");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "queue"), "My Queue is not top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "calendar"), "Calendar is not top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "inbox"), "Inbox is not top-level");
@@ -603,8 +629,8 @@ ok(
 // ---- General dissolution (D99): the group is gone ----
 ok(!NAV.some((e) => e.kind === "group" && e.key === "general"), "the General group is gone");
 ok(
-  NAV.map((e) => e.key).join(",") === "home,est,pm,crm,design",
-  "the top-level chips are Home, EST, PM, CRM, DESIGN in order (#55 put Home back, D124)",
+  NAV.map((e) => e.key).join(",") === "home,est,pm,crm,design,knowledge",
+  "the top-level chips are Home, EST, PM, CRM, DESIGN, KNOWLEDGE in order (#55 put Home back, D124; #136 added KNOWLEDGE)",
 );
 ok(
   activeKeyFor("/catalog") === "settings" &&
@@ -3382,6 +3408,97 @@ async function xlsxFixture(): Promise<Buffer> {
   ok(!otherKey.ok && otherKey.reason === "malformed", "redeem: different secret -> malformed");
   ok(!redeemHandoffCode("garbage", verifier, secret, now).ok, "redeem: garbage -> not ok");
 }
+
+/* --- #135 manual consulting projects (D155) --- */
+import { manualMilestoneSeeds, sweepIndexesEngagement } from "@/lib/consulting-stages";
+
+ok(JSON.stringify(manualMilestoneSeeds({ mode: "fixed", amount: 12000 })) === JSON.stringify([{ name: "Fee", targetDate: 0, amount: 12000 }]),
+  "#135: a fixed fee becomes ONE unscheduled 'Fee' milestone carrying the amount");
+ok(manualMilestoneSeeds({ mode: "fixed", amount: 0 }).length === 0 && manualMilestoneSeeds(null).length === 0 && manualMilestoneSeeds(undefined).length === 0,
+  "#135: no fee (or a zero fixed fee) seeds no milestones");
+const t135 = manualMilestoneSeeds({
+  mode: "milestones",
+  milestones: [
+    { name: " Schematic design ", targetDate: 1700000000000, amount: 5000 },
+    { name: "", targetDate: -5, amount: 2500 },
+    { name: "", targetDate: 0, amount: 0 },
+  ],
+});
+ok(t135.length === 2, `#135: rows with neither a name nor an amount are dropped (${t135.length})`);
+ok(t135[0].name === "Schematic design" && t135[0].targetDate === 1700000000000 && t135[0].amount === 5000,
+  "#135: milestone names are trimmed, dates and amounts kept");
+ok(t135[1].name === "Milestone" && t135[1].targetDate === 0 && t135[1].amount === 2500,
+  "#135: a blank name defaults to 'Milestone'; a negative date is unscheduled (0)");
+ok(!sweepIndexesEngagement({ origin: "manual", quoteId: null }),
+  "#135 (D155): the sweep skips a manual project that has no proposal");
+ok(sweepIndexesEngagement({ origin: "manual", quoteId: "Q-1" }),
+  "#135 (D155): once a proposal is attached the sweep tracks the row by that quote");
+ok(sweepIndexesEngagement({ quoteId: "Q-2" }) && sweepIndexesEngagement({ origin: "quote", quoteId: "Q-3" }),
+  "#135: quote-born rows (origin absent on pre-#135 docs, or 'quote') are indexed by their quote");
+ok(!sweepIndexesEngagement({ quoteId: "" }) && !sweepIndexesEngagement({ quoteId: null }),
+  "#135: a row with no quote id is never indexed");
+
+/* --- #121 typeahead ranking: SKU prefix first, then description contains, then anywhere --- */
+import { catalogFilter, catalogMatches, catalogRank, typeaheadMatches } from "@/lib/search/typeahead-rank";
+
+const t121 = [
+  { sku: "S4LED-S3", desc: "Source Four LED Series 3", mfr: "ETC", category: "Fixtures" },
+  { sku: "LENS-26", desc: "26° lens tube for S4LED", mfr: "ETC", category: "Fixtures" },
+  { sku: "CLAMP-1", desc: "Pipe clamp", mfr: "The Light Source", category: "Hardware" },
+  { sku: "ZZ-1", desc: "Speaker bracket", mfr: "S4LED Mounts Co", category: "Speakers" },
+];
+ok(catalogMatches("s4led", t121).map((p) => p.sku).join(",") === "S4LED-S3,LENS-26,ZZ-1",
+  "#121: SKU prefix first, then description contains, then a match anywhere (case-insensitive)");
+ok(catalogMatches("etc lens", t121).map((p) => p.sku).join(",") === "LENS-26",
+  "#121: every whitespace token must match somewhere in sku/desc/mfr/category");
+ok(catalogMatches("", t121).length === 4 && catalogMatches("", t121, 2).length === 2,
+  "#121: an empty query lists items in their given order, capped at max");
+ok(catalogMatches("nomatch", t121).length === 0, "#121: no hits → empty list");
+ok(catalogRank("S4LED", t121[0]) === 0 && catalogRank("S4LED", t121[1]) === 1 && catalogRank("S4LED", t121[3]) === 2,
+  "#121: catalogRank tiers are 0/1/2");
+ok(catalogFilter("", t121[2]) && !catalogFilter("etc", t121[2]) && catalogFilter("light source", t121[2]),
+  "#121: catalogFilter — empty passes everything, tokens are AND-ed across fields");
+ok(typeaheadMatches("b", ["b1", "a", "b2"], (q, s) => s.startsWith(q), undefined, 8).join(",") === "b1,b2",
+  "#121: typeaheadMatches without a rank keeps input order");
+ok(typeaheadMatches("x", ["x3", "x1", "x2"], () => true, (_q, s) => Number(s.slice(1)), 2).join(",") === "x1,x2",
+  "#121: a rank sorts ascending (stable) and max slices after ranking");
+
+/* --- #131 grid symbols (D154): shapeFor precedence + symbolGeometry snapshot --- */
+import {
+  DEFAULT_GRID_CATEGORY_SHAPES, GRID_SHAPES, isGridShape, markerColor, resolveCategoryShapes, shapeFor, symbolGeometry,
+} from "@/lib/design/grid-symbols";
+
+ok(GRID_SHAPES.length === 8 && GRID_SHAPES.join(",") === "rect,circle,triangle,diamond,hexagon,speaker,light,camera",
+  "#131: the eight curated shapes, rect first");
+ok(isGridShape("speaker") && !isGridShape("blob") && !isGridShape(null), "#131: isGridShape");
+ok(shapeFor({ category: "Speakers" }, {}) === "speaker" && shapeFor({ category: "Lighting" }, {}) === "light" &&
+   shapeFor({ category: "Cameras" }, {}) === "camera" && shapeFor({ category: "Rigging" }, {}) === "diamond" &&
+   shapeFor({ category: "Control" }, {}) === "hexagon",
+  "#131: the seeded category defaults");
+ok(shapeFor({ category: "  speakers " }, {}) === "speaker", "#131: category match is trimmed + case-insensitive");
+ok(shapeFor({ category: "Speakers", shape: "hexagon" }, {}) === "hexagon", "#131: the entry's own shape wins over its category default");
+ok(shapeFor({ category: "Speakers" }, { gridCategoryShapes: { Speakers: "circle" } }) === "circle", "#131: a stored category map wins over the seed");
+ok(shapeFor({ category: "Speakers" }, { gridCategoryShapes: {} }) === "rect", "#131: a stored map is the whole truth (full replacement) — unmapped → rect");
+ok(shapeFor({ category: "Anything else" }, {}) === "rect" && shapeFor(null, {}) === "rect" && shapeFor(undefined, null) === "rect",
+  "#131: unknown category / no part / no settings → rect");
+ok(shapeFor({ category: "Speakers", shape: "blob" }, {}) === "speaker", "#131: an unknown stored shape falls through to the category default");
+ok(JSON.stringify(resolveCategoryShapes(undefined)) === JSON.stringify(DEFAULT_GRID_CATEGORY_SHAPES) && resolveCategoryShapes(null) !== DEFAULT_GRID_CATEGORY_SHAPES,
+  "#131: resolveCategoryShapes — absent → a fresh copy of the seed");
+ok(resolveCategoryShapes({ Speakers: "nope", Lighting: "light" }).Speakers === undefined && resolveCategoryShapes({ Speakers: "nope", Lighting: "light" }).Lighting === "light",
+  "#131: resolveCategoryShapes drops unknown shape values");
+const g131 = (s: (typeof GRID_SHAPES)[number]) => symbolGeometry(s, 44, 30);
+ok(g131("rect").outline.kind === "rect" && g131("rect").glyph === null, "#131: rect = rounded rect, no glyph");
+ok(g131("circle").outline.kind === "circle" && (g131("circle").outline as { r: number }).r === 15, "#131: circle radius = half the short side");
+ok(g131("triangle").outline.kind === "polygon" && (g131("triangle").outline as { points: string }).points.split(" ").length === 3, "#131: triangle = 3 points");
+ok(g131("diamond").outline.kind === "polygon" && (g131("diamond").outline as { points: string }).points.split(" ").length === 4, "#131: diamond = 4 points");
+ok(g131("hexagon").outline.kind === "polygon" && (g131("hexagon").outline as { points: string }).points.split(" ").length === 6, "#131: hexagon = 6 points");
+for (const s of ["speaker", "light", "camera"] as const) {
+  ok(g131(s).outline.kind === "rect" && /^M /.test(g131(s).glyph || ""), `#131: ${s} = rect + path glyph`);
+}
+ok(g131("speaker").glyph === symbolGeometry("speaker", 44, 30).glyph && g131("speaker").glyph !== g131("camera").glyph && g131("light").glyph !== g131("camera").glyph,
+  "#131: glyph paths are deterministic and distinct per shape");
+ok(symbolGeometry("speaker", 12, 9).glyph !== g131("speaker").glyph, "#131: glyphs scale with the symbol box");
+ok(markerColor("Speakers") === markerColor("Speakers") && /^#[0-9a-f]{6}$/.test(markerColor("Speakers")), "#131: markerColor is a stable hex per category");
 
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */

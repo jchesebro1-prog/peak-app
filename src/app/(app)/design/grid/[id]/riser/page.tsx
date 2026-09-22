@@ -2,9 +2,13 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { getProject } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
+import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { getSettings } from "@/lib/settings";
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { riserGraph } from "@/lib/design/grid-riser";
+import { markerColor, shapeFor, type GridShape } from "@/lib/design/grid-symbols";
+import { SymbolIcon, SymbolShape } from "@/components/design/symbol-shape";
+import type { PartLite } from "@/lib/design/grid-bom";
 import { PrintButton } from "@/components/letter/print-button";
 
 export const metadata = { title: "Riser sketch — Quartzite-6" };
@@ -35,15 +39,45 @@ export default async function RiserPage({
     );
   }
 
-  const [catalog, settings] = await Promise.all([listCatalog(), getSettings()]);
+  const [catalog, gridSymbols, settings] = await Promise.all([listCatalog(), listGridSymbols(), getSettings()]);
   const accent = settings.accent || "#b08d4a";
+  // #131: placements point at Grid-library entries (which carry the symbol
+  // override); pricing rows fill in anything not in the library so every
+  // placement still resolves a description.
+  const seen = new Set<string>();
+  const parts: PartLite[] = [];
+  for (const s of gridSymbols) {
+    seen.add(s.id);
+    parts.push({ id: s.id, sku: s.modelNumber || s.id, desc: s.name, category: s.category || "Other", unit: "ea", list: 0, cost: 0, shape: s.shape ?? null });
+  }
+  for (const p of catalog) {
+    if (seen.has(p.id)) continue;
+    parts.push({ id: p.id, sku: p.sku, desc: p.desc, category: p.category, unit: p.unit, list: p.list, cost: p.cost });
+  }
   const graph = riserGraph(
     project.placements || [],
     project.routes || [],
     project.spaces || [],
-    catalog.map((p) => ({ id: p.id, sku: p.sku, desc: p.desc, category: p.category, unit: p.unit, list: p.list, cost: p.cost })),
+    parts,
     project.calibrations || []
   );
+  // Legend: one row per shape actually drawn, in first-seen order. Keyed on
+  // shape+category (not category alone) so a per-entry symbol override (one
+  // device drawn with a different glyph than its category default) gets its
+  // own row instead of being swallowed by whichever glyph was seen first for
+  // that category (#131 review).
+  const legend: Array<{ key: string; shape: GridShape; color: string; label: string }> = [];
+  for (const n of graph.nodes) {
+    for (const g of n.groups) {
+      const category = g.category || "Uncategorized";
+      const shape = shapeFor({ category: g.category, shape: g.shape }, settings);
+      const key = `${shape}|${category}`;
+      if (legend.some((l) => l.key === key)) continue;
+      const categoryDefault = shapeFor({ category: g.category }, settings);
+      const label = shape === categoryDefault ? category : `${category} — ${g.desc || g.partId}`;
+      legend.push({ key, shape, color: markerColor(g.category), label });
+    }
+  }
 
   // ---- layout: nodes as columns, edges as arcs underneath ----
   const COL_W = 216;
@@ -107,11 +141,17 @@ export default async function RiserPage({
                       no devices
                     </text>
                   ) : (
-                    n.groups.map((g, gi) => (
-                      <text key={g.partId} x={x + 12} y={PAD + HEAD_H + 12 + gi * LINE_H} fontSize={11.5} fill="#3d424e" style={{ fontFamily: "inherit" }}>
-                        {g.qty}× {g.partId}
-                      </text>
-                    ))
+                    n.groups.map((g, gi) => {
+                      const ly = PAD + HEAD_H + 8 + gi * LINE_H;
+                      return (
+                        <g key={g.partId}>
+                          <SymbolShape shape={shapeFor({ category: g.category, shape: g.shape }, settings)} x={x + 19} y={ly} w={14} h={11} color={markerColor(g.category)} />
+                          <text x={x + 30} y={ly + 4} fontSize={11.5} fill="#3d424e" style={{ fontFamily: "inherit" }}>
+                            {g.qty}× {g.partId}
+                          </text>
+                        </g>
+                      );
+                    })
                   )}
                   {/* drop stub to the edge rail */}
                   <line x1={x + COL_W / 2} y1={PAD + h} x2={x + COL_W / 2} y2={edgeBase} stroke="#c4c9d2" strokeWidth={1} strokeDasharray="3 3" />
@@ -141,6 +181,17 @@ export default async function RiserPage({
               );
             })}
           </svg>
+          {legend.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 12, fontSize: 11.5, color: "#5b616e" }}>
+              <span style={{ fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", fontSize: 10, color: "#9aa0ab", alignSelf: "center" }}>Legend</span>
+              {legend.map((l) => (
+                <span key={l.key} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <SymbolIcon shape={l.shape} color={l.color} size={14} />
+                  {l.label}
+                </span>
+              ))}
+            </div>
+          )}
           {graph.edges.length === 0 && (
             <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 8 }}>
               No wire runs yet — routed wire shows up here as connections between spaces.

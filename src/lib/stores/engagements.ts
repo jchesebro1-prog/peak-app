@@ -8,10 +8,13 @@ import {
 import type { Annotation, Calibration } from "@/lib/annotations";
 import {
   engagementSyncAction,
+  manualMilestoneSeeds,
   milestoneSeeds,
   normalizeEngagementStatus,
+  sweepIndexesEngagement,
   type ConsultingScope,
   type EngagementStage,
+  type ManualFee,
 } from "@/lib/consulting-stages";
 
 /* ------------------------------------------------------------------ *
@@ -225,8 +228,12 @@ export type ConsultingEngagement = {
   siteIds: string[];
   contactName: string;
   people: EngagementPerson[];
-  /** Source consulting quote — the paid commitment. */
-  quoteId: string;
+  /** Source consulting quote — the paid commitment. Null on a manually
+   *  added project (#135) until a proposal is attached. */
+  quoteId: string | null;
+  /** How the row was born (#135, D155): by the quote sweep (absent on every
+   *  pre-#135 doc — read absent as "quote") or by hand from the hub. */
+  origin?: "quote" | "manual";
   /** Linked budgetary designs (D-### records in stores/designs). Spec-gen source. */
   designIds: string[];
   /** If Peak bids the resulting install: an ordinary system quote id.
@@ -449,6 +456,7 @@ function fromQuote(
     contactName,
     people: [],
     quoteId: q.id,
+    origin: "quote",
     designIds: [],
     installQuoteId: null,
     architect: q.customer ? { company: q.customer, contact: contactName } : null,
@@ -529,7 +537,12 @@ export async function syncEngagementsFromQuotes(): Promise<number> {
     "consulting_engagements"
   );
   const byQuote = new Map<string, ConsultingEngagement>();
-  for (const e of engagements) byQuote.set(e.quoteId, e);
+  for (const e of engagements) {
+    // #135 (D155): a manual project has no proposal to reconcile until one is
+    // attached; rows are indexed by quote only when they carry one.
+    if (!sweepIndexesEngagement(e)) continue;
+    byQuote.set(e.quoteId, e);
+  }
   const quotes = await listDocs<QuoteLike>("quotes");
   let changed = 0;
   for (const q of quotes) {
@@ -570,6 +583,136 @@ export async function syncEngagementsFromQuotes(): Promise<number> {
     changed++;
   }
   return changed;
+}
+
+/* ---------- manual projects (#135, D155) ---------- */
+
+export type ManualEngagementInput = {
+  customerId: string;
+  /** Denormalized display name — the quotes/projects convention. */
+  customer: string;
+  name: string;
+  architect?: { company: string; contact: string } | null;
+  siteId?: string | null;
+  contactName?: string;
+  fee?: ManualFee | null;
+  /** Phase names. The ACTION resolves mergedConsultingPhases(settings) —
+   *  the store stays settings-free (the D91 idiom) so it is testable alone. */
+  phases: string[];
+};
+
+/**
+ * A consulting project that never had (or skipped) a fee proposal. Born
+ * `awarded` with `origin: "manual"` and no quote; milestones come from the
+ * fee (a fixed fee = one unscheduled "Fee" milestone), phases from the menu
+ * exactly as a won quote seeds them (all pending). The sweep ignores the
+ * row until attachQuoteToEngagement links a proposal.
+ */
+export async function createManualEngagement(
+  input: ManualEngagementInput,
+  me: { name: string }
+): Promise<ConsultingEngagement> {
+  const now = Date.now();
+  const phases = (input.phases.length ? input.phases : DEFAULT_CONSULTING_PHASES).map(makePhase);
+  const milestones: EngagementMilestone[] = manualMilestoneSeeds(input.fee).map((m) => ({
+    id: uid("ms-"),
+    name: m.name,
+    targetDate: m.targetDate,
+    completedAt: null,
+    amount: m.amount,
+  }));
+  const architectCompany = (input.architect?.company || "").trim();
+  const architectContact = (input.architect?.contact || "").trim();
+  const body: Omit<ConsultingEngagement, "id"> = {
+    name: input.name.trim() || "Consulting project",
+    customer: input.customer,
+    companyId: input.customerId,
+    siteIds: input.siteId ? [input.siteId] : [],
+    contactName: (input.contactName || "").trim(),
+    people: [],
+    quoteId: null,
+    origin: "manual",
+    designIds: [],
+    installQuoteId: null,
+    architect:
+      architectCompany || architectContact
+        ? { company: architectCompany, contact: architectContact }
+        : null,
+    status: "awarded",
+    phases,
+    milestones,
+    decisions: [
+      {
+        id: uid("dc-"),
+        at: now,
+        by: me.name,
+        decision: "Project added manually",
+        context: "Created from the Consulting hub without a fee proposal (#135).",
+      },
+    ],
+    meetings: [],
+    submittals: [],
+    documents: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+  return insertWithPrefixedId<ConsultingEngagement>(
+    "consulting_engagements",
+    "CE",
+    1000,
+    (id) => ({ ...body, id })
+  );
+}
+
+/** Link an existing consulting quote to a manual project. Milestones are
+ *  NOT touched — the fee was entered by hand and stays as entered; from here
+ *  the quote's status changes follow the normal sweep rules. Enforces the
+ *  one-engagement-per-quote invariant that the sweep's index
+ *  (sweepIndexesEngagement) and getEngagementByQuote both assume: only a
+ *  manual row with no proposal yet may attach, the quote must be a live
+ *  consulting quote, and it must not already belong to another engagement.
+ *  On success records a provenance decision, mirroring createManualEngagement. */
+export async function attachQuoteToEngagement(
+  engId: string,
+  quoteId: string,
+  me: { name: string } = { name: "System" }
+): Promise<{ ok: true; engagement: ConsultingEngagement } | { ok: false; error: string }> {
+  const eng = await getEngagement(engId);
+  if (!eng || eng.origin !== "manual") {
+    return {
+      ok: false,
+      error: "Only a manually added project can have a proposal attached.",
+    };
+  }
+  if (eng.quoteId) {
+    return { ok: false, error: "This project already has a proposal attached." };
+  }
+  const q = await getDoc<QuoteLike>("quotes", quoteId);
+  if (!q || q.quoteType !== "consulting") {
+    return { ok: false, error: "That quote is not a consulting proposal." };
+  }
+  const claimedBy = await getEngagementByQuote(quoteId);
+  if (claimedBy) {
+    return {
+      ok: false,
+      error: `That proposal already belongs to ${claimedBy.name}.`,
+    };
+  }
+  await patchEngagement(engId, (d) => {
+    d.quoteId = quoteId;
+    d.decisions.unshift({
+      id: uid("dc-"),
+      at: Date.now(),
+      by: me.name,
+      decision: `Proposal attached: ${quoteId}`,
+      context: "Linked to an existing consulting quote from the Consulting hub (#135).",
+    });
+  });
+  const updated = await getEngagement(engId);
+  if (!updated) {
+    return { ok: false, error: "The project could not be found after attaching the proposal." };
+  }
+  return { ok: true, engagement: updated };
 }
 
 /** Attach a document to the engagement (phaseId null) or to one phase's

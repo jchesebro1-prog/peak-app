@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { setRates as setFlameRates, getRates as getFlameRates } from "@/lib/flametest-engine";
 import { setRates as setRepairRates, getRates as getRepairRates } from "@/lib/repair-engine";
 import { setRates as setInspectionRates, getRates as getInspectionRates } from "@/lib/inspection-engine";
-import { ensureEngagementForQuote } from "@/lib/stores/engagements";
+import {
+  allEngagements,
+  attachQuoteToEngagement,
+  createManualEngagement,
+  ensureEngagementForQuote,
+  getEngagement,
+  syncEngagementsFromQuotes,
+} from "@/lib/stores/engagements";
 import { upsertDoc, patchDoc } from "@/db/doc-store";
 import type { Quote } from "@/lib/stores/quotes";
 import { contactByEmail } from "@/lib/identity/lookup";
@@ -882,6 +889,142 @@ async function main() {
     assert.ok(!foreign.ok && /T133 Other: .*T133-H1 is filed under T133 Hub/.test(foreign.error), "item 1: the guard still runs first and names the manufacturer + SKU");
     assert.equal((await getPart("T133-H1"))?.list, 55, "item 1: …and a rejected commit writes nothing");
   }
+  // #135 (D155) — a manual consulting project: created by hand, listed by
+  // the hub, ignored by the sweep, and later linked to a proposal without
+  // its milestones changing.
+  await syncEngagementsFromQuotes(); // settle any quote-born rows first
+  const manual = await createManualEngagement(
+    {
+      customerId: "t135-co",
+      customer: "T135 School District",
+      name: "T135 Auditorium study",
+      architect: { company: "T135 Architects", contact: "Pat" },
+      siteId: "t135-site",
+      contactName: "Sam",
+      fee: { mode: "fixed", amount: 8000 },
+      phases: ["Assessment", "Schematic Design"],
+    },
+    { name: "Tester" }
+  );
+  assert.equal(manual.origin, "manual", "#135 manual row is stamped origin=manual");
+  assert.equal(manual.quoteId, null, "#135 manual row has no quote");
+  assert.equal(manual.status, "awarded", "#135 manual row is born awarded");
+  assert.deepEqual(manual.milestones.map((m) => [m.name, m.amount, m.targetDate]), [["Fee", 8000, 0]], "#135 fixed fee → one unscheduled Fee milestone");
+  assert.deepEqual(manual.phases.map((p) => p.name), ["Assessment", "Schematic Design"], "#135 phases come from the menu the action resolved");
+  assert.deepEqual(manual.siteIds, ["t135-site"], "#135 venue link kept");
+  const t135Before = (await allEngagements()).length;
+  await syncEngagementsFromQuotes();
+  const t135After = await allEngagements();
+  assert.equal(t135After.length, t135Before, "#135 the sweep neither duplicates nor drops the manual row");
+  assert.ok(t135After.some((e) => e.id === manual.id), "#135 the manual row is in the hub list");
+  const t135Still = await getEngagement(manual.id);
+  assert.equal(t135Still?.status, "awarded", "#135 the sweep leaves the manual row's stage alone");
+  assert.equal(t135Still?.milestones.length, 1, "#135 the sweep leaves the manual row's milestones alone");
+  // Attach a WON consulting proposal (#135 review fix) — won, not draft, so
+  // engagementSyncAction has a real action to compute for "Q-t135-attach"
+  // and the next sweep actually exercises the index: a broken/missing
+  // sweepIndexesEngagement would fail to find this row by quoteId, see
+  // current=null, and mint a duplicate awarded engagement
+  // (engagementSyncAction("won", null) => create). A draft quote can never
+  // surface that bug — engagementSyncAction("draft", …) is always null, so
+  // the assertions below would pass whether or not the index worked. The
+  // quote is created only now (after the earlier settling sweeps), so no
+  // sweep-born row exists yet to collide with the id.
+  await upsertDoc("quotes", { ...quote, id: "Q-t135-attach", status: "won" } as Quote & Record<string, unknown>);
+  const attachResult = await attachQuoteToEngagement(manual.id, "Q-t135-attach");
+  assert.equal(attachResult.ok, true, "#135 attach succeeds on a manual row with no proposal yet");
+  if (!attachResult.ok) throw new Error("unreachable: attachResult.ok was just asserted true");
+  assert.equal(attachResult.engagement.quoteId, "Q-t135-attach", "#135 attach sets quoteId");
+  assert.equal(attachResult.engagement.origin, "manual", "#135 attach keeps origin=manual (provenance)");
+  assert.equal(attachResult.engagement.milestones.length, 1, "#135 attach never rewrites milestones");
+  const t135AttachedUpdatedAt = attachResult.engagement.updatedAt;
+  await syncEngagementsFromQuotes();
+  const t135Twice = await allEngagements();
+  assert.equal(t135Twice.filter((e) => e.quoteId === "Q-t135-attach").length, 1, "#135 the sweep never mints a second engagement for an attached (won) proposal");
+  const t135AfterSweep = await getEngagement(manual.id);
+  assert.equal(t135AfterSweep?.id, manual.id, "#135 the sweep leaves the manual row's id unchanged");
+  assert.equal(t135AfterSweep?.origin, "manual", "#135 the sweep leaves the manual row's origin unchanged");
+  assert.equal(t135AfterSweep?.status, "awarded", "#135 an awarded manual row is never demoted by the sweep");
+  assert.deepEqual(
+    t135AfterSweep?.milestones.map((m) => [m.name, m.amount, m.targetDate]),
+    [["Fee", 8000, 0]],
+    "#135 the sweep leaves the manual row's milestones unchanged"
+  );
+  assert.equal(
+    t135AfterSweep?.updatedAt,
+    t135AttachedUpdatedAt,
+    "#135 the sweep does not re-save the manual row at all — won+awarded computes no action"
+  );
+
+  // Negative paths (#135 review fix) — attachQuoteToEngagement now enforces
+  // the one-engagement-per-quote invariant instead of patching blindly.
+  const alreadyAttached = await attachQuoteToEngagement(manual.id, "Q-t135-second");
+  assert.equal(alreadyAttached.ok, false, "#135 attach refuses a project that already has a proposal");
+  if (alreadyAttached.ok) throw new Error("unreachable: alreadyAttached.ok was just asserted false");
+  assert.equal(
+    alreadyAttached.error,
+    "This project already has a proposal attached.",
+    "#135 already-attached refusal carries a plain-English error"
+  );
+
+  const secondManual = await createManualEngagement(
+    {
+      customerId: "t135b-co",
+      customer: "T135b School District",
+      name: "T135b Gym study",
+      fee: null,
+      phases: ["Assessment"],
+    },
+    { name: "Tester" }
+  );
+  await upsertDoc("quotes", { ...quote, id: "Q-t135-notconsulting", quoteType: "flame" } as Quote & Record<string, unknown>);
+  const nonConsulting = await attachQuoteToEngagement(secondManual.id, "Q-t135-notconsulting");
+  assert.equal(nonConsulting.ok, false, "#135 attach refuses a quote that is not quoteType 'consulting'");
+
+  const claimed = await attachQuoteToEngagement(secondManual.id, "Q-t135-attach");
+  assert.equal(claimed.ok, false, "#135 attach refuses a quote already claimed by another engagement");
+  if (claimed.ok) throw new Error("unreachable: claimed.ok was just asserted false");
+  assert.equal(
+    claimed.error,
+    "That proposal already belongs to T135 Auditorium study.",
+    "#135 already-claimed refusal names the owning engagement"
+  );
+
+  // Fee validation (#135 review fix) — createManualEngagementAction is the
+  // guard; the STORE stays permissive so a project with no fee at all still
+  // creates cleanly. These two pin the store half of that contract: no fee
+  // yields zero milestones (already true — asserted here for the first
+  // time), and a fixed fee of 0 ALSO yields zero milestones, documenting
+  // why the action must reject `{ mode: "fixed", amount: 0 }` itself rather
+  // than trust manualMilestoneSeeds' silence to catch it. The action can't
+  // be called from this harness (requirePerm needs a session), so these
+  // stay at the store layer.
+  const noFeeManual = await createManualEngagement(
+    {
+      customerId: "t135c-co",
+      customer: "T135c School District",
+      name: "T135c No-fee study",
+      phases: ["Assessment"],
+    },
+    { name: "Tester" }
+  );
+  assert.equal(noFeeManual.milestones.length, 0, "#135 fee: undefined yields zero milestones at the store");
+
+  const zeroFixedManual = await createManualEngagement(
+    {
+      customerId: "t135d-co",
+      customer: "T135d School District",
+      name: "T135d Zero-fee study",
+      fee: { mode: "fixed", amount: 0 },
+      phases: ["Assessment"],
+    },
+    { name: "Tester" }
+  );
+  assert.equal(
+    zeroFixedManual.milestones.length,
+    0,
+    '#135 { mode: "fixed", amount: 0 } yields zero milestones at the store — the action must guard this itself'
+  );
 
   console.log("review regression checks passed");
 }
