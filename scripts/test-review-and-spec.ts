@@ -3031,6 +3031,78 @@ import {
   ok(priceBooks(eight, {}, { now })[0]?.name === "Mfr0", "#14 priceBooks: sorted by count descending");
 }
 
+/* --- #132 / #134: catalog import guards --- pure */
+import {
+  MAX_CATALOG_IMPORT_BYTES,
+  checkManufacturer,
+  checkManufacturerGroups,
+  checkSize,
+  groupRowsByManufacturer,
+} from "@/lib/catalog-import-guard";
+
+{
+  const cat = [
+    { sku: "ETC-1", mfr: "ETC" },
+    { sku: "ETC-2", mfr: "ETC" },
+    { sku: "MEY-1", mfr: "Meyer Sound" },
+    { sku: "MEY-2", mfr: "Meyer Sound" },
+    { sku: "MEY-3", mfr: "meyer-sound" },
+    { sku: "NOB-1" },
+  ];
+  const missing = checkManufacturer({ mfr: "  ", fileSkus: ["X-1"], catalog: cat });
+  ok(!missing.ok && missing.reason === "missing", "#132 guard: blank manufacturer → missing");
+
+  const normalized = checkManufacturer({ mfr: "MEYER-SOUND", fileSkus: ["MEY-1", "MEY-9"], catalog: cat });
+  ok(
+    normalized.ok && normalized.normalizedMfr === "Meyer Sound",
+    "#132 guard: a re-spelled existing manufacturer normalizes to the most common stored spelling"
+  );
+  ok(normalized.ok && normalized.overlap === 1 && !normalized.isNew, "#132 guard: overlap counts the file SKUs already filed under that manufacturer");
+
+  const noOverlap = checkManufacturer({ mfr: "ETC", fileSkus: ["NEW-1", "NEW-2"], catalog: cat });
+  ok(
+    !noOverlap.ok && noOverlap.reason === "no-overlap" && noOverlap.detail.includes("None of the 2 SKUs in this file belong to ETC"),
+    "#132 guard: existing manufacturer + zero overlap → no-overlap with the spec's message"
+  );
+
+  const foreign = checkManufacturer({ mfr: "Meyer Sound", fileSkus: ["MEY-1", "etc-1", "ETC-2"], catalog: cat });
+  ok(
+    !foreign.ok && foreign.reason === "foreign-skus" && foreign.total === 2 && foreign.detail.includes("etc-1 is filed under ETC"),
+    "#132 guard: SKUs filed under another manufacturer are named (case-insensitive SKU match), and win over no-overlap"
+  );
+
+  const twelveForeign = Array.from({ length: 12 }, (_, i) => ({ sku: `F-${i}`, mfr: "Chauvet" }));
+  const twelve = checkManufacturer({ mfr: "Meyer Sound", fileSkus: twelveForeign.map((p) => p.sku), catalog: [...twelveForeign, ...cat] });
+  ok(
+    !twelve.ok && twelve.reason === "foreign-skus" && twelve.examples.length === 10 && twelve.detail.includes("(+2 more)"),
+    "#132 guard: foreign examples cap at 10 with a '+N more' tail"
+  );
+
+  const fresh = checkManufacturer({ mfr: "Chauvet", fileSkus: ["CH-1"], catalog: cat });
+  ok(fresh.ok && fresh.isNew && fresh.normalizedMfr === "Chauvet", "#132 guard: a new manufacturer with no parts is accepted as typed");
+  ok(checkManufacturer({ mfr: "Chauvet", fileSkus: ["NOB-1"], catalog: cat }).ok, "#132 guard: unbranded parts are never 'foreign' — importing them under a manufacturer brands them (D157)");
+  ok(checkManufacturer({ mfr: "ETC", fileSkus: [], catalog: cat }).ok, "#132 guard: an empty SKU list is not a wrong manufacturer (the importer's own no-rows check owns that)");
+
+  const groups = groupRowsByManufacturer([
+    { mfr: "ETC", sku: "ETC-1" },
+    { mfr: "etc", sku: "ETC-9" },
+    { mfr: "Meyer Sound", sku: "MEY-1" },
+    { mfr: "", sku: "X" },
+  ]);
+  ok(groups.length === 3 && groups[0].mfr === "ETC" && groups[0].skus.length === 2, "#132 groups: rows group by mfrKey, first spelling kept");
+  const checks = checkManufacturerGroups(groups, cat);
+  ok(
+    checks.length === 3 && checks[0].result.ok && checks[1].result.ok && !checks[2].result.ok && checks[2].result.reason === "missing" && checks[0].count === 2,
+    "#132 groups: each manufacturer group checks independently"
+  );
+
+  ok(checkSize(MAX_CATALOG_IMPORT_BYTES).ok, "#134 checkSize: exactly 1,048,576 bytes is allowed");
+  const over = checkSize(MAX_CATALOG_IMPORT_BYTES + 1);
+  ok(!over.ok && over.error.includes("1 MB"), "#134 checkSize: one byte over is refused with a message naming the 1 MB limit");
+  const big = checkSize(Math.round(2.3 * 1_048_576));
+  ok(!big.ok && big.error.includes("2.3 MB"), "#134 checkSize: the message renders the actual size");
+}
+
 /* ---- #95 — login honours a same-origin callbackUrl ---- */
 const O = "https://quartzite-six.vercel.app";
 ok(safeCallbackPath(undefined, O) === "/", "safeCallbackPath: missing → /");
