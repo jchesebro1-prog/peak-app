@@ -766,9 +766,8 @@ function Row({
           className="ib-quick"
           onClick={(e) => e.stopPropagation()}
           style={{
-            position: "absolute",
-            right: 12,
-            top: 10,
+            flexShrink: 0,
+            alignSelf: "flex-start",
             display: "flex",
             gap: 2,
             background: "#fff",
