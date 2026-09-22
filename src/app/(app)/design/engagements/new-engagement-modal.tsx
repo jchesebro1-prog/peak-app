@@ -37,6 +37,12 @@ const FIELD_ERR: React.CSSProperties = { marginTop: 6, fontSize: 11.5, color: "#
 
 const blankRow = (): MilestoneRow => ({ name: "", date: "", amount: "" });
 
+/** Matches `cleanFee`'s server-side cap (engagements/actions.ts): it keeps
+ *  the first 20 milestone rows and drops the rest, so a longer list could
+ *  pass this form's fee check on a row the server never sees and come back
+ *  rejected. Capped here the way the Settings cards cap "+ Add field". */
+const MAX_MILESTONES = 20;
+
 export function NewEngagementModal({
   customers,
   onClose,
@@ -221,9 +227,24 @@ export function NewEngagementModal({
                   <button type="button" aria-label="Remove milestone" onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))} style={{ ...SMALL_BTN, padding: "6px 0", textAlign: "center" }}>×</button>
                 </div>
               ))}
-              <button type="button" onClick={() => setRows((rs) => [...rs, blankRow()])} style={{ ...SMALL_BTN, justifySelf: "start" }}>
+              <button
+                type="button"
+                onClick={() => setRows((rs) => (rs.length >= MAX_MILESTONES ? rs : [...rs, blankRow()]))}
+                disabled={rows.length >= MAX_MILESTONES}
+                style={{
+                  ...SMALL_BTN,
+                  justifySelf: "start",
+                  opacity: rows.length >= MAX_MILESTONES ? 0.5 : 1,
+                  cursor: rows.length >= MAX_MILESTONES ? "default" : "pointer",
+                }}
+              >
                 + Add milestone
               </button>
+              {rows.length >= MAX_MILESTONES && (
+                <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>
+                  {MAX_MILESTONES} milestones is the maximum — remove a row to add another.
+                </div>
+              )}
             </div>
           )}
           {feeError && <div style={FIELD_ERR}>{feeError}</div>}

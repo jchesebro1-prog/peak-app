@@ -180,6 +180,24 @@ export async function createManualEngagementAction(input: {
   const name = String(input?.name || "").trim().slice(0, 160);
   if (!name) return { ok: false, error: "Name the project." };
 
+  // #135 review fix: the modal only ever posts a valid fee or none at all,
+  // but actions are public endpoints — refuse a fixed/milestone fee that
+  // would otherwise seed zero milestones silently (no fee, no error).
+  // fee === null ("no fee yet") stays allowed.
+  //
+  // Final-review fix: these guards run BEFORE the quick-add customer is
+  // written. They read nothing but `input.fee` (cleanFee and
+  // manualMilestoneSeeds are both pure), so nothing is lost by hoisting
+  // them — and a rejection here used to leave an orphan customer behind
+  // that the user's retry would then duplicate.
+  const fee = cleanFee(input?.fee);
+  if (fee?.mode === "fixed" && !(fee.amount > 0)) {
+    return { ok: false, error: "Enter the fee amount." };
+  }
+  if (fee?.mode === "milestones" && manualMilestoneSeeds(fee).length === 0) {
+    return { ok: false, error: "Add at least one milestone with an amount." };
+  }
+
   let customerId = String(input?.customerId || "").trim();
   let customerName = "";
   const fresh = input?.newCustomer;
@@ -198,18 +216,6 @@ export async function createManualEngagementAction(input: {
   if (siteId) {
     const locs = (await locationsForId(customerId)) || [];
     if (!locs.some((l) => l.id === siteId)) siteId = null; // never link a venue that isn't the customer's
-  }
-
-  // #135 review fix: the modal only ever posts a valid fee or none at all,
-  // but actions are public endpoints — refuse a fixed/milestone fee that
-  // would otherwise seed zero milestones silently (no fee, no error).
-  // fee === null ("no fee yet") stays allowed.
-  const fee = cleanFee(input?.fee);
-  if (fee?.mode === "fixed" && !(fee.amount > 0)) {
-    return { ok: false, error: "Enter the fee amount." };
-  }
-  if (fee?.mode === "milestones" && manualMilestoneSeeds(fee).length === 0) {
-    return { ok: false, error: "Add at least one milestone with an amount." };
   }
 
   const settings = await getSettings();

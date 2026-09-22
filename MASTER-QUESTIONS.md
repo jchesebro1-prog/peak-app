@@ -213,6 +213,13 @@ Estimating Rules — these just need real values before go-live)
   makes the book outdated — decision A from #14). ✦ keep both as built
   ☐ builders should show the oldest date too (a build with one stale part
   reads as stale) ☐ show both ("as of … / oldest line …") ☐ other: ______
+- **E7.** Consulting projects added by hand (D155, built 2026-09-21) seed
+  EVERY phase on the Settings phase menu, all pending — the "+ New consulting
+  project" modal has no phase picker. A project born from a won quote is
+  different: it seeds only the phases ticked on that proposal.
+  ✦ keep full-menu — an unwanted phase is removed on the project page in one
+  click ☐ give the modal a phase checklist (same list the fee proposal uses)
+  ☐ seed a shorter default set instead: ______ ☐ other: ______
 
 ## F. Service-line product decisions (from IDEAS.md)
 

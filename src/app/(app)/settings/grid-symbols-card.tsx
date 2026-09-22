@@ -43,6 +43,13 @@ const inS: React.CSSProperties = {
 
 const norm = (s: string) => s.trim().toLowerCase();
 
+/** `cleanGridCategoryShapes` keeps the first 60 entries and silently drops
+ *  the rest, so the card has to refuse a longer list rather than report
+ *  "✓ Saved" over edits that never landed. `mergedRows` can seed more than
+ *  60 rows on its own (one per live catalog category), so this is reachable
+ *  without "+ Add category", which the same cap already disables. */
+const MAX_CATEGORIES = 60;
+
 const rowsOf = (map: Record<string, GridShape>): Row[] =>
   Object.entries(map)
     .map(([category, shape]) => ({ category, shape }))
@@ -83,7 +90,11 @@ export function GridSymbolsCard({
   // deleting them one-by-one; that would post {} and clear the key, so
   // gate Save on it too, alongside the existing dirty/pending checks.
   const hasContent = rows.some((r) => r.category.trim());
-  const canSave = dirty && !pending && hasContent;
+  // Rows beyond the helper's cap are dropped on save, so gate Save on the
+  // count of rows that would actually be posted (blank ones are skipped).
+  const namedRows = rows.filter((r) => r.category.trim()).length;
+  const overCap = namedRows > MAX_CATEGORIES;
+  const canSave = dirty && !pending && hasContent && !overCap;
 
   const patch = (i: number, p: Partial<Row>) => {
     setJustSaved(false);
@@ -166,6 +177,11 @@ export function GridSymbolsCard({
           {error}
         </div>
       )}
+      {overCap && (
+        <div style={{ margin: "12px 18px 0", fontSize: 12, color: "#b4543a", background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 8, padding: "9px 12px" }}>
+          Too many categories to save ({MAX_CATEGORIES} max) — remove some rows.
+        </div>
+      )}
       {justSaved && !dirty && (
         <div style={{ margin: "12px 18px 0", fontSize: 11.5, color: "#1f7a52", fontWeight: 600 }}>✓ Saved</div>
       )}
@@ -210,7 +226,7 @@ export function GridSymbolsCard({
         <button
           type="button"
           onClick={addRow}
-          disabled={rows.length >= 60}
+          disabled={rows.length >= MAX_CATEGORIES}
           style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}
         >
           + Add category

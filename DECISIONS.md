@@ -3671,8 +3671,13 @@ hub now creates one by hand, and the sweep's contract was extended rather than b
 - **Model:** `ConsultingEngagement.origin?: "quote" | "manual"` (absent on pre-#135 docs = quote)
   and `quoteId: string | null` (null on a manual project until a proposal is attached). A manual
   project is born `awarded`, with milestones from the fee — a fixed fee is ONE unscheduled "Fee"
-  milestone carrying the amount, a schedule keeps its rows — and every phase from the Settings
-  phase menu pending, exactly as a won quote seeds them. The creation is logged as a decision
+  milestone carrying the amount, a schedule keeps its rows — and every phase on the Settings phase
+  menu seeded pending. The phase SET is not the one a won quote gets: `fromQuote` seeds only the
+  phases ticked on the proposal (`consulting.phases`, falling back to `DEFAULT_CONSULTING_PHASES`
+  when the quote named none), while the manual modal has no phase picker, so
+  `createManualEngagementAction` passes the whole `mergedConsultingPhases(settings.consultingPhases)`
+  menu. Both paths seed whatever phases they take as pending, and a phase is removed on the project
+  page in one click. Put to Jeff as MASTER-QUESTIONS E7. The creation is logged as a decision
   ("Project added manually", by the creator) so provenance is visible on the record.
 - **Sweep rule (`sweepIndexesEngagement`, pure):** the sweep indexes rows by quote and skips any
   row with no quote — so a manual project is invisible to it: never created, advanced, closed or
