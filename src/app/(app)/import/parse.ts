@@ -233,8 +233,17 @@ export function autoMap(headers: string[], fields: FieldDef[]): Record<string, n
   fields.forEach((f) => {
     if (map[f.key] >= 0) return;
     const cands = candsOf(f).filter((c) => c.length >= 4);
+    // A "<thing> Label N" column describes another column; it never holds the
+    // value. Daylite exports Phone Label 1 BEFORE Phone 1 and Email Label 1
+    // before Email 1, and the fuzzy test below matches on "contains", so
+    // "phonelabel1" contains "phone" and claimed the phone field at a lower
+    // index — leaving the real number unmapped and writing "Work"/"Business"
+    // into 1,550 customers' phone. Skip label columns unless the field being
+    // mapped is itself asking for one (#147).
+    const wantsLabel = cands.some((c) => c.indexOf("label") >= 0);
     for (let i = 0; i < H.length; i++) {
       if (used[i] || !H[i] || H[i].length < 3) continue;
+      if (!wantsLabel && H[i].indexOf("label") >= 0) continue;
       if (cands.some((c) => H[i].indexOf(c) >= 0 || c.indexOf(H[i]) >= 0)) {
         map[f.key] = i;
         used[i] = true;

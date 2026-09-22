@@ -82,6 +82,13 @@ export function samePlace(a: string | null | undefined, b: string | null | undef
       .trim()
       .toLowerCase()
       .replace(/^(city|town|village|township) of\s+/, "")
+      // Expand the abbreviations place names are written with before the
+      // punctuation is stripped, or "Mt. Horeb" never equals "Mount Horeb"
+      // and "St. Cloud" never equals "Saint Cloud". The #147 run rejected
+      // five perfectly good matches on exactly this.
+      .replace(/\bmt\.?\s+/g, "mount ")
+      .replace(/\bst\.?\s+/g, "saint ")
+      .replace(/\bft\.?\s+/g, "fort ")
       .replace(/[^a-z0-9]/g, "");
   const x = norm(a);
   const y = norm(b);
