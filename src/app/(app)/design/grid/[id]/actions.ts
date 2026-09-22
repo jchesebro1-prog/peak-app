@@ -38,8 +38,8 @@ import { resolveTier } from "@/lib/pricing-tiers";
 import { isTierPriced } from "@/lib/tier-pricing";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
-import { createGridAssembly, listGridSymbols } from "@/lib/stores/grid-catalog";
-import { getGridSymbol } from "@/lib/stores/grid-catalog";
+import { createGridAssembly, getGridSymbol, listGridSymbols, setGridSymbolShape } from "@/lib/stores/grid-catalog";
+import { isGridShape } from "@/lib/design/grid-symbols";
 import {
   bomLines,
   bomTotals,
@@ -78,11 +78,21 @@ export async function createGridAssemblyAction(input: {
   modelNumber: string;
   scope: string;
   members: Array<{ symbolId: string; qty: number; x: number; y: number }>;
+  /** #131 — optional symbol override for the new entry ("" = category default). */
+  shape?: string;
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!input.name.trim()) return { ok: false, error: "Name the assembly." };
   if (!input.members.length) return { ok: false, error: "Choose at least one child symbol." };
-  const assembly = await createGridAssembly({ ...input, by: user.name });
+  const assembly = await createGridAssembly({
+    name: input.name,
+    manufacturer: input.manufacturer,
+    modelNumber: input.modelNumber,
+    scope: input.scope,
+    members: input.members,
+    shape: isGridShape(input.shape) ? input.shape : null,
+    by: user.name,
+  });
   revalidatePath("/design/grid");
   return { ok: true, id: assembly.id };
 }
@@ -345,6 +355,24 @@ export async function setPlacementCategoryAction(
   await requireUser();
   const p = await setPlacementCategory(projectId, placementId, category || "");
   if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/**
+ * #131 (D154): set or clear the symbol override on ONE grid-catalog entry.
+ * Per-entry, not per-placement — placements resolve their part live, so every
+ * placed instance of the entry (on every design) redraws with the new shape.
+ */
+export async function setSymbolShapeAction(
+  projectId: string,
+  symbolId: string,
+  shape: string
+): Promise<Result> {
+  await requireUser();
+  if (shape !== "" && !isGridShape(shape)) return { ok: false, error: "Unknown symbol." };
+  const s = await setGridSymbolShape(symbolId, shape === "" ? null : shape);
+  if (!s) return { ok: false, error: "That part is not in the Grid library." };
   revalidatePath(editorPath(projectId));
   return { ok: true };
 }

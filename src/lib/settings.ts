@@ -87,6 +87,11 @@ export type AppSettingsData = {
   venueDoctrine?: import("@/lib/venue-doctrine").VenueDoctrinePatch;
   /** User-authored catalog-backed fixture assemblies. Full replacement. */
   fixtureAssemblies?: import("@/lib/fixture-assemblies").FixtureAssembly[];
+  /** Grid symbol per catalog category (#131, D154) — FULL REPLACEMENT on
+   *  save (the wireTypes idiom): resolveCategoryShapes in
+   *  lib/design/grid-symbols returns the seed when absent and exactly the
+   *  stored map when present. Edited in Settings → Admin → Grid symbols. */
+  gridCategoryShapes?: Record<string, import("@/lib/design/grid-symbols").GridShape>;
   /** Recordings → Drive archive (Krisp recordings spec §1.3). Connection key
    *  of the mailbox whose Google account owns the archive; null = not
    *  configured, the nightly archive job waits. */

@@ -12,6 +12,7 @@ import type { Port } from "@/lib/catalog-connect";
 // Type-only, and curtain-geom is the CUSTOMER-SAFE mirror (no cost basis, no
 // margin) - importing it here keeps this module client-safe.
 import type { CurtainSpec } from "@/lib/curtain-geom";
+import type { GridShape } from "./grid-symbols";
 
 /** The slice of a catalog part the BOM needs — structurally satisfied by
  *  stores/catalog.CatalogPart, mapped server-side and passed to the client. */
@@ -56,6 +57,9 @@ export type PartLite = {
   gridScope?: string;
   symbolWidth?: number;
   symbolHeight?: number;
+  /** Per-entry symbol override (#131) — resolved through shapeFor() with the
+   *  category defaults; absent = use the category default. */
+  shape?: GridShape | null;
   kind?: "device" | "assembly";
   assemblyMembers?: Array<{ symbolId: string; qty: number; x: number; y: number }>;
   pricingPartId?: string | null;

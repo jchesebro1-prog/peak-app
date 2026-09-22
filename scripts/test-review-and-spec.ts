@@ -3269,6 +3269,43 @@ ok(typeaheadMatches("b", ["b1", "a", "b2"], (q, s) => s.startsWith(q), undefined
 ok(typeaheadMatches("x", ["x3", "x1", "x2"], () => true, (_q, s) => Number(s.slice(1)), 2).join(",") === "x1,x2",
   "#121: a rank sorts ascending (stable) and max slices after ranking");
 
+/* --- #131 grid symbols (D154): shapeFor precedence + symbolGeometry snapshot --- */
+import {
+  DEFAULT_GRID_CATEGORY_SHAPES, GRID_SHAPES, isGridShape, markerColor, resolveCategoryShapes, shapeFor, symbolGeometry,
+} from "@/lib/design/grid-symbols";
+
+ok(GRID_SHAPES.length === 8 && GRID_SHAPES.join(",") === "rect,circle,triangle,diamond,hexagon,speaker,light,camera",
+  "#131: the eight curated shapes, rect first");
+ok(isGridShape("speaker") && !isGridShape("blob") && !isGridShape(null), "#131: isGridShape");
+ok(shapeFor({ category: "Speakers" }, {}) === "speaker" && shapeFor({ category: "Lighting" }, {}) === "light" &&
+   shapeFor({ category: "Cameras" }, {}) === "camera" && shapeFor({ category: "Rigging" }, {}) === "diamond" &&
+   shapeFor({ category: "Control" }, {}) === "hexagon",
+  "#131: the seeded category defaults");
+ok(shapeFor({ category: "  speakers " }, {}) === "speaker", "#131: category match is trimmed + case-insensitive");
+ok(shapeFor({ category: "Speakers", shape: "hexagon" }, {}) === "hexagon", "#131: the entry's own shape wins over its category default");
+ok(shapeFor({ category: "Speakers" }, { gridCategoryShapes: { Speakers: "circle" } }) === "circle", "#131: a stored category map wins over the seed");
+ok(shapeFor({ category: "Speakers" }, { gridCategoryShapes: {} }) === "rect", "#131: a stored map is the whole truth (full replacement) — unmapped → rect");
+ok(shapeFor({ category: "Anything else" }, {}) === "rect" && shapeFor(null, {}) === "rect" && shapeFor(undefined, null) === "rect",
+  "#131: unknown category / no part / no settings → rect");
+ok(shapeFor({ category: "Speakers", shape: "blob" }, {}) === "speaker", "#131: an unknown stored shape falls through to the category default");
+ok(JSON.stringify(resolveCategoryShapes(undefined)) === JSON.stringify(DEFAULT_GRID_CATEGORY_SHAPES) && resolveCategoryShapes(null) !== DEFAULT_GRID_CATEGORY_SHAPES,
+  "#131: resolveCategoryShapes — absent → a fresh copy of the seed");
+ok(resolveCategoryShapes({ Speakers: "nope", Lighting: "light" }).Speakers === undefined && resolveCategoryShapes({ Speakers: "nope", Lighting: "light" }).Lighting === "light",
+  "#131: resolveCategoryShapes drops unknown shape values");
+const g131 = (s: (typeof GRID_SHAPES)[number]) => symbolGeometry(s, 44, 30);
+ok(g131("rect").outline.kind === "rect" && g131("rect").glyph === null, "#131: rect = rounded rect, no glyph");
+ok(g131("circle").outline.kind === "circle" && (g131("circle").outline as { r: number }).r === 15, "#131: circle radius = half the short side");
+ok(g131("triangle").outline.kind === "polygon" && (g131("triangle").outline as { points: string }).points.split(" ").length === 3, "#131: triangle = 3 points");
+ok(g131("diamond").outline.kind === "polygon" && (g131("diamond").outline as { points: string }).points.split(" ").length === 4, "#131: diamond = 4 points");
+ok(g131("hexagon").outline.kind === "polygon" && (g131("hexagon").outline as { points: string }).points.split(" ").length === 6, "#131: hexagon = 6 points");
+for (const s of ["speaker", "light", "camera"] as const) {
+  ok(g131(s).outline.kind === "rect" && /^M /.test(g131(s).glyph || ""), `#131: ${s} = rect + path glyph`);
+}
+ok(g131("speaker").glyph === symbolGeometry("speaker", 44, 30).glyph && g131("speaker").glyph !== g131("camera").glyph && g131("light").glyph !== g131("camera").glyph,
+  "#131: glyph paths are deterministic and distinct per shape");
+ok(symbolGeometry("speaker", 12, 9).glyph !== g131("speaker").glyph, "#131: glyphs scale with the symbol box");
+ok(markerColor("Speakers") === markerColor("Speakers") && /^#[0-9a-f]{6}$/.test(markerColor("Speakers")), "#131: markerColor is a stable hex per category");
+
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
   {
