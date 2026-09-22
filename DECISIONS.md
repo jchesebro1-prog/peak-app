@@ -2709,3 +2709,32 @@ Decisions taken:
 `scripts/diagnose-prod-migrations.mjs` (read-only) prints what the target
 database believes is applied and whether a pending migration's objects already
 exist — run it before trusting a migration against production.
+
+## D140 — Inbox customer linking, Wave A (2026-09-21)
+
+PUNCHLIST #96, spec `docs/superpowers/specs/2026-09-21-inbox-customer-linking-and-label-sync-design.md`.
+Defaults taken while building Tasks 1–8 (branch `feat/inbox-linking`):
+
+- **Contact match links; domain match only suggests.** `applyResolution` never sets `customerId` from a
+  domain claim — the thread lands as `suggested` until someone clicks Link. Ambiguity (two live customers
+  on one address or one domain) never guesses.
+- **Deleted contacts/companies never resolve.** `contactByEmail` filters `deleted`, orders by
+  `updatedAt desc`, and returns *ambiguous* when live rows map to two customers (the old doc scan could
+  auto-link a re-added person to their previous employer).
+- **`resolution` stays inside the comms JSON document** (spec §4 said a promoted hot column). Volumes are
+  hundreds of threads; the Unmatched view is a filtered scan like every other Inbox view. Promote when it
+  measurably hurts.
+- **`customer_domains` pk is (domain, customer_id)** so a shared district domain can legitimately have two
+  owners (→ ambiguous). A learned claim is inserted with `WHERE NOT EXISTS`; under concurrent learned
+  claims the worst case is two owners (ambiguous), never a wrong link.
+- **Remember-address reuses before minting**: same address on a live contact wins, then a case-insensitive
+  display-name match on the customer, else a new contact. The name-keyed customer save would otherwise
+  soft-delete one of two same-name contacts.
+- **Domain claims are undoable** from the linked card ("Stop"), and the Unknown card offers "Link thread
+  only" so a consultant/architect domain that writes about several schools is never claimed by accident.
+- **App-created threads resolve on `create()` too** (Compose, Log call); the sync backfill only covers
+  Gmail-bridged threads, and the Unmatched view treats a missing `resolution` as unknown.
+- **Per-sync backfill is batched** (two `IN` queries over the unlinked set) so it stays inside the 60 s
+  route budget alongside the #97 import chunks.
+- **Quote intake's `toLocationInput` dropped `locationName`** — fixed in the Inbox copy; the intake's own
+  copy still does (follow-up).
