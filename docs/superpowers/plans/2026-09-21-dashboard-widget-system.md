@@ -1816,7 +1816,7 @@ export const metadata = { title: "Reports — Quartzite-6" };
  * registry widgets (see _dashboard/widgets/sales.tsx, installs.tsx); the
  * user's saved layout decides which render and in what order. History
  * widgets follow ?range; installs widgets always look 12 months ahead.
- * ?view= and ?ir= are no longer read (D143).
+ * ?view= and ?ir= are no longer read (D144).
  */
 export default async function ReportsPage({
   searchParams,
@@ -1983,7 +1983,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `src/app/(app)/_dashboard/renderers.tsx` (`Partial<Record<…>>` → `Record<WidgetId, WidgetRenderer>`), `src/app/(app)/_dashboard/host.tsx` (drop the "not available yet" branch: `RENDERERS[id]` is now always defined)
 - Delete: `src/app/(app)/home-stats.tsx`
-- Modify: `DECISIONS.md` (append D143), `PUNCHLIST.md` (#43 → WAVE A DONE, list the deferred items; #7 → SUPERSEDED by #43), `MASTER-HOWTO.md` (one paragraph: Customize / Reset / range chips / where layouts live)
+- Modify: `DECISIONS.md` (append D144), `PUNCHLIST.md` (#43 → WAVE A DONE, list the deferred items; #7 → SUPERSEDED by #43), `MASTER-HOWTO.md` (one paragraph: Customize / Reset / range chips / where layouts live)
 
 - [ ] **Step 1: Flip the type.** `export const RENDERERS: Record<WidgetId, WidgetRenderer> = { …four spreads… };` — tsc now fails if any registry id lacks a renderer. Simplify the host: `const body = await RENDERERS[id](ctx);` inside the try.
 
@@ -1991,12 +1991,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 - [ ] **Step 3: Full gate**, one at a time, nothing else holding a DB: `npx tsc --noEmit -p .` → empty; `npx eslint src scripts` → 0 errors; `npm run test:specs | tail -2` → ALL PASSED; `npm run test:review:regressions 2>&1 | tail -3` → passes; `npm run test:smoke 2>&1 | tail -3` → ALL PASSED; `pgrep -fl "next dev|next-server" || echo none` then `npm run build` → green (this is where a client-bundle leak would surface).
 
-- [ ] **Step 4: Write D143** — registry over query builder; blob persistence keyed by user id; `approve` gate and the Estimator consequence; `?customize=1` + up/down (no DnD); `?range=` shared, `?view=`/`?ir=` dropped, forward = 12 months; fixed size classes and the Home column change; KpiTile unification; greeting/sheet as chrome; projected profit definition; open vs backlog stage split; equipment-sold rules; deferred wave (#15, pipeline/capacity, scheduled load, Installer preset). Update PUNCHLIST #43 and #7, MASTER-HOWTO.
+- [ ] **Step 4: Write D144** — registry over query builder; blob persistence keyed by user id; `approve` gate and the Estimator consequence; `?customize=1` + up/down (no DnD); `?range=` shared, `?view=`/`?ir=` dropped, forward = 12 months; fixed size classes and the Home column change; KpiTile unification; greeting/sheet as chrome; projected profit definition; open vs backlog stage split; equipment-sold rules; deferred wave (#15, pipeline/capacity, scheduled load, Installer preset). Update PUNCHLIST #43 and #7, MASTER-HOWTO.
 
 - [ ] **Step 5: Commit**
 ```bash
 git add "src/app/(app)/_dashboard/renderers.tsx" "src/app/(app)/_dashboard/host.tsx" DECISIONS.md PUNCHLIST.md MASTER-HOWTO.md
-git commit -m "docs: D143 dashboard widget system wave A; #43 wave A shipped, #7 superseded; renderer map locked
+git commit -m "docs: D144 dashboard widget system wave A; #43 wave A shipped, #7 superseded; renderer map locked
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```

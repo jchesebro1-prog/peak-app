@@ -5443,7 +5443,7 @@ Brenda thread). §6 status derivation ships with #95's hardening batch; the rest
 
 **Status:** WAVE A SHIPPED 2026-09-21 (Tasks 1–8: resolver, `customer_domains`, ingest stamping +
 backfill/re-sweep, link actions, `EntityQuickAdd`, reader link sidebar, Unmatched view — branch
-`feat/inbox-linking`, D140). Wave B (two-way `Peak/*` labels, Tasks 9–12) OPEN. Follow-ups from the
+`feat/inbox-linking`, D141). Wave B (two-way `Peak/*` labels, Tasks 9–12) OPEN. Follow-ups from the
 final review: quote intake's own `toLocationInput` still drops `locationName`; ambiguous-card "Always"
 claims the domain even for a contact-level ambiguity (hint copy); duplicate option values when two
 candidate customers share a contact name.

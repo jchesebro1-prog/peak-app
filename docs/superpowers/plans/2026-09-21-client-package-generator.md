@@ -10,7 +10,7 @@
 
 ## Decisions taken
 
-Logged here so the executor does not re-litigate them; they become D144 in Task 8.
+Logged here so the executor does not re-litigate them; they become D145 in Task 8.
 
 1. **Bundle = one `.zip`, not a merged PDF.** Merging arbitrary vendor PDFs needs a PDF parser; the app has none and adding one on the eve of the beta is avoidable risk (same reasoning as D94's shipping-day call). A zip preserves each manufacturer's datasheet byte-for-byte. The spec's own default was "zip of three".
 2. **Zip writer is hand-rolled, STORE-only (`src/lib/zip.ts`).** Zero new npm dependencies, same rationale as `lib/pdf.ts` (D36/D39). Contents are PDFs and a `.docx`, already deflated. No ZIP64, no encryption.
@@ -20,7 +20,7 @@ Logged here so the executor does not re-litigate them; they become D144 in Task 
 6. **Storage degrades like sheets do.** New `client_packages` docTable; `blobPath` when `BLOB_READ_WRITE_TOKEN` is set (`client-packages/<sourceId>/<file>`), else the zip is kept in-doc as a base64 data-URL with a 32 MB cap and a clear error above it. Download only via `/api/client-packages/<id>` (requireUser), mirroring `/api/vendor-quote-attachments`.
 7. **Item resolution mirrors `partForGrid`:** catalog id first, then Grid symbol → `pricingPartId` / `modelNumber`. Curtain drop-ins become `CURTAIN` rows classed "custom goods". Duplicate SKUs merge (qty summed). Order: six beta groups in `GROUPS` order, then "Other", then by description.
 8. **Permissions.** Building a package is `requireUser` (any team member, like `saveSpecAction`). Gap chips link to `/catalog?edit=<sku>`; attaching a datasheet there remains `manage_users`-gated (unchanged).
-9. **Ids.** Packages are `PKG-####` from 1001 via `insertWithPrefixedId`. Decision entry is **D144** (D141 is reserved by the #96 Wave B plan).
+9. **Ids.** Packages are `PKG-####` from 1001 via `insertWithPrefixedId`. Decision entry is **D145** (D142 is the #96 Wave B decision).
 
 ## Global Constraints
 
@@ -1683,19 +1683,19 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Docs, D144, close-out
+### Task 8: Docs, D145, close-out
 
 **Files:**
-- Modify: `DECISIONS.md` (append D144), `PUNCHLIST.md` (#40 status), `MASTER-HOWTO.md` §9 (one paragraph: packages live under `client-packages/` in the same store; without the token they sit in the database, dev only)
+- Modify: `DECISIONS.md` (append D145), `PUNCHLIST.md` (#40 status), `MASTER-HOWTO.md` §9 (one paragraph: packages live under `client-packages/` in the same store; without the token they sit in the database, dev only)
 - Modify: `docs/superpowers/specs/2026-07-25-client-package-generator-design.md` — resolve the two open questions (zip taken by default; CRM attachment deferred) and note the drawings v1 scope.
 
 - [ ] **Step 1: Full gate**, one at a time: `npx tsc --noEmit -p .`, `npx eslint .` (0 errors), `npm run test:specs`, `npm run test:review:regressions`, `npm run test:smoke`.
-- [ ] **Step 2: Write D144** — the nine "Decisions taken" above, in DECISIONS voice (why, not what), plus the verified-live line from Task 6/7's manual checks. Mark PUNCHLIST #40 as **BUILT — completeness Jeff-gated**: list the "Blocked on Jeff" items verbatim and the commit hashes; leave #39's import gate untouched.
+- [ ] **Step 2: Write D145** — the nine "Decisions taken" above, in DECISIONS voice (why, not what), plus the verified-live line from Task 6/7's manual checks. Mark PUNCHLIST #40 as **BUILT — completeness Jeff-gated**: list the "Blocked on Jeff" items verbatim and the commit hashes; leave #39's import gate untouched.
 - [ ] **Step 3: Commit** (no push — the branch owner pushes)
 
 ```bash
 git add DECISIONS.md PUNCHLIST.md MASTER-HOWTO.md docs/superpowers/specs/2026-07-25-client-package-generator-design.md
-git commit -m "docs: D144 client package generator; #40 built, completeness Jeff-gated
+git commit -m "docs: D145 client package generator; #40 built, completeness Jeff-gated
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```

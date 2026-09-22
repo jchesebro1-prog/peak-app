@@ -2710,7 +2710,7 @@ Decisions taken:
 database believes is applied and whether a pending migration's objects already
 exist — run it before trusting a migration against production.
 
-## D140 — Inbox customer linking, Wave A (2026-09-21)
+## D141 — Inbox customer linking, Wave A (2026-09-21)
 
 PUNCHLIST #96, spec `docs/superpowers/specs/2026-09-21-inbox-customer-linking-and-label-sync-design.md`.
 Defaults taken while building Tasks 1–8 (branch `feat/inbox-linking`):

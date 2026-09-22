@@ -1958,15 +1958,15 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 9: Docs, decisions, close-out
 
 **Files:**
-- Modify: `DECISIONS.md` (append D142 — D141 is reserved by the #96 Wave B close-out in `2026-09-21-inbox-customer-linking-and-label-sync.md` Task 12), `PUNCHLIST.md` (#44 → DONE; #16 decisions D and E → DONE via #44; #17 audit note unchanged), `MASTER-HOWTO.md` (one paragraph: delivery lines → Scheduled, the install packet URL, where signatures live in the Blob store)
-- Modify: `docs/superpowers/specs/2026-07-25-projects-lifecycle-design.md` — under "Locked decisions" add a "Built as (2026-09-21)" note pointing at D142 for the four deviations (delivery-line field names, installs-only auto-advance, tasks row instead of D93 assignment, embedded roles).
+- Modify: `DECISIONS.md` (append D143 — D142 is the #96 Wave B close-out in `2026-09-21-inbox-customer-linking-and-label-sync.md` Task 12), `PUNCHLIST.md` (#44 → DONE; #16 decisions D and E → DONE via #44; #17 audit note unchanged), `MASTER-HOWTO.md` (one paragraph: delivery lines → Scheduled, the install packet URL, where signatures live in the Blob store)
+- Modify: `docs/superpowers/specs/2026-07-25-projects-lifecycle-design.md` — under "Locked decisions" add a "Built as (2026-09-21)" note pointing at D143 for the four deviations (delivery-line field names, installs-only auto-advance, tasks row instead of D93 assignment, embedded roles).
 
 - [ ] **Step 1: Full gate**, one at a time with nothing else running: `npx tsc --noEmit -p .`, `npx eslint src scripts` (0 errors beyond the pre-existing view.tsx `Date.now` one), `npm run test:specs`, `npm run test:review:regressions`, `npm run test:smoke`.
-- [ ] **Step 2: Write D142** — bullets: delivery-line shape kept; installs-only auto-advance + undo semantics (not-all → all transition; undo one-shot; undo skips template expansion); `via` on stage history; sign-off record shape + legacy normalizer + Blob/data-URL rule + `signatures/<projectId>/` prefix; completion gate on both kinds and `recordSignoff` never completing; scope taxonomy order (Grid categories → quote sections → Whole job); roles model minimal + PM handover of the sold task; walkthrough as a `tasks` row with `item16:completed:<id>`; item 15 deferred. Mark PUNCHLIST #44 DONE with commit hashes; under #16 add a status line "D and E DONE 2026-09-21 via #44 (D142)".
+- [ ] **Step 2: Write D143** — bullets: delivery-line shape kept; installs-only auto-advance + undo semantics (not-all → all transition; undo one-shot; undo skips template expansion); `via` on stage history; sign-off record shape + legacy normalizer + Blob/data-URL rule + `signatures/<projectId>/` prefix; completion gate on both kinds and `recordSignoff` never completing; scope taxonomy order (Grid categories → quote sections → Whole job); roles model minimal + PM handover of the sold task; walkthrough as a `tasks` row with `item16:completed:<id>`; item 15 deferred. Mark PUNCHLIST #44 DONE with commit hashes; under #16 add a status line "D and E DONE 2026-09-21 via #44 (D143)".
 - [ ] **Step 3: Commit + push**
 ```bash
 git add DECISIONS.md PUNCHLIST.md MASTER-HOWTO.md docs/superpowers/specs/2026-07-25-projects-lifecycle-design.md
-git commit -m "docs: D142 projects lifecycle defaults; close #44, #16 D/E
+git commit -m "docs: D143 projects lifecycle defaults; close #44, #16 D/E
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 git push origin feat/inbox-linking

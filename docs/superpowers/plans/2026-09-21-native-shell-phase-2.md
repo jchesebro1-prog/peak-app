@@ -1292,7 +1292,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `src/lib/measure/disto.ts` only if the real unit's UUIDs differ
-- Modify: `DECISIONS.md` (next free D-number; D141 is claimed by the #96 Wave B plan — use the next one), `PUNCHLIST.md` (#30 → DONE-native / #31 → DONE-phase-2 / #33 → program status with the six screens listed)
+- Modify: `DECISIONS.md` (next free D-number; D142 is the #96 Wave B decision — use the next one), `PUNCHLIST.md` (#30 → DONE-native / #31 → DONE-phase-2 / #33 → program status with the six screens listed)
 
 **Human steps (on the TestFlight build, signed in):**
 
@@ -1313,4 +1313,4 @@ git commit -m "docs: native shell phase 2 decisions; #30 laser on device, #31 Te
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
-> Decision numbering (assigned 2026-09-21 by the controller): #96 Wave B = D141, #44 = D142, #43 = D143, #40 = D144, this plan = **D145**.
+> Decision numbering (assigned 2026-09-21 by the controller): #96 Wave B = D142, #44 = D143, #43 = D144, #40 = D145, this plan = **D146**.

@@ -1088,7 +1088,7 @@ git commit -m "feat(inbox): Unmatched view for threads with no customer link (#9
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
-**Wave A checkpoint:** run the full gate (`tsc`, `eslint`, `test:specs`, `test:review:regressions`, `test:smoke` — one at a time), push, and let production sync once. Log **D140** in DECISIONS.md (resolver precedence, suggested-vs-linked distinction, learned-domain rule) before starting Wave B.
+**Wave A checkpoint:** run the full gate (`tsc`, `eslint`, `test:specs`, `test:review:regressions`, `test:smoke` — one at a time), push, and let production sync once. Log **D141** in DECISIONS.md (resolver precedence, suggested-vs-linked distinction, learned-domain rule) before starting Wave B.
 
 ---
 
@@ -1493,16 +1493,16 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 12: Docs, decisions, close-out
 
 **Files:**
-- Modify: `DECISIONS.md` (append D141), `PUNCHLIST.md` (#96 → DONE), `MASTER-HOWTO.md` §5 (one paragraph: the `Peak/` labels and what each does), `DEPLOY.md` (note `gmail.modify` is now load-bearing for labels)
+- Modify: `DECISIONS.md` (append D142), `PUNCHLIST.md` (#96 → DONE), `MASTER-HOWTO.md` §5 (one paragraph: the `Peak/` labels and what each does), `DEPLOY.md` (note `gmail.modify` is now load-bearing for labels)
 - Modify: `docs/superpowers/specs/2026-09-21-inbox-customer-linking-and-label-sync-design.md` — correct §3's claim that history replay "already sees" label events (it only requested `messageAdded` until Task 11) and §4's `labelMap` (the existing `gmail_labels` cache is used instead).
 
 - [ ] **Step 1: Full gate**, one at a time: `tsc`, `eslint` (0 errors), `test:specs`, `test:review:regressions`, `test:smoke`.
-- [ ] **Step 2: Write D141** — namespace, both-way table, echo window, conflict rule, learned-domain rule, suggested-vs-linked. Mark #96 DONE with commit hashes.
+- [ ] **Step 2: Write D142** — namespace, both-way table, echo window, conflict rule, learned-domain rule, suggested-vs-linked. Mark #96 DONE with commit hashes.
 - [ ] **Step 3: Commit + push**, then in production: open the Inbox once, confirm Curt/Brenda threads are linked to their customers, label one thread `Peak/Status/Done` in Gmail and watch it close in Peak on the next sync.
 
 ```bash
 git add DECISIONS.md PUNCHLIST.md MASTER-HOWTO.md DEPLOY.md docs/superpowers/specs/2026-09-21-inbox-customer-linking-and-label-sync-design.md
-git commit -m "docs: D141 two-way Peak/* labels + linking; close #96
+git commit -m "docs: D142 two-way Peak/* labels + linking; close #96
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 git push origin main
