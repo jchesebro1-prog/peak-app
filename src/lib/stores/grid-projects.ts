@@ -493,10 +493,9 @@ export async function addPlacement(
   projectId: string,
   input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string; by: string }
 ): Promise<GridProject | null> {
-  const project = await getProject(projectId);
-  if (!project || !hasOption(project, input.optionId)) return null;
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    ensureOptions(p);
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!hasOption(p, input.optionId)) { refused = true; return; }
     p.placements = [
       ...(p.placements || []),
       {
@@ -513,6 +512,7 @@ export async function addPlacement(
     ];
     p.updatedAt = Date.now();
   });
+  return refused ? null : updated;
 }
 
 /**
@@ -534,11 +534,10 @@ export async function addPlacements(
   }
 ): Promise<GridProject | null> {
   if (!input.items.length) return getProject(projectId);
-  const project = await getProject(projectId);
-  if (!project || !hasOption(project, input.optionId)) return null;
   const at = Date.now();
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    ensureOptions(p);
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!hasOption(p, input.optionId)) { refused = true; return; }
     const added: GridPlacement[] = input.items.map((item) => ({
       id: rid("gp-"),
       sheetId: input.sheetId,
@@ -555,6 +554,7 @@ export async function addPlacements(
     p.placements = [...(p.placements || []), ...added];
     p.updatedAt = at;
   });
+  return refused ? null : updated;
 }
 
 /**
@@ -580,10 +580,9 @@ export async function addCurtainPlacement(
     by: string;
   }
 ): Promise<GridProject | null> {
-  const project = await getProject(projectId);
-  if (!project || !hasOption(project, input.optionId)) return null;
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    ensureOptions(p);
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!hasOption(p, input.optionId)) { refused = true; return; }
     p.placements = [
       ...(p.placements || []),
       {
@@ -602,6 +601,7 @@ export async function addCurtainPlacement(
     ];
     p.updatedAt = Date.now();
   });
+  return refused ? null : updated;
 }
 
 /**
@@ -843,10 +843,9 @@ export async function addRoute(
     connectionType?: string;
   }
 ): Promise<GridProject | null> {
-  const project = await getProject(projectId);
-  if (!project || !hasOption(project, input.optionId)) return null;
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    ensureOptions(p);
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!hasOption(p, input.optionId)) { refused = true; return; }
     p.routes = [
       ...(p.routes || []),
       {
@@ -866,6 +865,7 @@ export async function addRoute(
     ];
     p.updatedAt = Date.now();
   });
+  return refused ? null : updated;
 }
 
 export async function removeRoute(
