@@ -32,7 +32,14 @@ export async function POST(req: NextRequest) {
   // same-origin Origin header, so the real flow is unaffected.
   const contentType = req.headers.get("content-type") ?? "";
   const origin = req.headers.get("origin");
-  if (!contentType.startsWith("application/json") || origin !== req.nextUrl.origin) {
+  const secFetchSite = req.headers.get("sec-fetch-site");
+  // Some same-origin requests (e.g. a WebView fetch with third-party cookie
+  // restrictions in play) omit Origin entirely; accept those only when
+  // sec-fetch-site confirms same-origin. Origin present but mismatched, or
+  // Origin absent with sec-fetch-site anything else, is rejected.
+  const originOk =
+    origin !== null ? origin === req.nextUrl.origin : secFetchSite === "same-origin";
+  if (!contentType.startsWith("application/json") || !originOk) {
     return jsonNoStore({ error: "malformed" }, { status: 400 });
   }
   let body: { code?: unknown; verifier?: unknown };
@@ -60,17 +67,24 @@ export async function POST(req: NextRequest) {
       maxAge: THIRTY_DAYS_S,
     });
   }
-  // Clean up any stale cookie of the OTHER known shape (e.g. an http
-  // `authjs.session-token` left over once the deployment moved to https and
-  // started minting `__Secure-authjs.session-token`), mirroring Auth.js's own
-  // chunk cleanup so the WebView's jar never carries two competing sessions.
+  // Clean up any stale cookie within the SAME cookie family that isn't one of
+  // the ones we just set (e.g. a leftover chunked `authjs.session-token.0`
+  // once the session shrank back under the chunking threshold), mirroring
+  // Auth.js's own chunk cleanup so the WebView's jar never carries two
+  // competing cookies for the same base name.
   if (result.cookies.length > 0) {
     const base = baseCookieName(result.cookies[0].name);
     if (base) {
       const keep = new Set(result.cookies.map((c) => c.name));
       for (const c of req.cookies.getAll()) {
         if (baseCookieName(c.name) === base && !keep.has(c.name)) {
-          res.cookies.set(c.name, "", { maxAge: 0, path: "/" });
+          res.cookies.set(c.name, "", {
+            maxAge: 0,
+            path: "/",
+            httpOnly: true,
+            sameSite: "lax",
+            secure: c.name.startsWith("__Secure-"),
+          });
         }
       }
     }

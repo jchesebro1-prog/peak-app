@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     sameSite: "lax",
     secure: req.nextUrl.protocol === "https:",
     path: "/",
-    maxAge: 300,
+    maxAge: 60 * 15, // matches Auth.js's own state/PKCE cookie lifetime
   });
   // signIn sets the Auth.js cookies via cookies() and throws Next's redirect
   // to Google; both are supported inside a Route Handler.

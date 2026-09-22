@@ -120,8 +120,10 @@ location.replace(next)  → signed in; WKWebView persists cookies across relaunc
   stores it under `localStorage["qz_native_verifier"]`, computes the challenge with
   `crypto.subtle.digest`, `Browser.open({ url: origin + "/api/native/auth/start?…" })`.
   `handleNativeAuthUrl(url): Promise<"ignored" | "done" | "failed">` — parses `quartzite://auth`,
-  POSTs to exchange with the stored verifier, clears the verifier, closes the sheet when the plugin
-  is available, and on success `location.replace(next)`.
+  POSTs to exchange with the stored verifier, closes the sheet when the plugin is available, and on
+  success `location.replace(next)`. The verifier is cleared only once the exchange settles with a 200
+  or a 401 (code consumed or definitively dead); a network error or unexpected status leaves it in
+  place so a retry of the same `quartzite://` URL can still work.
 - `src/app/login/login-buttons.tsx`: the Google button's handler becomes
   `if (!(await startNativeGoogleSignIn(next))) signIn("google", …)`.
 - `src/app/login/native-auth-return.tsx` (`"use client"`, renders `null` or one status line):

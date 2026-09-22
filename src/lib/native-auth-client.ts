@@ -14,6 +14,20 @@ import { isNativePlatform } from "@/lib/platform";
 export const NATIVE_AUTH_SCHEME_PREFIX = "quartzite://auth";
 const VERIFIER_KEY = "qz_native_verifier";
 
+/**
+ * Exact scheme + host match rather than a string prefix, so a URL like
+ * "quartzite://authx?…" or "quartzite://auth.evil?…" can't slip through.
+ */
+export function isNativeAuthUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "quartzite:" && parsed.host === "auth";
+}
+
 function b64url(bytes: Uint8Array): string {
   let s = "";
   for (const b of bytes) s += String.fromCharCode(b);
@@ -62,15 +76,8 @@ function isSafeNext(path: string): boolean {
  * shows a retry message.
  */
 export async function handleNativeAuthUrl(url: string): Promise<"ignored" | "done" | "failed"> {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return "ignored";
-  }
-  // Exact scheme + host match rather than a string prefix, so a URL like
-  // "quartzite://authx?…" or "quartzite://auth.evil?…" can't slip through.
-  if (parsed.protocol !== "quartzite:" || parsed.host !== "auth") return "ignored";
+  if (!isNativeAuthUrl(url)) return "ignored";
+  const parsed = new URL(url);
   const verifier = localStorage.getItem(VERIFIER_KEY);
   const code = parsed.searchParams.get("code");
   void closeSheet();
