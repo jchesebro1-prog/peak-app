@@ -5441,7 +5441,7 @@ interpreted from Gmail (customer, status, assign, route to lead/project); status
 latest message instead of stamped per import (the "Waiting on us after I replied" defect —
 Brenda thread). §6 status derivation ships with #95's hardening batch; the rest follows.
 
-**Status:** SHIPPED 2026-09-21 on `feat/inbox-linking`. Wave A (Tasks 1–8, D141): resolver,
+**Status:** SHIPPED 2026-09-21 on `feat/inbox-linking`. Wave A (Tasks 1–8, D140): resolver,
 `customer_domains`, ingest stamping + backfill/re-sweep, link actions, `EntityQuickAdd`, reader link
 sidebar, Unmatched view. Wave B (Tasks 9–12, D142, commits 5c0009c…03dc77b): pure `Peak/*` vocabulary,
 lazy label creation + bounded Peak→Gmail writer, Gmail→Peak interpreter (per-thread collapse, echo

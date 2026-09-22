@@ -2710,7 +2710,7 @@ Decisions taken:
 database believes is applied and whether a pending migration's objects already
 exist — run it before trusting a migration against production.
 
-## D141 — Inbox customer linking, Wave A (2026-09-21)
+## D140 — Inbox customer linking, Wave A (2026-09-21)
 
 PUNCHLIST #96, spec `docs/superpowers/specs/2026-09-21-inbox-customer-linking-and-label-sync-design.md`.
 Defaults taken while building Tasks 1–8 (branch `feat/inbox-linking`):
@@ -2743,7 +2743,7 @@ Defaults taken while building Tasks 1–8 (branch `feat/inbox-linking`):
 
 PUNCHLIST #96 Wave B, spec `docs/superpowers/specs/2026-09-21-inbox-customer-linking-and-label-sync-design.md`
 (commits 5c0009c…03dc77b on `feat/inbox-linking`). Gmail labels are now a two-way command surface,
-built on Wave A's linking (D141).
+built on Wave A's linking (D140).
 
 - **Namespace.** The app owns everything under `Peak/`; nothing outside it is read or written.
   `Peak/Customers/<name>`, `Peak/Status/{Needs reply|Waiting|Done}`, `Peak/Assign/<First>`,

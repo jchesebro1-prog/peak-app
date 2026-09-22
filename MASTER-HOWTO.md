@@ -146,7 +146,7 @@ The app is an installable web app (PWA) that keeps working with no signal.
 
 ## 5. Gmail integration ✅ *(Phase 7 — built; flip on when you're ready)*
 
-**`Peak/` labels (two-way, D141/D142).** Once a mailbox is connected, the app keeps a `Peak/`
+**`Peak/` labels (two-way, D140/D142).** Once a mailbox is connected, the app keeps a `Peak/`
 label namespace in Gmail in sync with the Inbox. Peak writes them when you link a thread to a
 customer, change its status, assign it, or link it to a project/lead/quote. You can also drive Peak
 *from* Gmail: apply `Peak/Customers/<name>`, `Peak/Status/Needs reply|Waiting|Done`,

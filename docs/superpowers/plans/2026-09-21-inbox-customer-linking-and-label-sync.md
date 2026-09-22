@@ -1088,7 +1088,7 @@ git commit -m "feat(inbox): Unmatched view for threads with no customer link (#9
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
-**Wave A checkpoint:** run the full gate (`tsc`, `eslint`, `test:specs`, `test:review:regressions`, `test:smoke` — one at a time), push, and let production sync once. Log **D141** in DECISIONS.md (resolver precedence, suggested-vs-linked distinction, learned-domain rule) before starting Wave B.
+**Wave A checkpoint:** run the full gate (`tsc`, `eslint`, `test:specs`, `test:review:regressions`, `test:smoke` — one at a time), push, and let production sync once. Log **D140** in DECISIONS.md (resolver precedence, suggested-vs-linked distinction, learned-domain rule) before starting Wave B.
 
 ---
 
