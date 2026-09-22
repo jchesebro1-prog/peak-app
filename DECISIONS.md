@@ -2722,3 +2722,229 @@ shows the category as a neutral badge only where no service badge applies.
 The field is editable from the Estimator's "Prepared for" bar and persists
 through the same meta path as the customer/venue/contact picks.
 
+
+## D142. `/venues` adopts the catalog page's own cap-at-200 + typeahead pattern (2026-09-21)
+
+Punch #92 found `/venues` rendering every venue and every company with no
+limit — 8.5 s / 10 MiB at 1,700 companies / 3,400 sites — and left three UX
+questions open for Jeff (paginate vs. infinite-scroll vs. virtualize; a
+typeahead vs. a huge company picker; whether the directory should list
+everything by default at all). Rather than invent a new answer, `/venues`
+takes the default this codebase already established for the identical
+problem on `/catalog` (`const PAGE = 200`): existing `?q=`/`?company=`
+filters narrow the set first, the result is capped to 200 rows, and a
+"Showing X of Y venues" label (matching catalog's own wording) distinguishes
+the truncated case from the untruncated one. No page-number links were
+added — catalog's own accepted behavior is "narrow with filters," not
+"click through pages" — so this stays reversible with no schema or URL-
+contract change once Jeff picks a real answer.
+
+The company filter (previously one `<Link>` chip per company, unbounded)
+is now a text `<input>` bound to a native `<datalist>` of company names,
+still submitting through the existing `?company=` param — no new client
+component or search dependency. Because a `<datalist>` fills the typed
+name rather than an id, the page resolves `?company=` against either a
+known company id (old links keep working) or a case-insensitive company
+name match; an unresolved value fails open to "no filter" instead of
+matching zero venues or erroring.
+
+Also removed: an unreviewed 50-per-page `?page=` paginator that had been
+committed to this file from the 2026-08-11 wip snapshot (`1391cdd`) but was
+never part of any reviewed change — it predates this decision and duplicated
+exactly the surface #92 asks Jeff to choose between.
+
+## D143. Punch #16 — quote-won and project-complete notify as a Home Queue task, not email (2026-09-21)
+
+Punch #16 asked for the company to be notified when a project is sold and
+when it's completed. Jeff's own alternative to automated email — "it becomes
+a task/lead for an employee to follow up... for an install sale the PM
+reaches out; for a project close, the salesperson follows up" — is now
+built, using the existing `assignments` collection (D93, the Home Queue's
+one non-derived source) rather than any email path. No new UI: an assignment
+created here shows up in the Home Queue and `/api/queue` (Mac Reminders
+sync) automatically.
+
+**Assignee default: the record's `owner`.** There is no distinct PM or
+salesperson role separate from `owner` anywhere in the data model (quotes
+and projects both carry only `owner: string`, per PUNCHLIST #16 decision E),
+so both hooks assign to the record's `owner`. This sidesteps all five of
+#16's email risks (an unaudited send channel already live on a 5-minute
+cron, guessed roster addresses with no correction UI, no dedupe/idempotency
+marker, no email log or audit trail, and silent send failures) while still
+satisfying Jeff's task-first alternative.
+
+**Hook 1 — quote won (`src/lib/stores/quotes.ts`, `setStatus`):** fires
+inside the existing one-shot guard (`if (!q || q.status === status) return
+q;`), so it only runs the moment a quote actually transitions into "won,"
+never on a re-save of an already-won quote. This is a genuine fix, not a
+duplicate: the only prior "sold" signal (`item16:sold:<id>` in
+`stores/projects.ts`, added 2026-07-25 under `724016c`) is a tasks-collection
+row created lazily when a project is converted (on Projects-page load or
+"Convert to project") and, per that commit, is created with **no
+assignee** — invisible in the Home Queue, whose task-source filters on
+`assigneeName === me`. It's left in place (still useful as a team-visible
+checklist row on the project's own Tasks tab) since it never collides with
+the new assignment in any shared view. The new hook is scoped to quote
+types that actually become an Installs project — excludes `flame_test`,
+`repair`, `inspection`, `consulting` (mirrors `syncProjectsFromQuotes`' own
+exclusion list) — so a won flame-test/repair/inspection quote, which also
+calls `setStatus(..., "won", ...)`, doesn't spawn a bogus "install sold"
+task.
+
+**Hook 2 — project complete (`src/app/(app)/projects/actions.ts`,
+`signoffAction`):** guarded by checking the project's stage *before*
+calling `setProjectStage` (`setProjectStage` has no early-return guard for
+an unchanged stage the way `setStatus` does — `recordStageChange`'s
+internal no-op doesn't stop the caller's side effects — so the guard lives
+in the caller instead of restructuring the store function). Unlike the sold
+hook, this one **replaced** rather than added to the prior mechanism: the
+same `724016c` commit already spawned a tasks-collection row
+(`item16:completed:<id>`) assigned to the quote's owner on entering
+"complete" via `setProjectStage`, which — being assigned — already rendered
+in that owner's Home Queue. Adding the new assignment alongside it would
+have put two rows for the same event in front of the same person, so the
+old spawn was removed from `setProjectStage` in favor of the one created by
+`signoffAction`. Known trade-off: a direct stage jump to "complete" via
+`setStageAction` (bypassing sign-off) no longer spawns any follow-up. That
+path is PUNCHLIST #16 decision D's still-open gap — Jeff's own answer there
+is that "a project must not be able to reach complete without a signoff" —
+so losing notification coverage on a path that shouldn't be reachable is
+preferred over duplicating it on the path that is. Enforcing that gate
+(blocking `setStageAction` from setting "complete" directly) remains
+unbuilt and is a natural companion to whoever picks up decision D.
+
+**Also fixed in passing:** an assignment's Home Queue row only linked
+anywhere for `link.kind === "engagement"`; `"project"` and `"quote"` fell
+through to `/queue` itself. `src/lib/queue.ts` now routes `"project"` to
+`/projects/<id>` and `"quote"` to `/quotes?id=<id>` (the app's existing link
+convention for a quote), so both new hooks land on the actual record instead
+of a dead end.
+
+PUNCHLIST.md #16 is updated to DONE; no email, no new stores, nothing under
+`src/lib/gmail/` or `src/lib/stores/comms.ts` touched.
+
+## D144. Calendar "based out of" + auto travel-time block on scheduled meetings (2026-09-21)
+
+Jeff: "In Calendar settings there should be an option for where you are
+based out of ... when scheduling meetings with physical address it auto
+adds travel time to the calendar as an event that you can remove."
+
+- **Reused `users.officeId`** (already on the `users` table, already
+  editable by an Admin in Settings -> Team) instead of a new column or a
+  separate preference table. Settings -> Team's `updateMemberAction` is
+  gated on `manage_users`, which most roles don't have for their own
+  record, so a new self-service action — `updateMyOfficeAction` in
+  `src/app/(app)/account/actions.ts` — writes `officeId` on the
+  SIGNED-IN user's own row only, ever. Surfaced as a small "Based out of"
+  card (`account/office-picker.tsx`) on `/account` — personal preferences
+  live there, company-wide config lives in Settings.
+- **Address heuristic** (`looksLikePhysicalAddress` in
+  `calendar-actions.ts`): a real street address usually carries a digit
+  (street number) and/or a comma (separating street/city/state); a Zoom
+  link, Meet/Teams URL, or bare room name usually has neither and is
+  rejected outright by an `http(s)://` / known-meeting-domain check first.
+  Loose by design — false positives just mean an extra (freely-deletable)
+  travel block; false negatives just mean none gets added.
+- **Fallback office**: if the signed-in user has no `officeId` set, the
+  travel block falls back to the quote-default office
+  (`quoteOrigin()`, same office Estimating/pricing already treats as the
+  default travel origin). If there is truly no office configured anywhere,
+  the travel block is skipped with no error — the meeting still saves.
+- **Free-text address -> coordinates**: `estimate()`'s target wants
+  lat/lng, not a string, so the location is geocoded first via `geo.ts`'s
+  existing `search()` (Nominatim) before calling `estimate([office],
+  {lat, lng})`. `search()` already fails soft (empty array) on a network
+  hiccup or an unresolvable address, which is exactly the "skip silently"
+  behavior this feature needs.
+- **Create only, not update.** `addCalendarEventAction` adds the travel
+  block; `updateCalendarEventAction` does not regenerate one when
+  `location` changes, to avoid piling up a new block on every edit with no
+  reliable way to tell an address change from an unrelated edit, and no
+  link from a travel block back to its meeting to find/replace the old
+  one (by design — it's an ordinary, unlinked, freely-removable event).
+  Logged as a known limitation, not fixed here.
+- **Failure is always silent and non-blocking.** `addTravelBlock` runs
+  after the real meeting event is already saved and is wrapped in its own
+  try/catch — a missing office, a geocoding miss, or a Calendar API error
+  never fails or blocks meeting creation.
+- **`schedule/actions.ts` (crew/install board) is out of scope.** Its
+  `calendarEvent()` never sets a `location` at all — those are crew shift
+  bookings ("Peak crew booking for <person>. Project <id>."), not
+  "meetings with a physical address" in Jeff's sense. Left untouched.
+
+No schema/migration change — `users.officeId` already existed.
+
+## D145. Grid Task 1 — generated base sheet (2026-09-21)
+
+Punch #38 (Task 1 of 6, per
+`docs/superpowers/plans/2026-09-21-grid-generated-base-sheet-plan.md`):
+replaces the dims-blind blank-rectangle default sheet with one rendered
+from the venue's actual `VenueDims`/`AState`, correctly scaled, with zero
+calibration step before painting.
+
+- **String-builder serializer, not React SSR.** New `renderPlanSvgMarkup()`
+  in `plan-svg.tsx` walks the same `rects`/`lines`/`circles`/`texts`/`paths`
+  arrays `<PlanSvg>` already renders and hand-builds the `<svg>…</svg>`
+  markup string. Rejected `react-dom/server`'s `renderToStaticMarkup`: the
+  caller is `grid-projects.ts`, a doc-store module with no request/render
+  context, invoked from a plain server action at intake-save time — there's
+  no natural place to renderToString into, and pulling `react-dom/server`
+  into a lib module for one static `<svg>` is a heavier dependency than a
+  ~40-line serializer over five already-typed primitive arrays. `handles`
+  (wall/door drag affordances) are deliberately excluded — a generated base
+  sheet is a static background image, like an uploaded plan; nothing on it
+  drags. `var(--font-mono)` (the interactive renderer's font) can't resolve
+  inside an `<img src="data:image/svg+xml…">` — that paints in its own
+  isolated context with no access to the host document's CSS custom
+  properties — so the static markup names `IBM Plex Mono, monospace`
+  directly instead.
+- **"First intake save" = `project.sheetIds.length === 0`.** `createProject()`
+  no longer pre-seeds any sheet/Space at all (previously unconditional,
+  before any dims existed — the literal cause of the old default being
+  dims-blind); every new project now opens straight into `GridIntake`
+  (`intake.complete` starts false) with an empty `sheetIds`. `saveGridIntakeAction`
+  checks `sheetIds.length` on the project as it stood *before* this save:
+  zero means this is the first completion, and it generates exactly one
+  starting sheet — `generateBaseSheet()` (measurementBased: true) or
+  `seedBlankSheet()` (measurementBased: false, "I have my own plan, skip
+  measurements" — no `VenueDims` yet to render, a real upload is expected
+  next). `GridIntake` has no re-entry path once `intake.complete` is true
+  (confirmed by grep — `saveGridIntakeAction` has exactly one caller), so in
+  practice this only ever fires once per project; the `sheetIds` check is a
+  belt-and-suspenders guard rather than a state machine this build needed to
+  invent.
+- **Auto-calibration reuses `calibrationScale()`**, the same function the
+  manual "measure a known reference" flow uses, rather than hand-deriving
+  each venue kind's private pixel-per-foot constant. Every `buildPlan*`
+  function's FIRST `rects[]` entry is the outer room/house floor — for a
+  proscenium house that's `width + 2×wing` (the house is wider than just the
+  proscenium opening); for every other kind it's exactly `width` — a
+  reference that holds across venue kinds without reaching into each
+  builder's private margin constants (`ML`/`MR`, not exported). The
+  resulting `Calibration` is written straight onto the new sheet, so
+  `findCalibration` short-circuits and nothing downstream ever prompts for
+  a calibration step on it.
+- **Geometry-derived starter Spaces for proscenium and church only.**
+  `prosGeom()`/`churchGeom()` are already exported specifically for reuse
+  (drag math), so building "Stage"/"Audience view"/"FOH · control" from
+  their `.stage`/house/booth fields — normalized by the same plan `W`/`H` —
+  was a genuinely small addition, and lands those three Spaces roughly where
+  the real stage/house/booth actually are instead of arbitrary fixed
+  fractions. The other buildable kinds (flat/conference, blackbox, gym)
+  compute their room/booth geometry as private local variables inside their
+  own `buildPlanFlat`/`buildPlanBlackbox`/`buildPlanGym` — there's no
+  exported equivalent to reuse, and adding one for three more kinds is real
+  geometry work, not a small addition. They keep the pre-existing
+  fixed-fraction Spaces. **Follow-up, not built here:** export a geometry
+  helper (or promote a `.stage`/room field onto `PlanData` itself) for
+  flat/blackbox/gym so their starter Spaces can be geometry-derived too.
+- Church's booth bottom edge (`y1 + boothH`) is recomputed locally in the
+  new `starterSpaces()` rather than added to `churchGeom()`'s return shape —
+  `churchGeom` already computes it as a local `yBoothBottom` it just never
+  returned; changing plan-svg.tsx's own geometry function's public shape for
+  one external caller felt like more churn than repeating one addition.
+
+No schema/migration change — `generateBaseSheet`/`seedBlankSheet`/
+`starterSpaces` write into the existing `grid_projects`/`grid_sheets`
+doc-store collections and the existing `Calibration`/`GridSpace` shapes,
+nothing new.

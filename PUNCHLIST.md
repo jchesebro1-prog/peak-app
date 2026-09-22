@@ -1300,7 +1300,7 @@ queued to build later per Jeff. The per-scope default *rules* are still to be de
 
 ---
 
-## 16. Notify the company when a project is sold and when it's completed — PARTIAL (corrected 2026-08-08)
+## 16. Notify the company when a project is sold and when it's completed — DONE 2026-09-21 (D143) — Home Queue task, not email
 
 **Area:** `src/app/(app)/quotes/actions.ts:25-43` (won), `src/app/(app)/projects/actions.ts:100-111`
 (signoff), `src/lib/gmail/bridge.ts`, `src/lib/stores/comms.ts`, `src/lib/stores/notif-prefs.ts`
@@ -1401,6 +1401,24 @@ direct stage change from reaching `complete` without a signoff — `setStageActi
 **decision E** (the project-roles model — tasks still spawn unassigned, per D87). Both are
 unbuilt, both real, and both worth a look together with item 20 Phase 2 (the roles model's stated
 home) whenever that's picked up — not built here, this is a documentation correction only.
+
+**DONE 2026-09-21 (D143).** Built Jeff's task-first alternative on the `assignments` collection
+(D93 — the Home Queue's one non-derived source) instead of extending the tasks-collection
+mechanism above. Two hooks, both assigning to the record's `owner` (still no separate PM/
+salesperson role — decision E's identity gap, addressed with the only assignee reliably present):
+`stores/quotes.ts` `setStatus` creates "Install sold — reach out" the moment a quote transitions
+into `won` (scoped to quote types that actually become an Installs project, so flame-test/repair/
+inspection/consulting wins don't get a bogus install task) — a real fix over the 7/25 `sold` task
+above, which spawns unassigned and only on project conversion, not the sale itself; that old task
+is left in place since it's still a useful team-visible checklist row and never collides with the
+new one in any shared view. `projects/actions.ts` `signoffAction` creates "Project complete —
+check in" guarded on the project's prior stage (not yet "complete") before calling
+`setProjectStage` — this one *replaces* the 7/25 `completed` task, which was already owner-assigned
+and would otherwise show twice in the same person's Home Queue for the same event. Decision D
+(direct stage jump to "complete" via `setStageAction`, bypassing sign-off) is still open and now
+also means that path spawns no follow-up — deliberate, per Jeff's own answer that sign-off should
+gate completion, not a silent gap. No email; nothing under `lib/gmail/` or `stores/comms.ts`
+touched. Full reasoning in DECISIONS.md D143.
 
 ---
 
@@ -2946,11 +2964,13 @@ field already exist; the work is a sell-price input + deciding A (line distribut
 
 ---
 
-## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — OPEN
+## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — IN PROGRESS 2026-09-21 (Task 1 of 6 shipped, D145) — generated base sheet
 
 **Area:** The Grid (`/design/grid`), sheet handling; shared `VenueDims`.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
-**Spec:** `docs/superpowers/specs/2026-07-25-grid-base-sheet-and-estimator-split-design.md` (wave 2)
+**Spec:** `docs/superpowers/specs/2026-08-09-grid-base-sheet-estimator-split-design.md` (supersedes
+the 2026-07-25 spec for this build); plan:
+`docs/superpowers/plans/2026-09-21-grid-generated-base-sheet-plan.md`.
 
 **Ask (Jeff):** *"we need to have a base plan sheet be default, so the user doesn't need to
 upload something right away, they can just start dropping items in"* — refined same day:
@@ -2963,7 +2983,18 @@ calibration step on the base sheet**.
 wall-to-wall; the generated sheet must be explicit about which drives it. Open: when a real
 plan uploads later, do base-sheet markers carry over or arrive as a separate sheet?
 
-**Status:** OPEN — spec written, rides wave 2 (part of #41's architecture).
+**Task 1 shipped (D145):** the first intake save now generates a real base sheet from
+`VenueDims` (`generateBaseSheet()`, `plan-svg.tsx`'s new `renderPlanSvgMarkup()`
+string-builder) instead of a blank rectangle, auto-calibrated so nothing downstream ever
+prompts for a calibration step; `createProject()` no longer pre-seeds a sheet at all. The
+"I have my own plan, skip measurements" path still gets the old blank fallback
+(`seedBlankSheet()`). Starter Spaces are geometry-derived for proscenium/church venues;
+flat/blackbox/gym keep the old fixed-fraction Spaces (follow-up, not a regression — see D145).
+**Remaining (Tasks 2–6, still OPEN):** seeding action, real-plan-upload as a separate sheet,
+artifact derivation (equipment/lineset schedule + riser), the estimator↔Grid BOM seam, and
+retiring the estimator's own drawing tabs once parity is reached.
+
+**Status:** IN PROGRESS — Task 1 of 6 shipped 2026-09-21 (D145); Tasks 2–6 open per the plan.
 
 ---
 
@@ -5333,7 +5364,7 @@ calling it.
 
 ---
 
-## 92. `/venues` renders every venue and every company in one page — 10 MiB, 8.5 s — OPEN
+## 92. `/venues` renders every venue and every company in one page — 10 MiB, 8.5 s — DONE 2026-09-21 — render capped at 200 (catalog's own pattern), company filter is now a typeahead (D142)
 
 **Area:** `src/app/(app)/venues/page.tsx`
 **Reported:** 2026-08-07 (found while fixing #91 — it is what #91's fix left behind)
@@ -5363,7 +5394,16 @@ instant locally. It was only found by seeding 1,700 synthetic companies and meas
 
 **Ties to:** #91, #89, #59 (real data is what makes this bite).
 
-**Status:** OPEN — logged only, no code. Needs a UX decision before anything is built.
+**Resolved 2026-09-21:** rather than pick among the three open pagination options, `/venues` takes
+the default already established for exactly this problem on `/catalog` (D142) — existing `?q=`/
+`?company=` filters narrow first, then the list is capped at 200 rows (`const PAGE = 200`) with a
+"Showing X of Y venues" label, no page-number links. The company filter is now a text input bound to
+a native `<datalist>` of company names (submits through the same `?company=` param; a typed name that
+doesn't resolve to a known company id fails open to no filter) instead of one `<Link>` chip per
+company. Also removed an unreviewed 50-per-page paginator that had leaked into this file from the
+2026-08-11 wip snapshot commit — it duplicated the exact surface this punch item asks Jeff to decide.
+
+**Status:** DONE 2026-09-21.
 
 ---
 
@@ -5599,3 +5639,50 @@ margin rule; example CSV shows both row kinds.
 cavecrew-reviewer pass, no confirmed findings. Not browser-checked — needs a visual on `/catalog`
 import, `/quotes/new`, and the estimator CSV panel.
 
+
+## 114. Calendar: based-out-of setting + auto travel-time block on scheduled meetings — DONE 2026-09-21 (D144)
+
+**Reported:** Jeff: "In Calendar settings there should be an option for where you are based out
+of. I would like when scheduling meetings with physical address it auto adds travel time to the
+calendar as an event that you can remove but has time dedicated to traveling to the site from
+where the person is based out of."
+
+**Shipped:** a "Based out of" picker on `/account` (self-service `updateMyOfficeAction`, reuses
+the existing `users.officeId` field Settings -> Team already edits for admins) and an auto
+travel-time block on `addCalendarEventAction` (Calendar's own meeting-create flow) — when a new
+event's location looks like a real street address (has a digit or comma, isn't a meeting-link
+URL), it geocodes the address (`geo.ts` `search()`), estimates drive time from the signed-in
+user's office (falling back to the quote-default office, then skipping silently if none exists),
+and inserts a second, ordinary, freely-removable "Drive to `<title>` (auto)" event ending at the
+meeting's start. Create-only — editing an existing meeting's location does not regenerate a
+travel block (known limitation, see D144). The crew/install Schedule board (`schedule/actions.ts`)
+is untouched — its bookings never carry a `location` and aren't "meetings with a physical
+address" in Jeff's sense.
+
+**Files:** `src/app/(app)/account/actions.ts`, `src/app/(app)/account/office-picker.tsx` (new),
+`src/app/(app)/account/page.tsx`, `src/app/(app)/calendar-actions.ts`. No schema/migration change.
+
+## 115. Apple Reminders sync agent (D93) — DONE 2026-09-21
+
+The Mac-side half of the work-queue/Reminders design
+(`docs/superpowers/specs/2026-07-19-work-queue-reminders-sync-design.md`) had never been built —
+only the server contract (`src/app/api/queue/route.ts`) existed. Apple publishes no cloud API for
+Reminders, so nothing hosted can ever write one; it has to run locally via osascript.
+
+**Shipped:** `scripts/reminders-agent.ts` — a standalone, mac-only (`process.platform !== "darwin"`
+guard) script that GETs `/api/queue?who=` with `x-queue-token`, reconciles the open items into a
+"Peak" list in Reminders.app via JXA (`osascript -l JavaScript`, chosen over AppleScript so
+argv-passed strings never need source-level quoting/escaping and list reads come back as JSON),
+and POSTs completions back to `/api/queue` for `source: "assignment"` items only, per the route's
+own write-back restriction. Dedupe is a `peak-queue-key: <key>` marker line in each reminder's
+notes, re-derived from Reminders' live state every run; a small ledger
+(`~/.peak-reminders-agent-ledger.json` by default) remembers only which keys were hand-deleted so
+they are never resurrected. Per-item osascript/POST failures are logged and skipped, not fatal;
+a bad token or unreachable host is fatal (non-zero exit). No new dependency — `child_process` +
+`fetch` only. Full usage (required env — `QUEUE_API_BASE_URL`, `QUEUE_API_TOKEN`,
+`QUEUE_AGENT_WHO` — manual run, and a launchd `.plist`/cron sample for the every-few-minutes
+schedule) is in the file's top-of-file doc comment, matching how the rest of `scripts/` documents
+itself (no sibling READMEs exist there).
+
+**Needs from Jeff to go live:** `QUEUE_API_TOKEN` set on the deployed app's env and on the Mac
+that will run this, and the script scheduled locally (launchd or cron) — see the doc comment.
