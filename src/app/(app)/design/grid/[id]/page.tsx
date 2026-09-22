@@ -160,6 +160,7 @@ export default async function GridEditorPage({
         routes: project.routes || [],
         revisions: project.revisions || [],
         autoConfig: project.intake?.autoConfig,
+        measurementBased: !!project.intake?.measurementBased,
       }}
       sheets={sheets.map((s) => ({
         id: s.id,
