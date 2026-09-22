@@ -57,11 +57,13 @@ function one(v: string | string[] | undefined): string {
 }
 
 /** #137 — a stored Website is usually bare ("riversideplayhouse.org"), which
- *  a browser would follow as a relative path. Give it a scheme; leave one it
- *  already has alone. */
+ *  a browser would follow as a relative path. Give it a scheme; leave an
+ *  http/https one alone. Only those two pass through: the field is free text
+ *  an import or a typo can fill, and anything else ("javascript:…") must
+ *  never become a live href — prefixing makes it an inert relative path. */
 function websiteHref(site: string): string {
   const s = site.trim();
-  return /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`;
+  return /^https?:\/\//i.test(s) ? s : `https://${s}`;
 }
 
 const card: CSSProperties = {
