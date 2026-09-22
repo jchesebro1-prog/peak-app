@@ -1,6 +1,6 @@
 # Quartzite native shell, Phase 2: field-ready mobile (camera, laser, push, readability, TestFlight)
 
-Status: draft for Jeff (2026-09-21). Builds on D132 (second entry, "Quartzite native shell — Capacitor
+Status: draft for Jeff (2026-09-21). Builds on D174 ("Quartzite native shell — Capacitor
 remote/hybrid Phase 1") which shipped the iOS/Android projects, `capacitor.config.ts` and
 `src/lib/platform.ts` with no device features. Nothing in this spec runs until Jeff completes the
 "Blocked on Jeff" list at the end; everything that does not need a device or an account is buildable
@@ -45,7 +45,7 @@ and testable now, on the web build, with the browser paths unchanged.
 
 ## Context
 
-Phase 1 (D132) made the app open inside WKWebView / Android WebView by loading the hosted Vercel app
+Phase 1 (D174) made the app open inside WKWebView / Android WebView by loading the hosted Vercel app
 (`server.url`). Next server components, server actions, Auth.js cookies and the Phase 6 offline outbox
 (`src/lib/sync/**`, `public/sw.js`) all work unchanged because the WebView is just another browser.
 The Capacitor bridge is injected into the remote page at document start (`JSExport.swift`,
@@ -65,7 +65,7 @@ Jeff's asks that this phase serves:
   progressive disclosure (less on a phone, more on a tablet, everything on a computer). The foundation
   (`useBreakpoint`, `--pk-h1/2/3`) landed but nothing has adopted it yet; the three ad-hoc thresholds
   (700/860/960) are still live.
-- The mobile-transition brief cited by D132: full offline-first field capture, TestFlight/App Store
+- The mobile-transition brief cited by D174: full offline-first field capture, TestFlight/App Store
   distribution, mobile work in parallel with the web roadmap.
 
 Capture editors in scope: Venue Assessments (`venue-assessments/[id]/controls.tsx` + `sections/photos.tsx`,
@@ -372,6 +372,6 @@ account, does:
 - Web push (browser notifications) — the web bell already exists; VAPID is a later phase.
 - Per-event push fast path (notify at `assign()` time) — the sweep is enough until latency hurts.
 - Photo upload to Vercel Blob (photos stay downscaled data URLs in the document, as today).
-- Static export / bundling the app into the binary (D132 rules it out).
+- Static export / bundling the app into the binary (D174 rules it out).
 - Deep links / universal links, biometric lock, background sync.
 - Every screen not named in section 5; the readability program continues as per-screen sub-items.

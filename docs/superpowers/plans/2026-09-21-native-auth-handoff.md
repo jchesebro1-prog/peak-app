@@ -549,7 +549,7 @@ import { isNativePlatform } from "@/lib/platform";
  * (docs/superpowers/specs/2026-09-21-native-auth-handoff-design.md).
  * Only ever active inside the Capacitor shell with the Browser/App plugins
  * present; every other combination returns false/"ignored" so callers fall
- * back to the plain web flow (version-skew rule, D132).
+ * back to the plain web flow (version-skew rule, D174).
  */
 
 export const NATIVE_AUTH_SCHEME_PREFIX = "quartzite://auth";
@@ -783,7 +783,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```markdown
 ## D153. Native shell signs in through a Safari sheet and returns by `quartzite://auth` (2026-09-21)
 
-The Capacitor shell (D132) could not sign in: Capacitor hands any non-app host to the system
+The Capacitor shell (D174) could not sign in: Capacitor hands any non-app host to the system
 browser, so Auth.js's state/PKCE cookies were set in the WebView while Google's callback landed in
 Safari. Verified on the iOS 27 simulator. Jeff chose to keep OAuth in a real browser context rather
 than spoof the WebView's user agent to satisfy Google's embedded-browser check.
