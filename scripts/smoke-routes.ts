@@ -73,6 +73,7 @@ const ROUTES = [
   "/reports",
   "/reviews",
   "/settings",
+  "/settings?section=admin", // #131 Grid symbols card lives here
   "/inbox",
   "/inbox?view=unmatched",
   "/queue",

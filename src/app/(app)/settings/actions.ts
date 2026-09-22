@@ -25,6 +25,7 @@ import {
   validateFieldDefs,
   type CustomFieldDef,
 } from "@/lib/customer-fields";
+import { isGridShape, type GridShape } from "@/lib/design/grid-symbols";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -272,6 +273,31 @@ export async function saveConsultingAssumptionsAction(assumptions: string[]) {
     .filter(Boolean)
     .slice(0, 40);
   await setSettings({ consultingAssumptions: clean });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** Grid symbol per category (#131, D154) — FULL REPLACEMENT (the wireTypes
+ *  idiom): the card posts every row; a category left off draws as a
+ *  rectangle. Unknown shapes and blank categories are dropped; capped.
+ *  settings.gridCategoryShapes is a whole-map replacement — a stored {}
+ *  would drop EVERY category to "rect" (resolveCategoryShapes treats an
+ *  empty object as "the whole truth", not "no overrides"). So an empty
+ *  result here is never persisted as {}: clearing every row (or Restore
+ *  defaults) clears the key instead, and resolveCategoryShapes falls back
+ *  to the seed, same as a fresh install (controller review, Task 10). */
+export async function saveGridCategoryShapesAction(map: Record<string, string>) {
+  await requirePerm("manage_users");
+  const clean: Record<string, GridShape> = {};
+  for (const [k, v] of Object.entries(map || {})) {
+    const category = String(k ?? "").trim().slice(0, 60);
+    if (!category || !isGridShape(v)) continue;
+    clean[category] = v;
+    if (Object.keys(clean).length >= 60) break;
+  }
+  await setSettings({
+    gridCategoryShapes: Object.keys(clean).length ? clean : null,
+  });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

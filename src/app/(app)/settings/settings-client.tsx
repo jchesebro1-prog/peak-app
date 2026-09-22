@@ -34,6 +34,8 @@ import type { UserStatus } from "@/lib/users";
 import type { GeoSearchHit } from "@/lib/geo";
 import type { CustomFieldDef } from "@/lib/customer-fields";
 import { CustomerFieldsCard } from "./customer-fields-card";
+import { GridSymbolsCard } from "./grid-symbols-card";
+import type { GridShape } from "@/lib/design/grid-symbols";
 import Link from "next/link";
 import { SegmentedToggle } from "@/components/ui";
 import {
@@ -160,6 +162,8 @@ export default function SettingsClient({
   consultingPhases,
   consultingAssumptions,
   customerFieldDefs,
+  gridCategoryShapes,
+  gridLiveCategories,
   offices,
   users,
 }: {
@@ -181,6 +185,8 @@ export default function SettingsClient({
   consultingPhases: string[];
   consultingAssumptions: string[];
   customerFieldDefs: CustomFieldDef[];
+  gridCategoryShapes: Record<string, GridShape>;
+  gridLiveCategories: string[];
   offices: OfficeVM[];
   users: UserVM[];
 }) {
@@ -1837,6 +1843,11 @@ export default function SettingsClient({
           <CustomerFieldsCard
             key={customerFieldDefs.map((d) => d.id).join("|")}
             defs={customerFieldDefs}
+          />
+          <GridSymbolsCard
+            key={JSON.stringify(gridCategoryShapes) + "::" + gridLiveCategories.join("|")}
+            shapes={gridCategoryShapes}
+            liveCategories={gridLiveCategories}
           />
         </>
       )}
