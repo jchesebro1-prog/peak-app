@@ -21,6 +21,14 @@ export type CatalogParse = {
   error?: string;
   rows: CatalogRow[];
   stats: { total: number; valid: number; invalid: number };
+  /** Did the file carry a List column at all? Rows coerce an absent column
+   *  to `list: 0`, which the importer must not read as "vendor priced this
+   *  at zero" — it preserves the stored price and skips the book date when
+   *  this is false (final review item 3, D156). Header files: the column
+   *  mapped; headerless files: some row reaches the positional slot. */
+  hasList: boolean;
+  /** Same for the Cost column. */
+  hasCost: boolean;
 };
 
 const ALIASES: Record<keyof Omit<CatalogRow, "valid">, string[]> = {
@@ -124,12 +132,11 @@ function looksLikeHeader(row: string[]): boolean {
  * whose category is blank/absent.
  */
 export function parseCatalog(text: string, defaultCategory = ""): CatalogParse {
-  if (!text || !text.trim())
-    return { ok: false, error: "Nothing pasted yet.", rows: [], stats: { total: 0, valid: 0, invalid: 0 } };
+  const none = { rows: [], stats: { total: 0, valid: 0, invalid: 0 }, hasList: false, hasCost: false };
+  if (!text || !text.trim()) return { ok: false, error: "Nothing pasted yet.", ...none };
 
   const grid = parseGrid(text);
-  if (!grid.length)
-    return { ok: false, error: "No rows found — paste at least one part.", rows: [], stats: { total: 0, valid: 0, invalid: 0 } };
+  if (!grid.length) return { ok: false, error: "No rows found — paste at least one part.", ...none };
 
   let dataRows = grid;
   const map: Record<keyof Omit<CatalogRow, "valid">, number> = {
@@ -141,6 +148,8 @@ export function parseCatalog(text: string, defaultCategory = ""): CatalogParse {
     cost: 5,
   };
 
+  let hasList: boolean;
+  let hasCost: boolean;
   if (looksLikeHeader(grid[0])) {
     const header = grid[0].map(norm);
     (Object.keys(ALIASES) as Array<keyof typeof ALIASES>).forEach((k) => {
@@ -149,6 +158,13 @@ export function parseCatalog(text: string, defaultCategory = ""): CatalogParse {
       map[k] = idx; // -1 when absent
     });
     dataRows = grid.slice(1);
+    hasList = map.list >= 0;
+    hasCost = map.cost >= 0;
+  } else {
+    // Positional: a column "exists" only if some row actually reaches it —
+    // a headerless SKU,Description paste carries no prices.
+    hasList = dataRows.some((r) => r.length > map.list);
+    hasCost = dataRows.some((r) => r.length > map.cost);
   }
 
   const rows: CatalogRow[] = dataRows.map((r) => {
@@ -171,5 +187,7 @@ export function parseCatalog(text: string, defaultCategory = ""): CatalogParse {
       valid: rows.filter((r) => r.valid).length,
       invalid: rows.filter((r) => !r.valid).length,
     },
+    hasList,
+    hasCost,
   };
 }

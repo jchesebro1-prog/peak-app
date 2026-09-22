@@ -3043,6 +3043,29 @@ import {
   ok(priceBooks(eight, {}, { now })[0]?.name === "Mfr0", "#14 priceBooks: sorted by count descending");
 }
 
+/* --- final review item 3: the Catalog page parser reports which price columns the file carried --- pure */
+import { parseCatalog } from "@/app/(app)/catalog/parse";
+
+{
+  const descOnly = parseCatalog("SKU,Description\nA-1,Widget\n");
+  ok(descOnly.ok && !descOnly.hasList && !descOnly.hasCost, "item 3 parseCatalog: no List/Cost header → hasList/hasCost false");
+  ok(descOnly.rows[0]?.list === 0 && descOnly.rows[0]?.cost === 0 && descOnly.rows[0]?.valid, "item 3 parseCatalog: …rows still coerce to 0 and stay valid");
+  const listOnly = parseCatalog("SKU,Description,List Price\nA-1,Widget,10\n");
+  ok(listOnly.hasList && !listOnly.hasCost && listOnly.rows[0]?.list === 10, "item 3 parseCatalog: a List column alone → hasList only");
+  const both = parseCatalog("SKU,Description,MSRP,Dealer Net\nA-1,Widget,10,6\n");
+  ok(both.hasList && both.hasCost && both.rows[0]?.cost === 6, "item 3 parseCatalog: List + Cost headers (through aliases) → both flags");
+  const blankCells = parseCatalog("SKU,Description,List,Cost\nA-1,Widget,,\n");
+  ok(blankCells.hasList && blankCells.hasCost && blankCells.rows[0]?.list === 0, "item 3 parseCatalog: a present column with blank cells still counts as carried (cell → 0, as before)");
+  const headerless2 = parseCatalog("A-1,Widget\nA-2,Gadget\n");
+  ok(headerless2.ok && !headerless2.hasList && !headerless2.hasCost, "item 3 parseCatalog: headerless SKU,Description rows carry no price columns");
+  const headerless6 = parseCatalog("A-1,Widget,Cat,ea,10,6\n");
+  ok(headerless6.hasList && headerless6.hasCost && headerless6.rows[0]?.list === 10 && headerless6.rows[0]?.cost === 6, "item 3 parseCatalog: headerless six-column rows carry both (positional)");
+  const headerless5 = parseCatalog("A-1,Widget,Cat,ea,10\n");
+  ok(headerless5.hasList && !headerless5.hasCost, "item 3 parseCatalog: headerless five-column rows carry List but not Cost");
+  const empty = parseCatalog("");
+  ok(!empty.ok && !empty.hasList && !empty.hasCost, "item 3 parseCatalog: a failed parse reports no price columns");
+}
+
 /* --- #132 / #134: catalog import guards --- pure */
 import {
   MAX_CATALOG_IMPORT_BYTES,

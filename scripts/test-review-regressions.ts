@@ -788,6 +788,26 @@ async function main() {
     assert.ok(!blank.ok && /Choose a manufacturer/.test(blank.error), "#132 a blank manufacturer is rejected server-side");
     const big = await runCatalogImport({ mfr: "T133 Acme", text: csv, bytes: 1_048_577, effectiveAt: D2, defaultCategory: "" });
     assert.ok(!big.ok && /1 MB/.test(big.error), "#134 an over-size upload is refused before parsing");
+
+    // Final review item 3 — a file without a List/Cost column must neither
+    // zero the stored prices nor date the manufacturer's book (D156: a file
+    // confirms only the prices it carries).
+    const D3 = new Date(2026, 8, 1).getTime();
+    const descOnly = "SKU,Description\nT133-A,Test part A (desc only)\n";
+    const noPrices = await runCatalogImport({ mfr: "T133 Acme", text: descOnly, bytes: Buffer.byteLength(descOnly), effectiveAt: D3, defaultCategory: "" });
+    assert.ok(noPrices.ok && noPrices.imported === 1, "item 3: a SKU+description file still imports");
+    const afterDescOnly = await getPart("T133-A");
+    assert.equal(afterDescOnly?.desc, "Test part A (desc only)", "item 3: …and updates the description");
+    assert.equal(afterDescOnly?.list, 100, "item 3: an absent List column leaves the stored list price alone (not zeroed)");
+    assert.equal(afterDescOnly?.cost, 60, "item 3: an absent Cost column leaves the stored cost alone (not zeroed)");
+    assert.equal(afterDescOnly?.pricedAt, D1, "item 3: …so pricedAt does not move");
+    assert.equal((await getSettings()).priceListEffective?.t133acme, D2, "item 3: a price-less file does NOT re-date the manufacturer's book");
+    const withPrices = "SKU,Description,List,Cost\nT133-A,Test part A,120,60\n";
+    const priced = await runCatalogImport({ mfr: "T133 Acme", text: withPrices, bytes: Buffer.byteLength(withPrices), effectiveAt: D3, defaultCategory: "" });
+    assert.ok(priced.ok, "item 3: a file with prices still imports");
+    assert.equal((await getPart("T133-A"))?.list, 120, "item 3: …and a carried List price still updates");
+    assert.equal((await getPart("T133-A"))?.pricedAt, D3, "item 3: …stamping the changed line");
+    assert.equal((await getSettings()).priceListEffective?.t133acme, D3, "item 3: …and re-dating the manufacturer's book");
   }
 
   // #132/#133 — the Import hub's catalog writer stamps the commit's effective date
@@ -815,6 +835,18 @@ async function main() {
     const invalid = await commitImport("catalog", prepOf("SKU,Description,List Price,Cost\nT133-H2,No manufacturer,50,30\n").rows, "update", { effectiveAt: D2 });
     assert.equal(invalid.errored, 1, "#132 a hub row without a manufacturer is never written");
     assert.equal(await getPart("T133-H2"), null, "#132 …and does not exist afterwards");
+
+    // Final review item 3 — "Create new" on a SKU that already exists is a
+    // merge (the SKU is the document id), so an absent price column must
+    // preserve the stored price exactly like "Update existing" does (#81).
+    const D3 = new Date(2026, 8, 1).getTime();
+    const createDescOnly = await commitImport("catalog", prepOf("SKU,Description,Manufacturer\nT133-H1,Hub part (desc only),T133 Hub\n").rows, "create", { effectiveAt: D3 });
+    assert.equal(createDescOnly.created, 1, "item 3: hub create mode on an existing SKU runs the create path");
+    const afterCreate = await getPart("T133-H1");
+    assert.equal(afterCreate?.desc, "Hub part (desc only)", "item 3: …and updates the description");
+    assert.equal(afterCreate?.list, 55, "item 3: hub create mode keeps the stored list price when the file has no List column");
+    assert.equal(afterCreate?.cost, 30, "item 3: …and the stored cost when it has no Cost column");
+    assert.equal(afterCreate?.pricedAt, D2, "item 3: …so pricedAt does not move");
   }
 
   console.log("review regression checks passed");

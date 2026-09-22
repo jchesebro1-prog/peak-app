@@ -86,7 +86,9 @@ const EQUIPMENT_CATEGORIES = [
  * create and update paths. Pure — it touches no store — so the merge
  * semantics are unit-testable without a database (scripts/test-review-and-spec.ts).
  *
- * `ex` is the part already in the catalog (null on the create path).
+ * `ex` is the part already in the catalog — null only when the SKU is brand
+ * new (the create path looks it up too, since "Create new" on an existing
+ * SKU is a merge into that document).
  *
  * Every field falls back to what the part already holds before falling back to
  * a default, because a vendor price sheet is allowed to omit columns: neither
@@ -493,13 +495,23 @@ const WRITERS: Record<string, Writer> = {
     load: async () => (await Catalog.list()) as unknown as Record<string, unknown>[],
     find: (v, cache) => cache.find((p) => ci(p.sku, v.sku)) || null,
     create: async (v, cache, ctx) => {
-      const sku = str(v.sku);
+      // "Create new" on a SKU that already exists cannot create a second
+      // part — the SKU is the document id — so it is a merge like update,
+      // and it must preserve prices exactly like update does: with
+      // `catalogPatch(v, null, …)` an absent List/Cost column zeroed every
+      // overlapping part (final review item 3). The existing record comes
+      // from the same cache `find` reads, so an in-file duplicate sees the
+      // row written just before it.
+      const ex = cache.find((p) => ci(p.sku, v.sku)) || null;
+      const sku = ex ? str(ex.sku) : str(v.sku);
+      const patch = catalogPatch(v, ex, sku);
       // mergeUpsert is the same entry point scripts/import-catalog.ts uses —
       // it preserves fields a price sheet doesn't carry (ports, trade, spec
       // text, datasheet attachments) when a SKU is re-imported. pricedAt
       // (#133) lands only when the price actually changes.
-      await Catalog.mergeUpsert(sku, catalogPatch(v, null, sku), { pricedAt: ctx.effectiveAt });
-      cache.push({ id: sku, sku });
+      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt });
+      if (ex) Object.assign(ex, patch);
+      else cache.push({ id: sku, sku, ...patch });
     },
     update: async (ex, v, ctx) => {
       const sku = str(ex.sku);
