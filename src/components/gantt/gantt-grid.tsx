@@ -139,7 +139,16 @@ export function GanttGrid({
 
   const days = dayColumns(startAt, endAt);
   const weekStarts = days.filter((d) => weekdayOf(d) === 0);
-  const hasToday = typeof now === "number" && now >= startAt && now <= endAt;
+  // #145 review fix (round 4): compared by LOCAL CALENDAR DAY, not raw
+  // instant — `startAt`/`endAt` are local-noon-anchored (every date input
+  // in this app is), so a raw `now >= startAt` / `now <= endAt` hid the
+  // today line for the morning of the engagement's first day (now before
+  // that day's noon) and the afternoon of its last day (now after that
+  // day's noon), even though "today" is genuinely within the engagement's
+  // span on both. `snapToDay` (already imported, identical definition to
+  // consulting-schedule.ts's `startOfLocalDay`) floors all three to their
+  // own local day before comparing, so only the CALENDAR day matters.
+  const hasToday = typeof now === "number" && snapToDay(now) >= snapToDay(startAt) && snapToDay(now) <= snapToDay(endAt);
   const todayStart = hasToday ? snapToDay(now as number) : 0;
 
   const dayWidthPx = trackWidthPx != null ? trackWidthPx / Math.max(1, days.length) : 0;

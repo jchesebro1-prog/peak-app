@@ -6363,7 +6363,17 @@ ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exporte
     "#145 review fix: …and the LAST column lands exactly on the real local midnight of the end date"
   );
   } finally {
-    process.env.TZ = savedTZ145;
+    // #145 review fix (round 4) — `process.env.TZ = undefined` does NOT
+    // delete the key: Node coerces it to the STRING "undefined", which
+    // resolves as a (nonexistent) zone name and falls back to UTC. Since
+    // this suite normally runs with no TZ set at all, `savedTZ145` here
+    // IS `undefined`, and the naive restore silently switched every
+    // assertion and async suite after this block — 53 sync assertions
+    // plus all four async suites deferred to the promise chain at the
+    // bottom of this file — from local time to UTC. `delete` is the only
+    // way to genuinely restore "unset".
+    if (savedTZ145 === undefined) delete process.env.TZ;
+    else process.env.TZ = savedTZ145;
   }
 }
 

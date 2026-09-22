@@ -250,10 +250,19 @@ export async function moveMilestoneAction(
   // silently shifting every ticked task and logging a false "X: Oct 5 →
   // Oct 5" audit note for a move nobody made. Bail entirely rather than
   // write a no-op targetDate and log that note.
-  if (startOfLocalDay(targetDate) === startOfLocalDay(ms.targetDate)) {
+  //
+  // `hasPriorDate` restores (day-granular) the old `ms.targetDate ||
+  // targetDate` fallback: an undated milestone (targetDate 0 — never
+  // reachable from the UI, since `markers` only shows targetDate > 0, but
+  // this action is directly POST-reachable regardless) has no real prior
+  // day to diff against. Without this, `startOfLocalDay(0)` floors to
+  // 1969/1970 and the delta below would be off by ~56 years, applied to
+  // every ticked task.
+  const hasPriorDate = ms.targetDate > 0;
+  if (hasPriorDate && startOfLocalDay(targetDate) === startOfLocalDay(ms.targetDate)) {
     return { ok: true, moved: 0 };
   }
-  const delta = startOfLocalDay(targetDate) - startOfLocalDay(ms.targetDate);
+  const delta = hasPriorDate ? startOfLocalDay(targetDate) - startOfLocalDay(ms.targetDate) : 0;
 
   await patchEngagement(engagementId, (e) => {
     e.milestones = e.milestones.map((m) => (m.id === milestoneId ? { ...m, targetDate } : m));

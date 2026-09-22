@@ -360,15 +360,24 @@ function ScheduledGantt({
           } as GanttRow,
         ])
     );
-    const seenGroup = new Set<string>();
-    const merged: GanttRow[] = [];
+    // #145 review fix: group the task rows by name too (rather than just
+    // walking `taskRows` and inserting a band the first time its group is
+    // seen), so a phase with NO scheduled tasks — which never appears as
+    // any row's `group` — still gets its band rendered. An empty phase
+    // still has a real extent, and its emptiness (nothing placed in it
+    // yet) is exactly the kind of thing this row exists to make visible.
+    const taskRowsByGroup = new Map<string, GanttRow[]>();
     for (const row of taskRows) {
-      const band = bandByGroup.get(row.group);
-      if (band && !seenGroup.has(row.group)) {
-        merged.push(band);
-        seenGroup.add(row.group);
-      }
-      merged.push(row);
+      const list = taskRowsByGroup.get(row.group);
+      if (list) list.push(row);
+      else taskRowsByGroup.set(row.group, [row]);
+    }
+    const allGroups = new Set([...taskRowsByGroup.keys(), ...bandByGroup.keys()]);
+    const merged: GanttRow[] = [];
+    for (const name of [...allGroups].sort()) {
+      const band = bandByGroup.get(name);
+      if (band) merged.push(band);
+      merged.push(...(taskRowsByGroup.get(name) ?? []));
     }
     return merged;
   }, [scheduledTasks, groupBy, phaseNameById, endAt, phaseBands]);
@@ -513,7 +522,14 @@ function MilestoneShiftDialog({
   // produce a non-zero delta whenever that instant happened to fall
   // after noon, silently shifting every ticked task and logging a false
   // "moved" note for a move nobody made. Same-day now reads as delta 0.
-  const delta = startOfLocalDay(targetDate) - startOfLocalDay(milestone.targetDate);
+  //
+  // `targetDate > 0` guards an EMPTIED date field: dateToEpoch("") is 0,
+  // and startOfLocalDay(0) floors to Dec 31 1969 — without this, clearing
+  // the field previewed every "moved" row ~56 years in the past. Display-
+  // only (confirm() below and the server both refuse targetDate <= 0
+  // before anything is written), but a broken-looking preview is still a
+  // bug in its own right.
+  const delta = targetDate > 0 ? startOfLocalDay(targetDate) - startOfLocalDay(milestone.targetDate) : 0;
 
   // shiftForMilestone's moved/skipped SPLIT depends only on phaseId and
   // handScheduled, not on the delta — the delta only changes the computed
