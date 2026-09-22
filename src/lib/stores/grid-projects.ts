@@ -57,6 +57,18 @@ export type GridPlacement = {
    * on the BOM as its own line.
    */
   curtain?: GridCurtain;
+  /**
+   * Set only on a placement created by the "generate starting layout"
+   * seeding action (#38 Task 2, D14x) — a stable key identifying which
+   * computed system-function instance this is (e.g. "lighting:par:2"), so
+   * a re-run can tell what it already seeded apart from anything hand-
+   * placed or hand-moved, and add only the delta instead of re-seeding
+   * blindly or silently replacing. Absent on every hand-placed placement
+   * and every pre-Task-2 doc, read as "not a seeded placement". Never
+   * cleared by a move/category edit — a seeded device dragged elsewhere is
+   * still the same seeded instance.
+   */
+  seededFrom?: string;
   by: string;
   at: number;
 };
@@ -474,6 +486,43 @@ export async function addPlacement(
       },
     ];
     p.updatedAt = Date.now();
+  });
+}
+
+/**
+ * Bulk device drop — the "generate starting layout" seeding action (#38
+ * Task 2) writes dozens of placements in one call; `addPlacement()` above is
+ * one `patchDoc` per item and would mean dozens of sequential JSONB rewrites
+ * for a single user action. Every item lands on the same sheet/page (the
+ * generated base sheet's page 1), so those are hoisted to call args instead
+ * of repeated per-item.
+ */
+export async function addPlacements(
+  projectId: string,
+  input: {
+    sheetId: string;
+    page: number;
+    items: Array<{ x: number; y: number; partId: string; category?: string; seededFrom?: string }>;
+    by: string;
+  }
+): Promise<GridProject | null> {
+  if (!input.items.length) return getProject(projectId);
+  const at = Date.now();
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const added: GridPlacement[] = input.items.map((item) => ({
+      id: rid("gp-"),
+      sheetId: input.sheetId,
+      page: input.page,
+      x: clamp01(item.x),
+      y: clamp01(item.y),
+      partId: item.partId,
+      ...(item.category ? { category: item.category } : {}),
+      ...(item.seededFrom ? { seededFrom: item.seededFrom } : {}),
+      by: input.by,
+      at,
+    }));
+    p.placements = [...(p.placements || []), ...added];
+    p.updatedAt = at;
   });
 }
 

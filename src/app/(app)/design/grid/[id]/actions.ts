@@ -7,6 +7,7 @@ import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";
 import {
   addCurtainPlacement,
   addPlacement,
+  addPlacements,
   addRevision,
   addRoute,
   addSheet,
@@ -29,6 +30,7 @@ import {
   setVenue,
   saveGridIntake,
 } from "@/lib/stores/grid-projects";
+import { deriveSeedPlacements, isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { can } from "@/lib/team";
 import { getAllDesigns, removeDesign } from "@/lib/stores/designs";
 import { docLocId, getSite } from "@/lib/identity/sites";
@@ -137,6 +139,50 @@ export async function saveGridIntakeAction(input: {
   }
   revalidatePath(editorPath(input.projectId));
   return { ok: true };
+}
+
+/**
+ * "Generate starting layout from dims" (#38 Task 2, D14x) — paints real,
+ * editable placements from the same parametric counts the Quick Design
+ * estimator already guesses with (`compute()`), instead of leaving them
+ * as numbers-only BOM lines. Additive by construction: `deriveSeedPlacements`
+ * is diffed against every placement already carrying a `seededFrom` key, so
+ * a re-run (after the user edits dims and re-saves intake) only adds the
+ * delta — it never touches or duplicates what a prior run already placed,
+ * and never touches a hand-placed device (those carry no `seededFrom` at
+ * all). Devices land as placeholders (see grid-seed.ts's `SEED_PART_PREFIX`)
+ * because there is no reliable mapping from "compute() says 2 electrics" to
+ * one specific catalog SKU — punch #52's rule against inventing part
+ * numbers applies here exactly as it did there.
+ */
+export async function seedStartingLayoutAction(
+  projectId: string
+): Promise<{ ok: true; added: number; skipped: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "That design could not be found." };
+  if (!project.intake?.measurementBased || !project.intake.autoConfig) {
+    return { ok: false, error: "This design wasn't set up from measurements — nothing to generate from." };
+  }
+  const baseSheetId = project.sheetIds[0];
+  if (!baseSheetId) return { ok: false, error: "No plan sheet to seed onto yet." };
+
+  const desired = deriveSeedPlacements(project.intake.autoConfig);
+  const already = new Set(
+    (project.placements || []).flatMap((pl) => (pl.seededFrom ? [pl.seededFrom] : []))
+  );
+  const delta = desired.filter((d) => !already.has(d.seededFrom));
+  if (!delta.length) return { ok: true, added: 0, skipped: desired.length };
+
+  const updated = await addPlacements(projectId, {
+    sheetId: baseSheetId,
+    page: 1,
+    items: delta,
+    by: user.name,
+  });
+  if (!updated) return { ok: false, error: "That design could not be found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true, added: delta.length, skipped: desired.length - delta.length };
 }
 
 /** ~8 MB of dataUrl — beyond this a JSONB doc stops being a sane home. */
@@ -585,6 +631,25 @@ export async function createDraftQuoteAction(
   const routes = project.routes || [];
   if (!placements.length && !routes.length)
     return { ok: false, error: "Place a device or route a wire first." };
+  // Hard-fail on unresolved seed placeholders (Task 2, #38) rather than
+  // let them silently price at $0 — the same "unresolved input must not
+  // silently zero a real number" call already made for fabric weight
+  // (#64). A placeholder's BOM line even LOOKS like a resolved-then-removed
+  // catalog part ("removed part — no longer in the catalog"), which is
+  // actively misleading here, not just missing. Naming the placement's own
+  // label (its `category`, the human name deriveSeedPlacements gave it,
+  // e.g. "Par") lets the user find and fix each one from the canvas.
+  const unresolvedSeeds = placements.filter((p) => isSeedPlaceholder(p.partId));
+  if (unresolvedSeeds.length) {
+    const names = Array.from(new Set(unresolvedSeeds.map((p) => p.category || p.partId))).sort();
+    return {
+      ok: false,
+      error:
+        `${unresolvedSeeds.length} seeded device${unresolvedSeeds.length === 1 ? "" : "s"} ` +
+        `still need${unresolvedSeeds.length === 1 ? "s" : ""} a real catalog part before this can ` +
+        `price: ${names.join(", ")}. Delete and re-drop each from the catalog, then try again.`,
+    };
+  }
 
   // Venue + tier stamp (D113.6): same resolution as estimator quotes (D87);
   // re-stamped on every mint/update while the quote is still a draft. The

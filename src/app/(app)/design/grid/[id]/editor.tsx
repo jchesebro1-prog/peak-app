@@ -43,6 +43,7 @@ import { curtainPriceEach, type FabricSell, type SellCoeffs } from "@/lib/curtai
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
+import { deriveSeedPlacements, isSeedPlaceholder } from "@/lib/design/grid-seed";
 import type { FabricOption, QuickScopeInputs } from "@/app/(app)/design/quick/engine";
 import type { GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
@@ -57,6 +58,7 @@ import {
   placeCurtainAction,
   placeDeviceAction,
   removePlacementAction,
+  seedStartingLayoutAction,
   setPlacementCategoryAction,
   setVenueAction,
 } from "./actions";
@@ -213,6 +215,11 @@ export type ProjectLite = {
   revisions: GridRevision[];
   scopeInputs: QuickScopeInputs | null;
   autoConfig?: AState;
+  /** Intake's "Generate from measurements as I work" toggle (#38 Task 2) —
+   *  gates the "Generate starting layout" trigger below: seeding reads
+   *  `autoConfig` and needs the base sheet `generateBaseSheet()` only makes
+   *  on this path (saveGridIntakeAction, grid-projects.ts). */
+  measurementBased: boolean;
 };
 
 type Pending =
@@ -258,6 +265,8 @@ export default function GridEditor({
   const router = useRouter();
   // Two-step arm/confirm; this app doesn't use window.confirm.
   const [armDelete, setArmDelete] = useState(false);
+  const [armSeed, setArmSeed] = useState(false);
+  const [seeding, setSeeding] = useState(false);
   const [activeSheetId, setActiveSheetId] = useState(sheets[0]?.id || "");
   const sheet = sheets.find((s) => s.id === activeSheetId) || sheets[0];
   const isPdf = sheet?.mime === "application/pdf" || sheet?.name.toLowerCase().endsWith(".pdf");
@@ -345,6 +354,21 @@ export default function GridEditor({
    *  with NaN — calibration would silently fail with a misleading error. */
   const aspect = size.w > 0 && size.h > 0 ? size.h / size.w : 1;
   const cal = sheet ? findCalibration(project.calibrations, sheet.id, page) : null;
+
+  /** "Generate starting layout" pending count (#38 Task 2) — computed
+   *  client-side with the SAME pure `deriveSeedPlacements` the server action
+   *  runs, so the confirm prompt's count always matches what a click will
+   *  actually add, and re-running after nothing changed can say so instead
+   *  of just doing a no-op silently. */
+  const pendingSeed = useMemo(() => {
+    if (!project.measurementBased || !project.autoConfig) return { total: 0, delta: 0 };
+    const desired = deriveSeedPlacements(project.autoConfig);
+    const already = new Set(
+      project.placements.flatMap((pl) => (pl.seededFrom ? [pl.seededFrom] : []))
+    );
+    const delta = desired.filter((d) => !already.has(d.seededFrom)).length;
+    return { total: desired.length, delta };
+  }, [project.measurementBased, project.autoConfig, project.placements]);
 
   const partById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
   const filteredParts = useMemo(() => {
@@ -1036,6 +1060,48 @@ export default function GridEditor({
         <button style={BTN} disabled={busy} onClick={() => fileRef.current?.click()}>
           + Plan sheet
         </button>
+        {project.measurementBased && project.autoConfig && sheets.length > 0 && (
+          armSeed ? (
+            <>
+              <button
+                style={{ ...BTN, background: "#1f7a52", color: "#fff", borderColor: "#1f7a52" }}
+                disabled={seeding || pendingSeed.delta === 0}
+                onClick={async () => {
+                  setSeeding(true);
+                  const r = await seedStartingLayoutAction(project.id);
+                  setSeeding(false);
+                  setArmSeed(false);
+                  if (!r.ok) {
+                    setErr(r.error);
+                    return;
+                  }
+                  router.refresh();
+                }}
+              >
+                {seeding ? "Adding…" : `Add ${pendingSeed.delta} device${pendingSeed.delta === 1 ? "" : "s"}`}
+              </button>
+              <button style={BTN} disabled={seeding} onClick={() => setArmSeed(false)}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              style={BTN}
+              disabled={busy}
+              onClick={() => setArmSeed(true)}
+              title="Paints editable devices/drapes from your measurements — additive, never replaces what's already placed"
+            >
+              Generate starting layout
+            </button>
+          )
+        )}
+        {armSeed && (
+          <span style={{ fontSize: 11.5, color: "#5b616e" }}>
+            {pendingSeed.delta === 0
+              ? "Starting layout is already up to date — nothing new to add."
+              : `This adds ${pendingSeed.delta} device${pendingSeed.delta === 1 ? "" : "s"} from your measurements. It never removes or moves what's already on the plan — continue?`}
+          </span>
+        )}
         <Link href={`/design/grid/${encodeURIComponent(project.id)}/riser`} style={{ ...BTN, textDecoration: "none" }}>
           Riser →
         </Link>
@@ -1423,7 +1489,9 @@ export default function GridEditor({
               <div style={{ fontSize: 12, color: "#16181d", fontWeight: 600 }}>
                 {selectedPlacement.curtain
                   ? selectedPlacement.curtain.name
-                  : selectedPlacement.partId}
+                  : isSeedPlaceholder(selectedPlacement.partId)
+                    ? selectedPlacement.category || "Unassigned device"
+                    : selectedPlacement.partId}
               </div>
               <div style={{ fontSize: 11.5, color: "#5b616e", marginTop: 2 }}>
                 {selectedPlacement.curtain
@@ -1431,7 +1499,9 @@ export default function GridEditor({
                       selectedPlacement.curtain,
                       fabricNames.get(selectedPlacement.curtain.fabricSku)
                     )
-                  : partById.get(selectedPlacement.partId)?.desc || "No longer in the catalog"}
+                  : isSeedPlaceholder(selectedPlacement.partId)
+                    ? "Generated from your measurements — delete and drop a real catalog part here"
+                    : partById.get(selectedPlacement.partId)?.desc || "No longer in the catalog"}
               </div>
               {selectedPlacement.curtain && (
                 <div style={{ fontSize: 11.5, color: "#16181d", fontWeight: 600, marginTop: 3 }}>
@@ -1958,7 +2028,14 @@ export default function GridEditor({
                   const x = pl.x * size.w;
                   const y = pl.y * size.h;
                   const on = pl.id === selected;
-                  const label = pl.curtain ? pl.curtain.name : part?.desc || part?.sku || pl.partId;
+                  // A seeded-but-unassigned placement (#38 Task 2) has no
+                  // catalog part to name it, so its own category — the
+                  // human system-function label grid-seed.ts stamped it
+                  // with — reads far better on the plan than the raw
+                  // placeholder partId.
+                  const label = pl.curtain
+                    ? pl.curtain.name
+                    : part?.desc || part?.sku || (isSeedPlaceholder(pl.partId) ? pl.category : undefined) || pl.partId;
                   return (
                     <g key={pl.id}>
                       {pl.curtain ? (
