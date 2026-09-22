@@ -421,3 +421,36 @@ up broken, the fix is the same three-line pattern used in both commits above.
 commits. Final gate suite, run clean after every commit and once more at the very end: `tsc` 0
 errors, `test:specs` 0 FAIL, `test:smoke` ALL PASSED, `eslint` clean on every touched file.
 **Nothing pushed, merged, or deployed** — everything is sitting on the branch for your review.
+
+---
+
+## Update, 6:57am — real device confirmation, four fixes visually verified
+
+Resumed after the summary above. The iOS Simulator MCP tool's `screenshot` action broke early in
+this stretch (`captureFailed`, survived a relaunch, a full shutdown+boot, an erase+fresh-boot, and
+a fresh device — the last of which needs your live consent to authorize, which explains the
+earlier "I can't get a new device without you here" note). Worked around it: drove the simulator
+with the MCP `tap`/`swipe` actions (which kept working the whole time) and verified with a raw
+`xcrun simctl io <udid> screenshot` read directly, bypassing the broken tool. Also found and fixed
+a coordinate-math bug in my own tap targeting that had been silently misfiring most of tonight —
+both are written up for next time in memory (`reference-ios-simulator-coordinate-math.md`,
+`project-ios-simulator-mcp-screenshot-broke.md`).
+
+With that sorted, I got real touch-input confirmation, not just code review, for the four fixes
+that mattered most:
+
+- ✅ **Item #1, the nav drawer** — a real finger-swipe scrolled the drawer from Home all the way
+  down through PM, CRM, DESIGN, Account settings, Settings, to Sign out. Everything is reachable.
+  This is the one I most wanted confirmed and it's solid.
+- ✅ **Lineset Builder** — Venue dimensions renders full-width, the schedule table stacks below it
+  instead of squeezing into a sliver alongside it.
+- ✅ **Design hub** — Active consulting and Recent designs stack in one column instead of
+  side-by-side.
+- ✅ **Account settings** — "Switch users from the account menu, top-right." now sits cleanly
+  below the identity block instead of overlapping the email and role text.
+
+The other five fixes (header/hamburger, home-tab scroll, Reports Sales chart, Inbox toolbar/
+reader, project-detail tabs, quote-button spacing) still only have `tsc`/`eslint`/the gate suite
+behind them — I didn't get to re-verify those visually in this pass, though they're simpler,
+lower-risk changes than the four above. Everything is still on `worktree-ios-ui-punchlist`,
+nothing pushed or merged.
