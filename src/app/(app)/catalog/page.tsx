@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
+import { isoDateOf } from "@/lib/catalog-books";
 import { list, get, type CatalogPart } from "@/lib/stores/catalog";
 import { money } from "@/lib/format";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
@@ -409,7 +410,7 @@ export default async function CatalogPage({
               minWidth: 0,
             }}
           >
-            <CatalogImportPanel manufacturers={manufacturers.filter((m) => m !== UNSPEC)} accent="var(--accent)" />
+            <CatalogImportPanel manufacturers={manufacturers.filter((m) => m !== UNSPEC)} accent="var(--accent)" today={isoDateOf(Date.now())} />
           </div>
         )}
       </div>

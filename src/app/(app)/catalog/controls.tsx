@@ -2,8 +2,29 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
+import { checkSize } from "@/lib/catalog-import-guard";
 import { parseCatalog } from "./parse";
 import { importCatalog, removePartDatasheetAction, uploadPartDatasheetAction } from "./actions";
+
+const fieldLabel: React.CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 600,
+  color: "#9aa0ab",
+  textTransform: "uppercase",
+  letterSpacing: ".05em",
+  marginBottom: 7,
+};
+const dateInput: React.CSSProperties = {
+  width: "100%",
+  fontSize: 13,
+  fontFamily: "var(--font-ui)",
+  color: "#16181d",
+  border: "1px solid #e4e7ec",
+  borderRadius: 8,
+  padding: "8px 12px",
+  outline: "none",
+  background: "#fff",
+};
 
 /** Search box + sort select for the catalog table; both drive URL state. */
 export function CatalogControls({
@@ -128,22 +149,30 @@ export function CatalogControls({
 export function CatalogImportPanel({
   manufacturers,
   accent,
+  today,
 }: {
   manufacturers: string[];
   accent: string;
+  /** Local YYYY-MM-DD from the server — the effective-date default; passed
+   *  in so the server render and the client agree (no hydration drift). */
+  today: string;
 }) {
   const [method, setMethod] = useState<"upload" | "api" | "paste">("upload");
   const [mfrSel, setMfrSel] = useState(manufacturers[0] || "");
   const [adding, setAdding] = useState(manufacturers.length === 0);
   const [newMfr, setNewMfr] = useState("");
+  const [effectiveDate, setEffectiveDate] = useState(today);
   const [text, setText] = useState("");
   const [fileName, setFileName] = useState("");
+  const [fileError, setFileError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const mfr = (adding ? newMfr : mfrSel).trim();
   const parsed = text.trim() ? parseCatalog(text) : null;
-  const canImport = method === "paste" && !!parsed?.ok && parsed.stats.valid > 0;
-  const canUpload = !!mfr && !!fileName && !pending;
+  // #134 — the paste box is capped like a file; bytes, not characters.
+  const pasteSize = checkSize(new TextEncoder().encode(text).length);
+  const canImport = method === "paste" && !!parsed?.ok && parsed.stats.valid > 0 && pasteSize.ok;
+  const canUpload = !!mfr && !!fileName && !fileError && !pending;
 
   const methods = [
     { id: "upload" as const, icon: "↑", title: "Import CSV / TSV", desc: "Upload a manufacturer or design-program export." },
@@ -275,6 +304,7 @@ export function CatalogImportPanel({
                   value={newMfr}
                   onChange={(e) => setNewMfr(e.target.value)}
                   placeholder="New manufacturer name"
+                  required
                   style={{
                     width: "100%",
                     marginTop: 8,
@@ -288,6 +318,19 @@ export function CatalogImportPanel({
                   }}
                 />
               )}
+              {/* #133 — the price list's effective date, stamped on every row
+                  whose price changes and recorded as the manufacturer's
+                  price-list date. */}
+              <div style={{ ...fieldLabel, marginTop: 12 }}>Price list effective</div>
+              <input
+                type="date"
+                value={effectiveDate}
+                onChange={(e) => setEffectiveDate(e.target.value || today)}
+                style={dateInput}
+              />
+              <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 4 }}>
+                Defaults to today. Stamped on every part whose price changes.
+              </div>
             </>
           )}
 
@@ -313,6 +356,7 @@ export function CatalogImportPanel({
             >
               <input type="hidden" name="mfr" value={mfr} />
               <input type="hidden" name="prebuilt" value="1" />
+              <input type="hidden" name="effectiveDate" value={effectiveDate} />
               <div
                 style={{
                   width: 42,
@@ -372,7 +416,24 @@ export function CatalogImportPanel({
                     required
                     disabled={pending}
                     style={{ display: "none" }}
-                    onChange={(e) => setFileName(e.target.files?.[0]?.name || "")}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (!f) {
+                        setFileName("");
+                        setFileError(null);
+                        return;
+                      }
+                      // #134 — refuse over-size files here, before any upload.
+                      const size = checkSize(f.size);
+                      if (!size.ok) {
+                        setFileError(size.error);
+                        setFileName("");
+                        e.target.value = "";
+                        return;
+                      }
+                      setFileError(null);
+                      setFileName(f.name);
+                    }}
                   />
                 </label>
                 {fileName && (
@@ -391,6 +452,9 @@ export function CatalogImportPanel({
                   </span>
                 )}
               </div>
+              {fileError && (
+                <div style={{ marginTop: 8, fontSize: 11.5, color: "#b4543a", lineHeight: 1.4 }}>{fileError}</div>
+              )}
               <button
                 type="submit"
                 disabled={!canUpload}
@@ -454,6 +518,7 @@ export function CatalogImportPanel({
               style={{ marginTop: 12 }}
             >
               <input type="hidden" name="mfr" value={mfr} />
+              <input type="hidden" name="effectiveDate" value={effectiveDate} />
               <div style={{ fontSize: 11.5, color: "#8c919c", marginBottom: 8, lineHeight: 1.4 }}>
                 One part per line: <span style={{ fontFamily: "var(--font-mono)" }}>SKU, Description, Category, Unit, List, Cost</span>.
                 A header row is auto-detected.
@@ -521,6 +586,9 @@ export function CatalogImportPanel({
                     of {parsed.stats.total} lines
                   </span>
                 </div>
+              )}
+              {!pasteSize.ok && (
+                <div style={{ marginTop: 10, fontSize: 11.5, color: "#b4543a", lineHeight: 1.4 }}>{pasteSize.error}</div>
               )}
 
               {/* preview */}

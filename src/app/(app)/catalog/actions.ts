@@ -4,11 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requirePerm } from "@/lib/session";
 import { clearCatalogPriceList, get as getPart, upsert, mergeUpsert } from "@/lib/stores/catalog";
-import { mfrKey } from "@/lib/catalog-books";
-import { parseCatalog } from "./parse";
+import { mfrKey, parseEffectiveDate } from "@/lib/catalog-books";
+import { checkSize } from "@/lib/catalog-import-guard";
 import { setPriceListEffective, setSettings } from "@/lib/settings";
 import { GROUPS, TRADES, type CategoryMap } from "@/lib/catalog-taxonomy";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
+import { runCatalogImport } from "./import";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -54,23 +55,20 @@ export async function upsertPart(formData: FormData): Promise<void> {
 }
 
 /**
- * Bulk import a pasted price book → parse → upsert each valid part. Every row
- * gets the manufacturer chosen in the sidebar (and its default category when a
- * row leaves category blank). Redirects back filtered to that manufacturer with
- * a count so the freshly-added rows are visible.
- *
- * Re-importing an already-catalogued SKU (e.g. a re-priced row) must not wipe
- * fields this parse doesn't know about (ports, trade, datasheet, …) — same
- * failure mode as upsertPart, same fix: mergeUpsert overlays just the parsed
- * fields onto whatever part already exists for that SKU.
+ * Bulk import a price book (upload or paste) → `runCatalogImport` (./import):
+ * size cap (#134), parse, the wrong-manufacturer guard (#132), upserts that
+ * stamp `pricedAt` with the form's effective date on rows whose price moved
+ * (#133), and the manufacturer's book date. Redirects back filtered to that
+ * manufacturer with a count so the freshly-added rows are visible.
  */
 export async function importCatalog(formData: FormData): Promise<void> {
   await requireUser();
   const mfr = String(formData.get("mfr") || "").trim();
   const defaultCategory = String(formData.get("category") || "").trim();
+  const effectiveAt = parseEffectiveDate(String(formData.get("effectiveDate") || ""), Date.now());
   let text = String(formData.get("text") || "");
+  let bytes = Buffer.byteLength(text, "utf8");
   const file = formData.get("file");
-  if (file instanceof File && file.size > 0) text = await file.text();
 
   // Every failure path redirects with a human message (punch #111) — a silent
   // return left the upload form looking frozen. redirect() throws, so these
@@ -81,30 +79,28 @@ export async function importCatalog(formData: FormData): Promise<void> {
     qs.set("importError", message);
     redirect("/catalog?" + qs.toString());
   };
-  if (!text.trim()) fail("No rows found in that file.");
 
-  const parsed = parseCatalog(text, defaultCategory || (String(formData.get("prebuilt") || "") === "1" ? "Prebuilt system" : ""));
-  if (!parsed.ok) fail(parsed.error || "No rows found in that file.");
-
-  let n = 0;
-  for (const r of parsed.rows) {
-    if (!r.valid) continue;
-    await mergeUpsert(r.sku, {
-      desc: r.desc,
-      category: r.category || "Uncategorized",
-      unit: r.unit,
-      list: r.list,
-      cost: r.cost,
-      mfr: mfr || undefined,
-    });
-    n++;
+  if (file instanceof File && file.size > 0) {
+    // #134 — refuse before reading a big file into memory.
+    const size = checkSize(file.size);
+    if (!size.ok) return fail(size.error);
+    bytes = file.size;
+    text = await file.text();
   }
-  if (n === 0) fail("No valid rows — check the header names.");
+
+  const res = await runCatalogImport({
+    mfr,
+    text,
+    bytes,
+    effectiveAt,
+    defaultCategory: defaultCategory || (String(formData.get("prebuilt") || "") === "1" ? "Prebuilt system" : ""),
+  });
+  if (!res.ok) return fail(res.error);
 
   revalidatePath("/", "layout");
   const qs = new URLSearchParams();
-  if (mfr) qs.set("mfr", mfr);
-  qs.set("imported", String(n));
+  qs.set("mfr", res.mfr);
+  qs.set("imported", String(res.imported));
   redirect("/catalog?" + qs.toString());
 }
 
