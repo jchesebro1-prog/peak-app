@@ -12,13 +12,16 @@
  * (stores/customers.ts) so the two never drift.
  */
 
+import { VENDOR_COMPANY_TYPE } from "./config";
+
 /** Company `type` values that are partners, not install venues → no base venue. */
 export const PARTNER_TYPES = new Set([
   "Architect",
   "Electrical Contractor",
   "General Contractor",
   "Engineer",
-  "Vendor",
+  "Vendor", // legacy spelling on rows that predate #122 — still a partner
+  VENDOR_COMPANY_TYPE, // #122 — the COMPANY_TYPES value the Vendors module keys on
   "Competitor",
   "Consultant",
 ]);

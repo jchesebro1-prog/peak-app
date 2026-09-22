@@ -28,6 +28,13 @@ import { saveConnection, replaceLabels } from "@/lib/gmail/connections";
 import { GMAIL_MODIFY_SCOPE } from "@/lib/gmail/config";
 import { get as getLead, getAll as getAllLeads } from "@/lib/stores/leads";
 import { addUser } from "@/lib/users";
+import { saveCompany } from "@/lib/identity/companies";
+import { sitesForCompany } from "@/lib/identity/sites";
+import { VENDOR_COMPANY_TYPE } from "@/lib/identity/config";
+import {
+  claimManufacturer, createVendorCompany, getVendorProfile, logPriceList, saveVendorProfile,
+  setContactRole, vendorForManufacturer,
+} from "@/lib/stores/vendors";
 
 async function main() {
   const flame = await setFlameRates({ laborRate: 123, mileageRate: 1.23 });
@@ -1046,6 +1053,34 @@ async function main() {
       { Speakers: "circle" },
       "#131 T10 an invalid shape is dropped while a valid sibling entry is kept"
     );
+  }
+
+  // #122 — vendor profiles: CRUD, claim moves a manufacturer, vendors get no base venue
+  {
+    await saveCompany({ id: "v-t122a", name: "Vendor A T122", type: VENDOR_COMPANY_TYPE });
+    await saveCompany({ id: "v-t122b", name: "Vendor B T122", type: VENDOR_COMPANY_TYPE });
+    assert.equal(await getVendorProfile("v-t122a"), null, "#122 no profile document until something is saved");
+    const saved = await saveVendorProfile("v-t122a", { discounts: { note: "Dealer program", percentOffList: 35, terms: "Net 30" } });
+    assert.equal(saved.discounts.percentOffList, 35, "#122 saveVendorProfile writes discounts");
+    assert.equal((await getVendorProfile("v-t122a"))?.discounts.terms, "Net 30", "#122 the profile round-trips through the doc table");
+    await claimManufacturer("v-t122a", "T122 Mfr");
+    assert.equal(await vendorForManufacturer("t122-mfr"), "v-t122a", "#122 claim matches by mfrKey (case/punctuation-insensitive)");
+    await claimManufacturer("v-t122b", "t122 MFR");
+    assert.equal(await vendorForManufacturer("T122 Mfr"), "v-t122b", "#122 claiming moves the manufacturer to the new vendor");
+    assert.deepEqual((await getVendorProfile("v-t122a"))?.manufacturers, [], "#122 the previous owner no longer lists it");
+    await setContactRole("v-t122b", "ct-t122-x", "Price lists");
+    assert.equal((await getVendorProfile("v-t122b"))?.contactRoles["ct-t122-x"], "Price lists", "#122 contact role is stored by contact id");
+    await setContactRole("v-t122b", "ct-t122-x", "   ");
+    assert.equal((await getVendorProfile("v-t122b"))?.contactRoles["ct-t122-x"], undefined, "#122 a blank role clears the entry");
+    const logged = await logPriceList("v-t122b", { receivedAt: 1_000, effectiveAt: 500, note: "old" }, "Tester");
+    await logPriceList("v-t122b", { receivedAt: 2_000, effectiveAt: 900, note: "newer" }, "Tester");
+    assert.equal(logged.priceLists.length, 1, "#122 logPriceList appends one entry");
+    assert.equal((await getVendorProfile("v-t122b"))?.priceLists[0]?.note, "newer", "#122 ledger is newest-first by effectiveAt");
+    const made = await createVendorCompany("Acme Rigging T122");
+    assert.equal(made.id, "v-acmeriggingt122", "#122 createVendorCompany mints v-<mfrKey>");
+    assert.equal(made.type, VENDOR_COMPANY_TYPE, "#122 createVendorCompany presets the vendor type");
+    assert.equal((await sitesForCompany(made.id)).length, 0, "#122 a new vendor gets NO base venue (PARTNER_TYPES fix)");
+    assert.ok(await getVendorProfile(made.id), "#122 createVendorCompany mints the blank profile");
   }
 
   console.log("review regression checks passed");

@@ -20,6 +20,16 @@ export const COMPANY_TYPES = [
   "other",
 ] as const;
 
+/** #122 — the COMPANY_TYPES value that makes a company a VENDOR (Vendors
+ *  module, docs/superpowers/specs/2026-09-21-vendors-module-design.md §1).
+ *  Exact-string match everywhere: PARTNER_TYPES (venue-defaults.ts) carries
+ *  it so vendors never get a base venue, and /vendors lists only these. */
+export const VENDOR_COMPANY_TYPE = "vendor/manufacturer";
+
+export function isVendorType(type: string | null | undefined): boolean {
+  return (type || "").trim() === VENDOR_COMPANY_TYPE;
+}
+
 /** Daylite's "category" as a lifecycle (spec §4.1). */
 export const LIFECYCLES = ["prospect", "customer", "past", "none"] as const;
 export type Lifecycle = (typeof LIFECYCLES)[number];

@@ -162,6 +162,13 @@
       "when": 1790050877402,
       "tag": "0022_customer_domains_repair",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790085511957,
+      "tag": "0023_vendor_profiles",
+      "breakpoints": true
     }
   ]
 }

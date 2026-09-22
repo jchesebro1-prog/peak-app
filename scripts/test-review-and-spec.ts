@@ -32,6 +32,8 @@ import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS, batte
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
 import { DEFAULT_SETTINGS, DEMO_COLLECTIONS } from "@/db/seed-data";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "@/db/doc-tables";
+import { PARTNER_TYPES, baseVenueKind } from "@/lib/identity/venue-defaults";
+import { VENDOR_COMPANY_TYPE, isVendorType } from "@/lib/identity/config";
 import { FIELD_COLLECTIONS } from "@/lib/sync/engine";
 import { canRecord } from "@/lib/settings";
 import {
@@ -3068,6 +3070,12 @@ import {
   ok(priceBooks(eight, {}, { now, limit: Infinity }).length === 8, "#133 priceBooks: limit: Infinity returns every book (the Catalog banner)");
   ok(priceBooks(eight, {}, { now })[0]?.name === "Mfr0", "#14 priceBooks: sorted by count descending");
 }
+
+/* ---- #122 §1 — a vendor is a company of the exact type; partners get no base venue ---- */
+ok(VENDOR_COMPANY_TYPE === "vendor/manufacturer" && isVendorType(" vendor/manufacturer ") && !isVendorType("Vendor"), "#122 isVendorType: exact COMPANY_TYPES string (trimmed), not the legacy 'Vendor'");
+ok(PARTNER_TYPES.has(VENDOR_COMPANY_TYPE), "#122 PARTNER_TYPES carries the exact vendor type string");
+ok(PARTNER_TYPES.has("Vendor"), "#122 PARTNER_TYPES keeps the legacy 'Vendor' spelling");
+ok(baseVenueKind(VENDOR_COMPANY_TYPE, "Rose Brand Church Supply") === null, "#122 a vendor company is never minted a base venue, whatever its name says");
 
 /* --- final review item 3: the Catalog page parser reports which price columns the file carried --- pure */
 import { parseCatalog } from "@/app/(app)/catalog/parse";
