@@ -6,6 +6,7 @@ import { findCalibration, type Calibration, type MeasureUnit, type Point } from 
 import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";
 import {
   addCurtainPlacement,
+  addOption,
   addPlacement,
   addPlacements,
   addRevision,
@@ -16,13 +17,16 @@ import {
   generateBaseSheet,
   getProject,
   movePlacement,
+  removeOption,
   removePlacement,
   removeProject,
   removeRoute,
   removeSpace,
+  renameOption,
   renameSpace,
   restoreRevision,
   seedBlankSheet,
+  setOptionQuote,
   setPlacementCategory,
   setQuote,
   setScopeInputs,
@@ -30,6 +34,7 @@ import {
   setVenue,
   saveGridIntake,
 } from "@/lib/stores/grid-projects";
+import { hasOption, resolveOptionId } from "@/lib/design/grid-options";
 import { deriveSeedPlacements, isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { can } from "@/lib/team";
 import { getAllDesigns, removeDesign } from "@/lib/stores/designs";
@@ -64,6 +69,8 @@ type Result = { ok: true } | { ok: false; error: string };
 function editorPath(projectId: string): string {
   return `/design/grid/${encodeURIComponent(projectId)}`;
 }
+
+const OPTION_GONE = "That option was removed — refresh the page.";
 
 async function partForGrid(id: string) {
   const priced = await getPart(id);
@@ -177,6 +184,7 @@ export async function seedStartingLayoutAction(
   const updated = await addPlacements(projectId, {
     sheetId: baseSheetId,
     page: 1,
+    optionId: resolveOptionId(project, null),
     items: delta,
     by: user.name,
   });
@@ -236,9 +244,12 @@ export async function addSheetAction(
 
 export async function placeDeviceAction(
   projectId: string,
-  input: { sheetId: string; page: number; x: number; y: number; partId: string }
+  input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string }
 ): Promise<Result> {
   const user = await requireUser();
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
   const p = await addPlacement(projectId, { ...input, by: user.name });
   if (!p) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
@@ -288,6 +299,7 @@ export async function placeCurtainAction(
       fabricSku: string;
     };
     category?: string;
+    optionId: string;
   }
 ): Promise<Result> {
   const user = await requireUser();
@@ -307,6 +319,9 @@ export async function placeCurtainAction(
   const fabric = await getPart(c.fabricSku);
   if (!fabric || !isFabricRow(fabric))
     return { ok: false, error: "Pick a fabric from the catalog's fabric rows." };
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
 
   const curtain: GridCurtain = {
     type: c.type as GridCurtain["type"],
@@ -323,6 +338,7 @@ export async function placeCurtainAction(
     y: input.y,
     curtain,
     category: (input.category || "").trim().slice(0, 40),
+    optionId: input.optionId,
     by: user.name,
   });
   if (!p) return { ok: false, error: "Design not found." };
@@ -446,6 +462,7 @@ export async function addRouteAction(
     partId: string;
     points: Point[];
     aspect: number;
+    optionId: string;
     /** Device-wire endpoints (Task 4) — the client's hit-test result.
      *  Re-verified below; never trusted blindly. */
     fromPlacementId?: string;
@@ -463,6 +480,7 @@ export async function addRouteAction(
     return { ok: false, error: `${part.sku} is priced per ${part.unit}, not per length — wires need a per-foot part.` };
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
+  if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
   if (!findCalibration(project.calibrations || [], input.sheetId, input.page))
     return { ok: false, error: "Calibrate this page before routing wire — lengths need a scale." };
 
@@ -569,6 +587,54 @@ export async function restoreRevisionAction(
     return { ok: false, error: r.reason === "no-such-rev" ? "That revision no longer exists." : "Design not found." };
   revalidatePath(editorPath(projectId));
   return { ok: true };
+}
+
+/* ------------------------------ options (Spec 1) ------------------------------ */
+
+export async function addOptionAction(
+  projectId: string,
+  input: { name: string; copyFromOptionId?: string | null }
+): Promise<{ ok: true; optionId: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const r = await addOption(projectId, {
+    name: input.name,
+    ...(input.copyFromOptionId ? { copyFromOptionId: input.copyFromOptionId } : {}),
+    by: user.name,
+  });
+  if (!r.ok) {
+    if (r.reason === "empty-name") return { ok: false, error: "Name the option — 'Good', 'Better', 'Alternate'…" };
+    if (r.reason === "no-such-option") return { ok: false, error: OPTION_GONE };
+    return { ok: false, error: "Design not found." };
+  }
+  revalidatePath(editorPath(projectId));
+  return { ok: true, optionId: r.option.id };
+}
+
+export async function renameOptionAction(projectId: string, optionId: string, name: string): Promise<Result> {
+  await requireUser();
+  const r = await renameOption(projectId, optionId, name);
+  if (!r.ok) {
+    if (r.reason === "empty-name") return { ok: false, error: "An option needs a name." };
+    if (r.reason === "no-such-option") return { ok: false, error: OPTION_GONE };
+    return { ok: false, error: "Design not found." };
+  }
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+export async function removeOptionAction(
+  projectId: string,
+  optionId: string
+): Promise<{ ok: true; removedPlacements: number; removedRoutes: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const r = await removeOption(projectId, optionId, user.name);
+  if (!r.ok) {
+    if (r.reason === "last-option") return { ok: false, error: "A design keeps at least one option — add another before removing this one." };
+    if (r.reason === "no-such-option") return { ok: false, error: OPTION_GONE };
+    return { ok: false, error: "Design not found." };
+  }
+  revalidatePath(editorPath(projectId));
+  return { ok: true, removedPlacements: r.removedPlacements, removedRoutes: r.removedRoutes };
 }
 
 /**

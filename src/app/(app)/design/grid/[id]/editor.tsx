@@ -45,7 +45,7 @@ import { validateDeviceWire } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
 import { deriveSeedPlacements, isSeedPlaceholder } from "@/lib/design/grid-seed";
 import type { FabricOption, QuickScopeInputs } from "@/app/(app)/design/quick/engine";
-import type { GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
+import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
   addRouteAction,
   addSheetAction,
@@ -208,6 +208,7 @@ export type ProjectLite = {
   siteId: string | null;
   siteName: string;
   quoteId: string | null;
+  options: GridOption[];
   placements: GridPlacement[];
   calibrations: Calibration[];
   spaces: GridSpace[];
@@ -799,6 +800,7 @@ export default function GridEditor({
           partId: wirePartId,
           points,
           aspect,
+          optionId: project.options[0].id,
           fromPlacementId,
           toPlacementId,
         }).then((r) => {
@@ -861,6 +863,7 @@ export default function GridEditor({
         x: p.x,
         y: p.y,
         partId: armedPart.id,
+        optionId: project.options[0].id,
       }).then((r) => {
         setBusy(false);
         if (!r.ok) setErr(r.error);
@@ -944,6 +947,7 @@ export default function GridEditor({
       x: curtainAt.x,
       y: curtainAt.y,
       curtain,
+      optionId: project.options[0].id,
     });
     setBusy(false);
     setCurtainAt(null);

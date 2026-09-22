@@ -153,6 +153,7 @@ export default async function GridEditorPage({
         siteId: project.siteId || null,
         siteName: project.siteName || "",
         quoteId: project.quoteId,
+        options: project.options || [],
         scopeInputs: project.scopeInputs || null,
         placements: project.placements || [],
         calibrations: project.calibrations || [],

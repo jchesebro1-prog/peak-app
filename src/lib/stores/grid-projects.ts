@@ -8,9 +8,15 @@ import {
 } from "@/db/doc-store";
 import { calibrationScale, clamp01, type Calibration, type Point } from "@/lib/annotations";
 import type { GridCurtain } from "@/lib/design/grid-bom";
-import { ensureOptions, type GridOption } from "@/lib/design/grid-options";
+import {
+  copyOptionMembers,
+  ensureOptions,
+  hasOption,
+  syncQuoteMirror,
+  type GridOption,
+} from "@/lib/design/grid-options";
 export type { GridOption } from "@/lib/design/grid-options";
-import { compute, VENUES, type AState, type QuickScopeInputs, type VenueKind } from "@/app/(app)/design/quick/engine";
+import { compute, VENUES, type AState, type QuickScopeInputs, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
 
 /**
@@ -485,9 +491,12 @@ export async function listSheets(projectId: string): Promise<GridSheet[]> {
 
 export async function addPlacement(
   projectId: string,
-  input: { sheetId: string; page: number; x: number; y: number; partId: string; by: string }
+  input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string; by: string }
 ): Promise<GridProject | null> {
+  const project = await getProject(projectId);
+  if (!project || !hasOption(project, input.optionId)) return null;
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    ensureOptions(p);
     p.placements = [
       ...(p.placements || []),
       {
@@ -497,6 +506,7 @@ export async function addPlacement(
         x: input.x,
         y: input.y,
         partId: input.partId,
+        optionId: input.optionId,
         by: input.by,
         at: Date.now(),
       },
@@ -518,13 +528,17 @@ export async function addPlacements(
   input: {
     sheetId: string;
     page: number;
+    optionId: string;
     items: Array<{ x: number; y: number; partId: string; category?: string; seededFrom?: string }>;
     by: string;
   }
 ): Promise<GridProject | null> {
   if (!input.items.length) return getProject(projectId);
+  const project = await getProject(projectId);
+  if (!project || !hasOption(project, input.optionId)) return null;
   const at = Date.now();
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    ensureOptions(p);
     const added: GridPlacement[] = input.items.map((item) => ({
       id: rid("gp-"),
       sheetId: input.sheetId,
@@ -532,6 +546,7 @@ export async function addPlacements(
       x: clamp01(item.x),
       y: clamp01(item.y),
       partId: item.partId,
+      optionId: input.optionId,
       ...(item.category ? { category: item.category } : {}),
       ...(item.seededFrom ? { seededFrom: item.seededFrom } : {}),
       by: input.by,
@@ -561,10 +576,14 @@ export async function addCurtainPlacement(
     y: number;
     curtain: GridCurtain;
     category?: string;
+    optionId: string;
     by: string;
   }
 ): Promise<GridProject | null> {
+  const project = await getProject(projectId);
+  if (!project || !hasOption(project, input.optionId)) return null;
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    ensureOptions(p);
     p.placements = [
       ...(p.placements || []),
       {
@@ -575,6 +594,7 @@ export async function addCurtainPlacement(
         y: input.y,
         partId: input.curtain.fabricSku,
         curtain: input.curtain,
+        optionId: input.optionId,
         ...(input.category ? { category: input.category } : {}),
         by: input.by,
         at: Date.now(),
@@ -701,14 +721,28 @@ export async function clearSheetCalibration(
   });
 }
 
-export async function setQuote(
+/** Store the draft quote minted from ONE option (Spec 1). `project.quoteId`
+ *  is re-mirrored from the first option every time. */
+export async function setOptionQuote(
   projectId: string,
+  optionId: string,
   quoteId: string
 ): Promise<GridProject | null> {
+  const project = await getProject(projectId);
+  if (!project || !hasOption(project, optionId)) return null;
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    p.quoteId = quoteId;
+    const doc = ensureOptions(p);
+    doc.options = doc.options.map((o) => (o.id === optionId ? { ...o, quoteId } : o));
+    syncQuoteMirror(doc);
     p.updatedAt = Date.now();
   });
+}
+
+/** TEMPORARY alias until Task 4 rewrites createDraftQuoteAction — stores on the first option. */
+export async function setQuote(projectId: string, quoteId: string): Promise<GridProject | null> {
+  const project = await getProject(projectId);
+  if (!project) return null;
+  return setOptionQuote(projectId, ensureOptions(project).options[0].id, quoteId);
 }
 
 export async function setVenue(
@@ -802,13 +836,17 @@ export async function addRoute(
     partId: string;
     points: Point[];
     aspect: number;
+    optionId: string;
     by: string;
     fromPlacementId?: string;
     toPlacementId?: string;
     connectionType?: string;
   }
 ): Promise<GridProject | null> {
+  const project = await getProject(projectId);
+  if (!project || !hasOption(project, input.optionId)) return null;
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    ensureOptions(p);
     p.routes = [
       ...(p.routes || []),
       {
@@ -818,6 +856,7 @@ export async function addRoute(
         partId: input.partId,
         points: input.points,
         aspect: input.aspect,
+        optionId: input.optionId,
         by: input.by,
         at: Date.now(),
         ...(input.fromPlacementId ? { fromPlacementId: input.fromPlacementId } : {}),
@@ -837,6 +876,96 @@ export async function removeRoute(
     p.routes = (p.routes || []).filter((r) => r.id !== routeId);
     p.updatedAt = Date.now();
   });
+}
+
+/* ------------------------------ options (Spec 1) ------------------------------ */
+
+export async function addOption(
+  projectId: string,
+  input: { name: string; copyFromOptionId?: string; tier?: TierKey; by: string }
+): Promise<{ ok: true; option: GridOption } | { ok: false; reason: "not-found" | "empty-name" | "no-such-option" }> {
+  const name = input.name.trim();
+  if (!name) return { ok: false, reason: "empty-name" };
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, reason: "not-found" };
+  if (input.copyFromOptionId && !hasOption(project, input.copyFromOptionId)) return { ok: false, reason: "no-such-option" };
+  const at = Date.now();
+  const option: GridOption = { id: rid("opt-"), name, quoteId: null, createdAt: at, ...(input.tier ? { tier: input.tier } : {}) };
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const doc = ensureOptions(p);
+    doc.options = [...doc.options, option];
+    if (input.copyFromOptionId) {
+      const copied = copyOptionMembers({
+        placements: doc.placements || [],
+        routes: doc.routes || [],
+        fromOptionId: input.copyFromOptionId,
+        toOptionId: option.id,
+        makeId: (prefix) => rid(prefix),
+        by: input.by,
+        at,
+      });
+      doc.placements = [...(doc.placements || []), ...copied.placements];
+      doc.routes = [...(doc.routes || []), ...copied.routes];
+    }
+    p.updatedAt = at;
+  });
+  return updated ? { ok: true, option } : { ok: false, reason: "not-found" };
+}
+
+export async function renameOption(
+  projectId: string,
+  optionId: string,
+  name: string
+): Promise<{ ok: true } | { ok: false; reason: "not-found" | "empty-name" | "no-such-option" }> {
+  const clean = name.trim();
+  if (!clean) return { ok: false, reason: "empty-name" };
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, reason: "not-found" };
+  if (!hasOption(project, optionId)) return { ok: false, reason: "no-such-option" };
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const doc = ensureOptions(p);
+    doc.options = doc.options.map((o) => (o.id === optionId ? { ...o, name: clean } : o));
+    p.updatedAt = Date.now();
+  });
+  return updated ? { ok: true } : { ok: false, reason: "not-found" };
+}
+
+/**
+ * Remove an option and every placement/route tagged with it, in one patch,
+ * after cutting a revision (non-destructive by construction, D109 idiom).
+ * The option's draft quote, if any, is left in the Quotes hub. Refuses the
+ * last option: a project always has ≥1.
+ */
+export async function removeOption(
+  projectId: string,
+  optionId: string,
+  by: string
+): Promise<
+  | { ok: true; removedPlacements: number; removedRoutes: number }
+  | { ok: false; reason: "not-found" | "no-such-option" | "last-option" }
+> {
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, reason: "not-found" };
+  const opts = ensureOptions(project).options;
+  const target = opts.find((o) => o.id === optionId);
+  if (!target) return { ok: false, reason: "no-such-option" };
+  if (opts.length <= 1) return { ok: false, reason: "last-option" };
+  let removedPlacements = 0;
+  let removedRoutes = 0;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const doc = ensureOptions(p);
+    pushRevision(doc, by, "manual", `Auto-saved before removing option ${target.name}`);
+    const keepP = (doc.placements || []).filter((pl) => pl.optionId !== optionId);
+    const keepR = (doc.routes || []).filter((r) => r.optionId !== optionId);
+    removedPlacements = (doc.placements || []).length - keepP.length;
+    removedRoutes = (doc.routes || []).length - keepR.length;
+    doc.placements = keepP;
+    doc.routes = keepR;
+    doc.options = doc.options.filter((o) => o.id !== optionId);
+    syncQuoteMirror(doc);
+    p.updatedAt = Date.now();
+  });
+  return updated ? { ok: true, removedPlacements, removedRoutes } : { ok: false, reason: "not-found" };
 }
 
 /* ----------------------------- revisions ----------------------------- */
