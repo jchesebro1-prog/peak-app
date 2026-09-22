@@ -1,3 +1,7 @@
+import {
+  generateSchedule, overrunsEnd, phaseWindows, placeTask, selectLines, shiftForMilestone,
+  type PhaseWeight, type ScheduleLine,
+} from "@/lib/consulting-schedule";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
@@ -5835,3 +5839,88 @@ ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1
   ok(!v12.created && v12.locations.length === 1 && v12.locations[0].id === "l1" && v12.locations[0].address === "220 E Doty St" && v12.locations[0].primary, "#137 C1b mergeLocation preferPrimary still updates an ADDRESSED but unnamed primary venue in place — that venue is the customers row's own (and the #137 T6 blank-label round-trip)");
   ok(venueKindFromCategory("Church") === "church" && venueKindFromCategory("Black Box") === "blackbox" && venueKindFromCategory("Arena") === "arena" && venueKindFromCategory("Gym") === "flat" && venueKindFromCategory("theatre") === "proscenium" && venueKindFromCategory("") === "proscenium" && venueKindFromCategory("flat") === "flat", "#137 T3 venueKindFromCategory");
 }
+
+/* ====== #145 (D164–D172): consulting schedule engine ====== */
+const DAY145 = 86400000;
+const OCT6 = Date.UTC(2026, 9, 6);
+const MAR30 = Date.UTC(2027, 2, 30);
+const W145: PhaseWeight[] = [
+  { phaseId: "ph-a", name: "Assessment", weight: 2 },
+  { phaseId: "ph-b", name: "Schematic Design", weight: 4 },
+  { phaseId: "ph-c", name: "Design Development", weight: 6 },
+  { phaseId: "ph-d", name: "Final Documents", weight: 5 },
+  { phaseId: "ph-e", name: "Bid Support", weight: 3 },
+];
+const win145 = phaseWindows(OCT6, MAR30, W145);
+ok(win145.length === 5, "#145 phaseWindows returns one window per phase");
+ok(win145[0].startAt === OCT6, "#145 the first window starts exactly at the project start");
+ok(win145[4].endAt === MAR30, "#145 the last window ends exactly on the project end — proportional division never drifts");
+ok(win145[1].startAt === win145[0].endAt, "#145 windows abut with no gap");
+ok(
+  Math.round((win145[2].endAt - win145[2].startAt) / DAY145) === 53,
+  "#145 Design Development takes 6/20 of a 175-day span (52.5d, rounded)"
+);
+// Dropping a phase redistributes the remainder in proportion — the whole
+// point of units over absolute days (D166).
+const dropped145 = phaseWindows(OCT6, MAR30, W145.filter((p) => p.phaseId !== "ph-e"));
+ok(dropped145[3].endAt === MAR30 && dropped145.length === 4, "#145 dropping a phase stretches the rest to still fill the span");
+ok(dropped145[2].endAt - dropped145[2].startAt > win145[2].endAt - win145[2].startAt, "#145 every surviving window grows when a phase is dropped");
+
+// Degenerate inputs (spec §4.2) — all handled, never thrown.
+ok(phaseWindows(OCT6, OCT6 - DAY145, W145).every((w) => w.startAt === OCT6 && w.endAt === OCT6), "#145 an end before the start collapses every window onto the start");
+ok(phaseWindows(OCT6, MAR30, []).length === 0, "#145 no phases means no windows");
+const zeroW145 = phaseWindows(OCT6, MAR30, W145.map((p) => ({ ...p, weight: 0 })));
+ok(
+  zeroW145[0].endAt - zeroW145[0].startAt === zeroW145[3].endAt - zeroW145[3].startAt,
+  "#145 all-zero weights divide the span equally rather than dividing by zero"
+);
+const negW145 = phaseWindows(OCT6, MAR30, [{ phaseId: "p1", name: "A", weight: -4 }, { phaseId: "p2", name: "B", weight: 1 }]);
+ok(negW145[0].endAt - negW145[0].startAt === negW145[1].endAt - negW145[1].startAt, "#145 a negative weight is treated as 1, not as a subtraction");
+
+// Scope gate (D165): phase must match; a BLANK discipline matches everything.
+const lines145: ScheduleLine[] = [
+  { key: "l1", title: "Verify grid", section: "Assessment", phase: "Assessment", discipline: "rigging", startPct: 0, lengthPct: 20 },
+  { key: "l2", title: "Site photos", section: "Assessment", phase: "Assessment", discipline: "", startPct: 10, lengthPct: 15 },
+  { key: "l3", title: "Fixture count", section: "Assessment", phase: "Assessment", discipline: "lighting", startPct: 0, lengthPct: 20 },
+  { key: "l4", title: "Bid walk", section: "Bid", phase: "Bid Support", discipline: "", startPct: 0, lengthPct: 50 },
+];
+const sel145 = selectLines(lines145, ["Assessment", "Bid Support"], ["rigging", "curtain"]);
+ok(sel145.map((l) => l.key).join(",") === "l1,l2,l4", "#145 selectLines keeps matching disciplines and every blank-discipline line, drops the rest");
+ok(selectLines(lines145, ["Assessment"], []).map((l) => l.key).join(",") === "l2", "#145 an engagement with no disciplines still gets its blank-discipline lines");
+ok(selectLines(lines145, [" assessment "], ["RIGGING"]).length === 2, "#145 selectLines matches case-insensitively and ignores surrounding space");
+
+// Placement within a window, and the overrun clamp (spec §4.2).
+const fd145 = win145[3];
+const placed145 = placeTask(fd145, 60, 20);
+ok(placed145.startAt > fd145.startAt && placed145.dueAt <= fd145.endAt, "#145 placeTask lands inside its own phase window");
+ok(Math.round((placed145.startAt - fd145.startAt) / DAY145) === 26, "#145 startPct 60 of a 43.75-day window is 26 days in");
+const spill145 = placeTask(fd145, 90, 50);
+ok(spill145.dueAt === fd145.endAt, "#145 startPct + lengthPct over 100 clamps to the window end instead of spilling into the next phase");
+ok(placeTask(fd145, -10, 999).startAt === fd145.startAt, "#145 out-of-range percentages clamp rather than throwing");
+ok(placeTask({ phaseId: "x", name: "X", startAt: OCT6, endAt: OCT6 }, 50, 50).startAt === OCT6, "#145 a zero-length window places every task on its start");
+
+ok(overrunsEnd({ dueAt: MAR30 + DAY145 }, MAR30), "#145 overrunsEnd flags work past the committed end date");
+ok(!overrunsEnd({ dueAt: null }, MAR30), "#145 an undated task never counts as an overrun");
+
+// Milestone shift (D168): the milestone's phase, minus hand-dragged tasks.
+const tasks145 = [
+  { id: "T-1", schedule: { phaseId: "ph-d" }, handScheduled: false, startAt: OCT6, dueAt: OCT6 + DAY145 },
+  { id: "T-2", schedule: { phaseId: "ph-d" }, handScheduled: true, startAt: OCT6, dueAt: OCT6 + DAY145 },
+  { id: "T-3", schedule: { phaseId: "ph-e" }, handScheduled: false, startAt: OCT6, dueAt: OCT6 + DAY145 },
+  { id: "T-4", schedule: null, handScheduled: false, startAt: null, dueAt: null },
+];
+const shift145 = shiftForMilestone({ phaseId: "ph-d" }, 14 * DAY145, tasks145);
+ok(shift145.moved.length === 1 && shift145.moved[0].id === "T-1", "#145 shiftForMilestone moves only its own phase's untouched tasks");
+ok(shift145.moved[0].startAt === OCT6 + 14 * DAY145, "#145 a moved task shifts by exactly the milestone's delta");
+ok(shift145.skipped.map((t) => t.id).join(",") === "T-2,T-3,T-4", "#145 a hand-dragged task is never moved by the app");
+ok(shiftForMilestone({ phaseId: null }, DAY145, tasks145).moved.length === 0, "#145 a milestone with no phase pre-ticks nothing and degrades to the manual checklist");
+
+// Whole-schedule generation.
+const gen145 = generateSchedule({
+  startAt: OCT6, endAt: MAR30, phases: W145, disciplines: ["rigging"], lines: lines145,
+  milestones: [{ id: "ms-1", phaseId: "ph-d", targetDate: 0 }, { id: "ms-2", phaseId: null, targetDate: 0 }],
+});
+ok(gen145.tasks.length === 3, "#145 generateSchedule expands exactly the in-scope lines");
+ok(gen145.tasks.every((t) => t.startAt >= OCT6 && t.dueAt <= MAR30), "#145 every generated task lands inside the project span");
+ok(gen145.milestones.find((m) => m.id === "ms-1")?.targetDate === win145[3].endAt, "#145 a phase-matched milestone is dated to its phase window's end");
+ok(gen145.milestones.find((m) => m.id === "ms-2")?.targetDate === 0, "#145 a milestone with no phase stays unscheduled and out of the billing forecast");
