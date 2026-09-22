@@ -79,6 +79,26 @@ export function shapeFor(
   return "rect";
 }
 
+/** The "clean or null" step `saveGridCategoryShapesAction` persists: trim
+ *  and cap category keys, drop unknown shapes and blank categories, cap at
+ *  60 entries — and collapse an empty result to `null` rather than `{}`,
+ *  since a stored `{}` is itself a whole-truth map (every category falls
+ *  back to "rect") while `null` is "absent" and resolves through
+ *  resolveCategoryShapes to a fresh copy of the seed. Pure and
+ *  session-free so the regression harness can pin it directly. */
+export function cleanGridCategoryShapes(
+  map: Record<string, string> | null | undefined
+): Record<string, GridShape> | null {
+  const clean: Record<string, GridShape> = {};
+  for (const [k, v] of Object.entries(map || {})) {
+    const category = String(k ?? "").trim().slice(0, 60);
+    if (!category || !isGridShape(v)) continue;
+    clean[category] = v;
+    if (Object.keys(clean).length >= 60) break;
+  }
+  return Object.keys(clean).length ? clean : null;
+}
+
 /* ---------------------------- geometry ---------------------------- */
 
 export type SymbolOutline =

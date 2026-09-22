@@ -79,6 +79,11 @@ export function GridSymbolsCard({
   const [justSaved, setJustSaved] = useState(false);
 
   const dirty = JSON.stringify(rows) !== JSON.stringify(saved);
+  // Every row's category can be blanked (or all rows removed) without
+  // deleting them one-by-one; that would post {} and clear the key, so
+  // gate Save on it too, alongside the existing dirty/pending checks.
+  const hasContent = rows.some((r) => r.category.trim());
+  const canSave = dirty && !pending && hasContent;
 
   const patch = (i: number, p: Partial<Row>) => {
     setJustSaved(false);
@@ -108,7 +113,16 @@ export function GridSymbolsCard({
           if (c) map[c] = r.shape;
         }
         await saveGridCategoryShapesAction(map);
-        setSaved(rows);
+        if (Object.keys(map).length === 0) {
+          // An empty save clears the key, so the plan falls back to the
+          // shipped seed (resolveCategoryShapes(null)) — reflect that here
+          // instead of leaving the card showing "Saved" over an empty list.
+          const fallback = mergedRows(DEFAULT_GRID_CATEGORY_SHAPES, liveCategories);
+          setRows(fallback);
+          setSaved(fallback);
+        } else {
+          setSaved(rows);
+        }
         setJustSaved(true);
         router.refresh();
       } catch (e) {
@@ -138,9 +152,9 @@ export function GridSymbolsCard({
           </button>
           <button
             type="button"
-            disabled={!dirty || pending}
+            disabled={!canSave}
             onClick={onSave}
-            style={{ fontSize: 13, fontWeight: 600, border: "none", borderRadius: 9, padding: "9px 16px", cursor: dirty && !pending ? "pointer" : "not-allowed", color: dirty && !pending ? "#fff" : "#aab0bb", background: dirty && !pending ? "var(--accent)" : "#eef0f3", whiteSpace: "nowrap" }}
+            style={{ fontSize: 13, fontWeight: 600, border: "none", borderRadius: 9, padding: "9px 16px", cursor: canSave ? "pointer" : "not-allowed", color: canSave ? "#fff" : "#aab0bb", background: canSave ? "var(--accent)" : "#eef0f3", whiteSpace: "nowrap" }}
           >
             {pending ? "Saving…" : "Save"}
           </button>
@@ -190,7 +204,7 @@ export function GridSymbolsCard({
         ))}
         {rows.length === 0 && (
           <div style={{ padding: "18px 0 8px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
-            No category symbols — everything draws as a rectangle.
+            No category symbols yet — the shipped defaults apply. Add a category, or use Restore defaults to edit them.
           </div>
         )}
         <button

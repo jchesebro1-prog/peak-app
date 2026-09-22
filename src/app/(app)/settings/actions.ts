@@ -25,7 +25,7 @@ import {
   validateFieldDefs,
   type CustomFieldDef,
 } from "@/lib/customer-fields";
-import { isGridShape, type GridShape } from "@/lib/design/grid-symbols";
+import { cleanGridCategoryShapes } from "@/lib/design/grid-symbols";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -282,22 +282,16 @@ export async function saveConsultingAssumptionsAction(assumptions: string[]) {
  *  rectangle. Unknown shapes and blank categories are dropped; capped.
  *  settings.gridCategoryShapes is a whole-map replacement — a stored {}
  *  would drop EVERY category to "rect" (resolveCategoryShapes treats an
- *  empty object as "the whole truth", not "no overrides"). So an empty
- *  result here is never persisted as {}: clearing every row (or Restore
- *  defaults) clears the key instead, and resolveCategoryShapes falls back
- *  to the seed, same as a fresh install (controller review, Task 10). */
+ *  empty object as "the whole truth", not "no overrides"). cleanGridCategoryShapes
+ *  collapses an empty result to null instead, so resolveCategoryShapes falls
+ *  back to the seed, same as a fresh install. That's the ONLY case that
+ *  clears the key: "Restore defaults" followed by Save posts today's seed as
+ *  an explicit dense map (never empty), so it writes that map verbatim —
+ *  pinning today's values, not clearing the key (controller review, Task 10
+ *  fix). */
 export async function saveGridCategoryShapesAction(map: Record<string, string>) {
   await requirePerm("manage_users");
-  const clean: Record<string, GridShape> = {};
-  for (const [k, v] of Object.entries(map || {})) {
-    const category = String(k ?? "").trim().slice(0, 60);
-    if (!category || !isGridShape(v)) continue;
-    clean[category] = v;
-    if (Object.keys(clean).length >= 60) break;
-  }
-  await setSettings({
-    gridCategoryShapes: Object.keys(clean).length ? clean : null,
-  });
+  await setSettings({ gridCategoryShapes: cleanGridCategoryShapes(map) });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

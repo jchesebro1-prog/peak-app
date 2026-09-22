@@ -1026,6 +1026,28 @@ async function main() {
     '#135 { mode: "fixed", amount: 0 } yields zero milestones at the store — the action must guard this itself'
   );
 
+  // #131 T10 (review fix) — cleanGridCategoryShapes is the exact "clean or
+  // null" step saveGridCategoryShapesAction persists (factored out to a
+  // pure helper since the action itself needs a session): an empty map
+  // must collapse to null — never {}, which resolveCategoryShapes treats
+  // as the whole truth and would drop every category to "rect" — a valid
+  // entry round-trips, and an invalid shape is dropped while a valid
+  // sibling entry survives.
+  {
+    const { cleanGridCategoryShapes } = await import("@/lib/design/grid-symbols");
+    assert.equal(cleanGridCategoryShapes({}), null, "#131 T10 an empty map collapses to null, not {}");
+    assert.deepEqual(
+      cleanGridCategoryShapes({ Speakers: "circle" }),
+      { Speakers: "circle" },
+      "#131 T10 a valid category/shape pair round-trips"
+    );
+    assert.deepEqual(
+      cleanGridCategoryShapes({ Speakers: "circle", Lighting: "not-a-shape" }),
+      { Speakers: "circle" },
+      "#131 T10 an invalid shape is dropped while a valid sibling entry is kept"
+    );
+  }
+
   console.log("review regression checks passed");
 }
 
