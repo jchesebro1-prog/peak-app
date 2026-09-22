@@ -75,9 +75,11 @@ export function Typeahead<T>({
     () => typeaheadMatches(query, items, filter, rank, max),
     [query, items, filter, rank, max]
   );
+  const activeIdx = matches.length ? Math.min(active, matches.length - 1) : 0;
 
   const pick = (item: T) => {
     onPick(item);
+    setActive(0);
     setQuery(labelOf ? labelOf(item) : "");
     if (!stayOpen) setOpen(false);
   };
@@ -107,9 +109,9 @@ export function Typeahead<T>({
           } else if (e.key === "ArrowUp") {
             e.preventDefault();
             setActive((i) => Math.max(0, i - 1));
-          } else if (e.key === "Enter" && open && matches[active]) {
+          } else if (e.key === "Enter" && open && matches[activeIdx]) {
             e.preventDefault();
-            pick(matches[active]);
+            pick(matches[activeIdx]);
           } else if (e.key === "Escape") {
             setOpen(false);
           }
@@ -153,10 +155,10 @@ export function Typeahead<T>({
                 fontFamily: "var(--font-ui)",
                 cursor: "pointer",
                 color: "#16181d",
-                background: i === active ? "var(--accent-soft)" : "transparent",
+                background: i === activeIdx ? "var(--accent-soft)" : "transparent",
               }}
             >
-              {render(item, i === active)}
+              {render(item, i === activeIdx)}
             </button>
           ))}
           {matches.length === 0 && (
