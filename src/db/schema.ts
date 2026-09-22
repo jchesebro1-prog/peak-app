@@ -1,4 +1,4 @@
-import { pgTable, text, boolean, bigint, jsonb, index, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, text, boolean, bigint, integer, jsonb, index, primaryKey } from "drizzle-orm/pg-core";
 
 export * from "./doc-tables";
 
@@ -174,6 +174,33 @@ export const calendarConnections = pgTable(
 
 export type CalendarConnectionRow = typeof calendarConnections.$inferSelect;
 export type NewCalendarConnectionRow = typeof calendarConnections.$inferInsert;
+
+/**
+ * Per-rep Krisp API keys (Recordings spec §1.2,
+ * docs/superpowers/specs/2026-09-21-krisp-recordings-design.md). Mirrors
+ * gmail_connections: one row per Peak user, the key encrypted at rest with
+ * the same AES-GCM helper (lib/gmail/crypto.ts), identity fields copied
+ * from Krisp's `GET /me` at connect time. Keys are personal to one Krisp
+ * user and the "one import in flight" rule is per Krisp account, so the
+ * import lock lives here too: `import_claimed_at` is set atomically by
+ * withKrispImportLock (lib/krisp/connections.ts) when null or older than
+ * 5 minutes and cleared in `finally` — the same conditional-UPDATE claim
+ * style as the per-mailbox sync slot (D74). Disconnect deletes the row.
+ */
+export const krispConnections = pgTable("krisp_connections", {
+  userId: text("user_id").primaryKey(), // users.id
+  apiKey: text("api_key").notNull(), // encrypted (lib/gmail/crypto.ts encryptToken)
+  krispUserId: integer("krisp_user_id"), // GET /me → id
+  krispEmail: text("krisp_email"), // GET /me → email
+  krispName: text("krisp_name"), // GET /me → first_name + last_name
+  connectedAt: bigint("connected_at", { mode: "number" }).notNull(),
+  lastUsedAt: bigint("last_used_at", { mode: "number" }),
+  lastError: text("last_error"),
+  importClaimedAt: bigint("import_claimed_at", { mode: "number" }), // the import lock (spec §1.2)
+});
+
+export type KrispConnectionRow = typeof krispConnections.$inferSelect;
+export type NewKrispConnectionRow = typeof krispConnections.$inferInsert;
 
 /* ------------------------------------------------------------------ *
  * Identity core (Daylite parity Phase 1, D85).

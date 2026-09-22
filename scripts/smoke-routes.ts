@@ -134,6 +134,9 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/projects/P-3001" },
   { route: "/inspections/RI-2042" },
   { route: "/venue-assessments/FS-1055" },
+  // #119 Recordings (D152): the recorder page for a seeded survey and the beta/no-Krisp gates.
+  { route: "/recordings/new?parent=survey:FS-1055" },
+  { route: "/recordings/new?parent=inspection:RI-2042" },
   { route: "/companies/lakefront" },
   { route: "/customers/lakefront" }, // the legacy path — this entry tests that the redirect to /companies/[id] still resolves
   { route: "/venues/st-lakefront-1" }, // identity convert: st-${docId}-${n}

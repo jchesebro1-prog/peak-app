@@ -36,3 +36,15 @@ export function resolveSettingsSection(
     ? (v as SettingsSection)
     : "general";
 }
+
+/**
+ * Integration cards inside the General section (Mailboxes, Recordings). Each
+ * card's `id` is its anchor, so deep links like `/settings#recordings` land
+ * on it; the Account page's "Enable Drive archive" hint points there.
+ */
+export const INTEGRATION_CARDS = [
+  { key: "mailboxes", label: "Mailboxes", desc: "Gmail connections — send, receive, calendar, tasks." },
+  { key: "recordings", label: "Recordings", desc: "Where site-visit audio is archived once transcribed." },
+] as const;
+
+export type IntegrationCard = (typeof INTEGRATION_CARDS)[number]["key"];

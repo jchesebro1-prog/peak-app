@@ -5856,3 +5856,24 @@ specific role, that needs a new field on `users` and Jeff's input on what the gr
 `src/app/(app)/task-templates/*` (new), `src/app/(app)/settings/settings-sections.ts`,
 `src/components/nav/nav-data.ts`, `src/app/(app)/projects/*`, `src/app/(app)/estimator/*`,
 `src/app/(app)/design/designs/*`. Decisions: D151.
+
+## 119. Recordings: in-app site-visit audio → Krisp → write-back → Drive archive (D152) — BUILT 2026-09-21, pilot pending
+
+**Reported:** 2026-09-21 (Jeff): the Krisp API Integration Brief — recording, transcript, summary
+and action items should land on the visit's record automatically.
+
+**Shipped on `feat/recordings` (worktree `.claude/worktrees/recordings`):** `recordings`
+collection + `krisp_connections` table (migration 0021); Krisp REST client, import relay, status
+check, reconcile, write-back (feed note, confirm-first action items, insert-on-tap prefill);
+recorder seam (native Capgo + web fallback), device upload queue, `/api/recordings/upload` Blob
+broker, `/recordings/new` recorder page and `/recordings/[id]` detail page (Summary / Action items
+/ Transcript / Audio); Drive archive job + `drive.file` scope; Account Krisp card; Settings →
+Recordings (archive account) and Beta (pilot users); Record control + recordings strip on Venue
+Assessments, Survey/Inspection/Flame/Repair editors, Field Work, Home agenda, customer record,
+Engagement Oversight; "From recording" panel in the Survey and Inspection editors; ⌘K search.
+
+**Jeff-gated before the pilot:** Core/Advanced Krisp seats; a Write key on his seat;
+`BLOB_READ_WRITE_TOKEN` in Vercel prod; Drive scope on the archive mailbox; the native build with
+the DEPLOY.md §6 plist/manifest edits. Device-only checks: recording through screen lock, Android
+foreground-service notification, multipart upload of a >50 MB take, Vercel's upload-completed
+callback (prod only).

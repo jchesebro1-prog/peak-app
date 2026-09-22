@@ -14,6 +14,8 @@ import {
   warrantyMonthsOf,
   DEFAULT_WARRANTY_MONTHS,
 } from "@/lib/stores/repair-jobs";
+import { RecordingsStrip } from "@/components/recordings/recordings-strip";
+import { loadRecordingsStrip } from "../../recordings/data";
 import { ResultsForm } from "./controls";
 
 export const metadata = { title: "Repair results — Quartzite-6" };
@@ -86,6 +88,7 @@ export default async function RepairResultsPage({
   }
 
   const sm = stageMeta(job.stage);
+  const strip = await loadRecordingsStrip("repair_job", job.id);
   const cat = categoryMeta(job.category);
   const pm = priorityMeta(job.priority);
   const isCompleted = job.stage === "completed";
@@ -123,7 +126,7 @@ export default async function RepairResultsPage({
       </Link>
 
       {/* header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
         <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Repair results</div>
         <span
           style={{
@@ -141,6 +144,7 @@ export default async function RepairResultsPage({
         >
           {sm.label}
         </span>
+        <RecordingsStrip parentKind="repair_job" parentId={job.id} recordings={strip.recordings} canRecord={strip.canRecord} />
       </div>
       <div style={{ fontSize: 13.5, color: "#8c919c", marginBottom: 18 }}>
         {isCompleted

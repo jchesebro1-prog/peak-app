@@ -12,6 +12,7 @@ import {
   GMAIL_MODIFY_SCOPE,
   gmailEnabled,
   hasCalendarScope,
+  hasDriveScope,
   hasTasksScope,
   personalKey,
   redirectHostMismatch,
@@ -80,6 +81,23 @@ export default async function SettingsPage() {
     };
   });
 
+  // Recordings → Drive archive (Krisp recordings spec §1.3 / §5.1): the
+  // archive-account picklist runs over every connected mailbox, flagged by
+  // whether its grant already carries drive.file.
+  const recordings = {
+    archiveMailbox: settings.recordingsArchiveMailbox ?? null,
+    rootFolderCached: !!settings.recordingsArchiveFolderId,
+    customerFolders: Object.keys(settings.recordingsArchiveFolders || {}).length,
+    lastRun: settings.recordingsArchiveLastRun ?? null,
+    betaUsers: Array.isArray(settings.recordingsBetaUsers) ? settings.recordingsBetaUsers : [],
+    mailboxes: connections.map((c) => ({
+      key: c.mailboxKey,
+      address: c.address,
+      connectedBy: c.connectedBy,
+      driveOn: hasDriveScope(c.scope),
+    })),
+  };
+
   return (
     <div className="pk-content" style={{ maxWidth: 1080, padding: "26px 30px 64px" }}>
       <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-0.015em" }}>
@@ -136,6 +154,7 @@ export default async function SettingsPage() {
           meId={me.id}
           meName={me.name}
           gmail={{ enabled: gmailOn, mailboxes: mailboxVMs, redirectUri, redirectWarning }}
+          recordings={recordings}
           settings={{
             companyName: settings.companyName,
             accent: settings.accent,

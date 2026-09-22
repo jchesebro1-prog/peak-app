@@ -12,6 +12,8 @@ import {
 import { loadServiceWork } from "@/lib/operations-work-server";
 import { WORK_TYPE_META, startOfDay, type WorkItem } from "@/lib/operations-work";
 import { ensureProjectTasksMigrated, allTasks, type TaskRecord } from "@/lib/stores/tasks";
+import { RecordingsStrip } from "@/components/recordings/recordings-strip";
+import { loadRecordingsStrip, loadRecordingsStrips } from "../recordings/data";
 import FieldWorkDetail, { type FieldIdentity } from "./controls";
 
 export const metadata = { title: "Field work — Quartzite-6" };
@@ -148,18 +150,26 @@ export default async function FieldWorkPage({
 
     type DayRow = { day: number; node: React.ReactNode };
 
+    // Recordings (spec §6): one Record control + recordings list per project
+    // on the day list — batched to ONE recordings pass + one gate read.
+    const strips = await loadRecordingsStrips("project", fieldJobs.map((p) => p.id));
+
     const projectRows: DayRow[] = fieldJobs.map((p) => {
       const jobTasks = taskRows.filter((t) => t.projectId === p.id);
       const done = jobTasks.filter((t) => t.status === "done").length;
       const onSite = p.stage === "install" || p.stage === "training";
+      const strip = strips.get(p.id);
+      // The card is itself a link, so the strip (links) sits in a footer
+      // attached below it rather than nested inside the anchor.
+      const hasStrip = !!strip && (strip.canRecord || strip.recordings.length > 0);
       return {
         day: p.installStart || p.targetDate || today,
         node: (
+          <div key={"project:" + p.id} style={{ marginBottom: 11 }}>
           <Link
-            key={"project:" + p.id}
             href={"/field-work?id=" + encodeURIComponent(p.id)}
             className="fw-card-link"
-            style={CARD_LINK_STYLE}
+            style={hasStrip ? { ...CARD_LINK_STYLE, marginBottom: 0, borderRadius: "14px 14px 0 0" } : { ...CARD_LINK_STYLE, marginBottom: 0 }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>
               <span style={chip(p.stage)}>{STAGE_META[p.stage]?.label || p.stage}</span>
@@ -248,6 +258,26 @@ export default async function FieldWorkPage({
               <span style={{ marginLeft: "auto", color: "#c4c9d2", fontSize: 20 }}>›</span>
             </div>
           </Link>
+          {hasStrip && strip && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                background: "#fafbfc",
+                border: "1px solid #e7e9ee",
+                borderTop: "none",
+                borderRadius: "0 0 14px 14px",
+                padding: "8px 16px",
+              }}
+            >
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", flexShrink: 0 }}>
+                Recordings
+              </span>
+              <RecordingsStrip parentKind="project" parentId={p.id} recordings={strip.recordings} canRecord={strip.canRecord} />
+            </div>
+          )}
+          </div>
         ),
       };
     });
@@ -384,6 +414,9 @@ export default async function FieldWorkPage({
   (p.notes || []).forEach((n) => addIdentity(n.by));
   (p.timeLogs || []).forEach((l) => addIdentity(l.person));
 
+  // Recordings (spec §6): the on-site header gets the Record control + list.
+  const strip = await loadRecordingsStrip("project", p.id);
+
   return (
     <FieldWorkDetail
       project={p}
@@ -391,6 +424,8 @@ export default async function FieldWorkPage({
       meName={me.name}
       identity={identity}
       initialTab={tab}
+      recordings={strip.recordings}
+      canShowRecord={strip.canRecord}
     />
   );
 }

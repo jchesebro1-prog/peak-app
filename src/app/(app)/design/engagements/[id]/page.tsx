@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/session";
 import { loadConsultingData } from "../data";
 import { ConsultingView } from "../view";
 import { TABS, type TabKey } from "../tabs";
+import { RecordingsCard } from "@/components/recordings/recordings-card";
 
 export const metadata = { title: "Consulting — Quartzite-6" };
 
@@ -29,5 +30,13 @@ export default async function ConsultingDetailPage({
   const tab: TabKey = (TABS as readonly string[]).includes(tabRaw)
     ? (tabRaw as TabKey)
     : "overview";
-  return <ConsultingView data={data} sel={sel} tab={tab} />;
+  return (
+    <ConsultingView
+      data={data}
+      sel={sel}
+      tab={tab}
+      // Recordings spec §6 — server-rendered card slotted under Oversight.
+      oversightExtra={tab === "oversight" ? <RecordingsCard parentKind="engagement" parentId={sel.id} /> : null}
+    />
+  );
 }
