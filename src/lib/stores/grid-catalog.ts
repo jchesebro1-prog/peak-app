@@ -1,6 +1,7 @@
 import { list as listPricingCatalog, type CatalogPart } from "@/lib/stores/catalog";
-import { listDocs, upsertDoc, insertWithPrefixedId } from "@/db/doc-store";
+import { listDocs, patchDoc, upsertDoc, insertWithPrefixedId } from "@/db/doc-store";
 import type { Port } from "@/lib/catalog-connect";
+import type { GridShape } from "@/lib/design/grid-symbols";
 
 /**
  * Grid's symbol library is intentionally separate from the pricing catalog.
@@ -25,6 +26,9 @@ export type GridSymbol = {
   height: number;
   ports: Port[];
   pricingPartId?: string | null;
+  /** Per-entry symbol override (#131, D154). Absent/null = the category
+   *  default from settings.gridCategoryShapes (see lib/design/grid-symbols). */
+  shape?: GridShape | null;
   kind?: "device" | "assembly";
   members?: GridAssemblyMember[];
   createdBy: string;
@@ -100,6 +104,7 @@ export async function createGridAssembly(input: {
   modelNumber: string;
   scope: string;
   members: GridAssemblyMember[];
+  shape?: GridShape | null;
   by: string;
 }): Promise<GridSymbol> {
   const t = Date.now();
@@ -115,8 +120,21 @@ export async function createGridAssembly(input: {
     ports: [],
     kind: "assembly",
     members: input.members,
+    shape: input.shape ?? null,
     createdBy: input.by,
     createdAt: t,
     updatedAt: t,
   }));
+}
+
+/** Set or clear (null) one entry's symbol override (#131). Returns null when
+ *  the entry doesn't exist in the Grid library. */
+export async function setGridSymbolShape(
+  id: string,
+  shape: GridShape | null
+): Promise<GridSymbol | null> {
+  return patchDoc<GridSymbol>("grid_catalog", id, (d) => {
+    d.shape = shape;
+    d.updatedAt = Date.now();
+  });
 }

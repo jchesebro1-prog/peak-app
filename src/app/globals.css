@@ -605,6 +605,89 @@ body {
   margin-bottom: 6px;
 }
 
+/* ============ Search bars (#121) ============ */
+/* One row: the box grows, filters ride beside it at the same 36px height,
+   everything wraps under 560px. Used by SearchFilterBar (components/search). */
+.pk-searchbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pk-searchbar-box {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  background: #fff;
+  border: 1px solid #e4e7ec;
+  border-radius: 9px;
+}
+.pk-searchbar-box:focus-within {
+  border-color: var(--accent);
+}
+.pk-searchbar-box input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  color: #16181d;
+  outline: none;
+}
+.pk-searchbar-glass {
+  width: 14px;
+  height: 14px;
+  border: 1.7px solid #aab0bb;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+}
+button.pk-searchbar-glass {
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.pk-searchbar-glass::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 6px;
+  height: 1.7px;
+  background: #aab0bb;
+  transform: rotate(45deg);
+}
+.pk-searchbar-select {
+  height: 36px;
+  box-sizing: border-box;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #3a3f4a;
+  background: #fff;
+  border: 1px solid #e4e7ec;
+  border-radius: 9px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.pk-searchbar-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+@media (max-width: 560px) {
+  .pk-searchbar > * {
+    flex-basis: 100%;
+  }
+}
+
 /* Printable documents (doc-page.js port) — Letter, serif letterhead */
 .pk-doc-page {
   width: 8.5in;

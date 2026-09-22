@@ -2,8 +2,8 @@
 
 import { useState, useTransition } from "react";
 import type { CSSProperties } from "react";
-import type { TaskTemplateLine, TaskTemplateSetRecord, TemplateRecordKind } from "@/lib/stores/task-templates";
-import { TEMPLATE_RECORD_LABEL, TEMPLATE_RECORD_KINDS } from "@/lib/stores/task-templates";
+import type { TaskTemplateLine, TaskTemplateSetRecord } from "@/lib/stores/task-templates";
+import { TEMPLATE_RECORD_LABEL, TEMPLATE_RECORD_KINDS, type TemplateRecordKind } from "@/lib/task-template-kinds";
 import type { Role } from "@/lib/team";
 import { archiveTaskTemplateSetAction, deleteTaskTemplateSetAction, saveTaskTemplateSetAction } from "./actions";
 

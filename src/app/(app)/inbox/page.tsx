@@ -5,6 +5,7 @@ import { activeUsers, getUser } from "@/lib/users";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { followUpCount } from "@/lib/stores/leads";
 import { crmModeOn } from "@/lib/stores/notif-prefs";
+import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
@@ -801,6 +802,7 @@ export default async function InboxPage({
       customerOptions: customers
         .map((c) => ({ value: c.id, label: c.name }))
         .sort((a, b) => a.label.localeCompare(b.label)),
+      customerOptionGroups: groupCompanyOptions(customers.map((c) => ({ id: c.id, name: c.name, type: c.type || "" }))),
       contactOptions: contactOptionsFor(
         linkedCustomer || suggestedCustomer
           ? [linkedCustomer || suggestedCustomer]
@@ -849,9 +851,15 @@ export default async function InboxPage({
   }));
 
   // ?draft=<id> opens a saved draft in the composer (IDEAS #36 outreach);
-  // ?compose=1 opens a blank sheet; ?new=<customerId> pre-fills the customer
+  // ?compose=1 opens a blank sheet; ?new=<customerId> pre-fills the customer.
+  // #122: ?customer=<companyId> is the same pre-filled composer (vendor pages
+  // link here), and ?customer=<companyId>&log=1 opens the Log call / meeting
+  // modal with that company preset instead.
   let initialCompose: ComposeInit | null = null;
-  const newCust = str(params.new);
+  const customerParam = str(params.customer);
+  const logCust = str(params.log) === "1" ? customerParam : "";
+  const newCust = logCust ? "" : str(params.new) || customerParam;
+  const initialLog = logCust && customerVMs.some((c) => c.id === logCust) ? { customerId: logCust } : null;
   if (openDraftThread) {
     const d = openDraftThread.draft || {};
     initialCompose = {
@@ -952,6 +960,7 @@ export default async function InboxPage({
             contactEmails={contactEmails}
             fromOptions={fromOptions}
             initialCompose={initialCompose}
+            initialLog={initialLog}
             categoryOptions={CATEGORIES}
             crmMode={crmMode}
           />

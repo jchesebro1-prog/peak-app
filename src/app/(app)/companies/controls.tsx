@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { SearchFilterBar } from "@/components/search/search-filter-bar";
 import type { MapPin } from "@/components/map/LeafletMap";
 import { ACCENT_INK, ACCENT_SOFT } from "./lib";
 
@@ -107,31 +108,56 @@ export function FilterBar({
 
   return (
     <div style={{ marginBottom: 14 }}>
-      {/* search */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 9,
-          background: "#fff",
-          border: "1px solid #e4e7ec",
-          borderRadius: 9,
-          padding: "9px 12px",
-        }}
-      >
-        <span style={{ width: 14, height: 14, border: "1.7px solid #aab0bb", borderRadius: "50%", flexShrink: 0, position: "relative" }}>
-          <span style={{ position: "absolute", right: -3, bottom: -3, width: 6, height: 1.7, background: "#aab0bb", transform: "rotate(45deg)" }} />
-        </span>
-        <input
-          value={text}
-          onChange={(e) => onSearch(e.target.value)}
-          placeholder="Search companies…"
-          style={{ flex: 1, border: "none", background: "transparent", fontSize: 13.5, fontFamily: "var(--font-ui)", color: "#16181d", outline: "none" }}
-        />
-      </div>
+      {/* #121: search + the owner select + New (7d) on ONE row. */}
+      <SearchFilterBar value={text} onChange={onSearch} placeholder="Search companies…" ariaLabel="Search companies">
+        <select
+          className="pk-searchbar-select"
+          value={ownerSelectValue}
+          onChange={(e) => pushWith({ scope: e.target.value === meName ? "mine" : e.target.value })}
+          aria-label="Owner filter"
+        >
+          {ownerOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => pushWith({ added: added === "7d" ? "" : "7d" })}
+          title="Companies added in the last 7 days"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            height: 36,
+            boxSizing: "border-box",
+            fontSize: 11.5,
+            fontWeight: added === "7d" ? 600 : 500,
+            padding: "0 11px",
+            borderRadius: 20,
+            border: `1px solid ${added === "7d" ? "var(--accent)" : "#e4e7ec"}`,
+            cursor: "pointer",
+            background: added === "7d" ? ACCENT_SOFT : "#fff",
+            color: added === "7d" ? ACCENT_INK : "#5b616e",
+            flexShrink: 0,
+            whiteSpace: "nowrap",
+          }}
+        >
+          New (7d)
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600 }}>{addedCount}</span>
+        </button>
+      </SearchFilterBar>
 
-      {/* type chips */}
-      <div style={{ display: "flex", gap: 6, marginTop: 11, flexWrap: "wrap" }}>
+      {/* scope toggle + type chips */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 11, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", background: "#eceef1", borderRadius: 9, padding: 3, flexShrink: 0 }}>
+          <button onClick={() => pushWith({ scope: "mine" })} style={scope === "mine" ? segActive : segIdle}>
+            My work
+          </button>
+          <button onClick={() => pushWith({ scope: "all" })} style={scope === "all" || !scope ? segActive : segIdle}>
+            Everyone
+          </button>
+        </div>
         {types.map((t) => {
           const active = type === t || (t === "all" && (!type || type === "all"));
           return (
@@ -153,63 +179,6 @@ export function FilterBar({
             </button>
           );
         })}
-      </div>
-
-      {/* scope */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 11 }}>
-        <div style={{ display: "flex", background: "#eceef1", borderRadius: 9, padding: 3, flexShrink: 0 }}>
-          <button onClick={() => pushWith({ scope: "mine" })} style={scope === "mine" ? segActive : segIdle}>
-            My work
-          </button>
-          <button onClick={() => pushWith({ scope: "all" })} style={scope === "all" || !scope ? segActive : segIdle}>
-            Everyone
-          </button>
-        </div>
-        <select
-          value={ownerSelectValue}
-          onChange={(e) => pushWith({ scope: e.target.value === meName ? "mine" : e.target.value })}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontFamily: "var(--font-ui)",
-            fontSize: 12,
-            fontWeight: 600,
-            color: "#3a3f4a",
-            background: "#fff",
-            border: "1px solid #e4e7ec",
-            borderRadius: 9,
-            padding: "8px 11px",
-            cursor: "pointer",
-          }}
-        >
-          {ownerOptions.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <button
-          onClick={() => pushWith({ added: added === "7d" ? "" : "7d" })}
-          title="Companies added in the last 7 days"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 11.5,
-            fontWeight: added === "7d" ? 600 : 500,
-            padding: "7px 11px",
-            borderRadius: 20,
-            border: `1px solid ${added === "7d" ? "var(--accent)" : "#e4e7ec"}`,
-            cursor: "pointer",
-            background: added === "7d" ? ACCENT_SOFT : "#fff",
-            color: added === "7d" ? ACCENT_INK : "#5b616e",
-            flexShrink: 0,
-            whiteSpace: "nowrap",
-          }}
-        >
-          New (7d)
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600 }}>{addedCount}</span>
-        </button>
       </div>
     </div>
   );

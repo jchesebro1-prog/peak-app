@@ -2554,6 +2554,11 @@ or is that prohibitively expensive/complicated?
 installable PWA today; go Capacitor when a native capability (Bluetooth laser, camera, push) justifies
 it — likely alongside item 30.** Not a full rewrite.
 
+- **2026-09-21 — native sign-in works (D153).** Xcode 27 + iOS 27 simulator on the build Mac; the
+  shell opens the hosted app, Google sign-in runs in a Safari sheet and returns via
+  `quartzite://auth`. Still open for "a real app": Apple Developer Program, TestFlight, Phase 2 device
+  features (`docs/superpowers/specs/2026-09-21-native-shell-phase-2-design.md`).
+
 ---
 
 ## 32. Adding a venue: address search doesn't autofill the street on select — DONE (status corrected 2026-07-29 by code audit)
@@ -4898,7 +4903,7 @@ work — a new type should follow the same pattern, not reopen the vendor-promis
 
 ---
 
-## 82. People need to import as first-class records, not riding along on Customers — OPEN
+## 82. People need to import as first-class records, not riding along on Customers — DONE 2026-09-21 (#137, D158)
 
 **Area:** `src/app/(app)/import/` (no `people` type exists), `src/lib/identity/contacts.ts`,
 `src/app/(app)/people/` (the People surface itself, [[peak-app]] #20)
@@ -4926,11 +4931,13 @@ Building a real `people` importer without #20's decision would mean importing IN
 **Ties to:** #20 (the real blocker), #81/#83 (the same "which collections get a bulk import"
 question, asked three times in one day).
 
-**Status:** OPEN — logged only, no code.
+**Status:** DONE 2026-09-21 — shipped as the `contacts` importer under #137 (D158): one row per
+person, linked to exactly one customer by name or id, unmatched customers auto-created (the
+narrower option in question 1; #20's multi-link model is unchanged).
 
 ---
 
-## 83. Venues need a bulk import — data model / cleanup TBD — OPEN
+## 83. Venues need a bulk import — data model / cleanup TBD — DONE 2026-09-21 (#137, D158)
 
 **Area:** `src/app/(app)/venues/`, `src/lib/identity/sites.ts`, `src/lib/identity/venue-defaults.ts`
 **Reported:** 2026-08-01 (Jeff: "we need to ... sort through the venues portion")
@@ -4957,7 +4964,11 @@ type" once that's seen.
 **Ties to:** #81, #82 (same day, same "no bulk import for this collection" pattern) · #30 (site
 survey / venue measurement, a related but distinct venues-adjacent item already on the list).
 
-**Status:** OPEN — logged only, no code. Needs scoping before it needs building.
+**Status:** DONE 2026-09-21 — shipped as the `venues` importer under #137 (D158): Customer /
+Customer ID, Venue Name, Address, City, State, Zip, Category (free text, new `sites.kind`), one
+row per venue, linked or auto-created. The data-quality walk-through of existing venue records
+(duplicates, conflated site-vs-performance-space) is still a conversation with Jeff, not a punch
+item.
 
 ---
 
@@ -5489,7 +5500,7 @@ fallback order, DEPLOY.md §5 (four scopes, rename trap, `AUTH_URL` required for
 **Still open (Jeff):** enable Google Calendar API in `peak-backend` + add `calendar.events`
 scope (calendar opt-in only); set `CRON_SECRET` on Vercel for background sync.
 
-## 96. Inbox: automatic customer linking, link sidebar, two-way Gmail labels, derived status — SPEC APPROVED 2026-09-21
+## 96. Inbox: automatic customer linking, link sidebar, two-way Gmail labels, derived status — DONE 2026-09-21 (D140, D142)
 
 **Reported:** 2026-09-21 (Jeff). Spec:
 `docs/superpowers/specs/2026-09-21-inbox-customer-linking-and-label-sync-design.md`.
@@ -5509,6 +5520,9 @@ suppression, one-lead `Peak/New lead` swap, unknown/ambiguous skip). Follow-ups 
 final review: quote intake's own `toLocationInput` still drops `locationName`; ambiguous-card "Always"
 claims the domain even for a contact-level ambiguity (hint copy); duplicate option values when two
 candidate customers share a contact name.
+
+The wiring was reverted on `main` by a later merge and re-landed — see #120; the label-drift cron
+reconcile follow-up is #138.
 
 ## 97. Gmail 90-day import never completed — quota blow-up restarted it from page 1 on every sync — DONE 2026-09-21
 
@@ -5533,25 +5547,6 @@ the cron route; the auto tick now includes un-imported mailboxes so a paused imp
 **Follow-ups:** `recordMessage` still does a full `comms` scan per message (fine at hundreds, worth a
 map when the directory grows); Hobby-plan cron is daily, so background completion depends on an open
 Inbox tab until `CRON_SECRET` + a Pro-plan schedule (or an external pinger) exist.
-
----
-
-## 98. Cron reconcile of Peak/* label drift on dormant threads — OPEN
-
-D142's Peak→Gmail writer (`queueLabelSync`) is fire-and-forget: it's queued from the store mutation
-inside a server action, with no `waitUntil`, so on serverless the process can freeze or recycle before
-the queued write actually lands. That's fine for an active thread — the next mutation re-queues a
-sync that picks up the current desired set — but a link/assign/status change on a thread that then
-goes quiet can leave it permanently unlabelled (or stale-labelled) on the Gmail side if that one
-queued write was the one that got dropped: nothing else re-queues a sync for a thread nobody touches
-again.
-
-The per-sync passes (open-tab tick, cron) only re-queue threads whose status just flipped or that
-just linked — they don't sweep everything else. A cron-only reconcile pass that, for every linked
-thread, loads its current label set + computes `desiredPeakLabels` and queues a sync whenever they
-differ would close this: bounded cost (one `getDoc` + one label-cache read per linked thread), and it
-only needs to run on the cron path, not the interactive one, since interactive traffic already
-self-heals via the next mutation. Reference D142.
 
 ---
 
@@ -5877,3 +5872,520 @@ Engagement Oversight; "From recording" panel in the Survey and Inspection editor
 the DEPLOY.md §6 plist/manifest edits. Device-only checks: recording through screen lock, Android
 foreground-service notification, multipart upload of a >50 MB take, Vercel's upload-completed
 callback (prod only).
+
+## 120. `main` after the review-audit merge: #96 wiring reverted, build broken, migrations non-convergent — DONE 2026-09-21 (branch `punch-2026-09-21-round-2`)
+
+**Found:** 2026-09-21 23:00, starting the round-2 branch. `056e0d4` ("Merge origin/main into
+punch-2026-09-21-review-audit") resolved every conflicting file by keeping its own side, so `main`
+@ 763febd had #96's integration reverted (`thread-reader.tsx` sidebar mount, `page.tsx` resolution
+VM + Unmatched view, `comms.ts` `queueLabelSync` hooks + resolution fields, `bridge.ts`
+resolve-on-ingest + label-event feed, `api.ts`, `config.ts`), `customerDomains` dropped from
+`schema.ts` and both snapshots, `0019_long_the_enforcers` off the journal, D140/D142 overwritten,
+the #96 status and old #98 lost. The other session's close-out (`b05aff6`…`6ba6220`) then re-landed
+the wiring, the schema, the journal entry and the D140/D142 numbering itself — so by the time this
+branch was rebuilt on 6ba6220, three things were still wrong on `main`:
+
+1. **The build fails.** `task-templates/template-sets-client.tsx` (a client component, #118)
+   value-imported `@/lib/stores/task-templates`, which pulls `doc-store → db → postgres` into the
+   browser bundle ("Module not found: Can't resolve 'fs'/'net'/'tls'/'perf_hooks'").
+2. **Migrations don't converge.** Preview builds of the review-audit branch had already applied its
+   original `0019_sleepy_dust` (calendar_connections) and `0020_odd_crusher_hogan` (task_templates)
+   to the one shared Neon DB (D141 warns about exactly this). The close-out then renamed them into a
+   merged `0020_brave_avengers` that is NOT idempotent, so the 6ba6220 production build died at
+   `CREATE TABLE "calendar_connections"` → *relation already exists*. Worse, because drizzle-orm
+   selects work by `created_at < when` only, prod's high-water mark may have passed
+   `0019_long_the_enforcers` (when 22:28Z) via those previews (01:14Z / 01:28Z) before cddf37b's
+   production build ran (01:41Z) — in which case **`customer_domains` was never created in prod**
+   and the live sidebar's domain claims fail. Settled by the 0e6fbe1 production migrate log:
+   `relation "customer_domains" already exists, skipping` — cddf37b's deploy had created it, so
+   the repair migration was a clean no-op in prod (the fix below made the answer irrelevant).
+3. **The newest snapshot lacked `customer_domains`**, so the next `db:generate` would have emitted
+   `DROP TABLE customer_domains`.
+
+**Fix (this branch, first commit):** the two constants the client needs moved to a DB-free
+`src/lib/task-template-kinds.ts` (store re-exports them); `0020_brave_avengers.sql` and
+`0021_krisp_recordings.sql` rewritten idempotently (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF
+NOT EXISTS`, `CREATE OR REPLACE TRIGGER` — PG14+, fine on Neon and PGlite 17); a new custom
+`0022_customer_domains_repair` re-issues `customer_domains` idempotently with a fresh timestamp so
+every database converges; the `customer_domains` block restored to `0021_snapshot.json` and carried
+into `0022_snapshot.json`. `quotes/new/intake-form.tsx` deliberately NOT restored to the #96 shape —
+#110 landed on top of it and my change there was only the `EntityQuickAdd` extraction (folds into
+the Grid intake spec §5).
+
+**Proof:** `drizzle-kit generate` → "No schema changes". A scratch-PGlite convergence script
+(three databases: fresh; prod-worst = original sleepy_dust + odd_crusher applied, high-water mark
+past 0019, no `customer_domains`; prod-best = same plus 0019) migrates all three without error,
+ends with `customer_domains` + `calendar_connections` + `task_templates` + `recordings` +
+`krisp_connections` present and both seq-bump triggers in place; a second run is a no-op.
+**Gates:** tsc 0 errors · test:specs ALL PASSED · test:review:regressions passed · test:smoke ALL
+PASSED · eslint clean on touched files · `next build` exit 0.
+**Deployed:** pushed to `main` as 0e6fbe1 (Jeff's call, 23:26 CDT); Vercel production build
+Ready at 23:30 — `[migrate] done.` with `calendar_connections` / `task_templates` / their indexes
+and `customer_domains` all reported "already exists, skipping", `recordings` + `krisp_connections`
+created. First successful production deploy since cddf37b; main now serves both sessions' work.
+
+**Lesson (adds to D141):** a merge that "keeps ours" for every conflict is a revert of the other
+branch, and a regenerated migration is only safe if it is actually idempotent — the "106 baseline"
+type errors the review-audit branch reported were this breakage. When two sessions land on `main`
+the same day: diff the merged files against `main` before branching, run the four gates on the
+merge commit itself, and never push a journal change without a convergence run.
+
+## ROUND 2 — 2026-09-21 (Jeff's list, branch `punch-2026-09-21-round-2`)
+
+Logged as #121–#137. "What exists" is from a code read of `main` @ 763febd (+ the #120 repair);
+items marked NEEDS SPEC get a design doc before code, the rest get a scoped plan each.
+
+## 121. Search bars: filter dropdown and results on the same line as the search box — DONE 2026-09-21
+
+**Reported:** 2026-09-21 (Jeff): "Anytime a search bar is present, especially with catalog, the
+dropdown and the search bar need to be the same line — it is confusing to have the dropdown be
+separate and not see your search results."
+
+**What exists:** no shared search component (`src/components` has none; 24 screens each roll their
+own `<input placeholder="Search…">`). Patterns in the wild: Catalog page has search + sort on one row
+(`catalog/controls.tsx:48`) but manufacturer/category/unit facets in a separate left rail
+(`catalog/page.tsx:220-259`); People and Companies put their filter `<select>`s on a second row
+(`people/controls.tsx:69-91`, `companies/controls.tsx:111-131`); the Subassemblies part picker
+filters a `<select>`'s own options, so the results ARE a detached dropdown you have to open
+(`design/subassemblies/subassemblies-client.tsx:27-28`); the estimator catalog picker is the one
+place results list inline under the input (`estimator/catalog-picker.tsx:79-99`).
+
+**Ask:** one shared control — `SearchFilterBar` (input + its filter selects in a single row) and a
+`Typeahead` variant where results render inline under the input (the estimator picker pattern) — and
+adopt it on the catalog-facing pickers first (Subassemblies/Assemblies part pickers, Catalog page,
+Grid device palette), then the People/Companies/Venues filter rows. Which screens Jeff means most is
+the open question (asked 2026-09-21).
+
+**Shipped:** two shared components in `src/components/search/` — `SearchFilterBar` (one flex row:
+the search box grows, `<select>` filters ride beside it at 36px, wraps under 560px; controlled or,
+inside a GET form, uncontrolled with the magnifier as the submit button) and `Typeahead<T>` (results
+inline under the box while typing, max 8 rows, arrow/enter/escape, listbox roles) over a pure
+`src/lib/search/typeahead-rank.ts` (SKU prefix first, then description contains, then anywhere;
+tokens AND-ed). Adopted on the Subassemblies `PartPicker` and the Assembly Builder's role pickers
+(the server-side search action is gone — the catalog slice ships to the client like Subassemblies
+already did), the Grid device palette (scope buttons on the search row), and the People, Companies
+and Venues filter rows. Leads/quotes tables and the Catalog facet rail are untouched (spec).
+
+## 122. Vendors module — DONE 2026-09-21 (D160)
+
+**Reported:** 2026-09-21 (Jeff): a vendor portion of the app that mostly references the catalog's
+vendors; tracks when we last received a price list and whether the catalog matches it — if not, add a
+task for Jena; vendor contacts and what to contact them for; discounts and project-registration
+information; log interactions with the vendor via the Inbox.
+
+**What exists:** vendor identity is free text everywhere — `CatalogPart.mfr` (`lib/stores/catalog.ts:32`),
+`ProcurementLine.vendor` / `ProjectDelivery.vendor` (`lib/stores/projects.ts:122,137`), a static
+`VENDORS` map (`projects.ts:106-112`); no vendors table. The company model already has a type picker
+value `"vendor/manufacturer"` (`lib/identity/config.ts:17`) and `PARTNER_TYPES` checks a literal
+`"Vendor"` (`identity/venue-defaults.ts:16-24`) — casing mismatch. No price-list/import history record
+of any kind; the only freshness signal is per-row `updatedAt` rolled up by `priceBooks()`
+(`lib/catalog-books.ts:20-46`) for the Home "Catalog glance" card. Tasks for a teammate = the Home
+Queue `assignments` store (`lib/stores/assignments.ts:67-90`, `link.kind` already includes
+`"company"`; assignee is a display name). Inbox linking to any company works unmodified
+(`inbox/link-actions.ts:64`) and the customer feed loader (`lib/customer-feed.ts:37`) is what a vendor
+page would reuse for interactions.
+
+**Ask:** a Vendors screen over companies of kind vendor (reusing contacts, feed, Inbox linking),
+matched to catalog manufacturers by name with an explicit alias list; a price-list ledger per vendor
+(received date + effective date, file/notes) that #133's per-line price dates are checked against —
+mismatch or staleness spawns an assignment for the catalog owner (a setting, default Jena); discount
+terms + project-registration fields on the vendor record. Spec before code — pairs with #133 (price
+dates) and #132/#134 (import).
+
+**Shipped:** spec `docs/superpowers/specs/2026-09-21-vendors-module-design.md`, plan
+`docs/superpowers/plans/2026-09-21-vendors-module.md`. `vendor_profiles` doc collection (id = company
+id; migration `0024_vendor_profiles`, idempotent) + `lib/stores/vendors.ts`; pure
+`lib/vendor-status.ts` (status, owner-task specs, catalog effective date over `mfrKey` aliases,
+manufacturer directory, owner resolution) and `lib/vendor-tasks.ts` (one catalog read + one
+profiles read; exactly-once assignments by `source` key; daily cron step); `/vendors` (table,
+status/search filters, unclaimed-manufacturer claims, + New vendor) and `/vendors/[id]`
+(Overview / Contacts / Price lists / Activity); `settings.catalogOwner` + the Catalog owner card on
+`/catalog`; Inbox picker Customers/Vendors optgroups and `/inbox?customer=<id>` (+`&log=1`);
+catalog facet tooltip + banner vendor link; CRM › Vendors nav; seeded `rose-brand`. Gates: tsc,
+test:specs, test:review:regressions, test:smoke (`/vendors`, `/vendors/rose-brand` + tabs), eslint
+on touched files. Decision D160.
+
+## 123. Inbox: "Link to work" above the customer picker in the link sidebar, plus quick-add quote — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "I want link to work to populate on the left side directly above
+the pick the customer. I want the ability to quick add quote from the link to work."
+
+**What exists:** the sidebar (`inbox/link-sidebar.tsx`, re-landed by main's close-out; see #120) renders the customer card
+first and nests the work picker (`thread-reader.tsx:670-847`, types quote/survey/inspection/project —
+no lead) inside/after it. `/quotes/new?customer=` pre-seeds a quote (`quotes/new/page.tsx:12`) but
+nothing in the Inbox links to it.
+
+**Ask:** move "Link to work" to the top of the sidebar; add "+ New quote" there that opens the quote
+intake pre-filled with the thread's customer/contact and links the thread to the created quote on
+save; add `lead` to the work-link types (the interpreter already writes `type:"lead"`).
+
+## 124. Inbox: link a venue through the selected customer — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "The Venue should also be linkable via the customer when selected."
+
+**What exists:** `CommThread` has no site/venue field (`lib/stores/comms.ts:235-277`); quick-add venue
+appends a `CustomerLocation` to the customer but never attaches it to the thread.
+
+**Ask:** once a customer is linked, a venue select (that customer's sites + quick-add) that stamps
+`siteId` on the thread; work links created from the thread (quote, survey, inspection) inherit it.
+
+## 125. Inbox: per-message picker to link from a specific message (in or out) — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "a dropdown menu for a thread and select that message in the thread,
+both incoming and outgoing, to link quicker."
+
+**What exists:** linking is whole-thread only (`setLinkAction`, `linkThread`); messages have no
+affordance beyond expand/collapse (`thread-reader.tsx:76-258`); the resolver keys off the thread's
+counterpart address, so a multi-party or forwarded thread suggests from the wrong person.
+
+**Ask:** a message picker in the sidebar (From/To · direction · date) that sets which message's
+addresses the resolver and quick-add use; exact semantics (identity source vs message-level link)
+confirmed with Jeff 2026-09-21 before the spec.
+
+## 126. Inbox: resizable list/reader panes + collapsible menu — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "the ability to resize the preview window, inbox, and collapse the
+menu."
+
+**What exists:** fixed widths — nav sidebar 238px (`inbox-shell.tsx:567`), list 392px
+(`thread-list.tsx:95`), reader `flex:1`; no splitter component anywhere in `src/`; no persisted
+layout prefs (the one Inbox pref, `crmMode`, is a server-side notif pref). The app nav is a top bar
+with a mobile drawer, not a rail.
+
+**Ask:** drag handles between folder rail / list / reader, a collapse toggle on the Inbox folder rail,
+widths remembered per user (localStorage, with sane min/max), and — if Jeff means the app nav — a
+compact mode for the top bar.
+
+## 127. Inbox: email signatures, auto-appended — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "There needs an ability to add signatures so they automatically get
+added."
+
+**What exists:** no signature field anywhere (`users`, `gmail_connections`, Account); the composer
+starts Reply/Reply-all with an empty body (`thread-reader.tsx:430-452`) and `buildRaw()` sends
+`text/plain` verbatim (`gmail/mime.ts:58-104`). Every live thread is `mailbox:"personal"` per user.
+
+**Ask:** a per-user signature (Account → Signature; plain text, optional per-mailbox override once
+shared boxes return) inserted into the composer on new/reply/forward below a `-- ` separator, editable
+before send; forward and reply quoting unchanged.
+
+## 128. Inbox: list row shows the last person who responded (Gmail-style); "waiting on them" badge stays — OPEN
+
+**Reported:** 2026-09-21 (Jeff): "The name in the inbox preview should be who responded last,
+organized similar to how Gmail works, and if I responded last ignore that and hold the last person to
+respond, but hold the badge that says waiting on them."
+
+**What exists:** row name = `participants` (unique authors joined, `comms.ts:564-571`) or
+`customer || contactName` (`page.tsx:399-419`); the status pill and the "waiting" chip come from
+`deriveStatus` (`comms.ts:132-142`).
+
+**Ask:** primary name = author of the newest message that isn't the signed-in user (fallback: the
+counterpart), Gmail-style "Brenda, me (3)" secondary; status/waiting badge unchanged.
+
+## 129. Assembly Builder: assemblies re-price when price lists update — DONE 2026-09-21 (D156)
+
+**Shipped:** Subassemblies resolve live through `resolveSubassembly()` (`lib/fixture-assemblies.ts`),
+the same engine + lens + options formula `saveFixtureAction` used to freeze; the record keeps a
+build-time `snapshot` for "was $X when built". Both builders show "prices as of" (newest effective
+price date among their parts). Assemblies were already live; no pricing change there.
+
+**Reported:** 2026-09-21 (Jeff): "make sure that as we update the price lists it auto-updates the
+assemblies prices based on what we selected."
+
+**What exists:** Assemblies already resolve live — `resolveFixtureAssemblies()` joins each component
+SKU against the current catalog on every read (`lib/fixture-assemblies.ts:60-89`), so a price-list
+import changes them immediately. Subassemblies do NOT: `saveFixtureAction` snapshots `cost`/`price`
+at save time (`design/subassemblies/actions.ts:45-46`) and never re-resolves.
+
+**Ask:** make Subassemblies resolve live too (store SKUs, compute on read; keep the snapshot only as a
+"priced as of" display), and show a "prices as of <catalog date>" stamp on both builders. Rides with
+#130.
+
+## 130. Assembly Builder + Subassemblies on one tab — DONE 2026-09-21 (D156)
+
+**Shipped:** `/design/assemblies?tab=assemblies|subassemblies` renders either builder under a
+two-link switch (URL param, so deep links and the nav key work); `/design/subassemblies` redirects
+to the tab (`designRedirect`); the Subassemblies nav entry is gone and `activeKeyFor` maps both
+paths to `assemblies`. Smoke covers both tab URLs and the redirect.
+
+**Reported:** 2026-09-21 (Jeff): "Can we combine this and Subassemblies to the same tab rather than
+two separate tabs?"
+
+**What exists:** two nav entries and routes — `/design/assemblies` and `/design/subassemblies`
+(`nav-data.ts:93,96`); assemblies live on `settings.fixtureAssemblies` (`lib/settings.ts:89`),
+subassemblies in their own doc collection.
+
+**Ask:** one "Assembly Builder" entry with an in-page Assemblies | Subassemblies switch (URL param so
+deep links keep working); `/design/subassemblies` redirects.
+
+## 131. The Grid: selectable symbol per placed item type — DONE 2026-09-21 (D154)
+
+**Reported:** 2026-09-21 (Jeff): "on the plans a select symbol for different items that get placed,
+so it is easier for people to distinguish between different objects."
+
+**What exists:** every placed device is the same rounded rect, colored by a hash of its category
+(`grid/[id]/editor.tsx:123-127, 2035-2094`); curtains are the one special glyph. `GridSymbol`
+(`lib/stores/grid-catalog.ts:17-33`) has size fields but no shape/glyph.
+
+**Ask:** a small curated symbol set (rect, circle, triangle, diamond, hexagon, speaker/light/camera
+glyphs…) selectable per grid-catalog entry (and overridable per category), rendered on the plan,
+in the riser and in the legend; default mapping by category so existing designs change sensibly.
+
+**Shipped:** D154 — eight curated shapes (`src/lib/design/grid-symbols.ts`), `shapeFor(part,
+settings)` = entry override → category default → rect, one `<SymbolShape>` renderer used by the
+plan, the palette rows, the riser's group lines and a new riser legend. Per-entry "Symbol" select
+on the placed device's context panel and on the Assemblies "+ Build" form; category defaults
+(seeded Speakers/Lighting/Cameras/Rigging/Control) in Settings → Admin → Grid symbols
+(`settings.gridCategoryShapes`, full replacement). No schema change; curtains, the selection ring
+and labels are untouched.
+
+## 132. Catalog import: mandatory manufacturer + wrong-manufacturer double check — DONE 2026-09-21 (D157)
+
+**Shipped:** manufacturer required on both importers; a pure guard (`lib/catalog-import-guard.ts`
+`checkManufacturer`) normalizes near-duplicate names to the existing spelling, rejects a file whose
+SKUs are filed under another manufacturer (named, up to 10) or that overlaps none of an existing
+manufacturer's parts, and accepts new manufacturers. Runs before any upsert on the Catalog page and
+in the Import hub's preview (server action) + commit.
+
+**Reported:** 2026-09-21 (Jeff): imports need a mandatory manufacturer; if the chosen manufacturer
+already exists, check whether the file's parts overlap the existing ones — overlap means it's the same
+manufacturer's list (allow it); no overlap means the wrong manufacturer was picked (error).
+
+**What exists:** two importers disagree — the Catalog page stamps ONE manufacturer over the whole
+file (`catalog/actions.ts:97`, picker at `controls.tsx:242-290`, optional), the Import hub takes it
+per row with a fallback to the existing part's value (`import/registry.ts:111-126`). Upsert key is
+SKU alone in both, so a wrong manufacturer silently relabels existing parts.
+
+**Ask:** manufacturer required on both paths; when it already exists, compute SKU overlap against
+that manufacturer's parts — ≥1 match allows, zero matches rejects with "none of these SKUs belong to
+<mfr>"; a brand-new manufacturer name that is a near-duplicate of an existing one (case/punctuation)
+is normalized to the existing one.
+
+## 133. Catalog: per-line price date, 18-month outdated banner by manufacturer, editable effective date — DONE 2026-09-21 (D156)
+
+**Shipped:** `CatalogPart.pricedAt` stamped only on a price change; an effective-date field (default
+today) on both importers; `settings.priceListEffective[mfrKey]` as the manufacturer's book date,
+editable inline on the new `/catalog` banner (outdated ≥ 548 days + undated books, facet links); the
+Home card shows Outdated / Unknown / age; the edit modal shows the line's effective date.
+
+**Reported:** 2026-09-21 (Jeff): every price tracks when it was last updated per line item; past 18
+months the catalog shows a banner flagging those manufacturers as outdated (like the dashboard shows
+them) but editable; and we can set the effective date of a price list on import — a one-time backfill
+during development, then ongoing.
+
+**What exists:** `CatalogPart.updatedAt` is a last-write stamp on ANY edit, not a price date
+(`lib/stores/catalog.ts:75,101`); the Home "Catalog glance" card shows raw age per manufacturer
+(`home-catalog.tsx`, `catalog-books.ts:20-46`) and hides it entirely if one part lacks a stamp; no
+threshold, no effective date anywhere.
+
+**Ask:** `pricedAt` (effective date) per part, set from an "effective date" field on both importers
+(default today) and only when the price actually changes; a per-manufacturer "price list effective"
+override editable from the banner (the one-time backfill); an 18-month rule surfaced as a Catalog
+banner + the dashboard card; feeds #122's ledger.
+
+## 134. Catalog import: 1 MB cap with a clear error — DONE 2026-09-21 (D157)
+
+**Shipped:** `MAX_CATALOG_IMPORT_BYTES` (1,048,576) checked client-side on the file and the paste
+box before upload, in the Catalog page action, in `importRecords` for the catalog type and in
+`/api/import/xlsx` for `type=catalog` (10 MB kept for other types); failures go through the existing
+`importError=` / `err=` banners. `serverActions.bodySizeLimit` raised to 1200 kB so the app's error
+wins over Next's opaque body-limit rejection.
+
+**Reported:** 2026-09-21 (Jeff): "There needs to be a cap on the import of 1mb or it errors and it
+needs to sense that."
+
+**What exists:** the Catalog page importer only checks `file.size > 0` (`catalog/actions.ts:72`); the
+xlsx route caps at 10 MB (`api/import/xlsx/route.ts:15`), datasheets at 8 MB; no
+`serverActions.bodySizeLimit` in `next.config.ts`.
+
+**Ask:** a 1 MB cap on the catalog CSV/TSV/xlsx paths, checked client-side before upload AND
+server-side, surfaced through the existing `importError` banner (#111) — never a silent failure.
+
+## 135. Consulting: add a project + fee manually from the hub — DONE 2026-09-21 (D155)
+
+**Reported:** 2026-09-21 (Jeff): "Consulting needs the ability to add a project and fee and such from
+this screen; normally it would get autogenerated by a fee proposal but should have the option to
+include a project that may have skipped a fee or proposal."
+
+**What exists:** engagements are created only by `syncEngagementsFromQuotes()` when a consulting quote
+goes sent/won (`lib/stores/engagements.ts:527-573`); the hub (`design/engagements/view.tsx`) has "+
+Add milestone" on an existing engagement but no "+ New engagement"; `ensureEngagementForQuote()` is
+dead code (`engagements.ts:495`).
+
+**Ask:** "+ New consulting project" on the hub — customer (pick/quick-add), name, architect, venue,
+optional fee (fixed amount or milestones) — creating an engagement with no quote, marked
+`origin:"manual"` so the sweep never overwrites it; a later fee proposal can attach to it.
+
+**Shipped:** D155 — "+ New consulting project" on `/design/engagements` opens a modal (customer
+pick or quick-add, name, architect, venue, optional fixed fee or milestone rows) → 
+`createManualEngagementAction` (`requirePerm("create")`) → an `awarded` engagement with
+`origin: "manual"`, `quoteId: null`, milestones from the fee and the Settings phase menu pending.
+`syncEngagementsFromQuotes` indexes rows by quote and skips rows without one, so the manual row is
+never touched; "Attach proposal" on the engagement's Links card links an existing consulting quote
+without rewriting milestones, after which the normal sweep rules apply. Hub cards show a "Manual"
+pill. `ensureEngagementForQuote` was not dead (the regression harness uses it) and is unchanged.
+
+## 136. Knowledge & Information tab: move Steel Calculator + Fixture Cross-Ref — DONE 2026-09-21 (first slice of #27/#56; #56 stays open)
+
+**Reported:** 2026-09-21 (Jeff): "Move Steel Calculator, Fixture Cross Ref to a Knowledge and
+information tab. The tab needs more information on how we get information into it and how it is
+developed, but for now those two can live under that tab."
+
+**What exists:** both live under the DESIGN group (`nav-data.ts:91,95`, pages
+`design/steel`, `design/fixtures`); no Knowledge route exists; #27 and #56 are logged-only.
+
+**Ask:** a KNOWLEDGE nav group with a landing page (short intro on where the data comes from and how
+it's maintained, placeholders for the #56 doctrine/rules items) plus those two entries moved in;
+old URLs redirect.
+
+**Shipped:** a KNOWLEDGE nav group after DESIGN (Overview `/knowledge`, Steel Calculator
+`/knowledge/steel`, Fixture Cross-Ref `/knowledge/fixtures`); the two pages moved with their
+components untouched (back links now read "← Knowledge"); `/design/steel`, `/design/fixtures` and
+the D97 `/design-studio/steel` stub all redirect to the new routes in one hop through
+`designRedirect`'s `KNOWLEDGE_MOVES`. The landing page lists the two tools, where each dataset
+comes from and how it is maintained, and a plain-text "Coming here" list (design doctrine,
+estimating rules, customer tiers) with no links to unbuilt pages. Spec-harness checks pin the group's
+children, the redirects and that no two nav entries share a key.
+
+## 137. Import/Export: separate customers / contacts / venues imports, category column, zip, link-back — DONE 2026-09-21 (D158) (absorbs #82, #83)
+
+**Reported:** 2026-09-21 (Jeff): customers, contacts and venues as separate import options with a
+category column; a zip for the company address; imported contacts and venues link back to the
+customer account.
+
+**What exists:** one `customers` importer with a single embedded contact + venue per row
+(`import/registry.ts:129-186`; template `import/types.ts:38-49`, no Zip); match is by normalized
+name only (`registry.ts:132`); `zip` exists on the `companies` and `sites` tables (`schema.ts:210,308`)
+but nothing in `CustomerLocation`/`writeRecord()` can set it (`customers.ts:497-515`); category ≈
+`type`/`lifecycle`/`keywords` on `CustomerDoc`, none set by the importer. No `people` or `venues`
+import types (#82, #83).
+
+**Ask:** three import types — customers (adds Category → `type`, Zip), contacts, venues — where
+contacts/venues carry a `Customer` column matched by name (case/punctuation-insensitive) with an
+optional `Customer ID`; unmatched rows are reported before commit (auto-create vs reject is Jeff's
+call, asked 2026-09-21); zip plumbed through the store; matching exports.
+
+**Shipped:** three cards on the Import hub. **Customers** — `Customer Name*, Category, Address,
+City, State, Zip, Phone, Website`; Category → `type`, the address lands on the customer's
+unnamed mailing venue — filling it if that slot is empty, appending one if the customer's venues are
+all named, and never overwriting a named venue's own address (C1b) — Zip also on
+the company row, Phone/Website on the company row; the old `Contact Name / Email / Venue` columns
+still import as hidden aliases. **Contacts** — `Customer* | Customer ID, Name*, Email, Phone,
+Mobile, Title, Role, Primary`, matched by customer + email-or-name, `Primary=yes` demotes the
+others, re-importing the same file is a no-op. **Venues** — `Customer* | Customer ID, Venue Name,
+Address, City, State, Zip, Category`, matched by customer + venue name (`Venue Name` is required
+unless the row carries an address); the first imported venue fills the customer's unnamed base
+venue — but only a true placeholder: a venues row never claims an unnamed venue that already
+carries an address, since that is the customer's mailing address. The rule is symmetric — a
+customers row never writes its address onto a *named* venue either, it appends an unnamed one —
+so a customer listed in both files ends up with the venue as its primary location and the mailing
+address kept as a second, unnamed one. A `Notes` column on any of the three is accepted and
+ignored: no store field holds it. Both link-back types match `Customer ID` → normalized
+name → **create the customer** (Jeff's call), once per name per file; the preview shows a Customer
+column (linked / will create) and "Will create N new customers: …" before commit, and the result
+reports rows linked vs customers created. Exports for all three (customers gains Category + Zip;
+contacts/venues carry the customer's name + id). Store seam: `zip`/`kind` on locations, `mobile` on
+contacts, `zip`/`phone`/`website` on the record, all preserve-when-omitted; new `sites.kind` column
+(migration 0023); one shared `toLocationInput` that keeps `locationName` (the #96 review
+follow-up). Files: `src/app/(app)/import/{types,parse,link,registry,actions,page,controls}.ts(x)`,
+`src/lib/stores/customers.ts`, `src/db/schema.ts` + `drizzle/0023_sites_kind.sql`,
+`src/app/(app)/companies/{types,lib,actions}.ts` + `[id]/page.tsx`, `quotes/new/actions.ts`,
+`inbox/link-actions.ts`. Tests: `test:specs` (#137 T2/T3), `test:review:regressions` (#137
+T1/T4/T5/T6), `test:smoke` (hub + export routes). Decisions: D158.
+
+## 138. Cron reconcile of Peak/* label drift on dormant threads — OPEN (re-logged; was #98)
+
+D142's Peak→Gmail writer (`queueLabelSync`) is fire-and-forget: it's queued from the store mutation
+inside a server action, with no `waitUntil`, so on serverless the process can freeze or recycle before
+the queued write actually lands. That's fine for an active thread — the next mutation re-queues a
+sync that picks up the current desired set — but a link/assign/status change on a thread that then
+goes quiet can leave it permanently unlabelled (or stale-labelled) on the Gmail side if that one
+queued write was the one that got dropped: nothing else re-queues a sync for a thread nobody touches
+again.
+
+The per-sync passes (open-tab tick, cron) only re-queue threads whose status just flipped or that
+just linked — they don't sweep everything else. A cron-only reconcile pass that, for every linked
+thread, loads its current label set + computes `desiredPeakLabels` and queues a sync whenever they
+differ would close this: bounded cost (one `getDoc` + one label-cache read per linked thread), and it
+only needs to run on the cron path, not the interactive one, since interactive traffic already
+self-heals via the next mutation. Reference D142.
+
+## 139. `PARTNER_TYPES` still mismatches `COMPANY_TYPES` for four non-vendor partner types — OPEN
+
+**Reported:** found during #122 (Vendors module) reviews, 2026-09-21 — pre-existing, out of that
+punch's scope.
+
+**What exists:** `PARTNER_TYPES` (`src/lib/identity/venue-defaults.ts:18-27`) is the set of company
+`type` strings `baseVenueKind()` checks to skip minting a base venue for partner companies (D85:
+partners get none). #122 fixed this for vendors — `VENDOR_COMPANY_TYPE` (`"vendor/manufacturer"`,
+the exact `COMPANY_TYPES` value) was added alongside the legacy `"Vendor"` spelling — but left the
+other four literals untouched: `"Architect"`, `"General Contractor"`, `"Electrical Contractor"`,
+`"Engineer"`. `COMPANY_TYPES` (`src/lib/identity/config.ts:10-21`) actually carries `"architect"`,
+`"general contractor"`, `"electrical contractor"`, and `"engineer or AV consultant"` — none of which
+match the `PARTNER_TYPES` strings (casing, and for Engineer, the wording too). A company created or
+imported with one of those four picker values falls through `PARTNER_TYPES.has(...)` and gets a base
+venue minted anyway — the exact bug #122 fixed for vendors, still live for these four. Affects real
+data on `main` today.
+
+**Ask:** four one-line additions to `PARTNER_TYPES`, the same pattern #122 used for vendors (keep the
+legacy literal, add the exact `COMPANY_TYPES` spelling): `"architect"`, `"general contractor"`,
+`"electrical contractor"`, `"engineer or AV consultant"`.
+
+## 140. A vendor with a price list but NO claimed manufacturers is permanently "Newer list received" — OPEN
+
+**Reported:** found during the #122 (Vendors module) final review, 2026-09-21. Not a defect against
+the spec — the spec says this and the regression harness asserts it — so it is Jeff's call, not a
+default anyone should take while he isn't looking.
+
+**What exists:** `vendorStatus()` (`src/lib/vendor-status.ts:87-97`) compares the newest ledger entry
+against `catalogEffectiveAt`, and `catalogEffectiveAtFor()` (`:67-77`) returns `null` when the vendor
+claims no manufacturers (no keys, nothing to date). The comparison is then
+`lastList.effectiveAt > (catalogEffectiveAt ?? 0)`, which any real date wins, so such a vendor reads
+`newer-list` forever: it can never reach `current` or `outdated`, and `vendorTasks()` (`:106-124`)
+mints an "Update catalog: X price list effective …" task for the catalog owner for every distinct
+effective date logged. The task is honest for a vendor whose catalog lines are waiting on an import,
+but the vendor kept purely for its contacts, discount terms and registration — no catalog presence at
+all, which is most of the "partner" rows Jeff is likeliest to add by hand — produces the same nag with
+nothing for the owner to actually do, and no way to clear it except completing the task by hand each
+time. A vendor with no ledger entry at all is unaffected (`no-list` short-circuits first).
+
+**Ask:** pick one. (a) Leave it — logging a price list for a vendor with no claimed manufacturers is
+arguably a data-entry mistake and the task is the prompt to fix it. (b) A fifth status key,
+`no-claims`, shown as its own chip and minting no task, so the Vendors list says plainly why the
+vendor is outside the freshness rule. (c) Return `no-list` when there are no manufacturers, which
+mints no task but hides the fact that a list was logged. (b) is the only one of the three that keeps
+the ledger visible AND the queue quiet, at the cost of one more chip in `VENDOR_STATUS_META` and the
+`/vendors` status filter. Whichever is picked, the spec §2 status table, `DECISIONS.md` D160 and the
+`#122` harness assertions move with it. Reference #122 / D160.
+
+## 141. Vendor Overview: the remount that fixed concurrent overwrites also eats the "Saved" chip and unsaved keystrokes — OPEN
+
+**Reported:** found during the #122 (Vendors module) re-review, 2026-09-22 — introduced by that
+module's own fix wave, so it ships with the feature rather than predating it.
+
+**What exists:** `/vendors/[id]` keys the Overview tab on the profile's `updatedAt`
+(`src/app/(app)/vendors/[id]/page.tsx:162`) so that a profile changed in another tab is re-read
+instead of silently overwritten by whatever the stale form held. `writeProfile`
+(`src/lib/stores/vendors.ts:152-156`) stamps `updatedAt` on *every* write, so the key changes after
+the tab's own saves too, and the component remounts. Two consequences:
+
+1. The green "Saved" confirmation (`overview-tab.tsx:38, 148`) is state on the remounted component,
+   so it is discarded the moment `router.refresh()` commits — in practice it never renders, and the
+   only success signal left is the button going back to disabled. The error path is unaffected: it
+   returns before the refresh (`overview-tab.tsx:53-56`), so failures still show their message.
+2. Claim and release also bump `updatedAt` (`overview-tab.tsx:40-41, 83, 99`), so clicking × or
+   **Claim** now discards unsaved Discounts / Registration keystrokes that used to survive. The
+   Claim control sits *above* those cards, which makes the ordering easy to hit.
+
+Both are strictly smaller than the concurrent-overwrite the key removes, so the key stays. The
+narrower shape is to drop the `key` and re-seed the two text areas from an effect keyed on
+`updatedAt` that skips while the form is dirty, leaving `saved` alone — then the confirmation
+survives, a concurrent edit still lands, and an in-progress edit is never thrown away.
+
+Two smaller items found in the same pass, both latent rather than live: the suffixed id in
+`createVendorCompany` (`src/lib/stores/vendors.ts:238`) is not itself re-checked against
+`companyIdTaken`, so two creates of the same name in the same millisecond still collide (reachable
+only by concurrent POSTs); and `vendorForManufacturer` (`:143-148`) still reads
+`allVendorProfiles()` unfiltered, so it would hand back a soft-deleted vendor's id — no `src/`
+caller does today, but it is the same shape as the stranded-claims bug that fix wave closed, and a
+future link-rendering caller would reintroduce it. Reference #122 / D160.

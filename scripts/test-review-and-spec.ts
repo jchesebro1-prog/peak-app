@@ -10,6 +10,14 @@ import {
   domainOf,
   isPublicDomain,
 } from "@/lib/gmail/config";
+import {
+  pickSessionCookies,
+  challengeFor,
+  isChallenge,
+  mintHandoffCode,
+  redeemHandoffCode,
+  HANDOFF_TTL_MS,
+} from "@/lib/native-auth";
 import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
@@ -24,6 +32,18 @@ import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS, batte
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
 import { DEFAULT_SETTINGS, DEMO_COLLECTIONS } from "@/db/seed-data";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "@/db/doc-tables";
+import { PARTNER_TYPES, baseVenueKind } from "@/lib/identity/venue-defaults";
+import { VENDOR_COMPANY_TYPE, isVendorType } from "@/lib/identity/config";
+import {
+  catalogEffectiveAtFor, groupCompanyOptions, manufacturerDirectory, partCountFor, resolveCatalogOwner, unclaimedManufacturers,
+  vendorStatus, vendorTasks, type PriceListEntry as VendorPriceListEntry,
+} from "@/lib/vendor-status";
+import { VENDOR_TABS, resolveVendorTab } from "@/app/(app)/vendors/tabs";
+import {
+  fromDateInput as vendorFromDateInput,
+  parseLedgerDates as vendorParseLedgerDates,
+  toDateInput as vendorToDateInput,
+} from "@/app/(app)/vendors/dates";
 import { FIELD_COLLECTIONS } from "@/lib/sync/engine";
 import { canRecord } from "@/lib/settings";
 import {
@@ -61,16 +81,33 @@ import { accentContrast } from "@/lib/color";
 import { emailFor, legacyEmailFor } from "@/lib/team";
 import { gridProjectsSeed } from "@/db/seeds/grid-projects";
 import { quotesSeed } from "@/db/seeds/quotes";
+import { customersSeed } from "@/db/seeds/customers";
+import { vendorProfilesSeed } from "@/db/seeds/vendors";
 import ExcelJS from "exceljs";
 import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
-import { getTypeMeta } from "@/app/(app)/import/types";
+import { IMPORT_TYPES, getTypeMeta, type ImportTypeMeta } from "@/app/(app)/import/types";
 import {
   autoMap,
+  normalizeZip,
   parseCsv as parseImportCsv,
   prepareRows,
+  visibleColumns,
 } from "@/app/(app)/import/parse";
+import {
+  linksCustomer,
+  matchContact,
+  matchLocation,
+  mergeContact,
+  mergeLocation,
+  parseYesNo,
+  previewLinks,
+  resolveCustomerForRow,
+  venueKindFromCategory,
+} from "@/app/(app)/import/link";
+import type { CustomerContact, CustomerLocation } from "@/lib/stores/customers";
 // Pure (no store access, no DB) — see the note on catalogPatch itself.
-import { catalogPatch } from "@/app/(app)/import/registry";
+import { catalogPatch, templateCsv as importTemplateCsv } from "@/app/(app)/import/registry";
+import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
 
 import {
   VENUE_CLASSES, SUBTYPES, VISIT_PURPOSES, classMeasureFields,
@@ -433,8 +470,8 @@ ok(designRedirect("/consulting/markup", { eng: "CE-1001", phase: "ph-2", doc: "e
   "markup preserves all three params in order");
 ok(designRedirect("/design-studio", {}) === "/design",
   "design-studio overview redirects to the new Design overview");
-ok(designRedirect("/design-studio/steel", {}) === "/design/steel",
-  "calculators keep their leaf name");
+ok(designRedirect("/design-studio/steel", {}) === "/knowledge/steel",
+  "calculators keep their leaf name — and follow the #136 move to Knowledge in ONE hop");
 ok(designRedirect("/design-studio/lineset", { design: "DS-abc" }) === "/design/lineset?design=DS-abc",
   "lineset preserves its ?design= deep link");
 ok(designRedirect("/design-studio/weights", { design: "DS-abc" }) === "/design/lineset?design=DS-abc",
@@ -447,6 +484,8 @@ ok(designRedirect("/quotes", {}) === null,
   "unrelated paths are not redirected");
 ok(designRedirect("/consulting/CE-1001", { tab: "bogus" }) === "/design/engagements/CE-1001?tab=bogus",
   "unknown tab values pass through — the destination validates, not the redirect");
+ok(designRedirect("/design/subassemblies", {}) === "/design/assemblies?tab=subassemblies",
+  "#130 /design/subassemblies redirects to the Subassemblies tab of the Assembly Builder");
 
 /* --- design module nav (D97) --- */
 import { activeKeyFor, NAV, parentGroupOf } from "@/components/nav/nav-data";
@@ -455,8 +494,12 @@ ok(activeKeyFor("/design") === "designoverview",
   "the Design overview resolves to the designoverview key");
 ok(activeKeyFor("/design/engagements") === "designoverview",
   "/design/engagements resolves to the designoverview key");
-ok(activeKeyFor("/design/steel") === "designoverview",
-  "/design/steel resolves to the designoverview key (segment-1 matching)");
+ok(activeKeyFor("/design/lineset") === "designoverview",
+  "/design/lineset resolves to the designoverview key (segment-1 matching)");
+ok(activeKeyFor("/design/assemblies") === "assemblies",
+  "#130 /design/assemblies lights the Assembly Builder child");
+ok(activeKeyFor("/design/subassemblies") === "assemblies",
+  "#130 the old Subassemblies path lights the Assembly Builder child too");
 ok(NAV.some((e) => e.kind === "group" && e.key === "design"),
   "Design exists as a nav group");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "consulting"),
@@ -469,15 +512,43 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
  * group after D97 shipped, which is why a bare `length === 6` went stale. */
 /* "grid" left when The Grid became a layout mode of Designs rather than a
  * tool of its own (D-grid-merge): the "designs" child is now labelled "The
- * Grid" and the standalone index it pointed at is gone. */
+ * Grid" and the standalone index it pointed at is gone. "steel" and
+ * "fixtures" moved to the KNOWLEDGE group (#136). */
+/* "subassemblies" left the group when it became a tab of the Assembly
+ * Builder (#130) — /design/subassemblies redirects there. */
 const DESIGN_CHILDREN = [
   "designoverview", "engagements", "designs",
-  "steel", "lineset", "assemblies", "motors", "fixtures", "subassemblies",
+  "lineset", "assemblies", "motors",
 ];
 ok(
   !!designGroup && designGroup.kind === "group" &&
     JSON.stringify(designGroup.children.map((c) => c.key)) === JSON.stringify(DESIGN_CHILDREN),
   `Design's children are exactly [${DESIGN_CHILDREN.join(", ")}]`);
+
+/* --- Knowledge & Information tab (#136) --- */
+ok(designRedirect("/design/steel", {}) === "/knowledge/steel",
+  "#136: /design/steel redirects to /knowledge/steel");
+ok(designRedirect("/design/fixtures", {}) === "/knowledge/fixtures",
+  "#136: /design/fixtures redirects to /knowledge/fixtures");
+ok(designRedirect("/design/lineset", {}) === null,
+  "#136: the other Design tools are NOT redirected");
+const knowledgeGroup = NAV.find((e) => e.kind === "group" && e.key === "knowledge");
+const KNOWLEDGE_CHILDREN = ["knowledgeoverview", "steel", "fixtures"];
+ok(
+  !!knowledgeGroup && knowledgeGroup.kind === "group" &&
+    JSON.stringify(knowledgeGroup.children.map((c) => c.key)) === JSON.stringify(KNOWLEDGE_CHILDREN),
+  `#136: KNOWLEDGE's children are exactly [${KNOWLEDGE_CHILDREN.join(", ")}]`);
+ok(NAV.findIndex((e) => e.key === "knowledge") === NAV.findIndex((e) => e.key === "design") + 1,
+  "#136: KNOWLEDGE sits immediately after DESIGN");
+ok(knowledgeGroup?.kind === "group" && knowledgeGroup.children.map((c) => c.href).join(",") === "/knowledge,/knowledge/steel,/knowledge/fixtures",
+  "#136: KNOWLEDGE hrefs are the new routes");
+ok(activeKeyFor("/knowledge") === "knowledgeoverview" && activeKeyFor("/knowledge/steel") === "knowledgeoverview" && activeKeyFor("/knowledge/fixtures") === "knowledgeoverview",
+  "#136: every /knowledge route lights the KNOWLEDGE pill (segment-1 matching)");
+ok(parentGroupOf("knowledgeoverview") === "knowledge" && parentGroupOf("steel") === "knowledge",
+  "#136: knowledge children resolve to the knowledge group");
+const NAV_KEYS = NAV.flatMap((e) => (e.kind === "group" ? [e.key, ...e.children.map((c) => c.key)] : [e.key]));
+ok(new Set(NAV_KEYS).size === NAV_KEYS.length,
+  `#136: no two nav entries share a key (${NAV_KEYS.length} keys)`);
 
 /* --- home tabbed hub (D98) ---
  * homeTabFor() was deleted (final-review Fix 2): every hub route is a
@@ -500,7 +571,7 @@ ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab"
 // Punch #55 (D124) REVERSES the D117 shape: Jeff asked for Home back as a real tab
 // on web and mobile, so the header is five groups and Home is the first. The five
 // hub routes stay CHILDREN of that group (they are not top-level links).
-ok(NAV.length === 5, "the header has 5 top-level items: Home joined the chips (#55, D124)");
+ok(NAV.length === 6, "the header has 6 top-level items: Home joined the chips (#55, D124); KNOWLEDGE joined after DESIGN (#136)");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "queue"), "My Queue is not top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "calendar"), "Calendar is not top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "inbox"), "Inbox is not top-level");
@@ -530,17 +601,17 @@ ok(
 // Opportunities joined as the first child (#18) — six children as of plan 02.
 const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "crm");
 ok(
-  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 7),
-  "CRM has seven children — Quotes and Reviews moved to EST (D117), Opportunities added (#18), My Leads added (#22)",
+  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 8),
+  "CRM has eight children — Quotes and Reviews moved to EST (D117), Opportunities added (#18), My Leads added (#22), Vendors added (#122)",
 );
 ok(
   !!(
     d99Sales &&
     d99Sales.kind === "group" &&
     d99Sales.children.map((c) => c.key).join(",") ===
-      "opportunities,leads,myleads,companies,people,venues,field"
+      "opportunities,leads,myleads,companies,vendors,people,venues,field"
   ),
-  "CRM children are opportunities, leads, myleads, companies, people, venues, field in order",
+  "CRM children are opportunities, leads, myleads, companies, vendors, people, venues, field in order",
 );
 ok(
   parentGroupOf("companies") === "crm" &&
@@ -587,8 +658,8 @@ ok(
 // ---- General dissolution (D99): the group is gone ----
 ok(!NAV.some((e) => e.kind === "group" && e.key === "general"), "the General group is gone");
 ok(
-  NAV.map((e) => e.key).join(",") === "home,est,pm,crm,design",
-  "the top-level chips are Home, EST, PM, CRM, DESIGN in order (#55 put Home back, D124)",
+  NAV.map((e) => e.key).join(",") === "home,est,pm,crm,design,knowledge",
+  "the top-level chips are Home, EST, PM, CRM, DESIGN, KNOWLEDGE in order (#55 put Home back, D124; #136 added KNOWLEDGE)",
 );
 ok(
   activeKeyFor("/catalog") === "settings" &&
@@ -2919,54 +2990,340 @@ import { rateLimit, rateLimitRefund } from "../src/lib/rate-limit";
   ok(rateLimit(k3, 1, 60_000).ok, "#88 rateLimitRefund: refunding an untouched key is a safe no-op");
 }
 
-/* --- #14: catalog price-book age pills --- pure, asserted here at top level. */
-import { priceBooks } from "../src/lib/catalog-books";
+/* --- #14/#133: catalog price books + price-date model --- pure, asserted at top level. */
+import {
+  OUTDATED_AFTER_MS,
+  effectivePriceDate,
+  isOutdated,
+  isoDateOf,
+  mfrKey,
+  nextPricedAt,
+  parseEffectiveDate,
+  priceBooks,
+} from "@/lib/catalog-books";
 
 {
   const now = Date.now();
   const DAY = 86400000;
+  const MONTH = 30.4375 * DAY;
 
-  const fullyFresh = priceBooks([
-    { mfr: "Acme", updatedAt: now - 3 * DAY },
-    { mfr: "Acme", updatedAt: now - 5 * DAY },
+  ok(
+    mfrKey("Meyer Sound") === "meyersound" && mfrKey("meyer-sound") === "meyersound" && mfrKey(" MEYER  SOUND ") === "meyersound",
+    "#133 mfrKey: case, spaces and punctuation collapse"
+  );
+  ok(mfrKey("") === "" && mfrKey(undefined) === "" && mfrKey("---") === "", "#133 mfrKey: blank/punctuation-only → empty key");
+
+  ok(OUTDATED_AFTER_MS === 548 * DAY, "#133 OUTDATED_AFTER_MS is 548 days (18 months)");
+  ok(!isOutdated(now - 17 * MONTH, now), "#133 isOutdated: 17 months → current");
+  ok(!isOutdated(now - 547 * DAY, now), "#133 isOutdated: one day short of the boundary → current");
+  ok(isOutdated(now - 548 * DAY, now), "#133 isOutdated: exactly 548 days (18 months) → outdated");
+  ok(isOutdated(now - 19 * MONTH, now), "#133 isOutdated: 19 months → outdated");
+
+  const S = { priceListEffective: { meyersound: now - 100 * DAY } };
+  ok(
+    effectivePriceDate({ mfr: "Meyer Sound", pricedAt: now - 10 * DAY }, S) === now - 10 * DAY,
+    "#133 effectivePriceDate: a newer per-line date wins over the book date"
+  );
+  ok(
+    effectivePriceDate({ mfr: "Meyer Sound", pricedAt: now - 400 * DAY }, S) === now - 100 * DAY,
+    "#133 effectivePriceDate: a newer book date (list confirmed later) wins over an older per-line date (D156)"
+  );
+  ok(
+    effectivePriceDate({ mfr: "meyer-sound" }, S) === now - 100 * DAY,
+    "#133 effectivePriceDate: no per-line date → the book date, matched through mfrKey"
+  );
+  ok(effectivePriceDate({ mfr: "ETC" }, S) === null, "#133 effectivePriceDate: no date anywhere → null");
+  ok(effectivePriceDate({ pricedAt: now - 5 * DAY }, S) === now - 5 * DAY, "#133 effectivePriceDate: unbranded parts still use their own date");
+
+  const D1 = now - 200 * DAY;
+  const D2 = now - 20 * DAY;
+  ok(nextPricedAt(null, { list: 10, cost: 5 }, D1) === D1, "#133 nextPricedAt: a new part is stamped with the write's date");
+  ok(
+    nextPricedAt({ list: 10, cost: 5, pricedAt: D1 }, { list: 10, cost: 5, pricedAt: D1 }, D2) === D1,
+    "#133 nextPricedAt: unchanged list+cost keep the old date"
+  );
+  ok(nextPricedAt({ list: 10, cost: 5, pricedAt: D1 }, { list: 12, cost: 5, pricedAt: D1 }, D2) === D2, "#133 nextPricedAt: a list change stamps the new date");
+  ok(nextPricedAt({ list: 10, cost: 5, pricedAt: D1 }, { list: 10, cost: 6, pricedAt: D1 }, D2) === D2, "#133 nextPricedAt: a cost change stamps the new date");
+  ok(
+    nextPricedAt({ list: 10, cost: 5 }, { list: 10, cost: 5 }, D2) === undefined,
+    "#133 nextPricedAt: legacy part, unchanged price → still undated (no fake date)"
+  );
+
+  ok(isoDateOf(new Date(2026, 0, 15).getTime()) === "2026-01-15", "#133 isoDateOf renders a local YYYY-MM-DD");
+  ok(
+    parseEffectiveDate("2026-01-15", now) === new Date(2026, 0, 15, 12, 0, 0, 0).getTime(),
+    "#133 parseEffectiveDate: a date input parses to local NOON, not midnight (a UTC server's midnight renders a day early in US browsers)"
+  );
+  ok(isoDateOf(parseEffectiveDate("2026-01-15", now)) === "2026-01-15", "#133 parseEffectiveDate → isoDateOf round-trips the calendar day");
+  ok(parseEffectiveDate("", now) === now && parseEffectiveDate("nope", now) === now, "#133 parseEffectiveDate: blank/invalid → the fallback");
+
+  const fresh = priceBooks([{ mfr: "Acme", pricedAt: now - 3 * DAY }, { mfr: "Acme", pricedAt: now - 5 * DAY }], {}, { now });
+  ok(
+    fresh[0]?.effectiveAt === now - 5 * DAY && !fresh[0].outdated && !fresh[0].unknown,
+    "#14/#133 priceBooks: effectiveAt is the OLDEST date in a fully-dated book, not the newest"
+  );
+  const partial = priceBooks([{ mfr: "Beta", pricedAt: now }, { mfr: "Beta" }], {}, { now });
+  ok(
+    partial[0]?.count === 2 && partial[0].effectiveAt === null && partial[0].unknown,
+    "#14/#133 priceBooks: one dated row out of two does NOT date the book (unknown is older than anything — decision A)"
+  );
+  const covered = priceBooks([{ mfr: "Beta", pricedAt: now }, { mfr: "Beta" }], { priceListEffective: { beta: now - 30 * DAY } }, { now });
+  ok(
+    covered[0]?.effectiveAt === now - 30 * DAY && !covered[0].unknown,
+    "#133 priceBooks: the book date covers the undated row, and oldest still wins"
+  );
+  const stale = priceBooks([{ mfr: "Gamma", pricedAt: now - 600 * DAY }], {}, { now });
+  ok(stale[0]?.outdated && !stale[0].unknown, "#133 priceBooks: a 600-day-old book is outdated");
+  const never = priceBooks([{ mfr: "Delta" }, { mfr: "Delta" }], {}, { now });
+  ok(never[0]?.unknown && never[0].effectiveAt === null && !never[0].outdated, "#14/#133 priceBooks: no date anywhere → unknown, never outdated");
+  const merged = priceBooks(
+    [{ mfr: "Meyer Sound", pricedAt: now }, { mfr: "meyer-sound", pricedAt: now }, { mfr: "Meyer Sound" }],
+    { priceListEffective: { meyersound: now - DAY } },
+    { now }
+  );
+  ok(
+    merged.length === 1 && merged[0].name === "Meyer Sound" && merged[0].key === "meyersound" && merged[0].count === 3,
+    "#133 priceBooks: spellings merge by mfrKey and the most common spelling names the book"
+  );
+  const unbranded = priceBooks([{ pricedAt: now }, { mfr: "  " }], {}, { now });
+  ok(
+    unbranded.some((b) => b.name === "Unbranded" && b.key === "" && b.count === 2),
+    "#14 priceBooks: blank/whitespace-only mfr groups under 'Unbranded' with an empty key"
+  );
+  const eight = Array.from({ length: 8 }, (_, i) => ({ mfr: `Mfr${i}`, pricedAt: now })).flatMap((p, i) =>
+    Array.from({ length: 8 - i }, () => p)
+  );
+  ok(priceBooks(eight, {}, { now }).length === 6, "#14 priceBooks: caps at the top 6 books by count by default");
+  ok(priceBooks(eight, {}, { now, limit: Infinity }).length === 8, "#133 priceBooks: limit: Infinity returns every book (the Catalog banner)");
+  ok(priceBooks(eight, {}, { now })[0]?.name === "Mfr0", "#14 priceBooks: sorted by count descending");
+}
+
+/* ---- #122 §1 — a vendor is a company of the exact type; partners get no base venue ---- */
+ok(VENDOR_COMPANY_TYPE === "vendor/manufacturer" && isVendorType(" vendor/manufacturer ") && !isVendorType("Vendor"), "#122 isVendorType: exact COMPANY_TYPES string (trimmed), not the legacy 'Vendor'");
+ok(PARTNER_TYPES.has(VENDOR_COMPANY_TYPE), "#122 PARTNER_TYPES carries the exact vendor type string");
+ok(PARTNER_TYPES.has("Vendor"), "#122 PARTNER_TYPES keeps the legacy 'Vendor' spelling");
+ok(baseVenueKind(VENDOR_COMPANY_TYPE, "Rose Brand Church Supply") === null, "#122 a vendor company is never minted a base venue, whatever its name says");
+
+/* ---- #122 §2 — vendor status + owner tasks ---- */
+{
+  const DAY = 86_400_000;
+  const now = Date.UTC(2026, 8, 21, 12);
+  const list = (effectiveAt: number): VendorPriceListEntry => ({ id: "pl-x", receivedAt: effectiveAt, effectiveAt, note: "", loggedBy: "t" });
+  ok(vendorStatus({ lastList: null, catalogEffectiveAt: now, now }) === "no-list", "#122 vendorStatus: no ledger entry → no-list (even with a fresh catalog)");
+  ok(vendorStatus({ lastList: list(now - DAY), catalogEffectiveAt: null, now }) === "newer-list", "#122 vendorStatus: a list but an undated catalog → newer-list");
+  ok(vendorStatus({ lastList: list(now - DAY), catalogEffectiveAt: now - 2 * DAY, now }) === "newer-list", "#122 vendorStatus: list newer than the catalog → newer-list");
+  ok(vendorStatus({ lastList: list(now - 2 * DAY), catalogEffectiveAt: now - DAY, now }) === "current", "#122 vendorStatus: catalog dated after the list → current");
+  ok(vendorStatus({ lastList: list(now - DAY), catalogEffectiveAt: now - DAY, now }) === "current", "#122 vendorStatus: equal dates → current, not newer (strict >)");
+  const edge = now - OUTDATED_AFTER_MS;
+  ok(vendorStatus({ lastList: list(edge), catalogEffectiveAt: edge, now }) === "current", "#122 vendorStatus: exactly OUTDATED_AFTER_MS old is still current (boundary is strict >)");
+  ok(vendorStatus({ lastList: list(edge - 1), catalogEffectiveAt: edge - 1, now }) === "outdated", "#122 vendorStatus: one ms past the threshold → outdated");
+  ok(vendorStatus({ lastList: list(edge - 1), catalogEffectiveAt: now - DAY, now }) === "current", "#122 vendorStatus: a fresh catalog keeps an old list current (max of the two dates)");
+  ok(vendorStatus({ lastList: list(edge - 1), catalogEffectiveAt: null, now }) === "newer-list", "#122 vendorStatus: newer-list wins over outdated when the catalog is undated");
+
+  const t1 = vendorTasks("newer-list", { id: "v1", name: "Rose Brand", lastList: list(now - DAY), catalogEffectiveAt: null });
+  ok(!!t1 && t1.title.startsWith("Update catalog: Rose Brand price list effective ") && t1.source === `auto: vendor v1 newer-list ${now - DAY}`, "#122 vendorTasks: newer-list → 'Update catalog' keyed by the list's effectiveAt");
+  const t2 = vendorTasks("outdated", { id: "v1", name: "Rose Brand", lastList: list(edge - 1), catalogEffectiveAt: edge - 5 });
+  ok(!!t2 && t2.title === "Request updated price list from Rose Brand" && t2.source === `auto: vendor v1 outdated ${edge - 1}`, "#122 vendorTasks: outdated → 'Request updated price list' keyed by the newer of list/catalog");
+  ok(vendorTasks("current", { id: "v1", name: "X", lastList: list(now), catalogEffectiveAt: now }) === null && vendorTasks("no-list", { id: "v1", name: "X", lastList: null, catalogEffectiveAt: null }) === null, "#122 vendorTasks: current / no-list → no task");
+
+  // `as unknown as` — the catalog plan may type this parameter as the full AppSettingsData.
+  const settings0 = { priceListEffective: {} } as unknown as Parameters<typeof catalogEffectiveAtFor>[2];
+  const parts = [
+    { mfr: "Rose Brand", pricedAt: now - 3 * DAY },
+    { mfr: "rose-brand", pricedAt: now - DAY },
+    { mfr: "Other", pricedAt: now },
+    { mfr: "Rose Brand" },
+  ];
+  ok(catalogEffectiveAtFor(parts, ["Rose Brand"], settings0) === now - DAY, "#122 catalogEffectiveAtFor: the NEWEST effective date across the vendor's manufacturers, aliases matched by mfrKey, undated parts ignored");
+  ok(catalogEffectiveAtFor(parts, ["Nobody"], settings0) === null && catalogEffectiveAtFor(parts, [], settings0) === null, "#122 catalogEffectiveAtFor: no matching parts → null");
+  ok(partCountFor(parts, ["ROSE BRAND"]) === 3 && partCountFor(parts, []) === 0, "#122 partCountFor counts parts by manufacturer key");
+
+  const users = [
+    { id: "u1", name: "Jeff Chesebro", roles: ["Admin", "Estimator"], status: "active" },
+    { id: "u3", name: "Jena Tolksdorf", roles: ["Estimator"], status: "active" },
+    { id: "u9", name: "Gone Admin", roles: ["Admin"], status: "archived" },
+  ];
+  ok(resolveCatalogOwner(null, users)?.id === "u3", "#122 resolveCatalogOwner: defaults to the user named Jena Tolksdorf");
+  ok(resolveCatalogOwner({ userId: "u1" }, users)?.id === "u1", "#122 resolveCatalogOwner: the Settings pick wins");
+  ok(resolveCatalogOwner({ userId: "u9" }, users)?.id === "u3", "#122 resolveCatalogOwner: an archived pick falls through to the default");
+  ok(resolveCatalogOwner(null, users.filter((u) => u.id !== "u3"))?.id === "u1", "#122 resolveCatalogOwner: no Jena → the first active Admin");
+  ok(resolveCatalogOwner(null, []) === null, "#122 resolveCatalogOwner: nobody active → null (no task is created)");
+
+  const dir = manufacturerDirectory(parts, [{ id: "v1", manufacturers: ["rose-brand"] }]);
+  ok(dir.length === 2 && dir[0].name === "Rose Brand" && dir[0].count === 3 && dir[0].vendorId === "v1" && dir[1].name === "Other" && dir[1].vendorId === null, "#122 manufacturerDirectory: grouped by mfrKey, first spelling wins, count-desc, claim owner attached");
+  ok(unclaimedManufacturers(parts, [{ id: "v1", manufacturers: ["rose-brand"] }]).map((m) => m.name).join(",") === "Other", "#122 unclaimedManufacturers: only keys no vendor claims");
+  ok(manufacturerDirectory([{ mfr: "" }, { mfr: "  " }, {}], []).length === 0, "#122 manufacturerDirectory: unbranded parts are not a manufacturer");
+}
+
+/* ---- #122 §3 — tab keys + date bridge ---- */
+ok(VENDOR_TABS.join(",") === "overview,contacts,prices,activity", "#122 vendor tabs are the spec's four");
+ok(resolveVendorTab("prices") === "prices" && resolveVendorTab("") === "overview" && resolveVendorTab("nope") === "overview", "#122 resolveVendorTab validates ?tab= (default overview)");
+ok(vendorToDateInput(new Date(2026, 8, 21, 15).getTime()) === "2026-09-21", "#122 toDateInput renders local Y-M-D");
+ok(vendorFromDateInput("2026-09-21") === new Date(2026, 8, 21).getTime() && vendorFromDateInput("") === null && vendorFromDateInput("2026-09") === null, "#122 fromDateInput → local midnight, null on blank/malformed");
+
+/* The ledger dates are validated at the ACTION boundary: logPriceList()'s
+ * store normalizer DROPS an entry whose effectiveAt isn't finite, so an
+ * unvalidated action would report success over a write that never happened. */
+{
+  const good = vendorParseLedgerDates({ receivedAt: 1_700_000_000_000, effectiveAt: 1_700_000_001_000 });
+  ok(good.ok && good.receivedAt === 1_700_000_000_000 && good.effectiveAt === 1_700_000_001_000, "#122 parseLedgerDates passes two finite epoch-ms dates through");
+  for (const bad of [NaN, Infinity, -Infinity, 0, -1, null, undefined, "2026-09-21", {}] as unknown[]) {
+    ok(!vendorParseLedgerDates({ receivedAt: bad, effectiveAt: 1_700_000_000_000 }).ok, `#122 parseLedgerDates rejects a non-finite receivedAt (${String(bad)})`);
+    ok(!vendorParseLedgerDates({ receivedAt: 1_700_000_000_000, effectiveAt: bad }).ok, `#122 parseLedgerDates rejects a non-finite effectiveAt (${String(bad)})`);
+  }
+  const rejected = vendorParseLedgerDates({ receivedAt: NaN, effectiveAt: NaN });
+  ok(!rejected.ok && rejected.error === "Both dates are required.", "#122 parseLedgerDates returns the action's error copy");
+}
+
+/* ---- #122 §3 — inbox option groups ---- */
+{
+  const groups = groupCompanyOptions([
+    { id: "rose-brand", name: "Rose Brand", type: "vendor/manufacturer" },
+    { id: "lakefront", name: "Lakefront PAC", type: "Performing arts" },
+    { id: "badger", name: "Badger Ballet", type: "" },
   ]);
+  ok(groups.length === 2 && groups[0].label === "Customers" && groups[1].label === "Vendors", "#122 groupCompanyOptions: Customers first, then Vendors");
+  ok(groups[0].options.map((o) => o.value).join(",") === "badger,lakefront" && groups[1].options[0].value === "rose-brand", "#122 groupCompanyOptions: name-sorted within a group, vendors by exact type");
+  ok(groupCompanyOptions([{ id: "x", name: "X", type: "Civic" }]).length === 1, "#122 groupCompanyOptions: an empty group is dropped");
+}
+
+/* ---- #122 §3 — nav + seed ---- */
+ok(activeKeyFor("/vendors") === "vendors" && activeKeyFor("/vendors/rose-brand") === "vendors" && parentGroupOf("vendors") === "crm", "#122 /vendors lights CRM › Vendors");
+ok(NAV.some((e) => e.kind === "group" && e.key === "crm" && e.children.some((c) => c.key === "vendors" && c.href === "/vendors")), "#122 Vendors sits in the CRM group");
+{
+  const vendorDocs = customersSeed().filter((c) => c.type === VENDOR_COMPANY_TYPE);
+  const seededProfiles = vendorProfilesSeed();
+  ok(vendorDocs.length === 1 && vendorDocs[0].id === "rose-brand" && vendorDocs[0].locations.length === 0, "#122 seed: one vendor company, no venues");
+  ok(seededProfiles.length === 1 && seededProfiles[0].id === "rose-brand" && seededProfiles[0].manufacturers.includes("Rose Brand"), "#122 seed: the profile claims the seeded catalog's manufacturer");
+  ok(seededProfiles[0].priceLists.length === 1 && seededProfiles[0].priceLists[0].effectiveAt <= Date.now(), "#122 seed: one ledger entry in the past so the pages have content");
+}
+
+/* --- final review item 3: the Catalog page parser reports which price columns the file carried --- pure */
+import { parseCatalog } from "@/app/(app)/catalog/parse";
+
+{
+  const descOnly = parseCatalog("SKU,Description\nA-1,Widget\n");
+  ok(descOnly.ok && !descOnly.hasList && !descOnly.hasCost, "item 3 parseCatalog: no List/Cost header → hasList/hasCost false");
+  ok(descOnly.rows[0]?.list === 0 && descOnly.rows[0]?.cost === 0 && descOnly.rows[0]?.valid, "item 3 parseCatalog: …rows still coerce to 0 and stay valid");
+  const listOnly = parseCatalog("SKU,Description,List Price\nA-1,Widget,10\n");
+  ok(listOnly.hasList && !listOnly.hasCost && listOnly.rows[0]?.list === 10, "item 3 parseCatalog: a List column alone → hasList only");
+  const both = parseCatalog("SKU,Description,MSRP,Dealer Net\nA-1,Widget,10,6\n");
+  ok(both.hasList && both.hasCost && both.rows[0]?.cost === 6, "item 3 parseCatalog: List + Cost headers (through aliases) → both flags");
+  const blankCells = parseCatalog("SKU,Description,List,Cost\nA-1,Widget,,\n");
+  ok(blankCells.hasList && blankCells.hasCost && blankCells.rows[0]?.list === 0, "item 3 parseCatalog: a present column with blank cells still counts as carried (cell → 0, as before)");
+  const headerless2 = parseCatalog("A-1,Widget\nA-2,Gadget\n");
+  ok(headerless2.ok && !headerless2.hasList && !headerless2.hasCost, "item 3 parseCatalog: headerless SKU,Description rows carry no price columns");
+  const headerless6 = parseCatalog("A-1,Widget,Cat,ea,10,6\n");
+  ok(headerless6.hasList && headerless6.hasCost && headerless6.rows[0]?.list === 10 && headerless6.rows[0]?.cost === 6, "item 3 parseCatalog: headerless six-column rows carry both (positional)");
+  const headerless5 = parseCatalog("A-1,Widget,Cat,ea,10\n");
+  ok(headerless5.hasList && !headerless5.hasCost, "item 3 parseCatalog: headerless five-column rows carry List but not Cost");
+  const empty = parseCatalog("");
+  ok(!empty.ok && !empty.hasList && !empty.hasCost, "item 3 parseCatalog: a failed parse reports no price columns");
+}
+
+/* --- #132 / #134: catalog import guards --- pure */
+import {
+  MAX_CATALOG_IMPORT_BYTES,
+  checkManufacturer,
+  checkManufacturerGroups,
+  checkSize,
+  groupRowsByManufacturer,
+} from "@/lib/catalog-import-guard";
+
+{
+  const cat = [
+    { sku: "ETC-1", mfr: "ETC" },
+    { sku: "ETC-2", mfr: "ETC" },
+    { sku: "MEY-1", mfr: "Meyer Sound" },
+    { sku: "MEY-2", mfr: "Meyer Sound" },
+    { sku: "MEY-3", mfr: "meyer-sound" },
+    { sku: "NOB-1" },
+  ];
+  const missing = checkManufacturer({ mfr: "  ", fileSkus: ["X-1"], catalog: cat });
+  ok(!missing.ok && missing.reason === "missing", "#132 guard: blank manufacturer → missing");
+
+  const normalized = checkManufacturer({ mfr: "MEYER-SOUND", fileSkus: ["MEY-1", "MEY-9"], catalog: cat });
   ok(
-    fullyFresh[0]?.ageDays === Math.floor((Date.now() - (now - 5 * DAY)) / DAY),
-    "#14 priceBooks: age pill is the OLDEST updatedAt in a fully-covered book, not the newest"
+    normalized.ok && normalized.normalizedMfr === "Meyer Sound",
+    "#132 guard: a re-spelled existing manufacturer normalizes to the most common stored spelling"
+  );
+  ok(normalized.ok && normalized.overlap === 1 && !normalized.isNew, "#132 guard: overlap counts the file SKUs already filed under that manufacturer");
+
+  const noOverlap = checkManufacturer({ mfr: "ETC", fileSkus: ["NEW-1", "NEW-2"], catalog: cat });
+  ok(
+    !noOverlap.ok && noOverlap.reason === "no-overlap" && noOverlap.detail.includes("None of the 2 SKUs in this file belong to ETC"),
+    "#132 guard: existing manufacturer + zero overlap → no-overlap with the spec's message"
   );
 
-  const partialCoverage = priceBooks([
-    { mfr: "Beta", updatedAt: now },
-    { mfr: "Beta" }, // never touched
+  const foreign = checkManufacturer({ mfr: "Meyer Sound", fileSkus: ["MEY-1", "etc-1", "ETC-2"], catalog: cat });
+  ok(
+    !foreign.ok && foreign.reason === "foreign-skus" && foreign.total === 2 && foreign.detail.includes("etc-1 is filed under ETC"),
+    "#132 guard: SKUs filed under another manufacturer are named (case-insensitive SKU match), and win over no-overlap"
+  );
+
+  const twelveForeign = Array.from({ length: 12 }, (_, i) => ({ sku: `F-${i}`, mfr: "Chauvet" }));
+  const twelve = checkManufacturer({ mfr: "Meyer Sound", fileSkus: twelveForeign.map((p) => p.sku), catalog: [...twelveForeign, ...cat] });
+  ok(
+    !twelve.ok && twelve.reason === "foreign-skus" && twelve.examples.length === 10 && twelve.detail.includes("(+2 more)"),
+    "#132 guard: foreign examples cap at 10 with a '+N more' tail"
+  );
+
+  const fresh = checkManufacturer({ mfr: "Chauvet", fileSkus: ["CH-1"], catalog: cat });
+  ok(fresh.ok && fresh.isNew && fresh.normalizedMfr === "Chauvet", "#132 guard: a new manufacturer with no parts is accepted as typed");
+  ok(checkManufacturer({ mfr: "Chauvet", fileSkus: ["NOB-1"], catalog: cat }).ok, "#132 guard: unbranded parts are never 'foreign' — importing them under a manufacturer brands them (D157)");
+  ok(checkManufacturer({ mfr: "ETC", fileSkus: [], catalog: cat }).ok, "#132 guard: an empty SKU list is not a wrong manufacturer (the importer's own no-rows check owns that)");
+
+  const groups = groupRowsByManufacturer([
+    { mfr: "ETC", sku: "ETC-1" },
+    { mfr: "etc", sku: "ETC-9" },
+    { mfr: "Meyer Sound", sku: "MEY-1" },
+    { mfr: "", sku: "X" },
   ]);
+  ok(groups.length === 3 && groups[0].mfr === "ETC" && groups[0].skus.length === 2, "#132 groups: rows group by mfrKey, first spelling kept");
+  const checks = checkManufacturerGroups(groups, cat);
   ok(
-    partialCoverage[0]?.count === 2 && partialCoverage[0]?.ageDays === undefined,
-    "#14 priceBooks: one touched row out of two does NOT produce an age pill for the whole book " +
-      "(a partial edit must not make a mostly-untouched book read as fresh)"
+    checks.length === 3 && checks[0].result.ok && checks[1].result.ok && !checks[2].result.ok && checks[2].result.reason === "missing" && checks[0].count === 2,
+    "#132 groups: each manufacturer group checks independently"
   );
 
-  const neverTouched = priceBooks([{ mfr: "Gamma" }, { mfr: "Gamma" }]);
-  ok(
-    neverTouched[0]?.ageDays === undefined,
-    "#14 priceBooks: a book with no updatedAt anywhere gets no pill (honest unknown, not a fake 0d)"
-  );
+  ok(checkSize(MAX_CATALOG_IMPORT_BYTES).ok, "#134 checkSize: exactly 1,048,576 bytes is allowed");
+  const over = checkSize(MAX_CATALOG_IMPORT_BYTES + 1);
+  ok(!over.ok && over.error.includes("1 MB"), "#134 checkSize: one byte over is refused with a message naming the 1 MB limit");
+  const big = checkSize(Math.round(2.3 * 1_048_576));
+  ok(!big.ok && big.error.includes("2.3 MB"), "#134 checkSize: the message renders the actual size");
+}
 
-  const unbranded = priceBooks([{ updatedAt: now }, { mfr: "  " }]);
-  ok(
-    unbranded.some((b) => b.name === "Unbranded" && b.count === 2),
-    "#14 priceBooks: blank/whitespace-only mfr groups under 'Unbranded'"
-  );
+/* --- #129: subassemblies resolve live --- pure */
+import { pricesAsOf, resolveSubassembly } from "@/lib/fixture-assemblies";
 
-  const capped = priceBooks(
-    Array.from({ length: 8 }, (_, i) => ({ mfr: `Mfr${i}`, updatedAt: now })).flatMap((p, i) =>
-      Array.from({ length: 8 - i }, () => p)
-    )
+{
+  const now = Date.now();
+  const DAY = 86400000;
+  const T0 = now - 300 * DAY;
+  const T1 = now - 30 * DAY;
+  const T2 = now - 3 * DAY;
+  const subCatalog = [
+    { sku: "ENG-1", desc: "Light engine", cost: 1000, mfr: "ETC", pricedAt: T1 },
+    { sku: "LENS-1", desc: "Lens tube", cost: 200, mfr: "ETC", pricedAt: T2 },
+    { sku: "CLAMP-1", desc: "C-clamp", cost: 25, mfr: "Acme" },
+    { sku: "DMX-1", desc: "DMX 10ft", cost: 12, mfr: "Acme" },
+  ];
+  const settings = { priceListEffective: { acme: T0 } };
+  const r = resolveSubassembly(
+    { lightEngineSku: "ENG-1", lensSku: "LENS-1", options: { mounting: [{ sku: "CLAMP-1", qty: 2 }], data: [{ sku: "DMX-1", qty: 1 }] } },
+    subCatalog,
+    settings
   );
-  ok(capped.length === 6, `#14 priceBooks: caps at the top 6 books by count (got ${capped.length})`);
-  ok(
-    capped[0]?.name === "Mfr0" && capped[0]?.count === 8,
-    "#14 priceBooks: sorted by count descending"
-  );
+  ok(r.cost === 1000 + 200 + 2 * 25 + 12, "#129 resolveSubassembly: cost = engine + lens + Σ option cost × qty (the legacy save-time formula)");
+  ok(r.price === r.cost, "#129 resolveSubassembly: price equals cost, as saveFixtureAction stored it");
+  ok(r.optionsCost === 62 && r.options.mounting[0].qty === 2 && r.options.mounting[0].cost === 25, "#129 resolveSubassembly: options carry qty and the live unit cost");
+  ok(r.lightEngine.name === "Light engine" && r.lens.found && r.options.power.length === 0 && r.options.accessories.length === 0, "#129 resolveSubassembly: names come from the catalog; absent categories resolve to []");
+  ok(r.pricesAsOf === T2 && r.missing.length === 0, "#129 resolveSubassembly: prices as of = the NEWEST effective date among its parts");
+  const gone = resolveSubassembly({ lightEngineSku: "ENG-1", lensSku: "NOPE", options: { accessories: [{ sku: "GONE", qty: 1 }] } }, subCatalog, settings);
+  ok(!gone.lens.found && gone.lens.cost === 0 && gone.missing.join(",") === "NOPE,GONE", "#129 resolveSubassembly: missing parts price at 0 and are listed");
+  ok(pricesAsOf(["CLAMP-1", "DMX-1"], subCatalog, settings) === T0, "#129 pricesAsOf: undated parts fall back to the manufacturer's book date");
+  ok(pricesAsOf(["CLAMP-1"], subCatalog) === null, "#129 pricesAsOf: no date anywhere → null");
+  ok(pricesAsOf([], subCatalog, settings) === null, "#129 pricesAsOf: no parts → null");
 }
 
 /* ---- #95 — login honours a same-origin callbackUrl ---- */
@@ -3138,6 +3495,140 @@ async function xlsxFixture(): Promise<Buffer> {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+/* ---- native auth hand-off (spec 2026-09-21-native-auth-handoff) ---- */
+{
+  const secret = "spec-secret-not-real";
+  const secureSet = [
+    { name: "__Secure-authjs.callback-url", value: "x" },
+    { name: "__Secure-authjs.session-token.1", value: "part1" },
+    { name: "authjs.session-token", value: "insecure" },
+    { name: "__Secure-authjs.session-token.0", value: "part0" },
+  ];
+  const picked = pickSessionCookies(secureSet);
+  ok(
+    picked.map((c) => c.name).join(",") === "__Secure-authjs.session-token.0,__Secure-authjs.session-token.1",
+    "pickSessionCookies: prefers the __Secure- family, includes chunks in order, drops the insecure twin"
+  );
+  ok(
+    pickSessionCookies([{ name: "authjs.session-token", value: "v" }]).length === 1,
+    "pickSessionCookies: falls back to the plain family on http"
+  );
+  ok(pickSessionCookies([{ name: "other", value: "v" }]).length === 0, "pickSessionCookies: none -> []");
+
+  const verifier = "verifier-abc-123";
+  const challenge = challengeFor(verifier);
+  ok(challenge.length === 43 && /^[A-Za-z0-9_-]+$/.test(challenge), "challengeFor: 43-char base64url");
+  ok(challengeFor(verifier) === challenge, "challengeFor: deterministic");
+  ok(isChallenge(challenge) && !isChallenge("short") && !isChallenge(42), "isChallenge: shape check");
+
+  const cookies = [{ name: "__Secure-authjs.session-token", value: "eyJ.session" }];
+  const now = 1_800_000_000_000;
+  const code = mintHandoffCode({ cookies, challenge, next: "/field-work", now }, secret);
+  ok(!code.includes("eyJ.session"), "mintHandoffCode: cookie value is not visible in the code");
+  const good = redeemHandoffCode(code, verifier, secret, now + 5_000);
+  ok(good.ok && good.cookies[0].value === "eyJ.session" && good.next === "/field-work", "redeem: round trip returns cookies + next");
+  const wrong = redeemHandoffCode(code, "not-the-verifier", secret, now + 5_000);
+  ok(!wrong.ok && wrong.reason === "mismatch", "redeem: wrong verifier -> mismatch");
+  const late = redeemHandoffCode(code, verifier, secret, now + HANDOFF_TTL_MS + 1);
+  ok(!late.ok && late.reason === "expired", "redeem: past ttl -> expired");
+  const flipped = code.slice(0, -2) + (code.endsWith("A") ? "B" : "A") + code.slice(-1);
+  ok(!redeemHandoffCode(flipped, verifier, secret, now).ok, "redeem: tampered code -> not ok");
+  const otherKey = redeemHandoffCode(code, verifier, "another-secret", now);
+  ok(!otherKey.ok && otherKey.reason === "malformed", "redeem: different secret -> malformed");
+  ok(!redeemHandoffCode("garbage", verifier, secret, now).ok, "redeem: garbage -> not ok");
+}
+
+/* --- #135 manual consulting projects (D155) --- */
+import { manualMilestoneSeeds, sweepIndexesEngagement } from "@/lib/consulting-stages";
+
+ok(JSON.stringify(manualMilestoneSeeds({ mode: "fixed", amount: 12000 })) === JSON.stringify([{ name: "Fee", targetDate: 0, amount: 12000 }]),
+  "#135: a fixed fee becomes ONE unscheduled 'Fee' milestone carrying the amount");
+ok(manualMilestoneSeeds({ mode: "fixed", amount: 0 }).length === 0 && manualMilestoneSeeds(null).length === 0 && manualMilestoneSeeds(undefined).length === 0,
+  "#135: no fee (or a zero fixed fee) seeds no milestones");
+const t135 = manualMilestoneSeeds({
+  mode: "milestones",
+  milestones: [
+    { name: " Schematic design ", targetDate: 1700000000000, amount: 5000 },
+    { name: "", targetDate: -5, amount: 2500 },
+    { name: "", targetDate: 0, amount: 0 },
+  ],
+});
+ok(t135.length === 2, `#135: rows with neither a name nor an amount are dropped (${t135.length})`);
+ok(t135[0].name === "Schematic design" && t135[0].targetDate === 1700000000000 && t135[0].amount === 5000,
+  "#135: milestone names are trimmed, dates and amounts kept");
+ok(t135[1].name === "Milestone" && t135[1].targetDate === 0 && t135[1].amount === 2500,
+  "#135: a blank name defaults to 'Milestone'; a negative date is unscheduled (0)");
+ok(!sweepIndexesEngagement({ origin: "manual", quoteId: null }),
+  "#135 (D155): the sweep skips a manual project that has no proposal");
+ok(sweepIndexesEngagement({ origin: "manual", quoteId: "Q-1" }),
+  "#135 (D155): once a proposal is attached the sweep tracks the row by that quote");
+ok(sweepIndexesEngagement({ quoteId: "Q-2" }) && sweepIndexesEngagement({ origin: "quote", quoteId: "Q-3" }),
+  "#135: quote-born rows (origin absent on pre-#135 docs, or 'quote') are indexed by their quote");
+ok(!sweepIndexesEngagement({ quoteId: "" }) && !sweepIndexesEngagement({ quoteId: null }),
+  "#135: a row with no quote id is never indexed");
+
+/* --- #121 typeahead ranking: SKU prefix first, then description contains, then anywhere --- */
+import { catalogFilter, catalogMatches, catalogRank, typeaheadMatches } from "@/lib/search/typeahead-rank";
+
+const t121 = [
+  { sku: "S4LED-S3", desc: "Source Four LED Series 3", mfr: "ETC", category: "Fixtures" },
+  { sku: "LENS-26", desc: "26° lens tube for S4LED", mfr: "ETC", category: "Fixtures" },
+  { sku: "CLAMP-1", desc: "Pipe clamp", mfr: "The Light Source", category: "Hardware" },
+  { sku: "ZZ-1", desc: "Speaker bracket", mfr: "S4LED Mounts Co", category: "Speakers" },
+];
+ok(catalogMatches("s4led", t121).map((p) => p.sku).join(",") === "S4LED-S3,LENS-26,ZZ-1",
+  "#121: SKU prefix first, then description contains, then a match anywhere (case-insensitive)");
+ok(catalogMatches("etc lens", t121).map((p) => p.sku).join(",") === "LENS-26",
+  "#121: every whitespace token must match somewhere in sku/desc/mfr/category");
+ok(catalogMatches("", t121).length === 4 && catalogMatches("", t121, 2).length === 2,
+  "#121: an empty query lists items in their given order, capped at max");
+ok(catalogMatches("nomatch", t121).length === 0, "#121: no hits → empty list");
+ok(catalogRank("S4LED", t121[0]) === 0 && catalogRank("S4LED", t121[1]) === 1 && catalogRank("S4LED", t121[3]) === 2,
+  "#121: catalogRank tiers are 0/1/2");
+ok(catalogFilter("", t121[2]) && !catalogFilter("etc", t121[2]) && catalogFilter("light source", t121[2]),
+  "#121: catalogFilter — empty passes everything, tokens are AND-ed across fields");
+ok(typeaheadMatches("b", ["b1", "a", "b2"], (q, s) => s.startsWith(q), undefined, 8).join(",") === "b1,b2",
+  "#121: typeaheadMatches without a rank keeps input order");
+ok(typeaheadMatches("x", ["x3", "x1", "x2"], () => true, (_q, s) => Number(s.slice(1)), 2).join(",") === "x1,x2",
+  "#121: a rank sorts ascending (stable) and max slices after ranking");
+
+/* --- #131 grid symbols (D154): shapeFor precedence + symbolGeometry snapshot --- */
+import {
+  DEFAULT_GRID_CATEGORY_SHAPES, GRID_SHAPES, isGridShape, markerColor, resolveCategoryShapes, shapeFor, symbolGeometry,
+} from "@/lib/design/grid-symbols";
+
+ok(GRID_SHAPES.length === 8 && GRID_SHAPES.join(",") === "rect,circle,triangle,diamond,hexagon,speaker,light,camera",
+  "#131: the eight curated shapes, rect first");
+ok(isGridShape("speaker") && !isGridShape("blob") && !isGridShape(null), "#131: isGridShape");
+ok(shapeFor({ category: "Speakers" }, {}) === "speaker" && shapeFor({ category: "Lighting" }, {}) === "light" &&
+   shapeFor({ category: "Cameras" }, {}) === "camera" && shapeFor({ category: "Rigging" }, {}) === "diamond" &&
+   shapeFor({ category: "Control" }, {}) === "hexagon",
+  "#131: the seeded category defaults");
+ok(shapeFor({ category: "  speakers " }, {}) === "speaker", "#131: category match is trimmed + case-insensitive");
+ok(shapeFor({ category: "Speakers", shape: "hexagon" }, {}) === "hexagon", "#131: the entry's own shape wins over its category default");
+ok(shapeFor({ category: "Speakers" }, { gridCategoryShapes: { Speakers: "circle" } }) === "circle", "#131: a stored category map wins over the seed");
+ok(shapeFor({ category: "Speakers" }, { gridCategoryShapes: {} }) === "rect", "#131: a stored map is the whole truth (full replacement) — unmapped → rect");
+ok(shapeFor({ category: "Anything else" }, {}) === "rect" && shapeFor(null, {}) === "rect" && shapeFor(undefined, null) === "rect",
+  "#131: unknown category / no part / no settings → rect");
+ok(shapeFor({ category: "Speakers", shape: "blob" }, {}) === "speaker", "#131: an unknown stored shape falls through to the category default");
+ok(JSON.stringify(resolveCategoryShapes(undefined)) === JSON.stringify(DEFAULT_GRID_CATEGORY_SHAPES) && resolveCategoryShapes(null) !== DEFAULT_GRID_CATEGORY_SHAPES,
+  "#131: resolveCategoryShapes — absent → a fresh copy of the seed");
+ok(resolveCategoryShapes({ Speakers: "nope", Lighting: "light" }).Speakers === undefined && resolveCategoryShapes({ Speakers: "nope", Lighting: "light" }).Lighting === "light",
+  "#131: resolveCategoryShapes drops unknown shape values");
+const g131 = (s: (typeof GRID_SHAPES)[number]) => symbolGeometry(s, 44, 30);
+ok(g131("rect").outline.kind === "rect" && g131("rect").glyph === null, "#131: rect = rounded rect, no glyph");
+ok(g131("circle").outline.kind === "circle" && (g131("circle").outline as { r: number }).r === 15, "#131: circle radius = half the short side");
+ok(g131("triangle").outline.kind === "polygon" && (g131("triangle").outline as { points: string }).points.split(" ").length === 3, "#131: triangle = 3 points");
+ok(g131("diamond").outline.kind === "polygon" && (g131("diamond").outline as { points: string }).points.split(" ").length === 4, "#131: diamond = 4 points");
+ok(g131("hexagon").outline.kind === "polygon" && (g131("hexagon").outline as { points: string }).points.split(" ").length === 6, "#131: hexagon = 6 points");
+for (const s of ["speaker", "light", "camera"] as const) {
+  ok(g131(s).outline.kind === "rect" && /^M /.test(g131(s).glyph || ""), `#131: ${s} = rect + path glyph`);
+}
+ok(g131("speaker").glyph === symbolGeometry("speaker", 44, 30).glyph && g131("speaker").glyph !== g131("camera").glyph && g131("light").glyph !== g131("camera").glyph,
+  "#131: glyph paths are deterministic and distinct per shape");
+ok(symbolGeometry("speaker", 12, 9).glyph !== g131("speaker").glyph, "#131: glyphs scale with the symbol box");
+ok(markerColor("Speakers") === markerColor("Speakers") && /^#[0-9a-f]{6}$/.test(markerColor("Speakers")), "#131: markerColor is a stable hex per category");
+
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
   {
@@ -3206,6 +3697,13 @@ async function asyncChecks(): Promise<void> {
     ok(vprep.stats.valid === 1, "#81 the row with no SKU is not importable");
     ok(vprep.stats.invalid === 1, "#81 …and is counted as needing attention");
     ok(Number(vprep.rows[0].values.list) === 1899.5, "#81 list price coerces to a number");
+
+    const noMfr = parseImportCsv(["Part Number,Description,MSRP", "S4LED-S2,Source Four LED Series 2,1899.50"].join("\n"));
+    const noMfrPrep = prepareRows(noMfr.rows, autoMap(noMfr.headers, catType.fields), catType.fields);
+    ok(
+      !noMfrPrep.rows[0].valid && noMfrPrep.rows[0].errors.includes("Missing Manufacturer"),
+      "#132 a hub catalog row without a manufacturer fails validation with the per-row error"
+    );
 
     /* ---- punch #81: re-importing a price sheet must not zero stored prices ----
      * The writer itself (commitImport → WRITERS.catalog.update → mergeUpsert)
@@ -4915,4 +5413,179 @@ async function archiveAsyncChecks(): Promise<void> {
     const r = await archiveRecordings(h.deps);
     ok(r.archived === 5 && uploads === 5, "archiveRecordings caps a run at 5 uploads (spec §5.2)");
   }
+}
+
+/* ======================================================================
+   #137 T2 — shared CustomerLocation / CustomerContact → input converters
+   (companies/lib.ts). Every field carries through so a save that starts
+   from a stored record never drops what the record holds.
+   ====================================================================== */
+{
+  const li = toLocationInput({
+    id: "lf1", locationName: "Campus", label: "Main Hall", primary: true, address: "1 Main", city: "Milwaukee", state: "WI",
+    zip: "53202", kind: "theatre", lat: "43.04", lng: null, venueKind: "proscenium", travelMiles: null, travelMin: 12,
+  });
+  ok(li.locationName === "Campus", "#137 T2 toLocationInput keeps locationName (the #96 review follow-up)");
+  ok(li.zip === "53202" && li.kind === "theatre", "#137 T2 toLocationInput carries zip + kind");
+  ok(li.lat === 43.04 && li.lng === null && li.travelMin === 12, "#137 T2 toLocationInput numbers lat, nulls blank lng, keeps travel");
+  const li2 = toLocationInput({ primary: false, venueKind: "church", travelMiles: null, travelMin: null });
+  ok(li2.zip === undefined && li2.kind === undefined && li2.label === "" && li2.locationName === "" && li2.venueKind === "church", "#137 T2 toLocationInput: absent zip/kind stay undefined (= preserve), text fields blank");
+  const ci = toContactInput({ name: "Maria Lopez", role: "TD", email: "m@x.org", phone: "1", mobile: "2", primary: true });
+  ok(ci.mobile === "2" && ci.phone === "1" && ci.role === "TD" && ci.primary, "#137 T2 toContactInput carries mobile");
+  ok(toContactInput({ name: "S", role: "", email: "", primary: false }).mobile === undefined, "#137 T2 toContactInput: absent mobile stays undefined");
+}
+
+/* ======================================================================
+   #137 T3 — three import types: template columns, alias resolution, hidden
+   legacy columns, Customer* OR Customer ID, zip cells, and the pure
+   link-back helpers (import/link.ts).
+   ====================================================================== */
+{
+  const cu = getTypeMeta("customers");
+  const ct = getTypeMeta("contacts");
+  const vn = getTypeMeta("venues");
+  ok(!!cu && !!ct && !!vn, "#137 T3 customers / contacts / venues types are registered");
+  if (cu && ct && vn) {
+    const visible = (t: ImportTypeMeta) => visibleColumns(t.fields).map((f) => f.header).join(",");
+    ok(visible(cu) === "Customer Name,Category,Address,City,State,Zip,Phone,Website", "#137 T3 customers template columns (embedded contact/venue columns gone)");
+    ok(visible(ct) === "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary", "#137 T3 contacts template columns");
+    ok(visible(vn) === "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category", "#137 T3 venues template columns");
+    // #137 T7 — the hub may only advertise what it honours. No customer,
+    // contact or venue record has a notes field: every Notes cell was
+    // dropped on import and the export wrote "". Hidden, so an old file's
+    // column is still absorbed (and can't be fuzzy-claimed by another
+    // field) but nothing offers it any more.
+    ok(
+      !visible(cu).includes("Notes") && !visible(ct).includes("Notes") && !visible(vn).includes("Notes"),
+      "#137 T7 Notes is advertised nowhere — no store field holds it"
+    );
+    ok(autoMap(["Customer", "Name", "Notes"], ct.fields).notes === 2, "#137 T7 …but a pre-#137 file's Notes column is still absorbed");
+    // The template header, the export header (both columnsOf) and the paste
+    // box's placeholder (visibleFields) are ONE list.
+    ok(importTemplateCsv("contacts").split("\n")[0] === visible(ct), "#137 T7 the contacts template header is exactly the visible columns");
+    ok(importTemplateCsv("venues").split("\n")[0] === visible(vn), "#137 T7 the venues template header is exactly the visible columns");
+
+    const legacy = parseImportCsv("Customer Name,Type,Contact Name,Email,Phone,Venue,Address,City,State,Notes\nRiverside Playhouse,Performing arts,Maria Lopez,maria@riverside.org,(608) 555-0110,Main Stage,215 W Main St,Madison,WI,");
+    const lm = autoMap(legacy.headers, cu.fields);
+    ok(lm.name === 0 && lm.type === 1 && lm.contactName === 2 && lm.email === 3 && lm.phone === 4 && lm.venue === 5 && lm.address === 6 && lm.notes === 9, "#137 T3 a pre-#137 customers file maps every column, embedded ones via hidden aliases");
+    const nm = autoMap(["Customer Name", "Category", "Address", "City", "State", "Zip", "Phone", "Website"], cu.fields);
+    ok(nm.type === 1 && nm.zip === 5 && nm.phone === 6 && nm.website === 7, "#137 T3 Category / Zip / Phone / Website map on the new customers template");
+    const cm = autoMap(["Company", "Customer ID", "Full Name", "E-mail", "Cell", "Job Title", "Primary Contact"], ct.fields);
+    ok(cm.customer === 0 && cm.customerId === 1 && cm.name === 2 && cm.email === 3 && cm.mobile === 4 && cm.title === 5 && cm.primary === 6, "#137 T3 contacts aliases: Company / Customer ID / Full Name / E-mail / Cell / Job Title / Primary Contact");
+    const vm = autoMap(["Customer", "Venue", "Street", "City", "State", "Zip Code", "Type"], vn.fields);
+    ok(vm.customer === 0 && vm.venue === 1 && vm.address === 2 && vm.zip === 5 && vm.kind === 6, "#137 T3 venues aliases: Venue / Street / Zip Code / Type");
+
+    const onlyId = prepareRows([["c-1", "Pat Doe"]], autoMap(["Customer ID", "Name"], ct.fields), ct.fields);
+    ok(onlyId.rows[0].valid, "#137 T3 a contacts row with only a Customer ID is valid (requiredUnless)");
+    const neither = prepareRows([["", "", "Pat Doe"]], autoMap(["Customer", "Customer ID", "Name"], ct.fields), ct.fields);
+    ok(!neither.rows[0].valid && neither.rows[0].errors.includes("Missing Customer"), "#137 T3 a row with neither Customer nor Customer ID fails validation");
+    const z = prepareRows([["A", "V", " 53703 "], ["B", "W", "53703-1234"], ["C", "X", "2134"]], autoMap(["Customer", "Venue Name", "Zip"], vn.fields), vn.fields);
+    ok(z.rows[0].values.zip === "53703" && z.rows[1].values.zip === "53703-1234" && z.rows[2].values.zip === "02134", "#137 T3 zip cells: trimmed, ZIP+4 kept as typed, Excel-stripped leading zero restored");
+  }
+}
+ok(normalizeZip(" 53703 ") === "53703" && normalizeZip("53703-1234") === "53703-1234" && normalizeZip(2134) === "02134" && normalizeZip("") === "" && normalizeZip(null) === "", "#137 T3 normalizeZip");
+ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1") && parseYesNo("x") && !parseYesNo("no") && !parseYesNo("") && !parseYesNo("0") && !parseYesNo(undefined), "#137 T3 parseYesNo");
+{
+  const cache = [{ id: "lakefront", name: "Lakefront Performing Arts Center" }, { id: "c-2", name: "Cedar Grove Schools" }];
+  const r1 = resolveCustomerForRow({ customerId: "c-2", customer: "Something Else" }, cache);
+  ok(r1.how === "id" && r1.id === "c-2", "#137 T3 resolve: Customer ID wins over the name");
+  const r2 = resolveCustomerForRow({ customer: "cedar-grove SCHOOLS" }, cache);
+  ok(r2.how === "name" && r2.id === "c-2" && r2.name === "Cedar Grove Schools", "#137 T3 resolve: normalized-name match returns the stored name");
+  const r3 = resolveCustomerForRow({ customerId: "nope", customer: "Brand New Org" }, cache);
+  ok(r3.how === "create" && r3.id === null && r3.name === "Brand New Org", "#137 T3 resolve: unknown id + unknown name → create");
+  const r4 = resolveCustomerForRow({ customerId: "", customer: "  " }, cache);
+  ok(r4.how === "missing" && r4.id === null, "#137 T3 resolve: neither → missing");
+  const rows = [
+    { values: { customer: "Brand New Org", name: "A" }, valid: true },
+    { values: { customer: "brand new org!", name: "B" }, valid: true },
+    { values: { customer: "Cedar Grove Schools", name: "C" }, valid: true },
+    { values: { customer: "", name: "" }, valid: false },
+  ];
+  const pv = previewLinks(rows, cache);
+  ok(pv.links.map((l) => l.how).join(",") === "create,create,name,skip", "#137 T3 previewLinks: the second row reuses the first row's pending create; invalid rows are skipped");
+  ok(pv.willCreate.length === 1 && pv.willCreate[0] === "Brand New Org", "#137 T3 previewLinks: one customer to create, counted once");
+}
+{
+  // #137 T7 — the preview's Customer column / "will create" list and the
+  // result's linked-vs-created line appear on exactly the types whose commit
+  // actually links a customer. Five other types carry a plain `customer`
+  // column they only copy onto their own record; `customers` IS the record.
+  const linked = IMPORT_TYPES.filter((t) => linksCustomer(t.fields)).map((t) => t.key).join(",");
+  ok(linked === "contacts,venues", "#137 T7 linksCustomer marks the link-back types only (not customers, not flame tests / inspections / surveys / quotes / projects)");
+}
+{
+  const contacts: CustomerContact[] = [
+    { name: "Maria Lopez", role: "TD", email: "maria@r.org", phone: "1", primary: true },
+    { name: "Sam Ortiz", role: "", email: "", primary: false },
+  ];
+  ok(matchContact(contacts, "MARIA@R.ORG", "Somebody")?.name === "Maria Lopez", "#137 T3 matchContact: email first, case-insensitive");
+  ok(matchContact(contacts, "", "sam ORTIZ")?.name === "Sam Ortiz", "#137 T3 matchContact: normalized name when no email");
+  ok(matchContact(contacts, "new@r.org", "New Person") === null && matchContact(contacts, "", "") === null, "#137 T3 matchContact: no hit / nothing to match");
+  const m1 = mergeContact(contacts, { name: "maria lopez", email: "maria@r.org", mobile: "9", primary: false });
+  ok(!m1.created && m1.contacts[0].name === "Maria Lopez" && m1.contacts[0].mobile === "9" && m1.contacts[0].role === "TD" && m1.contacts[0].phone === "1" && m1.contacts[0].primary, "#137 T3 mergeContact: a hit keeps the stored name/title/phone/primary and gains the mobile");
+  const m2 = mergeContact(contacts, { name: "Sam Ortiz", email: "sam@r.org", primary: true });
+  ok(!m2.created && m2.contacts[1].email === "sam@r.org" && m2.contacts[1].primary && !m2.contacts[0].primary, "#137 T3 mergeContact: primary:true promotes the hit and demotes the previous primary");
+  const m3 = mergeContact([], { name: "First Person", primary: false });
+  ok(m3.created && m3.contacts[0].primary, "#137 T3 mergeContact: the first contact on a record is primary even when the file says no");
+  const m4 = mergeContact(contacts, { name: "Third Person", title: "Billing", primary: false });
+  ok(m4.created && m4.contacts.length === 3 && m4.contacts[2].role === "Billing" && !m4.contacts[2].primary && m4.contacts[0].primary, "#137 T3 mergeContact: a new non-primary contact appends without touching the primary");
+  ok(contacts[0].mobile === undefined && contacts.length === 2 && contacts[1].email === "", "#137 T3 mergeContact never mutates its input");
+
+  const locs: CustomerLocation[] = [
+    { id: "l1", label: "", primary: true, venueKind: "proscenium", travelMiles: null, travelMin: null },
+  ];
+  const v1 = mergeLocation(locs, { label: "Main Stage", address: "215 W Main St", city: "Madison", state: "WI", zip: "53703", kind: "theatre" }, "l-new", { preferPrimary: false });
+  ok(!v1.created && v1.locations.length === 1 && v1.locations[0].id === "l1" && v1.locations[0].label === "Main Stage" && v1.locations[0].zip === "53703" && v1.locations[0].kind === "theatre" && v1.locations[0].primary, "#137 T3 mergeLocation claims the unnamed D85 base venue instead of adding a second venue");
+  ok(matchLocation(v1.locations, "main-stage")?.id === "l1" && matchLocation(v1.locations, "") === null, "#137 T3 matchLocation: normalized label; blank never matches");
+  const v2 = mergeLocation(v1.locations, { label: "MAIN stage", zip: "53704" }, "l-new2", { preferPrimary: false });
+  ok(!v2.created && v2.locations[0].zip === "53704" && v2.locations[0].address === "215 W Main St" && v2.locations[0].label === "MAIN stage", "#137 T3 mergeLocation: a normalized-label hit updates zip, keeps fields the row omits, takes the row's label spelling");
+  const v3 = mergeLocation(v1.locations, { label: "Black Box", kind: "black box" }, "l-new3", { preferPrimary: false });
+  ok(v3.created && v3.locations.length === 2 && v3.locations[1].id === "l-new3" && !v3.locations[1].primary && v3.locations[1].venueKind === "blackbox" && v3.locations[1].kind === "black box", "#137 T3 mergeLocation appends a non-primary venue whose venueKind derives from Category");
+  // Revised for #137 C1b (was: the row updates the primary venue's address in
+  // place) — that primary venue is NAMED, and its street address is the only
+  // copy the app holds, so a customers row appends its mailing address beside
+  // it instead of overwriting it.
+  const v4 = mergeLocation(v1.locations, { label: "", address: "1 HQ Way", zip: "53705" }, "l-new4", { preferPrimary: true });
+  ok(v4.created && v4.locations.length === 2 && v4.locations[0].label === "Main Stage" && v4.locations[0].address === "215 W Main St" && v4.locations[0].zip === "53703" && v4.locations[0].primary && !v4.locations[1].label && v4.locations[1].address === "1 HQ Way" && v4.locations[1].zip === "53705" && !v4.locations[1].primary, "#137 C1b mergeLocation preferPrimary: a customers row without a Venue column APPENDS its mailing address rather than overwriting a NAMED venue's");
+  const v5 = mergeLocation([], { label: "", address: "1 HQ Way" }, "l-new5", { preferPrimary: true, venueKind: "church" });
+  ok(v5.created && v5.locations[0].primary && v5.locations[0].label === "" && v5.locations[0].venueKind === "church" && v5.locations[0].id === "l-new5", "#137 T3 mergeLocation: the first venue on a new customer is primary and takes the caller's venueKind");
+  ok(locs[0].label === "" && locs.length === 1, "#137 T3 mergeLocation never mutates its input");
+
+  // #137 C1 (final review — data loss) — claimBlank. A labelled row may only
+  // claim a blank-label venue that carries NO address of its own: the
+  // customers template has no Venue column, so every customer it writes owns
+  // an unnamed but addressed primary venue (the mailing address), and
+  // claiming that slot overwrites it with the venue's address.
+  const addressedBlank: CustomerLocation[] = [
+    { id: "l1", label: "", primary: true, address: "215 W Main St", city: "Madison", zip: "53703", venueKind: "proscenium", travelMiles: null, travelMin: null },
+  ];
+  // The primary flags flipped in #137 I3 (this asserted the unnamed mailing
+  // venue kept primary): primaryLoc feeds the record page, travel and quote
+  // defaults, so the first NAMED venue outranks a mailing placeholder.
+  const v6 = mergeLocation(addressedBlank, { label: "Main Auditorium", address: "5000 N Ballard Rd", city: "Appleton", zip: "54913" }, "l-new6", { preferPrimary: true, claimBlank: "unaddressed" });
+  ok(v6.created && v6.locations.length === 2 && v6.locations[0].id === "l1" && !v6.locations[0].label && v6.locations[0].address === "215 W Main St" && v6.locations[0].city === "Madison" && !v6.locations[0].primary && v6.locations[1].label === "Main Auditorium" && v6.locations[1].address === "5000 N Ballard Rd" && v6.locations[1].primary, "#137 C1 mergeLocation claimBlank 'unaddressed': a labelled venues row APPENDS rather than claiming an addressed blank-label venue, so the customer's mailing address survives — and (#137 I3) the named venue takes primary from the unnamed mailing placeholder");
+  const v7 = mergeLocation(addressedBlank, { label: "Main Stage", address: "5000 N Ballard Rd" }, "l-new7", { preferPrimary: true, claimBlank: "any" });
+  ok(!v7.created && v7.locations.length === 1 && v7.locations[0].id === "l1" && v7.locations[0].label === "Main Stage" && v7.locations[0].address === "5000 N Ballard Rd", "#137 C1 mergeLocation claimBlank 'any': the customers writer still names the address venue its own row owns");
+  const v8 = mergeLocation(addressedBlank, { label: "Main Auditorium", address: "5000 N Ballard Rd" }, "l-new8", { preferPrimary: true });
+  ok(v8.created && v8.locations.length === 2 && v8.locations[0].address === "215 W Main St", "#137 C1 mergeLocation: the DEFAULT claimBlank is the safe one — an un-passed option never overwrites a stored address");
+  const v9 = mergeLocation(locs, { label: "Main Stage", address: "215 W Main St" }, "l-new9", { preferPrimary: false, claimBlank: "unaddressed" });
+  ok(!v9.created && v9.locations.length === 1 && v9.locations[0].id === "l1" && v9.locations[0].label === "Main Stage" && v9.locations[0].address === "215 W Main St", "#137 C1 mergeLocation claimBlank 'unaddressed' still claims a TRUE placeholder — the unnamed D85 base venue with no address of its own");
+  ok(addressedBlank.length === 1 && !addressedBlank[0].label && addressedBlank[0].address === "215 W Main St", "#137 C1 mergeLocation never mutates its input on the append path either");
+
+  // #137 C1b — the preferPrimary branch is the MIRROR of the claim branch: an
+  // unlabelled (customers) row may only land on a blank-label venue, i.e. one
+  // with no name of its own to lose. It prefers the primary such venue, falls
+  // back to any other, and appends when the customer has none — so a named
+  // venue's street address, the only copy the app holds, is never overwritten.
+  const namedPrimary: CustomerLocation[] = [
+    { id: "l1", label: "Main Auditorium", primary: true, address: "5000 N Ballard Rd", city: "Appleton", venueKind: "proscenium", travelMiles: null, travelMin: null },
+    { id: "l2", label: "", primary: false, address: "215 W Main St", city: "Madison", venueKind: "proscenium", travelMiles: null, travelMin: null },
+  ];
+  const v10 = mergeLocation(namedPrimary, { label: "", address: "220 E Doty St" }, "l-new10", { preferPrimary: true });
+  ok(!v10.created && v10.locations.length === 2 && v10.locations[0].id === "l1" && v10.locations[0].address === "5000 N Ballard Rd" && v10.locations[0].primary && v10.locations[1].id === "l2" && v10.locations[1].address === "220 E Doty St" && !v10.locations[1].primary, "#137 C1b mergeLocation preferPrimary falls back to the unnamed mailing venue when the PRIMARY venue is named — an 'Update existing' re-run updates it in place instead of growing a third venue");
+  const v11 = mergeLocation([{ id: "l1", label: "Main Auditorium", primary: false, address: "5000 N Ballard Rd", venueKind: "proscenium", travelMiles: null, travelMin: null }], { label: "", address: "1 HQ Way" }, "l-new11", { preferPrimary: true });
+  ok(v11.created && v11.locations.length === 2 && v11.locations[0].address === "5000 N Ballard Rd" && v11.locations[1].id === "l-new11" && v11.locations[1].address === "1 HQ Way", "#137 C1b mergeLocation preferPrimary: with no primary flag set at all it appends rather than falling back onto a NAMED list[0]");
+  const v12 = mergeLocation(addressedBlank, { label: "", address: "220 E Doty St" }, "l-new12", { preferPrimary: true });
+  ok(!v12.created && v12.locations.length === 1 && v12.locations[0].id === "l1" && v12.locations[0].address === "220 E Doty St" && v12.locations[0].primary, "#137 C1b mergeLocation preferPrimary still updates an ADDRESSED but unnamed primary venue in place — that venue is the customers row's own (and the #137 T6 blank-label round-trip)");
+  ok(venueKindFromCategory("Church") === "church" && venueKindFromCategory("Black Box") === "blackbox" && venueKindFromCategory("Arena") === "arena" && venueKindFromCategory("Gym") === "flat" && venueKindFromCategory("theatre") === "proscenium" && venueKindFromCategory("") === "proscenium" && venueKindFromCategory("flat") === "flat", "#137 T3 venueKindFromCategory");
 }

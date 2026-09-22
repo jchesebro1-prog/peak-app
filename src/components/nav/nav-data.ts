@@ -70,6 +70,7 @@ export const NAV: NavEntry[] = [
       { key: "leads", label: "Leads", href: "/leads" },
       { key: "myleads", label: "My Leads", href: "/leads?who=mine" }, // #22 — see the EST note
       { key: "companies", label: "Companies", href: "/companies" },
+      { key: "vendors", label: "Vendors", href: "/vendors" }, // #122 — vendor companies + price-list ledger
       { key: "people", label: "People", href: "/people" },
       { key: "venues", label: "Venues", href: "/venues" },
       { key: "field", label: "Venue Assessments", href: "/venue-assessments" },
@@ -88,12 +89,22 @@ export const NAV: NavEntry[] = [
        * (D108), chosen at creation. The standalone Grid index is gone — a
        * Grid project can no longer exist independent of a design record. */
       { key: "designs", label: "The Grid", href: "/design/designs" },
-      { key: "steel", label: "Steel Calculator", href: "/design/steel" },
       { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
       { key: "assemblies", label: "Assembly Builder", href: "/design/assemblies" },
       { key: "motors", label: "Motor Library", href: "/design/motors" },
-      { key: "fixtures", label: "Fixture Cross-Ref", href: "/design/fixtures" },
-      { key: "subassemblies", label: "Subassemblies", href: "/design/subassemblies" },
+    ],
+  },
+  /* #136: Knowledge & Information — reference tools and, later (#56), the
+   * company doctrine/rules/tiers. Steel Calculator and Fixture Cross-Ref
+   * moved here from DESIGN; their old /design/* routes redirect. */
+  {
+    kind: "group",
+    key: "knowledge",
+    label: "KNOWLEDGE",
+    children: [
+      { key: "knowledgeoverview", label: "Overview", href: "/knowledge" },
+      { key: "steel", label: "Steel Calculator", href: "/knowledge/steel" },
+      { key: "fixtures", label: "Fixture Cross-Ref", href: "/knowledge/fixtures" },
     ],
   },
 ];
@@ -105,7 +116,9 @@ export function activeKeyFor(pathname: string): string {
    * CHILD keys: returning "home" (the group's own key) lit nothing, which is
    * why the Home tab looked dead before the entry existed. */
   if (pathname === "/") return "dashboard";
-  if (pathname.startsWith("/design/subassemblies")) return "subassemblies";
+  // #130: both builders live on /design/assemblies (Subassemblies is a tab;
+  // the old path redirects), so both light the Assembly Builder child.
+  if (pathname.startsWith("/design/assemblies") || pathname.startsWith("/design/subassemblies")) return "assemblies";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
     "/queue": "queue",
@@ -116,6 +129,7 @@ export function activeKeyFor(pathname: string): string {
     "/quotes": "quotes",
     "/estimator": "estimator",
     "/design": "designoverview",
+    "/knowledge": "knowledgeoverview", // #136 — every /knowledge/* route lights the KNOWLEDGE pill
     "/reviews": "reviews",
     "/projects": "projects",
     "/schedule": "schedule",
@@ -125,6 +139,7 @@ export function activeKeyFor(pathname: string): string {
     "/repairs": "repairs",
     "/rentals": "rentals",
     "/companies": "companies",
+    "/vendors": "vendors",
     "/people": "people",
     "/venues": "venues",
     "/customers": "companies", // legacy route redirects to /companies (D85)

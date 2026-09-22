@@ -3517,3 +3517,303 @@ the main checkout already holds uncommitted D150/D151.
 **Follow-ups (not built):** Krisp webhooks; numeric extraction into typed fields; in-app audio
 playback; pull-and-match backfill of Jeff's existing Krisp mobile recordings; per-rep Drive
 archives; a PGlite-backed end-to-end test (the `deps` injection points exist).
+
+## D153. Native shell signs in through a Safari sheet and returns by `quartzite://auth` (2026-09-21)
+
+The Capacitor shell (D132) could not sign in: Capacitor hands any non-app host to the system
+browser, so Auth.js's state/PKCE cookies were set in the WebView while Google's callback landed in
+Safari. Verified on the iOS 27 simulator. Jeff chose to keep OAuth in a real browser context rather
+than spoof the WebView's user agent to satisfy Google's embedded-browser check.
+
+- **The whole round trip runs in an in-app Safari sheet** (`@capacitor/browser`,
+  SFSafariViewController): `GET /api/native/auth/start` calls Auth.js `signIn("google")` with the
+  hand-off route as `redirectTo`, so every Auth.js cookie lives in one jar.
+- **The session moves by copying the Auth.js session cookie verbatim**, chunks included, never by
+  re-encoding a JWT. `GET /api/native/auth/handoff` reads its own session cookie, wraps it in a
+  60-second AES-256-GCM code bound to a PKCE-style challenge, and serves a page that opens
+  `quartzite://auth?code=…`. `POST /api/native/auth/exchange` verifies the app-held verifier and sets
+  the same cookie in the WebView. Expiry and the per-request role refresh are unchanged.
+- **Stateless by design:** the code is encrypted with the existing `lib/gmail/crypto.ts` primitive
+  (key from `AUTH_SECRET`); no table, no migration, no new env var. `encryptWith`/`decryptWith`
+  now take the secret explicitly so the pure module is testable without env.
+- **Custom scheme, not Universal Links** — those need the paid Apple team; they are the upgrade path.
+- **Degrades, never throws:** every native call sits behind `isNativePlatform()` and
+  `Capacitor.isPluginAvailable`; an old binary falls back to the in-WebView `signIn`.
+- Bad GET input redirects to `/login?error=native` (so `test:smoke` covers the routes and a stray
+  visitor lands somewhere sensible); only the POST exchange returns JSON 400/401.
+- Android gets the manifest intent-filter in the same change but is not built or tested yet.
+- **Final review hardening:** the hand-off is bound to a flow that started at `/api/native/auth/start`
+  (a 5-minute `qz_native_challenge` cookie set there and required to match at handoff, so a drive-by
+  link to handoff can't mint a code over a visitor's session), and the exchange requires
+  `Content-Type: application/json` plus a same-origin `Origin` header (so a cross-site form can't set
+  a session cookie). Universal Links, once the paid Apple team lands, remove the duplicate-scheme risk
+  these two mitigate and are the eventual resolution.
+
+Spec: `docs/superpowers/specs/2026-09-21-native-auth-handoff-design.md`.
+
+## D156. Catalog price dates: per-line `pricedAt`, a manufacturer-level "price list effective" date, and the 18-month outdated rule (#133, #129, 2026-09-21)
+
+Jeff asked for per-line price dates, an editable 18-month "outdated" banner by manufacturer, and an
+effective date on price lists (2026-09-21). Spec: `docs/superpowers/specs/2026-09-21-catalog-price-dates-and-assemblies-design.md`.
+
+- **`CatalogPart.pricedAt` means "when this price last moved."** The store stamps it centrally in
+  `upsert`/`mergeUpsert` (`lib/stores/catalog.ts`) ONLY when `list` or `cost` actually changes —
+  importers pass the file's effective date, every other write stamps now. `updatedAt` keeps its
+  last-write meaning. Parts that predate the field stay undated; nothing invents a date.
+- **`settings.priceListEffective[mfrKey]` is the manufacturer's book date.** Set by the Catalog
+  banner's inline date input (the one-time backfill) AND by both importers when an import writes
+  rows (the file's effective date IS the list's effective date, and it confirms the unchanged rows
+  too). Precisely (final review, 2026-09-22): the Import hub's "Skip duplicates" mode compares
+  nothing, so it never stamps; a file that carries no List/Cost column confirmed no price, so it
+  updates descriptions but neither stamps the book nor touches stored prices (both importers, and
+  the hub's "Create new" on an existing SKU preserves prices exactly like "Update existing"); the
+  hub stamps per manufacturer group, only a group at least one of whose rows was written and none
+  of whose rows errored (`commitCatalogImport` in `import/catalog-commit.ts`).
+- **Partial-file caveat (open — Jeff's call).** The guard only requires that a file overlap the
+  manufacturer's book by one SKU (D157), so any file that passes it re-dates the manufacturer's
+  WHOLE book: with the later-of rule above, every part of that manufacturer — including the ones
+  the file never mentioned — reads as effective on the file's date. That is exactly right for a
+  full price-list re-import (the common case: the yearly book, most prices unchanged) but
+  over-claims for a supplement — a 40-row "new products" sheet or a single-category update
+  confirms nothing about the other 1,960 lines, yet they stop reading as outdated. Mitigations, none
+  taken by default: (a) a "this is the complete price list" checkbox on both importers, stamping
+  the book only when ticked (else only the written lines' `pricedAt` move); (b) a coverage gate —
+  stamp only when the file overlaps ≥ N % of the manufacturer's parts; (c) accept the over-claim and
+  rely on the banner to correct a date by hand. Logged as MASTER-QUESTIONS E6.
+- **A line's effective date is the LATER of its own `pricedAt` and the book date** (`effectivePriceDate`
+  in `lib/catalog-books.ts`). The spec's wording calls the book date a "fallback"; the later-of rule
+  is what makes the banner's edit actually clear an outdated book whose lines carry old `pricedAt`
+  (a list confirmed on day D confirms every line on it, and a line re-priced after D keeps its own
+  date). Yearly re-imports where most prices don't move therefore read as current.
+- **A book is dated only when every part is; oldest wins.** `priceBooks()` returns `effectiveAt` =
+  the oldest effective date when all parts have one, else `null` + `unknown: true` — #14 decision
+  A carried forward: a single hand-edited SKU must not make a 2,000-row book read as fresh; an
+  undated part is older than anything. `outdated` = dated and ≥ 548 days (18 months). The book date
+  is the one-click way to date the remainder.
+- **Surfaces:** Home card pill states (age / Outdated red / Unknown grey); a Catalog banner listing
+  outdated + undated manufacturers, each with a date input and a facet link (Unbranded is excluded —
+  there is no manufacturer to date); the part edit modal shows the line's effective date.
+  Manufacturers group by `mfrKey` (lowercase alphanumerics — the importer's `norm`), so spellings
+  merge; the display name is the most common stored spelling, and the banner link filters that
+  spelling.
+- **Subassemblies resolve live (#129)** through `resolveSubassembly()` (`lib/fixture-assemblies.ts`),
+  the legacy save-time formula (engine + lens + Σ option cost × qty) over the current catalog. The
+  record keeps `snapshot: { cost, price, pricedAt }` (and the legacy cost fields) for "was $X when
+  built". Both builders show "prices as of" = the NEWEST effective date among their parts.
+- No schema change; parts and settings are JSON documents. `bodySizeLimit` etc. — see D157.
+
+## D157. Catalog import guards: manufacturer required, wrong-manufacturer double check, 1 MB cap (#132, #134, 2026-09-21)
+
+- **Manufacturer is required on both importers.** Catalog page: the picker/new-name field won't
+  submit empty and the server re-checks. Import hub: the `catalog` type's `mfr` field is
+  `required`, so a row without one fails per-row validation (existing rendering) and is never written.
+- **Guard order** (`checkManufacturer` in `lib/catalog-import-guard.ts`, pure): blank → `missing`;
+  the name normalizes (`mfrKey`) to an existing manufacturer → that spelling is used; any file SKU
+  filed under a different manufacturer → `foreign-skus` (checked first — it names exactly which rows
+  are wrong, up to 10 examples + "+N more"); the manufacturer already has parts and the file overlaps
+  none → `no-overlap` ("None of the N SKUs in this file belong to ‹mfr›"); a new manufacturer or any
+  overlap → ok. SKUs compare case/punctuation-insensitively (the hub's dedupe `norm`). Unbranded
+  parts are never foreign — importing them under a manufacturer is how they get one.
+- **The Import hub runs the guard twice:** per manufacturer group in the preview through
+  `checkCatalogImportAction` (the ~10k-row catalog is too big to ship to the browser for a local
+  check), blocking the Import button on any failure, and authoritatively in `importRecords` before
+  `commitImport`; groups are normalized to the existing spelling on commit. The Catalog page runs it
+  in `runCatalogImport` before any upsert, so a rejected file writes nothing.
+- **1 MB = 1,048,576 bytes**, checked (a) client-side on `file.size` before any upload and on the
+  paste box's UTF-8 byte length, (b) in the Catalog page action (file or paste), (c) in `importRecords`
+  for the catalog type, and (d) in `/api/import/xlsx` when the client posts `type=catalog` (10 MB stays
+  for every other type). Failures surface through the existing `importError=` / `err=` banners.
+- **`experimental.serverActions.bodySizeLimit = "1200kb"`** in `next.config.ts`: server actions
+  default to a 1 MB request body, which multipart overhead pushes a ~1 MB file past, so Next would
+  reject it with an opaque error before the app's check runs. The headroom makes the app's clear
+  error win; anything larger still fails closed at Next's limit.
+
+## D154. The Grid draws a symbol per placed item type — eight curated shapes, per-entry override, per-category defaults in Settings (#131, 2026-09-21)
+
+Every placed device was the same rounded rect coloured by a category hash; curtains were the one
+special glyph. Jeff asked for selectable symbols so people can tell objects apart on a plan.
+
+- **Vocabulary is curated, not uploaded:** `rect | circle | triangle | diamond | hexagon | speaker |
+  light | camera` (`GRID_SHAPES` in `src/lib/design/grid-symbols.ts`). The last three are a rounded
+  rect with a small white path glyph inside; everything else is an outline. Symbol images/uploads
+  stay out of scope.
+- **Resolution is `part.shape ?? default[category] ?? "rect"`** (`shapeFor`, pure). The per-entry
+  override is `GridSymbol.shape` on the `grid_catalog` document — placements resolve their part
+  live, so changing an entry redraws every instance on every design. Category defaults live in
+  `settings.gridCategoryShapes`.
+- **The category map is FULL REPLACEMENT** (the `wireTypes` idiom, not a per-key merge over the
+  seed): absent = the seed `Speakers→speaker, Lighting→light, Cameras→camera, Rigging→diamond,
+  Control→hexagon`; present = exactly what Settings holds, and a category left off draws as a
+  rectangle. Category names match trimmed and case-insensitive because `CatalogPart.category` is
+  free text (~40 imported values).
+- **One renderer:** `<SymbolShape>` (`src/components/design/symbol-shape.tsx`) draws the plan
+  marker, the riser's group glyphs, the riser legend and the palette rows, so the palette shows
+  what the plan will draw. It takes `w`/`h` (the symbol's existing `symbolWidth`/`symbolHeight`),
+  not a single `size`, so the 44×30 footprint is unchanged. Curtains keep their drape glyph; the
+  selection ring and label placement are untouched. `markerColor` moved from the editor into the
+  pure module so the riser and Settings colour a category exactly like the plan.
+- **Where it is edited:** the placed item's context panel ("Symbol" select — per-entry, labelled
+  "applies to every placed X") and the Assemblies "+ Build" form (the only grid-catalog entry
+  editor that exists — entries are otherwise seeded from the pricing catalog). The category
+  defaults card lives under **Settings → Admin** (the spec harness pins the sections to
+  General/Team/Admin; a fourth "Grid" section is out of scope).
+- **The legend** lives on the riser page (the printable derived drawing); no legend existed
+  before this change.
+
+Spec: `docs/superpowers/specs/2026-09-21-round-2-standalone-design.md` §#131.
+
+## D155. Manual consulting engagements are never overwritten by the quote sweep (#135, 2026-09-21)
+
+Engagements were only ever minted by `syncEngagementsFromQuotes()` from sent/won consulting
+quotes; a project that skipped the fee proposal had no way in. "+ New consulting project" on the
+hub now creates one by hand, and the sweep's contract was extended rather than bypassed:
+
+- **Model:** `ConsultingEngagement.origin?: "quote" | "manual"` (absent on pre-#135 docs = quote)
+  and `quoteId: string | null` (null on a manual project until a proposal is attached). A manual
+  project is born `awarded`, with milestones from the fee — a fixed fee is ONE unscheduled "Fee"
+  milestone carrying the amount, a schedule keeps its rows — and every phase on the Settings phase
+  menu seeded pending. The phase SET is not the one a won quote gets: `fromQuote` seeds only the
+  phases ticked on the proposal (`consulting.phases`, falling back to `DEFAULT_CONSULTING_PHASES`
+  when the quote named none), while the manual modal has no phase picker, so
+  `createManualEngagementAction` passes the whole `mergedConsultingPhases(settings.consultingPhases)`
+  menu. Both paths seed whatever phases they take as pending, and a phase is removed on the project
+  page in one click. Put to Jeff as MASTER-QUESTIONS E7. The creation is logged as a decision
+  ("Project added manually", by the creator) so provenance is visible on the record.
+- **Sweep rule (`sweepIndexesEngagement`, pure):** the sweep indexes rows by quote and skips any
+  row with no quote — so a manual project is invisible to it: never created, advanced, closed or
+  reopened. "Attach proposal" sets `quoteId` (validated: exists, is a consulting quote, is not
+  another engagement's); from then on the row is keyed by that quote and follows
+  `engagementSyncAction` like any other. Those rules only move `proposal_sent` and `closed` rows,
+  so an awarded manual project is never demoted, and because the row is now indexed the sweep can
+  never mint a duplicate engagement for the attached quote. Attaching never rewrites milestones.
+- **Creation is `requirePerm("create")`** (the rentals-create gate); a customer is picked or
+  quick-added (`EntityQuickAdd`, minted with the `c<ms>` id convention), the venue must belong to
+  that customer or is dropped, and the phase menu is resolved in the action so the store stays
+  settings-free (the D91 idiom).
+- **Not changed:** `ensureEngagementForQuote` (the regression harness uses it), the on-win fan-out,
+  the Reports billing forecast (`targetDate > 0` still gates it), consulting fee proposals (#35).
+
+Spec: `docs/superpowers/specs/2026-09-21-round-2-standalone-design.md` §#135.
+
+## D160. Vendors are companies; price-list freshness is a date rule; owner tasks are exactly-once (#122, 2026-09-21)
+
+Spec: `docs/superpowers/specs/2026-09-21-vendors-module-design.md`. Jeff's decision in the
+brainstorm was **date rule only** — no price-list file upload or diff. Defaults taken while
+building:
+
+- **A vendor is a company with `type === "vendor/manufacturer"`** (the `COMPANY_TYPES` value,
+  `lib/identity/config.ts` `VENDOR_COMPANY_TYPE`). `PARTNER_TYPES` now carries that exact string
+  (the legacy `"Vendor"` spelling stays), so vendor companies no longer get a base venue. Rows
+  typed the legacy way do NOT appear on `/vendors` — retype them in the Companies edit modal, whose
+  type select now keeps a stored type that isn't one of the five prototype venue segments (it used
+  to render blank for any Daylite-imported type).
+- **One doc per vendor, id = company id** (`vendor_profiles`, migration `0024_vendor_profiles`,
+  written idempotently per D141). Manufacturer claims are `mfr` spellings matched by `mfrKey()`;
+  one owner per key — claiming moves it. Not sync-pushable.
+- **Status** (`lib/vendor-status.ts`, pure): `no-list` beats everything; `newer-list` when the
+  newest ledger `effectiveAt` is strictly after the NEWEST `effectivePriceDate` of the claimed
+  parts; `outdated` when `now − max(list, catalog) > OUTDATED_AFTER_MS` (boundary inclusive =
+  current); else `current`. `catalogEffectiveAt` is the newest date (the banner's `priceBooks()`
+  uses the oldest — a different question).
+- **Owner tasks** are Home Queue assignments keyed by
+  `source = "auto: vendor <id> <status> <at>"`; `ensureVendorAssignments()` skips when ANY
+  assignment with that key exists, open or done — exactly once per (vendor, status, date), never
+  re-opened. Runs after a ledger save and inside the daily `/api/gmail/sync` cron (own try/catch,
+  reported as `vendors` in the JSON). Assignee = `settings.catalogOwner.userId` if active, else the
+  user named Jena Tolksdorf, else the first active Admin; nobody → no task. `link.kind` stays
+  `"company"` (the Krisp write-back precedent: `AssignmentLink` kinds are not extended); the queue
+  row deep-links to `/vendors/<id>` anyway, gated on the source prefix — `assignmentHref()`
+  (`lib/queue.ts:43,61`) sends a `"company"` link to `/vendors/<id>` only when its `source` starts
+  with `"auto: vendor "`, and every other `"company"` link (which may be a customer, and that route
+  404s on one) still lands on `/queue`.
+- **Settings → Catalog** is the admin card on `/catalog` (Settings' Admin section only links
+  there); `setCatalogOwnerAction` is gated on `manage_users` like every other Settings write.
+- **"+ New vendor" is a name-only quick-add** through the customers-store upsert with the type
+  preset (the same seam the Inbox quick-add uses), not the full Companies modal: its type list is
+  the five venue segments and its default blank venue row would give a vendor a "Venue" site. The
+  unclaimed-manufacturer claim reuses a vendor whose name normalizes to the manufacturer, else
+  creates `v-<mfrKey>`; a non-vendor company with the same name is left alone.
+- **Inbox:** `/inbox?customer=<id>` is an alias of the pre-existing `?new=<id>` composer entry
+  (the spec's "extend `?draft=`"), and `&log=1` opens the Log call / meeting modal preset — so
+  "Log call" from a vendor really logs a call. The link sidebar's picker groups Customers /
+  Vendors; the compose/log modals' pickers are unchanged.
+- **Claiming a manufacturer does not re-run the task check** — only a ledger save and the cron do
+  (spec §2); the next daily run picks up a claim's effect on status.
+- Seed: `rose-brand` (the manufacturer with the most seeded parts) with a 3-week-old ledger entry,
+  so dev shows "Newer list received" and the first cron creates the owner's task.
+
+Out of scope, logged as follow-ups: procurement lines linking to vendor records
+(`ProcurementLine.vendor` stays free text); a `"vendor"` `AssignmentLink` kind of its own (the
+source-prefix gate above covers the one case that exists); multi-vendor manufacturers.
+## D158. Import hub — customers / contacts / venues as three importers, unmatched customers auto-created (#137, closes #82 + #83, 2026-09-21)
+
+Jeff's decision (brainstorm 2026-09-21): a contacts or venues row whose customer isn't in Peak
+**creates** the customer rather than failing. Spec:
+`docs/superpowers/specs/2026-09-21-import-export-people-venues-design.md`. Defaults taken while
+implementing it:
+
+- **Link-back order** is `Customer ID` exact match → normalized-name match (the hub's `norm`:
+  lowercase, alphanumerics only) → create `{ name, type: hidden "Customer Category" column ?? "" }`.
+  A created customer is pushed into the commit cache, so every later row in the same file links to
+  it — one file, one new record per distinct name. The preview lists "Will create N new customers"
+  from the same pure resolver (`import/link.ts`), so what it shows is what commits.
+- **`Customer` OR `Customer ID`** — `FieldDef.requiredUnless` lets either column satisfy the
+  requirement; a row with neither fails validation before commit.
+- **Embedded columns stay as hidden aliases** (`FieldDef.hidden`: auto-mapped on import, absent from
+  template and export) so pre-#137 customers files keep working for one release. On such a row,
+  `Phone` is the embedded contact's; on a new-format row it is the company's main phone.
+- **Where a customers row's address goes:** Address/City/State/Zip merge into the customer's
+  **unnamed mailing venue** — the primary venue on a customer that has no named one, which is the
+  address the record page, travel estimates and quotes use, and what this importer always did —
+  but now as a merge (`mergeLocation`), never the old replace-all-venues, and never onto a *named*
+  venue (see the base-venue bullet below for the full symmetric rule).
+  Zip also stamps `companies.zip` (the spec's "company HQ/billing" zip); Phone/Website stamp
+  `companies.main_phone` / `website`. The companies row's own address/city/state columns are left
+  for the Daylite import. A blank Category writes `""` (the old importer invented "Performing arts").
+- **Venue category is a new nullable `sites.kind`** (hand-written migration `0023_sites_kind`): the
+  spec allowed "the site row's existing free-text kind column, else the location document", but
+  `venue_kind` is the controlled vocabulary the estimator and Companies modal switch on, and sites
+  are relational rows, not documents. `kind` is stored as typed and shown as a pill on the customer
+  record; a venue the import **creates** derives `venueKind` from it (`venueKindFromCategory`:
+  church/blackbox/arena/flat, default proscenium); an existing venue keeps its `venueKind`.
+- **The first imported venue claims the unnamed D85 base venue** instead of leaving an empty twin
+  (a labelled row with no name match takes the first blank-label location) — but only a TRUE
+  placeholder, one carrying no address/city/state/zip of its own (`mergeLocation`'s `claimBlank`,
+  tightened in the final review). The customers template has no Venue column, so a customer
+  imported with an Address owns an unnamed but *addressed* primary venue: that is its mailing
+  address, which the companies row does not duplicate (see above), so a labelled venues row
+  appends beside it rather than overwriting it. Only the customers writer claims a blank-label
+  venue whatever it holds, because its own row IS that venue. **The rule is symmetric** (final
+  review, round 2): a customers row with no Venue column addresses an *unnamed* venue — the
+  primary one when it has no name of its own, else the unnamed one sitting beside a named venue —
+  and never renames what it addresses. When every venue is named there is nothing it may address,
+  so it appends its mailing address as a new unnamed location instead of overwriting a named
+  venue's street address, which nothing else in the app holds. **The customer's first named venue
+  becomes the primary one**, demoting that mailing placeholder (which stays, as a second
+  location): `primaryLoc` feeds the record page's location line, travel estimates and quote
+  defaults, and those belong on the venue where the work happens. So a customer that appears in
+  both customers.csv and venues.csv ends up with the venue primary and the mailing address kept as
+  a second, unnamed location.
+- **Contacts:** matched by primary email, else normalized name; a hit **keeps its stored name**
+  (writeRecord matches contacts by display name — renaming would mint a second row). `Title`, else
+  `Role`, fills the one free-text slot (`contacts.title`, the Daylite precedent). `Mobile` is a
+  second, "mobile"-labelled phone channel; `CustomerContact.phone` now composes as the non-mobile
+  number (falling back to the first phone) and `mobile` as the mobile one, so a round trip through
+  writeRecord targets the right row each. `Primary` = yes/y/true/1/x promotes and demotes the others;
+  anything else leaves flags alone, except that the first contact on a record is always primary.
+- **"Create new" never duplicates** a contact or venue — the writers are upserts; the mode only
+  matters for the customers type.
+- **Store seam:** `zip`/`kind` (locations), `mobile` (contacts) and `zip`/`phone`/`website` (doc)
+  are write-when-provided / preserve-when-undefined, backfilled before the D83 change check exactly
+  like #23's lifecycle/keywords/custom, so the Companies modal, quote intake and inbox quick-add —
+  which don't carry them — neither clear them nor bump `updatedAt`. `LocationInput`/`ContactInput`
+  and `saveCustomerAction` carry them anyway, and the quote-intake / inbox `toLocationInput` copies
+  are replaced by one shared converter in `companies/lib.ts` that keeps `locationName` (the #96
+  review follow-up: the intake copy was clearing the campus name on every save).
+- **Zip cells** are trimmed; 5-digit and ZIP+4 kept as typed; a 4-digit value gets its
+  Excel-stripped leading zero back.
+- **Exports:** contacts and venues export one row per record with the customer's name and id (so
+  export → edit → re-import links by id even after a rename); customers export gains Category + Zip
+  and drops the embedded contact/venue columns; an unnamed, address-less placeholder venue is not
+  exported (it would only produce a row that fails re-import). `Notes` columns are accepted and
+  ignored on all three types, as the customers importer always did.

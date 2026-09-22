@@ -14,7 +14,7 @@ import { routeLengthFt, type PartLite, type RouteLite } from "./grid-bom";
  * share one "Unassigned" node, so nothing silently disappears.
  * ------------------------------------------------------------------ */
 
-export type RiserGroup = { partId: string; desc: string; qty: number };
+export type RiserGroup = { partId: string; desc: string; qty: number; category: string; shape: string | null };
 
 export type RiserNode = {
   /** null = the Unassigned node. */
@@ -78,7 +78,7 @@ export function riserGraph(
     const part = partById.get(pl.partId);
     const g = node.groups.find((x) => x.partId === pl.partId);
     if (g) g.qty += 1;
-    else node.groups.push({ partId: pl.partId, desc: part?.desc || pl.partId, qty: 1 });
+    else node.groups.push({ partId: pl.partId, desc: part?.desc || pl.partId, qty: 1, category: part?.category || "", shape: part?.shape ?? null });
   }
 
   // Wires → edges between the spaces their endpoints land in.

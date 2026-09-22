@@ -2,7 +2,7 @@
 -- Drive archive (docs/superpowers/specs/2026-09-21-krisp-recordings-design.md).
 -- Hand-written (drizzle-kit generate needs the single-process dev DB); the
 -- `recordings` block is column-for-column the task_templates block from 0020.
-CREATE TABLE "recordings" (
+CREATE TABLE IF NOT EXISTS "recordings" (
 	"id" text PRIMARY KEY NOT NULL,
 	"doc" jsonb NOT NULL,
 	"rev" integer DEFAULT 1 NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE "recordings" (
 	"deleted" boolean DEFAULT false NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "krisp_connections" (
+CREATE TABLE IF NOT EXISTS "krisp_connections" (
 	"user_id" text PRIMARY KEY NOT NULL,
 	"api_key" text NOT NULL,
 	"krisp_user_id" integer,
@@ -25,12 +25,12 @@ CREATE TABLE "krisp_connections" (
 	"import_claimed_at" bigint
 );
 --> statement-breakpoint
-CREATE INDEX "recordings_seq_idx" ON "recordings" USING btree ("seq");--> statement-breakpoint
-CREATE INDEX "recordings_deleted_idx" ON "recordings" USING btree ("deleted");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "recordings_seq_idx" ON "recordings" USING btree ("seq");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "recordings_deleted_idx" ON "recordings" USING btree ("deleted");--> statement-breakpoint
 -- Hand-added, per the NOTE in 0012_seq_bump_trigger.sql: bump_doc_seq()
 -- cannot retroactively attach itself to a table that didn't exist yet.
 -- Without this, every UPDATE (patchDoc, softDeleteDoc, setReview) would
 -- leave `seq` stale and pull-sync's `WHERE seq > cursor ORDER BY seq` would
 -- stop reporting changes to this table — the same failure 0012/0014 fixed
 -- for the tables that existed before them.
-CREATE TRIGGER recordings_seq_bump BEFORE UPDATE ON "recordings" FOR EACH ROW EXECUTE FUNCTION bump_doc_seq();
+CREATE OR REPLACE TRIGGER recordings_seq_bump BEFORE UPDATE ON "recordings" FOR EACH ROW EXECUTE FUNCTION bump_doc_seq();

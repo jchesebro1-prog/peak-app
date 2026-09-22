@@ -219,6 +219,9 @@ export type ReaderVM = {
   } | null;
   /** every customer, for the pickers */
   customerOptions: Opt[];
+  /** #122 — the same companies split into "Customers" / "Vendors" optgroups
+   *  (vendor = type "vendor/manufacturer"); empty groups are omitted. */
+  customerOptionGroups: Array<{ label: string; options: Opt[] }>;
   /** contacts of the linked/suggested customer (value = contact name — the
    *  doc-shape contact carries no id) */
   contactOptions: Opt[];

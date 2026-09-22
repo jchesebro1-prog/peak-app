@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SearchFilterBar } from "@/components/search/search-filter-bar";
 import { requireUser } from "@/lib/session";
 import { loadVenueDirectory } from "@/lib/venue-history-server";
 import { timeAgo } from "@/lib/format";
@@ -122,82 +123,41 @@ export default async function VenuesPage({
 
       {hasVenues && (
         <div style={{ marginBottom: 14 }}>
-          <form action="/venues" method="GET" style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 9,
-                background: "#fff",
-                border: "1px solid #e4e7ec",
-                borderRadius: 9,
-                padding: "9px 12px",
-              }}
-            >
-              <button
-                type="submit"
-                aria-label="Search"
-                style={{
-                  width: 14,
-                  height: 14,
-                  border: "1.7px solid #aab0bb",
-                  borderRadius: "50%",
-                  flexShrink: 0,
-                  position: "relative",
-                  background: "transparent",
-                  padding: 0,
-                  cursor: "pointer",
-                }}
-              >
-                <span style={{ position: "absolute", right: -3, bottom: -3, width: 6, height: 1.7, background: "#aab0bb", transform: "rotate(45deg)" }} />
-              </button>
-              <input
-                type="text"
-                name="q"
-                defaultValue={q}
-                placeholder="Search venues…"
-                style={{ flex: 1, border: "none", background: "transparent", fontSize: 13.5, fontFamily: "var(--font-ui)", color: "#16181d", outline: "none" }}
-              />
-            </div>
-
-            {/* Company filter (D142) — a typeahead bound to a native
-             *  <datalist> rather than one option/chip per company, which
-             *  doesn't scale past a few dozen. Submits through the same
-             *  ?company= param as before; see the resolution above for how
-             *  a typed name (vs. an id from an old link) is handled. */}
-            {companyOptions.length > 1 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                <input
-                  type="text"
-                  name="company"
-                  defaultValue={activeCompanyName}
-                  list="ve-companies"
-                  placeholder="Filter by company…"
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontSize: 13,
-                    fontFamily: "var(--font-ui)",
-                    color: "#16181d",
-                    border: "1px solid #e4e7ec",
-                    borderRadius: 9,
-                    padding: "9px 12px",
-                    outline: "none",
-                    background: "#fff",
-                  }}
-                />
-                <datalist id="ve-companies">
-                  {companyOptions.map((c) => (
-                    <option key={c.id} value={c.name} />
-                  ))}
-                </datalist>
-                {company && (
-                  <Link href={linkWith({ company: "" })} style={{ fontSize: 12, fontWeight: 600, color: "#5b616e", whiteSpace: "nowrap", flexShrink: 0 }}>
-                    Clear
-                  </Link>
-                )}
-              </div>
-            )}
+          <form action="/venues" method="GET">
+            {/* #121: search + the company filter on ONE row. `submit` keeps
+                the magnifier as the form's submit button — with two text
+                inputs and no button, Enter would not submit. */}
+            <SearchFilterBar name="q" defaultValue={q} placeholder="Search venues…" ariaLabel="Search venues" submit>
+              {companyOptions.length > 1 && (
+                <>
+                  {/* Company filter (D142) — a typeahead bound to a native
+                   *  <datalist> rather than one option/chip per company, which
+                   *  doesn't scale past a few dozen. Submits through the same
+                   *  ?company= param as before; see the resolution above for how
+                   *  a typed name (vs. an id from an old link) is handled. */}
+                  <input
+                    type="text"
+                    name="company"
+                    defaultValue={activeCompanyName}
+                    list="ve-companies"
+                    placeholder="Filter by company…"
+                    aria-label="Filter by company"
+                    className="pk-searchbar-select"
+                    style={{ fontWeight: 500, cursor: "text", flex: "0 1 240px", minWidth: 160 }}
+                  />
+                  <datalist id="ve-companies">
+                    {companyOptions.map((c) => (
+                      <option key={c.id} value={c.name} />
+                    ))}
+                  </datalist>
+                  {company && (
+                    <Link href={linkWith({ company: "" })} style={{ fontSize: 12, fontWeight: 600, color: "#5b616e", whiteSpace: "nowrap", flexShrink: 0 }}>
+                      Clear
+                    </Link>
+                  )}
+                </>
+              )}
+            </SearchFilterBar>
           </form>
 
           <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 11 }}>{resultLabel}</div>

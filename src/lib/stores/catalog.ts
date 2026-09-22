@@ -1,4 +1,5 @@
 import { clearCollection, getDoc, listDocs, upsertDoc } from "@/db/doc-store";
+import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
 
 /**
@@ -73,6 +74,15 @@ export type CatalogPart = {
    *  predate this field on purpose; "unknown age" is honest for a row
    *  nobody has confirmed since import). */
   updatedAt?: number;
+  /** Epoch ms of the price list this line's price came from — its effective
+   *  date (PUNCHLIST #133, D156). Stamped by `upsert`/`mergeUpsert` ONLY when
+   *  `list` or `cost` actually changes (importers pass the price list's
+   *  effective date; any other write stamps "now"), so it means "when this
+   *  price last moved" — unlike `updatedAt`, which moves on every write.
+   *  Absent on parts that predate the field; the manufacturer-level
+   *  `settings.priceListEffective` date covers those (lib/catalog-books
+   *  effectivePriceDate). */
+  pricedAt?: number;
 };
 
 /** All parts (port of window.MASTER_CATALOG reads). */
@@ -90,23 +100,44 @@ export async function byCategory(category: string): Promise<CatalogPart[]> {
   return all.filter((p) => p.category === category);
 }
 
-/** Insert or fully replace a part; the SKU is the document id. Stamps
- *  `updatedAt` on every write (PUNCHLIST #14, decision A) — centralized here
- *  rather than left to each caller so every write path (the catalog edit
- *  form, the .xlsx/CSV importer, the spec-builder's create-on-the-fly path)
- *  gets it for free instead of needing to remember it individually. */
-export async function upsert(
-  part: Omit<CatalogPart, "id"> & { id?: string }
+/** Options for a part write. `pricedAt` is the effective date to stamp WHEN
+ *  the write changes `list` or `cost` (the importers pass the price list's
+ *  effective date); it is ignored when the price is unchanged. Default: now. */
+export type UpsertOpts = { pricedAt?: number };
+
+async function writePart(
+  existing: CatalogPart | null,
+  part: Omit<CatalogPart, "id"> & { id?: string },
+  opts: UpsertOpts
 ): Promise<CatalogPart> {
-  const doc: CatalogPart = { ...part, id: part.id || part.sku, updatedAt: Date.now() };
+  const now = Date.now();
+  const pricedAt = nextPricedAt(existing, part, opts.pricedAt ?? now);
+  const doc: CatalogPart = { ...part, id: part.id || part.sku, updatedAt: now };
+  if (pricedAt != null) doc.pricedAt = pricedAt;
+  else delete doc.pricedAt;
   return upsertDoc<CatalogPart>("catalog_parts", doc);
+}
+
+/** Insert or fully replace a part; the SKU is the document id. Stamps
+ *  `updatedAt` on every write (PUNCHLIST #14, decision A) and `pricedAt`
+ *  only when the price changed (PUNCHLIST #133) — centralized here rather
+ *  than left to each caller so every write path (the catalog edit form, the
+ *  .xlsx/CSV importers, the spec-builder's create-on-the-fly path, the
+ *  datasheet actions) gets both for free. Reads the existing doc first to
+ *  compare prices; `mergeUpsert` shares that read. */
+export async function upsert(
+  part: Omit<CatalogPart, "id"> & { id?: string },
+  opts: UpsertOpts = {}
+): Promise<CatalogPart> {
+  const existing = await get(part.id || part.sku);
+  return writePart(existing, part, opts);
 }
 
 /**
  * Load the existing part (if any) and shallow-merge `patch` over it before
- * calling `upsert` — which, per the note above, is a FULL REPLACE and will
- * otherwise silently drop any field the caller doesn't happen to carry
- * (ports, datasheetBlobKey/Name, trade, discipline/role, costPerSqft, …).
+ * writing — a bare `upsert` is a FULL REPLACE and would otherwise silently
+ * drop any field the caller doesn't happen to carry (ports,
+ * datasheetBlobKey/Name, trade, discipline/role, costPerSqft, pricedAt, …).
  *
  * Use this instead of a bare `upsert(...)` whenever the caller only knows
  * about a subset of a part's fields — the catalog edit form and bulk/paste
@@ -120,7 +151,8 @@ export async function upsert(
  */
 export async function mergeUpsert(
   sku: string,
-  patch: Partial<Omit<CatalogPart, "id" | "sku">>
+  patch: Partial<Omit<CatalogPart, "id" | "sku">>,
+  opts: UpsertOpts = {}
 ): Promise<CatalogPart> {
   const existing = await get(sku);
   // Cast: TS can't see that callers only omit fields `existing` already
@@ -128,7 +160,7 @@ export async function mergeUpsert(
   // field itself) — the runtime contract is enforced by callers, same as
   // the pre-existing `{ ...part, ... } as SpecCatalogPart` pattern in
   // design/engagements/spec/actions.ts.
-  return upsert({ ...(existing ?? {}), ...patch, sku } as Omit<CatalogPart, "id"> & { id?: string });
+  return writePart(existing, { ...(existing ?? {}), ...patch, sku } as Omit<CatalogPart, "id"> & { id?: string }, opts);
 }
 
 /** Explicit go-live reset for the pricing catalog only. Grid symbols and all

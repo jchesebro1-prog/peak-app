@@ -7,16 +7,23 @@ export type FixtureSubassembly = {
   description: string;
   lightEngineSku: string;
   lightEngineName: string;
+  /** Build-time snapshot (#129). Live values come from resolveSubassembly. */
   lightEngineCost: number;
   lensSku: string;
   lensName: string;
+  /** Build-time snapshot (#129). */
   lensCost: number;
   lamp?: string;
   position?: string;
   circuit?: string;
   options: Record<FixtureOptionCategory, FixtureCompatibleOption[]>;
+  /** Build-time snapshot (#129) — kept so older readers and exports still
+   *  see a number; the screen shows the live resolveSubassembly() value. */
   cost: number;
   price: number;
+  /** #129 — "was $X when built": the numbers frozen at the last save and the
+   *  newest effective price date among its parts at that moment. */
+  snapshot?: { cost: number; price: number; pricedAt: number | null };
   createdAt: number;
   updatedAt: number;
 };

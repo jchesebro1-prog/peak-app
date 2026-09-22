@@ -1,13 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/session";
+import { requirePerm, requireUser } from "@/lib/session";
 import {
   addAnnotation,
   addPhaseDocTo,
   addReviewComment,
+  attachQuoteToEngagement,
   clearCalibration,
   commentOnAnnotation,
+  createManualEngagement,
   deleteAnnotation,
   setCalibration,
   checklistTemplateFor,
@@ -21,6 +23,7 @@ import {
   getEngagement,
   makeChecklist,
   makePhase,
+  mergedConsultingPhases,
   patchEngagement,
   setChecklistItem,
   setCommentState,
@@ -28,11 +31,13 @@ import {
   submitPhaseReview,
   updateMeeting,
 } from "@/lib/stores/engagements";
-import { ENGAGEMENT_STAGE_KEYS } from "@/lib/consulting-stages";
+import { ENGAGEMENT_STAGE_KEYS, manualMilestoneSeeds, type ManualFee } from "@/lib/consulting-stages";
 import { getSettings } from "@/lib/settings";
 import type { Annotation, MeasureUnit } from "@/lib/annotations";
 import { linkVisitToEngagement } from "@/lib/stores/site-visits";
 import { get as getQuote } from "@/lib/stores/quotes";
+import { get as getCustomer, locationsForId, upsert as upsertCustomer } from "@/lib/stores/customers";
+import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
 
 /**
  * Consulting module server actions (D90) — thin, session-gated wrappers over
@@ -133,6 +138,124 @@ export async function setDesignIdsAction(engId: string, designIds: string[]) {
   await patchEngagement(engId, (d) => {
     d.designIds = clean;
   });
+  return done();
+}
+
+/* ---------- manual projects (#135, D155) ---------- */
+
+/** Server-side shape check for a hand-entered fee — the modal only ever
+ *  posts one of the two modes, but actions are public endpoints. */
+function cleanFee(raw: ManualFee | null | undefined): ManualFee | null {
+  if (!raw || typeof raw !== "object") return null;
+  if (raw.mode === "fixed") {
+    return { mode: "fixed", amount: Math.max(0, Math.round(Number(raw.amount) || 0)) };
+  }
+  if (raw.mode === "milestones") {
+    const milestones = (Array.isArray(raw.milestones) ? raw.milestones : [])
+      .slice(0, 20)
+      .map((m) => ({
+        name: String(m?.name || "").trim().slice(0, 120),
+        targetDate: Math.max(0, Math.round(Number(m?.targetDate) || 0)),
+        amount: Math.max(0, Math.round(Number(m?.amount) || 0)),
+      }));
+    return { mode: "milestones", milestones };
+  }
+  return null;
+}
+
+/** "+ New consulting project" (#135): a project that skipped the fee
+ *  proposal. Picks an existing customer or quick-adds one, checks the venue
+ *  belongs to that customer, resolves the phase menu from Settings, and
+ *  creates the engagement `awarded` with `origin: "manual"`. */
+export async function createManualEngagementAction(input: {
+  customerId: string;
+  newCustomer?: { name: string; type: string } | null;
+  name: string;
+  architect?: { company: string; contact: string } | null;
+  siteId?: string;
+  contactName?: string;
+  fee?: ManualFee | null;
+}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const me = await requirePerm("create");
+  const name = String(input?.name || "").trim().slice(0, 160);
+  if (!name) return { ok: false, error: "Name the project." };
+
+  // #135 review fix: the modal only ever posts a valid fee or none at all,
+  // but actions are public endpoints — refuse a fixed/milestone fee that
+  // would otherwise seed zero milestones silently (no fee, no error).
+  // fee === null ("no fee yet") stays allowed.
+  //
+  // Final-review fix: these guards run BEFORE the quick-add customer is
+  // written. They read nothing but `input.fee` (cleanFee and
+  // manualMilestoneSeeds are both pure), so nothing is lost by hoisting
+  // them — and a rejection here used to leave an orphan customer behind
+  // that the user's retry would then duplicate.
+  const fee = cleanFee(input?.fee);
+  if (fee?.mode === "fixed" && !(fee.amount > 0)) {
+    return { ok: false, error: "Enter the fee amount." };
+  }
+  if (fee?.mode === "milestones" && manualMilestoneSeeds(fee).length === 0) {
+    return { ok: false, error: "Add at least one milestone with an amount." };
+  }
+
+  let customerId = String(input?.customerId || "").trim();
+  let customerName = "";
+  const fresh = input?.newCustomer;
+  if (fresh && String(fresh.name || "").trim()) {
+    const type = (CUSTOMER_TYPES as readonly string[]).includes(fresh.type) ? fresh.type : "";
+    customerId = "c" + Date.now(); // the saveCustomerAction id convention
+    customerName = String(fresh.name).trim().slice(0, 160);
+    await upsertCustomer({ id: customerId, name: customerName, type });
+  } else {
+    const c = await getCustomer(customerId);
+    if (!c) return { ok: false, error: "Pick a customer or add a new one." };
+    customerName = c.name;
+  }
+
+  let siteId: string | null = String(input?.siteId || "").trim() || null;
+  if (siteId) {
+    const locs = (await locationsForId(customerId)) || [];
+    if (!locs.some((l) => l.id === siteId)) siteId = null; // never link a venue that isn't the customer's
+  }
+
+  const settings = await getSettings();
+  const eng = await createManualEngagement(
+    {
+      customerId,
+      customer: customerName,
+      name,
+      architect: {
+        company: String(input?.architect?.company || "").trim().slice(0, 120),
+        contact: String(input?.architect?.contact || "").trim().slice(0, 120),
+      },
+      siteId,
+      contactName: String(input?.contactName || "").trim().slice(0, 120),
+      fee,
+      phases: mergedConsultingPhases(settings.consultingPhases),
+    },
+    me
+  );
+  revalidatePath("/", "layout");
+  return { ok: true, id: eng.id };
+}
+
+/** "Attach proposal" on a manual project (#135): links an existing consulting
+ *  quote by id. Milestones are untouched. `attachQuoteToEngagement` (Task 3
+ *  review) now enforces the whole one-engagement-per-quote invariant itself
+ *  — non-manual/missing engagement, an engagement that already has a
+ *  quoteId, a missing/non-consulting quote, a quote already claimed by
+ *  another engagement — and returns a plain-English error for each, so this
+ *  wrapper does not re-check any of that; it only validates the raw input
+ *  and forwards the signed-in user's name for the provenance decision. */
+export async function attachProposalAction(
+  engId: string,
+  quoteId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const clean = String(quoteId || "").trim();
+  if (!clean) return { ok: false, error: "Enter the consulting quote id (Q-…)." };
+  const r = await attachQuoteToEngagement(engId, clean, { name: user.name });
+  if (!r.ok) return r;
   return done();
 }
 

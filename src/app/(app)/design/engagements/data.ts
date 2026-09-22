@@ -5,6 +5,7 @@ import {
   type ConsultingEngagement,
 } from "@/lib/stores/engagements";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
+import { all as allCustomers } from "@/lib/stores/customers";
 import { getAllDesigns } from "@/lib/stores/designs";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { activeUsers } from "@/lib/users";
@@ -32,6 +33,14 @@ export type VisitLite = {
   engagementId: string | null;
 };
 
+/** Serializable customer slice for the "+ New consulting project" modal (#135). */
+export type CustomerLite = {
+  id: string;
+  name: string;
+  locations: Array<{ id: string; label: string }>;
+  contactNames: string[];
+};
+
 export type ConsultingData = {
   engagements: ConsultingEngagement[];
   quotesById: Record<string, QuoteLite>;
@@ -41,6 +50,8 @@ export type ConsultingData = {
   phaseMenu: string[];
   /** All visits (lite) — the view filters by engagement / company. */
   visits: VisitLite[];
+  /** Every customer + its venues, for the manual-project modal (#135). */
+  customers: CustomerLite[];
 };
 
 export async function loadConsultingData(): Promise<ConsultingData> {
@@ -48,18 +59,19 @@ export async function loadConsultingData(): Promise<ConsultingData> {
   // paths never run the quote→engagement syncs, so every consulting load
   // sweeps first — sent proposals appear, wins advance, lost proposals close.
   await syncEngagementsFromQuotes();
-  const [engagements, quotes, designs, users, settings, visits] = await Promise.all([
+  const [engagements, quotes, designs, users, settings, visits, customerDocs] = await Promise.all([
     allEngagements(),
     getAllQuotes(),
     getAllDesigns(),
     activeUsers(),
     getSettings(),
     allVisits(),
+    allCustomers(),
   ]);
 
   const wanted = new Set<string>();
   for (const e of engagements) {
-    wanted.add(e.quoteId);
+    if (e.quoteId) wanted.add(e.quoteId); // #135: manual projects have none until a proposal is attached
     if (e.installQuoteId) wanted.add(e.installQuoteId);
   }
   const quotesById: Record<string, QuoteLite> = {};
@@ -103,5 +115,13 @@ export async function loadConsultingData(): Promise<ConsultingData> {
     roster: users.map((u) => u.name),
     phaseMenu: mergedConsultingPhases(settings.consultingPhases),
     visits: visitLites,
+    customers: customerDocs.map((c) => ({
+      id: c.id,
+      name: c.name,
+      locations: (c.locations || [])
+        .map((l) => ({ id: l.id || "", label: l.label || "Venue" }))
+        .filter((l) => l.id),
+      contactNames: (c.contacts || []).map((ct) => ct.name),
+    })),
   };
 }

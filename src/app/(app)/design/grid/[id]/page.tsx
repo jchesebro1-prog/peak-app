@@ -13,6 +13,7 @@ import { groupOf, resolveCategoryMap, tradeOf } from "@/lib/catalog-taxonomy";
 import { fabricSellPerSqft, sellCoeffs } from "@/lib/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { fabricAreaRate, isFabricRow } from "@/lib/design/grid-curtains";
+import { resolveCategoryShapes } from "@/lib/design/grid-symbols";
 import type { FabricSell } from "@/lib/curtain-geom";
 import type { FabricOption } from "@/app/(app)/design/quick/engine";
 import type { PartLite } from "@/lib/design/grid-bom";
@@ -102,6 +103,7 @@ export default async function GridEditorPage({
       kind: s.kind || "device",
       assemblyMembers: s.members,
       pricingPartId: s.pricingPartId,
+      shape: s.shape ?? null, // #131 per-entry override; category defaults ride separately
     };
   });
 
@@ -178,6 +180,7 @@ export default async function GridEditorPage({
       laborHoursPerDevice={laborHoursPerDevice}
       specHref={specHref}
       venues={venues}
+      categoryShapes={resolveCategoryShapes(settings.gridCategoryShapes)}
     />
   );
 }

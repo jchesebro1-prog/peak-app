@@ -23,6 +23,7 @@ import {
   addMilestoneAction,
   addPhaseAction,
   addSubmittalAction,
+  attachProposalAction,
   completeMilestoneAction,
   linkInstallQuoteAction,
   linkVisitAction,
@@ -45,6 +46,7 @@ import {
 import { approvalIsStale } from "@/lib/consulting-review";
 import { Card, EmptyState, KpiTile, Mono, PageHeader, Pill, StatusPill } from "@/components/ui";
 import { money } from "@/lib/format";
+import { NewEngagementModal } from "./new-engagement-modal";
 
 /**
  * Consulting module view (D90) — list + detail-with-tabs, the Projects-module
@@ -181,9 +183,10 @@ export function ConsultingView({
 /* ============================ list ================================ */
 
 function ConsultingList({ data }: { data: ConsultingData }) {
+  const [creating, setCreating] = useState(false);
   const active = data.engagements.filter(isOpenEngagement);
   const feeBook = data.engagements.reduce(
-    (a, e) => a + feeTotals(e, data.quotesById[e.quoteId]?.value || 0).total,
+    (a, e) => a + feeTotals(e, (e.quoteId ? data.quotesById[e.quoteId]?.value : 0) || 0).total,
     0
   );
   const soon = data.engagements
@@ -195,7 +198,13 @@ function ConsultingList({ data }: { data: ConsultingData }) {
       <PageHeader
         title="Consulting"
         sub="Consulting — Peak as the paid specifier. Sending the proposal opens the record at Proposal sent; any stage before Closed counts as active."
+        actions={
+          <button type="button" className="pk-btn-accent" onClick={() => setCreating(true)}>
+            + New consulting project
+          </button>
+        }
       />
+      {creating && <NewEngagementModal customers={data.customers} onClose={() => setCreating(false)} />}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 18 }}>
         <KpiTile label="Active consulting" value={active.length} tone="accent" />
         <KpiTile label="Fee book" value={money(feeBook)} sub="all consulting" tone="blue" />
@@ -211,7 +220,8 @@ function ConsultingList({ data }: { data: ConsultingData }) {
             sub={
               <>
                 Start with a <Link href="/design/engagements/quote" style={{ color: "var(--accent)" }}>consulting quote</Link> — sending
-                the proposal opens the engagement here at Proposal sent; winning advances it to Awarded.
+                the proposal opens the engagement here at Proposal sent; winning advances it to Awarded. A project that
+                skipped the proposal goes in through + New consulting project above.
               </>
             }
           />
@@ -219,7 +229,7 @@ function ConsultingList({ data }: { data: ConsultingData }) {
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
           {data.engagements.map((e) => {
-            const q = data.quotesById[e.quoteId];
+            const q = e.quoteId ? data.quotesById[e.quoteId] : undefined;
             const fees = feeTotals(e, q?.value || 0);
             const ph = activePhase(e);
             const ms = nextMilestone(e);
@@ -229,6 +239,7 @@ function ConsultingList({ data }: { data: ConsultingData }) {
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                     <Mono>{e.id}</Mono>
                     <StatusPill tone={ENGAGEMENT_STAGE_TONE[e.status]}>{ENGAGEMENT_STATUS_LABEL[e.status]}</StatusPill>
+                    {e.origin === "manual" && <Pill color="#8a6d1f">Manual</Pill>}
                   </div>
                   <div style={{ fontSize: 14.5, fontWeight: 700, color: "#16181d" }}>{e.name}</div>
                   <div style={{ fontSize: 12.5, color: "#5b616e", marginTop: 2 }}>{e.customer}</div>
@@ -316,7 +327,7 @@ function EngagementDetail({
   oversightExtra?: ReactNode;
 }) {
   const router = useRouter();
-  const q = data.quotesById[eng.quoteId];
+  const q = eng.quoteId ? data.quotesById[eng.quoteId] : undefined;
   const tabHref = (t: TabKey) => `/design/engagements/${encodeURIComponent(eng.id)}?tab=${t}`;
   const counts: Partial<Record<TabKey, number>> = {
     phases: eng.phases.length,
@@ -355,9 +366,11 @@ function EngagementDetail({
             Quote {q.id} · {money(q.value)} ({q.status})
           </Link>
         )}
-        <Link href={`/design/engagements/letter?id=${encodeURIComponent(eng.quoteId)}&kind=proposal`} style={{ color: "var(--accent)" }}>
-          Proposal / agreement
-        </Link>
+        {eng.quoteId && (
+          <Link href={`/design/engagements/letter?id=${encodeURIComponent(eng.quoteId)}&kind=proposal`} style={{ color: "var(--accent)" }}>
+            Proposal / agreement
+          </Link>
+        )}
         <Link href={`/design/engagements/letter?id=${encodeURIComponent(eng.id)}&kind=spec`} style={{ color: "var(--accent)" }}>
           Spec package
         </Link>
@@ -400,6 +413,8 @@ function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngag
   const router = useRouter();
   const [installQuote, setInstallQuote] = useState(eng.installQuoteId || "");
   const [linkErr, setLinkErr] = useState<string | null>(null);
+  const [proposal, setProposal] = useState("");
+  const [proposalErr, setProposalErr] = useState<string | null>(null);
   const visits = data.visits.filter((v) => v.engagementId === eng.id);
   const iq = eng.installQuoteId ? data.quotesById[eng.installQuoteId] : undefined;
 
@@ -415,12 +430,43 @@ function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngag
             <div>Company: <b>{eng.customer || "—"}</b></div>
             <div>Contact: <b>{eng.contactName || "—"}</b></div>
             <div>Site{eng.siteIds.length === 1 ? "" : "s"}: <b>{eng.siteIds.length ? eng.siteIds.join(", ") : "—"}</b></div>
-            <div>
-              Source quote:{" "}
-              <Link href={`/design/engagements/quote?id=${encodeURIComponent(eng.quoteId)}`} style={{ color: "var(--accent)" }}>
-                {eng.quoteId}
-              </Link>
-            </div>
+            {eng.quoteId ? (
+              <div>
+                Source quote:{" "}
+                <Link href={`/design/engagements/quote?id=${encodeURIComponent(eng.quoteId)}`} style={{ color: "var(--accent)" }}>
+                  {eng.quoteId}
+                </Link>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span>Proposal:</span>
+                <input
+                  value={proposal}
+                  onChange={(e) => setProposal(e.target.value)}
+                  placeholder="Q-…"
+                  aria-label="Consulting quote id"
+                  style={{ ...INPUT, width: 110, padding: "4px 8px", fontSize: 12 }}
+                />
+                <button
+                  style={SMALL_BTN}
+                  onClick={async () => {
+                    setProposalErr(null);
+                    const r = await attachProposalAction(eng.id, proposal.trim());
+                    if (!r.ok) {
+                      setProposalErr(r.error);
+                      return;
+                    }
+                    router.refresh();
+                  }}
+                >
+                  Attach proposal
+                </button>
+                <span style={{ fontSize: 11, color: "#9aa0ab" }}>
+                  Added manually — link the consulting quote once one exists; milestones stay as entered.
+                </span>
+              </div>
+            )}
+            {proposalErr && <div style={{ fontSize: 11.5, color: "#a0442b" }}>{proposalErr}</div>}
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span>Install quote:</span>
               <input

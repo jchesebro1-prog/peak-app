@@ -1,6 +1,7 @@
 "use client";
 
 import { signIn } from "next-auth/react";
+import { startNativeGoogleSignIn } from "@/lib/native-auth-client";
 
 export default function LoginButtons({
   google,
@@ -24,9 +25,13 @@ export default function LoginButtons({
       {google && (
         <button
           className="pk-google-btn"
-          onClick={() =>
-            signIn("google", { callbackUrl: window.location.origin + next })
-          }
+          onClick={async () => {
+            // Inside the Capacitor shell the OAuth round trip runs in a Safari
+            // sheet and returns via quartzite://auth (spec 2026-09-21-native-
+            // auth-handoff); anywhere else this is the unchanged web flow.
+            if (await startNativeGoogleSignIn(next)) return;
+            signIn("google", { callbackUrl: window.location.origin + next });
+          }}
         >
           <svg width="17" height="17" viewBox="0 0 48 48">
             <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />

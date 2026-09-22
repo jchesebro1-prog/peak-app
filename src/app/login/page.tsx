@@ -5,6 +5,7 @@ import { getSettings } from "@/lib/settings";
 import { activeUsers } from "@/lib/users";
 import { safeCallbackPath } from "@/lib/auth-redirect";
 import LoginButtons from "./login-buttons";
+import NativeAuthReturn from "./native-auth-return";
 
 export default async function LoginPage({
   searchParams,
@@ -80,6 +81,7 @@ export default async function LoginPage({
             next={next}
           />
         </div>
+        <NativeAuthReturn />
 
         <div
           style={{

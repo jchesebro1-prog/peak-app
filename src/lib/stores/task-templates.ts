@@ -45,13 +45,10 @@ import { getDesign } from "@/lib/stores/designs";
 
 const now = () => Date.now();
 
-export type TemplateRecordKind = "project" | "quote" | "design";
-export const TEMPLATE_RECORD_KINDS: TemplateRecordKind[] = ["project", "quote", "design"];
-export const TEMPLATE_RECORD_LABEL: Record<TemplateRecordKind, string> = {
-  project: "Projects",
-  quote: "Quotes",
-  design: "Designs",
-};
+// Kinds + labels live in a DB-free module (client components import them);
+// re-exported here so server-side importers keep one entry point.
+import { TEMPLATE_RECORD_KINDS, TEMPLATE_RECORD_LABEL, type TemplateRecordKind } from "@/lib/task-template-kinds";
+export { TEMPLATE_RECORD_KINDS, TEMPLATE_RECORD_LABEL, type TemplateRecordKind };
 
 export type TemplateAssignTarget =
   | { kind: "person"; userId: string }

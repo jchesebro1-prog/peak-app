@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePerm } from "@/lib/session";
 import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
+import { checkSize } from "@/lib/catalog-import-guard";
 
 /**
  * .xlsx upload → CSV text (punch #81). Converts only; writes nothing. The
@@ -10,6 +11,10 @@ import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
  *
  * Gated on the same manage_users permission as importRecords — it must not
  * be an open file-parsing endpoint even though it persists nothing.
+ *
+ * Size: the `catalog` type is capped at 1 MB (punch #134, same check as the
+ * Catalog page importer); every other type keeps the 10 MB cap. The client
+ * posts `type` alongside the file.
  */
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -31,7 +36,11 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (file.size === 0) {
     return NextResponse.json({ ok: false, error: "That file is empty." }, { status: 400 });
   }
-  if (file.size > MAX_BYTES) {
+  const type = String(form.get("type") || "");
+  if (type === "catalog") {
+    const size = checkSize(file.size);
+    if (!size.ok) return NextResponse.json({ ok: false, error: size.error }, { status: 413 });
+  } else if (file.size > MAX_BYTES) {
     return NextResponse.json(
       { ok: false, error: "That file is larger than 10 MB. Split it, or export the sheet as CSV." },
       { status: 413 }

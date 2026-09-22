@@ -87,6 +87,18 @@ export type AppSettingsData = {
   venueDoctrine?: import("@/lib/venue-doctrine").VenueDoctrinePatch;
   /** User-authored catalog-backed fixture assemblies. Full replacement. */
   fixtureAssemblies?: import("@/lib/fixture-assemblies").FixtureAssembly[];
+  /** Per-manufacturer "price list effective" date (PUNCHLIST #133, D156),
+   *  keyed by mfrKey() from lib/catalog-books (lowercase alphanumerics) →
+   *  epoch ms. Written by the Catalog banner's date input (the one-time
+   *  backfill for parts that predate `pricedAt`) and by both importers when
+   *  an import writes rows. A part's effective date is the LATER of its own
+   *  `pricedAt` and this — see effectivePriceDate. Absent = no book dates. */
+  priceListEffective?: Record<string, number>;
+  /** Grid symbol per catalog category (#131, D154) — FULL REPLACEMENT on
+   *  save (the wireTypes idiom): resolveCategoryShapes in
+   *  lib/design/grid-symbols returns the seed when absent and exactly the
+   *  stored map when present. Edited in Settings → Admin → Grid symbols. */
+  gridCategoryShapes?: Record<string, import("@/lib/design/grid-symbols").GridShape>;
   /** Recordings → Drive archive (Krisp recordings spec §1.3). Connection key
    *  of the mailbox whose Google account owns the archive; null = not
    *  configured, the nightly archive job waits. */
@@ -101,6 +113,10 @@ export type AppSettingsData = {
   /** Outcome of the last nightly archive pass (lib/krisp/archive.ts) — shown
    *  on Settings → Recordings. Optional: absent until the job has run once. */
   recordingsArchiveLastRun?: RecordingsArchiveLastRun | null;
+  /** #122 — Settings → Catalog: who receives the vendor price-list tasks
+   *  (spec §1). null/absent = the default rule in resolveCatalogOwner()
+   *  (the user named "Jena Tolksdorf" if present, else the first Admin). */
+  catalogOwner?: { userId: string } | null;
 };
 
 export type RecordingsArchiveLastRun = {
@@ -166,4 +182,20 @@ export async function setSettings(
       .insert(appSettings)
       .values({ id: "main", data: next, updatedAt: Date.now() });
   }
+}
+
+/** #133 — set (or with `at: null`, clear) one manufacturer's price-list
+ *  effective date. `key` must already be an mfrKey(); an empty key is a
+ *  no-op. Returns the full map after the write. */
+export async function setPriceListEffective(
+  key: string,
+  at: number | null
+): Promise<Record<string, number>> {
+  const current = await getSettings();
+  const next: Record<string, number> = { ...(current.priceListEffective || {}) };
+  if (!key) return next;
+  if (at == null) delete next[key];
+  else next[key] = at;
+  await setSettings({ priceListEffective: next });
+  return next;
 }

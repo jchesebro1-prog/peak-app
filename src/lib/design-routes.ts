@@ -22,6 +22,17 @@ function qs(pathname: string, query: Record<string, string>): string {
 }
 
 /**
+ * #136: Steel Calculator and Fixture Cross-Ref moved from DESIGN to the
+ * KNOWLEDGE tab. Keyed on the /design/* path they had after D97 so BOTH the
+ * D97 stubs (/design-studio/steel → /design/steel) and the /design/* stubs
+ * land on /knowledge/* in one hop instead of a redirect chain.
+ */
+const KNOWLEDGE_MOVES: Record<string, string> = {
+  "/design/steel": "/knowledge/steel",
+  "/design/fixtures": "/knowledge/fixtures",
+};
+
+/**
  * Returns the new path for a legacy Design-module path, or null when the
  * path is not a legacy path (and must render normally).
  */
@@ -41,6 +52,10 @@ export function designRedirect(
     return "/design/engagements/" + rest + qs(pathname, query);
   }
 
+  // Subassemblies became a tab of the Assembly Builder (#130).
+  if (pathname === "/design/subassemblies") return "/design/assemblies?tab=subassemblies";
+  if (KNOWLEDGE_MOVES[pathname]) return KNOWLEDGE_MOVES[pathname];
+
   if (pathname === "/design-studio") return "/design";
 
   // Weights was folded into the lineset builder — it has no standalone
@@ -52,7 +67,8 @@ export function designRedirect(
 
   if (pathname.startsWith("/design-studio/")) {
     const leaf = pathname.slice("/design-studio/".length);
-    return "/design/" + leaf + qs(pathname, query);
+    const next = "/design/" + leaf;
+    return (KNOWLEDGE_MOVES[next] || next) + qs(pathname, query);
   }
 
   if (pathname === "/quick-design") return "/design/quick" + qs(pathname, query);
