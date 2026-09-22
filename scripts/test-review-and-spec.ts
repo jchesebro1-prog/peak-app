@@ -3236,6 +3236,7 @@ async function xlsxFixture(): Promise<Buffer> {
   ok(designPatchFromIntake({ projectName: "Already named", venueName: "X", locationName: "", a }).name === undefined, "grid-intake: a named design keeps its name");
   ok(designPatchFromIntake({ projectName: "Untitled system design", venueName: "", locationName: "Only campus", a }).name === "Only campus", "grid-intake: falls back to whichever cover field is filled");
   ok(TRACKABLE_SYS_KEYS.join(",") === "rigging,curtains,lighting,audio,video", "grid-scopes: TRACKABLE_SYS_KEYS is exported in the Scope panel's order");
+}
 /* ---- native auth hand-off (spec 2026-09-21-native-auth-handoff) ---- */
 {
   const secret = "spec-secret-not-real";
