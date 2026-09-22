@@ -3,11 +3,13 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
 import { list, get, type CatalogPart } from "@/lib/stores/catalog";
-import { money } from "@/lib/format";
+import { dateYear, money } from "@/lib/format";
+import { effectivePriceDate, isoDateOf, priceBooks } from "@/lib/catalog-books";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { CatalogControls, CatalogImportPanel, PartDatasheetControl } from "./controls";
 import CatalogDangerZone from "./catalog-danger-zone";
 import { TaxonomyCard } from "./taxonomy-card";
+import { PriceDateBanner } from "./price-date-banner";
 import { upsertPart } from "./actions";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
@@ -80,6 +82,12 @@ export default async function CatalogPage({
     const s = qs.toString();
     return "/catalog" + (s ? "?" + s : "");
   };
+
+  /* ---- #133 price-list dates: outdated / undated manufacturers ---- */
+  const books = priceBooks(parts, settings, { limit: Infinity });
+  const flaggedBooks = books
+    .filter((b) => b.key && (b.outdated || b.unknown)) // Unbranded has no key: nothing to date
+    .map((b) => ({ ...b, href: hrefFor({ mfr: b.name }) }));
 
   /* ---- filter + sort ---- */
   const ql = q.toLowerCase();
@@ -216,6 +224,8 @@ export default async function CatalogPage({
           Import failed — {importError} Nothing was added to the catalog.
         </div>
       )}
+
+      {flaggedBooks.length > 0 && <PriceDateBanner books={flaggedBooks} />}
 
       <div className={"ct-body" + (importOpen ? " ct-import" : "")}>
         {/* left filter rail */}
@@ -409,7 +419,7 @@ export default async function CatalogPage({
               minWidth: 0,
             }}
           >
-            <CatalogImportPanel manufacturers={manufacturers.filter((m) => m !== UNSPEC)} accent="var(--accent)" />
+            <CatalogImportPanel manufacturers={manufacturers.filter((m) => m !== UNSPEC)} accent="var(--accent)" today={isoDateOf(Date.now())} />
           </div>
         )}
       </div>
@@ -424,6 +434,7 @@ export default async function CatalogPage({
       {showForm && (
         <PartFormModal
           part={editingPart}
+          priceDate={editingPart ? effectivePriceDate(editingPart, settings) : null}
           categories={categories}
           manufacturers={manufacturers.filter((m) => m !== UNSPEC)}
           isAdmin={isAdmin}
@@ -525,11 +536,14 @@ function FilterGroup({
 
 function PartFormModal({
   part,
+  priceDate,
   categories,
   manufacturers,
   isAdmin,
 }: {
   part: CatalogPart | null;
+  /** #133 — the part's effective price date (own pricedAt or the manufacturer's book date), null when undated. */
+  priceDate: number | null;
   categories: string[];
   manufacturers: string[];
   /** Datasheet attach/replace/remove (punch #39, Task 5) is admin-gated —
@@ -665,6 +679,13 @@ function PartFormModal({
                 <input name="cost" defaultValue={part?.cost != null ? String(part.cost) : ""} inputMode="decimal" placeholder="469" style={inputStyle} />
               </div>
             </div>
+            {editing && (
+              <div style={{ fontSize: 11, color: "#aab0bb", marginTop: -7, marginBottom: 13 }}>
+                {priceDate
+                  ? `Price effective ${dateYear(priceDate)} — moves when the list price or cost changes.`
+                  : "No price date yet — a price change here, an import, or the manufacturer's price-list date on the Catalog banner sets one."}
+              </div>
+            )}
             <div style={{ marginBottom: 4 }}>
               {label("Manufacturer")}
               <input name="mfr" defaultValue={part?.mfr || ""} list="ct-mfrs" placeholder="JR Clancy" style={inputStyle} />

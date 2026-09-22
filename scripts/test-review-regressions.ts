@@ -742,6 +742,153 @@ async function main() {
     }
   }
 
+  // #133 — pricedAt moves only when list/cost change; the book date round-trips
+  {
+    const { get: getPart, mergeUpsert } = await import("@/lib/stores/catalog");
+    const { getSettings, setPriceListEffective } = await import("@/lib/settings");
+    const D1 = new Date(2026, 0, 15).getTime();
+    const D2 = new Date(2026, 5, 1).getTime();
+    await mergeUpsert("T133-STAMP", { desc: "Stamp test", category: "Test", unit: "ea", list: 100, cost: 60, mfr: "T133 Stamp" }, { pricedAt: D1 });
+    assert.equal((await getPart("T133-STAMP"))?.pricedAt, D1, "#133 a new part is stamped with the write's effective date");
+    await mergeUpsert("T133-STAMP", { desc: "Stamp test (renamed)", list: 100, cost: 60 }, { pricedAt: D2 });
+    assert.equal((await getPart("T133-STAMP"))?.pricedAt, D1, "#133 an unchanged price keeps its date — a description edit doesn't move it");
+    await mergeUpsert("T133-STAMP", { list: 110 }, { pricedAt: D2 });
+    assert.equal((await getPart("T133-STAMP"))?.pricedAt, D2, "#133 a list change stamps the effective date that was passed");
+    const before = Date.now();
+    await mergeUpsert("T133-STAMP", { cost: 70 });
+    const stamped = (await getPart("T133-STAMP"))?.pricedAt ?? 0;
+    assert.ok(stamped >= before, "#133 a price change through any other path stamps now");
+    assert.equal((await getPart("T133-STAMP"))?.desc, "Stamp test (renamed)", "#133 mergeUpsert still preserves fields the patch doesn't carry");
+
+    await setPriceListEffective("t133stamp", D1);
+    assert.equal((await getSettings()).priceListEffective?.t133stamp, D1, "#133 setPriceListEffective round-trips through settings");
+    await setPriceListEffective("t133stamp", null);
+    assert.equal((await getSettings()).priceListEffective?.t133stamp, undefined, "#133 setPriceListEffective(null) clears the key");
+  }
+
+  // #132/#133/#134 — the Catalog page importer's body (importCatalog itself needs a session + redirects)
+  {
+    const { runCatalogImport } = await import("@/app/(app)/catalog/import");
+    const { get: getPart } = await import("@/lib/stores/catalog");
+    const { getSettings } = await import("@/lib/settings");
+    const D1 = new Date(2026, 0, 15).getTime();
+    const D2 = new Date(2026, 5, 1).getTime();
+    const csv = "SKU,Description,Category,Unit,List,Cost\nT133-A,Test part A,Test,ea,100,60\nT133-B,Test part B,Test,ea,200,120\n";
+    const first = await runCatalogImport({ mfr: "T133 Acme", text: csv, bytes: Buffer.byteLength(csv), effectiveAt: D1, defaultCategory: "" });
+    assert.ok(first.ok && first.imported === 2 && first.mfr === "T133 Acme", "#133 first import writes both rows under the typed manufacturer");
+    assert.equal((await getPart("T133-A"))?.pricedAt, D1, "#133 a new part carries the import's effective date");
+    assert.equal((await getSettings()).priceListEffective?.t133acme, D1, "#133 the import records the manufacturer's price-list effective date (D156)");
+
+    const csv2 = "SKU,Description,Category,Unit,List,Cost\nT133-A,Test part A (renamed),Test,ea,100,60\nT133-B,Test part B,Test,ea,210,120\n";
+    const second = await runCatalogImport({ mfr: "t133-acme", text: csv2, bytes: Buffer.byteLength(csv2), effectiveAt: D2, defaultCategory: "" });
+    assert.ok(second.ok && second.mfr === "T133 Acme", "#132 a re-spelled manufacturer normalizes to the existing spelling");
+    assert.equal((await getPart("T133-A"))?.pricedAt, D1, "#133 an unchanged price keeps its date across a re-import");
+    assert.equal((await getPart("T133-B"))?.pricedAt, D2, "#133 a changed list price stamps the new effective date");
+    assert.equal((await getPart("T133-A"))?.mfr, "T133 Acme", "#132 rows are filed under the normalized spelling");
+
+    const wrong = await runCatalogImport({ mfr: "T133 Acme", text: "SKU,Description\nT133-Z,Zed\n", bytes: 30, effectiveAt: D2, defaultCategory: "" });
+    assert.ok(!wrong.ok && /None of the 1 SKU in this file belong to T133 Acme/.test(wrong.error), "#132 zero overlap with an existing manufacturer is rejected with the SKU count");
+    const foreign = await runCatalogImport({ mfr: "T133 Other", text: "SKU,Description\nT133-A,Stolen\n", bytes: 30, effectiveAt: D2, defaultCategory: "" });
+    assert.ok(!foreign.ok && /T133-A is filed under T133 Acme/.test(foreign.error), "#132 a SKU filed under another manufacturer is named in the error");
+    assert.equal((await getPart("T133-A"))?.mfr, "T133 Acme", "#132 a rejected import writes nothing");
+    const blank = await runCatalogImport({ mfr: "", text: csv, bytes: 100, effectiveAt: D2, defaultCategory: "" });
+    assert.ok(!blank.ok && /Choose a manufacturer/.test(blank.error), "#132 a blank manufacturer is rejected server-side");
+    const big = await runCatalogImport({ mfr: "T133 Acme", text: csv, bytes: 1_048_577, effectiveAt: D2, defaultCategory: "" });
+    assert.ok(!big.ok && /1 MB/.test(big.error), "#134 an over-size upload is refused before parsing");
+
+    // Final review item 3 — a file without a List/Cost column must neither
+    // zero the stored prices nor date the manufacturer's book (D156: a file
+    // confirms only the prices it carries).
+    const D3 = new Date(2026, 8, 1).getTime();
+    const descOnly = "SKU,Description\nT133-A,Test part A (desc only)\n";
+    const noPrices = await runCatalogImport({ mfr: "T133 Acme", text: descOnly, bytes: Buffer.byteLength(descOnly), effectiveAt: D3, defaultCategory: "" });
+    assert.ok(noPrices.ok && noPrices.imported === 1, "item 3: a SKU+description file still imports");
+    const afterDescOnly = await getPart("T133-A");
+    assert.equal(afterDescOnly?.desc, "Test part A (desc only)", "item 3: …and updates the description");
+    assert.equal(afterDescOnly?.list, 100, "item 3: an absent List column leaves the stored list price alone (not zeroed)");
+    assert.equal(afterDescOnly?.cost, 60, "item 3: an absent Cost column leaves the stored cost alone (not zeroed)");
+    assert.equal(afterDescOnly?.pricedAt, D1, "item 3: …so pricedAt does not move");
+    assert.equal((await getSettings()).priceListEffective?.t133acme, D2, "item 3: a price-less file does NOT re-date the manufacturer's book");
+    const withPrices = "SKU,Description,List,Cost\nT133-A,Test part A,120,60\n";
+    const priced = await runCatalogImport({ mfr: "T133 Acme", text: withPrices, bytes: Buffer.byteLength(withPrices), effectiveAt: D3, defaultCategory: "" });
+    assert.ok(priced.ok, "item 3: a file with prices still imports");
+    assert.equal((await getPart("T133-A"))?.list, 120, "item 3: …and a carried List price still updates");
+    assert.equal((await getPart("T133-A"))?.pricedAt, D3, "item 3: …stamping the changed line");
+    assert.equal((await getSettings()).priceListEffective?.t133acme, D3, "item 3: …and re-dating the manufacturer's book");
+  }
+
+  // #132/#133 — the Import hub's catalog writer stamps the commit's effective date
+  {
+    const { commitImport } = await import("@/app/(app)/import/registry");
+    const { parseCsv, autoMap, prepareRows } = await import("@/app/(app)/import/parse");
+    const { getTypeMeta } = await import("@/app/(app)/import/types");
+    const { get: getPart } = await import("@/lib/stores/catalog");
+    const t = getTypeMeta("catalog");
+    assert.ok(t, "#132 catalog import type exists");
+    const D1 = new Date(2026, 0, 15).getTime();
+    const D2 = new Date(2026, 5, 1).getTime();
+    const prepOf = (csv: string) => {
+      const p = parseCsv(csv);
+      return prepareRows(p.rows, autoMap(p.headers, t!.fields), t!.fields);
+    };
+    const created = await commitImport("catalog", prepOf("SKU,Description,List Price,Cost,Manufacturer\nT133-H1,Hub part,50,30,T133 Hub\n").rows, "update", { effectiveAt: D1 });
+    assert.equal(created.created, 1, "#133 hub create path wrote the row");
+    assert.equal((await getPart("T133-H1"))?.pricedAt, D1, "#133 the hub stamps the commit's effective date on a new part");
+    const same = await commitImport("catalog", prepOf("SKU,Description,List Price,Cost,Manufacturer\nT133-H1,Hub part renamed,50,30,T133 Hub\n").rows, "update", { effectiveAt: D2 });
+    assert.equal(same.updated, 1, "#133 hub update path ran");
+    assert.equal((await getPart("T133-H1"))?.pricedAt, D1, "#133 an unchanged price through the hub keeps its date");
+    await commitImport("catalog", prepOf("SKU,Description,List Price,Cost,Manufacturer\nT133-H1,Hub part,55,30,T133 Hub\n").rows, "update", { effectiveAt: D2 });
+    assert.equal((await getPart("T133-H1"))?.pricedAt, D2, "#133 a changed price through the hub stamps the new date");
+    const invalid = await commitImport("catalog", prepOf("SKU,Description,List Price,Cost\nT133-H2,No manufacturer,50,30\n").rows, "update", { effectiveAt: D2 });
+    assert.equal(invalid.errored, 1, "#132 a hub row without a manufacturer is never written");
+    assert.equal(await getPart("T133-H2"), null, "#132 …and does not exist afterwards");
+
+    // Final review item 3 — "Create new" on a SKU that already exists is a
+    // merge (the SKU is the document id), so an absent price column must
+    // preserve the stored price exactly like "Update existing" does (#81).
+    const D3 = new Date(2026, 8, 1).getTime();
+    const createDescOnly = await commitImport("catalog", prepOf("SKU,Description,Manufacturer\nT133-H1,Hub part (desc only),T133 Hub\n").rows, "create", { effectiveAt: D3 });
+    assert.equal(createDescOnly.created, 1, "item 3: hub create mode on an existing SKU runs the create path");
+    const afterCreate = await getPart("T133-H1");
+    assert.equal(afterCreate?.desc, "Hub part (desc only)", "item 3: …and updates the description");
+    assert.equal(afterCreate?.list, 55, "item 3: hub create mode keeps the stored list price when the file has no List column");
+    assert.equal(afterCreate?.cost, 30, "item 3: …and the stored cost when it has no Cost column");
+    assert.equal(afterCreate?.pricedAt, D2, "item 3: …so pricedAt does not move");
+
+    // Final review item 1 (D156) — the hub's manufacturer book date is
+    // stamped per manufacturer group, only for groups the commit actually
+    // wrote: "Skip duplicates" compares nothing, so it confirms nothing.
+    // commitCatalogImport is importRecords' body (guard → normalize →
+    // commitImport → stamp), split out so it runs here without a session.
+    const { commitCatalogImport } = await import("@/app/(app)/import/catalog-commit");
+    const { getSettings } = await import("@/lib/settings");
+    assert.equal((await getSettings()).priceListEffective?.t133hub, undefined, "item 1: precondition — T133 Hub has no book date yet");
+    const skipped = await commitCatalogImport({ rows: prepOf("SKU,Description,List Price,Cost,Manufacturer\nT133-H1,Hub part,55,30,T133 Hub\n").rows, mode: "skip", effectiveAt: D3, priced: true });
+    assert.ok(skipped.ok && skipped.res.skipped === 1 && skipped.stamped.length === 0, "item 1: skip mode skips the existing SKU and stamps no book");
+    assert.equal((await getSettings()).priceListEffective?.t133hub, undefined, "item 1: a skip-mode commit leaves priceListEffective[key] undefined");
+    const updated = await commitCatalogImport({ rows: prepOf("SKU,Description,List Price,Cost,Manufacturer\nT133-H1,Hub part,55,30,t133-hub\n").rows, mode: "update", effectiveAt: D3, priced: true });
+    assert.ok(updated.ok && updated.res.updated === 1 && updated.res.written.length === 1, "item 1: update mode writes the row (commitImport reports the written rows)");
+    assert.deepEqual(updated.ok ? updated.stamped : [], ["t133hub"], "item 1: …and stamps exactly that manufacturer's book, keyed through mfrKey");
+    assert.equal((await getSettings()).priceListEffective?.t133hub, D3, "item 1: an update-mode commit sets priceListEffective[key] to the effective date (an unchanged price still confirms the list)");
+    assert.equal((await getPart("T133-H1"))?.pricedAt, D2, "item 1: …while the unchanged line keeps its own pricedAt");
+    const D4 = new Date(2026, 8, 15).getTime();
+    const unpriced = await commitCatalogImport({ rows: prepOf("SKU,Description,Manufacturer\nT133-H1,Hub part (desc only),T133 Hub\n").rows, mode: "update", effectiveAt: D4, priced: false });
+    assert.ok(unpriced.ok && unpriced.res.updated === 1 && unpriced.stamped.length === 0, "item 1/3: a price-less file writes the description but confirms no price");
+    assert.equal((await getSettings()).priceListEffective?.t133hub, D3, "item 1/3: …so the hub does not re-date the book either");
+    const mixed = await commitCatalogImport({
+      rows: prepOf("SKU,Description,List Price,Cost,Manufacturer\n,Blank SKU,1,1,T133 Hub\nT133-H1,Hub part,55,30,T133 Hub\nT133-H3,Other maker's part,10,5,T133 Hub Two\n").rows,
+      mode: "update",
+      effectiveAt: D4,
+      priced: true,
+    });
+    assert.ok(mixed.ok && mixed.res.errored === 1 && mixed.res.updated === 1 && mixed.res.created === 1 && mixed.res.failed.length === 1, "item 1: a file with one bad row still writes the good rows");
+    assert.deepEqual(mixed.ok ? mixed.stamped : [], ["t133hubtwo"], "item 1: per-group — the clean manufacturer is stamped, the one with an errored row is not");
+    assert.equal((await getSettings()).priceListEffective?.t133hub, D3, "item 1: …so T133 Hub keeps its earlier date");
+    assert.equal((await getSettings()).priceListEffective?.t133hubtwo, D4, "item 1: …and T133 Hub Two gets the file's date");
+    const foreign = await commitCatalogImport({ rows: prepOf("SKU,Description,List Price,Cost,Manufacturer\nT133-H1,Hub part,99,30,T133 Other\n").rows, mode: "update", effectiveAt: D4, priced: true });
+    assert.ok(!foreign.ok && /T133 Other: .*T133-H1 is filed under T133 Hub/.test(foreign.error), "item 1: the guard still runs first and names the manufacturer + SKU");
+    assert.equal((await getPart("T133-H1"))?.list, 55, "item 1: …and a rejected commit writes nothing");
+  }
   // #135 (D155) — a manual consulting project: created by hand, listed by
   // the hub, ignored by the sweep, and later linked to a proposal without
   // its milestones changing.

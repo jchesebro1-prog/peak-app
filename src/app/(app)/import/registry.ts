@@ -47,7 +47,18 @@ export type ImportResult = {
   skipped: number;
   errored: number;
   total: number;
+  /** The rows behind `created + updated` — what this commit actually wrote.
+   *  The catalog commit stamps each manufacturer's book date from these
+   *  (D156, final review item 1), so a group nothing was written for is
+   *  never confirmed. References to the caller's own rows, no copies. */
+  written: PreparedRow[];
+  /** The rows behind `errored` (invalid, or the write threw). */
+  failed: PreparedRow[];
 };
+
+/** #133 — per-commit context handed to every writer; only the catalog
+ *  writer reads it (the price list's effective date for `pricedAt`). */
+export type CommitContext = { effectiveAt: number };
 
 /**
  * One writer per type. `find` dedupes against `cache` (a mutable array loaded
@@ -58,8 +69,8 @@ type Writer = {
   count: () => Promise<number>;
   load: () => Promise<Record<string, unknown>[]>;
   find: (values: Values, cache: Record<string, unknown>[]) => Record<string, unknown> | null;
-  create: (values: Values, cache: Record<string, unknown>[]) => Promise<void>;
-  update?: (existing: Record<string, unknown>, values: Values) => Promise<void>;
+  create: (values: Values, cache: Record<string, unknown>[], ctx: CommitContext) => Promise<void>;
+  update?: (existing: Record<string, unknown>, values: Values, ctx: CommitContext) => Promise<void>;
   exportObjects: () => Promise<Values[]>;
 };
 
@@ -82,7 +93,9 @@ const EQUIPMENT_CATEGORIES = [
  * create and update paths. Pure — it touches no store — so the merge
  * semantics are unit-testable without a database (scripts/test-review-and-spec.ts).
  *
- * `ex` is the part already in the catalog (null on the create path).
+ * `ex` is the part already in the catalog — null only when the SKU is brand
+ * new (the create path looks it up too, since "Create new" on an existing
+ * SKU is a merge into that document).
  *
  * Every field falls back to what the part already holds before falling back to
  * a default, because a vendor price sheet is allowed to omit columns: neither
@@ -488,17 +501,28 @@ const WRITERS: Record<string, Writer> = {
     count: async () => (await Catalog.list()).length,
     load: async () => (await Catalog.list()) as unknown as Record<string, unknown>[],
     find: (v, cache) => cache.find((p) => ci(p.sku, v.sku)) || null,
-    create: async (v, cache) => {
-      const sku = str(v.sku);
+    create: async (v, cache, ctx) => {
+      // "Create new" on a SKU that already exists cannot create a second
+      // part — the SKU is the document id — so it is a merge like update,
+      // and it must preserve prices exactly like update does: with
+      // `catalogPatch(v, null, …)` an absent List/Cost column zeroed every
+      // overlapping part (final review item 3). The existing record comes
+      // from the same cache `find` reads, so an in-file duplicate sees the
+      // row written just before it.
+      const ex = cache.find((p) => ci(p.sku, v.sku)) || null;
+      const sku = ex ? str(ex.sku) : str(v.sku);
+      const patch = catalogPatch(v, ex, sku);
       // mergeUpsert is the same entry point scripts/import-catalog.ts uses —
       // it preserves fields a price sheet doesn't carry (ports, trade, spec
-      // text, datasheet attachments) when a SKU is re-imported.
-      await Catalog.mergeUpsert(sku, catalogPatch(v, null, sku));
-      cache.push({ id: sku, sku });
+      // text, datasheet attachments) when a SKU is re-imported. pricedAt
+      // (#133) lands only when the price actually changes.
+      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt });
+      if (ex) Object.assign(ex, patch);
+      else cache.push({ id: sku, sku, ...patch });
     },
-    update: async (ex, v) => {
+    update: async (ex, v, ctx) => {
       const sku = str(ex.sku);
-      await Catalog.mergeUpsert(sku, catalogPatch(v, ex, sku));
+      await Catalog.mergeUpsert(sku, catalogPatch(v, ex, sku), { pricedAt: ctx.effectiveAt });
     },
     exportObjects: async () => {
       const list = await Catalog.list();
@@ -602,20 +626,24 @@ export async function allCounts(): Promise<Record<string, number>> {
 
 /**
  * Write prepared rows into the type's store per `mode`. Invalid rows are
- * counted as errored (never written). Mirrors importkit.commit.
+ * counted as errored (never written). Mirrors importkit.commit. `ctx`
+ * carries the price list's effective date for the catalog writer (#133);
+ * every other writer ignores it.
  */
 export async function commitImport(
   key: string,
   rows: PreparedRow[],
-  mode: ImportMode
+  mode: ImportMode,
+  ctx: CommitContext = { effectiveAt: Date.now() }
 ): Promise<ImportResult> {
   const w = WRITERS[key];
-  const res: ImportResult = { created: 0, updated: 0, skipped: 0, errored: 0, total: rows.length };
+  const res: ImportResult = { created: 0, updated: 0, skipped: 0, errored: 0, total: rows.length, written: [], failed: [] };
   if (!w) return res;
   const cache = await w.load();
   for (const r of rows) {
     if (!r.valid) {
       res.errored++;
+      res.failed.push(r);
       continue;
     }
     try {
@@ -625,14 +653,17 @@ export async function commitImport(
         continue;
       }
       if (existing && mode === "update" && w.update) {
-        await w.update(existing, r.values);
+        await w.update(existing, r.values, ctx);
         res.updated++;
+        res.written.push(r);
         continue;
       }
-      await w.create(r.values, cache);
+      await w.create(r.values, cache, ctx);
       res.created++;
+      res.written.push(r);
     } catch {
       res.errored++;
+      res.failed.push(r);
     }
   }
   return res;

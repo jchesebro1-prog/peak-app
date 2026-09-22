@@ -91,7 +91,6 @@ export const NAV: NavEntry[] = [
       { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
       { key: "assemblies", label: "Assembly Builder", href: "/design/assemblies" },
       { key: "motors", label: "Motor Library", href: "/design/motors" },
-      { key: "subassemblies", label: "Subassemblies", href: "/design/subassemblies" },
     ],
   },
   /* #136: Knowledge & Information — reference tools and, later (#56), the
@@ -116,7 +115,9 @@ export function activeKeyFor(pathname: string): string {
    * CHILD keys: returning "home" (the group's own key) lit nothing, which is
    * why the Home tab looked dead before the entry existed. */
   if (pathname === "/") return "dashboard";
-  if (pathname.startsWith("/design/subassemblies")) return "subassemblies";
+  // #130: both builders live on /design/assemblies (Subassemblies is a tab;
+  // the old path redirects), so both light the Assembly Builder child.
+  if (pathname.startsWith("/design/assemblies") || pathname.startsWith("/design/subassemblies")) return "assemblies";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
     "/queue": "queue",

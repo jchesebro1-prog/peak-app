@@ -3,6 +3,13 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Native/WASM database drivers must not be bundled by the server compiler.
   serverExternalPackages: ["@electric-sql/pglite", "postgres"],
+  // #134 (D157): the catalog importers cap uploads at 1 MB themselves
+  // (lib/catalog-import-guard) and surface the refusal through the Catalog
+  // page's importError banner. Server actions default to a 1 MB request
+  // body, which multipart overhead pushes a ~1 MB file past, so Next would
+  // reject it with an opaque error before our check runs — leave room so the
+  // app's own clear error always wins.
+  experimental: { serverActions: { bodySizeLimit: "1200kb" } },
   // Baseline security response headers applied to every route. These are the
   // non-breaking hardening headers (no CSP yet — a Content-Security-Policy
   // needs to be tuned against Leaflet/Three/inline styles and verified in a

@@ -455,6 +455,8 @@ ok(designRedirect("/quotes", {}) === null,
   "unrelated paths are not redirected");
 ok(designRedirect("/consulting/CE-1001", { tab: "bogus" }) === "/design/engagements/CE-1001?tab=bogus",
   "unknown tab values pass through — the destination validates, not the redirect");
+ok(designRedirect("/design/subassemblies", {}) === "/design/assemblies?tab=subassemblies",
+  "#130 /design/subassemblies redirects to the Subassemblies tab of the Assembly Builder");
 
 /* --- design module nav (D97) --- */
 import { activeKeyFor, NAV, parentGroupOf } from "@/components/nav/nav-data";
@@ -465,6 +467,10 @@ ok(activeKeyFor("/design/engagements") === "designoverview",
   "/design/engagements resolves to the designoverview key");
 ok(activeKeyFor("/design/lineset") === "designoverview",
   "/design/lineset resolves to the designoverview key (segment-1 matching)");
+ok(activeKeyFor("/design/assemblies") === "assemblies",
+  "#130 /design/assemblies lights the Assembly Builder child");
+ok(activeKeyFor("/design/subassemblies") === "assemblies",
+  "#130 the old Subassemblies path lights the Assembly Builder child too");
 ok(NAV.some((e) => e.kind === "group" && e.key === "design"),
   "Design exists as a nav group");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "consulting"),
@@ -479,9 +485,11 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
  * tool of its own (D-grid-merge): the "designs" child is now labelled "The
  * Grid" and the standalone index it pointed at is gone. "steel" and
  * "fixtures" moved to the KNOWLEDGE group (#136). */
+/* "subassemblies" left the group when it became a tab of the Assembly
+ * Builder (#130) — /design/subassemblies redirects there. */
 const DESIGN_CHILDREN = [
   "designoverview", "engagements", "designs",
-  "lineset", "assemblies", "motors", "subassemblies",
+  "lineset", "assemblies", "motors",
 ];
 ok(
   !!designGroup && designGroup.kind === "group" &&
@@ -2953,54 +2961,240 @@ import { rateLimit, rateLimitRefund } from "../src/lib/rate-limit";
   ok(rateLimit(k3, 1, 60_000).ok, "#88 rateLimitRefund: refunding an untouched key is a safe no-op");
 }
 
-/* --- #14: catalog price-book age pills --- pure, asserted here at top level. */
-import { priceBooks } from "../src/lib/catalog-books";
+/* --- #14/#133: catalog price books + price-date model --- pure, asserted at top level. */
+import {
+  OUTDATED_AFTER_MS,
+  effectivePriceDate,
+  isOutdated,
+  isoDateOf,
+  mfrKey,
+  nextPricedAt,
+  parseEffectiveDate,
+  priceBooks,
+} from "@/lib/catalog-books";
 
 {
   const now = Date.now();
   const DAY = 86400000;
+  const MONTH = 30.4375 * DAY;
 
-  const fullyFresh = priceBooks([
-    { mfr: "Acme", updatedAt: now - 3 * DAY },
-    { mfr: "Acme", updatedAt: now - 5 * DAY },
+  ok(
+    mfrKey("Meyer Sound") === "meyersound" && mfrKey("meyer-sound") === "meyersound" && mfrKey(" MEYER  SOUND ") === "meyersound",
+    "#133 mfrKey: case, spaces and punctuation collapse"
+  );
+  ok(mfrKey("") === "" && mfrKey(undefined) === "" && mfrKey("---") === "", "#133 mfrKey: blank/punctuation-only → empty key");
+
+  ok(OUTDATED_AFTER_MS === 548 * DAY, "#133 OUTDATED_AFTER_MS is 548 days (18 months)");
+  ok(!isOutdated(now - 17 * MONTH, now), "#133 isOutdated: 17 months → current");
+  ok(!isOutdated(now - 547 * DAY, now), "#133 isOutdated: one day short of the boundary → current");
+  ok(isOutdated(now - 548 * DAY, now), "#133 isOutdated: exactly 548 days (18 months) → outdated");
+  ok(isOutdated(now - 19 * MONTH, now), "#133 isOutdated: 19 months → outdated");
+
+  const S = { priceListEffective: { meyersound: now - 100 * DAY } };
+  ok(
+    effectivePriceDate({ mfr: "Meyer Sound", pricedAt: now - 10 * DAY }, S) === now - 10 * DAY,
+    "#133 effectivePriceDate: a newer per-line date wins over the book date"
+  );
+  ok(
+    effectivePriceDate({ mfr: "Meyer Sound", pricedAt: now - 400 * DAY }, S) === now - 100 * DAY,
+    "#133 effectivePriceDate: a newer book date (list confirmed later) wins over an older per-line date (D156)"
+  );
+  ok(
+    effectivePriceDate({ mfr: "meyer-sound" }, S) === now - 100 * DAY,
+    "#133 effectivePriceDate: no per-line date → the book date, matched through mfrKey"
+  );
+  ok(effectivePriceDate({ mfr: "ETC" }, S) === null, "#133 effectivePriceDate: no date anywhere → null");
+  ok(effectivePriceDate({ pricedAt: now - 5 * DAY }, S) === now - 5 * DAY, "#133 effectivePriceDate: unbranded parts still use their own date");
+
+  const D1 = now - 200 * DAY;
+  const D2 = now - 20 * DAY;
+  ok(nextPricedAt(null, { list: 10, cost: 5 }, D1) === D1, "#133 nextPricedAt: a new part is stamped with the write's date");
+  ok(
+    nextPricedAt({ list: 10, cost: 5, pricedAt: D1 }, { list: 10, cost: 5, pricedAt: D1 }, D2) === D1,
+    "#133 nextPricedAt: unchanged list+cost keep the old date"
+  );
+  ok(nextPricedAt({ list: 10, cost: 5, pricedAt: D1 }, { list: 12, cost: 5, pricedAt: D1 }, D2) === D2, "#133 nextPricedAt: a list change stamps the new date");
+  ok(nextPricedAt({ list: 10, cost: 5, pricedAt: D1 }, { list: 10, cost: 6, pricedAt: D1 }, D2) === D2, "#133 nextPricedAt: a cost change stamps the new date");
+  ok(
+    nextPricedAt({ list: 10, cost: 5 }, { list: 10, cost: 5 }, D2) === undefined,
+    "#133 nextPricedAt: legacy part, unchanged price → still undated (no fake date)"
+  );
+
+  ok(isoDateOf(new Date(2026, 0, 15).getTime()) === "2026-01-15", "#133 isoDateOf renders a local YYYY-MM-DD");
+  ok(
+    parseEffectiveDate("2026-01-15", now) === new Date(2026, 0, 15, 12, 0, 0, 0).getTime(),
+    "#133 parseEffectiveDate: a date input parses to local NOON, not midnight (a UTC server's midnight renders a day early in US browsers)"
+  );
+  ok(isoDateOf(parseEffectiveDate("2026-01-15", now)) === "2026-01-15", "#133 parseEffectiveDate → isoDateOf round-trips the calendar day");
+  ok(parseEffectiveDate("", now) === now && parseEffectiveDate("nope", now) === now, "#133 parseEffectiveDate: blank/invalid → the fallback");
+
+  const fresh = priceBooks([{ mfr: "Acme", pricedAt: now - 3 * DAY }, { mfr: "Acme", pricedAt: now - 5 * DAY }], {}, { now });
+  ok(
+    fresh[0]?.effectiveAt === now - 5 * DAY && !fresh[0].outdated && !fresh[0].unknown,
+    "#14/#133 priceBooks: effectiveAt is the OLDEST date in a fully-dated book, not the newest"
+  );
+  const partial = priceBooks([{ mfr: "Beta", pricedAt: now }, { mfr: "Beta" }], {}, { now });
+  ok(
+    partial[0]?.count === 2 && partial[0].effectiveAt === null && partial[0].unknown,
+    "#14/#133 priceBooks: one dated row out of two does NOT date the book (unknown is older than anything — decision A)"
+  );
+  const covered = priceBooks([{ mfr: "Beta", pricedAt: now }, { mfr: "Beta" }], { priceListEffective: { beta: now - 30 * DAY } }, { now });
+  ok(
+    covered[0]?.effectiveAt === now - 30 * DAY && !covered[0].unknown,
+    "#133 priceBooks: the book date covers the undated row, and oldest still wins"
+  );
+  const stale = priceBooks([{ mfr: "Gamma", pricedAt: now - 600 * DAY }], {}, { now });
+  ok(stale[0]?.outdated && !stale[0].unknown, "#133 priceBooks: a 600-day-old book is outdated");
+  const never = priceBooks([{ mfr: "Delta" }, { mfr: "Delta" }], {}, { now });
+  ok(never[0]?.unknown && never[0].effectiveAt === null && !never[0].outdated, "#14/#133 priceBooks: no date anywhere → unknown, never outdated");
+  const merged = priceBooks(
+    [{ mfr: "Meyer Sound", pricedAt: now }, { mfr: "meyer-sound", pricedAt: now }, { mfr: "Meyer Sound" }],
+    { priceListEffective: { meyersound: now - DAY } },
+    { now }
+  );
+  ok(
+    merged.length === 1 && merged[0].name === "Meyer Sound" && merged[0].key === "meyersound" && merged[0].count === 3,
+    "#133 priceBooks: spellings merge by mfrKey and the most common spelling names the book"
+  );
+  const unbranded = priceBooks([{ pricedAt: now }, { mfr: "  " }], {}, { now });
+  ok(
+    unbranded.some((b) => b.name === "Unbranded" && b.key === "" && b.count === 2),
+    "#14 priceBooks: blank/whitespace-only mfr groups under 'Unbranded' with an empty key"
+  );
+  const eight = Array.from({ length: 8 }, (_, i) => ({ mfr: `Mfr${i}`, pricedAt: now })).flatMap((p, i) =>
+    Array.from({ length: 8 - i }, () => p)
+  );
+  ok(priceBooks(eight, {}, { now }).length === 6, "#14 priceBooks: caps at the top 6 books by count by default");
+  ok(priceBooks(eight, {}, { now, limit: Infinity }).length === 8, "#133 priceBooks: limit: Infinity returns every book (the Catalog banner)");
+  ok(priceBooks(eight, {}, { now })[0]?.name === "Mfr0", "#14 priceBooks: sorted by count descending");
+}
+
+/* --- final review item 3: the Catalog page parser reports which price columns the file carried --- pure */
+import { parseCatalog } from "@/app/(app)/catalog/parse";
+
+{
+  const descOnly = parseCatalog("SKU,Description\nA-1,Widget\n");
+  ok(descOnly.ok && !descOnly.hasList && !descOnly.hasCost, "item 3 parseCatalog: no List/Cost header → hasList/hasCost false");
+  ok(descOnly.rows[0]?.list === 0 && descOnly.rows[0]?.cost === 0 && descOnly.rows[0]?.valid, "item 3 parseCatalog: …rows still coerce to 0 and stay valid");
+  const listOnly = parseCatalog("SKU,Description,List Price\nA-1,Widget,10\n");
+  ok(listOnly.hasList && !listOnly.hasCost && listOnly.rows[0]?.list === 10, "item 3 parseCatalog: a List column alone → hasList only");
+  const both = parseCatalog("SKU,Description,MSRP,Dealer Net\nA-1,Widget,10,6\n");
+  ok(both.hasList && both.hasCost && both.rows[0]?.cost === 6, "item 3 parseCatalog: List + Cost headers (through aliases) → both flags");
+  const blankCells = parseCatalog("SKU,Description,List,Cost\nA-1,Widget,,\n");
+  ok(blankCells.hasList && blankCells.hasCost && blankCells.rows[0]?.list === 0, "item 3 parseCatalog: a present column with blank cells still counts as carried (cell → 0, as before)");
+  const headerless2 = parseCatalog("A-1,Widget\nA-2,Gadget\n");
+  ok(headerless2.ok && !headerless2.hasList && !headerless2.hasCost, "item 3 parseCatalog: headerless SKU,Description rows carry no price columns");
+  const headerless6 = parseCatalog("A-1,Widget,Cat,ea,10,6\n");
+  ok(headerless6.hasList && headerless6.hasCost && headerless6.rows[0]?.list === 10 && headerless6.rows[0]?.cost === 6, "item 3 parseCatalog: headerless six-column rows carry both (positional)");
+  const headerless5 = parseCatalog("A-1,Widget,Cat,ea,10\n");
+  ok(headerless5.hasList && !headerless5.hasCost, "item 3 parseCatalog: headerless five-column rows carry List but not Cost");
+  const empty = parseCatalog("");
+  ok(!empty.ok && !empty.hasList && !empty.hasCost, "item 3 parseCatalog: a failed parse reports no price columns");
+}
+
+/* --- #132 / #134: catalog import guards --- pure */
+import {
+  MAX_CATALOG_IMPORT_BYTES,
+  checkManufacturer,
+  checkManufacturerGroups,
+  checkSize,
+  groupRowsByManufacturer,
+} from "@/lib/catalog-import-guard";
+
+{
+  const cat = [
+    { sku: "ETC-1", mfr: "ETC" },
+    { sku: "ETC-2", mfr: "ETC" },
+    { sku: "MEY-1", mfr: "Meyer Sound" },
+    { sku: "MEY-2", mfr: "Meyer Sound" },
+    { sku: "MEY-3", mfr: "meyer-sound" },
+    { sku: "NOB-1" },
+  ];
+  const missing = checkManufacturer({ mfr: "  ", fileSkus: ["X-1"], catalog: cat });
+  ok(!missing.ok && missing.reason === "missing", "#132 guard: blank manufacturer → missing");
+
+  const normalized = checkManufacturer({ mfr: "MEYER-SOUND", fileSkus: ["MEY-1", "MEY-9"], catalog: cat });
+  ok(
+    normalized.ok && normalized.normalizedMfr === "Meyer Sound",
+    "#132 guard: a re-spelled existing manufacturer normalizes to the most common stored spelling"
+  );
+  ok(normalized.ok && normalized.overlap === 1 && !normalized.isNew, "#132 guard: overlap counts the file SKUs already filed under that manufacturer");
+
+  const noOverlap = checkManufacturer({ mfr: "ETC", fileSkus: ["NEW-1", "NEW-2"], catalog: cat });
+  ok(
+    !noOverlap.ok && noOverlap.reason === "no-overlap" && noOverlap.detail.includes("None of the 2 SKUs in this file belong to ETC"),
+    "#132 guard: existing manufacturer + zero overlap → no-overlap with the spec's message"
+  );
+
+  const foreign = checkManufacturer({ mfr: "Meyer Sound", fileSkus: ["MEY-1", "etc-1", "ETC-2"], catalog: cat });
+  ok(
+    !foreign.ok && foreign.reason === "foreign-skus" && foreign.total === 2 && foreign.detail.includes("etc-1 is filed under ETC"),
+    "#132 guard: SKUs filed under another manufacturer are named (case-insensitive SKU match), and win over no-overlap"
+  );
+
+  const twelveForeign = Array.from({ length: 12 }, (_, i) => ({ sku: `F-${i}`, mfr: "Chauvet" }));
+  const twelve = checkManufacturer({ mfr: "Meyer Sound", fileSkus: twelveForeign.map((p) => p.sku), catalog: [...twelveForeign, ...cat] });
+  ok(
+    !twelve.ok && twelve.reason === "foreign-skus" && twelve.examples.length === 10 && twelve.detail.includes("(+2 more)"),
+    "#132 guard: foreign examples cap at 10 with a '+N more' tail"
+  );
+
+  const fresh = checkManufacturer({ mfr: "Chauvet", fileSkus: ["CH-1"], catalog: cat });
+  ok(fresh.ok && fresh.isNew && fresh.normalizedMfr === "Chauvet", "#132 guard: a new manufacturer with no parts is accepted as typed");
+  ok(checkManufacturer({ mfr: "Chauvet", fileSkus: ["NOB-1"], catalog: cat }).ok, "#132 guard: unbranded parts are never 'foreign' — importing them under a manufacturer brands them (D157)");
+  ok(checkManufacturer({ mfr: "ETC", fileSkus: [], catalog: cat }).ok, "#132 guard: an empty SKU list is not a wrong manufacturer (the importer's own no-rows check owns that)");
+
+  const groups = groupRowsByManufacturer([
+    { mfr: "ETC", sku: "ETC-1" },
+    { mfr: "etc", sku: "ETC-9" },
+    { mfr: "Meyer Sound", sku: "MEY-1" },
+    { mfr: "", sku: "X" },
   ]);
+  ok(groups.length === 3 && groups[0].mfr === "ETC" && groups[0].skus.length === 2, "#132 groups: rows group by mfrKey, first spelling kept");
+  const checks = checkManufacturerGroups(groups, cat);
   ok(
-    fullyFresh[0]?.ageDays === Math.floor((Date.now() - (now - 5 * DAY)) / DAY),
-    "#14 priceBooks: age pill is the OLDEST updatedAt in a fully-covered book, not the newest"
+    checks.length === 3 && checks[0].result.ok && checks[1].result.ok && !checks[2].result.ok && checks[2].result.reason === "missing" && checks[0].count === 2,
+    "#132 groups: each manufacturer group checks independently"
   );
 
-  const partialCoverage = priceBooks([
-    { mfr: "Beta", updatedAt: now },
-    { mfr: "Beta" }, // never touched
-  ]);
-  ok(
-    partialCoverage[0]?.count === 2 && partialCoverage[0]?.ageDays === undefined,
-    "#14 priceBooks: one touched row out of two does NOT produce an age pill for the whole book " +
-      "(a partial edit must not make a mostly-untouched book read as fresh)"
-  );
+  ok(checkSize(MAX_CATALOG_IMPORT_BYTES).ok, "#134 checkSize: exactly 1,048,576 bytes is allowed");
+  const over = checkSize(MAX_CATALOG_IMPORT_BYTES + 1);
+  ok(!over.ok && over.error.includes("1 MB"), "#134 checkSize: one byte over is refused with a message naming the 1 MB limit");
+  const big = checkSize(Math.round(2.3 * 1_048_576));
+  ok(!big.ok && big.error.includes("2.3 MB"), "#134 checkSize: the message renders the actual size");
+}
 
-  const neverTouched = priceBooks([{ mfr: "Gamma" }, { mfr: "Gamma" }]);
-  ok(
-    neverTouched[0]?.ageDays === undefined,
-    "#14 priceBooks: a book with no updatedAt anywhere gets no pill (honest unknown, not a fake 0d)"
-  );
+/* --- #129: subassemblies resolve live --- pure */
+import { pricesAsOf, resolveSubassembly } from "@/lib/fixture-assemblies";
 
-  const unbranded = priceBooks([{ updatedAt: now }, { mfr: "  " }]);
-  ok(
-    unbranded.some((b) => b.name === "Unbranded" && b.count === 2),
-    "#14 priceBooks: blank/whitespace-only mfr groups under 'Unbranded'"
+{
+  const now = Date.now();
+  const DAY = 86400000;
+  const T0 = now - 300 * DAY;
+  const T1 = now - 30 * DAY;
+  const T2 = now - 3 * DAY;
+  const subCatalog = [
+    { sku: "ENG-1", desc: "Light engine", cost: 1000, mfr: "ETC", pricedAt: T1 },
+    { sku: "LENS-1", desc: "Lens tube", cost: 200, mfr: "ETC", pricedAt: T2 },
+    { sku: "CLAMP-1", desc: "C-clamp", cost: 25, mfr: "Acme" },
+    { sku: "DMX-1", desc: "DMX 10ft", cost: 12, mfr: "Acme" },
+  ];
+  const settings = { priceListEffective: { acme: T0 } };
+  const r = resolveSubassembly(
+    { lightEngineSku: "ENG-1", lensSku: "LENS-1", options: { mounting: [{ sku: "CLAMP-1", qty: 2 }], data: [{ sku: "DMX-1", qty: 1 }] } },
+    subCatalog,
+    settings
   );
-
-  const capped = priceBooks(
-    Array.from({ length: 8 }, (_, i) => ({ mfr: `Mfr${i}`, updatedAt: now })).flatMap((p, i) =>
-      Array.from({ length: 8 - i }, () => p)
-    )
-  );
-  ok(capped.length === 6, `#14 priceBooks: caps at the top 6 books by count (got ${capped.length})`);
-  ok(
-    capped[0]?.name === "Mfr0" && capped[0]?.count === 8,
-    "#14 priceBooks: sorted by count descending"
-  );
+  ok(r.cost === 1000 + 200 + 2 * 25 + 12, "#129 resolveSubassembly: cost = engine + lens + Σ option cost × qty (the legacy save-time formula)");
+  ok(r.price === r.cost, "#129 resolveSubassembly: price equals cost, as saveFixtureAction stored it");
+  ok(r.optionsCost === 62 && r.options.mounting[0].qty === 2 && r.options.mounting[0].cost === 25, "#129 resolveSubassembly: options carry qty and the live unit cost");
+  ok(r.lightEngine.name === "Light engine" && r.lens.found && r.options.power.length === 0 && r.options.accessories.length === 0, "#129 resolveSubassembly: names come from the catalog; absent categories resolve to []");
+  ok(r.pricesAsOf === T2 && r.missing.length === 0, "#129 resolveSubassembly: prices as of = the NEWEST effective date among its parts");
+  const gone = resolveSubassembly({ lightEngineSku: "ENG-1", lensSku: "NOPE", options: { accessories: [{ sku: "GONE", qty: 1 }] } }, subCatalog, settings);
+  ok(!gone.lens.found && gone.lens.cost === 0 && gone.missing.join(",") === "NOPE,GONE", "#129 resolveSubassembly: missing parts price at 0 and are listed");
+  ok(pricesAsOf(["CLAMP-1", "DMX-1"], subCatalog, settings) === T0, "#129 pricesAsOf: undated parts fall back to the manufacturer's book date");
+  ok(pricesAsOf(["CLAMP-1"], subCatalog) === null, "#129 pricesAsOf: no date anywhere → null");
+  ok(pricesAsOf([], subCatalog, settings) === null, "#129 pricesAsOf: no parts → null");
 }
 
 /* ---- #95 — login honours a same-origin callbackUrl ---- */
@@ -3374,6 +3568,13 @@ async function asyncChecks(): Promise<void> {
     ok(vprep.stats.valid === 1, "#81 the row with no SKU is not importable");
     ok(vprep.stats.invalid === 1, "#81 …and is counted as needing attention");
     ok(Number(vprep.rows[0].values.list) === 1899.5, "#81 list price coerces to a number");
+
+    const noMfr = parseImportCsv(["Part Number,Description,MSRP", "S4LED-S2,Source Four LED Series 2,1899.50"].join("\n"));
+    const noMfrPrep = prepareRows(noMfr.rows, autoMap(noMfr.headers, catType.fields), catType.fields);
+    ok(
+      !noMfrPrep.rows[0].valid && noMfrPrep.rows[0].errors.includes("Missing Manufacturer"),
+      "#132 a hub catalog row without a manufacturer fails validation with the per-row error"
+    );
 
     /* ---- punch #81: re-importing a price sheet must not zero stored prices ----
      * The writer itself (commitImport → WRITERS.catalog.update → mergeUpsert)

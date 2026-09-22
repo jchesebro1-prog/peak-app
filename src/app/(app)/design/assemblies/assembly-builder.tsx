@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import Link from "next/link";
+import { dateYear } from "@/lib/format";
 import {
   ASSEMBLY_ROLES,
   type AssemblyRole,
@@ -28,7 +28,7 @@ const ROLE_SECTIONS: { role: AssemblyRole; label: string; multi: boolean }[] = [
   { role: "cable", label: "Safety cable", multi: true },
 ];
 
-export default function AssemblyBuilder({ initial }: { initial: FixtureAssembly[] }) {
+export default function AssemblyBuilder({ initial, priceDates }: { initial: FixtureAssembly[]; priceDates: Record<string, number | null> }) {
   const [assemblies, setAssemblies] = useState(initial);
   const [query, setQuery] = useState<Record<string, string>>({});
   const [hits, setHits] = useState<Record<string, Hit[]>>({});
@@ -59,11 +59,16 @@ export default function AssemblyBuilder({ initial }: { initial: FixtureAssembly[
     setSaved(true);
   });
 
+  const pricesNote = (id: string) => {
+    if (!(id in priceDates)) return "Prices resolve from the catalog once saved";
+    const at = priceDates[id];
+    return at == null ? "Prices as of: unknown — set price-list dates on the Catalog screen" : `Prices as of ${dateYear(at)}`;
+  };
+
   return (
-    <div className="pk-content" style={{ maxWidth: 980 }}>
-      <Link href="/design" style={{ fontSize: 12.5, color: "#8c919c" }}>← Design</Link>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end", gap: 16, margin: "8px 0 20px", flexWrap: "wrap" }}>
-        <div><h1 style={{ margin: 0, fontSize: 24 }}>Assembly Builder</h1><p style={{ margin: "5px 0 0", color: "#707681", fontSize: 13 }}>Build orderable fixtures from catalog parts. A default quantity of 0 keeps an item available without adding it automatically.</p></div>
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end", gap: 16, margin: "0 0 16px", flexWrap: "wrap" }}>
+        <p style={{ margin: 0, color: "#707681", fontSize: 13, maxWidth: 640 }}>Build orderable fixtures from catalog parts. A default quantity of 0 keeps an item available without adding it automatically.</p>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="pk-btn" onClick={() => setAssemblies((all) => all.concat({ id: `fa-${Date.now().toString(36)}`, name: "New fixture assembly", components: [] }))}>+ New assembly</button>
           <button className="pk-btn pk-btn-primary" disabled={pending} onClick={save}>{pending ? "Saving…" : saved ? "Saved" : "Save assemblies"}</button>
@@ -76,6 +81,7 @@ export default function AssemblyBuilder({ initial }: { initial: FixtureAssembly[
             <input aria-label="Assembly name" value={assembly.name} onChange={(event) => patch(assembly.id, { name: event.target.value })} style={{ ...input, fontWeight: 650, fontSize: 15 }} />
             <button className="pk-btn" onClick={() => setAssemblies((all) => all.filter((item) => item.id !== assembly.id))}>Delete</button>
           </div>
+          <div style={{ marginTop: 6, fontSize: 11.5, color: "#8c919c" }}>{pricesNote(assembly.id)}</div>
           <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
             {assembly.components.map((component, index) => (
               <div key={`${component.sku}-${index}`} style={{ display: "grid", gridTemplateColumns: "minmax(160px,1.2fr) minmax(140px,1fr) 120px 90px 40px", gap: 8, alignItems: "center" }}>

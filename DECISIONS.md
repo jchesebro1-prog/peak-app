@@ -3550,3 +3550,80 @@ than spoof the WebView's user agent to satisfy Google's embedded-browser check.
   these two mitigate and are the eventual resolution.
 
 Spec: `docs/superpowers/specs/2026-09-21-native-auth-handoff-design.md`.
+
+## D156. Catalog price dates: per-line `pricedAt`, a manufacturer-level "price list effective" date, and the 18-month outdated rule (#133, #129, 2026-09-21)
+
+Jeff asked for per-line price dates, an editable 18-month "outdated" banner by manufacturer, and an
+effective date on price lists (2026-09-21). Spec: `docs/superpowers/specs/2026-09-21-catalog-price-dates-and-assemblies-design.md`.
+
+- **`CatalogPart.pricedAt` means "when this price last moved."** The store stamps it centrally in
+  `upsert`/`mergeUpsert` (`lib/stores/catalog.ts`) ONLY when `list` or `cost` actually changes —
+  importers pass the file's effective date, every other write stamps now. `updatedAt` keeps its
+  last-write meaning. Parts that predate the field stay undated; nothing invents a date.
+- **`settings.priceListEffective[mfrKey]` is the manufacturer's book date.** Set by the Catalog
+  banner's inline date input (the one-time backfill) AND by both importers when an import writes
+  rows (the file's effective date IS the list's effective date, and it confirms the unchanged rows
+  too). Precisely (final review, 2026-09-22): the Import hub's "Skip duplicates" mode compares
+  nothing, so it never stamps; a file that carries no List/Cost column confirmed no price, so it
+  updates descriptions but neither stamps the book nor touches stored prices (both importers, and
+  the hub's "Create new" on an existing SKU preserves prices exactly like "Update existing"); the
+  hub stamps per manufacturer group, only a group at least one of whose rows was written and none
+  of whose rows errored (`commitCatalogImport` in `import/catalog-commit.ts`).
+- **Partial-file caveat (open — Jeff's call).** The guard only requires that a file overlap the
+  manufacturer's book by one SKU (D157), so any file that passes it re-dates the manufacturer's
+  WHOLE book: with the later-of rule above, every part of that manufacturer — including the ones
+  the file never mentioned — reads as effective on the file's date. That is exactly right for a
+  full price-list re-import (the common case: the yearly book, most prices unchanged) but
+  over-claims for a supplement — a 40-row "new products" sheet or a single-category update
+  confirms nothing about the other 1,960 lines, yet they stop reading as outdated. Mitigations, none
+  taken by default: (a) a "this is the complete price list" checkbox on both importers, stamping
+  the book only when ticked (else only the written lines' `pricedAt` move); (b) a coverage gate —
+  stamp only when the file overlaps ≥ N % of the manufacturer's parts; (c) accept the over-claim and
+  rely on the banner to correct a date by hand. Logged as MASTER-QUESTIONS E6.
+- **A line's effective date is the LATER of its own `pricedAt` and the book date** (`effectivePriceDate`
+  in `lib/catalog-books.ts`). The spec's wording calls the book date a "fallback"; the later-of rule
+  is what makes the banner's edit actually clear an outdated book whose lines carry old `pricedAt`
+  (a list confirmed on day D confirms every line on it, and a line re-priced after D keeps its own
+  date). Yearly re-imports where most prices don't move therefore read as current.
+- **A book is dated only when every part is; oldest wins.** `priceBooks()` returns `effectiveAt` =
+  the oldest effective date when all parts have one, else `null` + `unknown: true` — #14 decision
+  A carried forward: a single hand-edited SKU must not make a 2,000-row book read as fresh; an
+  undated part is older than anything. `outdated` = dated and ≥ 548 days (18 months). The book date
+  is the one-click way to date the remainder.
+- **Surfaces:** Home card pill states (age / Outdated red / Unknown grey); a Catalog banner listing
+  outdated + undated manufacturers, each with a date input and a facet link (Unbranded is excluded —
+  there is no manufacturer to date); the part edit modal shows the line's effective date.
+  Manufacturers group by `mfrKey` (lowercase alphanumerics — the importer's `norm`), so spellings
+  merge; the display name is the most common stored spelling, and the banner link filters that
+  spelling.
+- **Subassemblies resolve live (#129)** through `resolveSubassembly()` (`lib/fixture-assemblies.ts`),
+  the legacy save-time formula (engine + lens + Σ option cost × qty) over the current catalog. The
+  record keeps `snapshot: { cost, price, pricedAt }` (and the legacy cost fields) for "was $X when
+  built". Both builders show "prices as of" = the NEWEST effective date among their parts.
+- No schema change; parts and settings are JSON documents. `bodySizeLimit` etc. — see D157.
+
+## D157. Catalog import guards: manufacturer required, wrong-manufacturer double check, 1 MB cap (#132, #134, 2026-09-21)
+
+- **Manufacturer is required on both importers.** Catalog page: the picker/new-name field won't
+  submit empty and the server re-checks. Import hub: the `catalog` type's `mfr` field is
+  `required`, so a row without one fails per-row validation (existing rendering) and is never written.
+- **Guard order** (`checkManufacturer` in `lib/catalog-import-guard.ts`, pure): blank → `missing`;
+  the name normalizes (`mfrKey`) to an existing manufacturer → that spelling is used; any file SKU
+  filed under a different manufacturer → `foreign-skus` (checked first — it names exactly which rows
+  are wrong, up to 10 examples + "+N more"); the manufacturer already has parts and the file overlaps
+  none → `no-overlap` ("None of the N SKUs in this file belong to ‹mfr›"); a new manufacturer or any
+  overlap → ok. SKUs compare case/punctuation-insensitively (the hub's dedupe `norm`). Unbranded
+  parts are never foreign — importing them under a manufacturer is how they get one.
+- **The Import hub runs the guard twice:** per manufacturer group in the preview through
+  `checkCatalogImportAction` (the ~10k-row catalog is too big to ship to the browser for a local
+  check), blocking the Import button on any failure, and authoritatively in `importRecords` before
+  `commitImport`; groups are normalized to the existing spelling on commit. The Catalog page runs it
+  in `runCatalogImport` before any upsert, so a rejected file writes nothing.
+- **1 MB = 1,048,576 bytes**, checked (a) client-side on `file.size` before any upload and on the
+  paste box's UTF-8 byte length, (b) in the Catalog page action (file or paste), (c) in `importRecords`
+  for the catalog type, and (d) in `/api/import/xlsx` when the client posts `type=catalog` (10 MB stays
+  for every other type). Failures surface through the existing `importError=` / `err=` banners.
+- **`experimental.serverActions.bodySizeLimit = "1200kb"`** in `next.config.ts`: server actions
+  default to a 1 MB request body, which multipart overhead pushes a ~1 MB file past, so Next would
+  reject it with an opaque error before the app's check runs. The headroom makes the app's clear
+  error win; anything larger still fails closed at Next's limit.

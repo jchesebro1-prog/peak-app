@@ -1230,6 +1230,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `src/app/(app)/import/types.ts:203` (`mfr` required)
 - Modify: `src/app/(app)/import/registry.ts:57-64` (`Writer` + `CommitContext`), `:487-502` (catalog writer), `:603-639` (`commitImport`)
+- Create: `src/app/(app)/import/catalog-groups.ts` (shared server/client helper — the one place prepared rows become manufacturer groups)
 - Modify: `src/app/(app)/import/actions.ts` (whole file, 49 lines)
 - Modify: `src/app/(app)/import/controls.tsx:1-5` (imports), `:15-46` (props/state/derived), `:54-86` (`onFile`), after `:219` (size + guard errors), before `:221` (effective date)
 - Modify: `src/app/(app)/import/page.tsx:697-702` (pass `today`) + its imports
@@ -1382,6 +1383,23 @@ export async function commitImport(
 }
 ```
 
+Create `src/app/(app)/import/catalog-groups.ts` (shared by the server commit path and the client preview — one implementation, per the pre-flight review):
+
+```ts
+import { groupRowsByManufacturer, type ManufacturerGroup } from "@/lib/catalog-import-guard";
+import type { PreparedRow } from "./parse";
+
+/** #132 — per-manufacturer groups of a prepared catalog table (valid rows only —
+ *  rows without a manufacturer are already invalid and never written). Used by
+ *  `actions.ts` (commit) and `controls.tsx` (live preview) so the two can never
+ *  disagree about which rows a manufacturer check covers. */
+export function catalogGroups(rows: PreparedRow[]): ManufacturerGroup[] {
+  return groupRowsByManufacturer(
+    rows.filter((r) => r.valid).map((r) => ({ mfr: String(r.values.mfr ?? ""), sku: String(r.values.sku ?? "") }))
+  );
+}
+```
+
 Replace `src/app/(app)/import/actions.ts` entirely:
 
 ```ts
@@ -1396,11 +1414,11 @@ import { mfrKey, parseEffectiveDate } from "@/lib/catalog-books";
 import {
   checkManufacturerGroups,
   checkSize,
-  groupRowsByManufacturer,
   type GroupCheck,
   type ManufacturerGroup,
 } from "@/lib/catalog-import-guard";
 import { parseCsv, autoMap, prepareRows, type PreparedRow } from "./parse";
+import { catalogGroups } from "./catalog-groups";
 import { getTypeMeta } from "./types";
 import { commitImport, type ImportMode } from "./registry";
 
@@ -1409,13 +1427,9 @@ function guardMessage(c: GroupCheck): string {
   return c.result.ok ? "" : (c.mfr ? `${c.mfr}: ` : "") + c.result.detail;
 }
 
-/** #132 — per-manufacturer groups of a prepared catalog table (valid rows only —
- *  rows without a manufacturer are already invalid and never written). */
-function catalogGroups(rows: PreparedRow[]): ManufacturerGroup[] {
-  return groupRowsByManufacturer(
-    rows.filter((r) => r.valid).map((r) => ({ mfr: String(r.values.mfr ?? ""), sku: String(r.values.sku ?? "") }))
-  );
-}
+// #132 — `catalogGroups` (prepared rows → manufacturer groups) lives in
+// ./catalog-groups so the client preview and this server commit share ONE
+// implementation (pre-flight finding: the block was duplicated).
 
 /**
  * Import a pasted CSV/TSV block into a type's store. FormData-shaped so the
@@ -1517,8 +1531,9 @@ export async function checkCatalogImportAction(groups: ManufacturerGroup[]): Pro
 "use client";
 
 import { useEffect, useState } from "react";
-import { checkSize, groupRowsByManufacturer, type GroupCheck } from "@/lib/catalog-import-guard";
+import { checkSize, type GroupCheck } from "@/lib/catalog-import-guard";
 import { autoMap, parseCsv, prepareRows, type FieldDef } from "./parse";
+import { catalogGroups } from "./catalog-groups";
 import { checkCatalogImportAction, importRecords } from "./actions";
 
 const sectionLabel: React.CSSProperties = {
@@ -1599,9 +1614,7 @@ export function PastePreview({
       const p = parseCsv(text);
       if (!p.ok) return;
       const pr = prepareRows(p.rows, autoMap(p.headers, fields), fields);
-      const groups = groupRowsByManufacturer(
-        pr.rows.filter((r) => r.valid).map((r) => ({ mfr: String(r.values.mfr ?? ""), sku: String(r.values.sku ?? "") }))
-      );
+      const groups = catalogGroups(pr.rows);
       if (!groups.length) {
         setGuard(null);
         return;
@@ -1778,7 +1791,7 @@ export async function POST(req: Request): Promise<NextResponse> {
 - [ ] **Step 5: Commit**
 
 ```bash
-git add "src/app/(app)/import/types.ts" "src/app/(app)/import/registry.ts" "src/app/(app)/import/actions.ts" "src/app/(app)/import/controls.tsx" "src/app/(app)/import/page.tsx" src/app/api/import/xlsx/route.ts scripts/test-review-and-spec.ts scripts/test-review-regressions.ts
+git add "src/app/(app)/import/types.ts" "src/app/(app)/import/registry.ts" "src/app/(app)/import/catalog-groups.ts" "src/app/(app)/import/actions.ts" "src/app/(app)/import/controls.tsx" "src/app/(app)/import/page.tsx" src/app/api/import/xlsx/route.ts scripts/test-review-and-spec.ts scripts/test-review-regressions.ts
 git commit -m "feat(import): catalog type — manufacturer required per row, guard in preview + commit, effective date, 1 MB on paste + xlsx (#132, #133, #134 §3)
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"

@@ -1,8 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { checkSize, type GroupCheck } from "@/lib/catalog-import-guard";
+import { useClientToday } from "@/lib/use-client-today";
 import { autoMap, parseCsv, prepareRows, type FieldDef } from "./parse";
-import { importRecords } from "./actions";
+import { catalogGroups } from "./catalog-groups";
+import { checkCatalogImportAction, importRecords } from "./actions";
+
+const sectionLabel: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: "#9aa0ab",
+  letterSpacing: ".05em",
+  textTransform: "uppercase",
+  marginBottom: 8,
+};
+const errorBox: React.CSSProperties = {
+  marginTop: 12,
+  background: "#f9ece8",
+  border: "1px solid #f0d6cd",
+  borderRadius: 9,
+  padding: "10px 12px",
+  fontSize: 12,
+  color: "#a0442b",
+  lineHeight: 1.45,
+};
 
 /**
  * Paste → live preview → confirm, the client leaf of the import flow. It parses
@@ -17,18 +39,31 @@ export function PastePreview({
   fields,
   dedupeLabel,
   accent,
+  today,
 }: {
   typeKey: string;
   fields: FieldDef[];
   dedupeLabel: string;
   accent: string;
+  /** Local YYYY-MM-DD from the server — the catalog type's effective-date
+   *  default during SSR/hydration; after mount the input shows the BROWSER's
+   *  day (useClientToday — a UTC server's "today" runs a day ahead of a US
+   *  user's evening). */
+  today: string;
 }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"skip" | "update" | "create">("skip");
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState("");
   const [uploadNote, setUploadNote] = useState("");
+  const [guard, setGuard] = useState<GroupCheck[] | null>(null);
+  // #133 — "" = untouched → today (the browser's, once mounted); a cleared
+  // input falls back to today too.
+  const clientToday = useClientToday(today);
+  const [pickedDate, setPickedDate] = useState("");
+  const effectiveDate = pickedDate || clientToday;
 
+  const isCatalog = typeKey === "catalog";
   const trimmed = text.trim();
   const parsed = trimmed ? parseCsv(text) : null;
   const mapping = parsed && parsed.ok ? autoMap(parsed.headers, fields) : null;
@@ -43,7 +78,51 @@ export function PastePreview({
   const previewFields = (mappedFields.length ? mappedFields : fields.slice(0, 3)).slice(0, 4);
   const previewRows = (prep?.rows || []).slice(0, 5);
 
-  const canImport = !!prep && prep.stats.valid > 0 && reqMissing.length === 0;
+  // #134 — the catalog type is capped at 1 MB of pasted/converted text.
+  const size = isCatalog ? checkSize(new TextEncoder().encode(text).length) : ({ ok: true } as const);
+  // #132 — wrong-manufacturer findings from the server-side preview check.
+  // Treated as empty once the catalog type isn't active, the box is empty,
+  // or the paste is over the 1 MB cap — the effect below stops scheduling
+  // checks in those cases too, so deriving it here (rather than an effect
+  // calling setGuard(null)) keeps stale results from an emptied textarea
+  // off the screen without setting state synchronously from inside an
+  // effect body.
+  const guardFailures = !isCatalog || !trimmed || !size.ok ? [] : (guard || []).filter((g) => !g.result.ok);
+
+  const canImport = !!prep && prep.stats.valid > 0 && reqMissing.length === 0 && size.ok && guardFailures.length === 0;
+
+  /* #132 — debounce the pasted table into {mfr, skus} groups and ask the
+     server whether each manufacturer checks out; the same guard runs again
+     on commit, this is the early warning. An over-cap paste (#134) is
+     neither parsed client-side nor sent — the size error already blocks the
+     button. The `cancelled` flag drops a response that lands after the text
+     changed again (a slower earlier RPC must not overwrite a newer result).
+     */
+  useEffect(() => {
+    if (!isCatalog || !trimmed || !size.ok) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const p = parseCsv(text);
+      if (!p.ok) return;
+      const pr = prepareRows(p.rows, autoMap(p.headers, fields), fields);
+      const groups = catalogGroups(pr.rows);
+      if (!groups.length) {
+        setGuard(null);
+        return;
+      }
+      checkCatalogImportAction(groups)
+        .then((r) => {
+          if (!cancelled) setGuard(r);
+        })
+        .catch(() => {
+          if (!cancelled) setGuard(null);
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [text, trimmed, isCatalog, fields, size.ok]);
 
   const modeTabs: Array<{ id: "skip" | "update" | "create"; label: string }> = [
     { id: "skip", label: "Skip duplicates" },
@@ -60,12 +139,22 @@ export function PastePreview({
     const file = e.target.files?.[0];
     e.target.value = ""; // let the same file be re-picked after a failure
     if (!file) return;
+    if (isCatalog) {
+      // #134 — refuse over-size workbooks here, before any upload.
+      const fileSize = checkSize(file.size);
+      if (!fileSize.ok) {
+        setUploadErr(fileSize.error);
+        setUploadNote("");
+        return;
+      }
+    }
     setUploading(true);
     setUploadErr("");
     setUploadNote("");
     try {
       const fd = new FormData();
       fd.append("file", file);
+      fd.append("type", typeKey);
       const res = await fetch("/api/import/xlsx", { method: "POST", body: fd });
       const data = (await res.json()) as
         | { ok: true; csv: string; rows: number; sheetName: string }
@@ -215,6 +304,43 @@ export function PastePreview({
         >
           Couldn’t find a column for {reqMissing.join(" and ")} — it’s required. Add a header row
           named like “{reqMissing[0]}”.
+        </div>
+      )}
+      {!size.ok && <div style={errorBox}>{size.error}</div>}
+      {guardFailures.length > 0 && (
+        <div style={errorBox}>
+          {guardFailures.map((g) => (
+            <div key={g.mfr || "(blank)"}>
+              <b>{g.mfr || "No manufacturer"}</b> — {g.result.ok ? "" : g.result.detail}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* #133 — the price list's effective date (catalog only) */}
+      {isCatalog && (
+        <div style={{ marginTop: 16 }}>
+          <div style={sectionLabel}>Price list effective</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <input
+              type="date"
+              name="effectiveDate"
+              value={effectiveDate}
+              onChange={(e) => setPickedDate(e.target.value)}
+              style={{
+                border: "1px solid #e4e7ec",
+                borderRadius: 9,
+                padding: "8px 11px",
+                fontSize: 12.5,
+                fontFamily: "var(--font-ui)",
+                color: "#16181d",
+                background: "#fff",
+              }}
+            />
+            <span style={{ fontSize: 11.5, color: "#aab0bb" }}>
+              Defaults to today. Stamped on every part whose price changes.
+            </span>
+          </div>
         </div>
       )}
 
