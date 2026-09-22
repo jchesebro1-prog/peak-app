@@ -2657,7 +2657,7 @@ the repo as generated iOS + Android projects plus `capacitor.config.ts`.
   builds remain unchanged. BLE, camera, push, signing, and store submission
   remain later phases and require device/account decisions.
 
-## D140. Merge-regenerated migrations are written idempotently (2026-09-21)
+## D141. Merge-regenerated migrations are written idempotently (2026-09-21)
 
 `0018_clever_maverick` — the migration drizzle-kit regenerated when
 `session/pensive-swift-b0f7` merged into main — failed on the production
