@@ -488,6 +488,31 @@ ok(
     JSON.stringify(designGroup.children.map((c) => c.key)) === JSON.stringify(DESIGN_CHILDREN),
   `Design's children are exactly [${DESIGN_CHILDREN.join(", ")}]`);
 
+/* --- Knowledge & Information tab (#136) --- */
+ok(designRedirect("/design/steel", {}) === "/knowledge/steel",
+  "#136: /design/steel redirects to /knowledge/steel");
+ok(designRedirect("/design/fixtures", {}) === "/knowledge/fixtures",
+  "#136: /design/fixtures redirects to /knowledge/fixtures");
+ok(designRedirect("/design/lineset", {}) === null,
+  "#136: the other Design tools are NOT redirected");
+const knowledgeGroup = NAV.find((e) => e.kind === "group" && e.key === "knowledge");
+const KNOWLEDGE_CHILDREN = ["knowledgeoverview", "steel", "fixtures"];
+ok(
+  !!knowledgeGroup && knowledgeGroup.kind === "group" &&
+    JSON.stringify(knowledgeGroup.children.map((c) => c.key)) === JSON.stringify(KNOWLEDGE_CHILDREN),
+  `#136: KNOWLEDGE's children are exactly [${KNOWLEDGE_CHILDREN.join(", ")}]`);
+ok(NAV.findIndex((e) => e.key === "knowledge") === NAV.findIndex((e) => e.key === "design") + 1,
+  "#136: KNOWLEDGE sits immediately after DESIGN");
+ok(knowledgeGroup?.kind === "group" && knowledgeGroup.children.map((c) => c.href).join(",") === "/knowledge,/knowledge/steel,/knowledge/fixtures",
+  "#136: KNOWLEDGE hrefs are the new routes");
+ok(activeKeyFor("/knowledge") === "knowledgeoverview" && activeKeyFor("/knowledge/steel") === "knowledgeoverview" && activeKeyFor("/knowledge/fixtures") === "knowledgeoverview",
+  "#136: every /knowledge route lights the KNOWLEDGE pill (segment-1 matching)");
+ok(parentGroupOf("knowledgeoverview") === "knowledge" && parentGroupOf("steel") === "knowledge",
+  "#136: knowledge children resolve to the knowledge group");
+const NAV_KEYS = NAV.flatMap((e) => (e.kind === "group" ? [e.key, ...e.children.map((c) => c.key)] : [e.key]));
+ok(new Set(NAV_KEYS).size === NAV_KEYS.length,
+  `#136: no two nav entries share a key (${NAV_KEYS.length} keys)`);
+
 /* --- home tabbed hub (D98) ---
  * homeTabFor() was deleted (final-review Fix 2): every hub route is a
  * server component that already knows which tab it is, so the four call
@@ -509,7 +534,7 @@ ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab"
 // Punch #55 (D124) REVERSES the D117 shape: Jeff asked for Home back as a real tab
 // on web and mobile, so the header is five groups and Home is the first. The five
 // hub routes stay CHILDREN of that group (they are not top-level links).
-ok(NAV.length === 5, "the header has 5 top-level items: Home joined the chips (#55, D124)");
+ok(NAV.length === 6, "the header has 6 top-level items: Home joined the chips (#55, D124); KNOWLEDGE joined after DESIGN (#136)");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "queue"), "My Queue is not top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "calendar"), "Calendar is not top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "inbox"), "Inbox is not top-level");
@@ -596,8 +621,8 @@ ok(
 // ---- General dissolution (D99): the group is gone ----
 ok(!NAV.some((e) => e.kind === "group" && e.key === "general"), "the General group is gone");
 ok(
-  NAV.map((e) => e.key).join(",") === "home,est,pm,crm,design",
-  "the top-level chips are Home, EST, PM, CRM, DESIGN in order (#55 put Home back, D124)",
+  NAV.map((e) => e.key).join(",") === "home,est,pm,crm,design,knowledge",
+  "the top-level chips are Home, EST, PM, CRM, DESIGN, KNOWLEDGE in order (#55 put Home back, D124; #136 added KNOWLEDGE)",
 );
 ok(
   activeKeyFor("/catalog") === "settings" &&
