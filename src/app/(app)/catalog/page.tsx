@@ -4,7 +4,7 @@ import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
 import { list, get, type CatalogPart } from "@/lib/stores/catalog";
 import { dateYear, money } from "@/lib/format";
-import { effectivePriceDate, isoDateOf, priceBooks } from "@/lib/catalog-books";
+import { effectivePriceDate, isoDateOf, mfrKey, priceBooks } from "@/lib/catalog-books";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { CatalogControls, CatalogImportPanel, PartDatasheetControl } from "./controls";
 import CatalogDangerZone from "./catalog-danger-zone";
@@ -12,7 +12,8 @@ import { TaxonomyCard } from "./taxonomy-card";
 import { PriceDateBanner } from "./price-date-banner";
 import { upsertPart } from "./actions";
 import { activeUsers } from "@/lib/users";
-import { resolveCatalogOwner } from "@/lib/vendor-status";
+import { allVendorProfiles, vendorCompanies } from "@/lib/stores/vendors";
+import { claimOwnerByKey, resolveCatalogOwner } from "@/lib/vendor-status";
 import { CatalogOwnerCard } from "./catalog-owner-card";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
@@ -40,15 +41,24 @@ export default async function CatalogPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, parts, settings, users] = await Promise.all([
+  const [user, sp, parts, settings, users, profiles, vendorCos] = await Promise.all([
     requireUser(),
     searchParams,
     list(),
     getSettings(),
     activeUsers(),
+    allVendorProfiles(),
+    vendorCompanies(),
   ]);
   const isAdmin = can("manage_users", user.roles);
   const catalogOwner = resolveCatalogOwner(settings.catalogOwner, users);
+  const vendorNameById = new Map(vendorCos.map((c) => [c.id, c.name]));
+  const vendorByKey = claimOwnerByKey(profiles);
+  /** #122 — the vendor that claims a manufacturer spelling, or null. */
+  const vendorFor = (m: string): { id: string; name: string } | null => {
+    const id = vendorByKey.get(mfrKey(m));
+    return id ? { id, name: vendorNameById.get(id) ?? id } : null;
+  };
 
   const mfrParam = one(sp.mfr) || "all";
   const catParam = one(sp.cat) || "all";
@@ -92,7 +102,8 @@ export default async function CatalogPage({
   const books = priceBooks(parts, settings, { limit: Infinity });
   const flaggedBooks = books
     .filter((b) => b.key && (b.outdated || b.unknown)) // Unbranded has no key: nothing to date
-    .map((b) => ({ ...b, href: hrefFor({ mfr: b.name }) }));
+    // #122: `vendor` is the vendor that claims this manufacturer, or null.
+    .map((b) => ({ ...b, href: hrefFor({ mfr: b.name }), vendor: vendorFor(b.name) }));
 
   /* ---- filter + sort ---- */
   const ql = q.toLowerCase();
@@ -241,12 +252,16 @@ export default async function CatalogPage({
             allLabel="All manufacturers"
             allHref={hrefFor({ mfr: "all" })}
             allCount={parts.length}
-            options={manufacturers.map((m) => ({
-              key: m,
-              label: m,
-              href: hrefFor({ mfr: m }),
-              count: parts.filter((p) => mfrOf(p) === m).length,
-            }))}
+            options={manufacturers.map((m) => {
+              const v = vendorFor(m);
+              return {
+                key: m,
+                label: m,
+                href: hrefFor({ mfr: m }),
+                count: parts.filter((p) => mfrOf(p) === m).length,
+                title: v ? `Supplied by ${v.name} — open the vendor from the price banner or /vendors` : undefined,
+              };
+            })}
           />
           <div style={{ height: 16 }} />
           <FilterGroup
@@ -476,9 +491,12 @@ function FilterGroup({
   allLabel: string;
   allHref: string;
   allCount: number;
-  options: Array<{ key: string; label: string; href: string; count: number }>;
+  options: Array<{ key: string; label: string; href: string; count: number; title?: string }>;
 }) {
-  const items = [{ key: "all", label: allLabel, href: allHref, count: allCount }, ...options];
+  const items: Array<{ key: string; label: string; href: string; count: number; title?: string }> = [
+    { key: "all", label: allLabel, href: allHref, count: allCount },
+    ...options,
+  ];
   return (
     <div>
       <div
@@ -502,6 +520,7 @@ function FilterGroup({
             href={o.href}
             scroll={false}
             className="ct-filter"
+            title={o.title}
             style={{
               width: "100%",
               display: "flex",

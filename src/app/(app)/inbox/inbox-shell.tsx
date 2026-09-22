@@ -84,6 +84,7 @@ export default function InboxShell({
   contactEmails,
   fromOptions,
   initialCompose,
+  initialLog,
   categoryOptions,
   // Punch #42: per-user Inbox/CRM mode pref, server-resolved. Renamed on
   // destructure — the shell keeps its own optimistic copy (see crmMode
@@ -104,6 +105,9 @@ export default function InboxShell({
   contactEmails: Opt[];
   fromOptions: Opt[];
   initialCompose: ComposeInit | null;
+  /** #122 — /inbox?customer=<id>&log=1 opens the log modal with that company
+   *  preset; null (the usual case) leaves the modal closed. */
+  initialLog: { customerId: string } | null;
   categoryOptions: CategoryOpt[];
   // Punch #42: per-user Inbox/CRM mode pref (waiting-first sort opt-in),
   // resolved server-side from the current user.
@@ -143,7 +147,7 @@ export default function InboxShell({
   };
 
   const [compose, setCompose] = useState<ComposeInit | null>(initialCompose);
-  const [logging, setLogging] = useState(false);
+  const [logging, setLogging] = useState(!!initialLog);
   // optimistic unread clearing while markRead lands server-side
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
 
@@ -1025,6 +1029,7 @@ export default function InboxShell({
         <LogModal
           customers={customers}
           rosterOptions={rosterOptions}
+          initialCustomerId={initialLog?.customerId || ""}
           onClose={() => setLogging(false)}
           onLogged={(id) => {
             setLogging(false);

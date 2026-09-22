@@ -10,6 +10,9 @@ import { setPriceListEffectiveAction } from "./actions";
 export type BannerBook = PriceBookRow & {
   /** The manufacturer facet link, built by the page with its hrefFor(). */
   href: string;
+  /** #122 — the vendor that claims this manufacturer, or null when unclaimed.
+   *  Plain data resolved on the server; the row links it to /vendors/<id>. */
+  vendor?: { id: string; name: string } | null;
 };
 
 /**
@@ -50,6 +53,14 @@ export function PriceDateBanner({ books }: { books: BannerBook[] }) {
             <Link href={b.href} scroll={false} style={{ fontWeight: 600, color: "#5b4a12", textDecoration: "none" }}>
               {b.name}
             </Link>
+            {b.vendor && (
+              <Link
+                href={`/vendors/${encodeURIComponent(b.vendor.id)}`}
+                style={{ marginLeft: 8, fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+              >
+                {b.vendor.name} ›
+              </Link>
+            )}
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#8a6d1f" }}>{b.count} parts</span>
             <span style={pill(b.outdated)}>{b.outdated ? `Outdated · effective ${dateYear(b.effectiveAt)}` : "No date"}</span>
             <label style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#7a5f18" }}>

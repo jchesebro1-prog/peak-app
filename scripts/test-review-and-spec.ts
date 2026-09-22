@@ -35,7 +35,7 @@ import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "@/db/doc-tables";
 import { PARTNER_TYPES, baseVenueKind } from "@/lib/identity/venue-defaults";
 import { VENDOR_COMPANY_TYPE, isVendorType } from "@/lib/identity/config";
 import {
-  catalogEffectiveAtFor, manufacturerDirectory, partCountFor, resolveCatalogOwner, unclaimedManufacturers,
+  catalogEffectiveAtFor, groupCompanyOptions, manufacturerDirectory, partCountFor, resolveCatalogOwner, unclaimedManufacturers,
   vendorStatus, vendorTasks, type PriceListEntry as VendorPriceListEntry,
 } from "@/lib/vendor-status";
 import { VENDOR_TABS, resolveVendorTab } from "@/app/(app)/vendors/tabs";
@@ -3156,6 +3156,18 @@ ok(vendorFromDateInput("2026-09-21") === new Date(2026, 8, 21).getTime() && vend
   }
   const rejected = vendorParseLedgerDates({ receivedAt: NaN, effectiveAt: NaN });
   ok(!rejected.ok && rejected.error === "Both dates are required.", "#122 parseLedgerDates returns the action's error copy");
+}
+
+/* ---- #122 §3 — inbox option groups ---- */
+{
+  const groups = groupCompanyOptions([
+    { id: "rose-brand", name: "Rose Brand", type: "vendor/manufacturer" },
+    { id: "lakefront", name: "Lakefront PAC", type: "Performing arts" },
+    { id: "badger", name: "Badger Ballet", type: "" },
+  ]);
+  ok(groups.length === 2 && groups[0].label === "Customers" && groups[1].label === "Vendors", "#122 groupCompanyOptions: Customers first, then Vendors");
+  ok(groups[0].options.map((o) => o.value).join(",") === "badger,lakefront" && groups[1].options[0].value === "rose-brand", "#122 groupCompanyOptions: name-sorted within a group, vendors by exact type");
+  ok(groupCompanyOptions([{ id: "x", name: "X", type: "Civic" }]).length === 1, "#122 groupCompanyOptions: an empty group is dropped");
 }
 
 /* --- final review item 3: the Catalog page parser reports which price columns the file carried --- pure */

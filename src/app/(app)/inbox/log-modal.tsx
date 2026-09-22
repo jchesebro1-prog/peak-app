@@ -41,18 +41,21 @@ type LogDraft = {
 export default function LogModal({
   customers,
   rosterOptions,
+  initialCustomerId = "",
   onClose,
   onLogged,
 }: {
   customers: CustomerVM[];
   rosterOptions: Opt[];
+  /** #122 — /inbox?customer=<id>&log=1 opens this modal with the company preset */
+  initialCustomerId?: string;
   onClose: () => void;
   onLogged: (id: string | null) => void;
 }) {
   const [ld, setLd] = useState<LogDraft>({
     channel: "call",
     direction: "in",
-    customerId: "",
+    customerId: initialCustomerId,
     contactName: "",
     contactEmail: "",
     subject: "",

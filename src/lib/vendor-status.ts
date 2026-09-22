@@ -10,6 +10,7 @@
  */
 import { OUTDATED_AFTER_MS, effectivePriceDate, mfrKey } from "@/lib/catalog-books";
 import { dateYear } from "@/lib/format";
+import { isVendorType } from "@/lib/identity/config";
 
 export type PriceListEntry = {
   id: string;
@@ -176,4 +177,20 @@ export function unclaimedManufacturers(
   profiles: Array<{ id: string; manufacturers: string[] }>
 ): ManufacturerEntry[] {
   return manufacturerDirectory(parts, profiles).filter((m) => !m.vendorId);
+}
+
+/** Inbox link sidebar (spec §3): the customer picker's optgroups. */
+export function groupCompanyOptions(
+  companies: Array<{ id: string; name: string; type: string }>
+): Array<{ label: "Customers" | "Vendors"; options: Array<{ value: string; label: string }> }> {
+  const sorted = companies
+    .map((c) => ({ value: c.id, label: c.name, vendor: isVendorType(c.type) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const pick = (vendor: boolean) => sorted.filter((o) => o.vendor === vendor).map(({ value, label }) => ({ value, label }));
+  return (
+    [
+      { label: "Customers" as const, options: pick(false) },
+      { label: "Vendors" as const, options: pick(true) },
+    ] as Array<{ label: "Customers" | "Vendors"; options: Array<{ value: string; label: string }> }>
+  ).filter((g) => g.options.length > 0);
 }

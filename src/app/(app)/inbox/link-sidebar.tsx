@@ -207,10 +207,14 @@ export default function LinkSidebar({
   const customerPicker = (value: string, onChange: (v: string) => void, withNew: boolean) => (
     <select value={value} onChange={(e) => onChange(e.target.value)} style={SELECT}>
       <option value="">Pick a customer…</option>
-      {vm.customerOptions.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
+      {vm.customerOptionGroups.map((g) => (
+        <optgroup key={g.label} label={g.label}>
+          {g.options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </optgroup>
       ))}
       {withNew && <option value="__new">+ New customer…</option>}
     </select>
