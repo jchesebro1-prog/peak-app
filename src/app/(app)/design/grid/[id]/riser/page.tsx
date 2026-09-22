@@ -6,7 +6,7 @@ import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { getSettings } from "@/lib/settings";
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { riserGraph } from "@/lib/design/grid-riser";
-import { markerColor, shapeFor } from "@/lib/design/grid-symbols";
+import { markerColor, shapeFor, type GridShape } from "@/lib/design/grid-symbols";
 import { SymbolIcon, SymbolShape } from "@/components/design/symbol-shape";
 import type { PartLite } from "@/lib/design/grid-bom";
 import { PrintButton } from "@/components/letter/print-button";
@@ -61,13 +61,21 @@ export default async function RiserPage({
     parts,
     project.calibrations || []
   );
-  // Legend: one row per category actually drawn, in first-seen order.
-  const legend: Array<{ category: string; shape: ReturnType<typeof shapeFor>; color: string }> = [];
+  // Legend: one row per shape actually drawn, in first-seen order. Keyed on
+  // shape+category (not category alone) so a per-entry symbol override (one
+  // device drawn with a different glyph than its category default) gets its
+  // own row instead of being swallowed by whichever glyph was seen first for
+  // that category (#131 review).
+  const legend: Array<{ key: string; shape: GridShape; color: string; label: string }> = [];
   for (const n of graph.nodes) {
     for (const g of n.groups) {
       const category = g.category || "Uncategorized";
-      if (legend.some((l) => l.category === category)) continue;
-      legend.push({ category, shape: shapeFor({ category: g.category, shape: g.shape }, settings), color: markerColor(g.category) });
+      const shape = shapeFor({ category: g.category, shape: g.shape }, settings);
+      const key = `${shape}|${category}`;
+      if (legend.some((l) => l.key === key)) continue;
+      const categoryDefault = shapeFor({ category: g.category }, settings);
+      const label = shape === categoryDefault ? category : `${category} — ${g.desc || g.partId}`;
+      legend.push({ key, shape, color: markerColor(g.category), label });
     }
   }
 
@@ -177,9 +185,9 @@ export default async function RiserPage({
             <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 12, fontSize: 11.5, color: "#5b616e" }}>
               <span style={{ fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", fontSize: 10, color: "#9aa0ab", alignSelf: "center" }}>Legend</span>
               {legend.map((l) => (
-                <span key={l.category} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span key={l.key} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <SymbolIcon shape={l.shape} color={l.color} size={14} />
-                  {l.category}
+                  {l.label}
                 </span>
               ))}
             </div>
