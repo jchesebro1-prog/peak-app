@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MONDAY_TONE } from "@/components/ui";
-import { barRect, dateFromX, dayColumns, snapToDay } from "./gantt-lib";
+import { barRect, DAY, dateFromX, dayColumns, packTracks, snapToDay } from "./gantt-lib";
 
 /**
  * Shared draggable Gantt grid (#145) — used standalone here against fixture
@@ -13,8 +13,6 @@ import { barRect, dateFromX, dayColumns, snapToDay } from "./gantt-lib";
  * `src/app/(app)/schedule/page.tsx`'s crew-board day grid (~line 268-302)
  * so the two grids read as one system.
  */
-
-const DAY = 86400000;
 
 export type GanttBar = {
   id: string;
@@ -28,10 +26,13 @@ export type GanttBar = {
   overrun: boolean;
 };
 
-/** A single point-in-time marker (milestone). `locked: true` markers are
- *  not draggable (D167) and fire `onMarkerClick` instead — there is no
- *  move callback for markers, so in this version every marker is
- *  click-only; `locked` is preserved on the type for that contract. */
+/** A single point-in-time marker (milestone). `locked: true` (D167) means
+ *  the date is fixed and not casually movable: it renders solid, with a
+ *  "pointer" cursor and a title/aria-label that says clicking opens the
+ *  reschedule dialog. `locked: false` renders as a hollow diamond with a
+ *  "grab" cursor to look perceptibly different — this is a rendering cue
+ *  only; there is no `onMarkerMove` callback, so no marker actually drags
+ *  in this version. `onMarkerClick` fires for either. */
 export type GanttMarker = { id: string; label: string; at: number; locked: boolean };
 
 export type GanttRow = { id: string; label: string; group: string; bars: GanttBar[] };
@@ -43,6 +44,9 @@ type DragState = {
   /** Pixel offset from the track's left edge to the point the user grabbed,
    *  so the bar doesn't jump to snap its left edge under the cursor. */
   grabOffsetPx: number;
+  /** The bar's own startAt when the drag began, so a release with no net
+   *  movement (a plain click) can skip firing onBarMove. */
+  origStart: number;
   previewStart: number;
   previewDue: number;
 };
@@ -59,28 +63,19 @@ function weekLabel(ts: number): string {
   return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase();
 }
 
-/** Greedy overlap packing so bars sharing a row don't collide — port of
- *  schedule/page.tsx's packTracks (same algorithm, row-scoped here). */
-function packTracks(items: Array<{ s: number; e: number; k: string }>): {
-  map: Record<string, number>;
-  n: number;
-} {
-  const sorted = items.slice().sort((a, b) => a.s - b.s);
-  const ends: number[] = [];
-  const map: Record<string, number> = {};
-  sorted.forEach((it) => {
-    let tk = ends.findIndex((en) => en < it.s);
-    if (tk < 0) {
-      tk = ends.length;
-      ends.push(it.e);
-    } else ends[tk] = it.e;
-    map[it.k] = tk;
-  });
-  return { map, n: Math.max(1, ends.length) };
-}
-
 const LABEL_W = 190;
-const HEADER_H = 34;
+/** schedule/page.tsx's own day-cell header height (HEADH), reused verbatim
+ *  when this grid is dense enough to show per-day cells too. */
+const DENSE_HEADER_H = 60;
+/** Compact header height when only week-start labels fit. */
+const SPARSE_HEADER_H = 34;
+/** Below this many px per day, a stacked weekday-letter + day-number cell
+ *  (schedule/page.tsx:735-779) starts to overlap its neighbors — that grid
+ *  gets away with a similar floor (its narrowest zoom column is 19px)
+ *  because it can be horizontally scrolled into view; this grid has no
+ *  scroll escape hatch (it fills whatever width its container gives it),
+ *  so it needs a slightly safer floor before it commits to per-day cells. */
+const MIN_DAY_CELL_PX = 24;
 const MARKER_STRIP_H = 24;
 const GROUP_HEADER_H = 24;
 const BAR_H = 28;
@@ -110,6 +105,24 @@ export function GanttGrid({
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
 
+  /* Range-adaptive day cells (review fix, #145): measure the track's real
+   * rendered width so the decision reflects whatever container this
+   * component actually ends up in, rather than guessing from the date
+   * range alone. Starts unmeasured (server-render / first paint) — that
+   * conservatively falls back to week-only labels until the effect runs,
+   * never to unreadably squeezed day cells. */
+  const [trackWidthPx, setTrackWidthPx] = useState<number | null>(null);
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (typeof w === "number") setTrackWidthPx(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const span = Math.max(1, endAt - startAt);
   const pct = (t: number) => ((t - startAt) / span) * 100;
   const dayPct = (DAY / span) * 100;
@@ -118,6 +131,10 @@ export function GanttGrid({
   const weekStarts = days.filter((d) => weekdayOf(d) === 0);
   const hasToday = typeof now === "number" && now >= startAt && now <= endAt;
   const todayStart = hasToday ? snapToDay(now as number) : 0;
+
+  const dayWidthPx = trackWidthPx != null ? trackWidthPx / Math.max(1, days.length) : 0;
+  const showDayCells = dayWidthPx >= MIN_DAY_CELL_PX;
+  const headerH = showDayCells ? DENSE_HEADER_H : SPARSE_HEADER_H;
 
   /* per-row track packing + cumulative layout, with an optional group
      header strip inserted whenever a row's `group` differs from the row
@@ -150,6 +167,7 @@ export function GanttGrid({
       pointerId: e.pointerId,
       duration: bar.dueAt - bar.startAt,
       grabOffsetPx: pointerPx - barLeftPx,
+      origStart: bar.startAt,
       previewStart: bar.startAt,
       previewDue: bar.dueAt,
     });
@@ -167,7 +185,13 @@ export function GanttGrid({
 
   function endDrag(e: React.PointerEvent<HTMLDivElement>) {
     if (!drag || e.pointerId !== drag.pointerId) return;
-    onBarMove(drag.barId, drag.previewStart, drag.previewDue);
+    // A plain click (pointerdown+up with no movement) leaves previewStart
+    // equal to where the drag began — skip the callback so a click doesn't
+    // cost a persist + revalidate + refresh once this is wired to a server
+    // action (Task 6/12).
+    if (drag.previewStart !== drag.origStart) {
+      onBarMove(drag.barId, drag.previewStart, drag.previewDue);
+    }
     setDrag(null);
   }
 
@@ -178,10 +202,13 @@ export function GanttGrid({
 
   return (
     <div className="pk-card" style={{ padding: 0, overflow: "hidden" }}>
-      {/* day/week header — port of schedule/page.tsx's week-mark idiom */}
+      {/* day/week header — port of schedule/page.tsx's week-mark idiom, plus
+          its per-day cell idiom (weekday letter + date, today as an accent
+          circle) once the measured track is wide enough per day; see
+          MIN_DAY_CELL_PX. */}
       <div style={{ display: "flex", borderBottom: "1px solid #e7e9ee" }}>
         <div style={{ width: LABEL_W, flexShrink: 0, borderRight: "1px solid #e7e9ee", background: "#fff" }} />
-        <div style={{ position: "relative", flex: 1, height: HEADER_H }}>
+        <div style={{ position: "relative", flex: 1, height: headerH }}>
           {weekStarts.map((w) => (
             <div
               key={"wl" + w}
@@ -200,6 +227,55 @@ export function GanttGrid({
               {weekLabel(w)}
             </div>
           ))}
+          {showDayCells &&
+            days.map((d) => {
+              const isToday = hasToday && d === todayStart;
+              return (
+                <div
+                  key={"dc" + d}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    bottom: 0,
+                    left: `${pct(d)}%`,
+                    width: `${dayPct}%`,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 1,
+                    borderLeft: `1px solid ${weekdayOf(d) === 0 ? "#e4e7ec" : "#f1f2f5"}`,
+                    background: isWeekend(d) ? "#fafbfc" : undefined,
+                  }}
+                >
+                  <span style={{ fontSize: 9.5, color: "#aab0bb", fontWeight: 600 }}>
+                    {["S", "M", "T", "W", "T", "F", "S"][weekdayOf(d)]}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      lineHeight: 1.4,
+                      ...(isToday
+                        ? {
+                            color: "#fff",
+                            background: "var(--accent)",
+                            width: 20,
+                            height: 20,
+                            borderRadius: "50%",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }
+                        : { color: "#5b616e" }),
+                    }}
+                  >
+                    {new Date(d).getDate()}
+                  </span>
+                </div>
+              );
+            })}
         </div>
       </div>
 
@@ -219,10 +295,15 @@ export function GanttGrid({
                 key={m.id}
                 role={onMarkerClick ? "button" : undefined}
                 tabIndex={onMarkerClick ? 0 : undefined}
-                title={m.label}
+                title={m.locked ? `${m.label} — date is fixed; opens a dialog to reschedule` : m.label}
+                aria-label={m.locked ? `${m.label} — date is fixed; opens a dialog to reschedule` : m.label}
                 onClick={() => onMarkerClick?.(m.id)}
                 onKeyDown={(e) => {
-                  if (onMarkerClick && (e.key === "Enter" || e.key === " ")) onMarkerClick(m.id);
+                  if (!onMarkerClick) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onMarkerClick(m.id);
+                  }
                 }}
                 style={{
                   position: "absolute",
@@ -232,10 +313,15 @@ export function GanttGrid({
                   height: 11,
                   marginTop: -5.5,
                   marginLeft: -5.5,
-                  background: "var(--accent)",
+                  background: m.locked ? "var(--accent)" : "#fff",
+                  border: m.locked ? "none" : "2px solid var(--accent)",
+                  boxSizing: "border-box",
                   transform: "rotate(45deg)",
                   borderRadius: 3,
-                  cursor: onMarkerClick ? "pointer" : "default",
+                  // Not literally draggable (no onMarkerMove exists) — "grab"
+                  // is a rendering cue only, so a hollow (unlocked) marker
+                  // reads as "editable" against a locked one's solid fill.
+                  cursor: m.locked ? "pointer" : "grab",
                 }}
               />
             ))}

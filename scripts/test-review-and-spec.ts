@@ -1,4 +1,4 @@
-import { barRect, dateFromX, dayColumns, snapToDay } from "@/components/gantt/gantt-lib";
+import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
@@ -5848,4 +5848,32 @@ ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1
   ok(barRect({ startAt: OCT6, dueAt: OCT6 }, OCT6, OCT6 + 10 * DAY145).widthPct > 0, "#145 a zero-length bar still renders a visible sliver rather than vanishing");
   ok(snapToDay(OCT6 + 3 * DAY145 + 3600000) === OCT6 + 3 * DAY145, "#145 a drop snaps back to the start of its day");
   ok(dateFromX(50, 100, OCT6, OCT6 + 10 * DAY145) === OCT6 + 5 * DAY145, "#145 dateFromX maps a pixel offset to a date within the range");
+}
+
+/* ====== #145: packTracks (review fix — relocated from gantt-grid.tsx into
+   gantt-lib.ts since it's pure) ====== */
+{
+  const DAY145 = 86400000;
+  const OCT6 = Date.UTC(2026, 9, 6);
+  const none = packTracks([]);
+  ok(none.n === 1 && Object.keys(none.map).length === 0, "#145 packTracks: an empty list still reports at least 1 track and an empty map");
+  const disjoint = packTracks([
+    { s: OCT6, e: OCT6 + DAY145, k: "a" },
+    { s: OCT6 + 2 * DAY145, e: OCT6 + 3 * DAY145, k: "b" },
+  ]);
+  ok(disjoint.n === 1 && disjoint.map.a === 0 && disjoint.map.b === 0, "#145 packTracks: non-overlapping items share a single track");
+  const overlap = packTracks([
+    { s: OCT6, e: OCT6 + 5 * DAY145, k: "a" },
+    { s: OCT6 + 2 * DAY145, e: OCT6 + 6 * DAY145, k: "b" },
+  ]);
+  ok(overlap.n === 2 && overlap.map.a === 0 && overlap.map.b === 1, "#145 packTracks: two overlapping items land on distinct tracks");
+  const reuse = packTracks([
+    { s: OCT6, e: OCT6 + 2 * DAY145, k: "a" },
+    { s: OCT6 + 1 * DAY145, e: OCT6 + 5 * DAY145, k: "b" },
+    { s: OCT6 + 3 * DAY145, e: OCT6 + 4 * DAY145, k: "c" },
+  ]);
+  ok(
+    reuse.n === 2 && reuse.map.a === 0 && reuse.map.b === 1 && reuse.map.c === 0,
+    "#145 packTracks: a track is reused once its occupant has ended, instead of growing a third track"
+  );
 }
