@@ -11,6 +11,7 @@ import {
   isPublicDomain,
 } from "@/lib/gmail/config";
 import { resolveSender } from "@/lib/gmail/resolve";
+import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus } from "@/lib/gmail/peak-labels";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
   msOf as opMsOf,
@@ -2995,6 +2996,19 @@ ok(domainOf("Brenda.Gauchel@Lakefront.K12.MN.US") === "lakefront.k12.mn.us", "do
 ok(domainOf("no-at-sign") === "", "domainOf: no @ → empty");
 ok(isPublicDomain("gmail.com") && isPublicDomain("Yahoo.com") && isPublicDomain("icloud.com"), "isPublicDomain: webmail");
 ok(!isPublicDomain("lakefront.k12.mn.us"), "isPublicDomain: district is claimable");
+
+/* ---- #96 §3 — Peak/* label vocabulary ---- */
+ok(JSON.stringify(parsePeakLabel("Peak/Customers/Lakefront ISD")) === JSON.stringify({ kind: "customer", name: "Lakefront ISD" }), "parse customer label");
+ok(parsePeakLabel("Peak/Status/Needs reply")?.kind === "status", "parse status label");
+ok(JSON.stringify(parsePeakLabel("Peak/Assign/Nic")) === JSON.stringify({ kind: "assign", firstName: "Nic" }), "parse assign label");
+ok(parsePeakLabel("Peak/New lead")?.kind === "newLead", "parse new-lead label");
+ok(JSON.stringify(parsePeakLabel("Peak/Projects/P-3001")) === JSON.stringify({ kind: "work", type: "project", id: "P-3001" }), "parse project label");
+ok(parsePeakLabel("Follow up") === null && parsePeakLabel("Peak/Nonsense/x") === null, "non-Peak / unknown → null");
+ok(labelForStatus("waiting_us") === "Peak/Status/Needs reply" && labelForStatus("replied") === null, "status → label");
+const wantPeakLabels = desiredPeakLabels({ customer: "Lakefront ISD", status: "waiting_them", assignedTo: "Nic Trapani", link: { type: "project", id: "P-3001" } });
+ok(wantPeakLabels.includes("Peak/Customers/Lakefront ISD") && wantPeakLabels.includes("Peak/Status/Waiting") && wantPeakLabels.includes("Peak/Assign/Nic") && wantPeakLabels.includes("Peak/Projects/P-3001") && wantPeakLabels.length === 4, "desired set");
+const peakLabelDiff = diffLabels(wantPeakLabels, ["INBOX", "Peak/Status/Needs reply", "Peak/Customers/Lakefront ISD", "Follow up"]);
+ok(peakLabelDiff.add.length === 3 && peakLabelDiff.remove.length === 1 && peakLabelDiff.remove[0] === "Peak/Status/Needs reply", "diff adds missing, removes only stale Peak/* labels");
 
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
