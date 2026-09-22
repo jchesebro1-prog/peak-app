@@ -36,6 +36,7 @@ import {
   type ApplyTemplateSchedule, type TaskTemplateLine,
 } from "@/lib/stores/task-templates";
 import { activeUsers } from "@/lib/users";
+import { parseAssignTarget } from "@/app/(app)/import/registry";
 import { softDeleteDoc } from "@/db/doc-store";
 import {
   msOf as opMsOf,
@@ -6625,3 +6626,18 @@ ok(
  * test was left out here rather than threaded into the file's existing
  * recordingsAsyncChecks()-then-chain (this file has no per-block async
  * runner, and a stray top-level await breaks the tsx/esbuild cjs build). */
+
+/* ====== #145 D169: task-template CSV ====== */
+const ttType145 = IMPORT_TYPES.find((t) => t.key === "task_templates");
+ok(!!ttType145, "#145 task_templates is a registered import type");
+ok(ttType145!.fields.map((f) => f.header).join(",") === "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %", "#145 the template CSV columns match the spec exactly");
+ok(ttType145!.fields.filter((f) => f.required).map((f) => f.key).join(",") === "set,task", "#145 only the set name and the task title are required");
+ok(ttType145!.fields.every((f) => f.hidden || typeof f.example === "string"), "#145 every visible column carries an example so the downloadable template is fillable");
+
+ok(parseAssignTarget("team", []).kind === "team", "#145 'team' parses to the everyone target");
+ok(parseAssignTarget("role:Estimator", []).kind === "role", "#145 'role:X' parses to a role target");
+const users145 = [{ id: "u1", name: "Jeff Chesebro" }];
+const person145 = parseAssignTarget("person:Jeff Chesebro", users145);
+ok(person145.kind === "person" && person145.userId === "u1", "#145 'person:Name' resolves to a user id");
+ok(parseAssignTarget("person:Nobody At All", users145).kind === "team", "#145 an unresolvable person falls back to team rather than minting a task nobody owns");
+ok(parseAssignTarget("", users145).kind === "team", "#145 a blank Assign To defaults to team");

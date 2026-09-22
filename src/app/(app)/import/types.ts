@@ -290,6 +290,27 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "monthRate", header: "Month Rate", label: "Month rate", kind: "number", aliases: ["monthrate", "month rate", "monthly"], example: "500" },
     ],
   },
+  {
+    key: "task_templates",
+    label: "Task templates",
+    mono: "TT",
+    color: "#3f6f8a",
+    blurb: "Reusable task-template lines — many rows make one set. Blank Discipline applies to every discipline; Start % and Length % position the task inside its phase's window.",
+    dedupeLabel: "template set name",
+    viewHref: "/task-templates",
+    viewLabel: "View in Task templates",
+    fields: [
+      { key: "set", header: "Template Set", label: "Template set", required: true, aliases: ["template set", "set", "template", "template name"], example: "Consulting — Full Design" },
+      { key: "appliesTo", header: "Applies To", label: "Applies to", aliases: ["applies to", "appliesto", "record", "record kind", "kind"], example: "consulting" },
+      { key: "phase", header: "Phase", label: "Phase", aliases: ["phase", "stage"], example: "Assessment" },
+      { key: "discipline", header: "Discipline", label: "Discipline", aliases: ["discipline", "trade", "scope"], example: "rigging" },
+      { key: "task", header: "Task", label: "Task", required: true, aliases: ["task", "title", "task title", "item"], example: "Field-verify grid heights and attachment points" },
+      { key: "section", header: "Section", label: "Section", aliases: ["section", "group"], example: "Assessment" },
+      { key: "assignTo", header: "Assign To", label: "Assign to", aliases: ["assign to", "assignto", "assignee", "owner"], example: "role:Estimator" },
+      { key: "startPct", header: "Start %", label: "Start %", aliases: ["start %", "start", "start pct", "start percent", "offset"], example: "0" },
+      { key: "lengthPct", header: "Length %", label: "Length %", aliases: ["length %", "length", "length pct", "duration", "duration %"], example: "20" },
+    ],
+  },
 ];
 
 const BY_KEY: Record<string, ImportTypeMeta> = {};
