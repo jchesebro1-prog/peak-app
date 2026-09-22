@@ -94,7 +94,7 @@ export async function vendorCompanyNamed(mfr): Promise<CompanyRow>;             
 import { PARTNER_TYPES, baseVenueKind } from "@/lib/identity/venue-defaults";
 import { VENDOR_COMPANY_TYPE, isVendorType } from "@/lib/identity/config";
 ```
-and after the `#14 priceBooks` block (the `}` on line 2979, before `/* ---- #95 — login honours a same-origin callbackUrl ---- */`):
+and after the `#14 priceBooks` block (PRE-FLIGHT CORRECTION: that block's closing `}` is line **3070**, not 2979 — 2979 is mid-statement inside it — and `#95` is at 3200 with ~130 lines of #132/#134 tests in between; insert after line 3070, locating it by content):
 
 ```ts
 /* ---- #122 §1 — a vendor is a company of the exact type; partners get no base venue ---- */
@@ -432,7 +432,7 @@ export async function vendorCompanyNamed(mfr: string): Promise<CompanyRow> {
 }
 ```
 
-- [ ] **Step 8: Regression test** — in `scripts/test-review-regressions.ts` add to the top imports (after line 23):
+- [ ] **Step 8: Regression test** — in `scripts/test-review-regressions.ts` add to the top imports (PRE-FLIGHT CORRECTION: insert after line **30**, the last import statement, immediately before `async function main()` at line 32 — line 23 is a bare identifier INSIDE the multi-line `import { … } from "@/lib/gmail/label-sync"` spanning 19-24, so inserting there is a syntax error):
 
 ```ts
 import { saveCompany } from "@/lib/identity/companies";
@@ -443,7 +443,7 @@ import {
   setContactRole, vendorForManufacturer,
 } from "@/lib/stores/vendors";
 ```
-and inside `main()`, immediately before `console.log("review regression checks passed");` (line 738):
+and inside `main()`, immediately before `console.log("review regression checks passed");` (PRE-FLIGHT CORRECTION: that call is at line **1051**, not 738 — 738 lands inside an unrelated #96 test block):
 
 ```ts
   // #122 — vendor profiles: CRUD, claim moves a manufacturer, vendors get no base venue
