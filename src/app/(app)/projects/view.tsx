@@ -1076,7 +1076,15 @@ function ProjectDetail({
       {/* tabs */}
       <div
         className="pm-rowscroll"
-        style={{ display: "flex", gap: 2, margin: "16px 20px 0", borderBottom: "1px solid #f0f1f4", overflowX: "auto" }}
+        style={{
+          display: "flex",
+          gap: 2,
+          margin: "16px 20px 0",
+          borderBottom: "1px solid #f0f1f4",
+          flexWrap: "nowrap",
+          overflowX: "auto",
+          WebkitOverflowScrolling: "touch",
+        }}
       >
         {tabDefs.map(([key, label, cnt]) => {
           const on = curTab === key;
@@ -1095,6 +1103,7 @@ function ProjectDetail({
                 textDecoration: "none",
                 borderBottom: "2px solid " + (on ? "var(--accent)" : "transparent"),
                 color: on ? "#16181d" : "#9aa0ab",
+                flexShrink: 0,
               }}
             >
               {label}

@@ -154,7 +154,7 @@ export default function Nav({
           {narrow && (
             <button
               aria-label="Menu"
-              onClick={() => setDrawerOpen(true)}
+              onClick={() => setDrawerOpen((open) => !open)}
               style={{
                 width: 42,
                 height: 42,
@@ -209,7 +209,7 @@ export default function Nav({
               ) : (
                 <div className="pk-mark">{markLetter}</div>
               )}
-              <div className="pk-company">{companyName}</div>
+              {!narrow && <div className="pk-company">{companyName}</div>}
             </Link>
             <span className="pk-beta">BETA</span>
           </div>
@@ -668,6 +668,7 @@ export default function Nav({
                 alignItems: "center",
                 gap: 11,
                 padding: "16px 16px 14px",
+                paddingTop: "calc(16px + env(safe-area-inset-top))",
                 borderBottom: "1px solid #23262d",
               }}
             >
@@ -715,7 +716,17 @@ export default function Nav({
 
             <SyncChip variant="drawer" />
 
-            <nav style={{ flex: 1, overflowY: "auto", padding: "0 10px" }}>
+            <nav
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
+                WebkitOverflowScrolling: "touch",
+                overscrollBehavior: "contain",
+                touchAction: "pan-y",
+                padding: "0 10px",
+              }}
+            >
               {NAV.map((entry) =>
                 entry.kind === "link" ? (
                   <DrawerLink

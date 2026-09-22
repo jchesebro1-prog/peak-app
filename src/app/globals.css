@@ -83,6 +83,44 @@ body {
   .pk-content { padding: 16px 14px 56px; }
 }
 
+/* ============ Reports — Sales tab main grid ============ */
+.pk-reports-sales-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 700px) {
+  .pk-reports-sales-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============ Design hub — Active consulting / Recent designs ============ */
+.pk-design-hub-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+@media (max-width: 700px) {
+  .pk-design-hub-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============ Lineset Builder — input rail / schedule ============ */
+.pk-lineset-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 700px) {
+  .pk-lineset-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ============ Top nav bar ============ */
 .pk-nav {
   flex-shrink: 0;
@@ -511,6 +549,9 @@ body {
   border: 1px solid var(--card-border);
   border-radius: 13px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.pk-home-tabs-scroll::-webkit-scrollbar {
+  display: none;
 }
 .pk-page-title {
   font-size: 20px;

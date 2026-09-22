@@ -83,6 +83,7 @@ export default async function AccountPage() {
           marginBottom: 20,
           display: "flex",
           alignItems: "center",
+          flexWrap: "wrap",
           gap: 14,
         }}
       >
@@ -103,7 +104,7 @@ export default async function AccountPage() {
         >
           {user.initials}
         </span>
-        <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ minWidth: 180, flex: 1 }}>
           <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.25 }}>
             {user.name}
           </div>

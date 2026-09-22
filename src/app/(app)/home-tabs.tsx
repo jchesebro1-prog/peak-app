@@ -38,8 +38,11 @@ export default function HomeTabs({
       style={{ maxWidth, padding: "24px 28px 64px", ...style }}
     >
       <div
+        className="pk-home-tabs-scroll"
         style={{
-          display: "flex", gap: 6, flexWrap: "wrap",
+          display: "flex", gap: 6, flexWrap: "nowrap",
+          overflowX: "auto", WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "none", msOverflowStyle: "none",
           borderBottom: "1px solid #eef0f3",
           paddingBottom: 10, marginBottom: 18,
         }}
@@ -52,7 +55,7 @@ export default function HomeTabs({
               href={t.href}
               style={{
                 textDecoration: "none", fontSize: 12.5, fontWeight: 600,
-                padding: "7px 12px", borderRadius: 8,
+                padding: "7px 12px", borderRadius: 8, flexShrink: 0,
                 color: on ? "color-mix(in srgb, var(--accent) 70%, #000)" : "#8c919c",
                 background: on ? "color-mix(in srgb, var(--accent) 10%, #fff)" : "transparent",
                 border: on
