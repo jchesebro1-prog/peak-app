@@ -74,11 +74,17 @@ export function nextPricedAt(
   return next.pricedAt ?? existing.pricedAt;
 }
 
-/** `<input type="date">` value → epoch ms at local midnight; blank/invalid → `now`. */
+/** `<input type="date">` value → epoch ms at local NOON; blank/invalid → `now`.
+ *  Noon, not midnight: the server actions parse this on Vercel (UTC), and a
+ *  UTC midnight renders as the previous calendar day in every US browser
+ *  (the banner input/pill, both builders' "prices as of") — and hydrates
+ *  mismatched. Noon stays on the same calendar day in every zone within
+ *  ±11 h; the same date-only convention the task due dates use
+ *  (`due + "T12:00:00"` in projects/estimator/designs actions). */
 export function parseEffectiveDate(input: string | null | undefined, now: number): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((input || "").trim());
   if (!m) return now;
-  const t = new Date(+m[1], +m[2] - 1, +m[3]).getTime();
+  const t = new Date(+m[1], +m[2] - 1, +m[3], 12, 0, 0, 0).getTime();
   return Number.isFinite(t) ? t : now;
 }
 

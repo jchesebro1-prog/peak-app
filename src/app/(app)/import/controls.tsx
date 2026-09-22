@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { checkSize, type GroupCheck } from "@/lib/catalog-import-guard";
+import { useClientToday } from "@/lib/use-client-today";
 import { autoMap, parseCsv, prepareRows, type FieldDef } from "./parse";
 import { catalogGroups } from "./catalog-groups";
 import { checkCatalogImportAction, importRecords } from "./actions";
@@ -44,7 +45,10 @@ export function PastePreview({
   fields: FieldDef[];
   dedupeLabel: string;
   accent: string;
-  /** Local YYYY-MM-DD from the server — the catalog type's effective-date default. */
+  /** Local YYYY-MM-DD from the server — the catalog type's effective-date
+   *  default during SSR/hydration; after mount the input shows the BROWSER's
+   *  day (useClientToday — a UTC server's "today" runs a day ahead of a US
+   *  user's evening). */
   today: string;
 }) {
   const [text, setText] = useState("");
@@ -53,6 +57,11 @@ export function PastePreview({
   const [uploadErr, setUploadErr] = useState("");
   const [uploadNote, setUploadNote] = useState("");
   const [guard, setGuard] = useState<GroupCheck[] | null>(null);
+  // #133 — "" = untouched → today (the browser's, once mounted); a cleared
+  // input falls back to today too.
+  const clientToday = useClientToday(today);
+  const [pickedDate, setPickedDate] = useState("");
+  const effectiveDate = pickedDate || clientToday;
 
   const isCatalog = typeKey === "catalog";
   const trimmed = text.trim();
@@ -303,7 +312,8 @@ export function PastePreview({
             <input
               type="date"
               name="effectiveDate"
-              defaultValue={today}
+              value={effectiveDate}
+              onChange={(e) => setPickedDate(e.target.value)}
               style={{
                 border: "1px solid #e4e7ec",
                 borderRadius: 9,

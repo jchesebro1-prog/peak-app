@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { checkSize } from "@/lib/catalog-import-guard";
+import { useClientToday } from "@/lib/use-client-today";
 import { parseCatalog } from "./parse";
 import { importCatalog, removePartDatasheetAction, uploadPartDatasheetAction } from "./actions";
 
@@ -153,15 +154,21 @@ export function CatalogImportPanel({
 }: {
   manufacturers: string[];
   accent: string;
-  /** Local YYYY-MM-DD from the server — the effective-date default; passed
-   *  in so the server render and the client agree (no hydration drift). */
+  /** Local YYYY-MM-DD from the server — the effective-date default's SSR
+   *  value, so the server render and hydration agree; after mount the input
+   *  shows the BROWSER's day instead (useClientToday — a UTC server's
+   *  "today" runs a day ahead of a US user's evening). */
   today: string;
 }) {
   const [method, setMethod] = useState<"upload" | "api" | "paste">("upload");
   const [mfrSel, setMfrSel] = useState(manufacturers[0] || "");
   const [adding, setAdding] = useState(manufacturers.length === 0);
   const [newMfr, setNewMfr] = useState("");
-  const [effectiveDate, setEffectiveDate] = useState(today);
+  // "" = untouched → today (the browser's, once mounted); a cleared input
+  // falls back to today too, as before.
+  const clientToday = useClientToday(today);
+  const [pickedDate, setPickedDate] = useState("");
+  const effectiveDate = pickedDate || clientToday;
   const [text, setText] = useState("");
   const [fileName, setFileName] = useState("");
   const [fileError, setFileError] = useState<string | null>(null);
@@ -325,7 +332,7 @@ export function CatalogImportPanel({
               <input
                 type="date"
                 value={effectiveDate}
-                onChange={(e) => setEffectiveDate(e.target.value || today)}
+                onChange={(e) => setPickedDate(e.target.value)}
                 style={dateInput}
               />
               <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 4 }}>

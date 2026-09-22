@@ -2995,7 +2995,11 @@ import {
   );
 
   ok(isoDateOf(new Date(2026, 0, 15).getTime()) === "2026-01-15", "#133 isoDateOf renders a local YYYY-MM-DD");
-  ok(parseEffectiveDate("2026-01-15", now) === new Date(2026, 0, 15).getTime(), "#133 parseEffectiveDate: a date input parses to local midnight");
+  ok(
+    parseEffectiveDate("2026-01-15", now) === new Date(2026, 0, 15, 12, 0, 0, 0).getTime(),
+    "#133 parseEffectiveDate: a date input parses to local NOON, not midnight (a UTC server's midnight renders a day early in US browsers)"
+  );
+  ok(isoDateOf(parseEffectiveDate("2026-01-15", now)) === "2026-01-15", "#133 parseEffectiveDate → isoDateOf round-trips the calendar day");
   ok(parseEffectiveDate("", now) === now && parseEffectiveDate("nope", now) === now, "#133 parseEffectiveDate: blank/invalid → the fallback");
 
   const fresh = priceBooks([{ mfr: "Acme", pricedAt: now - 3 * DAY }, { mfr: "Acme", pricedAt: now - 5 * DAY }], {}, { now });
