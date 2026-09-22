@@ -56,6 +56,14 @@ function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
 }
 
+/** #137 — a stored Website is usually bare ("riversideplayhouse.org"), which
+ *  a browser would follow as a relative path. Give it a scheme; leave one it
+ *  already has alone. */
+function websiteHref(site: string): string {
+  const s = site.trim();
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`;
+}
+
 const card: CSSProperties = {
   background: "#fff",
   border: "1px solid #ececf0",
@@ -272,6 +280,26 @@ export default async function CustomerDetailPage({
               ))}
             </div>
             <div style={{ fontSize: 13, color: "#8c919c", marginTop: 4 }}>{custLocation(cust)}</div>
+            {/* #137 — the company's main line + website: the customers
+                import writes both, so the record has to show them (editing
+                them is a follow-up). Either one is omitted when blank. */}
+            {(cust.phone || cust.website) && (
+              <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginTop: 5 }}>
+                {cust.phone && (
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#5b616e" }}>{cust.phone}</span>
+                )}
+                {cust.website && (
+                  <a
+                    href={websiteHref(cust.website)}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+                  >
+                    {cust.website}
+                  </a>
+                )}
+              </div>
+            )}
             {ownerIdent && (
               <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 9 }}>
                 <Avatar name={owner} initials={ownerIdent.initials} color={ownerIdent.color} size={22} />

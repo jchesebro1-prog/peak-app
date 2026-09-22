@@ -9,11 +9,13 @@ import type { AddressHitVM, ContactInput, LocationInput } from "./types";
  *
  * NOTE on the ported store shape: the canonical CustomerDoc the store persists
  * is the reduced directory record — { id, name, type, location, locations[],
- * contacts[] }. The prototype's `since`, `owner`, `notes`, `mono`, per-venue
- * street/zip/stage dims and inline `quotes[]` are NOT persisted (normalizeRecord
- * drops them). So: `mono` is derived from the name, the account `owner` is
- * rolled up from the customer's linked quotes/projects, and activity (quotes,
- * projects, surveys) is cross-read live from those stores by customerId/name.
+ * contacts[] }. A venue's street address, zip and free-text category DO
+ * persist (D76 for the street; #137 added `zip` + `kind`); the prototype's
+ * `since`, `owner`, `notes`, `mono`, per-venue stage dims and inline
+ * `quotes[]` are NOT (normalizeRecord drops them). So: `mono` is derived from
+ * the name, the account `owner` is rolled up from the customer's linked
+ * quotes/projects, and activity (quotes, projects, surveys) is cross-read
+ * live from those stores by customerId/name.
  */
 
 export const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";

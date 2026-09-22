@@ -6236,14 +6236,17 @@ optional `Customer ID`; unmatched rows are reported before commit (auto-create v
 call, asked 2026-09-21); zip plumbed through the store; matching exports.
 
 **Shipped:** three cards on the Import hub. **Customers** — `Customer Name*, Category, Address,
-City, State, Zip, Phone, Website, Notes`; Category → `type`, the address merges into the primary
+City, State, Zip, Phone, Website`; Category → `type`, the address merges into the primary
 venue (non-destructively — the old writer replaced every venue on "Update existing"), Zip also on
 the company row, Phone/Website on the company row; the old `Contact Name / Email / Venue` columns
 still import as hidden aliases. **Contacts** — `Customer* | Customer ID, Name*, Email, Phone,
-Mobile, Title, Role, Primary, Notes`, matched by customer + email-or-name, `Primary=yes` demotes the
-others, re-importing the same file is a no-op. **Venues** — `Customer* | Customer ID, Venue Name*,
-Address, City, State, Zip, Category, Notes`, matched by customer + venue name; the first imported
-venue fills the customer's unnamed base venue. Both link-back types match `Customer ID` → normalized
+Mobile, Title, Role, Primary`, matched by customer + email-or-name, `Primary=yes` demotes the
+others, re-importing the same file is a no-op. **Venues** — `Customer* | Customer ID, Venue Name,
+Address, City, State, Zip, Category`, matched by customer + venue name (`Venue Name` is required
+unless the row carries an address); the first imported venue fills the customer's unnamed base
+venue — but only a true placeholder: a venues row never claims an unnamed venue that already
+carries an address, since that is the customer's mailing address. A `Notes` column on any of the
+three is accepted and ignored: no store field holds it. Both link-back types match `Customer ID` → normalized
 name → **create the customer** (Jeff's call), once per name per file; the preview shows a Customer
 column (linked / will create) and "Will create N new customers: …" before commit, and the result
 reports rows linked vs customers created. Exports for all three (customers gains Category + Zip;
