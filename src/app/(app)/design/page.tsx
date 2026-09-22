@@ -86,7 +86,7 @@ export default async function DesignOverviewPage({
         Paid consulting and budgetary designs — the same job at different stages.
       </p>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 18 }}>
+      <div className="pk-design-hub-grid">
         <section className="pk-card" style={card}>
           <div style={head}>
             <strong style={{ fontSize: 14 }}>Active consulting</strong>

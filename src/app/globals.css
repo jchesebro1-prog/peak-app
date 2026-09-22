@@ -96,6 +96,18 @@ body {
   }
 }
 
+/* ============ Design hub — Active consulting / Recent designs ============ */
+.pk-design-hub-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+@media (max-width: 700px) {
+  .pk-design-hub-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ============ Top nav bar ============ */
 .pk-nav {
   flex-shrink: 0;
