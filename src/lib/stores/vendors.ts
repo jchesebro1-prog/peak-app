@@ -130,6 +130,15 @@ export async function vendorCompanies(): Promise<CompanyRow[]> {
   return (await allCompanies()).filter((c) => isVendorType(c.type));
 }
 
+/** Is `id` a LIVE company of the vendor type? The scope check every
+ *  vendor-record write runs first (`vendorOr()` in the vendors actions): a
+ *  customer id must never reach the vendor_profiles collection, and a
+ *  soft-deleted vendor is not writable either. */
+export async function isVendorCompany(id: string): Promise<boolean> {
+  const co = await getCompany(id);
+  return !!co && isVendorType(co.type);
+}
+
 /** Which vendor owns a manufacturer (by mfrKey), or null. */
 export async function vendorForManufacturer(mfr: string): Promise<string | null> {
   const key = mfrKey(mfr);

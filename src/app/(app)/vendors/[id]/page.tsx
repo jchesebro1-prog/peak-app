@@ -153,7 +153,13 @@ export default async function VendorDetailPage({
         </div>
 
         {tab === "overview" && (
+          // The tab seeds its inputs from these props once (useState), so a
+          // refresh after someone else's edit would otherwise leave the stale
+          // values on screen — and the next Save would write them back over
+          // the newer ones. Keying on the profile's updatedAt remounts it with
+          // the fresh values instead (#122 M4).
           <OverviewTab
+            key={row.profile.updatedAt}
             vendorId={row.id}
             discounts={row.profile.discounts}
             registration={row.profile.registration}

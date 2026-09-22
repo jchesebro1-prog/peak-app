@@ -32,11 +32,11 @@ import { getCompany, saveCompany } from "@/lib/identity/companies";
 import { sitesForCompany } from "@/lib/identity/sites";
 import { VENDOR_COMPANY_TYPE } from "@/lib/identity/config";
 import {
-  claimManufacturer, createVendorCompany, getVendorProfile, logPriceList, saveVendorProfile,
-  setContactRole, vendorCompanyNamed, vendorForManufacturer,
+  claimManufacturer, createVendorCompany, getVendorProfile, isVendorCompany, logPriceList,
+  saveVendorProfile, setContactRole, vendorCompanyNamed, vendorForManufacturer,
 } from "@/lib/stores/vendors";
 import { setSettings } from "@/lib/settings";
-import { allAssignments, setAssignmentDone } from "@/lib/stores/assignments";
+import { allAssignments, createAssignment, setAssignmentDone } from "@/lib/stores/assignments";
 import { ensureVendorAssignments, loadVendors } from "@/lib/vendor-tasks";
 import { loadQueue } from "@/lib/queue";
 import {
@@ -1263,6 +1263,42 @@ async function main() {
       (await getVendorProfile(co.id))?.manufacturers.includes("T122 I1 Mfr"),
       "#122 I1 …while the deleted vendor's own profile keeps the claim (C1: nothing blanks it)"
     );
+  }
+
+  // #122 T1 — the NEGATIVE half of the queue's company-link rule. The
+  // /vendors/<id> deep link is gated on the vendor task's `source` prefix
+  // because a "company" link from anywhere else may be a CUSTOMER, and that
+  // route notFound()s on one.
+  {
+    const plain = await createAssignment({
+      title: "Ring the T122 T1 customer back",
+      assignee: "Catalog Owner T122",
+      createdBy: "Tester",
+      link: { kind: "company", id: "c-t122-t1-customer", label: "T122 T1 Customer" },
+      source: "iMessage from Jena, 2026-09-21",
+    });
+    const blank = await createAssignment({
+      title: "Company task with no source at all",
+      assignee: "Catalog Owner T122",
+      createdBy: "Tester",
+      link: { kind: "company", id: "c-t122-t1-customer", label: "T122 T1 Customer" },
+    });
+    const queue = await loadQueue("Catalog Owner T122");
+    const hrefOf = (id: string) => queue.find((i) => i.key === `assignment:${id}`)?.href;
+    assert.equal(hrefOf(plain.id), "/queue", "#122 T1 a company link whose source isn't a vendor task stays on /queue");
+    assert.equal(hrefOf(blank.id), "/queue", "#122 T1 …and so does one with no source at all");
+  }
+
+  // #122 T1 — the action-layer scope guard (`vendorOr()` in vendors/actions.ts
+  // is this predicate turned into "Vendor not found."): only a LIVE company of
+  // the vendor type can be written to, so no customer record can ever reach
+  // the vendor_profiles collection.
+  {
+    await upsertCustomer({ id: "c-t122-t1-customer", name: "T122 T1 Customer", type: "Education", locations: [], contacts: [] });
+    assert.equal(await isVendorCompany("c-t122-t1-customer"), false, "#122 T1 a customer id is rejected by the vendor scope guard");
+    assert.equal(await isVendorCompany("v-t122b"), true, "#122 T1 …a vendor company passes it");
+    assert.equal(await isVendorCompany("v-deletedvendort122"), false, "#122 T1 …a soft-deleted vendor is not writable either");
+    assert.equal(await isVendorCompany("v-t122-no-such-id"), false, "#122 T1 …nor is an id that doesn't exist");
   }
 
   // #137 T1 — zip / kind / phone / website / mobile plumbing through the customer seam

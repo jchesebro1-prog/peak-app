@@ -17,6 +17,7 @@ import { getContact } from "@/lib/identity/contacts";
 import {
   claimManufacturer,
   createVendorCompany,
+  isVendorCompany,
   logPriceList,
   releaseManufacturer,
   saveVendorProfile,
@@ -92,11 +93,11 @@ const TEXT_MAX = 2000;
 const clip = (v: unknown) => (typeof v === "string" ? v.trim().slice(0, TEXT_MAX) : "");
 
 /** Every vendor-record write is scoped to a company of the vendor type — a
- *  customer id must never reach the vendor profile collection. */
+ *  customer id must never reach the vendor profile collection. The predicate
+ *  lives in the store (`isVendorCompany`) so the harness can exercise it
+ *  without a session; this stays the one place that turns it into an error. */
 async function vendorOr(id: string): Promise<{ ok: false; error: string } | null> {
-  const co = await getCompany(id);
-  if (!co || !isVendorType(co.type)) return { ok: false, error: "Vendor not found." };
-  return null;
+  return (await isVendorCompany(id)) ? null : { ok: false, error: "Vendor not found." };
 }
 
 /** Overview tab — discounts + project registration (spec §3). */
