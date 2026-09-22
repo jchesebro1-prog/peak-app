@@ -11,6 +11,7 @@ import type {
 } from "@/lib/stores/engagements";
 import type { NoteRecord } from "@/lib/stores/notes";
 import type { TaskRecord } from "@/lib/stores/tasks";
+import type { PhaseWindow } from "@/lib/consulting-schedule";
 import type { ConsultingData, VisitLite } from "./data";
 import { isOpenEngagement } from "@/lib/consulting-review";
 import {
@@ -177,6 +178,7 @@ export function ConsultingView({
   tasks,
   people,
   templateSets,
+  phaseBands,
 }: {
   data: ConsultingData;
   sel: ConsultingEngagement | null;
@@ -197,6 +199,12 @@ export function ConsultingView({
    *  tab's unscheduled-engagement template picker. Fetched only for
    *  tab === "schedule", same precedent as tasks/people above. */
   templateSets?: TemplateSetLite[];
+  /** #145 spec ruling — each phase's actual proportional window
+   *  (phaseWindows), computed server-side (phaseWeightsFor/getSettings
+   *  live in a DB-touching module) so the Schedule tab's Gantt can render
+   *  a real band per phase instead of just a text group header. Fetched
+   *  only for tab === "schedule". */
+  phaseBands?: PhaseWindow[];
 }) {
   if (!sel) return <ConsultingList data={data} />;
   return (
@@ -209,6 +217,7 @@ export function ConsultingView({
       tasks={tasks || []}
       people={people || []}
       templateSets={templateSets || []}
+      phaseBands={phaseBands || []}
     />
   );
 }
@@ -363,6 +372,7 @@ function EngagementDetail({
   tasks,
   people,
   templateSets,
+  phaseBands,
 }: {
   data: ConsultingData;
   eng: ConsultingEngagement;
@@ -372,6 +382,7 @@ function EngagementDetail({
   tasks: TaskRecord[];
   people: ActivityPerson[];
   templateSets: TemplateSetLite[];
+  phaseBands: PhaseWindow[];
 }) {
   const router = useRouter();
   const q = eng.quoteId ? data.quotesById[eng.quoteId] : undefined;
@@ -446,7 +457,7 @@ function EngagementDetail({
       </div>
 
       {tab === "overview" && <OverviewTab data={data} eng={eng} />}
-      {tab === "schedule" && <ScheduleTab eng={eng} tasks={tasks} templateSets={templateSets} />}
+      {tab === "schedule" && <ScheduleTab eng={eng} tasks={tasks} templateSets={templateSets} phaseBands={phaseBands} />}
       {tab === "phases" && <PhasesTab data={data} eng={eng} />}
       {tab === "milestones" && <MilestonesTab eng={eng} quoteValue={q?.value || 0} />}
       {tab === "meetings" && <MeetingsTab eng={eng} />}

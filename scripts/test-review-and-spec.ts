@@ -1,6 +1,6 @@
 import {
   generateSchedule, overrunsEnd, phaseWindows, placeTask, selectLines, shiftForMilestone, validateSpan,
-  withEngagementPhaseIds, defaultMilestonePhaseId, phaseIdsByName,
+  withEngagementPhaseIds, defaultMilestonePhaseId, phaseIdsByName, startOfLocalDay,
   type PhaseWeight, type ScheduleLine,
 } from "@/lib/consulting-schedule";
 import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
@@ -6214,6 +6214,20 @@ ok(pw145[0].name === "Assessment" && typeof pw145[0].phaseId === "string" && pw1
 ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exported for the consulting side of the collection");
 /* ====== #145: Gantt geometry ====== */
 {
+  // #145 review fix (round 2): pinned for this whole block. Under
+  // TZ=UTC, "local day" and "UTC day" are the SAME day by definition —
+  // no assertion phrased in terms of that distinction can discriminate
+  // the bug there, because there is no bug to find (offset 0 has nothing
+  // to drift across). Pinning to a real, DST-observing zone (this app's
+  // actual deployment, per AGENTS.md) is what keeps these assertions
+  // meaningful on a CI box that happens to run in UTC, rather than
+  // silently passing against a reintroduced UTC-epoch implementation.
+  // Node re-resolves `process.env.TZ` on the next Date call (verified on
+  // the Node version this repo runs), so this takes effect immediately
+  // and the `finally` below undoes it before any later test observes it.
+  const savedTZ145 = process.env.TZ;
+  process.env.TZ = "America/Chicago";
+  try {
   const DAY145 = 86400000;
   // LOCAL midnight, October 6 2026 — not Date.UTC(...). #145 review fix:
   // snapToDay/dateFromX now floor to the LOCAL calendar day (see gantt-lib.ts's
@@ -6266,6 +6280,28 @@ ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exporte
     "#145 review fix: …but due on the NEXT local day is an overrun, even by only half an hour past midnight"
   );
 
+  // #145 review fix (round 3): startOfLocalDay, now exported so the
+  // milestone-reschedule dialog (schedule-tab.tsx) and moveMilestoneAction
+  // can compare a milestone's stored targetDate (an arbitrary
+  // phase-window-end instant — generateSchedule dates it to a
+  // phaseWindow's `endAt`, never noon-anchored) against a freshly
+  // re-picked, noon-anchored date at DAY granularity instead of by raw
+  // instant. Without this, confirming the dialog with NO real change
+  // (the ordinary case) produced a non-zero delta whenever the stored
+  // instant fell after noon — a live sweep of realistic phase-window
+  // ends found this on 66% of them. The reviewer's own worked case:
+  const phaseWindowEnd145 = new Date(2027, 1, 23, 21, 17, 0).getTime(); // Tue Feb 23 2027 21:17
+  const reconfirmedNoon145 = new Date(2027, 1, 23, 12, 0, 0).getTime(); // same local day, re-picked
+  ok(
+    startOfLocalDay(phaseWindowEnd145) === startOfLocalDay(reconfirmedNoon145),
+    "#145 review fix: an arbitrary phase-window-end instant and a same-day noon-anchored re-pick floor to the identical local day — a no-op confirm must compute a zero delta, not a false 'moved' note"
+  );
+  const nextDayNoon145 = new Date(2027, 1, 24, 12, 0, 0).getTime();
+  ok(
+    startOfLocalDay(phaseWindowEnd145) !== startOfLocalDay(nextDayNoon145),
+    "#145 review fix: …but a genuinely different local day still floors differently, so a real reschedule still registers"
+  );
+
   // barRect: a bar ENTIRELY past the visible end used to collapse to the
   // same ~0.6%-wide sliver as a same-day zero-length bar, sitting right at
   // the container's edge — easy to miss completely. It now anchors to the
@@ -6297,10 +6333,38 @@ ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exporte
     spanningDst145.length === 15,
     "#145 review fix: dayColumns across a DST transition still returns exactly 15 days (Oct 25 – Nov 8 inclusive), not one short/long from the fall-back hour"
   );
+  // Note: the LENGTH assertion above does not by itself discriminate the
+  // bug on FALL-BACK — a raw-ms walk also happens to total 15 here (it
+  // drifts the LAST element's clock time by the fall-back hour without
+  // dropping/duplicating a day). The next assertion is the one that
+  // actually catches it.
   ok(
     spanningDst145[spanningDst145.length - 1] === afterDst145,
     "#145 review fix: …and the LAST column lands exactly on the real local midnight of the end date, not an hour off"
   );
+
+  // …and the OTHER direction: Mar 14, 2027 is when US clocks "spring
+  // forward" (a 23-hour local day). Mar 7 and Mar 21, 2027 are the
+  // Sundays a week either side of it. Unlike fall-back, a raw-ms walk
+  // breaks the COUNT itself here (it comes up one day short — 14 instead
+  // of 15 — because the 23-hour transition day makes the walk's running
+  // total fall behind by an hour, and by the far end that hour is enough
+  // to make the loop's `<=` cutoff exclude the real last day). Nothing
+  // covered this direction before; only the fall-back case was tested.
+  const beforeSpring145 = new Date(2027, 2, 7).getTime();
+  const afterSpring145 = new Date(2027, 2, 21).getTime();
+  const spanningSpring145 = dayColumns(beforeSpring145, afterSpring145);
+  ok(
+    spanningSpring145.length === 15,
+    "#145 review fix: dayColumns across the SPRING-FORWARD transition also returns exactly 15 days (Mar 7 – Mar 21 inclusive), not one short from the lost hour"
+  );
+  ok(
+    spanningSpring145[spanningSpring145.length - 1] === afterSpring145,
+    "#145 review fix: …and the LAST column lands exactly on the real local midnight of the end date"
+  );
+  } finally {
+    process.env.TZ = savedTZ145;
+  }
 }
 
 /* ====== #145: packTracks (review fix — relocated from gantt-grid.tsx into

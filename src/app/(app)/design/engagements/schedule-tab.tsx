@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ConsultingEngagement, EngagementMilestone } from "@/lib/stores/engagements";
 import type { TaskRecord, TaskStatus } from "@/lib/stores/tasks";
-import { overrunsEnd, shiftForMilestone } from "@/lib/consulting-schedule";
+import { overrunsEnd, shiftForMilestone, startOfLocalDay, type PhaseWindow } from "@/lib/consulting-schedule";
+import { toDateInput as epochToDateInput } from "@/app/(app)/vendors/dates";
 import { GanttGrid, type GanttMarker, type GanttRow } from "@/components/gantt/gantt-grid";
 import { Card, EmptyState, Pill } from "@/components/ui";
 import {
@@ -78,28 +79,9 @@ function dateToEpoch(v: string): number {
   return Number.isFinite(t) ? t : 0;
 }
 
-function epochToDateInput(ms: number): string {
-  if (!ms) return "";
-  return new Date(ms).toISOString().slice(0, 10);
-}
-
 function fmtShort(ms: number): string {
   if (!ms) return "—";
   return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
-
-/**
- * Module-scope, non-component helper. GanttGrid takes `now` as a prop
- * rather than reading the clock itself specifically so it stays pure
- * (react-hooks/purity, a warning-as-gate in this repo's eslint config);
- * this wrapper is what lets THIS component supply that value without
- * tripping the same rule — it pattern-matches a literal `Date.now()` call
- * site lexically inside a component/hook body, and a plain (non-component-
- * named) function defined at module scope is invisible to that check even
- * though it ultimately reads the same clock.
- */
-function nowMs(): number {
-  return Date.now();
 }
 
 const STATUS_TONE: Record<TaskStatus, string> = {
@@ -115,10 +97,14 @@ export function ScheduleTab({
   eng,
   tasks,
   templateSets,
+  phaseBands,
 }: {
   eng: ConsultingEngagement;
   tasks: TaskRecord[];
   templateSets: TemplateSetLite[];
+  /** #145 spec ruling — each phase's actual proportional window, for the
+   *  Gantt's phase-band rows (see ScheduledGantt). */
+  phaseBands: PhaseWindow[];
 }) {
   const startAt = eng.startAt || 0;
   const endAt = eng.endAt || 0;
@@ -127,7 +113,7 @@ export function ScheduleTab({
   if (!scheduled) {
     return <UnscheduledSetup engagementId={eng.id} templateSets={templateSets} />;
   }
-  return <ScheduledGantt eng={eng} startAt={startAt} endAt={endAt} tasks={tasks} />;
+  return <ScheduledGantt eng={eng} startAt={startAt} endAt={endAt} tasks={tasks} phaseBands={phaseBands} />;
 }
 
 /* ------------------------- unscheduled: setup ------------------------- */
@@ -280,11 +266,13 @@ function ScheduledGantt({
   startAt,
   endAt,
   tasks,
+  phaseBands,
 }: {
   eng: ConsultingEngagement;
   startAt: number;
   endAt: number;
   tasks: TaskRecord[];
+  phaseBands: PhaseWindow[];
 }) {
   const router = useRouter();
   const [groupBy, setGroupBy] = useState<GroupBy>("phase");
@@ -295,6 +283,20 @@ function ScheduledGantt({
   const [endDate, setEndDate] = useState(epochToDateInput(endAt));
   const [spanErr, setSpanErr] = useState<string | null>(null);
   const [spanBusy, setSpanBusy] = useState(false);
+
+  // #145 review fix: `now` starts undefined (hides the Gantt's today line)
+  // so the FIRST client render matches whatever the server rendered —
+  // reading Date.now() directly here would differ between the server's
+  // render and hydration's, a genuine (if sub-pixel) hydration mismatch on
+  // the today-line's `left:` position. Deferred one tick past mount
+  // instead of set synchronously inside the effect body, which this
+  // repo's react-hooks/set-state-in-effect gate (an error, not a warning)
+  // refuses outright.
+  const [now, setNow] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    const id = setTimeout(() => setNow(Date.now()), 0);
+    return () => clearTimeout(id);
+  }, []);
 
   const phaseNameById = useMemo(() => new Map(eng.phases.map((p) => [p.id, p.name])), [eng.phases]);
 
@@ -315,7 +317,7 @@ function ScheduledGantt({
       if (a.group !== b.group) return a.group < b.group ? -1 : 1;
       return (a.t.startAt || 0) - (b.t.startAt || 0);
     });
-    return withGroup.map(({ t, group }) => ({
+    const taskRows: GanttRow[] = withGroup.map(({ t, group }) => ({
       id: t.id,
       label: t.title,
       group,
@@ -331,7 +333,45 @@ function ScheduledGantt({
         },
       ],
     }));
-  }, [scheduledTasks, groupBy, phaseNameById, endAt]);
+
+    // #145 spec ruling: render each phase's ACTUAL proportional window as
+    // a non-draggable band row — GanttGrid's own text group header names
+    // the phase, but can't show WHEN it runs; being unable to see that,
+    // say, Design Development spans Nov 27–Jan 13 defeats the point of a
+    // feature whose entire model is proportional phase windows. Phase-
+    // grouping only — a window doesn't belong to one assignee, so it has
+    // nowhere sensible to sit when grouped that way.
+    if (groupBy !== "phase" || phaseBands.length === 0) return taskRows;
+    const bandByGroup = new Map(
+      phaseBands
+        .filter((w) => w.endAt > w.startAt)
+        .map((w) => [
+          w.name,
+          {
+            id: `band:${w.phaseId}`,
+            label: w.name,
+            group: w.name,
+            bars: [
+              // "purple" — deliberately outside STATUS_TONE's palette (open
+              // is already "gray") so a band never happens to render the
+              // same color as an ordinary open task sitting right below it.
+              { id: `band:${w.phaseId}`, label: w.name, startAt: w.startAt, dueAt: w.endAt, tone: "purple", draggable: false, overrun: false },
+            ],
+          } as GanttRow,
+        ])
+    );
+    const seenGroup = new Set<string>();
+    const merged: GanttRow[] = [];
+    for (const row of taskRows) {
+      const band = bandByGroup.get(row.group);
+      if (band && !seenGroup.has(row.group)) {
+        merged.push(band);
+        seenGroup.add(row.group);
+      }
+      merged.push(row);
+    }
+    return merged;
+  }, [scheduledTasks, groupBy, phaseNameById, endAt, phaseBands]);
 
   const markers: GanttMarker[] = useMemo(
     () =>
@@ -421,7 +461,7 @@ function ScheduledGantt({
           endAt={endAt}
           onBarMove={handleBarMove}
           onMarkerClick={setShiftMilestoneId}
-          now={nowMs()}
+          now={now}
         />
       )}
 
@@ -465,7 +505,15 @@ function MilestoneShiftDialog({
 
   const phaseId = milestone.phaseId ?? null;
   const targetDate = dateToEpoch(dateStr);
-  const delta = targetDate - milestone.targetDate;
+  // #145 review fix: compared by LOCAL CALENDAR DAY, not raw instant.
+  // `targetDate` is local-noon (dateToEpoch); `milestone.targetDate` is
+  // whatever arbitrary instant generateSchedule dated it to (a phase
+  // window's `endAt`, never noon-anchored) — comparing them as raw
+  // numbers made confirming this dialog WITHOUT changing the date
+  // produce a non-zero delta whenever that instant happened to fall
+  // after noon, silently shifting every ticked task and logging a false
+  // "moved" note for a move nobody made. Same-day now reads as delta 0.
+  const delta = startOfLocalDay(targetDate) - startOfLocalDay(milestone.targetDate);
 
   // shiftForMilestone's moved/skipped SPLIT depends only on phaseId and
   // handScheduled, not on the delta — the delta only changes the computed

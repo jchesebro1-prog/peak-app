@@ -113,10 +113,22 @@ export function placeTask(
   return { startAt, dueAt };
 }
 
-/** Floor to the start of the LOCAL calendar day containing `ms` — the same
- *  definition gantt-lib.ts's `snapToDay` uses, duplicated rather than
- *  imported (this file is zero-import by design; see the file header). */
-function startOfLocalDay(ms: number): number {
+/**
+ * Floor to the start of the LOCAL calendar day containing `ms` — the same
+ * definition gantt-lib.ts's `snapToDay` uses, duplicated there rather than
+ * imported (this file is zero-import by design; see the file header) but
+ * exported HERE for every other caller that needs the same day-granular
+ * comparison this module's own `overrunsEnd` uses below: a stored
+ * `EngagementMilestone.targetDate` is an arbitrary instant (a
+ * phase-matched milestone is dated to its `phaseWindows` window's
+ * `endAt`, never noon-anchored), so comparing it against a freshly
+ * `dateToEpoch`'d (local-noon) input by raw instant produces a false
+ * non-zero delta whenever the two happen to fall on the SAME local day —
+ * exactly the "confirm without changing anything" case the Schedule
+ * tab's reschedule dialog and `moveMilestoneAction` both have to get
+ * right (#145 review fix, round 3).
+ */
+export function startOfLocalDay(ms: number): number {
   const d = new Date(ms);
   d.setHours(0, 0, 0, 0);
   return d.getTime();

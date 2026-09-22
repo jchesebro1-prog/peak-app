@@ -16,6 +16,7 @@ import {
   defaultMilestonePhaseId,
   phaseIdsByName,
   shiftForMilestone,
+  startOfLocalDay,
   type ScheduleLine,
 } from "@/lib/consulting-schedule";
 
@@ -225,19 +226,42 @@ export async function moveMilestoneAction(
   alsoMoveTaskIds: string[]
 ): Promise<{ ok: true; moved: number } | { ok: false; error: string }> {
   const me = await requireUser();
+  // #145 review fix — this is a directly POST-reachable endpoint (every
+  // export from a "use server" file is), unlike its siblings it had no
+  // input guard at all: a non-finite targetDate would still get written
+  // straight onto the milestone, dropping it out of `markers` (any
+  // `NaN`/non-number fails `m.targetDate > 0`) and poisoning the Reports
+  // billing forecast, which reads targetDate directly.
+  if (!Number.isFinite(targetDate) || targetDate <= 0) {
+    return { ok: false, error: "Pick a valid date." };
+  }
   const eng = await getEngagement(engagementId);
   if (!eng) return { ok: false, error: "That engagement could not be found." };
   const ms = eng.milestones.find((m) => m.id === milestoneId);
   if (!ms) return { ok: false, error: "That milestone could not be found." };
 
-  const delta = targetDate - (ms.targetDate || targetDate);
+  // #145 review fix — compared by LOCAL CALENDAR DAY, not raw instant.
+  // A milestone's stored targetDate is an arbitrary phase-window-end
+  // instant (generateSchedule dates it to `phaseWindows`' `endAt`, never
+  // noon-anchored), while the caller's `targetDate` is local-noon
+  // (schedule-tab.tsx's dateToEpoch). Comparing them as raw numbers made
+  // confirming the reschedule dialog WITHOUT changing the date produce a
+  // non-zero delta whenever that instant happened to fall after noon —
+  // silently shifting every ticked task and logging a false "X: Oct 5 →
+  // Oct 5" audit note for a move nobody made. Bail entirely rather than
+  // write a no-op targetDate and log that note.
+  if (startOfLocalDay(targetDate) === startOfLocalDay(ms.targetDate)) {
+    return { ok: true, moved: 0 };
+  }
+  const delta = startOfLocalDay(targetDate) - startOfLocalDay(ms.targetDate);
+
   await patchEngagement(engagementId, (e) => {
     e.milestones = e.milestones.map((m) => (m.id === milestoneId ? { ...m, targetDate } : m));
     return e;
   });
 
   let moved = 0;
-  if (delta !== 0 && alsoMoveTaskIds.length) {
+  if (alsoMoveTaskIds.length) {
     const tasks = await tasksForEngagement(engagementId);
     const { moved: shifts } = shiftForMilestone({ phaseId: ms.phaseId ?? null }, delta, tasks);
     const allowed = new Set(alsoMoveTaskIds);
