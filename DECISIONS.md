@@ -3425,5 +3425,11 @@ than spoof the WebView's user agent to satisfy Google's embedded-browser check.
 - Bad GET input redirects to `/login?error=native` (so `test:smoke` covers the routes and a stray
   visitor lands somewhere sensible); only the POST exchange returns JSON 400/401.
 - Android gets the manifest intent-filter in the same change but is not built or tested yet.
+- **Final review hardening:** the hand-off is bound to a flow that started at `/api/native/auth/start`
+  (a 5-minute `qz_native_challenge` cookie set there and required to match at handoff, so a drive-by
+  link to handoff can't mint a code over a visitor's session), and the exchange requires
+  `Content-Type: application/json` plus a same-origin `Origin` header (so a cross-site form can't set
+  a session cookie). Universal Links, once the paid Apple team lands, remove the duplicate-scheme risk
+  these two mitigate and are the eventual resolution.
 
 Spec: `docs/superpowers/specs/2026-09-21-native-auth-handoff-design.md`.

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { isNativePlatform } from "@/lib/platform";
-import { handleNativeAuthUrl } from "@/lib/native-auth-client";
+import { handleNativeAuthUrl, NATIVE_AUTH_SCHEME_PREFIX } from "@/lib/native-auth-client";
 
 /**
  * Mounted on the login page. Inside the Capacitor shell it listens for the
@@ -12,6 +12,10 @@ import { handleNativeAuthUrl } from "@/lib/native-auth-client";
  */
 export default function NativeAuthReturn() {
   const [state, setState] = useState<"idle" | "busy" | "failed">("idle");
+  // Cold start can deliver the same launch URL to both getLaunchUrl() and an
+  // appUrlOpen event; without dedup that double-handles it (two exchanges of
+  // the same one-time code, the second always failing).
+  const handledUrls = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!isNativePlatform() || !Capacitor.isPluginAvailable("App")) return;
@@ -20,6 +24,13 @@ export default function NativeAuthReturn() {
 
     const handle = async (url: string) => {
       if (disposed) return;
+      // Cheap pre-check before touching state: a non-auth launch URL (e.g. a
+      // plain cold start with no deep link) should never flash "Signing you
+      // in…", and handleNativeAuthUrl's own parsing check is not worth a
+      // render just to say "ignored".
+      if (!url.startsWith(NATIVE_AUTH_SCHEME_PREFIX)) return;
+      if (handledUrls.current.has(url)) return;
+      handledUrls.current.add(url);
       setState("busy");
       const result = await handleNativeAuthUrl(url);
       if (disposed) return;

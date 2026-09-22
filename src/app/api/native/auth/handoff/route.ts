@@ -5,6 +5,9 @@ import { isChallenge, mintHandoffCode, pickSessionCookies } from "@/lib/native-a
 
 export const dynamic = "force-dynamic";
 
+/** Same literal as start/route.ts's CHALLENGE_COOKIE — see that file's comment. */
+const CHALLENGE_COOKIE = "qz_native_challenge";
+
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -14,11 +17,20 @@ const escapeHtml = (s: string) =>
  * Auth.js session cookie into a 60 s, challenge-bound code and serves a
  * minimal page that opens quartzite://auth?code=… (auto + button).
  * Never logs the code or the cookie. Spec: 2026-09-21-native-auth-handoff.
+ *
+ * Bound to a flow that went through /api/native/auth/start (finding B): start
+ * sets a 5-minute, httpOnly `qz_native_challenge` cookie holding the same
+ * challenge it forwarded here. Without a match, a drive-by link straight to
+ * this route with an attacker-chosen `challenge` could otherwise mint a code
+ * over the visitor's own session, so we refuse rather than mint.
  */
 export async function GET(req: NextRequest) {
   const origin = req.nextUrl.origin;
   const challenge = req.nextUrl.searchParams.get("challenge");
   if (!isChallenge(challenge)) {
+    return NextResponse.redirect(new URL("/login?error=native", origin));
+  }
+  if (req.cookies.get(CHALLENGE_COOKIE)?.value !== challenge) {
     return NextResponse.redirect(new URL("/login?error=native", origin));
   }
   const session = await auth();
@@ -54,7 +66,7 @@ export async function GET(req: NextRequest) {
   <a href="${escapeHtml(target)}">Return to Quartzite</a>
   <script>location.replace(${JSON.stringify(target)});</script>
 </main></body></html>`;
-  return new NextResponse(html, {
+  const res = new NextResponse(html, {
     status: 200,
     headers: {
       "content-type": "text/html; charset=utf-8",
@@ -62,4 +74,14 @@ export async function GET(req: NextRequest) {
       "referrer-policy": "no-referrer",
     },
   });
+  // One-time use: the challenge cookie has done its job (bound this handoff
+  // to the start call that set it), so drop it rather than let it linger.
+  res.cookies.set(CHALLENGE_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: req.nextUrl.protocol === "https:",
+    path: "/",
+    maxAge: 0,
+  });
+  return res;
 }

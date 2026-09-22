@@ -156,6 +156,11 @@ location.replace(next)  → signed in; WKWebView persists cookies across relaunc
 - `next` is always passed through `safeCallbackPath`, so the post-exchange navigation is same-origin.
 - The hand-off page carries `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 - The exchange is POST with a JSON body; a `quartzite://` URL alone cannot set a cookie.
+- The hand-off is bound to a flow that started at `/api/native/auth/start`: start sets a 5-minute
+  `qz_native_challenge` cookie in the sheet's jar and handoff mints only when it matches, so a
+  drive-by link to handoff with an attacker's challenge mints nothing. The exchange requires
+  `Content-Type: application/json` and a same-origin `Origin` header, so a cross-site form cannot
+  set a session cookie. Universal Links (later) remove the duplicate-scheme risk entirely.
 
 ## Version skew
 

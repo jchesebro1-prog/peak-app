@@ -62,16 +62,18 @@ function isSafeNext(path: string): boolean {
  * shows a retry message.
  */
 export async function handleNativeAuthUrl(url: string): Promise<"ignored" | "done" | "failed"> {
-  if (!url.startsWith(NATIVE_AUTH_SCHEME_PREFIX)) return "ignored";
-  const verifier = localStorage.getItem(VERIFIER_KEY);
-  localStorage.removeItem(VERIFIER_KEY);
-  void closeSheet();
-  let code: string | null = null;
+  let parsed: URL;
   try {
-    code = new URL(url).searchParams.get("code");
+    parsed = new URL(url);
   } catch {
-    return "failed";
+    return "ignored";
   }
+  // Exact scheme + host match rather than a string prefix, so a URL like
+  // "quartzite://authx?…" or "quartzite://auth.evil?…" can't slip through.
+  if (parsed.protocol !== "quartzite:" || parsed.host !== "auth") return "ignored";
+  const verifier = localStorage.getItem(VERIFIER_KEY);
+  const code = parsed.searchParams.get("code");
+  void closeSheet();
   if (!code || !verifier) return "failed";
   try {
     const res = await fetch("/api/native/auth/exchange", {
@@ -80,6 +82,10 @@ export async function handleNativeAuthUrl(url: string): Promise<"ignored" | "don
       body: JSON.stringify({ code, verifier }),
       credentials: "same-origin",
     });
+    // Only burn the verifier once we know the code has been consumed (or is
+    // definitively dead) — a network error or unexpected status leaves it in
+    // place so a retry of the same quartzite:// URL can still work.
+    if (res.ok || res.status === 401) localStorage.removeItem(VERIFIER_KEY);
     if (!res.ok) return "failed";
     const { next } = (await res.json()) as { next?: string };
     window.location.replace(typeof next === "string" && isSafeNext(next) ? next : "/");
