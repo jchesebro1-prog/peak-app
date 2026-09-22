@@ -1,5 +1,14 @@
 # Vendors Module Implementation Plan (PUNCHLIST #122)
 
+> **Executed and shipped 2026-09-21/22** as `punch-round-2-vendors`, merged to `main` at
+> `6e5205d`. Two details below were overtaken by execution and are deliberately left as
+> written, because this is the record of what was built from: the migration landed as
+> **`0024_vendor_profiles`** (the `00NN` placeholders assume index 23, which Import/Export's
+> `0023_sites_kind` took first), and the queue's company links **do** deep-link to
+> `/vendors/<id>` when the assignment's `source` carries the `auto: vendor ` prefix — the
+> out-of-scope note saying otherwise was corrected in D160, not here. Follow-ups from the
+> reviews are PUNCHLIST #140 and #141.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give vendors (companies typed `vendor/manufacturer`) a record that claims catalog manufacturers, keeps a price-list ledger checked against the catalog's effective price dates (date rule only), spawns the catalog owner's Home Queue task when the catalog lags or the list is stale, and carries contacts-with-roles, discounts, registration and Inbox-logged activity.

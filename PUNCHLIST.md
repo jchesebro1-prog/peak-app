@@ -6357,3 +6357,35 @@ mints no task but hides the fact that a list was logged. (b) is the only one of 
 the ledger visible AND the queue quiet, at the cost of one more chip in `VENDOR_STATUS_META` and the
 `/vendors` status filter. Whichever is picked, the spec §2 status table, `DECISIONS.md` D160 and the
 `#122` harness assertions move with it. Reference #122 / D160.
+
+## 141. Vendor Overview: the remount that fixed concurrent overwrites also eats the "Saved" chip and unsaved keystrokes — OPEN
+
+**Reported:** found during the #122 (Vendors module) re-review, 2026-09-22 — introduced by that
+module's own fix wave, so it ships with the feature rather than predating it.
+
+**What exists:** `/vendors/[id]` keys the Overview tab on the profile's `updatedAt`
+(`src/app/(app)/vendors/[id]/page.tsx:162`) so that a profile changed in another tab is re-read
+instead of silently overwritten by whatever the stale form held. `writeProfile`
+(`src/lib/stores/vendors.ts:152-156`) stamps `updatedAt` on *every* write, so the key changes after
+the tab's own saves too, and the component remounts. Two consequences:
+
+1. The green "Saved" confirmation (`overview-tab.tsx:38, 148`) is state on the remounted component,
+   so it is discarded the moment `router.refresh()` commits — in practice it never renders, and the
+   only success signal left is the button going back to disabled. The error path is unaffected: it
+   returns before the refresh (`overview-tab.tsx:53-56`), so failures still show their message.
+2. Claim and release also bump `updatedAt` (`overview-tab.tsx:40-41, 83, 99`), so clicking × or
+   **Claim** now discards unsaved Discounts / Registration keystrokes that used to survive. The
+   Claim control sits *above* those cards, which makes the ordering easy to hit.
+
+Both are strictly smaller than the concurrent-overwrite the key removes, so the key stays. The
+narrower shape is to drop the `key` and re-seed the two text areas from an effect keyed on
+`updatedAt` that skips while the form is dirty, leaving `saved` alone — then the confirmation
+survives, a concurrent edit still lands, and an in-progress edit is never thrown away.
+
+Two smaller items found in the same pass, both latent rather than live: the suffixed id in
+`createVendorCompany` (`src/lib/stores/vendors.ts:238`) is not itself re-checked against
+`companyIdTaken`, so two creates of the same name in the same millisecond still collide (reachable
+only by concurrent POSTs); and `vendorForManufacturer` (`:143-148`) still reads
+`allVendorProfiles()` unfiltered, so it would hand back a soft-deleted vendor's id — no `src/`
+caller does today, but it is the same shape as the stranded-claims bug that fix wave closed, and a
+future link-rendering caller would reintroduce it. Reference #122 / D160.
