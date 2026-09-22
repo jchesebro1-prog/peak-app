@@ -369,8 +369,9 @@ function inBox(t: CommThread, boxId: string, me: string): boolean {
 }
 
 // Every thread the current user can see. Legacy shared-mailbox threads stay
-// stored for history but are no longer part of the active Inbox.
-function visibleTo(t: CommThread, me: string): boolean {
+// stored for history but are no longer part of the active Inbox. Exported so
+// the Unmatched view (#96 §5) applies the same rule as the other views.
+export function visibleTo(t: CommThread, me: string): boolean {
   return t.mailbox === "personal" && t.mailboxUser === me;
 }
 

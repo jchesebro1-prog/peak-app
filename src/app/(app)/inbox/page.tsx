@@ -42,6 +42,7 @@ import {
   threadsIn,
   timeAgo,
   timeFull,
+  visibleTo,
   waitingSince,
   waitLabel,
   type CommMessage,
@@ -269,9 +270,14 @@ export default async function InboxPage({
   ]);
 
   // Threads worth linking to a customer but not yet linked (#96 §5) — any
-  // channel, any mailbox, never deleted, and not already resolved.
+  // channel, but only the mailbox the signed-in user can see (same rule as
+  // every other view), never deleted, never a draft, not already resolved.
   const isUnmatched = (t: CommThread) =>
-    !t.deleted && !t.customerId && t.resolution !== "linked";
+    visibleTo(t, me) &&
+    !t.deleted &&
+    t.status !== "draft" &&
+    !t.customerId &&
+    t.resolution !== "linked";
   const unmatchedCnt = allComms.filter(isUnmatched).length;
   const threads = view === "unmatched" ? allComms.filter(isUnmatched) : queriedThreads;
 
