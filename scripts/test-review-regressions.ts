@@ -28,6 +28,27 @@ import { saveConnection, replaceLabels } from "@/lib/gmail/connections";
 import { GMAIL_MODIFY_SCOPE } from "@/lib/gmail/config";
 import { get as getLead, getAll as getAllLeads } from "@/lib/stores/leads";
 import { addUser } from "@/lib/users";
+import {
+  upsert as upsertCustomer,
+  get as getCustomer,
+  all as allCustomers,
+  remove as removeCustomer,
+  findCustomerByName,
+  findCustomerById,
+} from "@/lib/stores/customers";
+import { commitImport, exportCsv } from "@/app/(app)/import/registry";
+import { getTypeMeta } from "@/app/(app)/import/types";
+import { autoMap, norm, parseCsv, prepareRows } from "@/app/(app)/import/parse";
+
+/** #137 — CSV text → the prepared rows commitImport takes, through the same
+ *  parse / autoMap / prepareRows path the import action runs. */
+function prepImport(key: string, csv: string) {
+  const type = getTypeMeta(key);
+  if (!type) throw new Error(`unknown import type ${key}`);
+  const p = parseCsv(csv);
+  if (!p.ok) throw new Error(`CSV did not parse: ${p.error}`);
+  return prepareRows(p.rows, autoMap(p.headers, type.fields), type.fields).rows;
+}
 
 async function main() {
   const flame = await setFlameRates({ laborRate: 123, mileageRate: 1.23 });
@@ -1046,6 +1067,540 @@ async function main() {
       { Speakers: "circle" },
       "#131 T10 an invalid shape is dropped while a valid sibling entry is kept"
     );
+  }
+
+  // #137 T1 — zip / kind / phone / website / mobile plumbing through the customer seam
+  {
+    await upsertCustomer({
+      id: "c-t137-plumb", name: "T137 Plumbing Playhouse", type: "Performing arts",
+      zip: "53703", phone: "(608) 555-0100", website: "t137.example",
+      locations: [{ id: "l-t137-1", label: "Main Stage", primary: true, address: "215 W Main St", city: "Madison", state: "WI", zip: "53703-1234", kind: "theatre" }],
+      contacts: [{ name: "Maria Lopez", email: "maria@t137.example", phone: "(608) 555-0110", mobile: "(608) 555-0111", primary: true }],
+    });
+    const a = await getCustomer("c-t137-plumb");
+    assert.ok(a, "#137 T1 customer written");
+    assert.equal(a!.zip, "53703", "#137 T1 company zip persists (companies.zip)");
+    assert.equal(a!.phone, "(608) 555-0100", "#137 T1 company phone persists (companies.main_phone)");
+    assert.equal(a!.website, "t137.example", "#137 T1 company website persists");
+    assert.equal(a!.locations[0].zip, "53703-1234", "#137 T1 venue zip persists (ZIP+4 kept as typed)");
+    assert.equal(a!.locations[0].kind, "theatre", "#137 T1 venue kind persists (sites.kind)");
+    assert.equal(a!.contacts[0].mobile, "(608) 555-0111", "#137 T1 contact mobile persists as a mobile-labelled phone");
+    assert.equal(a!.contacts[0].phone, "(608) 555-0110", "#137 T1 …and the work phone is still `phone`");
+
+    // A writer that doesn't carry the new fields (the Companies modal shape)
+    // preserves them AND does not register as a change (D83).
+    await upsertCustomer({
+      id: "c-t137-plumb", name: "T137 Plumbing Playhouse", type: "Performing arts",
+      locations: [{ id: "l-t137-1", label: "Main Stage", primary: true, address: "215 W Main St", city: "Madison", state: "WI" }],
+      contacts: [{ name: "Maria Lopez", email: "maria@t137.example", phone: "(608) 555-0110", primary: true }],
+    });
+    const b = await getCustomer("c-t137-plumb");
+    assert.equal(b!.zip, "53703", "#137 T1 company zip preserved when a writer omits it");
+    assert.equal(b!.phone, "(608) 555-0100", "#137 T1 company phone preserved when a writer omits it");
+    assert.equal(b!.locations[0].zip, "53703-1234", "#137 T1 venue zip preserved when a writer omits it");
+    assert.equal(b!.locations[0].kind, "theatre", "#137 T1 venue kind preserved when a writer omits it");
+    assert.equal(b!.contacts[0].mobile, "(608) 555-0111", "#137 T1 contact mobile preserved when a writer omits it");
+    assert.equal(b!.updatedAt, a!.updatedAt, "#137 T1 an omit-everything re-save is a no-change write (updatedAt unchanged)");
+
+    // …and a writer that carries a value writes it.
+    await upsertCustomer({
+      id: "c-t137-plumb", name: "T137 Plumbing Playhouse", type: "Performing arts", zip: "53704",
+      locations: [{ id: "l-t137-1", label: "Main Stage", primary: true, address: "215 W Main St", city: "Madison", state: "WI", zip: "53704" }],
+      contacts: [{ name: "Maria Lopez", email: "maria@t137.example", phone: "(608) 555-0110", primary: true }],
+    });
+    const c = await getCustomer("c-t137-plumb");
+    assert.equal(c!.zip, "53704", "#137 T1 a provided company zip overwrites");
+    assert.equal(c!.locations[0].zip, "53704", "#137 T1 a provided venue zip overwrites");
+    assert.equal(c!.contacts[0].mobile, "(608) 555-0111", "#137 T1 mobile survives a zip-only change");
+
+    assert.equal((await findCustomerByName("t-137 plumbing PLAYHOUSE!"))?.id, "c-t137-plumb", "#137 T1 findCustomerByName matches case/punctuation-insensitively");
+    assert.equal(await findCustomerByName("nobody t137"), null, "#137 T1 findCustomerByName: unknown → null");
+    assert.equal((await findCustomerById("c-t137-plumb"))?.name, "T137 Plumbing Playhouse", "#137 T1 findCustomerById");
+    assert.ok((await allCustomers()).some((x) => x.id === "c-t137-plumb"), "#137 T1 all() lists it");
+
+    // Re-creating a soft-deleted id (Companies "remove" → a later upsert with
+    // the same id, e.g. a re-import) must keep matching the surviving contact
+    // rows by name — softDeleteCompany leaves them on the company — so the
+    // revival neither duplicates them nor drops their phone/mobile channels.
+    await removeCustomer("c-t137-plumb");
+    assert.equal(await getCustomer("c-t137-plumb"), null, "#137 T1 soft-deleted customer no longer composes");
+    assert.equal(await findCustomerByName("T137 Plumbing Playhouse"), null, "#137 T1 findCustomerByName ignores soft-deleted companies");
+    await upsertCustomer({
+      id: "c-t137-plumb", name: "T137 Plumbing Playhouse", type: "Performing arts",
+      locations: [{ id: "l-t137-1", label: "Main Stage", primary: true, city: "Madison", state: "WI" }],
+      contacts: [{ name: "Maria Lopez", email: "maria@t137.example", primary: true }],
+    });
+    const d = await getCustomer("c-t137-plumb");
+    assert.equal(d!.contacts.length, 1, "#137 T1 revived id re-matches the surviving contact by name (no duplicate row)");
+    assert.equal(d!.contacts[0].phone, "(608) 555-0110", "#137 T1 revived contact keeps its work phone");
+    assert.equal(d!.contacts[0].mobile, "(608) 555-0111", "#137 T1 revived contact keeps its mobile channel");
+
+    // #137 T1 review — a supplied phone/mobile that matches an existing
+    // number under a different label relabels that row instead of vanishing
+    // (else rec.mobile never matches the composed side and D83 never converges).
+    await upsertCustomer({
+      id: "c-t137-dupphone", name: "T137 Dup Phone Co", type: "Vendor",
+      contacts: [{ name: "Sam Duplicate", email: "sam@t137.example", phone: "555-1000", mobile: "555-1000", primary: true }],
+    });
+    const e = await getCustomer("c-t137-dupphone");
+    assert.equal(e!.contacts[0].phone, "555-1000", "#137 T1 review: phone==mobile on first save — phone reads back");
+    assert.equal(e!.contacts[0].mobile, "555-1000", "#137 T1 review: phone==mobile on first save — mobile relabelled, not dropped (one row)");
+    await upsertCustomer({
+      id: "c-t137-dupphone", name: "T137 Dup Phone Co", type: "Vendor",
+      contacts: [{ name: "Sam Duplicate", email: "sam@t137.example", phone: "555-1000", mobile: "555-1000", primary: true }],
+    });
+    const e2 = await getCustomer("c-t137-dupphone");
+    assert.equal(e2!.updatedAt, e!.updatedAt, "#137 T1 review: identical phone==mobile re-save leaves updatedAt unchanged (D83)");
+
+    // A genuinely distinct mobile is unaffected: two separate rows, phone unchanged.
+    await upsertCustomer({
+      id: "c-t137-2phones", name: "T137 Two Phones Co", type: "Vendor",
+      contacts: [{ name: "Dana Separate", email: "dana@t137.example", phone: "555-3000", mobile: "555-4000", primary: true }],
+    });
+    const f = await getCustomer("c-t137-2phones");
+    assert.equal(f!.contacts[0].phone, "555-3000", "#137 T1 review: distinct phone/mobile — phone unchanged");
+    assert.equal(f!.contacts[0].mobile, "555-4000", "#137 T1 review: distinct phone/mobile — a separate mobile row exists");
+
+    // phone only, mobile never supplied: re-saving identically does not churn.
+    await upsertCustomer({
+      id: "c-t137-onlyphone", name: "T137 Only Phone Co", type: "Vendor",
+      contacts: [{ name: "Pat Phoneonly", email: "pat@t137.example", phone: "555-5000", primary: true }],
+    });
+    const g = await getCustomer("c-t137-onlyphone");
+    assert.equal(g!.contacts[0].mobile, undefined, "#137 T1 review: phone-only contact has no mobile");
+    await upsertCustomer({
+      id: "c-t137-onlyphone", name: "T137 Only Phone Co", type: "Vendor",
+      contacts: [{ name: "Pat Phoneonly", email: "pat@t137.example", phone: "555-5000", primary: true }],
+    });
+    const g2 = await getCustomer("c-t137-onlyphone");
+    assert.equal(g2!.updatedAt, g!.updatedAt, "#137 T1 review: identical phone-only re-save leaves updatedAt unchanged (D83)");
+  }
+
+  // #137 T4 — customers import: Category + Zip + Phone + Website, legacy embedded columns, export round-trip
+  {
+    const res = await commitImport("customers", prepImport("customers", [
+      "Customer Name,Category,Address,City,State,Zip,Phone,Website,Notes",
+      "T137 Import Playhouse,Worship,215 W Main St,Madison,WI,53703,(608) 555-0100,t137import.example,",
+    ].join("\n")), "skip");
+    assert.equal(res.created, 1, "#137 T4 one customer created");
+    assert.equal(res.errored, 0, "#137 T4 no errors");
+    const a = await findCustomerByName("T137 Import Playhouse");
+    assert.ok(a, "#137 T4 customer findable by name");
+    assert.equal(a!.type, "Worship", "#137 T4 Category → type");
+    assert.equal(a!.zip, "53703", "#137 T4 Zip → company zip");
+    assert.equal(a!.phone, "(608) 555-0100", "#137 T4 Phone → company phone (no contact on the row)");
+    assert.equal(a!.website, "t137import.example", "#137 T4 Website → company website");
+    assert.equal(a!.locations.length, 1, "#137 T4 exactly one venue (the address venue, no extra base venue)");
+    assert.equal(a!.locations[0].address, "215 W Main St", "#137 T4 Address → primary venue");
+    assert.equal(a!.locations[0].zip, "53703", "#137 T4 Zip → primary venue zip too");
+    assert.equal(a!.locations[0].primary, true, "#137 T4 …and it is primary");
+
+    // A pre-#137 file (Type / Contact Name / Email / Phone / Venue) in
+    // "Update existing" mode: embedded columns still land, nothing is wiped.
+    const res2 = await commitImport("customers", prepImport("customers", [
+      "Customer Name,Type,Contact Name,Email,Phone,Venue,Address,City,State",
+      "T137 Import Playhouse,Performing arts,Maria Lopez,maria@t137import.example,(608) 555-0110,Main Stage,215 W Main St,Madison,WI",
+    ].join("\n")), "update");
+    assert.equal(res2.updated, 1, "#137 T4 a legacy file matches by name and updates");
+    const b = await findCustomerByName("T137 Import Playhouse");
+    assert.equal(b!.type, "Performing arts", "#137 T4 legacy Type alias → type");
+    assert.equal(b!.locations.length, 1, "#137 T4 legacy Venue claims the unnamed address venue instead of adding one");
+    assert.equal(b!.locations[0].label, "Main Stage", "#137 T4 legacy Venue names the primary venue");
+    assert.equal(b!.locations[0].zip, "53703", "#137 T4 a file without Zip keeps the stored venue zip");
+    assert.equal(b!.zip, "53703", "#137 T4 …and the company zip");
+    assert.equal(b!.website, "t137import.example", "#137 T4 …and the website");
+    assert.equal(b!.contacts.length, 1, "#137 T4 legacy Contact Name lands as a contact");
+    assert.equal(b!.contacts[0].email, "maria@t137import.example", "#137 T4 legacy Email on the contact");
+    assert.equal(b!.contacts[0].phone, "(608) 555-0110", "#137 T4 legacy Phone goes to the contact when a Contact Name is present");
+    assert.equal(b!.contacts[0].primary, true, "#137 T4 the embedded contact is primary");
+    assert.equal(b!.phone, "(608) 555-0100", "#137 T4 …and the company phone is left alone");
+
+    // "Skip duplicates" on the same name is a skip, not a second customer.
+    const res3 = await commitImport("customers", prepImport("customers", "Customer Name,Category\nt137 import PLAYHOUSE,Civic"), "skip");
+    assert.equal(res3.skipped, 1, "#137 T4 normalized-name duplicate skipped");
+    assert.equal((await allCustomers()).filter((c) => norm(c.name) === norm("T137 Import Playhouse")).length, 1, "#137 T4 still one customer");
+
+    // Export round-trip: Category + Zip present, same values, re-import creates nothing.
+    const csv = await exportCsv("customers");
+    const exp = parseCsv(csv);
+    // #137 T7 — no Notes column: nothing on a customer record stores it, so
+    // the hub stopped advertising it (the input file above still carries one,
+    // and it is still absorbed without erroring).
+    assert.equal(exp.headers.join(","), "Customer Name,Category,Address,City,State,Zip,Phone,Website", "#137 T4 customers export columns = template columns (hidden aliases excluded)");
+    const row = exp.objects.find((o) => o["Customer Name"] === "T137 Import Playhouse");
+    assert.ok(row, "#137 T4 exported row present");
+    assert.equal(row!.Category, "Performing arts", "#137 T4 export Category");
+    assert.equal(row!.Zip, "53703", "#137 T4 export Zip");
+    assert.equal(row!.Address, "215 W Main St", "#137 T4 export Address from the primary venue");
+    assert.equal(row!.Phone, "(608) 555-0100", "#137 T4 export Phone = company phone");
+    assert.equal(row!.Website, "t137import.example", "#137 T4 export Website");
+    const back = await commitImport("customers", prepImport("customers", csv).filter((r) => String(r.values.name).startsWith("T137")), "skip");
+    assert.equal(back.created, 0, "#137 T4 export → re-import creates nothing");
+    assert.equal(back.errored, 0, "#137 T4 export → re-import errors nothing");
+  }
+
+  // #137 T5 — contacts import: link by name + id, primary demotion, one auto-created customer for several rows, idempotent re-import, export round-trip
+  {
+    await upsertCustomer({
+      id: "c-t137-ct", name: "T137 Contacts Co", type: "Education", locations: [],
+      contacts: [{ name: "Old Primary", email: "old@t137ct.example", primary: true }],
+    });
+    const csv1 = [
+      "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary",
+      "t137 contacts co,,Maria Lopez,maria@t137ct.example,(608) 555-0110,(608) 555-0111,Technical Director,,yes",
+      ",c-t137-ct,Sam Ortiz,sam@t137ct.example,,,,billing,no",
+      "T137 Brand New Org,,Pat Doe,pat@t137new.example,,,,,",
+      "t137 BRAND new org,,Lee Park,lee@t137new.example,,,,,",
+    ].join("\n");
+    const r1 = await commitImport("contacts", prepImport("contacts", csv1), "skip");
+    assert.equal(r1.errored, 0, "#137 T5 no errors");
+    assert.equal(r1.created, 4, "#137 T5 four contacts created");
+    assert.equal(r1.customersLinked, 2, "#137 T5 two rows linked to the existing customer (one by name, one by id)");
+    assert.equal(r1.customersCreated, 1, "#137 T5 exactly one customer auto-created for the two unmatched rows");
+    const co = await getCustomer("c-t137-ct");
+    const maria = co!.contacts.find((c) => c.name === "Maria Lopez");
+    const sam = co!.contacts.find((c) => c.name === "Sam Ortiz");
+    const old = co!.contacts.find((c) => c.name === "Old Primary");
+    assert.ok(maria && sam && old, "#137 T5 both imported contacts sit on the customer beside the old one");
+    assert.equal(maria!.primary, true, "#137 T5 Primary=yes promotes Maria");
+    assert.equal(old!.primary, false, "#137 T5 …and demotes the previous primary");
+    assert.equal(sam!.primary, false, "#137 T5 Primary=no stays non-primary");
+    assert.equal(maria!.mobile, "(608) 555-0111", "#137 T5 Mobile persists");
+    assert.equal(maria!.phone, "(608) 555-0110", "#137 T5 Phone persists");
+    assert.equal(maria!.role, "Technical Director", "#137 T5 Title → contact title");
+    assert.equal(sam!.role, "billing", "#137 T5 Role fills the title when Title is blank");
+    const created = (await allCustomers()).filter((c) => norm(c.name) === norm("T137 Brand New Org"));
+    assert.equal(created.length, 1, "#137 T5 the unmatched name created exactly one customer");
+    assert.equal(created[0].name, "T137 Brand New Org", "#137 T5 …named as the first row spelled it");
+    assert.equal(created[0].contacts.length, 2, "#137 T5 both rows landed on that one new customer");
+    assert.equal(created[0].contacts.find((c) => c.name === "Pat Doe")?.primary, true, "#137 T5 the first contact on a new customer becomes primary");
+
+    const r2 = await commitImport("contacts", prepImport("contacts", csv1), "skip");
+    assert.equal(r2.skipped, 4, "#137 T5 re-importing the same file skips every row");
+    assert.equal(r2.customersCreated, 0, "#137 T5 …and creates no customers");
+    assert.equal((await getCustomer("c-t137-ct"))!.updatedAt, co!.updatedAt, "#137 T5 a skipped re-import writes nothing (updatedAt unchanged)");
+    const r3 = await commitImport("contacts", prepImport("contacts", csv1), "update");
+    assert.equal(r3.updated, 4, "#137 T5 update mode re-imports without duplicating");
+    assert.equal((await getCustomer("c-t137-ct"))!.contacts.length, 3, "#137 T5 still three contacts after two re-imports");
+    assert.equal((await allCustomers()).filter((c) => norm(c.name) === norm("T137 Brand New Org")).length, 1, "#137 T5 still one auto-created customer");
+    // The relabel rule from #137 T1 is what makes this converge: saving the
+    // same contacts file twice must be a no-change write, not a churn of the
+    // phone/mobile channels (D83).
+    assert.equal((await getCustomer("c-t137-ct"))!.updatedAt, co!.updatedAt, "#137 T5 saving the same contacts file twice leaves updatedAt unchanged (idempotent)");
+    assert.equal((await getCustomer(created[0].id))!.updatedAt, created[0].updatedAt, "#137 T5 …on the auto-created customer too");
+
+    const csv = await exportCsv("contacts");
+    const exp = parseCsv(csv);
+    assert.equal(exp.headers.join(","), "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary", "#137 T5 contacts export columns = template columns (no Notes — a contact has nowhere to store it)");
+    const m = exp.objects.find((o) => o.Email === "maria@t137ct.example");
+    assert.ok(m, "#137 T5 exported contact present");
+    assert.ok(m!.Customer === "T137 Contacts Co" && m!["Customer ID"] === "c-t137-ct" && m!.Mobile === "(608) 555-0111" && m!.Phone === "(608) 555-0110" && m!.Title === "Technical Director" && m!.Primary === "yes", "#137 T5 exported contact carries the customer's name + id and its fields");
+    const back = await commitImport("contacts", prepImport("contacts", csv).filter((r) => String(r.values.customer).startsWith("T137")), "skip");
+    assert.equal(back.created, 0, "#137 T5 export → re-import creates nothing (round-trip)");
+    assert.equal(back.errored, 0, "#137 T5 export → re-import errors nothing");
+  }
+
+  // #137 T6 — venues import: link by name + id, zip + category persist, the first venue claims the unnamed base venue, auto-create, idempotent, export round-trip
+  {
+    await upsertCustomer({ id: "c-t137-vn", name: "T137 Venues District", type: "Education", locations: [], contacts: [] });
+    assert.equal((await getCustomer("c-t137-vn"))!.locations.length, 1, "#137 T6 fixture: a new customer starts with its unnamed D85 base venue");
+    const csv1 = [
+      "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category,Notes",
+      "T137 Venues District,,Main Auditorium,5000 N Ballard Rd,Appleton,WI,54913,theatre,",
+      ",c-t137-vn,Black Box,5000 N Ballard Rd,Appleton,WI,54913-1234,black box,",
+      "T137 Venue Church,,Sanctuary,1 Church St,Oshkosh,WI,54901,church,",
+    ].join("\n");
+    const r1 = await commitImport("venues", prepImport("venues", csv1), "skip");
+    assert.equal(r1.errored, 0, "#137 T6 no errors");
+    assert.equal(r1.created, 3, "#137 T6 three venues created");
+    assert.equal(r1.customersLinked, 2, "#137 T6 two rows linked (one by name, one by id)");
+    assert.equal(r1.customersCreated, 1, "#137 T6 one customer auto-created");
+    const d = await getCustomer("c-t137-vn");
+    assert.equal(d!.locations.length, 2, "#137 T6 the first venue claimed the unnamed base venue; the second appended");
+    const main = d!.locations.find((l) => l.label === "Main Auditorium");
+    const bb = d!.locations.find((l) => l.label === "Black Box");
+    assert.ok(main && bb, "#137 T6 both venues on the customer");
+    assert.equal(main!.zip, "54913", "#137 T6 venue zip persists");
+    assert.equal(main!.kind, "theatre", "#137 T6 venue Category → kind");
+    assert.equal(main!.address, "5000 N Ballard Rd", "#137 T6 venue address persists");
+    assert.equal(main!.primary, true, "#137 T6 the claimed base venue stays primary");
+    assert.equal(bb!.zip, "54913-1234", "#137 T6 ZIP+4 kept");
+    assert.equal(bb!.kind, "black box", "#137 T6 category kept as typed");
+    assert.equal(bb!.venueKind, "blackbox", "#137 T6 a new venue's venueKind derives from Category");
+    assert.equal(bb!.primary, false, "#137 T6 an appended venue is not primary");
+    const church = (await allCustomers()).find((c) => c.name === "T137 Venue Church");
+    assert.ok(church, "#137 T6 unmatched customer auto-created");
+    assert.equal(church!.locations.length, 1, "#137 T6 …with exactly one venue (the row's, on the base venue)");
+    assert.equal(church!.locations[0].label, "Sanctuary", "#137 T6 …named from the row");
+    assert.equal(church!.locations[0].zip, "54901", "#137 T6 …with its zip");
+
+    const r2 = await commitImport("venues", prepImport("venues", csv1), "skip");
+    assert.equal(r2.skipped, 3, "#137 T6 re-import skips all three");
+    assert.equal((await getCustomer("c-t137-vn"))!.updatedAt, d!.updatedAt, "#137 T6 a skipped re-import writes nothing (updatedAt unchanged)");
+    const r3 = await commitImport("venues", prepImport("venues", csv1), "update");
+    assert.equal(r3.updated, 3, "#137 T6 update mode re-imports without duplicating");
+    assert.equal((await getCustomer("c-t137-vn"))!.locations.length, 2, "#137 T6 no duplicate venues after re-imports");
+    // Same D83 contract the contacts file relies on above: re-importing an
+    // unchanged venues file is a no-change write, not a churn of the sites.
+    assert.equal((await getCustomer("c-t137-vn"))!.updatedAt, d!.updatedAt, "#137 T6 saving the same venues file twice leaves updatedAt unchanged (idempotent)");
+    assert.equal((await getCustomer(church!.id))!.updatedAt, church!.updatedAt, "#137 T6 …on the auto-created customer too");
+
+    const csv = await exportCsv("venues");
+    const exp = parseCsv(csv);
+    assert.equal(exp.headers.join(","), "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category", "#137 T6 venues export columns = template columns (no Notes — a venue has nowhere to store it)");
+    const row = exp.objects.find((o) => o["Customer ID"] === "c-t137-vn" && o["Venue Name"] === "Black Box");
+    assert.ok(row, "#137 T6 exported venue present");
+    assert.ok(row!.Zip === "54913-1234" && row!.Category === "black box" && row!.Customer === "T137 Venues District" && row!.Address === "5000 N Ballard Rd", "#137 T6 exported venue carries the customer's name + id and its fields");
+    const back = await commitImport("venues", prepImport("venues", csv).filter((r) => String(r.values.customer).startsWith("T137")), "skip");
+    assert.equal(back.created, 0, "#137 T6 export → re-import creates nothing (round-trip)");
+    assert.equal(back.errored, 0, "#137 T6 export → re-import errors nothing");
+
+    // #137 T6 review (punch #137 fix) — a customers import with Address/
+    // City/State/Zip but no Venue leaves an ADDRESSED, UNNAMED primary venue
+    // (D85 base venue); the venues export emits it with a blank Venue Name;
+    // committing that exact row back must not error, must target the SAME
+    // venue in place, and must never invent a name for it.
+    await upsertCustomer({
+      id: "c-t137-vn-addr",
+      name: "T137 Venue Addressed Only",
+      type: "Education",
+      locations: [
+        { id: "l-t137-vn-addr-1", label: "", primary: true, address: "9 Probe St", city: "Neenah", state: "WI", zip: "54956" },
+      ],
+      contacts: [],
+    });
+    const addrBefore = await getCustomer("c-t137-vn-addr");
+    assert.equal(addrBefore!.locations.length, 1, "#137 T6 fix fixture: exactly one venue — unnamed, addressed");
+    // Blank labels read back as undefined (composeLocation: `s.name || undefined`), not "".
+    assert.ok(!addrBefore!.locations[0].label, "#137 T6 fix fixture: the venue has no name");
+
+    const csvAddr = await exportCsv("venues");
+    const expAddr = parseCsv(csvAddr);
+    const addrRow = expAddr.objects.find((o) => o["Customer ID"] === "c-t137-vn-addr");
+    assert.ok(addrRow, "#137 T6 fix: the addressed unnamed venue is exported");
+    assert.equal(addrRow!["Venue Name"], "", "#137 T6 fix: exported with a blank Venue Name");
+    assert.equal(addrRow!.Address, "9 Probe St", "#137 T6 fix: exported with its address");
+
+    const addrRowsBack = prepImport("venues", csvAddr).filter((r) => String(r.values.customerId) === "c-t137-vn-addr");
+    assert.equal(addrRowsBack.length, 1, "#137 T6 fix: exactly one prepared row for this customer");
+    assert.equal(
+      addrRowsBack[0].valid,
+      true,
+      "#137 T6 fix: a blank Venue Name is VALID when the row carries an address (requiredUnless: address)"
+    );
+
+    const rt1 = await commitImport("venues", addrRowsBack, "update");
+    assert.equal(rt1.errored, 0, "#137 T6 fix: committing the exported blank-label row errors nothing");
+    // matchLocation never matches a blank label (by design — see link.ts), so
+    // WRITERS.venues.find() can't report this row as "existing"; it always
+    // takes the create() path. That's fine: create() re-links the SAME
+    // customer and writeVenueRow's mergeLocation (preferPrimary: true)
+    // targets the existing primary venue in place rather than appending.
+    assert.equal(rt1.created + rt1.updated, 1, "#137 T6 fix: the row is written exactly once");
+    const addrAfter1 = await getCustomer("c-t137-vn-addr");
+    assert.equal(addrAfter1!.locations.length, 1, "#137 T6 fix: still exactly one venue — no second unnamed venue created");
+    assert.ok(!addrAfter1!.locations[0].label, "#137 T6 fix: still unnamed — no name was invented for it");
+    assert.equal(addrAfter1!.locations[0].primary, true, "#137 T6 fix: still the primary venue");
+    assert.equal(addrAfter1!.locations[0].address, "9 Probe St", "#137 T6 fix: address unchanged");
+    assert.equal(
+      addrAfter1!.updatedAt,
+      addrBefore!.updatedAt,
+      "#137 T6 fix: round-tripping identical content is a no-op (updatedAt unchanged)"
+    );
+
+    const rt2 = await commitImport("venues", addrRowsBack, "update");
+    assert.equal(rt2.errored, 0, "#137 T6 fix: a second identical re-import still errors nothing");
+    const addrAfter2 = await getCustomer("c-t137-vn-addr");
+    assert.equal(addrAfter2!.locations.length, 1, "#137 T6 fix: still no duplicate venue on a second re-import");
+    assert.equal(
+      addrAfter2!.updatedAt,
+      addrBefore!.updatedAt,
+      "#137 T6 fix: …and updatedAt still hasn't moved (idempotent)"
+    );
+
+    // A blank-label row for a customer with NO venue at all: a partner-type
+    // customer (D85 venue-defaults) gets no auto base venue, so there is
+    // nothing to claim — mergeLocation's existing fallback (opts.preferPrimary
+    // with an empty list) appends the customer's first venue, still unnamed
+    // rather than erroring or inventing a name.
+    await upsertCustomer({ id: "c-t137-vn-novenue", name: "T137 Venue Partner Co", type: "Vendor", locations: [], contacts: [] });
+    assert.equal(
+      (await getCustomer("c-t137-vn-novenue"))!.locations.length,
+      0,
+      "#137 T6 fix fixture: a partner-type customer has no venue at all"
+    );
+    const csvNoVenue = [
+      ["Customer", "Customer ID", "Venue Name", "Address", "City", "State", "Zip", "Category", "Notes"],
+      ["", "c-t137-vn-novenue", "", "200 Vendor Way", "Neenah", "WI", "54956", "warehouse", ""],
+    ]
+      .map((r) => r.join(","))
+      .join("\n");
+    const rNoVenue = await commitImport("venues", prepImport("venues", csvNoVenue), "skip");
+    assert.equal(rNoVenue.errored, 0, "#137 T6 fix: a blank-label row on a venueless customer does not error");
+    assert.equal(rNoVenue.created, 1, "#137 T6 fix: it creates the customer's first venue");
+    const novenue = await getCustomer("c-t137-vn-novenue");
+    assert.equal(novenue!.locations.length, 1, "#137 T6 fix: exactly one venue now exists");
+    assert.ok(!novenue!.locations[0].label, "#137 T6 fix: still no invented name");
+    assert.equal(novenue!.locations[0].primary, true, "#137 T6 fix: the sole venue is primary");
+    assert.equal(novenue!.locations[0].address, "200 Vendor Way", "#137 T6 fix: its address persists");
+
+    // A row with NEITHER a Venue Name NOR anything else to target (no
+    // address/city/state/zip either) is still invalid: required-unless
+    // doesn't mean "always optional" — keep it required when there is
+    // nothing else for the row to target.
+    const csvNothing = [
+      ["Customer", "Customer ID", "Venue Name", "Address", "City", "State", "Zip", "Category", "Notes"],
+      ["", "c-t137-vn-novenue", "", "", "", "", "", "", ""],
+    ]
+      .map((r) => r.join(","))
+      .join("\n");
+    const nothingRows = prepImport("venues", csvNothing);
+    assert.equal(
+      nothingRows[0].valid,
+      false,
+      "#137 T6 fix: a blank Venue Name with no address either is still invalid (nothing to target)"
+    );
+  }
+
+  // #137 C1 (final review — data loss) — the go-live order in MASTER-HOWTO §7
+  // is customers.csv → contacts.csv → venues.csv. The customers template has
+  // no Venue column, so every customer it writes ends up owning an UNNAMED
+  // but ADDRESSED primary venue: the company's mailing address. A labelled
+  // venues row for that customer must APPEND a second venue — claiming the
+  // addressed slot would overwrite the mailing address with the venue's, and
+  // D158 leaves companies.address/city/state to the Daylite import, so
+  // nothing else holds it and it is unrecoverable.
+  {
+    const cRes = await commitImport("customers", prepImport("customers", [
+      "Customer Name,Category,Address,City,State,Zip",
+      "T137 C1 Mailing Co,Education,215 W Main St,Madison,WI,53703",
+    ].join("\n")), "skip");
+    assert.equal(cRes.errored, 0, "#137 C1 fixture: the customers row errors nothing");
+    assert.equal(cRes.created, 1, "#137 C1 fixture: the customers row creates the customer");
+    const c1 = await findCustomerByName("T137 C1 Mailing Co");
+    assert.equal(c1!.locations.length, 1, "#137 C1 fixture: one venue — the unnamed mailing venue");
+    assert.ok(!c1!.locations[0].label, "#137 C1 fixture: …unnamed (the template has no Venue column)");
+    assert.equal(c1!.locations[0].address, "215 W Main St", "#137 C1 fixture: …carrying the mailing address");
+
+    const vRes = await commitImport("venues", prepImport("venues", [
+      "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category",
+      "T137 C1 Mailing Co,,Main Auditorium,5000 N Ballard Rd,Appleton,WI,54913,theatre",
+    ].join("\n")), "skip");
+    assert.equal(vRes.errored, 0, "#137 C1 the venues row errors nothing");
+    assert.equal(vRes.created, 1, "#137 C1 the venues row writes one venue");
+    const c2 = await findCustomerByName("T137 C1 Mailing Co");
+    assert.equal(c2!.locations.length, 2, "#137 C1 a labelled venues row APPENDS — it never claims a blank-label venue that already has an address");
+    const mail = c2!.locations.find((l) => !l.label);
+    const aud = c2!.locations.find((l) => l.label === "Main Auditorium");
+    assert.ok(mail && aud, "#137 C1 both the mailing venue and the named venue exist");
+    assert.equal(mail!.address, "215 W Main St", "#137 C1 the customer's mailing address survives the venues import");
+    assert.equal(mail!.city, "Madison", "#137 C1 …and its city");
+    assert.equal(aud!.address, "5000 N Ballard Rd", "#137 C1 the appended venue keeps its own address");
+    assert.equal(aud!.city, "Appleton", "#137 C1 …and its city");
+    // Revised for #137 I3 (was: the mailing venue stays primary / the appended
+    // venue is not): primaryLoc drives the record page's location line, travel
+    // estimates and quote defaults, so the venue where the work happens must
+    // outrank the unnamed mailing placeholder, which stays as a second location.
+    assert.equal(aud!.primary, true, "#137 I3 the appended NAMED venue becomes primary");
+    assert.equal(mail!.primary, false, "#137 I3 …and the unnamed mailing placeholder is demoted, not removed");
+
+    // The mirror, the same slot from the other side (#137 C1b) — a customers
+    // row must never address a venue that has a name to lose. Two shapes:
+    //
+    // (1) the go-live re-run ("Update existing"). After I3 the NAMED venue is
+    //     the primary one, so the row has to skip it and land on the unnamed
+    //     mailing venue it owns — both addresses intact, no third venue.
+    const cRes2 = await commitImport("customers", prepImport("customers", [
+      "Customer Name,Category,Address,City,State,Zip",
+      "T137 C1 Mailing Co,Education,220 E Doty St,Madison,WI,53703",
+    ].join("\n")), "update");
+    assert.equal(cRes2.errored, 0, "#137 C1b mirror: the second customers file errors nothing");
+    assert.equal(cRes2.updated, 1, "#137 C1b mirror: it matches by name and updates");
+    const c3 = await findCustomerByName("T137 C1 Mailing Co");
+    assert.equal(c3!.locations.length, 2, "#137 C1b mirror: still exactly two venues");
+    assert.equal(
+      c3!.locations.find((l) => l.label === "Main Auditorium")!.address,
+      "5000 N Ballard Rd",
+      "#137 C1b mirror: a customers row with no Venue never overwrites an existing named venue's address"
+    );
+    assert.equal(
+      c3!.locations.find((l) => l.label === "Main Auditorium")!.primary,
+      true,
+      "#137 C1b mirror: …and the named venue is still the primary one"
+    );
+    assert.equal(
+      c3!.locations.find((l) => !l.label)!.address,
+      "220 E Doty St",
+      "#137 C1b mirror: it updates the unnamed mailing venue it owns instead"
+    );
+
+    // (2) the shape the previous round's fixture missed, and the one that
+    //     actually loses data: the named, addressed venue IS the primary and
+    //     there is no unnamed venue at all — every seeded customer
+    //     (src/db/seeds/customers.ts) and anything named through the Companies
+    //     modal looks like this. The preferPrimary branch landed straight on
+    //     it and overwrote "5000 N Ballard Rd" with the row's mailing address,
+    //     which nothing else holds (D158 leaves companies.address/city/state
+    //     to the Daylite import).
+    await upsertCustomer({
+      id: "c-t137-c1b",
+      name: "T137 C1b Named Primary Co",
+      type: "Education",
+      locations: [
+        { id: "l-t137-c1b-1", label: "Main Auditorium", primary: true, address: "5000 N Ballard Rd", city: "Appleton", state: "WI", zip: "54913" },
+      ],
+      contacts: [],
+    });
+    const b0 = await getCustomer("c-t137-c1b");
+    assert.equal(b0!.locations.length, 1, "#137 C1b fixture: one venue — named and addressed");
+    assert.equal(b0!.locations[0].primary, true, "#137 C1b fixture: …and it IS the primary venue");
+    const bRes = await commitImport("customers", prepImport("customers", [
+      "Customer Name,Customer ID,Category,Address,City,State,Zip",
+      "T137 C1b Named Primary Co,c-t137-c1b,Education,215 W Main St,Madison,WI,53703",
+    ].join("\n")), "update");
+    assert.equal(bRes.errored, 0, "#137 C1b the customers row errors nothing");
+    assert.equal(bRes.updated, 1, "#137 C1b it matches the existing customer and updates");
+    const b1 = await getCustomer("c-t137-c1b");
+    assert.equal(b1!.locations.length, 2, "#137 C1b a customers row APPENDS its mailing address — it never addresses a NAMED venue");
+    const bAud = b1!.locations.find((l) => l.label === "Main Auditorium");
+    const bMail = b1!.locations.find((l) => !l.label);
+    assert.ok(bAud && bMail, "#137 C1b both the named venue and the new mailing venue exist");
+    assert.equal(bAud!.address, "5000 N Ballard Rd", "#137 C1b the named venue's address survives the customers import");
+    assert.equal(bAud!.city, "Appleton", "#137 C1b …and its city");
+    assert.equal(bAud!.primary, true, "#137 C1b …and it stays primary (I3: a named venue outranks a mailing placeholder)");
+    assert.equal(bMail!.address, "215 W Main St", "#137 C1b the row's mailing address lands on the appended unnamed venue");
+    assert.equal(bMail!.city, "Madison", "#137 C1b …and its city");
+    assert.equal(bMail!.primary, false, "#137 C1b …and it is not primary");
+
+    // …and a second run updates that mailing venue in place rather than
+    // growing a new unnamed venue on every "Update existing" pass.
+    const bRes2 = await commitImport("customers", prepImport("customers", [
+      "Customer Name,Customer ID,Category,Address,City,State,Zip",
+      "T137 C1b Named Primary Co,c-t137-c1b,Education,220 E Doty St,Madison,WI,53703",
+    ].join("\n")), "update");
+    assert.equal(bRes2.errored, 0, "#137 C1b the second customers run errors nothing");
+    const b2 = await getCustomer("c-t137-c1b");
+    assert.equal(b2!.locations.length, 2, "#137 C1b a re-run does not grow a third venue");
+    assert.equal(b2!.locations.find((l) => !l.label)!.address, "220 E Doty St", "#137 C1b it updates the unnamed mailing venue it owns");
+    assert.equal(b2!.locations.find((l) => l.label === "Main Auditorium")!.address, "5000 N Ballard Rd", "#137 C1b …and still never touches the named venue");
+
+    // And the claim that C1 narrows stays intact: when the blank-label venue
+    // is a TRUE D85 placeholder (no address of its own), a labelled venues
+    // row still fills it rather than leaving an empty twin behind.
+    await upsertCustomer({ id: "c-t137-c1-bare", name: "T137 C1 Bare Co", type: "Education", locations: [], contacts: [] });
+    const bare = await getCustomer("c-t137-c1-bare");
+    assert.equal(bare!.locations.length, 1, "#137 C1 fixture: a new customer starts with its unnamed D85 base venue");
+    assert.ok(!bare!.locations[0].address, "#137 C1 fixture: …with no address of its own");
+    const vBare = await commitImport("venues", prepImport("venues", [
+      "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category",
+      ",c-t137-c1-bare,Recital Hall,12 Bare St,Neenah,WI,54956,theatre",
+    ].join("\n")), "skip");
+    assert.equal(vBare.errored, 0, "#137 C1 the placeholder row errors nothing");
+    const bare2 = await getCustomer("c-t137-c1-bare");
+    assert.equal(bare2!.locations.length, 1, "#137 C1 an unaddressed base venue is still claimed — no empty twin");
+    assert.equal(bare2!.locations[0].label, "Recital Hall", "#137 C1 …and it takes the row's name");
+    assert.equal(bare2!.locations[0].address, "12 Bare St", "#137 C1 …and the row's address");
+    assert.equal(bare2!.locations[0].primary, true, "#137 C1 …and it stays primary");
   }
 
   console.log("review regression checks passed");

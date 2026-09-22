@@ -57,6 +57,17 @@ const ROUTES = [
    * became a layout mode of Designs (D-grid-merge). Its editor route is still
    * covered below as a dynamic route. */
   "/import",
+  // #137 — the three people/venue importers + every CSV the hub serves.
+  "/import?type=customers",
+  "/import?type=contacts",
+  "/import?type=venues",
+  "/import?tab=export",
+  "/import/export?type=customers",
+  "/import/export?type=customers&kind=template",
+  "/import/export?type=contacts",
+  "/import/export?type=contacts&kind=template",
+  "/import/export?type=venues",
+  "/import/export?type=venues&kind=template",
   "/catalog",
   "/estimating-rules",
   "/inspections",

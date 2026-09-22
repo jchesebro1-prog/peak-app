@@ -71,14 +71,29 @@ import { gridProjectsSeed } from "@/db/seeds/grid-projects";
 import { quotesSeed } from "@/db/seeds/quotes";
 import ExcelJS from "exceljs";
 import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
-import { getTypeMeta } from "@/app/(app)/import/types";
+import { IMPORT_TYPES, getTypeMeta, type ImportTypeMeta } from "@/app/(app)/import/types";
 import {
   autoMap,
+  normalizeZip,
   parseCsv as parseImportCsv,
   prepareRows,
+  visibleColumns,
 } from "@/app/(app)/import/parse";
+import {
+  linksCustomer,
+  matchContact,
+  matchLocation,
+  mergeContact,
+  mergeLocation,
+  parseYesNo,
+  previewLinks,
+  resolveCustomerForRow,
+  venueKindFromCategory,
+} from "@/app/(app)/import/link";
+import type { CustomerContact, CustomerLocation } from "@/lib/stores/customers";
 // Pure (no store access, no DB) — see the note on catalogPatch itself.
-import { catalogPatch } from "@/app/(app)/import/registry";
+import { catalogPatch, templateCsv as importTemplateCsv } from "@/app/(app)/import/registry";
+import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
 
 import {
   VENUE_CLASSES, SUBTYPES, VISIT_PURPOSES, classMeasureFields,
@@ -5284,4 +5299,179 @@ async function archiveAsyncChecks(): Promise<void> {
     const r = await archiveRecordings(h.deps);
     ok(r.archived === 5 && uploads === 5, "archiveRecordings caps a run at 5 uploads (spec §5.2)");
   }
+}
+
+/* ======================================================================
+   #137 T2 — shared CustomerLocation / CustomerContact → input converters
+   (companies/lib.ts). Every field carries through so a save that starts
+   from a stored record never drops what the record holds.
+   ====================================================================== */
+{
+  const li = toLocationInput({
+    id: "lf1", locationName: "Campus", label: "Main Hall", primary: true, address: "1 Main", city: "Milwaukee", state: "WI",
+    zip: "53202", kind: "theatre", lat: "43.04", lng: null, venueKind: "proscenium", travelMiles: null, travelMin: 12,
+  });
+  ok(li.locationName === "Campus", "#137 T2 toLocationInput keeps locationName (the #96 review follow-up)");
+  ok(li.zip === "53202" && li.kind === "theatre", "#137 T2 toLocationInput carries zip + kind");
+  ok(li.lat === 43.04 && li.lng === null && li.travelMin === 12, "#137 T2 toLocationInput numbers lat, nulls blank lng, keeps travel");
+  const li2 = toLocationInput({ primary: false, venueKind: "church", travelMiles: null, travelMin: null });
+  ok(li2.zip === undefined && li2.kind === undefined && li2.label === "" && li2.locationName === "" && li2.venueKind === "church", "#137 T2 toLocationInput: absent zip/kind stay undefined (= preserve), text fields blank");
+  const ci = toContactInput({ name: "Maria Lopez", role: "TD", email: "m@x.org", phone: "1", mobile: "2", primary: true });
+  ok(ci.mobile === "2" && ci.phone === "1" && ci.role === "TD" && ci.primary, "#137 T2 toContactInput carries mobile");
+  ok(toContactInput({ name: "S", role: "", email: "", primary: false }).mobile === undefined, "#137 T2 toContactInput: absent mobile stays undefined");
+}
+
+/* ======================================================================
+   #137 T3 — three import types: template columns, alias resolution, hidden
+   legacy columns, Customer* OR Customer ID, zip cells, and the pure
+   link-back helpers (import/link.ts).
+   ====================================================================== */
+{
+  const cu = getTypeMeta("customers");
+  const ct = getTypeMeta("contacts");
+  const vn = getTypeMeta("venues");
+  ok(!!cu && !!ct && !!vn, "#137 T3 customers / contacts / venues types are registered");
+  if (cu && ct && vn) {
+    const visible = (t: ImportTypeMeta) => visibleColumns(t.fields).map((f) => f.header).join(",");
+    ok(visible(cu) === "Customer Name,Category,Address,City,State,Zip,Phone,Website", "#137 T3 customers template columns (embedded contact/venue columns gone)");
+    ok(visible(ct) === "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary", "#137 T3 contacts template columns");
+    ok(visible(vn) === "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category", "#137 T3 venues template columns");
+    // #137 T7 — the hub may only advertise what it honours. No customer,
+    // contact or venue record has a notes field: every Notes cell was
+    // dropped on import and the export wrote "". Hidden, so an old file's
+    // column is still absorbed (and can't be fuzzy-claimed by another
+    // field) but nothing offers it any more.
+    ok(
+      !visible(cu).includes("Notes") && !visible(ct).includes("Notes") && !visible(vn).includes("Notes"),
+      "#137 T7 Notes is advertised nowhere — no store field holds it"
+    );
+    ok(autoMap(["Customer", "Name", "Notes"], ct.fields).notes === 2, "#137 T7 …but a pre-#137 file's Notes column is still absorbed");
+    // The template header, the export header (both columnsOf) and the paste
+    // box's placeholder (visibleFields) are ONE list.
+    ok(importTemplateCsv("contacts").split("\n")[0] === visible(ct), "#137 T7 the contacts template header is exactly the visible columns");
+    ok(importTemplateCsv("venues").split("\n")[0] === visible(vn), "#137 T7 the venues template header is exactly the visible columns");
+
+    const legacy = parseImportCsv("Customer Name,Type,Contact Name,Email,Phone,Venue,Address,City,State,Notes\nRiverside Playhouse,Performing arts,Maria Lopez,maria@riverside.org,(608) 555-0110,Main Stage,215 W Main St,Madison,WI,");
+    const lm = autoMap(legacy.headers, cu.fields);
+    ok(lm.name === 0 && lm.type === 1 && lm.contactName === 2 && lm.email === 3 && lm.phone === 4 && lm.venue === 5 && lm.address === 6 && lm.notes === 9, "#137 T3 a pre-#137 customers file maps every column, embedded ones via hidden aliases");
+    const nm = autoMap(["Customer Name", "Category", "Address", "City", "State", "Zip", "Phone", "Website"], cu.fields);
+    ok(nm.type === 1 && nm.zip === 5 && nm.phone === 6 && nm.website === 7, "#137 T3 Category / Zip / Phone / Website map on the new customers template");
+    const cm = autoMap(["Company", "Customer ID", "Full Name", "E-mail", "Cell", "Job Title", "Primary Contact"], ct.fields);
+    ok(cm.customer === 0 && cm.customerId === 1 && cm.name === 2 && cm.email === 3 && cm.mobile === 4 && cm.title === 5 && cm.primary === 6, "#137 T3 contacts aliases: Company / Customer ID / Full Name / E-mail / Cell / Job Title / Primary Contact");
+    const vm = autoMap(["Customer", "Venue", "Street", "City", "State", "Zip Code", "Type"], vn.fields);
+    ok(vm.customer === 0 && vm.venue === 1 && vm.address === 2 && vm.zip === 5 && vm.kind === 6, "#137 T3 venues aliases: Venue / Street / Zip Code / Type");
+
+    const onlyId = prepareRows([["c-1", "Pat Doe"]], autoMap(["Customer ID", "Name"], ct.fields), ct.fields);
+    ok(onlyId.rows[0].valid, "#137 T3 a contacts row with only a Customer ID is valid (requiredUnless)");
+    const neither = prepareRows([["", "", "Pat Doe"]], autoMap(["Customer", "Customer ID", "Name"], ct.fields), ct.fields);
+    ok(!neither.rows[0].valid && neither.rows[0].errors.includes("Missing Customer"), "#137 T3 a row with neither Customer nor Customer ID fails validation");
+    const z = prepareRows([["A", "V", " 53703 "], ["B", "W", "53703-1234"], ["C", "X", "2134"]], autoMap(["Customer", "Venue Name", "Zip"], vn.fields), vn.fields);
+    ok(z.rows[0].values.zip === "53703" && z.rows[1].values.zip === "53703-1234" && z.rows[2].values.zip === "02134", "#137 T3 zip cells: trimmed, ZIP+4 kept as typed, Excel-stripped leading zero restored");
+  }
+}
+ok(normalizeZip(" 53703 ") === "53703" && normalizeZip("53703-1234") === "53703-1234" && normalizeZip(2134) === "02134" && normalizeZip("") === "" && normalizeZip(null) === "", "#137 T3 normalizeZip");
+ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1") && parseYesNo("x") && !parseYesNo("no") && !parseYesNo("") && !parseYesNo("0") && !parseYesNo(undefined), "#137 T3 parseYesNo");
+{
+  const cache = [{ id: "lakefront", name: "Lakefront Performing Arts Center" }, { id: "c-2", name: "Cedar Grove Schools" }];
+  const r1 = resolveCustomerForRow({ customerId: "c-2", customer: "Something Else" }, cache);
+  ok(r1.how === "id" && r1.id === "c-2", "#137 T3 resolve: Customer ID wins over the name");
+  const r2 = resolveCustomerForRow({ customer: "cedar-grove SCHOOLS" }, cache);
+  ok(r2.how === "name" && r2.id === "c-2" && r2.name === "Cedar Grove Schools", "#137 T3 resolve: normalized-name match returns the stored name");
+  const r3 = resolveCustomerForRow({ customerId: "nope", customer: "Brand New Org" }, cache);
+  ok(r3.how === "create" && r3.id === null && r3.name === "Brand New Org", "#137 T3 resolve: unknown id + unknown name → create");
+  const r4 = resolveCustomerForRow({ customerId: "", customer: "  " }, cache);
+  ok(r4.how === "missing" && r4.id === null, "#137 T3 resolve: neither → missing");
+  const rows = [
+    { values: { customer: "Brand New Org", name: "A" }, valid: true },
+    { values: { customer: "brand new org!", name: "B" }, valid: true },
+    { values: { customer: "Cedar Grove Schools", name: "C" }, valid: true },
+    { values: { customer: "", name: "" }, valid: false },
+  ];
+  const pv = previewLinks(rows, cache);
+  ok(pv.links.map((l) => l.how).join(",") === "create,create,name,skip", "#137 T3 previewLinks: the second row reuses the first row's pending create; invalid rows are skipped");
+  ok(pv.willCreate.length === 1 && pv.willCreate[0] === "Brand New Org", "#137 T3 previewLinks: one customer to create, counted once");
+}
+{
+  // #137 T7 — the preview's Customer column / "will create" list and the
+  // result's linked-vs-created line appear on exactly the types whose commit
+  // actually links a customer. Five other types carry a plain `customer`
+  // column they only copy onto their own record; `customers` IS the record.
+  const linked = IMPORT_TYPES.filter((t) => linksCustomer(t.fields)).map((t) => t.key).join(",");
+  ok(linked === "contacts,venues", "#137 T7 linksCustomer marks the link-back types only (not customers, not flame tests / inspections / surveys / quotes / projects)");
+}
+{
+  const contacts: CustomerContact[] = [
+    { name: "Maria Lopez", role: "TD", email: "maria@r.org", phone: "1", primary: true },
+    { name: "Sam Ortiz", role: "", email: "", primary: false },
+  ];
+  ok(matchContact(contacts, "MARIA@R.ORG", "Somebody")?.name === "Maria Lopez", "#137 T3 matchContact: email first, case-insensitive");
+  ok(matchContact(contacts, "", "sam ORTIZ")?.name === "Sam Ortiz", "#137 T3 matchContact: normalized name when no email");
+  ok(matchContact(contacts, "new@r.org", "New Person") === null && matchContact(contacts, "", "") === null, "#137 T3 matchContact: no hit / nothing to match");
+  const m1 = mergeContact(contacts, { name: "maria lopez", email: "maria@r.org", mobile: "9", primary: false });
+  ok(!m1.created && m1.contacts[0].name === "Maria Lopez" && m1.contacts[0].mobile === "9" && m1.contacts[0].role === "TD" && m1.contacts[0].phone === "1" && m1.contacts[0].primary, "#137 T3 mergeContact: a hit keeps the stored name/title/phone/primary and gains the mobile");
+  const m2 = mergeContact(contacts, { name: "Sam Ortiz", email: "sam@r.org", primary: true });
+  ok(!m2.created && m2.contacts[1].email === "sam@r.org" && m2.contacts[1].primary && !m2.contacts[0].primary, "#137 T3 mergeContact: primary:true promotes the hit and demotes the previous primary");
+  const m3 = mergeContact([], { name: "First Person", primary: false });
+  ok(m3.created && m3.contacts[0].primary, "#137 T3 mergeContact: the first contact on a record is primary even when the file says no");
+  const m4 = mergeContact(contacts, { name: "Third Person", title: "Billing", primary: false });
+  ok(m4.created && m4.contacts.length === 3 && m4.contacts[2].role === "Billing" && !m4.contacts[2].primary && m4.contacts[0].primary, "#137 T3 mergeContact: a new non-primary contact appends without touching the primary");
+  ok(contacts[0].mobile === undefined && contacts.length === 2 && contacts[1].email === "", "#137 T3 mergeContact never mutates its input");
+
+  const locs: CustomerLocation[] = [
+    { id: "l1", label: "", primary: true, venueKind: "proscenium", travelMiles: null, travelMin: null },
+  ];
+  const v1 = mergeLocation(locs, { label: "Main Stage", address: "215 W Main St", city: "Madison", state: "WI", zip: "53703", kind: "theatre" }, "l-new", { preferPrimary: false });
+  ok(!v1.created && v1.locations.length === 1 && v1.locations[0].id === "l1" && v1.locations[0].label === "Main Stage" && v1.locations[0].zip === "53703" && v1.locations[0].kind === "theatre" && v1.locations[0].primary, "#137 T3 mergeLocation claims the unnamed D85 base venue instead of adding a second venue");
+  ok(matchLocation(v1.locations, "main-stage")?.id === "l1" && matchLocation(v1.locations, "") === null, "#137 T3 matchLocation: normalized label; blank never matches");
+  const v2 = mergeLocation(v1.locations, { label: "MAIN stage", zip: "53704" }, "l-new2", { preferPrimary: false });
+  ok(!v2.created && v2.locations[0].zip === "53704" && v2.locations[0].address === "215 W Main St" && v2.locations[0].label === "MAIN stage", "#137 T3 mergeLocation: a normalized-label hit updates zip, keeps fields the row omits, takes the row's label spelling");
+  const v3 = mergeLocation(v1.locations, { label: "Black Box", kind: "black box" }, "l-new3", { preferPrimary: false });
+  ok(v3.created && v3.locations.length === 2 && v3.locations[1].id === "l-new3" && !v3.locations[1].primary && v3.locations[1].venueKind === "blackbox" && v3.locations[1].kind === "black box", "#137 T3 mergeLocation appends a non-primary venue whose venueKind derives from Category");
+  // Revised for #137 C1b (was: the row updates the primary venue's address in
+  // place) — that primary venue is NAMED, and its street address is the only
+  // copy the app holds, so a customers row appends its mailing address beside
+  // it instead of overwriting it.
+  const v4 = mergeLocation(v1.locations, { label: "", address: "1 HQ Way", zip: "53705" }, "l-new4", { preferPrimary: true });
+  ok(v4.created && v4.locations.length === 2 && v4.locations[0].label === "Main Stage" && v4.locations[0].address === "215 W Main St" && v4.locations[0].zip === "53703" && v4.locations[0].primary && !v4.locations[1].label && v4.locations[1].address === "1 HQ Way" && v4.locations[1].zip === "53705" && !v4.locations[1].primary, "#137 C1b mergeLocation preferPrimary: a customers row without a Venue column APPENDS its mailing address rather than overwriting a NAMED venue's");
+  const v5 = mergeLocation([], { label: "", address: "1 HQ Way" }, "l-new5", { preferPrimary: true, venueKind: "church" });
+  ok(v5.created && v5.locations[0].primary && v5.locations[0].label === "" && v5.locations[0].venueKind === "church" && v5.locations[0].id === "l-new5", "#137 T3 mergeLocation: the first venue on a new customer is primary and takes the caller's venueKind");
+  ok(locs[0].label === "" && locs.length === 1, "#137 T3 mergeLocation never mutates its input");
+
+  // #137 C1 (final review — data loss) — claimBlank. A labelled row may only
+  // claim a blank-label venue that carries NO address of its own: the
+  // customers template has no Venue column, so every customer it writes owns
+  // an unnamed but addressed primary venue (the mailing address), and
+  // claiming that slot overwrites it with the venue's address.
+  const addressedBlank: CustomerLocation[] = [
+    { id: "l1", label: "", primary: true, address: "215 W Main St", city: "Madison", zip: "53703", venueKind: "proscenium", travelMiles: null, travelMin: null },
+  ];
+  // The primary flags flipped in #137 I3 (this asserted the unnamed mailing
+  // venue kept primary): primaryLoc feeds the record page, travel and quote
+  // defaults, so the first NAMED venue outranks a mailing placeholder.
+  const v6 = mergeLocation(addressedBlank, { label: "Main Auditorium", address: "5000 N Ballard Rd", city: "Appleton", zip: "54913" }, "l-new6", { preferPrimary: true, claimBlank: "unaddressed" });
+  ok(v6.created && v6.locations.length === 2 && v6.locations[0].id === "l1" && !v6.locations[0].label && v6.locations[0].address === "215 W Main St" && v6.locations[0].city === "Madison" && !v6.locations[0].primary && v6.locations[1].label === "Main Auditorium" && v6.locations[1].address === "5000 N Ballard Rd" && v6.locations[1].primary, "#137 C1 mergeLocation claimBlank 'unaddressed': a labelled venues row APPENDS rather than claiming an addressed blank-label venue, so the customer's mailing address survives — and (#137 I3) the named venue takes primary from the unnamed mailing placeholder");
+  const v7 = mergeLocation(addressedBlank, { label: "Main Stage", address: "5000 N Ballard Rd" }, "l-new7", { preferPrimary: true, claimBlank: "any" });
+  ok(!v7.created && v7.locations.length === 1 && v7.locations[0].id === "l1" && v7.locations[0].label === "Main Stage" && v7.locations[0].address === "5000 N Ballard Rd", "#137 C1 mergeLocation claimBlank 'any': the customers writer still names the address venue its own row owns");
+  const v8 = mergeLocation(addressedBlank, { label: "Main Auditorium", address: "5000 N Ballard Rd" }, "l-new8", { preferPrimary: true });
+  ok(v8.created && v8.locations.length === 2 && v8.locations[0].address === "215 W Main St", "#137 C1 mergeLocation: the DEFAULT claimBlank is the safe one — an un-passed option never overwrites a stored address");
+  const v9 = mergeLocation(locs, { label: "Main Stage", address: "215 W Main St" }, "l-new9", { preferPrimary: false, claimBlank: "unaddressed" });
+  ok(!v9.created && v9.locations.length === 1 && v9.locations[0].id === "l1" && v9.locations[0].label === "Main Stage" && v9.locations[0].address === "215 W Main St", "#137 C1 mergeLocation claimBlank 'unaddressed' still claims a TRUE placeholder — the unnamed D85 base venue with no address of its own");
+  ok(addressedBlank.length === 1 && !addressedBlank[0].label && addressedBlank[0].address === "215 W Main St", "#137 C1 mergeLocation never mutates its input on the append path either");
+
+  // #137 C1b — the preferPrimary branch is the MIRROR of the claim branch: an
+  // unlabelled (customers) row may only land on a blank-label venue, i.e. one
+  // with no name of its own to lose. It prefers the primary such venue, falls
+  // back to any other, and appends when the customer has none — so a named
+  // venue's street address, the only copy the app holds, is never overwritten.
+  const namedPrimary: CustomerLocation[] = [
+    { id: "l1", label: "Main Auditorium", primary: true, address: "5000 N Ballard Rd", city: "Appleton", venueKind: "proscenium", travelMiles: null, travelMin: null },
+    { id: "l2", label: "", primary: false, address: "215 W Main St", city: "Madison", venueKind: "proscenium", travelMiles: null, travelMin: null },
+  ];
+  const v10 = mergeLocation(namedPrimary, { label: "", address: "220 E Doty St" }, "l-new10", { preferPrimary: true });
+  ok(!v10.created && v10.locations.length === 2 && v10.locations[0].id === "l1" && v10.locations[0].address === "5000 N Ballard Rd" && v10.locations[0].primary && v10.locations[1].id === "l2" && v10.locations[1].address === "220 E Doty St" && !v10.locations[1].primary, "#137 C1b mergeLocation preferPrimary falls back to the unnamed mailing venue when the PRIMARY venue is named — an 'Update existing' re-run updates it in place instead of growing a third venue");
+  const v11 = mergeLocation([{ id: "l1", label: "Main Auditorium", primary: false, address: "5000 N Ballard Rd", venueKind: "proscenium", travelMiles: null, travelMin: null }], { label: "", address: "1 HQ Way" }, "l-new11", { preferPrimary: true });
+  ok(v11.created && v11.locations.length === 2 && v11.locations[0].address === "5000 N Ballard Rd" && v11.locations[1].id === "l-new11" && v11.locations[1].address === "1 HQ Way", "#137 C1b mergeLocation preferPrimary: with no primary flag set at all it appends rather than falling back onto a NAMED list[0]");
+  const v12 = mergeLocation(addressedBlank, { label: "", address: "220 E Doty St" }, "l-new12", { preferPrimary: true });
+  ok(!v12.created && v12.locations.length === 1 && v12.locations[0].id === "l1" && v12.locations[0].address === "220 E Doty St" && v12.locations[0].primary, "#137 C1b mergeLocation preferPrimary still updates an ADDRESSED but unnamed primary venue in place — that venue is the customers row's own (and the #137 T6 blank-label round-trip)");
+  ok(venueKindFromCategory("Church") === "church" && venueKindFromCategory("Black Box") === "blackbox" && venueKindFromCategory("Arena") === "arena" && venueKindFromCategory("Gym") === "flat" && venueKindFromCategory("theatre") === "proscenium" && venueKindFromCategory("") === "proscenium" && venueKindFromCategory("flat") === "flat", "#137 T3 venueKindFromCategory");
 }

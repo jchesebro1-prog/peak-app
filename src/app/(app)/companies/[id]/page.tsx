@@ -44,6 +44,8 @@ import {
   money,
   moneyDash,
   quoteStatusMeta,
+  toContactInput,
+  toLocationInput,
   TRAVEL_SOURCE_META,
   typeColor,
   venueKindLabel,
@@ -52,6 +54,18 @@ import type { SaveCustomerInput } from "../types";
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
+}
+
+/** #137 — a stored Website is usually bare ("riversideplayhouse.org"), which
+ *  a browser would follow as a relative path. Give it a scheme; leave an
+ *  http/https one alone. Only those two pass through: the field is free text
+ *  an import or a typo can fill, and anything else ("javascript:…") must
+ *  never become a live href. Prefixing yields an ordinary https URL whose
+ *  host is the junk text, which resolves nowhere — the point is that the
+ *  original scheme can never reach the href. */
+function websiteHref(site: string): string {
+  const s = site.trim();
+  return /^https?:\/\//i.test(s) ? s : `https://${s}`;
 }
 
 const card: CSSProperties = {
@@ -150,7 +164,10 @@ export default async function CustomerDetailPage({
         label: l.label || "Venue",
         primary: !!l.primary,
         kindLabel: venueKindLabel(l.venueKind),
-        address: [l.address, cityState(l)].filter(Boolean).join(" · ") || "—",
+        // #137 — imported venue category, shown beside the kind when present.
+        category: l.kind || "",
+        address:
+          [l.address, [cityState(l), l.zip].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || "—",
         officeName: est.office ? est.office.name : "nearest office",
         miles: fmtMiles(est.miles),
         time: fmtTime(est.minutes),
@@ -189,27 +206,8 @@ export default async function CustomerDetailPage({
     lifecycle: cust.lifecycle || "none",
     keywords: cust.keywords || [],
     custom: cust.custom || {},
-    locations: (cust.locations || []).map((l) => ({
-      id: l.id,
-      locationName: l.locationName || "",
-      label: l.label || "",
-      primary: !!l.primary,
-      address: l.address || "",
-      city: l.city || "",
-      state: l.state || "",
-      lat: l.lat == null || l.lat === "" ? null : Number(l.lat),
-      lng: l.lng == null || l.lng === "" ? null : Number(l.lng),
-      venueKind: l.venueKind || "proscenium",
-      travelMiles: l.travelMiles ?? null,
-      travelMin: l.travelMin ?? null,
-    })),
-    contacts: (cust.contacts || []).map((ct) => ({
-      name: ct.name,
-      role: ct.role,
-      email: ct.email,
-      phone: ct.phone || "",
-      primary: ct.primary,
-    })),
+    locations: (cust.locations || []).map(toLocationInput),
+    contacts: (cust.contacts || []).map(toContactInput),
   };
 
   const tc = typeColor(cust.type);
@@ -286,6 +284,26 @@ export default async function CustomerDetailPage({
               ))}
             </div>
             <div style={{ fontSize: 13, color: "#8c919c", marginTop: 4 }}>{custLocation(cust)}</div>
+            {/* #137 — the company's main line + website: the customers
+                import writes both, so the record has to show them (editing
+                them is a follow-up). Either one is omitted when blank. */}
+            {(cust.phone || cust.website) && (
+              <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginTop: 5 }}>
+                {cust.phone && (
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#5b616e" }}>{cust.phone}</span>
+                )}
+                {cust.website && (
+                  <a
+                    href={websiteHref(cust.website)}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+                  >
+                    {cust.website}
+                  </a>
+                )}
+              </div>
+            )}
             {ownerIdent && (
               <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 9 }}>
                 <Avatar name={owner} initials={ownerIdent.initials} color={ownerIdent.color} size={22} />
@@ -335,6 +353,11 @@ export default async function CustomerDetailPage({
                   <span style={{ fontSize: 10, fontWeight: 600, color: "#5b616e", background: "#f1f2f5", border: "1px solid #e4e7ec", padding: "2px 8px", borderRadius: 20 }}>
                     {l.kindLabel}
                   </span>
+                  {l.category && (
+                    <span style={{ fontSize: 10, fontWeight: 600, color: "#5b616e", background: "#f1f2f5", border: "1px solid #e4e7ec", padding: "2px 8px", borderRadius: 20 }}>
+                      {l.category}
+                    </span>
+                  )}
                   {l.primary && (
                     <span style={{ fontSize: 9, fontWeight: 700, color: ACCENT_INK, background: ACCENT_SOFT, padding: "1px 6px", borderRadius: 4, letterSpacing: ".03em" }}>
                       PRIMARY

@@ -12,13 +12,9 @@ import { requireUser } from "@/lib/session";
 import { patchDoc } from "@/db/doc-store";
 import { get as getThread } from "@/lib/stores/comms";
 import type { CommThread } from "@/lib/stores/comms";
-import {
-  get as getCustomer,
-  contactsForId,
-  type CustomerContact,
-  type CustomerLocation,
-} from "@/lib/stores/customers";
+import { get as getCustomer, contactsForId } from "@/lib/stores/customers";
 import { saveCustomerAction } from "@/app/(app)/companies/actions";
+import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
 import type { ContactInput, LocationInput } from "@/app/(app)/companies/types";
 import { savePersonAction } from "@/app/(app)/people/actions";
 import type { SavePersonInput } from "@/app/(app)/people/types";
@@ -28,35 +24,6 @@ import { linkThread, rememberAddress, resweepThreads } from "@/lib/gmail/linking
 
 type R = { ok: true } | { ok: false; error: string };
 const revalidate = () => revalidatePath("/", "layout");
-
-/** Same shape the guided quote intake uses (quotes/new/actions.ts) — kept
- *  local since that file doesn't export it. */
-function toLocationInput(l: CustomerLocation): LocationInput {
-  return {
-    id: l.id,
-    locationName: l.locationName || "",
-    label: l.label || "",
-    primary: !!l.primary,
-    address: l.address || "",
-    city: l.city || "",
-    state: l.state || "",
-    lat: l.lat == null || l.lat === "" ? null : Number(l.lat),
-    lng: l.lng == null || l.lng === "" ? null : Number(l.lng),
-    venueKind: l.venueKind || "proscenium",
-    travelMiles: l.travelMiles,
-    travelMin: l.travelMin,
-  };
-}
-
-function toContactInput(c: CustomerContact): ContactInput {
-  return {
-    name: c.name,
-    role: c.role || "",
-    email: c.email || "",
-    phone: c.phone || "",
-    primary: !!c.primary,
-  };
-}
 
 /** Link sidebar's Link / pick — links a thread to an existing customer,
  *  optionally remembering the sender's address and/or claiming their
