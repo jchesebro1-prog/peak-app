@@ -239,6 +239,14 @@ export async function applyTaskTemplate(
   if (!set.appliesTo.includes(target.kind)) {
     throw new Error(`"${set.name}" isn't set up to apply to ${TEMPLATE_RECORD_LABEL[target.kind].toLowerCase()}.`);
   }
+  // #145: a consulting target with no schedule would skip the scope gate
+  // entirely below (the `if (schedule)` block never runs) and mint every
+  // line as an undated task regardless of phase/discipline fit — exactly
+  // the silent-wrong-data failure this feature exists to prevent. Loud and
+  // early beats quiet and wrong; callers (Tasks 4 and 11) must always pass one.
+  if (target.kind === "consulting" && !schedule) {
+    throw new Error("A consulting engagement must be scheduled before a template can be applied to it.");
+  }
   // Confirm the target actually exists (and is the kind claimed) before
   // minting any tasks against it — a bad id (mistyped, or a caller passing
   // a quote id under a "project" target) must fail here, not create tasks

@@ -25,9 +25,14 @@ import {
 import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
-import { normalizeEngagementRecord, type EngagementPhase } from "@/lib/stores/engagements";
+import { normalizeEngagementRecord, type EngagementPhase, createManualEngagement, allEngagements } from "@/lib/stores/engagements";
 import { TEMPLATE_RECORD_KINDS, TEMPLATE_RECORD_LABEL } from "@/lib/task-template-kinds";
-import { normalizeLine as normalizeTemplateLine } from "@/lib/stores/task-templates";
+import {
+  normalizeLine as normalizeTemplateLine,
+  applyTaskTemplate, createTaskTemplateSet, updateTaskTemplateSet, allTaskTemplateSets,
+  type ApplyTemplateSchedule, type TaskTemplateLine,
+} from "@/lib/stores/task-templates";
+import { activeUsers } from "@/lib/users";
 import {
   msOf as opMsOf,
   serviceToWorkItems,
@@ -1783,7 +1788,7 @@ ok(legacyEmailFor("Jeff Chesebro") === "jchesebro@peaksystemsgroup.com", "legacy
 /* ============ TASKS (#17) — store pure logic ============ */
 import {
   isOverdue, taskFromLegacy, expandTemplate, taskBellItems, autoTaskId,
-  normalizeTask, tasksForEngagement,
+  normalizeTask, tasksForEngagement, tasksForProject,
   STATUSES, type TaskRecord, type TaskTemplateItem,
 } from "@/lib/stores/tasks";
 import { CATEGORIES } from "@/lib/stores/notif-prefs";
@@ -5398,6 +5403,7 @@ recordingsAsyncChecks()
   .then(() => writeBackAsyncChecks())
   .then(() => archiveAsyncChecks())
   .then(() => asyncChecks())
+  .then(() => templateScheduleAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -5967,3 +5973,191 @@ ok(bareLine145.startPct === 0 && bareLine145.lengthPct === 100, "#145 an unmeasu
 const clampedLine145 = normalizeTemplateLine({ title: "x", startPct: -5, lengthPct: 500 });
 ok(clampedLine145.startPct === 0 && clampedLine145.lengthPct === 100, "#145 out-of-range template percentages are clamped at normalize, not at render");
 ok(normalizeTemplateLine({ title: "x", discipline: " Rigging " }).discipline === "rigging", "#145 a discipline is stored lowercased and trimmed so selectLines matches it");
+
+/* ---- #145 T3: a non-numeric percentage falls back rather than becoming NaN ---- */
+ok(normalizeTemplateLine({ title: "x", startPct: "abc" }).startPct === 0, "#145 a non-numeric startPct string falls back to 0 rather than becoming NaN");
+
+/* ====== #145 T3: applyTaskTemplate schedules + gates a consulting fan-out ======
+ * DB-backed (async, doc-store), mirroring the file's own #13 idiom: fixed
+ * test names + find-or-converge lookups since this writes to the real
+ * persistent dev DB, not a scratch one. */
+async function templateScheduleAsyncChecks(): Promise<void> {
+  const ENG_START_145T3 = Date.UTC(2027, 3, 1);
+  const ENG_END_145T3 = ENG_START_145T3 + 100 * DAY145;
+  const PHASES_145T3: PhaseWeight[] = [
+    { phaseId: "ph-assess-145t3", name: "Assessment", weight: 1 },
+    { phaseId: "ph-dd-145t3", name: "Design Development", weight: 1 },
+  ];
+  const DISCIPLINES_145T3 = ["rigging"];
+
+  const ENG_NAME_145T3 = "PUNCHLIST #145 T3 integration test engagement";
+  const eng145t3 =
+    (await allEngagements()).find((e) => e.name === ENG_NAME_145T3) ||
+    (await createManualEngagement(
+      {
+        customerId: "test-customer-145t3",
+        customer: "Test Customer #145 T3",
+        name: ENG_NAME_145T3,
+        phases: ["Assessment", "Design Development"],
+      },
+      { name: "Test Harness" }
+    ));
+
+  const linesFor145t3: TaskTemplateLine[] = [
+    {
+      key: "t3-person", title: "T3 in-scope person line", section: "",
+      target: { kind: "person", userId: "u1" },
+      phase: "Assessment", discipline: "", startPct: 0, lengthPct: 100,
+    },
+    {
+      key: "t3-wrong-phase", title: "T3 wrong-phase line", section: "",
+      target: { kind: "team" },
+      phase: "Nonexistent Phase", discipline: "", startPct: 0, lengthPct: 100,
+    },
+    {
+      key: "t3-wrong-discipline", title: "T3 wrong-discipline line", section: "",
+      target: { kind: "team" },
+      phase: "Assessment", discipline: "lighting", startPct: 0, lengthPct: 100,
+    },
+    {
+      key: "t3-blank-discipline", title: "T3 blank-discipline line", section: "",
+      target: { kind: "team" },
+      phase: "Design Development", discipline: "", startPct: 10, lengthPct: 20,
+    },
+    {
+      key: "t3-role", title: "T3 role line", section: "",
+      target: { kind: "role", role: "Estimator" },
+      phase: "Assessment", discipline: "rigging", startPct: 0, lengthPct: 100,
+    },
+  ];
+
+  const SET_NAME_145T3 = "PUNCHLIST #145 T3 integration test set";
+  const found145t3 = (await allTaskTemplateSets()).find((s) => s.name === SET_NAME_145T3);
+  const set145t3 = found145t3
+    ? await updateTaskTemplateSet(found145t3.id, { lines: linesFor145t3 })
+    : await createTaskTemplateSet({ name: SET_NAME_145T3, appliesTo: ["consulting"], lines: linesFor145t3 }, { name: "Test Harness" });
+  if (!set145t3) throw new Error("#145 T3 setup: template set not found after create/update");
+
+  const schedule145t3: ApplyTemplateSchedule = {
+    startAt: ENG_START_145T3, endAt: ENG_END_145T3, phases: PHASES_145T3, disciplines: DISCIPLINES_145T3,
+  };
+  await applyTaskTemplate(set145t3.id, { kind: "consulting", id: eng145t3.id }, { name: "Test Harness" }, schedule145t3);
+
+  const engTasks145t3 = await tasksForEngagement(eng145t3.id);
+  const byTitle145t3 = (title: string) => engTasks145t3.filter((t) => t.title === title);
+
+  ok(
+    byTitle145t3("T3 wrong-phase line").length === 0,
+    "#145 T3 a line whose phase the engagement doesn't have never produces a task for anyone"
+  );
+  ok(
+    byTitle145t3("T3 wrong-discipline line").length === 0,
+    "#145 T3 a line whose discipline the engagement didn't buy never produces a task for anyone"
+  );
+
+  const blankDiscTasks145t3 = byTitle145t3("T3 blank-discipline line");
+  ok(
+    blankDiscTasks145t3.length > 0,
+    "#145 T3 a blank-discipline line DOES expand even when the engagement bought only some disciplines"
+  );
+  ok(
+    blankDiscTasks145t3.every((t) => t.engagementId === eng145t3.id && t.schedule?.phaseId === "ph-dd-145t3"),
+    "#145 T3 the blank-discipline line's tasks are placed in their own phase window"
+  );
+
+  const personTasks145t3 = byTitle145t3("T3 in-scope person line");
+  ok(personTasks145t3.length === 1, "#145 T3 a person-target in-scope line produces exactly one task");
+  ok(personTasks145t3[0]?.assigneeUserId === "u1", "#145 T3 the person-target task is assigned to the named person");
+  ok(
+    personTasks145t3[0]?.schedule?.phaseId === "ph-assess-145t3" &&
+      personTasks145t3[0]?.startAt === ENG_START_145T3 &&
+      personTasks145t3[0]?.dueAt === ENG_START_145T3 + 50 * DAY145,
+    "#145 T3 the person-target task carries the phase's own placement (startPct 0 / lengthPct 100 of a 50-day window)"
+  );
+
+  const roleUsers145t3 = (await activeUsers()).filter((u) => (u.roles || []).includes("Estimator"));
+  const roleTasks145t3 = byTitle145t3("T3 role line");
+  ok(
+    roleUsers145t3.length > 0 && roleTasks145t3.length === roleUsers145t3.length,
+    "#145 T3 a role line fans out to exactly one task per active user holding that role"
+  );
+  ok(
+    roleTasks145t3.every(
+      (t) => t.schedule?.phaseId === "ph-assess-145t3" && t.startAt === ENG_START_145T3 && t.dueAt === ENG_START_145T3 + 50 * DAY145
+    ),
+    "#145 T3 every fanned-out role task carries the SAME placement (the ::userId suffix is stripped before the placement lookup)"
+  );
+  ok(
+    new Set(roleTasks145t3.map((t) => t.assigneeUserId)).size === roleUsers145t3.length,
+    "#145 T3 each role-line task is assigned to a distinct matching user"
+  );
+
+  /* ---- guard: a consulting target with no schedule must throw, not silently skip the gate ---- */
+  let threw145t3 = false;
+  let thrownMessage145t3 = "";
+  try {
+    await applyTaskTemplate(set145t3.id, { kind: "consulting", id: eng145t3.id }, { name: "Test Harness" });
+  } catch (e) {
+    threw145t3 = true;
+    thrownMessage145t3 = e instanceof Error ? e.message : String(e);
+  }
+  ok(
+    threw145t3,
+    "#145 T3 applying a template to a consulting engagement with no schedule throws instead of silently skipping the scope gate"
+  );
+  ok(
+    /schedul/i.test(thrownMessage145t3) && /consulting/i.test(thrownMessage145t3),
+    "#145 T3 the no-schedule guard's error names the missing schedule and the consulting engagement"
+  );
+
+  /* ---- omitting schedule reproduces the old behaviour exactly (project target) ---- */
+  const PROJECT_ID_145T3 = "test-project-punch145-t3";
+  if (!(await getProject(PROJECT_ID_145T3))) {
+    await upsertDoc("projects", {
+      id: PROJECT_ID_145T3,
+      kind: "project",
+      quoteId: null,
+      projectType: null,
+      name: "PUNCHLIST #145 T3 test project",
+      customer: "Test Customer #145 T3",
+      customerId: null,
+      locationId: null,
+      owner: "Test Harness",
+      value: 0,
+      stage: "procurement",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  }
+
+  const linesFor145t3Project: TaskTemplateLine[] = [
+    {
+      key: "t3-proj-line", title: "T3 project line (no schedule)", section: "",
+      target: { kind: "person", userId: "u1" },
+      // Deliberately garbage phase/discipline/percentages — with no schedule
+      // argument the `if (schedule)` block never runs, so these must be
+      // entirely ignored, exactly like every pre-#145 template line.
+      phase: "Totally Made Up Phase", discipline: "not-a-real-discipline", startPct: 999, lengthPct: -50,
+    },
+  ];
+  const SET_NAME_145T3_PROJECT = "PUNCHLIST #145 T3 integration test set — project";
+  const foundProj145t3 = (await allTaskTemplateSets()).find((s) => s.name === SET_NAME_145T3_PROJECT);
+  const set145t3Project = foundProj145t3
+    ? await updateTaskTemplateSet(foundProj145t3.id, { lines: linesFor145t3Project })
+    : await createTaskTemplateSet(
+        { name: SET_NAME_145T3_PROJECT, appliesTo: ["project"], lines: linesFor145t3Project },
+        { name: "Test Harness" }
+      );
+  if (!set145t3Project) throw new Error("#145 T3 setup: project template set not found after create/update");
+
+  await applyTaskTemplate(set145t3Project.id, { kind: "project", id: PROJECT_ID_145T3 }, { name: "Test Harness" });
+  const projTasks145t3 = (await tasksForProject(PROJECT_ID_145T3)).filter((t) => t.title === "T3 project line (no schedule)");
+  ok(projTasks145t3.length === 1, "#145 T3 omitting schedule still applies a template to a project target exactly as before");
+  ok(
+    projTasks145t3[0]?.startAt === null &&
+      projTasks145t3[0]?.dueAt === null &&
+      projTasks145t3[0]?.schedule === null &&
+      projTasks145t3[0]?.handScheduled === false,
+    "#145 T3 omitting schedule produces no dates, no schedule, and handScheduled false — the old behaviour exactly"
+  );
+}
