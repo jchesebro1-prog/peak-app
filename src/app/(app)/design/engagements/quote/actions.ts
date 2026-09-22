@@ -16,6 +16,7 @@ import {
 } from "@/lib/stores/leads";
 import type { ConsultingQuotePayload } from "@/lib/stores/engagements";
 import { scopesTotal, type ConsultingScope } from "@/lib/consulting-stages";
+import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
 
 /**
  * Consulting proposal mutations (#35 rebuild over the D90 lightweight
@@ -72,6 +73,12 @@ async function persist(formData: FormData): Promise<string | null> {
   } catch {
     phases = [];
   }
+  let postedDisciplines: unknown[] = [];
+  try {
+    postedDisciplines = JSON.parse(String(formData.get("disciplines") || "[]"));
+  } catch {
+    postedDisciplines = [];
+  }
 
   if (!customerId || !venueCustomerId) return null;
 
@@ -95,11 +102,24 @@ async function persist(formData: FormData): Promise<string | null> {
 
   const value = scopesTotal(scopes);
 
-  const [architectRecord, venueRecord] = await Promise.all([
+  const [architectRecord, venueRecord, settings] = await Promise.all([
     getCustomer(customerId),
     getCustomer(venueCustomerId),
+    getSettings(),
   ]);
   if (!architectRecord || !venueRecord) return null;
+  // #145 D165 — treat the posted disciplines as untrusted (same allowlist
+  // idiom as cleanLocationId below): only a discipline actually in the
+  // live vocabulary survives, so a hand-crafted POST can't stash an
+  // arbitrary string onto the quote (and, at spawn, the engagement).
+  const liveDisciplines = new Set(mergedConsultingDisciplines(settings.consultingDisciplines));
+  const cleanDisciplines = Array.from(
+    new Set(
+      (Array.isArray(postedDisciplines) ? postedDisciplines : [])
+        .map((d) => String(d ?? "").trim().toLowerCase())
+        .filter((d) => liveDisciplines.has(d))
+    )
+  );
   const custName = (await nameFor(customerId)) || architectRecord.name || "";
   const venueCustomer = (await nameFor(venueCustomerId)) || venueRecord.name || "";
   const cleanLocationId = (venueRecord.locations || []).some((l) => l.id === locationId)
@@ -120,6 +140,7 @@ async function persist(formData: FormData): Promise<string | null> {
     fees: [],
     terms,
     phases: cleanPhases,
+    disciplines: cleanDisciplines,
     scopes,
     assumptions,
     leadId: priorPay?.leadId ?? null,

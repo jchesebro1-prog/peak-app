@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
-import { getSettings } from "@/lib/settings";
+import { getSettings, mergedConsultingDisciplines, phaseWeightsFor } from "@/lib/settings";
 import { mergedCatalog } from "@/lib/stores/survey-intake";
 import { mergedVisitReasons } from "@/lib/stores/site-visits";
 import { mergedConsultingPhases } from "@/lib/stores/engagements";
@@ -179,6 +179,11 @@ export default async function SettingsPage() {
           visitReasons={mergedVisitReasons(settings.visitReasons)}
           consultingPhases={mergedConsultingPhases(settings.consultingPhases)}
           consultingAssumptions={mergedConsultingAssumptions(settings.consultingAssumptions)}
+          phaseWeights={phaseWeightsFor(
+            settings.consultingPhaseWeights,
+            mergedConsultingPhases(settings.consultingPhases)
+          )}
+          consultingDisciplines={mergedConsultingDisciplines(settings.consultingDisciplines)}
           customerFieldDefs={resolveFieldDefs(settings.customerFieldDefs)}
           gridCategoryShapes={resolveCategoryShapes(settings.gridCategoryShapes)}
           gridLiveCategories={gridLiveCategories}

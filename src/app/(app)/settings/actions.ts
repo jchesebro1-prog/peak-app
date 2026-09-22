@@ -277,6 +277,47 @@ export async function saveConsultingAssumptionsAction(assumptions: string[]) {
   return { ok: true as const };
 }
 
+/** Consulting phase weights (#145 D165/D166 — sizes each phase's
+ *  proportional window in the scheduling engine; absent/invalid reads as 1
+ *  via phaseWeightsFor). FULL REPLACEMENT keyed by phase NAME, posted whole
+ *  by the Settings number-input row (one per phase in the current menu) —
+ *  a name no longer in the phase menu is simply inert, never read back by
+ *  phaseWeightsFor. Each weight is clamped to a small positive range so a
+ *  stray value can't produce a degenerate schedule window. */
+export async function saveConsultingPhaseWeightsAction(weights: Record<string, number>) {
+  await requirePerm("manage_users");
+  const clean: Record<string, number> = {};
+  const entries = weights && typeof weights === "object" ? Object.entries(weights) : [];
+  for (const [name, raw] of entries.slice(0, 20)) {
+    const trimmed = String(name ?? "").trim();
+    if (!trimmed) continue;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    clean[trimmed] = Math.min(1000, Math.round(n * 100) / 100);
+  }
+  await setSettings({ consultingPhaseWeights: clean });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** Consulting discipline vocabulary (#145 D165 — DEFAULT_CONSULTING_DISCIPLINES
+ *  overrides, mergedConsultingDisciplines). Trimmed, lowercased (matches how
+ *  TaskTemplateLine.discipline and the default four are stored) and
+ *  de-duplicated; an empty list falls back to the defaults. */
+export async function saveConsultingDisciplinesAction(disciplines: string[]) {
+  await requirePerm("manage_users");
+  const clean = Array.from(
+    new Set(
+      (Array.isArray(disciplines) ? disciplines : [])
+        .map((t) => String(t ?? "").trim().toLowerCase())
+        .filter(Boolean)
+    )
+  ).slice(0, 20);
+  await setSettings({ consultingDisciplines: clean });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
 /** Grid symbol per category (#131, D154) — FULL REPLACEMENT (the wireTypes
  *  idiom): the card posts every row; a category left off draws as a
  *  rectangle. Unknown shapes and blank categories are dropped; capped.
