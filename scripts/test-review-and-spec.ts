@@ -38,6 +38,7 @@ import {
   type ApplyTemplateSchedule, type TaskTemplateLine,
 } from "@/lib/stores/task-templates";
 import { activeUsers } from "@/lib/users";
+import { groupByPerson } from "@/app/(app)/schedule/people-lib";
 import { parseAssignTarget } from "@/app/(app)/import/registry";
 import { softDeleteDoc } from "@/db/doc-store";
 import {
@@ -7045,3 +7046,48 @@ const person145 = parseAssignTarget("person:Jeff Chesebro", users145);
 ok(person145.kind === "person" && person145.userId === "u1", "#145 'person:Name' resolves to a user id");
 ok(parseAssignTarget("person:Nobody At All", users145).kind === "team", "#145 an unresolvable person falls back to team rather than minting a task nobody owns");
 ok(parseAssignTarget("", users145).kind === "team", "#145 a blank Assign To defaults to team");
+
+/* ====== #145: the By person view (schedule/people-lib.ts, D172) ====== */
+{
+  const ppl145 = [{ id: "u1", name: "Jeff C." }, { id: "u2", name: "Chris C." }];
+  const tk145 = [
+    { id: "T-1", title: "SD set", assigneeUserId: "u1", assigneeName: "Jeff C.", startAt: OCT6, dueAt: OCT6 + 5 * DAY145, engagementId: "CE-1", handScheduled: false },
+    { id: "T-2", title: "QC", assigneeUserId: "u1", assigneeName: "Jeff C.", startAt: OCT6 + 2 * DAY145, dueAt: OCT6 + 6 * DAY145, engagementId: "CE-1", handScheduled: false },
+    { id: "T-3", title: "Rigging", assigneeUserId: null, assigneeName: "", startAt: OCT6, dueAt: OCT6 + DAY145, engagementId: "CE-1", handScheduled: false },
+  ];
+  const rows145 = groupByPerson(tk145, ppl145);
+  ok(rows145.length === 3, "#145 groupByPerson emits a lane per active person plus an Unassigned lane");
+  ok(rows145[0].bars.length === 2, "#145 a person's lane carries every task assigned to them across projects");
+  ok(rows145.find((r) => r.label === "Unassigned")?.bars.length === 1, "#145 unassigned work is visible rather than silently dropped");
+  ok(rows145.find((r) => r.label === "Chris C.")?.bars.length === 0, "#145 a person with no work still gets a lane — an empty lane is the answer to 'who is free'");
+  ok(rows145[0].bars.every((b) => b.draggable), "#145 consulting bars are draggable on the portfolio view");
+
+  // Review additions beyond the brief's own fixture — tone-by-engagement,
+  // the no-startAt/dueAt skip, and an empty user list still yielding the
+  // Unassigned lane (no rows === "grouping didn't run", not "no one to show").
+  const tk145b = [
+    { id: "T-4", title: "Other CE", assigneeUserId: "u1", assigneeName: "Jeff C.", startAt: OCT6, dueAt: OCT6 + DAY145, engagementId: "CE-2", handScheduled: false },
+    { id: "T-5", title: "No dates", assigneeUserId: "u1", assigneeName: "Jeff C.", startAt: null, dueAt: null, engagementId: "CE-1", handScheduled: false },
+  ];
+  const rows145b = groupByPerson([...tk145, ...tk145b], ppl145);
+  const jeffBars145b = rows145b[0].bars;
+  ok(jeffBars145b.length === 3, "#145 a task with no startAt/dueAt is skipped — it has no bar — while its dated siblings still show");
+  const ce1Tone = jeffBars145b.find((b) => b.id === "T-1")!.tone;
+  const ce2Tone = jeffBars145b.find((b) => b.id === "T-4")!.tone;
+  ok(ce1Tone !== ce2Tone, "#145 two different engagements get two different tones");
+  ok(
+    jeffBars145b.find((b) => b.id === "T-2")!.tone === ce1Tone,
+    "#145 two tasks on the SAME engagement (CE-1) get the SAME tone — one project reads as one colour"
+  );
+
+  const rowsNoUsers145 = groupByPerson(tk145, []);
+  ok(
+    rowsNoUsers145.length === 1 && rowsNoUsers145[0].label === "Unassigned" && rowsNoUsers145[0].bars.length === 3,
+    "#145 with no active users at all, every dated task still surfaces in the Unassigned lane rather than vanishing"
+  );
+
+  ok(
+    groupByPerson([], []).length === 1 && groupByPerson([], [])[0].label === "Unassigned" && groupByPerson([], [])[0].bars.length === 0,
+    "#145 an empty task list still yields the Unassigned lane, empty"
+  );
+}
