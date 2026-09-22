@@ -560,12 +560,16 @@ Expected: `No schema changes, nothing to migrate 😴`. Anything else means the 
 
 - [ ] **Step 5: Prove the migration applies to a fresh database and is re-runnable**
 
+`scripts/test-review-regressions.ts` opens PGlite, which runs `migrate()` — so running it twice against the same scratch datadir exercises both the first application and the re-run:
+
 ```bash
-D=$(mktemp -d); PGLITE_PATH=$D npx tsx -e 'import {getDb} from "@/db"; await getDb(); console.log("open 1 ok");'
-PGLITE_PATH=$D npx tsx -e 'import {getDb} from "@/db"; const db=await getDb(); console.log("open 2 ok");'
-rm -rf $D
+ps aux | grep tsx                 # must be empty before you start
+D=$(mktemp -d)
+PGLITE_PATH=$D npx tsx scripts/test-review-regressions.ts
+PGLITE_PATH=$D npx tsx scripts/test-review-regressions.ts
+rm -rf "$D"
 ```
-Expected: both print `ok` and exit. The second open re-runs nothing but proves the datadir survived. **Never point this at `.data/pglite`**, and make sure no other `tsx` is alive first (`ps aux | grep tsx`).
+Expected: both runs pass. The first proves the three tables and their triggers are created; the second proves every statement is idempotent, which is the D141 rule that the 2026-07 production failure on 0020 broke. **Never point this at `.data/pglite`.**
 
 - [ ] **Step 6: Typecheck and commit**
 
@@ -2389,7 +2393,15 @@ export function skusOnBomSince(
   sources: { quotes: unknown[]; gridProjects: unknown[]; generated: unknown[] },
   since: number
 ): Set<string>;
-export function coverageRows(parts, articles, sections, onBom): CoverageRow[];
+/** What coverage needs off a catalog part — a superset of SpecPartLike, so a
+ *  real CatalogPart is structurally assignable with no cast. */
+export type CoveragePart = SpecPartLike & { desc?: string; datasheetName?: string };
+export function coverageRows(
+  parts: CoveragePart[],
+  articles: SpecCategoryArticle[],
+  sections: SpecSection[],
+  onBom: Set<string>
+): CoverageRow[];
 export function filterCoverage(rows, f: { articleId?: string; state?: CoverageState | "all"; onBomOnly?: boolean; datasheetOnly?: boolean; q?: string }): CoverageRow[];
 ```
 
