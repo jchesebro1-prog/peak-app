@@ -1,4 +1,6 @@
 import type { CatalogPart } from "@/lib/stores/catalog";
+import type { FixtureOptionCategory } from "@/lib/stores/subassemblies";
+import { effectivePriceDate, type PriceDateSettings } from "./catalog-books";
 
 export const ASSEMBLY_ROLES = [
   "fixture", "lens", "mount", "accessory", "cable", "power", "data", "lamp", "other",
@@ -93,4 +95,88 @@ export function assemblyDescription(assembly: ResolvedFixtureAssembly): string {
     .filter((component) => component.defaultQty > 0)
     .map((component) => component.defaultQty === 1 ? component.label : `${component.label} ×${component.defaultQty}`);
   return included.length ? `${assembly.name} — ${included.join("; ")}` : assembly.name;
+}
+
+/* ---- #129 — subassemblies resolve live, like assemblies ------------------ */
+
+export const FIXTURE_OPTION_CATEGORIES: readonly FixtureOptionCategory[] = ["data", "power", "mounting", "accessories"];
+
+/** "Prices as of": the NEWEST effective price date among the given SKUs
+ *  (own pricedAt or the manufacturer's book date), null when none is dated. */
+export function pricesAsOf(
+  skus: string[],
+  catalog: Array<{ sku: string; mfr?: string; pricedAt?: number }>,
+  settings: PriceDateSettings = {}
+): number | null {
+  const bySku = new Map(catalog.map((p) => [p.sku, p]));
+  let newest: number | null = null;
+  for (const sku of skus) {
+    const part = bySku.get(sku);
+    if (!part) continue;
+    const at = effectivePriceDate(part, settings);
+    if (at != null && (newest == null || at > newest)) newest = at;
+  }
+  return newest;
+}
+
+export type SubassemblyInput = {
+  lightEngineSku: string;
+  lensSku: string;
+  /** Categories may be absent on older records and on the builder's draft. */
+  options?: Partial<Record<FixtureOptionCategory, Array<{ sku: string; qty: number }>>>;
+};
+
+export type ResolvedSubassemblyPart = { sku: string; name: string; cost: number; found: boolean };
+export type ResolvedSubassemblyOption = ResolvedSubassemblyPart & { qty: number };
+
+export type ResolvedSubassembly = {
+  lightEngine: ResolvedSubassemblyPart;
+  lens: ResolvedSubassemblyPart;
+  options: Record<FixtureOptionCategory, ResolvedSubassemblyOption[]>;
+  optionsCost: number;
+  cost: number;
+  /** Equals cost — the legacy save-time formula priced fixtures at cost. */
+  price: number;
+  /** SKUs no longer in the catalog (priced at 0 above). */
+  missing: string[];
+  pricesAsOf: number | null;
+};
+
+/**
+ * Price a fixture subassembly from the CURRENT catalog — exactly the formula
+ * saveFixtureAction used to freeze at save time (engine cost + lens cost +
+ * Σ option cost × qty), so a price-list import re-prices every fixture at
+ * once. The saved record keeps its build-time numbers as `snapshot`.
+ */
+export function resolveSubassembly(
+  sub: SubassemblyInput,
+  catalog: Array<Pick<CatalogPart, "sku" | "desc" | "cost"> & { mfr?: string; pricedAt?: number }>,
+  settings: PriceDateSettings = {}
+): ResolvedSubassembly {
+  const bySku = new Map(catalog.map((p) => [p.sku, p]));
+  const missing: string[] = [];
+  const partOf = (sku: string): ResolvedSubassemblyPart => {
+    const p = bySku.get(sku);
+    if (!p) {
+      if (sku) missing.push(sku);
+      return { sku, name: sku || "—", cost: 0, found: false };
+    }
+    return { sku: p.sku, name: p.desc, cost: Number(p.cost) || 0, found: true };
+  };
+  const lightEngine = partOf(sub.lightEngineSku);
+  const lens = partOf(sub.lensSku);
+  const options = { data: [], power: [], mounting: [], accessories: [] } as Record<FixtureOptionCategory, ResolvedSubassemblyOption[]>;
+  let optionsCost = 0;
+  const skus = [sub.lightEngineSku, sub.lensSku];
+  for (const category of FIXTURE_OPTION_CATEGORIES) {
+    for (const o of sub.options?.[category] || []) {
+      const qty = Math.max(1, Math.round(Number(o.qty) || 1));
+      const part = partOf(o.sku);
+      options[category].push({ ...part, qty });
+      optionsCost += part.cost * qty;
+      skus.push(o.sku);
+    }
+  }
+  const cost = lightEngine.cost + lens.cost + optionsCost;
+  return { lightEngine, lens, options, optionsCost, cost, price: cost, missing, pricesAsOf: pricesAsOf(skus, catalog, settings) };
 }

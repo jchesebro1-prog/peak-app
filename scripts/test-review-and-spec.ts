@@ -3103,6 +3103,39 @@ import {
   ok(!big.ok && big.error.includes("2.3 MB"), "#134 checkSize: the message renders the actual size");
 }
 
+/* --- #129: subassemblies resolve live --- pure */
+import { pricesAsOf, resolveSubassembly } from "@/lib/fixture-assemblies";
+
+{
+  const now = Date.now();
+  const DAY = 86400000;
+  const T0 = now - 300 * DAY;
+  const T1 = now - 30 * DAY;
+  const T2 = now - 3 * DAY;
+  const subCatalog = [
+    { sku: "ENG-1", desc: "Light engine", cost: 1000, mfr: "ETC", pricedAt: T1 },
+    { sku: "LENS-1", desc: "Lens tube", cost: 200, mfr: "ETC", pricedAt: T2 },
+    { sku: "CLAMP-1", desc: "C-clamp", cost: 25, mfr: "Acme" },
+    { sku: "DMX-1", desc: "DMX 10ft", cost: 12, mfr: "Acme" },
+  ];
+  const settings = { priceListEffective: { acme: T0 } };
+  const r = resolveSubassembly(
+    { lightEngineSku: "ENG-1", lensSku: "LENS-1", options: { mounting: [{ sku: "CLAMP-1", qty: 2 }], data: [{ sku: "DMX-1", qty: 1 }] } },
+    subCatalog,
+    settings
+  );
+  ok(r.cost === 1000 + 200 + 2 * 25 + 12, "#129 resolveSubassembly: cost = engine + lens + Σ option cost × qty (the legacy save-time formula)");
+  ok(r.price === r.cost, "#129 resolveSubassembly: price equals cost, as saveFixtureAction stored it");
+  ok(r.optionsCost === 62 && r.options.mounting[0].qty === 2 && r.options.mounting[0].cost === 25, "#129 resolveSubassembly: options carry qty and the live unit cost");
+  ok(r.lightEngine.name === "Light engine" && r.lens.found && r.options.power.length === 0 && r.options.accessories.length === 0, "#129 resolveSubassembly: names come from the catalog; absent categories resolve to []");
+  ok(r.pricesAsOf === T2 && r.missing.length === 0, "#129 resolveSubassembly: prices as of = the NEWEST effective date among its parts");
+  const gone = resolveSubassembly({ lightEngineSku: "ENG-1", lensSku: "NOPE", options: { accessories: [{ sku: "GONE", qty: 1 }] } }, subCatalog, settings);
+  ok(!gone.lens.found && gone.lens.cost === 0 && gone.missing.join(",") === "NOPE,GONE", "#129 resolveSubassembly: missing parts price at 0 and are listed");
+  ok(pricesAsOf(["CLAMP-1", "DMX-1"], subCatalog, settings) === T0, "#129 pricesAsOf: undated parts fall back to the manufacturer's book date");
+  ok(pricesAsOf(["CLAMP-1"], subCatalog) === null, "#129 pricesAsOf: no date anywhere → null");
+  ok(pricesAsOf([], subCatalog, settings) === null, "#129 pricesAsOf: no parts → null");
+}
+
 /* ---- #95 — login honours a same-origin callbackUrl ---- */
 const O = "https://quartzite-six.vercel.app";
 ok(safeCallbackPath(undefined, O) === "/", "safeCallbackPath: missing → /");

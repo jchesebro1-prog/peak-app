@@ -4,7 +4,11 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CatalogPart } from "@/lib/stores/catalog";
 import type { FixtureOptionCategory, FixtureSubassembly } from "@/lib/stores/subassemblies";
+import { resolveSubassembly } from "@/lib/fixture-assemblies";
+import { dateYear } from "@/lib/format";
 import { deleteSubassemblyAction, saveFixtureAction } from "./actions";
+
+const pricesNote = (at: number | null) => (at == null ? "prices as of: unknown" : `prices as of ${dateYear(at)}`);
 
 const FIELD: React.CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #dfe2e8", borderRadius: 8, padding: "9px 10px", font: "inherit", fontSize: 13, color: "#16181d", background: "#fff" };
 const LABEL: React.CSSProperties = { display: "block", fontSize: 10, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#737985", marginBottom: 5 };
@@ -35,7 +39,7 @@ function PartPicker({ label, parts, value, onChange }: { label: string; parts: C
   );
 }
 
-export default function SubassembliesClient({ parts, initial }: { parts: CatalogPart[]; initial: FixtureSubassembly[] }) {
+export default function SubassembliesClient({ parts, initial, priceListEffective }: { parts: CatalogPart[]; initial: FixtureSubassembly[]; priceListEffective: Record<string, number> }) {
   const router = useRouter();
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
@@ -48,6 +52,9 @@ export default function SubassembliesClient({ parts, initial }: { parts: Catalog
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const settings = { priceListEffective };
+  /** #129 — live pricing for the form's current picks, the same resolver the saved list uses. */
+  const draft = resolveSubassembly({ lightEngineSku, lensSku, options }, parts, settings);
 
   const reset = () => { setEditingId(null); setLabel(""); setDescription(""); setLightEngineSku(""); setLensSku(""); setLamp(""); setPosition(""); setCircuit(""); setOptions({ data: [], power: [], mounting: [], accessories: [] }); setError(null); };
   const edit = (item: FixtureSubassembly) => { setEditingId(item.id); setLabel(item.label); setDescription(item.description); setLightEngineSku(item.lightEngineSku); setLensSku(item.lensSku); setLamp(item.lamp || ""); setPosition(item.position || ""); setCircuit(item.circuit || ""); setOptions({ data: item.options?.data || [], power: item.options?.power || [], mounting: item.options?.mounting || [], accessories: item.options?.accessories || [] }); setError(null); window.scrollTo({ top: 0, behavior: "smooth" }); };
@@ -91,7 +98,8 @@ export default function SubassembliesClient({ parts, initial }: { parts: Catalog
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 16, paddingTop: 14, borderTop: "1px solid #eef0f3" }}>
           <div style={{ fontSize: 12.5, color: "#5b616e" }}>
-            Combined cost: <strong>{money((parts.find((p) => p.sku === lightEngineSku)?.cost || 0) + (parts.find((p) => p.sku === lensSku)?.cost || 0) + OPTION_CATEGORIES.reduce((sum, category) => sum + options[category.key].reduce((sub, option) => sub + (parts.find((p) => p.sku === option.sku)?.cost || 0) * option.qty, 0), 0))}</strong>
+            Combined cost: <strong>{money(draft.cost)}</strong>
+            <span style={{ marginLeft: 8, color: "#9aa0ab", fontSize: 11.5 }}>{pricesNote(draft.pricesAsOf)}</span>
           </div>
           <button type="button" onClick={submit} disabled={busy} style={{ border: 0, borderRadius: 8, padding: "9px 15px", background: busy ? "#c7cad1" : "var(--accent)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: busy ? "wait" : "pointer" }}>{busy ? "Saving…" : editingId ? "Save fixture" : "Build fixture"}</button>
         </div>
@@ -100,7 +108,35 @@ export default function SubassembliesClient({ parts, initial }: { parts: Catalog
 
       <section className="pk-card" style={{ padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}><h2 style={{ fontSize: 17, margin: 0 }}>Fixture subassemblies</h2><span style={{ color: "#9aa0ab", fontSize: 12 }}>{initial.length} saved</span></div>
-        {initial.length === 0 ? <p style={{ color: "#8c919c", fontSize: 13 }}>No fixtures built yet.</p> : <div style={{ display: "grid", gap: 9 }}>{initial.map((item) => <div key={item.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto auto", gap: 14, alignItems: "center", padding: "12px 0", borderTop: "1px solid #eef0f3" }}><div><div style={{ fontSize: 13.5, fontWeight: 700 }}>{item.label}</div><div style={{ color: "#737985", fontSize: 12, marginTop: 4 }}>{item.description || "No description"}</div><div style={{ color: "#9aa0ab", fontSize: 11.5, marginTop: 5 }}>{item.lightEngineName} + {item.lensName}</div></div><div style={{ textAlign: "right" }}><div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700 }}>{money(item.price)}</div><div style={{ color: "#9aa0ab", fontSize: 10.5 }}>combined cost</div></div><div style={{ display: "flex", gap: 6 }}><button type="button" onClick={() => edit(item)} style={{ border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#3d424e", cursor: "pointer", fontSize: 11.5 }}>Edit</button><button type="button" onClick={() => remove(item)} style={{ border: "1px solid #f0d6cd", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#a0442b", cursor: "pointer", fontSize: 11.5 }}>Delete</button></div></div>)}</div>}
+        {initial.length === 0 ? <p style={{ color: "#8c919c", fontSize: 13 }}>No fixtures built yet.</p> : <div style={{ display: "grid", gap: 9 }}>{initial.map((item) => {
+  const live = resolveSubassembly(item, parts, settings);
+  const was = item.snapshot?.price ?? item.price;
+  return (
+    <div key={item.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto auto", gap: 14, alignItems: "center", padding: "12px 0", borderTop: "1px solid #eef0f3" }}>
+      <div>
+        <div style={{ fontSize: 13.5, fontWeight: 700 }}>{item.label}</div>
+        <div style={{ color: "#737985", fontSize: 12, marginTop: 4 }}>{item.description || "No description"}</div>
+        <div style={{ color: "#9aa0ab", fontSize: 11.5, marginTop: 5 }}>{item.lightEngineName} + {item.lensName}</div>
+        {live.missing.length > 0 && (
+          <div style={{ color: "#a0442b", fontSize: 11.5, marginTop: 4 }}>
+            {live.missing.length} part{live.missing.length === 1 ? "" : "s"} no longer in the catalog: {live.missing.join(", ")}
+          </div>
+        )}
+      </div>
+      <div style={{ textAlign: "right" }}>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700 }}>{money(live.price)}</div>
+        <div style={{ color: "#9aa0ab", fontSize: 10.5 }}>live combined cost · {pricesNote(live.pricesAsOf)}</div>
+        {Math.abs(was - live.price) >= 0.005 && (
+          <div style={{ color: "#8a6d1f", fontSize: 10.5 }}>was {money(was)} when built ({dateYear(item.updatedAt)})</div>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button type="button" onClick={() => edit(item)} style={{ border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#3d424e", cursor: "pointer", fontSize: 11.5 }}>Edit</button>
+        <button type="button" onClick={() => remove(item)} style={{ border: "1px solid #f0d6cd", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#a0442b", cursor: "pointer", fontSize: 11.5 }}>Delete</button>
+      </div>
+    </div>
+  );
+})}</div>}
       </section>
     </>
   );
