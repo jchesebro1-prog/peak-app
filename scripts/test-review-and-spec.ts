@@ -2,6 +2,7 @@ import {
   generateSchedule, overrunsEnd, phaseWindows, placeTask, selectLines, shiftForMilestone,
   type PhaseWeight, type ScheduleLine,
 } from "@/lib/consulting-schedule";
+import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
@@ -5958,3 +5959,43 @@ ok(pw145[0].name === "Assessment" && typeof pw145[0].phaseId === "string" && pw1
  * (Task 3+ exercises it against real records; this only proves the store
  * compiles and exports it, with no DB touch here). */
 ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exported for the consulting side of the collection");
+/* ====== #145: Gantt geometry ====== */
+{
+  const DAY145 = 86400000;
+  const OCT6 = Date.UTC(2026, 9, 6);
+  ok(dayColumns(OCT6, OCT6 + 6 * DAY145).length === 7, "#145 dayColumns is inclusive of both ends");
+  const rect145 = barRect({ startAt: OCT6 + 2 * DAY145, dueAt: OCT6 + 4 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
+  ok(Math.round(rect145.leftPct) === 20 && Math.round(rect145.widthPct) === 20, "#145 barRect converts a span to percentages of the visible range");
+  ok(barRect({ startAt: OCT6 - DAY145, dueAt: OCT6 + DAY145 }, OCT6, OCT6 + 10 * DAY145).leftPct === 0, "#145 a bar starting before the window is clipped to the left edge, not drawn off-screen");
+  ok(barRect({ startAt: OCT6, dueAt: OCT6 }, OCT6, OCT6 + 10 * DAY145).widthPct > 0, "#145 a zero-length bar still renders a visible sliver rather than vanishing");
+  ok(snapToDay(OCT6 + 3 * DAY145 + 3600000) === OCT6 + 3 * DAY145, "#145 a drop snaps back to the start of its day");
+  ok(dateFromX(50, 100, OCT6, OCT6 + 10 * DAY145) === OCT6 + 5 * DAY145, "#145 dateFromX maps a pixel offset to a date within the range");
+}
+
+/* ====== #145: packTracks (review fix — relocated from gantt-grid.tsx into
+   gantt-lib.ts since it's pure) ====== */
+{
+  const DAY145 = 86400000;
+  const OCT6 = Date.UTC(2026, 9, 6);
+  const none = packTracks([]);
+  ok(none.n === 1 && Object.keys(none.map).length === 0, "#145 packTracks: an empty list still reports at least 1 track and an empty map");
+  const disjoint = packTracks([
+    { s: OCT6, e: OCT6 + DAY145, k: "a" },
+    { s: OCT6 + 2 * DAY145, e: OCT6 + 3 * DAY145, k: "b" },
+  ]);
+  ok(disjoint.n === 1 && disjoint.map.a === 0 && disjoint.map.b === 0, "#145 packTracks: non-overlapping items share a single track");
+  const overlap = packTracks([
+    { s: OCT6, e: OCT6 + 5 * DAY145, k: "a" },
+    { s: OCT6 + 2 * DAY145, e: OCT6 + 6 * DAY145, k: "b" },
+  ]);
+  ok(overlap.n === 2 && overlap.map.a === 0 && overlap.map.b === 1, "#145 packTracks: two overlapping items land on distinct tracks");
+  const reuse = packTracks([
+    { s: OCT6, e: OCT6 + 2 * DAY145, k: "a" },
+    { s: OCT6 + 1 * DAY145, e: OCT6 + 5 * DAY145, k: "b" },
+    { s: OCT6 + 3 * DAY145, e: OCT6 + 4 * DAY145, k: "c" },
+  ]);
+  ok(
+    reuse.n === 2 && reuse.map.a === 0 && reuse.map.b === 1 && reuse.map.c === 0,
+    "#145 packTracks: a track is reused once its occupant has ended, instead of growing a third track"
+  );
+}
