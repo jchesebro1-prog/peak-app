@@ -2949,6 +2949,27 @@ No schema/migration change — `generateBaseSheet`/`seedBlankSheet`/
 doc-store collections and the existing `Calibration`/`GridSpace` shapes,
 nothing new.
 
+**Addendum (Task 3, same plan, 2026-09-21):** "real-plan-upload creates a
+separate sheet" turned out to be pure UI copy, exactly as the plan's own
+recon predicted — no new decision number warranted. `addSheet()`/
+`addSheetAction` already append to `sheetIds` without ever touching
+`placements`, and the sheet-`<select>` in `editor.tsx` already lists every
+sheet by its own `name` (an uploaded sheet is already named from
+`file.name` in the client's `upload()`, a generated base sheet is named
+`"Generated base plan"` per `generateBaseSheet()`'s `addSheet()` call) — so
+switching between a generated base sheet and an uploaded one already
+worked correctly before this task touched anything. The only real gap: the
+"+ Plan sheet" button gave no indication that clicking it, once a project
+already has one or more sheets, adds an ADDITIONAL sheet rather than
+replacing what's open. Fixed with copy only: the button now reads
+"+ Additional sheet" (vs. "+ Plan sheet" when the project has none yet) and
+carries a `title` tooltip spelling out that upload is additive and leaves
+existing sheets/placements untouched; the sheet `<select>` gained a
+`title` tooltip to the same effect once there's more than one sheet to
+switch between. No stale "replace the plan" copy was found anywhere in the
+Grid editor to correct — there wasn't one. No files besides `editor.tsx`
+touched; no schema change.
+
 ## D146. Google Tasks two-way sync for the Home Queue (2026-09-21)
 
 Jeff: "This needs to be implemented with google tasks... work that way [like

@@ -2964,7 +2964,7 @@ field already exist; the work is a sell-price input + deciding A (line distribut
 
 ---
 
-## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — IN PROGRESS 2026-09-21 (Tasks 1–2 of 6 shipped, D145, D147) — generated base sheet + seeding action
+## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — IN PROGRESS 2026-09-21 (Tasks 1–3 of 6 shipped, D145, D147, D145-addendum) — generated base sheet + seeding action + separate-sheet upload copy
 
 **Area:** The Grid (`/design/grid`), sheet handling; shared `VenueDims`.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)

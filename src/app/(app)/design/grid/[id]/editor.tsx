@@ -1048,6 +1048,11 @@ export default function GridEditor({
               setCurtainAt(null);
               setCategoryDraft(null);
             }}
+            title={
+              sheets.length > 1
+                ? "Switch sheets — this design has more than one (e.g. the generated base plan and an uploaded plan)"
+                : undefined
+            }
             style={{ ...BTN, fontWeight: 500 }}
           >
             {sheets.map((s) => (
@@ -1057,8 +1062,17 @@ export default function GridEditor({
             ))}
           </select>
         )}
-        <button style={BTN} disabled={busy} onClick={() => fileRef.current?.click()}>
-          + Plan sheet
+        <button
+          style={BTN}
+          disabled={busy}
+          onClick={() => fileRef.current?.click()}
+          title={
+            sheets.length > 0
+              ? "Uploads a real plan as a NEW, separate sheet — the sheet(s) already here, and everything placed on them, are untouched"
+              : "Upload a plan sheet (PDF or image)"
+          }
+        >
+          {sheets.length > 0 ? "+ Additional sheet" : "+ Plan sheet"}
         </button>
         {project.measurementBased && project.autoConfig && sheets.length > 0 && (
           armSeed ? (
