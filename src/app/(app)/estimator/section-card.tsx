@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { SuggestPart } from "./estimator-data";
 import { fmt, marginColor, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
-import type { CustomDraft, QuoteLite, SpecSection } from "./types";
+import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import CatalogPicker from "./catalog-picker";
 import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, type ImportedMaterial } from "./material-csv";
@@ -19,8 +19,12 @@ import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, type ImportedMaterial } from "
  */
 
 /** The six mutually-exclusive add-part input methods. Declared here rather than
- *  in the estimator client so the card can name them without a cyclic import. */
-export type InputKind = "catalog" | "custom" | "curtain" | "fixture" | "labor" | "import";
+ *  in the estimator client so the card can name them without a cyclic import.
+ *
+ *  #143 replaced "import" with "vendor": the CSV importer is no longer
+ *  separately openable — it lives inside the catalog panel, where the parts it
+ *  batch-adds come from — and "+ Vendor quote" became its own method. */
+export type InputKind = "catalog" | "custom" | "curtain" | "fixture" | "labor" | "vendor";
 
 const LBL: CSSProperties = {
   display: "block",
@@ -57,11 +61,20 @@ export type SectionCardProps = {
   cols: string;
   catalogOpen: boolean;
   customOpen: boolean;
-  importOpen: boolean;
   /** Which input method is open on THIS system, if any — drives the accent flag
    *  on the add-part row so the exclusivity is visible. */
   openMethod: InputKind | null;
   customDraft: CustomDraft;
+  /** Every vendor quote on the estimate (#143) — a vendor line renders from
+   *  its record, so flipping Single/Itemized needs no re-entry. */
+  vendorQuotes: VendorQuote[];
+  /** Object-URLs for attachments uploaded to Blob storage in THIS page's
+   *  lifetime, by vendor-quote id (#143) — the download link for a file whose
+   *  bytes are already in Blob but whose estimate has not been saved yet. */
+  vendorPreviews: Record<string, string>;
+  /** The saved quote id, or null before the first save — decides whether an
+   *  attachment downloads through the authenticated proxy or from memory. */
+  savedQuoteId: string | null;
   registerRef: (id: string, el: HTMLDivElement | null) => void;
   onToggleExpand: () => void;
   onRename: (name: string) => void;
@@ -77,12 +90,14 @@ export type SectionCardProps = {
   onToggleFixture: () => void;
   onToggleLabor: () => void;
   onToggleCustom: () => void;
-  onToggleImport: () => void;
+  onToggleVendor: () => void;
   onAddPart: (cat: SuggestPart) => void;
   /** CSV batch-add (#112): resolves SKUs against the catalog, returns how many priced from it vs. landed custom. */
   onImportMaterials: (items: ImportedMaterial[]) => Promise<{ fromCatalog: number; custom: number }>;
   onSetCustomDraft: (field: keyof CustomDraft, v: string) => void;
   onAddCustomPart: () => void;
+  /** Live Single/Itemized flip on a stored vendor quote (#143). */
+  onSetVendorDisplay: (vendorQuoteId: string, display: "single" | "itemized") => void;
   /** Moves this system into a brand-new estimate (sibling of onDelete). */
   onMoveToNew: () => void;
   /** Moves this system into an already-existing estimate, by id. */
@@ -125,9 +140,9 @@ export default function SectionCard(p: SectionCardProps) {
      keeps the reset out of an effect. The import banner is cleared on the way
      IN rather than on the way out on purpose: an import whose panel is closed
      mid-flight still has a result to report (see the notice below). */
-  const handleToggleImport = () => {
+  const handleToggleCatalog = () => {
     setImportMessage(""); // a stale "12 materials added" must not greet the next open
-    p.onToggleImport();
+    p.onToggleCatalog();
   };
   const handleToggleCustom = () => {
     setLinkRevealed(false); // the draft is reseeded on open; the URL field goes with it
@@ -584,6 +599,32 @@ export default function SectionCard(p: SectionCardProps) {
             {visible.map((it) => {
               const hasComment = !!(it.comment && it.comment.trim());
               const showInternal = isInternal && !!(it.internalNote && it.internalNote.trim());
+              /* #143: a vendor line renders from its RECORD, not from the
+                 stamped desc, so flipping Single/Itemized needs no re-entry.
+                 Terms and notes ride in the amber INTERNAL box — the same
+                 vehicle as internalNote, which the customer document has no
+                 code path for, so they cannot leak. */
+              const vq = it.vendorQuoteId
+                ? p.vendorQuotes.find((v) => v.id === it.vendorQuoteId)
+                : undefined;
+              const lineDesc = vq
+                ? vq.vendor + " \u00b7 " + vq.quoteNumber + " \u2014 " + vq.description
+                : it.desc;
+              const vqTerms = (vq?.terms || "").trim();
+              const vqNotes = (vq?.notes || "").trim();
+              const att = vq?.attachment;
+              // In-memory first so the link works BEFORE the first save —
+              // the data-URL when Blob is off, this page's object-URL when the
+              // file went straight to Blob; the authenticated proxy once the
+              // estimate has an id to look the record up by.
+              const attPreview = vq ? p.vendorPreviews[vq.id] : undefined;
+              const attHref = att
+                ? att.dataUrl ||
+                  attPreview ||
+                  (p.savedQuoteId && vq
+                    ? `/api/vendor-quote-attachments/${encodeURIComponent(p.savedQuoteId)}/${encodeURIComponent(vq.id)}`
+                    : null)
+                : null;
               return (
                 <div
                   key={it.id}
@@ -600,7 +641,7 @@ export default function SectionCard(p: SectionCardProps) {
                 >
                   <div style={{ minWidth: 0 }}>
                     <div style={{ lineHeight: 1.3 }}>
-                      {it.desc}
+                      {lineDesc}
                       {it.link && (
                         <a href={it.link} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} title="Open product link" style={{ display: "inline-flex", marginLeft: 7, color: "var(--accent)", textDecoration: "none", fontSize: 12 }}>↗</a>
                       )}
@@ -652,6 +693,22 @@ export default function SectionCard(p: SectionCardProps) {
                           LABOR
                         </span>
                       )}
+                      {!!vq && (
+                        <span
+                          style={{
+                            fontSize: 9.5,
+                            fontWeight: 700,
+                            color: ACCENT_INK,
+                            background: ACCENT_SOFT,
+                            padding: "1px 6px",
+                            borderRadius: 4,
+                            letterSpacing: ".04em",
+                            marginLeft: 6,
+                          }}
+                        >
+                          VENDOR
+                        </span>
+                      )}
                     </div>
                     <div
                       style={{
@@ -663,6 +720,73 @@ export default function SectionCard(p: SectionCardProps) {
                     >
                       {it.sku}
                     </div>
+                    {!!vq && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 4 }}>
+                        {attHref && (
+                          <a
+                            href={attHref}
+                            download={att?.name || "vendor-quote"}
+                            onClick={(event) => event.stopPropagation()}
+                            style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+                          >
+                            Download {att?.name || "quote file"}
+                          </a>
+                        )}
+                        {vq.link && (
+                          <a
+                            href={vq.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(event) => event.stopPropagation()}
+                            style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+                          >
+                            Vendor link
+                          </a>
+                        )}
+                        {vq.includesFreight && (
+                          <span style={{ fontSize: 10.5, color: "#8c919c" }}>Includes freight</span>
+                        )}
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "#aab0bb" }}>
+                          Display
+                          {(["single", "itemized"] as const).map((mode) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => p.onSetVendorDisplay(vq.id, mode)}
+                              style={{
+                                fontFamily: "var(--font-ui)",
+                                fontSize: 10.5,
+                                fontWeight: 600,
+                                padding: "2px 8px",
+                                borderRadius: 5,
+                                cursor: "pointer",
+                                border: "1px solid " + (vq.display === mode ? "var(--accent)" : "#e4e7ec"),
+                                background: vq.display === mode ? ACCENT_SOFT : "#fff",
+                                color: vq.display === mode ? ACCENT_INK : "#8c919c",
+                              }}
+                            >
+                              {mode === "single" ? "Single line" : "Itemized"}
+                            </button>
+                          ))}
+                        </span>
+                      </div>
+                    )}
+                    {!!vq && vq.display === "itemized" && vq.lines.length > 0 && (
+                      /* Unpriced sub-rows: the cost stays on the parent line. */
+                      <div style={{ marginTop: 5, paddingLeft: 12, borderLeft: "2px solid #eef0f3" }}>
+                        {vq.lines.map((line) => (
+                          <div
+                            key={line.id}
+                            style={{ fontSize: 11.5, color: "#5b616e", lineHeight: 1.5 }}
+                          >
+                            <span style={{ fontFamily: "var(--font-mono)", color: "#aab0bb", marginRight: 7 }}>
+                              {line.qty} {line.unit}
+                            </span>
+                            {line.description}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {hasComment && (
                       <div style={{ fontSize: 11, color: "#5b616e", marginTop: 3, lineHeight: 1.35 }}>
                         {it.comment}
@@ -683,6 +807,24 @@ export default function SectionCard(p: SectionCardProps) {
                       >
                         <span style={{ fontWeight: 700, letterSpacing: ".04em" }}>INTERNAL</span> ·{" "}
                         {it.internalNote}
+                      </div>
+                    )}
+                    {isInternal && !!vq && (vqTerms || vqNotes) && (
+                      <div
+                        style={{
+                          fontSize: 10.5,
+                          color: "#8a6d1f",
+                          background: "#fbf3dd",
+                          border: "1px solid #f0e2bd",
+                          borderRadius: 5,
+                          padding: "3px 8px",
+                          marginTop: 4,
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        <span style={{ fontWeight: 700, letterSpacing: ".04em" }}>INTERNAL</span>
+                        {vqTerms && <span> · Terms: {vqTerms}</span>}
+                        {vqNotes && <span> · Notes: {vqNotes}</span>}
                       </div>
                     )}
                   </div>
@@ -827,12 +969,12 @@ export default function SectionCard(p: SectionCardProps) {
             <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
               {/* Only the open method reads as accented; with nothing open the
                   catalog stays the highlighted default, as in the prototype. */}
-              {addBtn("+ Add part from catalog", p.onToggleCatalog, openMethod === "catalog" || openMethod === null)}
+              {addBtn("+ Add part from catalog", handleToggleCatalog, openMethod === "catalog" || openMethod === null)}
               {addBtn("+ Configure curtain", p.onToggleCurtain, openMethod === "curtain")}
               {addBtn("+ Configure fixture", p.onToggleFixture, openMethod === "fixture")}
               {addBtn("+ Configure labor", p.onToggleLabor, openMethod === "labor")}
               {addBtn("+ Build custom part", handleToggleCustom, openMethod === "custom")}
-              {addBtn("+ Vendor quote / CSV", handleToggleImport, openMethod === "import")}
+              {addBtn("+ Vendor quote", p.onToggleVendor, openMethod === "vendor")}
             </div>
 
             {/* An import outlives its panel: the file is read and resolved
@@ -840,8 +982,8 @@ export default function SectionCard(p: SectionCardProps) {
                 method closes the panel while that is still in flight. The
                 outcome — "Import failed; nothing was added" above all — has to
                 land somewhere the user can still see it, so it stands here
-                until dismissed or until the panel is reopened. */}
-            {!p.importOpen && importMessage && (
+                until dismissed or until the catalog panel is reopened. */}
+            {!p.catalogOpen && importMessage && (
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
                 <span role="status" style={{ fontSize: 12, color: importMsgColor(importMessage) }}>{importMessage}</span>
                 <button
@@ -855,47 +997,51 @@ export default function SectionCard(p: SectionCardProps) {
               </div>
             )}
 
-            {p.catalogOpen && <CatalogPicker onAdd={p.onAddPart} />}
-
-            {p.importOpen && (
-              <div style={{ marginTop: 11, background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "15px 16px" }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" }}>Import material list or vendor quote</div>
-                <div style={{ marginTop: 5, fontSize: 12, color: "#777d88" }}>Batch-add catalog or custom materials. For catalog parts a SKU and quantity are enough: description, cost, and sell come from the catalog unless the file gives its own. Custom rows need a description, unit cost, unit sell, and an optional product link.</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-                  <label style={{ display: "inline-flex", alignItems: "center", borderRadius: 7, padding: "8px 13px", background: "var(--accent)", color: "#fff", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
-                    Select CSV file
-                    <input
-                      type="file"
-                      accept=".csv,text/csv,text/tab-separated-values"
-                      style={{ display: "none" }}
-                      onChange={(event) => {
-                        const input = event.currentTarget;
-                        const file = input.files?.[0];
-                        if (!file) return;
-                        file.text().then(async (text) => {
-                          const result = parseMaterialCsv(text);
-                          input.value = "";
-                          if (!result.items.length) {
-                            setImportMessage(result.errors.join(" "));
-                            return;
-                          }
-                          setImportMessage("Importing\u2026");
-                          const skipped = result.errors.length ? `; ${result.errors.length} row${result.errors.length === 1 ? "" : "s"} skipped` : "";
-                          try {
-                            const { fromCatalog, custom } = await p.onImportMaterials(result.items);
-                            const n = fromCatalog + custom;
-                            setImportMessage(`${n} material${n === 1 ? "" : "s"} added (${fromCatalog} priced from catalog, ${custom} custom)${skipped}.`);
-                          } catch {
-                            setImportMessage(`Import failed; nothing was added${skipped}.`);
-                          }
-                        });
-                      }}
-                    />
-                  </label>
-                  <a download="quartzite-material-import-example.csv" href={`data:text/csv;charset=utf-8,${encodeURIComponent(MATERIAL_CSV_TEMPLATE)}`} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>Download example CSV</a>
-                  {importMessage && <span role="status" style={{ fontSize: 12, color: importMsgColor(importMessage) }}>{importMessage}</span>}
+            {/* #143: the CSV importer belongs with the catalog parts it adds —
+                it is no longer a separately openable input method, so it rides
+                inside this panel rather than beside it. */}
+            {p.catalogOpen && (
+              <>
+                <CatalogPicker onAdd={p.onAddPart} />
+                <div style={{ marginTop: 11, background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "15px 16px" }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" }}>Import catalog parts from CSV</div>
+                  <div style={{ marginTop: 5, fontSize: 12, color: "#777d88" }}>Batch-add parts instead of picking them one at a time. For a catalog part a SKU and quantity are enough: description, unit, cost, and sell come from the catalog unless the file gives its own. A row with no SKU lands as a custom part and needs a description, unit cost, unit sell, and an optional product link.</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+                    <label style={{ display: "inline-flex", alignItems: "center", borderRadius: 7, padding: "8px 13px", background: "var(--accent)", color: "#fff", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                      Select CSV file
+                      <input
+                        type="file"
+                        accept=".csv,text/csv,text/tab-separated-values"
+                        style={{ display: "none" }}
+                        onChange={(event) => {
+                          const input = event.currentTarget;
+                          const file = input.files?.[0];
+                          if (!file) return;
+                          file.text().then(async (text) => {
+                            const result = parseMaterialCsv(text);
+                            input.value = "";
+                            if (!result.items.length) {
+                              setImportMessage(result.errors.join(" "));
+                              return;
+                            }
+                            setImportMessage("Importing\u2026");
+                            const skipped = result.errors.length ? `; ${result.errors.length} row${result.errors.length === 1 ? "" : "s"} skipped` : "";
+                            try {
+                              const { fromCatalog, custom } = await p.onImportMaterials(result.items);
+                              const n = fromCatalog + custom;
+                              setImportMessage(`${n} material${n === 1 ? "" : "s"} added (${fromCatalog} priced from catalog, ${custom} custom)${skipped}.`);
+                            } catch {
+                              setImportMessage(`Import failed; nothing was added${skipped}.`);
+                            }
+                          });
+                        }}
+                      />
+                    </label>
+                    <a download="quartzite-catalog-import-example.csv" href={`data:text/csv;charset=utf-8,${encodeURIComponent(MATERIAL_CSV_TEMPLATE)}`} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>Download example CSV</a>
+                    {importMessage && <span role="status" style={{ fontSize: 12, color: importMsgColor(importMessage) }}>{importMessage}</span>}
+                  </div>
                 </div>
-              </div>
+              </>
             )}
 
             {/* ===== custom part portal ===== */}

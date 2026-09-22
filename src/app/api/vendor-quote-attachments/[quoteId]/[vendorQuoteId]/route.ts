@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { dataUrlToBytes, getBlobStream, safeName } from "@/lib/blob";
+import { ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import { get as getQuote } from "@/lib/stores/quotes";
 
 type VendorQuoteAttachment = {
@@ -26,7 +27,7 @@ export async function GET(
     : [];
   const vendorQuote = vendorQuotes.find((item) => item.id === decodeURIComponent(vendorQuoteId));
   const attachment = vendorQuote?.attachment;
-  if (!attachment) return new Response("Not found", { status: 404 });
+  if (!vendorQuote || !attachment) return new Response("Not found", { status: 404 });
 
   const headers = {
     "content-type": attachment.mime || "application/octet-stream",
@@ -35,6 +36,15 @@ export async function GET(
   };
 
   if (attachment.blobPath) {
+    /* #143 re-review: a stored path is streamed only when it is this vendor
+       quote's own file under the vendor-quotes prefix. `blobPath` originates
+       in the browser (the upload route returns it, the save carries it), and
+       the save action already refuses a foreign one — this second check means
+       a path planted by any other writer, or left on a stale document, still
+       cannot turn this route into a reader for the whole private store. */
+    if (!ownsVendorQuoteBlobPath(attachment.blobPath, vendorQuote.id)) {
+      return new Response("Not found", { status: 404 });
+    }
     const stream = await getBlobStream(attachment.blobPath);
     if (!stream) return new Response("File missing from storage", { status: 404 });
     return new Response(stream, { headers });

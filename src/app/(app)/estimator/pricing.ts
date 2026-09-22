@@ -56,9 +56,20 @@ export function systemItemsCost(sec: SpecSection): number {
   return sec.items.filter((x) => !x.option).reduce((a, x) => a + x.qty * x.cost, 0);
 }
 
-/** Freight is a % of the section's item COST. */
+/**
+ * The cost freight is charged on (#143, D162 — Jeff's exemption): every
+ * non-option line EXCEPT one whose own price already includes freight (a
+ * vendor quote added with "Quote includes freight"). Deliberately NOT
+ * systemItemsCost, which still counts every line for the margin readout and
+ * the cost column.
+ */
+export function systemFreightBase(sec: SpecSection): number {
+  return sec.items.filter((x) => !x.option && !x.noFreight).reduce((a, x) => a + x.qty * x.cost, 0);
+}
+
+/** Freight is a % of the section's freight-bearing item COST. */
 export function systemFreight(sec: SpecSection): number {
-  return Math.round(systemItemsCost(sec) * ((sec.freightPct || 0) / 100) * 100) / 100;
+  return Math.round(systemFreightBase(sec) * ((sec.freightPct || 0) / 100) * 100) / 100;
 }
 
 export type QuoteTotals = {

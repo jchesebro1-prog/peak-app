@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
 import { fmt, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
-import type { PaymentTerms, SpecItem, SpecSection } from "./types";
+import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 
 /**
  * Customer preview — the quote document with the Show-on-PDF toggles.
@@ -70,6 +70,9 @@ export type PreviewProps = {
   logoDark: string | null;
   quoteNote: string;
   sections: SpecSection[];
+  /** #143 — a vendor line reads from its record here too, but NEVER its cost,
+   *  terms or notes: those are internal only (Jeff). */
+  vendorQuotes: VendorQuote[];
   t: QuoteTotals;
   taxRatePct: number;
   detail: "itemized" | "sectioned";
@@ -124,20 +127,48 @@ export default function PreviewDoc(p: PreviewProps) {
                   desc: "Installation, commissioning & project management",
                   comment: "",
                   showComment: false,
+                  sub: [] as { key: string; qty: number; unit: string; text: string }[],
                   qty: "" as string | number,
                   unit: "",
                   ext: fmt(visible.reduce((a, it) => a + it.qty * it.price, 0)),
                 },
               ]
-            : visible.map((it) => ({
-                key: String(it.id),
-                desc: it.allowance ? "Budget allowance — " + it.desc : it.desc,
-                comment: (it.comment || "").trim(),
-                showComment: !!(p.pdfNotes && it.comment && it.comment.trim()),
-                qty: it.qty as string | number,
-                unit: it.unit,
-                ext: fmt(it.qty * it.price),
-              })),
+            : visible.map((it) => {
+                /* #143: a vendor quote shows as one line reading
+                   "Vendor · Quote no. — Description", or, set to Itemized, the
+                   same line with its material descriptions underneath and the
+                   price rolled up on the parent. Terms, notes and the vendor's
+                   cost never appear here. */
+                const vq = it.vendorQuoteId
+                  ? p.vendorQuotes.find((v) => v.id === it.vendorQuoteId)
+                  : undefined;
+                const desc = vq
+                  ? vq.vendor + " \u00b7 " + vq.quoteNumber + " \u2014 " + vq.description
+                  : it.allowance
+                  ? "Budget allowance — " + it.desc
+                  : it.desc;
+                return {
+                  key: String(it.id),
+                  desc,
+                  comment: (it.comment || "").trim(),
+                  showComment: !!(p.pdfNotes && it.comment && it.comment.trim()),
+                  /* Qty/unit stay SEPARATE from the text (#143 re-review):
+                     baked into the description they printed straight past the
+                     Quantities toggle the rest of the document obeys. */
+                  sub:
+                    vq && vq.display === "itemized"
+                      ? vq.lines.map((l) => ({
+                          key: String(l.id),
+                          qty: l.qty,
+                          unit: l.unit,
+                          text: l.description,
+                        }))
+                      : [],
+                  qty: it.qty as string | number,
+                  unit: it.unit,
+                  ext: fmt(it.qty * it.price),
+                };
+              }),
       };
     });
 
@@ -528,6 +559,26 @@ export default function PreviewDoc(p: PreviewProps) {
                             {ln.comment}
                           </span>
                         )}
+                        {ln.sub.map((sl) => (
+                          <span
+                            key={sl.key}
+                            style={{
+                              display: "block",
+                              fontSize: 11,
+                              color: "#8c919c",
+                              marginTop: 2,
+                              paddingLeft: 12,
+                              lineHeight: 1.35,
+                            }}
+                          >
+                            {p.pdfQty && (
+                              <span style={{ fontFamily: "var(--font-mono)", marginRight: 6 }}>
+                                {sl.qty} {sl.unit}
+                              </span>
+                            )}
+                            {sl.text}
+                          </span>
+                        ))}
                       </span>}
                       {p.pdfQty && (
                         <span

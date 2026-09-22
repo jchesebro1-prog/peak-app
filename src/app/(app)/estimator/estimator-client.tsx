@@ -56,17 +56,21 @@ import type {
   SpecMob,
   SpecSection,
   TravelLite,
+  VendorDraft,
+  VendorLineDraft,
+  VendorQuote,
 } from "./types";
-import { PAYMENT_TERMS } from "./types";
+import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { assemblyDescription } from "@/lib/fixture-assemblies";
 import { defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import SectionCard, { type InputKind } from "./section-card";
-import type { ImportedMaterial } from "./material-csv";
+import { parseMoney, type ImportedMaterial } from "./material-csv";
 import AiScopeModal from "./ai-scope-modal";
 import CurtainModal from "./curtain-modal";
 import FixtureModal from "./fixture-modal";
 import LaborModal from "./labor-modal";
+import VendorQuoteModal, { vendorDraftTotal, vendorKeptLines } from "./vendor-quote-modal";
 import PreviewDoc from "./preview-doc";
 
 /**
@@ -150,6 +154,38 @@ const freshFixture = (): FixtureDraft => {
   };
 };
 
+/* Globally unique, NOT from nextId() (#143 re-review). That counter starts at
+   100 on every fresh estimate, so the first vendor quote in any two estimates
+   was "vq101" in both — and "Move system to another estimate" carries the
+   item's vendorQuoteId verbatim, so the moved line would resolve against the
+   target's unrelated record and print another vendor's name, file and terms.
+   Same reasoning as "sys" + Date.now().
+
+   Minted when the FORM OPENS, not at add time: with Blob storage on the file
+   is uploaded under this id before the estimate itself has one, and the id on
+   the stored record has to be the same one (see VendorDraft.id). Its shape is
+   validated by /api/vendor-quote-attachments/upload — keep them in step. */
+const mintVendorQuoteId = () =>
+  "vq" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+/** A blank vendor-quote form (#143). Display defaults to the single line —
+ *  Jeff's "just the Vendor, Quote Number and Description" reading. */
+const freshVendor = (): VendorDraft => ({
+  id: mintVendorQuoteId(),
+  vendor: "",
+  quoteNumber: "",
+  description: "",
+  link: "",
+  attachment: null,
+  attachmentPreview: null,
+  lines: [],
+  terms: "",
+  notes: "",
+  total: "",
+  includesFreight: false,
+  display: "single",
+});
+
 const freshLabor = (
   t: TravelLite | null,
   /** Tier-seeded margin fraction (item 11, D87); null → the legacy 30. */
@@ -224,6 +260,8 @@ export default function EstimatorClient({
   laborRates,
   fixtureRates,
   fixtureAssemblies,
+  vendors,
+  blobUploads,
   customers,
   travel,
   reviewers,
@@ -291,8 +329,9 @@ export default function EstimatorClient({
      closes and discards the last one (see openInputMethod). Five per-method
      section ids used to be cross-cleared by hand — and the sixth, the CSV
      importer, lived inside SectionCard and was coordinated with nothing, so one
-     could sit open per section. A seventh method is now one entry in InputKind
-     rather than five more setter calls. */
+     could sit open per section. #143 then split that button: the CSV importer
+     folded into the catalog panel and "+ Vendor quote" became its own method —
+     one entry in InputKind rather than five more setter calls. */
   const [openInput, setOpenInput] = useState<{ kind: InputKind; secId: string } | null>(null);
   /** Mirrors `openInput` for callbacks that land later (the labor travel fetch
    *  below). openInputMethod/closeInput are its only writers. */
@@ -309,11 +348,24 @@ export default function EstimatorClient({
   const curtainFor = openFor("curtain");
   const fixtureFor = openFor("fixture");
   const laborFor = openFor("labor");
+  const vendorFor = openFor("vendor");
   const [customDraft, setCustomDraft] = useState<CustomDraft>(freshCustom);
   const [curtainDraft, setCurtainDraft] = useState<CurtainDraft>(() =>
     freshCurtain(defaultFabric)
   );
   const [fixtureDraft, setFixtureDraft] = useState<FixtureDraft>(freshFixture);
+  const [vendorDraft, setVendorDraft] = useState<VendorDraft>(freshVendor);
+  /* #143: vendor quotes live TOP-LEVEL on the quote doc, beside `spec` — the
+     attachment proxy route reads `quote.vendorQuotes`, and keeping file bytes
+     out of `spec` stops every revision snapshot from copying them. */
+  const [vendorQuotes, setVendorQuotes] = useState<VendorQuote[]>(initial.vendorQuotes);
+  /* #143: object-URLs for files uploaded straight to Blob storage, keyed by
+     vendor-quote id. They fill the one gap the upload-on-select path opens —
+     a record whose bytes are in Blob but whose estimate has no id yet, so the
+     authenticated proxy has nothing to look it up by. Page-lifetime only; a
+     reload falls back to the proxy, which by then has a saved quote. */
+  const [vendorPreviews, setVendorPreviews] = useState<Record<string, string>>({});
+  const vendorLineIdRef = useRef(0);
   // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
   // curtain configurator; refreshed when the meta action re-stamps.
   const [tierMargin, setTierMargin] = useState<number | null>(initial.tierMargin);
@@ -419,32 +471,47 @@ export default function EstimatorClient({
     const mobs: SpecMob[] = [];
     sections.forEach((sec) => sec.items.forEach((it) => it.mob && mobs.push(it.mob)));
     startTransition(async () => {
-      const res = await saveQuoteAction(loadedId, {
-        name: initial.projectName,
-        customer: cname,
-        customerId: customerId || null,
-        locationId: locationId || null,
-        contactName: contactName || "",
-        quoteNote: quoteNote || "",
-        paymentTerms,
-        category,
-        value: t.grand,
-        margin: t.margin,
-        status,
-        sections,
-        mobs,
-      });
-      if (res.ok && res.id) {
-        setLoadedId(res.id);
-        setQuoteId(res.id);
-        setRevNum(res.revNum);
-        setRevDateMs(res.updatedAt);
-        if (res.review) setReview(res.review);
-        if (res.status) setStatus(res.status);
+      try {
+        const res = await saveQuoteAction(loadedId, {
+          name: initial.projectName,
+          customer: cname,
+          customerId: customerId || null,
+          locationId: locationId || null,
+          contactName: contactName || "",
+          quoteNote: quoteNote || "",
+          paymentTerms,
+          category,
+          value: t.grand,
+          margin: t.margin,
+          status,
+          sections,
+          mobs,
+          vendorQuotes,
+        });
+        if (res.ok && res.id) {
+          setLoadedId(res.id);
+          setQuoteId(res.id);
+          // The server may have moved attachments into Blob storage — take its
+          // version back so the next save doesn't re-upload the same bytes.
+          if (res.vendorQuotes) setVendorQuotes(res.vendorQuotes);
+          setRevNum(res.revNum);
+          setRevDateMs(res.updatedAt);
+          if (res.review) setReview(res.review);
+          if (res.status) setStatus(res.status);
+        }
+        setJustSaved(true);
+        if (savedTimer.current) clearTimeout(savedTimer.current);
+        savedTimer.current = setTimeout(() => setJustSaved(false), 1800);
+      } catch (e) {
+        /* #143 re-review: a save that THROWS — a rejected request body, a
+           dropped connection — used to be indistinguishable from a save that
+           did nothing: no "Saved" flash, no banner, and every edit still
+           only in memory. Say so instead. */
+        console.error("[estimator] save failed:", e);
+        setActionError(
+          "That save did not go through — nothing was written. Check your connection, or remove a large vendor-quote attachment, and try again."
+        );
       }
-      setJustSaved(true);
-      if (savedTimer.current) clearTimeout(savedTimer.current);
-      savedTimer.current = setTimeout(() => setJustSaved(false), 1800);
     });
   };
 
@@ -601,8 +668,14 @@ export default function EstimatorClient({
     if (isNaN(n) || n < 0) n = 0;
     patchItem(id, (it) => ({ ...it, qty: n }));
   };
-  const removeItem = (id: number) =>
+  const removeItem = (id: number) => {
+    // #143: the × on a vendor line takes its VendorQuote record with it —
+    // otherwise the attachment and the internal terms outlive the money.
+    const gone = sections.flatMap((s) => s.items).find((x) => x.id === id);
+    if (gone?.vendorQuoteId)
+      setVendorQuotes((vs) => vs.filter((v) => v.id !== gone.vendorQuoteId));
     setSections((ss) => ss.map((s) => ({ ...s, items: s.items.filter((x) => x.id !== id) })));
+  };
 
   const setMarginAll = (v: string) => {
     const m = parseInt(v, 10) / 100;
@@ -647,16 +720,30 @@ export default function EstimatorClient({
       ? customers.find((c) => c.id === customerId)?.name || custName
       : custName;
     setMoveNotice(null);
+    /* #143: a vendor line's file, terms, notes and material list live on a
+       VendorQuote record beside the spec, so they travel WITH the section —
+       otherwise the target showed a bare line and the source's next save
+       pruned the only copy of the vendor's PDF away. */
+    const movedVqIds = new Set(
+      sec.items.map((it) => it.vendorQuoteId).filter((id): id is string => !!id)
+    );
+    const movedVq = vendorQuotes.filter((v) => movedVqIds.has(v.id));
     startTransition(async () => {
-      const res = await moveSystemToEstimateAction(sec, target, {
-        customerId: customerId || null,
-        locationId: locationId || null,
-        customer: cname,
-        contactName: contactName || "",
-      });
+      const res = await moveSystemToEstimateAction(
+        sec,
+        target,
+        {
+          customerId: customerId || null,
+          locationId: locationId || null,
+          customer: cname,
+          contactName: contactName || "",
+        },
+        movedVq
+      );
       if (res.ok) {
         const list = sections.filter((s) => s.id !== secId);
         setSections(list);
+        if (movedVq.length) setVendorQuotes((vs) => vs.filter((v) => !movedVqIds.has(v.id)));
         setActiveId((a) => (a === secId ? (list[0] ? list[0].id : null) : a));
         setMoveNotice({ ok: true, targetId: res.targetId, targetName: res.targetName });
       } else {
@@ -804,13 +891,15 @@ export default function EstimatorClient({
      closeInput(), so none of them leave a typed draft alive in memory. */
 
   /** Reset one method's draft to its fresh seed. Catalog owns no shared draft
-   *  (CatalogPicker unmounts, taking its query with it). Import has no draft
-   *  either — only SectionCard's result banner, which deliberately OUTLIVES the
-   *  panel: an import closed mid-flight still has to report what it did. */
+   *  (CatalogPicker unmounts, taking its query with it) — and since #143 it
+   *  also hosts the CSV importer, whose only state is SectionCard's result
+   *  banner, which deliberately OUTLIVES the panel: an import closed
+   *  mid-flight still has to report what it did. */
   const discardDraft = (kind: InputKind, secId: string) => {
     if (kind === "custom") setCustomDraft(freshCustom());
     else if (kind === "curtain") setCurtainDraft(freshCurtain(defaultFabric));
     else if (kind === "fixture") setFixtureDraft(freshFixture());
+    else if (kind === "vendor") setVendorDraft(freshVendor());
     else if (kind === "labor")
       setLaborDraft(
         freshLabor(travelEstNow(), tierMargin, sections.find((s) => s.id === secId)?.name || "")
@@ -821,6 +910,7 @@ export default function EstimatorClient({
   const seedDraft = (kind: InputKind, secId: string) => {
     if (kind === "custom") setCustomDraft(freshCustom());
     else if (kind === "curtain") setCurtainDraft(freshCurtain(defaultFabric));
+    else if (kind === "vendor") setVendorDraft(freshVendor());
     else if (kind === "fixture") {
       const first = fixtureAssemblies[0];
       setFixtureDraft({
@@ -897,6 +987,105 @@ export default function EstimatorClient({
     ]);
     closeInput(); // closing discards, so the draft reseed happens there
   };
+
+  /* ---------------- vendor quote (#143, D162) ----------------
+     ONE priced SpecItem per vendor quote carries the money (the vendor's
+     rolled-up total, marked up by the section margin like any other cost
+     line). The material lines stay on the VendorQuote record rather than
+     becoming sibling SpecItems: that keeps pricing.ts honest with a single
+     priced line, survives the row's × control, and makes Single/Itemized a
+     pure render decision instead of a set of $0 rows that would leak onto
+     the customer document. */
+  const setVendorField = <K extends keyof VendorDraft>(field: K, value: VendorDraft[K]) =>
+    setVendorDraft((d) => ({ ...d, [field]: value }));
+  const setVendorLine = (
+    id: number,
+    field: keyof Omit<VendorLineDraft, "id">,
+    value: string
+  ) =>
+    setVendorDraft((d) => ({
+      ...d,
+      lines: d.lines.map((l) => (l.id === id ? { ...l, [field]: value } : l)),
+    }));
+  const addVendorLine = () =>
+    setVendorDraft((d) => ({
+      ...d,
+      lines: d.lines.concat([
+        { id: ++vendorLineIdRef.current, description: "", qty: "1", unit: "ea", amount: "" },
+      ]),
+    }));
+  const removeVendorLine = (id: number) =>
+    setVendorDraft((d) => ({ ...d, lines: d.lines.filter((l) => l.id !== id) }));
+  /** APPENDS (#143 re-review) — a CSV load used to silently replace lines the
+   *  user had typed by hand, with no warning and no undo. */
+  const loadVendorLines = (lines: Omit<VendorLineDraft, "id">[]) =>
+    setVendorDraft((d) => ({
+      ...d,
+      lines: d.lines.concat(lines.map((l) => ({ ...l, id: ++vendorLineIdRef.current }))),
+    }));
+
+  const addVendorQuote = (secId: string) => {
+    const d = vendorDraft;
+    const vendor = (d.vendor || "").trim();
+    const quoteNumber = (d.quoteNumber || "").trim();
+    const description = (d.description || "").trim();
+    const total = vendorDraftTotal(d);
+    if (!vendor || !quoteNumber || !description || total <= 0) return;
+    const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
+    /* The id the form was opened with (mintVendorQuoteId) — NOT a second one.
+       With Blob storage on the attachment was already uploaded under it, so a
+       fresh id here would orphan the file (#143). */
+    const vqId = d.id;
+    const record: VendorQuote = {
+      id: vqId,
+      vendor,
+      quoteNumber,
+      description,
+      ...(d.attachment ? { attachment: { ...d.attachment } } : {}),
+      ...((d.link || "").trim() ? { link: d.link.trim() } : {}),
+      // vendorKeptLines is the ONE rule for which lines exist: the same set
+      // vendorDraftTotal priced, so the breakdown can never omit money the
+      // customer is paying (#143 re-review). parseMoney handles "1,250.00".
+      lines: vendorKeptLines(d.lines).map((l) => ({
+        id: l.id,
+        description: (l.description || "").trim(),
+        qty: parseMoney(l.qty) || 0,
+        unit: (l.unit || "").trim() || "ea",
+        amount: round2(parseMoney(l.amount) || 0),
+      })),
+      terms: d.terms || "",
+      notes: d.notes || "",
+      total,
+      includesFreight: d.includesFreight,
+      display: d.display,
+    };
+    setVendorQuotes((vs) => vs.concat([record]));
+    if (d.attachmentPreview)
+      setVendorPreviews((m) => ({ ...m, [vqId]: d.attachmentPreview as string }));
+    pushItems(secId, [
+      {
+        id: nextId(),
+        sku: quoteNumber,
+        desc: vendor + " \u00b7 " + quoteNumber + " \u2014 " + description,
+        qty: 1,
+        unit: "lot",
+        cost: total,
+        price: round2(total / (1 - margin)),
+        vendorQuoteId: vqId,
+        // Jeff's exemption: a quote that already includes freight is excluded
+        // from the section freight base (pricing.systemFreightBase).
+        ...(d.includesFreight ? { noFreight: true } : {}),
+      },
+    ]);
+    closeInput();
+  };
+
+  /** Single/Itemized is LIVE on the stored record, not frozen at add time —
+   *  Jeff must be able to flip it without re-entering the quote. */
+  const setVendorDisplay = (vendorQuoteId: string, display: "single" | "itemized") =>
+    setVendorQuotes((vs) =>
+      vs.map((v) => (v.id === vendorQuoteId ? { ...v, display } : v))
+    );
 
   const addCurtain = (secId: string) => {
     const d = curtainDraft;
@@ -1214,6 +1403,7 @@ export default function EstimatorClient({
   const curtainSec = sections.find((s) => s.id === curtainFor);
   const fixtureSec = sections.find((s) => s.id === fixtureFor);
   const laborSec = sections.find((s) => s.id === laborFor);
+  const vendorSec = sections.find((s) => s.id === vendorFor);
 
   return (
     <div
@@ -2300,9 +2490,11 @@ export default function EstimatorClient({
                   cols={cols}
                   catalogOpen={isOpenFor("catalog", sec.id)}
                   customOpen={isOpenFor("custom", sec.id)}
-                  importOpen={isOpenFor("import", sec.id)}
                   openMethod={openInput && openInput.secId === sec.id ? openInput.kind : null}
                   customDraft={customDraft}
+                  vendorQuotes={vendorQuotes}
+                  vendorPreviews={vendorPreviews}
+                  savedQuoteId={loadedId}
                   registerRef={(id, el) => {
                     cardRefs.current[id] = el;
                   }}
@@ -2320,9 +2512,10 @@ export default function EstimatorClient({
                   onToggleFixture={() => openInputMethod("fixture", sec.id)}
                   onToggleLabor={() => openInputMethod("labor", sec.id)}
                   onToggleCustom={() => openInputMethod("custom", sec.id)}
-                  onToggleImport={() => openInputMethod("import", sec.id)}
+                  onToggleVendor={() => openInputMethod("vendor", sec.id)}
                   onAddPart={(cat) => addPart(sec.id, cat)}
                   onImportMaterials={(items) => importMaterials(sec.id, items)}
+                  onSetVendorDisplay={setVendorDisplay}
                   onSetCustomDraft={(field, v) => setCustomDraft((d) => ({ ...d, [field]: v }))}
                   onAddCustomPart={() => addCustomPart(sec.id)}
                   onMoveToNew={() => moveSystem(sec.id, { kind: "new" })}
@@ -2401,6 +2594,23 @@ export default function EstimatorClient({
               onClose={closeInput}
             />
           )}
+          {vendorFor && (
+            <VendorQuoteModal
+              secName={vendorSec ? vendorSec.name : ""}
+              draft={vendorDraft}
+              vendors={vendors}
+              margin={tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3}
+              blobUploads={blobUploads}
+              attachedChars={vendorAttachmentLoad(vendorQuotes)}
+              onSet={setVendorField}
+              onSetLine={setVendorLine}
+              onAddLine={addVendorLine}
+              onRemoveLine={removeVendorLine}
+              onLoadLines={loadVendorLines}
+              onAdd={() => addVendorQuote(vendorFor)}
+              onClose={closeInput}
+            />
+          )}
           {aiSource && aiOpen && (
             <AiScopeModal
               sourceLabel={
@@ -2449,6 +2659,7 @@ export default function EstimatorClient({
           logoDark={logoDark}
           quoteNote={quoteNote}
           sections={sections}
+          vendorQuotes={vendorQuotes}
           t={t}
           taxRatePct={TAX_RATE_PCT}
           detail={detail}

@@ -189,6 +189,10 @@ export type QuoteRevision = {
   inspection?: unknown;
   consulting?: unknown;
   rental?: unknown;
+  /** Estimator vendor quotes (#143). They live BESIDE `spec` on the doc, so
+   *  a snapshot that copied only `spec` recalled a priced vendor line whose
+   *  source document, terms and notes had already been pruned away. */
+  vendorQuotes?: unknown;
 };
 
 export type ReviewOpts = {
@@ -428,7 +432,30 @@ function snapshotOf(
     inspection: doc.inspection ?? null,
     consulting: doc.consulting ?? null,
     rental: doc.rental ?? null,
+    vendorQuotes: doc.vendorQuotes ?? null,
   };
+}
+
+type IdedRecord = { id?: unknown };
+
+/** Rows of a `vendorQuotes` blob that at least carry a string id. */
+function vendorQuoteRows(raw: unknown): IdedRecord[] {
+  return Array.isArray(raw) ? (raw as IdedRecord[]).filter((v) => !!v && typeof v === "object") : [];
+}
+
+/**
+ * Union two `vendorQuotes` blobs by id, with `incoming` winning (#143).
+ * Used on revision recall so neither the recalled spec's records nor the
+ * ones the auto-snapshot just froze are dropped.
+ */
+function mergeVendorQuotes(current: unknown, incoming: unknown): unknown {
+  const rows = vendorQuoteRows(incoming);
+  if (!rows.length) return current ?? null;
+  const byId = new Map<string, IdedRecord>();
+  [...vendorQuoteRows(current), ...rows].forEach((v) => {
+    if (typeof v.id === "string") byId.set(v.id, v);
+  });
+  return [...byId.values()];
 }
 
 /** Append a snapshot inside an existing patch callback. Returns the new revision. */
@@ -510,6 +537,12 @@ export async function restoreQuoteRevision(
     doc.inspection = target.inspection ?? null;
     doc.consulting = target.consulting ?? null;
     doc.rental = target.rental ?? null;
+    // #143: MERGE rather than replace. The recalled spec's vendor lines need
+    // their records back, but the snapshot taken one line above (the state we
+    // are leaving) still references the records the CURRENT spec used — and
+    // those have to survive on the doc for that revision to be recallable in
+    // turn. Pre-#143 snapshots carry nothing here and leave the doc alone.
+    doc.vendorQuotes = mergeVendorQuotes(doc.vendorQuotes, target.vendorQuotes);
     pushRevision(doc, actor, "manual", `Recalled v${rev}`);
     doc.updatedAt = Date.now();
   });

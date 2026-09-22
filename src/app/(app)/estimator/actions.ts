@@ -31,7 +31,9 @@ import {
   type InspectionRecord,
 } from "@/lib/stores/inspections";
 import { list as catalogList } from "@/lib/stores/catalog";
-import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection } from "./types";
+import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
+import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
+import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import type { SuggestPart } from "./estimator-data";
 import { totals } from "./pricing";
 import { activeUsers } from "@/lib/users";
@@ -59,6 +61,10 @@ type QuoteExtras = {
   quoteNote?: string;
   paymentTerms?: PaymentTerms;
   spec?: { sections: SpecSection[]; mobs: SpecMob[] };
+  /** #143: top-level, NOT inside `spec` — the attachment proxy route reads
+   *  `quote.vendorQuotes`, and file bytes buried in `spec` would be copied
+   *  into every revision snapshot. */
+  vendorQuotes?: VendorQuote[];
 };
 
 type QuotePatch = Partial<Quote> & QuoteExtras;
@@ -78,6 +84,9 @@ export type SavePayload = {
   status: QuoteStatus;
   sections: SpecSection[];
   mobs: SpecMob[];
+  /** Always sent in full (#143) — the stored list is replaced, so removing a
+   *  vendor quote in the builder actually removes it from the doc. */
+  vendorQuotes: VendorQuote[];
 };
 
 export type SaveResult = {
@@ -87,6 +96,9 @@ export type SaveResult = {
   updatedAt: number;
   review: QuoteReview | null;
   status: QuoteStatus | null;
+  /** What was actually stored (#143) — attachments moved into Blob storage
+   *  come back as blobPath so the next save doesn't re-upload the bytes. */
+  vendorQuotes?: VendorQuote[];
   /** Set on `ok: false` when the record was created but a requested status
    *  transition was refused (punch #60: setStatus's approval gate). */
   error?: string;
@@ -108,6 +120,106 @@ function refresh() {
 async function syncOf(id: string): Promise<ReviewSync> {
   const q = await get(id);
   return { ok: !!q, review: q?.review ?? null, status: q?.status ?? null };
+}
+
+/**
+ * Move vendor-quote attachments into Blob storage when the token exists
+ * (D116's seam, #143). Runs with the REAL quote id in hand — a brand-new
+ * quote has none until create() returns, and an earlier attempt wrote the
+ * path under an id that did not exist yet, so nothing ever matched. Without
+ * a token the data-URL stays in the document, exactly as the proxy route's
+ * local fallback expects.
+ *
+ * It is also the gate on an incoming `blobPath`: since #143 that field comes
+ * from the browser, so it is honoured only for a path this record can claim.
+ */
+async function storeVendorQuotes(
+  quoteId: string,
+  vendorQuotes: VendorQuote[]
+): Promise<VendorQuote[]> {
+  const canUpload = blobEnabled();
+  const out: VendorQuote[] = [];
+  for (const vq of vendorQuotes) {
+    const att = vq.attachment;
+    if (!att) {
+      out.push(vq);
+      continue;
+    }
+    /* #143 re-review: `blobPath` reaches this action FROM THE BROWSER now —
+       the upload route hands it back and it rides along in the save payload —
+       so it is untrusted input, not a server fact. Unvalidated, a crafted
+       save would point a vendor quote at any object in the private Blob store
+       and the authenticated download proxy would stream it. The path is only
+       honoured when it is this record's own file (ownsVendorQuoteBlobPath);
+       anything else is dropped and the dataUrl branch takes over.
+       The path check runs even with Blob off, so a planted path can never be
+       persisted at all. */
+    const stored = ownsVendorQuoteBlobPath(att.blobPath, vq.id) ? att.blobPath : undefined;
+    if (att.blobPath && !stored) {
+      console.warn(
+        "[estimator] refused a vendor-quote blobPath that is not this record's:",
+        att.blobPath
+      );
+    }
+    if (stored) {
+      // Already in storage under this record's id (the upload route's normal
+      // path): nothing to do. Any residual dataUrl is dropped so the bytes
+      // stop riding in every later save payload.
+      out.push(
+        att.dataUrl
+          ? { ...vq, attachment: { name: att.name, mime: att.mime, blobPath: stored } }
+          : vq
+      );
+      continue;
+    }
+    if (!canUpload || !att.dataUrl) {
+      // Keep the record, never a path it cannot claim.
+      out.push(att.blobPath ? { ...vq, attachment: { name: att.name, mime: att.mime } } : vq);
+      continue;
+    }
+    try {
+      const { bytes, mime } = dataUrlToBytes(att.dataUrl);
+      const up = await putBlob(
+        `${VENDOR_QUOTE_BLOB_PREFIX}${quoteId}/${vq.id}-${safeName(att.name || "quote")}`,
+        bytes,
+        att.mime || mime
+      );
+      out.push({
+        ...vq,
+        attachment: { name: att.name, mime: att.mime || mime, blobPath: up.pathname },
+      });
+    } catch (e) {
+      // A failed upload must not lose the file: keep the data-URL, which the
+      // proxy route still serves.
+      console.error("[estimator] vendor quote blob upload failed:", e);
+      out.push(vq);
+    }
+  }
+  return out;
+}
+
+/** Vendor-quote ids the items of a spec's sections still reference (#143). */
+function vendorIdsInSections(sections: SpecSection[] | undefined | null): Set<string> {
+  const out = new Set<string>();
+  (Array.isArray(sections) ? sections : []).forEach((sec) =>
+    (sec?.items || []).forEach((it) => {
+      if (it && it.vendorQuoteId) out.add(it.vendorQuoteId);
+    })
+  );
+  return out;
+}
+
+/** Same, for a revision's opaque `spec` payload. */
+function vendorIdsInSpec(spec: unknown): Set<string> {
+  const sections = (spec as { sections?: SpecSection[] } | null | undefined)?.sections;
+  return vendorIdsInSections(sections);
+}
+
+/** Narrow a stored `quote.vendorQuotes` blob (typed `unknown` on Quote). */
+function vendorQuoteRows(raw: unknown): VendorQuote[] {
+  return Array.isArray(raw)
+    ? (raw as VendorQuote[]).filter((v) => !!v && typeof v === "object" && typeof v.id === "string")
+    : [];
 }
 
 /**
@@ -137,8 +249,33 @@ export async function saveQuoteAction(
   };
   let q: Quote | null = null;
   let statusError: string | undefined;
+  /* #143: keep only the vendor quotes something still references. Deleting a
+     system, or moving one to another estimate, would otherwise strand its
+     record — and its attachment — on this document forever.
+
+     "Something" is NOT just the live spec (#143 re-review): every recallable
+     revision names records too, and with Blob storage off the data-URL in the
+     record is the only copy of the vendor's file. Pruning a record a sent
+     revision still points at would make that revision unrecallable — the line
+     would come back priced but anonymous — so those keep their STORED copy,
+     while the builder's own copy wins for anything a live line references. */
+  const liveVq = vendorIdsInSections(payload.sections);
+  const prior = loadedId ? await get(loadedId) : null;
+  const revVq = new Set<string>();
+  (prior?.revisions || []).forEach((r) =>
+    vendorIdsInSpec(r.spec).forEach((id) => revVq.add(id))
+  );
+  const keptVq = new Map<string, VendorQuote>();
+  vendorQuoteRows(prior?.vendorQuotes).forEach((vq) => {
+    if (revVq.has(vq.id)) keptVq.set(vq.id, vq);
+  });
+  (payload.vendorQuotes || []).forEach((vq) => {
+    if (liveVq.has(vq.id) || revVq.has(vq.id)) keptVq.set(vq.id, vq);
+  });
+  let storedVendorQuotes: VendorQuote[] = [...keptVq.values()];
   if (loadedId) {
-    q = await update(loadedId, patch);
+    storedVendorQuotes = await storeVendorQuotes(loadedId, storedVendorQuotes);
+    q = await update(loadedId, { ...patch, vendorQuotes: storedVendorQuotes } as QuotePatch);
   } else {
     // #62 gave every mint a retry budget; `insertWithPrefixedId` THROWS once an
     // id collision outlasts it (doc-store.ts). Rare, but this is a save button —
@@ -162,11 +299,15 @@ export async function saveQuoteAction(
       };
     }
     // create() promotes only the declared columns — stamp the extras + status.
+    // The vendor-quote attachments can only be stored now: this is the first
+    // moment the real quote id exists to key their Blob path by (#143).
+    storedVendorQuotes = await storeVendorQuotes(created.id, storedVendorQuotes);
     q = await update(created.id, {
       contactName: payload.contactName || "",
       quoteNote: payload.quoteNote || "",
       paymentTerms: payload.paymentTerms,
       category: (payload.category || "").trim(),
+      vendorQuotes: storedVendorQuotes,
     } as QuotePatch);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand
@@ -190,6 +331,7 @@ export async function saveQuoteAction(
     updatedAt: q?.updatedAt ?? Date.now(),
     review: q?.review ?? null,
     status: q?.status ?? null,
+    vendorQuotes: storedVendorQuotes,
     ...(statusError ? { error: statusError } : {}),
   };
 }
@@ -237,6 +379,13 @@ export type MoveSystemResult =
  * `setSections` change, persisted only when the user hits Save there (same
  * as delete). The section's id is regenerated so it can never collide with
  * an id already present in the target quote.
+ *
+ * #143 re-review: a vendor line's money is on the item, but its file, terms,
+ * notes and material list are on a VendorQuote record BESIDE the spec — so
+ * those records travel with the section. Without that the target resolved the
+ * moved line against whatever it already held under that id (nothing, or,
+ * worse, a different vendor's quote), and the source's next save pruned the
+ * only copy of the file away.
  */
 export async function moveSystemToEstimateAction(
   section: SpecSection,
@@ -246,10 +395,16 @@ export async function moveSystemToEstimateAction(
     locationId: string | null;
     customer: string;
     contactName: string;
-  }
+  },
+  vendorQuotes: VendorQuote[] = []
 ): Promise<MoveSystemResult> {
   const user = await requireUser();
   const moved: SpecSection = { ...section, id: "sys" + Date.now() };
+  // Trust the section, not the caller's list: only records this section's own
+  // items name travel. Ids are globally unique (Date.now + random), so they
+  // are carried as-is and can never shadow a record already on the target.
+  const movedIds = vendorIdsInSections([moved]);
+  const movedVq = vendorQuoteRows(vendorQuotes).filter((vq) => movedIds.has(vq.id));
 
   if (target.kind === "existing") {
     const existing = await get(target.quoteId);
@@ -262,10 +417,21 @@ export async function moveSystemToEstimateAction(
       | undefined;
     const mergedSections = [...(existingSpec?.sections || []), moved];
     const t = totals(mergedSections, 0);
+    const carried = movedVq.length
+      ? await storeVendorQuotes(target.quoteId, movedVq)
+      : [];
     const updated = await update(target.quoteId, {
       spec: { sections: mergedSections, mobs: existingSpec?.mobs || [] },
       value: t.grand,
       margin: t.margin,
+      ...(carried.length
+        ? {
+            vendorQuotes: [
+              ...vendorQuoteRows(existing.vendorQuotes).filter((vq) => !movedIds.has(vq.id)),
+              ...carried,
+            ],
+          }
+        : {}),
     } as QuotePatch);
     if (!updated) {
       return { ok: false, error: "That estimate could not be found." };
@@ -302,6 +468,11 @@ export async function moveSystemToEstimateAction(
   // along on the doc like it does for saveQuoteAction's fresh-create path.
   const withContact = await update(created.id, {
     contactName: sourceContext.contactName || "",
+    // Same as saveQuoteAction's fresh-create path: the Blob path can only be
+    // keyed by the real quote id, which exists for the first time here.
+    ...(movedVq.length
+      ? { vendorQuotes: await storeVendorQuotes(created.id, movedVq) }
+      : {}),
   } as QuotePatch);
   refresh();
   return { ok: true, targetId: created.id, targetName: (withContact || created).name };

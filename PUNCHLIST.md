@@ -6440,3 +6440,76 @@ exclusive descriptor while still opening the catalog picker on the new system �
 is lost, since the draft was reseeded on the next open before this change too). And there is still no
 confirm-before-discard anywhere; a scrim misclick on a long labor configuration discards it, as it
 effectively did before. Both are product calls, logged in D161.
+
+## 143. Estimator: a real vendor-quote form; the catalog CSV moves under "+ Add part from catalog" — DONE 2026-09-22 (D162)
+
+**Reported:** 2026-09-22 (Jeff), two items that his own answer merged into one change:
+
+> "Vendor quotes need to have more of a form for importing the vendor name, quote number, file or link
+> upload, materials, description, terms, and notes. Then have the option to display just a single line
+> item for the vendor quote which would be the Vendor, Quote Number, and Description. Or the full line
+> items with the cost all rolled into one."
+
+> "We still need an import CSV for pulling prices from the catalog with a format option download for
+> that import…"
+
+Asked what the second meant given #112 already ships a per-section catalog-pricing CSV import, Jeff
+answered: *"Vendor Quote is both a vendor quote with data and information and adding a csv instead of
+manually adding the material list. a CSV catalog import is part of adding the catalog parts"* and
+chose **Split it off the Vendor button**. On freight: *"Why don't we create an exemption that if the
+vendor quote includes freight then the freight slider doesn't affect that particular line."* On terms
+and notes: **internal only**.
+
+**What existed:** no vendor-quote record at all. `+ Vendor quote / CSV` was one button opening the
+#112 CSV panel — the label said "vendor quote", the feature was a material-list import. The only
+vendor-quote code in the tree was dead: `Quote.vendorQuotes?: unknown` (`lib/stores/quotes.ts:131`)
+and an unreachable download proxy at `api/vendor-quote-attachments/[quoteId]/[vendorQuoteId]`. A real
+implementation existed once on `26d16f4` and never landed; it is a design reference only — the
+estimator has changed by 1184/1339 lines since, and its rollup (whole total on child line 0, $0 on the
+rest) leaked $0 rows onto the customer document.
+
+PUNCHLIST.md:5567's audit line "Vendor quote beside Custom part … CSV import with example download"
+was verifying a **label**, not a form. A button reading `+ Vendor quote / CSV` did sit beside
+`+ Build custom part`; the feature behind it did not exist.
+
+**Shipped:** D162 — see that entry for the model, the two displays, the freight exemption, the
+extended-vs-unit Amount rule, the upload route and the blobPath ownership check. Eleven files:
+`types.ts`, `pricing.ts`, `material-csv.ts`, `estimator-client.tsx`, `section-card.tsx`,
+`preview-doc.tsx`, `actions.ts`, `page.tsx`, new `vendor-quote-modal.tsx`, new
+`src/lib/vendor-quote-file.ts`, new `api/vendor-quote-attachments/upload/route.ts`, plus
+`lib/stores/quotes.ts` (revision snapshot/merge) and the spec harness. No schema change.
+
+**Found and fixed during review, each with a concrete failure:**
+- The attachment rode the save payload against a 1200kb server-action cap — a 1.5 MB vendor PDF made
+  the whole estimate unsaveable, silently, until the tab was reloaded.
+- A client-supplied `blobPath` was trusted at the save boundary: an arbitrary-read primitive over the
+  private Blob store via the authenticated proxy.
+- `qty × amount` treated the Amount column as a unit price while the CSV aliased "line total",
+  "extended" and "ext cost" into it — a 12 × $3,480 line totalled $41,760. Verified live before and
+  after: the same CSV now totals $5,680.
+- Revision snapshots dropped `vendorQuotes` while the save pruned unreferenced ones, so recalling a
+  revision destroyed the vendor record; `snapshotOf` now copies and `restoreQuoteRevision` merges.
+- `"vq" + nextId()` collided across estimates (quote-local counter seeded at 100).
+- "Add vendor quote" stayed live during an in-flight upload, storing a record with no attachment.
+- Itemized sub-lines printed qty/unit on the customer document with the Quantities toggle off.
+- An upload resolving after the form closed wrote into the next draft.
+- `parseFloat("12,450.00")` → 12.
+
+**Verified in the running app,** not only by the gates: the form captures every field Jeff named; the
+CSV loads the materials list and reports skipped rows; the grid line reads
+`Rose Brand · RB-88214 — Stage rigging hardware package` with a VENDOR badge, Download, the internal
+terms/notes box and a live Single/Itemized toggle; Itemized shows unpriced sub-rows with the price on
+the parent; **Freight reads $0.00 with the slider at 2%**; the customer document shows both displays
+with no cost, terms or notes, and the Quantities toggle gates the sub-lines; save → reload round-trips
+every field including the attachment.
+
+Gates: `tsc` 0 errors (baseline 0) · `eslint` 120 warnings / 0 errors (baseline 120; all new files
+silent) · `test:specs` 1486 PASS / 0 FAIL · `test:smoke` ALL PASSED.
+
+**Open, for Jeff:** (1) a vendor line is marked up by the section margin slider like any other cost
+line — he answered the freight half of the pricing question, not the margin half, so no price lock was
+added; (2) editing an existing vendor quote means remove and re-add; (3) no blob garbage collection
+for a replaced or abandoned file — no prefix in this repo has a sweeper (worth its own item);
+(4) local dev cannot upload to Blob at all — Vercel Blob reports *"OIDC is enabled for this project,
+but not for the development environment"*, so every local attachment takes the data-URL fallback.
+Production is unaffected, but it means the Blob path is untested outside production.

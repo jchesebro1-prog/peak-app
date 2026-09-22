@@ -23,6 +23,21 @@ export const MATERIAL_CSV_TEMPLATE =
   "ABC-100,,4,,,,\n" +
   ",Example custom part,1,ea,100.00,142.86,https://vendor.example/item\n";
 
+/**
+ * The vendor-quote form's own example (#143 re-review). Its headers are the
+ * ones that form's Materials grid shows, so a file saved from it round-trips.
+ * Separate from MATERIAL_CSV_TEMPLATE on purpose: that one is the catalog
+ * layout, and the spec harness asserts its parsed output line by line.
+ *
+ * #143: amount is the row's EXTENDED total — what its aliases (total, line
+ * total, extended) mean and what the form sums — so the examples below show
+ * 120 ft at $222.00 and 40 ea at $168.00, not per-unit prices.
+ */
+export const VENDOR_CSV_TEMPLATE =
+  "description,quantity,unit,amount\n" +
+  '"1/4in wire rope, 7x19 galvanized",120,ft,222.00\n' +
+  '"Shackle, 3/8in screw pin",40,ea,168.00\n';
+
 const ALIASES = {
   sku: ["sku", "part no", "part number", "part", "model", "item"],
   desc: ["description", "desc", "item name", "name", "product"],
@@ -62,22 +77,44 @@ function indexOf(headers: string[], aliases: readonly string[]): number {
   return aliases.map(normalized).map((alias) => values.indexOf(alias)).find((index) => index >= 0) ?? -1;
 }
 
-function money(value: string): number {
+/**
+ * Money as a person types or a vendor prints it — "$12,450.00" included.
+ * Exported (#143 re-review) so the vendor-quote form's typed Total and line
+ * Amounts parse exactly the way the same number does through a CSV; a bare
+ * parseFloat("12,450.00") silently returns 12.
+ */
+export function parseMoney(value: string): number {
   const parsed = Number((value || "").replace(/[$,\s]/g, ""));
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
-export function parseMaterialCsv(text: string): MaterialCsvResult {
+export type MaterialCsvOptions = {
+  /**
+   * #143: a vendor's own material list quotes COST, not sell. In that mode a
+   * row with a description and a positive unit cost is enough — the estimator
+   * never prices those lines individually (the vendor's rolled-up total is
+   * the money). Omitted / false keeps the #112 catalog-import rule, which is
+   * what MATERIAL_CSV_TEMPLATE and its tests describe.
+   */
+  costOnly?: boolean;
+};
+
+export function parseMaterialCsv(text: string, opts: MaterialCsvOptions = {}): MaterialCsvResult {
   const lines = String(text || "").split(/\r?\n/).filter((line) => line.trim());
   if (lines.length < 2) return { items: [], errors: ["Choose a CSV with a header row and at least one material row."] };
   const delimiter = lines[0].includes("\t") ? "\t" : ",";
   const headers = splitLine(lines[0], delimiter);
+  // #143 re-review: a vendor's list calls the money column what the form's
+  // own grid calls it — Amount — so in costOnly mode those words map to cost.
+  const costAliases = opts.costOnly
+    ? [...ALIASES.cost, "amount", "total", "line total", "line amount", "extended", "ext", "ext cost"]
+    : ALIASES.cost;
   const col = {
     sku: indexOf(headers, ALIASES.sku),
     desc: indexOf(headers, ALIASES.desc),
     qty: indexOf(headers, ALIASES.qty),
     unit: indexOf(headers, ALIASES.unit),
-    cost: indexOf(headers, ALIASES.cost),
+    cost: indexOf(headers, costAliases),
     price: indexOf(headers, ALIASES.price),
     link: indexOf(headers, ALIASES.link),
   };
@@ -97,13 +134,23 @@ export function parseMaterialCsv(text: string): MaterialCsvResult {
     const sku = col.sku >= 0 ? (cells[col.sku] || "").trim() : "";
     const desc = col.desc >= 0 ? (cells[col.desc] || "").trim() : "";
     const qty = col.qty >= 0 ? Number(cells[col.qty]) : 1;
-    const price = col.price >= 0 ? money(cells[col.price] || "0") : 0;
-    const cost = col.cost >= 0 ? money(cells[col.cost] || "0") : 0;
+    const price = col.price >= 0 ? parseMoney(cells[col.price] || "0") : 0;
+    const cost = col.cost >= 0 ? parseMoney(cells[col.cost] || "0") : 0;
     const numbersOk = Number.isFinite(qty) && qty > 0 && Number.isFinite(price) && price >= 0 && Number.isFinite(cost) && cost >= 0;
-    const identified = sku ? true : !!desc && price > 0;
+    /* costOnly rows are never re-priced from the catalog, so a SKU cannot
+       stand in for a missing amount the way it does for a #112 import
+       (#143 re-review: a zero-amount row used to load silently and deflate
+       the vendor total the form falls back to). */
+    const identified = opts.costOnly
+      ? (!!desc || !!sku) && (price > 0 || cost > 0)
+      : sku
+      ? true
+      : !!desc && price > 0;
     if (!numbersOk || !identified) {
       errors.push(
-        sku
+        opts.costOnly
+          ? `Row ${row}: a description with a positive amount, plus a positive quantity, are required.`
+          : sku
           ? `Row ${row}: positive quantity and non-negative unit cost / unit sell are required.`
           : `Row ${row}: a sku, or a description with a positive unit sell, plus a positive quantity and non-negative unit cost are required.`
       );

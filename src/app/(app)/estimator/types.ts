@@ -48,7 +48,74 @@ export type SpecItem = {
   mob?: SpecMob;
   /** Orderable component detail for a catalog-backed fixture assembly. */
   components?: Array<{ sku: string; label: string; role: AssemblyRole; qty: number; unit: string; cost: number; price: number }>;
+  /** Links this line to its VendorQuote record (#143) — one priced line per
+   *  vendor quote; the materials list lives on the record, not as siblings. */
+  vendorQuoteId?: string;
+  /** Section freight is not charged on this line (#143, D162) — the vendor's
+   *  own price already includes it. */
+  noFreight?: boolean;
 };
+
+/* ---------------- vendor quotes (#143, D162) ---------------- */
+
+/**
+ * What the vendor-quote attachments on ONE estimate may weigh, as data-URL
+ * characters (#143 re-review).
+ *
+ * Attachments ride to the server inside `saveQuoteAction`'s payload, and
+ * next.config.ts caps a server-action request body at 1200 kb. Blob storage
+ * only changes where the bytes END UP — the request that carries them is the
+ * same one — and with no BLOB_READ_WRITE_TOKEN (the dev default) the
+ * data-URL stays in the document and is re-sent on every later save. So the
+ * budget is per-ESTIMATE, not per-file: 820 kB of data-URL leaves ~380 kB of
+ * the body for the sections, items and header fields. Past it Next rejects
+ * the whole request and the estimate stops saving at all, so the form
+ * refuses the file instead and points at the Link field.
+ */
+export const VENDOR_ATTACHMENT_BUDGET = 820_000;
+
+/** One material line off a vendor's quote — descriptive only; the money for
+ *  the whole quote rides on the single spawned SpecItem. */
+export type VendorQuoteLine = {
+  id: number;
+  description: string;
+  qty: number;
+  unit: string;
+  amount: number;
+};
+
+/**
+ * A vendor's quote imported into an estimate. Persisted TOP-LEVEL on the
+ * quote doc (`quote.vendorQuotes`), not inside `spec`: the attachment proxy
+ * route reads it there, and burying file bytes in `spec` would duplicate the
+ * payload into every revision snapshot.
+ */
+export type VendorQuote = {
+  id: string;
+  vendor: string;
+  quoteNumber: string;
+  description: string;
+  /** Shape matched EXACTLY to /api/vendor-quote-attachments/[quoteId]/[id]. */
+  attachment?: { name?: string; mime?: string; dataUrl?: string; blobPath?: string };
+  link?: string;
+  lines: VendorQuoteLine[];
+  /** Internal only — never rendered on the customer document (Jeff, #143). */
+  terms: string;
+  /** Internal only — never rendered on the customer document (Jeff, #143). */
+  notes: string;
+  total: number;
+  /** Jeff's freight exemption: the vendor's price already includes freight,
+   *  so the section freight slider skips this line. */
+  includesFreight: boolean;
+  /** LIVE on the record, not frozen at add time — flippable from the row. */
+  display: "single" | "itemized";
+};
+
+/** Data-URL characters the estimate's vendor attachments already spend of
+ *  VENDOR_ATTACHMENT_BUDGET. Bytes moved into Blob storage cost nothing. */
+export function vendorAttachmentLoad(quotes: VendorQuote[]): number {
+  return quotes.reduce((a, v) => a + (v.attachment?.dataUrl?.length || 0), 0);
+}
 
 /** One system card. */
 export type SpecSection = {
@@ -86,6 +153,47 @@ export type CurtainDraft = {
   bottom: string;
   /** Real vendor (Rose Brand) unit cost; when set, overrides the make-it cost. */
   vendorCostOverride?: string;
+};
+
+/** One typed materials row in the vendor-quote form (strings while editing). */
+export type VendorLineDraft = {
+  id: number;
+  description: string;
+  qty: string;
+  unit: string;
+  amount: string;
+};
+
+export type VendorDraft = {
+  /** The record's id, minted when the form OPENS (#143). The attachment is
+   *  uploaded under it before the estimate has an id of its own, so exactly
+   *  one id must exist per record — `addVendorQuote` reuses this one rather
+   *  than minting a second. */
+  id: string;
+  vendor: string;
+  quoteNumber: string;
+  description: string;
+  link: string;
+  /**
+   * With Blob storage on (#143) the file is POSTed to
+   * /api/vendor-quote-attachments/upload the moment it is selected and only
+   * `blobPath` is held here — the bytes never enter the save payload. With
+   * Blob off it stays a `dataUrl`, in-memory until save, and the server moves
+   * it to Blob later if a token ever appears.
+   */
+  attachment: { name: string; mime: string; dataUrl?: string; blobPath?: string } | null;
+  /** Transient object-URL for the file just selected, so the form (and the
+   *  line, until the estimate is saved) can offer a download of a file whose
+   *  bytes are already in Blob storage. NEVER persisted — it dies with the
+   *  page. */
+  attachmentPreview: string | null;
+  lines: VendorLineDraft[];
+  terms: string;
+  notes: string;
+  /** Blank falls back to the sum of the material lines. */
+  total: string;
+  includesFreight: boolean;
+  display: "single" | "itemized";
 };
 
 export type FixtureDraft = {
@@ -203,6 +311,8 @@ export type InitialQuote = {
   tierMargin: number | null;
   /** Saved builder state (spec.sections) — null starts a clean estimate. */
   sections: SpecSection[] | null;
+  /** Imported vendor quotes (#143) — top-level on the doc, not in spec. */
+  vendorQuotes: VendorQuote[];
 };
 
 /**
@@ -228,6 +338,13 @@ export type EstimatorProps = {
   /** Live fixture add-on rates (Estimating Rules → fixture group). */
   fixtureRates: FixtureRates;
   fixtureAssemblies: ResolvedFixtureAssembly[];
+  /** Distinct catalog manufacturers — the vendor-name datalist (#143). */
+  vendors: string[];
+  /** Whether Blob storage is configured (#143). Computed in page.tsx and
+   *  passed as data: src/lib/blob.ts is server-only (it holds the token) and
+   *  must never be imported from a client component. False keeps the
+   *  data-URL + VENDOR_ATTACHMENT_BUDGET path. */
+  blobUploads: boolean;
   customers: CustomerLite[];
   /** Keys: `${customerId}|${locationId}` and `${customerId}|` (primary) and `name|${custName}`. */
   travel: Record<string, TravelLite>;

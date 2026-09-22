@@ -15,6 +15,7 @@ import { getSettings, type Office } from "@/lib/settings";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates } from "@/lib/stores/pricing";
+import { blobEnabled } from "@/lib/blob";
 import { tasksForQuote } from "@/lib/stores/tasks";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import EstimatorClient from "./estimator-client";
@@ -25,6 +26,7 @@ import type {
   PaymentTerms,
   SpecSection,
   TravelLite,
+  VendorQuote,
 } from "./types";
 
 export const metadata = { title: "Estimator — Quartzite-6" };
@@ -62,6 +64,20 @@ type QuoteDoc = Quote & {
   spec?: { sections?: unknown; mobs?: unknown } | null;
 };
 
+/**
+ * Vendor quotes ride TOP-LEVEL on the doc (#143), typed `unknown` on Quote —
+ * narrow them here. The attachment is handed over whole, including the local
+ * data-URL when Blob storage is off: it is the only copy of the file, and a
+ * save round-trips whatever the builder holds.
+ */
+function vendorQuotesOf(q: QuoteDoc | null): VendorQuote[] {
+  const raw = q?.vendorQuotes;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (v): v is VendorQuote => !!v && typeof v === "object" && typeof (v as VendorQuote).id === "string"
+  );
+}
+
 /** Resolve the loaded quote's customer link + header fields (port of loadFromUrl). */
 async function initialFrom(
   q: QuoteDoc | null,
@@ -88,6 +104,7 @@ async function initialFrom(
       pricingTier: null,
       tierMargin: null,
       sections: null,
+      vendorQuotes: [],
     };
   }
   const cid = q.customerId || (await resolveId(q.customer)) || null;
@@ -136,6 +153,7 @@ async function initialFrom(
     pricingTier: q.pricingTier ?? null,
     tierMargin: q.tierMargin ?? null,
     sections,
+    vendorQuotes: vendorQuotesOf(q),
   };
 }
 
@@ -203,6 +221,13 @@ export default async function EstimatorPage({
       costPerSqft: p.costPerSqft ?? 0,
       curtainAreaRate: p.curtainAreaRate,
     }));
+  // #143: distinct catalog manufacturers seed the vendor-name datalist — no
+  // new server action, the catalog rows are already loaded for the fixture
+  // assemblies.
+  const vendorNames = Array.from(
+    new Set(catalogRows.map((p) => (p.mfr || "").trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
+
   const laborRates: Record<string, number> = {};
   laborRows.forEach((p) => {
     laborRates[p.sku] = p.cost;
@@ -280,6 +305,8 @@ export default async function EstimatorPage({
       laborRates={laborRates}
       fixtureRates={fixtureRates}
       fixtureAssemblies={resolveFixtureAssemblies(settings.fixtureAssemblies, catalogRows)}
+      vendors={vendorNames}
+      blobUploads={blobEnabled()}
       customers={customers}
       travel={travel}
       reviewers={reviewerRows.map((u) => u.name)}

@@ -148,9 +148,11 @@ import {
   assemblyUnitTotals,
   resolveFixtureAssemblies,
 } from "@/lib/fixture-assemblies";
-import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv } from "@/app/(app)/estimator/material-csv";
+import { MATERIAL_CSV_TEMPLATE, VENDOR_CSV_TEMPLATE, parseMaterialCsv, parseMoney } from "@/app/(app)/estimator/material-csv";
+import { ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
-import { computeLabor, computeMob } from "@/app/(app)/estimator/pricing";
+import { computeLabor, computeMob, systemFreight, systemFreightBase, systemItemsCost } from "@/app/(app)/estimator/pricing";
+import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -199,6 +201,76 @@ ok(
 const templateCsv = parseMaterialCsv(MATERIAL_CSV_TEMPLATE);
 ok(templateCsv.errors.length === 0 && templateCsv.items.length === 2, "material CSV example template parses both its catalog and custom rows");
 ok(templateCsv.items[0]?.sku === "ABC-100" && templateCsv.items[0]?.price === 0 && templateCsv.items[1]?.price === 142.86, "material CSV example template: catalog row unpriced, custom row priced");
+
+/* --- #143 (D162): the vendor quote form's own CSV mode --- */
+const vendorTemplateCsv = parseMaterialCsv(VENDOR_CSV_TEMPLATE, { costOnly: true });
+ok(
+  vendorTemplateCsv.errors.length === 0 && vendorTemplateCsv.items.length === 2 &&
+    vendorTemplateCsv.items[0]?.cost === 222 && vendorTemplateCsv.items[0]?.qty === 120,
+  "#143 vendor CSV template parses through the form's own costOnly mode"
+);
+// #143: Amount is the line's EXTENDED total, never a per-unit price — the
+// aliases it accepts ("line total", "extended", "ext cost") all say so, and
+// vendorLinesTotal sums the column rather than multiplying it by qty. This
+// pins the template against a regression back to per-unit reads, which
+// inflated a 12 x $3,480 line to $41,760 in the form.
+ok(
+  vendorTemplateCsv.items.reduce((a, it) => a + it.cost, 0) === 390,
+  "#143 vendor CSV template amounts sum as extended totals, not qty x unit"
+);
+const vendorAmountCsv = parseMaterialCsv('description,quantity,unit,amount\nTruss corner,4,ea,"1,250.00"', { costOnly: true });
+ok(
+  vendorAmountCsv.errors.length === 0 && vendorAmountCsv.items[0]?.cost === 1250,
+  "#143 costOnly maps an Amount column — the header the form's own grid shows — to cost"
+);
+ok(
+  parseMaterialCsv("description,quantity,unit,amount\nTruss corner,4,ea,1250").items.length === 0,
+  "#143 the Amount alias is costOnly-only: a #112 catalog import still needs unit_cost/unit_sell"
+);
+const vendorZeroCsv = parseMaterialCsv("part number,description,quantity,unit_cost\nP-1,Yoke,12,4.50\nP-2,TBD bundle,2,", { costOnly: true });
+ok(
+  vendorZeroCsv.items.length === 1 && vendorZeroCsv.errors.length === 1,
+  "#143 a SKU cannot stand in for a missing amount in costOnly mode — a $0 row would deflate the vendor total"
+);
+ok(parseMoney("$12,450.00") === 12450 && !Number.isFinite(parseMoney("abc")), "#143 money parses as printed on a vendor quote");
+const freightSec: EstimatorSpecSection = {
+  id: "sys1", name: "Rigging", kind: "materials", mfr: "", freightPct: 10,
+  items: [
+    { id: 1, sku: "A", desc: "Catalog part", qty: 2, unit: "ea", cost: 100, price: 150 },
+    { id: 2, sku: "V-1", desc: "Vendor quote", qty: 1, unit: "lot", cost: 1000, price: 1428.57, vendorQuoteId: "vq1", noFreight: true },
+  ],
+};
+ok(
+  systemItemsCost(freightSec) === 1200 && systemFreightBase(freightSec) === 200 && systemFreight(freightSec) === 20,
+  "#143 (D162) a vendor quote that includes freight leaves the freight base but still counts as cost"
+);
+
+/* #143 re-review — `blobPath` reaches the server from the BROWSER (the upload
+   route hands it back, the save carries it), so it is untrusted: unchecked, a
+   crafted save would point a vendor quote at any object in the private Blob
+   store and the authenticated download proxy would stream it. Both the save
+   action and the proxy gate on ownsVendorQuoteBlobPath, so these cases pin the
+   whole guard. The last two matter most and are the easiest to regress: a
+   prefix that merely STARTS with "vendor-quotes" is not inside it, and an id
+   that is a prefix of another id must not borrow its file. */
+const blobPathCases: [string, string | null, string, boolean][] = [
+  ["upload route shape", "vendor-quotes/vqabc123-quote.pdf", "vqabc123", true],
+  ["save action shape", "vendor-quotes/Q-2044/vqabc123-quote.pdf", "vqabc123", true],
+  ["another module's store", "recordings/2026-09-22/meeting.m4a", "vqabc123", false],
+  ["a grid plan sheet", "grid_sheets/GRD-5001/plan.pdf", "vqabc123", false],
+  ["a parent-dir escape", "vendor-quotes/../recordings/meeting.m4a", "vqabc123", false],
+  ["a deeper walk", "vendor-quotes/a/b/vqabc123-quote.pdf", "vqabc123", false],
+  ["another vendor quote's file", "vendor-quotes/vqother99-quote.pdf", "vqabc123", false],
+  ["a look-alike prefix", "vendor-quotes-evil/vqabc123-quote.pdf", "vqabc123", false],
+  ["no path", "", "vqabc123", false],
+  ["a null path", null, "vqabc123", false],
+  ["no record id", "vendor-quotes/vqabc123-quote.pdf", "", false],
+  ["an id that is a prefix of another", "vendor-quotes/vqabc1234-quote.pdf", "vqabc123", false],
+];
+ok(
+  blobPathCases.every(([, path, id, want]) => ownsVendorQuoteBlobPath(path, id) === want),
+  "#143 a vendor quote may claim only its own file under the vendor-quotes prefix"
+);
 
 /* --- Offline navigation contract --- */
 const serviceWorkerSource = readFileSync(join(process.cwd(), "public/sw.js"), "utf8");

@@ -3859,3 +3859,72 @@ Consequences worth naming:
 The two resets are handler wrappers rather than `useEffect`s: `react-hooks/set-state-in-effect` is on
 and **errors** in this repo, and each portal can only be opened from its own button on its own card,
 so clearing on entry covers every open path.
+
+## D162. Vendor quotes are a record with a display toggle; the catalog CSV moves under the catalog method (#143, 2026-09-22)
+
+Jeff's punchlist asked two things of the add-part row that turn out to be one change. Asked what was
+missing from the #112 CSV importer, he answered: "Vendor Quote is both a vendor quote with data and
+information and adding a csv instead of manually adding the material list. a CSV catalog import is
+part of adding the catalog parts" — and chose "Split it off the Vendor button". So the single
+`+ Vendor quote / CSV` button split along its two jobs:
+
+- **The catalog-parts CSV moved inside the catalog method.** It renders under the CatalogPicker when
+  `+ Add part from catalog` is open, reworded "Import catalog parts from CSV". `"import"` left
+  `InputKind` (D161) because it is no longer separately openable; the card-level result notice still
+  renders outside the panel, now gated on `!p.catalogOpen`.
+- **`+ Vendor quote` became its own input method** — a ConfigModal like the three configurators,
+  registered as `"vendor"` in `InputKind`.
+
+**Model.** `VendorQuote` — vendor, quoteNumber, description, attachment, link, lines, terms, notes,
+total, includesFreight, display — lives TOP-LEVEL on the quote doc, not inside `spec`. The doc store
+is JSONB with a shallow `Object.assign` merge, so this needed no migration, and the already-written
+proxy route reads `quote.vendorQuotes`. `SpecItem` gained `vendorQuoteId` and `noFreight`.
+
+**One priced line, two displays.** A vendor quote spawns exactly ONE `SpecItem` carrying the money
+(`cost` = the vendor total, `price` seeded by the same `tierMargin`-else-30% rule `addPart` uses).
+The materials live on the record, not as separate items, so `pricing.ts` totals stay honest, the row's
+× behaves, and `display` is a pure render decision that stays live after save — Jeff said "have the
+option to display", so it is a toggle on the row, not a choice frozen at add time. A previous attempt
+(26d16f4, never landed) put the total on child line 0 and $0 on the rest; that is explicitly rejected,
+because those $0 rows reached the customer document.
+
+**Freight exemption, in Jeff's words:** "if the vendor quote includes freight then the freight slider
+doesn't affect that particular line". Ticking *Quote includes freight* stamps `noFreight` on the line,
+and the new `systemFreightBase()` excludes those lines. `systemItemsCost` is deliberately untouched —
+it still counts every line for the margin readout and the cost column; only the freight base changes.
+
+**Terms and notes are internal only** (Jeff's pick), rendered in the amber INTERNAL box beside
+`internalNote`. `PreviewDoc` is rendered only inside the team-only estimator and the customer portal
+never reads quote `spec`, so there is no customer surface for them at all.
+
+**Amount is a line's extended total, never a per-unit price.** The vendor CSV mode accepts
+`amount, total, line total, line amount, extended, ext, ext cost` — every one of those means the
+extended figure, and a vendor PDF prints description / qty / unit / extended. The first cut multiplied
+by qty, which turned a 12 × $3,480 line into $41,760; the column now reads "Line total" and
+`vendorLinesTotal` sums it. qty and unit are descriptive, shown in the itemized display, carrying no
+money.
+
+**Attachments never ride the save payload when Blob is on.** `next.config.ts` pins
+`serverActions.bodySizeLimit` at 1200kb and base64 inflates by 4/3, so a data-URL in the save payload
+capped a vendor PDF near 600 KB per estimate — and a blown limit rejected the whole save, not just the
+upload. Files now POST to `/api/vendor-quote-attachments/upload` (route handlers are not bound by that
+limit), which returns a `blobPath`. The cap is 4 MB, in one shared constant used by the route, its
+refusal text and the form's label, because Vercel Functions reject a body over ~4.5 MB before the
+handler runs and a bigger promise would be the host's error, not ours. Above that, the Link field is
+the escape hatch; the client-upload broker the recordings module uses is the documented upgrade path.
+With Blob off — or when it errors — the data-URL path and its per-estimate budget remain, with an
+honest message.
+
+**A `blobPath` from the browser is untrusted.** It now round-trips through the client, so unchecked it
+would be an arbitrary-read primitive over the private Blob store: a crafted save could point a vendor
+quote at meeting audio or a grid plan sheet and the authenticated proxy would stream it.
+`ownsVendorQuoteBlobPath()` (src/lib/vendor-quote-file.ts) binds a path to its record — under the
+`vendor-quotes/` prefix, no `..`, at most one grouping segment, filename starting `<vqId>-` — and is
+checked in BOTH the save action and the download proxy, so a path planted by any other writer or left
+on a stale document still cannot be served. Twelve cases pin it in the spec harness.
+
+**Open, for Jeff:** a vendor line is marked up by the section margin slider like any other cost line.
+He answered the freight half of the pricing question, not the margin half, so no price lock was added.
+Also not done: editing an existing vendor quote in place (remove and re-add), and carrying the record
+across `moveSystemToEstimateAction` now copies it, but blob garbage collection for a replaced or
+abandoned file does not exist for any prefix in this repo.
