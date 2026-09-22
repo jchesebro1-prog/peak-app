@@ -36,6 +36,19 @@ import {
   findCustomerByName,
   findCustomerById,
 } from "@/lib/stores/customers";
+import { commitImport, exportCsv } from "@/app/(app)/import/registry";
+import { getTypeMeta } from "@/app/(app)/import/types";
+import { autoMap, norm, parseCsv, prepareRows } from "@/app/(app)/import/parse";
+
+/** #137 — CSV text → the prepared rows commitImport takes, through the same
+ *  parse / autoMap / prepareRows path the import action runs. */
+function prepImport(key: string, csv: string) {
+  const type = getTypeMeta(key);
+  if (!type) throw new Error(`unknown import type ${key}`);
+  const p = parseCsv(csv);
+  if (!p.ok) throw new Error(`CSV did not parse: ${p.error}`);
+  return prepareRows(p.rows, autoMap(p.headers, type.fields), type.fields).rows;
+}
 
 async function main() {
   const flame = await setFlameRates({ laborRate: 123, mileageRate: 1.23 });
@@ -1139,6 +1152,66 @@ async function main() {
     });
     const g2 = await getCustomer("c-t137-onlyphone");
     assert.equal(g2!.updatedAt, g!.updatedAt, "#137 T1 review: identical phone-only re-save leaves updatedAt unchanged (D83)");
+  }
+
+  // #137 T4 — customers import: Category + Zip + Phone + Website, legacy embedded columns, export round-trip
+  {
+    const res = await commitImport("customers", prepImport("customers", [
+      "Customer Name,Category,Address,City,State,Zip,Phone,Website,Notes",
+      "T137 Import Playhouse,Worship,215 W Main St,Madison,WI,53703,(608) 555-0100,t137import.example,",
+    ].join("\n")), "skip");
+    assert.equal(res.created, 1, "#137 T4 one customer created");
+    assert.equal(res.errored, 0, "#137 T4 no errors");
+    const a = await findCustomerByName("T137 Import Playhouse");
+    assert.ok(a, "#137 T4 customer findable by name");
+    assert.equal(a!.type, "Worship", "#137 T4 Category → type");
+    assert.equal(a!.zip, "53703", "#137 T4 Zip → company zip");
+    assert.equal(a!.phone, "(608) 555-0100", "#137 T4 Phone → company phone (no contact on the row)");
+    assert.equal(a!.website, "t137import.example", "#137 T4 Website → company website");
+    assert.equal(a!.locations.length, 1, "#137 T4 exactly one venue (the address venue, no extra base venue)");
+    assert.equal(a!.locations[0].address, "215 W Main St", "#137 T4 Address → primary venue");
+    assert.equal(a!.locations[0].zip, "53703", "#137 T4 Zip → primary venue zip too");
+    assert.equal(a!.locations[0].primary, true, "#137 T4 …and it is primary");
+
+    // A pre-#137 file (Type / Contact Name / Email / Phone / Venue) in
+    // "Update existing" mode: embedded columns still land, nothing is wiped.
+    const res2 = await commitImport("customers", prepImport("customers", [
+      "Customer Name,Type,Contact Name,Email,Phone,Venue,Address,City,State",
+      "T137 Import Playhouse,Performing arts,Maria Lopez,maria@t137import.example,(608) 555-0110,Main Stage,215 W Main St,Madison,WI",
+    ].join("\n")), "update");
+    assert.equal(res2.updated, 1, "#137 T4 a legacy file matches by name and updates");
+    const b = await findCustomerByName("T137 Import Playhouse");
+    assert.equal(b!.type, "Performing arts", "#137 T4 legacy Type alias → type");
+    assert.equal(b!.locations.length, 1, "#137 T4 legacy Venue claims the unnamed address venue instead of adding one");
+    assert.equal(b!.locations[0].label, "Main Stage", "#137 T4 legacy Venue names the primary venue");
+    assert.equal(b!.locations[0].zip, "53703", "#137 T4 a file without Zip keeps the stored venue zip");
+    assert.equal(b!.zip, "53703", "#137 T4 …and the company zip");
+    assert.equal(b!.website, "t137import.example", "#137 T4 …and the website");
+    assert.equal(b!.contacts.length, 1, "#137 T4 legacy Contact Name lands as a contact");
+    assert.equal(b!.contacts[0].email, "maria@t137import.example", "#137 T4 legacy Email on the contact");
+    assert.equal(b!.contacts[0].phone, "(608) 555-0110", "#137 T4 legacy Phone goes to the contact when a Contact Name is present");
+    assert.equal(b!.contacts[0].primary, true, "#137 T4 the embedded contact is primary");
+    assert.equal(b!.phone, "(608) 555-0100", "#137 T4 …and the company phone is left alone");
+
+    // "Skip duplicates" on the same name is a skip, not a second customer.
+    const res3 = await commitImport("customers", prepImport("customers", "Customer Name,Category\nt137 import PLAYHOUSE,Civic"), "skip");
+    assert.equal(res3.skipped, 1, "#137 T4 normalized-name duplicate skipped");
+    assert.equal((await allCustomers()).filter((c) => norm(c.name) === norm("T137 Import Playhouse")).length, 1, "#137 T4 still one customer");
+
+    // Export round-trip: Category + Zip present, same values, re-import creates nothing.
+    const csv = await exportCsv("customers");
+    const exp = parseCsv(csv);
+    assert.equal(exp.headers.join(","), "Customer Name,Category,Address,City,State,Zip,Phone,Website,Notes", "#137 T4 customers export columns = template columns (hidden aliases excluded)");
+    const row = exp.objects.find((o) => o["Customer Name"] === "T137 Import Playhouse");
+    assert.ok(row, "#137 T4 exported row present");
+    assert.equal(row!.Category, "Performing arts", "#137 T4 export Category");
+    assert.equal(row!.Zip, "53703", "#137 T4 export Zip");
+    assert.equal(row!.Address, "215 W Main St", "#137 T4 export Address from the primary venue");
+    assert.equal(row!.Phone, "(608) 555-0100", "#137 T4 export Phone = company phone");
+    assert.equal(row!.Website, "t137import.example", "#137 T4 export Website");
+    const back = await commitImport("customers", prepImport("customers", csv).filter((r) => String(r.values.name).startsWith("T137")), "skip");
+    assert.equal(back.created, 0, "#137 T4 export → re-import creates nothing");
+    assert.equal(back.errored, 0, "#137 T4 export → re-import errors nothing");
   }
 
   console.log("review regression checks passed");
