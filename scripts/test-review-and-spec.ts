@@ -32,6 +32,18 @@ import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS, batte
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
 import { DEFAULT_SETTINGS, DEMO_COLLECTIONS } from "@/db/seed-data";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "@/db/doc-tables";
+import { PARTNER_TYPES, baseVenueKind } from "@/lib/identity/venue-defaults";
+import { VENDOR_COMPANY_TYPE, isVendorType } from "@/lib/identity/config";
+import {
+  catalogEffectiveAtFor, groupCompanyOptions, manufacturerDirectory, partCountFor, resolveCatalogOwner, unclaimedManufacturers,
+  vendorStatus, vendorTasks, type PriceListEntry as VendorPriceListEntry,
+} from "@/lib/vendor-status";
+import { VENDOR_TABS, resolveVendorTab } from "@/app/(app)/vendors/tabs";
+import {
+  fromDateInput as vendorFromDateInput,
+  parseLedgerDates as vendorParseLedgerDates,
+  toDateInput as vendorToDateInput,
+} from "@/app/(app)/vendors/dates";
 import { FIELD_COLLECTIONS } from "@/lib/sync/engine";
 import { canRecord } from "@/lib/settings";
 import {
@@ -69,6 +81,8 @@ import { accentContrast } from "@/lib/color";
 import { emailFor, legacyEmailFor } from "@/lib/team";
 import { gridProjectsSeed } from "@/db/seeds/grid-projects";
 import { quotesSeed } from "@/db/seeds/quotes";
+import { customersSeed } from "@/db/seeds/customers";
+import { vendorProfilesSeed } from "@/db/seeds/vendors";
 import ExcelJS from "exceljs";
 import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
 import { IMPORT_TYPES, getTypeMeta, type ImportTypeMeta } from "@/app/(app)/import/types";
@@ -587,17 +601,17 @@ ok(
 // Opportunities joined as the first child (#18) — six children as of plan 02.
 const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "crm");
 ok(
-  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 7),
-  "CRM has seven children — Quotes and Reviews moved to EST (D117), Opportunities added (#18), My Leads added (#22)",
+  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 8),
+  "CRM has eight children — Quotes and Reviews moved to EST (D117), Opportunities added (#18), My Leads added (#22), Vendors added (#122)",
 );
 ok(
   !!(
     d99Sales &&
     d99Sales.kind === "group" &&
     d99Sales.children.map((c) => c.key).join(",") ===
-      "opportunities,leads,myleads,companies,people,venues,field"
+      "opportunities,leads,myleads,companies,vendors,people,venues,field"
   ),
-  "CRM children are opportunities, leads, myleads, companies, people, venues, field in order",
+  "CRM children are opportunities, leads, myleads, companies, vendors, people, venues, field in order",
 );
 ok(
   parentGroupOf("companies") === "crm" &&
@@ -3082,6 +3096,106 @@ import {
   ok(priceBooks(eight, {}, { now }).length === 6, "#14 priceBooks: caps at the top 6 books by count by default");
   ok(priceBooks(eight, {}, { now, limit: Infinity }).length === 8, "#133 priceBooks: limit: Infinity returns every book (the Catalog banner)");
   ok(priceBooks(eight, {}, { now })[0]?.name === "Mfr0", "#14 priceBooks: sorted by count descending");
+}
+
+/* ---- #122 §1 — a vendor is a company of the exact type; partners get no base venue ---- */
+ok(VENDOR_COMPANY_TYPE === "vendor/manufacturer" && isVendorType(" vendor/manufacturer ") && !isVendorType("Vendor"), "#122 isVendorType: exact COMPANY_TYPES string (trimmed), not the legacy 'Vendor'");
+ok(PARTNER_TYPES.has(VENDOR_COMPANY_TYPE), "#122 PARTNER_TYPES carries the exact vendor type string");
+ok(PARTNER_TYPES.has("Vendor"), "#122 PARTNER_TYPES keeps the legacy 'Vendor' spelling");
+ok(baseVenueKind(VENDOR_COMPANY_TYPE, "Rose Brand Church Supply") === null, "#122 a vendor company is never minted a base venue, whatever its name says");
+
+/* ---- #122 §2 — vendor status + owner tasks ---- */
+{
+  const DAY = 86_400_000;
+  const now = Date.UTC(2026, 8, 21, 12);
+  const list = (effectiveAt: number): VendorPriceListEntry => ({ id: "pl-x", receivedAt: effectiveAt, effectiveAt, note: "", loggedBy: "t" });
+  ok(vendorStatus({ lastList: null, catalogEffectiveAt: now, now }) === "no-list", "#122 vendorStatus: no ledger entry → no-list (even with a fresh catalog)");
+  ok(vendorStatus({ lastList: list(now - DAY), catalogEffectiveAt: null, now }) === "newer-list", "#122 vendorStatus: a list but an undated catalog → newer-list");
+  ok(vendorStatus({ lastList: list(now - DAY), catalogEffectiveAt: now - 2 * DAY, now }) === "newer-list", "#122 vendorStatus: list newer than the catalog → newer-list");
+  ok(vendorStatus({ lastList: list(now - 2 * DAY), catalogEffectiveAt: now - DAY, now }) === "current", "#122 vendorStatus: catalog dated after the list → current");
+  ok(vendorStatus({ lastList: list(now - DAY), catalogEffectiveAt: now - DAY, now }) === "current", "#122 vendorStatus: equal dates → current, not newer (strict >)");
+  const edge = now - OUTDATED_AFTER_MS;
+  ok(vendorStatus({ lastList: list(edge), catalogEffectiveAt: edge, now }) === "current", "#122 vendorStatus: exactly OUTDATED_AFTER_MS old is still current (boundary is strict >)");
+  ok(vendorStatus({ lastList: list(edge - 1), catalogEffectiveAt: edge - 1, now }) === "outdated", "#122 vendorStatus: one ms past the threshold → outdated");
+  ok(vendorStatus({ lastList: list(edge - 1), catalogEffectiveAt: now - DAY, now }) === "current", "#122 vendorStatus: a fresh catalog keeps an old list current (max of the two dates)");
+  ok(vendorStatus({ lastList: list(edge - 1), catalogEffectiveAt: null, now }) === "newer-list", "#122 vendorStatus: newer-list wins over outdated when the catalog is undated");
+
+  const t1 = vendorTasks("newer-list", { id: "v1", name: "Rose Brand", lastList: list(now - DAY), catalogEffectiveAt: null });
+  ok(!!t1 && t1.title.startsWith("Update catalog: Rose Brand price list effective ") && t1.source === `auto: vendor v1 newer-list ${now - DAY}`, "#122 vendorTasks: newer-list → 'Update catalog' keyed by the list's effectiveAt");
+  const t2 = vendorTasks("outdated", { id: "v1", name: "Rose Brand", lastList: list(edge - 1), catalogEffectiveAt: edge - 5 });
+  ok(!!t2 && t2.title === "Request updated price list from Rose Brand" && t2.source === `auto: vendor v1 outdated ${edge - 1}`, "#122 vendorTasks: outdated → 'Request updated price list' keyed by the newer of list/catalog");
+  ok(vendorTasks("current", { id: "v1", name: "X", lastList: list(now), catalogEffectiveAt: now }) === null && vendorTasks("no-list", { id: "v1", name: "X", lastList: null, catalogEffectiveAt: null }) === null, "#122 vendorTasks: current / no-list → no task");
+
+  // `as unknown as` — the catalog plan may type this parameter as the full AppSettingsData.
+  const settings0 = { priceListEffective: {} } as unknown as Parameters<typeof catalogEffectiveAtFor>[2];
+  const parts = [
+    { mfr: "Rose Brand", pricedAt: now - 3 * DAY },
+    { mfr: "rose-brand", pricedAt: now - DAY },
+    { mfr: "Other", pricedAt: now },
+    { mfr: "Rose Brand" },
+  ];
+  ok(catalogEffectiveAtFor(parts, ["Rose Brand"], settings0) === now - DAY, "#122 catalogEffectiveAtFor: the NEWEST effective date across the vendor's manufacturers, aliases matched by mfrKey, undated parts ignored");
+  ok(catalogEffectiveAtFor(parts, ["Nobody"], settings0) === null && catalogEffectiveAtFor(parts, [], settings0) === null, "#122 catalogEffectiveAtFor: no matching parts → null");
+  ok(partCountFor(parts, ["ROSE BRAND"]) === 3 && partCountFor(parts, []) === 0, "#122 partCountFor counts parts by manufacturer key");
+
+  const users = [
+    { id: "u1", name: "Jeff Chesebro", roles: ["Admin", "Estimator"], status: "active" },
+    { id: "u3", name: "Jena Tolksdorf", roles: ["Estimator"], status: "active" },
+    { id: "u9", name: "Gone Admin", roles: ["Admin"], status: "archived" },
+  ];
+  ok(resolveCatalogOwner(null, users)?.id === "u3", "#122 resolveCatalogOwner: defaults to the user named Jena Tolksdorf");
+  ok(resolveCatalogOwner({ userId: "u1" }, users)?.id === "u1", "#122 resolveCatalogOwner: the Settings pick wins");
+  ok(resolveCatalogOwner({ userId: "u9" }, users)?.id === "u3", "#122 resolveCatalogOwner: an archived pick falls through to the default");
+  ok(resolveCatalogOwner(null, users.filter((u) => u.id !== "u3"))?.id === "u1", "#122 resolveCatalogOwner: no Jena → the first active Admin");
+  ok(resolveCatalogOwner(null, []) === null, "#122 resolveCatalogOwner: nobody active → null (no task is created)");
+
+  const dir = manufacturerDirectory(parts, [{ id: "v1", manufacturers: ["rose-brand"] }]);
+  ok(dir.length === 2 && dir[0].name === "Rose Brand" && dir[0].count === 3 && dir[0].vendorId === "v1" && dir[1].name === "Other" && dir[1].vendorId === null, "#122 manufacturerDirectory: grouped by mfrKey, first spelling wins, count-desc, claim owner attached");
+  ok(unclaimedManufacturers(parts, [{ id: "v1", manufacturers: ["rose-brand"] }]).map((m) => m.name).join(",") === "Other", "#122 unclaimedManufacturers: only keys no vendor claims");
+  ok(manufacturerDirectory([{ mfr: "" }, { mfr: "  " }, {}], []).length === 0, "#122 manufacturerDirectory: unbranded parts are not a manufacturer");
+}
+
+/* ---- #122 §3 — tab keys + date bridge ---- */
+ok(VENDOR_TABS.join(",") === "overview,contacts,prices,activity", "#122 vendor tabs are the spec's four");
+ok(resolveVendorTab("prices") === "prices" && resolveVendorTab("") === "overview" && resolveVendorTab("nope") === "overview", "#122 resolveVendorTab validates ?tab= (default overview)");
+ok(vendorToDateInput(new Date(2026, 8, 21, 15).getTime()) === "2026-09-21", "#122 toDateInput renders local Y-M-D");
+ok(vendorFromDateInput("2026-09-21") === new Date(2026, 8, 21).getTime() && vendorFromDateInput("") === null && vendorFromDateInput("2026-09") === null, "#122 fromDateInput → local midnight, null on blank/malformed");
+
+/* The ledger dates are validated at the ACTION boundary: logPriceList()'s
+ * store normalizer DROPS an entry whose effectiveAt isn't finite, so an
+ * unvalidated action would report success over a write that never happened. */
+{
+  const good = vendorParseLedgerDates({ receivedAt: 1_700_000_000_000, effectiveAt: 1_700_000_001_000 });
+  ok(good.ok && good.receivedAt === 1_700_000_000_000 && good.effectiveAt === 1_700_000_001_000, "#122 parseLedgerDates passes two finite epoch-ms dates through");
+  for (const bad of [NaN, Infinity, -Infinity, 0, -1, null, undefined, "2026-09-21", {}] as unknown[]) {
+    ok(!vendorParseLedgerDates({ receivedAt: bad, effectiveAt: 1_700_000_000_000 }).ok, `#122 parseLedgerDates rejects a non-finite receivedAt (${String(bad)})`);
+    ok(!vendorParseLedgerDates({ receivedAt: 1_700_000_000_000, effectiveAt: bad }).ok, `#122 parseLedgerDates rejects a non-finite effectiveAt (${String(bad)})`);
+  }
+  const rejected = vendorParseLedgerDates({ receivedAt: NaN, effectiveAt: NaN });
+  ok(!rejected.ok && rejected.error === "Both dates are required.", "#122 parseLedgerDates returns the action's error copy");
+}
+
+/* ---- #122 §3 — inbox option groups ---- */
+{
+  const groups = groupCompanyOptions([
+    { id: "rose-brand", name: "Rose Brand", type: "vendor/manufacturer" },
+    { id: "lakefront", name: "Lakefront PAC", type: "Performing arts" },
+    { id: "badger", name: "Badger Ballet", type: "" },
+  ]);
+  ok(groups.length === 2 && groups[0].label === "Customers" && groups[1].label === "Vendors", "#122 groupCompanyOptions: Customers first, then Vendors");
+  ok(groups[0].options.map((o) => o.value).join(",") === "badger,lakefront" && groups[1].options[0].value === "rose-brand", "#122 groupCompanyOptions: name-sorted within a group, vendors by exact type");
+  ok(groupCompanyOptions([{ id: "x", name: "X", type: "Civic" }]).length === 1, "#122 groupCompanyOptions: an empty group is dropped");
+}
+
+/* ---- #122 §3 — nav + seed ---- */
+ok(activeKeyFor("/vendors") === "vendors" && activeKeyFor("/vendors/rose-brand") === "vendors" && parentGroupOf("vendors") === "crm", "#122 /vendors lights CRM › Vendors");
+ok(NAV.some((e) => e.kind === "group" && e.key === "crm" && e.children.some((c) => c.key === "vendors" && c.href === "/vendors")), "#122 Vendors sits in the CRM group");
+{
+  const vendorDocs = customersSeed().filter((c) => c.type === VENDOR_COMPANY_TYPE);
+  const seededProfiles = vendorProfilesSeed();
+  ok(vendorDocs.length === 1 && vendorDocs[0].id === "rose-brand" && vendorDocs[0].locations.length === 0, "#122 seed: one vendor company, no venues");
+  ok(seededProfiles.length === 1 && seededProfiles[0].id === "rose-brand" && seededProfiles[0].manufacturers.includes("Rose Brand"), "#122 seed: the profile claims the seeded catalog's manufacturer");
+  ok(seededProfiles[0].priceLists.length === 1 && seededProfiles[0].priceLists[0].effectiveAt <= Date.now(), "#122 seed: one ledger entry in the past so the pages have content");
 }
 
 /* --- final review item 3: the Catalog page parser reports which price columns the file carried --- pure */

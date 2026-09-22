@@ -5550,25 +5550,6 @@ Inbox tab until `CRON_SECRET` + a Pro-plan schedule (or an external pinger) exis
 
 ---
 
-## 98. Cron reconcile of Peak/* label drift on dormant threads — OPEN
-
-D142's Peak→Gmail writer (`queueLabelSync`) is fire-and-forget: it's queued from the store mutation
-inside a server action, with no `waitUntil`, so on serverless the process can freeze or recycle before
-the queued write actually lands. That's fine for an active thread — the next mutation re-queues a
-sync that picks up the current desired set — but a link/assign/status change on a thread that then
-goes quiet can leave it permanently unlabelled (or stale-labelled) on the Gmail side if that one
-queued write was the one that got dropped: nothing else re-queues a sync for a thread nobody touches
-again.
-
-The per-sync passes (open-tab tick, cron) only re-queue threads whose status just flipped or that
-just linked — they don't sweep everything else. A cron-only reconcile pass that, for every linked
-thread, loads its current label set + computes `desiredPeakLabels` and queues a sync whenever they
-differ would close this: bounded cost (one `getDoc` + one label-cache read per linked thread), and it
-only needs to run on the cron path, not the interactive one, since interactive traffic already
-self-heals via the next mutation. Reference D142.
-
----
-
 ## REVIEW AUDIT — 2026-09-21 (Jeff's feature-review list, checked against `main` @ 771499b)
 
 Jeff re-sent his full review list (offline, dashboard queue, inbox/calendar, Assembly Builder,
@@ -5985,7 +5966,7 @@ tokens AND-ed). Adopted on the Subassemblies `PartPicker` and the Assembly Build
 already did), the Grid device palette (scope buttons on the search row), and the People, Companies
 and Venues filter rows. Leads/quotes tables and the Catalog facet rail are untouched (spec).
 
-## 122. Vendors module — OPEN, NEEDS SPEC
+## 122. Vendors module — DONE 2026-09-21 (D160)
 
 **Reported:** 2026-09-21 (Jeff): a vendor portion of the app that mostly references the catalog's
 vendors; tracks when we last received a price list and whether the catalog matches it — if not, add a
@@ -6010,6 +5991,19 @@ matched to catalog manufacturers by name with an explicit alias list; a price-li
 mismatch or staleness spawns an assignment for the catalog owner (a setting, default Jena); discount
 terms + project-registration fields on the vendor record. Spec before code — pairs with #133 (price
 dates) and #132/#134 (import).
+
+**Shipped:** spec `docs/superpowers/specs/2026-09-21-vendors-module-design.md`, plan
+`docs/superpowers/plans/2026-09-21-vendors-module.md`. `vendor_profiles` doc collection (id = company
+id; migration `0024_vendor_profiles`, idempotent) + `lib/stores/vendors.ts`; pure
+`lib/vendor-status.ts` (status, owner-task specs, catalog effective date over `mfrKey` aliases,
+manufacturer directory, owner resolution) and `lib/vendor-tasks.ts` (one catalog read + one
+profiles read; exactly-once assignments by `source` key; daily cron step); `/vendors` (table,
+status/search filters, unclaimed-manufacturer claims, + New vendor) and `/vendors/[id]`
+(Overview / Contacts / Price lists / Activity); `settings.catalogOwner` + the Catalog owner card on
+`/catalog`; Inbox picker Customers/Vendors optgroups and `/inbox?customer=<id>` (+`&log=1`);
+catalog facet tooltip + banner vendor link; CRM › Vendors nav; seeded `rose-brand`. Gates: tsc,
+test:specs, test:review:regressions, test:smoke (`/vendors`, `/vendors/rose-brand` + tabs), eslint
+on touched files. Decision D160.
 
 ## 123. Inbox: "Link to work" above the customer picker in the link sidebar, plus quick-add quote — OPEN
 
@@ -6315,3 +6309,51 @@ thread, loads its current label set + computes `desiredPeakLabels` and queues a 
 differ would close this: bounded cost (one `getDoc` + one label-cache read per linked thread), and it
 only needs to run on the cron path, not the interactive one, since interactive traffic already
 self-heals via the next mutation. Reference D142.
+
+## 139. `PARTNER_TYPES` still mismatches `COMPANY_TYPES` for four non-vendor partner types — OPEN
+
+**Reported:** found during #122 (Vendors module) reviews, 2026-09-21 — pre-existing, out of that
+punch's scope.
+
+**What exists:** `PARTNER_TYPES` (`src/lib/identity/venue-defaults.ts:18-27`) is the set of company
+`type` strings `baseVenueKind()` checks to skip minting a base venue for partner companies (D85:
+partners get none). #122 fixed this for vendors — `VENDOR_COMPANY_TYPE` (`"vendor/manufacturer"`,
+the exact `COMPANY_TYPES` value) was added alongside the legacy `"Vendor"` spelling — but left the
+other four literals untouched: `"Architect"`, `"General Contractor"`, `"Electrical Contractor"`,
+`"Engineer"`. `COMPANY_TYPES` (`src/lib/identity/config.ts:10-21`) actually carries `"architect"`,
+`"general contractor"`, `"electrical contractor"`, and `"engineer or AV consultant"` — none of which
+match the `PARTNER_TYPES` strings (casing, and for Engineer, the wording too). A company created or
+imported with one of those four picker values falls through `PARTNER_TYPES.has(...)` and gets a base
+venue minted anyway — the exact bug #122 fixed for vendors, still live for these four. Affects real
+data on `main` today.
+
+**Ask:** four one-line additions to `PARTNER_TYPES`, the same pattern #122 used for vendors (keep the
+legacy literal, add the exact `COMPANY_TYPES` spelling): `"architect"`, `"general contractor"`,
+`"electrical contractor"`, `"engineer or AV consultant"`.
+
+## 140. A vendor with a price list but NO claimed manufacturers is permanently "Newer list received" — OPEN
+
+**Reported:** found during the #122 (Vendors module) final review, 2026-09-21. Not a defect against
+the spec — the spec says this and the regression harness asserts it — so it is Jeff's call, not a
+default anyone should take while he isn't looking.
+
+**What exists:** `vendorStatus()` (`src/lib/vendor-status.ts:87-97`) compares the newest ledger entry
+against `catalogEffectiveAt`, and `catalogEffectiveAtFor()` (`:67-77`) returns `null` when the vendor
+claims no manufacturers (no keys, nothing to date). The comparison is then
+`lastList.effectiveAt > (catalogEffectiveAt ?? 0)`, which any real date wins, so such a vendor reads
+`newer-list` forever: it can never reach `current` or `outdated`, and `vendorTasks()` (`:106-124`)
+mints an "Update catalog: X price list effective …" task for the catalog owner for every distinct
+effective date logged. The task is honest for a vendor whose catalog lines are waiting on an import,
+but the vendor kept purely for its contacts, discount terms and registration — no catalog presence at
+all, which is most of the "partner" rows Jeff is likeliest to add by hand — produces the same nag with
+nothing for the owner to actually do, and no way to clear it except completing the task by hand each
+time. A vendor with no ledger entry at all is unaffected (`no-list` short-circuits first).
+
+**Ask:** pick one. (a) Leave it — logging a price list for a vendor with no claimed manufacturers is
+arguably a data-entry mistake and the task is the prompt to fix it. (b) A fifth status key,
+`no-claims`, shown as its own chip and minting no task, so the Vendors list says plainly why the
+vendor is outside the freshness rule. (c) Return `no-list` when there are no manufacturers, which
+mints no task but hides the fact that a list was logged. (b) is the only one of the three that keeps
+the ledger visible AND the queue quiet, at the cost of one more chip in `VENDOR_STATUS_META` and the
+`/vendors` status filter. Whichever is picked, the spec §2 status table, `DECISIONS.md` D160 and the
+`#122` harness assertions move with it. Reference #122 / D160.

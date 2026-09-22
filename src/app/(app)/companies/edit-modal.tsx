@@ -436,6 +436,12 @@ export default function EditCustomerModal({
               onChange={(e) => setType(e.target.value)}
               style={selStyle}
             >
+              {/* #122 — a stored type outside the five venue segments (a
+                  vendor/manufacturer, or a Daylite import) would otherwise
+                  render as a blank select and be silently rewritten on save. */}
+              {!(CUSTOMER_TYPES as readonly string[]).includes(type) && type && (
+                <option value={type}>{type}</option>
+              )}
               {CUSTOMER_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {t}

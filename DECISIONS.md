@@ -3694,6 +3694,57 @@ hub now creates one by hand, and the sweep's contract was extended rather than b
   the Reports billing forecast (`targetDate > 0` still gates it), consulting fee proposals (#35).
 
 Spec: `docs/superpowers/specs/2026-09-21-round-2-standalone-design.md` §#135.
+
+## D160. Vendors are companies; price-list freshness is a date rule; owner tasks are exactly-once (#122, 2026-09-21)
+
+Spec: `docs/superpowers/specs/2026-09-21-vendors-module-design.md`. Jeff's decision in the
+brainstorm was **date rule only** — no price-list file upload or diff. Defaults taken while
+building:
+
+- **A vendor is a company with `type === "vendor/manufacturer"`** (the `COMPANY_TYPES` value,
+  `lib/identity/config.ts` `VENDOR_COMPANY_TYPE`). `PARTNER_TYPES` now carries that exact string
+  (the legacy `"Vendor"` spelling stays), so vendor companies no longer get a base venue. Rows
+  typed the legacy way do NOT appear on `/vendors` — retype them in the Companies edit modal, whose
+  type select now keeps a stored type that isn't one of the five prototype venue segments (it used
+  to render blank for any Daylite-imported type).
+- **One doc per vendor, id = company id** (`vendor_profiles`, migration `0024_vendor_profiles`,
+  written idempotently per D141). Manufacturer claims are `mfr` spellings matched by `mfrKey()`;
+  one owner per key — claiming moves it. Not sync-pushable.
+- **Status** (`lib/vendor-status.ts`, pure): `no-list` beats everything; `newer-list` when the
+  newest ledger `effectiveAt` is strictly after the NEWEST `effectivePriceDate` of the claimed
+  parts; `outdated` when `now − max(list, catalog) > OUTDATED_AFTER_MS` (boundary inclusive =
+  current); else `current`. `catalogEffectiveAt` is the newest date (the banner's `priceBooks()`
+  uses the oldest — a different question).
+- **Owner tasks** are Home Queue assignments keyed by
+  `source = "auto: vendor <id> <status> <at>"`; `ensureVendorAssignments()` skips when ANY
+  assignment with that key exists, open or done — exactly once per (vendor, status, date), never
+  re-opened. Runs after a ledger save and inside the daily `/api/gmail/sync` cron (own try/catch,
+  reported as `vendors` in the JSON). Assignee = `settings.catalogOwner.userId` if active, else the
+  user named Jena Tolksdorf, else the first active Admin; nobody → no task. `link.kind` stays
+  `"company"` (the Krisp write-back precedent: `AssignmentLink` kinds are not extended); the queue
+  row deep-links to `/vendors/<id>` anyway, gated on the source prefix — `assignmentHref()`
+  (`lib/queue.ts:43,61`) sends a `"company"` link to `/vendors/<id>` only when its `source` starts
+  with `"auto: vendor "`, and every other `"company"` link (which may be a customer, and that route
+  404s on one) still lands on `/queue`.
+- **Settings → Catalog** is the admin card on `/catalog` (Settings' Admin section only links
+  there); `setCatalogOwnerAction` is gated on `manage_users` like every other Settings write.
+- **"+ New vendor" is a name-only quick-add** through the customers-store upsert with the type
+  preset (the same seam the Inbox quick-add uses), not the full Companies modal: its type list is
+  the five venue segments and its default blank venue row would give a vendor a "Venue" site. The
+  unclaimed-manufacturer claim reuses a vendor whose name normalizes to the manufacturer, else
+  creates `v-<mfrKey>`; a non-vendor company with the same name is left alone.
+- **Inbox:** `/inbox?customer=<id>` is an alias of the pre-existing `?new=<id>` composer entry
+  (the spec's "extend `?draft=`"), and `&log=1` opens the Log call / meeting modal preset — so
+  "Log call" from a vendor really logs a call. The link sidebar's picker groups Customers /
+  Vendors; the compose/log modals' pickers are unchanged.
+- **Claiming a manufacturer does not re-run the task check** — only a ledger save and the cron do
+  (spec §2); the next daily run picks up a claim's effect on status.
+- Seed: `rose-brand` (the manufacturer with the most seeded parts) with a 3-week-old ledger entry,
+  so dev shows "Newer list received" and the first cron creates the owner's task.
+
+Out of scope, logged as follow-ups: procurement lines linking to vendor records
+(`ProcurementLine.vendor` stays free text); a `"vendor"` `AssignmentLink` kind of its own (the
+source-prefix gate above covers the one case that exists); multi-vendor manufacturers.
 ## D158. Import hub — customers / contacts / venues as three importers, unmatched customers auto-created (#137, closes #82 + #83, 2026-09-21)
 
 Jeff's decision (brainstorm 2026-09-21): a contacts or venues row whose customer isn't in Peak

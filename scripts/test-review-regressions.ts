@@ -13,7 +13,7 @@ import {
 import { upsertDoc, patchDoc } from "@/db/doc-store";
 import type { Quote } from "@/lib/stores/quotes";
 import { contactByEmail } from "@/lib/identity/lookup";
-import { emailsFor, saveContact, setEmails, softDeleteContact } from "@/lib/identity/contacts";
+import { contactsForCompany, emailsFor, saveContact, setEmails, softDeleteContact } from "@/lib/identity/contacts";
 import { claimDomain, customersForDomain } from "@/lib/gmail/domains";
 import { applyResolution, applyResweepPatch, resolveForThread, resweepThreads } from "@/lib/gmail/linking";
 import {
@@ -28,6 +28,17 @@ import { saveConnection, replaceLabels } from "@/lib/gmail/connections";
 import { GMAIL_MODIFY_SCOPE } from "@/lib/gmail/config";
 import { get as getLead, getAll as getAllLeads } from "@/lib/stores/leads";
 import { addUser } from "@/lib/users";
+import { getCompany, saveCompany } from "@/lib/identity/companies";
+import { sitesForCompany } from "@/lib/identity/sites";
+import { VENDOR_COMPANY_TYPE } from "@/lib/identity/config";
+import {
+  claimManufacturer, createVendorCompany, getVendorProfile, isVendorCompany, logPriceList,
+  saveVendorProfile, setContactRole, vendorCompanyNamed, vendorForManufacturer,
+} from "@/lib/stores/vendors";
+import { setSettings } from "@/lib/settings";
+import { allAssignments, createAssignment, setAssignmentDone } from "@/lib/stores/assignments";
+import { ensureVendorAssignments, loadVendors } from "@/lib/vendor-tasks";
+import { loadQueue } from "@/lib/queue";
 import {
   upsert as upsertCustomer,
   get as getCustomer,
@@ -1067,6 +1078,227 @@ async function main() {
       { Speakers: "circle" },
       "#131 T10 an invalid shape is dropped while a valid sibling entry is kept"
     );
+  }
+
+  // #122 — vendor profiles: CRUD, claim moves a manufacturer, vendors get no base venue
+  {
+    await saveCompany({ id: "v-t122a", name: "Vendor A T122", type: VENDOR_COMPANY_TYPE });
+    await saveCompany({ id: "v-t122b", name: "Vendor B T122", type: VENDOR_COMPANY_TYPE });
+    assert.equal(await getVendorProfile("v-t122a"), null, "#122 no profile document until something is saved");
+    const saved = await saveVendorProfile("v-t122a", { discounts: { note: "Dealer program", percentOffList: 35, terms: "Net 30" } });
+    assert.equal(saved.discounts.percentOffList, 35, "#122 saveVendorProfile writes discounts");
+    assert.equal((await getVendorProfile("v-t122a"))?.discounts.terms, "Net 30", "#122 the profile round-trips through the doc table");
+    await claimManufacturer("v-t122a", "T122 Mfr");
+    assert.equal(await vendorForManufacturer("t122-mfr"), "v-t122a", "#122 claim matches by mfrKey (case/punctuation-insensitive)");
+    await claimManufacturer("v-t122b", "t122 MFR");
+    assert.equal(await vendorForManufacturer("T122 Mfr"), "v-t122b", "#122 claiming moves the manufacturer to the new vendor");
+    assert.deepEqual((await getVendorProfile("v-t122a"))?.manufacturers, [], "#122 the previous owner no longer lists it");
+    await setContactRole("v-t122b", "ct-t122-x", "Price lists");
+    assert.equal((await getVendorProfile("v-t122b"))?.contactRoles["ct-t122-x"], "Price lists", "#122 contact role is stored by contact id");
+    await setContactRole("v-t122b", "ct-t122-x", "   ");
+    assert.equal((await getVendorProfile("v-t122b"))?.contactRoles["ct-t122-x"], undefined, "#122 a blank role clears the entry");
+    const logged = await logPriceList("v-t122b", { receivedAt: 1_000, effectiveAt: 500, note: "old" }, "Tester");
+    await logPriceList("v-t122b", { receivedAt: 2_000, effectiveAt: 900, note: "newer" }, "Tester");
+    assert.equal(logged.priceLists.length, 1, "#122 logPriceList appends one entry");
+    assert.equal((await getVendorProfile("v-t122b"))?.priceLists[0]?.note, "newer", "#122 ledger is newest-first by effectiveAt");
+    const made = await createVendorCompany("Acme Rigging T122");
+    assert.equal(made.id, "v-acmeriggingt122", "#122 createVendorCompany mints v-<mfrKey>");
+    assert.equal(made.type, VENDOR_COMPANY_TYPE, "#122 createVendorCompany presets the vendor type");
+    assert.equal((await sitesForCompany(made.id)).length, 0, "#122 a new vendor gets NO base venue (PARTNER_TYPES fix)");
+    assert.ok(await getVendorProfile(made.id), "#122 createVendorCompany mints the blank profile");
+  }
+
+  // #122 — owner tasks are exactly-once per (vendor, status, date); done ones never reopen
+  {
+    const part = (sku: string) => ({ id: sku, sku, desc: "T122 cron part " + sku, category: "Rigging", unit: "ea", list: 10, cost: 5, mfr: "T122 Cron Mfr" });
+    await upsertDoc("catalog_parts", part("T122-C1"));
+    await upsertDoc("catalog_parts", part("T122-C2"));
+    await saveCompany({ id: "v-t122c", name: "Vendor C T122", type: VENDOR_COMPANY_TYPE });
+    await claimManufacturer("v-t122c", "T122 Cron Mfr");
+    const owner = await addUser({ name: "Catalog Owner T122", roles: ["Admin"] });
+    await setSettings({ catalogOwner: { userId: owner.id } });
+
+    const before = (await loadVendors("v-t122c")).rows[0];
+    assert.equal(before?.status, "no-list", "#122 a vendor with no ledger entry reads no-list");
+    assert.equal(before?.partCount, 2, "#122 loadVendors counts the claimed manufacturer's parts");
+    assert.equal((await ensureVendorAssignments("v-t122c", "Tester")).created, 0, "#122 no-list creates no task");
+
+    const E = Date.now() - 5 * 86_400_000;
+    await logPriceList("v-t122c", { receivedAt: Date.now(), effectiveAt: E, note: "2026 list" }, "Tester");
+    const key = `auto: vendor v-t122c newer-list ${E}`;
+    const withKey = async () => (await allAssignments()).filter((a) => a.source === key);
+
+    const first = await ensureVendorAssignments("v-t122c", "Tester");
+    assert.equal(first.created, 1, "#122 a newer list creates exactly one owner task");
+    assert.equal(first.owner, "Catalog Owner T122", "#122 the owner comes from settings.catalogOwner");
+    const made = await withKey();
+    assert.equal(made.length, 1, "#122 the task is keyed by source");
+    assert.equal(made[0].assignee, "Catalog Owner T122", "#122 the task is addressed to the owner by display name");
+    assert.equal(made[0].link?.kind, "company", "#122 the task links to the vendor company");
+    assert.ok(made[0].title.startsWith("Update catalog: Vendor C T122 price list effective "), "#122 newer-list title");
+    assert.equal((await loadVendors("v-t122c")).rows[0]?.openTask?.id, made[0].id, "#122 loadVendors surfaces the open task");
+
+    assert.equal((await ensureVendorAssignments("v-t122c", "Tester")).created, 0, "#122 a second pass doesn't duplicate the open task");
+    await setAssignmentDone(made[0].id, true);
+    assert.equal((await ensureVendorAssignments("v-t122c", "Tester")).created, 0, "#122 a done task is never re-opened or re-created");
+    assert.equal((await withKey()).length, 1, "#122 still exactly one assignment for the key");
+    assert.equal((await loadVendors("v-t122c")).rows[0]?.openTask, null, "#122 a done task is no longer the open task");
+
+    // a later import stamps pricedAt ≥ effectiveAt → current, nothing new
+    await upsertDoc("catalog_parts", { ...part("T122-C1"), pricedAt: E });
+    await upsertDoc("catalog_parts", { ...part("T122-C2"), pricedAt: E + 1 });
+    assert.equal((await loadVendors("v-t122c")).rows[0]?.status, "current", "#122 pricedAt ≥ effectiveAt flips the status to current");
+    assert.equal((await ensureVendorAssignments("v-t122c", "Tester")).created, 0, "#122 current creates nothing");
+    assert.equal((await withKey()).length, 1, "#122 the done task stays done and alone");
+
+    // the cron path with zero vendors in scope
+    const none = await ensureVendorAssignments("v-t122-does-not-exist", "Tester");
+    assert.deepEqual([none.checked, none.created], [0, 0], "#122 the cron path runs with zero vendors");
+  }
+
+  // #122 §3 — a ledger save spawns the owner task immediately, and that task's
+  // Home Queue row lands on the vendor's own screen (not back on /queue).
+  {
+    const part = { id: "T122-D1", sku: "T122-D1", desc: "T122 detail part", category: "Rigging", unit: "ea", list: 10, cost: 5, mfr: "T122 Detail Mfr" };
+    await upsertDoc("catalog_parts", part);
+    await saveCompany({ id: "v-t122d", name: "Vendor D T122", type: VENDOR_COMPANY_TYPE });
+    await claimManufacturer("v-t122d", "T122 Detail Mfr");
+
+    const eff = Date.now() - 3 * 86_400_000;
+    const key = `auto: vendor v-t122d newer-list ${eff}`;
+    const withKey = async () => (await allAssignments()).filter((a) => a.source === key);
+
+    // what logPriceListAction does: append the entry, then re-derive at once
+    await logPriceList("v-t122d", { receivedAt: Date.now(), effectiveAt: eff, note: "2027 list" }, "Tester");
+    assert.equal((await ensureVendorAssignments("v-t122d", "Tester")).created, 1, "#122 §3 a ledger save spawns the catalog-owner task right away, not just on the cron");
+    assert.equal((await withKey()).length, 1, "#122 §3 …exactly one");
+
+    // re-saving the SAME entry must not spawn a second task
+    await logPriceList("v-t122d", { receivedAt: Date.now(), effectiveAt: eff, note: "2027 list again" }, "Tester");
+    assert.equal((await ensureVendorAssignments("v-t122d", "Tester")).created, 0, "#122 §3 re-logging the same effective date spawns no second task");
+    assert.equal((await withKey()).length, 1, "#122 §3 …still exactly one");
+
+    const taskId = (await withKey())[0].id;
+    const queued = (await loadQueue("Catalog Owner T122")).filter((i) => i.key === `assignment:${taskId}`);
+    assert.equal(queued.length, 1, "#122 §3 the owner task shows on the owner's Home Queue");
+    assert.equal(queued[0].href, "/vendors/v-t122d", "#122 §3 a company-linked assignment links to the vendor record, not back to /queue");
+  }
+
+  // #122 — claim from the unclaimed panel: reuse a vendor by normalized name, else create one
+  {
+    const reused = await vendorCompanyNamed("VENDOR-B T122");
+    assert.equal(reused.id, "v-t122b", "#122 vendorCompanyNamed reuses a vendor whose name normalizes the same");
+    const fresh = await vendorCompanyNamed("Wenger Corp T122");
+    assert.equal(fresh.id, "v-wengercorpt122", "#122 vendorCompanyNamed creates a vendor named after the manufacturer");
+    assert.equal(fresh.type, VENDOR_COMPANY_TYPE, "#122 …typed as a vendor");
+    await claimManufacturer(fresh.id, "Wenger Corp T122");
+    assert.equal(await vendorForManufacturer("wenger corp t122"), fresh.id, "#122 …and it owns the claimed manufacturer");
+  }
+
+  // #122 C1 — re-creating a vendor by the name of a SOFT-DELETED one must not
+  // silently revive and overwrite it. The slug is taken by ANY company row,
+  // deleted or not, so "+ New vendor" mints a fresh id; the deleted vendor
+  // keeps its ledger, claims, discounts and contacts (the only history there
+  // is — the profile doc has no versions to recover from).
+  {
+    const made = await createVendorCompany("Deleted Vendor T122");
+    assert.equal(made.id, "v-deletedvendort122", "#122 C1 fixture: the first vendor takes the plain v-<mfrKey> slug");
+    await upsertCustomer({
+      id: made.id,
+      name: "Deleted Vendor T122",
+      type: VENDOR_COMPANY_TYPE,
+      locations: [{ id: "l-t122-c1", label: "Warehouse", primary: true, address: "1 Dock Rd", city: "Madison", state: "WI" }],
+      contacts: [{ name: "Dana Ledger", email: "dana@t122c1.example", primary: true }],
+    });
+    await claimManufacturer(made.id, "T122 C1 Mfr");
+    await logPriceList(made.id, { receivedAt: 1_700_000_000_000, effectiveAt: 1_700_000_000_000, note: "2026 list" }, "Tester");
+    await saveVendorProfile(made.id, { discounts: { note: "Dealer program", percentOffList: 20, terms: "Net 45" } });
+    assert.equal((await contactsForCompany(made.id)).length, 1, "#122 C1 fixture: the vendor carries one contact");
+
+    // The Edit button's Delete — deleteCustomerAction → softDeleteCompany.
+    await removeCustomer(made.id);
+    assert.equal(await getCompany(made.id), null, "#122 C1 fixture: the vendor reads as deleted");
+
+    const again = await createVendorCompany("Deleted Vendor T122");
+    assert.notEqual(again.id, made.id, "#122 C1 a soft-deleted slug is TAKEN — the re-created vendor gets its own id");
+    assert.equal(await getCompany(made.id), null, "#122 C1 …and the deleted vendor is not resurrected by the re-create");
+    const kept = await getVendorProfile(made.id);
+    assert.equal(kept?.priceLists.length, 1, "#122 C1 the deleted vendor's price-list ledger survives");
+    assert.deepEqual(kept?.manufacturers, ["T122 C1 Mfr"], "#122 C1 …its manufacturer claims survive");
+    assert.equal(kept?.discounts.terms, "Net 45", "#122 C1 …and its discount terms survive");
+    assert.equal(
+      (await contactsForCompany(made.id)).length,
+      1,
+      "#122 C1 …and its contacts are not soft-deleted by the re-create's empty contacts list"
+    );
+
+    const born = await getVendorProfile(again.id);
+    assert.ok(born, "#122 C1 the re-created vendor gets its own blank profile");
+    assert.deepEqual(
+      [born?.priceLists.length, born?.manufacturers.length],
+      [0, 0],
+      "#122 C1 …blank, sharing nothing with the deleted vendor's record"
+    );
+  }
+
+  // #122 I1 — nothing cascades from softDeleteCompany to vendor_profiles, so a
+  // deleted vendor's claims must stop counting as ownership: the manufacturer
+  // returns to "Unclaimed manufacturers" (the only path back to a real vendor)
+  // instead of labelling the Catalog link with a raw id that 404s.
+  {
+    await upsertDoc("catalog_parts", {
+      id: "T122-I1", sku: "T122-I1", desc: "T122 I1 part", category: "Rigging", unit: "ea", list: 10, cost: 5, mfr: "T122 I1 Mfr",
+    });
+    const co = await createVendorCompany("Stranded Vendor T122");
+    await claimManufacturer(co.id, "T122 I1 Mfr");
+    const claimed = (await loadVendors(co.id)).directory.find((m) => m.name === "T122 I1 Mfr");
+    assert.equal(claimed?.vendorId, co.id, "#122 I1 fixture: a live vendor owns the manufacturer");
+    assert.equal(claimed?.vendorName, "Stranded Vendor T122", "#122 I1 fixture: …labelled by name, not by raw id");
+
+    await removeCustomer(co.id);
+    const after = (await loadVendors()).directory.find((m) => m.name === "T122 I1 Mfr");
+    assert.equal(after?.vendorId, null, "#122 I1 a soft-deleted vendor's manufacturer reappears as unclaimed");
+    assert.equal(after?.vendorName, "", "#122 I1 …with no dangling vendor link to label");
+    assert.ok(
+      (await getVendorProfile(co.id))?.manufacturers.includes("T122 I1 Mfr"),
+      "#122 I1 …while the deleted vendor's own profile keeps the claim (C1: nothing blanks it)"
+    );
+  }
+
+  // #122 T1 — the NEGATIVE half of the queue's company-link rule. The
+  // /vendors/<id> deep link is gated on the vendor task's `source` prefix
+  // because a "company" link from anywhere else may be a CUSTOMER, and that
+  // route notFound()s on one.
+  {
+    const plain = await createAssignment({
+      title: "Ring the T122 T1 customer back",
+      assignee: "Catalog Owner T122",
+      createdBy: "Tester",
+      link: { kind: "company", id: "c-t122-t1-customer", label: "T122 T1 Customer" },
+      source: "iMessage from Jena, 2026-09-21",
+    });
+    const blank = await createAssignment({
+      title: "Company task with no source at all",
+      assignee: "Catalog Owner T122",
+      createdBy: "Tester",
+      link: { kind: "company", id: "c-t122-t1-customer", label: "T122 T1 Customer" },
+    });
+    const queue = await loadQueue("Catalog Owner T122");
+    const hrefOf = (id: string) => queue.find((i) => i.key === `assignment:${id}`)?.href;
+    assert.equal(hrefOf(plain.id), "/queue", "#122 T1 a company link whose source isn't a vendor task stays on /queue");
+    assert.equal(hrefOf(blank.id), "/queue", "#122 T1 …and so does one with no source at all");
+  }
+
+  // #122 T1 — the action-layer scope guard (`vendorOr()` in vendors/actions.ts
+  // is this predicate turned into "Vendor not found."): only a LIVE company of
+  // the vendor type can be written to, so no customer record can ever reach
+  // the vendor_profiles collection.
+  {
+    await upsertCustomer({ id: "c-t122-t1-customer", name: "T122 T1 Customer", type: "Education", locations: [], contacts: [] });
+    assert.equal(await isVendorCompany("c-t122-t1-customer"), false, "#122 T1 a customer id is rejected by the vendor scope guard");
+    assert.equal(await isVendorCompany("v-t122b"), true, "#122 T1 …a vendor company passes it");
+    assert.equal(await isVendorCompany("v-deletedvendort122"), false, "#122 T1 …a soft-deleted vendor is not writable either");
+    assert.equal(await isVendorCompany("v-t122-no-such-id"), false, "#122 T1 …nor is an id that doesn't exist");
   }
 
   // #137 T1 — zip / kind / phone / website / mobile plumbing through the customer seam

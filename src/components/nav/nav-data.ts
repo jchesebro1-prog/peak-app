@@ -70,6 +70,7 @@ export const NAV: NavEntry[] = [
       { key: "leads", label: "Leads", href: "/leads" },
       { key: "myleads", label: "My Leads", href: "/leads?who=mine" }, // #22 — see the EST note
       { key: "companies", label: "Companies", href: "/companies" },
+      { key: "vendors", label: "Vendors", href: "/vendors" }, // #122 — vendor companies + price-list ledger
       { key: "people", label: "People", href: "/people" },
       { key: "venues", label: "Venues", href: "/venues" },
       { key: "field", label: "Venue Assessments", href: "/venue-assessments" },
@@ -138,6 +139,7 @@ export function activeKeyFor(pathname: string): string {
     "/repairs": "repairs",
     "/rentals": "rentals",
     "/companies": "companies",
+    "/vendors": "vendors",
     "/people": "people",
     "/venues": "venues",
     "/customers": "companies", // legacy route redirects to /companies (D85)
