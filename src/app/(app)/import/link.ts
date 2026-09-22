@@ -148,8 +148,14 @@ export type LocationPatch = {
 };
 
 export type MergeLocationOpts = {
-  /** customers file: a row with no Venue column addresses the primary venue
-   *  (or the first one) instead of appending. */
+  /**
+   * customers file: a row with no Venue column addresses an UNNAMED venue —
+   * the primary one when it has no name of its own, else any other unnamed
+   * one — instead of appending (#137 C1b). It never lands on a named venue:
+   * that venue's street address is the only copy the app holds, so writing
+   * the row's mailing address over it destroys it (the mirror of `claimBlank`
+   * below; see `isUnnamed`).
+   */
   preferPrimary: boolean;
   /** venueKind for a venue this merge CREATES; default derives from `kind`. */
   venueKind?: string;
@@ -171,11 +177,17 @@ export type MergeLocationOpts = {
   claimBlank?: "any" | "unaddressed";
 };
 
+/** A venue with no name of its own: the only kind of venue an unlabelled
+ *  customers row may address, because it has no name to lose (#137 C1b). */
+function isUnnamed(l: CustomerLocation): boolean {
+  return !norm(l.label);
+}
+
 /** A blank-label venue with nothing of its own to lose: the D85 base venue a
  *  labelled row may safely claim, as opposed to the addressed-but-unnamed
  *  primary venue a customers import leaves behind (#137 C1). */
 function isBlankPlaceholder(l: CustomerLocation): boolean {
-  return !norm(l.label) && !txt(l.address) && !txt(l.city) && !txt(l.state) && !txt(l.zip);
+  return isUnnamed(l) && !txt(l.address) && !txt(l.city) && !txt(l.state) && !txt(l.zip);
 }
 
 /**
@@ -183,9 +195,15 @@ function isBlankPlaceholder(l: CustomerLocation): boolean {
  * normalized-label match → a labelled row claims the unnamed D85 base venue
  * (so the first imported venue fills it instead of leaving an empty twin —
  * `claimBlank` decides whether an ADDRESSED unnamed venue counts) → a
- * `preferPrimary` row without a label merges into the primary venue →
- * append. Blank incoming fields never clear stored ones; an existing venue
- * keeps its venueKind, lat/lng and travel figures.
+ * `preferPrimary` row without a label merges into an UNNAMED venue, the
+ * primary one for preference (#137 C1b — never a named venue, whose address
+ * it would overwrite) → append. Blank incoming fields never clear stored
+ * ones; an existing venue keeps its venueKind, lat/lng and travel figures.
+ *
+ * The first NAMED venue on a customer becomes the primary one, demoting the
+ * unnamed mailing placeholder a customers import leaves behind (#137 I3):
+ * `primaryLoc` drives the record page's location line, travel estimates and
+ * quote defaults, which belong on the venue where the work happens.
  */
 export function mergeLocation(
   locations: readonly CustomerLocation[],
@@ -197,11 +215,20 @@ export function mergeLocation(
   const label = txt(incoming.label);
   let hit: CustomerLocation | null = matchLocation(list, label);
   if (!hit && label) {
-    const claimable =
-      opts.claimBlank === "any" ? (l: CustomerLocation) => !norm(l.label) : isBlankPlaceholder;
+    const claimable = opts.claimBlank === "any" ? isUnnamed : isBlankPlaceholder;
     hit = list.find(claimable) ?? null;
   }
-  if (!hit && !label && opts.preferPrimary) hit = list.find((l) => l.primary) ?? list[0] ?? null;
+  if (!hit && !label && opts.preferPrimary) {
+    // #137 C1b — the mirror of the claim branch above. An unlabelled row
+    // carries the customer's mailing address, so it may only land on an
+    // UNNAMED venue: the primary one when that venue has no name (the D85
+    // base venue, or the addressed mailing venue this importer wrote there
+    // and now re-runs over — #137 T6's blank-label round trip), else the
+    // unnamed venue it left beside a named one. When every venue is named
+    // there is nothing it may address, so it appends its own.
+    const unnamed = list.filter(isUnnamed);
+    hit = unnamed.find((l) => l.primary) ?? unnamed[0] ?? null;
+  }
   const or = (next: string | undefined, prev: string | undefined) => txt(next) || prev;
   if (hit) {
     if (label) hit.label = label;
@@ -212,10 +239,15 @@ export function mergeLocation(
     hit.kind = or(incoming.kind, hit.kind);
     return { locations: list, created: false };
   }
+  // #137 I3 — the customer's first NAMED venue takes primary from the unnamed
+  // mailing placeholder a customers row leaves behind (it stays, as a second
+  // location). Once a named venue exists, later appends never touch primary.
+  const promote = list.length === 0 || (!!label && list.every(isUnnamed));
+  if (promote) for (const l of list) l.primary = false;
   list.push({
     id: newId,
     label,
-    primary: list.length === 0,
+    primary: promote,
     address: txt(incoming.address) || undefined,
     city: txt(incoming.city) || undefined,
     state: txt(incoming.state) || undefined,

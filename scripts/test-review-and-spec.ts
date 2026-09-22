@@ -5427,8 +5427,12 @@ ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1
   ok(!v2.created && v2.locations[0].zip === "53704" && v2.locations[0].address === "215 W Main St" && v2.locations[0].label === "MAIN stage", "#137 T3 mergeLocation: a normalized-label hit updates zip, keeps fields the row omits, takes the row's label spelling");
   const v3 = mergeLocation(v1.locations, { label: "Black Box", kind: "black box" }, "l-new3", { preferPrimary: false });
   ok(v3.created && v3.locations.length === 2 && v3.locations[1].id === "l-new3" && !v3.locations[1].primary && v3.locations[1].venueKind === "blackbox" && v3.locations[1].kind === "black box", "#137 T3 mergeLocation appends a non-primary venue whose venueKind derives from Category");
+  // Revised for #137 C1b (was: the row updates the primary venue's address in
+  // place) — that primary venue is NAMED, and its street address is the only
+  // copy the app holds, so a customers row appends its mailing address beside
+  // it instead of overwriting it.
   const v4 = mergeLocation(v1.locations, { label: "", address: "1 HQ Way", zip: "53705" }, "l-new4", { preferPrimary: true });
-  ok(!v4.created && v4.locations[0].label === "Main Stage" && v4.locations[0].address === "1 HQ Way" && v4.locations[0].zip === "53705", "#137 T3 mergeLocation preferPrimary: a customers row without a Venue column updates the primary venue's address without renaming it");
+  ok(v4.created && v4.locations.length === 2 && v4.locations[0].label === "Main Stage" && v4.locations[0].address === "215 W Main St" && v4.locations[0].zip === "53703" && v4.locations[0].primary && !v4.locations[1].label && v4.locations[1].address === "1 HQ Way" && v4.locations[1].zip === "53705" && !v4.locations[1].primary, "#137 C1b mergeLocation preferPrimary: a customers row without a Venue column APPENDS its mailing address rather than overwriting a NAMED venue's");
   const v5 = mergeLocation([], { label: "", address: "1 HQ Way" }, "l-new5", { preferPrimary: true, venueKind: "church" });
   ok(v5.created && v5.locations[0].primary && v5.locations[0].label === "" && v5.locations[0].venueKind === "church" && v5.locations[0].id === "l-new5", "#137 T3 mergeLocation: the first venue on a new customer is primary and takes the caller's venueKind");
   ok(locs[0].label === "" && locs.length === 1, "#137 T3 mergeLocation never mutates its input");
@@ -5441,8 +5445,11 @@ ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1
   const addressedBlank: CustomerLocation[] = [
     { id: "l1", label: "", primary: true, address: "215 W Main St", city: "Madison", zip: "53703", venueKind: "proscenium", travelMiles: null, travelMin: null },
   ];
+  // The primary flags flipped in #137 I3 (this asserted the unnamed mailing
+  // venue kept primary): primaryLoc feeds the record page, travel and quote
+  // defaults, so the first NAMED venue outranks a mailing placeholder.
   const v6 = mergeLocation(addressedBlank, { label: "Main Auditorium", address: "5000 N Ballard Rd", city: "Appleton", zip: "54913" }, "l-new6", { preferPrimary: true, claimBlank: "unaddressed" });
-  ok(v6.created && v6.locations.length === 2 && v6.locations[0].id === "l1" && !v6.locations[0].label && v6.locations[0].address === "215 W Main St" && v6.locations[0].city === "Madison" && v6.locations[0].primary && v6.locations[1].label === "Main Auditorium" && v6.locations[1].address === "5000 N Ballard Rd" && !v6.locations[1].primary, "#137 C1 mergeLocation claimBlank 'unaddressed': a labelled venues row APPENDS rather than claiming an addressed blank-label venue, so the customer's mailing address survives");
+  ok(v6.created && v6.locations.length === 2 && v6.locations[0].id === "l1" && !v6.locations[0].label && v6.locations[0].address === "215 W Main St" && v6.locations[0].city === "Madison" && !v6.locations[0].primary && v6.locations[1].label === "Main Auditorium" && v6.locations[1].address === "5000 N Ballard Rd" && v6.locations[1].primary, "#137 C1 mergeLocation claimBlank 'unaddressed': a labelled venues row APPENDS rather than claiming an addressed blank-label venue, so the customer's mailing address survives — and (#137 I3) the named venue takes primary from the unnamed mailing placeholder");
   const v7 = mergeLocation(addressedBlank, { label: "Main Stage", address: "5000 N Ballard Rd" }, "l-new7", { preferPrimary: true, claimBlank: "any" });
   ok(!v7.created && v7.locations.length === 1 && v7.locations[0].id === "l1" && v7.locations[0].label === "Main Stage" && v7.locations[0].address === "5000 N Ballard Rd", "#137 C1 mergeLocation claimBlank 'any': the customers writer still names the address venue its own row owns");
   const v8 = mergeLocation(addressedBlank, { label: "Main Auditorium", address: "5000 N Ballard Rd" }, "l-new8", { preferPrimary: true });
@@ -5450,5 +5457,21 @@ ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1
   const v9 = mergeLocation(locs, { label: "Main Stage", address: "215 W Main St" }, "l-new9", { preferPrimary: false, claimBlank: "unaddressed" });
   ok(!v9.created && v9.locations.length === 1 && v9.locations[0].id === "l1" && v9.locations[0].label === "Main Stage" && v9.locations[0].address === "215 W Main St", "#137 C1 mergeLocation claimBlank 'unaddressed' still claims a TRUE placeholder — the unnamed D85 base venue with no address of its own");
   ok(addressedBlank.length === 1 && !addressedBlank[0].label && addressedBlank[0].address === "215 W Main St", "#137 C1 mergeLocation never mutates its input on the append path either");
+
+  // #137 C1b — the preferPrimary branch is the MIRROR of the claim branch: an
+  // unlabelled (customers) row may only land on a blank-label venue, i.e. one
+  // with no name of its own to lose. It prefers the primary such venue, falls
+  // back to any other, and appends when the customer has none — so a named
+  // venue's street address, the only copy the app holds, is never overwritten.
+  const namedPrimary: CustomerLocation[] = [
+    { id: "l1", label: "Main Auditorium", primary: true, address: "5000 N Ballard Rd", city: "Appleton", venueKind: "proscenium", travelMiles: null, travelMin: null },
+    { id: "l2", label: "", primary: false, address: "215 W Main St", city: "Madison", venueKind: "proscenium", travelMiles: null, travelMin: null },
+  ];
+  const v10 = mergeLocation(namedPrimary, { label: "", address: "220 E Doty St" }, "l-new10", { preferPrimary: true });
+  ok(!v10.created && v10.locations.length === 2 && v10.locations[0].id === "l1" && v10.locations[0].address === "5000 N Ballard Rd" && v10.locations[0].primary && v10.locations[1].id === "l2" && v10.locations[1].address === "220 E Doty St" && !v10.locations[1].primary, "#137 C1b mergeLocation preferPrimary falls back to the unnamed mailing venue when the PRIMARY venue is named — an 'Update existing' re-run updates it in place instead of growing a third venue");
+  const v11 = mergeLocation([{ id: "l1", label: "Main Auditorium", primary: false, address: "5000 N Ballard Rd", venueKind: "proscenium", travelMiles: null, travelMin: null }], { label: "", address: "1 HQ Way" }, "l-new11", { preferPrimary: true });
+  ok(v11.created && v11.locations.length === 2 && v11.locations[0].address === "5000 N Ballard Rd" && v11.locations[1].id === "l-new11" && v11.locations[1].address === "1 HQ Way", "#137 C1b mergeLocation preferPrimary: with no primary flag set at all it appends rather than falling back onto a NAMED list[0]");
+  const v12 = mergeLocation(addressedBlank, { label: "", address: "220 E Doty St" }, "l-new12", { preferPrimary: true });
+  ok(!v12.created && v12.locations.length === 1 && v12.locations[0].id === "l1" && v12.locations[0].address === "220 E Doty St" && v12.locations[0].primary, "#137 C1b mergeLocation preferPrimary still updates an ADDRESSED but unnamed primary venue in place — that venue is the customers row's own (and the #137 T6 blank-label round-trip)");
   ok(venueKindFromCategory("Church") === "church" && venueKindFromCategory("Black Box") === "blackbox" && venueKindFromCategory("Arena") === "arena" && venueKindFromCategory("Gym") === "flat" && venueKindFromCategory("theatre") === "proscenium" && venueKindFromCategory("") === "proscenium" && venueKindFromCategory("flat") === "flat", "#137 T3 venueKindFromCategory");
 }

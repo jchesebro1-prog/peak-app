@@ -1473,32 +1473,94 @@ async function main() {
     assert.ok(mail && aud, "#137 C1 both the mailing venue and the named venue exist");
     assert.equal(mail!.address, "215 W Main St", "#137 C1 the customer's mailing address survives the venues import");
     assert.equal(mail!.city, "Madison", "#137 C1 …and its city");
-    assert.equal(mail!.primary, true, "#137 C1 …and it is still the primary venue");
     assert.equal(aud!.address, "5000 N Ballard Rd", "#137 C1 the appended venue keeps its own address");
     assert.equal(aud!.city, "Appleton", "#137 C1 …and its city");
-    assert.equal(aud!.primary, false, "#137 C1 …and it is not primary");
+    // Revised for #137 I3 (was: the mailing venue stays primary / the appended
+    // venue is not): primaryLoc drives the record page's location line, travel
+    // estimates and quote defaults, so the venue where the work happens must
+    // outrank the unnamed mailing placeholder, which stays as a second location.
+    assert.equal(aud!.primary, true, "#137 I3 the appended NAMED venue becomes primary");
+    assert.equal(mail!.primary, false, "#137 I3 …and the unnamed mailing placeholder is demoted, not removed");
 
-    // The mirror, the same slot from the other side: re-running the customers
-    // file (go-live re-runs it in "Update existing") must land on the primary
-    // mailing venue it owns and leave the venues file's named venue alone.
+    // The mirror, the same slot from the other side (#137 C1b) — a customers
+    // row must never address a venue that has a name to lose. Two shapes:
+    //
+    // (1) the go-live re-run ("Update existing"). After I3 the NAMED venue is
+    //     the primary one, so the row has to skip it and land on the unnamed
+    //     mailing venue it owns — both addresses intact, no third venue.
     const cRes2 = await commitImport("customers", prepImport("customers", [
       "Customer Name,Category,Address,City,State,Zip",
       "T137 C1 Mailing Co,Education,220 E Doty St,Madison,WI,53703",
     ].join("\n")), "update");
-    assert.equal(cRes2.errored, 0, "#137 C1 mirror: the second customers file errors nothing");
-    assert.equal(cRes2.updated, 1, "#137 C1 mirror: it matches by name and updates");
+    assert.equal(cRes2.errored, 0, "#137 C1b mirror: the second customers file errors nothing");
+    assert.equal(cRes2.updated, 1, "#137 C1b mirror: it matches by name and updates");
     const c3 = await findCustomerByName("T137 C1 Mailing Co");
-    assert.equal(c3!.locations.length, 2, "#137 C1 mirror: still exactly two venues");
+    assert.equal(c3!.locations.length, 2, "#137 C1b mirror: still exactly two venues");
     assert.equal(
       c3!.locations.find((l) => l.label === "Main Auditorium")!.address,
       "5000 N Ballard Rd",
-      "#137 C1 mirror: a customers row with no Venue never overwrites an existing named venue's address"
+      "#137 C1b mirror: a customers row with no Venue never overwrites an existing named venue's address"
+    );
+    assert.equal(
+      c3!.locations.find((l) => l.label === "Main Auditorium")!.primary,
+      true,
+      "#137 C1b mirror: …and the named venue is still the primary one"
     );
     assert.equal(
       c3!.locations.find((l) => !l.label)!.address,
       "220 E Doty St",
-      "#137 C1 mirror: it updates the unnamed primary mailing venue it owns instead"
+      "#137 C1b mirror: it updates the unnamed mailing venue it owns instead"
     );
+
+    // (2) the shape the previous round's fixture missed, and the one that
+    //     actually loses data: the named, addressed venue IS the primary and
+    //     there is no unnamed venue at all — every seeded customer
+    //     (src/db/seeds/customers.ts) and anything named through the Companies
+    //     modal looks like this. The preferPrimary branch landed straight on
+    //     it and overwrote "5000 N Ballard Rd" with the row's mailing address,
+    //     which nothing else holds (D158 leaves companies.address/city/state
+    //     to the Daylite import).
+    await upsertCustomer({
+      id: "c-t137-c1b",
+      name: "T137 C1b Named Primary Co",
+      type: "Education",
+      locations: [
+        { id: "l-t137-c1b-1", label: "Main Auditorium", primary: true, address: "5000 N Ballard Rd", city: "Appleton", state: "WI", zip: "54913" },
+      ],
+      contacts: [],
+    });
+    const b0 = await getCustomer("c-t137-c1b");
+    assert.equal(b0!.locations.length, 1, "#137 C1b fixture: one venue — named and addressed");
+    assert.equal(b0!.locations[0].primary, true, "#137 C1b fixture: …and it IS the primary venue");
+    const bRes = await commitImport("customers", prepImport("customers", [
+      "Customer Name,Customer ID,Category,Address,City,State,Zip",
+      "T137 C1b Named Primary Co,c-t137-c1b,Education,215 W Main St,Madison,WI,53703",
+    ].join("\n")), "update");
+    assert.equal(bRes.errored, 0, "#137 C1b the customers row errors nothing");
+    assert.equal(bRes.updated, 1, "#137 C1b it matches the existing customer and updates");
+    const b1 = await getCustomer("c-t137-c1b");
+    assert.equal(b1!.locations.length, 2, "#137 C1b a customers row APPENDS its mailing address — it never addresses a NAMED venue");
+    const bAud = b1!.locations.find((l) => l.label === "Main Auditorium");
+    const bMail = b1!.locations.find((l) => !l.label);
+    assert.ok(bAud && bMail, "#137 C1b both the named venue and the new mailing venue exist");
+    assert.equal(bAud!.address, "5000 N Ballard Rd", "#137 C1b the named venue's address survives the customers import");
+    assert.equal(bAud!.city, "Appleton", "#137 C1b …and its city");
+    assert.equal(bAud!.primary, true, "#137 C1b …and it stays primary (I3: a named venue outranks a mailing placeholder)");
+    assert.equal(bMail!.address, "215 W Main St", "#137 C1b the row's mailing address lands on the appended unnamed venue");
+    assert.equal(bMail!.city, "Madison", "#137 C1b …and its city");
+    assert.equal(bMail!.primary, false, "#137 C1b …and it is not primary");
+
+    // …and a second run updates that mailing venue in place rather than
+    // growing a new unnamed venue on every "Update existing" pass.
+    const bRes2 = await commitImport("customers", prepImport("customers", [
+      "Customer Name,Customer ID,Category,Address,City,State,Zip",
+      "T137 C1b Named Primary Co,c-t137-c1b,Education,220 E Doty St,Madison,WI,53703",
+    ].join("\n")), "update");
+    assert.equal(bRes2.errored, 0, "#137 C1b the second customers run errors nothing");
+    const b2 = await getCustomer("c-t137-c1b");
+    assert.equal(b2!.locations.length, 2, "#137 C1b a re-run does not grow a third venue");
+    assert.equal(b2!.locations.find((l) => !l.label)!.address, "220 E Doty St", "#137 C1b it updates the unnamed mailing venue it owns");
+    assert.equal(b2!.locations.find((l) => l.label === "Main Auditorium")!.address, "5000 N Ballard Rd", "#137 C1b …and still never touches the named venue");
 
     // And the claim that C1 narrows stays intact: when the blank-label venue
     // is a TRUE D85 placeholder (no address of its own), a labelled venues

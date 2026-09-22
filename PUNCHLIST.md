@@ -6245,8 +6245,11 @@ others, re-importing the same file is a no-op. **Venues** — `Customer* | Custo
 Address, City, State, Zip, Category`, matched by customer + venue name (`Venue Name` is required
 unless the row carries an address); the first imported venue fills the customer's unnamed base
 venue — but only a true placeholder: a venues row never claims an unnamed venue that already
-carries an address, since that is the customer's mailing address. A `Notes` column on any of the
-three is accepted and ignored: no store field holds it. Both link-back types match `Customer ID` → normalized
+carries an address, since that is the customer's mailing address. The rule is symmetric — a
+customers row never writes its address onto a *named* venue either, it appends an unnamed one —
+so a customer listed in both files ends up with the venue as its primary location and the mailing
+address kept as a second, unnamed one. A `Notes` column on any of the three is accepted and
+ignored: no store field holds it. Both link-back types match `Customer ID` → normalized
 name → **create the customer** (Jeff's call), once per name per file; the preview shows a Customer
 column (linked / will create) and "Will create N new customers: …" before commit, and the result
 reports rows linked vs customers created. Exports for all three (customers gains Category + Zip;

@@ -3646,8 +3646,10 @@ implementing it:
   template and export) so pre-#137 customers files keep working for one release. On such a row,
   `Phone` is the embedded contact's; on a new-format row it is the company's main phone.
 - **Where a customers row's address goes:** Address/City/State/Zip merge into the customer's
-  **primary venue** — the only address the record page, travel estimates and quotes use, and what
-  this importer always did — but now as a merge (`mergeLocation`), never the old replace-all-venues.
+  **unnamed mailing venue** — the primary venue on a customer that has no named one, which is the
+  address the record page, travel estimates and quotes use, and what this importer always did —
+  but now as a merge (`mergeLocation`), never the old replace-all-venues, and never onto a *named*
+  venue (see the base-venue bullet below for the full symmetric rule).
   Zip also stamps `companies.zip` (the spec's "company HQ/billing" zip); Phone/Website stamp
   `companies.main_phone` / `website`. The companies row's own address/city/state columns are left
   for the Daylite import. A blank Category writes `""` (the old importer invented "Performing arts").
@@ -3664,8 +3666,17 @@ implementing it:
   imported with an Address owns an unnamed but *addressed* primary venue: that is its mailing
   address, which the companies row does not duplicate (see above), so a labelled venues row
   appends beside it rather than overwriting it. Only the customers writer claims a blank-label
-  venue whatever it holds, because its own row IS that venue; a customers row with no Venue column
-  addresses the primary venue without renaming it.
+  venue whatever it holds, because its own row IS that venue. **The rule is symmetric** (final
+  review, round 2): a customers row with no Venue column addresses an *unnamed* venue — the
+  primary one when it has no name of its own, else the unnamed one sitting beside a named venue —
+  and never renames what it addresses. When every venue is named there is nothing it may address,
+  so it appends its mailing address as a new unnamed location instead of overwriting a named
+  venue's street address, which nothing else in the app holds. **The customer's first named venue
+  becomes the primary one**, demoting that mailing placeholder (which stays, as a second
+  location): `primaryLoc` feeds the record page's location line, travel estimates and quote
+  defaults, and those belong on the venue where the work happens. So a customer that appears in
+  both customers.csv and venues.csv ends up with the venue primary and the mailing address kept as
+  a second, unnamed location.
 - **Contacts:** matched by primary email, else normalized name; a hit **keeps its stored name**
   (writeRecord matches contacts by display name — renaming would mint a second row). `Title`, else
   `Role`, fills the one free-text slot (`contacts.title`, the Daylite precedent). `Mobile` is a

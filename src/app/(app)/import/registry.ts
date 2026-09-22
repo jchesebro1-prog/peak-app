@@ -217,11 +217,14 @@ function hasVenueColumns(v: Values): boolean {
 /**
  * The record one customers row writes. `prev` is the customer as stored
  * (null on the create path). Company fields come from the row; the row's
- * Address/City/State/Zip merge into the PRIMARY venue — the only address the
- * UI, travel and quotes use, as this importer always did, but without
- * replacing the customer's other venues; Zip also stamps the company row;
- * and the legacy embedded Contact Name / Email / Phone columns still land as
- * a contact (D158).
+ * Address/City/State/Zip merge into the customer's UNNAMED mailing venue —
+ * the primary venue on a customer that has no named one, i.e. the address
+ * the UI, travel and quotes use, as this importer always did — but without
+ * replacing the customer's other venues, and never onto a NAMED venue, whose
+ * street address nothing else holds (#137 C1b; `mergeLocation` appends a new
+ * unnamed venue instead). Zip also stamps the company row; and the legacy
+ * embedded Contact Name / Email / Phone columns still land as a contact
+ * (D158).
  */
 function customerRecordFor(
   id: string,
@@ -321,9 +324,11 @@ async function writeContactRow(cust: Customers.CustomerDoc, v: Values): Promise<
  *  (a labelled row claims the unnamed base venue first, but only a TRUE
  *  placeholder — `claimBlank: "unaddressed"`, #137 C1: an unnamed venue that
  *  already carries an address is the customer's mailing address, so the row
- *  appends beside it instead of overwriting it; a blank-label row — #137 T6
- *  review, a round-tripped export of an addressed D85 base venue — targets
- *  the primary venue directly via mergeLocation's preferPrimary). */
+ *  appends beside it instead of overwriting it, and that appended venue —
+ *  the customer's first named one — takes primary from the placeholder,
+ *  #137 I3; a blank-label row — #137 T6 review, a round-tripped export of an
+ *  addressed D85 base venue — targets the unnamed primary venue directly via
+ *  mergeLocation's preferPrimary). */
 async function writeVenueRow(cust: Customers.CustomerDoc, v: Values): Promise<void> {
   const { locations } = mergeLocation(
     cust.locations || [],
