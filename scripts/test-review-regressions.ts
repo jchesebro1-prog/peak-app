@@ -33,7 +33,7 @@ import { sitesForCompany } from "@/lib/identity/sites";
 import { VENDOR_COMPANY_TYPE } from "@/lib/identity/config";
 import {
   claimManufacturer, createVendorCompany, getVendorProfile, logPriceList, saveVendorProfile,
-  setContactRole, vendorForManufacturer,
+  setContactRole, vendorCompanyNamed, vendorForManufacturer,
 } from "@/lib/stores/vendors";
 import { setSettings } from "@/lib/settings";
 import { allAssignments, setAssignmentDone } from "@/lib/stores/assignments";
@@ -1132,6 +1132,17 @@ async function main() {
     // the cron path with zero vendors in scope
     const none = await ensureVendorAssignments("v-t122-does-not-exist", "Tester");
     assert.deepEqual([none.checked, none.created], [0, 0], "#122 the cron path runs with zero vendors");
+  }
+
+  // #122 — claim from the unclaimed panel: reuse a vendor by normalized name, else create one
+  {
+    const reused = await vendorCompanyNamed("VENDOR-B T122");
+    assert.equal(reused.id, "v-t122b", "#122 vendorCompanyNamed reuses a vendor whose name normalizes the same");
+    const fresh = await vendorCompanyNamed("Wenger Corp T122");
+    assert.equal(fresh.id, "v-wengercorpt122", "#122 vendorCompanyNamed creates a vendor named after the manufacturer");
+    assert.equal(fresh.type, VENDOR_COMPANY_TYPE, "#122 …typed as a vendor");
+    await claimManufacturer(fresh.id, "Wenger Corp T122");
+    assert.equal(await vendorForManufacturer("wenger corp t122"), fresh.id, "#122 …and it owns the claimed manufacturer");
   }
 
   console.log("review regression checks passed");
