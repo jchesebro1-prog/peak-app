@@ -15,6 +15,7 @@ import {
 } from "./actions";
 import { ChanGlyph, MailEmptyIcon, PaperclipIcon, ReplyIcon, SendIcon } from "./icons";
 import SiteVisitModal from "./site-visit-modal";
+import LinkSidebar from "./link-sidebar";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
@@ -498,11 +499,160 @@ export default function ThreadReader({
     ? vm.linkOptions[(linkType as keyof ReaderVM["linkOptions"]) || "quote"] || []
     : [];
 
+  // #96 §2 — the "+ Link to work" chip + picker. Lives in the sidebar's
+  // Work section (see LinkSidebar children); kept here so its state and the
+  // adopt-on-pick behaviour stay with the reader.
+  const linkWork = (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {vm.link && (
+          <>
+            <a
+              href={vm.link.href}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                minWidth: 0,
+                textDecoration: "none",
+                fontSize: 11.5,
+                fontWeight: 600,
+                color: "#3a3f4a",
+                background: "#f4f5f7",
+                border: "1px solid #e8eaee",
+                borderRadius: 8,
+                padding: "6px 10px",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: ".04em",
+                  textTransform: "uppercase",
+                  color: "#fff",
+                  background: vm.link.color,
+                  padding: "2px 6px",
+                  borderRadius: 5,
+                  flexShrink: 0,
+                }}
+              >
+                {vm.link.kindLabel}
+              </span>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {vm.link.label}
+              </span>
+            </a>
+            <button
+              onClick={async () => {
+                await setLinkAction(vm.id, null);
+                router.refresh();
+              }}
+              title="Remove link"
+              style={{
+                width: 26,
+                height: 26,
+                flexShrink: 0,
+                borderRadius: 7,
+                border: "1px solid #e4e7ec",
+                background: "#fff",
+                color: "#aab0bb",
+                fontSize: 14,
+                lineHeight: 1,
+                cursor: "pointer",
+              }}
+            >
+              ×
+            </button>
+          </>
+        )}
+        <button
+          onClick={() => setLinkPickerOpen(!linkPickerOpen)}
+          style={{
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: ACCENT_INK,
+            background: ACCENT_SOFT,
+            border: `1px solid ${ACCENT_SOFT}`,
+            borderRadius: 8,
+            padding: "6px 10px",
+            cursor: "pointer",
+            fontFamily: "var(--font-ui)",
+          }}
+        >
+          {vm.link ? "Change link" : "+ Link to work"}
+        </button>
+      </div>
+      {linkPickerOpen && (
+        <>
+          {vm.resolvedCustomerId ? (
+            <div style={{ marginTop: 9, fontSize: 11, color: "#9aa0ab", lineHeight: 1.45 }}>
+              Showing{" "}
+              <span style={{ fontWeight: 600, color: "#5b616e" }}>{vm.resolvedCustomerName}</span>
+              &apos;s quotes, surveys, inspections &amp; projects.
+            </div>
+          ) : (
+            <div style={{ marginTop: 9, fontSize: 11, color: "#9aa0ab", lineHeight: 1.45 }}>
+              Link this thread to a customer first and their records will show here.
+            </div>
+          )}
+          <div style={{ display: "grid", gap: 8, marginTop: 9 }}>
+            <select
+              value={linkType}
+              onChange={(e) => setLinkType(e.target.value)}
+              style={linkSelectStyle}
+            >
+              {LINK_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value=""
+              onChange={async (e) => {
+                const id = e.target.value;
+                if (!id) return;
+                const opt = linkRecOptions.find((o) => o.value === id);
+                await setLinkAction(
+                  vm.id,
+                  { type: linkType, id, label: opt ? opt.label : id },
+                  vm.needsAdopt && vm.resolvedCustomerId
+                    ? {
+                        customerId: vm.resolvedCustomerId,
+                        customer: vm.resolvedCustomerName,
+                      }
+                    : null
+                );
+                setLinkPickerOpen(false);
+                router.refresh();
+              }}
+              style={linkSelectStyle}
+            >
+              <option value="">Select a record…</option>
+              {linkRecOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </>
+      )}
+    </>
+  );
+  const sidebar = (
+    <LinkSidebar vm={vm} variant={variant}>
+      {linkWork}
+    </LinkSidebar>
+  );
+
   return (
-    <div style={rootStyle}>
+    <div style={{ ...rootStyle, flexDirection: variant === "pane" ? "row" : "column" }}>
       <div
         style={{
           flex: 1,
+          minWidth: 0,
           display: "flex",
           flexDirection: "column",
           minHeight: 0,
@@ -667,185 +817,8 @@ export default function ThreadReader({
             </div>
           </div>
 
-          {/* linked work */}
-          <div
-            style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap" }}
-          >
-            {vm.link && (
-              <>
-                <a
-                  href={vm.link.href}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 7,
-                    textDecoration: "none",
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                    color: "#3a3f4a",
-                    background: "#f4f5f7",
-                    border: "1px solid #e8eaee",
-                    borderRadius: 8,
-                    padding: "6px 10px",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 9,
-                      fontWeight: 700,
-                      letterSpacing: ".04em",
-                      textTransform: "uppercase",
-                      color: "#fff",
-                      background: vm.link.color,
-                      padding: "2px 6px",
-                      borderRadius: 5,
-                    }}
-                  >
-                    {vm.link.kindLabel}
-                  </span>
-                  <span>{vm.link.label}</span>
-                </a>
-                <button
-                  onClick={async () => {
-                    await setLinkAction(vm.id, null);
-                    router.refresh();
-                  }}
-                  title="Remove link"
-                  style={{
-                    width: 26,
-                    height: 26,
-                    borderRadius: 7,
-                    border: "1px solid #e4e7ec",
-                    background: "#fff",
-                    color: "#aab0bb",
-                    fontSize: 14,
-                    lineHeight: 1,
-                    cursor: "pointer",
-                  }}
-                >
-                  ×
-                </button>
-              </>
-            )}
-            <button
-              onClick={() => setLinkPickerOpen(!linkPickerOpen)}
-              style={{
-                fontSize: 11.5,
-                fontWeight: 600,
-                color: ACCENT_INK,
-                background: ACCENT_SOFT,
-                border: `1px solid ${ACCENT_SOFT}`,
-                borderRadius: 8,
-                padding: "6px 10px",
-                cursor: "pointer",
-                fontFamily: "var(--font-ui)",
-              }}
-            >
-              {vm.link ? "Change link" : "+ Link to work"}
-            </button>
-          </div>
-          {linkPickerOpen && (
-            <>
-              {vm.resolvedCustomerId ? (
-                <div style={{ marginTop: 9, fontSize: 11, color: "#9aa0ab" }}>
-                  Showing{" "}
-                  <span style={{ fontWeight: 600, color: "#5b616e" }}>
-                    {vm.resolvedCustomerName}
-                  </span>
-                  &apos;s quotes, surveys, inspections &amp; projects.
-                </div>
-              ) : (
-                <div
-                  style={{
-                    marginTop: 9,
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: 7,
-                    fontSize: 11,
-                    color: "#8a6d1f",
-                    background: "#fbf3dd",
-                    border: "1px solid #f0e2bd",
-                    borderRadius: 8,
-                    padding: "8px 10px",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  <span style={{ flexShrink: 0, fontWeight: 700 }}>!</span>
-                  <span>
-                    This email isn&apos;t linked to a client yet, so there&apos;s no work to pull
-                    from. Add{" "}
-                    <span style={{ fontFamily: "var(--font-mono)", color: "#5b616e" }}>
-                      {vm.contactEmail}
-                    </span>{" "}
-                    to a customer&apos;s contacts and their quotes &amp; projects will filter in
-                    here automatically.
-                  </span>
-                </div>
-              )}
-              <div style={{ display: "flex", gap: 8, marginTop: 9 }}>
-                <select
-                  value={linkType}
-                  onChange={(e) => setLinkType(e.target.value)}
-                  style={{
-                    fontFamily: "var(--font-ui)",
-                    fontSize: 12.5,
-                    color: "#16181d",
-                    border: "1px solid #e4e7ec",
-                    borderRadius: 8,
-                    padding: "8px 10px",
-                    background: "#fff",
-                    cursor: "pointer",
-                  }}
-                >
-                  {LINK_TYPE_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value=""
-                  onChange={async (e) => {
-                    const id = e.target.value;
-                    if (!id) return;
-                    const opt = linkRecOptions.find((o) => o.value === id);
-                    await setLinkAction(
-                      vm.id,
-                      { type: linkType, id, label: opt ? opt.label : id },
-                      vm.needsAdopt && vm.resolvedCustomerId
-                        ? {
-                            customerId: vm.resolvedCustomerId,
-                            customer: vm.resolvedCustomerName,
-                          }
-                        : null
-                    );
-                    setLinkPickerOpen(false);
-                    router.refresh();
-                  }}
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontFamily: "var(--font-ui)",
-                    fontSize: 12.5,
-                    color: "#16181d",
-                    border: "1px solid #e4e7ec",
-                    borderRadius: 8,
-                    padding: "8px 10px",
-                    background: "#fff",
-                    cursor: "pointer",
-                  }}
-                >
-                  <option value="">Select a record…</option>
-                  {linkRecOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </>
-          )}
         </div>
+        {variant === "overlay" && sidebar}
         {/* conversation */}
         <div
           className="ib-scroll"
@@ -1247,9 +1220,23 @@ export default function ThreadReader({
           )}
         </div>
       </div>
+      {variant === "pane" && sidebar}
     </div>
   );
 }
+
+const linkSelectStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  fontFamily: "var(--font-ui)",
+  fontSize: 12.5,
+  color: "#16181d",
+  border: "1px solid #e4e7ec",
+  borderRadius: 8,
+  padding: "8px 10px",
+  background: "#fff",
+  cursor: "pointer",
+};
 
 const rootStyle: React.CSSProperties = {
   display: "flex",

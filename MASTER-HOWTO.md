@@ -146,6 +146,15 @@ The app is an installable web app (PWA) that keeps working with no signal.
 
 ## 5. Gmail integration ✅ *(Phase 7 — built; flip on when you're ready)*
 
+**`Peak/` labels (two-way, D140/D142).** Once a mailbox is connected, the app keeps a `Peak/`
+label namespace in Gmail in sync with the Inbox. Peak writes them when you link a thread to a
+customer, change its status, assign it, or link it to a project/lead/quote. You can also drive Peak
+*from* Gmail: apply `Peak/Customers/<name>`, `Peak/Status/Needs reply|Waiting|Done`,
+`Peak/Assign/<first name>`, `Peak/Projects|Leads|Quotes/<id>`, or `Peak/New lead` (creates one lead in
+the SLA queue and renames itself to `Peak/Leads/<id>`). Nothing outside `Peak/` is ever touched.
+Sync runs on the same schedule as mail (open-tab tick, or the 5-minute cron once `CRON_SECRET` is set).
+
+
 The Inbox is wired for real Gmail but ships **off** — it stays in simulated
 mode (sends are logged, "Get mail" drops demo messages) until you enable it.
 Nothing about the rest of the app depends on it.

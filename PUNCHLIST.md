@@ -1300,7 +1300,7 @@ queued to build later per Jeff. The per-scope default *rules* are still to be de
 
 ---
 
-## 16. Notify the company when a project is sold and when it's completed — DONE 2026-09-21 (D143) — Home Queue task, not email
+## 16. Notify the company when a project is sold and when it's completed — DONE 2026-09-21 (D145) — Home Queue task, not email
 
 **Area:** `src/app/(app)/quotes/actions.ts:25-43` (won), `src/app/(app)/projects/actions.ts:100-111`
 (signoff), `src/lib/gmail/bridge.ts`, `src/lib/stores/comms.ts`, `src/lib/stores/notif-prefs.ts`
@@ -1402,7 +1402,7 @@ direct stage change from reaching `complete` without a signoff — `setStageActi
 unbuilt, both real, and both worth a look together with item 20 Phase 2 (the roles model's stated
 home) whenever that's picked up — not built here, this is a documentation correction only.
 
-**DONE 2026-09-21 (D143).** Built Jeff's task-first alternative on the `assignments` collection
+**DONE 2026-09-21 (D145).** Built Jeff's task-first alternative on the `assignments` collection
 (D93 — the Home Queue's one non-derived source) instead of extending the tasks-collection
 mechanism above. Two hooks, both assigning to the record's `owner` (still no separate PM/
 salesperson role — decision E's identity gap, addressed with the only assignee reliably present):
@@ -1418,7 +1418,7 @@ and would otherwise show twice in the same person's Home Queue for the same even
 (direct stage jump to "complete" via `setStageAction`, bypassing sign-off) is still open and now
 also means that path spawns no follow-up — deliberate, per Jeff's own answer that sign-off should
 gate completion, not a silent gap. No email; nothing under `lib/gmail/` or `stores/comms.ts`
-touched. Full reasoning in DECISIONS.md D143.
+touched. Full reasoning in DECISIONS.md D145.
 
 ---
 
@@ -2964,7 +2964,7 @@ field already exist; the work is a sell-price input + deciding A (line distribut
 
 ---
 
-## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — IN PROGRESS 2026-09-21 (Tasks 1–3 of 6 shipped, D145, D147, D145-addendum) — generated base sheet + seeding action + separate-sheet upload copy
+## 38. The Grid: default base plan sheet, GENERATED like the estimator plan view — IN PROGRESS 2026-09-21 (Tasks 1–3 of 6 shipped, D147, D149, D147-addendum) — generated base sheet + seeding action + separate-sheet upload copy
 
 **Area:** The Grid (`/design/grid`), sheet handling; shared `VenueDims`.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
@@ -2983,14 +2983,14 @@ calibration step on the base sheet**.
 wall-to-wall; the generated sheet must be explicit about which drives it. Open: when a real
 plan uploads later, do base-sheet markers carry over or arrive as a separate sheet?
 
-**Task 1 shipped (D145):** the first intake save now generates a real base sheet from
+**Task 1 shipped (D147):** the first intake save now generates a real base sheet from
 `VenueDims` (`generateBaseSheet()`, `plan-svg.tsx`'s new `renderPlanSvgMarkup()`
 string-builder) instead of a blank rectangle, auto-calibrated so nothing downstream ever
 prompts for a calibration step; `createProject()` no longer pre-seeds a sheet at all. The
 "I have my own plan, skip measurements" path still gets the old blank fallback
 (`seedBlankSheet()`). Starter Spaces are geometry-derived for proscenium/church venues;
-flat/blackbox/gym keep the old fixed-fraction Spaces (follow-up, not a regression — see D145).
-**Task 2 shipped (D147):** an explicit "Generate starting layout" action
+flat/blackbox/gym keep the old fixed-fraction Spaces (follow-up, not a regression — see D147).
+**Task 2 shipped (D149):** an explicit "Generate starting layout" action
 (`seedStartingLayoutAction`, gated on `intake.measurementBased`, confirmed
 client-side before writing) paints real, editable `GridPlacement`s from
 `compute(a)`'s real fixture/curtain quantities, at the same positions
@@ -3004,7 +3004,7 @@ Lighting + Curtains — the only two systems with an established per-device
 plan position anywhere in this codebase. Re-running is a true per-instance
 diff (new `GridPlacement.seededFrom` key), never a silent replace, never
 auto-deletes. New bulk `addPlacements()` writes the whole batch in one
-`patchDoc`. See D147 for the full trade-offs, including two accepted rough
+`patchDoc`. See D149 for the full trade-offs, including two accepted rough
 edges: `grid-bom.ts`'s "removed part" copy shows for an unresolved seeded
 placement, and minting a quote before resolving every placeholder currently
 prices those lines at $0 with no guard (flagged for Task 5 or a follow-up,
@@ -3014,7 +3014,7 @@ not fixed here).
 artifact derivation (equipment/lineset schedule + riser), the estimator↔Grid BOM seam, and
 retiring the estimator's own drawing tabs once parity is reached.
 
-**Status:** IN PROGRESS — Tasks 1–2 of 6 shipped 2026-09-21 (D145, D147); Tasks 3–6 open per the plan.
+**Status:** IN PROGRESS — Tasks 1–2 of 6 shipped 2026-09-21 (D147, D149); Tasks 3–6 open per the plan.
 
 ---
 
@@ -5384,7 +5384,7 @@ calling it.
 
 ---
 
-## 92. `/venues` renders every venue and every company in one page — 10 MiB, 8.5 s — DONE 2026-09-21 — render capped at 200 (catalog's own pattern), company filter is now a typeahead (D142)
+## 92. `/venues` renders every venue and every company in one page — 10 MiB, 8.5 s — DONE 2026-09-21 — render capped at 200 (catalog's own pattern), company filter is now a typeahead (D144)
 
 **Area:** `src/app/(app)/venues/page.tsx`
 **Reported:** 2026-08-07 (found while fixing #91 — it is what #91's fix left behind)
@@ -5415,7 +5415,7 @@ instant locally. It was only found by seeding 1,700 synthetic companies and meas
 **Ties to:** #91, #89, #59 (real data is what makes this bite).
 
 **Resolved 2026-09-21:** rather than pick among the three open pagination options, `/venues` takes
-the default already established for exactly this problem on `/catalog` (D142) — existing `?q=`/
+the default already established for exactly this problem on `/catalog` (D144) — existing `?q=`/
 `?company=` filters narrow first, then the list is capped at 200 rows (`const PAGE = 200`) with a
 "Showing X of Y venues" label, no page-number links. The company filter is now a text input bound to
 a native `<datalist>` of company names (submits through the same `?company=` param; a typed name that
@@ -5501,7 +5501,14 @@ interpreted from Gmail (customer, status, assign, route to lead/project); status
 latest message instead of stamped per import (the "Waiting on us after I replied" defect —
 Brenda thread). §6 status derivation ships with #95's hardening batch; the rest follows.
 
-**Status:** OPEN — spec approved, plan next.
+**Status:** SHIPPED 2026-09-21 on `feat/inbox-linking`. Wave A (Tasks 1–8, D140): resolver,
+`customer_domains`, ingest stamping + backfill/re-sweep, link actions, `EntityQuickAdd`, reader link
+sidebar, Unmatched view. Wave B (Tasks 9–12, D142, commits 5c0009c…03dc77b): pure `Peak/*` vocabulary,
+lazy label creation + bounded Peak→Gmail writer, Gmail→Peak interpreter (per-thread collapse, echo
+suppression, one-lead `Peak/New lead` swap, unknown/ambiguous skip). Follow-ups from the
+final review: quote intake's own `toLocationInput` still drops `locationName`; ambiguous-card "Always"
+claims the domain even for a contact-level ambiguity (hint copy); duplicate option values when two
+candidate customers share a contact name.
 
 ## 97. Gmail 90-day import never completed — quota blow-up restarted it from page 1 on every sync — DONE 2026-09-21
 
@@ -5526,6 +5533,25 @@ the cron route; the auto tick now includes un-imported mailboxes so a paused imp
 **Follow-ups:** `recordMessage` still does a full `comms` scan per message (fine at hundreds, worth a
 map when the directory grows); Hobby-plan cron is daily, so background completion depends on an open
 Inbox tab until `CRON_SECRET` + a Pro-plan schedule (or an external pinger) exist.
+
+---
+
+## 98. Cron reconcile of Peak/* label drift on dormant threads — OPEN
+
+D142's Peak→Gmail writer (`queueLabelSync`) is fire-and-forget: it's queued from the store mutation
+inside a server action, with no `waitUntil`, so on serverless the process can freeze or recycle before
+the queued write actually lands. That's fine for an active thread — the next mutation re-queues a
+sync that picks up the current desired set — but a link/assign/status change on a thread that then
+goes quiet can leave it permanently unlabelled (or stale-labelled) on the Gmail side if that one
+queued write was the one that got dropped: nothing else re-queues a sync for a thread nobody touches
+again.
+
+The per-sync passes (open-tab tick, cron) only re-queue threads whose status just flipped or that
+just linked — they don't sweep everything else. A cron-only reconcile pass that, for every linked
+thread, loads its current label set + computes `desiredPeakLabels` and queues a sync whenever they
+differ would close this: bounded cost (one `getDoc` + one label-cache read per linked thread), and it
+only needs to run on the cron path, not the interactive one, since interactive traffic already
+self-heals via the next mutation. Reference D142.
 
 ---
 
@@ -5566,7 +5592,7 @@ client — add the `tasks` scope), complete-in-either-place closes both, reassig
 Open questions for Jeff: one list per person or one shared "Quartzite" list; whether every derived
 item syncs or only assignments/reminders; due-date source. Spec before code.
 
-## 108. Calendar: multiple calendars, slide-out filter rail, shared team calendar — PARTIALLY DONE 2026-09-21 (D148, #117); shared calendar still OPEN
+## 108. Calendar: multiple calendars, slide-out filter rail, shared team calendar — PARTIALLY DONE 2026-09-21 (D150, #117); shared calendar still OPEN
 
 **Reported:** 2026-09-21 (Jeff): toggle and add calendars to the calendar view; a filter sidebar on
 the right that slides out to expose the different calendars; a shared calendar people can add group
@@ -5581,7 +5607,7 @@ right-hand slide-out rail with a color swatch per calendar, plus one shared Peak
 calendar owned by the shared mailbox, or a Peak-side `events` collection — Jeff's call) with "add to
 shared calendar" in the event modal. Spec before code; pairs with #107's scope work.
 
-**Shipped 2026-09-21 (see #117, D148):** connect additional Google accounts and subscribe to their
+**Shipped 2026-09-21 (see #117, D150):** connect additional Google accounts and subscribe to their
 individual calendars from a right-hand slide-out filter rail on the Calendar tab, with per-calendar
 visibility toggles and color swatches, merged into the same agenda feed as a new `"external"`
 `AgendaItem` source. This closes the "toggle and add calendars" + "filter sidebar that slides out"
@@ -5604,7 +5630,7 @@ three-pane layout, are not in the #96 spec. Log here so they ride the same branc
 plumbing lands: color per label (customer / status / assignee families), chip rendering in
 `thread-list.tsx` + `thread-reader.tsx`, and a density/spacing pass.
 
-## 110. Intake: user-defined quote category — DONE 2026-09-21 (D141)
+## 110. Intake: user-defined quote category — DONE 2026-09-21 (D143)
 
 **Reported:** 2026-09-21 (Jeff): "I also want to have a service category by default and then a user
 defined category."
@@ -5659,7 +5685,7 @@ system — not that it should open with one row. Left as-is until Jeff confirms.
 ## BUILD LOG — 2026-09-21, #110–#113 (branch `punch-2026-09-21-review-audit`)
 
 **#113** 5b97915 · **#111** 91520a4 · **#112 + #110** df95611 (shared estimator files).
-#110 ships as a `system` quote carrying a `category` string (D141) — `/quotes/new` "Custom
+#110 ships as a `system` quote carrying a `category` string (D143) — `/quotes/new` "Custom
 category" card → `/estimator?category=` → editable in the Prepared-for bar (persists on blur via
 `updateQuoteMetaAction`) → neutral badge on the Quotes hub. #111: `importCatalog` redirects with
 `?importError=` on empty/unparseable/zero-valid input; upload submits through a transition with
@@ -5672,7 +5698,7 @@ cavecrew-reviewer pass, no confirmed findings. Not browser-checked — needs a v
 import, `/quotes/new`, and the estimator CSV panel.
 
 
-## 114. Calendar: based-out-of setting + auto travel-time block on scheduled meetings — DONE 2026-09-21 (D144)
+## 114. Calendar: based-out-of setting + auto travel-time block on scheduled meetings — DONE 2026-09-21 (D146)
 
 **Reported:** Jeff: "In Calendar settings there should be an option for where you are based out
 of. I would like when scheduling meetings with physical address it auto adds travel time to the
@@ -5687,7 +5713,7 @@ URL), it geocodes the address (`geo.ts` `search()`), estimates drive time from t
 user's office (falling back to the quote-default office, then skipping silently if none exists),
 and inserts a second, ordinary, freely-removable "Drive to `<title>` (auto)" event ending at the
 meeting's start. Create-only — editing an existing meeting's location does not regenerate a
-travel block (known limitation, see D144). The crew/install Schedule board (`schedule/actions.ts`)
+travel block (known limitation, see D146). The crew/install Schedule board (`schedule/actions.ts`)
 is untouched — its bookings never carry a `location` and aren't "meetings with a physical
 address" in Jeff's sense.
 
@@ -5719,7 +5745,7 @@ itself (no sibling READMEs exist there).
 **Needs from Jeff to go live:** `QUEUE_API_TOKEN` set on the deployed app's env and on the Mac
 that will run this, and the script scheduled locally (launchd or cron) — see the doc comment.
 
-## 116. Google Tasks two-way sync for the Home Queue (D146) — DONE 2026-09-21
+## 116. Google Tasks two-way sync for the Home Queue (D148) — DONE 2026-09-21
 
 Jeff: "This needs to be implemented with google tasks... work that way [like the Apple Reminders
 queue sync]." #115 (Reminders) only reaches Jeff's own Mac; this is the cloud-side equivalent for
@@ -5749,13 +5775,13 @@ that equivalent would need a new doc-store collection for an edge case nobody's 
 **Files:** `src/lib/gmail/config.ts`, `src/app/api/gmail/connect/route.ts`, `src/lib/google/tasks.ts`
 (new), `src/lib/google/tasks-sync.ts` (new), `src/app/api/gmail/sync/route.ts`,
 `src/lib/stores/assignments.ts`, `src/app/(app)/settings/page.tsx`,
-`src/app/(app)/settings/settings-client.tsx`. Decisions: D146. No schema/migration change.
+`src/app/(app)/settings/settings-client.tsx`. Decisions: D148. No schema/migration change.
 
 **Needs from Jeff to go live:** the Google Cloud OAuth consent screen must list the
 `https://www.googleapis.com/auth/tasks` scope (same place Calendar's scope was added, DEPLOY.md
 §5) before `?tasks=1` will work in production.
 
-## 117. Calendar: connect multiple Google accounts and subscribe to their calendars — DONE 2026-09-21 (D148)
+## 117. Calendar: connect multiple Google accounts and subscribe to their calendars — DONE 2026-09-21 (D150)
 
 **Reported:** 2026-09-21 (Jeff): "We need a way to log into multiple google accounts and subscribe
 to other calendars via the calendar tab only so you can sync other calendars in one place."
@@ -5785,14 +5811,14 @@ separate, still-open ask).
 (new), `src/lib/google/calendar.ts`, `src/app/api/gmail/connect/route.ts`,
 `src/app/api/gmail/callback/route.ts`, `src/lib/agenda.ts`, `src/app/(app)/calendar-actions.ts`,
 `src/app/(app)/calendar/calendar-client.tsx`, `src/app/(app)/calendar/calendar-filter-rail.tsx`
-(new), `src/app/(app)/calendar/page.tsx`. Decisions: D148.
+(new), `src/app/(app)/calendar/page.tsx`. Decisions: D150.
 
 **Needs from Jeff to go live:** the Google Cloud OAuth consent screen must list the
 `https://www.googleapis.com/auth/calendar.readonly` scope before "Connect an account" will
 complete in production — same category of action as the Calendar/Tasks scope additions before it,
 but no new redirect URI this time (the flow reuses the existing Gmail callback URL).
 
-## 118. Reusable task templates for projects, quotes, and designs (D149) — DONE 2026-09-21
+## 118. Reusable task templates for projects, quotes, and designs (D151) — DONE 2026-09-21
 
 **Reported:** 2026-09-21 (Jeff): "I want to be able to add template tasks to projects, quotes, and
 designs that can be assigned based on groups, people, or teams."
@@ -5829,4 +5855,4 @@ specific role, that needs a new field on `users` and Jeff's input on what the gr
 `src/lib/stores/task-templates.ts` (new), `src/components/apply-template-control.tsx` (new),
 `src/app/(app)/task-templates/*` (new), `src/app/(app)/settings/settings-sections.ts`,
 `src/components/nav/nav-data.ts`, `src/app/(app)/projects/*`, `src/app/(app)/estimator/*`,
-`src/app/(app)/design/designs/*`. Decisions: D149.
+`src/app/(app)/design/designs/*`. Decisions: D151.

@@ -7,7 +7,12 @@ import {
   IMPORT_BATCH_PER_RUN,
   IMPORT_MAX_CHUNKS_PER_RUN,
   isRateLimit,
+  domainOf,
+  isPublicDomain,
 } from "@/lib/gmail/config";
+import { resolveSender } from "@/lib/gmail/resolve";
+import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
+import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
 import type { EngagementPhase } from "@/lib/stores/engagements";
 import {
   msOf as opMsOf,
@@ -2999,6 +3004,97 @@ ok(isRateLimit(new Error('Gmail API /messages/x → 403 { "reason": "userRateLim
 ok(!isRateLimit(new Error("Gmail API /messages/x → 500 { \"reason\": \"backendError\" }")), "isRateLimit: backendError is not a rate limit");
 ok(IMPORT_MAX_CHUNKS_PER_RUN * IMPORT_BATCH_PER_RUN * 5 <= 6000 * 0.6, "a full run of chunks stays under 60% of the per-minute quota");
 
+/* ---- #96 §1 — domain helpers ---- */
+ok(domainOf("Brenda.Gauchel@Lakefront.K12.MN.US") === "lakefront.k12.mn.us", "domainOf lowercases");
+ok(domainOf("no-at-sign") === "", "domainOf: no @ → empty");
+ok(isPublicDomain("gmail.com") && isPublicDomain("Yahoo.com") && isPublicDomain("icloud.com"), "isPublicDomain: webmail");
+ok(!isPublicDomain("lakefront.k12.mn.us"), "isPublicDomain: district is claimable");
+
+/* ---- #96 §3 — Peak/* label vocabulary ---- */
+ok(JSON.stringify(parsePeakLabel("Peak/Customers/Lakefront ISD")) === JSON.stringify({ kind: "customer", name: "Lakefront ISD" }), "parse customer label");
+ok(parsePeakLabel("Peak/Status/Needs reply")?.kind === "status", "parse status label");
+ok(JSON.stringify(parsePeakLabel("Peak/Assign/Nic")) === JSON.stringify({ kind: "assign", firstName: "Nic" }), "parse assign label");
+ok(parsePeakLabel("Peak/New lead")?.kind === "newLead", "parse new-lead label");
+ok(JSON.stringify(parsePeakLabel("Peak/Projects/P-3001")) === JSON.stringify({ kind: "work", type: "project", id: "P-3001" }), "parse project label");
+ok(parsePeakLabel("Follow up") === null && parsePeakLabel("Peak/Nonsense/x") === null, "non-Peak / unknown → null");
+ok(labelForStatus("waiting_us") === "Peak/Status/Needs reply" && labelForStatus("replied") === null, "status → label");
+const wantPeakLabels = desiredPeakLabels({ customer: "Lakefront ISD", status: "waiting_them", assignedTo: "Nic Trapani", link: { type: "project", id: "P-3001" } });
+ok(wantPeakLabels.includes("Peak/Customers/Lakefront ISD") && wantPeakLabels.includes("Peak/Status/Waiting") && wantPeakLabels.includes("Peak/Assign/Nic") && wantPeakLabels.includes("Peak/Projects/P-3001") && wantPeakLabels.length === 4, "desired set");
+const peakLabelDiff = diffLabels(wantPeakLabels, ["INBOX", "Peak/Status/Needs reply", "Peak/Customers/Lakefront ISD", "Follow up"]);
+ok(peakLabelDiff.add.length === 3 && peakLabelDiff.remove.length === 1 && peakLabelDiff.remove[0] === "Peak/Status/Needs reply", "diff adds missing, removes only stale Peak/* labels");
+
+// #96 §3 review fix (Critical 1) — "current" must be the union across every
+// message that carries gmailLabelIds, not just the newest one, so a
+// trailing Peak-authored message (no gmailLabelIds) never blanks it.
+const cplnIdToName = new Map([
+  ["L1", "Peak/Status/Waiting"],
+  ["L2", "Peak/Customers/X"],
+]);
+const cpln = currentPeakLabelNames(
+  [{ gmailLabelIds: ["L1"] }, { gmailLabelIds: ["L2", "INBOX"] }, {}],
+  cplnIdToName
+);
+ok(
+  cpln.includes("Peak/Status/Waiting") && cpln.includes("Peak/Customers/X"),
+  "currentPeakLabelNames: union across every message that has gmailLabelIds, trailing Peak-only message doesn't blank it"
+);
+
+/* ---- #96 §3 — Gmail → Peak command planning (Task 11) ---- */
+const plan = planLabelCommands(["INBOX", "Peak/Status/Waiting", "Peak/Status/Done", "Peak/Assign/Nic", "Peak/New lead", "Follow up"]);
+ok(plan.filter((c) => c.kind === "status").length === 1 && (plan.find((c) => c.kind === "status") as any).status === "closed", "plan: last status wins");
+ok(plan.some((c) => c.kind === "assign") && plan.some((c) => c.kind === "newLead") && plan.length === 3, "plan: ignores non-Peak labels, keeps one of each independent command");
+const planCustomerAssign = planLabelCommands(["Peak/Customers/A", "Peak/Customers/B", "Peak/Assign/Nic", "Peak/Assign/Jill"]);
+ok(
+  planCustomerAssign.filter((c) => c.kind === "customer").length === 1 &&
+    (planCustomerAssign.find((c) => c.kind === "customer") as any).name === "B" &&
+    planCustomerAssign.filter((c) => c.kind === "assign").length === 1 &&
+    (planCustomerAssign.find((c) => c.kind === "assign") as any).firstName === "Jill",
+  "plan: last customer and last assign each win independently"
+);
+const planWork = planLabelCommands(["Peak/Projects/P-1", "Peak/Leads/L-1", "Peak/Quotes/Q-1"]);
+ok(planWork.length === 3 && planWork.every((c) => c.kind === "work"), "plan: every work-link label is its own independent command");
+
+/* ---- #96 §3 review fix (Critical) — collapse per-message history records
+ * into one event per thread, so a thread-wide Gmail label doesn't plan (and
+ * apply) its command once per message on a multi-message thread. ---- */
+const collapsed = collapseLabelEventsByThread([
+  { messageId: "m1", threadId: "T1", added: ["L-newlead"], removed: [] },
+  { messageId: "m2", threadId: "T1", added: ["L-newlead", "L-done"], removed: [] },
+  { messageId: "m3", threadId: "T1", added: [], removed: [] },
+]);
+ok(collapsed.length === 1, "collapse: three same-thread events become one");
+ok(
+  collapsed[0].messageIds.join(",") === "m1,m2,m3",
+  "collapse: keeps every message id that contributed to the thread"
+);
+ok(
+  [...collapsed[0].added].sort().join(",") === "L-done,L-newlead",
+  "collapse: unions and dedupes added label ids across the thread's messages"
+);
+const collapsedPlan = planLabelCommands(
+  collapsed[0].added.filter((id) => id === "L-newlead").map(() => "Peak/New lead")
+);
+ok(collapsedPlan.length === 1, "collapse: the New-lead command plans exactly once from a collapsed thread event");
+
+const collapsedTwoThreads = collapseLabelEventsByThread([
+  { messageId: "m1", threadId: "T1", added: ["L-a"], removed: [] },
+  { messageId: "m2", threadId: "T2", added: ["L-b"], removed: [] },
+]);
+ok(collapsedTwoThreads.length === 2, "collapse: distinct threads never merge");
+
+const collapsedAddWinsOverRemove = collapseLabelEventsByThread([
+  { messageId: "m1", threadId: "T1", added: [], removed: ["L-x"] },
+  { messageId: "m2", threadId: "T1", added: ["L-x"], removed: [] },
+]);
+ok(
+  collapsedAddWinsOverRemove[0].added.includes("L-x") && !collapsedAddWinsOverRemove[0].removed.includes("L-x"),
+  "collapse: a label id added by one message and removed by another nets to added (added wins)"
+);
+ok(
+  collapseLabelEventsByThread([]).length === 0,
+  "collapse: an empty events array collapses to no threads"
+);
+
 async function xlsxFixture(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Price List");
@@ -3010,6 +3106,31 @@ async function xlsxFixture(): Promise<Buffer> {
 }
 
 async function asyncChecks(): Promise<void> {
+  /* ---- #96 §1 — resolver precedence ---- */
+  {
+    const L = {
+      contactByEmail: async (e: string) =>
+        e === "brenda@lakefront.k12.mn.us" ? { contactId: "ct-b", customerId: "lakefront" } : null,
+      customersByDomain: async (d: string) =>
+        d === "lakefront.k12.mn.us" ? ["lakefront"] : d === "shared.org" ? ["a", "b"] : [],
+    };
+    const r1 = await resolveSender("Brenda@Lakefront.K12.MN.US", L);
+    ok(r1.kind === "linked" && r1.via === "contact" && r1.customerId === "lakefront", "resolve: exact contact wins");
+    const r2 = await resolveSender("new.person@lakefront.k12.mn.us", L);
+    ok(r2.kind === "linked" && r2.via === "domain", "resolve: domain fallback");
+    const r3 = await resolveSender("x@shared.org", L);
+    ok(r3.kind === "ambiguous" && r3.candidates.length === 2, "resolve: shared domain → ambiguous");
+    const r4 = await resolveSender("someone@gmail.com", { ...L, customersByDomain: async () => ["oops"] });
+    ok(r4.kind === "unknown", "resolve: public domain never uses the domain step");
+    const r5 = await resolveSender("", L);
+    ok(r5.kind === "unknown", "resolve: empty → unknown");
+    const r6 = await resolveSender("dup@shared.org", {
+      ...L,
+      contactByEmail: async () => ({ ambiguous: ["a", "b"] }),
+    });
+    ok(r6.kind === "ambiguous" && r6.candidates.length === 2, "resolve: two live customers on one address → ambiguous");
+  }
+
   const xr = await xlsxToCsv(await xlsxFixture());
   ok(xr.ok, "#81 a well-formed .xlsx converts");
   if (xr.ok) {

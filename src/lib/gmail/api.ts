@@ -21,6 +21,7 @@ async function gapi<T>(
       "Content-Type": "application/json",
       ...(init.headers || {}),
     },
+    signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) {
     throw new Error(
@@ -142,21 +143,52 @@ export async function listLabels(mailboxKey: string): Promise<GmailLabelMeta[]> 
   return r.labels || [];
 }
 
-export type GmailHistoryMessageAdded = { message: GmailMessageMeta };
-export type GmailHistoryRecord = { messagesAdded?: GmailHistoryMessageAdded[] };
+/** #96 §3 — create a user label (nesting on "/"). Returns Gmail's id. */
+export async function createLabel(
+  mailboxKey: string,
+  name: string
+): Promise<{ id: string; name: string }> {
+  return gapi(mailboxKey, "/labels", {
+    method: "POST",
+    body: JSON.stringify({ name, labelListVisibility: "labelShow", messageListVisibility: "show" }),
+  });
+}
 
-/** Incremental changes since a historyId. Returns added-message ids + the new
- *  cursor. If the cursor is too old Gmail 404s; the caller falls back to a
- *  bounded query re-scan. */
+/** Add/remove labels on a single message (used where a thread-level change
+ *  isn't appropriate). Requires the gmail.modify scope — callers must check
+ *  the connection's stored grant first. */
+export async function modifyMessage(
+  mailboxKey: string,
+  messageId: string,
+  change: { addLabelIds?: string[]; removeLabelIds?: string[] }
+): Promise<void> {
+  await gapi(mailboxKey, "/messages/" + messageId + "/modify", {
+    method: "POST",
+    body: JSON.stringify(change),
+  });
+}
+
+export type GmailHistoryMessageAdded = { message: GmailMessageMeta };
+/** #96 §3 — label events, resolved from history's labelsAdded/labelsRemoved
+ *  records. `added`/`removed` are Gmail label ids; the caller (label-
+ *  interpret.ts) resolves them to names via the mailbox's cached label list. */
+export type GmailLabelEvent = { messageId: string; threadId: string; added: string[]; removed: string[] };
+export type GmailHistoryRecord = {
+  messagesAdded?: GmailHistoryMessageAdded[];
+  labelsAdded?: Array<{ message: { id: string; threadId: string }; labelIds: string[] }>;
+  labelsRemoved?: Array<{ message: { id: string; threadId: string }; labelIds: string[] }>;
+};
+
+/** Incremental changes since a historyId. Returns added-message ids, Peak-
+ *  relevant label events, and the new cursor. If the cursor is too old
+ *  Gmail 404s; the caller falls back to a bounded query re-scan. */
 export async function listHistory(
   mailboxKey: string,
   startHistoryId: string,
   pageToken?: string
-): Promise<{ added: GmailMessageMeta[]; historyId?: string; nextPageToken?: string }> {
-  const params = new URLSearchParams({
-    startHistoryId,
-    historyTypes: "messageAdded",
-  });
+): Promise<{ added: GmailMessageMeta[]; labelEvents: GmailLabelEvent[]; historyId?: string; nextPageToken?: string }> {
+  const params = new URLSearchParams({ startHistoryId });
+  for (const t of ["messageAdded", "labelAdded", "labelRemoved"]) params.append("historyTypes", t);
   if (pageToken) params.set("pageToken", pageToken);
   const r = await gapi<{
     history?: GmailHistoryRecord[];
@@ -164,8 +196,13 @@ export async function listHistory(
     nextPageToken?: string;
   }>(mailboxKey, "/history?" + params.toString());
   const added: GmailMessageMeta[] = [];
+  const labelEvents: GmailLabelEvent[] = [];
   for (const h of r.history || []) {
     for (const m of h.messagesAdded || []) added.push(m.message);
+    for (const e of h.labelsAdded || [])
+      labelEvents.push({ messageId: e.message.id, threadId: e.message.threadId, added: e.labelIds, removed: [] });
+    for (const e of h.labelsRemoved || [])
+      labelEvents.push({ messageId: e.message.id, threadId: e.message.threadId, added: [], removed: e.labelIds });
   }
-  return { added, historyId: r.historyId, nextPageToken: r.nextPageToken };
+  return { added, labelEvents, historyId: r.historyId, nextPageToken: r.nextPageToken };
 }

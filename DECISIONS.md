@@ -2657,7 +2657,7 @@ the repo as generated iOS + Android projects plus `capacitor.config.ts`.
   builds remain unchanged. BLE, camera, push, signing, and store submission
   remain later phases and require device/account decisions.
 
-## D140. Merge-regenerated migrations are written idempotently (2026-09-21)
+## D141. Merge-regenerated migrations are written idempotently (2026-09-21)
 
 `0018_clever_maverick` — the migration drizzle-kit regenerated when
 `session/pensive-swift-b0f7` merged into main — failed on the production
@@ -2710,7 +2710,73 @@ Decisions taken:
 database believes is applied and whether a pending migration's objects already
 exist — run it before trusting a migration against production.
 
-## D141. A user-defined quote category is a label on a system quote, not a new quoteType (2026-09-21)
+## D140 — Inbox customer linking, Wave A (2026-09-21)
+
+PUNCHLIST #96, spec `docs/superpowers/specs/2026-09-21-inbox-customer-linking-and-label-sync-design.md`.
+Defaults taken while building Tasks 1–8 (branch `feat/inbox-linking`):
+
+- **Contact match links; domain match only suggests.** `applyResolution` never sets `customerId` from a
+  domain claim — the thread lands as `suggested` until someone clicks Link. Ambiguity (two live customers
+  on one address or one domain) never guesses.
+- **Deleted contacts/companies never resolve.** `contactByEmail` filters `deleted`, orders by
+  `updatedAt desc`, and returns *ambiguous* when live rows map to two customers (the old doc scan could
+  auto-link a re-added person to their previous employer).
+- **`resolution` stays inside the comms JSON document** (spec §4 said a promoted hot column). Volumes are
+  hundreds of threads; the Unmatched view is a filtered scan like every other Inbox view. Promote when it
+  measurably hurts.
+- **`customer_domains` pk is (domain, customer_id)** so a shared district domain can legitimately have two
+  owners (→ ambiguous). A learned claim is inserted with `WHERE NOT EXISTS`; under concurrent learned
+  claims the worst case is two owners (ambiguous), never a wrong link.
+- **Remember-address reuses before minting**: same address on a live contact wins, then a case-insensitive
+  display-name match on the customer, else a new contact. The name-keyed customer save would otherwise
+  soft-delete one of two same-name contacts.
+- **Domain claims are undoable** from the linked card ("Stop"), and the Unknown card offers "Link thread
+  only" so a consultant/architect domain that writes about several schools is never claimed by accident.
+- **App-created threads resolve on `create()` too** (Compose, Log call); the sync backfill only covers
+  Gmail-bridged threads, and the Unmatched view treats a missing `resolution` as unknown.
+- **Per-sync backfill is batched** (two `IN` queries over the unlinked set) so it stays inside the 60 s
+  route budget alongside the #97 import chunks.
+- **Quote intake's `toLocationInput` dropped `locationName`** — fixed in the Inbox copy; the intake's own
+  copy still does (follow-up).
+
+## D142 — Inbox two-way Peak/* labels, Wave B (2026-09-21)
+
+PUNCHLIST #96 Wave B, spec `docs/superpowers/specs/2026-09-21-inbox-customer-linking-and-label-sync-design.md`
+(commits 5c0009c…03dc77b on `feat/inbox-linking`). Gmail labels are now a two-way command surface,
+built on Wave A's linking (D140).
+
+- **Namespace.** The app owns everything under `Peak/`; nothing outside it is read or written.
+  `Peak/Customers/<name>`, `Peak/Status/{Needs reply|Waiting|Done}`, `Peak/Assign/<First>`,
+  `Peak/New lead` (command only), `Peak/{Projects|Leads|Quotes}/<id>` (work links). A customer whose
+  name contains `/` is written and matched with `/`→`-`; the interpreter matches back through the
+  **same sanitiser** (sanitised-name comparison, never raw equality).
+- **Peak → Gmail** is derived, not stamped: the "current" label set is the union of `Peak/*` names
+  across every message that carries `gmailLabelIds` (never a single message), so a Peak-side reply
+  can't blank the set and leave a stale `Peak/Status/*`. Labels are created lazily and sequentially
+  per mailbox (one cache load, one refresh after all creates; a 409 → refresh + re-lookup), and one
+  `messages.modify` per thread applies the diff. Every store mutation of customer/status/assign/link —
+  and `linkThread` — funnels through a **bounded serial queue** (`queueLabelSync`) that coalesces
+  repeat calls per thread and dequeues at the start of a turn so a mid-flight change re-queues one
+  trailing sync. Gmail fetches carry a 20 s timeout so one hung socket can't stall the chain.
+  Label writes queued from server actions are best-effort on serverless (no `waitUntil`); a
+  dropped write self-heals on the thread's next mutation, and a blanket cron reconcile of label
+  drift on dormant linked threads is a logged follow-up (#98).
+- **Gmail → Peak.** The incremental history sync now returns `labelAdded`/`labelRemoved` events;
+  the interpreter **collapses them per thread** (Gmail emits one record per message; added wins over
+  removed) so labelling a whole conversation is one command, then applies it through the same store
+  functions the UI uses. Only additions are commands, except a `Peak/Customers/<name>` **removal**
+  matching the current customer, which unlinks. `Peak/New lead` creates exactly one lead (guarded by
+  the thread's existing `lead` work-link, independent of the label swap's success) and swaps the label
+  to `Peak/Leads/<id>` so it can't fire twice. Unknown/ambiguous customer or assignee → log and skip,
+  never guess (assignee requires exactly one active-user first-name match).
+- **Echo suppression.** An interpreter-applied change stamps `peakLabelsAppliedAt`; the writer's 2-min
+  window then treats the label Gmail echoes back as already-in-sync and skips it. Commands are
+  idempotent to a fixed point, so the window boundary at worst causes a redundant no-op, never a loop.
+- **Conflict rule:** last write wins by timestamp; same-second collisions resolve in Gmail's favour.
+- **Cadence:** the interpreter runs inside the existing sync (open-tab tick ~2 min, cron every 5 min
+  once `CRON_SECRET` is set). Gmail push (Pub/Sub) remains a later phase.
+
+## D143. A user-defined quote category is a label on a system quote, not a new quoteType (2026-09-21)
 
 Punch #110 asked for "a service category by default and then a user defined
 category" on the intake. The six service types stay the default categories;
@@ -2723,7 +2789,7 @@ The field is editable from the Estimator's "Prepared for" bar and persists
 through the same meta path as the customer/venue/contact picks.
 
 
-## D142. `/venues` adopts the catalog page's own cap-at-200 + typeahead pattern (2026-09-21)
+## D144. `/venues` adopts the catalog page's own cap-at-200 + typeahead pattern (2026-09-21)
 
 Punch #92 found `/venues` rendering every venue and every company with no
 limit — 8.5 s / 10 MiB at 1,700 companies / 3,400 sites — and left three UX
@@ -2753,7 +2819,7 @@ committed to this file from the 2026-08-11 wip snapshot (`1391cdd`) but was
 never part of any reviewed change — it predates this decision and duplicated
 exactly the surface #92 asks Jeff to choose between.
 
-## D143. Punch #16 — quote-won and project-complete notify as a Home Queue task, not email (2026-09-21)
+## D145. Punch #16 — quote-won and project-complete notify as a Home Queue task, not email (2026-09-21)
 
 Punch #16 asked for the company to be notified when a project is sold and
 when it's completed. Jeff's own alternative to automated email — "it becomes
@@ -2823,7 +2889,7 @@ of a dead end.
 PUNCHLIST.md #16 is updated to DONE; no email, no new stores, nothing under
 `src/lib/gmail/` or `src/lib/stores/comms.ts` touched.
 
-## D144. Calendar "based out of" + auto travel-time block on scheduled meetings (2026-09-21)
+## D146. Calendar "based out of" + auto travel-time block on scheduled meetings (2026-09-21)
 
 Jeff: "In Calendar settings there should be an option for where you are
 based out of ... when scheduling meetings with physical address it auto
@@ -2874,7 +2940,7 @@ adds travel time to the calendar as an event that you can remove."
 
 No schema/migration change — `users.officeId` already existed.
 
-## D145. Grid Task 1 — generated base sheet (2026-09-21)
+## D147. Grid Task 1 — generated base sheet (2026-09-21)
 
 Punch #38 (Task 1 of 6, per
 `docs/superpowers/plans/2026-09-21-grid-generated-base-sheet-plan.md`):
@@ -2970,7 +3036,7 @@ switch between. No stale "replace the plan" copy was found anywhere in the
 Grid editor to correct — there wasn't one. No files besides `editor.tsx`
 touched; no schema change.
 
-## D146. Google Tasks two-way sync for the Home Queue (2026-09-21)
+## D148. Google Tasks two-way sync for the Home Queue (2026-09-21)
 
 Jeff: "This needs to be implemented with google tasks... work that way [like
 the Apple Reminders queue sync]." The Reminders side (D93, punch #115) only
@@ -3043,11 +3109,11 @@ Home Queue mirror can run server-side for any team member who opts in.
 `src/app/api/gmail/sync/route.ts`, `src/lib/stores/assignments.ts`,
 `src/app/(app)/settings/page.tsx`, `src/app/(app)/settings/settings-client.tsx`.
 
-## D147. Grid Task 2 — "generate starting layout from dims" seeds placeholder devices, not guessed SKUs (2026-09-21)
+## D149. Grid Task 2 — "generate starting layout from dims" seeds placeholder devices, not guessed SKUs (2026-09-21)
 
 Punch #38 (Task 2 of 6, per
 `docs/superpowers/plans/2026-09-21-grid-generated-base-sheet-plan.md`),
-built on Task 1's generated base sheet (D145). New `seedStartingLayoutAction`
+built on Task 1's generated base sheet (D147). New `seedStartingLayoutAction`
 translates `compute(a)`'s real fixture/curtain quantities — the same numbers
 the Quick Design BOM already prices — into real, editable `GridPlacement`s
 on the base sheet, gated on `project.intake.measurementBased` and confirmed
@@ -3127,8 +3193,8 @@ before writing (editor.tsx's "Generate starting layout" trigger).
   ceiling, bounded in practice only by `compute()`'s own realistic output.
 - **flat/blackbox/gym/arena get a fallback stage rect, not real geometry** —
   literally the same `{x:0.2,y:0.12,w:0.6,h:0.28}` fraction
-  `starterSpaces()` (D145) already uses for those kinds' "Stage" Space, for
-  the identical reason D145 gave: those `buildPlan*` functions compute their
+  `starterSpaces()` (D147) already uses for those kinds' "Stage" Space, for
+  the identical reason D147 gave: those `buildPlan*` functions compute their
   room/platform rect as private locals with no exported equivalent to
   `prosGeom`/`churchGeom`, and reverse-engineering each one's private
   margins for a second feature is real geometry work this task didn't scope
@@ -3169,7 +3235,7 @@ grid-projects.ts` (`GridPlacement.seededFrom`, `addPlacements`),
 aware marker/detail-panel labels), `src/app/(app)/design/grid/[id]/page.tsx`
 (`measurementBased` passed to the editor).
 
-## D148. Connect additional Google accounts to subscribe to their calendars — Calendar tab only (2026-09-21)
+## D150. Connect additional Google accounts to subscribe to their calendars — Calendar tab only (2026-09-21)
 
 Punch #117 (new; closes the "multiple calendars" + "slide-out filter rail"
 parts of #108 — the "shared team calendar" part of #108 stays open, see
@@ -3197,7 +3263,7 @@ account, ...) purely to view their calendars, with no mail semantics.
 - **Read-only scope (`calendar.readonly`), never `calendar.events`.** This
   feature subscribes/views; it never writes an event into someone else's
   externally-connected account. `addCalendarEventAction`'s existing
-  travel-time-block feature (D144) is untouched and keeps writing only to
+  travel-time-block feature (D146) is untouched and keeps writing only to
   the signed-in user's OWN primary mailbox calendar via the existing
   `CALENDAR_SCOPE`/`gmail_connections` path.
 - **OAuth mechanics reused, not reimplemented — but folded into the
@@ -3273,7 +3339,7 @@ account, ...) purely to view their calendars, with no mail semantics.
   scope addition (Gmail/Calendar-events/Tasks):** the OAuth consent
   screen's scope list needs `.../auth/calendar.readonly` added before this
   works in production, the same way `calendar.events` (D77) and
-  `tasks` (D146) each needed adding. No NEW redirect URI is needed (see
+  `tasks` (D148) each needed adding. No NEW redirect URI is needed (see
   above) — that part is simpler than the Gmail/Tasks scope additions were.
   For a non-Workspace ("External" user type) OAuth consent screen still in
   "Testing" mode, `calendar.readonly` is a non-sensitive/recommended scope
@@ -3300,7 +3366,7 @@ client.tsx` (external item rendering, "Calendars" button),
 `src/app/(app)/calendar/calendar-filter-rail.tsx` (new),
 `src/app/(app)/calendar/page.tsx` (fetches initial connections).
 
-## D149. Reusable task templates for projects, quotes, and designs — assignable by person, role, or "everyone" (#118, 2026-09-21)
+## D151. Reusable task templates for projects, quotes, and designs — assignable by person, role, or "everyone" (#118, 2026-09-21)
 
 Jeff (verbatim): "I want to be able to add template tasks to projects, quotes, and designs that
 can be assigned based on groups, people, or teams." Distinct from tasks.ts's existing
@@ -3339,7 +3405,7 @@ checklist where every item is unassigned. This is a NEW, admin-editable, cross-r
   different sets, or the same set to two different records, never collides. This makes re-apply
   additive: a newly-hired Estimator added to a role target after the first apply gets their task
   on the next apply, and everyone else's rows are untouched (same idiom as the Grid's seeded-layout
-  re-run, D147, and the per-stage project template already in production).
+  re-run, D149, and the per-stage project template already in production).
 - **Quote task-linkage already existed** — punch #17's remainder shipped `quoteId` on `TaskRecord`
   plus a working Tasks card in the estimator (`estimator-client.tsx`, `estimator/actions.ts`)
   before this task started; the punchlist's audit note calling out "quotes have zero task UI" is

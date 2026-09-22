@@ -74,6 +74,7 @@ const ROUTES = [
   "/reviews",
   "/settings",
   "/inbox",
+  "/inbox?view=unmatched",
   "/queue",
   "/templates",
   "/consulting",
