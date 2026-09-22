@@ -650,6 +650,12 @@ export function buildPlan(s: AState, lineSets: number, electrics: number, accent
 /* --------------------------------- render --------------------------------- */
 
 const MONO = "var(--font-mono), IBM Plex Mono, monospace";
+/** `renderPlanSvgMarkup`'s own font stack (Grid base sheet, Task 1, #38) —
+ *  `var(--font-mono)` above resolves against the APP's own document, which
+ *  an <img src="data:image/svg+xml…"> never joins (a data-URL image paints
+ *  in its own isolated context with no access to the host page's CSS custom
+ *  properties), so the static markup falls straight back to the named font. */
+const STATIC_MONO = "IBM Plex Mono, monospace";
 
 export function PlanSvg({
   plan,
@@ -731,6 +737,65 @@ export function PlanSvg({
         ))}
     </svg>
   );
+}
+
+/**
+ * Static string-builder twin of `<PlanSvg>` (Task 1, #38 — generated base
+ * sheet). A Grid base sheet is stored as a plain `data:image/svg+xml…`
+ * `GridSheet.dataUrl` and painted through an `<img>` tag (editor.tsx), never
+ * mounted as React — so it needs raw markup, not a component, and NOT
+ * `react-dom/server` either: this file is imported from `grid-projects.ts`,
+ * a doc-store module with no request/render context to renderToString into,
+ * called at intake-save time from a plain server action. A small manual
+ * serializer over the same five primitive arrays `<PlanSvg>` already walks
+ * is the entire cost of avoiding that dependency.
+ *
+ * Deliberately excludes `handles` — Quick Design's own interactive wall/door
+ * drag affordances. A generated Grid base sheet is a static background
+ * image, like an uploaded plan; nothing on it drags.
+ *
+ * `accent` is accepted only to keep this a drop-in twin of `buildPlan`'s own
+ * signature — every primitive already carries its resolved color from
+ * `buildPlan`, the same way `buildPlanProscenium`'s own `_accent` parameter
+ * goes unused once its symbols are drawn in fixed system colors.
+ */
+export function renderPlanSvgMarkup(plan: PlanData, accent: string): string {
+  void accent;
+  const p = plan;
+  const esc = (s: string) =>
+    String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const attr = (name: string, value: string | number | undefined | null) =>
+    value === undefined || value === null || value === "" ? "" : ` ${name}="${esc(String(value))}"`;
+
+  const rects = (p.rects || [])
+    .map(
+      (r) =>
+        `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${esc(r.fill)}" stroke="${esc(r.stroke)}" stroke-width="${r.sw}"${attr("rx", r.rx)}${attr("stroke-dasharray", r.dash)} />`
+    )
+    .join("");
+  const paths = (p.paths || [])
+    .map(
+      (q) =>
+        `<path d="${esc(q.d)}" fill="${esc(q.fill)}"${attr("stroke", q.stroke)}${attr("stroke-width", q.sw)}${attr("stroke-dasharray", q.dash)} />`
+    )
+    .join("");
+  const lines = (p.lines || [])
+    .map(
+      (l) =>
+        `<line x1="${l.x1}" y1="${l.y1}" x2="${l.x2}" y2="${l.y2}" stroke="${esc(l.stroke)}" stroke-width="${l.sw}"${attr("stroke-dasharray", l.dash)} stroke-linecap="round" />`
+    )
+    .join("");
+  const circles = (p.circles || [])
+    .map((c) => `<circle cx="${c.cx}" cy="${c.cy}" r="${c.r}" fill="${esc(c.fill)}" />`)
+    .join("");
+  const texts = (p.texts || [])
+    .map(
+      (t) =>
+        `<text x="${t.x}" y="${t.y}" text-anchor="${esc(t.anchor)}"${attr("transform", t.transform)} font-size="${t.size}" font-weight="${t.weight || 400}" fill="${esc(t.fill)}" font-family="${esc(STATIC_MONO)}">${esc(t.t)}</text>`
+    )
+    .join("");
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${p.W}" height="${p.H}" viewBox="0 0 ${p.W} ${p.H}" preserveAspectRatio="xMidYMid meet">${rects}${paths}${lines}${circles}${texts}</svg>`;
 }
 
 /* --------------------- house drag math (auto plan) --------------------- */

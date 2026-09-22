@@ -6,9 +6,10 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
-import { clamp01, type Calibration, type Point } from "@/lib/annotations";
+import { calibrationScale, clamp01, type Calibration, type Point } from "@/lib/annotations";
 import type { GridCurtain } from "@/lib/design/grid-bom";
-import type { AState, QuickScopeInputs } from "@/app/(app)/design/quick/engine";
+import { compute, VENUES, type AState, type QuickScopeInputs, type VenueKind } from "@/app/(app)/design/quick/engine";
+import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
 
 /**
  * The Grid (D108) — system-design projects: plan sheets, painted catalog
@@ -226,27 +227,176 @@ export async function createProject(input: {
     createdAt: t,
     updatedAt: t,
   }));
-  // A design should open as a usable drawing surface even before the user has
-  // a PDF. The blank sheet remains a normal independent sheet; a later upload
-  // is appended and never replaces placements made here.
+  // Sheets/Spaces are deliberately NOT pre-seeded here (Task 1, #38). Every
+  // new project opens straight into GridIntake (intake.complete starts
+  // false) before anything is ever painted, so generating a starting sheet
+  // here — before VenueDims exist — is exactly what made the old default
+  // dims-blind. The first intake save decides what to generate instead: a
+  // dims-derived plan via generateBaseSheet() when "Generate from
+  // measurements as I work" is checked, or the blank fallback via
+  // seedBlankSheet() when it isn't (saveGridIntakeAction).
+  return project;
+}
+
+/**
+ * The pre-Task-1 default: a blank white rectangle with no venue geometry,
+ * plus three arbitrary fixed-fraction starter Spaces. Used now only for the
+ * "I have my own plan, skip measurements" intake path (measurementBased:
+ * false) — there's no VenueDims yet to render a real plan from, and a real
+ * upload is expected to follow. Called once, from saveGridIntakeAction, the
+ * first time intake completes with that box unchecked.
+ */
+export async function seedBlankSheet(
+  projectId: string,
+  projectName: string,
+  by: string
+): Promise<GridSheet | null> {
   const blank = encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="white"/><path d="M40 40H1160V760H40Z" fill="none" stroke="#e5e7eb" stroke-width="2"/><text x="60" y="84" font-family="Arial,sans-serif" font-size="22" fill="#9ca3af">${project.name.replace(/[<>&]/g, "")}</text><text x="60" y="112" font-family="Arial,sans-serif" font-size="14" fill="#c0c4ca">Blank design sheet · upload a plan any time</text></svg>`
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="white"/><path d="M40 40H1160V760H40Z" fill="none" stroke="#e5e7eb" stroke-width="2"/><text x="60" y="84" font-family="Arial,sans-serif" font-size="22" fill="#9ca3af">${projectName.replace(/[<>&]/g, "")}</text><text x="60" y="112" font-family="Arial,sans-serif" font-size="14" fill="#c0c4ca">Blank design sheet · upload a plan any time</text></svg>`
   );
-  const sheet = await addSheet(project.id, {
+  const sheet = await addSheet(projectId, {
     name: "Blank design sheet",
     mime: "image/svg+xml",
     dataUrl: `data:image/svg+xml;charset=utf-8,${blank}`,
-    by: input.by,
+    by,
   });
   if (sheet) {
-    // Give a new blank design useful spatial vocabulary immediately. These
-    // are editable starter outlines, including an audience-view area for
+    // Give a blank design useful spatial vocabulary immediately. These are
+    // editable starter outlines, including an audience-view area for
     // sightline and coverage planning; uploaded plans can be redrawn over.
-    await addSpace(project.id, { sheetId: sheet.id, page: 1, name: "Audience view", points: [{ x: 0.08, y: 0.58 }, { x: 0.92, y: 0.58 }, { x: 0.92, y: 0.9 }, { x: 0.08, y: 0.9 }], by: input.by });
-    await addSpace(project.id, { sheetId: sheet.id, page: 1, name: "Stage", points: [{ x: 0.2, y: 0.12 }, { x: 0.8, y: 0.12 }, { x: 0.8, y: 0.4 }, { x: 0.2, y: 0.4 }], by: input.by });
-    await addSpace(project.id, { sheetId: sheet.id, page: 1, name: "FOH / control", points: [{ x: 0.38, y: 0.44 }, { x: 0.62, y: 0.44 }, { x: 0.62, y: 0.53 }, { x: 0.38, y: 0.53 }], by: input.by });
+    await addSpace(projectId, { sheetId: sheet.id, page: 1, name: "Audience view", points: [{ x: 0.08, y: 0.58 }, { x: 0.92, y: 0.58 }, { x: 0.92, y: 0.9 }, { x: 0.08, y: 0.9 }], by });
+    await addSpace(projectId, { sheetId: sheet.id, page: 1, name: "Stage", points: [{ x: 0.2, y: 0.12 }, { x: 0.8, y: 0.12 }, { x: 0.8, y: 0.4 }, { x: 0.2, y: 0.4 }], by });
+    await addSpace(projectId, { sheetId: sheet.id, page: 1, name: "FOH / control", points: [{ x: 0.38, y: 0.44 }, { x: 0.62, y: 0.44 }, { x: 0.62, y: 0.53 }, { x: 0.38, y: 0.53 }], by });
   }
-  return (await getProject(project.id)) || project;
+  return sheet;
+}
+
+/**
+ * Starter Spaces for a generated base sheet (Task 1, #38 — D145). Proscenium
+ * and church venues get Spaces drawn from the SAME geometry the plan itself
+ * used (`prosGeom`/`churchGeom`, already exported for exactly this kind of
+ * reuse), so "Stage"/"Audience view"/"FOH · control" land roughly where the
+ * real stage, house and booth are instead of arbitrary fixed fractions.
+ *
+ * The other buildable kinds (flat, blackbox, gym) compute their room/booth
+ * geometry as private local variables inside their own buildPlan* function —
+ * there's no exported equivalent of prosGeom/churchGeom for them, and
+ * reverse-engineering each one's private margins here to get one would be
+ * more than the "small addition" this task calls for. They keep the old
+ * fixed-fraction Spaces; follow-up noted in DECISIONS.md D145.
+ */
+function starterSpaces(
+  a: AState,
+  kind: VenueKind,
+  sheetId: string
+): Array<{ sheetId: string; page: number; name: string; points: Point[] }> {
+  if (kind === "proscenium") {
+    const G = prosGeom(a);
+    const at = (x: number, y: number): Point => ({ x: clamp01(x / G.W), y: clamp01(y / G.H) });
+    return [
+      {
+        sheetId, page: 1, name: "Stage",
+        points: [at(G.stage.x, G.stage.y), at(G.stage.x + G.stage.w, G.stage.y), at(G.stage.x + G.stage.w, G.stage.y + G.stage.h), at(G.stage.x, G.stage.y + G.stage.h)],
+      },
+      {
+        sheetId, page: 1, name: "Audience view",
+        points: [at(G.xAudL, G.yHouseFront), at(G.xAudR, G.yHouseFront), at(G.xAudR, G.yBackWall), at(G.xAudL, G.yBackWall)],
+      },
+      {
+        sheetId, page: 1, name: "FOH / control",
+        points: [at(G.cx - G.boothW / 2, G.yBackWall), at(G.cx + G.boothW / 2, G.yBackWall), at(G.cx + G.boothW / 2, G.yBoothBottom), at(G.cx - G.boothW / 2, G.yBoothBottom)],
+      },
+    ];
+  }
+  if (kind === "church") {
+    const G = churchGeom(a);
+    // churchGeom computes its booth bottom edge as a local (y1 + boothH) but
+    // doesn't return it — recomputed the same way here rather than changing
+    // that function's return shape for a caller outside plan-svg.tsx.
+    const boothBottom = G.y1 + G.boothH;
+    const at = (x: number, y: number): Point => ({ x: clamp01(x / G.W), y: clamp01(y / G.H) });
+    return [
+      {
+        sheetId, page: 1, name: "Stage",
+        points: [at(G.stage.x, G.stage.y), at(G.stage.x + G.stage.w, G.stage.y), at(G.stage.x + G.stage.w, G.stage.y + G.stage.h), at(G.stage.x, G.stage.y + G.stage.h)],
+      },
+      {
+        sheetId, page: 1, name: "Audience view",
+        points: [at(G.x0, G.pBot), at(G.x1, G.pBot), at(G.x1, G.seatBot), at(G.x0, G.seatBot)],
+      },
+      {
+        sheetId, page: 1, name: "FOH / control",
+        points: [at(G.cx - G.boothW / 2, G.y1), at(G.cx + G.boothW / 2, G.y1), at(G.cx + G.boothW / 2, boothBottom), at(G.cx - G.boothW / 2, boothBottom)],
+      },
+    ];
+  }
+  return [
+    { sheetId, page: 1, name: "Audience view", points: [{ x: 0.08, y: 0.58 }, { x: 0.92, y: 0.58 }, { x: 0.92, y: 0.9 }, { x: 0.08, y: 0.9 }] },
+    { sheetId, page: 1, name: "Stage", points: [{ x: 0.2, y: 0.12 }, { x: 0.8, y: 0.12 }, { x: 0.8, y: 0.4 }, { x: 0.2, y: 0.4 }] },
+    { sheetId, page: 1, name: "FOH / control", points: [{ x: 0.38, y: 0.44 }, { x: 0.62, y: 0.44 }, { x: 0.62, y: 0.53 }, { x: 0.38, y: 0.53 }] },
+  ];
+}
+
+/**
+ * Render a Grid base sheet directly from `VenueDims`/`AState` (Task 1, #38)
+ * — the estimator's own plan-view geometry (`buildPlan`), correctly scaled,
+ * with zero calibration step. Called once, from saveGridIntakeAction, the
+ * first time intake completes with "Generate from measurements as I work"
+ * checked.
+ */
+export async function generateBaseSheet(
+  projectId: string,
+  a: AState,
+  accent: string,
+  by: string
+): Promise<GridSheet | null> {
+  const { lineSets, electrics } = compute(a);
+  const plan = buildPlan(a, lineSets, electrics, accent);
+  const markup = renderPlanSvgMarkup(plan, accent);
+  const sheet = await addSheet(projectId, {
+    name: "Generated base plan",
+    mime: "image/svg+xml",
+    dataUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`,
+    by,
+  });
+  if (!sheet) return null;
+
+  // Auto-calibrate from the plan's own known geometry so nothing downstream
+  // ever prompts for a calibration step on this sheet (Task 1 acceptance).
+  // Every buildPlan* function's FIRST rect is the outer room/house floor —
+  // its real-world width is the venue's full width in feet (plus wings, for
+  // a proscenium house, whose house rect is wider than just the proscenium
+  // opening) — a reference that holds for every venue kind without needing
+  // each builder's private margin constants (see starterSpaces above for why
+  // those aren't all exported).
+  const venue = VENUES.find((v) => v.key === a.venue) || VENUES[0];
+  const kind = venue.kind || "proscenium";
+  const refWidthFt = kind === "proscenium" ? a.width + 2 * (a.wing || 0) : a.width;
+  const room = plan.rects[0];
+  const scale = room
+    ? calibrationScale(
+        { x: room.x / plan.W, y: room.y / plan.H },
+        { x: (room.x + room.w) / plan.W, y: room.y / plan.H },
+        plan.H / plan.W,
+        refWidthFt
+      )
+    : null;
+  if (scale) {
+    await setSheetCalibration(projectId, {
+      docId: sheet.id,
+      page: 1,
+      scale,
+      unit: "ft",
+      refLength: refWidthFt,
+      by,
+      at: Date.now(),
+    });
+  }
+
+  for (const sp of starterSpaces(a, kind, sheet.id)) {
+    await addSpace(projectId, { ...sp, by });
+  }
+  return sheet;
 }
 
 export async function saveGridIntake(
