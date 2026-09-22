@@ -11,6 +11,7 @@ export const TABS = [
   "phases",
   "milestones",
   "meetings",
+  "activity",
   "oversight",
   "documents",
 ] as const;

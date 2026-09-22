@@ -9,6 +9,8 @@ import type {
   EngagementMilestone,
   EngagementPhase,
 } from "@/lib/stores/engagements";
+import type { NoteRecord } from "@/lib/stores/notes";
+import type { TaskRecord } from "@/lib/stores/tasks";
 import type { ConsultingData, VisitLite } from "./data";
 import { isOpenEngagement } from "@/lib/consulting-review";
 import {
@@ -47,6 +49,7 @@ import { approvalIsStale } from "@/lib/consulting-review";
 import { Card, EmptyState, KpiTile, Mono, PageHeader, Pill, StatusPill } from "@/components/ui";
 import { money } from "@/lib/format";
 import { NewEngagementModal } from "./new-engagement-modal";
+import { ActivityTab, type ActivityPerson } from "./activity-tab";
 
 /**
  * Consulting module view (D90) — list + detail-with-tabs, the Projects-module
@@ -61,6 +64,7 @@ const TAB_LABEL: Record<TabKey, string> = {
   phases: "Phases & Reviews",
   milestones: "Milestones & Billing",
   meetings: "Meetings & Decisions",
+  activity: "Activity",
   oversight: "Oversight",
   documents: "Documents",
 };
@@ -167,6 +171,9 @@ export function ConsultingView({
   sel,
   tab,
   oversightExtra,
+  notes,
+  tasks,
+  people,
 }: {
   data: ConsultingData;
   sel: ConsultingEngagement | null;
@@ -175,9 +182,25 @@ export function ConsultingView({
    *  <RecordingsCard parentKind="engagement">) — a server component can't be
    *  imported into this client view, so the [id] page passes it in. */
   oversightExtra?: ReactNode;
+  /** #145 D170 — the Activity tab's feed inputs. Per-engagement (not part
+   *  of ConsultingData), fetched by the [id] page detail-route-only; absent
+   *  on the list route, where the Activity tab never mounts. */
+  notes?: NoteRecord[];
+  tasks?: TaskRecord[];
+  people?: ActivityPerson[];
 }) {
   if (!sel) return <ConsultingList data={data} />;
-  return <EngagementDetail data={data} eng={sel} tab={tab} oversightExtra={oversightExtra} />;
+  return (
+    <EngagementDetail
+      data={data}
+      eng={sel}
+      tab={tab}
+      oversightExtra={oversightExtra}
+      notes={notes || []}
+      tasks={tasks || []}
+      people={people || []}
+    />
+  );
 }
 
 /* ============================ list ================================ */
@@ -320,11 +343,17 @@ function EngagementDetail({
   eng,
   tab,
   oversightExtra,
+  notes,
+  tasks,
+  people,
 }: {
   data: ConsultingData;
   eng: ConsultingEngagement;
   tab: TabKey;
   oversightExtra?: ReactNode;
+  notes: NoteRecord[];
+  tasks: TaskRecord[];
+  people: ActivityPerson[];
 }) {
   const router = useRouter();
   const q = eng.quoteId ? data.quotesById[eng.quoteId] : undefined;
@@ -333,6 +362,7 @@ function EngagementDetail({
     phases: eng.phases.length,
     milestones: eng.milestones.length,
     meetings: eng.meetings.length + eng.decisions.length,
+    activity: notes.length,
     oversight: eng.submittals.length + data.visits.filter((v) => v.engagementId === eng.id).length,
     documents: eng.documents.length,
   };
@@ -401,6 +431,7 @@ function EngagementDetail({
       {tab === "phases" && <PhasesTab data={data} eng={eng} />}
       {tab === "milestones" && <MilestonesTab eng={eng} quoteValue={q?.value || 0} />}
       {tab === "meetings" && <MeetingsTab eng={eng} />}
+      {tab === "activity" && <ActivityTab eng={eng} notes={notes} tasks={tasks} people={people} />}
       {tab === "oversight" && <OversightTab data={data} eng={eng} extra={oversightExtra} />}
       {tab === "documents" && <DocumentsTab eng={eng} />}
     </div>

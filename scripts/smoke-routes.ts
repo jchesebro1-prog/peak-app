@@ -181,6 +181,7 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   // so this route mints CE-1001 on its own — there is no ordering dependency
   // on the static /design/engagements entry above.
   { route: "/design/engagements/CE-1001" },
+  { route: "/design/engagements/CE-1001?tab=activity" },
   /* Service-line documents (#78's uncovered half). Each is the artifact a
    * customer actually receives, and each compiles a different report/letter
    * module that nothing else in this list pulls in. */

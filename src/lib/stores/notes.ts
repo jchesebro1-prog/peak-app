@@ -74,6 +74,13 @@ export async function notesForCustomer(customerId: string): Promise<NoteRecord[]
   return (await allNotes()).filter((n) => n.customerId === customerId);
 }
 
+/** #145 — the consulting Activity tab's read, mirroring notesForCustomer. */
+export async function notesForEngagement(engagementId: string): Promise<NoteRecord[]> {
+  return (await allNotes()).filter(
+    (n) => n.parentKind === "engagement" && n.parentId === engagementId
+  );
+}
+
 export async function addNoteRecord(
   input: {
     parentKind: NoteParentKind;

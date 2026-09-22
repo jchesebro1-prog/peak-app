@@ -166,6 +166,7 @@ import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, s
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { mergeActivity } from "@/lib/engagement-activity";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -5958,3 +5959,20 @@ ok(pw145[0].name === "Assessment" && typeof pw145[0].phaseId === "string" && pw1
  * (Task 3+ exercises it against real records; this only proves the store
  * compiles and exports it, with no DB touch here). */
 ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exported for the consulting side of the collection");
+
+/* ====== #145 D170: the Activity feed merges existing records ====== */
+const feed145 = mergeActivity({
+  notes: [
+    { id: "N-1", at: 300, text: "Call with Dana", by: "Jeff", attachments: [], taskIds: ["T-9"], system: false },
+    { id: "N-2", at: 500, text: "Milestone moved", by: "Jeff", attachments: [], taskIds: [], system: true },
+  ],
+  meetings: [{ id: "mt-1", at: 400, title: "Design review", attendees: "Dana, Jeff", minutes: "..." }],
+  decisions: [{ id: "dc-1", at: 200, by: "Jeff", decision: "Fire curtain in scope", context: "" }],
+  phaseAttachments: [{ id: "ed-1", addedAt: 100, name: "as-built.dwg", addedBy: "Chris", phaseName: "DD" }],
+});
+ok(feed145.length === 5, "#145 the feed merges notes, meetings, decisions and phase attachments with nothing new stored");
+ok(feed145[0].at === 500 && feed145[4].at === 100, "#145 the feed is newest first");
+ok(feed145[0].kind === "note" && feed145[0].system === true, "#145 a milestone-move note is marked system so the feed can style it apart");
+ok(feed145.find((e) => e.id === "N-1")?.taskIds.join(",") === "T-9", "#145 a note carries the tasks it spawned so a task's origin stays answerable");
+ok(feed145.filter((e) => e.kind === "meeting").length === 1, "#145 meetings appear without being copied into notes");
+ok(mergeActivity({ notes: [], meetings: [], decisions: [], phaseAttachments: [] }).length === 0, "#145 an empty engagement produces an empty feed, not a crash");
