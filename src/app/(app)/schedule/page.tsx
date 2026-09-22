@@ -17,6 +17,12 @@ import {
 } from "@/lib/stores/projects";
 import { loadServiceWork } from "@/lib/operations-work-server";
 import { WORK_TYPE_META, type WorkType } from "@/lib/operations-work";
+import { allEngagements, syncEngagementsFromQuotes } from "@/lib/stores/engagements";
+import { OPEN_ENGAGEMENT_STAGES } from "@/lib/consulting-stages";
+import { tasksForEngagement } from "@/lib/stores/tasks";
+import { groupByPerson, mergeBookingsIntoPersonRows, UNASSIGNED_LABEL } from "./people-lib";
+import { PortfolioGantt } from "./portfolio-gantt";
+import type { GanttBar, GanttRow } from "@/components/gantt/gantt-grid";
 
 export const metadata = { title: "Schedule — Quartzite-6" };
 
@@ -111,6 +117,22 @@ function packTracks(items: Array<{ s: number; e: number; k: string }>): {
   return { map, n: Math.max(1, ends.length) };
 }
 
+/** #145 (D172) — a sensible visible window for a GanttGrid instance built
+ *  from an arbitrary bar set: the full extent of the given bars, padded to
+ *  whole weeks (same `sow`/`DAY` local-day convention the Project timeline
+ *  model below already uses for tlStart/tlEnd), unioned with `nowTs` so an
+ *  all-past, all-future, or empty bar set still shows a window that
+ *  includes today rather than a degenerate or empty-looking range. */
+function ganttRange(bars: Array<{ startAt: number; dueAt: number }>, nowTs: number): { start: number; end: number } {
+  let lo = nowTs,
+    hi = nowTs;
+  bars.forEach((b) => {
+    lo = Math.min(lo, b.startAt);
+    hi = Math.max(hi, b.dueAt);
+  });
+  return { start: sow(lo - 3 * DAY), end: sow(hi + 10 * DAY) + 7 * DAY };
+}
+
 export default async function SchedulePage({
   searchParams,
 }: {
@@ -122,11 +144,33 @@ export default async function SchedulePage({
   const serviceWork = await loadServiceWork();
 
   /* ---- URL state ---- */
-  const view = one(sp.view) === "timeline" ? "timeline" : "crew";
+  const rawView = one(sp.view);
+  const view = rawView === "timeline" ? "timeline" : rawView === "people" ? "people" : "crew";
   const zoom = [8, 12, 16].includes(Number(one(sp.zoom))) ? Number(one(sp.zoom)) : 8;
   const weekOffset = parseInt(one(sp.week) || "0", 10) || 0;
-  const showMap = one(sp.map) !== "0";
+  // #145 — the By person view has no map/venue geometry of its own; force it
+  // off rather than let a stale `?map=` param render an empty sidebar next
+  // to a view it was never built for.
+  const showMap = one(sp.map) !== "0" && view !== "people";
   const now = Date.now();
+
+  /* ================= CONSULTING (#145 D172) ================= */
+  // Loaded for both new views: "timeline" groups these into a Consulting
+  // section above Installs; "people" needs every open engagement's tasks to
+  // build the By person lanes. Skipped for "crew" — that view never touches
+  // consulting data, so there's no reason to pay for it on the common case.
+  // syncEngagementsFromQuotes() mirrors syncProjectsFromQuotes() above (same
+  // idempotent won-quote-spawns-a-record idiom, D90) — without it, a won
+  // consulting quote with no engagement record yet (nothing else on this
+  // request path has visited the engagements hub) would read as "no
+  // consulting engagements" here even though one is really pending.
+  if (view === "timeline" || view === "people") await syncEngagementsFromQuotes();
+  const engagements = view === "timeline" || view === "people" ? await allEngagements() : [];
+  const openEngagements = engagements.filter((e) => OPEN_ENGAGEMENT_STAGES.includes(e.status));
+  const consultingTasks =
+    view === "people"
+      ? (await Promise.all(openEngagements.map((e) => tasksForEngagement(e.id)))).flat()
+      : [];
 
   /* ---- project colors + bookings ---- */
   const byId = projects.slice().sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -165,22 +209,35 @@ export default async function SchedulePage({
       ? schedulable.length +
         " project" +
         (schedulable.length === 1 ? "" : "s") +
-        " · lead times → install windows"
-      : bookings.length +
-        " booking" +
-        (bookings.length === 1 ? "" : "s") +
-        " across " +
-        activeProjects.length +
-        " active project" +
-        (activeProjects.length === 1 ? "" : "s") +
-        (onSiteNow ? " · " + onSiteNow + " on site today" : "");
+        " · lead times → install windows" +
+        (openEngagements.length
+          ? " · " + openEngagements.length + " consulting engagement" + (openEngagements.length === 1 ? "" : "s")
+          : "")
+      : view === "people"
+        ? users.length +
+          " " +
+          (users.length === 1 ? "person" : "people") +
+          " · consulting + install work in one lane per person"
+        : bookings.length +
+          " booking" +
+          (bookings.length === 1 ? "" : "s") +
+          " across " +
+          activeProjects.length +
+          " active project" +
+          (activeProjects.length === 1 ? "" : "s") +
+          (onSiteNow ? " · " + onSiteNow + " on site today" : "");
 
   /* ---- service work (flame/inspection/repair) overlaid as single-day bars ----
      Synthesized as Booking-shaped entries so the crew board's roster building,
      track packing and row rendering (below) handle them for free. Appended
      after onSiteNow/standfirst are computed so those project-only stats are
-     unaffected. */
-  const UNASSIGNED_LANE = "Unassigned";
+     unaffected.
+     #145 review fix: this used to be its own locally-declared "Unassigned"
+     string, agreeing with people-lib.ts's UNASSIGNED_LABEL only by
+     coincidence of an identical literal — an independent edit to either one
+     would silently break the By person view's Unassigned-lane merge (see
+     mergeBookingsIntoPersonRows' own doc comment). Import the one real
+     sentinel instead of restating it. */
   serviceWork.forEach((w) => {
     bookings.push({
       projectId: w.id,
@@ -190,7 +247,7 @@ export default async function SchedulePage({
       completed: false,
       crewId: w.id,
       mobId: null,
-      person: w.assignee || UNASSIGNED_LANE,
+      person: w.assignee || UNASSIGNED_LABEL,
       role: WORK_TYPE_META[w.type].label,
       start: w.startMs,
       end: w.endMs, // inclusive single day — do not add a day
@@ -386,6 +443,89 @@ export default async function SchedulePage({
   };
   const tlTodayX = tlXOf(now);
 
+  /* ================= CONSULTING ROWS (#145 D172) =================
+     A GanttGrid "Consulting" section, rendered as its own stacked card
+     above the crew-board/timeline board area (never nested inside that
+     area's own bordered container — GanttGrid already brings its own
+     card chrome). One row per open engagement; a scheduled engagement
+     gets a single non-draggable bar spanning its startAt/endAt (the span
+     is edited on the engagement's own Schedule tab, not by dragging here
+     — same rule as install project bars); an unscheduled one still gets a
+     row, just with no bar — the same "empty lane" idiom the By person
+     view uses for a free person. */
+  const engColor: Record<string, string> = {};
+  openEngagements
+    .slice()
+    .sort((a, b) => (a.id < b.id ? -1 : 1))
+    .forEach((e, i) => {
+      engColor[e.id] = PALETTE[i % PALETTE.length];
+    });
+  const consultingRows: GanttRow[] = openEngagements
+    .slice()
+    .sort((a, b) => (a.startAt || Infinity) - (b.startAt || Infinity))
+    .map((e) => {
+      const scheduled = (e.startAt || 0) > 0 && (e.endAt || 0) > (e.startAt || 0);
+      const bar: GanttBar | null = scheduled
+        ? {
+            id: e.id,
+            label: e.name,
+            startAt: e.startAt as number,
+            dueAt: e.endAt as number,
+            tone: engColor[e.id] || "#5b4b8a",
+            draggable: false,
+            overrun: false,
+          }
+        : null;
+      // group: "" — the page-level "Consulting" heading above this grid
+      // already names the section; every row here shares one group, so
+      // GanttGrid's OWN internal group-header strip would just repeat that
+      // same label a second time immediately below it.
+      return { id: e.id, label: e.name, group: "", bars: bar ? [bar] : [] };
+    });
+  const consultingRange = ganttRange(
+    consultingRows.flatMap((r) => r.bars),
+    now
+  );
+
+  /* ================= PEOPLE ROWS (#145 D172) =================
+     The By person portfolio view: groupByPerson (people-lib.ts, pure, zero
+     DB) builds one lane per active user plus Unassigned from consulting
+     tasks alone; install/service work (this file's own `bookings`, already
+     built above from project crew + flame/repair/inspection jobs) is
+     merged in here as non-draggable bars, matched by person name — the
+     same matching `bookedNames`/roster-building above already relies on.
+     A booking whose person matches no user (a name-only crew booking, same
+     as the crew board's own roster fallback) gets its own extra lane. */
+  const sortedUsersByName = users
+    .slice()
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const personBaseRows =
+    view === "people"
+      ? groupByPerson(
+          consultingTasks.map((t) => ({
+            id: t.id,
+            title: t.title,
+            assigneeUserId: t.assigneeUserId,
+            assigneeName: t.assigneeName,
+            startAt: t.startAt,
+            dueAt: t.dueAt,
+            engagementId: t.engagementId,
+          })),
+          sortedUsersByName.map((u) => ({ id: u.id, name: u.name }))
+        )
+      : [];
+  // #145 review fix: the merge itself is now a pure, exported helper
+  // (people-lib.ts's mergeBookingsIntoPersonRows) — same reason
+  // groupByPerson was pulled out on its own, and the merge needed the same
+  // treatment (it was previously exercised only by a live browser session
+  // and an HTTP-200 smoke check, neither of which asserts anything about
+  // rows/bars/draggability).
+  const personRows: GanttRow[] = view === "people" ? mergeBookingsIntoPersonRows(personBaseRows, bookings) : [];
+  const peopleRange = ganttRange(
+    personRows.flatMap((r) => r.bars),
+    now
+  );
+
   /* ================= POPOVER MODEL ================= */
   const bookOpen = one(sp.book) === "1";
   const editKey = one(sp.edit); // "projectId~crewId"
@@ -498,24 +638,26 @@ export default async function SchedulePage({
             flexWrap: "wrap",
           }}
         >
-          <Link
-            href={boardParams({ map: showMap ? "0" : null })}
-            title="Toggle job-location map"
-            style={{
-              fontFamily: "var(--font-ui)",
-              fontSize: 12.5,
-              fontWeight: 600,
-              padding: "7px 13px",
-              borderRadius: 9,
-              textDecoration: "none",
-              border: `1px solid ${showMap ? "var(--accent)" : "#e7e9ee"}`,
-              background: showMap ? "var(--accent-soft)" : "#fff",
-              color: showMap ? "var(--accent)" : "#5b616e",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Map
-          </Link>
+          {view !== "people" && (
+            <Link
+              href={boardParams({ map: showMap ? "0" : null })}
+              title="Toggle job-location map"
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 12.5,
+                fontWeight: 600,
+                padding: "7px 13px",
+                borderRadius: 9,
+                textDecoration: "none",
+                border: `1px solid ${showMap ? "var(--accent)" : "#e7e9ee"}`,
+                background: showMap ? "var(--accent-soft)" : "#fff",
+                color: showMap ? "var(--accent)" : "#5b616e",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Map
+            </Link>
+          )}
 
           {/* view switcher */}
           <div style={{ display: "flex", background: "#eef0f3", borderRadius: 10, padding: 3 }}>
@@ -524,6 +666,11 @@ export default async function SchedulePage({
             </Link>
             <Link href={boardParams({ view: "timeline" })} style={segBtn(view === "timeline")}>
               Project timeline
+            </Link>
+            {/* #145 — the third view: every assignee's consulting + install
+                work in one lane, spanning both kinds of work at once. */}
+            <Link href={boardParams({ view: "people" })} style={segBtn(view === "people")}>
+              By person
             </Link>
           </div>
 
@@ -632,19 +779,72 @@ export default async function SchedulePage({
         </div>
       </div>
 
+      {/* ===== consulting (#145 D172) — its own stacked card, above the
+          crew-board/timeline board area, never nested inside that area's
+          own bordered container (GanttGrid already brings its own card
+          chrome). Only for the Project timeline view — "Consulting" above
+          the existing "Installs" group below. ===== */}
+      {view === "timeline" && (
+        <div style={{ marginBottom: 16 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: ".05em",
+              textTransform: "uppercase",
+              color: "#9aa0ab",
+              marginBottom: 8,
+            }}
+          >
+            Consulting
+          </div>
+          {consultingRows.length > 0 ? (
+            <PortfolioGantt rows={consultingRows} startAt={consultingRange.start} endAt={consultingRange.end} draggable={false} />
+          ) : (
+            <div
+              className="pk-card"
+              style={{ padding: "24px 20px", textAlign: "center", color: "#9aa0ab", fontSize: 13 }}
+            >
+              No consulting engagements yet.
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ===== board area + map ===== */}
       <div style={{ display: "flex", gap: 0, alignItems: "stretch", minHeight: 0 }}>
         <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            background: "#fff",
-            border: "1px solid #e7e9ee",
-            borderRadius: showMap ? "13px 0 0 13px" : 13,
-            overflow: "hidden",
-          }}
+          style={
+            view === "people"
+              ? { flex: 1, minWidth: 0 }
+              : {
+                  flex: 1,
+                  minWidth: 0,
+                  background: "#fff",
+                  border: "1px solid #e7e9ee",
+                  borderRadius: showMap ? "13px 0 0 13px" : 13,
+                  overflow: "hidden",
+                }
+          }
         >
-          {projects.length === 0 && (
+          {/* ---------- BY PERSON (#145 D172) ---------- */}
+          {view === "people" && (
+            personRows.length > 0 ? (
+              <PortfolioGantt rows={personRows} startAt={peopleRange.start} endAt={peopleRange.end} draggable />
+            ) : (
+              <div
+                className="pk-card"
+                style={{ padding: "60px 24px", textAlign: "center", color: "#9aa0ab" }}
+              >
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#5b616e" }}>No one to schedule yet</div>
+                <div style={{ fontSize: 13, lineHeight: 1.6, marginTop: 6 }}>
+                  Active team members show up here, each in their own lane, once there is a team.
+                </div>
+              </div>
+            )
+          )}
+
+          {projects.length === 0 && view !== "people" && (
             <div
               style={{
                 padding: "60px 24px",
@@ -1175,6 +1375,20 @@ export default async function SchedulePage({
           )}
 
           {/* ---------- PROJECT TIMELINE ---------- */}
+          {projects.length > 0 && view === "timeline" && (
+            <div
+              style={{
+                padding: "12px 14px 0",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: ".05em",
+                textTransform: "uppercase",
+                color: "#9aa0ab",
+              }}
+            >
+              Installs
+            </div>
+          )}
           {projects.length > 0 && view === "timeline" && tlProjects.length > 0 && (
             <div
               className="sch-scroll"

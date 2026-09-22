@@ -38,6 +38,7 @@ import {
   type ApplyTemplateSchedule, type TaskTemplateLine,
 } from "@/lib/stores/task-templates";
 import { activeUsers } from "@/lib/users";
+import { groupByPerson, mergeBookingsIntoPersonRows, UNASSIGNED_LABEL, type PersonBooking } from "@/app/(app)/schedule/people-lib";
 import { parseAssignTarget } from "@/app/(app)/import/registry";
 import { softDeleteDoc } from "@/db/doc-store";
 import {
@@ -7045,3 +7046,139 @@ const person145 = parseAssignTarget("person:Jeff Chesebro", users145);
 ok(person145.kind === "person" && person145.userId === "u1", "#145 'person:Name' resolves to a user id");
 ok(parseAssignTarget("person:Nobody At All", users145).kind === "team", "#145 an unresolvable person falls back to team rather than minting a task nobody owns");
 ok(parseAssignTarget("", users145).kind === "team", "#145 a blank Assign To defaults to team");
+
+/* ====== #145: the By person view (schedule/people-lib.ts, D172) ====== */
+{
+  const ppl145 = [{ id: "u1", name: "Jeff C." }, { id: "u2", name: "Chris C." }];
+  const tk145 = [
+    { id: "T-1", title: "SD set", assigneeUserId: "u1", assigneeName: "Jeff C.", startAt: OCT6, dueAt: OCT6 + 5 * DAY145, engagementId: "CE-1", handScheduled: false },
+    { id: "T-2", title: "QC", assigneeUserId: "u1", assigneeName: "Jeff C.", startAt: OCT6 + 2 * DAY145, dueAt: OCT6 + 6 * DAY145, engagementId: "CE-1", handScheduled: false },
+    { id: "T-3", title: "Rigging", assigneeUserId: null, assigneeName: "", startAt: OCT6, dueAt: OCT6 + DAY145, engagementId: "CE-1", handScheduled: false },
+  ];
+  const rows145 = groupByPerson(tk145, ppl145);
+  ok(rows145.length === 3, "#145 groupByPerson emits a lane per active person plus an Unassigned lane");
+  ok(rows145[0].bars.length === 2, "#145 a person's lane carries every task assigned to them across projects");
+  ok(rows145.find((r) => r.label === "Unassigned")?.bars.length === 1, "#145 unassigned work is visible rather than silently dropped");
+  ok(rows145.find((r) => r.label === "Chris C.")?.bars.length === 0, "#145 a person with no work still gets a lane — an empty lane is the answer to 'who is free'");
+  ok(rows145[0].bars.every((b) => b.draggable), "#145 consulting bars are draggable on the portfolio view");
+
+  // Review additions beyond the brief's own fixture — tone-by-engagement,
+  // the no-startAt/dueAt skip, and an empty user list still yielding the
+  // Unassigned lane (no rows === "grouping didn't run", not "no one to show").
+  const tk145b = [
+    { id: "T-4", title: "Other CE", assigneeUserId: "u1", assigneeName: "Jeff C.", startAt: OCT6, dueAt: OCT6 + DAY145, engagementId: "CE-2", handScheduled: false },
+    { id: "T-5", title: "No dates", assigneeUserId: "u1", assigneeName: "Jeff C.", startAt: null, dueAt: null, engagementId: "CE-1", handScheduled: false },
+  ];
+  const rows145b = groupByPerson([...tk145, ...tk145b], ppl145);
+  const jeffBars145b = rows145b[0].bars;
+  ok(jeffBars145b.length === 3, "#145 a task with no startAt/dueAt is skipped — it has no bar — while its dated siblings still show");
+  const ce1Tone = jeffBars145b.find((b) => b.id === "T-1")!.tone;
+  const ce2Tone = jeffBars145b.find((b) => b.id === "T-4")!.tone;
+  ok(ce1Tone !== ce2Tone, "#145 two different engagements get two different tones");
+  ok(
+    jeffBars145b.find((b) => b.id === "T-2")!.tone === ce1Tone,
+    "#145 two tasks on the SAME engagement (CE-1) get the SAME tone — one project reads as one colour"
+  );
+
+  const rowsNoUsers145 = groupByPerson(tk145, []);
+  ok(
+    rowsNoUsers145.length === 1 && rowsNoUsers145[0].label === "Unassigned" && rowsNoUsers145[0].bars.length === 3,
+    "#145 with no active users at all, every dated task still surfaces in the Unassigned lane rather than vanishing"
+  );
+
+  ok(
+    groupByPerson([], []).length === 1 && groupByPerson([], [])[0].label === "Unassigned" && groupByPerson([], [])[0].bars.length === 0,
+    "#145 an empty task list still yields the Unassigned lane, empty"
+  );
+}
+
+/* ====== #145 review fix: mergeBookingsIntoPersonRows (schedule/people-lib.ts, D172) ======
+ * The By person view's other half — page.tsx merges install/service
+ * bookings onto groupByPerson's rows, and until this fix that merge lived
+ * only in page.tsx, exercised by nothing but a smoke-test HTTP 200 and a
+ * one-off browser session. Pulled into its own pure function for exactly
+ * the same reason groupByPerson was: it's the code path where an
+ * independently-edited "Unassigned" sentinel would silently drop every
+ * unassigned booking on the floor (#145 review — Important 1). */
+{
+  const baseRows145 = groupByPerson(
+    [
+      {
+        id: "T-10", title: "Bid walk", assigneeUserId: "u1", assigneeName: "Jeff C.",
+        startAt: OCT6, dueAt: OCT6 + 3 * DAY145, engagementId: "CE-9",
+      },
+    ],
+    [{ id: "u1", name: "Jeff C." }, { id: "u2", name: "Chris C." }]
+  );
+
+  const booking145 = (over: Partial<PersonBooking>): PersonBooking => ({
+    crewId: "cw-1", projectName: "Harbor Rep", person: "Jeff C.",
+    start: OCT6, end: OCT6 + 2 * DAY145, color: "#123456",
+    ...over,
+  });
+
+  // 1. Someone carrying BOTH a consulting task and an install booking ends
+  //    up with both bars in the SAME lane.
+  const merged145a = mergeBookingsIntoPersonRows(baseRows145, [booking145({ crewId: "cw-1", person: "Jeff C." })]);
+  const jeffRow145a = merged145a.find((r) => r.label === "Jeff C.");
+  ok(
+    !!jeffRow145a && jeffRow145a.bars.length === 2 && jeffRow145a.bars.some((b) => b.id === "T-10") && jeffRow145a.bars.some((b) => b.id === "install:cw-1"),
+    "#145 a person carrying both a consulting task and an install booking gets both bars in one lane"
+  );
+  ok(
+    merged145a.length === baseRows145.length,
+    "#145 a booking for someone already in a row adds a bar, not a whole new lane"
+  );
+
+  // 2. An install booking for an UNASSIGNED person lands in the Unassigned
+  //    lane rather than being dropped — matched by the real UNASSIGNED_LABEL
+  //    constant, not a locally re-typed "Unassigned" string.
+  const merged145b = mergeBookingsIntoPersonRows(baseRows145, [booking145({ crewId: "cw-2", person: UNASSIGNED_LABEL })]);
+  const unassignedRow145b = merged145b.find((r) => r.label === UNASSIGNED_LABEL);
+  ok(
+    !!unassignedRow145b && unassignedRow145b.bars.length === 1 && unassignedRow145b.bars[0].id === "install:cw-2",
+    "#145 an install booking for an unassigned person lands in the Unassigned lane rather than vanishing"
+  );
+  ok(merged145b.length === baseRows145.length, "#145 an unassigned booking is folded into the existing Unassigned row, not a new one");
+
+  // 3. A booked name with NO matching row gets its own synthesized row —
+  //    never silently dropped.
+  const merged145c = mergeBookingsIntoPersonRows(baseRows145, [booking145({ crewId: "cw-3", person: "Rose Brand Sub" })]);
+  const extraRow145c = merged145c.find((r) => r.label === "Rose Brand Sub");
+  ok(
+    !!extraRow145c && extraRow145c.bars.length === 1 && extraRow145c.bars[0].id === "install:cw-3",
+    "#145 a booked name with no matching user gets its own synthesized row rather than vanishing"
+  );
+  ok(
+    merged145c.length === baseRows145.length + 1 && merged145c[merged145c.length - 1].label === UNASSIGNED_LABEL,
+    "#145 the synthesized row is appended before Unassigned, which stays last"
+  );
+
+  // 4. Every merged install/service bar is draggable: false — D172 — while
+  //    the consulting bars it sits beside are untouched (still draggable).
+  const merged145d = mergeBookingsIntoPersonRows(baseRows145, [booking145({ crewId: "cw-4", person: "Jeff C." })]);
+  const jeffRow145d = merged145d.find((r) => r.label === "Jeff C.")!;
+  ok(
+    jeffRow145d.bars.find((b) => b.id === "install:cw-4")?.draggable === false,
+    "#145 a merged install/service bar is draggable: false"
+  );
+  ok(
+    jeffRow145d.bars.find((b) => b.id === "T-10")?.draggable === true,
+    "#145 the consulting bar sitting beside it is untouched — still draggable"
+  );
+
+  // groupByPerson's own rows/bars are never mutated by the merge.
+  const beforeJeffBars = JSON.stringify(baseRows145.find((r) => r.label === "Jeff C.")?.bars);
+  mergeBookingsIntoPersonRows(baseRows145, [booking145({ crewId: "cw-5", person: "Jeff C." }), booking145({ crewId: "cw-6", person: UNASSIGNED_LABEL })]);
+  ok(
+    JSON.stringify(baseRows145.find((r) => r.label === "Jeff C.")?.bars) === beforeJeffBars,
+    "#145 mergeBookingsIntoPersonRows never mutates the rows groupByPerson returned"
+  );
+
+  // No bookings at all: the merge is a same-shape passthrough.
+  const merged145e = mergeBookingsIntoPersonRows(baseRows145, []);
+  ok(
+    merged145e.length === baseRows145.length && merged145e.every((r, i) => r.bars.length === baseRows145[i].bars.length),
+    "#145 with no bookings, the merge changes nothing"
+  );
+}

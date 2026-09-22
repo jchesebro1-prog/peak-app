@@ -82,6 +82,8 @@ const ROUTES = [
   "/leads",
   "/opportunities",
   "/schedule",
+  "/schedule?view=timeline", // #145 D172 — consulting rows grouped above installs
+  "/schedule?view=people", // #145 D172 — the By person portfolio view
   "/calendar",
   "/reports",
   "/reviews",
