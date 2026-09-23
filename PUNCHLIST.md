@@ -3037,8 +3037,16 @@ optional saved Lineset Builder link plus a live `/lineset` schedule that regener
 the linked design's inputs. The estimator↔Grid BOM seam and retiring the estimator's own
 drawing tabs remain open; the latter waits for parity and real-world review.
 
+**Task 5 partially shipped:** the existing extracted `buildGridQuote()` remains the
+authoritative Grid BOM pricing path for promotion, and the Designs read path now uses its
+live value for manual/Grid-linked designs instead of showing the creation-time zero budget.
+Quick Design records continue to use their saved equation result. The full editor-side
+"Grid BOM if present, otherwise parametric" seam still needs the remaining presentation
+and refinement work.
+
 **Status:** IN PROGRESS — Tasks 1–3 shipped; Task 4 partial (equipment/riser/lineset
-artifacts); Tasks 5–6 remain open pending the estimator seam and parity gate.
+artifacts); Task 5 partial (live manual-design budget); Task 6 remains gated on parity and
+real-world review.
 
 ---
 
