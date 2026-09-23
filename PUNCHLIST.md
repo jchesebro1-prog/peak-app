@@ -2353,7 +2353,9 @@ then broadened to wanting a dedicated Knowledge tab for it (item 27).
 - **D. Start small or all 7** — ship one category first (Ellipsoidals are the flagship) or all seven?
   Pricing columns included, or equivalence-only to start?
 
-**Status:** OPEN — logged 2026-07-21, no code touched. Home depends on item 27.
+**Status:** DONE 2026-09-23 audit — the fixture cross-reference is implemented under Knowledge
+at `/knowledge/fixtures`, with its checked-in seven-matrix dataset and internal-only presentation.
+Future storage or placement changes remain part of #56's longer-term Knowledge direction.
 
 ---
 
@@ -2838,7 +2840,8 @@ lead + pipeline flow), the Consulting module (D90). Converging with 20/34 on one
 links to people/companies with roles and flows into the pipeline. **Strong brainstorm + design-spec
 candidate.**
 
-**Status:** OPEN — logged 2026-07-21, no code touched. **Blocked on Jeff supplying the actual Peak
+**Status:** PARTIAL — the consulting lifecycle, scopes, assumptions, lead linkage, architect and
+quote links are shipped as documented below. **Blocked on Jeff supplying the actual Peak
 consulting letter** (needed as the format guide) and coupled to item 20 for the architect party.
 
 **CLOSED 2026-07-26 (plan 06, D123) — with two Jeff-homework residuals.** Shipped:
@@ -3829,7 +3832,8 @@ and mobile): the cheapest fix is both: make the mark a `<Link href="/">` *and* a
 **#43** (build-your-own widget system, supersedes #7) owns what the dashboard *contains*; this
 item is only about reaching it.
 
-**Status:** OPEN: small nav fix; coordinate with #45.
+**Status:** DONE 2026-09-23 audit — the Home mark/tab work is shipped by #55; the remaining
+responsive label-switch item is correctly tracked under #45(b).
 
 ---
 
