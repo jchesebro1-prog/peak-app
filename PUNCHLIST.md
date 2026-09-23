@@ -3125,10 +3125,8 @@ labels (trade packages, alternates — open-ended by design). **Naming/nav TABLE
 rebuild in flight). **NO data migration** (beta, sample data only). Sequencing: #39 lands
 first; this rides on top. Pricing math mostly does NOT move (budget + quote share `goods.ts`).
 
-**Status:** PARTIAL 2026-09-23 — delivery status now auto-advances an install project to
-Scheduled when all shipment lines are received, while manual stage controls remain available for
-undo/correction. Remaining scope-report/phone-signature/checklist work and the completion
-walkthrough task still remain.
+**Status:** OPEN — direction is confirmed, but the split/merge work remains sequenced behind #39
+catalog metadata and the broader naming/nav rebuild.
 
 ---
 
@@ -3157,10 +3155,9 @@ reply" view keeps waiting-first in both modes; CRM mode adds a Needs reply · Fl
 Unread chip row), **(2) conversation count badge + combined participants** on list rows,
 **(3) tighter density** (9px rows, 26px channel tile, chip row only when it has content) **+
 Delete/Restore in the hover quick actions**, **(4) arrow-key navigation** (clamped, guarded
-against inputs/selects/search mode/compose+log modals, scroll-into-view). Verified live:
+against inputs/selects/search mode/compose+log modals/dialogs/menus, scroll-into-view). Verified live:
 mode flip is optimistic + survives reload; date-desc default confirmed; CRM flip re-sorts
-waiting-first. Carried minors: site-visit modal's open state can't gate the key handler
-without a state-lift (edge case, logged); calls/flagged smart views now follow the mode's
+waiting-first. Carried minors: calls/flagged smart views now follow the mode's
 sort (was always waiting-first) — flag to Jeff if unwanted.
 
 ---
@@ -3208,7 +3205,10 @@ into an explicit signoff record). **(d)** Complete → auto-task to the project'
 role (falls back to quote owner), due ~7 days: walk the site with the end user. Depends on
 #17 tasks table (plan 01 LANDED 2026-07-25) + #16E roles model.
 
-**Status:** OPEN — wave 2.
+**Status:** PARTIAL 2026-09-23 — delivery status auto-advances an install project to Scheduled
+when all shipment lines are received, while manual stage controls remain available for
+undo/correction. Remaining scope-report/phone-signature/checklist work and the completion
+walkthrough task still remain.
 
 ---
 
@@ -3240,22 +3240,16 @@ Do not pick up standalone; the rebuild session owns the nav.
 **Area:** Inbox. **Logged:** 2026-07-25, bundling the accepted-as-follow-up findings from the
 #42 per-task and whole-branch reviews. None are defects blocking daily use; batch them.
 
-- CRM chips row renders above the list's title/search block (needs a small `thread-list.tsx`
-  change that was out of scope for the toggle task).
-- Site-visit modal's open state (`visitOpen`, local to `thread-reader.tsx`) can't gate the
-  arrow-key handler — needs a state lift; open Filter▾/Sort▾ menus have the same
-  unguarded-BUTTON gap.
-- Arrow-nav `lastIndexRef` only learns positions from key presses — sync it on click
-  selections / reset on listKey change (click-then-arrow under a vanishing filter can resume
-  from a stale anchor).
+- CRM chips row renders above the list's title/search block — done.
+- Site-visit, Filter, and Sort overlays expose semantic boundaries and yield to arrow
+  navigation — done.
+- Arrow-nav `lastIndexRef` syncs on click selections and resets on list-key change — done.
 - CRM mode's Sort▾ menu has no "Default (waiting first)" entry to return to the mode default
   after an explicit sort; mode flips also carry an explicit sort/filter param across —
   product call (Jeff) whether flips should reset refinements.
-- `crmMode` local state never reconciles with the server prop (second tab/device flips show
-  a stale toggle until remount); key-repeat isn't throttled (held arrow = many navigations +
-  mark-reads); scroll-into-view doesn't re-fire on list re-sorts.
-- Test/seed gaps: no automated coverage for the keydown clamp/guards; no chip-less (3-line)
-  seed thread; no 3+-author seed thread for the "+N" participants badge.
+- `crmMode` reconciliation and scroll-on-selection are done; key-repeat throttling and seed
+  coverage for chip-less and multi-author threads remain.
+- Test/seed gaps remain for held-arrow behavior and the "+N" participants badge.
 - **Jeff to confirm:** calls/flagged smart views now follow the mode's sort (date-desc in
   plain mode; previously always waiting-first) — intended?
 
