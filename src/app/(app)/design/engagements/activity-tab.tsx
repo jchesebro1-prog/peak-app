@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ConsultingEngagement } from "@/lib/stores/engagements";
 import type { NoteRecord } from "@/lib/stores/notes";
 import type { TaskRecord, TaskStatus } from "@/lib/stores/tasks";
 import type { FileRef } from "@/lib/consulting-files";
-import { mergeActivity, type ActivityEntry } from "@/lib/engagement-activity";
+import { mergeActivity, prefillFromMeeting, type ActivityEntry, type MeetingSource } from "@/lib/engagement-activity";
 import { captureAction } from "./activity-actions";
 import { Card, EmptyState, Pill } from "@/components/ui";
 
@@ -28,6 +28,14 @@ import { Card, EmptyState, Pill } from "@/components/ui";
  *
  * Only `import type` reaches the store modules (tasks-card.tsx's rule):
  * importing a value would pull doc-store/PGlite into the client bundle.
+ *
+ * Task 8 (Krisp/meeting pre-fill, D170): `prefillId`/`recordingSource`
+ * (below) seed the composer from a meeting or a linked Krisp recording. The
+ * seed itself happens DURING RENDER (the `seededPrefillId` guard), not in a
+ * `useEffect` — this repo's react-hooks/set-state-in-effect gate (an error)
+ * refuses a bare `setState` in an effect; `companies/controls.tsx`'s
+ * `prevQ` reset is the same shape. Clearing the URL's `prefill` param IS a
+ * navigation, not state, so that part safely lives in its own effect below.
  */
 
 const INPUT: React.CSSProperties = {
@@ -85,11 +93,21 @@ export function ActivityTab({
   notes,
   tasks,
   people,
+  prefillId,
+  recordingSource,
 }: {
   eng: ConsultingEngagement;
   notes: NoteRecord[];
   tasks: TaskRecord[];
   people: ActivityPerson[];
+  /** #145 D170 (Task 8) — a `?prefill=<id>` request the [id] page read off
+   *  the URL server-side (Meetings tab's "Capture to Activity" link, or a
+   *  linked recording's "Capture to engagement" action). */
+  prefillId: string | null;
+  /** #145 D170 (Task 8) — a Krisp recording linked to this engagement,
+   *  server-projected into the same shape as an `eng.meetings[]` entry, for
+   *  when `prefillId` isn't already a logged meeting. */
+  recordingSource: MeetingSource | null;
 }) {
   const router = useRouter();
 
@@ -99,6 +117,10 @@ export function ActivityTab({
   const [submitErr, setSubmitErr] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [prefillAttendees, setPrefillAttendees] = useState<string[]>([]);
+  // The id already seeded — guards against re-seeding on every render, and
+  // against ever re-seeding once the URL's `prefill` param is cleared below.
+  const [seededPrefillId, setSeededPrefillId] = useState<string | null>(null);
 
   const tasksById = useMemo(() => {
     const m: Record<string, TaskRecord> = {};
@@ -117,6 +139,30 @@ export function ActivityTab({
     for (const mt of eng.meetings) m[mt.id] = mt;
     return m;
   }, [eng.meetings]);
+
+  // #145 D170 — seed the composer once per incoming `prefillId` (derived
+  // state during render, not a setState-in-effect — see the file doc
+  // comment). `eng.meetings` wins over `recordingSource`: a recording only
+  // stands in for a meeting that was never logged.
+  if (prefillId && prefillId !== seededPrefillId) {
+    setSeededPrefillId(prefillId);
+    const source = meetingsById[prefillId] ?? (recordingSource?.id === prefillId ? recordingSource : null);
+    if (source) {
+      const pre = prefillFromMeeting(source);
+      if (pre.text) {
+        setText(pre.text);
+        setPrefillAttendees(pre.attendees);
+      }
+    }
+  }
+
+  // Clearing `?prefill=` is a navigation, not state, so it's safe in an
+  // effect: once cleared, `prefillId` is null on the next request, so this
+  // never re-fires and a refresh can't re-seed over the user's edits.
+  useEffect(() => {
+    if (!prefillId) return;
+    router.replace(`/design/engagements/${encodeURIComponent(eng.id)}?tab=activity`);
+  }, [prefillId, eng.id, router]);
 
   const entries = useMemo<ActivityEntry[]>(() => {
     return mergeActivity({
@@ -200,6 +246,7 @@ export function ActivityTab({
         setText("");
         setAttachments([]);
         setPendingTasks([]);
+        setPrefillAttendees([]);
         router.refresh();
       } catch {
         setSubmitErr("Couldn't save that capture — please try again.");
@@ -220,6 +267,11 @@ export function ActivityTab({
           rows={3}
           style={{ ...INPUT, width: "100%", resize: "vertical", boxSizing: "border-box" }}
         />
+        {prefillAttendees.length > 0 && (
+          <div style={{ marginTop: 6, fontSize: 11, color: "#9aa0ab" }}>
+            Pre-filled from a meeting · Attendees: {prefillAttendees.join(", ")}
+          </div>
+        )}
 
         <div
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}

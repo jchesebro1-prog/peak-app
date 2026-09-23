@@ -5,8 +5,9 @@
  * orders them newest first.
  *
  * Kept dependency-free (no store imports, no DB) so it is spec-tested with
- * no DB — see scripts/test-review-and-spec.ts. Task 8 (Krisp/meeting
- * pre-fill) adds `prefillFromMeeting` to this file; leave room for it.
+ * no DB — see scripts/test-review-and-spec.ts. Also home to
+ * `prefillFromMeeting` (Task 8, Krisp/meeting pre-fill) — same purity
+ * requirement, so it stays testable without a DB alongside `mergeActivity`.
  */
 
 export type ActivityKind = "note" | "meeting" | "decision" | "file";
@@ -71,4 +72,36 @@ export function mergeActivity(input: MergeInput): ActivityEntry[] {
   }
 
   return out.sort((a, b) => (b.at || 0) - (a.at || 0));
+}
+
+/**
+ * The generic "meeting-shaped" source a pre-fill can come from — a real
+ * `ConsultingEngagement["meetings"][number]` entry, or (Task 8) a Krisp
+ * recording linked to the engagement, projected into this same shape by the
+ * [id] page server-side (never a store import here — see
+ * activity-tab.tsx's `recordingSource` prop).
+ */
+export type MeetingSource = {
+  id: string;
+  at: number;
+  title?: string;
+  attendees: string;
+  minutes: string;
+};
+
+/**
+ * #145 D170 — what the composer opens with when launched from a meeting or
+ * a Krisp recording. Body only: NOTHING is auto-extracted into tasks. A
+ * human ticks the lines that become work.
+ */
+export function prefillFromMeeting(meeting: MeetingSource): { text: string; attendees: string[] } {
+  const title = String(meeting.title || "").trim();
+  const minutes = String(meeting.minutes || "").trim();
+  const attendees = String(meeting.attendees || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!title && !minutes) return { text: "", attendees };
+  const head = title || "Meeting";
+  return { text: minutes ? `${head}\n\n${minutes}` : head, attendees };
 }

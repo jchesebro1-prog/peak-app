@@ -12,6 +12,7 @@ import type {
 import type { NoteRecord } from "@/lib/stores/notes";
 import type { TaskRecord } from "@/lib/stores/tasks";
 import type { PhaseWindow } from "@/lib/consulting-schedule";
+import type { MeetingSource } from "@/lib/engagement-activity";
 import type { ConsultingData, VisitLite } from "./data";
 import { isOpenEngagement } from "@/lib/consulting-review";
 import {
@@ -179,6 +180,8 @@ export function ConsultingView({
   people,
   templateSets,
   phaseBands,
+  prefillId,
+  recordingSource,
 }: {
   data: ConsultingData;
   sel: ConsultingEngagement | null;
@@ -205,6 +208,14 @@ export function ConsultingView({
    *  a real band per phase instead of just a text group header. Fetched
    *  only for tab === "schedule". */
   phaseBands?: PhaseWindow[];
+  /** #145 D170 (Task 8) — the `?prefill=<id>` the [id] page read off the
+   *  URL server-side; absent on the list route. */
+  prefillId?: string | null;
+  /** #145 D170 (Task 8) — a Krisp recording linked to this engagement,
+   *  projected into the same shape as an `eng.meetings[]` entry, fetched by
+   *  the [id] page ONLY when `prefillId` doesn't already match a logged
+   *  meeting. Never a store import here — see activity-tab.tsx. */
+  recordingSource?: MeetingSource | null;
 }) {
   if (!sel) return <ConsultingList data={data} />;
   return (
@@ -218,6 +229,8 @@ export function ConsultingView({
       people={people || []}
       templateSets={templateSets || []}
       phaseBands={phaseBands || []}
+      prefillId={prefillId ?? null}
+      recordingSource={recordingSource ?? null}
     />
   );
 }
@@ -373,6 +386,8 @@ function EngagementDetail({
   people,
   templateSets,
   phaseBands,
+  prefillId,
+  recordingSource,
 }: {
   data: ConsultingData;
   eng: ConsultingEngagement;
@@ -383,6 +398,8 @@ function EngagementDetail({
   people: ActivityPerson[];
   templateSets: TemplateSetLite[];
   phaseBands: PhaseWindow[];
+  prefillId: string | null;
+  recordingSource: MeetingSource | null;
 }) {
   const router = useRouter();
   const q = eng.quoteId ? data.quotesById[eng.quoteId] : undefined;
@@ -461,7 +478,16 @@ function EngagementDetail({
       {tab === "phases" && <PhasesTab data={data} eng={eng} />}
       {tab === "milestones" && <MilestonesTab eng={eng} quoteValue={q?.value || 0} />}
       {tab === "meetings" && <MeetingsTab eng={eng} />}
-      {tab === "activity" && <ActivityTab eng={eng} notes={notes} tasks={tasks} people={people} />}
+      {tab === "activity" && (
+        <ActivityTab
+          eng={eng}
+          notes={notes}
+          tasks={tasks}
+          people={people}
+          prefillId={prefillId}
+          recordingSource={recordingSource}
+        />
+      )}
       {tab === "oversight" && <OversightTab data={data} eng={eng} extra={oversightExtra} />}
       {tab === "documents" && <DocumentsTab eng={eng} />}
     </div>
@@ -1321,6 +1347,12 @@ function MeetingsTab({ eng }: { eng: ConsultingEngagement }) {
                     ▶ Watch recording
                   </a>
                 )}
+                <Link
+                  href={`/design/engagements/${encodeURIComponent(eng.id)}?tab=activity&prefill=${encodeURIComponent(m.id)}`}
+                  style={{ fontSize: 11.5, color: "var(--accent)", textDecoration: "none" }}
+                >
+                  Capture to Activity
+                </Link>
                 <button
                   style={{ ...SMALL_BTN, padding: "2px 7px", fontSize: 11, color: "#a0442b" }}
                   onClick={async () => { await deleteMeetingAction(eng.id, m.id); router.refresh(); }}
