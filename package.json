@@ -21,6 +21,7 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:export": "tsx scripts/export.ts",
     "db:inventory": "tsx scripts/inventory.ts",
+    "ports:rules": "tsx scripts/port-rules.ts",
     "geo": "tsx scripts/enrich-addresses.ts",
     "db:reset-local": "rm -rf .data && npm run db:seed",
     "db:convert-identity": "tsx scripts/convert-identity.ts",
