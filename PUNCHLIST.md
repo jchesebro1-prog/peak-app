@@ -3229,8 +3229,9 @@ role (falls back to quote owner), due ~7 days: walk the site with the end user. 
 **Status:** PARTIAL 2026-09-23 — delivery status auto-advances an install project to Scheduled,
 closeout now captures a bounded phone/trackpad-drawn PNG signature, and completion creates the
 end-user site-walk follow-up. Manual stage controls remain available for undo/correction.
-Remaining scope-report/attachment handoff and richer per-scope closeout checklist presentation
-still remain.
+Remaining scope-report/attachment handoff still remains; the closeout now renders and
+persists a required per-scope completion checklist derived from the project's procurement
+lines.
 
 ---
 

@@ -18,6 +18,7 @@ import {
   timeAgo,
   STAGING_BUFFER,
   PROJECT_STAGES,
+  signoffScopes,
   type ProjectRecord,
   type ProjectStage,
   type ProjectKind,
@@ -1985,6 +1986,7 @@ function SignoffTab({
   initialsOf: (n: string) => string;
 }) {
   const so = p.signoff;
+  const scopes = signoffScopes(p);
   if (so) {
     return (
       <div style={{ background: "#eaf6ef", border: "1px solid #cce9da", borderRadius: 12, padding: "16px 18px" }}>
@@ -2014,6 +2016,10 @@ function SignoffTab({
         {so.note && (
           <div style={{ fontSize: 12.5, color: "#3a6650", marginTop: 10, fontStyle: "italic" }}>“{so.note}”</div>
         )}
+        <div style={{ marginTop: 12, display: "grid", gap: 5 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#2f5742", textTransform: "uppercase", letterSpacing: ".06em" }}>Scope confirmed</div>
+          {scopes.map((scope) => <div key={scope} style={{ fontSize: 12.5, color: "#2f5742" }}>✓ {scope}</div>)}
+        </div>
       </div>
     );
   }
@@ -2044,6 +2050,15 @@ function SignoffTab({
           rows={2}
           style={{ ...inputStyle, resize: "vertical" }}
         />
+        <fieldset style={{ border: "1px solid #e4e7ec", borderRadius: 9, padding: "10px 12px", display: "grid", gap: 7 }}>
+          <legend style={{ padding: "0 5px", fontSize: 12, fontWeight: 700, color: "#3d424e" }}>Confirm completed scope</legend>
+          {scopes.map((scope) => (
+            <label key={scope} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#3d424e" }}>
+              <input type="checkbox" name="scope" value={scope} required />
+              {scope}
+            </label>
+          ))}
+        </fieldset>
         <SignaturePad />
         <button
           type="submit"

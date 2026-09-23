@@ -192,6 +192,8 @@ export type ProjectSignoff = {
   note?: string;
   /** Small PNG data URL captured on the field device at hand-off. */
   signature?: string;
+  /** Per-scope completion acknowledgements captured at hand-off. */
+  scopeChecks?: Record<string, boolean>;
 };
 
 export type ProjectRecord = {
@@ -228,6 +230,17 @@ export type ProjectRecord = {
   signoff: ProjectSignoff | null;
   trainingAt: number | null;
 };
+
+/** Stable closeout scopes derived from the project's purchased lines. */
+export function signoffScopes(project: Pick<ProjectRecord, "procurement">): string[] {
+  const scopes = new Set<string>();
+  for (const line of project.procurement || []) {
+    const scope = VENDORS[line.vendor]?.scope || line.vendor;
+    if (scope?.trim()) scopes.add(scope.trim());
+  }
+  if (!scopes.size) scopes.add("General installation");
+  return [...scopes].sort((a, b) => a.localeCompare(b));
+}
 
 /**
  * One stage transition, appended on every stage write. Mirrors QuoteHistoryEntry

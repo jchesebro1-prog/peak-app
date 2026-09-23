@@ -501,7 +501,7 @@ const projectViewSource = readFileSync(join(process.cwd(), "src/app/(app)/projec
 const projectStoreSource = readFileSync(join(process.cwd(), "src/lib/stores/projects.ts"), "utf8");
 ok(projectActionsSource.includes('str(formData, "signature")') && projectActionsSource.includes("data:image\\/png;base64"), "#44 sign-off action requires a bounded drawn PNG signature");
 ok(projectViewSource.includes('import SignaturePad') && projectViewSource.includes("<SignaturePad />"), "#44 sign-off form captures a phone-drawn signature");
-ok(projectStoreSource.includes("signature?: string") && projectActionsSource.includes("Walk the completed site with the end user"), "#44 stores sign-off signature and creates the walkthrough follow-up");
+ok(projectStoreSource.includes("signature?: string") && projectStoreSource.includes("scopeChecks?: Record<string, boolean>") && projectActionsSource.includes("Walk the completed site with the end user"), "#44 stores sign-off signature, per-scope checks, and creates the walkthrough follow-up");
 const inboxFixture = commsSeed().find((thread) => thread.id === "C-1019");
 ok(!!inboxFixture && inboxFixture.link === null && inboxFixture.messages.length === 3 && new Set(inboxFixture.messages.map((message) => message.author)).size === 3, "#46 seed includes a chip-less three-author thread for participant rendering");
 
@@ -2140,7 +2140,7 @@ import {
 
 /* ============ PROJECTS BOARD (#19) ============ */
 import { boardProjects, dueChipLabel } from "@/app/(app)/projects/board-lib";
-import { PROJECT_STAGES, ORDER_STAGES } from "@/lib/stores/projects";
+import { PROJECT_STAGES, ORDER_STAGES, signoffScopes } from "@/lib/stores/projects";
 
 ok(
   PROJECT_STAGES.map((s) => s.key).join(",") === "procurement,delivery,scheduled,install,training,signoff,complete",
@@ -2149,6 +2149,10 @@ ok(
 ok(
   ORDER_STAGES.map((s) => s.key).join(",") === "procurement,delivery,signoff,complete",
   "#19: orders carry a different 4-stage vocabulary — excluded from the board"
+);
+ok(
+  signoffScopes({ procurement: [{ vendor: "ETC" } as any, { vendor: "ETC" } as any, { vendor: "Rose Brand" } as any] }).join("|") === "Dimming, control & fixtures|Soft goods (sewn to order)",
+  "#44: sign-off checklist derives unique purchased scopes"
 );
 {
   const mix: Array<{ kind: "project" | "order" }> = [

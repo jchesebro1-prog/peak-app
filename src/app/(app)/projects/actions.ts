@@ -16,6 +16,7 @@ import {
   addNote,
   addTime,
   setSignoff,
+  signoffScopes,
   createProjectFromQuote,
   stagesFor,
   type ProjectStage,
@@ -128,7 +129,16 @@ export async function signoffAction(formData: FormData): Promise<void> {
   const note = str(formData, "note").trim();
   const signature = str(formData, "signature").trim();
   if (!/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(signature) || signature.length > 350_000) return;
-  await setSignoff(id, { name, role, note, signature }, user.name);
+  const scopes = signoffScopes(p);
+  const checked = new Set(formData.getAll("scope").map((value) => String(value).trim()).filter(Boolean));
+  if (scopes.some((scope) => !checked.has(scope))) return;
+  await setSignoff(id, {
+    name,
+    role,
+    note,
+    signature,
+    scopeChecks: Object.fromEntries(scopes.map((scope) => [scope, true])),
+  }, user.name);
   // Punch #16 (D14x): narrow idempotency guard — setProjectStage has no
   // "already at this stage" early return (recordStageChange() is a no-op
   // internally but doesn't stop the caller's side effects), so this checks
