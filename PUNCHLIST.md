@@ -3126,8 +3126,13 @@ Both write a private Blob ZIP with a D94 specification DOCX, a rough drawing/equ
 available catalog datasheets, and a customer-safe index with explicit catalog/spec/datasheet
 gaps. Grid packages also include original plan-sheet assets and the derived riser summary. The
 bundle walker and authenticated manifest/download seams are covered by the smoke/spec harness.
-Remaining: richer raster/PDF plan rendering and catalog population still depend on Jeff's #39
-starter-set review.
+The read-only Displays Manager API seam is also live under `/api/v1/displays`: catalog,
+manufacturer, spec, filtering, `updated_since`, ETag, and optional bearer-token reads all use
+an explicit public-field allowlist and expose no write methods. Remaining: richer raster/PDF plan
+rendering and catalog population still depend on Jeff's #39 starter-set review; the API's final
+production hardening still needs organization-scoped hashed/revocable token management, rate
+limits, and a decision on expiring external datasheet links (the current bearer token is an
+environment-gated first slice and datasheet URLs remain Peak-session protected).
 
 ---
 
