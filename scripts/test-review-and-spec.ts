@@ -3659,6 +3659,10 @@ ok(
  * catalog-import checks it sits next to. */
 import { list as listEquipmentItems, byCategory as equipmentByCategory } from "../src/lib/stores/equipment-items";
 import { equipmentItemsSeed } from "../src/db/seeds/equipment";
+// #148: the dev auto-seed is fire-and-forget from getDb() — seeded() is the
+// external waiter that lets this gate hold for it before anything reads
+// seeded rows (equipment-items, surveys, etc. below).
+import { seeded } from "@/db";
 
 /* --- Rentals module, Task 2: equipment bookings + availability logic ---
  * overlaps() is pure, so it's asserted here at top level; availableQty()/
@@ -6698,7 +6702,14 @@ async function writeBackAsyncChecks(): Promise<void> {
 ok((TABS as readonly string[]).includes("schedule"), "#145 schedule is a valid engagement tab (?tab= validation depends on it)");
 ok((TABS as readonly string[]).includes("activity"), "#145 activity is a valid engagement tab");
 
-recordingsAsyncChecks()
+// #148: wait for the dev auto-seed once, up front, before any of this async
+// chain runs — asyncChecks() below reads seeded equipment items and surveys,
+// and without this the gate races a cold datadir's seed intermittently
+// (equipment-items x3, "seeded surveys exist to migrate", "FS-1053 is
+// present in the seed"). One await here covers the whole chain rather than
+// sprinkling it in front of each function that happens to read seeded data.
+seeded()
+  .then(() => recordingsAsyncChecks())
   .then(() => writeBackAsyncChecks())
   .then(() => archiveAsyncChecks())
   .then(() => asyncChecks())

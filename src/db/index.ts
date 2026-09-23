@@ -64,6 +64,12 @@ async function createDb(): Promise<Db> {
   return db;
 }
 
+/** The dev auto-seed's promise, so callers that READ seeded data can wait for
+ *  it. Never awaited inside createDb(): seedIfEmpty() calls getDb() through
+ *  the doc-store helpers, so awaiting it there would await the promise it is
+ *  itself part of. An external waiter has no such cycle. */
+let seedDone: Promise<void> | null = null;
+
 export function getDb(): Promise<Db> {
   if (!globalForDb.__peakDb) {
     globalForDb.__peakDb = createDb();
@@ -72,7 +78,7 @@ export function getDb(): Promise<Db> {
     // (awaiting the same promise → deadlock). Skipped during a build: those
     // datadirs are throwaway, so seeding them is wasted work per worker.
     if (!process.env.DATABASE_URL && !isBuild) {
-      void globalForDb.__peakDb
+      seedDone = globalForDb.__peakDb
         .then(async (db) => {
           const { seedIfEmpty } = await import("./seed-data");
           await seedIfEmpty(db);
@@ -81,4 +87,15 @@ export function getDb(): Promise<Db> {
     }
   }
   return globalForDb.__peakDb;
+}
+
+/** Resolves once the dev auto-seed has finished (or immediately when there is
+ *  nothing to seed — hosted DATABASE_URL, or a build's throwaway datadir).
+ *  Call this before reading seeded data (#148). */
+export async function seeded(): Promise<void> {
+  // Ensure the seed has actually been kicked off (getDb() assigns seedDone
+  // synchronously on first call) even if this is the very first call in the
+  // process — then wait on it, if there is one.
+  await getDb();
+  if (seedDone) await seedDone;
 }
