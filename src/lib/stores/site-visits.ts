@@ -244,6 +244,7 @@ export async function requestVisitForLead(
     contact: string;
     email: string;
     phone: string;
+    address: string;
     city: string;
     state: string;
     customerId: string | null;
@@ -259,7 +260,7 @@ export async function requestVisitForLead(
     customer: lead.org,
     locationId: null,
     venue: "",
-    address: [lead.city, lead.state].filter(Boolean).join(", "),
+    address: [lead.address, lead.city, lead.state].filter(Boolean).join(", "),
     contactName: lead.contact,
     contactEmail: lead.email,
     contactPhone: lead.phone,

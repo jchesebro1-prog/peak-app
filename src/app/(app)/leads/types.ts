@@ -50,8 +50,10 @@ export type DrawerDetailVM = {
   id: string;
   org: string;
   contact: string;
+  contactRole: string;
   email: string;
   phone: string;
+  address: string;
   srcShort: string;
   srcColor: string;
   locLine: string;
@@ -96,6 +98,7 @@ export type LeadCustomerLiteVM = {
   id: string;
   name: string;
   contacts: LeadCustomerContactVM[];
+  locations: { id: string; label: string; address: string; city: string; state: string; primary: boolean }[];
 };
 
 /** #34 — the lead's visit/survey thread, server-built with chip colors

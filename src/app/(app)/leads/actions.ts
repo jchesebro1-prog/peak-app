@@ -195,8 +195,10 @@ export async function createLeadAction(input: {
   source: string;
   org: string;
   contact: string;
+  contactRole?: string;
   email: string;
   phone: string;
+  address?: string;
   city: string;
   state: string;
   interest: string;
@@ -223,8 +225,10 @@ export async function createLeadAction(input: {
         source: input.source,
         org: input.org,
         contact: input.contact,
+        contactRole: input.contactRole,
         email: input.email,
         phone: input.phone,
+        address: input.address,
         city: input.city,
         state: input.state || "WI",
         interest: input.interest,
@@ -270,6 +274,7 @@ export async function requestSiteVisitAction(
       contact: l.contact,
       email: l.email,
       phone: l.phone,
+      address: l.address || "",
       city: l.city,
       state: l.state,
       customerId: l.customerId ?? null,

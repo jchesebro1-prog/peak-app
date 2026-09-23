@@ -888,7 +888,11 @@ pay for itself immediately across those call sites** — recommend doing that ra
   `customerId` non-null from the start and simplifies convert; deferred avoids junk customer
   records for leads that die at stage "new".
 
-**Status:** OPEN — needs A–D. The convert() PHONE drop is FIXED (`01310aa`); street address still can't pass through because the lead form doesn't collect one (part of decision C).
+**Status:** DONE 2026-09-23 (D12 extension): the existing-customer picker is wired with
+prefill-and-override behavior, and leads now carry contact role plus street address snapshots.
+Conversion passes both through to the canonical customer contact/location and site-visit requests
+use the captured street address. No customer write-back is performed when an estimator edits the
+lead snapshot.
 
 ---
 
@@ -2288,8 +2292,8 @@ user-facing "Engagements" strings if the rename should be consistent: page title
 "Engagements" string for consistency (nav label + page titles + breadcrumbs + Overview card —
 all display text, still trivial) unless Jeff narrows it to the nav label only.
 
-**Status:** OPEN — queued, **not building yet.** Jeff is keeping a running list and will batch
-these. Logged 2026-07-21, no code touched.
+**Status:** DONE — the nav and remaining user-facing module labels were swept on 2026-07-26 as
+documented below.
 
 **CLOSED 2026-07-26 (plan 06).** The nav label itself had already read "Consulting"
 since the D117 Q-6 rebrand (`nav-data.ts:71`); this plan swept the remaining
@@ -2390,11 +2394,12 @@ in the app for reference material, starting with the fixture cross-reference (it
 - **D. Audience** — internal-only, staff-wide, or is any of it customer-facing? (The fixture
   cross-reference itself is internal competitive intel.)
 
-**Status:** OPEN — logged 2026-07-21, no code touched. Item 26 is its first intended resident.
+**Status:** SUPERSEDED — the first resident shipped under #136 (Knowledge & Information). The
+fixture cross-reference itself is complete; future Knowledge expansion belongs to #56.
 
 ---
 
-## 28. Lineset Builder: default the layout to 50′ × 30′ (was 80′ × 30′), SHIPPED, STATUS STALE
+## 28. Lineset Builder: default the layout to 50′ × 30′ (was 80′ × 30′) — DONE 2026-07-27
 
 > **2026-07-27 recon:** the code is DONE, `DEFAULT_LINESET_INPUTS` is 50×30
 > (`src/lib/design/lineset.ts:52-72`, header note at `:5`) and the reset button reads
@@ -2415,7 +2420,8 @@ label `src/app/(app)/design/lineset/lineset-builder.tsx:367`.
   `setInp(DEFAULT_LINESET_INPUTS)` (`:366`). Update the label to "50′ × 30′" so it matches.
 - No decision needed; no downstream math cares (auto-layout reads the live inputs, not the constant).
 
-**Status:** OPEN — logged 2026-07-21, no code touched. Same request as item 29.
+**Status:** DONE — shipped with the #50 lineset rework; the current constant and reset label both
+use 50′ × 30′.
 
 ---
 
@@ -2607,8 +2613,7 @@ exact street.
 data gap). Acceptable (city/state/coords still fill), or add a fallback to the road / display name?
 Minor — the primary defect is that street is dropped entirely.
 
-**Status:** OPEN — logged 2026-07-21, no code touched. Small and well-isolated; ready to fix on your
-go.
+**Status:** DONE — shipped and browser-verified as described in the audit note above.
 
 ---
 
@@ -3667,7 +3672,8 @@ for section Price `:219`, cost `:200`, freight `:326`, and the app-wide `money()
 the Sell box is the odd one out. **Decide: `fmt()` (cents) or `money()` (no cents)?** Adjacent
 readouts use `fmt()`.
 
-**Status:** OPEN: small and self-contained.
+**Status:** DONE — the formatted section sell control shipped and was browser-verified as described
+above.
 
 ---
 
