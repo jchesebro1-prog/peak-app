@@ -2,7 +2,7 @@
 
 - **Date:** 2026-09-22
 - **Punch:** #147
-- **Decisions:** D175–D181 (allocated below)
+- **Decisions:** D179–D185 (allocated below)
 - **Status:** design approved by Jeff 2026-09-22, awaiting implementation plan
 - **Related:** `daylite-export-audit-checklist.md` (2026-07-21 audit), punch #114 /
   D146 (calendar travel block), punch #137 (import hub people/venues)
@@ -156,7 +156,7 @@ If no street column is detected, the script **fails hard** and prints the
 actual header row. A silent fallback to city-level would reintroduce exactly
 the bug being fixed.
 
-**D175 — the enrichment input is a Daylite CSV re-export, matched by name.**
+**D179 — the enrichment input is a Daylite CSV re-export, matched by name.**
 Rejected alternatives: the Daylite API (needs credentials and a new
 integration for a one-time job) and hand-entry (1,550 rows).
 
@@ -180,7 +180,7 @@ to a shared `scripts/daylite-ids.ts` that both the importer and the enrichment
 script import.** Two copies would drift and the ids would silently stop lining
 up — the failure mode would be a successful-looking run that enriched nothing.
 
-**D176 — Daylite id helpers are extracted to one shared module.** Any future
+**D180 — Daylite id helpers are extracted to one shared module.** Any future
 Daylite tooling imports them rather than re-deriving.
 
 ### 4.3 Writes
@@ -209,7 +209,7 @@ Nothing else is touched — not the company record, not contacts, leads, quotes,
 projects, portal grants, `venueKind`, `legacyLocId`, `locationName`, or any
 work done in the app since July.
 
-**D177 — enrichment uses targeted UPDATEs, never an upsert.** A company whose
+**D181 — enrichment uses targeted UPDATEs, never an upsert.** A company whose
 Daylite name changed since the export is a reported exception, not a new
 record; a company with no venue gets a mailing address and stays venue-less.
 
@@ -230,7 +230,7 @@ Manual travel overrides outrank everything in `estimate()`'s chain
 what coordinates are stamped. The script reports the count explicitly so the
 number is visible rather than a silent surprise.
 
-**D178 — app-entered addresses beat the Daylite export; manual travel
+**D182 — app-entered addresses beat the Daylite export; manual travel
 overrides are never modified.**
 
 ### 4.5 Geocoding
@@ -275,7 +275,7 @@ resolve a building); city-only rows use `searchCity()`, added to `geo.ts`.
 After both changes, all 11 fixture venues geocoded within 0.9 mi or were
 rejected and reported. None were silently wrong.
 
-**D181 — geocoding is gated on state AND city, and city-only rows use
+**D185 — geocoding is gated on state AND city, and city-only rows use
 Nominatim's structured query.** A confident wrong answer misprices a quote; a
 reported miss costs a minute with the existing address picker.
 
@@ -295,7 +295,7 @@ with one marked as the quote default, or `quoteOrigin()` returns nothing and
 every venue still reads "—". The script **verifies this first and aborts with a
 clear message** rather than running for an hour to no effect.
 
-**D179 — the backfill warms the OSRM route cache as a distinct phase.**
+**D183 — the backfill warms the OSRM route cache as a distinct phase.**
 Coordinates alone leave travel on the haversine tier.
 
 ### 4.7 Idempotence and resumability
@@ -354,7 +354,7 @@ timeout that makes geocoding 1,550 rows inline impossible.
 
 One mechanism serves both the one-time backfill and every future import.
 
-**D180 — geocoding is a bounded, resumable batch job shared by the CLI and the
+**D184 — geocoding is a bounded, resumable batch job shared by the CLI and the
 admin UI**, not an inline step in an import commit. 1,550 lookups at 1 req/sec
 cannot complete inside a server action.
 

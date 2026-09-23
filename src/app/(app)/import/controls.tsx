@@ -46,6 +46,7 @@ export function PastePreview({
   accent,
   today,
   customerIndex,
+  canUpdate = true,
 }: {
   typeKey: string;
   /** EVERY field of the type, hidden ones included: auto-mapping must still
@@ -62,6 +63,11 @@ export function PastePreview({
   /** #137 — every customer already in Peak ({id, name}), for the Customer
    *  column. Empty for the types that don't link back. */
   customerIndex: CustomerRef[];
+  /** #147 — false for the types whose writer has no `update` (flametests,
+   *  inspections, surveys, projects). "Update existing" used to fall through
+   *  to create() for those and silently duplicate the record the user asked
+   *  to update, so the mode is not offered at all. */
+  canUpdate?: boolean;
 }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"skip" | "update" | "create">("skip");
@@ -164,9 +170,19 @@ export function PastePreview({
     };
   }, [text, trimmed, isCatalog, fields, size.ok]);
 
-  const modeTabs: Array<{ id: "skip" | "update" | "create"; label: string }> = [
+  const modeTabs: Array<{
+    id: "skip" | "update" | "create";
+    label: string;
+    disabled?: boolean;
+    why?: string;
+  }> = [
     { id: "skip", label: "Skip duplicates" },
-    { id: "update", label: "Update existing" },
+    {
+      id: "update",
+      label: "Update existing",
+      disabled: !canUpdate,
+      why: canUpdate ? undefined : "This type can't update existing records yet — matched rows would be skipped.",
+    },
     { id: "create", label: "Create new" },
   ];
 
@@ -407,7 +423,9 @@ export function PastePreview({
                 <button
                   key={m.id}
                   type="button"
-                  onClick={() => setMode(m.id)}
+                  disabled={m.disabled}
+                  title={m.why}
+                  onClick={() => !m.disabled && setMode(m.id)}
                   style={{
                     flex: 1,
                     fontFamily: "var(--font-ui)",
@@ -416,9 +434,9 @@ export function PastePreview({
                     padding: "8px 8px",
                     borderRadius: 7,
                     border: "none",
-                    cursor: "pointer",
+                    cursor: m.disabled ? "not-allowed" : "pointer",
                     background: on ? "#fff" : "transparent",
-                    color: on ? "#16181d" : "#8c919c",
+                    color: m.disabled ? "#c2c6cd" : on ? "#16181d" : "#8c919c",
                     boxShadow: on ? "0 1px 2px rgba(0,0,0,.1)" : "none",
                   }}
                 >
@@ -427,6 +445,11 @@ export function PastePreview({
               );
             })}
           </div>
+          {!canUpdate && (
+            <div style={{ marginTop: 6, fontSize: 11.5, color: "#8c919c" }}>
+              This type can&rsquo;t update existing records yet — matched rows are skipped.
+            </div>
+          )}
         </>
       )}
 

@@ -13,6 +13,8 @@ import {
 import {
   addUserAction,
   clearDemoDataAction,
+  travelCoverageAction,
+  geocodeBatchAction,
   geocodeCityAction,
   removeOfficeAction,
   saveOfficeAction,
@@ -259,6 +261,14 @@ export default function SettingsClient({
 
   // ---- Go-live: clear demo data ----
   const [clearOpen, setClearOpen] = useState(false);
+
+  /* #147 — travel-time backfill. The whole job is ~1,300 venues paced at
+     1 req/s, so the action runs in bounded batches and this loops until
+     `remaining` hits zero, surfacing progress and any rejections. */
+  const [geoCov, setGeoCov] = useState<Awaited<ReturnType<typeof travelCoverageAction>> | null>(null);
+  const [geoRunning, setGeoRunning] = useState(false);
+  const [geoMsg, setGeoMsg] = useState("");
+  const [geoFails, setGeoFails] = useState<Array<{ query: string; reason: string; got?: string }>>([]);
   const [clearConfirm, setClearConfirm] = useState("");
   const [clearDone, setClearDone] = useState<string | null>(null);
 
@@ -395,6 +405,46 @@ export default function SettingsClient({
       }
       return res;
     });
+  async function refreshGeoCoverage() {
+    try {
+      setGeoCov(await travelCoverageAction());
+    } catch {
+      setGeoCov(null);
+    }
+  }
+
+  /** Drive both phases to completion, one bounded batch at a time. */
+  async function runGeocode() {
+    setGeoRunning(true);
+    setGeoFails([]);
+    try {
+      for (const phase of ["geocode", "routes"] as const) {
+        // Hard stop so a bug that never decrements `remaining` cannot spin
+        // forever against Nominatim: 1,300 venues / 10 per batch = 130 calls,
+        // so 400 is generous headroom and still bounded.
+        for (let i = 0; i < 400; i++) {
+          const r = await geocodeBatchAction({ limit: 10, phase });
+          if (!r.ok) break;
+          if (phase === "geocode" && "failures" in r && r.failures?.length) {
+            setGeoFails((prev) => [...prev, ...r.failures].slice(0, 50));
+          }
+          setGeoMsg(
+            phase === "geocode"
+              ? `Geocoding — ${r.done} stamped, ${r.remaining} lookups left…`
+              : `Routing from ${r.originName || "the quote origin"} — ${r.remaining} left…`
+          );
+          if (!r.remaining) break;
+        }
+      }
+      setGeoMsg("Done.");
+      await refreshGeoCoverage();
+    } catch (e) {
+      setGeoMsg("Stopped: " + (e instanceof Error ? e.message : "unknown error"));
+    } finally {
+      setGeoRunning(false);
+    }
+  }
+
   const clearDemoData = () =>
     startTransition(async () => {
       setError(null);
@@ -1557,6 +1607,89 @@ export default function SettingsClient({
             </div>
           </div>
           <Toggle on={settings.seedDemo} onChange={(v) => saveSetting({ seedDemo: v })} />
+        </div>
+
+        {/* #147 — travel-time backfill */}
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+            <div>
+              <div style={{ fontSize: 13.5, fontWeight: 600 }}>Travel time — geocode addresses</div>
+              <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2, maxWidth: 460 }}>
+                Quotes price travel per mile and per drive-minute, and that needs
+                coordinates on each venue. This looks up every venue that has an
+                address but no coordinates, then fetches the real driving route
+                from your quote origin. A venue with a street address resolves to
+                the building; one with only a city resolves to the town centre,
+                which is fine for scheduling but not precise enough to quote from.
+                Safe to re-run — finished work is skipped.
+              </div>
+            </div>
+            <button
+              className="pk-btn"
+              style={{ whiteSpace: "nowrap" }}
+              disabled={geoRunning}
+              onClick={() => {
+                void runGeocode();
+              }}
+            >
+              {geoRunning ? "Working…" : "Geocode addresses"}
+            </button>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <button
+              className="pk-btn-quiet"
+              style={{ fontSize: 12 }}
+              onClick={() => {
+                void refreshGeoCoverage();
+              }}
+            >
+              Check coverage
+            </button>
+            {geoCov && (
+              <div style={{ marginTop: 8, fontSize: 12.5, color: "#5d636e", lineHeight: 1.7 }}>
+                <div>
+                  <strong>{geoCov.withCoords.toLocaleString()}</strong> of{" "}
+                  <strong>{geoCov.venues.toLocaleString()}</strong> venues have coordinates.
+                </div>
+                <div>
+                  {geoCov.withStreetAddress.toLocaleString()} have a street address
+                  (quote-grade) · {geoCov.cityOnly.toLocaleString()} city only ·{" "}
+                  {geoCov.noAddress.toLocaleString()} have no address to work from.
+                </div>
+                {geoCov.manualOverride > 0 && (
+                  <div>
+                    {geoCov.manualOverride.toLocaleString()} have a manual travel override and
+                    will not change.
+                  </div>
+                )}
+                {!geoCov.originOk && (
+                  <div style={{ color: "#8a3a2a" }}>
+                    No usable quote origin — set an office with coordinates under Locations and
+                    mark it the quote default, or nothing can be routed.
+                  </div>
+                )}
+              </div>
+            )}
+            {geoMsg && (
+              <div style={{ marginTop: 8, fontSize: 12.5, color: "#5d636e" }}>{geoMsg}</div>
+            )}
+            {geoFails.length > 0 && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#8a3a2a", maxWidth: 520 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                  {geoFails.length} address{geoFails.length === 1 ? "" : "es"} could not be
+                  resolved safely — fix these on the venue and re-run:
+                </div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, lineHeight: 1.6 }}>
+                  {geoFails.slice(0, 20).map((f, i) => (
+                    <div key={i}>
+                      {f.query} — {f.reason}
+                      {f.got ? ` (got ${f.got})` : ""}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Go-live: clear demo data */}

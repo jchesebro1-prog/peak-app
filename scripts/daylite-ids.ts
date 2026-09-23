@@ -1,7 +1,7 @@
 /**
  * Daylite id derivation — the single source of truth.
  *
- * These were private to scripts/import-daylite.ts until 2026-09-22 (D176).
+ * These were private to scripts/import-daylite.ts until 2026-09-22 (D180).
  * Every id the Daylite import produced is a pure function of a NAME, so any
  * later tooling that wants to find those records again has to hash names the
  * exact same way. A second copy that drifted by one character would not throw:

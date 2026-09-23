@@ -4383,3 +4383,66 @@ required settling a phases-vs-stages reconciliation nobody has asked for yet, as
 shipping the scheduler at all — the expensive path, taken on for a benefit (install scheduling) that
 is out of scope for #145 (D172 itself, restated: install `Projects` are explicitly out of scope,
 reachable later through this same engine's seam).
+
+## D179. Customer addresses are recovered by re-exporting from Daylite, matched on name (#147, 2026-09-22)
+
+The July 2026 Daylite export carried `City` and `State/Province` and no street address, in any of
+its four files, so 1,550 companies landed with nothing to geocode. Jeff confirmed Daylite itself
+holds the addresses — the export template simply omitted them. Rejected: the Daylite API (new
+credentials and an integration for a one-time job) and hand-entry (1,550 rows). The re-export is
+matched to the existing records by the deterministic company id, so it enriches rather than
+re-imports.
+
+## D180. The Daylite id helpers live in one module, imported by every tool that needs them (#147, 2026-09-22)
+
+`norm`/`hash`/`companyId` were private to `scripts/import-daylite.ts`. Every id the import produced
+is a pure function of a company NAME, so any later tool that wants to find those records has to hash
+names identically. A second copy that drifted by one character would not throw — it would match zero
+rows and report a clean, successful, completely empty run. They now live in `scripts/daylite-ids.ts`
+and must never be "improved": 1,723 companies and their contacts, leads and projects are already
+stored under these ids.
+
+## D181. Enrichment uses targeted UPDATEs, never an upsert (#147, 2026-09-22)
+
+`saveCompany`/`saveSite` both have an insert path (`onConflictDoUpdate`), so a company renamed in
+Daylite since the export would silently gain a brand-new empty record instead of raising. A direct
+`UPDATE` cannot create anything: a statement matching no row is reported by name and skipped. This
+is also how the partner case surfaces — 387 of 1,723 companies have no venue at all (the import
+skips partners), and they get a company mailing address while staying venue-less rather than having
+a venue manufactured for them that would pollute the venue directory and the schedulers.
+
+## D182. App-entered addresses beat the Daylite export; manual travel overrides are never touched (#147, 2026-09-22)
+
+The export is from 2026-07-22 and anything typed into the app is newer, so the app is the system of
+record: a venue that already has a street address is skipped and counted, with `--overwrite` to flip
+it. Manual `travelMiles`/`travelMin` outrank everything in `estimate()`'s chain, so those venues will
+not reprice no matter what coordinates are stamped — the count is reported explicitly rather than
+left as a silent surprise.
+
+## D183. The backfill warms the OSRM route cache as a distinct phase (#147, 2026-09-22)
+
+Coordinates alone leave travel on the haversine tier (`source: "auto"`): a straight-line distance
+times a road factor. Only a cached OSRM route makes it `"routed"`. So phase 2 fetches the real route
+from the quote origin for every geocoded venue and writes it to `geo_cache`. It aborts up front when
+Settings → Locations has no office with coordinates marked as the quote default, rather than running
+for an hour to no effect. Both phases dedupe first — 990 venues collapsed to 293 distinct lookups.
+
+## D184. Geocoding is a bounded, resumable batch job shared by the CLI and the admin UI (#147, 2026-09-22)
+
+Nominatim's usage policy is 1 request/second and the book is ~1,300 venues, so the whole job cannot
+run inside a server action. The logic lives in `src/lib/geo-backfill.ts` with a `limit`; the CLI is a
+thin wrapper and Settings → Beta calls it 10 venues at a time, looping on `remaining`. Both phases
+skip work already done, so an interrupted run resumes by being run again. One mechanism serves the
+one-time backfill and every future import.
+
+## D185. Geocoding is gated on state AND city, and city-only rows use Nominatim's structured query (#147, 2026-09-22)
+
+A state-only check is not enough. In the first run against real data, free text returned **Portage
+County** for `Portage, WI` (63.7 mi from the City of Portage) and **Town of Baraboo** for
+`LaCrosse, WI` (79.6 mi from La Crosse) — both in Wisconsin, both waved through, travel reading
+148 mi for Portage against a real 103. So the resolved city must BE the stated city, compared after
+normalizing (lowercase, drop a leading "City/Town/Village of", expand `Mt.`→Mount / `St.`→Saint /
+`Ft.`→Fort, strip punctuation) and compared EXACTLY — never a prefix test, since "Portage County"
+starts with "Portage". City-only rows additionally use Nominatim's structured `city=`+`state=` form,
+which resolves Portage to 0.2 mi and honestly returns nothing for "LaCrosse". A confident wrong
+answer misprices a quote; a reported miss costs a minute with the existing address picker.

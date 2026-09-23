@@ -356,6 +356,69 @@ export async function clearDemoDataAction(confirm: string) {
   return { ok: true as const, cleared };
 }
 
+/* ---------------- Geo backfill (#147, D184) ---------------- */
+
+/**
+ * Coverage snapshot for the "Travel time" panel — how much of the book can
+ * produce a travel number at all, and how much of that is precise enough to
+ * price a quote from. Read-only.
+ */
+export async function travelCoverageAction() {
+  await requirePerm("manage_users");
+  const { travelCoverage } = await import("@/lib/geo-backfill");
+  const { officesFromSettings, quoteOrigin, hasCoords } = await import("@/lib/geo");
+  const coverage = await travelCoverage();
+  const origin = quoteOrigin(await officesFromSettings());
+  return {
+    ...coverage,
+    originOk: !!origin && hasCoords(origin),
+    originName: origin?.name || "",
+  };
+}
+
+/**
+ * One BOUNDED batch of the geocode backfill, then one bounded batch of route
+ * warming once every venue has coordinates. Bounded because the whole job is
+ * ~1,300 venues paced at 1 request/second against Nominatim and OSRM, which
+ * no server action can sit through; the client calls this repeatedly and
+ * shows `remaining`. Both phases are idempotent, so a batch that dies is
+ * retried simply by calling again (D184).
+ */
+export async function geocodeBatchAction(input?: { limit?: number; phase?: "geocode" | "routes" }) {
+  await requirePerm("manage_users");
+  const limit = Math.max(1, Math.min(25, Number(input?.limit) || 10));
+  const { backfillVenueCoords, warmRoutes } = await import("@/lib/geo-backfill");
+
+  if (input?.phase === "routes") {
+    const r = await warmRoutes({ limit, dryRun: false });
+    revalidatePath("/", "layout");
+    return {
+      ok: true as const,
+      phase: "routes" as const,
+      done: r.warmed,
+      failed: r.failed,
+      remaining: r.remaining,
+      originName: r.officeName,
+    };
+  }
+
+  const r = await backfillVenueCoords({ limit, dryRun: false });
+  revalidatePath("/", "layout");
+  return {
+    ok: true as const,
+    phase: "geocode" as const,
+    done: r.geocoded,
+    building: r.geocodedBuilding,
+    city: r.geocodedCity,
+    failed: r.failures.length,
+    remaining: r.remaining,
+    // Surface the rejections — a venue the geocoder got wrong is worse than
+    // one it skipped, so the reasons are shown rather than buried in a count.
+    failures: r.failures.slice(0, 25).map((f) => ({ query: f.query, reason: f.reason, got: f.got })),
+    originName: "",
+  };
+}
+
 /* ---------------- Locations (offices) ----------------
    Port of Settings.dc.html saveOffice/removeOffice — the offices array is a
    field of the AppSettings blob (setSettings({ offices })). Coords come from

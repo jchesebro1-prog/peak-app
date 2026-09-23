@@ -6775,6 +6775,84 @@ current-tense wording rather than left describing a gap that had just closed.
    is to proxy the bytes through the server as the archive already does, at the cost of the
    ~4.5 MB function-body ceiling.
 
+## 147. Imported customers have no location, so travel time is blank for the whole book — PARTIAL 2026-09-22 (D179-D185)
+
+**Reported:** Jeff: "How do we use all of the customers that are in the app currently and ensure they
+have an address that is actually located for travel time. When I imported the data I don't think it
+took the location and now doesn't have the travel time."
+
+**Root cause:** `estimate()` (`src/lib/geo.ts`) resolves travel as manual override → cached OSRM
+route → haversine-from-office → none, and every tier but the manual override needs lat/lng ON THE
+VENUE. The Daylite export carried `City` and `State/Province` and nothing else — no street address
+in any of the four files — so `scripts/import-daylite.ts:190` writing sites with only city+state was
+not a bug; there was nothing else to take. Measured against the live book: **1,336 venues, 0 with
+coordinates, 0 with a street address**, 990 city-only, 346 with no address at all. The 2026-07-21
+export audit (`docs/superpowers/specs/daylite-export-audit-checklist.md`) checked relationships,
+roles, notes, custom fields, keywords and attachments — it never asked whether the export carried a
+mailing address, which is how this shipped.
+
+**Shipped so far:**
+- `src/lib/geo-backfill.ts` — two bounded, idempotent, resumable phases: `backfillVenueCoords()`
+  (geocode venues missing coordinates) and `warmRoutes()` (fetch the real OSRM route from the quote
+  origin, which is what lifts travel off the haversine tier), plus `travelCoverage()`.
+- `scripts/enrich-addresses.ts` (`npm run geo -- status|geocode|routes|enrich`) — dry-run by default,
+  hosted writes gated by `requireHostedConfirmation`. `scripts/daylite-ids.ts` extracts the
+  deterministic id helpers so the importer and this tooling cannot drift (D180).
+- `geo.searchCity()` — Nominatim's structured `city=`+`state=` form for city-only rows.
+- Settings → Beta → **"Travel time — geocode addresses"**: coverage readout plus a batched runner
+  that drives both phases to completion 10 venues at a time (D184).
+- `maxDuration = 60` on `/import`, which every other heavy route already had.
+
+**Measured on the real book:** 949 of 990 city-only venues geocoded (95.9%) from 293 deduped
+queries. The 41 failures are source-data typos (`Broadhead`, `Mayvillle`, `Sun Prarie`, `DePere`,
+`Wisc. Dells`, one row with a zip in the city field) and genuine ambiguities (`Salem`→Salem Lakes,
+`Menomonee`→Menomonee Falls, `Hill Point`→Town of Washington) — all reported, never guessed.
+
+**Two gates, both proven necessary.** A state-only check passed two badly wrong matches: `Portage,
+WI` → **Portage County** (63.7 mi out) and `LaCrosse, WI` → **Town of Baraboo** (79.6 mi out), both
+in Wisconsin. Travel read 148 mi for Portage against a real 103. A city-match gate plus the
+structured query fixed both (Portage now 0.2 mi off; LaCrosse honestly returns nothing) — D185.
+
+**Still open — this is why the item is PARTIAL:**
+- **Production is untouched.** No `DATABASE_URL` on this machine, so all 1,336 prod venues still
+  have zero coordinates and travel time is still blank there.
+- **No street addresses exist.** Jeff has confirmed Daylite holds them; the July export template
+  omitted them. Until the re-export lands, geocoding yields town centres — usable for scheduling,
+  NOT precise enough to price a quote from, which was the stated requirement.
+- The `enrich --csv` path is built but has never been run against a real file (no file to run on).
+- Stage 2 remainder: Import-hub lat/lng columns and `import-daylite.ts` reading the address columns.
+- Stage 3: the "Open in Maps" link.
+- The report on open quotes priced against missing travel (Jeff: report only, decide later).
+
+**Files:** `src/lib/geo-backfill.ts` (new), `scripts/enrich-addresses.ts` (new),
+`scripts/daylite-ids.ts` (new), `src/lib/geo.ts`, `src/app/(app)/settings/actions.ts`,
+`src/app/(app)/settings/settings-client.tsx`, `src/app/(app)/import/page.tsx`, `package.json`.
+Design: `docs/superpowers/specs/2026-09-22-customer-address-geocoding-design.md`. No schema change.
+
+## 147b. Import: "<thing> Label N" columns stole the value column, and four types silently duplicated on "Update existing" — DONE 2026-09-22 (D179-D185)
+
+Found while diagnosing #147, by running the real 1,550-row `Companies.csv` through the app's own
+parser.
+
+**(a) autoMap fed the label column into the value field.** The fuzzy pass matches on "contains", and
+Daylite exports `Phone Label 1` BEFORE `Phone 1` (same for email). `"phonelabel1"` contains
+`"phone"`, so the label column claimed the field at the lower index and the real number was never
+mapped — the import wrote `phone="Work"` / `phone="Business"` for every customer in the file. A
+`<thing> Label N` column describes another column and never holds the value, so the fuzzy pass now
+skips headers containing "label" unless the field being mapped asks for one. Verified against the
+real export: phone → `[3] "Phone 1"` → `(608) 756-2326`, email → `[5] "Email 1"`.
+
+**(b) "Update existing" created duplicates for four types.** `commitImport` gated on
+`existing && mode === "update" && w.update`, so a type whose writer has no `update` fell through to
+`create()` — making a duplicate of the record the user explicitly asked to update. `flametests`,
+`inspections`, `surveys` and `projects` are all in that state: their `find` returns a match stub
+with no id, so there is nothing to address an update at. Those rows are now **skipped and counted**
+rather than duplicated, and `UPDATABLE_TYPES` keeps the import hub from offering the mode at all.
+Giving those four a genuine `update` needs store-level update APIs and is left open.
+
+**Files:** `src/app/(app)/import/parse.ts`, `src/app/(app)/import/registry.ts`,
+`src/app/(app)/import/controls.tsx`, `src/app/(app)/import/page.tsx`.
+
 ## 148. The dev auto-seed is fire-and-forget, making every gate in this repo slightly untrustworthy — OPEN
 
 **Reported:** found independently by multiple agents during #145's review (Tasks 2, 6's merge, 10,

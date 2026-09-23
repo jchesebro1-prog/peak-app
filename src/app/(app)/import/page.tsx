@@ -5,7 +5,7 @@ import { isoDateOf } from "@/lib/catalog-books";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { IMPORT_TYPES, getTypeMeta } from "./types";
 import { linksCustomer, type CustomerRef } from "./link";
-import { allCounts } from "./registry";
+import { allCounts, UPDATABLE_TYPES } from "./registry";
 import { PastePreview } from "./controls";
 
 export const metadata = { title: "Import & export — Quartzite-6" };
@@ -23,6 +23,16 @@ const CSS = `
   .im-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(304px, 1fr)); gap: 14px; }
   @media (max-width: 720px) { .im-steps { display: none !important; } }
 `;
+
+/**
+ * #147 — a commit writes one row at a time, and each row is several sequential
+ * round trips to Postgres (find → read → upsert → refresh). A real customer
+ * file is 1,500+ rows, which against hosted Neon runs far past Vercel's
+ * default function ceiling; the action dies mid-file with no result and a
+ * partially-written import. Every other heavy route in the app already opts
+ * into the 60s maximum — this one never did.
+ */
+export const maxDuration = 60;
 
 export default async function ImportPage({
   searchParams,
@@ -715,6 +725,7 @@ function ImportFlowModal({
                   accent="var(--accent)"
                   today={isoDateOf(Date.now())}
                   customerIndex={customerIndex}
+                  canUpdate={UPDATABLE_TYPES.has(type.key)}
                 />
               </>
             )}

@@ -1228,7 +1228,16 @@ export async function commitImport(
         res.skipped++;
         continue;
       }
-      if (existing && mode === "update" && w.update) {
+      if (existing && mode === "update") {
+        if (!w.update) {
+          // This type has no update path (its `find` returns a match stub, not
+          // an addressable record). Falling through to create() would make a
+          // DUPLICATE of a record the user explicitly asked to update — silent
+          // data corruption. Skip and count it instead; `canUpdate` below
+          // keeps the UI from offering the mode at all (#147).
+          res.skipped++;
+          continue;
+        }
         noteWarnings(r.i, await w.update(existing, r.values, cache, ctx, link));
         res.updated++;
         res.written.push(r);
@@ -1245,6 +1254,22 @@ export async function commitImport(
   res.customersCreated = link.customersCreated;
   res.customersLinked = link.customersLinked;
   return res;
+}
+
+/**
+ * Whether a type can genuinely UPDATE an existing record, i.e. its writer has
+ * an `update`. Four types do not (`flametests`, `inspections`, `surveys`,
+ * `projects`): their `find` returns a lightweight match stub with no id, so
+ * there is nothing to address an update at. The import hub reads this to
+ * disable the "Update existing" mode rather than offer a choice that cannot
+ * work, and commitImport skips defensively if it is asked anyway (#147).
+ */
+export const UPDATABLE_TYPES: ReadonlySet<string> = new Set(
+  Object.keys(WRITERS).filter((k) => !!WRITERS[k].update)
+);
+
+export function canUpdate(key: string): boolean {
+  return UPDATABLE_TYPES.has(key);
 }
 
 /** Records → export objects keyed by field.key (read-only). */
