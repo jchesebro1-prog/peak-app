@@ -15,7 +15,11 @@ import * as schema from "./schema";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Db = PgDatabase<any, typeof schema>;
 
-const globalForDb = globalThis as unknown as { __peakDb?: Promise<Db> };
+const globalForDb = globalThis as unknown as {
+  __peakDb?: Promise<Db>;
+  __peakReady?: Promise<Db>;
+  __peakSeeding?: boolean;
+};
 
 /**
  * True while `next build` is running. The build fans out across ~7 worker
@@ -67,18 +71,29 @@ async function createDb(): Promise<Db> {
 export function getDb(): Promise<Db> {
   if (!globalForDb.__peakDb) {
     globalForDb.__peakDb = createDb();
-    // Dev auto-seed runs AFTER the db promise resolves — never inside
-    // createDb(), because seeding uses doc-store helpers that call getDb()
-    // (awaiting the same promise → deadlock). Skipped during a build: those
-    // datadirs are throwaway, so seeding them is wasted work per worker.
+    // Dev auto-seed runs after the database opens and is part of the readiness
+    // promise. This prevents requests from racing the bootstrap. The seed
+    // helpers use doc-store functions that call getDb(), so while the seed is
+    // running getDb() deliberately returns the raw database promise; callers
+    // outside the seed await __peakReady and therefore see a fully bootstrapped
+    // database. Skipped during a build: those datadirs are throwaway, so
+    // seeding them is wasted work per worker.
     if (!process.env.DATABASE_URL && !isBuild) {
-      void globalForDb.__peakDb
-        .then(async (db) => {
+      globalForDb.__peakReady = globalForDb.__peakDb.then(async (db) => {
+        globalForDb.__peakSeeding = true;
+        try {
           const { seedIfEmpty } = await import("./seed-data");
           await seedIfEmpty(db);
-        })
-        .catch((err) => console.error("[db] dev auto-seed failed:", err));
+          return db;
+        } finally {
+          globalForDb.__peakSeeding = false;
+        }
+      });
+    } else {
+      globalForDb.__peakReady = globalForDb.__peakDb;
     }
   }
-  return globalForDb.__peakDb;
+  return globalForDb.__peakSeeding
+    ? globalForDb.__peakDb
+    : (globalForDb.__peakReady ?? globalForDb.__peakDb);
 }
