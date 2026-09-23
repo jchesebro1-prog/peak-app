@@ -118,6 +118,7 @@ import { emailFor, legacyEmailFor } from "@/lib/team";
 import { gridProjectsSeed } from "@/db/seeds/grid-projects";
 import { quotesSeed } from "@/db/seeds/quotes";
 import { customersSeed } from "@/db/seeds/customers";
+import { commsSeed } from "@/db/seeds/comms";
 import { vendorProfilesSeed } from "@/db/seeds/vendors";
 import ExcelJS from "exceljs";
 import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
@@ -491,6 +492,7 @@ const inboxShellSource = readFileSync(join(process.cwd(), "src/app/(app)/inbox/i
 const inboxCommandSource = readFileSync(join(process.cwd(), "src/app/(app)/inbox/command-bar.tsx"), "utf8");
 const siteVisitSource = readFileSync(join(process.cwd(), "src/app/(app)/inbox/site-visit-modal.tsx"), "utf8");
 ok(inboxShellSource.includes("el.closest('[role=\"dialog\"], [role=\"menu\"]')"), "#46 arrow navigation yields to dialogs and popover menus");
+ok(inboxShellSource.includes("e.repeat && now - lastArrowAtRef.current < 120"), "#46 held arrow repeats are throttled");
 ok(inboxCommandSource.includes('role="menu"'), "#46 Filter/Sort popovers expose a menu boundary");
 ok(siteVisitSource.includes('role="dialog"') && siteVisitSource.includes('aria-modal="true"'), "#46 site-visit modal exposes a dialog boundary");
 
@@ -500,6 +502,8 @@ const projectStoreSource = readFileSync(join(process.cwd(), "src/lib/stores/proj
 ok(projectActionsSource.includes('str(formData, "signature")') && projectActionsSource.includes("data:image\\/png;base64"), "#44 sign-off action requires a bounded drawn PNG signature");
 ok(projectViewSource.includes('import SignaturePad') && projectViewSource.includes("<SignaturePad />"), "#44 sign-off form captures a phone-drawn signature");
 ok(projectStoreSource.includes("signature?: string") && projectActionsSource.includes("Walk the completed site with the end user"), "#44 stores sign-off signature and creates the walkthrough follow-up");
+const inboxFixture = commsSeed().find((thread) => thread.id === "C-1019");
+ok(!!inboxFixture && inboxFixture.link === null && inboxFixture.messages.length === 3 && new Set(inboxFixture.messages.map((message) => message.author)).size === 3, "#46 seed includes a chip-less three-author thread for participant rendering");
 
 /* --- Offline navigation contract --- */
 const serviceWorkerSource = readFileSync(join(process.cwd(), "public/sw.js"), "utf8");

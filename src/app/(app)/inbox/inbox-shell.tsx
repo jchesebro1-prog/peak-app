@@ -454,6 +454,7 @@ export default function InboxShell({
   // current (possibly shorter) list so ArrowDown/ArrowUp continue from where
   // the vanished row was.
   const lastIndexRef = useRef(0);
+  const lastArrowAtRef = useRef(0);
   const lastListKeyRef = useRef(listKey);
   useEffect(() => {
     if (lastListKeyRef.current !== listKey) {
@@ -471,6 +472,11 @@ export default function InboxShell({
     if (narrow || isSearch || !!compose || logging) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const now = performance.now();
+      // A held arrow key should advance at a readable cadence, not issue a
+      // navigation/mark-read request for every browser repeat event.
+      if (e.repeat && now - lastArrowAtRef.current < 120) return;
+      lastArrowAtRef.current = now;
       const el = e.target as HTMLElement | null;
       // SELECT isn't in the brief's guard list, but the reading pane (Owner,
       // link-type/link-record pickers in thread-reader.tsx) and the list's

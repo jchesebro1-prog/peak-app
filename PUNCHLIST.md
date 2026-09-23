@@ -3250,17 +3250,18 @@ Do not pick up standalone; the rebuild session owns the nav.
 - CRM mode's Sort▾ menu has no "Default (waiting first)" entry to return to the mode default
   after an explicit sort; mode flips also carry an explicit sort/filter param across —
   product call (Jeff) whether flips should reset refinements.
-- `crmMode` reconciliation and scroll-on-selection are done; key-repeat throttling and seed
-  coverage for chip-less and multi-author threads remain.
-- Test/seed gaps remain for held-arrow behavior and the "+N" participants badge.
+- `crmMode` reconciliation, scroll-on-selection, key-repeat throttling, and seed coverage for
+  chip-less and multi-author threads are done.
+- Automated source-level coverage now protects the held-arrow guard and the "+N" participants
+  fixture.
 - **Jeff to confirm:** calls/flagged smart views now follow the mode's sort (date-desc in
   plain mode; previously always waiting-first) — intended?
 
 **Status:** PARTIAL 2026-09-23 — the CRM mode now reconciles server changes while mounted, the
 arrow-navigation index resets with list changes and tracks click selections, and Sort▾ now has a
 Default entry that clears an explicit refinement. Arrow navigation now also yields to the site-visit
-dialog and Filter/Sort menus. Remaining mode-flip refinement policy and seed/automated keyboard
-coverage are still open.
+dialog and Filter/Sort menus; held-repeat and representative seed fixtures are covered. Remaining
+mode-flip refinement policy and the smart-view sort preference are product calls for Jeff.
 
 ---
 
