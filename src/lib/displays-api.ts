@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { requireUser } from "@/lib/session";
 import type { CatalogPart } from "@/lib/stores/catalog";
 import type { PartSpecFields } from "@/lib/bid-spec";
+import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 /**
  * Read-only Displays Manager boundary. A deployment may provide a dedicated
@@ -84,4 +85,23 @@ export function catalogEtag(parts: CatalogPart[]): string {
 
 export function unauthorizedMessage(error: unknown): string {
   return error instanceof Error && error.message.includes("token") ? error.message : "Authentication required.";
+}
+
+const DISPLAY_RATE_LIMIT = 120;
+const DISPLAY_RATE_WINDOW_MS = 60_000;
+
+export function displaysRateLimit(req: Request) {
+  const bearer = req.headers.get("authorization") || "";
+  const identity = bearer.startsWith("Bearer ")
+    ? createHash("sha256").update(bearer).digest("hex")
+    : clientIp(req) || "session";
+  return rateLimit(`displays-api:${identity}`, DISPLAY_RATE_LIMIT, DISPLAY_RATE_WINDOW_MS);
+}
+
+export function displaysRateHeaders(result: ReturnType<typeof displaysRateLimit>): Record<string, string> {
+  return {
+    "RateLimit-Limit": String(DISPLAY_RATE_LIMIT),
+    "RateLimit-Remaining": String(result.remaining),
+    "RateLimit-Reset": String(Math.ceil((Date.now() + (result.ok ? DISPLAY_RATE_WINDOW_MS : result.retryAfterMs)) / 1000)),
+  };
 }

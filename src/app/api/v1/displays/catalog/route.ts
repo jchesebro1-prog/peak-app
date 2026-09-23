@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { list as listCatalog } from "@/lib/stores/catalog";
-import { apiEnvelope, authorizeDisplaysRequest, catalogEtag, publicCatalogPart, unauthorizedMessage } from "@/lib/displays-api";
+import { apiEnvelope, authorizeDisplaysRequest, catalogEtag, displaysRateHeaders, displaysRateLimit, publicCatalogPart, unauthorizedMessage } from "@/lib/displays-api";
 import type { SpecCatalogPart } from "@/lib/bid-spec";
 
 export async function GET(req: Request) {
@@ -9,6 +9,8 @@ export async function GET(req: Request) {
   } catch (error) {
     return NextResponse.json({ error: unauthorizedMessage(error) }, { status: 401 });
   }
+  const rate = displaysRateLimit(req);
+  if (!rate.ok) return NextResponse.json({ error: "Rate limit exceeded." }, { status: 429, headers: { ...displaysRateHeaders(rate), "retry-after": String(Math.ceil(rate.retryAfterMs / 1000)) } });
   const url = new URL(req.url);
   const q = (url.searchParams.get("q") || "").trim().toLowerCase();
   const category = (url.searchParams.get("category") || "").trim();
@@ -16,7 +18,7 @@ export async function GET(req: Request) {
   const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 500), 1), 2000);
   const parts = (await listCatalog()) as SpecCatalogPart[];
   const etag = catalogEtag(parts);
-  if (req.headers.get("if-none-match") === etag) return new NextResponse(null, { status: 304, headers: { etag } });
+  if (req.headers.get("if-none-match") === etag) return new NextResponse(null, { status: 304, headers: { etag, ...displaysRateHeaders(rate) } });
   const data = parts
     .filter((part) => !since || (part.updatedAt || part.pricedAt || 0) > since)
     .filter((part) => !category || part.category === category)
@@ -25,6 +27,6 @@ export async function GET(req: Request) {
     .slice(0, limit)
     .map(publicCatalogPart);
   return NextResponse.json(apiEnvelope(data, { count: data.length, readOnly: true }), {
-    headers: { etag, "cache-control": "private, max-age=60", "x-api-read-only": "true" },
+    headers: { etag, "cache-control": "private, max-age=60", "x-api-read-only": "true", ...displaysRateHeaders(rate) },
   });
 }
