@@ -2637,7 +2637,12 @@ anyone who can reach Manual mode can already reach `/design/quick` and see
 the same numbers today, so this doesn't create a new exposure, only a
 second place the existing one shows up. Revisit if Manual mode ever gets a
 permission boundary Quick Design doesn't have.
-## D132. Quartzite native shell — Capacitor remote/hybrid Phase 1 (2026-09-20)
+## D174. Quartzite native shell — Capacitor remote/hybrid Phase 1 (2026-09-20)
+
+*Renumbered 2026-09-22: this entry and D132 (Venue Assessments) were both written as D132 on
+2026-09-20. D132 keeps the Venue Assessments meaning — it holds the earlier position and
+`docs/superpowers/plans/2026-08-18-venue-assessments.md` cites it that way. Citations of the
+native shell were repointed here.*
 
 The mobile transition brief confirms a native wrapper via Capacitor, distributed
 through TestFlight/App Store, with full offline-first field capture and mobile
@@ -3520,7 +3525,7 @@ archives; a PGlite-backed end-to-end test (the `deps` injection points exist).
 
 ## D153. Native shell signs in through a Safari sheet and returns by `quartzite://auth` (2026-09-21)
 
-The Capacitor shell (D132) could not sign in: Capacitor hands any non-app host to the system
+The Capacitor shell (D174) could not sign in: Capacitor hands any non-app host to the system
 browser, so Auth.js's state/PKCE cookies were set in the WebView while Google's callback landed in
 Safari. Verified on the iOS 27 simulator. Jeff chose to keep OAuth in a real browser context rather
 than spoof the WebView's user agent to satisfy Google's embedded-browser check.

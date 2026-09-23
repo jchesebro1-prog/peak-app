@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the Phase 1 Capacitor shell (D132) field-ready: native camera into assessment and inspection photos, a Bluetooth laser (Leica DISTO) that fills measurement fields with a manual fallback everywhere, push notifications for the to-do bell, the #33 readability pass on the field screens, and a TestFlight-ready iOS project whose signing/upload steps are handed to Jeff.
+**Goal:** Make the Phase 1 Capacitor shell (D174) field-ready: native camera into assessment and inspection photos, a Bluetooth laser (Leica DISTO) that fills measurement fields with a manual fallback everywhere, push notifications for the to-do bell, the #33 readability pass on the field screens, and a TestFlight-ready iOS project whose signing/upload steps are handed to Jeff.
 
 **Architecture:** Every native call sits behind `src/lib/platform.ts` (`hasNativeCapability`) and a hydration-safe hook, so SSR and the first client paint are unchanged on the web. Three seams: `src/lib/capture/*` (photos), `src/lib/measure/*` (laser; Web Bluetooth on Android/desktop Chrome, `@capacitor-community/bluetooth-le` in the shell), `src/lib/push/*` (FCM HTTP v1 sender + cron sweep over the derived bell). Readability is a pure `DISCLOSURE` table plus adoption of the existing `useBreakpoint` / `--pk-h*` foundation. Spec: `docs/superpowers/specs/2026-09-21-native-shell-phase-2-design.md`.
 

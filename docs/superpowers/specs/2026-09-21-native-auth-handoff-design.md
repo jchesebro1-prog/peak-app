@@ -1,7 +1,7 @@
 # Native shell: Google sign-in via Safari hand-off and `quartzite://` return
 
 Status: approved by Jeff 2026-09-21 (design presented in session; "Approved, go").
-Builds on D132 (Capacitor remote/hybrid shell, Phase 1). Unblocks the first thing the shell
+Builds on D174 (Capacitor remote/hybrid shell, Phase 1). Unblocks the first thing the shell
 cannot do today: sign in.
 
 ## Problem
