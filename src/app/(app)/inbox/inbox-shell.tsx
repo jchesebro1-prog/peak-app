@@ -147,6 +147,13 @@ export default function InboxShell({
   // can't race the first one's persist and land out of order.
   const [crmMode, setCrmModeState] = useState(initialCrmMode);
   const [modePending, startTransition] = useTransition();
+  // A refresh from another tab/device can change the server preference while
+  // this shell stays mounted; reconcile the optimistic local copy with it.
+  const [previousInitialCrmMode, setPreviousInitialCrmMode] = useState(initialCrmMode);
+  if (previousInitialCrmMode !== initialCrmMode) {
+    setPreviousInitialCrmMode(initialCrmMode);
+    setCrmModeState(initialCrmMode);
+  }
   const onToggleMode = (on: boolean) => {
     const previous = crmMode;
     setCrmModeState(on);
@@ -447,6 +454,19 @@ export default function InboxShell({
   // current (possibly shorter) list so ArrowDown/ArrowUp continue from where
   // the vanished row was.
   const lastIndexRef = useRef(0);
+  const lastListKeyRef = useRef(listKey);
+  useEffect(() => {
+    if (lastListKeyRef.current !== listKey) {
+      lastListKeyRef.current = listKey;
+      lastIndexRef.current = 0;
+    }
+  }, [listKey]);
+  useEffect(() => {
+    if (narrow || isSearch) return;
+    const ids = list.rows.filter((r) => !r.isDraft).map((r) => r.id);
+    const index = currentThreadId ? ids.indexOf(currentThreadId) : -1;
+    if (index >= 0) lastIndexRef.current = index;
+  }, [currentThreadId, list.rows, narrow, isSearch]);
   useEffect(() => {
     if (narrow || isSearch || !!compose || logging) return;
     const onKey = (e: KeyboardEvent) => {

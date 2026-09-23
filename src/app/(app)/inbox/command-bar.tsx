@@ -31,6 +31,7 @@ const FILTERS: Opt[] = [
 ];
 
 const SORTS: Opt[] = [
+  { value: "", label: "Default" },
   { value: "date", label: "Date (newest)" },
   { value: "from", label: "From (A–Z)" },
   { value: "subject", label: "Subject (A–Z)" },

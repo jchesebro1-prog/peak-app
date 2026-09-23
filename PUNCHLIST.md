@@ -3252,7 +3252,10 @@ Do not pick up standalone; the rebuild session owns the nav.
 - **Jeff to confirm:** calls/flagged smart views now follow the mode's sort (date-desc in
   plain mode; previously always waiting-first) — intended?
 
-**Status:** OPEN — polish batch, no urgency.
+**Status:** PARTIAL 2026-09-23 — the CRM mode now reconciles server changes while mounted, the
+arrow-navigation index resets with list changes and tracks click selections, and Sort▾ now has a
+Default entry that clears an explicit refinement. Remaining modal-keyboard plumbing, mode-flip
+refinement policy, and seed/automated keyboard coverage are still open.
 
 ---
 
