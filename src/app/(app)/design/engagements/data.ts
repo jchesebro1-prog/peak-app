@@ -9,7 +9,7 @@ import { all as allCustomers } from "@/lib/stores/customers";
 import { getAllDesigns } from "@/lib/stores/designs";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { activeUsers } from "@/lib/users";
-import { getSettings } from "@/lib/settings";
+import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
 
 /**
  * Shared server loader for the Consulting module (D90) — the projects-module
@@ -48,6 +48,9 @@ export type ConsultingData = {
   designsById: Record<string, DesignLite>;
   roster: string[];
   phaseMenu: string[];
+  /** #145 D165 — the discipline vocabulary, for the creation modal's
+   *  checkbox row (mirrors phaseMenu's settings-merge pattern). */
+  disciplineMenu: string[];
   /** All visits (lite) — the view filters by engagement / company. */
   visits: VisitLite[];
   /** Every customer + its venues, for the manual-project modal (#135). */
@@ -114,6 +117,7 @@ export async function loadConsultingData(): Promise<ConsultingData> {
     designsById,
     roster: users.map((u) => u.name),
     phaseMenu: mergedConsultingPhases(settings.consultingPhases),
+    disciplineMenu: mergedConsultingDisciplines(settings.consultingDisciplines),
     visits: visitLites,
     customers: customerDocs.map((c) => ({
       id: c.id,

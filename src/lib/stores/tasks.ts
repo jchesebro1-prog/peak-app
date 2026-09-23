@@ -2,6 +2,7 @@ import {
   listDocs, getDoc, upsertDoc, patchDoc, softDeleteDoc, insertDocIfAbsent, insertWithPrefixedId,
 } from "@/db/doc-store";
 import type { ProjectTask, ProjectStage, ProjectRecord } from "@/lib/stores/projects";
+import { shiftForMilestone, shiftTasksByIds } from "@/lib/consulting-schedule";
 
 /* ============================================================
    Tasks (#17) — the app's first cross-record task collection,
@@ -39,10 +40,20 @@ export type TaskRecord = {
   projectId: string | null;      // parent pointers — nullable, no FK (D85 convention)
   quoteId: string | null;
   designId: string | null;       // added D149 — the reusable-template feature's design task-linkage
+  /** #145 — the fourth nullable parent pointer (D85 convention). */
+  engagementId: string | null;
   coverageKey: string | null;    // stable template/auto key; null for manual tasks
   assigneeUserId: string | null; // users.id ("u1"); null = unassigned or legacy
   assigneeName: string;          // denormalized display name; "" = unassigned
   dueAt: number | null;          // epoch-ms
+  /** #145 — Gantt bar start; dueAt is the bar end. */
+  startAt: number | null;
+  /** #145 — template provenance: which phase window placed this task, and
+   *  at what percentages. Null for a manually added task. */
+  schedule: { phaseId: string; startPct: number; lengthPct: number } | null;
+  /** #145 D168 — set when a human drags the bar. Excluded from every
+   *  milestone-shift pre-tick thereafter. */
+  handScheduled: boolean;
   status: TaskStatus;
   notes: string;
   createdBy: string;             // display name
@@ -175,9 +186,10 @@ export function isOverdue(t: Pick<TaskRecord, "dueAt" | "status">, nowMs: number
 export function taskFromLegacy(projectId: string, pt: ProjectTask, at: number): TaskRecord {
   return {
     id: pt.id, title: pt.title, section: pt.section || "Install",
-    projectId, quoteId: null, designId: null, coverageKey: null,
+    projectId, quoteId: null, designId: null, engagementId: null, coverageKey: null,
     assigneeUserId: null, assigneeName: pt.assignee || "",
-    dueAt: null, status: pt.done ? "done" : "open", notes: "",
+    dueAt: null, startAt: null, schedule: null, handScheduled: false,
+    status: pt.done ? "done" : "open", notes: "",
     createdBy: pt.assignee || "", createdAt: at, updatedAt: at,
     doneAt: pt.done ? (pt.doneAt ?? at) : null,
   };
@@ -216,19 +228,31 @@ export function taskBellItems(all: TaskRecord[], me: string, nowMs: number): Tas
 
 /* ---------- normalize + CRUD ---------- */
 
-function normalizeTask(raw: Partial<TaskRecord> & { id: string }): TaskRecord {
+export function normalizeTask(raw: Partial<TaskRecord> & { id: string }): TaskRecord {
   const at = raw.createdAt ?? now();
-  return {
+  const t: TaskRecord = {
     id: raw.id, title: raw.title || "New task", section: raw.section ?? "Install",
     projectId: raw.projectId ?? null, quoteId: raw.quoteId ?? null,
     designId: raw.designId ?? null,
+    engagementId: raw.engagementId ?? null,
     coverageKey: raw.coverageKey ?? null,
     assigneeUserId: raw.assigneeUserId ?? null, assigneeName: raw.assigneeName ?? "",
     dueAt: raw.dueAt ?? null,
+    startAt: typeof raw.startAt === "number" ? raw.startAt : null,
+    schedule:
+      raw.schedule && typeof raw.schedule === "object" && typeof raw.schedule.phaseId === "string"
+        ? {
+            phaseId: raw.schedule.phaseId,
+            startPct: Number(raw.schedule.startPct) || 0,
+            lengthPct: Number(raw.schedule.lengthPct) || 0,
+          }
+        : null,
+    handScheduled: !!raw.handScheduled,
     status: (STATUSES as readonly string[]).includes(raw.status as string) ? (raw.status as TaskStatus) : "open",
     notes: raw.notes ?? "", createdBy: raw.createdBy ?? "",
     createdAt: at, updatedAt: raw.updatedAt ?? at, doneAt: raw.doneAt ?? null,
   };
+  return t;
 }
 
 export async function allTasks(): Promise<TaskRecord[]> {
@@ -250,6 +274,11 @@ export async function tasksForQuote(quoteId: string): Promise<TaskRecord[]> {
 /** D149 — the reusable-template feature's design side, mirroring tasksForQuote. */
 export async function tasksForDesign(designId: string): Promise<TaskRecord[]> {
   return (await allTasks()).filter((t) => t.designId === designId);
+}
+
+/** #145 — the consulting side of the collection. */
+export async function tasksForEngagement(engagementId: string): Promise<TaskRecord[]> {
+  return (await allTasks()).filter((t) => t.engagementId === engagementId);
 }
 
 export async function getTask(id: string): Promise<TaskRecord | null> {
@@ -314,6 +343,70 @@ export async function updateTask(
 
 export async function removeTask(id: string): Promise<void> {
   await softDeleteDoc("tasks", id);
+}
+
+/**
+ * #145 — a general-purpose task patch for callers that need to mutate more
+ * than updateTask's fixed field list (the Schedule tab's drag persistence
+ * and milestone-shift both need startAt/dueAt/handScheduled together). Not
+ * itself a server action and not exported from a "use server" file, so it
+ * is NOT directly POST-reachable (see AGENTS.md's Next 16 note) — every
+ * caller that touches storage from a "use server" module must call
+ * requireUser() before reaching this, same as every other action in
+ * schedule-actions.ts already does.
+ */
+export async function patchTask(
+  id: string,
+  mutate: (t: TaskRecord) => TaskRecord | void
+): Promise<TaskRecord | null> {
+  return patchDoc<TaskRecord>("tasks", id, (t) => {
+    const next = (mutate(t) as TaskRecord) || t;
+    next.updatedAt = now();
+    return next;
+  });
+}
+
+/**
+ * #145 D168 review — the writer half of a milestone shift, pulled out of
+ * `moveMilestoneAction` (schedule-actions.ts, "use server") so it's an
+ * ordinary module import the spec harness can call directly, the same
+ * Data Access Layer split `performCapture` uses (engagement-activity-
+ * write.ts) — every export of a "use server" file is directly
+ * POST-reachable, so the actual write logic lives here and the action is
+ * just `requireUser()` then delegate.
+ *
+ * Branches on whether the milestone has a phase: `shiftForMilestone`
+ * pre-ticks and moves only that phase's untouched tasks (a null phase
+ * always returns `moved: []` from it, by design); `shiftTasksByIds`
+ * covers the null-phase manual checklist instead, where the caller's own
+ * `alsoMoveTaskIds` — not a phase match — IS the membership. Either way,
+ * `allowed` re-filters against exactly the ids the caller passed, so a
+ * `shiftTasksByIds` result (already scoped to those same ids) is filtered
+ * redundantly but harmlessly, and a `shiftForMilestone` result stays
+ * scoped to what the caller actually ticked.
+ */
+export async function applyMilestoneTaskShifts(
+  ms: { phaseId: string | null },
+  deltaMs: number,
+  alsoMoveTaskIds: readonly string[],
+  tasks: readonly TaskRecord[]
+): Promise<number> {
+  if (!alsoMoveTaskIds.length) return 0;
+  const shifts = ms.phaseId
+    ? shiftForMilestone({ phaseId: ms.phaseId }, deltaMs, tasks).moved
+    : shiftTasksByIds(alsoMoveTaskIds, deltaMs, tasks);
+  const allowed = new Set(alsoMoveTaskIds);
+  let moved = 0;
+  for (const s of shifts) {
+    if (!allowed.has(s.id)) continue;
+    await patchTask(s.id, (t) => {
+      t.startAt = s.startAt;
+      t.dueAt = s.dueAt;
+      return t; // NOT handScheduled — this was a milestone move, not a drag
+    });
+    moved++;
+  }
+  return moved;
 }
 
 /** One-way, idempotent: copy any project's embedded tasks[] into the tasks

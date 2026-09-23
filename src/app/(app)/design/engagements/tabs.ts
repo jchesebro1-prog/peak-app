@@ -8,6 +8,8 @@
  */
 export const TABS = [
   "overview",
+  "schedule",
+  "activity",
   "phases",
   "milestones",
   "meetings",

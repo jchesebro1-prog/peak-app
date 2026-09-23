@@ -82,6 +82,8 @@ const ROUTES = [
   "/leads",
   "/opportunities",
   "/schedule",
+  "/schedule?view=timeline", // #145 D172 — consulting rows grouped above installs
+  "/schedule?view=people", // #145 D172 — the By person portfolio view
   "/calendar",
   "/reports",
   "/reviews",
@@ -181,6 +183,8 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   // so this route mints CE-1001 on its own — there is no ordering dependency
   // on the static /design/engagements entry above.
   { route: "/design/engagements/CE-1001" },
+  { route: "/design/engagements/CE-1001?tab=activity" },
+  { route: "/design/engagements/CE-1001?tab=schedule" },
   /* Service-line documents (#78's uncovered half). Each is the artifact a
    * customer actually receives, and each compiles a different report/letter
    * module that nothing else in this list pulls in. */

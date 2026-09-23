@@ -1,5 +1,12 @@
+import {
+  generateSchedule, overrunsEnd, phaseWindows, placeTask, selectLines, shiftForMilestone, shiftTasksByIds, validateSpan,
+  withEngagementPhaseIds, defaultMilestonePhaseId, phaseIdsByName, startOfLocalDay,
+  type PhaseWeight, type ScheduleLine,
+} from "@/lib/consulting-schedule";
+import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
+import { TABS } from "@/app/(app)/design/engagements/tabs";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
 import { safeCallbackPath, resolveSignInRedirect } from "@/lib/auth-redirect";
 import {
@@ -21,7 +28,20 @@ import {
 import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
-import type { EngagementPhase } from "@/lib/stores/engagements";
+import {
+  normalizeEngagementRecord, getEngagement, type EngagementPhase, createManualEngagement, allEngagements,
+  setMilestonePhase, patchEngagement,
+} from "@/lib/stores/engagements";
+import { TEMPLATE_RECORD_KINDS, TEMPLATE_RECORD_LABEL } from "@/lib/task-template-kinds";
+import {
+  normalizeLine as normalizeTemplateLine,
+  applyTaskTemplate, createTaskTemplateSet, updateTaskTemplateSet, allTaskTemplateSets, removeTaskTemplateSet,
+  type ApplyTemplateSchedule, type TaskTemplateLine,
+} from "@/lib/stores/task-templates";
+import { activeUsers } from "@/lib/users";
+import { groupByPerson, mergeBookingsIntoPersonRows, UNASSIGNED_LABEL, type PersonBooking } from "@/app/(app)/schedule/people-lib";
+import { parseAssignTarget } from "@/app/(app)/import/registry";
+import { softDeleteDoc } from "@/db/doc-store";
 import {
   msOf as opMsOf,
   serviceToWorkItems,
@@ -45,7 +65,7 @@ import {
   toDateInput as vendorToDateInput,
 } from "@/app/(app)/vendors/dates";
 import { FIELD_COLLECTIONS } from "@/lib/sync/engine";
-import { canRecord } from "@/lib/settings";
+import { canRecord, mergedConsultingDisciplines, phaseWeightsFor } from "@/lib/settings";
 import {
   blankAudio, blankKrisp, isArchivable, mergeActionItems, needsKrispCheck, normalizeRecording,
   recordingParentLabel, recordingStatusChip,
@@ -68,6 +88,10 @@ import {
   DriveApiError, DRIVE_API_BASE, DRIVE_UPLOAD_BASE, driveFileLink, driveQuote, ensureFolder, folderQuery,
   uploadFileResumable, type DriveFetch,
 } from "@/lib/google/drive";
+import {
+  engagementFolderPath, fileRefHref, fileRefKey, fileRefName, isOwnedBlobPathname, isValidDataRef, ownsEngagementFile, safeMime,
+  type FileRef,
+} from "@/lib/consulting-files";
 import {
   archiveDateStamp, archiveFileName, archiveFolderKey, archiveRecordings, archiveSafeName, extForMime,
   ARCHIVE_MAX_PER_RUN, ARCHIVE_MIN_AGE_MS, ARCHIVE_SKIP_NO_SCOPE, ARCHIVE_SKIP_NOT_CONFIGURED, ARCHIVE_SKIP_NOT_CONNECTED,
@@ -105,8 +129,11 @@ import {
   venueKindFromCategory,
 } from "@/app/(app)/import/link";
 import type { CustomerContact, CustomerLocation } from "@/lib/stores/customers";
-// Pure (no store access, no DB) — see the note on catalogPatch itself.
-import { catalogPatch, templateCsv as importTemplateCsv } from "@/app/(app)/import/registry";
+// catalogPatch/templateCsv are pure (no store access, no DB) — see the note
+// on catalogPatch itself. commitImport/exportCsv are NOT — #145 D169 review
+// (Important 1) exercises the task_templates writer for real, DB-backed,
+// with cleanup (see asyncChecks()).
+import { catalogPatch, templateCsv as importTemplateCsv, commitImport, exportCsv } from "@/app/(app)/import/registry";
 import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
 
 import {
@@ -161,6 +188,8 @@ import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, s
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { mergeActivity, prefillFromMeeting } from "@/lib/engagement-activity";
+import { performCapture, type CaptureDeps } from "@/lib/engagement-activity-write";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -1777,6 +1806,8 @@ ok(legacyEmailFor("Jeff Chesebro") === "jchesebro@peaksystemsgroup.com", "legacy
 /* ============ TASKS (#17) — store pure logic ============ */
 import {
   isOverdue, taskFromLegacy, expandTemplate, taskBellItems, autoTaskId,
+  normalizeTask, tasksForEngagement, createTask, tasksForProject, removeTask,
+  applyMilestoneTaskShifts, getTask,
   STATUSES, type TaskRecord, type TaskTemplateItem,
 } from "@/lib/stores/tasks";
 import { CATEGORIES } from "@/lib/stores/notif-prefs";
@@ -1811,7 +1842,8 @@ import { CATEGORIES } from "@/lib/stores/notif-prefs";
 
   const mk = (o: Partial<TaskRecord>): TaskRecord => ({
     id: "T-6000", title: "t", section: "Install", projectId: null, quoteId: null, designId: null,
-    coverageKey: null, assigneeUserId: null, assigneeName: "", dueAt: null,
+    engagementId: null, coverageKey: null, assigneeUserId: null, assigneeName: "", dueAt: null,
+    startAt: null, schedule: null, handScheduled: false,
     status: "open", notes: "", createdBy: "x", createdAt: NOW, updatedAt: NOW, doneAt: null, ...o,
   });
   const bell = taskBellItems([
@@ -2106,7 +2138,7 @@ import { blank as surveyBlank } from "@/lib/stores/surveys";
 /* ============ ACTIVITY TIMELINE (#21) ============ */
 /* notes collection — normalize-on-read defaults. normalizeNote is pure
    (no DB touched by importing the store module). */
-import { normalizeNote, type NoteRecord } from "@/lib/stores/notes";
+import { normalizeNote, addNoteRecord, notesForEngagement, type NoteRecord } from "@/lib/stores/notes";
 
 {
   const T = new Date(2026, 5, 30, 10).getTime();
@@ -2131,6 +2163,9 @@ import { normalizeNote, type NoteRecord } from "@/lib/stores/notes";
     by: "Dana Whitmer",
     at: T,
     text: "Called about the valance",
+    attachments: [],
+    taskIds: [],
+    system: false,
     createdAt: T,
     updatedAt: T,
   });
@@ -3171,7 +3206,7 @@ import { qtyOwned as equipmentQtyOwned } from "../src/lib/stores/equipment-items
 import { upsertDoc } from "../src/db/doc-store";
 import { createFromQuote as createInspectionFromQuote, byQuote as inspectionsByQuote } from "../src/lib/stores/inspections";
 import { createFromQuote as createRepairFromQuote, byQuote as repairByQuote } from "../src/lib/stores/repair-jobs";
-import { getProject, getProjectByQuote } from "../src/lib/stores/projects";
+import { getProject, getProjectByQuote, removeProject } from "../src/lib/stores/projects";
 
 ok(overlaps(1000, 2000, 1500, 2500) === true, "overlaps: partial overlap detected");
 ok(overlaps(1000, 2000, 2000, 3000) === true, "overlaps: touching boundary counts as overlap");
@@ -4168,6 +4203,145 @@ async function asyncChecks(): Promise<void> {
     ok(!!p1 && !!p2 && p1.id !== p2.id, "#13 the inspection and repair test quotes get DISTINCT linked projects");
   }
 
+  /* --- #145 D170/D171: captureAction's rollback is exercised for real, not
+   * just read as correct-looking code (review Important #1). A mid-capture
+   * failure is FORCED by injecting a `deps.createTask` that lets the first
+   * task really land in the doc-store, then throws on the second — proving
+   * `performCapture` deletes the first before rethrowing, and never writes
+   * the note. Fixed test id + idempotency check since this writes to the
+   * real persistent dev DB, same as the #13 block above. */
+  const TEST_ROLLBACK_ENG_ID = "test-eng-punch145-rollback";
+  {
+    if (!(await getEngagement(TEST_ROLLBACK_ENG_ID))) {
+      await upsertDoc("consulting_engagements", {
+        id: TEST_ROLLBACK_ENG_ID,
+        name: "PUNCHLIST #145 rollback test engagement",
+        customer: "Test Customer #145",
+        companyId: null,
+        siteIds: [],
+        contactName: "",
+        people: [],
+        quoteId: null,
+        designIds: [],
+        installQuoteId: null,
+        status: "design",
+        phases: [],
+        milestones: [],
+        decisions: [],
+        meetings: [],
+        submittals: [],
+        documents: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
+    const priorTasks = await tasksForEngagement(TEST_ROLLBACK_ENG_ID);
+    const priorNotes = await notesForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(
+      priorTasks.length === 0 && priorNotes.length === 0,
+      "#145 rollback test: no leftover tasks/notes from a prior run (proves the rollback actually cleans up, not just this run's assertions)"
+    );
+
+    /* Minor (round 3 re-review): the "Nothing to capture." guard had no
+     * assertion of its own — only exercised incidentally by the rollback/
+     * refusal tests' non-empty inputs. */
+    const emptyCapture = await performCapture(
+      { engagementId: TEST_ROLLBACK_ENG_ID, text: "   ", attachments: [], tasks: [] },
+      { id: "u1", name: "Test Runner" }
+    );
+    ok(
+      !emptyCapture.ok && emptyCapture.error === "Nothing to capture.",
+      "#145 a capture with no text, no files, and no tasks is refused rather than writing an empty note"
+    );
+
+    let createCalls = 0;
+    const flakyDeps: CaptureDeps = {
+      createTask: async (taskInput, me) => {
+        createCalls++;
+        if (createCalls === 2) throw new Error("simulated task-write failure (#145 rollback test)");
+        return createTask(taskInput, me);
+      },
+      addNoteRecord,
+      softDeleteDoc,
+    };
+
+    let threw = false;
+    try {
+      await performCapture(
+        {
+          engagementId: TEST_ROLLBACK_ENG_ID,
+          text: "This capture must not survive a mid-capture failure",
+          attachments: [],
+          tasks: [
+            { title: "First task — created for real, then rolled back", assigneeUserId: null, dueAt: null },
+            { title: "Second task — the write throws here", assigneeUserId: null, dueAt: null },
+          ],
+        },
+        { id: "u1", name: "Test Runner" },
+        flakyDeps
+      );
+    } catch {
+      threw = true;
+    }
+    ok(threw, "#145 a mid-capture task-write failure rejects the whole capture rather than silently partially succeeding");
+    ok(createCalls === 2, "#145 the forced failure happened on the second task write, after the first really landed in the doc-store");
+
+    const tasksAfter = await tasksForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(tasksAfter.length === 0, "#145 rollback soft-deletes the task(s) already created before the failure");
+
+    const notesAfter = await notesForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(
+      notesAfter.length === 0,
+      "#145 rollback leaves no note behind — a half-written capture must never persist a note pointing at deleted tasks"
+    );
+  }
+
+  /* --- #145 D171: a capture carrying an unverifiable attachment writes
+   * NOTHING — the Critical fix's whole point, and it belongs in this
+   * task's own coverage, not only Task 9's validateFileRefsForEngagement
+   * unit tests (which check the validator; this checks captureAction's
+   * USE of it). A "blob" ref whose own pathname names a different
+   * engagement fails the structural half of the check with no network
+   * call needed, so this is hermetic. Reuses the rollback test's fixed
+   * engagement, with its own before/after empty-state assertions so this
+   * block proves the refusal on its own, independent of the block above. */
+  {
+    const priorTasks = await tasksForEngagement(TEST_ROLLBACK_ENG_ID);
+    const priorNotes = await notesForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(
+      priorTasks.length === 0 && priorNotes.length === 0,
+      "#145 attachment-refusal test: no leftover tasks/notes before this run"
+    );
+
+    const forgedRef: FileRef = {
+      kind: "blob",
+      pathname: "engagement-files/some-other-engagement/secret.pdf",
+      name: "secret.pdf",
+      mime: "application/pdf",
+      size: 1,
+    };
+    const refused = await performCapture(
+      {
+        engagementId: TEST_ROLLBACK_ENG_ID,
+        text: "This must never be saved",
+        attachments: [forgedRef],
+        tasks: [{ title: "This task must never be saved either", assigneeUserId: null, dueAt: null }],
+      },
+      { id: "u1", name: "Test Runner" }
+    );
+    ok(!refused.ok, "#145 a capture carrying an attachment that fails validateFileRefsForEngagement is refused, not silently accepted");
+    ok(
+      !refused.ok && !/engagement-files|Drive|storage path/i.test(refused.error),
+      "#145 the refusal message is generic — it does not leak the validator's internal storage-path/Drive wording to the caller"
+    );
+
+    const tasksAfterRefusal = await tasksForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(tasksAfterRefusal.length === 0, "#145 the refused capture created no task — validation runs before any write, not just before the note");
+
+    const notesAfterRefusal = await notesForEngagement(TEST_ROLLBACK_ENG_ID);
+    ok(notesAfterRefusal.length === 0, "#145 the refused capture created no note either");
+  }
+
   /* --- Venue Assessments: record migration --- */
   {
     const { getAll } = await import("@/lib/stores/surveys");
@@ -4226,6 +4400,428 @@ async function asyncChecks(): Promise<void> {
       (fs1053 as Record<string, unknown>).templateRev === "1.0",
       "records stamp the template revision"
     );
+  }
+
+  /* ====== #145 round 3: validateFileRefsForEngagement (consulting-files-server.ts) ======
+   * The writer-side half of the ownership fix — Task 7's note-save writer
+   * takes client-supplied FileRef[]; this is where each one gets proven to
+   * belong to the named engagement BEFORE it's ever stored, mirroring the
+   * same rules the download proxy enforces on the way back out. Exercised
+   * against a real (test) engagement record and the real, unconfigured
+   * test-env Drive connection — no fake fetch needed for the "no Drive
+   * connected" case, since that's this environment's actual state. */
+  {
+    const { createManualEngagement: createEng145 } = await import("@/lib/stores/engagements");
+    const { validateFileRefsForEngagement } = await import("@/lib/consulting-files-server");
+    // Fixed fixture name, declared outside the try so the finally block can
+    // re-look-up and tear down this engagement regardless of how far setup
+    // got before a throw — same idiom as the #145 T3 cleanup below. This
+    // fixture previously had no find-or-create and no teardown: every
+    // test:specs run minted a fresh CE-#### with status "awarded", which
+    // OPEN_ENGAGEMENT_STAGES counts as open, polluting the Consulting hub,
+    // the "Active consulting" KPI, and /schedule?view=timeline in what may
+    // be the one real Neon database shared across Production/Preview/
+    // Development (AGENTS.md, #145 review round 4).
+    const ENG_NAME_145FILES = "Test files engagement (#145)";
+    try {
+      const eng145 =
+        (await allEngagements()).find((e) => e.name === ENG_NAME_145FILES) ||
+        (await createEng145(
+          { customerId: "test-customer-145files", customer: "Test Files Co", name: ENG_NAME_145FILES, phases: [] },
+          { name: "test-harness" }
+        ));
+
+      const goodBlob145: FileRef = {
+        kind: "blob",
+        pathname: `engagement-files/${eng145.id}/plan.pdf`,
+        name: "plan.pdf",
+        mime: "application/pdf",
+        size: 10,
+      };
+      const validated145 = await validateFileRefsForEngagement([goodBlob145], eng145.id);
+      ok(
+        validated145.length === 1 && validated145[0] === goodBlob145,
+        "#145 validateFileRefsForEngagement returns a correctly-scoped blob ref unchanged"
+      );
+
+      const badBlob145: FileRef = {
+        kind: "blob",
+        pathname: "engagement-files/some-other-engagement/plan.pdf",
+        name: "plan.pdf",
+        mime: "application/pdf",
+        size: 10,
+      };
+      let threwBadBlob145 = false;
+      try {
+        await validateFileRefsForEngagement([badBlob145], eng145.id);
+      } catch {
+        threwBadBlob145 = true;
+      }
+      ok(threwBadBlob145, "#145 validateFileRefsForEngagement throws on a blob ref scoped to a DIFFERENT engagement");
+
+      const safeData145: FileRef = { kind: "data", dataUrl: "data:text/plain,hello", name: "note.txt", mime: "text/plain", size: 5 };
+      const validatedData145 = await validateFileRefsForEngagement([safeData145], eng145.id);
+      ok(validatedData145.length === 1, "#145 validateFileRefsForEngagement accepts a safe data-URL ref");
+
+      const dangerousData145: FileRef = {
+        kind: "data",
+        dataUrl: "data:text/html,<script>alert(1)</script>",
+        name: "evil.html",
+        mime: "text/html",
+        size: 30,
+      };
+      let threwDangerousData145 = false;
+      try {
+        await validateFileRefsForEngagement([dangerousData145], eng145.id);
+      } catch {
+        threwDangerousData145 = true;
+      }
+      ok(
+        threwDangerousData145,
+        "#145 validateFileRefsForEngagement refuses a data-URL ref with a renderable-as-HTML mime"
+      );
+
+      const driveRef145: FileRef = { kind: "drive", fileId: "somefile", webViewLink: "x", name: "plan.pdf", mime: "application/pdf", size: 10 };
+      let threwDrive145 = false;
+      try {
+        await validateFileRefsForEngagement([driveRef145], eng145.id);
+      } catch {
+        threwDrive145 = true;
+      }
+      ok(
+        threwDrive145,
+        "#145 validateFileRefsForEngagement throws on a drive ref when there is no live Drive connection to verify it against"
+      );
+
+      ok(
+        (await validateFileRefsForEngagement([], eng145.id)).length === 0,
+        "#145 validateFileRefsForEngagement is a no-op on an empty ref list"
+      );
+
+      let threwMissingEngagement145 = false;
+      try {
+        await validateFileRefsForEngagement([goodBlob145], "CE-does-not-exist-145");
+      } catch {
+        threwMissingEngagement145 = true;
+      }
+      ok(threwMissingEngagement145, "#145 validateFileRefsForEngagement throws when the engagement itself doesn't exist");
+    } finally {
+      // Teardown (#145 review round 4): re-queried by the fixed fixture
+      // name rather than trusting `eng145` to have survived an early throw,
+      // so cleanup is complete no matter how far setup got. No tasks are
+      // ever spawned against this engagement, but tasksForEngagement is
+      // swept anyway for parity with the T3 idiom in case that changes.
+      const engToClean145Files = (await allEngagements()).find((e) => e.name === ENG_NAME_145FILES);
+      if (engToClean145Files) {
+        for (const t of await tasksForEngagement(engToClean145Files.id)) await removeTask(t.id);
+        await softDeleteDoc("consulting_engagements", engToClean145Files.id);
+      }
+    }
+  }
+
+  /* ====== #145 Task 15 review — setMilestonePhase + applyMilestoneTaskShifts ======
+   * DB-backed (async, doc-store), same idiom as the block above: a fixed
+   * fixture name declared outside the try, find-or-create, and a finally
+   * that re-queries by that fixed name and tears down every task and the
+   * engagement itself — this may be the one real Neon database shared
+   * across Production/Preview/Development (AGENTS.md).
+   *
+   * Covers the two write paths pulled out of "use server" actions
+   * specifically so they're callable here without a request context
+   * (requireUser() throws "headers was called outside a request scope"
+   * outside one): setMilestonePhase's reject-a-foreign-phaseId path (the
+   * validate-before-write half of the milestone phase dropdown, D168),
+   * and applyMilestoneTaskShifts's null-phase branch (the manual-
+   * checklist half of a milestone move, D168) — moveMilestoneAction's own
+   * DB-backed integration is not re-tested here; this is the unit the
+   * ternary actually dispatches to. */
+  {
+    const ENG_NAME_145MS = "Test milestone-phase engagement (#145)";
+    try {
+      const eng145ms =
+        (await allEngagements()).find((e) => e.name === ENG_NAME_145MS) ||
+        (await createManualEngagement(
+          { customerId: "test-customer-145ms", customer: "Test MS Co", name: ENG_NAME_145MS, phases: ["Assessment", "Design Development"] },
+          { name: "test-harness" }
+        ));
+      const realPhaseId = eng145ms.phases.find((p) => p.name === "Design Development")!.id;
+
+      /* ---- setMilestonePhase: validate-before-write ---- */
+      await patchEngagement(eng145ms.id, (d) => {
+        if (!d.milestones.some((m) => m.id === "ms-145-test")) {
+          d.milestones.push({ id: "ms-145-test", name: "Test milestone", targetDate: 0, completedAt: null, amount: null, phaseId: null });
+        }
+      });
+
+      const rejectForeign145ms = await setMilestonePhase(eng145ms.id, "ms-145-test", "ph-not-on-this-engagement");
+      ok(!rejectForeign145ms.ok, "#145 setMilestonePhase refuses a phaseId that isn't one of the engagement's own phases");
+      const afterReject145ms = await getEngagement(eng145ms.id);
+      ok(
+        afterReject145ms?.milestones.find((m) => m.id === "ms-145-test")?.phaseId == null,
+        "#145 setMilestonePhase's rejected write never touched the milestone — it still reads null, not the foreign id"
+      );
+
+      const acceptReal145ms = await setMilestonePhase(eng145ms.id, "ms-145-test", realPhaseId);
+      ok(acceptReal145ms.ok, "#145 setMilestonePhase accepts a phaseId that IS one of the engagement's own phases");
+      const afterAccept145ms = await getEngagement(eng145ms.id);
+      ok(
+        afterAccept145ms?.milestones.find((m) => m.id === "ms-145-test")?.phaseId === realPhaseId,
+        "#145 setMilestonePhase's accepted write actually persisted the real phaseId"
+      );
+
+      const clearBack145ms = await setMilestonePhase(eng145ms.id, "ms-145-test", null);
+      ok(clearBack145ms.ok, "#145 setMilestonePhase accepts null — clearing back to \"No phase\" is always valid");
+
+      const missingMs145 = await setMilestonePhase(eng145ms.id, "ms-does-not-exist-145", realPhaseId);
+      ok(missingMs145.ok, "#145 setMilestonePhase no-ops (still {ok:true}) on a milestone id that doesn't exist, rather than throwing");
+
+      /* ---- applyMilestoneTaskShifts: the null-phase manual-checklist branch ---- */
+      const dayMs145 = 86400000;
+      const tPhase145 = await createTask(
+        {
+          title: "#145 MS test — DD-phase task",
+          engagementId: eng145ms.id,
+          startAt: 1000 * dayMs145,
+          dueAt: 1010 * dayMs145,
+          schedule: { phaseId: realPhaseId, startPct: 0, lengthPct: 50 },
+          handScheduled: false,
+        },
+        { id: "u1", name: "Test Harness" }
+      );
+      const tManual145 = await createTask(
+        {
+          title: "#145 MS test — no-schedule task",
+          engagementId: eng145ms.id,
+          startAt: 2000 * dayMs145,
+          dueAt: 2010 * dayMs145,
+          schedule: null,
+          handScheduled: false,
+        },
+        { id: "u1", name: "Test Harness" }
+      );
+
+      const tasksForShift145 = await tasksForEngagement(eng145ms.id);
+      const delta145 = 7 * dayMs145;
+      // Only tManual145 is ticked. A null-phase milestone has no phase to
+      // infer membership from — before this fix, moveMilestoneAction's own
+      // shiftForMilestone({phaseId:null},...) call always returned
+      // moved: [], so ticking ANY id here would have moved NOTHING.
+      const movedCount145 = await applyMilestoneTaskShifts({ phaseId: null }, delta145, [tManual145.id], tasksForShift145);
+      ok(movedCount145 === 1, "#145 applyMilestoneTaskShifts(null phase) moves exactly the ticked id, not zero and not every task");
+
+      const tManualAfter145 = await getTask(tManual145.id);
+      ok(
+        tManualAfter145?.startAt === 2000 * dayMs145 + delta145 && tManualAfter145?.dueAt === 2010 * dayMs145 + delta145,
+        "#145 applyMilestoneTaskShifts actually wrote the shifted dates onto the ticked task, not just counted it"
+      );
+      const tPhaseAfter145 = await getTask(tPhase145.id);
+      ok(
+        tPhaseAfter145?.startAt === 1000 * dayMs145 && tPhaseAfter145?.dueAt === 1010 * dayMs145,
+        "#145 applyMilestoneTaskShifts(null phase) never touches an UN-ticked task, even one with a real phase schedule"
+      );
+
+      // Phase-matched branch, for the same call site: ticking the
+      // schedule-matched task under a REAL phaseId still moves it (via
+      // shiftForMilestone, not shiftTasksByIds) — regression check that
+      // the null-phase branch didn't change this path's behavior.
+      const movedPhase145 = await applyMilestoneTaskShifts({ phaseId: realPhaseId }, delta145, [tPhase145.id], tasksForShift145);
+      ok(movedPhase145 === 1, "#145 applyMilestoneTaskShifts(real phase) still moves its own phase's ticked task");
+
+      ok(
+        (await applyMilestoneTaskShifts({ phaseId: null }, delta145, [], tasksForShift145)) === 0,
+        "#145 applyMilestoneTaskShifts is a no-op on an empty id list, either branch"
+      );
+    } finally {
+      const engToClean145ms = (await allEngagements()).find((e) => e.name === ENG_NAME_145MS);
+      if (engToClean145ms) {
+        for (const t of await tasksForEngagement(engToClean145ms.id)) await removeTask(t.id);
+        await softDeleteDoc("consulting_engagements", engToClean145ms.id);
+      }
+    }
+  }
+
+  /* ---- #145 D169 review (Important 1) — the task_templates CSV writer,
+   * for real: commitImport/exportCsv actually write and read the store, so
+   * this cleans up every fixture it creates on every exit path (success OR
+   * a mid-test throw) — this repo shares one database across Production,
+   * Preview and Development (AGENTS.md). Fixture names are prefixed
+   * "ZZ-TEST-145-T10" so they can't collide with real data or another
+   * agent's fixtures in a sibling worktree. */
+  {
+    const ttType10 = getTypeMeta("task_templates");
+    if (!ttType10) throw new Error("#145 T10 setup: task_templates import type not registered");
+    const SET_A_145T10 = "ZZ-TEST-145-T10 Round Trip";
+    const SET_B_145T10 = "ZZ-TEST-145-T10 Collision";
+    const SET_SKIP_145T10 = "ZZ-TEST-145-T10 Skip New";
+    const SET_APPLIES_145T10 = "ZZ-TEST-145-T10 Applies";
+    const SET_RT_145T10 = "ZZ-TEST-145-T10 Round Trip Targets";
+    const ALL_SETS_145T10 = [SET_A_145T10, SET_B_145T10, SET_SKIP_145T10, SET_APPLIES_145T10, SET_RT_145T10];
+    const rowsFor145T10 = (csv: string) => {
+      const parsed = parseImportCsv(csv);
+      if (!parsed.ok) throw new Error("#145 T10 setup: csv did not parse — " + parsed.error);
+      const mapping = autoMap(parsed.headers, ttType10.fields);
+      return prepareRows(parsed.rows, mapping, ttType10.fields).rows;
+    };
+    try {
+      /* -- replace-by-set: re-import must not double, and must shrink when a line is dropped -- */
+      const csv2Lines145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_A_145T10},consulting,Assessment,rigging,Line One,Assessment,team,0,50`,
+        `${SET_A_145T10},consulting,Assessment,,Line Two,Assessment,team,50,50`,
+      ].join("\n");
+      const created145t10 = await commitImport("task_templates", rowsFor145T10(csv2Lines145T10), "create", { effectiveAt: Date.now() });
+      ok(
+        created145t10.created === 2 && created145t10.errored === 0,
+        "#145 T10 a 2-line file for a brand-new set commits both rows through create() (row 2 finds row 1's fresh record via the in-commit accumulator, not the generic dedupe)"
+      );
+      const afterCreate145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_A_145T10);
+      ok(!!afterCreate145t10 && afterCreate145t10.lines.length === 2, "#145 T10 the new set holds both lines");
+
+      const updated145t10 = await commitImport("task_templates", rowsFor145T10(csv2Lines145T10), "update", { effectiveAt: Date.now() });
+      ok(updated145t10.updated === 2 && updated145t10.errored === 0, "#145 T10 re-importing the identical file in update mode touches both rows");
+      const afterReimport145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_A_145T10);
+      ok(
+        afterReimport145t10?.lines.length === 2,
+        "#145 T10 replace-by-set: re-importing the SAME rows does not double the lines (still 2, not 4 — the append-on-reimport bug this decision exists to prevent)"
+      );
+
+      const csv1Line145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_A_145T10},consulting,Assessment,rigging,Line One,Assessment,team,0,50`,
+      ].join("\n");
+      await commitImport("task_templates", rowsFor145T10(csv1Line145T10), "update", { effectiveAt: Date.now() });
+      const afterDrop145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_A_145T10);
+      ok(
+        afterDrop145t10?.lines.length === 1 && afterDrop145t10.lines[0]?.title === "Line One",
+        "#145 T10 replace-by-set: dropping a line from the file shrinks the stored set to match — wholesale replace, not merge"
+      );
+
+      /* -- create mode against an EXISTING name mints a SECOND, distinct set (Critical fix) -- */
+      const csvB145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_B_145T10},project,,,Original Line,,team,0,100`,
+      ].join("\n");
+      await commitImport("task_templates", rowsFor145T10(csvB145T10), "create", { effectiveAt: Date.now() });
+      const original145t10 = (await allTaskTemplateSets()).filter((s) => s.name === SET_B_145T10);
+      ok(original145t10.length === 1 && original145t10[0].lines.length === 1, "#145 T10 setup: the first Collision set exists with its one original line");
+
+      const csvBCollide145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_B_145T10},project,,,Second Set Line One,,team,0,50`,
+        `${SET_B_145T10},project,,,Second Set Line Two,,team,50,50`,
+      ].join("\n");
+      const collideRes145t10 = await commitImport("task_templates", rowsFor145T10(csvBCollide145T10), "create", { effectiveAt: Date.now() });
+      ok(
+        collideRes145t10.created === 2 && collideRes145t10.errored === 0,
+        "#145 T10 create mode against a colliding name still reports success for both rows (one NEW set minted, its second row appended to it — not the original)"
+      );
+      const afterCollide145t10 = (await allTaskTemplateSets()).filter((s) => s.name === SET_B_145T10);
+      ok(
+        afterCollide145t10.length === 2,
+        "#145 T10 Critical fix: create mode against an existing set name mints a SECOND, distinct set — it never merges into (and so never destroys) the original"
+      );
+      const untouchedOriginal145t10 = afterCollide145t10.find((s) => s.lines.length === 1 && s.lines[0]?.title === "Original Line");
+      ok(!!untouchedOriginal145t10, "#145 T10 the ORIGINAL Collision set's line is untouched by the colliding create");
+      const newSecondSet145t10 = afterCollide145t10.find((s) => s.lines.length === 2);
+      ok(
+        !!newSecondSet145t10 && newSecondSet145t10.lines.every((l) => l.title.startsWith("Second Set Line")),
+        "#145 T10 the newly-minted second set holds exactly the colliding file's own 2 lines"
+      );
+
+      /* -- skip mode against a BRAND-NEW multi-line set creates every row, not just the first -- */
+      const csvSkipNew145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_SKIP_145T10},project,,,Skip Line One,,team,0,50`,
+        `${SET_SKIP_145T10},project,,,Skip Line Two,,team,50,50`,
+      ].join("\n");
+      const skipNewRes145t10 = await commitImport("task_templates", rowsFor145T10(csvSkipNew145T10), "skip", { effectiveAt: Date.now() });
+      ok(
+        skipNewRes145t10.created === 2 && skipNewRes145t10.skipped === 0,
+        "#145 T10 skip mode against a BRAND-NEW multi-line set still creates every row (find() hides this-commit creations, so row 2 can't find-and-skip row 1's fresh record)"
+      );
+      const skipNewSet145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_SKIP_145T10);
+      ok(skipNewSet145t10?.lines.length === 2, "#145 T10 ...and the set ends up holding both lines");
+
+      const skipAgainRes145t10 = await commitImport("task_templates", rowsFor145T10(csvSkipNew145T10), "skip", { effectiveAt: Date.now() });
+      ok(skipAgainRes145t10.skipped === 2 && skipAgainRes145t10.created === 0, "#145 T10 skip mode against that NOW pre-existing set skips every row on the next import");
+
+      /* -- a blank Applies To column preserves what the set already has (Important 3) -- */
+      const csvAppliesSet145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_APPLIES_145T10},"consulting, project",,,Has Applies,,team,0,100`,
+      ].join("\n");
+      await commitImport("task_templates", rowsFor145T10(csvAppliesSet145T10), "create", { effectiveAt: Date.now() });
+      const beforeBlank145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_APPLIES_145T10);
+      ok(
+        !!beforeBlank145t10 &&
+          beforeBlank145t10.appliesTo.length === 2 &&
+          beforeBlank145t10.appliesTo.includes("consulting") &&
+          beforeBlank145t10.appliesTo.includes("project"),
+        "#145 T10 setup: the Applies set starts out applying to both consulting and project"
+      );
+      const csvAppliesBlank145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_APPLIES_145T10},,,,Has Applies,,team,0,100`,
+      ].join("\n");
+      await commitImport("task_templates", rowsFor145T10(csvAppliesBlank145T10), "update", { effectiveAt: Date.now() });
+      const afterBlank145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_APPLIES_145T10);
+      ok(
+        !!afterBlank145t10 &&
+          afterBlank145t10.appliesTo.length === 2 &&
+          afterBlank145t10.appliesTo.includes("consulting") &&
+          afterBlank145t10.appliesTo.includes("project"),
+        "#145 T10 Important 3 fix: re-importing with a BLANK Applies To column preserves the set's existing appliesTo instead of wiping it to nothing (which would drop it from every \"Apply template\" picker)"
+      );
+
+      /* -- export -> re-import round trip reproduces role/person targets exactly (decision 4) -- */
+      const users145t10 = await activeUsers();
+      const person145t10 = users145t10[0];
+      if (!person145t10) throw new Error("#145 T10 setup: no active user in seed data to round-trip a person target against");
+      const csvRT145T10 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_RT_145T10},consulting,Assessment,rigging,Role Line,Assessment,role:Estimator,10,30`,
+        `${SET_RT_145T10},consulting,Assessment,,Person Line,Assessment,person:${person145t10.name},40,60`,
+      ].join("\n");
+      await commitImport("task_templates", rowsFor145T10(csvRT145T10), "create", { effectiveAt: Date.now() });
+      const beforeRT145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_RT_145T10);
+      ok(!!beforeRT145t10 && beforeRT145t10.lines.length === 2, "#145 T10 setup: the round-trip-targets set has its 2 lines");
+
+      const exportedAll145t10 = await exportCsv("task_templates");
+      const exportedHeader145t10 = exportedAll145t10.split("\n")[0];
+      const exportedRTLines145t10 = exportedAll145t10.split("\n").filter((l) => l.startsWith(SET_RT_145T10 + ","));
+      ok(exportedRTLines145t10.length === 2, "#145 T10 export emits one row per line, including the role/person target lines");
+      ok(
+        exportedRTLines145t10.some((l) => l.includes("role:Estimator")) &&
+          exportedRTLines145t10.some((l) => l.includes(`person:${person145t10.name}`)),
+        "#145 T10 export reproduces the role: and person:<name> cells exactly — assignTargetToCell is the true reverse of parseAssignTarget"
+      );
+
+      const miniRT145t10 = [exportedHeader145t10, ...exportedRTLines145t10].join("\n");
+      const rtRes145t10 = await commitImport("task_templates", rowsFor145T10(miniRT145t10), "update", { effectiveAt: Date.now() });
+      ok(rtRes145t10.updated === 2 && rtRes145t10.errored === 0, "#145 T10 re-importing the exported round-trip rows commits cleanly");
+      const afterRT145t10 = (await allTaskTemplateSets()).find((s) => s.name === SET_RT_145T10);
+      const roleLineRT145t10 = afterRT145t10?.lines.find((l) => l.title === "Role Line");
+      const personLineRT145t10 = afterRT145t10?.lines.find((l) => l.title === "Person Line");
+      ok(
+        roleLineRT145t10?.target.kind === "role" && roleLineRT145t10.target.role === "Estimator",
+        "#145 T10 export -> re-import round-trips a role target to the SAME role"
+      );
+      ok(
+        personLineRT145t10?.target.kind === "person" && personLineRT145t10.target.userId === person145t10.id,
+        "#145 T10 export -> re-import round-trips a person target to the SAME user id, re-resolved by name"
+      );
+    } finally {
+      // Teardown: re-queried by fixed fixture names rather than trusting
+      // local variables to have survived an early throw, so cleanup is
+      // complete no matter how far setup got — same idiom as the #145 T3
+      // cleanup above, applied to every fixture this block can create
+      // (including the SECOND Collision set the Critical-fix test mints).
+      for (const name of ALL_SETS_145T10) {
+        for (const s of (await allTaskTemplateSets()).filter((s) => s.name === name)) {
+          await removeTaskTemplateSet(s.id);
+        }
+      }
+    }
   }
 }
 
@@ -5383,10 +5979,15 @@ async function writeBackAsyncChecks(): Promise<void> {
   ok(rateLimited, "pollKrispImport: 429 propagates as KrispRateLimitError (reconcile stops that account)");
 }
 
+/* ====== #145: the schedule tab is a real tab key ====== */
+ok((TABS as readonly string[]).includes("schedule"), "#145 schedule is a valid engagement tab (?tab= validation depends on it)");
+ok((TABS as readonly string[]).includes("activity"), "#145 activity is a valid engagement tab");
+
 recordingsAsyncChecks()
   .then(() => writeBackAsyncChecks())
   .then(() => archiveAsyncChecks())
   .then(() => asyncChecks())
+  .then(() => templateScheduleAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -5835,3 +6436,924 @@ ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1
   ok(!v12.created && v12.locations.length === 1 && v12.locations[0].id === "l1" && v12.locations[0].address === "220 E Doty St" && v12.locations[0].primary, "#137 C1b mergeLocation preferPrimary still updates an ADDRESSED but unnamed primary venue in place — that venue is the customers row's own (and the #137 T6 blank-label round-trip)");
   ok(venueKindFromCategory("Church") === "church" && venueKindFromCategory("Black Box") === "blackbox" && venueKindFromCategory("Arena") === "arena" && venueKindFromCategory("Gym") === "flat" && venueKindFromCategory("theatre") === "proscenium" && venueKindFromCategory("") === "proscenium" && venueKindFromCategory("flat") === "flat", "#137 T3 venueKindFromCategory");
 }
+
+/* ====== #145 (D164–D172): consulting schedule engine ====== */
+const DAY145 = 86400000;
+const OCT6 = Date.UTC(2026, 9, 6);
+const MAR30 = Date.UTC(2027, 2, 30);
+const W145: PhaseWeight[] = [
+  { phaseId: "ph-a", name: "Assessment", weight: 2 },
+  { phaseId: "ph-b", name: "Schematic Design", weight: 4 },
+  { phaseId: "ph-c", name: "Design Development", weight: 6 },
+  { phaseId: "ph-d", name: "Final Documents", weight: 5 },
+  { phaseId: "ph-e", name: "Bid Support", weight: 3 },
+];
+const win145 = phaseWindows(OCT6, MAR30, W145);
+ok(win145.length === 5, "#145 phaseWindows returns one window per phase");
+ok(win145[0].startAt === OCT6, "#145 the first window starts exactly at the project start");
+ok(win145[4].endAt === MAR30, "#145 the last window ends exactly on the project end — proportional division never drifts");
+ok(win145[1].startAt === win145[0].endAt, "#145 windows abut with no gap");
+ok(
+  Math.round((win145[2].endAt - win145[2].startAt) / DAY145) === 53,
+  "#145 Design Development takes 6/20 of a 175-day span (52.5d, rounded)"
+);
+// Dropping a phase redistributes the remainder in proportion — the whole
+// point of units over absolute days (D166).
+const dropped145 = phaseWindows(OCT6, MAR30, W145.filter((p) => p.phaseId !== "ph-e"));
+ok(dropped145[3].endAt === MAR30 && dropped145.length === 4, "#145 dropping a phase stretches the rest to still fill the span");
+ok(dropped145[2].endAt - dropped145[2].startAt > win145[2].endAt - win145[2].startAt, "#145 every surviving window grows when a phase is dropped");
+
+// Degenerate inputs (spec §4.2) — all handled, never thrown.
+ok(phaseWindows(OCT6, OCT6 - DAY145, W145).every((w) => w.startAt === OCT6 && w.endAt === OCT6), "#145 an end before the start collapses every window onto the start");
+ok(phaseWindows(OCT6, MAR30, []).length === 0, "#145 no phases means no windows");
+const zeroW145 = phaseWindows(OCT6, MAR30, W145.map((p) => ({ ...p, weight: 0 })));
+ok(
+  zeroW145[0].endAt - zeroW145[0].startAt === zeroW145[3].endAt - zeroW145[3].startAt,
+  "#145 all-zero weights divide the span equally rather than dividing by zero"
+);
+const negW145 = phaseWindows(OCT6, MAR30, [{ phaseId: "p1", name: "A", weight: -4 }, { phaseId: "p2", name: "B", weight: 1 }]);
+ok(negW145[0].endAt - negW145[0].startAt === negW145[1].endAt - negW145[1].startAt, "#145 a negative weight is treated as 1, not as a subtraction");
+
+// Scope gate (D165): phase must match; a BLANK discipline matches everything.
+const lines145: ScheduleLine[] = [
+  { key: "l1", title: "Verify grid", section: "Assessment", phase: "Assessment", discipline: "rigging", startPct: 0, lengthPct: 20 },
+  { key: "l2", title: "Site photos", section: "Assessment", phase: "Assessment", discipline: "", startPct: 10, lengthPct: 15 },
+  { key: "l3", title: "Fixture count", section: "Assessment", phase: "Assessment", discipline: "lighting", startPct: 0, lengthPct: 20 },
+  { key: "l4", title: "Bid walk", section: "Bid", phase: "Bid Support", discipline: "", startPct: 0, lengthPct: 50 },
+];
+const sel145 = selectLines(lines145, ["Assessment", "Bid Support"], ["rigging", "curtain"]);
+ok(sel145.map((l) => l.key).join(",") === "l1,l2,l4", "#145 selectLines keeps matching disciplines and every blank-discipline line, drops the rest");
+ok(selectLines(lines145, ["Assessment"], []).map((l) => l.key).join(",") === "l2", "#145 an engagement with no disciplines still gets its blank-discipline lines");
+ok(selectLines(lines145, [" assessment "], ["RIGGING"]).length === 2, "#145 selectLines matches case-insensitively and ignores surrounding space");
+
+// Placement within a window, and the overrun clamp (spec §4.2).
+const fd145 = win145[3];
+const placed145 = placeTask(fd145, 60, 20);
+ok(placed145.startAt > fd145.startAt && placed145.dueAt <= fd145.endAt, "#145 placeTask lands inside its own phase window");
+ok(Math.round((placed145.startAt - fd145.startAt) / DAY145) === 26, "#145 startPct 60 of a 43.75-day window is 26 days in");
+const spill145 = placeTask(fd145, 90, 50);
+ok(spill145.dueAt === fd145.endAt, "#145 startPct + lengthPct over 100 clamps to the window end instead of spilling into the next phase");
+ok(placeTask(fd145, -10, 999).startAt === fd145.startAt, "#145 out-of-range percentages clamp rather than throwing");
+ok(placeTask({ phaseId: "x", name: "X", startAt: OCT6, endAt: OCT6 }, 50, 50).startAt === OCT6, "#145 a zero-length window places every task on its start");
+
+ok(overrunsEnd({ dueAt: MAR30 + DAY145 }, MAR30), "#145 overrunsEnd flags work past the committed end date");
+ok(!overrunsEnd({ dueAt: null }, MAR30), "#145 an undated task never counts as an overrun");
+
+// Milestone shift (D168): the milestone's phase, minus hand-dragged tasks.
+const tasks145 = [
+  { id: "T-1", schedule: { phaseId: "ph-d" }, handScheduled: false, startAt: OCT6, dueAt: OCT6 + DAY145 },
+  { id: "T-2", schedule: { phaseId: "ph-d" }, handScheduled: true, startAt: OCT6, dueAt: OCT6 + DAY145 },
+  { id: "T-3", schedule: { phaseId: "ph-e" }, handScheduled: false, startAt: OCT6, dueAt: OCT6 + DAY145 },
+  { id: "T-4", schedule: null, handScheduled: false, startAt: null, dueAt: null },
+];
+const shift145 = shiftForMilestone({ phaseId: "ph-d" }, 14 * DAY145, tasks145);
+ok(shift145.moved.length === 1 && shift145.moved[0].id === "T-1", "#145 shiftForMilestone moves only its own phase's untouched tasks");
+ok(shift145.moved[0].startAt === OCT6 + 14 * DAY145, "#145 a moved task shifts by exactly the milestone's delta");
+ok(shift145.skipped.map((t) => t.id).join(",") === "T-2,T-3,T-4", "#145 a hand-dragged task is never moved by the app");
+ok(shiftForMilestone({ phaseId: null }, DAY145, tasks145).moved.length === 0, "#145 a milestone with no phase pre-ticks nothing and degrades to the manual checklist");
+
+// shiftTasksByIds (#145 Task 15 review): the manual-checklist half of the
+// null-phase path above. Unlike shiftForMilestone it takes NO position on
+// phase or handScheduled — the caller's own id list IS the membership,
+// since there's no phase to infer it from.
+const byIds145 = shiftTasksByIds(["T-2", "T-4", "T-does-not-exist"], 14 * DAY145, tasks145);
+ok(
+  byIds145.length === 2 && byIds145[0].id === "T-2" && byIds145[1].id === "T-4",
+  "#145 shiftTasksByIds returns exactly the ids that exist, in the CALLER's order, silently dropping one that doesn't"
+);
+ok(
+  byIds145[0].startAt === OCT6 + 14 * DAY145 && byIds145[0].dueAt === OCT6 + DAY145 + 14 * DAY145,
+  "#145 shiftTasksByIds shifts a hand-scheduled task too — it has no phase-based opinion, only the ids it's given"
+);
+ok(
+  byIds145[1].startAt === null && byIds145[1].dueAt === null,
+  "#145 shiftTasksByIds keeps a null start/due null rather than shifting into NaN"
+);
+ok(shiftTasksByIds([], DAY145, tasks145).length === 0, "#145 shiftTasksByIds is a no-op on an empty id list");
+
+// Whole-schedule generation.
+const gen145 = generateSchedule({
+  startAt: OCT6, endAt: MAR30, phases: W145, disciplines: ["rigging"], lines: lines145,
+  milestones: [{ id: "ms-1", phaseId: "ph-d", targetDate: 0 }, { id: "ms-2", phaseId: null, targetDate: 0 }],
+});
+ok(gen145.tasks.length === 3, "#145 generateSchedule expands exactly the in-scope lines");
+ok(gen145.tasks.every((t) => t.startAt >= OCT6 && t.dueAt <= MAR30), "#145 every generated task lands inside the project span");
+ok(gen145.milestones.find((m) => m.id === "ms-1")?.targetDate === win145[3].endAt, "#145 a phase-matched milestone is dated to its phase window's end");
+ok(gen145.milestones.find((m) => m.id === "ms-2")?.targetDate === 0, "#145 a milestone with no phase stays unscheduled and out of the billing forecast");
+/* ====== #145: record shapes normalize absent fields ====== */
+const bareEng145 = normalizeEngagementRecord({ id: "CE-1043", name: "North HS", status: "design" } as never);
+ok(bareEng145.startAt === 0 && bareEng145.endAt === 0, "#145 an engagement written before this feature reads as unscheduled, not NaN");
+ok(Array.isArray(bareEng145.disciplines) && bareEng145.disciplines.length === 0, "#145 absent disciplines read as an empty list");
+ok(bareEng145.milestones.every((m) => m.phaseId === null), "#145 absent milestone phaseId reads as null");
+
+const bareTask145 = normalizeTask({ id: "T-6001", title: "x" } as never);
+ok(bareTask145.engagementId === null && bareTask145.startAt === null, "#145 a pre-existing task reads with null engagement and no bar start");
+ok(bareTask145.schedule === null && bareTask145.handScheduled === false, "#145 a pre-existing task is not hand-scheduled and carries no template provenance");
+
+const bareNote145 = normalizeNote({ id: "N-7001", parentKind: "customer", parentId: "c1" } as never);
+ok(Array.isArray(bareNote145.attachments) && bareNote145.attachments.length === 0, "#145 a pre-existing note reads with no attachments");
+ok(Array.isArray(bareNote145.taskIds) && bareNote145.taskIds.length === 0, "#145 a pre-existing note reads with no spawned tasks");
+
+ok(TEMPLATE_RECORD_KINDS.includes("consulting"), "#145 consulting is a template target kind (D172)");
+ok(TEMPLATE_RECORD_LABEL.consulting === "Consulting", "#145 the consulting kind has a label for the apply picker");
+
+/* phase weights + disciplines merge like every other settings list */
+ok(mergedConsultingDisciplines([]).join(",") === "rigging,curtain,lighting,av", "#145 disciplines default to the four intake groups");
+ok(mergedConsultingDisciplines(["rigging", " AV "]).join(",") === "rigging,AV", "#145 a stored discipline list overrides wholesale and is trimmed");
+const pw145 = phaseWeightsFor({ "Design Development": 6 }, ["Assessment", "Design Development"]);
+ok(pw145[0].weight === 1 && pw145[1].weight === 6, "#145 phaseWeightsFor defaults an unweighted phase to 1 and honours a stored weight");
+ok(pw145[0].name === "Assessment" && typeof pw145[0].phaseId === "string" && pw145[0].phaseId.length > 0, "#145 phaseWeightsFor carries a stable id per phase name");
+
+/* tasksForEngagement is exported for the consulting side of the collection
+ * (Task 3+ exercises it against real records; this only proves the store
+ * compiles and exports it, with no DB touch here). */
+ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exported for the consulting side of the collection");
+/* ====== #145: Gantt geometry ====== */
+{
+  // #145 review fix (round 2): pinned for this whole block. Under
+  // TZ=UTC, "local day" and "UTC day" are the SAME day by definition —
+  // no assertion phrased in terms of that distinction can discriminate
+  // the bug there, because there is no bug to find (offset 0 has nothing
+  // to drift across). Pinning to a real, DST-observing zone (this app's
+  // actual deployment, per AGENTS.md) is what keeps these assertions
+  // meaningful on a CI box that happens to run in UTC, rather than
+  // silently passing against a reintroduced UTC-epoch implementation.
+  // Node re-resolves `process.env.TZ` on the next Date call (verified on
+  // the Node version this repo runs), so this takes effect immediately
+  // and the `finally` below undoes it before any later test observes it.
+  const savedTZ145 = process.env.TZ;
+  process.env.TZ = "America/Chicago";
+  try {
+  const DAY145 = 86400000;
+  // LOCAL midnight, October 6 2026 — not Date.UTC(...). #145 review fix:
+  // snapToDay/dateFromX now floor to the LOCAL calendar day (see gantt-lib.ts's
+  // doc comment), matching every date this app actually writes (every
+  // `<input type="date">` anchors at LOCAL NOON). A UTC anchor would make
+  // these assertions pass or fail depending on the test runner's timezone
+  // offset instead of proving anything about the implementation.
+  const OCT6 = new Date(2026, 9, 6).getTime();
+  ok(dayColumns(OCT6, OCT6 + 6 * DAY145).length === 7, "#145 dayColumns is inclusive of both ends");
+  const rect145 = barRect({ startAt: OCT6 + 2 * DAY145, dueAt: OCT6 + 4 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
+  ok(Math.round(rect145.leftPct) === 20 && Math.round(rect145.widthPct) === 20, "#145 barRect converts a span to percentages of the visible range");
+  ok(barRect({ startAt: OCT6 - DAY145, dueAt: OCT6 + DAY145 }, OCT6, OCT6 + 10 * DAY145).leftPct === 0, "#145 a bar starting before the window is clipped to the left edge, not drawn off-screen");
+  ok(barRect({ startAt: OCT6, dueAt: OCT6 }, OCT6, OCT6 + 10 * DAY145).widthPct > 0, "#145 a zero-length bar still renders a visible sliver rather than vanishing");
+  ok(snapToDay(OCT6 + 3 * DAY145 + 3600000) === OCT6 + 3 * DAY145, "#145 a drop snaps back to the start of its day");
+  ok(dateFromX(50, 100, OCT6, OCT6 + 10 * DAY145) === OCT6 + 5 * DAY145, "#145 dateFromX maps a pixel offset to a date within the range");
+
+  /* ====== #145 review fix (live-verification round): the drag-vs-endAt
+   * false-overrun bug, and the invisible-sliver bug, both surfaced by
+   * actually rendering the Gantt for the first time. ====== */
+
+  // snapToDay must floor to the LOCAL day, not the UTC one. Proven with an
+  // arbitrary sub-day offset compared against a manually-computed local
+  // midnight — this is the implementation's actual contract, and it is
+  // the contract every caller (dateFromX, the drag handlers) depends on.
+  const arbitrary145 = OCT6 + 3 * DAY145 + 7 * 3600000 + 41 * 60000; // Oct 9, some odd hour:minute
+  const expectedLocalMidnight145 = new Date(arbitrary145);
+  expectedLocalMidnight145.setHours(0, 0, 0, 0);
+  ok(
+    snapToDay(arbitrary145) === expectedLocalMidnight145.getTime(),
+    "#145 review fix: snapToDay floors to the LOCAL calendar day — the day boundary every date input in this app actually uses"
+  );
+
+  // overrunsEnd compares LOCAL CALENDAR DAYS, not raw instants. endAt is
+  // always local-noon-anchored (every date input in this app goes through
+  // "T12:00:00"), so a task due later the SAME local day must not read as
+  // an overrun just because its clock time falls after noon — this is the
+  // exact false positive a live drag produced (dragged onto the
+  // engagement's own end date; the drop's midnight-ish snap plus the
+  // task's own sub-day-length duration landed a few hours after that
+  // day's noon endAt).
+  const noonOct10_145 = new Date(2026, 9, 10, 12, 0, 0).getTime();
+  const eveningOct10_145 = new Date(2026, 9, 10, 19, 12, 0).getTime();
+  ok(
+    !overrunsEnd({ dueAt: eveningOct10_145 }, noonOct10_145),
+    "#145 review fix: due later the SAME local day as endAt is not an overrun, even though its raw timestamp is after endAt's noon anchor"
+  );
+  const justAfterMidnightOct11_145 = new Date(2026, 9, 11, 0, 30, 0).getTime();
+  ok(
+    overrunsEnd({ dueAt: justAfterMidnightOct11_145 }, noonOct10_145),
+    "#145 review fix: …but due on the NEXT local day is an overrun, even by only half an hour past midnight"
+  );
+
+  // #145 review fix (round 3): startOfLocalDay, now exported so the
+  // milestone-reschedule dialog (schedule-tab.tsx) and moveMilestoneAction
+  // can compare a milestone's stored targetDate (an arbitrary
+  // phase-window-end instant — generateSchedule dates it to a
+  // phaseWindow's `endAt`, never noon-anchored) against a freshly
+  // re-picked, noon-anchored date at DAY granularity instead of by raw
+  // instant. Without this, confirming the dialog with NO real change
+  // (the ordinary case) produced a non-zero delta whenever the stored
+  // instant fell after noon — a live sweep of realistic phase-window
+  // ends found this on 66% of them. The reviewer's own worked case:
+  const phaseWindowEnd145 = new Date(2027, 1, 23, 21, 17, 0).getTime(); // Tue Feb 23 2027 21:17
+  const reconfirmedNoon145 = new Date(2027, 1, 23, 12, 0, 0).getTime(); // same local day, re-picked
+  ok(
+    startOfLocalDay(phaseWindowEnd145) === startOfLocalDay(reconfirmedNoon145),
+    "#145 review fix: an arbitrary phase-window-end instant and a same-day noon-anchored re-pick floor to the identical local day — a no-op confirm must compute a zero delta, not a false 'moved' note"
+  );
+  const nextDayNoon145 = new Date(2027, 1, 24, 12, 0, 0).getTime();
+  ok(
+    startOfLocalDay(phaseWindowEnd145) !== startOfLocalDay(nextDayNoon145),
+    "#145 review fix: …but a genuinely different local day still floors differently, so a real reschedule still registers"
+  );
+
+  // barRect: a bar ENTIRELY past the visible end used to collapse to the
+  // same ~0.6%-wide sliver as a same-day zero-length bar, sitting right at
+  // the container's edge — easy to miss completely. It now anchors to the
+  // right edge sized by its own real duration, so it stays a legible bar.
+  const farPast145 = barRect({ startAt: OCT6 + 15 * DAY145, dueAt: OCT6 + 18 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
+  ok(farPast145.widthPct === 30, "#145 review fix: a bar entirely past the visible end is sized by its own 3-day duration over the 10-day span (30%), not clamped to a hairline");
+  ok(farPast145.leftPct === 70, "#145 review fix: …and anchored flush against the right edge (leftPct + widthPct === 100)");
+  const barelyPast145 = barRect({ startAt: OCT6 + 10 * DAY145, dueAt: OCT6 + 10 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
+  ok(barelyPast145.leftPct + barelyPast145.widthPct === 100, "#145 review fix: even a zero-length bar exactly at the boundary stays anchored flush right, not drawn past the edge");
+  // A very long overrun (duration bigger than the whole visible span) caps
+  // at 100% width rather than reporting something the caller would need to
+  // clamp itself.
+  const massivelyPast145 = barRect({ startAt: OCT6 + 15 * DAY145, dueAt: OCT6 + 45 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
+  ok(massivelyPast145.widthPct === 100 && massivelyPast145.leftPct === 0, "#145 review fix: an overrun longer than the whole visible span caps at 100% width instead of overflowing it");
+
+  // #145 review fix (found live, not in review): dayColumns must walk by
+  // LOCAL CALENDAR DAY, not by adding a raw 86400000ms each step — a DST
+  // transition among the walked days is 23 or 25 real hours, and adding a
+  // flat 24h drifts every later "day" out of alignment with true local
+  // midnight. This is what actually produced the header's overlapping
+  // week labels on an 8-month span: two labels that should have been 21
+  // real days apart ended up rendered only ~14 apart. Nov 1, 2026 is when
+  // US clocks "fall back" — Oct 25 and Nov 8, 2026 are the Sundays a week
+  // either side of it.
+  const beforeDst145 = new Date(2026, 9, 25).getTime();
+  const afterDst145 = new Date(2026, 10, 8).getTime();
+  const spanningDst145 = dayColumns(beforeDst145, afterDst145);
+  ok(
+    spanningDst145.length === 15,
+    "#145 review fix: dayColumns across a DST transition still returns exactly 15 days (Oct 25 – Nov 8 inclusive), not one short/long from the fall-back hour"
+  );
+  // Note: the LENGTH assertion above does not by itself discriminate the
+  // bug on FALL-BACK — a raw-ms walk also happens to total 15 here (it
+  // drifts the LAST element's clock time by the fall-back hour without
+  // dropping/duplicating a day). The next assertion is the one that
+  // actually catches it.
+  ok(
+    spanningDst145[spanningDst145.length - 1] === afterDst145,
+    "#145 review fix: …and the LAST column lands exactly on the real local midnight of the end date, not an hour off"
+  );
+
+  // …and the OTHER direction: Mar 14, 2027 is when US clocks "spring
+  // forward" (a 23-hour local day). Mar 7 and Mar 21, 2027 are the
+  // Sundays a week either side of it. Unlike fall-back, a raw-ms walk
+  // breaks the COUNT itself here (it comes up one day short — 14 instead
+  // of 15 — because the 23-hour transition day makes the walk's running
+  // total fall behind by an hour, and by the far end that hour is enough
+  // to make the loop's `<=` cutoff exclude the real last day). Nothing
+  // covered this direction before; only the fall-back case was tested.
+  const beforeSpring145 = new Date(2027, 2, 7).getTime();
+  const afterSpring145 = new Date(2027, 2, 21).getTime();
+  const spanningSpring145 = dayColumns(beforeSpring145, afterSpring145);
+  ok(
+    spanningSpring145.length === 15,
+    "#145 review fix: dayColumns across the SPRING-FORWARD transition also returns exactly 15 days (Mar 7 – Mar 21 inclusive), not one short from the lost hour"
+  );
+  ok(
+    spanningSpring145[spanningSpring145.length - 1] === afterSpring145,
+    "#145 review fix: …and the LAST column lands exactly on the real local midnight of the end date"
+  );
+  } finally {
+    // #145 review fix (round 4) — `process.env.TZ = undefined` does NOT
+    // delete the key: Node coerces it to the STRING "undefined", which
+    // resolves as a (nonexistent) zone name and falls back to UTC. Since
+    // this suite normally runs with no TZ set at all, `savedTZ145` here
+    // IS `undefined`, and the naive restore silently switched every
+    // assertion and async suite after this block — 53 sync assertions
+    // plus all four async suites deferred to the promise chain at the
+    // bottom of this file — from local time to UTC. `delete` is the only
+    // way to genuinely restore "unset".
+    if (savedTZ145 === undefined) delete process.env.TZ;
+    else process.env.TZ = savedTZ145;
+  }
+}
+
+/* ====== #145: packTracks (review fix — relocated from gantt-grid.tsx into
+   gantt-lib.ts since it's pure) ====== */
+{
+  const DAY145 = 86400000;
+  const OCT6 = Date.UTC(2026, 9, 6);
+  const none = packTracks([]);
+  ok(none.n === 1 && Object.keys(none.map).length === 0, "#145 packTracks: an empty list still reports at least 1 track and an empty map");
+  const disjoint = packTracks([
+    { s: OCT6, e: OCT6 + DAY145, k: "a" },
+    { s: OCT6 + 2 * DAY145, e: OCT6 + 3 * DAY145, k: "b" },
+  ]);
+  ok(disjoint.n === 1 && disjoint.map.a === 0 && disjoint.map.b === 0, "#145 packTracks: non-overlapping items share a single track");
+  const overlap = packTracks([
+    { s: OCT6, e: OCT6 + 5 * DAY145, k: "a" },
+    { s: OCT6 + 2 * DAY145, e: OCT6 + 6 * DAY145, k: "b" },
+  ]);
+  ok(overlap.n === 2 && overlap.map.a === 0 && overlap.map.b === 1, "#145 packTracks: two overlapping items land on distinct tracks");
+  const reuse = packTracks([
+    { s: OCT6, e: OCT6 + 2 * DAY145, k: "a" },
+    { s: OCT6 + 1 * DAY145, e: OCT6 + 5 * DAY145, k: "b" },
+    { s: OCT6 + 3 * DAY145, e: OCT6 + 4 * DAY145, k: "c" },
+  ]);
+  ok(
+    reuse.n === 2 && reuse.map.a === 0 && reuse.map.b === 1 && reuse.map.c === 0,
+    "#145 packTracks: a track is reused once its occupant has ended, instead of growing a third track"
+  );
+}
+
+/* ====== #145: template lines carry scope + units ====== */
+const bareLine145 = normalizeTemplateLine({ title: "Do the thing" });
+ok(bareLine145.phase === "" && bareLine145.discipline === "", "#145 a pre-#145 template line reads with no phase and no discipline");
+ok(bareLine145.startPct === 0 && bareLine145.lengthPct === 100, "#145 an unmeasured line defaults to spanning its whole phase window");
+const clampedLine145 = normalizeTemplateLine({ title: "x", startPct: -5, lengthPct: 500 });
+ok(clampedLine145.startPct === 0 && clampedLine145.lengthPct === 100, "#145 out-of-range template percentages are clamped at normalize, not at render");
+ok(normalizeTemplateLine({ title: "x", discipline: " Rigging " }).discipline === "rigging", "#145 a discipline is stored lowercased and trimmed so selectLines matches it");
+
+/* ---- #145 T3: a non-numeric percentage falls back rather than becoming NaN ---- */
+ok(normalizeTemplateLine({ title: "x", startPct: "abc" }).startPct === 0, "#145 a non-numeric startPct string falls back to 0 rather than becoming NaN");
+
+/* ====== #145 T3: applyTaskTemplate schedules + gates a consulting fan-out ======
+ * DB-backed (async, doc-store), mirroring the file's own #13 idiom: fixed
+ * test names + find-or-converge lookups since this writes to the real
+ * persistent dev DB, not a scratch one. */
+async function templateScheduleAsyncChecks(): Promise<void> {
+  const ENG_START_145T3 = Date.UTC(2027, 3, 1);
+  const ENG_END_145T3 = ENG_START_145T3 + 100 * DAY145;
+  const PHASES_145T3: PhaseWeight[] = [
+    { phaseId: "ph-assess-145t3", name: "Assessment", weight: 1 },
+    { phaseId: "ph-dd-145t3", name: "Design Development", weight: 1 },
+  ];
+  const DISCIPLINES_145T3 = ["rigging"];
+
+  // Fixed test names/ids, declared outside the try so the finally block
+  // below can re-look-up and tear down every fixture this function writes,
+  // by the SAME identifiers, regardless of how far setup got before a
+  // throw — this is not a scratch DB, it may be the one real Neon instance
+  // shared by Production/Preview/Development (#145 review round 3).
+  const ENG_NAME_145T3 = "PUNCHLIST #145 T3 integration test engagement";
+  const SET_NAME_145T3 = "PUNCHLIST #145 T3 integration test set";
+  const SET_NAME_145T3_PROJECT = "PUNCHLIST #145 T3 integration test set — project";
+  const PROJECT_ID_145T3 = "test-project-punch145-t3";
+
+  try {
+    const eng145t3 =
+      (await allEngagements()).find((e) => e.name === ENG_NAME_145T3) ||
+      (await createManualEngagement(
+        {
+          customerId: "test-customer-145t3",
+          customer: "Test Customer #145 T3",
+          name: ENG_NAME_145T3,
+          phases: ["Assessment", "Design Development"],
+        },
+        { name: "Test Harness" }
+      ));
+
+    const linesFor145t3: TaskTemplateLine[] = [
+      {
+        key: "t3-person", title: "T3 in-scope person line", section: "",
+        target: { kind: "person", userId: "u1" },
+        phase: "Assessment", discipline: "", startPct: 0, lengthPct: 100,
+      },
+      {
+        key: "t3-wrong-phase", title: "T3 wrong-phase line", section: "",
+        target: { kind: "team" },
+        phase: "Nonexistent Phase", discipline: "", startPct: 0, lengthPct: 100,
+      },
+      {
+        key: "t3-wrong-discipline", title: "T3 wrong-discipline line", section: "",
+        target: { kind: "team" },
+        phase: "Assessment", discipline: "lighting", startPct: 0, lengthPct: 100,
+      },
+      {
+        key: "t3-blank-discipline", title: "T3 blank-discipline line", section: "",
+        target: { kind: "team" },
+        phase: "Design Development", discipline: "", startPct: 10, lengthPct: 20,
+      },
+      {
+        key: "t3-role", title: "T3 role line", section: "",
+        target: { kind: "role", role: "Estimator" },
+        phase: "Assessment", discipline: "rigging", startPct: 0, lengthPct: 100,
+      },
+    ];
+
+    const found145t3 = (await allTaskTemplateSets()).find((s) => s.name === SET_NAME_145T3);
+    const set145t3 = found145t3
+      ? await updateTaskTemplateSet(found145t3.id, { lines: linesFor145t3 })
+      : await createTaskTemplateSet({ name: SET_NAME_145T3, appliesTo: ["consulting"], lines: linesFor145t3 }, { name: "Test Harness" });
+    if (!set145t3) throw new Error("#145 T3 setup: template set not found after create/update");
+
+    const schedule145t3: ApplyTemplateSchedule = {
+      startAt: ENG_START_145T3, endAt: ENG_END_145T3, phases: PHASES_145T3, disciplines: DISCIPLINES_145T3,
+    };
+    await applyTaskTemplate(set145t3.id, { kind: "consulting", id: eng145t3.id }, { name: "Test Harness" }, schedule145t3);
+
+    const engTasks145t3 = await tasksForEngagement(eng145t3.id);
+    const byTitle145t3 = (title: string) => engTasks145t3.filter((t) => t.title === title);
+
+    ok(
+      byTitle145t3("T3 wrong-phase line").length === 0,
+      "#145 T3 a line whose phase the engagement doesn't have never produces a task for anyone"
+    );
+    ok(
+      byTitle145t3("T3 wrong-discipline line").length === 0,
+      "#145 T3 a line whose discipline the engagement didn't buy never produces a task for anyone"
+    );
+
+    const blankDiscTasks145t3 = byTitle145t3("T3 blank-discipline line");
+    ok(
+      blankDiscTasks145t3.length > 0,
+      "#145 T3 a blank-discipline line DOES expand even when the engagement bought only some disciplines"
+    );
+    ok(
+      blankDiscTasks145t3.every((t) => t.engagementId === eng145t3.id && t.schedule?.phaseId === "ph-dd-145t3"),
+      "#145 T3 the blank-discipline line's tasks are placed in their own phase window"
+    );
+
+    const personTasks145t3 = byTitle145t3("T3 in-scope person line");
+    ok(personTasks145t3.length === 1, "#145 T3 a person-target in-scope line produces exactly one task");
+    ok(personTasks145t3[0]?.assigneeUserId === "u1", "#145 T3 the person-target task is assigned to the named person");
+    ok(
+      personTasks145t3[0]?.schedule?.phaseId === "ph-assess-145t3" &&
+        personTasks145t3[0]?.startAt === ENG_START_145T3 &&
+        personTasks145t3[0]?.dueAt === ENG_START_145T3 + 50 * DAY145,
+      "#145 T3 the person-target task carries the phase's own placement (startPct 0 / lengthPct 100 of a 50-day window)"
+    );
+
+    const roleUsers145t3 = (await activeUsers()).filter((u) => (u.roles || []).includes("Estimator"));
+    const roleTasks145t3 = byTitle145t3("T3 role line");
+    ok(
+      roleUsers145t3.length > 0 && roleTasks145t3.length === roleUsers145t3.length,
+      "#145 T3 a role line fans out to exactly one task per active user holding that role"
+    );
+    ok(
+      roleTasks145t3.every(
+        (t) => t.schedule?.phaseId === "ph-assess-145t3" && t.startAt === ENG_START_145T3 && t.dueAt === ENG_START_145T3 + 50 * DAY145
+      ),
+      "#145 T3 every fanned-out role task carries the SAME placement (the ::userId suffix is stripped before the placement lookup)"
+    );
+    ok(
+      new Set(roleTasks145t3.map((t) => t.assigneeUserId)).size === roleUsers145t3.length,
+      "#145 T3 each role-line task is assigned to a distinct matching user"
+    );
+
+    /* ---- guard: a consulting target with no schedule must throw, not silently skip the gate ---- */
+    let threw145t3 = false;
+    let thrownMessage145t3 = "";
+    try {
+      await applyTaskTemplate(set145t3.id, { kind: "consulting", id: eng145t3.id }, { name: "Test Harness" });
+    } catch (e) {
+      threw145t3 = true;
+      thrownMessage145t3 = e instanceof Error ? e.message : String(e);
+    }
+    ok(
+      threw145t3,
+      "#145 T3 applying a template to a consulting engagement with no schedule throws instead of silently skipping the scope gate"
+    );
+    ok(
+      /schedul/i.test(thrownMessage145t3) && /consulting/i.test(thrownMessage145t3),
+      "#145 T3 the no-schedule guard's error names the missing schedule and the consulting engagement"
+    );
+
+    /* ---- omitting schedule reproduces the old behaviour exactly (project target) ---- */
+    if (!(await getProject(PROJECT_ID_145T3))) {
+      await upsertDoc("projects", {
+        id: PROJECT_ID_145T3,
+        kind: "project",
+        quoteId: null,
+        projectType: null,
+        name: "PUNCHLIST #145 T3 test project",
+        customer: "Test Customer #145 T3",
+        customerId: null,
+        locationId: null,
+        owner: "Test Harness",
+        value: 0,
+        stage: "procurement",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
+
+    const linesFor145t3Project: TaskTemplateLine[] = [
+      {
+        key: "t3-proj-line", title: "T3 project line (no schedule)", section: "",
+        target: { kind: "person", userId: "u1" },
+        // Deliberately garbage phase/discipline/percentages — with no schedule
+        // argument the `if (schedule)` block never runs, so these must be
+        // entirely ignored, exactly like every pre-#145 template line.
+        phase: "Totally Made Up Phase", discipline: "not-a-real-discipline", startPct: 999, lengthPct: -50,
+      },
+    ];
+    const foundProj145t3 = (await allTaskTemplateSets()).find((s) => s.name === SET_NAME_145T3_PROJECT);
+    const set145t3Project = foundProj145t3
+      ? await updateTaskTemplateSet(foundProj145t3.id, { lines: linesFor145t3Project })
+      : await createTaskTemplateSet(
+          { name: SET_NAME_145T3_PROJECT, appliesTo: ["project"], lines: linesFor145t3Project },
+          { name: "Test Harness" }
+        );
+    if (!set145t3Project) throw new Error("#145 T3 setup: project template set not found after create/update");
+
+    await applyTaskTemplate(set145t3Project.id, { kind: "project", id: PROJECT_ID_145T3 }, { name: "Test Harness" });
+    const projTasks145t3 = (await tasksForProject(PROJECT_ID_145T3)).filter((t) => t.title === "T3 project line (no schedule)");
+    ok(projTasks145t3.length === 1, "#145 T3 omitting schedule still applies a template to a project target exactly as before");
+    ok(
+      projTasks145t3[0]?.startAt === null &&
+        projTasks145t3[0]?.dueAt === null &&
+        projTasks145t3[0]?.schedule === null &&
+        projTasks145t3[0]?.handScheduled === false,
+      "#145 T3 omitting schedule produces no dates, no schedule, and handScheduled false — the old behaviour exactly"
+    );
+  } finally {
+    // Teardown (#145 review round 3): this function must leave NO trace in
+    // what may be the one real Neon database shared across Production/
+    // Preview/Development — on the success path AND on a mid-test throw.
+    // Re-queried by the same fixed names/ids setup used above, rather than
+    // trusting local variables to have survived an early throw, so cleanup
+    // is complete no matter how far setup got.
+    const engToClean = (await allEngagements()).find((e) => e.name === ENG_NAME_145T3);
+    if (engToClean) {
+      for (const t of await tasksForEngagement(engToClean.id)) await removeTask(t.id);
+      await softDeleteDoc("consulting_engagements", engToClean.id);
+    }
+    for (const t of await tasksForProject(PROJECT_ID_145T3)) await removeTask(t.id);
+    await removeProject(PROJECT_ID_145T3);
+    const setToClean = (await allTaskTemplateSets()).find((s) => s.name === SET_NAME_145T3);
+    if (setToClean) await removeTaskTemplateSet(setToClean.id);
+    const setProjectToClean = (await allTaskTemplateSets()).find((s) => s.name === SET_NAME_145T3_PROJECT);
+    if (setProjectToClean) await removeTaskTemplateSet(setProjectToClean.id);
+  }
+}
+
+/* ====== #145 D170: the Activity feed merges existing records ====== */
+const feed145 = mergeActivity({
+  notes: [
+    { id: "N-1", at: 300, text: "Call with Dana", by: "Jeff", attachments: [], taskIds: ["T-9"], system: false },
+    { id: "N-2", at: 500, text: "Milestone moved", by: "Jeff", attachments: [], taskIds: [], system: true },
+  ],
+  meetings: [{ id: "mt-1", at: 400, title: "Design review", attendees: "Dana, Jeff", minutes: "..." }],
+  decisions: [{ id: "dc-1", at: 200, by: "Jeff", decision: "Fire curtain in scope", context: "" }],
+  phaseAttachments: [{ id: "ed-1", addedAt: 100, name: "as-built.dwg", addedBy: "Chris", phaseName: "DD" }],
+});
+ok(feed145.length === 5, "#145 the feed merges notes, meetings, decisions and phase attachments with nothing new stored");
+ok(feed145[0].at === 500 && feed145[4].at === 100, "#145 the feed is newest first");
+ok(feed145[0].kind === "note" && feed145[0].system === true, "#145 a milestone-move note is marked system so the feed can style it apart");
+ok(feed145.find((e) => e.id === "N-1")?.taskIds.join(",") === "T-9", "#145 a note carries the tasks it spawned so a task's origin stays answerable");
+ok(feed145.filter((e) => e.kind === "meeting").length === 1, "#145 meetings appear without being copied into notes");
+ok(mergeActivity({ notes: [], meetings: [], decisions: [], phaseAttachments: [] }).length === 0, "#145 an empty engagement produces an empty feed, not a crash");
+
+/* ====== #145 D171: the file seam and its ownership check ====== */
+ok(engagementFolderPath("Cedar Grove Schools", "CE-1044") === "Peak Projects/Cedar Grove Schools/CE-1044", "#145 the Drive folder path is customer then engagement id");
+ok(engagementFolderPath("A/B \\ C", "CE-1") === "Peak Projects/A-B - C/CE-1", "#145 path separators in a customer name are sanitized, never used as folders");
+ok(fileRefName({ kind: "drive", fileId: "f1", webViewLink: "x", name: "set.pdf", mime: "application/pdf", size: 10 }) === "set.pdf", "#145 fileRefName reads across every union member");
+
+const ownedRefs145: FileRef[] = [
+  { kind: "drive" as const, fileId: "good", webViewLink: "x", name: "a.pdf", mime: "application/pdf", size: 1 },
+  { kind: "blob" as const, pathname: "engagement-files/CE-1/b.pdf", name: "b.pdf", mime: "application/pdf", size: 1 },
+];
+ok(ownsEngagementFile(ownedRefs145, "good", "CE-1"), "#145 a Drive id stored on the engagement is streamable (DB-level half only — the proxy's live Drive parents re-check is the other half, not spec-testable here with no network)");
+ok(ownsEngagementFile(ownedRefs145, "engagement-files/CE-1/b.pdf", "CE-1"), "#145 a Blob pathname stored on the engagement, under ITS OWN engagement prefix, is streamable");
+ok(!ownsEngagementFile(ownedRefs145, "someone-elses-file", "CE-1"), "#145 an id NOT stored on this engagement is refused — the vendor-quote arbitrary-read lesson");
+ok(!ownsEngagementFile([], "good", "CE-1"), "#145 an engagement with no files streams nothing");
+ok(!ownsEngagementFile(ownedRefs145, "", "CE-1"), "#145 an empty id is refused rather than matching a falsy field");
+ok(!ownsEngagementFile(ownedRefs145, "good", ""), "#145 an empty engagementId is refused even if the key is stored somewhere");
+
+/* The vendor-quote precedent (ownsVendorQuoteBlobPath) is TWO checks: is it
+ * stored, AND does the path's own shape belong to this exact record. A
+ * writer that takes client-supplied FileRef data (this seam's note
+ * attachments) makes the "is it stored" half attacker-controlled, so a
+ * "blob" key must ALSO structurally sit under THIS engagement's own
+ * upload prefix — closing the hole a forged attachment on the attacker's
+ * OWN engagement would otherwise open onto another engagement's, or
+ * another feature's, private files. */
+const crossEngRef145: FileRef = { kind: "blob", pathname: "engagement-files/CE-2/other.pdf", name: "other.pdf", mime: "application/pdf", size: 1 };
+ok(
+  !ownsEngagementFile([crossEngRef145], "engagement-files/CE-2/other.pdf", "CE-1"),
+  "#145 a blob ref whose OWN pathname prefix names a DIFFERENT engagement is refused, even though the key is 'stored' on this one — the exact shape of the attack once a note-save writer takes client-supplied FileRefs"
+);
+const traversalRef145: FileRef = { kind: "blob", pathname: "engagement-files/CE-1/../../vendor-quotes/secret.pdf", name: "secret.pdf", mime: "application/pdf", size: 1 };
+ok(
+  !ownsEngagementFile([traversalRef145], "engagement-files/CE-1/../../vendor-quotes/secret.pdf", "CE-1"),
+  "#145 a blob pathname containing '..' is refused even when its literal prefix matches this engagement"
+);
+ok(
+  !ownsEngagementFile(
+    [{ kind: "blob", pathname: "vendor-quotes/vq123-secret.pdf", name: "secret.pdf", mime: "application/pdf", size: 1 }],
+    "vendor-quotes/vq123-secret.pdf",
+    "CE-1"
+  ),
+  "#145 a blob pathname borrowed from an unrelated feature's own prefix (vendor-quotes/) is refused"
+);
+
+/* fileRefKey / fileRefHref — not in the brief's floor, added for coverage
+ * of the two other exports consulting-files.ts produces. */
+const dataRef145: FileRef = { kind: "data", dataUrl: "data:text/plain,hi", name: "c.txt", mime: "text/plain", size: 2 };
+ok(fileRefKey(dataRef145) === "", "#145 a data-URL ref has no storage key");
+ok(!ownsEngagementFile([dataRef145], "", "CE-1"), "#145 a data-URL ref's empty key never matches an empty request either");
+ok(fileRefHref(dataRef145, "CE-1") === dataRef145.dataUrl, "#145 a data-URL ref's href is the data URL itself — no network round trip");
+ok(fileRefHref(ownedRefs145[0], "CE-1044") === "/api/engagement-files/CE-1044/good", "#145 a drive ref's href routes through the ownership-checked proxy, not a raw Drive link");
+ok(fileRefHref(ownedRefs145[1], "CE-1") === "/api/engagement-files/CE-1/engagement-files%2FCE-1%2Fb.pdf", "#145 a blob ref's href is proxied with its pathname encoded");
+
+/* ====== #145 round 3: positive-shape validation replaces the '..' denylist ======
+ * The reviewer checked @vercel/blob's constructBlobUrl directly: it
+ * interpolates the pathname RAW and UNENCODED into the blob URL, so a
+ * percent-encoded traversal segment carries no literal '..' and would
+ * have sailed through the old denylist while still reaching that URL
+ * construction. isOwnedBlobPathname (which ownsEngagementFile now calls)
+ * validates the remainder POSITIVELY instead — this is the regression
+ * test for exactly that gap. */
+ok(
+  !isOwnedBlobPathname("engagement-files/CE-1/%2e%2e%2f%2e%2e%2fvendor-quotes/x.pdf", "CE-1"),
+  "#145 a percent-encoded traversal segment carries no literal '..' but is refused by the positive shape check — a denylist alone would have let this through"
+);
+ok(
+  !ownsEngagementFile(
+    [{ kind: "blob", pathname: "engagement-files/CE-1/%2e%2e%2f%2e%2e%2fvendor-quotes/x.pdf", name: "x.pdf", mime: "application/pdf", size: 1 }],
+    "engagement-files/CE-1/%2e%2e%2f%2e%2e%2fvendor-quotes/x.pdf",
+    "CE-1"
+  ),
+  "#145 ownsEngagementFile refuses the same percent-encoded traversal case end to end"
+);
+ok(
+  !isOwnedBlobPathname("engagement-files/CE-1/plan.pdf?x=1", "CE-1"),
+  "#145 a '?' in the remainder is refused — it would turn part of the key into a query string against the raw-interpolated blob URL"
+);
+ok(
+  !isOwnedBlobPathname("engagement-files/CE-1/plan.pdf#frag", "CE-1"),
+  "#145 a '#' in the remainder is refused for the same reason"
+);
+ok(
+  isOwnedBlobPathname("engagement-files/CE-1/My_Drawing-Set_v2.pdf", "CE-1"),
+  "#145 an ordinary safeName-shaped filename — the only shape putBlob's writer ever mints — still passes the positive check"
+);
+ok(
+  isOwnedBlobPathname("engagement-files/CE-1/sub/My_Drawing-Set_v2-Ab12Cd34.pdf", "CE-1"),
+  "#145 a filename carrying putBlob's random suffix, one directory segment deep, still passes"
+);
+ok(!isOwnedBlobPathname("", "CE-1"), "#145 an empty pathname is refused");
+ok(!isOwnedBlobPathname("engagement-files/CE-1/plan.pdf", ""), "#145 an empty engagementId is refused even with an otherwise-valid pathname");
+
+/* safeMime — positive validation, not a CR/LF-only denylist. */
+ok(safeMime("application/pdf") === "application/pdf", "#145 safeMime passes through an ordinary mime token");
+ok(safeMime("application/pdf\r\nX-Injected: 1") === "application/octet-stream", "#145 safeMime clamps a value containing CR/LF");
+ok(safeMime("text/plain\x00") === "application/octet-stream", "#145 safeMime clamps a value containing a control byte, not just CR/LF");
+ok(safeMime("app/☺") === "application/octet-stream", "#145 safeMime clamps non-ASCII — a positive check, not a denylist of specific bad bytes");
+ok(safeMime(null) === "application/octet-stream" && safeMime(undefined) === "application/octet-stream" && safeMime("") === "application/octet-stream", "#145 safeMime defaults on absent input");
+
+/* isValidDataRef — the only place a client-supplied dataUrl is ever
+ * inspected at all, since the download proxy never touches a "data" ref
+ * (fileRefKey returns "" for it). */
+ok(
+  isValidDataRef({ kind: "data", dataUrl: "data:text/plain,hello", name: "a.txt", mime: "text/plain", size: 5 }),
+  "#145 isValidDataRef accepts a plain-text data URL"
+);
+ok(
+  isValidDataRef({ kind: "data", dataUrl: "data:application/pdf;base64,JVBERi0xLjQK", name: "a.pdf", mime: "application/pdf", size: 9 }),
+  "#145 isValidDataRef accepts a base64 data URL with a benign declared mime"
+);
+ok(
+  !isValidDataRef({ kind: "data", dataUrl: "data:text/html,<script>alert(1)</script>", name: "evil.html", mime: "text/html", size: 30 }),
+  "#145 isValidDataRef refuses a data URL declaring an HTML-renderable mime — nothing else inspects this before a UI might render it"
+);
+ok(
+  !isValidDataRef({ kind: "data", dataUrl: "data:image/svg+xml,<svg onload=alert(1)></svg>", name: "evil.svg", mime: "image/svg+xml", size: 30 }),
+  "#145 isValidDataRef refuses image/svg+xml the same way — SVG executes script like HTML"
+);
+ok(
+  !isValidDataRef({ kind: "data", dataUrl: "data:text/plain,fine", name: "sneaky.txt", mime: "text/html", size: 4 }),
+  "#145 isValidDataRef checks the ref's OWN declared mime too, not only the data URL's scheme mime — a mismatched pair is refused"
+);
+ok(
+  !isValidDataRef({ kind: "data", dataUrl: "not-a-data-url-at-all", name: "a.txt", mime: "text/plain", size: 5 }),
+  "#145 isValidDataRef refuses a malformed data URL"
+);
+ok(
+  !isValidDataRef({ kind: "data", dataUrl: "data:text/plain;base64," + "A".repeat(3_000_000), name: "a.txt", mime: "text/plain", size: 5 }),
+  "#145 isValidDataRef refuses a payload far beyond the stated ceiling regardless of what a claimed size says"
+);
+
+/* initiateResumableSession itself is exercised indirectly but exactly: the
+ * existing uploadFileResumable tests above assert the precise headers
+ * (X-Upload-Content-Length, X-Upload-Content-Type) and body sent on the
+ * initiate POST, and uploadFileResumable now calls initiateResumableSession
+ * to produce that request — so those assertions passing IS the proof the
+ * split preserved the recordings archive's behaviour. A direct async unit
+ * test was left out here rather than threaded into the file's existing
+ * recordingsAsyncChecks()-then-chain (this file has no per-block async
+ * runner, and a stray top-level await breaks the tsx/esbuild cjs build). */
+
+/* ====== #145: span validation is pure and blocks at creation ====== */
+ok(validateSpan(OCT6, MAR30) === null, "#145 a normal span validates");
+ok(validateSpan(0, MAR30) !== null, "#145 a missing start is rejected with a message");
+ok(validateSpan(MAR30, OCT6) !== null, "#145 an end before the start is rejected rather than generating a degenerate schedule");
+ok(validateSpan(OCT6, OCT6) !== null, "#145 a zero-length span is rejected — every task would land on one day");
+ok((validateSpan(MAR30, OCT6) || "").toLowerCase().includes("end"), "#145 the rejection message names the field at fault");
+
+/* ====== #145 review fix: withEngagementPhaseIds / defaultMilestonePhaseId
+ * are pure and directly testable (moved out of schedule-actions.ts, a
+ * "use server" module the harness can't import — same reason validateSpan
+ * lives here instead of there). ====== */
+{
+  const weights: PhaseWeight[] = [
+    { phaseId: "slug-assessment", name: "Assessment", weight: 1 },
+    { phaseId: "slug-design", name: "Design", weight: 2 },
+  ];
+  const enginePhases = [
+    { id: "ph-real-1", name: "Assessment" },
+    { id: "ph-real-2", name: "Design" },
+  ];
+  const mapped = withEngagementPhaseIds(weights, enginePhases);
+  ok(mapped[0].phaseId === "ph-real-1", "#145 withEngagementPhaseIds maps the first weight onto the engagement's own phase id");
+  ok(mapped[1].phaseId === "ph-real-2", "#145 …and the second, by name — not by having guessed position");
+  ok(mapped[0].name === "Assessment" && mapped[0].weight === 1, "#145 …name and weight pass through untouched");
+
+  // A weight name absent from the engine's phases keeps its own (slug) id
+  // rather than being dropped — the output is never shorter than the input.
+  const orphanWeights: PhaseWeight[] = [{ phaseId: "slug-ghost", name: "Ghost Phase", weight: 1 }];
+  const orphanMapped = withEngagementPhaseIds(orphanWeights, enginePhases);
+  ok(orphanMapped.length === 1 && orphanMapped[0].phaseId === "slug-ghost", "#145 a weight with no matching engine phase keeps its slug id instead of being dropped");
+
+  // An engine phase absent from the weight list has no opinion voiced for
+  // it — it just never appears in the output (which is keyed off `weights`).
+  const shortWeights: PhaseWeight[] = [{ phaseId: "slug-design", name: "Design", weight: 1 }];
+  const shortMapped = withEngagementPhaseIds(shortWeights, enginePhases);
+  ok(shortMapped.length === 1 && shortMapped[0].phaseId === "ph-real-2", "#145 an engine phase with no matching weight simply isn't in the output — nothing invents an entry for it");
+
+  // Case-insensitive, trim-tolerant, matching phaseWindows/generateSchedule's own norm().
+  const looseWeights: PhaseWeight[] = [{ phaseId: "slug-x", name: "  assessment  ", weight: 1 }];
+  const looseMapped = withEngagementPhaseIds(looseWeights, enginePhases);
+  ok(looseMapped[0].phaseId === "ph-real-1", "#145 withEngagementPhaseIds matches case-insensitively and trims whitespace");
+}
+{
+  const byName = phaseIdsByName([{ id: "ph-1", name: "Assessment" }, { id: "ph-2", name: "Design Development" }]);
+  ok(byName.get("assessment") === "ph-1", "#145 phaseIdsByName keys by the normalized (trimmed, lowercased) name");
+
+  ok(
+    defaultMilestonePhaseId({ name: "Assessment", phaseId: "already-set" }, byName) === "already-set",
+    "#145 defaultMilestonePhaseId leaves an already-set phaseId alone even though the name would also match"
+  );
+  ok(
+    defaultMilestonePhaseId({ name: " Design Development ", phaseId: null }, byName) === "ph-2",
+    "#145 defaultMilestonePhaseId assigns by exact (trimmed/case-insensitive) name match when phaseId is unset"
+  );
+  ok(
+    defaultMilestonePhaseId({ name: "No Such Phase", phaseId: undefined }, byName) === null,
+    "#145 defaultMilestonePhaseId defaults to null rather than guessing when nothing matches"
+  );
+}
+/* ====== #145 D169: task-template CSV ====== */
+const ttType145 = IMPORT_TYPES.find((t) => t.key === "task_templates");
+ok(!!ttType145, "#145 task_templates is a registered import type");
+ok(ttType145!.fields.map((f) => f.header).join(",") === "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %", "#145 the template CSV columns match the spec exactly");
+ok(ttType145!.fields.filter((f) => f.required).map((f) => f.key).join(",") === "set,task", "#145 only the set name and the task title are required");
+ok(ttType145!.fields.every((f) => f.hidden || typeof f.example === "string"), "#145 every visible column carries an example so the downloadable template is fillable");
+
+ok(parseAssignTarget("team", []).kind === "team", "#145 'team' parses to the everyone target");
+ok(parseAssignTarget("role:Estimator", []).kind === "role", "#145 'role:X' parses to a role target");
+const users145 = [{ id: "u1", name: "Jeff Chesebro" }];
+const person145 = parseAssignTarget("person:Jeff Chesebro", users145);
+ok(person145.kind === "person" && person145.userId === "u1", "#145 'person:Name' resolves to a user id");
+ok(parseAssignTarget("person:Nobody At All", users145).kind === "team", "#145 an unresolvable person falls back to team rather than minting a task nobody owns");
+ok(parseAssignTarget("", users145).kind === "team", "#145 a blank Assign To defaults to team");
+
+/* ====== #145: the By person view (schedule/people-lib.ts, D172) ====== */
+{
+  const ppl145 = [{ id: "u1", name: "Jeff C." }, { id: "u2", name: "Chris C." }];
+  const tk145 = [
+    { id: "T-1", title: "SD set", assigneeUserId: "u1", assigneeName: "Jeff C.", startAt: OCT6, dueAt: OCT6 + 5 * DAY145, engagementId: "CE-1", handScheduled: false },
+    { id: "T-2", title: "QC", assigneeUserId: "u1", assigneeName: "Jeff C.", startAt: OCT6 + 2 * DAY145, dueAt: OCT6 + 6 * DAY145, engagementId: "CE-1", handScheduled: false },
+    { id: "T-3", title: "Rigging", assigneeUserId: null, assigneeName: "", startAt: OCT6, dueAt: OCT6 + DAY145, engagementId: "CE-1", handScheduled: false },
+  ];
+  const rows145 = groupByPerson(tk145, ppl145);
+  ok(rows145.length === 3, "#145 groupByPerson emits a lane per active person plus an Unassigned lane");
+  ok(rows145[0].bars.length === 2, "#145 a person's lane carries every task assigned to them across projects");
+  ok(rows145.find((r) => r.label === "Unassigned")?.bars.length === 1, "#145 unassigned work is visible rather than silently dropped");
+  ok(rows145.find((r) => r.label === "Chris C.")?.bars.length === 0, "#145 a person with no work still gets a lane — an empty lane is the answer to 'who is free'");
+  ok(rows145[0].bars.every((b) => b.draggable), "#145 consulting bars are draggable on the portfolio view");
+
+  // Review additions beyond the brief's own fixture — tone-by-engagement,
+  // the no-startAt/dueAt skip, and an empty user list still yielding the
+  // Unassigned lane (no rows === "grouping didn't run", not "no one to show").
+  const tk145b = [
+    { id: "T-4", title: "Other CE", assigneeUserId: "u1", assigneeName: "Jeff C.", startAt: OCT6, dueAt: OCT6 + DAY145, engagementId: "CE-2", handScheduled: false },
+    { id: "T-5", title: "No dates", assigneeUserId: "u1", assigneeName: "Jeff C.", startAt: null, dueAt: null, engagementId: "CE-1", handScheduled: false },
+  ];
+  const rows145b = groupByPerson([...tk145, ...tk145b], ppl145);
+  const jeffBars145b = rows145b[0].bars;
+  ok(jeffBars145b.length === 3, "#145 a task with no startAt/dueAt is skipped — it has no bar — while its dated siblings still show");
+  const ce1Tone = jeffBars145b.find((b) => b.id === "T-1")!.tone;
+  const ce2Tone = jeffBars145b.find((b) => b.id === "T-4")!.tone;
+  ok(ce1Tone !== ce2Tone, "#145 two different engagements get two different tones");
+  ok(
+    jeffBars145b.find((b) => b.id === "T-2")!.tone === ce1Tone,
+    "#145 two tasks on the SAME engagement (CE-1) get the SAME tone — one project reads as one colour"
+  );
+
+  const rowsNoUsers145 = groupByPerson(tk145, []);
+  ok(
+    rowsNoUsers145.length === 1 && rowsNoUsers145[0].label === "Unassigned" && rowsNoUsers145[0].bars.length === 3,
+    "#145 with no active users at all, every dated task still surfaces in the Unassigned lane rather than vanishing"
+  );
+
+  ok(
+    groupByPerson([], []).length === 1 && groupByPerson([], [])[0].label === "Unassigned" && groupByPerson([], [])[0].bars.length === 0,
+    "#145 an empty task list still yields the Unassigned lane, empty"
+  );
+}
+
+/* ====== #145 review fix: mergeBookingsIntoPersonRows (schedule/people-lib.ts, D172) ======
+ * The By person view's other half — page.tsx merges install/service
+ * bookings onto groupByPerson's rows, and until this fix that merge lived
+ * only in page.tsx, exercised by nothing but a smoke-test HTTP 200 and a
+ * one-off browser session. Pulled into its own pure function for exactly
+ * the same reason groupByPerson was: it's the code path where an
+ * independently-edited "Unassigned" sentinel would silently drop every
+ * unassigned booking on the floor (#145 review — Important 1). */
+{
+  const baseRows145 = groupByPerson(
+    [
+      {
+        id: "T-10", title: "Bid walk", assigneeUserId: "u1", assigneeName: "Jeff C.",
+        startAt: OCT6, dueAt: OCT6 + 3 * DAY145, engagementId: "CE-9",
+      },
+    ],
+    [{ id: "u1", name: "Jeff C." }, { id: "u2", name: "Chris C." }]
+  );
+
+  const booking145 = (over: Partial<PersonBooking>): PersonBooking => ({
+    crewId: "cw-1", projectName: "Harbor Rep", person: "Jeff C.",
+    start: OCT6, end: OCT6 + 2 * DAY145, color: "#123456",
+    ...over,
+  });
+
+  // 1. Someone carrying BOTH a consulting task and an install booking ends
+  //    up with both bars in the SAME lane.
+  const merged145a = mergeBookingsIntoPersonRows(baseRows145, [booking145({ crewId: "cw-1", person: "Jeff C." })]);
+  const jeffRow145a = merged145a.find((r) => r.label === "Jeff C.");
+  ok(
+    !!jeffRow145a && jeffRow145a.bars.length === 2 && jeffRow145a.bars.some((b) => b.id === "T-10") && jeffRow145a.bars.some((b) => b.id === "install:cw-1"),
+    "#145 a person carrying both a consulting task and an install booking gets both bars in one lane"
+  );
+  ok(
+    merged145a.length === baseRows145.length,
+    "#145 a booking for someone already in a row adds a bar, not a whole new lane"
+  );
+
+  // 2. An install booking for an UNASSIGNED person lands in the Unassigned
+  //    lane rather than being dropped — matched by the real UNASSIGNED_LABEL
+  //    constant, not a locally re-typed "Unassigned" string.
+  const merged145b = mergeBookingsIntoPersonRows(baseRows145, [booking145({ crewId: "cw-2", person: UNASSIGNED_LABEL })]);
+  const unassignedRow145b = merged145b.find((r) => r.label === UNASSIGNED_LABEL);
+  ok(
+    !!unassignedRow145b && unassignedRow145b.bars.length === 1 && unassignedRow145b.bars[0].id === "install:cw-2",
+    "#145 an install booking for an unassigned person lands in the Unassigned lane rather than vanishing"
+  );
+  ok(merged145b.length === baseRows145.length, "#145 an unassigned booking is folded into the existing Unassigned row, not a new one");
+
+  // 3. A booked name with NO matching row gets its own synthesized row —
+  //    never silently dropped.
+  const merged145c = mergeBookingsIntoPersonRows(baseRows145, [booking145({ crewId: "cw-3", person: "Rose Brand Sub" })]);
+  const extraRow145c = merged145c.find((r) => r.label === "Rose Brand Sub");
+  ok(
+    !!extraRow145c && extraRow145c.bars.length === 1 && extraRow145c.bars[0].id === "install:cw-3",
+    "#145 a booked name with no matching user gets its own synthesized row rather than vanishing"
+  );
+  ok(
+    merged145c.length === baseRows145.length + 1 && merged145c[merged145c.length - 1].label === UNASSIGNED_LABEL,
+    "#145 the synthesized row is appended before Unassigned, which stays last"
+  );
+
+  // 4. Every merged install/service bar is draggable: false — D172 — while
+  //    the consulting bars it sits beside are untouched (still draggable).
+  const merged145d = mergeBookingsIntoPersonRows(baseRows145, [booking145({ crewId: "cw-4", person: "Jeff C." })]);
+  const jeffRow145d = merged145d.find((r) => r.label === "Jeff C.")!;
+  ok(
+    jeffRow145d.bars.find((b) => b.id === "install:cw-4")?.draggable === false,
+    "#145 a merged install/service bar is draggable: false"
+  );
+  ok(
+    jeffRow145d.bars.find((b) => b.id === "T-10")?.draggable === true,
+    "#145 the consulting bar sitting beside it is untouched — still draggable"
+  );
+
+  // groupByPerson's own rows/bars are never mutated by the merge.
+  const beforeJeffBars = JSON.stringify(baseRows145.find((r) => r.label === "Jeff C.")?.bars);
+  mergeBookingsIntoPersonRows(baseRows145, [booking145({ crewId: "cw-5", person: "Jeff C." }), booking145({ crewId: "cw-6", person: UNASSIGNED_LABEL })]);
+  ok(
+    JSON.stringify(baseRows145.find((r) => r.label === "Jeff C.")?.bars) === beforeJeffBars,
+    "#145 mergeBookingsIntoPersonRows never mutates the rows groupByPerson returned"
+  );
+
+  // No bookings at all: the merge is a same-shape passthrough.
+  const merged145e = mergeBookingsIntoPersonRows(baseRows145, []);
+  ok(
+    merged145e.length === baseRows145.length && merged145e.every((r, i) => r.bars.length === baseRows145[i].bars.length),
+    "#145 with no bookings, the merge changes nothing"
+  );
+}
+
+/* ====== #145 D170: Krisp / meeting pre-fill ====== */
+const pre145 = prefillFromMeeting({ id: "mt-1", at: OCT6, title: "Design review — SD", attendees: "Dana Kim, Jeff C.", minutes: "District wants the fire curtain in scope." });
+ok(pre145.text.includes("Design review — SD"), "#145 the pre-filled body leads with the meeting title");
+ok(pre145.text.includes("fire curtain"), "#145 the pre-filled body carries the minutes verbatim");
+ok(pre145.attendees.join("|") === "Dana Kim|Jeff C.", "#145 attendees are split for attachment to the note");
+ok(prefillFromMeeting({ id: "m", at: 0, title: "", attendees: "", minutes: "" }).text === "", "#145 an empty meeting pre-fills nothing rather than a header with no content");
+ok(!prefillFromMeeting({ id: "m", at: OCT6, title: "x", attendees: "", minutes: "y" }).text.includes("undefined"), "#145 a meeting with no attendees never renders the string 'undefined'");

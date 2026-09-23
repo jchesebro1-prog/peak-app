@@ -4087,3 +4087,299 @@ exercised in production.
 **Not done:** `src/app/(app)/catalog/actions.ts` carries the identical defect —
 `MAX_DATASHEET_BYTES = 8 * 1024 * 1024` in a server action, with a comment saying it mirrors the
 Grid's cap. It is logged as its own item rather than folded in here.
+
+## D178. Task-template CSV import replaces a set's lines wholesale — it never appends (#145, D169, 2026-09-22)
+
+*Renumbered 2026-09-22: written as D174 during Task 10. `origin/main` had independently claimed
+D174 for "Quartzite native shell — Capacitor remote/hybrid Phase 1" (itself once renumbered off a
+D132 collision, 2026-09-20) while this branch was in flight. Checked against a fresh
+`git fetch origin main` before renumbering: D175–D177 (this decision's siblings, immediately below)
+are free on both branches and are unchanged; D164–D172 (this item's own decisions) were unused on
+both and are used as reserved. Only this one entry moved.*
+
+D169 (spec, `docs/superpowers/specs/2026-09-22-consulting-project-management-design.md`) says
+task templates import through the existing Import hub registry (`src/app/(app)/import/`), which
+already had a "skip / update / create" mode for every other type. That contract does not by itself
+say what "update" means for a type where MANY ROWS make ONE record — every existing writer in the
+registry dedupes at the same grain it writes (one row = one contact, one venue, one catalog SKU),
+so "update" always meant "patch this one row's fields." A task-template set has no such
+per-row identity to patch.
+
+**Default taken: the uploaded file is the source of truth for a set's `lines` (and, see D177,
+`appliesTo`).** `find` matches an existing set by normalized name; `update` REPLACES that set's
+`lines` with exactly the rows this file carries for it — not merged, not appended. Re-importing the
+same file twice leaves the set exactly as it was; dropping a line from the file and re-importing
+shrinks the stored set to match. The alternative (append every row that doesn't exactly match an
+existing line) was rejected: a template set has no stable natural key for a line to append against
+across two different uploads of "the same" spreadsheet (edited row order, a retyped title), so
+append-by-default silently doubles every line on the second import of an otherwise-unchanged file —
+worse than doing nothing, because nothing flags it. `WRITERS.task_templates.update` /
+`ttApplyRow` in `registry.ts`.
+
+## D175. A CSV-minted task-template set's `createdBy` defaults to the fixed string "Import" (#145, D169, 2026-09-22)
+
+`createTaskTemplateSet(input, me)` stamps `createdBy` from `me.name` — the admin editor
+(`task-templates/actions.ts`) passes the real signed-in `requireUser()`. The Import hub's server
+action (`import/actions.ts`) never captured that value for any existing writer, because no other
+type stamps an author from the importing session at all (customers/contacts/venues never touch
+`owner` from the admin who ran the import either).
+
+**Default taken: `CommitContext` grew an optional `me?: { name: string }`; when absent (which is
+every call today, since `import/actions.ts` was left unchanged), the task_templates writer stamps
+`createdBy: "Import"`** rather than threading the real session user through — matching the
+existing precedent (no writer attributes authorship from the import session) rather than making
+this one type the first exception. `CommitContext.me` is there, unused by `import/actions.ts`,
+for a follow-up that wants the real name instead.
+
+## D176. "Create" mode against a colliding task-template-set name always mints a second, distinct set (#145, D169, 2026-09-22)
+
+The catalog writer's "Create new" on an existing SKU is a merge, because a SKU IS the document id —
+two documents sharing one SKU is structurally impossible, so a merge is the only thing "create" CAN
+mean there. A first pass at the task_templates writer copied that shape (re-look-up the set by name
+on `create`, merge into whatever it found) without checking whether the same constraint holds — it
+doesn't: `createTaskTemplateSet` mints an independent sequential `TT-###` id unrelated to `name`, so
+two sets sharing a name is a perfectly ordinary, distinct pair of records (review, 2026-09-22:
+flagged as the round's one Critical finding — an admin re-uploading an old export, or two people
+naming a set the same thing, silently destroyed the existing set's lines with no error and nothing
+distinguishing it from a normal successful create).
+
+**Default taken: "create" mode never merges into a set that pre-existed before the file was
+opened.** It ONLY ever merges into a record this SAME commit already started (the multi-row case —
+several rows for one brand-new set in one file) — tracked by `ttCreatedThisCommit`, a set of ids
+minted during the current `commitImport` call. That same set is also why `find` hides a
+just-created id from the generic skip/update dispatch: without it, row 2 of a brand-new multi-line
+set would "find" row 1's fresh record and — under "skip" mode — skip every row after the first,
+truncating a set the file never asked to be partial. Verified for all three modes (skip/update/
+create) against both a brand-new and a pre-existing set name, DB-backed, in
+`scripts/test-review-and-spec.ts` (`#145 T10`).
+
+## D177. A blank "Applies To" column on re-import preserves the set's existing value (#145, D169, 2026-09-22)
+
+Decision D178's replace-by-set default extends naturally to `appliesTo` (also set-level, also
+recomputed from the file's rows) — but unconditionally wiping it to `rec.appliesTo = []` whenever a
+row's Applies To cell was blank meant a file exported for one purpose (e.g. bulk-editing every
+line's Phase) and re-imported without remembering to fill in Applies To on every row silently
+disabled the set: it stops appearing in every "Apply template" picker, and the failure is invisible
+until someone goes looking for a set that used to be there (review, 2026-09-22, Important 3).
+
+**Default taken: a blank Applies To column means "the file doesn't say," not "clear it."** A
+per-commit accumulator (`ttAppliesAccum`, separate from the set's own `appliesTo` field) unions only
+what the file's rows actually specify; if that union is still empty once a set's rows are all
+processed, the set's Applies To is left exactly as it was before the commit
+(`ttOriginalAppliesTo`, captured once per set before anything is touched). The moment any row in
+the file DOES specify one, that replaces wholesale as D178 already does for `lines` — this only
+protects the "the file never mentions it at all" case, not "the file says something different."
+
+## D164. Consulting project management attaches to the existing `CE-####` engagement (#145, 2026-09-22)
+
+Spec: `docs/superpowers/specs/2026-09-22-consulting-project-management-design.md`. Task templates,
+scheduling, the Activity tab and per-person portfolio work all hang off the engagement record that
+already exists (`src/lib/stores/engagements.ts`), not a new record and not the install `Project`.
+
+**Why:** the engagement already carries client, sites, people-with-roles, phases, fees and the
+document trail. A parallel record would duplicate all of it and force a "which one is the project"
+decision on every screen that touches consulting work — the customer record, the quote, the
+Activity tab, the schedule.
+
+**Rejected alternative:** a new, dedicated project-management record for consulting engagements,
+separate from `CE-####`. It lost because nothing it would hold isn't already on the engagement;
+the only thing it would add is the duplication problem above.
+
+## D165. Scope is phases × disciplines, with a blank discipline matching every discipline (#145, 2026-09-22)
+
+A task-template line is tagged with a phase and optionally a discipline. An engagement expands only
+the lines whose phase it has and whose discipline it bought. Phases already flow from the consulting
+quote (`design/engagements/quote/actions.ts:69`); disciplines are new on the quote builder, reusing
+the intake four (`survey-intake.ts:124`: rigging/curtain/lighting/av), and are admin-editable in
+Settings (`consultingDisciplines: string[]`) the same way the phase list already is.
+
+**A blank discipline matches every discipline**, deliberately — this is what lets a phase-only
+template (an admin-authored checklist that doesn't care about trade) work on day one, before anyone
+has gone through and tagged every line by discipline.
+
+**Rejected alternative:** free-text `ConsultingScope` lines (the engagement's existing scope-of-work
+strings) as the template key instead of a controlled phase/discipline pair. Rejected because free
+text cannot key anything — there is no way to match "Rigging inspection and reporting" typed once
+against a template line without either exact-string coupling (breaks the moment either side is
+reworded) or fuzzy matching (silently wrong some of the time, in a system whose whole point is
+correct fan-out).
+
+## D166. Dates are proportional units within a phase window, not absolute days (#145, 2026-09-22)
+
+The engagement carries a typed `startAt` and `endAt`. Selected phases carry weights
+(`consultingPhaseWeights: Record<string, number>` in Settings) that divide that span into windows;
+a task-template line carries a start percentage and a length percentage **within its own phase
+window**, not within the whole engagement. `phaseWindows()` / `placeTask()` in the new
+`src/lib/consulting-schedule.ts` (zero imports, pure) do the math:
+
+```
+window(phase)  = [ start + span × (Σweights before) / Σweights,
+                   start + span × (Σweights through) / Σweights ]
+task.startAt   = window.start + windowLen × startPct  / 100
+task.dueAt     = task.startAt + windowLen × lengthPct / 100
+```
+
+A longer engagement gives every task proportionally more room; dropping a phase redistributes the
+remainder in proportion rather than stranding tasks at stale absolute positions.
+
+**Rejected alternative 1: whole-project percentages** (a task's position expressed as a percentage
+of the entire engagement, ignoring phases). **This breaks on scope change** — the moment a phase is
+added or dropped after tasks are placed, every whole-project percentage still points at the same
+fraction of a span whose composition has changed underneath it; a task meant to sit at "20% into
+Design Development" drifts to wherever 20%-of-the-whole-project now falls, which is a different
+phase entirely once Bid Support is added or removed. Per-phase windows contain that drift inside
+the one phase whose scope actually changed.
+
+**Rejected alternative 2: task-weight chaining** (each task's start derived from the previous task's
+end, engagement-wide, like a critical path with no parallelism). Rejected because it forces every
+task serial and forbids rigging and curtain running the same week — two disciplines that routinely
+do exactly that. Proportional placement within a phase window lets tasks in the same phase overlap
+freely; only the phase boundaries are ordered.
+
+**Degenerate inputs**, handled in the engine and pinned by tests: `endAt <= startAt` → zero-length
+windows, every task lands on `startAt`, blocked at creation with a validation message rather than
+generating a degenerate schedule silently; a phase with weight 0 or absent → weight 1; `Σweights = 0`
+→ equal division; `startPct + lengthPct > 100` → the bar clamps to the window end rather than
+spilling into the next phase.
+
+## D167. Milestones are locked; tasks are freely draggable (#145, 2026-09-22)
+
+Milestone dates are computed once, at schedule creation, and then fixed — editable only from the
+engagement's main screen, not from the Gantt. Tasks are freely draggable on the Gantt with no
+confirmation dialog.
+
+**Why:** this replaces what would otherwise be a pin/re-flow arbitration problem (what happens when
+a locked item and a movable item disagree about a date). Splitting the two into "moves only
+deliberately, from one screen" and "moves casually, with no friction" means the two layers never
+fight, because only one of them moves casually. A milestone that needs to move goes through D168's
+explicit shift instead.
+
+**Rejected alternative:** milestones and tasks both draggable on the Gantt, with some reconciliation
+rule for when a drag would move a milestone past its own dependent tasks or vice versa. Rejected as
+the more expensive path for no real gain — Jeff's billing milestones are deliberate commitments, not
+things that should casually slip because someone fat-fingered a drag.
+
+## D168. A milestone gains a `phaseId`; moving it offers to move that phase's tasks — but never ripples past it (#145, 2026-09-22)
+
+Milestones (billing, seeded from free-text `ConsultingScope` scope lines) and phases (structure,
+carrying the tasks) are different lists, so `EngagementMilestone.phaseId: string | null` makes the
+link explicit rather than inferred. The shift dialog pre-ticks that milestone's phase's tasks as an
+adjustable checklist. **Hand-dragged tasks are excluded from the pre-tick** — a task moved by a
+person for a reason the app cannot see is never moved again by the app on the next milestone shift.
+
+`phaseId` defaults by exact name match (case-insensitive, trimmed) against the phase list, else
+`null`; a milestone with a null `phaseId` still moves, its shift dialog simply pre-ticks nothing,
+degrading to the manual checklist rather than guessing which tasks belong to it. `targetDate` for a
+phase-matched milestone is computed at creation from that phase window's end date — a deliverable is
+due when its phase finishes; a milestone with a null `phaseId` keeps `targetDate: 0` and stays
+unscheduled until dated by hand.
+
+**Rejected alternative: rippling every later milestone and task forward when an earlier milestone
+moves** (the conventional project-management default). **This moves the wrong half of the
+schedule.** The work that actually slipped sits *before* the deliverable that just moved — the
+milestone moving is the symptom, not the cause — and what would actually need to ripple in response
+to a real-world slip is the bid schedule feeding into the *next* milestone, which is usually the one
+date Peak does not control in the first place (it's the client's or the AHJ's). Rippling everything
+after the moved milestone would confidently move dates Peak has no basis to move, while leaving
+untouched the dates that actually caused the shift.
+
+## D169. Task templates import by CSV through the existing import registry, not a new importer (#145, 2026-09-22)
+
+A `task_templates` import type is added to the registry (`src/app/(app)/import/types.ts`,
+`registry.ts:973`) rather than a bespoke importer for this one record type. Example-row download,
+alias auto-mapping, preview→confirm and dedupe are all inherited for free. Rows are validated
+against the live phase and discipline lists; unknown values are surfaced (see D178/D174–D177 for how
+the "replace vs. append", authorship and blank-column defaults were resolved once the registry's
+existing per-row skip/update/create contract turned out not to say what "update" means for a type
+where many rows make one record).
+
+**Rejected alternative:** a dedicated `/task-templates` CSV upload endpoint outside the import
+registry, built to fit the templates' many-rows-one-record shape from scratch. Rejected because the
+registry's inherited machinery (preview, dedupe, alias mapping, the CSV-template download) is exactly
+what an admin authoring the first real template sets needs, and duplicating it for one type buys
+nothing.
+
+## D170. One Activity tab, with a composer that emits a note, files and tasks together as one linked action (#145, 2026-09-22)
+
+A single composer — body text, dropped files, checkable lines that become assigned, dated tasks —
+writes a `NoteRecord` carrying `attachments: FileRef[]` and `taskIds: string[]`, plus the tasks
+themselves, in one server action. The three records stay linked, so a task's origin is answerable
+six months later by following `taskIds` back to the note that spawned it.
+
+The feed merges, newest first: notes (with their spawned tasks and files inline), meetings,
+decisions, phase attachments, and milestone-move notes. A milestone move (D168) writes a
+**system-authored note** into this same feed rather than introducing a separate history table —
+one feed, one record shape, one place to look for "what happened on this engagement." Task lines
+are ticked by a human; nothing is auto-extracted into them.
+
+**Krisp/meeting pre-fill (#145 Task 8, landed as a fast-follow rather than in this composer's
+original commit):** `prefillFromMeeting` (`src/lib/engagement-activity.ts`) seeds the composer's
+body from a meeting's minutes, with attendees surfaced as a caption for the human to read. It's
+reached from two entry points — the Meetings tab's "Capture to Activity" link, and a Krisp
+recording's "Capture to engagement" action — both landing on `?tab=activity&prefill=<id>`; the
+`[id]` page resolves `<id>` against `eng.meetings` first, then (only when needed) projects a linked
+Krisp recording's summary into the same meeting shape via a server-computed prop, never importing
+the recordings store into a client component. The prefill param is cleared with `router.replace`
+once seeded, so a refresh can't re-seed over edits. Body only, matching this decision's own rule
+above — the pre-fill never touches task lines; those stay ticked by a human.
+
+**Rejected alternative:** separate, unlinked flows for adding a note, uploading a file, and creating
+a task, the way most of the app's other record types already work. Rejected because it is exactly
+what makes "why does this task exist" and "what was decided in this meeting" unanswerable later —
+the whole point of this decision is that capture-time context is cheap to keep and expensive to
+reconstruct.
+
+## D171. Attachments write through a `FileRef` union; Drive is upload-only, no picker (#145, 2026-09-22)
+
+```ts
+type FileRef =
+  | ({ kind: "drive"; fileId: string; webViewLink: string } & FileMeta)
+  | ({ kind: "blob";  pathname: string }                    & FileMeta)
+  | ({ kind: "data";  dataUrl: string }                     & FileMeta);
+```
+
+One union, resolved at write time by what is configured: Google Drive when connected
+(`ensureFolder` building `Peak Projects / <customer> / <CE-id>`, caching the folder id on the
+engagement), Vercel Blob when Drive isn't connected, a data-URL as the last-resort local fallback.
+
+**No Drive picker in this slice** — letting a user attach an *existing* Drive file (rather than
+uploading a new one through the app) needs an OAuth scope beyond `drive.file` and a Google
+consent-screen change, both of which are Jeff-gated infrastructure decisions, not code. **No
+vendor-quote Blob→Drive migration here either** — that migration touches live production data
+behind an authenticated proxy and is deliberately its own slice (slice 3), off the critical path of
+a scheduling feature.
+
+**Rejected alternative:** build the Drive picker and the vendor-quote migration into this slice
+so attachments are "done" in one pass. Rejected on scope grounds — neither blocks anything this
+spec needs, and both carry their own review risk (a broadened OAuth scope; a live-data migration)
+that shouldn't ride along with a scheduling feature's review.
+
+**Verification caveat (added at merge, 2026-09-22):** the Drive leg is **not proven end to end**.
+`uploadToDrive` issues the first **browser-direct** Drive PUT in this codebase — `drive.ts`'s
+`uploadFileResumable`, used by the Recordings archive in production, does the equivalent transfer
+server-side. A stubbed `fetch` proved the response parsing; nothing has proved Google's resumable
+endpoint accepts a cross-origin browser PUT, specifically the CORS preflight on a non-simple
+`Content-Type`. That needs a real OAuth connection, which does not exist locally. The Blob and
+data-URL legs are verified byte-exact. If the preflight is refused in real use, the fallback is to
+proxy the bytes server-side as the archive already does, accepting the ~4.5 MB function-body
+ceiling. Tracked as "Open, for Jeff" item 6 on PUNCHLIST #145.
+
+## D172. Consulting ships first, on a parent-agnostic engine; install Projects are not touched (#145, 2026-09-22)
+
+The new scheduling engine (`src/lib/consulting-schedule.ts`) takes primitives — dates, phases,
+weights, template lines — not engagements, which is what makes wiring a second parent type in later
+a connection job rather than a rewrite. Install `Projects` keep their existing, separate,
+stage-keyed `TASK_TEMPLATE` (`tasks.ts:67`, the shape Jeff reviewed in Aug 2026) untouched.
+
+**Why:** phases (consulting's axis) and stages (installs' axis) are different concepts that happen
+to sound similar; reconciling them into one model while simultaneously building the scheduler that
+depends on the reconciliation being right is the expensive, riskiest path, and nothing about
+installs asked for this feature. The engine's zero-import, primitives-in shape means Projects can
+plug into it later without the engine itself changing.
+
+**Rejected alternative:** design one unified phase/stage model spanning both consulting and install
+work from the start, so the scheduler serves both from day one. Rejected because it would have
+required settling a phases-vs-stages reconciliation nobody has asked for yet, as a prerequisite to
+shipping the scheduler at all — the expensive path, taken on for a benefit (install scheduling) that
+is out of scope for #145 (D172 itself, restated: install `Projects` are explicitly out of scope,
+reachable later through this same engine's seam).

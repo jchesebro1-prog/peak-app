@@ -157,6 +157,10 @@ export type EngagementMilestone = {
   targetDate: number; // epoch-ms; 0 = not scheduled yet
   completedAt?: number | null;
   amount?: number | null; // feeds the Reports billing forecast (forecast-only)
+  /** #145 D168 — the phase this deliverable belongs to. Defaulted by exact
+   *  name match at generation; null otherwise, set from a dropdown on the
+   *  milestone row. A null phase pre-ticks nothing on a shift. */
+  phaseId?: string | null;
 };
 
 export type EngagementDecision = {
@@ -244,12 +248,26 @@ export type ConsultingEngagement = {
    *  (absent on every pre-#35 doc). */
   architect?: { company: string; contact: string } | null;
   status: EngagementStatus;
+  /** #145 D166 — the schedule span, typed at creation. 0 = unscheduled;
+   *  a pre-#145 engagement reads as unscheduled and nothing recomputes. */
+  startAt?: number;
+  endAt?: number;
+  /** #145 D165 — disciplines bought, from the quote, editable here. */
+  disciplines?: string[];
   phases: EngagementPhase[];
   milestones: EngagementMilestone[];
   decisions: EngagementDecision[];
   meetings: EngagementMeeting[];
   submittals: EngagementSubmittal[];
   documents: EngagementDoc[];
+  /** #145 D171 — Drive folder id this engagement's files upload route
+   *  resolved (`ensureFolderPath(engagementFolderPath(customer, id))`),
+   *  persisted the first time it's needed so a later customer-name edit
+   *  can't silently move where the download proxy expects an already-
+   *  uploaded Drive file to live. Absent/null until the first Drive
+   *  upload or download-proxy check for this engagement re-derives and
+   *  stores it. */
+  driveFolderId?: string | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -350,25 +368,45 @@ export function makeChecklist(texts: string[]): ChecklistItem[] {
  * callers can keep importing everything engagement-shaped from one module. */
 export { approvalIsStale, openChecklistItems, openComments };
 
-/** Lazy migration (spec §1): stored legacy statuses surface as their mapped
- *  stage on every read; the doc itself upgrades on its next write. */
-function normalizeEngagement(e: ConsultingEngagement): ConsultingEngagement {
-  const s = normalizeEngagementStatus(String(e.status));
-  return s === e.status ? e : { ...e, status: s };
+/** Normalize-on-read for a stored engagement doc. Lazy migration (spec §1):
+ *  stored legacy statuses surface as their mapped stage on every read; the
+ *  doc itself upgrades on its next write. Extracted (#145) so the spec
+ *  harness can exercise the absent-field defaults without a DB. */
+export function normalizeEngagementRecord(
+  raw: Partial<ConsultingEngagement> & { id: string }
+): ConsultingEngagement {
+  const e = raw as ConsultingEngagement;
+  e.status = normalizeEngagementStatus(String(raw.status || ""));
+  e.startAt = Number(raw.startAt) > 0 ? Number(raw.startAt) : 0;
+  e.endAt = Number(raw.endAt) > 0 ? Number(raw.endAt) : 0;
+  e.disciplines = Array.isArray(raw.disciplines)
+    ? raw.disciplines.map((d) => String(d).trim()).filter(Boolean)
+    : [];
+  e.phases = Array.isArray(raw.phases) ? raw.phases : [];
+  e.milestones = (Array.isArray(raw.milestones) ? raw.milestones : []).map((m) => ({
+    ...m,
+    phaseId: typeof m.phaseId === "string" && m.phaseId ? m.phaseId : null,
+  }));
+  e.decisions = Array.isArray(raw.decisions) ? raw.decisions : [];
+  e.meetings = Array.isArray(raw.meetings) ? raw.meetings : [];
+  e.submittals = Array.isArray(raw.submittals) ? raw.submittals : [];
+  e.documents = Array.isArray(raw.documents) ? raw.documents : [];
+  e.driveFolderId = typeof raw.driveFolderId === "string" && raw.driveFolderId ? raw.driveFolderId : null;
+  return e;
 }
 
 export async function allEngagements(): Promise<ConsultingEngagement[]> {
   const list = await listDocs<ConsultingEngagement>("consulting_engagements");
   return list
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-    .map(normalizeEngagement);
+    .map(normalizeEngagementRecord);
 }
 
 export async function getEngagement(
   id: string
 ): Promise<ConsultingEngagement | null> {
   const e = await getDoc<ConsultingEngagement>("consulting_engagements", id);
-  return e ? normalizeEngagement(e) : null;
+  return e ? normalizeEngagementRecord(e) : null;
 }
 
 export async function patchEngagement(
@@ -382,6 +420,41 @@ export async function patchEngagement(
     mut(d);
     d.updatedAt = Date.now();
   });
+}
+
+export type SetMilestonePhaseResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * #145 D168 review — D168's `phaseId` had no writer besides
+ * `generateScheduleAction`'s exact-name match (the minority case — most
+ * milestones come from free-text scope/fee rows, not a name that happens
+ * to match a phase). This is the writer half of the milestone row's phase
+ * dropdown, pulled out of `setMilestonePhaseAction`
+ * (design/engagements/actions.ts, "use server") so it's an ordinary
+ * module import the spec harness can call directly, the same Data Access
+ * Layer split `performCapture` uses — every export of a "use server" file
+ * is directly POST-reachable, so the action is just `requireUser()` then
+ * delegate.
+ *
+ * The posted `phaseId` is validated against the engagement's OWN phases
+ * (never trusted as given) — a stale or foreign id would otherwise sit on
+ * the milestone and silently break `shiftForMilestone`'s phase match.
+ */
+export async function setMilestonePhase(
+  engId: string,
+  msId: string,
+  phaseId: string | null
+): Promise<SetMilestonePhaseResult> {
+  const eng = await getEngagement(engId);
+  if (!eng) return { ok: false, error: "That engagement could not be found." };
+  if (phaseId != null && !eng.phases.some((p) => p.id === phaseId)) {
+    return { ok: false, error: "That phase isn't part of this engagement." };
+  }
+  await patchEngagement(engId, (d) => {
+    const ms = d.milestones.find((m) => m.id === msId);
+    if (ms) ms.phaseId = phaseId;
+  });
+  return { ok: true };
 }
 
 /** The consulting payload a consulting-quote builder writes onto the quote
@@ -399,6 +472,11 @@ export type ConsultingQuotePayload = {
   terms: string;
   /** Phase names chosen at quote time — seeds the engagement's phases. */
   phases: string[];
+  /** #145 D165 — disciplines chosen at quote time (checkbox row against the
+   *  Settings-editable vocabulary) — seeds the engagement's `disciplines`
+   *  the same way `phases` seeds `EngagementPhase[]` on spawn. Optional so a
+   *  pre-#145 quote payload still parses; read `?? []`. */
+  disciplines?: string[];
   /** #35 structured scopes — id: uid('sc-'). */
   scopes?: ConsultingScope[];
   /** #35 ticked assumption texts, frozen at save. */
@@ -461,6 +539,11 @@ function fromQuote(
     installQuoteId: null,
     architect: q.customer ? { company: q.customer, contact: contactName } : null,
     status,
+    // #145 D165 — carried straight from the quote payload (already
+    // allowlisted against the live vocabulary when the quote was saved,
+    // same trust boundary as `phases` just above); normalizeEngagementRecord
+    // re-cleans on every read regardless, same as every other field here.
+    disciplines: pay?.disciplines || [],
     phases,
     milestones,
     decisions: [],
@@ -477,7 +560,7 @@ export async function getEngagementByQuote(
 ): Promise<ConsultingEngagement | null> {
   const all = await listDocs<ConsultingEngagement>("consulting_engagements");
   const hit = all.find((e) => e.quoteId === quoteId) || null;
-  return hit ? normalizeEngagement(hit) : null;
+  return hit ? normalizeEngagementRecord(hit) : null;
 }
 
 /** The engagement referencing this quote either as its source (quoteId) or
@@ -492,7 +575,7 @@ export async function getEngagementForQuoteRef(
     all.find((e) => e.quoteId === quoteId) ||
     all.find((e) => e.installQuoteId === quoteId) ||
     null;
-  return hit ? normalizeEngagement(hit) : null;
+  return hit ? normalizeEngagementRecord(hit) : null;
 }
 
 /** Idempotently make sure a consulting quote has its engagement, born at
@@ -599,6 +682,14 @@ export type ManualEngagementInput = {
   /** Phase names. The ACTION resolves mergedConsultingPhases(settings) —
    *  the store stays settings-free (the D91 idiom) so it is testable alone. */
   phases: string[];
+  /** #145 D166 — the schedule span, typed at creation. Optional/0 for
+   *  every caller that predates this (including the fixtures in
+   *  scripts/test-review-regressions.ts) — an engagement created without
+   *  a span reads as unscheduled, same as before #145. */
+  startAt?: number;
+  endAt?: number;
+  /** #145 D165 — disciplines bought. Absent/empty reads as none. */
+  disciplines?: string[];
 };
 
 /**
@@ -639,6 +730,9 @@ export async function createManualEngagement(
         ? { company: architectCompany, contact: architectContact }
         : null,
     status: "awarded",
+    startAt: input.startAt || 0,
+    endAt: input.endAt || 0,
+    disciplines: input.disciplines || [],
     phases,
     milestones,
     decisions: [
