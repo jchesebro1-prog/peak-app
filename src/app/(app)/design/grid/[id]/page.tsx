@@ -10,6 +10,7 @@ import { isOpenEngagement } from "@/lib/consulting-review";
 import { sitesForCompany } from "@/lib/identity/sites";
 import { frac } from "@/lib/stores/pricing";
 import { getSettings } from "@/lib/settings";
+import { listDesigns } from "@/lib/stores/studio-designs";
 import { groupOf, resolveCategoryMap, tradeOf } from "@/lib/catalog-taxonomy";
 import { fabricSellPerSqft, sellCoeffs } from "@/lib/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
@@ -58,7 +59,7 @@ export default async function GridEditorPage({
 
   const activeOptionId = resolveOptionId(project, requestedOption);
 
-  const [sheets, catalog, gridSymbols, engagements, laborHoursPerDevice, settings] = await Promise.all([
+  const [sheets, catalog, gridSymbols, engagements, laborHoursPerDevice, settings, linesetDesigns] = await Promise.all([
     listSheets(project.id),
     listCatalog(),
     listGridSymbols(),
@@ -66,6 +67,7 @@ export default async function GridEditorPage({
     // Install-hours-per-device knob (D114) — admin-tunable like every rate.
     frac("grid.laborHoursPerDevice", 0.5),
     getSettings(),
+    listDesigns({ kind: "lineset" }),
   ]);
   // Beta group resolution (Task 6, punch #39) — server-side only; the
   // editor receives each part's already-resolved `group` and never sees
@@ -169,6 +171,7 @@ export default async function GridEditorPage({
         spaces: project.spaces || [],
         routes: project.routes || [],
         revisions: project.revisions || [],
+        linesetDesignId: project.linesetDesignId || null,
       }}
       sheets={sheets.map((s) => ({
         id: s.id,
@@ -187,6 +190,7 @@ export default async function GridEditorPage({
       specHref={specHref}
       venues={venues}
       categoryShapes={resolveCategoryShapes(settings.gridCategoryShapes)}
+      linesetDesigns={linesetDesigns.map((d) => ({ id: d.id, name: d.name }))}
     />
   );
 }

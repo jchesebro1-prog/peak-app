@@ -28,6 +28,7 @@ import {
   setOptionQuote,
   setPlacementCategory,
   setScopeInputs,
+  setLinesetDesign,
   setSheetCalibration,
   setVenue,
   saveGridIntake,
@@ -45,6 +46,7 @@ import { getSite } from "@/lib/identity/sites";
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
 import { get as getPart } from "@/lib/stores/catalog";
 import { createGridAssembly, getGridSymbol, setGridSymbolShape } from "@/lib/stores/grid-catalog";
+import { getDesign } from "@/lib/stores/studio-designs";
 import { isGridShape } from "@/lib/design/grid-symbols";
 import {
   GRID_CURTAIN_TYPES,
@@ -198,6 +200,25 @@ export async function seedStartingLayoutAction(
   if (!updated) return { ok: false, error: "That design could not be found." };
   revalidatePath(editorPath(projectId));
   return { ok: true, added: delta.length, skipped: desired.length - delta.length };
+}
+
+/** Link the Grid to a saved Lineset Builder design. The schedule remains a
+ * live derivation of the saved inputs, so edits to that design are reflected
+ * the next time the Grid schedule is opened. */
+export async function linkLinesetDesignAction(
+  projectId: string,
+  designId: string | null
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  if (designId) {
+    const design = await getDesign(designId);
+    if (!design || design.kind !== "lineset") return { ok: false, error: "Choose a saved Lineset Builder design." };
+  }
+  const updated = await setLinesetDesign(projectId, designId);
+  if (!updated) return { ok: false, error: "That design could not be found." };
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/schedule`);
+  return { ok: true };
 }
 
 export async function placeDeviceAction(

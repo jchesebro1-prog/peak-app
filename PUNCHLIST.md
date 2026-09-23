@@ -3029,11 +3029,16 @@ placement, and minting a quote before resolving every placeholder currently
 prices those lines at $0 with no guard (flagged for Task 5 or a follow-up,
 not fixed here).
 
-**Remaining (Tasks 3–6, still OPEN):** real-plan-upload as a separate sheet,
-artifact derivation (equipment/lineset schedule + riser), the estimator↔Grid BOM seam, and
-retiring the estimator's own drawing tabs once parity is reached.
+**Task 3 shipped (D-task-3):** uploading a real PDF/image uses the route handler and
+appends a separate sheet; the editor labels the action as an additional sheet and keeps
+the generated base plan and its placements untouched. **Task 4 is now partially shipped:**
+the equipment schedule and derived riser were already live, and the Grid now persists an
+optional saved Lineset Builder link plus a live `/lineset` schedule that regenerates from
+the linked design's inputs. The estimator↔Grid BOM seam and retiring the estimator's own
+drawing tabs remain open; the latter waits for parity and real-world review.
 
-**Status:** IN PROGRESS — Tasks 1–2 of 6 shipped 2026-09-21 (D147, D149); Tasks 3–6 open per the plan.
+**Status:** IN PROGRESS — Tasks 1–3 shipped; Task 4 partial (equipment/riser/lineset
+artifacts); Tasks 5–6 remain open pending the estimator seam and parity gate.
 
 ---
 
