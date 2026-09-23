@@ -83,6 +83,8 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
         desc: r.desc,
         category: r.category || "Uncategorized",
         unit: r.unit,
+        ...(parsed.hasList ? { list: r.list } : {}),
+        ...(parsed.hasCost ? { cost: r.cost } : {}),
         mfr: r.mfr || mfr,
         ...(r.manufacturerPartNumber ? { manufacturerPartNumber: r.manufacturerPartNumber } : {}),
         ...(r.manufacturerModelNumber ? { manufacturerModelNumber: r.manufacturerModelNumber } : {}),

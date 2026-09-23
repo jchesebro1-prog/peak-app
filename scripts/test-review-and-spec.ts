@@ -125,6 +125,7 @@ import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
 import { IMPORT_TYPES, getTypeMeta, type ImportTypeMeta } from "@/app/(app)/import/types";
 import {
   autoMap,
+  coerce,
   normalizeZip,
   parseCsv as parseImportCsv,
   prepareRows,
@@ -6614,6 +6615,7 @@ async function archiveAsyncChecks(): Promise<void> {
     ok(cm.customer === 0 && cm.customerId === 1 && cm.name === 2 && cm.email === 3 && cm.mobile === 4 && cm.title === 5 && cm.primary === 6, "#137 T3 contacts aliases: Company / Customer ID / Full Name / E-mail / Cell / Job Title / Primary Contact");
     const vm = autoMap(["Customer", "Venue", "Street", "City", "State", "Zip Code", "Latitude", "Longitude", "Type"], vn.fields);
     ok(vm.customer === 0 && vm.venue === 1 && vm.address === 2 && vm.zip === 5 && vm.lat === 6 && vm.lng === 7 && vm.kind === 8, "#147 venues aliases map coordinates alongside Venue / Street / Zip Code / Type");
+    ok(coerce(cu.fields.find((f) => f.key === "lat")!, "") === "" && coerce(cu.fields.find((f) => f.key === "lat")!, "0") === 0, "#147 blank coordinates stay blank while zero remains a real number");
 
     const onlyId = prepareRows([["c-1", "Pat Doe"]], autoMap(["Customer ID", "Name"], ct.fields), ct.fields);
     ok(onlyId.rows[0].valid, "#137 T3 a contacts row with only a Customer ID is valid (requiredUnless)");

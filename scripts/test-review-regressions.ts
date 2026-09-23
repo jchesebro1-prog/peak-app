@@ -1458,7 +1458,7 @@ async function main() {
     // #137 T7 — no Notes column: nothing on a customer record stores it, so
     // the hub stopped advertising it (the input file above still carries one,
     // and it is still absorbed without erroring).
-    assert.equal(exp.headers.join(","), "Customer Name,Category,Address,City,State,Zip,Phone,Website", "#137 T4 customers export columns = template columns (hidden aliases excluded)");
+    assert.equal(exp.headers.join(","), "Customer Name,Category,Address,City,State,Zip,Latitude,Longitude,Phone,Website", "#137 T4 customers export columns = template columns (hidden aliases excluded)");
     const row = exp.objects.find((o) => o["Customer Name"] === "T137 Import Playhouse");
     assert.ok(row, "#137 T4 exported row present");
     assert.equal(row!.Category, "Performing arts", "#137 T4 export Category");
@@ -1579,7 +1579,7 @@ async function main() {
 
     const csv = await exportCsv("venues");
     const exp = parseCsv(csv);
-    assert.equal(exp.headers.join(","), "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category", "#137 T6 venues export columns = template columns (no Notes — a venue has nowhere to store it)");
+    assert.equal(exp.headers.join(","), "Customer,Customer ID,Venue Name,Address,City,State,Zip,Latitude,Longitude,Category", "#137 T6 venues export columns = template columns (no Notes — a venue has nowhere to store it)");
     const row = exp.objects.find((o) => o["Customer ID"] === "c-t137-vn" && o["Venue Name"] === "Black Box");
     assert.ok(row, "#137 T6 exported venue present");
     assert.ok(row!.Zip === "54913-1234" && row!.Category === "black box" && row!.Customer === "T137 Venues District" && row!.Address === "5000 N Ballard Rd", "#137 T6 exported venue carries the customer's name + id and its fields");
