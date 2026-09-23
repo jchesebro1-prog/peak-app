@@ -158,6 +158,7 @@ const ROUTES = [
  */
 const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/projects/P-3001" },
+  { route: "/api/projects/P-3001/handoff" },
   { route: "/inspections/RI-2042" },
   { route: "/venue-assessments/FS-1055" },
   // #119 Recordings (D152): the recorder page for a seeded survey and the beta/no-Krisp gates.

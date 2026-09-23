@@ -3240,8 +3240,9 @@ closeout now captures a bounded phone/trackpad-drawn PNG signature, and completi
 end-user site-walk follow-up. Manual stage controls remain available for undo/correction. The
 project detail now has a Handoff packet tab that assembles site/schedule, crew, scope-grouped
 materials, field progress, notes, sign-off, and the linked Grid drawing/datasheet handoff in one
-installer-facing view. Remaining: richer attachment/report export and any additional real-world
-package review.
+installer-facing view. The tab now also downloads a server-generated PDF field sheet containing
+the same handoff data, with an authenticated route and dynamic-route smoke coverage. Remaining:
+attachment embedding/richer drawing export and any additional real-world package review.
 
 ---
 

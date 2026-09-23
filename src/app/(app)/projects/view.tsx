@@ -1188,7 +1188,10 @@ function HandoffPacketTab({ p, taskRows }: { p: ProjectRecord; taskRows: TaskRec
           <div style={{ fontSize: 15, fontWeight: 650 }}>Installer handoff packet</div>
           <div style={{ color: "#8c919c", fontSize: 12.5, marginTop: 3 }}>Everything captured so far for the crew and customer hand-off.</div>
         </div>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#6f7682", background: "#f1f2f5", padding: "4px 7px", borderRadius: 5 }}>{p.id}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <a href={`/api/projects/${encodeURIComponent(p.id)}/handoff`} className="pk-btn-outline" style={{ textDecoration: "none", fontSize: 12 }}>Download PDF</a>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#6f7682", background: "#f1f2f5", padding: "4px 7px", borderRadius: 5 }}>{p.id}</span>
+        </div>
       </div>
       {section("Site & schedule", <>{row("Customer", p.customer || "—")}{row("Install window", p.installStart ? fmtDate(p.installStart) + " – " + fmtDate(p.installEnd) : "Not scheduled")}{row("Crew", p.crew.length ? p.crew.map((c) => c.person).join(", ") : "Unassigned")}{row("Target", fmtDate(p.targetDate))}</>)}
       {section("Scope & materials", <div style={{ display: "grid", gap: 9 }}>{scopes.map((scope) => {
