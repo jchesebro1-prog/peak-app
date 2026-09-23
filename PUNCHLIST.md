@@ -5175,8 +5175,10 @@ path is now included: quote/lead mint failures are caught and returned to the bu
 visible error banner, preserving the edit id when applicable. The remaining FormData mutation
 surface now also covers the customer portal's request lead and self-serve estimate quote writes,
 with customer-safe retry messages. The remaining FormData mutation surface needs a broader audit
-of every task/import/create action and a consistent typed-result contract; the five-page error
-channel described above is now in place for the paths covered here.
+of every task/import/create action and a consistent typed-result contract. Field Work task toggles,
+notes, and time entries now redirect to the field-work error banner; inspection scheduling, renewal
+outreach, and deletion now redirect to visible inspection errors. The five-page error channel
+described above is now in place for the paths covered here.
 
 ---
 
