@@ -3699,7 +3699,9 @@ accessories, power and data, and if there is a lamp the lamp cost."*
   the alternative (one `SpecItem` per component) changes how the fixture reads on the customer
   PDF (`preview-doc.tsx`).
 
-**Status:** OPEN: logged only, no code.
+**Status:** APPROVED — BLOCKED ON JEFF'S ETC SKU LIST. Do not invent the light-engine/lens
+part numbers; import the supplied list first, then build the catalog-backed picker and preset
+component persistence.
 
 ---
 
@@ -3783,12 +3785,13 @@ that labor rates are pulling from the catalog for easy long term updating."*
   `actions.ts:106`, consumed on win as `project.mobilizations` (`projects.ts:555`). The portal
   path writes `mobs: []` (`portal/actions.ts:275`).
 
-**Open questions for Jeff:** show the resolved $/hr per discipline in the modal (and flag when a
-rate fell back to the hardcoded map)? And should labor rates *also* appear in `/estimating-rules`,
-or is the catalog the sole home? "Redone" needs scoping, what specifically is wrong beyond the
-invisible rates?
+**Open questions for Jeff:** should labor rates also appear in `/estimating-rules`, or is the
+catalog the sole home? "Redone" still needs scoping beyond the now-visible rates.
 
-**Status:** OPEN: logged only, no code.
+**Status:** PARTIAL 2026-09-23 audit — the estimator displays resolved installer, overtime, and
+supervisor rates with catalog/fallback provenance chips, and enforces the single mobilization rule.
+A broader labor redesign and the treatment of non-hourly travel/equipment rates still need Jeff's
+scope decision.
 
 ---
 
@@ -3882,7 +3885,9 @@ company/settings surface? Is the content **static curated docs** (like `/design/
 "estimating rules and customer tiers live here" mean **moving** those screens or **linking** to
 them from Knowledge?
 
-**Status:** OPEN: logged only, no code. **Supersedes #27.**
+**Status:** PARTIAL 2026-09-23 audit — the Knowledge top-level group and reference overview/tools
+are shipped, while editable company doctrine and relocation/linking of estimating rules and tiers
+remain the explicit product decisions recorded above.
 
 ---
 
