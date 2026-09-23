@@ -78,10 +78,15 @@ export const WIDGETS = [
 
 export type WidgetId = (typeof WIDGETS)[number]["id"];
 
-const BY_ID: Record<string, WidgetDef> = Object.fromEntries(WIDGETS.map((w) => [w.id, w]));
+const BY_ID: Record<string, WidgetDef> = Object.create(null) as Record<string, WidgetDef>;
+for (const w of WIDGETS) BY_ID[w.id] = w;
+
+function byId(id: string): WidgetDef | undefined {
+  return Object.hasOwn(BY_ID, id) ? BY_ID[id] : undefined;
+}
 
 export function widgetDef(id: string): WidgetDef | null {
-  return BY_ID[id] ?? null;
+  return byId(id) ?? null;
 }
 
 export function canSee(w: WidgetDef, roles: string[]): boolean {
@@ -111,7 +116,10 @@ export const PRESETS: Record<Surface, readonly WidgetId[]> = {
 };
 
 export function presetFor(surface: Surface, roles: string[]): WidgetId[] {
-  return PRESETS[surface].filter((id) => canSee(BY_ID[id], roles));
+  return PRESETS[surface].filter((id) => {
+    const w = byId(id);
+    return !!w && canSee(w, roles);
+  });
 }
 
 /** null/undefined = "never customized" → preset. Otherwise keep only ids
@@ -125,7 +133,7 @@ export function normalizeLayout(
   const seen = new Set<string>();
   const out: WidgetId[] = [];
   for (const id of ids) {
-    const w = BY_ID[id];
+    const w = byId(id);
     if (!w || seen.has(id) || !w.surfaces.includes(surface) || !canSee(w, roles)) continue;
     seen.add(id);
     out.push(id as WidgetId);
@@ -159,7 +167,7 @@ export function resolveRange(v: string | undefined): RangeKey {
 }
 
 export function layoutNeedsRange(ids: readonly string[]): boolean {
-  return ids.some((id) => BY_ID[id]?.timeframe === "history");
+  return ids.some((id) => byId(id)?.timeframe === "history");
 }
 
 /** Build a surface href keeping only the params that are set. */

@@ -4120,10 +4120,24 @@ import {
 } from "@/lib/dashboard/registry";
 {
   const ids = WIDGETS.map((w) => w.id);
+  const expectedIds = [
+    "my-open-pipeline", "my-win-rate", "my-out-for-signature", "my-avg-quote", "my-queue", "inbox", "my-leads", "my-designs", "my-pipeline", "catalog", "calendar", "venue-assessments", "team-activity", "needs-attention",
+    "total-quoted", "won-value", "win-rate", "avg-quote", "quoted-vs-won", "pipeline-by-stage", "win-donut", "top-customers", "pipeline-by-estimator",
+    "backlog-value", "to-be-billed", "expected-collected", "book-margin", "billing-forecast", "backlog-by-stage", "margin-donut", "upcoming-completions", "completion-timeline", "project-locations",
+    "avg-margin", "projected-profit", "open-projects", "backlog", "equipment-sold",
+  ];
   ok(new Set(ids).size === ids.length, "#43 registry ids are unique");
+  ok(ids.join() === expectedIds.join(), "#43 registry covers the exact widget id set and order");
   ok(WIDGETS.every((w) => ["tile", "half", "full"].includes(w.size)), "#43 every widget has a size class");
   ok(PRESETS.home.every((id) => !!widgetDef(id)) && PRESETS.reports.every((id) => !!widgetDef(id)), "#43 presets only name registered widgets");
   ok(PRESETS.home[0] === "my-open-pipeline" && PRESETS.home.includes("my-queue"), "#43 home preset starts with today's stat row and carries the queue card");
+  const approveIds = ["book-margin", "margin-donut", "avg-margin", "projected-profit"];
+  ok(WIDGETS.filter((w) => "perm" in w && w.perm === "approve").map((w) => w.id).join() === approveIds.join(), "#43 all expected approve-gated widgets are registered");
+  const historyIds = ["total-quoted", "won-value", "win-rate", "avg-quote", "quoted-vs-won", "win-donut", "top-customers", "avg-margin", "equipment-sold"];
+  const forwardIds = ["backlog-value", "to-be-billed", "expected-collected", "book-margin", "billing-forecast", "backlog-by-stage", "margin-donut", "upcoming-completions", "completion-timeline", "project-locations", "projected-profit"];
+  ok(WIDGETS.filter((w) => w.timeframe === "history").map((w) => w.id).join() === historyIds.join(), "#43 history widgets cover the required report contracts");
+  ok(WIDGETS.filter((w) => w.timeframe === "forward").map((w) => w.id).join() === forwardIds.join(), "#43 forward widgets cover the required report contracts");
+  ok([...historyIds, ...forwardIds].every((id) => widgetDef(id)?.surfaces.includes("reports")), "#43 history and forward widgets are offered on reports");
   const admin = ["Admin"], est = ["Estimator"];
   ok(presetFor("reports", admin).includes("book-margin"), "#43 admins see margin widgets");
   ok(!presetFor("reports", est).includes("book-margin"), "#43 estimators do not see margin widgets (approve gate)");
@@ -4132,6 +4146,7 @@ import {
   ok(normalizeLayout(null, "home", est).join() === presetFor("home", est).join(), "#43 null layout resolves to the preset");
   ok(normalizeLayout([], "home", est).length === 0, "#43 an emptied layout stays empty");
   ok(normalizeLayout(["nope", "my-queue", "my-queue", "book-margin"], "home", est).join() === "my-queue", "#43 normalize drops unknown, duplicate and gated ids");
+  ok(widgetDef("__proto__") === null && normalizeLayout(["__proto__", "my-queue"], "home", est).join() === "my-queue", "#43 hostile prototype ids stay unknown and cannot crash normalization");
   ok(normalizeLayout(["my-queue"], "reports", admin).length === 0, "#43 normalize drops widgets not offered on the surface");
   ok(addWidget(["a"], "b").join() === "a,b" && addWidget(["a"], "a").join() === "a", "#43 addWidget appends once");
   ok(removeWidget(["a", "b"], "a").join() === "b", "#43 removeWidget");
