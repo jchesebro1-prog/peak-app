@@ -4904,7 +4904,7 @@ overwritten record — is exactly what #62 existed to stop. Do NOT make it retur
 
 **A real bug surfaced by this work, and it is the reason the pass was worth doing at all:** `lead-drawer.tsx` was **discarding `createLeadAction`'s return value entirely** — calling it, ignoring the result, and closing the drawer. Because nothing read the return, widening that action's type to carry a failure could not make `tsc` complain; the code would have gone on cheerfully reporting success for a lead that was never written, on the intake surface. The result is now routed into the drawer's existing `nfErr` surface. This is the same class as #78's lesson: the type system cannot flag a value nobody looks at.
 
-**Remaining:** #85 (the 5 void actions plus `addToQuotesAction`), #86 (mints inside page-load sync functions, which need a third fix shape), #88 (the intake route's advertised retry does not actually work).
+**Remaining:** #85 (the 5 void actions), #86 (mints inside page-load sync functions, which need a third fix shape), #88 (the intake route's advertised retry does not actually work). `addToQuotesAction` is now guarded and its Quick Design caller renders the typed failure (2026-09-23).
 
 ---
 

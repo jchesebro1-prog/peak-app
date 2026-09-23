@@ -285,6 +285,7 @@ export default function QuickDesignClient({
     const partial = makeDesign();
     startTransition(async () => {
       const res = await addToQuotesAction(designId, partial);
+      if (!res.ok) return toast(res.error);
       router.push(`/estimator?id=${encodeURIComponent(res.quoteId)}`);
     });
   };
