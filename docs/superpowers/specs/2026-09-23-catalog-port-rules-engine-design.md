@@ -2,7 +2,7 @@
 
 - **Date:** 2026-09-23
 - **Punch:** #159
-- **Decisions:** D192–D196 (allocated below)
+- **Decisions:** D192–D197 (allocated below)
 - **Status:** design approved by Jeff 2026-09-23; this spec awaits his review
 - **Builds on:** #158 / D187–D191 (the ports editor, shipped 2026-09-22), #39
   (the wiring engine + `CONNECTION_TYPES`, INFRA DONE 2026-07-25)
@@ -78,7 +78,38 @@ brands that is 2,271 parts the engine cannot reach. They remain editor-only
 until their price books are re-imported with real product names. The engine's
 report names the count per manufacturer every run so the gap stays visible.
 
-Addressable set: **2,479 parts** — 45× the current 55.
+Addressable set for *reading*: **2,479 parts**.
+
+### 2.1 Correction — readable is not the same as classifiable
+
+An earlier draft of this spec treated those 2,479 as the coverage estimate.
+That conflates two different things, and the difference is large. Classifying
+the 2,552 inferable parts across the six in-scope brands by device class
+(2026-09-23):
+
+| class | parts | shape exists today? |
+|---|---|---|
+| speakers (passive / 70V / powered) | 658 | yes |
+| **wireless mic / receiver / transmitter** | **267** | **no** |
+| **amplifier** | **97** | **no** |
+| AV distribution (matrix / extender / splitter) | 78 | yes |
+| **DSP / processor** | **27** | **no** |
+| lighting fixture | 23 | yes |
+| mixer / console | 18 | yes |
+| camera | 2 | yes |
+| no class matched | **1,382 (54%)** | — |
+
+So the honest first-pass estimate is **~780 parts** coverable with the existing
+21 shapes, rising to **~1,170** if three new shapes are added. Still 14–21× the
+current 55, but not 2,479. The 1,382 unclassified are the long tail: real
+products whose descriptions do not announce a device class in any pattern worth
+writing a rule for. They stay portless and are reported as unmatched.
+
+**D197 — three new port shapes are added deliberately as part of this work:**
+`amplifierPorts`, `wirelessReceiverPorts` and `dspPorts`. Adding a shape stays
+a human act, not something the engine does (§5) — these three are named here,
+reviewed with the rules, and cover the 391 parts that are classifiable but have
+nowhere to land. Any further shape needs the same treatment.
 
 ## 3. The core decision: review rules, not rows
 
