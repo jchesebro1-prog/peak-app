@@ -93,6 +93,9 @@ export function hasDriveScope(scope: string | null | undefined): boolean {
  * DEPLOY.md.
  */
 export const CALENDAR_READONLY_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+/** Needed by the calendar-only callback to identify the Google account that
+ * authorized the read-only calendar grant. */
+export const USERINFO_EMAIL_SCOPE = "https://www.googleapis.com/auth/userinfo.email";
 
 /** History-import depth on first connect (MASTER-QUESTIONS C3 — last 90 days). */
 export const IMPORT_WINDOW_DAYS = 90;
