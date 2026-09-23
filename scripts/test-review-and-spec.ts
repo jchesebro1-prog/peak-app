@@ -909,6 +909,7 @@ import { HOME_TABS } from "@/app/(app)/home-tabs-keys";
 import {
   resolveSettingsSection,
   ADMIN_SCREENS,
+  COMPANY_SCREENS,
   SETTINGS_SECTIONS,
 } from "@/app/(app)/settings/settings-sections";
 
@@ -996,12 +997,13 @@ ok(
   SETTINGS_SECTIONS.map((s) => s.key).join(",") === "company,admin",
   "Settings exposes company and admin sections in order",
 );
-ok(ADMIN_SCREENS.length === 5, "Admin lists exactly five screens");
+ok(ADMIN_SCREENS.length === 4, "Admin lists exactly four screens");
 ok(
   ADMIN_SCREENS.map((s) => s.href).join(",") ===
-    "/catalog,/templates,/estimating-rules,/task-templates,/import",
-  "Admin links Catalog, Templates, Estimating Rules, Task Templates, Import — by their own routes",
+    "/templates,/estimating-rules,/task-templates,/import",
+  "Admin links Templates, Estimating Rules, Task Templates, Import — by their own routes",
 );
+ok(COMPANY_SCREENS.length === 1 && COMPANY_SCREENS[0].href === "/catalog", "Company owns the Catalog screen");
 
 // ---- General dissolution (D99): the group is gone ----
 ok(!NAV.some((e) => e.kind === "group" && e.key === "general"), "the General group is gone");

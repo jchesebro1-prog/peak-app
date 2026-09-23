@@ -40,13 +40,12 @@ import type { UserStatus } from "@/lib/users";
 import type { GeoSearchHit } from "@/lib/geo";
 import type { CustomFieldDef } from "@/lib/customer-fields";
 import { CustomerFieldsCard } from "./customer-fields-card";
-import { GridSymbolsCard } from "./grid-symbols-card";
-import type { GridShape } from "@/lib/design/grid-symbols";
 import Link from "next/link";
 import { SegmentedToggle } from "@/components/ui";
 import {
   SETTINGS_SECTIONS,
   ADMIN_SCREENS,
+  COMPANY_SCREENS,
   INTEGRATION_CARDS,
   resolveSettingsSection,
 } from "./settings-sections";
@@ -170,8 +169,6 @@ export default function SettingsClient({
   phaseWeights,
   consultingDisciplines,
   customerFieldDefs,
-  gridCategoryShapes,
-  gridLiveCategories,
   offices,
   users,
 }: {
@@ -199,8 +196,6 @@ export default function SettingsClient({
   /** #145 D165 — the discipline vocabulary (mergedConsultingDisciplines). */
   consultingDisciplines: string[];
   customerFieldDefs: CustomFieldDef[];
-  gridCategoryShapes: Record<string, GridShape>;
-  gridLiveCategories: string[];
   offices: OfficeVM[];
   users: UserVM[];
 }) {
@@ -716,6 +711,18 @@ export default function SettingsClient({
       {section === "company" && (
         <>
           <DashboardLayoutEditor mode="company" initial={settings.dashboardDefaults} />
+          <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
+            <div style={{ fontSize: 14.5, fontWeight: 600 }}>Company tools</div>
+            <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3, marginBottom: 12 }}>
+              Shared company data and price-book configuration.
+            </div>
+            {COMPANY_SCREENS.map((s) => (
+              <Link key={s.href} href={s.href} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", border: "1px solid #eef0f3", borderRadius: 10, textDecoration: "none", color: "inherit" }}>
+                <span><span style={{ fontSize: 13.5, fontWeight: 600 }}>{s.label}</span><span style={{ display: "block", fontSize: 12, color: "#8c919c", marginTop: 2 }}>{s.desc}</span></span>
+                <span aria-hidden style={{ color: "#b7bcc6", fontSize: 16 }}>→</span>
+              </Link>
+            ))}
+          </section>
           {/* ---- Branding ---- */}
           <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
         <div style={{ fontSize: 14.5, fontWeight: 600 }}>Branding</div>
@@ -1586,7 +1593,11 @@ export default function SettingsClient({
         </div>
       </section>
 
-      {/* ---- Beta ---- */}
+      </>
+      )}
+
+      {section === "admin" && (<>
+      {/* ---- Beta / rollout controls ---- */}
       <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
         <div style={{ fontSize: 14.5, fontWeight: 600 }}>Beta</div>
         <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
@@ -2100,6 +2111,14 @@ export default function SettingsClient({
       {section === "admin" && (
         <>
           <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
+            <div style={{ fontSize: 14.5, fontWeight: 600 }}>Beta</div>
+            <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3, marginBottom: 12 }}>Development and rollout controls for administrators.</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "10px 0", borderTop: "1px solid #f3f4f7" }}>
+              <div><div style={{ fontSize: 13.5, fontWeight: 600 }}>Demo data</div><div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>Seed prototype records while testing.</div></div>
+              <Toggle on={settings.seedDemo} onChange={(v) => saveSetting({ seedDemo: v })} />
+            </div>
+          </section>
+          <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Admin</div>
             <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 4, marginBottom: 14 }}>
               Data administration. Each screen keeps its own page.
@@ -2135,11 +2154,6 @@ export default function SettingsClient({
           <CustomerFieldsCard
             key={customerFieldDefs.map((d) => d.id).join("|")}
             defs={customerFieldDefs}
-          />
-          <GridSymbolsCard
-            key={JSON.stringify(gridCategoryShapes) + "::" + gridLiveCategories.join("|")}
-            shapes={gridCategoryShapes}
-            liveCategories={gridLiveCategories}
           />
         </>
       )}

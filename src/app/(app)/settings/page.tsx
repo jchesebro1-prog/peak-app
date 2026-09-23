@@ -7,8 +7,6 @@ import { mergedConsultingPhases } from "@/lib/stores/engagements";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { resolveFieldDefs } from "@/lib/customer-fields";
 import { allUsers } from "@/lib/users";
-import { listGridSymbols } from "@/lib/stores/grid-catalog";
-import { resolveCategoryShapes } from "@/lib/design/grid-symbols";
 import {
   callbackUrl,
   GMAIL_MODIFY_SCOPE,
@@ -36,15 +34,6 @@ export default async function SettingsPage() {
   const isAdmin = can("manage_users", me.roles);
   const settings = await getSettings();
   const users = isAdmin ? await allUsers() : [];
-
-  // Grid symbols card (#131, D154) — live catalog categories, derived the
-  // same way design/grid/[id]/page.tsx derives them for the editor's own
-  // parts list, so the card can show a category no default matches (e.g.
-  // the shipped catalog uses "control-io", not "Control").
-  const gridSymbols = isAdmin ? await listGridSymbols() : [];
-  const gridLiveCategories = Array.from(
-    new Set(gridSymbols.map((s) => s.category || "Other"))
-  ).sort();
 
   // ---- Mailboxes (Gmail) — admin surface, env-gated ----
   const gmailOn = gmailEnabled();
@@ -186,8 +175,6 @@ export default async function SettingsPage() {
           )}
           consultingDisciplines={mergedConsultingDisciplines(settings.consultingDisciplines)}
           customerFieldDefs={resolveFieldDefs(settings.customerFieldDefs)}
-          gridCategoryShapes={resolveCategoryShapes(settings.gridCategoryShapes)}
-          gridLiveCategories={gridLiveCategories}
           offices={settings.offices.map((o) => ({
             id: o.id,
             type: o.type || "Main Office",
