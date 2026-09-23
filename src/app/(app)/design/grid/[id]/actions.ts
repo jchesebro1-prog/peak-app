@@ -742,20 +742,26 @@ export async function createDraftQuoteAction(
     return { ok: true, quoteId: existing.id, updated: true, fallbackLines: build.fallbackLines };
   }
 
-  const q = await createQuote({
-    name: build.quoteName,
-    customer: project.customer,
-    customerId: project.customerId,
-    locationId: build.locationId,
-    value: build.value,
-    margin: build.margin,
-    pricingTier: build.tier.tier,
-    tierMargin: build.tier.margin,
-    source: "grid",
-    quoteType: "system",
-    owner: user.name,
-    spec: build.spec,
-  });
+  let q;
+  try {
+    q = await createQuote({
+      name: build.quoteName,
+      customer: project.customer,
+      customerId: project.customerId,
+      locationId: build.locationId,
+      value: build.value,
+      margin: build.margin,
+      pricingTier: build.tier.tier,
+      tierMargin: build.tier.margin,
+      source: "grid",
+      quoteType: "system",
+      owner: user.name,
+      spec: build.spec,
+    });
+  } catch (error) {
+    console.error("createDraftQuoteAction: quote mint failed", error);
+    return { ok: false, error: "Couldn’t create the draft quote — please try again." };
+  }
   await setOptionQuote(project.id, resolvedOptionId, q.id);
   await addRevision(projectId, { by: user.name, reason: "quote", note: `${option.name} quoted as ${q.id}` });
   revalidatePath(editorPath(projectId));

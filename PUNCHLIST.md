@@ -5154,8 +5154,9 @@ over.
 recreated).
 
 **Status:** PARTIAL 2026-09-23 — the previously unguarded Quick Design promotion, inspection
-creation, venue-assessment creation/quote paths, project conversion/sign-off/follow-up task
-paths, and offline Field Work task creation now convert mint failures into visible error UI (or
+creation, venue-assessment creation/quote paths, Grid draft-quote creation, project
+conversion/sign-off/follow-up task paths, and offline Field Work task creation now convert mint
+failures into visible error UI (or
 the existing offline flash) instead of raw 500s. The shared task card now also reports typed
 failures for design and estimator task creation, covering those actions without redirecting away
 from the current record. The shared Apply Template control now does the same for project, quote,
