@@ -6627,10 +6627,8 @@ draggable task bars, overrun flagged in red — sharing `schedule/page.tsx`'s da
 a new `src/components/gantt/` (D167); a milestone shift dialog that pre-ticks its phase's tasks
 (hand-dragged tasks excluded), degrading to a full manual checklist for a milestone with no phase
 set, and moves the ticked tasks on confirm (D168); one **Activity tab** whose composer writes a
-note + files + tasks in a single linked action, with a merged feed (D170) — the seam for a meeting
-or recording to open that composer pre-filled is tracked as its own follow-up, not shipped here
-(see the D170 correction in DECISIONS.md); a `FileRef` (drive/blob/data) storage seam with an
-authenticated engagement-files
+note + files + tasks in a single linked action, with a merged feed and Krisp/meeting pre-fill
+(D170); a `FileRef` (drive/blob/data) storage seam with an authenticated engagement-files
 proxy and upload route (D171); `/task-templates` gaining phase/discipline/%/% authoring plus a
 `task_templates` CSV import type through the existing Import hub, replace-by-set (D169, D178,
 D175–D177); disciplines added to the consulting quote builder and Settings (D165); and `/schedule`
@@ -6740,8 +6738,12 @@ Also fixed `MilestoneShiftDialog` for a null-phase milestone: it rendered no che
 now shows every task unticked (`shiftTasksByIds`, a new sibling to `shiftForMilestone` for the
 no-phase-to-infer-from case), and `moveMilestoneAction` takes the matching branch server-side so
 ticking and confirming actually moves the chosen tasks rather than silently moving nothing. Also
-closed a leaked test fixture (see #149's update) and corrected the two documentation inaccuracies
-this same review found (#154's amendment above; #157, new).
+closed a leaked test fixture (see #149's update); amended #154 above (its bounded SSR/hydration
+measurement doesn't cover `/schedule?view=timeline`'s larger, full-day divergence); logged #157,
+new, for the two-grid seam on that same page; and caught this entry's own D170/Krisp-pre-fill claim
+going stale mid-review — flagged as unshipped, then found to have actually landed as Task 8's
+fast-follow before this entry was finalized, so both this entry and D170 were restored to accurate
+current-tense wording rather than left describing a gap that had just closed.
 
 **Open, for Jeff:**
 

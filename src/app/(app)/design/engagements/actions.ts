@@ -27,6 +27,7 @@ import {
   patchEngagement,
   setChecklistItem,
   setCommentState,
+  setMilestonePhase,
   setPhaseStatus,
   submitPhaseReview,
   updateMeeting,
@@ -598,10 +599,11 @@ export async function updateMilestoneAction(
  * minority of milestones whose free-text name happens to match a phase
  * name. This is the dropdown's action: every export of a "use server" file
  * is directly POST-reachable in Next 16 (a sibling task was sent back for
- * missing this), so requireUser() is called before any write, and the
- * posted phaseId is checked against the engagement's OWN phases rather
- * than stored as given — a stale or foreign phase id would otherwise sit
- * on the milestone and silently break shiftForMilestone's phase match.
+ * missing this), so requireUser() is called before any write. The actual
+ * validate-then-write logic lives in `setMilestonePhase` (stores/
+ * engagements.ts) — an ordinary module export the spec harness can call
+ * directly, the same split `performCapture` uses — so this action is
+ * just the auth gate plus a `revalidatePath`.
  */
 export async function setMilestonePhaseAction(
   engId: string,
@@ -609,15 +611,8 @@ export async function setMilestonePhaseAction(
   phaseId: string | null
 ) {
   await requireUser();
-  const eng = await getEngagement(engId);
-  if (!eng) return { ok: false as const, error: "That engagement could not be found." };
-  if (phaseId != null && !eng.phases.some((p) => p.id === phaseId)) {
-    return { ok: false as const, error: "That phase isn't part of this engagement." };
-  }
-  await patchEngagement(engId, (d) => {
-    const ms = d.milestones.find((m) => m.id === msId);
-    if (ms) ms.phaseId = phaseId;
-  });
+  const r = await setMilestonePhase(engId, msId, phaseId);
+  if (!r.ok) return r;
   return done();
 }
 

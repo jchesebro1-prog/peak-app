@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { getEngagement, patchEngagement } from "@/lib/stores/engagements";
 import { getTaskTemplateSet, applyTaskTemplate } from "@/lib/stores/task-templates";
-import { patchTask, tasksForEngagement } from "@/lib/stores/tasks";
+import { applyMilestoneTaskShifts, patchTask, tasksForEngagement } from "@/lib/stores/tasks";
 import { addNoteRecord } from "@/lib/stores/notes";
 import { getSettings, phaseWeightsFor } from "@/lib/settings";
 import { TEMPLATE_RECORD_LABEL } from "@/lib/task-template-kinds";
@@ -15,8 +15,6 @@ import {
   withEngagementPhaseIds,
   defaultMilestonePhaseId,
   phaseIdsByName,
-  shiftForMilestone,
-  shiftTasksByIds,
   startOfLocalDay,
   type ScheduleLine,
 } from "@/lib/consulting-schedule";
@@ -270,31 +268,17 @@ export async function moveMilestoneAction(
     return e;
   });
 
-  let moved = 0;
-  if (alsoMoveTaskIds.length) {
-    const tasks = await tasksForEngagement(engagementId);
-    // #145 review fix (D168) — a null-phase milestone has no phase to
-    // infer membership from, so shiftForMilestone always returns moved: []
-    // for it (by design — see its own doc comment). Without this branch,
-    // the null-phase dialog's manual checklist was pure UI decoration:
-    // ticking tasks and confirming silently moved nothing, because the
-    // `allowed` filter below was always intersecting against an empty
-    // list. shiftTasksByIds computes the same NEW-dates shape directly
-    // from the ids the human actually ticked.
-    const shifts = ms.phaseId
-      ? shiftForMilestone({ phaseId: ms.phaseId }, delta, tasks).moved
-      : shiftTasksByIds(alsoMoveTaskIds, delta, tasks);
-    const allowed = new Set(alsoMoveTaskIds);
-    for (const s of shifts) {
-      if (!allowed.has(s.id)) continue;
-      await patchTask(s.id, (t) => {
-        t.startAt = s.startAt;
-        t.dueAt = s.dueAt;
-        return t; // NOT handScheduled — this was a milestone move, not a drag
-      });
-      moved++;
-    }
-  }
+  // #145 review fix (D168) — the actual shift-and-write logic lives in
+  // applyMilestoneTaskShifts (stores/tasks.ts) now, not inline here: a
+  // null-phase milestone has no phase to infer membership from, so
+  // shiftForMilestone always returns moved: [] for it (by design — see
+  // its own doc comment), which used to make the null-phase dialog's
+  // manual checklist pure UI decoration — ticking tasks and confirming
+  // silently moved nothing. Pulling the branch into an ordinary module
+  // export (rather than leaving it only reachable through this "use
+  // server" action) is what let the spec harness assert it directly.
+  const tasks = alsoMoveTaskIds.length ? await tasksForEngagement(engagementId) : [];
+  const moved = await applyMilestoneTaskShifts({ phaseId: ms.phaseId ?? null }, delta, alsoMoveTaskIds, tasks);
 
   await addNoteRecord(
     {

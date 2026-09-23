@@ -542,7 +542,11 @@ function MilestoneShiftDialog({
   );
   const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
   const movedRows = useMemo(
-    () => moved.map((m) => ({ ...m, title: tasksById.get(m.id)?.title || m.id })),
+    // handScheduled is always false here — shiftForMilestone already
+    // excludes a hand-dragged task from `moved` (it shows under "Not
+    // moved" below instead). Carried on the row anyway so movedRows and
+    // manualRows share one shape for checklistRows below.
+    () => moved.map((m) => ({ ...m, title: tasksById.get(m.id)?.title || m.id, handScheduled: false })),
     [moved, tasksById]
   );
   const handDragged = useMemo(
@@ -558,11 +562,19 @@ function MilestoneShiftDialog({
   // shiftTasksByIds computes the same NEW-dates preview shape for every
   // task id; moveMilestoneAction takes the identical branch server-side
   // when the ticked ids are actually applied.
+  // handScheduled is carried per row (never true in movedRows, since
+  // shiftForMilestone already excludes those) so the render below can
+  // flag a hand-scheduled task with the same "moved by hand" Pill the
+  // phase-matched path uses — checkable here (there is no phase to
+  // structurally exclude it), but still visibly marked: handScheduled
+  // records a human's deliberate placement, and ticking through a long
+  // list shouldn't silently override that.
   const manualRows = useMemo(() => {
     if (phaseId) return [] as typeof movedRows;
     return shiftTasksByIds(tasks.map((t) => t.id), delta, tasks).map((m) => ({
       ...m,
       title: tasksById.get(m.id)?.title || m.id,
+      handScheduled: tasksById.get(m.id)?.handScheduled ?? false,
     }));
   }, [phaseId, tasks, delta, tasksById]);
   const checklistRows = phaseId ? movedRows : manualRows;
@@ -640,6 +652,15 @@ function MilestoneShiftDialog({
                   <label key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#3a3f4a" }}>
                     <input type="checkbox" checked={effectiveTicked.has(m.id)} onChange={() => toggle(m.id)} />
                     <span style={{ flex: 1 }}>{m.title}</span>
+                    {/* #145 review fix (Minor 1) — the manual (null-phase)
+                        checklist offers a hand-scheduled task as a fully
+                        live, checkable row, unlike the phase-matched path
+                        which excludes it structurally. Unticked by default
+                        is enough on its own, but the same "moved by hand"
+                        Pill the excluded rows below use keeps a human's
+                        deliberate placement visible even here, so ticking
+                        through a long list doesn't quietly override it. */}
+                    {m.handScheduled && <Pill color="#8c919c">moved by hand</Pill>}
                     {typeof m.startAt === "number" && typeof m.dueAt === "number" && (
                       <span style={{ color: "#9aa0ab", fontSize: 11.5, whiteSpace: "nowrap" }}>
                         {fmtShort(m.startAt)} – {fmtShort(m.dueAt)}
