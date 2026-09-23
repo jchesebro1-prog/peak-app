@@ -4159,6 +4159,38 @@ import {
   ok(dashHref("/", { range: "12m", customize: undefined }) === "/?range=12m" && dashHref("/reports", {}) === "/reports", "#43 dashHref drops empty params");
 }
 
+/* ---- #43 §3 — dashboard metrics (pure) ---- */
+import type { Quote } from "@/lib/stores/quotes";
+import type { ProjectRecord } from "@/lib/stores/projects";
+import {
+  salesBuckets, periodBounds, salesMetrics, wonAt, projectedProfit, openProjects, backlogProjects,
+  equipmentSold, installsForecast,
+} from "@/lib/dashboard/metrics";
+{
+  const T = Date.UTC(2026, 8, 15, 12);
+  const D = 86_400_000;
+  ok(salesBuckets("qtr", T).length === 3 && salesBuckets("6m", T).length === 6 && salesBuckets("12m", T).length === 4, "#43 buckets: qtr=3 months, 6m=6 months, 12m=4 quarters");
+  const pb = periodBounds("6m", T);
+  ok(pb.start < T && pb.priorStart < pb.start && pb.start - pb.priorStart === T - pb.start, "#43 prior period is the same length as the current one");
+  const q = (o: Record<string, unknown>) => ({ id: "Q", name: "", customer: "", customerId: null, locationId: null, value: 0, margin: 0, status: "draft", source: "estimator", owner: "A", review: { state: "none" }, createdAt: T - D, updatedAt: T - D, history: [], ...o }) as unknown as Quote;
+  const won = q({ id: "W", value: 1000, margin: 0.4, status: "won", history: [{ at: T - 2 * D, from: "sent", to: "won" }] });
+  ok(wonAt(won) === T - 2 * D, "#43 wonAt reads the last won transition");
+  const m = salesMetrics([won, q({ id: "L", value: 500, margin: 0.2, status: "lost", history: [{ at: T - D, from: "sent", to: "lost" }] }), q({ id: "O", value: 200, createdAt: T - 400 * D })], T - 30 * D, T + 1);
+  ok(m.quotedValue === 1500 && m.won === 1 && m.lost === 1 && m.winRate === 50, "#43 salesMetrics counts created/won/lost in range");
+  ok(Math.abs(m.avgMargin - (1000 * 0.4 + 500 * 0.2) / 1500) < 1e-9, "#43 avgMargin is value-weighted over quotes created in range");
+  const p = (o: Record<string, unknown>) => ({ id: "P", kind: "project", quoteId: null, projectType: null, name: "", customer: "", customerId: null, locationId: null, owner: "A", value: 0, margin: 0, createdAt: T, updatedAt: T, startedAt: T, targetDate: null, installStart: null, installEnd: null, stage: "procurement", stageHistory: [], procurement: [], mobilizations: [], deliveries: [], crew: [], tasks: [], notes: [], timeLogs: [], signoff: null, trainingAt: null, ...o }) as unknown as ProjectRecord;
+  const ps = [p({ id: "A", value: 1000, margin: 0.3, stage: "install", targetDate: T + 20 * D }), p({ id: "B", value: 500, margin: 0.5, stage: "procurement", targetDate: T + 60 * D }), p({ id: "C", value: 999, margin: 0.9, stage: "complete" })];
+  const pp = projectedProfit(ps);
+  ok(pp.value === 1500 && pp.profit === 550, "#43 projected profit sums value*margin over the open book only");
+  ok(openProjects(ps).map((x) => x.id).join() === "A" && backlogProjects(ps).map((x) => x.id).join() === "B", "#43 open = on-site stages, backlog = procurement/delivery");
+  const sold = q({ id: "S", status: "won", history: [{ at: T - D, from: "sent", to: "won" }], spec: { sections: [{ kind: "materials", items: [{ sku: "FX-1", desc: "Fixture", qty: 2, price: 100 }, { sku: "LAB", desc: "Labor", qty: 1, price: 999, labor: true }, { sku: "OPT", desc: "Option", qty: 1, price: 50, option: true }] }, { kind: "labor", items: [{ sku: "X", qty: 1, price: 1 }] }] } });
+  const es = equipmentSold([sold], (sku) => (sku === "FX-1" ? "Lighting Fixtures" : undefined), T - 30 * D, T + 1);
+  ok(es.length === 1 && es[0].category === "Lighting Fixtures" && es[0].value === 200 && es[0].items[0].qty === 2, "#43 equipmentSold skips labor/option lines and joins category by sku");
+  const f = installsForecast(ps, [], T, 12);
+  ok(f.book.length === 2 && f.totalValue === 1500 && f.buckets.length === 6, "#43 installsForecast: open book within horizon, six buckets");
+  ok(f.toBill === 1500 && f.byStage.length === 2, "#43 toBill sums targets inside the horizon; byStage groups the book");
+}
+
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
   {
