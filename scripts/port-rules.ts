@@ -7,8 +7,9 @@
  * The report IS the review artifact (D193): Jeff reads the rules, not the
  * parts, and replies with the ids to apply. Task 5 adds the apply path.
  */
-import { resolveDbTarget } from "./db-target";
+import { resolveDbTarget, requireHostedConfirmation } from "./db-target";
 import { PORT_RULES, matchRule, proposeForPart, type RulePart } from "../src/lib/catalog-port-rules";
+import { applyRules } from "../src/lib/catalog-port-apply";
 
 const args = process.argv.slice(2);
 const only = (args.find((a) => a.startsWith("--mfr=")) || "").slice(6);
@@ -26,6 +27,31 @@ function isModelish(desc: string, sku: string): boolean {
 const n = (x: number) => x.toLocaleString("en-US");
 
 async function main() {
+  if (args.includes("--apply")) {
+    const idsArg = (args.find((a) => a.startsWith("--rules=")) || "").slice(8)
+      || args[args.indexOf("--rules") + 1] || "";
+    const ids = idsArg.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!ids.length) {
+      console.error("--apply needs --rules <id,id>. Nothing applies by default.");
+      process.exit(1);
+    }
+    const unknown = ids.filter((id) => !PORT_RULES.some((r) => r.id === id));
+    if (unknown.length) {
+      console.error(`Unknown rule id(s): ${unknown.join(", ")}`);
+      process.exit(1);
+    }
+    const commit = args.includes("--yes");
+    const { hosted } = resolveDbTarget("port rules apply");
+    if (commit) requireHostedConfirmation(hosted, args);
+    const out = await applyRules(ids, { commit });
+    console.log(`\n${commit ? "APPLIED" : "DRY RUN"} — rules: ${ids.join(", ")}`);
+    for (const [id, count] of Object.entries(out.byRule)) console.log(`  ${String(count).padStart(6)}  ${id}`);
+    console.log(`  ${String(out.applied).padStart(6)}  total ${commit ? "written" : "would be written"}`);
+    console.log(`  ${String(out.skippedHasPorts).padStart(6)}  skipped — already have ports (hand edits win)`);
+    if (!commit) console.log("\n  DRY RUN — nothing written. Add --yes to apply.");
+    process.exit(0);
+  }
+
   resolveDbTarget("port rules report");
   const { getDb } = await import("../src/db");
   const { catalogParts } = await import("../src/db/doc-tables");

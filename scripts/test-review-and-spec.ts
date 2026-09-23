@@ -5233,6 +5233,44 @@ async function asyncChecks(): Promise<void> {
       }
     }
   }
+
+  /* --- #159 Task 5: applying named rules --- */
+  {
+    const { mergeUpsert, get: getPart } = await import("@/lib/stores/catalog");
+    const { softDeleteDoc } = await import("@/db/doc-store");
+    const { applyRules } = await import("@/lib/catalog-port-apply");
+    try {
+      await mergeUpsert("TEST:RULE-SPK", { desc: 'Passive 18" Installation Subwoofer. Black', category: "SB", unit: "ea", list: 1, cost: 1, mfr: "EAW" });
+      await mergeUpsert("TEST:RULE-AMP", { desc: "RU 4 Channel ENERGY STAR amplifier", category: "Audio", unit: "ea", list: 1, cost: 1, mfr: "QSC" });
+      await mergeUpsert("TEST:RULE-HAND", { desc: 'Passive 15" Installation Subwoofer. Black', category: "SB", unit: "ea", list: 1, cost: 1, mfr: "EAW",
+        ports: [{ name: "Hand edited", direction: "in", connectionType: "speakON NL4" }] });
+
+      const res = await applyRules(["speaker-passive"], { commit: true });
+
+      const spk = await getPart("TEST:RULE-SPK");
+      ok((spk?.ports || []).length === 1 && spk?.ports?.[0].connectionType === "speakON NL2",
+        "apply: a named rule ports the parts it matched");
+
+      const amp = await getPart("TEST:RULE-AMP");
+      ok((amp?.ports || []).length === 0, "apply: a rule that was NOT named leaves its parts alone");
+
+      const hand = await getPart("TEST:RULE-HAND");
+      ok(hand?.ports?.[0].name === "Hand edited", "apply: a hand-edited part is never overwritten (D196)");
+      ok(res.skippedHasPorts >= 1, "apply: the result counts parts skipped for having ports");
+
+      const again = await applyRules(["speaker-passive"], { commit: true });
+      ok(again.applied === 0, "apply: a second run is a no-op — idempotent");
+
+      const dry = await applyRules(["amplifier"], { commit: false });
+      ok(dry.applied > 0, "apply: a dry run reports what it would do");
+      const ampStill = await getPart("TEST:RULE-AMP");
+      ok((ampStill?.ports || []).length === 0, "apply: a dry run writes nothing");
+    } finally {
+      await softDeleteDoc("catalog_parts", "TEST:RULE-SPK");
+      await softDeleteDoc("catalog_parts", "TEST:RULE-AMP");
+      await softDeleteDoc("catalog_parts", "TEST:RULE-HAND");
+    }
+  }
 }
 
 /* --- Venue Assessments: class model --- */
