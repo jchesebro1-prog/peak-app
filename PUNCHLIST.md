@@ -6625,9 +6625,12 @@ startPct/lengthPct` (D165); a scheduling step in engagement creation with a prev
 generation flow; a per-engagement **Schedule tab** — phase bands, locked milestone diamonds, freely
 draggable task bars, overrun flagged in red — sharing `schedule/page.tsx`'s day-grid conventions via
 a new `src/components/gantt/` (D167); a milestone shift dialog that pre-ticks its phase's tasks
-(hand-dragged tasks excluded) and moves them on confirm (D168); one **Activity tab** whose composer
-writes a note + files + tasks in a single linked action, with a merged feed and Krisp meeting
-pre-fill (D170); a `FileRef` (drive/blob/data) storage seam with an authenticated engagement-files
+(hand-dragged tasks excluded), degrading to a full manual checklist for a milestone with no phase
+set, and moves the ticked tasks on confirm (D168); one **Activity tab** whose composer writes a
+note + files + tasks in a single linked action, with a merged feed (D170) — the seam for a meeting
+or recording to open that composer pre-filled is tracked as its own follow-up, not shipped here
+(see the D170 correction in DECISIONS.md); a `FileRef` (drive/blob/data) storage seam with an
+authenticated engagement-files
 proxy and upload route (D171); `/task-templates` gaining phase/discipline/%/% authoring plus a
 `task_templates` CSV import type through the existing Import hub, replace-by-set (D169, D178,
 D175–D177); disciplines added to the consulting quote builder and Settings (D165); and `/schedule`
@@ -6726,6 +6729,20 @@ any `#145` file) · `test:specs` **1719 PASS / 0 FAIL** (**213** of them `#145` 
 PASSED, confirmed stable across three consecutive runs after a fresh-datadir dev-seed race produced
 spurious failures on the first two — see #148) · `test:smoke` ALL PASSED.
 
+**Closed during #145 Task 15's whole-branch review (2026-09-22):** D168's `phaseId` had no writer
+besides `generateScheduleAction`'s exact-name match, which only fires for milestones whose free-text
+name happens to match a phase name — the minority case, since most milestones come from proposal
+scope titles or manual fee rows. Added the phase `<select>` (including "No phase") on the milestone
+row in `MilestonesTab` (`design/engagements/view.tsx`) and its server action
+(`setMilestonePhaseAction`, validated against the engagement's own phases, `requireUser()`-gated).
+Also fixed `MilestoneShiftDialog` for a null-phase milestone: it rendered no checklist at all
+("no tasks move with it"), contradicting D168's own promise to degrade to a manual checklist; it
+now shows every task unticked (`shiftTasksByIds`, a new sibling to `shiftForMilestone` for the
+no-phase-to-infer-from case), and `moveMilestoneAction` takes the matching branch server-side so
+ticking and confirming actually moves the chosen tasks rather than silently moving nothing. Also
+closed a leaked test fixture (see #149's update) and corrected the two documentation inaccuracies
+this same review found (#154's amendment above; #157, new).
+
 **Open, for Jeff:**
 
 1. **Which Drive mailbox backs engagement files?** No setting names one, so the implementation
@@ -6741,7 +6758,7 @@ spurious failures on the first two — see #148) · `test:smoke` ALL PASSED.
 5. **Disciplines on historical engagements** are absent and read as empty, which means every
    discipline-tagged template line matches. Acceptable for old records; worth confirming.
 
-**Not this item's scope, logged separately as their own punch items:** #148–#156, below.
+**Not this item's scope, logged separately as their own punch items:** #148–#157, below.
 
 ## 148. The dev auto-seed is fire-and-forget, making every gate in this repo slightly untrustworthy — OPEN
 
@@ -6781,6 +6798,13 @@ data, distinguishable from real records only by name pattern.
 **Ask:** a shared fixture-marker/sweep convention — e.g. a name/id prefix every DB-backed spec test
 uses, plus a script that finds and soft-deletes anything carrying it — rather than relying on each
 new test's author to remember `try`/`finally`.
+
+**Update (#145 Task 15 whole-branch review, 2026-09-22):** found and fixed a second instance —
+the `validateFileRefsForEngagement` block's `createManualEngagement(...)` call (originally
+`scripts/test-review-and-spec.ts:4413-4418`) had no find-or-create and no teardown, minting a fresh
+open `CE-####` on every `test:specs` run. Given the same find-or-create-by-fixed-name +
+`try`/`finally` + `softDeleteDoc` treatment as Task 3's. Two instances fixed now; the ask above
+(a repo-wide convention) still stands — this remains a per-test discipline, not an enforced one.
 
 ## 150. The engagement file proxy keys on a client-supplied storage key rather than record coordinates — OPEN
 
@@ -6857,14 +6881,28 @@ feature's scope.
 timezone-dependent by design (D166/Task 6: local calendar days, not UTC, because every date input in
 this app is local-noon-anchored) — but the Gantt page renders once on the server (UTC on Vercel)
 before hydrating in the browser (the visitor's local zone, e.g. America/Chicago). Measured over a
-120-day span: column **count**, week-start columns and weekend-shaded cells are **identical**
-between the two renders; only each column's absolute timestamp differs by the UTC/local offset,
-moving each column's `left:` style by roughly **0.17% of the span's total width**. This is a
-style-attribute mismatch and a subtree re-render on hydration, not a structural DOM mismatch.
+120-day span **on the per-engagement Schedule tab** (`design/engagements/schedule-tab.tsx`, whose
+bars come from already noon-anchored task dates): column **count**, week-start columns and
+weekend-shaded cells are **identical** between the two renders; only each column's absolute
+timestamp differs by the UTC/local offset, moving each column's `left:` style by roughly **0.17% of
+the span's total width**. This is a style-attribute mismatch and a subtree re-render on hydration,
+not a structural DOM mismatch.
+
+**Amended (#145 Task 15 whole-branch review, 2026-09-22): the 0.17%/bounded figure above is scoped
+to that one caller and does NOT describe `/schedule?view=timeline`.** There, `ganttRange`
+(`src/app/(app)/schedule/page.tsx:126`) windows the Consulting rows' `GanttGrid` from `sow(now - …)`
+— and unlike the per-engagement tab's task dates, `now` (`Date.now()`) is not noon-anchored, so
+`sow`'s local-midnight floor lands on a DIFFERENT calendar day between the server's UTC render and
+a US-timezone browser's hydration. Column **count** still matches (same mechanism, same self-
+correction), but the shift is a full calendar day, not a sub-day fraction — this is the same root
+cause, at a larger and differently-bounded magnitude, not the case the 0.17% number was measured
+against. A future triage reading only the number above would wrongly conclude `/schedule` is the
+bounded case too.
 
 **Ask:** none required to ship safely (React recovers from a style-only hydration mismatch by
 re-rendering that subtree) — logged so a future console-warning triage doesn't have to re-derive
-that this specific mismatch is cosmetic and bounded rather than a sign of a real bug.
+that this specific mismatch is cosmetic and self-correcting rather than a sign of a real bug, and
+doesn't assume every Gantt-grid caller shares the engagement tab's 0.17% bound.
 
 ## 155. A discipline deleted from Settings still renders as a checked box on an existing consulting quote — OPEN
 
@@ -6899,3 +6937,29 @@ phase re-exported and re-imported five times stays `"Schematic Design"` or drift
 **Ask:** add a phase-casing round-trip assertion alongside the existing assignment-target one, or
 confirm by inspection that `normalizeLine`'s phase handling is already case-preserving and close
 this as a non-issue.
+
+## 157. `/schedule?view=timeline` stacks two independently-ranged grids — the same x-position means a different date in each — OPEN
+
+**Reported:** found during #145 Task 15's whole-branch review, 2026-09-22. The most user-visible of
+the carried minors from this branch; Jeff should not discover it by surprise.
+
+**What exists:** `/schedule?view=timeline` (`src/app/(app)/schedule/page.tsx`) stacks two separately
+built grids on one page. The Consulting section (line ~801) renders `PortfolioGantt`/`GanttGrid`
+over `consultingRange = ganttRange(consultingRows.flatMap((r) => r.bars), now)` (line 485) —
+percentage-of-range positioned, no fixed day width (`components/gantt/gantt-grid.tsx:10`). The
+Installs "project timeline" section (line ~1392) does not use `GanttGrid` at all: it computes its
+own `tlStart`/`tlDays`/`tlDayW`/`tlGridW` (lines 413-436) from the install projects' own date range,
+laid out at a fixed pixel width per day (`tlDayW`, 13-26px depending on `zoom`) rather than
+percentage-of-container. Both windows are padded the same way (`sow(lo - 3*DAY)` … `sow(hi + 10*DAY)
++ 7*DAY`), but from **different bar sets**, so the two ranges' start dates rarely coincide — and
+even when they did, one grid stretches to fill its container while the other has a fixed pixel
+width, so a given horizontal offset from the left edge of the Consulting grid and the same offset
+in the Installs grid below it are, in general, two different calendar dates. Visually the two
+sections are stacked directly on top of one another with no date ruler shared between them, so
+nothing on screen signals that "the same x" isn't "the same day."
+
+**Ask:** either share one `{start, end, dayWidth}` window (and one layout strategy — percentage or
+fixed-pixel, not both) between the two sections, or add a visible separator/ruler so the page
+doesn't read as one aligned timeline when it isn't. Not fixed here — this task's scope was the
+milestone-phase dropdown, the leaked test fixture, and the two documentation corrections above;
+logged so it isn't discovered by surprise.

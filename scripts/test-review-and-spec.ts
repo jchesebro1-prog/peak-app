@@ -4411,10 +4411,23 @@ async function asyncChecks(): Promise<void> {
   {
     const { createManualEngagement: createEng145 } = await import("@/lib/stores/engagements");
     const { validateFileRefsForEngagement } = await import("@/lib/consulting-files-server");
-    const eng145 = await createEng145(
-      { customerId: "test-customer-145files", customer: "Test Files Co", name: "Test files engagement (#145)", phases: [] },
-      { name: "test-harness" }
-    );
+    // Fixed fixture name, declared outside the try so the finally block can
+    // re-look-up and tear down this engagement regardless of how far setup
+    // got before a throw — same idiom as the #145 T3 cleanup below. This
+    // fixture previously had no find-or-create and no teardown: every
+    // test:specs run minted a fresh CE-#### with status "awarded", which
+    // OPEN_ENGAGEMENT_STAGES counts as open, polluting the Consulting hub,
+    // the "Active consulting" KPI, and /schedule?view=timeline in what may
+    // be the one real Neon database shared across Production/Preview/
+    // Development (AGENTS.md, #145 review round 4).
+    const ENG_NAME_145FILES = "Test files engagement (#145)";
+    try {
+    const eng145 =
+      (await allEngagements()).find((e) => e.name === ENG_NAME_145FILES) ||
+      (await createEng145(
+        { customerId: "test-customer-145files", customer: "Test Files Co", name: ENG_NAME_145FILES, phases: [] },
+        { name: "test-harness" }
+      ));
 
     const goodBlob145: FileRef = {
       kind: "blob",
@@ -4490,6 +4503,18 @@ async function asyncChecks(): Promise<void> {
       threwMissingEngagement145 = true;
     }
     ok(threwMissingEngagement145, "#145 validateFileRefsForEngagement throws when the engagement itself doesn't exist");
+    } finally {
+      // Teardown (#145 review round 4): re-queried by the fixed fixture
+      // name rather than trusting `eng145` to have survived an early throw,
+      // so cleanup is complete no matter how far setup got. No tasks are
+      // ever spawned against this engagement, but tasksForEngagement is
+      // swept anyway for parity with the T3 idiom in case that changes.
+      const engToClean145Files = (await allEngagements()).find((e) => e.name === ENG_NAME_145FILES);
+      if (engToClean145Files) {
+        for (const t of await tasksForEngagement(engToClean145Files.id)) await removeTask(t.id);
+        await softDeleteDoc("consulting_engagements", engToClean145Files.id);
+      }
+    }
   }
 
   /* ---- #145 D169 review (Important 1) — the task_templates CSV writer,

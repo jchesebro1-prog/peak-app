@@ -592,6 +592,35 @@ export async function updateMilestoneAction(
   return done();
 }
 
+/**
+ * #145 review — a milestone's phaseId (D168) had no writer at all besides
+ * generateScheduleAction's exact-name match, which only fires for the
+ * minority of milestones whose free-text name happens to match a phase
+ * name. This is the dropdown's action: every export of a "use server" file
+ * is directly POST-reachable in Next 16 (a sibling task was sent back for
+ * missing this), so requireUser() is called before any write, and the
+ * posted phaseId is checked against the engagement's OWN phases rather
+ * than stored as given — a stale or foreign phase id would otherwise sit
+ * on the milestone and silently break shiftForMilestone's phase match.
+ */
+export async function setMilestonePhaseAction(
+  engId: string,
+  msId: string,
+  phaseId: string | null
+) {
+  await requireUser();
+  const eng = await getEngagement(engId);
+  if (!eng) return { ok: false as const, error: "That engagement could not be found." };
+  if (phaseId != null && !eng.phases.some((p) => p.id === phaseId)) {
+    return { ok: false as const, error: "That phase isn't part of this engagement." };
+  }
+  await patchEngagement(engId, (d) => {
+    const ms = d.milestones.find((m) => m.id === msId);
+    if (ms) ms.phaseId = phaseId;
+  });
+  return done();
+}
+
 export async function completeMilestoneAction(
   engId: string,
   msId: string,

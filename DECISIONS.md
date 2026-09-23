@@ -4304,9 +4304,17 @@ six months later by following `taskIds` back to the note that spawned it.
 The feed merges, newest first: notes (with their spawned tasks and files inline), meetings,
 decisions, phase attachments, and milestone-move notes. A milestone move (D168) writes a
 **system-authored note** into this same feed rather than introducing a separate history table —
-one feed, one record shape, one place to look for "what happened on this engagement." Krisp/meeting
-pre-fill (opening the composer from a meeting or recording pre-fills the body with minutes and
-attaches attendees) ships in v1; task lines are ticked by a human, nothing is auto-extracted.
+one feed, one record shape, one place to look for "what happened on this engagement." Task lines
+are ticked by a human; nothing is auto-extracted into them.
+
+**Correction (#145 Task 15 whole-branch review, 2026-09-22): Krisp/meeting pre-fill did NOT ship
+here.** This paragraph originally claimed that opening the composer from a meeting or recording
+pre-fills the body with minutes and attaches attendees "in v1" — that was never built in this
+slice; the composer's body always starts empty (`activity-tab.tsx`'s `text` state has no seed from
+a meeting/recording at all). The intended seam — a meeting or recording being able to open this
+composer with its body pre-filled — is tracked as its own follow-up item, not a v1 claim. Check
+PUNCHLIST.md before relying on this: it may have landed on a sibling branch by the time this
+merges, in which case that entry supersedes this note.
 
 **Rejected alternative:** separate, unlinked flows for adding a note, uploading a file, and creating
 a task, the way most of the app's other record types already work. Rejected because it is exactly

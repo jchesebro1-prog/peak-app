@@ -16,6 +16,7 @@ import {
   defaultMilestonePhaseId,
   phaseIdsByName,
   shiftForMilestone,
+  shiftTasksByIds,
   startOfLocalDay,
   type ScheduleLine,
 } from "@/lib/consulting-schedule";
@@ -272,7 +273,17 @@ export async function moveMilestoneAction(
   let moved = 0;
   if (alsoMoveTaskIds.length) {
     const tasks = await tasksForEngagement(engagementId);
-    const { moved: shifts } = shiftForMilestone({ phaseId: ms.phaseId ?? null }, delta, tasks);
+    // #145 review fix (D168) — a null-phase milestone has no phase to
+    // infer membership from, so shiftForMilestone always returns moved: []
+    // for it (by design — see its own doc comment). Without this branch,
+    // the null-phase dialog's manual checklist was pure UI decoration:
+    // ticking tasks and confirming silently moved nothing, because the
+    // `allowed` filter below was always intersecting against an empty
+    // list. shiftTasksByIds computes the same NEW-dates shape directly
+    // from the ids the human actually ticked.
+    const shifts = ms.phaseId
+      ? shiftForMilestone({ phaseId: ms.phaseId }, delta, tasks).moved
+      : shiftTasksByIds(alsoMoveTaskIds, delta, tasks);
     const allowed = new Set(alsoMoveTaskIds);
     for (const s of shifts) {
       if (!allowed.has(s.id)) continue;
