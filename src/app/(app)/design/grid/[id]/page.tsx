@@ -90,6 +90,15 @@ export default async function GridEditorPage({
   const pricingById = new Map(catalog.map((p) => [p.id, p]));
   const parts: PartLite[] = gridSymbols.map((s) => {
     const p = s.pricingPartId ? pricingById.get(s.pricingPartId) : undefined;
+    // Prefer the LIVE catalog part's ports over the grid_catalog symbol's
+    // seed-time snapshot (`s.ports`): grid-catalog.ts only ever copies
+    // `ports` from the pricing catalog once, at first seed, and never
+    // refreshes it. Editing ports later through the catalog ports editor
+    // updates `p.ports` but leaves `s.ports` frozen — reading `s.ports`
+    // here would hide new/corrected ports from the inspector and from the
+    // client's `bothHavePorts` pre-validation. Fall back to the symbol's
+    // snapshot only when there's no linked pricing part with its own ports.
+    const ports = p?.ports?.length ? p.ports : s.ports;
     return {
       id: s.id,
       sku: s.modelNumber || s.id,
@@ -98,7 +107,7 @@ export default async function GridEditorPage({
       unit: p?.unit || "ea",
       list: p?.list || 0,
       cost: p?.cost || 0,
-      ...(s.ports.length > 0 ? { ports: s.ports } : {}),
+      ...(ports.length > 0 ? { ports } : {}),
       ...(p?.datasheetBlobKey ? { hasDatasheet: true } : {}),
       ...(p ? { group: groupOf(p, categoryMap), trade: tradeOf(p, categoryMap) } : {}),
       manufacturer: s.manufacturer,
