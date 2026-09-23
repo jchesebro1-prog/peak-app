@@ -6,6 +6,7 @@ import { findCalibration, type Calibration, type MeasureUnit, type Point } from 
 import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";
 import {
   addCurtainPlacement,
+  addOption,
   addPlacement,
   addPlacements,
   addRevision,
@@ -15,41 +16,43 @@ import {
   generateBaseSheet,
   getProject,
   movePlacement,
+  removeOption,
   removePlacement,
   removeProject,
   removeRoute,
   removeSpace,
+  renameOption,
+  renameProject,
   renameSpace,
   restoreRevision,
-  seedBlankSheet,
+  setOptionQuote,
   setPlacementCategory,
-  setQuote,
   setScopeInputs,
   setSheetCalibration,
   setVenue,
   saveGridIntake,
 } from "@/lib/stores/grid-projects";
-import { deriveSeedPlacements, isSeedPlaceholder } from "@/lib/design/grid-seed";
+import { hasOption, resolveOptionId } from "@/lib/design/grid-options";
+import { designPatchFromIntake, manualScopeInputs } from "@/lib/design/grid-intake";
+import { buildGridQuote } from "@/lib/design/grid-quote";
+import { deriveSeedPlacements } from "@/lib/design/grid-seed";
 import { can } from "@/lib/team";
-import { getAllDesigns, removeDesign } from "@/lib/stores/designs";
-import { docLocId, getSite } from "@/lib/identity/sites";
-import { resolveTier } from "@/lib/pricing-tiers";
-import { isTierPriced } from "@/lib/tier-pricing";
-import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
-import { createGridAssembly, getGridSymbol, listGridSymbols, setGridSymbolShape } from "@/lib/stores/grid-catalog";
+import { getAllDesigns, removeDesign, updateDesign } from "@/lib/stores/designs";
+import { getSite } from "@/lib/identity/sites";
+// Tier resolution, catalog listing and the BOM/curtain pricing moved verbatim
+// into lib/design/grid-quote.ts (D186) so a quote can be built per option on a
+// scratch DB; the blob upload this action used to do moved to
+// /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
+import { get as getPart } from "@/lib/stores/catalog";
+import { createGridAssembly, getGridSymbol, setGridSymbolShape } from "@/lib/stores/grid-catalog";
 import { isGridShape } from "@/lib/design/grid-symbols";
 import {
-  bomLines,
-  bomTotals,
-  curtainLines,
   GRID_CURTAIN_TYPES,
   GRID_FULLNESS,
   isPerLengthUnit,
-  routeLines,
-  type BomLine,
   type GridCurtain,
 } from "@/lib/design/grid-bom";
-import { isFabricRow, priceGridCurtains } from "@/lib/design/grid-curtains";
+import { isFabricRow } from "@/lib/design/grid-curtains";
 import { polygonArea } from "@/lib/design/grid-geometry";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
@@ -62,6 +65,8 @@ type Result = { ok: true } | { ok: false; error: string };
 function editorPath(projectId: string): string {
   return `/design/grid/${encodeURIComponent(projectId)}`;
 }
+
+const OPTION_GONE = "That option was removed — refresh the page.";
 
 async function partForGrid(id: string) {
   const priced = await getPart(id);
@@ -97,20 +102,22 @@ export async function createGridAssemblyAction(input: {
 
 export async function saveGridIntakeAction(input: {
   projectId: string;
+  mode: "manual";
   venueName: string;
   locationName: string;
   address: string;
   notes: string;
-  measurementBased: boolean;
   autoConfig: AState;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!input.venueName.trim() && !input.locationName.trim()) return { ok: false, error: "Add a venue or location to continue." };
+  if (input.mode !== "manual") return { ok: false, error: "Auto-estimate lands in the next release — choose Manual placement for now." };
   const project = await getProject(input.projectId);
   if (!project) return { ok: false, error: "That design could not be found." };
   const saved = await saveGridIntake(input.projectId, {
     complete: true,
-    measurementBased: !!input.measurementBased,
+    measurementBased: true,
+    mode: input.mode,
     venueName: input.venueName.trim(),
     locationName: input.locationName.trim(),
     address: input.address.trim(),
@@ -118,34 +125,33 @@ export async function saveGridIntakeAction(input: {
     autoConfig: input.autoConfig,
   });
   if (!saved) return { ok: false, error: "That design could not be found." };
-  // First-save gate (Task 1, #38): a base sheet is generated exactly once —
-  // the first time intake completes — never on a later re-save of venue
-  // details. `sheetIds` is empty until then because createProject() no
-  // longer pre-seeds a sheet at all (see grid-projects.ts createProject).
-  // Re-checked on `saved` (the just-written doc) rather than the earlier
-  // `project` read, to narrow — the doc-store has no transactions (#74),
-  // so a true double-submit race isn't fully closed here, only shortened
-  // from "the whole saveGridIntake write" to "this one re-read" — an
-  // accepted, user-recoverable residual risk (delete the extra sheet),
-  // consistent with this codebase's existing #74/#80/#85/#86 judgment
-  // calls on low-probability concurrency edge cases.
+  // First-save gate (D145): the base sheet is generated exactly once. The
+  // same gate now also seeds the Scope panel's inputs and the linked design
+  // record's dims (Spec 1) — a later re-save of venue details changes none
+  // of them, so a designer's later Scope edits are never overwritten.
+  // Order matters: `sheetIds` becoming non-empty is the sentinel that marks
+  // this block done, and generateBaseSheet() is what flips it — so it runs
+  // LAST. The other three steps (setScopeInputs, the DesignRecord patch,
+  // renameProject) are idempotent re-applies of the same input, so they run
+  // FIRST: if any of them throws, sheetIds is still empty and the next save
+  // re-runs the whole block instead of leaving the project stuck without
+  // Scope inputs or its rename.
   const isFirstSave = (saved.sheetIds || []).length === 0;
   if (isFirstSave) {
-    if (input.measurementBased) {
-      // A generated base sheet is stored as a static artifact, same as an
-      // uploaded plan — it must never bake in the live, user-configurable
-      // accent (AGENTS.md: "never hardcode accent-colored UI"), or every
-      // sheet generated before a branding change goes stale forever. Use a
-      // fixed neutral drawing-line ink instead of settings.accent.
-      await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
-    } else {
-      // "I have my own plan, skip measurements" — no VenueDims to render
-      // from yet; seed the same blank fallback createProject() used to
-      // create unconditionally, and let the user upload a real plan next.
-      await seedBlankSheet(input.projectId, project.name, user.name);
-    }
+    await setScopeInputs(input.projectId, manualScopeInputs(input.autoConfig));
+    const patch = designPatchFromIntake({
+      projectName: project.name,
+      venueName: input.venueName,
+      locationName: input.locationName,
+      a: input.autoConfig,
+    });
+    const linked = (await getAllDesigns()).filter((d) => d.gridProjectId === input.projectId);
+    for (const d of linked) await updateDesign(d.id, patch);
+    if (patch.name) await renameProject(input.projectId, patch.name);
+    await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
   }
   revalidatePath(editorPath(input.projectId));
+  revalidatePath("/design/designs");
   return { ok: true };
 }
 
@@ -185,6 +191,7 @@ export async function seedStartingLayoutAction(
   const updated = await addPlacements(projectId, {
     sheetId: baseSheetId,
     page: 1,
+    optionId: resolveOptionId(project, null),
     items: delta,
     by: user.name,
   });
@@ -195,9 +202,12 @@ export async function seedStartingLayoutAction(
 
 export async function placeDeviceAction(
   projectId: string,
-  input: { sheetId: string; page: number; x: number; y: number; partId: string }
+  input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string }
 ): Promise<Result> {
   const user = await requireUser();
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
   const p = await addPlacement(projectId, { ...input, by: user.name });
   if (!p) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
@@ -247,6 +257,7 @@ export async function placeCurtainAction(
       fabricSku: string;
     };
     category?: string;
+    optionId: string;
   }
 ): Promise<Result> {
   const user = await requireUser();
@@ -266,6 +277,9 @@ export async function placeCurtainAction(
   const fabric = await getPart(c.fabricSku);
   if (!fabric || !isFabricRow(fabric))
     return { ok: false, error: "Pick a fabric from the catalog's fabric rows." };
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
 
   const curtain: GridCurtain = {
     type: c.type as GridCurtain["type"],
@@ -282,6 +296,7 @@ export async function placeCurtainAction(
     y: input.y,
     curtain,
     category: (input.category || "").trim().slice(0, 40),
+    optionId: input.optionId,
     by: user.name,
   });
   if (!p) return { ok: false, error: "Design not found." };
@@ -423,6 +438,7 @@ export async function addRouteAction(
     partId: string;
     points: Point[];
     aspect: number;
+    optionId: string;
     /** Device-wire endpoints (Task 4) — the client's hit-test result.
      *  Re-verified below; never trusted blindly. */
     fromPlacementId?: string;
@@ -440,6 +456,7 @@ export async function addRouteAction(
     return { ok: false, error: `${part.sku} is priced per ${part.unit}, not per length — wires need a per-foot part.` };
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
+  if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
   if (!findCalibration(project.calibrations || [], input.sheetId, input.page))
     return { ok: false, error: "Calibrate this page before routing wire — lengths need a scale." };
 
@@ -548,6 +565,54 @@ export async function restoreRevisionAction(
   return { ok: true };
 }
 
+/* ------------------------------ options (Spec 1) ------------------------------ */
+
+export async function addOptionAction(
+  projectId: string,
+  input: { name: string; copyFromOptionId?: string | null }
+): Promise<{ ok: true; optionId: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const r = await addOption(projectId, {
+    name: input.name,
+    ...(input.copyFromOptionId ? { copyFromOptionId: input.copyFromOptionId } : {}),
+    by: user.name,
+  });
+  if (!r.ok) {
+    if (r.reason === "empty-name") return { ok: false, error: "Name the option — 'Good', 'Better', 'Alternate'…" };
+    if (r.reason === "no-such-option") return { ok: false, error: OPTION_GONE };
+    return { ok: false, error: "Design not found." };
+  }
+  revalidatePath(editorPath(projectId));
+  return { ok: true, optionId: r.option.id };
+}
+
+export async function renameOptionAction(projectId: string, optionId: string, name: string): Promise<Result> {
+  await requireUser();
+  const r = await renameOption(projectId, optionId, name);
+  if (!r.ok) {
+    if (r.reason === "empty-name") return { ok: false, error: "An option needs a name." };
+    if (r.reason === "no-such-option") return { ok: false, error: OPTION_GONE };
+    return { ok: false, error: "Design not found." };
+  }
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+export async function removeOptionAction(
+  projectId: string,
+  optionId: string
+): Promise<{ ok: true; removedPlacements: number; removedRoutes: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const r = await removeOption(projectId, optionId, user.name);
+  if (!r.ok) {
+    if (r.reason === "last-option") return { ok: false, error: "A design keeps at least one option — add another before removing this one." };
+    if (r.reason === "no-such-option") return { ok: false, error: OPTION_GONE };
+    return { ok: false, error: "Design not found." };
+  }
+  revalidatePath(editorPath(projectId));
+  return { ok: true, removedPlacements: r.removedPlacements, removedRoutes: r.removedRoutes };
+}
+
 /**
  * Delete this design from inside its editor — restored from the Grid index's
  * deleteProjectAction, which the D-grid-merge commit deleted along with the
@@ -596,6 +661,7 @@ export async function deleteProjectAction(
  */
 export async function createDraftQuoteAction(
   projectId: string,
+  optionId: string | null,
   laborLines?: Array<{ partId: string; hours: number }>
 ): Promise<
   | { ok: true; quoteId: string; updated: boolean; fallbackLines: string[] }
@@ -604,206 +670,52 @@ export async function createDraftQuoteAction(
   const user = await requireUser();
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
-  const placements = project.placements || [];
-  const routes = project.routes || [];
-  if (!placements.length && !routes.length)
-    return { ok: false, error: "Place a device or route a wire first." };
-  // Hard-fail on unresolved seed placeholders (Task 2, #38) rather than
-  // let them silently price at $0 — the same "unresolved input must not
-  // silently zero a real number" call already made for fabric weight
-  // (#64). A placeholder's BOM line even LOOKS like a resolved-then-removed
-  // catalog part ("removed part — no longer in the catalog"), which is
-  // actively misleading here, not just missing. Naming the placement's own
-  // label (its `category`, the human name deriveSeedPlacements gave it,
-  // e.g. "Par") lets the user find and fix each one from the canvas.
-  const unresolvedSeeds = placements.filter((p) => isSeedPlaceholder(p.partId));
-  if (unresolvedSeeds.length) {
-    const names = Array.from(new Set(unresolvedSeeds.map((p) => p.category || p.partId))).sort();
-    return {
-      ok: false,
-      error:
-        `${unresolvedSeeds.length} seeded device${unresolvedSeeds.length === 1 ? "" : "s"} ` +
-        `still need${unresolvedSeeds.length === 1 ? "s" : ""} a real catalog part before this can ` +
-        `price: ${names.join(", ")}. Delete and re-drop each from the catalog, then try again.`,
-    };
-  }
+  const resolvedOptionId = resolveOptionId(project, optionId);
+  if (optionId && resolvedOptionId !== optionId) return { ok: false, error: OPTION_GONE };
+  const option = project.options!.find((o) => o.id === resolvedOptionId)!;
 
-  // Venue + tier stamp (D113.6): same resolution as estimator quotes (D87);
-  // re-stamped on every mint/update while the quote is still a draft. The
-  // tier margin is resolved BEFORE pricing because it applies to every line
-  // category on this quote — curtains, devices, wire runs and labor alike
-  // (#63) — exactly as the estimator and the portal do.
-  const tier = await resolveTier(project.customerId);
+  const built = await buildGridQuote(project, resolvedOptionId, laborLines);
+  if (!built.ok) return built;
+  const { build } = built;
 
-  const catalog = await listCatalog();
-  const symbols = await listGridSymbols();
-  const pricingById = new Map(catalog.map((p) => [p.id, p]));
-  // Rebuild a quote-facing catalog from the independent Grid symbols. A
-  // symbol with no pricingPartId is still valid design data; it simply carries
-  // a zero price until someone links a price-book row later.
-  const gridCatalog = symbols.map((s) => {
-    const p = s.pricingPartId ? pricingById.get(s.pricingPartId) : undefined;
-    return p
-      ? { ...p, id: s.id, sku: s.modelNumber || p.sku, desc: s.name }
-      : { id: s.id, sku: s.modelNumber || s.id, desc: s.name, category: s.category, unit: "ea", list: 0, cost: 0, ports: s.ports };
-  });
-  // Tier-priced catalog (#63): the same cost ÷ (1 − margin) re-derivation the
-  // portal uses for its equipment lines (portal/actions.ts) and
-  // customerCatalog() uses for the picker — a part without a usable cost, or
-  // a margin outside (0, 1), keeps its plain list price. Devices, wire runs
-  // and labor all price off this list below, so the tier margin actually
-  // reaches every line, not just curtains.
-  const tierSource = [
-    ...gridCatalog,
-    ...catalog.filter((p) => (p.role || "").toLowerCase() === "labor"),
-  ];
-  const tierCatalog = tierSource.map((p) => ({
-    ...p,
-    list: isTierPriced(p.cost, tier.margin)
-      ? Math.round((p.cost / (1 - tier.margin)) * 100) / 100
-      : p.list,
-  }));
-  // Punch #76: the fallback above is silent — a part with no usable cost (a
-  // bulk import that only carried list prices, say) keeps its plain list
-  // price while everything around it gets tier-priced, and nothing on the
-  // quote said so even though pricingTier/tierMargin implies every line got
-  // the tier treatment. Track which parts fell back, by BOTH id and SKU:
-  // device/wire lines key off the catalog id, but the labor lines built below
-  // key off the part's SKU instead (see the `labor.push` below), so a single
-  // id-only set would silently miss labor fallbacks. Curtains are never in
-  // this set — priceGridCurtains prices them straight from cost + margin with
-  // no separate "list" to fall back to.
-  const fallbackKeys = new Set(
-    gridCatalog.filter((p) => !isTierPriced(p.cost, tier.margin)).flatMap((p) => [p.id, p.sku])
-  );
-  const isFallbackLine = (l: Pick<BomLine, "partId" | "kind">) =>
-    l.kind !== "curtain" && fallbackKeys.has(l.partId);
-  const devLines = bomLines(placements, tierCatalog);
-  const devTotals = bomTotals(placements, tierCatalog);
-  const wires = routeLines(routes, tierCatalog, project.calibrations || []);
-
-  // Curtains (punch #49) - priced HERE, server-side, from the authoritative
-  // cost model. The editor's sidebar price is a customer-safe mirror of this
-  // same math and matches to the cent; this is the number that gets quoted.
-  const curtainPrices = priceGridCurtains(placements, catalog, tier.margin);
-  const fabricNames = new Map(
-    catalog.filter(isFabricRow).map((p) => [p.id, p.desc] as const)
-  );
-  const curtains = curtainLines(
-    placements,
-    new Map([...curtainPrices].map(([id, v]) => [id, v.priceEach])),
-    fabricNames
-  );
-  const curtainValue = curtains.reduce((a, l) => a + l.ext, 0);
-  const curtainCostTotal = [...curtainPrices.values()].reduce((a, v) => a + v.costEach, 0);
-
-  // Labor rides in only as hours against real catalog labor rows — the
-  // client proposes, the server prices (D114). Priced off the tier catalog
-  // (#63) so labor carries the same margin as everything else on the quote.
-  const labor: Array<{ sku: string; desc: string; qty: number; unit: string; price: number; ext: number; cost: number }> = [];
-  for (const l of laborLines || []) {
-    const part = tierCatalog.find((p) => p.id === l.partId);
-    const hours = Number(l.hours);
-    if (!part || (part.role || "").toLowerCase() !== "labor") continue;
-    if (!(hours > 0) || hours > 10000) continue;
-    labor.push({
-      sku: part.sku,
-      desc: part.desc,
-      qty: hours,
-      unit: part.unit || "hr",
-      price: part.list,
-      ext: hours * part.list,
-      cost: hours * part.cost,
-    });
-  }
-
-  const lines: BomLine[] = [
-    ...devLines,
-    ...wires.lines,
-    ...curtains,
-    ...labor.map((l) => ({ partId: l.sku, desc: l.desc, unit: l.unit, qty: l.qty, list: l.price, ext: l.ext })),
-  ];
-  const value =
-    devTotals.value + wires.value + curtainValue + labor.reduce((a, l) => a + l.ext, 0);
-  const cost =
-    devTotals.cost + wires.cost + curtainCostTotal + labor.reduce((a, l) => a + l.cost, 0);
-  const totals = { value, margin: value > 0 ? (value - cost) / value : 0 };
-
-  // Punch #76: which of the assembled lines actually landed on a
-  // fallback-priced part — computed once here so the flag on the spec below
-  // and the list handed back to the caller (for the editor's banner) can
-  // never disagree.
-  const fallbackLines = lines.filter(isFallbackLine).map((l) => l.desc);
-
-  const site = project.siteId ? await getSite(project.siteId) : null;
-  const locationId = site ? docLocId(site) : null;
-  const spec = {
-    kind: "grid",
-    gridProjectId: project.id,
-    lines: lines.map((l) => ({
-      // A curtain line's partId is its PLACEMENT id, not a catalog id (#49):
-      // it has no SKU because it isn't a stocked part, and putting "gp-4f2a…"
-      // in front of a customer would be nonsense. The description carries the
-      // name, type, dimensions, fullness and fabric.
-      sku: l.kind === "curtain" ? "CURTAIN" : l.partId,
-      desc: l.desc,
-      qty: l.qty,
-      unit: l.unit,
-      price: l.list,
-      ext: l.ext,
-      // Punch #76: this line's part had no usable cost (or the tier margin
-      // itself was out of range) and so kept its plain list price while its
-      // tier stamp (pricingTier/tierMargin, below) implies every line got
-      // the tier treatment. Never a price change — a fallback line keeps its
-      // list price — only a marker so the mix is visible on the document
-      // instead of silent. Omitted (not `false`) on every ordinary line so
-      // existing quotes/specs with no such lines are untouched.
-      ...(isFallbackLine(l) ? { tierFallback: true as const } : {}),
-    })),
-  };
-
-  const existing = project.quoteId ? await getQuote(project.quoteId) : null;
+  const existing = option.quoteId ? await getQuote(option.quoteId) : null;
   if (existing) {
     if (existing.status !== "draft")
-      return {
-        ok: false,
-        error: `${existing.id} is already ${existing.status} — cut a revision from the quote screen instead.`,
-      };
+      return { ok: false, error: `${existing.id} is already ${existing.status} — cut a revision from the quote screen instead.` };
     await updateQuote(existing.id, {
-      name: `${project.name} — The Grid design`,
-      value: totals.value,
-      margin: totals.margin,
-      locationId,
-      pricingTier: tier.tier,
-      tierMargin: tier.margin,
-      spec,
+      name: build.quoteName,
+      value: build.value,
+      margin: build.margin,
+      locationId: build.locationId,
+      pricingTier: build.tier.tier,
+      tierMargin: build.tier.margin,
+      spec: build.spec,
     });
-    // The revision records exactly what was quoted (D109).
-    await addRevision(projectId, { by: user.name, reason: "quote", note: `Quoted as ${existing.id}` });
+    await addRevision(projectId, { by: user.name, reason: "quote", note: `${option.name} quoted as ${existing.id}` });
     revalidatePath(editorPath(projectId));
     revalidatePath("/quotes");
     revalidatePath("/design/designs");
-    return { ok: true, quoteId: existing.id, updated: true, fallbackLines };
+    return { ok: true, quoteId: existing.id, updated: true, fallbackLines: build.fallbackLines };
   }
 
   const q = await createQuote({
-    name: `${project.name} — The Grid design`,
+    name: build.quoteName,
     customer: project.customer,
     customerId: project.customerId,
-    locationId,
-    value: totals.value,
-    margin: totals.margin,
-    pricingTier: tier.tier,
-    tierMargin: tier.margin,
+    locationId: build.locationId,
+    value: build.value,
+    margin: build.margin,
+    pricingTier: build.tier.tier,
+    tierMargin: build.tier.margin,
     source: "grid",
     quoteType: "system",
     owner: user.name,
-    spec,
+    spec: build.spec,
   });
-  await setQuote(project.id, q.id);
-  await addRevision(projectId, { by: user.name, reason: "quote", note: `Quoted as ${q.id}` });
+  await setOptionQuote(project.id, resolvedOptionId, q.id);
+  await addRevision(projectId, { by: user.name, reason: "quote", note: `${option.name} quoted as ${q.id}` });
   revalidatePath(editorPath(projectId));
   revalidatePath("/quotes");
   revalidatePath("/design/designs");
-  return { ok: true, quoteId: q.id, updated: false, fallbackLines };
+  return { ok: true, quoteId: q.id, updated: false, fallbackLines: build.fallbackLines };
 }

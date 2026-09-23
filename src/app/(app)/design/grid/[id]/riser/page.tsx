@@ -9,6 +9,7 @@ import { riserGraph } from "@/lib/design/grid-riser";
 import { markerColor, shapeFor, type GridShape } from "@/lib/design/grid-symbols";
 import { SymbolIcon, SymbolShape } from "@/components/design/symbol-shape";
 import type { PartLite } from "@/lib/design/grid-bom";
+import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { PrintButton } from "@/components/letter/print-button";
 
 export const metadata = { title: "Riser sketch — Quartzite-6" };
@@ -24,11 +25,14 @@ export const dynamic = "force-dynamic";
  */
 export default async function RiserPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ option?: string }>;
 }) {
   await requireUser();
   const { id } = await params;
+  const { option: requestedOption } = await searchParams;
   const project = await getProject(decodeURIComponent(id));
   if (!project) {
     return (
@@ -38,6 +42,11 @@ export default async function RiserPage({
       </div>
     );
   }
+
+  const optionId = resolveOptionId(project, requestedOption);
+  const option = project.options!.find((o) => o.id === optionId)!;
+  const slice = optionSlice(project, optionId);
+  const optionQuery = `?option=${encodeURIComponent(optionId)}`;
 
   const [catalog, gridSymbols, settings] = await Promise.all([listCatalog(), listGridSymbols(), getSettings()]);
   const accent = settings.accent || "#b08d4a";
@@ -55,8 +64,8 @@ export default async function RiserPage({
     parts.push({ id: p.id, sku: p.sku, desc: p.desc, category: p.category, unit: p.unit, list: p.list, cost: p.cost });
   }
   const graph = riserGraph(
-    project.placements || [],
-    project.routes || [],
+    slice.placements,
+    slice.routes,
     project.spaces || [],
     parts,
     project.calibrations || []
@@ -98,7 +107,7 @@ export default async function RiserPage({
       <style>{`@media print { .grid-riser-card { border: none !important; box-shadow: none !important; padding: 0 !important; } }`}</style>
       <div className="pk-doc-toolbar" style={{ maxWidth: "none", justifyContent: "flex-start" }}>
         <Link
-          href={`/design/grid/${encodeURIComponent(project.id)}`}
+          href={`/design/grid/${encodeURIComponent(project.id)}${optionQuery}`}
           style={{ fontFamily: "var(--font-ui)", fontSize: 12.5, color: "var(--accent)", textDecoration: "none", marginRight: "auto" }}
         >
           ← {project.name}
@@ -109,6 +118,7 @@ export default async function RiserPage({
         <h1 style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Riser sketch</h1>
         <span style={{ color: "#8c919c", fontSize: 13 }}>
           {project.name}
+          {project.options!.length > 1 ? ` · ${option.name}` : ""}
           {project.customer ? ` · ${project.customer}` : ""} ·{" "}
           {new Date(project.updatedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })} · {project.id}
         </span>

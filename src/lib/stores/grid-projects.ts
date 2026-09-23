@@ -8,7 +8,15 @@ import {
 } from "@/db/doc-store";
 import { calibrationScale, clamp01, type Calibration, type Point } from "@/lib/annotations";
 import type { GridCurtain } from "@/lib/design/grid-bom";
-import { compute, VENUES, type AState, type QuickScopeInputs, type VenueKind } from "@/app/(app)/design/quick/engine";
+import {
+  copyOptionMembers,
+  ensureOptions,
+  hasOption,
+  syncQuoteMirror,
+  type GridOption,
+} from "@/lib/design/grid-options";
+export type { GridOption } from "@/lib/design/grid-options";
+import { compute, VENUES, type AState, type QuickScopeInputs, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
 
 /**
@@ -57,6 +65,9 @@ export type GridPlacement = {
    * on the BOM as its own line.
    */
   curtain?: GridCurtain;
+  /** Option membership (Spec 1, options model). Absent on pre-spec
+   *  placements — read as the project's first option (ensureOptions). */
+  optionId?: string;
   /**
    * Set only on a placement created by the "generate starting layout"
    * seeding action (#38 Task 2, D14x) — a stable key identifying which
@@ -111,6 +122,9 @@ export type GridRevision = {
   spaces: GridSpace[];
   /** Absent on pre-D110 snapshots — read as []. */
   routes?: GridRoute[];
+  /** Option list at snapshot time (Spec 1). Absent on older snapshots —
+   *  restore normalizes to a single default option. */
+  options?: GridOption[];
 };
 
 /**
@@ -138,6 +152,8 @@ export type GridRoute = {
   /** Validated shared connectionType (catalog-connect.validateDeviceWire),
    *  stamped only when both endpoint devices carry `ports`. */
   connectionType?: string;
+  /** Option membership (Spec 1) — see GridPlacement.optionId. */
+  optionId?: string;
 };
 
 export type GridProject = {
@@ -152,6 +168,9 @@ export type GridProject = {
   intake?: {
     complete: boolean;
     measurementBased: boolean;
+    /** Chosen at intake (Spec 1). Absent on pre-spec docs. Only "manual" is
+     *  reachable until Spec 2. */
+    mode?: "auto" | "manual";
     venueName: string;
     locationName: string;
     address: string;
@@ -169,6 +188,11 @@ export type GridProject = {
   routes?: GridRoute[];
   /** Append-only snapshots (Phase 2) — absent on pre-D109 docs. */
   revisions?: GridRevision[];
+  /** Design options (Spec 1) — variants sharing this project's sheets.
+   *  Absent on pre-spec docs; every read passes through ensureOptions, so
+   *  callers may treat this as always ≥1 entry. `quoteId` below mirrors
+   *  options[0].quoteId. */
+  options?: GridOption[];
   /** Draft quote minted from this design, when one exists. */
   quoteId: string | null;
   /** Live-revisable basic-info snapshot (D-manual-scope-targets) — venue,
@@ -208,11 +232,12 @@ function rid(prefix: string): string {
 /** All live projects, newest activity first. */
 export async function listProjects(): Promise<GridProject[]> {
   const list = await listDocs<GridProject>("grid_projects");
-  return list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return list.map((p) => ensureOptions(p)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
 export async function getProject(id: string): Promise<GridProject | null> {
-  return getDoc<GridProject>("grid_projects", id);
+  const p = await getDoc<GridProject>("grid_projects", id);
+  return p ? ensureOptions(p) : null;
 }
 
 export async function createProject(input: {
@@ -243,44 +268,12 @@ export async function createProject(input: {
   // new project opens straight into GridIntake (intake.complete starts
   // false) before anything is ever painted, so generating a starting sheet
   // here — before VenueDims exist — is exactly what made the old default
-  // dims-blind. The first intake save decides what to generate instead: a
-  // dims-derived plan via generateBaseSheet() when "Generate from
-  // measurements as I work" is checked, or the blank fallback via
-  // seedBlankSheet() when it isn't (saveGridIntakeAction).
+  // dims-blind. The first intake save generates the dims-derived plan
+  // instead, via generateBaseSheet() (saveGridIntakeAction). Manual is the
+  // only reachable mode until Spec 2's Auto-estimate lands, so the old
+  // "I have my own plan, skip measurements" blank-sheet path (seedBlankSheet)
+  // is gone (Spec 1, Task 6).
   return project;
-}
-
-/**
- * The pre-Task-1 default: a blank white rectangle with no venue geometry,
- * plus three arbitrary fixed-fraction starter Spaces. Used now only for the
- * "I have my own plan, skip measurements" intake path (measurementBased:
- * false) — there's no VenueDims yet to render a real plan from, and a real
- * upload is expected to follow. Called once, from saveGridIntakeAction, the
- * first time intake completes with that box unchecked.
- */
-export async function seedBlankSheet(
-  projectId: string,
-  projectName: string,
-  by: string
-): Promise<GridSheet | null> {
-  const blank = encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="white"/><path d="M40 40H1160V760H40Z" fill="none" stroke="#e5e7eb" stroke-width="2"/><text x="60" y="84" font-family="Arial,sans-serif" font-size="22" fill="#9ca3af">${projectName.replace(/[<>&]/g, "")}</text><text x="60" y="112" font-family="Arial,sans-serif" font-size="14" fill="#c0c4ca">Blank design sheet · upload a plan any time</text></svg>`
-  );
-  const sheet = await addSheet(projectId, {
-    name: "Blank design sheet",
-    mime: "image/svg+xml",
-    dataUrl: `data:image/svg+xml;charset=utf-8,${blank}`,
-    by,
-  });
-  if (sheet) {
-    // Give a blank design useful spatial vocabulary immediately. These are
-    // editable starter outlines, including an audience-view area for
-    // sightline and coverage planning; uploaded plans can be redrawn over.
-    await addSpace(projectId, { sheetId: sheet.id, page: 1, name: "Audience view", points: [{ x: 0.08, y: 0.58 }, { x: 0.92, y: 0.58 }, { x: 0.92, y: 0.9 }, { x: 0.08, y: 0.9 }], by });
-    await addSpace(projectId, { sheetId: sheet.id, page: 1, name: "Stage", points: [{ x: 0.2, y: 0.12 }, { x: 0.8, y: 0.12 }, { x: 0.8, y: 0.4 }, { x: 0.2, y: 0.4 }], by });
-    await addSpace(projectId, { sheetId: sheet.id, page: 1, name: "FOH / control", points: [{ x: 0.38, y: 0.44 }, { x: 0.62, y: 0.44 }, { x: 0.62, y: 0.53 }, { x: 0.38, y: 0.53 }], by });
-  }
-  return sheet;
 }
 
 /**
@@ -469,9 +462,11 @@ export async function listSheets(projectId: string): Promise<GridSheet[]> {
 
 export async function addPlacement(
   projectId: string,
-  input: { sheetId: string; page: number; x: number; y: number; partId: string; by: string }
+  input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string; by: string }
 ): Promise<GridProject | null> {
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!hasOption(p, input.optionId)) { refused = true; return; }
     p.placements = [
       ...(p.placements || []),
       {
@@ -481,12 +476,14 @@ export async function addPlacement(
         x: input.x,
         y: input.y,
         partId: input.partId,
+        optionId: input.optionId,
         by: input.by,
         at: Date.now(),
       },
     ];
     p.updatedAt = Date.now();
   });
+  return refused ? null : updated;
 }
 
 /**
@@ -502,13 +499,16 @@ export async function addPlacements(
   input: {
     sheetId: string;
     page: number;
+    optionId: string;
     items: Array<{ x: number; y: number; partId: string; category?: string; seededFrom?: string }>;
     by: string;
   }
 ): Promise<GridProject | null> {
   if (!input.items.length) return getProject(projectId);
   const at = Date.now();
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!hasOption(p, input.optionId)) { refused = true; return; }
     const added: GridPlacement[] = input.items.map((item) => ({
       id: rid("gp-"),
       sheetId: input.sheetId,
@@ -516,6 +516,7 @@ export async function addPlacements(
       x: clamp01(item.x),
       y: clamp01(item.y),
       partId: item.partId,
+      optionId: input.optionId,
       ...(item.category ? { category: item.category } : {}),
       ...(item.seededFrom ? { seededFrom: item.seededFrom } : {}),
       by: input.by,
@@ -524,6 +525,7 @@ export async function addPlacements(
     p.placements = [...(p.placements || []), ...added];
     p.updatedAt = at;
   });
+  return refused ? null : updated;
 }
 
 /**
@@ -545,10 +547,13 @@ export async function addCurtainPlacement(
     y: number;
     curtain: GridCurtain;
     category?: string;
+    optionId: string;
     by: string;
   }
 ): Promise<GridProject | null> {
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!hasOption(p, input.optionId)) { refused = true; return; }
     p.placements = [
       ...(p.placements || []),
       {
@@ -559,6 +564,7 @@ export async function addCurtainPlacement(
         y: input.y,
         partId: input.curtain.fabricSku,
         curtain: input.curtain,
+        optionId: input.optionId,
         ...(input.category ? { category: input.category } : {}),
         by: input.by,
         at: Date.now(),
@@ -566,6 +572,7 @@ export async function addCurtainPlacement(
     ];
     p.updatedAt = Date.now();
   });
+  return refused ? null : updated;
 }
 
 /**
@@ -685,12 +692,19 @@ export async function clearSheetCalibration(
   });
 }
 
-export async function setQuote(
+/** Store the draft quote minted from ONE option (Spec 1). `project.quoteId`
+ *  is re-mirrored from the first option every time. */
+export async function setOptionQuote(
   projectId: string,
+  optionId: string,
   quoteId: string
 ): Promise<GridProject | null> {
+  const project = await getProject(projectId);
+  if (!project || !hasOption(project, optionId)) return null;
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    p.quoteId = quoteId;
+    const doc = ensureOptions(p);
+    doc.options = doc.options.map((o) => (o.id === optionId ? { ...o, quoteId } : o));
+    syncQuoteMirror(doc);
     p.updatedAt = Date.now();
   });
 }
@@ -703,6 +717,15 @@ export async function setVenue(
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.siteId = siteId;
     p.siteName = siteName;
+    p.updatedAt = Date.now();
+  });
+}
+
+export async function renameProject(projectId: string, name: string): Promise<GridProject | null> {
+  const clean = name.trim();
+  if (!clean) return getProject(projectId);
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.name = clean;
     p.updatedAt = Date.now();
   });
 }
@@ -786,13 +809,16 @@ export async function addRoute(
     partId: string;
     points: Point[];
     aspect: number;
+    optionId: string;
     by: string;
     fromPlacementId?: string;
     toPlacementId?: string;
     connectionType?: string;
   }
 ): Promise<GridProject | null> {
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!hasOption(p, input.optionId)) { refused = true; return; }
     p.routes = [
       ...(p.routes || []),
       {
@@ -802,6 +828,7 @@ export async function addRoute(
         partId: input.partId,
         points: input.points,
         aspect: input.aspect,
+        optionId: input.optionId,
         by: input.by,
         at: Date.now(),
         ...(input.fromPlacementId ? { fromPlacementId: input.fromPlacementId } : {}),
@@ -811,6 +838,7 @@ export async function addRoute(
     ];
     p.updatedAt = Date.now();
   });
+  return refused ? null : updated;
 }
 
 export async function removeRoute(
@@ -821,6 +849,96 @@ export async function removeRoute(
     p.routes = (p.routes || []).filter((r) => r.id !== routeId);
     p.updatedAt = Date.now();
   });
+}
+
+/* ------------------------------ options (Spec 1) ------------------------------ */
+
+export async function addOption(
+  projectId: string,
+  input: { name: string; copyFromOptionId?: string; tier?: TierKey; by: string }
+): Promise<{ ok: true; option: GridOption } | { ok: false; reason: "not-found" | "empty-name" | "no-such-option" }> {
+  const name = input.name.trim().slice(0, 40);
+  if (!name) return { ok: false, reason: "empty-name" };
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, reason: "not-found" };
+  if (input.copyFromOptionId && !hasOption(project, input.copyFromOptionId)) return { ok: false, reason: "no-such-option" };
+  const at = Date.now();
+  const option: GridOption = { id: rid("opt-"), name, quoteId: null, createdAt: at, ...(input.tier ? { tier: input.tier } : {}) };
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const doc = ensureOptions(p);
+    doc.options = [...doc.options, option];
+    if (input.copyFromOptionId) {
+      const copied = copyOptionMembers({
+        placements: doc.placements || [],
+        routes: doc.routes || [],
+        fromOptionId: input.copyFromOptionId,
+        toOptionId: option.id,
+        makeId: (prefix) => rid(prefix),
+        by: input.by,
+        at,
+      });
+      doc.placements = [...(doc.placements || []), ...copied.placements];
+      doc.routes = [...(doc.routes || []), ...copied.routes];
+    }
+    p.updatedAt = at;
+  });
+  return updated ? { ok: true, option } : { ok: false, reason: "not-found" };
+}
+
+export async function renameOption(
+  projectId: string,
+  optionId: string,
+  name: string
+): Promise<{ ok: true } | { ok: false; reason: "not-found" | "empty-name" | "no-such-option" }> {
+  const clean = name.trim().slice(0, 40);
+  if (!clean) return { ok: false, reason: "empty-name" };
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, reason: "not-found" };
+  if (!hasOption(project, optionId)) return { ok: false, reason: "no-such-option" };
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const doc = ensureOptions(p);
+    doc.options = doc.options.map((o) => (o.id === optionId ? { ...o, name: clean } : o));
+    p.updatedAt = Date.now();
+  });
+  return updated ? { ok: true } : { ok: false, reason: "not-found" };
+}
+
+/**
+ * Remove an option and every placement/route tagged with it, in one patch,
+ * after cutting a revision (non-destructive by construction, D109 idiom).
+ * The option's draft quote, if any, is left in the Quotes hub. Refuses the
+ * last option: a project always has ≥1.
+ */
+export async function removeOption(
+  projectId: string,
+  optionId: string,
+  by: string
+): Promise<
+  | { ok: true; removedPlacements: number; removedRoutes: number }
+  | { ok: false; reason: "not-found" | "no-such-option" | "last-option" }
+> {
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, reason: "not-found" };
+  const opts = ensureOptions(project).options;
+  const target = opts.find((o) => o.id === optionId);
+  if (!target) return { ok: false, reason: "no-such-option" };
+  if (opts.length <= 1) return { ok: false, reason: "last-option" };
+  let removedPlacements = 0;
+  let removedRoutes = 0;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const doc = ensureOptions(p);
+    pushRevision(doc, by, "manual", `Auto-saved before removing option ${target.name}`);
+    const keepP = (doc.placements || []).filter((pl) => pl.optionId !== optionId);
+    const keepR = (doc.routes || []).filter((r) => r.optionId !== optionId);
+    removedPlacements = (doc.placements || []).length - keepP.length;
+    removedRoutes = (doc.routes || []).length - keepR.length;
+    doc.placements = keepP;
+    doc.routes = keepR;
+    doc.options = doc.options.filter((o) => o.id !== optionId);
+    syncQuoteMirror(doc);
+    p.updatedAt = Date.now();
+  });
+  return updated ? { ok: true, removedPlacements, removedRoutes } : { ok: false, reason: "not-found" };
 }
 
 /* ----------------------------- revisions ----------------------------- */
@@ -845,6 +963,11 @@ function snapshotOf(
     calibrations: [...(p.calibrations || [])],
     spaces: [...(p.spaces || [])],
     routes: [...(p.routes || [])],
+    options: ensureOptions({
+      options: p.options ? p.options.map((o) => ({ ...o })) : undefined,
+      quoteId: p.quoteId,
+      createdAt: p.createdAt,
+    }).options,
   };
 }
 
@@ -896,6 +1019,15 @@ export async function restoreRevision(
     doc.calibrations = [...target.calibrations];
     doc.spaces = [...target.spaces];
     doc.routes = [...(target.routes || [])];
+    // Quote links are bookkeeping, not design state: a restore brings back
+    // the option LIST and membership, but every option that still exists
+    // keeps its CURRENT quote link, and the project mirror is re-derived.
+    const currentQuotes = new Map(ensureOptions(doc).options.map((o) => [o.id, o.quoteId]));
+    doc.options = target.options
+      ? target.options.map((o) => ({ ...o, quoteId: currentQuotes.has(o.id) ? currentQuotes.get(o.id)! : o.quoteId }))
+      : undefined;
+    ensureOptions(doc);
+    syncQuoteMirror(doc);
     pushRevision(doc, by, "restore", `Recalled v${rev}`);
     doc.updatedAt = Date.now();
   });

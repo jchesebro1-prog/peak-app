@@ -50,6 +50,17 @@ import {
 } from "@/lib/operations-work";
 import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS, battenLenFt, BATTEN_OVERHANG_FT } from "@/lib/design/venue-dims";
 import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
+import {
+  DEFAULT_OPTION_ID,
+  DEFAULT_OPTION_NAME,
+  copyOptionMembers,
+  defaultOptionId,
+  ensureOptions,
+  hasOption,
+  optionSlice,
+  resolveOptionId,
+  syncQuoteMirror,
+} from "@/lib/design/grid-options";
 import { DEFAULT_SETTINGS, DEMO_COLLECTIONS } from "@/db/seed-data";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "@/db/doc-tables";
 import { PARTNER_TYPES, baseVenueKind } from "@/lib/identity/venue-defaults";
@@ -1662,6 +1673,8 @@ import { computeCurtain as computeCurtainQuote } from "@/app/(app)/estimator/pri
 
 /* --- Quick Design budget curtain block on the shared model (task 6) --- */
 import { compute as computeQuick, defaultAState, tierSystems, curtainMakeCost, tierDefsDefault } from "@/app/(app)/design/quick/engine";
+import { designPatchFromIntake, manualScopeInputs } from "@/lib/design/grid-intake";
+import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import { drapeRule as drapeRuleQ } from "@/lib/design/goods";
 import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFor as makingForQ } from "@/lib/design/curtain-pricing";
 {
@@ -3776,6 +3789,84 @@ async function xlsxFixture(): Promise<Buffer> {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+/* --- Grid options (Spec 1, 2026-09-21): normalization + slicing + copy --- */
+{
+  const legacy = {
+    quoteId: "Q-9001",
+    createdAt: 1000,
+    placements: [
+      { id: "gp-a", sheetId: "gs-1", page: 1, x: 0.1, y: 0.1, partId: "p1", by: "t", at: 1 },
+      { id: "gp-b", sheetId: "gs-1", page: 1, x: 0.2, y: 0.2, partId: "p2", by: "t", at: 1 },
+    ] as Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; by: string; at: number; optionId?: string }>,
+    routes: [
+      { id: "wr-a", sheetId: "gs-1", page: 1, partId: "w1", points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], aspect: 1, by: "t", at: 1, fromPlacementId: "gp-a", toPlacementId: "gp-b" },
+    ] as Array<{ id: string; sheetId: string; page: number; partId: string; points: { x: number; y: number }[]; aspect: number; by: string; at: number; fromPlacementId?: string; toPlacementId?: string; optionId?: string }>,
+  };
+  const norm = ensureOptions(structuredClone(legacy));
+  ok(norm.options.length === 1 && norm.options[0].id === DEFAULT_OPTION_ID && norm.options[0].name === DEFAULT_OPTION_NAME, "grid-options: a legacy doc normalizes to one 'Design' option with id opt-base");
+  ok(norm.options[0].quoteId === "Q-9001", "grid-options: the default option inherits the project quoteId");
+  ok(norm.placements!.every((p) => p.optionId === DEFAULT_OPTION_ID) && norm.routes!.every((r) => r.optionId === DEFAULT_OPTION_ID), "grid-options: untagged placements and routes read as members of the first option");
+
+  const two = ensureOptions({
+    createdAt: 1000,
+    quoteId: null,
+    options: [
+      { id: "opt-x", name: "Good", quoteId: null, createdAt: 1 },
+      { id: "opt-y", name: "Better", quoteId: "Q-2", createdAt: 2 },
+    ],
+    placements: [
+      { id: "gp-1", optionId: "opt-x" },
+      { id: "gp-2", optionId: "opt-y" },
+      { id: "gp-3" },
+    ] as Array<{ id: string; optionId?: string }>,
+    routes: [{ id: "wr-1", optionId: "opt-y" }] as Array<{ id: string; optionId?: string }>,
+  });
+  ok(two.options.length === 2 && two.options[0].id === "opt-x", "grid-options: an existing options list is preserved in order");
+  ok(two.placements![2].optionId === "opt-x", "grid-options: an untagged member on a multi-option doc falls to the FIRST option");
+  ok(defaultOptionId(two) === "opt-x", "grid-options: defaultOptionId is the first option");
+  ok(resolveOptionId(two, "opt-y") === "opt-y" && resolveOptionId(two, "opt-nope") === "opt-x" && resolveOptionId(two, null) === "opt-x", "grid-options: resolveOptionId honours a known id and falls back to the first otherwise");
+  ok(hasOption(two, "opt-y") && !hasOption(two, "opt-z"), "grid-options: hasOption");
+  const sliceY = optionSlice(two, "opt-y");
+  ok(sliceY.placements.length === 1 && sliceY.placements[0].id === "gp-2" && sliceY.routes.length === 1, "grid-options: optionSlice returns only that option's placements and routes");
+  ok(optionSlice(two, "opt-x").placements.map((p) => p.id).join(",") === "gp-1,gp-3", "grid-options: optionSlice of the first option includes formerly-untagged members");
+
+  const mirrored = syncQuoteMirror({ ...two, quoteId: "stale" });
+  ok(mirrored.quoteId === null, "grid-options: syncQuoteMirror copies options[0].quoteId onto the project (null here)");
+  const mirrored2 = syncQuoteMirror({ ...two, options: [two.options[1], two.options[0]] });
+  ok(mirrored2.quoteId === "Q-2", "grid-options: syncQuoteMirror follows whichever option is first");
+
+  let n = 0;
+  const copied = copyOptionMembers({
+    placements: norm.placements!,
+    routes: norm.routes!,
+    fromOptionId: DEFAULT_OPTION_ID,
+    toOptionId: "opt-new",
+    makeId: (prefix) => `${prefix}c${++n}`,
+    by: "copier",
+    at: 5000,
+  });
+  ok(copied.placements.length === 2 && copied.placements.every((p) => p.optionId === "opt-new" && p.by === "copier" && p.at === 5000), "grid-options: copyOptionMembers copies every placement into the target option with new provenance");
+  ok(copied.placements.map((p) => p.id).join(",") === "gp-c1,gp-c2", "grid-options: copied placements get NEW ids");
+  ok(copied.routes.length === 1 && copied.routes[0].id === "wr-c3" && copied.routes[0].fromPlacementId === "gp-c1" && copied.routes[0].toPlacementId === "gp-c2", "grid-options: copied routes get new ids and remapped device-wire endpoints");
+  ok(norm.placements![0].id === "gp-a" && norm.placements![0].optionId === DEFAULT_OPTION_ID, "grid-options: copyOptionMembers never mutates the source members");
+}
+
+/* --- Grid intake helpers (Spec 1, Task 6) --- */
+{
+  const a = { ...defaultAState(0), venue: "pac", size: "large" as const, width: 48, depth: 34, grid: 58, wing: 18, ph: 28 };
+  const si = manualScopeInputs(a);
+  ok(si.venue === "pac" && si.width === 48 && si.depth === 34 && si.grid === 58 && si.wing === 18 && si.ph === 28, "grid-intake: manualScopeInputs carries venue/size/dims through");
+  ok(si.sys.lighting && si.sys.rigging && si.sys.curtains && si.sys.audio && si.sys.video, "grid-intake: PAC preset turns on all five trackable systems");
+  ok(!si.sys.controls && !si.sys.acoustical && !si.sys.pit, "grid-intake: non-trackable systems are off even when the preset has them");
+  ok(!("tier" in si) && !("placements" in si) && !("qtyOverrides" in si), "grid-intake: AState-only fields are stripped");
+  const church = manualScopeInputs({ ...a, venue: "church" });
+  ok(!church.sys.rigging && church.sys.video, "grid-intake: preset differences flow through (church: no rigging, video on)");
+  const patch = designPatchFromIntake({ projectName: "Untitled system design", venueName: "Main Hall", locationName: "Northshore HS", a });
+  ok(patch.name === "Main Hall — Northshore HS" && patch.venue === "pac" && patch.size === "large" && patch.width === 48 && patch.depth === 34 && patch.grid === 58, "grid-intake: designPatchFromIntake names an untitled design from venue + location and copies dims");
+  ok(designPatchFromIntake({ projectName: "Already named", venueName: "X", locationName: "", a }).name === undefined, "grid-intake: a named design keeps its name");
+  ok(designPatchFromIntake({ projectName: "Untitled system design", venueName: "", locationName: "Only campus", a }).name === "Only campus", "grid-intake: falls back to whichever cover field is filled");
+  ok(TRACKABLE_SYS_KEYS.join(",") === "rigging,curtains,lighting,audio,video", "grid-scopes: TRACKABLE_SYS_KEYS is exported in the Scope panel's order");
+}
 /* ---- native auth hand-off (spec 2026-09-21-native-auth-handoff) ---- */
 {
   const secret = "spec-secret-not-real";

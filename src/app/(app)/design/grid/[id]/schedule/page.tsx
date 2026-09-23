@@ -6,6 +6,7 @@ import { getSettings } from "@/lib/settings";
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { spaceOf } from "@/lib/design/grid-geometry";
 import { riserGraph } from "@/lib/design/grid-riser";
+import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { curtainDesc } from "@/lib/design/grid-bom";
 import { PrintButton } from "@/components/letter/print-button";
 
@@ -21,11 +22,14 @@ export const dynamic = "force-dynamic";
  */
 export default async function SchedulePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ option?: string }>;
 }) {
   await requireUser();
   const { id } = await params;
+  const { option: requestedOption } = await searchParams;
   const project = await getProject(decodeURIComponent(id));
   if (!project) {
     return (
@@ -36,12 +40,17 @@ export default async function SchedulePage({
     );
   }
 
+  const optionId = resolveOptionId(project, requestedOption);
+  const option = project.options!.find((o) => o.id === optionId)!;
+  const slice = optionSlice(project, optionId);
+  const optionQuery = `?option=${encodeURIComponent(optionId)}`;
+
   const [catalog, settings] = await Promise.all([listCatalog(), getSettings()]);
   const accent = settings.accent || "#b08d4a";
   const partById = new Map(catalog.map((p) => [p.id, p]));
-  const placements = project.placements || [];
+  const placements = slice.placements;
   const spaces = project.spaces || [];
-  const routes = project.routes || [];
+  const routes = slice.routes;
 
   // Devices grouped per space (same computed assignment as everywhere else).
   // `code` overrides the printed Part cell for rows with no SKU (curtains).
@@ -123,7 +132,7 @@ export default async function SchedulePage({
     <div className="pk-content" style={{ padding: "26px 30px 64px" }}>
       <div className="pk-doc-toolbar">
         <Link
-          href={`/design/grid/${encodeURIComponent(project.id)}`}
+          href={`/design/grid/${encodeURIComponent(project.id)}${optionQuery}`}
           style={{ fontFamily: "var(--font-ui)", fontSize: 12.5, color: "var(--accent)", marginRight: "auto", textDecoration: "none" }}
         >
           ← {project.name}
@@ -137,7 +146,7 @@ export default async function SchedulePage({
           <div style={{ fontFamily: "var(--font-mono), monospace", fontSize: "8pt", letterSpacing: ".14em", textTransform: "uppercase", color: "#666" }}>
             {settings.companyName || "Peak Systems Group"} · Equipment schedule
           </div>
-          <div style={{ fontSize: "17pt", fontWeight: 700, marginTop: 2 }}>{project.name}</div>
+          <div style={{ fontSize: "17pt", fontWeight: 700, marginTop: 2 }}>{project.name}{project.options!.length > 1 ? ` · ${option.name}` : ""}</div>
           <div style={{ fontSize: "11pt", color: "#444", marginTop: 1 }}>
             {project.customer || "—"}
             {" · "}

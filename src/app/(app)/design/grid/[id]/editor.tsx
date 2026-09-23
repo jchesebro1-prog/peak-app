@@ -3,8 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import type { AState } from "@/app/(app)/design/quick/engine";
+import { usePathname, useRouter } from "next/navigation";
 import {
   type Calibration,
   calibrationScale,
@@ -45,10 +44,11 @@ import { curtainPriceEach, type FabricSell, type SellCoeffs } from "@/lib/curtai
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
-import { deriveSeedPlacements, isSeedPlaceholder } from "@/lib/design/grid-seed";
+import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { GRID_SHEET_MAX_BYTES, GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
+import { optionSlice } from "@/lib/design/grid-options";
 import type { FabricOption, QuickScopeInputs } from "@/app/(app)/design/quick/engine";
-import type { GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
+import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
   addRouteAction,
   addSpaceAction,
@@ -60,7 +60,6 @@ import {
   placeCurtainAction,
   placeDeviceAction,
   removePlacementAction,
-  seedStartingLayoutAction,
   setPlacementCategoryAction,
   setSymbolShapeAction,
   setVenueAction,
@@ -73,6 +72,7 @@ import WiresPanel from "./wires-panel";
 import ScopePanel from "./scope-panel";
 import AssembliesPanel from "./assemblies-panel";
 import { SearchFilterBar } from "@/components/search/search-filter-bar";
+import OptionSwitcher from "./option-switcher";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -205,18 +205,13 @@ export type ProjectLite = {
   siteId: string | null;
   siteName: string;
   quoteId: string | null;
+  options: GridOption[];
   placements: GridPlacement[];
   calibrations: Calibration[];
   spaces: GridSpace[];
   routes: GridRoute[];
   revisions: GridRevision[];
   scopeInputs: QuickScopeInputs | null;
-  autoConfig?: AState;
-  /** Intake's "Generate from measurements as I work" toggle (#38 Task 2) —
-   *  gates the "Generate starting layout" trigger below: seeding reads
-   *  `autoConfig` and needs the base sheet `generateBaseSheet()` only makes
-   *  on this path (saveGridIntakeAction, grid-projects.ts). */
-  measurementBased: boolean;
 };
 
 type Pending =
@@ -237,6 +232,7 @@ export default function GridEditor({
   venues,
   canCreate,
   categoryShapes,
+  activeOptionId,
 }: {
   project: ProjectLite;
   sheets: SheetLite[];
@@ -261,12 +257,42 @@ export default function GridEditor({
   canCreate: boolean;
   /** Category → symbol defaults (#131), resolved server-side from settings. */
   categoryShapes: Record<string, GridShape>;
+  /** Resolved by page.tsx from ?option= — always a real option id. */
+  activeOptionId: string;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const [selected, setSelected] = useState<string | null>(null);
+  /** Punch #76 — lines the last successful draft/update quoted at plain list
+   *  price because the part had no usable cost (or the resolved tier margin
+   *  itself was out of range), even though this quote's pricingTier/tierMargin
+   *  stamp implies every line got the tier treatment. Non-blocking, mirrors
+   *  the Lineset Builder's fabric-unresolved banner (#64): names the lines,
+   *  impossible to miss, never refuses the quote. Cleared on every new
+   *  mint/update so a fixed catalog makes the warning go away on its own. */
+  const [tierFallbackLines, setTierFallbackLines] = useState<string[]>([]);
+  /** Members of the ACTIVE option only (Spec 1). Every read below goes
+   *  through this slice; the whole-project arrays are used only for the
+   *  switcher's per-option counts. */
+  const active = useMemo(() => optionSlice(project, activeOptionId), [project, activeOptionId]);
+  const placements = active.placements;
+  const routes = active.routes;
+  const optionCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const pl of project.placements) m.set(pl.optionId || project.options[0].id, (m.get(pl.optionId || project.options[0].id) || 0) + 1);
+    return m;
+  }, [project.placements, project.options]);
+  const activeOption = project.options.find((o) => o.id === activeOptionId) || project.options[0];
+  const switchOption = useCallback(
+    (id: string) => {
+      setSelected(null);
+      setTierFallbackLines([]);
+      router.replace(`${pathname}?option=${encodeURIComponent(id)}`, { scroll: false });
+    },
+    [pathname, router]
+  );
   // Two-step arm/confirm; this app doesn't use window.confirm.
   const [armDelete, setArmDelete] = useState(false);
-  const [armSeed, setArmSeed] = useState(false);
-  const [seeding, setSeeding] = useState(false);
   const [activeSheetId, setActiveSheetId] = useState(sheets[0]?.id || "");
   const sheet = sheets.find((s) => s.id === activeSheetId) || sheets[0];
   const isPdf = sheet?.mime === "application/pdf" || sheet?.name.toLowerCase().endsWith(".pdf");
@@ -277,14 +303,6 @@ export default function GridEditor({
   const [size, setSize] = useState({ w: 900, h: 1200 });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  /** Punch #76 — lines the last successful draft/update quoted at plain list
-   *  price because the part had no usable cost (or the resolved tier margin
-   *  itself was out of range), even though this quote's pricingTier/tierMargin
-   *  stamp implies every line got the tier treatment. Non-blocking, mirrors
-   *  the Lineset Builder's fabric-unresolved banner (#64): names the lines,
-   *  impossible to miss, never refuses the quote. Cleared on every new
-   *  mint/update so a fixed catalog makes the warning go away on its own. */
-  const [tierFallbackLines, setTierFallbackLines] = useState<string[]>([]);
 
   const [search, setSearch] = useState("");
   // Palette SCOPE filter (punch #48, replacing Task #39's group filter):
@@ -294,7 +312,6 @@ export default function GridEditor({
   // layer visibility below is a separate axis and the two never touch.
   const [scopeFilter, setScopeFilter] = useState("");
   const [armedPartId, setArmedPartId] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
 
   /** Hidden LAYERS (punch #48) - namespaced keys, scopes and user categories
    *  together (grid-scopes). View state, not design state: which layers one
@@ -355,21 +372,6 @@ export default function GridEditor({
   const aspect = size.w > 0 && size.h > 0 ? size.h / size.w : 1;
   const cal = sheet ? findCalibration(project.calibrations, sheet.id, page) : null;
 
-  /** "Generate starting layout" pending count (#38 Task 2) — computed
-   *  client-side with the SAME pure `deriveSeedPlacements` the server action
-   *  runs, so the confirm prompt's count always matches what a click will
-   *  actually add, and re-running after nothing changed can say so instead
-   *  of just doing a no-op silently. */
-  const pendingSeed = useMemo(() => {
-    if (!project.measurementBased || !project.autoConfig) return { total: 0, delta: 0 };
-    const desired = deriveSeedPlacements(project.autoConfig);
-    const already = new Set(
-      project.placements.flatMap((pl) => (pl.seededFrom ? [pl.seededFrom] : []))
-    );
-    const delta = desired.filter((d) => !already.has(d.seededFrom)).length;
-    return { total: desired.length, delta };
-  }, [project.measurementBased, project.autoConfig, project.placements]);
-
   const partById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
   /** shapeFor() takes a settings-shaped object; built once per prop change. */
   const shapeSettings = useMemo(() => ({ gridCategoryShapes: categoryShapes }), [categoryShapes]);
@@ -411,27 +413,27 @@ export default function GridEditor({
    *  page is still a scope in this design. */
   const scopeCounts = useMemo(() => {
     const m = new Map<GridLayer, number>();
-    for (const pl of project.placements) {
+    for (const pl of placements) {
       const s = scopeOfPlacement(pl);
       m.set(s, (m.get(s) || 0) + 1);
     }
-    for (const r of project.routes || []) {
+    for (const r of routes || []) {
       const s = scopeOfPart(partById.get(r.partId));
       m.set(s, (m.get(s) || 0) + 1);
     }
     return m;
-  }, [project.placements, project.routes, scopeOfPlacement, partById]);
+  }, [placements, routes, scopeOfPlacement, partById]);
 
   const categoryCounts = useMemo(() => {
     const m = new Map<string, number>();
-    for (const pl of project.placements) {
+    for (const pl of placements) {
       const c = normalizeCategory(pl.category);
       if (c) m.set(c, (m.get(c) || 0) + 1);
     }
     return [...m.entries()]
       .map(([key, count]) => ({ key, count }))
       .sort((a, b) => a.key.localeCompare(b.key));
-  }, [project.placements]);
+  }, [placements]);
 
   /** Per-placement displacement from what the server currently says (punch
    *  #47): the live drag plus any committed-but-unrefreshed move. One map
@@ -440,7 +442,7 @@ export default function GridEditor({
   const placementOffsets = useMemo(() => {
     const m = new Map<string, { dx: number; dy: number }>();
     const put = (id: string, at: Point) => {
-      const base = project.placements.find((q) => q.id === id);
+      const base = placements.find((q) => q.id === id);
       if (!base) return;
       const dx = at.x - base.x;
       const dy = at.y - base.y;
@@ -448,23 +450,23 @@ export default function GridEditor({
       else m.delete(id);
     };
     for (const [id, o] of Object.entries(movedLocal)) {
-      const server = project.placements.find((q) => q.id === id);
+      const server = placements.find((q) => q.id === id);
       // Spent: the refresh landed, or that device moved some other way.
       if (!server || server.x !== o.base.x || server.y !== o.base.y) continue;
       put(id, o.at);
     }
     if (drag && drag.moved) put(drag.id, drag.at); // the live gesture wins
     return m;
-  }, [project.placements, movedLocal, drag]);
+  }, [placements, movedLocal, drag]);
 
   const sheetPlacements = useMemo(() => {
-    const base = project.placements.filter((pl) => pl.sheetId === sheet?.id && pl.page === page);
+    const base = placements.filter((pl) => pl.sheetId === sheet?.id && pl.page === page);
     if (!placementOffsets.size) return base;
     return base.map((pl) => {
       const d = placementOffsets.get(pl.id);
       return d ? { ...pl, x: clamp01(pl.x + d.dx), y: clamp01(pl.y + d.dy) } : pl;
     });
-  }, [project.placements, sheet?.id, page, placementOffsets]);
+  }, [placements, sheet?.id, page, placementOffsets]);
   /**
    * What the canvas may show, hit-test, select and drag (punch #48). Every
    * gesture on the plan reads THIS list, never `sheetPlacements`: a hidden
@@ -481,7 +483,7 @@ export default function GridEditor({
   );
 
   const pageRoutes = useMemo(() => {
-    const base = (project.routes || []).filter((r) => r.sheetId === sheet?.id && r.page === page);
+    const base = (routes || []).filter((r) => r.sheetId === sheet?.id && r.page === page);
     if (!placementOffsets.size) return base;
     // Mirror of movePlacement()'s endpoint translation, so a wire follows its
     // device while the pointer is still down instead of visibly detaching and
@@ -500,7 +502,7 @@ export default function GridEditor({
         }),
       };
     });
-  }, [project.routes, sheet?.id, page, placementOffsets]);
+  }, [routes, sheet?.id, page, placementOffsets]);
   /** A wire run belongs to its part's scope, and hides with it (#48). Routes
    *  carry no user category - only a placed item can be labelled. */
   const visibleRoutes = useMemo(
@@ -512,11 +514,11 @@ export default function GridEditor({
   );
   const wireParts = useMemo(() => parts.filter((p) => isPerLengthUnit(p.unit)), [parts]);
 
-  const lines = useMemo(() => bomLines(project.placements, parts), [project.placements, parts]);
-  const totals = useMemo(() => bomTotals(project.placements, parts), [project.placements, parts]);
+  const lines = useMemo(() => bomLines(placements, parts), [placements, parts]);
+  const totals = useMemo(() => bomTotals(placements, parts), [placements, parts]);
   const wires = useMemo(
-    () => routeLines(project.routes || [], parts, project.calibrations),
-    [project.routes, parts, project.calibrations]
+    () => routeLines(routes || [], parts, project.calibrations),
+    [routes, parts, project.calibrations]
   );
 
   /* ------------------------------ curtains (#49) ------------------------------ */
@@ -531,7 +533,7 @@ export default function GridEditor({
    *  it alone holds; the two match to the cent (see lib/curtain-geom). */
   const curtainPrices = useMemo(() => {
     const m = new Map<string, number>();
-    for (const pl of project.placements) {
+    for (const pl of placements) {
       if (!pl.curtain) continue;
       const fabric = fabricBySku.get(pl.curtain.fabricSku);
       m.set(
@@ -540,24 +542,24 @@ export default function GridEditor({
       );
     }
     return m;
-  }, [project.placements, fabricBySku, curtainCoeffs]);
+  }, [placements, fabricBySku, curtainCoeffs]);
   const curtains = useMemo(
-    () => curtainLines(project.placements, curtainPrices, fabricNames),
-    [project.placements, curtainPrices, fabricNames]
+    () => curtainLines(placements, curtainPrices, fabricNames),
+    [placements, curtainPrices, fabricNames]
   );
   const curtainValue = curtains.reduce((a, l) => a + l.ext, 0);
 
   // Labor suggestions (D114): the rule proposes; overrides let the human
   // adjust hours or exclude a line before the quote mints.
   const laborSuggestions = useMemo(
-    () => suggestLabor(project.placements, parts, laborParts, laborHoursPerDevice),
-    [project.placements, parts, laborParts, laborHoursPerDevice]
+    () => suggestLabor(placements, parts, laborParts, laborHoursPerDevice),
+    [placements, parts, laborParts, laborHoursPerDevice]
   );
   const [laborOverrides, setLaborOverrides] = useState<
     Record<string, { hours?: number; included: boolean }>
   >({});
   const laborRows = laborSuggestions.map((s) => {
-    const o = laborOverrides[s.partId];
+    const o = laborOverrides[`${activeOptionId}:${s.partId}`];
     const hours = o?.hours !== undefined && o.hours >= 0 ? o.hours : s.hours;
     return { ...s, hours, included: o ? o.included : true, ext: hours * s.rate };
   });
@@ -566,8 +568,8 @@ export default function GridEditor({
 
   const grandValue = totals.value + wires.value + laborValue + curtainValue;
   const spaceRollups = useMemo(
-    () => bomBySpace(project.placements, parts, project.spaces || [], curtainPrices),
-    [project.placements, parts, project.spaces, curtainPrices]
+    () => bomBySpace(placements, parts, project.spaces || [], curtainPrices),
+    [placements, parts, project.spaces, curtainPrices]
   );
   /** Whole-project placed $/count by scope (D-manual-scope-targets) — feeds
    *  the Scope panel's "placed" column. Reuses bomBySpace with an EMPTY
@@ -577,8 +579,8 @@ export default function GridEditor({
    *  out. Cheap: same inputs spaceRollups already recomputes on, one more
    *  pass. */
   const projectScopeRollup = useMemo(
-    () => bomBySpace(project.placements, parts, [], curtainPrices)[0] ?? null,
-    [project.placements, parts, curtainPrices]
+    () => bomBySpace(placements, parts, [], curtainPrices)[0] ?? null,
+    [placements, parts, curtainPrices]
   );
 
   const armedPart = armedPartId ? partById.get(armedPartId) : null;
@@ -587,7 +589,7 @@ export default function GridEditor({
    *  Remove button. Derived rather than cleared from an effect, so it can't
    *  race a refresh. */
   const selectedPlacement =
-    project.placements.find((pl) => pl.id === selected && placementVisible(pl)) || null;
+    placements.find((pl) => pl.id === selected && placementVisible(pl)) || null;
   /** The catalog entry behind the selected device (curtains and seed
    *  placeholders have none) — what the Symbol select edits (#131). */
   const selectedPart =
@@ -606,7 +608,7 @@ export default function GridEditor({
    *  server refuses, so the marker never flickers back to where it was. */
   const commitMove = useCallback(
     (placementId: string, at: Point) => {
-      const server = project.placements.find((q) => q.id === placementId);
+      const server = placements.find((q) => q.id === placementId);
       if (!server) return;
       setMovedLocal((prev) => ({
         ...prev,
@@ -631,7 +633,7 @@ export default function GridEditor({
         router.refresh();
       });
     },
-    [project.id, project.placements, router]
+    [project.id, placements, router]
   );
 
   // Arrow-key nudge for the selected device (punch #47). Bound to the window
@@ -829,6 +831,7 @@ export default function GridEditor({
           partId: wirePartId,
           points,
           aspect,
+          optionId: activeOptionId,
           fromPlacementId,
           toPlacementId,
         }).then((r) => {
@@ -891,6 +894,7 @@ export default function GridEditor({
         x: p.x,
         y: p.y,
         partId: armedPart.id,
+        optionId: activeOptionId,
       }).then((r) => {
         setBusy(false);
         if (!r.ok) setErr(r.error);
@@ -983,6 +987,7 @@ export default function GridEditor({
       x: curtainAt.x,
       y: curtainAt.y,
       curtain,
+      optionId: activeOptionId,
     });
     setBusy(false);
     setCurtainAt(null);
@@ -1048,7 +1053,6 @@ export default function GridEditor({
             <span style={{ color: "#8c919c", fontWeight: 500 }}> · {project.customer}</span>
           ) : null}
         </div>
-        {project.autoConfig ? <span style={{ fontSize: 11, color: "#6f3b7f", background: "#f1e8f4", borderRadius: 999, padding: "5px 9px", fontWeight: 700 }}>Auto brief saved</span> : null}
         {venues.length > 0 && (
           <select
             value={project.siteId || ""}
@@ -1101,6 +1105,16 @@ export default function GridEditor({
             ))}
           </select>
         )}
+        <OptionSwitcher
+          projectId={project.id}
+          options={project.options}
+          activeId={activeOptionId}
+          counts={optionCounts}
+          busy={busy}
+          onSwitch={switchOption}
+          onChanged={() => router.refresh()}
+          onError={(m) => setErr(m)}
+        />
         <button
           style={BTN}
           disabled={busy}
@@ -1113,52 +1127,10 @@ export default function GridEditor({
         >
           {sheets.length > 0 ? "+ Additional sheet" : "+ Plan sheet"}
         </button>
-        {project.measurementBased && project.autoConfig && sheets.length > 0 && (
-          armSeed ? (
-            <>
-              <button
-                style={{ ...BTN, background: "#1f7a52", color: "#fff", borderColor: "#1f7a52" }}
-                disabled={seeding || pendingSeed.delta === 0}
-                onClick={async () => {
-                  setSeeding(true);
-                  const r = await seedStartingLayoutAction(project.id);
-                  setSeeding(false);
-                  setArmSeed(false);
-                  if (!r.ok) {
-                    setErr(r.error);
-                    return;
-                  }
-                  router.refresh();
-                }}
-              >
-                {seeding ? "Adding…" : `Add ${pendingSeed.delta} device${pendingSeed.delta === 1 ? "" : "s"}`}
-              </button>
-              <button style={BTN} disabled={seeding} onClick={() => setArmSeed(false)}>
-                Cancel
-              </button>
-            </>
-          ) : (
-            <button
-              style={BTN}
-              disabled={busy}
-              onClick={() => setArmSeed(true)}
-              title="Paints editable devices/drapes from your measurements — additive, never replaces what's already placed"
-            >
-              Generate starting layout
-            </button>
-          )
-        )}
-        {armSeed && (
-          <span style={{ fontSize: 11.5, color: "#5b616e" }}>
-            {pendingSeed.delta === 0
-              ? "Starting layout is already up to date — nothing new to add."
-              : `This adds ${pendingSeed.delta} device${pendingSeed.delta === 1 ? "" : "s"} from your measurements. It never removes or moves what's already on the plan — continue?`}
-          </span>
-        )}
-        <Link href={`/design/grid/${encodeURIComponent(project.id)}/riser`} style={{ ...BTN, textDecoration: "none" }}>
+        <Link href={`/design/grid/${encodeURIComponent(project.id)}/riser?option=${encodeURIComponent(activeOptionId)}`} style={{ ...BTN, textDecoration: "none" }}>
           Riser →
         </Link>
-        <Link href={`/design/grid/${encodeURIComponent(project.id)}/schedule`} style={{ ...BTN, textDecoration: "none" }}>
+        <Link href={`/design/grid/${encodeURIComponent(project.id)}/schedule?option=${encodeURIComponent(activeOptionId)}`} style={{ ...BTN, textDecoration: "none" }}>
           Schedule →
         </Link>
         {canCreate && (
@@ -1434,10 +1406,12 @@ export default function GridEditor({
 
           {/* scope targets (D-manual-scope-targets) */}
           <ScopePanel
+            key={activeOptionId}
             projectId={project.id}
             scopeInputs={project.scopeInputs}
             byScope={projectScopeRollup?.byScope || []}
             engineFabrics={engineFabrics}
+            defaultTier={activeOption.tier}
             onChanged={() => router.refresh()}
             onError={(m) => setErr(m)}
           />
@@ -1760,7 +1734,7 @@ export default function GridEditor({
                           onChange={(e) =>
                             setLaborOverrides((prev) => ({
                               ...prev,
-                              [l.partId]: { ...prev[l.partId], included: e.target.checked },
+                              [`${activeOptionId}:${l.partId}`]: { ...prev[`${activeOptionId}:${l.partId}`], included: e.target.checked },
                             }))
                           }
                           style={{ margin: 0 }}
@@ -1777,8 +1751,8 @@ export default function GridEditor({
                             const v = Number(e.target.value);
                             setLaborOverrides((prev) => ({
                               ...prev,
-                              [l.partId]: {
-                                included: prev[l.partId]?.included ?? true,
+                              [`${activeOptionId}:${l.partId}`]: {
+                                included: prev[`${activeOptionId}:${l.partId}`]?.included ?? true,
                                 hours: Number.isFinite(v) && v >= 0 ? v : 0,
                               },
                             }));
@@ -1816,6 +1790,7 @@ export default function GridEditor({
                 setBusy(true);
                 const r = await createDraftQuoteAction(
                   project.id,
+                  activeOptionId,
                   includedLabor.map((l) => ({ partId: l.partId, hours: l.hours }))
                 );
                 setBusy(false);
@@ -1827,7 +1802,7 @@ export default function GridEditor({
                 }
               }}
             >
-              {project.quoteId ? `Update draft quote ${project.quoteId}` : "Create draft quote"}
+              {activeOption.quoteId ? `Update draft quote ${activeOption.quoteId}` : "Create draft quote"}
             </button>
             {/* Punch #76 — non-blocking: the quote was still created/updated
                 above, this only says part of it priced at plain list instead
@@ -1856,7 +1831,7 @@ export default function GridEditor({
                 {tierFallbackLines.length > 4 ? ` +${tierFallbackLines.length - 4} more` : ""}
               </div>
             )}
-            {project.quoteId && (
+            {activeOption.quoteId && (
               <Link
                 href="/quotes"
                 style={{ display: "block", marginTop: 6, fontSize: 11.5, color: "var(--accent)", textAlign: "center" }}
@@ -1864,7 +1839,7 @@ export default function GridEditor({
                 View in Quotes →
               </Link>
             )}
-            {project.quoteId && specHref && (
+            {activeOption.quoteId && specHref && (
               <Link
                 href={specHref}
                 style={{ display: "block", marginTop: 3, fontSize: 11.5, color: "var(--accent)", textAlign: "center" }}

@@ -4446,3 +4446,54 @@ normalizing (lowercase, drop a leading "City/Town/Village of", expand `Mt.`→Mo
 starts with "Portage". City-only rows additionally use Nominatim's structured `city=`+`state=` form,
 which resolves Portage to 0.2 mi and honestly returns nothing for "LaCrosse". A confident wrong
 answer misprices a quote; a reported miss costs a minute with the existing address picker.
+
+## D186. Grid options are a tag on placements/routes, not nested documents; Manual intake asks venue + dims only (2026-09-21)
+
+Spec `docs/superpowers/specs/2026-09-21-grid-options-and-intake-branch-design.md` (Spec 1 of 3
+from Jeff's 2026-09-21 Grid brainstorm — Auto branch and proposal document follow).
+
+- **Options as first-class variants.** A Grid project holds `options[]` (Good/Better/Best or
+  user-named); placements and wire routes carry `optionId`; sheets, calibration, spaces,
+  intake, scope inputs and revisions are shared. Chosen over revisions (history, not variants)
+  and sibling projects (no way to send three as one document). Tagging beats nesting: every
+  existing store function, BOM/riser/schedule library and revision snapshot keeps its shape;
+  consumers filter by `optionSlice()`.
+- **Read-side migration only.** Legacy docs normalize to one option `opt-base` named
+  "Design" that inherits `project.quoteId`; untagged members belong to it. `project.quoteId`
+  stays as a mirror of the first option's quote so pre-spec readers are untouched.
+- **One draft quote per option**, named `<project> · <option> — The Grid design` when the
+  project has more than one option. Pricing moved verbatim into
+  `src/lib/design/grid-quote.ts` (`buildGridQuote`) so it can be tested per option on a
+  scratch DB (`npm run test:grid-options`).
+- **"Generate starting layout" removed from the editor** (D149's UI). It painted placeholder
+  devices and ignored the chosen tier — the thing Jeff hit on 2026-09-21. `grid-seed.ts`
+  and its action stay for Spec 2's real generator; the quote guard against unresolved
+  placeholders stays because the punch branch's preview deploy may have written some.
+- **Manual intake = venue type + dimensions, then mode + cover page.** Systems/tier/brief
+  and the "Generate from measurements" checkbox are gone; the base sheet is always generated
+  from dims; the first save also seeds `scopeInputs` (venue preset ∩ the five trackable
+  systems) and patches the linked DesignRecord's name/venue/size/dims. Auto-estimate is
+  shown greyed ("Next release") so the flow's shape is visible before Spec 2 enables it.
+- **Entry points unchanged for now** — "New design" keeps Quick canvas / Manual layout until
+  the Auto branch exists (Spec 2), otherwise there'd be no way to auto-estimate a new design.
+- Known, deliberately untouched: `DesignRecord.budget` is still never written for manual
+  designs (pre-existing, #38 plan recon item 7).
+- Revisions now snapshot the options list; on restore the option list and membership come
+  back but each surviving option keeps its CURRENT quote link and `project.quoteId` is
+  re-mirrored (quote links are bookkeeping, not design state).
+- The Designs dashboard's "Add to Quotes" (`promoteDesignAction`) quotes the FIRST option;
+  per-option quoting is done from the editor. Stated limitation until Spec 3's proposal
+  document.
+- The delete confirm reads "Removes N devices and their wire runs from X" (device count
+  only; route count isn't tallied in the switcher). Option names are capped at 40
+  characters.
+
+Follow-ups (not blocking): a refused member write (unknown optionId) still bumps the doc's
+rev/seq via `patchDoc`; a guard helper could dedupe the 4 in-callback `hasOption` checks;
+`OPTION_GONE` is duplicated in `grid-quote.ts` (move to `grid-options.ts`); no automated
+coverage of `createDraftQuoteAction`'s branching or the intake's DesignRecord patch
+(session-bound); `optionSlice` mutates its argument (safe today, callers pass normalized
+docs); whole-project device counts on the `/design` orphan list and the revisions panel;
+the Rigging Scope target of $1.8M for a 46 ft Auditorium is pre-existing D139 engine math
+to check.
+
