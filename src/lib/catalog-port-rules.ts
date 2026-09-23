@@ -200,12 +200,12 @@ export const PORT_RULES: readonly PortRule[] = [
     desc: /\b(70 ?v|100 ?v|constant voltage|transformer|trafo)\b/i,
     exclude: new RegExp(
       `(?<![-\\w])amplifiers?\\b|\\bpower ?amps?\\b|${POWER_AMP_SPEC}` +
-        `|\\b(?:mixers?|dsps?|processors?|isolation|panels?|kits?|balanced)\\b` +
+        `|\\b(?:amps?|mixers?|dsps?|processors?|isolation|panels?|kits?|balanced)\\b` +
         `|\\bno transformer\\b`,
       "i"
     ),
     shape: () => seventyVSpeakerPorts(),
-    note: "70V/100V distributed lines take a transformer-tapped pair, not speakON. Checked before speaker-passive because most RCF/EAW 70V commercial speakers ALSO say \"Passive\". Excludes anything that DRIVES the line rather than hanging off it: the word amplifier, \"power amp\", and QSC's bare power-amp spec form (\"8 channels, 100 watts/ch at 70V.\" — 9 QSC CX/ISA amplifiers were being given a 70V speaker INPUT because they never use the word amplifier). Also excludes the \"16Ω (no transformer)\" negation, and mixer/DSP/isolation-transformer/kit language.",
+    note: "70V/100V distributed lines take a transformer-tapped pair, not speakON. Checked before speaker-passive because most RCF/EAW 70V commercial speakers ALSO say \"Passive\". Excludes anything that DRIVES the line rather than hanging off it: the word amplifier, \"power amp\", QSC's bare power-amp spec form (\"8 channels, 100 watts/ch at 70V.\" — 9 QSC CX/ISA amplifiers were being given a 70V speaker INPUT because they never use the word amplifier), and the bare token \"amp\" — Shure's MXN-AMP (\"NETWORKED DANTE LOW IMP/70V POE+ AMP\") never says \"amplifier\" either and was given a 70V speaker INPUT for a device that drives the line, not one that hangs off it. Unlike speaker-passive (which must NOT exclude bare \"amp\" — see its own note), nothing 70V-tapped in the live catalog uses \"amp\" as part of a compound word like \"Bi-Amp\", so the bare token costs nothing here and catches a real amplifier. Also excludes the \"16Ω (no transformer)\" negation, and mixer/DSP/isolation-transformer/kit language.",
   },
   {
     id: "speaker-passive",

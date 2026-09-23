@@ -8,6 +8,29 @@ import { proposeForPart, type RulePart } from "@/lib/catalog-port-rules";
 export type ApplyResult = { applied: number; skippedHasPorts: number; byRule: Record<string, number> };
 
 /**
+ * A description that is really a model/part number, not prose — e.g. a bare
+ * SKU repeated as the description, or a brand (Biamp/JBL, D192) that never
+ * writes real prose at all. A rule can still technically match text like
+ * this by accident, but no one reviewed that as a real proposal, so it must
+ * not be treated as one.
+ *
+ * Shared between the report (scripts/port-rules.ts) and this apply path —
+ * they MUST agree on which parts are even eligible, or the report undercounts
+ * what apply would actually write. That is exactly how gate FIX 1 happened:
+ * the report had its own local copy of this predicate and the apply path had
+ * none, so a dry run wrote 90 rows (6%) the report never showed anyone. Do
+ * not fork a second copy of this function — import it.
+ */
+export function isModelish(desc: string, sku: string): boolean {
+  const d = (desc || "").trim();
+  if (!d) return true;
+  if (!/\s/.test(d)) return true;
+  if (/^[\d.\-]+$/.test(d)) return true;
+  const bare = sku.includes(":") ? sku.slice(sku.indexOf(":") + 1) : sku;
+  return d.replace(/[^a-z0-9]/gi, "").toUpperCase() === bare.replace(/[^a-z0-9]/gi, "").toUpperCase();
+}
+
+/**
  * Apply ONLY the named rules. Nothing runs without being named (D196) — there
  * is deliberately no "apply all".
  *
@@ -37,6 +60,7 @@ export async function applyRules(
       category: String(d.category || ""), mfr: String(d.mfr || ""),
     };
     if (!part.sku) continue;
+    if (isModelish(part.desc, part.sku)) continue;
     const existing = d.ports as unknown[] | undefined;
     const proposal = proposeForPart(part);
     if (!proposal || !wanted.has(proposal.rule.id)) continue;

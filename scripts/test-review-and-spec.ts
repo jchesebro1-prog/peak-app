@@ -1021,6 +1021,16 @@ ok(channelCount("2U Sixteen Channel 100 Watt Amplifier", 4) === 16,
 ok(proposeForPart({ sku: "SHU:X", mfr: "Shure", category: "Audio", desc: "Access Point/Charger/DSP - 2 Ch." })?.ports[0].count === 2,
   "ruleset: a DSP is sized from its stated channel count, not a hardcoded 8x8");
 
+// FIX 1 (D200): isModelish now lives in catalog-port-apply.ts and is shared
+// by the report and the apply path — locked here directly so the two can
+// never drift back into separate copies.
+import { isModelish } from "@/lib/catalog-port-apply";
+ok(isModelish("", "EAW:SB1002") === true, "isModelish: an empty description is modelish");
+ok(isModelish("2039611", "EAW:2039611") === true, "isModelish: a bare digit string is modelish");
+ok(isModelish("SB 1002", "EAW:SB1002") === true, "isModelish: a spaced-out repeat of the bare SKU is still modelish");
+ok(isModelish('Passive 18" Installation Subwoofer. Black', "EAW:SB1002") === false,
+  "isModelish: real prose is not modelish");
+
 // M1/M2/M4: the negation and RF traps.
 ok(matchRule({ sku: "SHU:UA860V", mfr: "Shure", category: "Audio", desc: "Passive Omnidirectional Antenna" })?.id !== "speaker-passive",
   "ruleset: a passive RF antenna is not a passive speaker");
@@ -1028,6 +1038,22 @@ ok(matchRule({ sku: "QSC:X", mfr: "QSC", category: "Audio", desc: '6.5" Two-way 
   "ruleset: \"(no transformer)\" does not make a speaker a 70V speaker");
 ok(matchRule({ sku: "QSC:X", mfr: "QSC", category: "Audio", desc: '4" Full-range, low-profile ceiling-mount network loudspeaker, PoE/PoE+ powered. Includes C-ring and tile rails. Color - White.' })?.id !== "speaker-powered",
   "ruleset: a PoE-powered network loudspeaker is not given a mains inlet");
+
+/* ---- gate review fix (D200) — speaker-70v regression ----
+   The D199 fix correctly stopped evicting genuine passive speakers that
+   mention "Bi-Amp"/"Tri-amp" from speaker-passive by dropping the bare
+   token "amp" from its exclude — but the same change was also made to
+   speaker-70v's exclude, where "amp" was doing real work. Shure's MXN-AMP
+   never says the word "amplifier"; it was matching speaker-70v and getting
+   a 70V speaker INPUT for a device that drives the line. Restoring the bare
+   "amp" guard on speaker-70v only (not speaker-passive) fixes this without
+   reopening the bi-amp regression: nothing 70V-tapped in the live catalog
+   uses "amp" as part of a compound word like "Bi-Amp". */
+ok(matchRule({
+  sku: "Shure:MXN-AMP", mfr: "Shure", category: "Audio",
+  desc: "NETWORKED DANTE LOW IMP/70V POE+ AMP",
+})?.id !== "speaker-70v",
+  "ruleset: a networked amplifier described only as '...POE+ AMP' does not get a 70V speaker input");
 
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
@@ -5365,6 +5391,13 @@ async function asyncChecks(): Promise<void> {
       await mergeUpsert("TEST:RULE-AMP", { desc: "RU 4 Channel ENERGY STAR amplifier", category: "Audio", unit: "ea", list: 1, cost: 1, mfr: "QSC" });
       await mergeUpsert("TEST:RULE-HAND", { desc: 'Passive 15" Installation Subwoofer. Black', category: "SB", unit: "ea", list: 1, cost: 1, mfr: "EAW",
         ports: [{ name: "Hand edited", direction: "in", connectionType: "speakON NL4" }] });
+      // gate review (FIX 1, D200): a bare model number that HAPPENS to be a
+      // rule keyword ("Passive") with no other prose. matchRule() alone would
+      // still propose speaker-passive for it, but the REPORT never shows this
+      // row (scripts/port-rules.ts's isModelish skips it), so apply must skip
+      // it too — that gap (90 rows, 6%, written but never reviewed) was the
+      // whole finding.
+      await mergeUpsert("TEST:RULE-MODELISH", { desc: "Passive", category: "SB", unit: "ea", list: 1, cost: 1, mfr: "EAW" });
 
       const res = await applyRules(["speaker-passive"], { commit: true });
 
@@ -5379,6 +5412,10 @@ async function asyncChecks(): Promise<void> {
       ok(hand?.ports?.[0].name === "Hand edited", "apply: a hand-edited part is never overwritten (D196)");
       ok(res.skippedHasPorts >= 1, "apply: the result counts parts skipped for having ports");
 
+      const modelish = await getPart("TEST:RULE-MODELISH");
+      ok((modelish?.ports || []).length === 0,
+        "apply: a bare model/part-number description is skipped, same as the report's isModelish filter (FIX 1, D200)");
+
       const again = await applyRules(["speaker-passive"], { commit: true });
       ok(again.applied === 0, "apply: a second run is a no-op — idempotent");
 
@@ -5390,6 +5427,7 @@ async function asyncChecks(): Promise<void> {
       await softDeleteDoc("catalog_parts", "TEST:RULE-SPK");
       await softDeleteDoc("catalog_parts", "TEST:RULE-AMP");
       await softDeleteDoc("catalog_parts", "TEST:RULE-HAND");
+      await softDeleteDoc("catalog_parts", "TEST:RULE-MODELISH");
     }
   }
 }
