@@ -172,6 +172,7 @@ export function TasksCard({
 
                 <form action={setStatusAction} style={{ margin: 0 }}>
                   <input type="hidden" name="taskId" value={t.id} />
+                  <input type="hidden" name="id" value={parentId} />
                   <select
                     name="status"
                     defaultValue={t.status}
@@ -188,6 +189,7 @@ export function TasksCard({
 
                 <form action={updateAction} style={{ margin: 0, display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <input type="hidden" name="taskId" value={t.id} />
+                  <input type="hidden" name="id" value={parentId} />
                   <select
                     name="assigneeUserId"
                     defaultValue={t.assigneeUserId || ""}

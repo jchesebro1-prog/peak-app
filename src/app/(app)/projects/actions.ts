@@ -77,7 +77,9 @@ export async function setStageAction(formData: FormData): Promise<void> {
   if (!p) return;
   if (!stagesFor(p.kind).some((s) => s.key === stage)) return; // illegal for kind
   try {
-    await setProjectStage(id, stage, user.name);
+    if (!await setProjectStage(id, stage, user.name)) {
+      projectErrorPath(id, formTab(formData, "overview"), "That project could not be updated — please refresh and try again.");
+    }
   } catch (error) {
     console.error("setStageAction failed", error);
     projectErrorPath(id, formTab(formData, "overview"), "Couldn’t update the project stage — please try again.");
@@ -93,7 +95,9 @@ export async function cycleLineAction(formData: FormData): Promise<void> {
   const status = str(formData, "status") as LineStatus;
   if (!id || !lineId || !LINE_STATUSES.includes(status)) return;
   try {
-    await setLineStatus(id, lineId, status);
+    if (!await setLineStatus(id, lineId, status)) {
+      projectErrorPath(id, formTab(formData, "procurement"), "That procurement line could not be updated — please refresh and try again.");
+    }
   } catch (error) {
     console.error("cycleLineAction failed", error);
     projectErrorPath(id, formTab(formData, "procurement"), "Couldn’t update that procurement line — please try again.");
@@ -109,7 +113,9 @@ export async function setLinePoAction(formData: FormData): Promise<void> {
   const po = str(formData, "po");
   if (!id || !lineId) return;
   try {
-    await setLinePo(id, lineId, po);
+    if (!await setLinePo(id, lineId, po)) {
+      projectErrorPath(id, formTab(formData, "procurement"), "That procurement line could not be updated — please refresh and try again.");
+    }
   } catch (error) {
     console.error("setLinePoAction failed", error);
     projectErrorPath(id, formTab(formData, "procurement"), "Couldn’t save that PO number — please try again.");
@@ -125,7 +131,9 @@ export async function cycleDeliveryAction(formData: FormData): Promise<void> {
   const status = str(formData, "status") as DeliveryStatus;
   if (!id || !deliveryId || !DELIVERY_STATUSES.includes(status)) return;
   try {
-    await setDeliveryStatus(id, deliveryId, status);
+    if (!await setDeliveryStatus(id, deliveryId, status)) {
+      projectErrorPath(id, formTab(formData, "deliveries"), "That delivery could not be updated — please refresh and try again.");
+    }
   } catch (error) {
     console.error("cycleDeliveryAction failed", error);
     projectErrorPath(id, formTab(formData, "deliveries"), "Couldn’t update that delivery — please try again.");
@@ -142,7 +150,9 @@ export async function addCrewAction(formData: FormData): Promise<void> {
   const p = await getProject(id);
   if (!p || p.kind === "order") return; // orders have no crew
   try {
-    await addCrew(id, person);
+    if (!await addCrew(id, person)) {
+      projectErrorPath(id, formTab(formData, "crew"), "That crew assignment could not be added — please refresh and try again.");
+    }
   } catch (error) {
     console.error("addCrewAction failed", error);
     projectErrorPath(id, formTab(formData, "crew"), "Couldn’t add that crew member — please try again.");
@@ -157,7 +167,9 @@ export async function removeCrewAction(formData: FormData): Promise<void> {
   const crewId = str(formData, "crewId");
   if (!id || !crewId) return;
   try {
-    await removeCrew(id, crewId);
+    if (!await removeCrew(id, crewId)) {
+      projectErrorPath(id, formTab(formData, "crew"), "That crew assignment could not be removed — please refresh and try again.");
+    }
   } catch (error) {
     console.error("removeCrewAction failed", error);
     projectErrorPath(id, formTab(formData, "crew"), "Couldn’t remove that crew member — please try again.");
@@ -181,13 +193,15 @@ export async function signoffAction(formData: FormData): Promise<void> {
   const checked = new Set(formData.getAll("scope").map((value) => String(value).trim()).filter(Boolean));
   if (scopes.some((scope) => !checked.has(scope))) return;
   try {
-    await setSignoff(id, {
+    if (!await setSignoff(id, {
       name,
       role,
       note,
       signature,
       scopeChecks: Object.fromEntries(scopes.map((scope) => [scope, true])),
-    }, user.name);
+    }, user.name)) {
+      projectErrorPath(id, formTab(formData, "signoff"), "That project could not be signed off — please refresh and try again.");
+    }
   } catch (error) {
     console.error("signoffAction: sign-off save failed", error);
     projectErrorPath(id, formTab(formData, "signoff"), "Couldn’t record sign-off — please try again.");
@@ -247,7 +261,9 @@ export async function addNoteAction(formData: FormData): Promise<void> {
   const text = str(formData, "text").trim();
   if (!id || !text) return;
   try {
-    await addNote(id, user.name || undefined, text);
+    if (!await addNote(id, user.name || undefined, text)) {
+      projectErrorPath(id, formTab(formData, "overview"), "That note could not be saved — please refresh and try again.");
+    }
   } catch (error) {
     console.error("addNoteAction failed", error);
     projectErrorPath(id, formTab(formData, "overview"), "Couldn’t save that note — please try again.");
@@ -261,7 +277,9 @@ export async function addTimeAction(formData: FormData): Promise<void> {
   const hours = str(formData, "hours");
   if (!id || !hours) return;
   try {
-    await addTime(id, user.name || undefined, hours, str(formData, "note").trim());
+    if (!await addTime(id, user.name || undefined, hours, str(formData, "note").trim())) {
+      projectErrorPath(id, formTab(formData, "overview"), "That time entry could not be saved — please refresh and try again.");
+    }
   } catch (error) {
     console.error("addTimeAction failed", error);
     projectErrorPath(id, formTab(formData, "overview"), "Couldn’t save that time entry — please try again.");
@@ -303,7 +321,9 @@ export async function setTaskStatusAction(formData: FormData) {
   let projectId = str(formData, "id");
   try {
     projectId = (await getTask(taskId))?.projectId || projectId;
-    await setTaskStatus(taskId, status as TaskStatus);
+    if (!await setTaskStatus(taskId, status as TaskStatus)) {
+      projectErrorPath(projectId, formTab(formData, "tasks"), "That task could not be updated — please refresh and try again.");
+    }
   } catch (error) {
     console.error("setTaskStatusAction failed", error);
     projectErrorPath(projectId, formTab(formData, "overview"), "Couldn’t update that task — please try again.");
@@ -329,7 +349,9 @@ export async function updateTaskAction(formData: FormData) {
       patch.dueAt = d ? new Date(d + "T12:00:00").getTime() : null;
     }
     if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
-    await updateTask(taskId, patch);
+    if (!await updateTask(taskId, patch)) {
+      projectErrorPath(projectId, formTab(formData, "tasks"), "That task could not be updated — please refresh and try again.");
+    }
   } catch (error) {
     console.error("updateTaskAction failed", error);
     projectErrorPath(projectId, formTab(formData, "overview"), "Couldn’t update that task — please try again.");
