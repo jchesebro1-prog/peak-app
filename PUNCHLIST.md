@@ -3355,7 +3355,9 @@ place → select → **Remove device** → re-place.
 - Should a move cut a revision? `addRevision` (`grid-projects.ts:469-479`) is manual/quote/
   restore only: wiring drags into it would flood the snapshot array.
 
-**Status:** OPEN: logged only, no code.
+**Status:** DONE 2026-09-23 audit — `movePlacement`/`movePlacementAction`, drag movement,
+arrow-key nudging, coordinate readout, and attached-wire endpoint translation are implemented
+and present in the current Grid editor. Browser verification notes remain above where applicable.
 
 ---
 
@@ -3418,7 +3420,9 @@ together; don't scope #41's category field without this.
   item has no catalog category to derive from, and the map is admin-mutable at runtime
   (`catalog-taxonomy.ts:12-15`), so old designs can silently re-bucket.
 
-**Status:** OPEN: logged only, no code.
+**Status:** DONE 2026-09-23 audit — Grid scope/layer filtering, user-defined placement
+categories, and per-space scope/category rollups are implemented in the current Grid editor and
+BOM seams. The known non-persisted view-state limitation remains documented above.
 
 ---
 
@@ -3471,7 +3475,9 @@ become (a) a `GridCurtain[]` array on `GridProject`, (b) a placement with an opt
 blob, or (c) a synthesized `CRT-*` pseudo-part like `estimator-client.tsx:721`? That choice also
 determines how `bomLines` (`grid-bom.ts:68`) prices it, since it looks up parts by id.
 
-**Status:** OPEN: logged only, no code.
+**Status:** DONE 2026-09-23 audit — Grid curtain drop-ins, configuration, pricing, BOM lines,
+schedule, riser, and scope/layer handling are implemented through the current `GridCurtain`
+placement model. The historical enum/design discussion above is retained as rationale.
 
 ---
 
@@ -3567,7 +3573,9 @@ its own dims inline (`lineset-builder.tsx:172-180`).
 **Housekeeping:** **#28 is stale**, the 50′×30′ defaults shipped (`lineset.ts:52-72`,
 `lineset-builder.tsx:500-502`) but the item is still marked OPEN. Close it with this work.
 
-**Status:** OPEN: logged only, no code.
+**Status:** DONE 2026-09-23 audit — the three-input reduction and shared batten-length rule
+are implemented and verified as described above. Remaining unrelated design-consolidation work
+belongs to #41/#51.
 
 ---
 
