@@ -4349,6 +4349,16 @@ so attachments are "done" in one pass. Rejected on scope grounds — neither blo
 spec needs, and both carry their own review risk (a broadened OAuth scope; a live-data migration)
 that shouldn't ride along with a scheduling feature's review.
 
+**Verification caveat (added at merge, 2026-09-22):** the Drive leg is **not proven end to end**.
+`uploadToDrive` issues the first **browser-direct** Drive PUT in this codebase — `drive.ts`'s
+`uploadFileResumable`, used by the Recordings archive in production, does the equivalent transfer
+server-side. A stubbed `fetch` proved the response parsing; nothing has proved Google's resumable
+endpoint accepts a cross-origin browser PUT, specifically the CORS preflight on a non-simple
+`Content-Type`. That needs a real OAuth connection, which does not exist locally. The Blob and
+data-URL legs are verified byte-exact. If the preflight is refused in real use, the fallback is to
+proxy the bytes server-side as the archive already does, accepting the ~4.5 MB function-body
+ceiling. Tracked as "Open, for Jeff" item 6 on PUNCHLIST #145.
+
 ## D172. Consulting ships first, on a parent-agnostic engine; install Projects are not touched (#145, 2026-09-22)
 
 The new scheduling engine (`src/lib/consulting-schedule.ts`) takes primitives — dates, phases,

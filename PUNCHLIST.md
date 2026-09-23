@@ -6720,12 +6720,17 @@ an-existing-name collision producing two distinct sets, and an export→re-impor
 bars staying non-draggable, and one person shown carrying both consulting and install work with an
 Unassigned lane for anyone not in the active-user list.
 
-**Gates** (run in a dedicated worktree on `3b9c463`, the branch tip with all twelve feature tasks
-merged — not the main checkout, which another session owned throughout this run): `tsc --noEmit`
-0 errors · `eslint` 120 warnings / 0 errors (unchanged from the `47fe2c8` base; zero warnings from
-any `#145` file) · `test:specs` **1719 PASS / 0 FAIL** (**213** of them `#145` assertions; ALL
-PASSED, confirmed stable across three consecutive runs after a fresh-datadir dev-seed race produced
-spurious failures on the first two — see #148) · `test:smoke` ALL PASSED.
+**Gates** (run in a dedicated worktree on `f768533`, the branch tip with all thirteen tasks plus the
+four whole-branch-review fixes merged — not the main checkout, which another session owned
+throughout this run): `tsc --noEmit` 0 errors · `eslint` 120 warnings / 0 errors (unchanged from the
+`47fe2c8` base; zero warnings from any `#145` file) · `test:specs` ALL PASSED with **233** `#145`
+assertions, confirmed stable across consecutive runs after a fresh-datadir dev-seed race produced
+spurious failures on the first two — see #148 · `test:smoke` ALL PASSED.
+
+**Scope note on "Verified in the running app" above:** the composer's *file* path was exercised live
+on the **Blob** and **data-URL** legs only (upload → capture → download, byte-exact, with
+oversized-refusals firing before any byte transfer). The **Drive** leg was exercised against a
+stubbed `fetch`, never a real endpoint — see "Open, for Jeff" item 6.
 
 **Closed during #145 Task 15's whole-branch review (2026-09-22):** D168's `phaseId` had no writer
 besides `generateScheduleAction`'s exact-name match, which only fires for milestones whose free-text
@@ -6759,8 +6764,16 @@ current-tense wording rather than left describing a gap that had just closed.
    archive uses `Peak Recordings / <customer>`.
 5. **Disciplines on historical engagements** are absent and read as empty, which means every
    discipline-tagged template line matches. Acceptable for old records; worth confirming.
-
-**Not this item's scope, logged separately as their own punch items:** #148–#157, below.
+6. **The Drive upload leg is architecturally sound but NOT proven end to end.** `uploadToDrive`
+   (`activity-tab.tsx`) is the first **browser-direct** Drive PUT in this codebase — `drive.ts`'s
+   existing `uploadFileResumable`, which the Recordings archive uses in production, does the
+   equivalent transfer server-side. A stubbed `fetch` proved the response parsing, but nothing has
+   proved that Google's resumable endpoint accepts a cross-origin browser PUT, specifically the
+   **CORS preflight on a non-simple `Content-Type` header**. That needs a real OAuth connection,
+   which does not exist locally. **The Blob and data-URL legs are verified byte-exact; the Drive leg
+   is not.** First real Drive-connected use is the test — if the preflight is refused, the fallback
+   is to proxy the bytes through the server as the archive already does, at the cost of the
+   ~4.5 MB function-body ceiling.
 
 ## 148. The dev auto-seed is fire-and-forget, making every gate in this repo slightly untrustworthy — OPEN
 
