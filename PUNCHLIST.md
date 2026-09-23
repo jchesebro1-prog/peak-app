@@ -6604,3 +6604,298 @@ so datasheet PDFs over ~900 kB fail the same way; logged separately rather than 
 uses); weighed and deliberately deferred in D173 because for the Grid it needs a pre-minted sheet doc
 and a client-named path. (3) No blob garbage collection for a replaced sheet — same gap #143 logged,
 no prefix in this repo has a sweeper.
+
+## 145. Consulting project management — task templates, scoped scheduling, Activity capture, Gantt (both per-engagement and all-projects) — DONE 2026-09-22 (D164–D172, D178)
+
+**Spec:** `docs/superpowers/specs/2026-09-22-consulting-project-management-design.md`. Built as a
+13-task plan (`docs/superpowers/plans/2026-09-22-consulting-project-management.md`), most tasks
+carrying their own review round(s); this entry is the record for the whole item.
+
+**What existed:** consulting engagements (`CE-####`) had a lifecycle, phases, milestones, meetings
+and documents, but no way to plan or assign work. Task templates had no date model.
+`TemplateRecordKind` excluded consulting and `TaskRecord` had no engagement pointer, so consulting
+work could not be assigned at all. Engagements had no `startAt`/`endAt`. `NoteParentKind` excluded
+engagements. `/schedule` showed install projects only, read-only.
+
+**Shipped:** a pure, zero-import scheduling engine (`src/lib/consulting-schedule.ts`) dividing an
+engagement's span into weighted, proportional phase windows and placing tasks within them (D166);
+`ConsultingEngagement.startAt/endAt/disciplines`, `EngagementMilestone.phaseId` (D168),
+`TaskRecord.engagementId/startAt/schedule/handScheduled`, and `TaskTemplateLine.phase/discipline/
+startPct/lengthPct` (D165); a scheduling step in engagement creation with a preview-before-commit
+generation flow; a per-engagement **Schedule tab** — phase bands, locked milestone diamonds, freely
+draggable task bars, overrun flagged in red — sharing `schedule/page.tsx`'s day-grid conventions via
+a new `src/components/gantt/` (D167); a milestone shift dialog that pre-ticks its phase's tasks
+(hand-dragged tasks excluded) and moves them on confirm (D168); one **Activity tab** whose composer
+writes a note + files + tasks in a single linked action, with a merged feed and Krisp meeting
+pre-fill (D170); a `FileRef` (drive/blob/data) storage seam with an authenticated engagement-files
+proxy and upload route (D171); `/task-templates` gaining phase/discipline/%/% authoring plus a
+`task_templates` CSV import type through the existing Import hub, replace-by-set (D169, D178,
+D175–D177); disciplines added to the consulting quote builder and Settings (D165); and `/schedule`
+becoming editable, with consulting rows beside installs and a new **By person** portfolio view
+laning every assignee's work across both kinds (D172).
+
+44 files (plus this doc set): `src/lib/consulting-schedule.ts`, `src/lib/consulting-files.ts`,
+`src/lib/consulting-files-server.ts`, `src/lib/engagement-activity.ts`,
+`src/lib/engagement-activity-write.ts`, `src/components/gantt/gantt-lib.ts`,
+`src/components/gantt/gantt-grid.tsx`, `src/app/api/engagement-files/upload/route.ts`,
+`src/app/api/engagement-files/[engagementId]/[fileId]/route.ts`,
+`src/app/(app)/design/engagements/{page.tsx,view.tsx,data.ts,actions.ts,tabs.ts,
+new-engagement-modal.tsx,activity-actions.ts,activity-tab.tsx,schedule-actions.ts,
+schedule-tab.tsx}`, `src/app/(app)/design/engagements/quote/{actions.ts,controls.tsx,page.tsx}`,
+`src/app/(app)/schedule/{page.tsx,people-lib.ts,portfolio-gantt.tsx}`,
+`src/app/(app)/task-templates/{page.tsx,template-sets-client.tsx}`,
+`src/app/(app)/import/{types.ts,registry.ts,actions.ts,page.tsx}`,
+`src/app/(app)/settings/{page.tsx,settings-client.tsx,actions.ts}`, `src/lib/settings.ts`,
+`src/lib/google/drive.ts`, `src/lib/stores/{engagements.ts,notes.ts,task-templates.ts,tasks.ts}`,
+`src/lib/task-template-kinds.ts`, `src/app/(app)/field-work/controls.tsx`,
+`scripts/{smoke-routes.ts,test-review-and-spec.ts}`.
+
+**Found and fixed during review** — this run found real defects, not just style nits:
+
+- **An authenticated-read hole in the engagement file proxy.** The ownership check
+  (`ownsEngagementFile`) proved a file id appeared on a note under the requested engagement, but the
+  `FileRef` itself is browser-supplied — so a forged `{kind:"drive", fileId:"<any id>"}` or
+  `{kind:"blob", pathname:"vendor-quotes/..."}` on the caller's *own* engagement's note would have
+  been streamed back, with the Drive branch using the recordings-archive token, making the blast
+  radius every archived Krisp meeting recording plus the whole private Blob store. Not exploitable
+  at the point it was caught (nothing wrote attachments yet), which is exactly why it was closed
+  there instead of downstream. Closed at two layers: a structural blob-path binding
+  (`ENGAGEMENT_FILES_BLOB_PREFIX` + a positive per-segment shape check, not a `".."` denylist —
+  `@vercel/blob` interpolates the pathname raw, so a denylist alone still let `%2e%2e%2f` through),
+  and a live Drive `parents` re-check at read time so a forged Drive ref is refused before any
+  storage call. Verified by direct attack, twice, on both the initial fix and the re-check.
+- **An unauthenticated write path.** `performCapture` was exported from a `"use server"` module,
+  did real writes, and trusted a caller-supplied `me` — it never called `requireUser()`. Every
+  exported server action is a directly POST-reachable entry point (this repo's own installed Next
+  docs say so unconditionally). Fixed by moving the writer core into a plain module with no
+  `"use server"` directive (`src/lib/engagement-activity-write.ts`), leaving the action file's one
+  export (`captureAction`) as the only thing that calls `requireUser()` before delegating.
+- **Silent data loss in the CSV importer.** `create` mode against an existing task-template-set name
+  wholesale-replaced that set's lines and Applies To — identical to `update`, no error, no warning.
+  The first pass copied the catalog writer's create-is-a-merge shape without checking whether the
+  same constraint held; it doesn't (`createTaskTemplateSet` mints an independent `TT-###` id
+  unrelated to name), so `create` now always mints a genuinely distinct set unless the collision is
+  with a set the *same* import commit already created.
+- **A partial write in schedule generation.** The engagement's span and milestone dates were
+  committed via `patchEngagement` before the one call that could actually fail
+  (`applyTaskTemplate`), so a bad or since-deleted template set id left dates written, zero tasks,
+  and an uncaught throw instead of the declared `{ok:false,error}`. Reordered so the template set is
+  validated and applied before any mutation is written, with the apply call additionally wrapped as
+  a second defence against a delete-mid-race.
+- **A milestone dialog that moved tasks when nothing had changed.** The shift dialog compared a
+  local-noon date-input value against the non-noon instant `generateSchedule` actually stamps on a
+  phase-matched milestone. Swept 1024 realistic window ends: a no-op confirm shifted every ticked
+  task in **676 of 1024** sampled cases (66%), worst case **17.4 hours**, and wrote a false audit
+  note ("Milestone moved - X: Oct 5 → Oct 5"). Fixed by comparing `startOfLocalDay` on both sides
+  (exported once, reused, not a fourth copy); re-swept the same 1024 cases at **0/1024**.
+- **Three Gantt bugs found only by rendering it**, invisible to eleven tasks of static review and
+  typechecking: a false overrun flag from a UTC/local day-boundary mismatch (reporting a slip that
+  had not happened); a task entirely past a shrunk `endAt` collapsing to a near-invisible sliver
+  instead of a visible red bar (the case a person most needs to see, disappearing); and week-label
+  headers overlapping unreadably on long spans. Fixing the first exposed a **fourth**: `dayColumns`
+  walked days with `+= DAY` in raw milliseconds, which drifts across DST transitions (UTC, the prior
+  convention, has no DST, so the drift was latent) — fixed by walking via `Date.setDate`, regression-
+  tested straddling the Nov 2026 fall-back and confirmed to also fail correctly against
+  spring-forward. Fixing *that* exposed a **fifth**: the fix's own `process.env.TZ` restore assigned
+  the literal string `"undefined"` when the prior value was unset, which Node resolves to UTC —
+  silently switching the rest of the suite's timezone for every assertion after it in the same run.
+  Fixed to delete the key instead of restoring a stringified `undefined`; proved independently
+  (`TZ key present: false | offset: 300`, not the UTC offset).
+
+**Verified in the running app**, on scratch datadirs (never `.data/pglite`, never `npm run dev`):
+unscheduled engagement → span/discipline entry → generated-schedule preview → commit, with the
+Gantt rendering both the dense (many-day) and sparse (week-label) header modes; task-bar drag
+persisting across reload with `handScheduled` set; the milestone shift dialog pre-ticking its
+phase's tasks with hand-dragged tasks excluded, a no-op confirm writing nothing, and a real day
+change moving tasks and logging an accurate note; an overrunning bar rendering fully visible in red
+at the engagement's `endAt`; the Activity composer capturing body text + a dropped file + checked
+task lines into one linked note, with a mid-capture forced failure rolling back every task and
+leaving no orphan note; a capture carrying a forged `FileRef` refused before any write; the
+template-line editor's phase/discipline/%/% fields and the Settings phase-weight and discipline
+editors, including a saved quote's disciplines reaching a spawned engagement end to end; CSV
+import replace-by-set (no doubling on re-import, shrinks when a line is dropped), a create-against-
+an-existing-name collision producing two distinct sets, and an export→re-import round trip; and, on
+`/schedule`, a drag persisting across reload and matching the engagement's own Schedule tab, install
+bars staying non-draggable, and one person shown carrying both consulting and install work with an
+Unassigned lane for anyone not in the active-user list.
+
+**Gates** (run in a dedicated worktree on `3b9c463`, the branch tip with all twelve feature tasks
+merged — not the main checkout, which another session owned throughout this run): `tsc --noEmit`
+0 errors · `eslint` 120 warnings / 0 errors (unchanged from the `47fe2c8` base; zero warnings from
+any `#145` file) · `test:specs` **1719 PASS / 0 FAIL** (**213** of them `#145` assertions; ALL
+PASSED, confirmed stable across three consecutive runs after a fresh-datadir dev-seed race produced
+spurious failures on the first two — see #148) · `test:smoke` ALL PASSED.
+
+**Open, for Jeff:**
+
+1. **Which Drive mailbox backs engagement files?** No setting names one, so the implementation
+   reuses `recordingsArchiveMailbox` (the Krisp archive connection). This is now a **security
+   property**, not mere configuration — that account's `drive.file` corpus is the blast radius the
+   proxy's live `parents` check defends. Needs a real decision either way, then a DECISIONS.md entry.
+2. **Phase weights have no real values.** The seeded defaults (2/4/6/5/3) are illustrative. Jeff's
+   typical phase durations are needed before the generated dates mean anything.
+3. **No default template set content.** Deliberate — the CSV import exists so Jeff authors the
+   first real sets rather than inheriting guesses.
+4. **Drive folder naming** `Peak Projects / <customer> / <CE-id>` is a proposal; the recordings
+   archive uses `Peak Recordings / <customer>`.
+5. **Disciplines on historical engagements** are absent and read as empty, which means every
+   discipline-tagged template line matches. Acceptable for old records; worth confirming.
+
+**Not this item's scope, logged separately as their own punch items:** #148–#156, below.
+
+## 148. The dev auto-seed is fire-and-forget, making every gate in this repo slightly untrustworthy — OPEN
+
+**Reported:** found independently by multiple agents during #145's review (Tasks 2, 6's merge, 10,
+11, and 12), and hit again directly during #145's own Task 13 gate run: on a fresh datadir, the
+first `test:specs` run failed on unrelated, pre-existing seeded-survey assertions
+(`seeded surveys exist to migrate`, `FS-1053 is present in the seed`) with
+`TypeError: Cannot read properties of undefined (reading 'venueClass')`; a second run still showed
+3 failures; a third and every run after was `ALL PASSED` (1719 PASS / 0 FAIL).
+
+**What exists:** `getDb()` (`src/db/index.ts:75`) fires the dev auto-seed as
+`void globalForDb.__peakDb.then(async (db) => { const { seedIfEmpty } = await import("./seed-data");
+await seedIfEmpty(db); })` — nothing awaits it. Any assertion that reads seeded data can race the
+seed on a datadir that has not finished seeding, and the race is not reliably won within one run on
+a cold datadir. The danger is not the flake itself — it's that a **real** regression surfacing as a
+`test:specs` failure gets the same "flaky, passed on rerun" dismissal this one already has, five
+separate times, from five different people who each had to re-derive that it wasn't theirs.
+
+**Ask:** await the seed (block whatever needs seeded data behind the same promise `getDb()` already
+returns) or gate `test:specs`'s start on the seed's completion, so a fresh datadir either seeds
+before anything reads it or the run fails loudly and consistently rather than intermittently.
+
+## 149. The spec harness's fixture rows are never torn down, by file-wide convention — OPEN
+
+**Reported:** found during #145 Task 3's review, 2026-09-22 — pre-existing pattern, not introduced
+by #145, but #145 is what made it worth logging given the shared-DB risk below.
+
+**What exists:** `scripts/test-review-and-spec.ts`'s pre-existing `#13` fake-quote idiom writes rows
+that nothing ever deletes; it is a repo-wide convention, not one test's oversight. Task 3's own new
+DB-backed integration test was sent back specifically to add `try`/`finally` teardown (proved with a
+forced mid-run throw and a raw-table read confirming true tombstones) — but that fixed one test, not
+the pattern. This matters more here than in most repos because **one Neon database is shared across
+Production, Preview and Development** (see `project-vercel-preview-writes-production-db.md`): a
+`test:specs` run that resolves a real `DATABASE_URL` injects synthetic business records into live
+data, distinguishable from real records only by name pattern.
+
+**Ask:** a shared fixture-marker/sweep convention — e.g. a name/id prefix every DB-backed spec test
+uses, plus a script that finds and soft-deletes anything carrying it — rather than relying on each
+new test's author to remember `try`/`finally`.
+
+## 150. The engagement file proxy keys on a client-supplied storage key rather than record coordinates — OPEN
+
+**Reported:** found during #145 Task 9's review, 2026-09-22. Deferred deliberately during the run
+to avoid a third collision with a task (#145 Task 7) editing the same rendering path the same day.
+
+**What exists:** `/api/engagement-files/[engagementId]/[fileId]` (`src/app/api/engagement-files/
+[engagementId]/[fileId]/route.ts`) takes a client-supplied `FileRef` kind + key and validates
+ownership against it. Three existing proxies in this repo — `grid-sheets`, `part-datasheet`,
+`vendor-quote-attachments` — instead take a record id and look the storage path up server-side, so
+a client never names a storage key and the whole forged-key class of bug disappears by construction.
+The engagement-files proxy is **verified safe today** by direct attack at two layers (the structural
+blob-path binding and the live Drive `parents` re-check — see #145's "Found and fixed during
+review" section), but a route shaped as `/[engagementId]/[noteId]/[attachmentIndex]` would not need
+those two layers to be safe in the first place.
+
+**Ask:** reshape `fileRefHref` and the proxy to address a note + attachment index rather than a raw
+`FileRef`, once no other task is mid-edit on the same rendering path.
+
+## 151. Task-template import validation surfaces at commit time, on the receipt — not per-row in the preview — OPEN
+
+**Reported:** found during #145 Task 10's review, 2026-09-22. The spec (§5.5) said unknown
+phase/discipline values on a template-set CSV import are "reported per-row in the preview."
+
+**What exists:** unknown phase/discipline values on a `task_templates` import are computed inside
+the writer at commit time (`ttApplyRow` in `import/registry.ts`) and surfaced only as a **count**
+with a generic link to `/task-templates` on the post-commit receipt — after the row has already
+been written, not before, in the pre-commit preview like every other per-row validation in this
+importer. Ruled at review to reach a human and be actionable (fix the sheet, re-import) even in this
+shape, so #145 shipped it rather than expanding scope — but it does not match what the spec
+promised, and an operator still has to re-diff their own CSV to find which rows were unknown.
+
+**Ask:** move phase/discipline validation into the shared import-pipeline's preview stage so
+unknown values are flagged per-row before commit, the way every other import type in the registry
+already works. Touches shared code beyond `task_templates`, which is why #145 didn't do it inline.
+
+## 152. Gantt: `barRect`'s overrun test is a raw instant where `overrunsEnd` is day-granular — OPEN
+
+**Reported:** found during #145 Task 5's original build, 2026-09-22 — bounded and not reachable
+today, logged so it isn't lost if that changes.
+
+**What exists:** `barRect` (`src/components/gantt/gantt-lib.ts:51`) tests `bar.startAt >= endAt`
+(line 66) as a raw millisecond comparison, while `overrunsEnd` (`consulting-schedule.ts`) floors to
+the local day first. A bar starting late in the day on the `endAt` day itself would get "fully past"
+bar geometry while `overrunsEnd` correctly still paints it gray (not overrun). Not reachable to a
+wrong flag today because every post-drag `startAt` is snapped to local midnight
+(`snapToDay`) — there is no code path that produces a late-in-day `startAt` for a drag-placed task.
+
+**Ask:** floor `barRect`'s comparison to the local day the same way, so the two functions agree by
+construction rather than by the coincidence that nothing currently feeds `barRect` an unsnapped time.
+
+## 153. Gantt: a task's first drag can shift its visible length by up to a day — OPEN
+
+**Reported:** found during #145 Task 5's original build, 2026-09-22.
+
+**What exists:** `gantt-grid.tsx`'s drag handling preserves a task's original millisecond duration
+(`dueAt - startAt`) while snapping the dragged `startAt` to local midnight (`snapToDay`). A task
+generated mid-morning (say, placed by the scheduling engine at 9am on its phase's start day) keeps
+its original mid-morning-relative duration on the first drag, but the new `startAt` is midnight —
+so the computed `dueAt` lands roughly the morning offset *earlier* than a duration-preserving drag
+would produce from a midnight-anchored task, visibly shortening the bar by a fraction of a day on
+that first drag only. Subsequent drags (both endpoints already at local midnight) are exact.
+
+**Ask:** snap the duration's reference point (or recompute duration in whole days at the moment of
+the first drag) so a task's very first drag doesn't quietly clip up to a day off its length.
+
+## 154. Gantt: SSR/hydration style divergence from timezone-dependent day columns — OPEN
+
+**Reported:** found during #145 Task 6's review, 2026-09-22 — measured and bounded, not fixed,
+because the fix is a rendering-strategy change (server TZ vs. client TZ) outside a scheduling
+feature's scope.
+
+**What exists:** `dayColumns`/`snapToDay` (`src/components/gantt/gantt-lib.ts:21,27`) are
+timezone-dependent by design (D166/Task 6: local calendar days, not UTC, because every date input in
+this app is local-noon-anchored) — but the Gantt page renders once on the server (UTC on Vercel)
+before hydrating in the browser (the visitor's local zone, e.g. America/Chicago). Measured over a
+120-day span: column **count**, week-start columns and weekend-shaded cells are **identical**
+between the two renders; only each column's absolute timestamp differs by the UTC/local offset,
+moving each column's `left:` style by roughly **0.17% of the span's total width**. This is a
+style-attribute mismatch and a subtree re-render on hydration, not a structural DOM mismatch.
+
+**Ask:** none required to ship safely (React recovers from a style-only hydration mismatch by
+re-rendering that subtree) — logged so a future console-warning triage doesn't have to re-derive
+that this specific mismatch is cosmetic and bounded rather than a sign of a real bug.
+
+## 155. A discipline deleted from Settings still renders as a checked box on an existing consulting quote — OPEN
+
+**Reported:** found during #145 Task 11's review, 2026-09-22.
+
+**What exists:** the quote builder's discipline checkboxes (`design/engagements/quote/
+controls.tsx:162-169, 462-464`) build their menu from the live `consultingDisciplines` Settings
+vocabulary plus any disciplines already on the quote being edited that aren't in that live list
+(`extra`, line 165) — specifically so an old quote's now-removed discipline still shows up, checked.
+But saving the form intersects the posted disciplines against the **current** live vocabulary (the
+same Set-intersection that stops a hand-crafted POST from stashing an arbitrary discipline), so a
+removed discipline is silently dropped the next time that quote is saved, whether or not the box
+was checked. Correct behaviour — a deleted discipline shouldn't persist — but confusing display: the
+box reads as if unchecking it would do something, when saving drops it either way.
+
+**Ask:** either grey out / label a discipline that's on the quote but no longer in the live
+vocabulary as "removed," or accept the current display and just note it in whatever end-user docs
+exist for the quote builder.
+
+## 156. `normalizeLine`'s idempotency on phase casing across repeated export→import cycles is unconfirmed — OPEN
+
+**Reported:** found during #145 Task 10's review, 2026-09-22.
+
+**What exists:** `normalizeLine` (`src/lib/stores/task-templates.ts`, called from
+`import/registry.ts:418`) clamps percents and normalizes a CSV row into a `TaskTemplateLine`. The
+round-trip test added for #145 (`export → re-import`) covers assignment-target idempotency
+thoroughly (`role:`/`person:<name>` cells surviving a full cycle byte-for-byte) but never asserts
+that a phase name's **casing** survives repeated export→import cycles the same way — e.g. whether a
+phase re-exported and re-imported five times stays `"Schematic Design"` or drifts to
+`"schematic design"` or similar on some cycle.
+
+**Ask:** add a phase-casing round-trip assertion alongside the existing assignment-target one, or
+confirm by inspection that `normalizeLine`'s phase handling is already case-preserving and close
+this as a non-issue.
