@@ -776,10 +776,25 @@ export async function setDeliveryStatus(
   if (!p) return null;
   if (!(p.deliveries || []).some((d) => d.id === deliveryId)) return null;
   return patchDoc<ProjectRecord>("projects", id, (doc) => {
-    const d = (doc.deliveries || []).find((x) => x.id === deliveryId);
+    const deliveries = Array.isArray(doc.deliveries) ? doc.deliveries : [];
+    doc.deliveries = deliveries;
+    const d = deliveries.find((x) => x.id === deliveryId);
     if (!d) return doc;
     d.status = status;
     if (status === "received") d.receivedAt = now();
+    // Delivery-driven lifecycle (#44): once every shipment is physically
+    // received, put an install project into the scheduling queue. This does
+    // not block crew booking and the normal stage controls can still undo or
+    // correct the transition when a receipt was entered in error.
+    if (
+      status === "received" &&
+      doc.kind === "project" &&
+      doc.stage === "delivery" &&
+      deliveries.length > 0 &&
+      deliveries.every((row) => row.status === "received")
+    ) {
+      recordStageChange(doc, "scheduled", "System");
+    }
     doc.updatedAt = now();
     return doc;
   });

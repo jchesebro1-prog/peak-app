@@ -3125,7 +3125,10 @@ labels (trade packages, alternates — open-ended by design). **Naming/nav TABLE
 rebuild in flight). **NO data migration** (beta, sample data only). Sequencing: #39 lands
 first; this rides on top. Pricing math mostly does NOT move (budget + quote share `goods.ts`).
 
-**Status:** OPEN — wave 2.
+**Status:** PARTIAL 2026-09-23 — delivery status now auto-advances an install project to
+Scheduled when all shipment lines are received, while manual stage controls remain available for
+undo/correction. Remaining scope-report/phone-signature/checklist work and the completion
+walkthrough task still remain.
 
 ---
 
@@ -6987,7 +6990,7 @@ that first drag only. Subsequent drags (both endpoints already at local midnight
 **Ask:** snap the duration's reference point (or recompute duration in whole days at the moment of
 the first drag) so a task's very first drag doesn't quietly clip up to a day off its length.
 
-## 154. Gantt: SSR/hydration style divergence from timezone-dependent day columns — OPEN
+## 154. Gantt: SSR/hydration style divergence from timezone-dependent day columns — ACCEPTED COSMETIC
 
 **Reported:** found during #145 Task 6's review, 2026-09-22 — measured and bounded, not fixed,
 because the fix is a rendering-strategy change (server TZ vs. client TZ) outside a scheduling
@@ -7019,6 +7022,9 @@ bounded case too.
 re-rendering that subtree) — logged so a future console-warning triage doesn't have to re-derive
 that this specific mismatch is cosmetic and self-correcting rather than a sign of a real bug, and
 doesn't assume every Gantt-grid caller shares the engagement tab's 0.17% bound.
+
+**Disposition 2026-09-23:** no functional work remains for this entry; the mismatch is explicitly
+bounded and self-correcting as documented above.
 
 ## 155. A discipline deleted from Settings still renders as a checked box on an existing consulting quote — DONE 2026-09-23
 
