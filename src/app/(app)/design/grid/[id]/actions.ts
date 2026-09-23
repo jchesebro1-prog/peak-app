@@ -90,15 +90,21 @@ export async function createGridAssemblyAction(input: {
   const user = await requireUser();
   if (!input.name.trim()) return { ok: false, error: "Name the assembly." };
   if (!input.members.length) return { ok: false, error: "Choose at least one child symbol." };
-  const assembly = await createGridAssembly({
-    name: input.name,
-    manufacturer: input.manufacturer,
-    modelNumber: input.modelNumber,
-    scope: input.scope,
-    members: input.members,
-    shape: isGridShape(input.shape) ? input.shape : null,
-    by: user.name,
-  });
+  let assembly: Awaited<ReturnType<typeof createGridAssembly>>;
+  try {
+    assembly = await createGridAssembly({
+      name: input.name,
+      manufacturer: input.manufacturer,
+      modelNumber: input.modelNumber,
+      scope: input.scope,
+      members: input.members,
+      shape: isGridShape(input.shape) ? input.shape : null,
+      by: user.name,
+    });
+  } catch (error) {
+    console.error("createGridAssemblyAction: assembly mint failed", error);
+    return { ok: false, error: "Couldn’t save that assembly — please try again." };
+  }
   revalidatePath("/design/grid");
   return { ok: true, id: assembly.id };
 }
