@@ -229,7 +229,14 @@ async function refreshCache(cache: Record<string, unknown>[], id: string): Promi
 
 /** True when a customers row carries anything for its address venue. */
 function hasVenueColumns(v: Values): boolean {
-  return !!(str(v.venue) || str(v.address) || str(v.city) || str(v.state) || str(v.zip));
+  return !!(str(v.venue) || str(v.address) || str(v.city) || str(v.state) || str(v.zip) || coordinate(v.lat) !== undefined || coordinate(v.lng) !== undefined);
+}
+
+function coordinate(value: unknown): number | undefined {
+  const raw = String(value ?? "").trim();
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 /**
@@ -256,7 +263,7 @@ function customerRecordFor(
   if (hasVenueColumns(v)) {
     locations = mergeLocation(
       locations,
-      { label: str(v.venue), address: str(v.address), city: str(v.city), state: str(v.state), zip: str(v.zip) },
+      { label: str(v.venue), address: str(v.address), city: str(v.city), state: str(v.state), zip: str(v.zip), lat: coordinate(v.lat), lng: coordinate(v.lng) },
       "l" + id + "-" + seq(),
       // claimBlank "any": unlike a venues row, this row genuinely IS the
       // customer's address venue, so a legacy file's Venue column may name
@@ -356,6 +363,8 @@ async function writeVenueRow(cust: Customers.CustomerDoc, v: Values): Promise<vo
       city: str(v.city),
       state: str(v.state),
       zip: str(v.zip),
+      lat: coordinate(v.lat),
+      lng: coordinate(v.lng),
       kind: str(v.kind),
     },
     "l" + cust.id + "-" + seq(),

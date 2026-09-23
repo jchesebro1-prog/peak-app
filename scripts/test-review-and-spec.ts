@@ -6474,9 +6474,9 @@ async function archiveAsyncChecks(): Promise<void> {
   ok(!!cu && !!ct && !!vn, "#137 T3 customers / contacts / venues types are registered");
   if (cu && ct && vn) {
     const visible = (t: ImportTypeMeta) => visibleColumns(t.fields).map((f) => f.header).join(",");
-    ok(visible(cu) === "Customer Name,Category,Address,City,State,Zip,Phone,Website", "#137 T3 customers template columns (embedded contact/venue columns gone)");
+    ok(visible(cu) === "Customer Name,Category,Address,City,State,Zip,Latitude,Longitude,Phone,Website", "#147 customers template includes address coordinates");
     ok(visible(ct) === "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary", "#137 T3 contacts template columns");
-    ok(visible(vn) === "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category", "#137 T3 venues template columns");
+    ok(visible(vn) === "Customer,Customer ID,Venue Name,Address,City,State,Zip,Latitude,Longitude,Category", "#147 venues template includes address coordinates");
     // #137 T7 — the hub may only advertise what it honours. No customer,
     // contact or venue record has a notes field: every Notes cell was
     // dropped on import and the export wrote "". Hidden, so an old file's
@@ -6495,12 +6495,12 @@ async function archiveAsyncChecks(): Promise<void> {
     const legacy = parseImportCsv("Customer Name,Type,Contact Name,Email,Phone,Venue,Address,City,State,Notes\nRiverside Playhouse,Performing arts,Maria Lopez,maria@riverside.org,(608) 555-0110,Main Stage,215 W Main St,Madison,WI,");
     const lm = autoMap(legacy.headers, cu.fields);
     ok(lm.name === 0 && lm.type === 1 && lm.contactName === 2 && lm.email === 3 && lm.phone === 4 && lm.venue === 5 && lm.address === 6 && lm.notes === 9, "#137 T3 a pre-#137 customers file maps every column, embedded ones via hidden aliases");
-    const nm = autoMap(["Customer Name", "Category", "Address", "City", "State", "Zip", "Phone", "Website"], cu.fields);
-    ok(nm.type === 1 && nm.zip === 5 && nm.phone === 6 && nm.website === 7, "#137 T3 Category / Zip / Phone / Website map on the new customers template");
+    const nm = autoMap(["Customer Name", "Category", "Address", "City", "State", "Zip", "Latitude", "Longitude", "Phone", "Website"], cu.fields);
+    ok(nm.type === 1 && nm.zip === 5 && nm.lat === 6 && nm.lng === 7 && nm.phone === 8 && nm.website === 9, "#147 customers aliases map latitude/longitude alongside address fields");
     const cm = autoMap(["Company", "Customer ID", "Full Name", "E-mail", "Cell", "Job Title", "Primary Contact"], ct.fields);
     ok(cm.customer === 0 && cm.customerId === 1 && cm.name === 2 && cm.email === 3 && cm.mobile === 4 && cm.title === 5 && cm.primary === 6, "#137 T3 contacts aliases: Company / Customer ID / Full Name / E-mail / Cell / Job Title / Primary Contact");
-    const vm = autoMap(["Customer", "Venue", "Street", "City", "State", "Zip Code", "Type"], vn.fields);
-    ok(vm.customer === 0 && vm.venue === 1 && vm.address === 2 && vm.zip === 5 && vm.kind === 6, "#137 T3 venues aliases: Venue / Street / Zip Code / Type");
+    const vm = autoMap(["Customer", "Venue", "Street", "City", "State", "Zip Code", "Latitude", "Longitude", "Type"], vn.fields);
+    ok(vm.customer === 0 && vm.venue === 1 && vm.address === 2 && vm.zip === 5 && vm.lat === 6 && vm.lng === 7 && vm.kind === 8, "#147 venues aliases map coordinates alongside Venue / Street / Zip Code / Type");
 
     const onlyId = prepareRows([["c-1", "Pat Doe"]], autoMap(["Customer ID", "Name"], ct.fields), ct.fields);
     ok(onlyId.rows[0].valid, "#137 T3 a contacts row with only a Customer ID is valid (requiredUnless)");
@@ -6566,6 +6566,8 @@ ok(parseYesNo("Yes") && parseYesNo(" y ") && parseYesNo("TRUE") && parseYesNo("1
   ok(matchLocation(v1.locations, "main-stage")?.id === "l1" && matchLocation(v1.locations, "") === null, "#137 T3 matchLocation: normalized label; blank never matches");
   const v2 = mergeLocation(v1.locations, { label: "MAIN stage", zip: "53704" }, "l-new2", { preferPrimary: false });
   ok(!v2.created && v2.locations[0].zip === "53704" && v2.locations[0].address === "215 W Main St" && v2.locations[0].label === "MAIN stage", "#137 T3 mergeLocation: a normalized-label hit updates zip, keeps fields the row omits, takes the row's label spelling");
+  const vCoords = mergeLocation(v1.locations, { label: "Main Stage", lat: 43.0731, lng: "-89.4012" }, "l-coords", { preferPrimary: false });
+  ok(vCoords.locations[0].lat === 43.0731 && vCoords.locations[0].lng === "-89.4012", "#147 mergeLocation persists imported latitude/longitude without clearing address fields");
   const v3 = mergeLocation(v1.locations, { label: "Black Box", kind: "black box" }, "l-new3", { preferPrimary: false });
   ok(v3.created && v3.locations.length === 2 && v3.locations[1].id === "l-new3" && !v3.locations[1].primary && v3.locations[1].venueKind === "blackbox" && v3.locations[1].kind === "black box", "#137 T3 mergeLocation appends a non-primary venue whose venueKind derives from Category");
   // Revised for #137 C1b (was: the row updates the primary venue's address in

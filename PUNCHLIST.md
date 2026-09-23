@@ -6798,7 +6798,7 @@ current-tense wording rather than left describing a gap that had just closed.
    is to proxy the bytes through the server as the archive already does, at the cost of the
    ~4.5 MB function-body ceiling.
 
-## 147. Imported customers have no location, so travel time is blank for the whole book — PARTIAL 2026-09-22 (D179-D185)
+## 147. Imported customers have no location, so travel time is blank for the whole book — PARTIAL 2026-09-23 (D179-D185)
 
 **Reported:** Jeff: "How do we use all of the customers that are in the app currently and ensure they
 have an address that is actually located for travel time. When I imported the data I don't think it
@@ -6851,6 +6851,12 @@ structured query fixed both (Portage now 0.2 mi off; LaCrosse honestly returns n
 `scripts/daylite-ids.ts` (new), `src/lib/geo.ts`, `src/app/(app)/settings/actions.ts`,
 `src/app/(app)/settings/settings-client.tsx`, `src/app/(app)/import/page.tsx`, `package.json`.
 Design: `docs/superpowers/specs/2026-09-22-customer-address-geocoding-design.md`. No schema change.
+
+**Stage 2 update 2026-09-23:** the CSV contract now exposes Latitude and Longitude on both
+Customers and Venues templates/exports. Imports validate finite coordinates, merge them into the
+same location record without clearing address fields, and preserve them on re-import. This removes
+the app-side data-path gap; production backfill and the missing street-address re-export remain
+data/hosting-gated as described above.
 
 ## 147b. Import: "<thing> Label N" columns stole the value column, and four types silently duplicated on "Update existing" — DONE 2026-09-22 (D179-D185)
 

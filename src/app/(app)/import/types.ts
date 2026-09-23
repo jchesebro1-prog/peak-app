@@ -42,6 +42,8 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "city", header: "City", label: "City", aliases: ["city", "town"], example: "Madison" },
       { key: "state", header: "State", label: "State", aliases: ["state", "province", "st"], example: "WI" },
       { key: "zip", header: "Zip", label: "Zip", kind: "zip", aliases: ["zip", "zip code", "zipcode", "postal", "postal code", "postcode"], example: "53703" },
+      { key: "lat", header: "Latitude", label: "Latitude", kind: "number", aliases: ["latitude", "lat", "y coordinate"], example: "43.0731" },
+      { key: "lng", header: "Longitude", label: "Longitude", kind: "number", aliases: ["longitude", "lng", "lon", "long", "x coordinate"], example: "-89.4012" },
       { key: "phone", header: "Phone", label: "Phone", aliases: ["phone", "telephone", "tel", "main phone", "phonenumber", "company phone"], example: "(608) 555-0110" },
       { key: "website", header: "Website", label: "Website", aliases: ["website", "web", "url", "homepage", "www"], example: "riversideplayhouse.org" },
       // #137 — a customer record has nowhere to store free-text notes
@@ -109,6 +111,8 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "city", header: "City", label: "City", aliases: ["city", "town"], example: "Madison" },
       { key: "state", header: "State", label: "State", aliases: ["state", "province", "st"], example: "WI" },
       { key: "zip", header: "Zip", label: "Zip", kind: "zip", aliases: ["zip", "zip code", "zipcode", "postal", "postal code", "postcode"], example: "53703" },
+      { key: "lat", header: "Latitude", label: "Latitude", kind: "number", aliases: ["latitude", "lat", "y coordinate"], example: "43.0731" },
+      { key: "lng", header: "Longitude", label: "Longitude", kind: "number", aliases: ["longitude", "lng", "lon", "long", "x coordinate"], example: "-89.4012" },
       { key: "kind", header: "Category", label: "Category", aliases: ["category", "venue type", "venuetype", "type", "kind", "venue kind"], example: "theatre" },
       // #137 — CustomerLocation has no notes field either; same treatment as
       // the customers / contacts Notes columns.
