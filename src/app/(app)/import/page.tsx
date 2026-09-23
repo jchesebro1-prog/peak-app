@@ -7,6 +7,8 @@ import { IMPORT_TYPES, getTypeMeta } from "./types";
 import { linksCustomer, type CustomerRef } from "./link";
 import { allCounts, UPDATABLE_TYPES } from "./registry";
 import { PastePreview } from "./controls";
+import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
+import { mergedConsultingPhases } from "@/lib/stores/engagements";
 
 export const metadata = { title: "Import & export — Quartzite-6" };
 
@@ -146,6 +148,7 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
   const resultRaw = one(sp.r);
   const errRaw = tab === "import" ? one(sp.err) : "";
   const counts = await allCounts();
+  const settings = await getSettings();
 
   // #137 — the contacts / venues previews resolve each row's customer
   // client-side against this index, with the same rule the commit uses
@@ -547,6 +550,10 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
           closeHref={hrefFor({ type: null, r: null })}
           anotherHref={hrefFor({ type: openType.key, r: null })}
           customerIndex={customerIndex}
+          validationOptions={{
+            phases: mergedConsultingPhases(settings.consultingPhases),
+            disciplines: mergedConsultingDisciplines(settings.consultingDisciplines),
+          }}
         />
       )}
     </>
@@ -560,6 +567,7 @@ function ImportFlowModal({
   closeHref,
   anotherHref,
   customerIndex,
+  validationOptions,
 }: {
   type: NonNullable<ReturnType<typeof getTypeMeta>>;
   resultRaw: string;
@@ -567,6 +575,7 @@ function ImportFlowModal({
   closeHref: string;
   anotherHref: string;
   customerIndex: CustomerRef[];
+  validationOptions: { phases: string[]; disciplines: string[] };
 }) {
   const done = parseResult(resultRaw);
 
@@ -726,6 +735,7 @@ function ImportFlowModal({
                   today={isoDateOf(Date.now())}
                   customerIndex={customerIndex}
                   canUpdate={UPDATABLE_TYPES.has(type.key)}
+                  validationOptions={validationOptions}
                 />
               </>
             )}
