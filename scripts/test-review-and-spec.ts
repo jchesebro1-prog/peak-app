@@ -801,6 +801,112 @@ const catRule: PortRule[] = [
 ok(matchRule(rpart("anything", { category: "SB" }), catRule)?.id === "sb", "rules: a category pattern matches");
 ok(matchRule(rpart("anything", { category: "Audio" }), catRule) === null, "rules: a category pattern that misses blocks the rule");
 
+/* --- #159 Task 3: the shipped rule set --- */
+import { PORT_RULES } from "@/lib/catalog-port-rules";
+
+// Task 1 review follow-up: lock in the three new shapes' port names, directions
+// and counts — previously only their connectionTypes were checked.
+const amp4 = Shapes.amplifierPorts(4);
+ok(amp4.find((p) => p.name === "Line In")?.direction === "in", "shapes: an amplifier's line input is an input");
+ok(amp4.find((p) => p.name === "Speaker Out")?.direction === "out", "shapes: an amplifier's speaker output is an output");
+ok(amp4.find((p) => p.name === "Speaker Out")?.count === 4, "shapes: an amplifier carries its channel count");
+const rx2 = Shapes.wirelessReceiverPorts(2);
+ok(rx2.find((p) => p.name === "Audio Out")?.direction === "out", "shapes: a wireless receiver's audio port is an output");
+ok(rx2.find((p) => p.name === "Audio Out")?.count === 2, "shapes: a wireless receiver carries its channel count");
+const dsp = Shapes.dspPorts(8, 8);
+ok(dsp.find((p) => p.name === "Analog In")?.direction === "in" && dsp.find((p) => p.name === "Analog Out")?.direction === "out",
+  "shapes: a DSP has analog in and analog out in the right directions");
+
+ok(PORT_RULES.length > 0, "ruleset: rules are defined");
+ok(PORT_RULES.filter((r) => r.accessory).length > 0, "ruleset: an accessory layer exists");
+ok(PORT_RULES.findIndex((r) => r.accessory) < PORT_RULES.findIndex((r) => !r.accessory),
+  "ruleset: the accessory layer is ordered BEFORE device rules, so a bracket never gets device ports");
+ok(new Set(PORT_RULES.map((r) => r.id)).size === PORT_RULES.length, "ruleset: rule ids are unique");
+ok(PORT_RULES.every((r) => r.note.trim().length > 10), "ruleset: every rule carries a real note for review");
+
+// The vocabulary guard again, at the rule level this time.
+const rConn = new Set(CONNECTION_TYPES);
+const badRule = PORT_RULES.filter((r) => !r.accessory).find((r) =>
+  r.shape({ sku: "T:1", desc: "4 Channel", category: "Audio", mfr: r.mfr }).some((prt) => !rConn.has(prt.connectionType))
+);
+ok(!badRule, `ruleset: every rule emits only known connection types${badRule ? ` (offender: ${badRule.id})` : ""}`);
+
+// A bracket must never reach a device rule.
+ok(matchRule({ sku: "RCF:X", desc: "Horizontal Bracket for MR50", category: "Audio", mfr: "RCF" })?.accessory === true,
+  "ruleset: a real bracket description matches the accessory layer");
+ok(matchRule({ sku: "EAW:SB1002", desc: 'Passive 18" Installation Subwoofer. Black', category: "SB", mfr: "EAW" })?.accessory !== true,
+  "ruleset: a real passive subwoofer description does NOT match the accessory layer");
+
+ok(matchRule({ sku: "QSC:X", desc: "RU 4 Channel ENERGY STAR amplifier", category: "Audio", mfr: "QSC" })?.id === "amplifier",
+  "ruleset: a real QSC amplifier description matches the amplifier rule");
+const ampProp = proposeForPart({ sku: "QSC:X", desc: "RU 4 Channel ENERGY STAR amplifier", category: "Audio", mfr: "QSC" });
+ok(ampProp?.ports.find((prt) => prt.name === "Speaker Out")?.count === 4,
+  "ruleset: the amplifier rule reads its channel count from the description");
+const mtx = proposeForPart({ sku: "AV:X", desc: "8x8 HDBaseT Matrix Switcher", category: "AV Distribution", mfr: "AVPro Edge" });
+ok(mtx?.ports[0].count === 8 && mtx?.ports[1].count === 8, "ruleset: a matrix reads NxM from the description");
+
+/* ---- real-data fixes (#159 Task 3 review of scripts/*.tsv dumped from the
+   live catalog, D198) — each of these is a description sampled verbatim from
+   the real dev DB that the brief's draft rule set got wrong. See
+   task-3-report.md for the full account. ---- */
+
+// A passive RCF speaker that is ALSO 70V/100V-transformer-tapped must get the
+// 70V pair shape, not speakON — the draft order (passive before 70V) silently
+// mis-wired ~42 real EAW/RCF SKUs to the wrong connector.
+ok(proposeForPart({
+  sku: "RCF:X", mfr: "RCF", category: "BUSINESS AUDIO WALL MOUNTED SPEAKERS - PASSIVE",
+  desc: 'Passive 160W 5" 2-Way Wall Mount Monitor Speaker w/ Transformer - 8 Ω, 70/100V',
+})?.rule.id === "speaker-70v",
+  "ruleset: a passive speaker that is also 70V-transformer-tapped gets the 70V shape, not speakON");
+
+// "loudspeaker" is one token, not "speaker" preceded by "loud" — the draft's
+// \bspeaker\b missed all 44 real QSC/EAW/Shure SKUs that use this word.
+ok(proposeForPart({
+  sku: "EAW:X", mfr: "EAW", category: "RSX",
+  desc: "8\" Powered Loudspeaker. Horz: 90˚ Vert: 60˚. Dante. Black.",
+})?.rule.id === "speaker-powered",
+  "ruleset: 'Powered Loudspeaker' matches the powered-speaker rule, not just 'Powered Speaker'");
+
+// AVPro Edge's "AV Distribution" catalog uses "processor" for video-wall and
+// remote-control gear, and QSC sells bare "Q-SYS Core ... Software License"
+// SKUs under category Audio — neither is a physical fixed-I/O audio DSP.
+ok(matchRule({
+  sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution",
+  desc: "8K HDR 2x2 scaling video wall processor featuring VRR",
+})?.id !== "dsp",
+  "ruleset: an AV-Distribution video-wall processor does not match the audio DSP rule");
+ok(matchRule({
+  sku: "QSC:X", mfr: "QSC", category: "Audio",
+  desc: "Q-SYS Core 110 Scripting Engine Software License, Perpetual.",
+})?.id !== "dsp",
+  "ruleset: a Q-SYS Core software license is not a physical DSP");
+
+// Shure gooseneck mics routinely mention a status "LED" or "LED Indicator" —
+// without a manufacturer scope this shipped every one of them as a lighting
+// fixture. Chauvet Professional is the only lighting brand in scope.
+ok(matchRule({
+  sku: "SHU:X", mfr: "Shure", category: "Audio",
+  desc: "Cardioid-12\" Gooseneck Condenser Microphone, Attached Preamp with XLR, Shock Mount, Flange Mount, Snap-Fit Foam Windscreen, Mute Switch, LED Indicator",
+})?.id !== "fixture-led",
+  "ruleset: a microphone's status LED does not make it a lighting fixture");
+
+// RCF's install amplifiers/mixer-amps list 70/100V outputs in their own spec —
+// those must stay amplifiers, not get reinterpreted as a passive 70V speaker
+// INPUT.
+ok(matchRule({
+  sku: "RCF:X", mfr: "RCF", category: "POWER AMPLIFIERS",
+  desc: "Class D Power Amplifier with Dual Input per Channel - 4 Ω, 70/100V, 2 x 250W",
+})?.id === "amplifier",
+  "ruleset: a 70V-capable power amplifier matches the amplifier rule, not speaker-70v");
+
+// QSC ceiling/surface 70V speakers routinely describe their OWN bundled
+// mounting hardware ("blind mount installation", "includes yoke mount") —
+// the bare accessory keyword "mount" swallowed ~100 real speaker SKUs.
+ok(proposeForPart({
+  sku: "QSC:X", mfr: "QSC", category: "Audio",
+  desc: "6.5\" Two-way ceiling speaker, 70/100V transformer with 8Ω bypass, 110° conical coverage, includes C-ring and rails for blind mount installation.",
+})?.rule.id === "speaker-70v",
+  "ruleset: a ceiling speaker describing its own mount hardware is not swallowed by the accessory layer");
 
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
