@@ -116,6 +116,11 @@ const HOME_CSS = `
 .pkh-main{display:grid;grid-template-columns:minmax(0,1fr) 348px;gap:18px;align-items:start}
 .pkh-inbox{display:grid;grid-template-columns:minmax(0,1fr) 296px}
 .pkh-inbox-aside{border-left:1px solid #f0f1f4;background:#fbfbfc;padding:14px 16px}
+.pkh-widget-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:18px;align-items:start}
+.pkh-widget-full{grid-column:span 12}
+.pkh-widget-half{grid-column:span 6}
+.pkh-widget-third{grid-column:span 4}
+.pkh-widget-sidebar{grid-column:span 3}
 @media (max-width:860px){
   .pkh-content{padding-left:16px !important;padding-right:16px !important}
   .pkh-greet{flex-direction:column !important;align-items:stretch !important}
@@ -125,6 +130,7 @@ const HOME_CSS = `
   .pkh-main{grid-template-columns:1fr}
   .pkh-inbox{grid-template-columns:1fr}
   .pkh-inbox-aside{border-left:none;border-top:1px solid #f0f1f4}
+  .pkh-widget-full,.pkh-widget-half,.pkh-widget-third,.pkh-widget-sidebar{grid-column:span 12}
   .pkh-sheetwrap{align-items:flex-end !important;padding:0 !important}
   .pkh-sheet{width:100% !important;max-width:100% !important;border-radius:18px 18px 0 0 !important}
 }
@@ -146,8 +152,6 @@ export default async function HomePage({
   const me = user.name;
   const sp = await searchParams;
   const dashboardLayout = resolveDashboardLayout(appSettings.dashboardDefaults, dashboardOverride);
-  const dashboardVisible = (key: Parameters<typeof resolveDashboardLayout>[0]["widgets"][number]["key"]) =>
-    dashboardLayout.widgets.find((w) => w.key === key)?.visible !== false;
 
   const pipeParam = first(sp.pipe);
   const pipe: "all" | QuoteStatus =
@@ -535,6 +539,23 @@ export default async function HomePage({
       }
     : null;
 
+  const widgetNodes = {
+    stats: <HomeStats stats={stats} />,
+    queue: <HomeQueue open={queueOpen} overdue={queueOverdue} rows={queueRows} />,
+    inbox: <HomeInbox inboxNeedsCount={inboxNeedsCount} inboxUnread={inboxUnread} inboxItems={inboxItems} inboxBoxes={inboxBoxes} />,
+    leads: <HomeMyLeads myFollowCount={myFollowCount} leadGroups={leadGroups} />,
+    designs: <HomeMyDesigns cards={designCards} />,
+    pipeline: <HomePipeline pipe={pipe} filterDefs={filterDefs} pipeCounts={pipeCounts} filteredQuotes={filteredQuotes} />,
+    catalog: <HomeCatalog books={books} partCount={catalogParts.length} />,
+    calendar: <HomeCalendar items={agenda} calendarOn={calendarOn} gmailOn={gmailOn} recordVisitIds={recordVisitIds} />,
+    surveys: <HomeVenueAssessments surveyCards={surveyCards} surveyPendingCount={surveyPendingCount} />,
+    teamActivity: <HomeTeamActivity teamActivity={teamActivity} />,
+    needsAttention: <HomeNeedsAttention alerts={alerts} />,
+  };
+  const configuredWidgets = dashboardLayout.widgets
+    .filter((w) => w.visible && widgetNodes[w.key])
+    .sort((a, b) => a.position - b.position);
+
   /* ===================================================================== */
 
   return (
@@ -551,70 +572,15 @@ export default async function HomePage({
         timezone={timezone}
       />
 
-      {/* stat tiles */}
-      {dashboardVisible("stats") && <HomeStats stats={stats} />}
-
-      {/* ===== My Queue (D98) — placed first among the content cards so
-          urgency is visible without scrolling; the queue previously had no
-          dashboard presence at all. ===== */}
-      {dashboardVisible("queue") && <HomeQueue open={queueOpen} overdue={queueOverdue} rows={queueRows} />}
-
-      {/* ===== Inbox dashboard ===== */}
-      {dashboardVisible("inbox") && (
-        <HomeInbox
-          inboxNeedsCount={inboxNeedsCount}
-          inboxUnread={inboxUnread}
-          inboxItems={inboxItems}
-          inboxBoxes={inboxBoxes}
-        />
-      )}
-
-      {/* ===== My leads (follow-up worklist) ===== */}
-      {dashboardVisible("leads") && <HomeMyLeads myFollowCount={myFollowCount} leadGroups={leadGroups} />}
-
-      {/* ===== My designs (sandbox) ===== */}
-      {dashboardVisible("designs") && <HomeMyDesigns cards={designCards} />}
-
-      {/* ===== two columns ===== */}
-      <div className="pkh-main">
-        {/* LEFT: pipeline + catalog */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
-          {dashboardVisible("pipeline") && (
-            <HomePipeline
-              pipe={pipe}
-              filterDefs={filterDefs}
-              pipeCounts={pipeCounts}
-              filteredQuotes={filteredQuotes}
-            />
-          )}
-
-          {/* catalog (moved under pipeline to balance the grid) */}
-          {dashboardVisible("catalog") && <HomeCatalog books={books} partCount={catalogParts.length} />}
-        </div>
-
-        {/* RIGHT: calendar + surveys + team activity + needs attention */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          {/* calendar (D77) */}
-          {dashboardVisible("calendar") && (
-            <HomeCalendar
-              items={agenda}
-              calendarOn={calendarOn}
-              gmailOn={gmailOn}
-              recordVisitIds={recordVisitIds}
-            />
-          )}
-
-          {/* field surveys */}
-          {dashboardVisible("surveys") && (
-            <HomeVenueAssessments surveyCards={surveyCards} surveyPendingCount={surveyPendingCount} />
-          )}
-
-          {/* team activity glance */}
-          {dashboardVisible("teamActivity") && <HomeTeamActivity teamActivity={teamActivity} />}
-
-          {/* needs attention */}
-          {dashboardVisible("needsAttention") && <HomeNeedsAttention alerts={alerts} />}
-        </div>
+      {/* The Home dashboard is a configured widget surface: settings control
+          visibility, order, and size; this renderer intentionally contains no
+          second fixed JSX ordering to drift from the editor. */}
+      <div className="pkh-widget-grid">
+        {configuredWidgets.map((widget) => (
+          <div key={widget.key} className={`pkh-widget-${widget.width}`}>
+            {widgetNodes[widget.key]}
+          </div>
+        ))}
       </div>
 
       {/* ===== stage sheet ===== */}

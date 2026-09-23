@@ -62,6 +62,7 @@ import {
   syncQuoteMirror,
 } from "@/lib/design/grid-options";
 import { DEFAULT_SETTINGS, DEMO_COLLECTIONS } from "@/db/seed-data";
+import { defaultDashboardLayout, resolveDashboardLayout } from "@/lib/dashboard-layout";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "@/db/doc-tables";
 import { PARTNER_TYPES, baseVenueKind } from "@/lib/identity/venue-defaults";
 import { VENDOR_COMPANY_TYPE, isVendorType } from "@/lib/identity/config";
@@ -1825,6 +1826,15 @@ ok(safeName("///") === "file", "a name with nothing usable falls back to 'file'"
 
 /* --- Quartzite-6 rebrand (D117): gold default accent --- */
 ok(DEFAULT_SETTINGS.accent === "#b08d4a", "default accent is Q-6 gold (D117)");
+const dashLayout = defaultDashboardLayout();
+const dashResolved = resolveDashboardLayout(dashLayout, {
+  version: 1,
+  hidden: ["calendar"],
+  order: ["catalog", "stats"],
+  widths: { catalog: "third" },
+});
+ok(dashResolved.widgets[0].key === "catalog" && dashResolved.widgets[0].width === "third", "dashboard settings reorder and resize widgets");
+ok(dashResolved.widgets.find((w) => w.key === "calendar")?.visible === false, "dashboard settings hide a widget");
 
 /* --- Quartzite-6 rebrand (D117): adaptive accent-contrast text --- */
 ok(accentContrast("#b08d4a") === "#16181b", "gold accent carries near-black text (D117)");
