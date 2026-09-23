@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import {
   getProject,
@@ -24,7 +25,12 @@ export async function toggleFieldTask(formData: FormData): Promise<void> {
   const taskId = String(formData.get("taskId") || "");
   const done = String(formData.get("done") || "") === "1";
   if (!taskId) return;
-  await setTaskStatus(taskId, done ? "done" : "open");
+  try {
+    await setTaskStatus(taskId, done ? "done" : "open");
+  } catch (error) {
+    console.error("toggleFieldTask failed", error);
+    redirectFieldError("Couldn’t update that task — please try again.", formData);
+  }
   revalidatePath("/", "layout");
 }
 
@@ -57,7 +63,12 @@ export async function postFieldNote(formData: FormData): Promise<void> {
   if (!id || !text) return;
   const p = await getProject(id);
   if (!p) return;
-  await addNote(id, me.name, text, null);
+  try {
+    await addNote(id, me.name, text, null);
+  } catch (error) {
+    console.error("postFieldNote failed", error);
+    redirectFieldError("Couldn’t save that note — please try again.", formData);
+  }
   revalidatePath("/", "layout");
 }
 
@@ -70,6 +81,16 @@ export async function logFieldTime(formData: FormData): Promise<void> {
   if (!id || !(hours > 0)) return;
   const p = await getProject(id);
   if (!p) return;
-  await addTime(id, me.name, hours, note);
+  try {
+    await addTime(id, me.name, hours, note);
+  } catch (error) {
+    console.error("logFieldTime failed", error);
+    redirectFieldError("Couldn’t save that time entry — please try again.", formData);
+  }
   revalidatePath("/", "layout");
+}
+
+function redirectFieldError(message: string, formData: FormData): never {
+  const id = String(formData.get("id") || "");
+  redirect(`/field-work${id ? `?id=${encodeURIComponent(id)}&` : "?"}err=${encodeURIComponent(message)}`);
 }

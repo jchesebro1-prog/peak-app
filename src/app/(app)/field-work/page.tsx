@@ -349,7 +349,7 @@ export default async function FieldWorkPage({
     return (
       <div style={{ maxWidth: 560, margin: "0 auto", padding: "18px 16px 80px" }}>
         <style>{CSS}</style>
-        <ActionError message={projectSync.skipped.length ? `Some won quotes could not be reconciled into Field Work (${projectSync.skipped.join(", ")}). Refresh later or contact an administrator.` : undefined} />
+        <ActionError message={one(sp.err) || (projectSync.skipped.length ? `Some won quotes could not be reconciled into Field Work (${projectSync.skipped.join(", ")}). Refresh later or contact an administrator.` : undefined)} />
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-.015em", marginRight: "auto" }}>
@@ -421,7 +421,7 @@ export default async function FieldWorkPage({
 
   return (
     <>
-      <ActionError message={projectSync.skipped.length ? `Some won quotes could not be reconciled into Field Work (${projectSync.skipped.join(", ")}). Refresh later or contact an administrator.` : undefined} />
+      <ActionError message={one(sp.err) || (projectSync.skipped.length ? `Some won quotes could not be reconciled into Field Work (${projectSync.skipped.join(", ")}). Refresh later or contact an administrator.` : undefined)} />
       <FieldWorkDetail
         project={p}
         tasks={jobTasks}
