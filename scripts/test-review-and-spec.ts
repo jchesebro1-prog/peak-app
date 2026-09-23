@@ -5007,6 +5007,46 @@ async function asyncChecks(): Promise<void> {
       await softDeleteDoc("catalog_parts", "TEST:PORTS-1");
     }
   }
+
+  /* --- #158 Task 5: a part edited through the form is wireable in The Grid --- */
+  {
+    const { mergeUpsert, get: getCatalogPart } = await import("@/lib/stores/catalog");
+    const { parsePortsField } = await import("@/lib/catalog-ports");
+    const { validateDeviceWire } = await import("@/lib/catalog-connect");
+
+    const amp = parsePortsField(JSON.stringify([{ name: "Speaker out", direction: "out", connectionType: "speakON NL4", count: 4 }]));
+    const box = parsePortsField(JSON.stringify([{ name: "Input", direction: "in", connectionType: "speakON NL4" }]));
+    const hdmi = parsePortsField(JSON.stringify([{ name: "HDMI in", direction: "in", connectionType: "HDMI" }]));
+    ok(amp.ok && box.ok && hdmi.ok, "ports/wire: fixtures parse");
+    if (amp.ok && box.ok && hdmi.ok) {
+      try {
+        await mergeUpsert("TEST:AMP", { desc: "Test amp", category: "Audio Controls", unit: "ea", list: 1, cost: 1, ports: amp.ports });
+        await mergeUpsert("TEST:SPK", { desc: "Test speaker", category: "Speakers", unit: "ea", list: 1, cost: 1, ports: box.ports });
+        await mergeUpsert("TEST:TV", { desc: "Test display", category: "Video", unit: "ea", list: 1, cost: 1, ports: hdmi.ports });
+
+        const a = await getCatalogPart("TEST:AMP");
+        const s = await getCatalogPart("TEST:SPK");
+        const t = await getCatalogPart("TEST:TV");
+
+        const good = validateDeviceWire({ ports: a?.ports || [] }, { ports: s?.ports || [] });
+        ok(good.ok === true, "ports/wire: a part edited through the form wires to a compatible part");
+        if (good.ok) ok(good.connectionType === "speakON NL4", "ports/wire: the route stamps the shared connection type");
+
+        const bad = validateDeviceWire({ ports: a?.ports || [] }, { ports: t?.ports || [] });
+        ok(bad.ok === false, "ports/wire: an incompatible pair is still refused");
+
+        const countKept = (a?.ports || [])[0]?.count === 4;
+        ok(countKept, "ports/wire: a multi-port count survives the store round trip");
+      } finally {
+        // Teardown: same idiom as the #158 Task 2 cleanup just above — remove
+        // all three fixtures regardless of how far setup got, so a throw
+        // mid-block doesn't leave them behind in the catalog store.
+        await softDeleteDoc("catalog_parts", "TEST:AMP");
+        await softDeleteDoc("catalog_parts", "TEST:SPK");
+        await softDeleteDoc("catalog_parts", "TEST:TV");
+      }
+    }
+  }
 }
 
 /* --- Venue Assessments: class model --- */
