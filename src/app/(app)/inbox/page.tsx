@@ -478,9 +478,12 @@ export default async function InboxPage({
       categoryColor: cat?.color || "",
       categoryLabel: cat?.label || "",
       labels: labelOptions
-        .filter((l) => l.type === "user")
+        // System labels are useful context too (e.g. Starred, Important,
+        // Sent); Gmail's inbox/sent/draft routing labels are omitted because
+        // the folder already communicates them.
+        .filter((l) => l.type === "user" || !["INBOX", "SENT", "DRAFT", "TRASH", "SPAM", "ALL_MAIL"].includes(l.id))
         .filter((l) => (t.messages || []).some((m) => (m.gmailLabelIds || []).includes(l.id)))
-        .slice(0, 3),
+        .slice(0, 4),
       name: nm,
       msgCount: (t.messages || []).length,
       messagePreviews: (t.messages || []).slice(-8).map((m) => ({
@@ -490,6 +493,7 @@ export default async function InboxPage({
         out: m.direction === "out",
       })),
       participants: participantsFor(t),
+      lastResponder: (t.messages || []).at(-1)?.author || t.contactName || "Unknown",
       subject: t.subject || "(no subject)",
       snippet: snip,
       time: timeAgo(t.updatedAt),

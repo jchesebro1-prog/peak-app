@@ -97,6 +97,8 @@ export type ThreadRowVM = {
   messagePreviews: Array<{ author: string; time: string; snippet: string; out: boolean }>;
   /** unique message authors beyond a single-author thread, e.g. "Jeff, Sarah +1"; "" when <= 1 author */
   participants: string;
+  /** Compact last-responder context for scanning a busy thread list. */
+  lastResponder: string;
   subject: string;
   snippet: string;
   time: string;

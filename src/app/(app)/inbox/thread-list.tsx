@@ -679,6 +679,11 @@ function Row({
         >
           {r.snippet}
         </span>
+        {r.msgCount > 1 && r.lastResponder && (
+          <span style={{ display: "block", fontSize: 10.5, color: "#b0b5bf", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            Last reply: {r.lastResponder}
+          </span>
+        )}
         {r.labels.length > 0 && (
           <span style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
             {r.labels.map((label) => (
