@@ -83,6 +83,13 @@ export default function PortsEditor({ initial }: { initial: Port[] }) {
             onChange={(e) => patch(i, { connectionType: e.target.value })}
             style={cell}
           >
+            {/* A new row starts on this placeholder, not a real connection
+                type (D189 follow-up) — a stray "+ Add port" click must not
+                manufacture a wireable-but-wrong `powerCON/True1` input with
+                zero typing. The server already refuses "" (not a member of
+                CONNECTION_TYPES), so the row can't be saved without a
+                deliberate choice. */}
+            <option value="" disabled>Choose a connection type…</option>
             {CONNECTION_TYPES.map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}
@@ -121,7 +128,7 @@ export default function PortsEditor({ initial }: { initial: Port[] }) {
 
       <button
         type="button"
-        onClick={() => setRows((r) => [...r, { name: "", direction: "in", connectionType: CONNECTION_TYPES[0] }])}
+        onClick={() => setRows((r) => [...r, { name: "", direction: "in", connectionType: "" }])}
         style={{ ...cell, width: "auto", cursor: "pointer", fontWeight: 600, color: "#3d424e", marginTop: 2 }}
       >
         + Add port

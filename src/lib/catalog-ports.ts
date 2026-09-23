@@ -68,6 +68,21 @@ export function parsePortsField(raw: unknown): PortsParse {
         return { ok: false, error: `${where}: count must be a whole number of 1 or more.` };
       if (count !== 1) port.count = count;
     }
+
+    // Two ports with the same name + direction + connectionType are
+    // meaningless, and the Grid's device inspector keys its port list on
+    // `${port.name}-${port.connectionType}` — shipped code that assumes
+    // uniqueness, so a duplicate collides there. Refuse loudly, same as
+    // every other malformed row above, rather than silently storing it.
+    const dupIndex = ports.findIndex(
+      (p) => p.name === port.name && p.direction === port.direction && p.connectionType === port.connectionType
+    );
+    if (dupIndex !== -1)
+      return {
+        ok: false,
+        error: `${where}: "${port.name || "(unnamed)"}" (${port.direction}, ${port.connectionType}) duplicates Port ${dupIndex + 1}.`,
+      };
+
     ports.push(port);
   }
   return { ok: true, ports };
