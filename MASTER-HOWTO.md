@@ -90,6 +90,12 @@ And now the whole **Installs** side + **General** tools (Phase 5):
   (paste-CSV import with preview→confirm; CSV/JSON export + blank templates).
 - **Reports** — Sales (pipeline, win rate, top customers, by-estimator) and
   Installs (backlog, billing forecast, margin, completion timeline) dashboards.
+- **Home and Reports dashboards** — click **Customize** to add a curated widget, move it up or
+  down, or remove it; **Done** saves your personal layout, while **Reset to default** restores the
+  role-appropriate starting layout. When a dashboard includes a historical widget, its Quarter,
+  6 months, and 12 months range chips apply to every historical widget on that page; forward-looking
+  widgets always show their next 12 months. Layouts live in your per-user dashboard preference row,
+  so changing yours never changes anyone else's.
 - **Estimating Rules** — edit every rate & formula the estimators run on, with
   live/reference tags, defaults, reset, and CSV/JSON export.
 - **Settings** now also manages office **Locations** (travel origins) and each

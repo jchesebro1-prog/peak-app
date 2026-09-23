@@ -37,10 +37,9 @@ export default async function WidgetHost({
 
   const rendered = await Promise.all(
     ids.map(async (id) => {
-      const render = RENDERERS[id];
       let body: ReactNode;
       try {
-        body = render ? await render(ctx) : <Note text="This widget is not available yet." />;
+        body = await RENDERERS[id](ctx);
       } catch (err) {
         console.error("[dashboard] widget failed:", id, err);
         body = <Note text="Couldn't load this widget." />;

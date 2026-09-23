@@ -457,7 +457,9 @@ common contract, then building a per-user layout store. **Suggest phase 1 = five
 landing pages** (Design Studio's overview as the pattern) **with no customization at all**,
 which delivers the navigation win immediately and defers C/D.
 
-**Status:** OPEN — needs A–E
+**Status:** SUPERSEDED BY #43 — Wave A supplies the shared, per-user Home/Reports widget system;
+the separate section landing-page/navigation idea is not carried forward as a competing dashboard
+plan.
 
 ---
 
@@ -3203,7 +3205,7 @@ sort (was always waiting-first) — flag to Jeff if unwanted.
 
 ---
 
-## 43. Reports + Home rebuilt as BUILD-YOUR-OWN widget system — PARTIAL (supersedes #7)
+## 43. Reports + Home rebuilt as BUILD-YOUR-OWN widget system — WAVE A DONE (supersedes #7)
 
 **Area:** Reports, Home.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
@@ -3221,10 +3223,16 @@ PREREQUISITE** (expected install window per quote); stage-default weights + per-
 category→trade mapping (no explicit Rigging category — resolved by #39's mapping table).
 **Supersedes #7** — reconcile in the Daylite-parity design.
 
-**Status:** PARTIAL 2026-09-23 — Home now renders from the saved company/personal widget layout
-and exposes a global timeframe selector for historical metrics; the forward-looking pipeline stays
-outside the historical filter. Remaining registry unification with Reports, role presets/gates,
-capacity bands, trade mix, and scheduled-load widgets still depend on the broader #39/#41 work.
+**Status:** WAVE A DONE 2026-09-23 — one curated registry now powers Home and Reports, with
+per-user layouts, role gates, gallery add/remove/reorder controls, fixed-size auto-flow cells, and
+the shared historical range selector. Home's existing cards and the existing Reports panels are
+all registry widgets; the first backward widgets ship too: total quoted, average margin, projected
+profit, open projects, backlog, and equipment sold with category-to-item drill-down.
+
+**Deferred to the next wave:** #15's quote install timeframe; the pipeline/capacity widget
+(`capacity_bands`, catalog-category trade split, stage weights, and sits-awhile timing); the
+scheduled-load widget; and an Installer preset. Those need #15 plus the #39 trade mapping data and
+are deliberately not approximated in this wave.
 
 ---
 

@@ -4497,3 +4497,27 @@ docs); whole-project device counts on the `/design` orphan list and the revision
 the Rigging Scope target of $1.8M for a 46 ft Auditorium is pre-existing D139 engine math
 to check.
 
+## D187. Dashboard Widget System Wave A uses a curated registry and per-user layouts (#43, 2026-09-23)
+
+Home and Reports now draw from one curated widget registry, rather than a query builder: every
+widget has a fixed tile/half/full size, a timeframe contract, and an optional permission gate.
+Home moves from its hand-written columns to that fixed-size grid; `KpiTile` is the shared metric
+primitive, while the greeting and stage sheet remain Home chrome rather than widgets. A complete
+`Record<WidgetId, WidgetRenderer>` now makes TypeScript reject a registry id with no renderer.
+
+Layouts live in the `blobs` row `dashboard_layouts:<userId>`, with `home` and `reports` keys holding
+`string[] | null`; `null` restores the role-filtered preset. The `approve` gate protects margin and
+profit widgets, so Estimators do not see Avg. margin or Margin at completion. Editing is URL state
+(`?customize=1`) with gallery add, up/down reorder, remove, and reset controls — no drag-and-drop.
+
+`?range=qtr|6m|12m` is shared by both surfaces and applies only to history widgets; the prior
+Reports `?view=`/`?ir=` state is gone. Forward widgets always cover the next 12 months. Projected
+profit is open-book value times projected margin; Open projects means scheduled/on-site work,
+whereas Backlog means sold work still in procurement/delivery. Equipment sold counts won quote
+lines by catalog category, then drills into items, with uncatalogued lines kept as custom rather
+than guessed.
+
+Deferred to the next wave: #15's quote install timeframe, the pipeline/capacity widget (capacity
+bands, catalog trade split, stage weights, and sits-awhile timing), the scheduled-load widget, and
+an Installer preset. Those need #15 and #39's trade mapping data, so Wave A does not invent a
+partial approximation.

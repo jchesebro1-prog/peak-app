@@ -5,9 +5,8 @@ import { INSTALLS_RENDERERS } from "./widgets/installs";
 import { SALES_RENDERERS } from "./widgets/sales";
 import { BACKWARD_RENDERERS } from "./widgets/backward";
 
-/** #43 — id → renderer. Partial until every widget file lands (Task 9 makes
- *  it a full Record so tsc enforces completeness from then on). */
-export const RENDERERS: Partial<Record<WidgetId, WidgetRenderer>> = {
+/** #43 — id → renderer. The full Record makes tsc enforce registry coverage. */
+export const RENDERERS: Record<WidgetId, WidgetRenderer> = {
   ...HOME_RENDERERS,
   ...SALES_RENDERERS,
   ...INSTALLS_RENDERERS,
