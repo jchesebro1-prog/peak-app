@@ -258,11 +258,16 @@ export async function updateTaskAction(formData: FormData) {
 /** Apply a reusable task-template set (D149, #118) to this project — thin
  *  FormData wrapper over task-templates.ts's applyTaskTemplate(), mirroring
  *  addTaskAction's own no-op-on-bad-input convention above. */
-export async function applyProjectTemplateAction(formData: FormData) {
+export async function applyProjectTemplateAction(formData: FormData): Promise<{ ok: true } | { ok: false; error: string } | void> {
   const me = await requireUser();
   const projectId = String(formData.get("id") || "");
   const setId = String(formData.get("setId") || "");
   if (!projectId || !setId) return;
-  await applyTaskTemplate(setId, { kind: "project", id: projectId }, me);
+  try {
+    await applyTaskTemplate(setId, { kind: "project", id: projectId }, me);
+  } catch (error) {
+    console.error("applyProjectTemplateAction: task template failed", error);
+    return { ok: false, error: error instanceof Error ? error.message : "Couldn’t apply that template — please try again." };
+  }
   revalidatePath("/", "layout");
 }

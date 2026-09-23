@@ -226,11 +226,16 @@ export async function updateDesignTaskAction(formData: FormData) {
 
 /** Apply a reusable task-template set (D149, #118) to this design — thin
  *  FormData wrapper over task-templates.ts's applyTaskTemplate(). */
-export async function applyDesignTemplateAction(formData: FormData) {
+export async function applyDesignTemplateAction(formData: FormData): Promise<{ ok: true } | { ok: false; error: string } | void> {
   const me = await requireUser();
   const designId = String(formData.get("designId") || "");
   const setId = String(formData.get("setId") || "");
   if (!designId || !setId) return;
-  await applyTaskTemplate(setId, { kind: "design", id: designId }, me);
+  try {
+    await applyTaskTemplate(setId, { kind: "design", id: designId }, me);
+  } catch (error) {
+    console.error("applyDesignTemplateAction: task template failed", error);
+    return { ok: false, error: error instanceof Error ? error.message : "Couldn’t apply that template — please try again." };
+  }
   revalidatePath("/design/designs");
 }

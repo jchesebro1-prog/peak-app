@@ -1105,11 +1105,16 @@ export async function updateQuoteTaskAction(formData: FormData) {
 /** Apply a reusable task-template set (D149, #118) to this quote — thin
  *  FormData wrapper over task-templates.ts's applyTaskTemplate(), same
  *  no-op-on-bad-input convention as addQuoteTaskAction above. */
-export async function applyQuoteTemplateAction(formData: FormData) {
+export async function applyQuoteTemplateAction(formData: FormData): Promise<{ ok: true } | { ok: false; error: string } | void> {
   const me = await requireUser();
   const quoteId = String(formData.get("quoteId") || "");
   const setId = String(formData.get("setId") || "");
   if (!quoteId || !setId) return;
-  await applyTaskTemplate(setId, { kind: "quote", id: quoteId }, me);
+  try {
+    await applyTaskTemplate(setId, { kind: "quote", id: quoteId }, me);
+  } catch (error) {
+    console.error("applyQuoteTemplateAction: task template failed", error);
+    return { ok: false, error: error instanceof Error ? error.message : "Couldn’t apply that template — please try again." };
+  }
   revalidatePath("/", "layout");
 }
