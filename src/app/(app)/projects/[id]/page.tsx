@@ -37,7 +37,7 @@ export default async function ProjectDetailPage({
 
   return (
     <>
-      <ActionError message={one(sp.err)} />
+      <ActionError message={one(sp.err) || (data.syncSkipped.length ? `Some won quotes could not be reconciled into Projects (${data.syncSkipped.join(", ")}). Refresh later or contact an administrator.` : undefined)} />
       <ProjectsView
         projects={projects}
         pending={pending}

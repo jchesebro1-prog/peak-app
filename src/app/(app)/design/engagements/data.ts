@@ -55,13 +55,14 @@ export type ConsultingData = {
   visits: VisitLite[];
   /** Every customer + its venues, for the manual-project modal (#135). */
   customers: CustomerLite[];
+  syncSkipped: string[];
 };
 
 export async function loadConsultingData(): Promise<ConsultingData> {
   // #35 safety net (the projects data.ts idiom): estimator/inbox/home status
   // paths never run the quote→engagement syncs, so every consulting load
   // sweeps first — sent proposals appear, wins advance, lost proposals close.
-  await syncEngagementsFromQuotes();
+  const sync = await syncEngagementsFromQuotes();
   const [engagements, quotes, designs, users, settings, visits, customerDocs] = await Promise.all([
     allEngagements(),
     getAllQuotes(),
@@ -127,5 +128,6 @@ export async function loadConsultingData(): Promise<ConsultingData> {
         .filter((l) => l.id),
       contactNames: (c.contacts || []).map((ct) => ct.name),
     })),
+    syncSkipped: sync.skipped,
   };
 }

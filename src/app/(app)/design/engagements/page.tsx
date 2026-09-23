@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { loadConsultingData } from "./data";
 import { ConsultingView } from "./view";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Consulting — Quartzite-6" };
 
@@ -27,5 +28,10 @@ export default async function ConsultingPage({
   ]);
   const id = one(sp.id);
   if (id) redirect("/design/engagements/" + encodeURIComponent(id));
-  return <ConsultingView data={data} sel={null} tab="overview" />;
+  return (
+    <>
+      <ActionError message={data.syncSkipped.length ? `Some consulting quotes could not be reconciled (${data.syncSkipped.join(", ")}). Refresh later or contact an administrator.` : undefined} />
+      <ConsultingView data={data} sel={null} tab="overview" />
+    </>
+  );
 }

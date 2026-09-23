@@ -453,7 +453,7 @@ export async function createFromQuote(qid: string): Promise<FlameJob | null> {
  * Scan accepted (won) flame-test quotes and create any job not made yet.
  * Returns how many jobs were created.
  */
-export async function syncFromQuotes(): Promise<number> {
+export async function syncFromQuotes(): Promise<{ created: number; skipped: string[] }> {
   const jobs = await listDocs<FlameJob>("flame_jobs");
   const have: Record<string, boolean> = {};
   jobs.forEach((j) => {
@@ -464,6 +464,7 @@ export async function syncFromQuotes(): Promise<number> {
     (q) => q.quoteType === "flame_test" && q.status === "won"
   );
   let made = 0;
+  const skipped: string[] = [];
   for (const q of won) {
     if (have[q.id]) continue;
     try {
@@ -478,10 +479,11 @@ export async function syncFromQuotes(): Promise<number> {
       have[q.id] = true;
       made++;
     } catch (error) {
+      skipped.push(q.id);
       console.error(`syncFromQuotes(flame): skipped ${q.id} during page-load reconciliation`, error);
     }
   }
-  return made;
+  return { created: made, skipped };
 }
 
 /** Shallow-merge a patch into a job; bumps updatedAt. */

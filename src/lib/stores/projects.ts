@@ -674,7 +674,7 @@ export async function spawnServiceLinkedProject(
  * Flame-test quotes have their own independent job lifecycle (FlameJobStore)
  * — they must NOT become Installs projects (port of syncFromQuotes).
  */
-export async function syncProjectsFromQuotes(): Promise<number> {
+export async function syncProjectsFromQuotes(): Promise<{ created: number; skipped: string[] }> {
   const skip = await dismissedQuoteIds();
   const projects = await listDocs<ProjectRecord>("projects");
   const haveQ = new Set<string>();
@@ -684,6 +684,7 @@ export async function syncProjectsFromQuotes(): Promise<number> {
     .slice()
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   let made = 0;
+  const skipped: string[] = [];
   const { createAutoTask } = await import("@/lib/stores/tasks");
   for (const q of quotes) {
     // Only install/system quotes become Projects. Repair and inspection wins
@@ -723,10 +724,11 @@ export async function syncProjectsFromQuotes(): Promise<number> {
         dueAt: Date.now() + 7 * DAY, // kickoff within a week of sale; overdue then nags the bell (unassigned until roles model, D87)
       });
     } catch (error) {
+      skipped.push(q.id);
       console.error(`syncProjectsFromQuotes: skipped ${q.id} during page-load reconciliation`, error);
     }
   }
-  return made;
+  return { created: made, skipped };
 }
 
 /** Won quotes that have not been converted yet — the "ready to start" strip (port of pendingConversions). */

@@ -5193,11 +5193,12 @@ itself the thing to revisit instead of patching its error handling?
 **Ties to:** #80 (same throw, third fix shape), #74 (the same page-load sync machinery, documented
 there), #16 (triggers re-running on every page load).
 
-**Status:** PARTIAL 2026-09-23 — the three page-load reconciliation boundaries now catch a
-single quote's mint/sync failure, log the skipped quote, and continue rendering the rest of the
-page instead of surfacing a raw 500. This deliberately does not roll back earlier writes or claim
-transactional behavior; transaction design remains #74. A future pass can add a visible degraded
-state and/or move reconciliation out of render once the product decision is made.
+**Status:** PARTIAL 2026-09-23 — the three reconciliation boundaries catch a single quote's
+mint/sync failure, return skipped quote IDs, and continue rendering the rest of the page instead
+of surfacing a raw 500. Projects and Consulting now render a visible degraded-state banner naming
+the skipped quote IDs; Schedule and Field Work still consume the result only as a best-effort
+sync and need the same banner wiring. This deliberately does not roll back earlier writes or
+claim transactional behavior; transaction design remains #74.
 
 ---
 

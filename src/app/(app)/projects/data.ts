@@ -21,8 +21,9 @@ export async function loadProjectsData(): Promise<{
   taskRows: TaskRecord[];
   people: { id: string; name: string }[];
   templateSets: TaskTemplateSetRecord[];
+  syncSkipped: string[];
 }> {
-  await syncProjectsFromQuotes();
+  const sync = await syncProjectsFromQuotes();
   const [projects, pending, customers, users, templateSets] = await Promise.all([
     getAllProjects(),
     pendingConversions(),
@@ -43,7 +44,7 @@ export async function loadProjectsData(): Promise<{
   }));
   const roster = users.map((u) => u.name);
   const people = users.map((u) => ({ id: u.id, name: u.name }));
-  return { projects, pending, custById, identity, roster, taskRows, people, templateSets };
+  return { projects, pending, custById, identity, roster, taskRows, people, templateSets, syncSkipped: sync.skipped };
 }
 
 /** Normalize a searchParams value to a single string. */

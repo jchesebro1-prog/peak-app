@@ -615,7 +615,7 @@ export async function ensureEngagementForQuote(
  *  awarded), won advances a proposal_sent record to awarded, lost closes a
  *  still-proposal_sent record with a "Proposal lost" decision entry.
  *  Idempotent throughout. Returns the number of records touched. */
-export async function syncEngagementsFromQuotes(): Promise<number> {
+export async function syncEngagementsFromQuotes(): Promise<{ created: number; skipped: string[] }> {
   const engagements = await listDocs<ConsultingEngagement>(
     "consulting_engagements"
   );
@@ -628,6 +628,7 @@ export async function syncEngagementsFromQuotes(): Promise<number> {
   }
   const quotes = await listDocs<QuoteLike>("quotes");
   let changed = 0;
+  const skipped: string[] = [];
   for (const q of quotes) {
     if (q.quoteType !== "consulting") continue;
     const existing = byQuote.get(q.id) || null;
@@ -666,10 +667,11 @@ export async function syncEngagementsFromQuotes(): Promise<number> {
       }
       changed++;
     } catch (error) {
+      skipped.push(q.id);
       console.error(`syncEngagementsFromQuotes: skipped ${q.id} during page-load reconciliation`, error);
     }
   }
-  return changed;
+  return { created: changed, skipped };
 }
 
 /* ---------- manual projects (#135, D155) ---------- */
