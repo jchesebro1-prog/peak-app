@@ -908,6 +908,127 @@ ok(proposeForPart({
 })?.rule.id === "speaker-70v",
   "ruleset: a ceiling speaker describing its own mount hardware is not swallowed by the accessory layer");
 
+/* ---- #159 rule-set review fixes (D199) — every description below is
+   verbatim from the live catalog and was measured wrong before the fix. See
+   .superpowers/sdd/rule-fix-report.md for the before/after counts. ---- */
+
+import { channelCount, portCount } from "@/lib/catalog-port-rules";
+
+// C1: the bare token "amp" is not the word "amplifier". 61 passive EAW/QSC/
+// Fulcrum speakers say "Bi-Amp"/"Tri-amp"/"amp channels" and were being wired
+// as amplifiers — one speakON NL2 INPUT turned into four speakON NL4 OUTPUTS.
+const biAmp = proposeForPart({
+  sku: "EAW:2039611", mfr: "EAW", category: "QX",
+  desc: 'Passive 12" 3-Way Bi-Amp Speaker. 4 x 12" LF, 1 x 2" Exit 3.5" Voice Coil MF and 1 x 2" Exit 1.75" HF. Horz: 90˚ Vert: 60˚. Black',
+});
+ok(biAmp?.rule.id === "speaker-passive",
+  "ruleset: a passive speaker that mentions bi-amping is still a passive speaker");
+ok(biAmp?.ports.length === 1 && biAmp.ports[0].direction === "in" && biAmp.ports[0].connectionType === "speakON NL2",
+  "ruleset: that bi-amp passive speaker gets one speakON NL2 input, not amplifier outputs");
+ok(matchRule({ sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution", desc: "PS16-1, KX2, KX7 16 VCD 1 Amp Power Supply" }) === null,
+  "ruleset: \"1 Amp Power Supply\" is amperes, not an amplifier");
+
+// C3: QSC's CX/ISA power amps never use the word "amplifier" — they were
+// given a 70V speaker INPUT, backwards for a device that drives the line.
+const cx108v = proposeForPart({
+  sku: "QSC:CX108V", mfr: "QSC", category: "Audio",
+  desc: "8 channels, 100 watts/ch at 70V.",
+});
+ok(cx108v?.rule.id === "amplifier",
+  "ruleset: \"8 channels, 100 watts/ch at 70V.\" is a power amplifier, not a 70V speaker");
+ok(cx108v?.ports.find((prt) => prt.name === "Speaker Out")?.count === 8,
+  "ruleset: that power amp's channel count comes from its spec line");
+
+// C2: a device that lists its own bundled hardware is not an accessory.
+ok(proposeForPart({
+  sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution",
+  desc: "Four Channel Dual Mode 70 Volt DSP Amplifier with Dante; includes rack mount",
+})?.rule.id === "amplifier",
+  "ruleset: an amplifier that includes a rack mount is an amplifier, not an accessory");
+ok(matchRule({
+  sku: "QSC:12x", mfr: "QSC", category: "Audio",
+  desc: "Optical Zoom 80° Horizontal Field of View, PTZ Network Camera, PoE, with HDMI and SDI output. Includes PTZ-WMB1 wall mount bracket",
+})?.id === "camera-ptz",
+  "ruleset: a PTZ camera that bundles its own wall bracket is still a camera");
+ok(matchRule({
+  sku: "SHU:X", mfr: "Shure", category: "Audio",
+  desc: "Four--channel receiver. Includes AD4Q, locking power and jumper cables, BNC bulkhead adapter, coaxial antenna, BNC cable assemblies, BNC cable, Ethernet cables, rackmount hardware",
+})?.id === "wireless-receiver",
+  "ruleset: a rack receiver whose box contains cables and an antenna is still a receiver");
+
+// I4: the other side of the same coin — an accessory FOR a speaker is an
+// accessory, and must stay out of the coverage-gap report (D195).
+for (const [desc, mfr, cat] of [
+  ["Cluster Bracket for P4228/P5228 (Connects (2) Speakers)", "RCF", "Audio"],
+  ["Caster Wheel for Subwoofer", "EAW", "RS"],
+  ["Soft padded cover for the KLA181 Subwoofer", "QSC", "Audio"],
+  ["STRIKE Array Flush Bracket", "Chauvet Professional", "STRIKE Series Accessories"],
+] as const) {
+  ok(matchRule({ sku: "T:1", desc, category: cat, mfr })?.accessory === true,
+    `ruleset: "${desc.slice(0, 40)}" is an accessory for a speaker, not a speaker`);
+}
+
+// I1: an RX-only half must not get the TX+RX kit shape — both directions
+// would be inverted — and there is no receive-only shape to invent.
+ok(matchRule({
+  sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution",
+  desc: "HDBaseT (CAT6) RECEIVER ONLY. ICT 18G, 70m 4K (100m HD) Slim Extender with I-Pass, Bi-Directional Power, RS232, IR - ICT for full HDR/HDMI Pass-Through. Full HDR, 4K60 4:4:4.",
+}) === null,
+  "ruleset: a receive-only HDBaseT unit is left unmatched, not given an extender kit's ports");
+ok(matchRule({ sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution", desc: "Power Supply for VIP-UHD-TX/RX (only required if not using PoE)" }) === null,
+  "ruleset: a power supply for an extender is not an extender");
+ok(matchRule({ sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution", desc: "2Ch Audio Extender" }) === null,
+  "ruleset: an audio extender is not an HDMI extender");
+
+// I2: a bare \bmatrix\b stole a wall-plate extender kit on a NEGATION, and
+// gave audio matrices HDMI ports.
+ok(matchRule({
+  sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution",
+  desc: "HDMI Single Gang Decora Style Wall Plate (White) HDBaseT Basic Extender Kit (70M HD 1080p) **These MUST be used as a kit – not for use as a transmitter or receiver for any matrix switch.**",
+})?.id === "av-extender",
+  "ruleset: \"not for use ... for any matrix switch\" does not make a part a matrix");
+ok(matchRule({ sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution", desc: "Audio Distribution 16x16 DSP Matrix" }) === null,
+  "ruleset: an audio matrix is not given HDMI ports");
+
+// I5: `exclude` is only ever tested against desc, so a Chauvet accessory in an
+// "… Series Accessories" category was getting DMX + powerCON regardless.
+ok(matchRule({
+  sku: "CHV:OVE2IRIS", mfr: "Chauvet Professional", category: "Ovation Series Accessories",
+  desc: "Drop-in Iris: Ovation E-2 FC",
+})?.id !== "fixture-led",
+  "ruleset: a Chauvet accessory-category row is not an LED fixture");
+ok(matchRule({
+  sku: "CHV:F2X4", mfr: "Chauvet Professional", category: "F Series",
+  desc: "F2 - SMD LED Video Panel 4-Pack",
+})?.id !== "fixture-led",
+  "ruleset: an SMD LED video panel is fed by a processor, not DMX + powerCON");
+
+// I6: the distribution-amplifier branch was dead while `amplifier` ran first.
+ok(matchRule({ sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution", desc: "48Gbps HDMI scaling distribution amplifier with one input, and four outputs" })?.id === "av-splitter",
+  "ruleset: an HDMI distribution amplifier is a splitter, not an install amplifier");
+
+// I7: the count helpers.
+ok(portCount('2 x 15" Subwoofer', "in", 4) === 4 && portCount('2 x 15" Subwoofer', "out", 4) === 4,
+  "ruleset: a driver complement (2 x 15\") is never read as a port count");
+ok(portCount("40Gbps 8 HDMI input, 8 HDMI output 8K Matrix Switcher", "in", 4) === 8,
+  "ruleset: \"N input ... N output\" prose is read as a port count");
+ok(portCount("18Gbps HDMI 16x16 Matrix w/Audio Deembedding", "out", 4) === 16,
+  "ruleset: an NxM is still read as a port count");
+ok(channelCount("128 Channel Dante amplifier", 4) === 4,
+  "ruleset: a 3-digit channel count falls back instead of reading its last two digits");
+ok(channelCount("2U Sixteen Channel 100 Watt Amplifier", 4) === 16,
+  "ruleset: a word-form channel count is parsed");
+ok(proposeForPart({ sku: "SHU:X", mfr: "Shure", category: "Audio", desc: "Access Point/Charger/DSP - 2 Ch." })?.ports[0].count === 2,
+  "ruleset: a DSP is sized from its stated channel count, not a hardcoded 8x8");
+
+// M1/M2/M4: the negation and RF traps.
+ok(matchRule({ sku: "SHU:UA860V", mfr: "Shure", category: "Audio", desc: "Passive Omnidirectional Antenna" })?.id !== "speaker-passive",
+  "ruleset: a passive RF antenna is not a passive speaker");
+ok(matchRule({ sku: "QSC:X", mfr: "QSC", category: "Audio", desc: '6.5" Two-way surface speaker, 16Ω (no transformer) , 105° conical DMT™ coverage, includes X-Mount™ and weather input cup. Color - Black.' })?.id !== "speaker-70v",
+  "ruleset: \"(no transformer)\" does not make a speaker a 70V speaker");
+ok(matchRule({ sku: "QSC:X", mfr: "QSC", category: "Audio", desc: '4" Full-range, low-profile ceiling-mount network loudspeaker, PoE/PoE+ powered. Includes C-ring and tile rails. Color - White.' })?.id !== "speaker-powered",
+  "ruleset: a PoE-powered network loudspeaker is not given a mains inlet");
+
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
 import type { Annotation } from "@/lib/annotations";
