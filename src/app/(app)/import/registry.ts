@@ -181,6 +181,44 @@ export function catalogPatch(
 ): Partial<Omit<Catalog.CatalogPart, "id" | "sku">> {
   const e = ex ?? {};
   const mfr = str(v.mfr) || str(e.mfr);
+  const existingMetadata = (e.productMetadata || undefined) as Catalog.CatalogProductMetadata | undefined;
+  const metadata: Catalog.CatalogProductMetadata = { ...(existingMetadata || {}) };
+  let hasMetadata = false;
+  const productFamily = str(v.productFamily);
+  const specSection = str(v.specSection);
+  const specArticle = str(v.specArticle);
+  const specLanguageKey = str(v.specLanguageKey);
+  const researchStatus = str(v.researchStatus) as Catalog.CatalogProductMetadata["researchStatus"];
+  if (productFamily) { metadata.productFamily = productFamily; hasMetadata = true; }
+  if (specSection) { metadata.specSection = specSection; hasMetadata = true; }
+  if (specArticle) { metadata.specArticle = specArticle; hasMetadata = true; }
+  if (specLanguageKey) { metadata.specLanguageKey = specLanguageKey; hasMetadata = true; }
+  if (["unverified", "needs-review", "researched"].includes(researchStatus || "")) {
+    metadata.researchStatus = researchStatus;
+    hasMetadata = true;
+  }
+  const source: NonNullable<Catalog.CatalogProductMetadata["source"]> = { ...(existingMetadata?.source || {}) };
+  const manufacturerUrl = str(v.manufacturerUrl);
+  const sourceDocumentName = str(v.sourceDocumentName);
+  const sourceDocumentDate = isoToMs(str(v.sourceDocumentDate));
+  if (manufacturerUrl) { source.manufacturerUrl = manufacturerUrl; hasMetadata = true; }
+  if (sourceDocumentName) { source.sourceDocumentName = sourceDocumentName; hasMetadata = true; }
+  if (sourceDocumentDate != null) { source.sourceDocumentDate = sourceDocumentDate; hasMetadata = true; }
+  if (hasMetadata || Object.keys(source).length > 0) metadata.source = source;
+  const docs = [...(existingMetadata?.datasheets || [])];
+  const addSourceDoc = (kind: "datasheet" | "guide-spec", url: string) => {
+    const index = docs.findIndex((doc) => doc.kind === kind);
+    const fileName = sourceDocumentName || url.split("/").pop()?.split("?")[0] || `${sku}-${kind}.pdf`;
+    const doc = { kind, fileName, sourceUrl: url } as const;
+    if (index >= 0) docs[index] = { ...docs[index], ...doc };
+    else docs.push(doc);
+    hasMetadata = true;
+  };
+  const datasheetUrl = str(v.datasheetUrl);
+  const guideSpecUrl = str(v.guideSpecUrl);
+  if (datasheetUrl) addSourceDoc("datasheet", datasheetUrl);
+  if (guideSpecUrl) addSourceDoc("guide-spec", guideSpecUrl);
+  if (docs.length && hasMetadata) metadata.datasheets = docs;
   return {
     desc: str(v.desc) || str(e.desc) || sku,
     category: str(v.category) || str(e.category) || "Uncategorized",
@@ -191,6 +229,7 @@ export function catalogPatch(
     ...(str(v.manufacturerPartNumber) ? { manufacturerPartNumber: str(v.manufacturerPartNumber) } : {}),
     ...(str(v.manufacturerModelNumber) ? { manufacturerModelNumber: str(v.manufacturerModelNumber) } : {}),
     ...(v.mapPrice !== undefined ? { mapPrice: num(v.mapPrice) } : {}),
+    ...(hasMetadata ? { productMetadata: metadata } : {}),
   };
 }
 
@@ -1038,6 +1077,16 @@ const WRITERS: Record<string, Writer> = {
         manufacturerPartNumber: p.manufacturerPartNumber || "",
         manufacturerModelNumber: p.manufacturerModelNumber || "",
         mapPrice: p.mapPrice ?? "",
+        productFamily: p.productMetadata?.productFamily || "",
+        specSection: p.productMetadata?.specSection || "",
+        specArticle: p.productMetadata?.specArticle || "",
+        specLanguageKey: p.productMetadata?.specLanguageKey || "",
+        researchStatus: p.productMetadata?.researchStatus || "",
+        manufacturerUrl: p.productMetadata?.source?.manufacturerUrl || "",
+        datasheetUrl: p.productMetadata?.datasheets?.find((d) => d.kind === "datasheet")?.sourceUrl || "",
+        guideSpecUrl: p.productMetadata?.datasheets?.find((d) => d.kind === "guide-spec")?.sourceUrl || "",
+        sourceDocumentName: p.productMetadata?.source?.sourceDocumentName || "",
+        sourceDocumentDate: p.productMetadata?.source?.sourceDocumentDate ? isoOf(p.productMetadata.source.sourceDocumentDate) : "",
       }));
     },
   },

@@ -3136,7 +3136,12 @@ metadata shape. The read endpoints also apply a process-local 120-request/minute
 depend on Jeff's #39 starter-set review; the API's final production hardening still needs
 organization-scoped hashed/revocable token management and a decision on expiring external
 datasheet links (the current bearer token is an environment-gated first slice and datasheet URLs
-remain Peak-session protected).
+remain Peak-session protected). The shared CSV Import/Export catalog writer now round-trips
+product family, CSI/spec section and article, spec-language key, research status,
+manufacturer URL, datasheet/guide-spec URLs, and source document provenance while preserving
+existing metadata on sparse re-imports. These URLs are provenance pointers, not private Blob
+attachments; actual catalog population, richer raster/PDF drawings, organization-scoped API
+tokens, and expiring external links remain open.
 
 ---
 

@@ -4174,6 +4174,19 @@ async function asyncChecks(): Promise<void> {
     ok(vprep.stats.invalid === 1, "#81 …and is counted as needing attention");
     ok(Number(vprep.rows[0].values.list) === 1899.5, "#81 list price coerces to a number");
 
+    const metadataCsv = [
+      "SKU,Description,Manufacturer,Product Family,Spec Section,Spec Article,Spec Language Key,Research Status,Manufacturer URL,Datasheet URL,Guide Spec URL,Source Document Name,Source Document Date",
+      "META-1,Metadata test,ETC,Source Four LED,11 61 13,Stage Lighting Instruments,lighting.instrument,researched,https://etcconnect.com,https://example.com/data.pdf,https://example.com/guide.pdf,ETC guide.pdf,2026-01-15",
+    ].join("\n");
+    const mp = parseImportCsv(metadataCsv);
+    const mprep = prepareRows(mp.rows, autoMap(mp.headers, catType.fields), catType.fields);
+    const metadataPatch = catalogPatch(mprep.rows[0].values, null, "META-1");
+    ok(metadataPatch.productMetadata?.productFamily === "Source Four LED", "#40 catalog CSV maps product family metadata");
+    ok(metadataPatch.productMetadata?.specSection === "11 61 13" && metadataPatch.productMetadata?.specArticle === "Stage Lighting Instruments", "#40 catalog CSV maps spec identity metadata");
+    ok(metadataPatch.productMetadata?.researchStatus === "researched" && typeof metadataPatch.productMetadata?.source?.sourceDocumentDate === "number", "#40 catalog CSV maps research status and provenance date");
+    ok(metadataPatch.productMetadata?.datasheets?.some((d) => d.kind === "datasheet" && d.sourceUrl === "https://example.com/data.pdf") === true, "#40 catalog CSV maps datasheet source URL");
+    ok(metadataPatch.productMetadata?.datasheets?.some((d) => d.kind === "guide-spec" && d.sourceUrl === "https://example.com/guide.pdf") === true, "#40 catalog CSV maps guide spec source URL");
+
     const noMfr = parseImportCsv(["Part Number,Description,MSRP", "S4LED-S2,Source Four LED Series 2,1899.50"].join("\n"));
     const noMfrPrep = prepareRows(noMfr.rows, autoMap(noMfr.headers, catType.fields), catType.fields);
     ok(
