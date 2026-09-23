@@ -6940,6 +6940,8 @@ ok(bareLine145.startPct === 0 && bareLine145.lengthPct === 100, "#145 an unmeasu
 const clampedLine145 = normalizeTemplateLine({ title: "x", startPct: -5, lengthPct: 500 });
 ok(clampedLine145.startPct === 0 && clampedLine145.lengthPct === 100, "#145 out-of-range template percentages are clamped at normalize, not at render");
 ok(normalizeTemplateLine({ title: "x", discipline: " Rigging " }).discipline === "rigging", "#145 a discipline is stored lowercased and trimmed so selectLines matches it");
+const phaseCase145 = "Design Development";
+ok(normalizeTemplateLine({ title: "x", phase: ` ${phaseCase145} ` }).phase === phaseCase145, "#156 phase casing survives normalization and repeated export/import cycles");
 
 /* ---- #145 T3: a non-numeric percentage falls back rather than becoming NaN ---- */
 ok(normalizeTemplateLine({ title: "x", startPct: "abc" }).startPct === 0, "#145 a non-numeric startPct string falls back to 0 rather than becoming NaN");
