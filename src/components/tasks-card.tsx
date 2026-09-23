@@ -1,6 +1,7 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import type { TaskRecord, TaskStatus } from "@/lib/stores/tasks";
 
 /**
@@ -33,6 +34,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 };
 
 const ACCENT = "var(--accent)";
+type ActionResult = { ok: true } | { ok: false; error: string } | void;
 
 function isRowOverdue(t: Pick<TaskRecord, "dueAt" | "status">): boolean {
   return !!t.dueAt && t.status !== "done" && t.dueAt < Date.now();
@@ -92,13 +94,15 @@ export function TasksCard({
   parentId: string;
   tasks: TaskRecord[];
   people: { id: string; name: string }[];
-  addAction: (formData: FormData) => void | Promise<void>;
+  addAction: (formData: FormData) => ActionResult | Promise<ActionResult>;
   setStatusAction: (formData: FormData) => void | Promise<void>;
   updateAction: (formData: FormData) => void | Promise<void>;
   /** Placeholder section for a new task — "Install" fits project work,
    *  quotes pass something that fits a review checklist instead. */
   defaultSection?: string;
 }) {
+  const router = useRouter();
+  const [addError, setAddError] = useState<string | null>(null);
   const groupsMap: Record<string, TaskRecord[]> = {};
   const order: string[] = [];
   for (const t of tasks) {
@@ -212,7 +216,18 @@ export function TasksCard({
       ))}
 
       <form
-        action={addAction}
+        onSubmit={async (event: FormEvent<HTMLFormElement>) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          setAddError(null);
+          const result = await addAction(new FormData(form));
+          if (result && !result.ok) {
+            setAddError(result.error);
+            return;
+          }
+          form.reset();
+          router.refresh();
+        }}
         style={{
           display: "flex",
           alignItems: "center",
@@ -223,6 +238,11 @@ export function TasksCard({
           flexWrap: "wrap",
         }}
       >
+        {addError && (
+          <div role="alert" style={{ flex: "1 0 100%", color: "#b4543a", fontSize: 11.5 }}>
+            {addError}
+          </div>
+        )}
         <input type="hidden" name={parentField} value={parentId} />
         <input
           type="text"

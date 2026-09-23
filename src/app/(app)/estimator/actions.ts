@@ -1044,7 +1044,7 @@ export async function travelForSelectionAction(
    (they only ever touch taskId), so only "add" needs a quote-specific
    version — it writes quoteId instead of projectId. */
 
-export async function addQuoteTaskAction(formData: FormData) {
+export async function addQuoteTaskAction(formData: FormData): Promise<{ ok: true } | { ok: false; error: string } | void> {
   const me = await requireUser();
   const quoteId = String(formData.get("quoteId") || "");
   const title = String(formData.get("title") || "").trim();
@@ -1055,17 +1055,22 @@ export async function addQuoteTaskAction(formData: FormData) {
   const assigneeName = assigneeUserId
     ? (await activeUsers()).find((u) => u.id === assigneeUserId)?.name || ""
     : "";
-  await createTask(
-    {
-      title,
-      section,
-      quoteId,
-      assigneeUserId,
-      assigneeName,
-      dueAt: due ? new Date(due + "T12:00:00").getTime() : null,
-    },
-    me
-  );
+  try {
+    await createTask(
+      {
+        title,
+        section,
+        quoteId,
+        assigneeUserId,
+        assigneeName,
+        dueAt: due ? new Date(due + "T12:00:00").getTime() : null,
+      },
+      me
+    );
+  } catch (error) {
+    console.error("addQuoteTaskAction: task mint failed", error);
+    return { ok: false, error: "Couldn’t add that task — please try again." };
+  }
   revalidatePath("/", "layout");
 }
 

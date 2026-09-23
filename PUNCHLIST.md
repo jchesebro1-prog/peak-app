@@ -5140,9 +5140,11 @@ recreated).
 **Status:** PARTIAL 2026-09-23 — the previously unguarded Quick Design promotion, inspection
 creation, venue-assessment creation/quote paths, project conversion/sign-off/follow-up task
 paths, and offline Field Work task creation now convert mint failures into visible error UI (or
-the existing offline flash) instead of raw 500s. The remaining FormData mutation surface needs
-a broader audit of every task/import/create action and a consistent typed-result contract; the
-five-page error channel described above is now in place for the paths covered here.
+the existing offline flash) instead of raw 500s. The shared task card now also reports typed
+failures for design and estimator task creation, covering those actions without redirecting away
+from the current record. The remaining FormData mutation surface needs a broader audit of every
+task/import/create action and a consistent typed-result contract; the five-page error channel
+described above is now in place for the paths covered here.
 
 ---
 
