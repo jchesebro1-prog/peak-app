@@ -6905,7 +6905,9 @@ Design: `docs/superpowers/specs/2026-09-22-customer-address-geocoding-design.md`
 Customers and Venues templates/exports. Imports validate finite coordinates, merge them into the
 same location record without clearing address fields, and preserve them on re-import. This removes
 the app-side data-path gap; production backfill and the missing street-address re-export remain
-data/hosting-gated as described above.
+data/hosting-gated as described above. Stage 3 now adds an authenticated venue-detail **Open in
+Maps** link using the imported address (or coordinates when no address exists); production
+enrichment and the missing street-address re-export remain data/hosting-gated.
 
 ## 147b. Import: "<thing> Label N" columns stole the value column, and four types silently duplicated on "Update existing" — DONE 2026-09-22 (D179-D185)
 
