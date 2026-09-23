@@ -720,6 +720,27 @@ ok(pGarbage.ok === false, "ports: unparseable JSON is refused, never silently dr
 const pNoName = parsePortsField(JSON.stringify([{ direction: "io", connectionType: "RDM" }]));
 ok(pNoName.ok === true && pNoName.ports[0].name === "", "ports: a missing name defaults to empty, not a failure");
 
+// A genuine duplicate (same name + direction + connectionType) is refused —
+// the Grid's device inspector keys its port list on
+// `${port.name}-${port.connectionType}`, so a duplicate would collide there.
+const pDup = parsePortsField(JSON.stringify([
+  { name: "Audio in", direction: "in", connectionType: "speakON NL4" },
+  { name: "Audio in", direction: "in", connectionType: "speakON NL4" },
+]));
+ok(pDup.ok === false, "ports: a duplicate name/direction/connectionType row is refused");
+if (!pDup.ok) ok(pDup.error.includes("Audio in"), "ports: the duplicate refusal names the offending port");
+
+// ...but two rows differing only in direction describe two distinct jacks
+// on the same connector family, which is a normal, legal device.
+const pSameNameDiffDir = parsePortsField(JSON.stringify([
+  { name: "Link", direction: "in", connectionType: "speakON NL4" },
+  { name: "Link", direction: "out", connectionType: "speakON NL4" },
+]));
+ok(
+  pSameNameDiffDir.ok === true && pSameNameDiffDir.ports.length === 2,
+  "ports: two rows differing only in direction are still allowed"
+);
+
 ok(
   serializePorts([{ name: "A", direction: "in", connectionType: "HDMI" }]) === '[{"name":"A","direction":"in","connectionType":"HDMI"}]',
   "ports: serializePorts emits compact JSON with a stable key order"
@@ -4491,16 +4512,21 @@ async function asyncChecks(): Promise<void> {
     );
     const fs1053 = all.find((s) => s.id === "FS-1053");
     ok(!!fs1053, "FS-1053 is present in the seed");
-    // The seeded-survey lookups below dereference `fs1053`/`fs1055`/`withMeas`
-    // directly. The dev auto-seed is fire-and-forget (getDb() in src/db/index.ts
-    // does not await it), so on a fresh datadir this find() can lose the race and
+    // The next dozen assertions (through "records stamp the template
+    // revision" below) dereference `fs1053`/`fs1055`/`withMeas` directly.
+    // The dev auto-seed is fire-and-forget (getDb() in src/db/index.ts does
+    // not await it), so on a fresh datadir this find() can lose the race and
     // return undefined — and the unguarded deref then threw a TypeError that
-    // rejected the promise chain and killed the process. Because asyncChecks() is
-    // second-to-last in that chain, the crash silently skipped the remaining 50
-    // assertions here AND all of templateScheduleAsyncChecks(), which had
-    // therefore never run at all. Guarding turns a lost seed race back into what
-    // it should always have been: the one honest FAIL above, and the dependent
-    // assertions skipped rather than the suite dying (#158).
+    // rejected the promise chain and killed the process. Because asyncChecks()
+    // is second-to-last in that chain, the crash silently skipped the
+    // remaining 50 assertions here AND all of templateScheduleAsyncChecks(),
+    // which had therefore never run at all. Guarding turns a lost seed race
+    // back into what it should always have been: the one honest FAIL above,
+    // and just these dependent assertions skipped rather than the suite
+    // dying (#158). This guard closes immediately below — everything after
+    // it (the #145 file-ref/milestone/task-template blocks, the #158 ports
+    // blocks, etc.) has nothing to do with the survey seed and must always
+    // run, guard or no guard.
     if (fs1053) {
     ok(
       (fs1053 as Record<string, unknown>).venueClass === "theatre",
@@ -4545,6 +4571,7 @@ async function asyncChecks(): Promise<void> {
       (fs1053 as Record<string, unknown>).templateRev === "1.0",
       "records stamp the template revision"
     );
+  }
   }
 
   /* ====== #145 round 3: validateFileRefsForEngagement (consulting-files-server.ts) ======
@@ -4969,7 +4996,6 @@ async function asyncChecks(): Promise<void> {
     }
   }
 
-  }
   /* --- #158 Task 2: ports persist through the catalog edit form --- */
   {
     const { mergeUpsert, get: getCatalogPart } = await import("@/lib/stores/catalog");
