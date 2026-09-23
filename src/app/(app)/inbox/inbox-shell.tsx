@@ -114,6 +114,20 @@ export default function InboxShell({
   crmMode: boolean;
 }) {
   const router = useRouter();
+  const [sideCollapsed, setSideCollapsed] = useState(false);
+  const [listWidth, setListWidth] = useState(392);
+  const beginListResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = listWidth;
+    const move = (e: PointerEvent) => setListWidth(Math.max(300, Math.min(620, startWidth + e.clientX - startX)));
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  };
 
   // prototype tracked window width for pane/overlay behavior
   const [narrow, setNarrow] = useState(false);
@@ -573,15 +587,26 @@ export default function InboxShell({
       <div
         className="ib-side"
         style={{
-          width: 238,
+          width: sideCollapsed ? 54 : 238,
           flexShrink: 0,
           background: "#fbfbfc",
           borderRight: "1px solid #ececf0",
           display: "flex",
           flexDirection: "column",
           minHeight: 0,
+          overflow: "hidden",
         }}
       >
+        <button
+          type="button"
+          onClick={() => setSideCollapsed((v) => !v)}
+          title={sideCollapsed ? "Expand mailbox menu" : "Collapse mailbox menu"}
+          aria-label={sideCollapsed ? "Expand mailbox menu" : "Collapse mailbox menu"}
+          style={{ alignSelf: "flex-end", margin: "8px 8px 0", border: "1px solid #e4e7ec", background: "#fff", borderRadius: 7, color: "#5b616e", cursor: "pointer", width: 28, height: 26, flexShrink: 0 }}
+        >
+          {sideCollapsed ? "›" : "‹"}
+        </button>
+        <div style={{ display: sideCollapsed ? "none" : "contents" }}>
         <div style={{ padding: "14px 13px 10px", flexShrink: 0 }}>
           <button
             onClick={() => setCompose(blankCompose(composeDefaultBox))}
@@ -854,6 +879,7 @@ export default function InboxShell({
             </span>
           </div>
         </div>
+        </div>
       </div>
 
       {/* ===== message list ===== */}
@@ -945,6 +971,14 @@ export default function InboxShell({
         searching={searching}
         onOpenResult={openSearchResult}
         rowActions={rowActions}
+        width={listWidth}
+      />
+
+      <div
+        role="separator"
+        aria-label="Resize message list"
+        onPointerDown={beginListResize}
+        style={{ width: 6, flexShrink: 0, cursor: "col-resize", background: "#f0f1f4", borderRight: "1px solid #e4e7ec", borderLeft: "1px solid #e4e7ec" }}
       />
 
       {/* ===== reading pane (desktop) ===== */}

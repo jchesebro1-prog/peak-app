@@ -39,6 +39,7 @@ export default function ThreadList({
   searching,
   onOpenResult,
   rowActions,
+  width = 392,
 }: {
   list: ListVM;
   selectedId: string | null;
@@ -63,6 +64,7 @@ export default function ThreadList({
   searching: boolean;
   onOpenResult: (id: string) => void;
   rowActions: RowActions;
+  width?: number;
 }) {
   const rows = list.rows;
 
@@ -97,7 +99,7 @@ export default function ThreadList({
     <div
       className="ib-list"
       style={{
-        width: 392,
+        width,
         flexShrink: 0,
         background: "#fff",
         borderRight: "1px solid #ececf0",
