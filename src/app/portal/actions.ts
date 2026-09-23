@@ -67,22 +67,27 @@ export async function submitPortalRequest(formData: FormData): Promise<void> {
     "\n\n" +
     details;
 
-  await createLead(
-    {
-      org: cust.name,
-      contact: session.name,
-      email: session.email,
-      phone,
-      city: venue?.city || "",
-      state: venue?.state || "WI",
-      source: "existing",
-      owner: "", // unassigned → enters the SLA response queue
-      interest: service,
-      message,
-      customerId: session.customerId,
-    },
-    session.name
-  );
+  try {
+    await createLead(
+      {
+        org: cust.name,
+        contact: session.name,
+        email: session.email,
+        phone,
+        city: venue?.city || "",
+        state: venue?.state || "WI",
+        source: "existing",
+        owner: "", // unassigned → enters the SLA response queue
+        interest: service,
+        message,
+        customerId: session.customerId,
+      },
+      session.name
+    );
+  } catch (error) {
+    console.error("submitPortalRequest: lead mint failed", error);
+    redirect("/portal/request?err=send");
+  }
 
   revalidatePath("/", "layout");
   redirect("/portal?sent=1");
@@ -262,28 +267,34 @@ export async function submitPortalEstimate(formData: FormData): Promise<void> {
   const hasEquip = equipItems.length > 0;
   const defaultName = hasDrape && hasEquip ? "Equipment & drapery estimate" : hasEquip ? "Equipment estimate" : "Drapery estimate";
 
-  const created = await createQuote({
-    name: cust.name + " — " + (project || defaultName),
-    customer: cust.name,
-    customerId: session.customerId,
-    locationId: venue?.id || null,
-    value: Math.round(rev),
-    margin,
-    pricingTier: tier.tier,
-    tierMargin: tier.margin,
-    source: "portal-self-serve",
-    spec: { sections, mobs: [] },
-  });
-  // Stamp portal provenance + leave it unassigned for the response queue.
-  const patch = {
-    owner: "",
-    contactName: session.name,
-    quoteNote:
-      "Submitted by " +
-      session.name +
-      " via the customer portal self-serve estimator. Prices are budgetary — review and confirm before sending.",
-  };
-  await updateQuote(created.id, patch as unknown as Parameters<typeof updateQuote>[1]);
+  let created;
+  try {
+    created = await createQuote({
+      name: cust.name + " — " + (project || defaultName),
+      customer: cust.name,
+      customerId: session.customerId,
+      locationId: venue?.id || null,
+      value: Math.round(rev),
+      margin,
+      pricingTier: tier.tier,
+      tierMargin: tier.margin,
+      source: "portal-self-serve",
+      spec: { sections, mobs: [] },
+    });
+    // Stamp portal provenance + leave it unassigned for the response queue.
+    const patch = {
+      owner: "",
+      contactName: session.name,
+      quoteNote:
+        "Submitted by " +
+        session.name +
+        " via the customer portal self-serve estimator. Prices are budgetary — review and confirm before sending.",
+    };
+    await updateQuote(created.id, patch as unknown as Parameters<typeof updateQuote>[1]);
+  } catch (error) {
+    console.error("submitPortalEstimate: quote mint/update failed", error);
+    redirect("/portal/estimate?err=submit");
+  }
 
   revalidatePath("/", "layout");
   redirect("/portal?estimate=1");

@@ -5165,8 +5165,10 @@ error instead of surfacing a raw 500. Inspection-report renovation quote creatio
 back to the report with the same visible error banner on mint failure. The consulting quote save
 path is now included: quote/lead mint failures are caught and returned to the builder with a
 visible error banner, preserving the edit id when applicable. The remaining FormData mutation
-surface needs a broader audit of every task/import/create action and a consistent typed-result
-contract; the five-page error channel described above is now in place for the paths covered here.
+surface now also covers the customer portal's request lead and self-serve estimate quote writes,
+with customer-safe retry messages. The remaining FormData mutation surface needs a broader audit
+of every task/import/create action and a consistent typed-result contract; the five-page error
+channel described above is now in place for the paths covered here.
 
 ---
 
