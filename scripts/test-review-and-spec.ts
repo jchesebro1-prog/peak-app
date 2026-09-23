@@ -487,6 +487,13 @@ ok(
   "#146 an oversize plan sheet is refused before its body is read into memory"
 );
 
+const inboxShellSource = readFileSync(join(process.cwd(), "src/app/(app)/inbox/inbox-shell.tsx"), "utf8");
+const inboxCommandSource = readFileSync(join(process.cwd(), "src/app/(app)/inbox/command-bar.tsx"), "utf8");
+const siteVisitSource = readFileSync(join(process.cwd(), "src/app/(app)/inbox/site-visit-modal.tsx"), "utf8");
+ok(inboxShellSource.includes("el.closest('[role=\"dialog\"], [role=\"menu\"]')"), "#46 arrow navigation yields to dialogs and popover menus");
+ok(inboxCommandSource.includes('role="menu"'), "#46 Filter/Sort popovers expose a menu boundary");
+ok(siteVisitSource.includes('role="dialog"') && siteVisitSource.includes('aria-modal="true"'), "#46 site-visit modal exposes a dialog boundary");
+
 /* --- Offline navigation contract --- */
 const serviceWorkerSource = readFileSync(join(process.cwd(), "public/sw.js"), "utf8");
 ok(serviceWorkerSource.includes('req.mode === "navigate"'), "offline cache treats document navigation separately");

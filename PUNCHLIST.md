@@ -3261,8 +3261,9 @@ Do not pick up standalone; the rebuild session owns the nav.
 
 **Status:** PARTIAL 2026-09-23 — the CRM mode now reconciles server changes while mounted, the
 arrow-navigation index resets with list changes and tracks click selections, and Sort▾ now has a
-Default entry that clears an explicit refinement. Remaining modal-keyboard plumbing, mode-flip
-refinement policy, and seed/automated keyboard coverage are still open.
+Default entry that clears an explicit refinement. Arrow navigation now also yields to the site-visit
+dialog and Filter/Sort menus. Remaining mode-flip refinement policy and seed/automated keyboard
+coverage are still open.
 
 ---
 

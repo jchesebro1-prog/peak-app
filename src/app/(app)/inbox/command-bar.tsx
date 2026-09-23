@@ -487,6 +487,7 @@ function Menu({
       </button>
       {open && (
         <div
+          role="menu"
           style={{
             position: "absolute",
             top: "calc(100% + 4px)",

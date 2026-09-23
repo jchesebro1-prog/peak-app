@@ -482,7 +482,8 @@ export default function InboxShell({
         (el.tagName === "INPUT" ||
           el.tagName === "TEXTAREA" ||
           el.tagName === "SELECT" ||
-          el.isContentEditable)
+          el.isContentEditable ||
+          el.closest('[role="dialog"], [role="menu"]'))
       )
         return;
       const ids = list.rows.filter((r) => !r.isDraft).map((r) => r.id);
