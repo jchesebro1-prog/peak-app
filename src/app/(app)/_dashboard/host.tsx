@@ -32,7 +32,7 @@ export default async function WidgetHost({
   const base = surface === "home" ? "/" : "/reports";
   const keep = { range: flat.range, customize: flat.customize };
 
-  const { ids, customized } = await layoutFor(user.id, surface, user.roles);
+  const { ids, customized } = await layoutFor(user.id, surface, user.roles, user.name);
   const ctx: WidgetCtx = { user, surface, range, now: Date.now(), sp: flat, data: data ?? makeDashboardData(user) };
 
   const rendered = await Promise.all(

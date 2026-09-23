@@ -9,6 +9,7 @@ import HomeTabs from "./home-tabs";
 import HomeGreeting from "./home-greeting";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 import WidgetHost from "./_dashboard/host";
+import { reconcileRecordingsIfStale } from "@/lib/krisp/reconcile";
 
 /**
  * Home dashboard. Since #43 the cards are registry widgets rendered by
@@ -64,6 +65,7 @@ export default async function HomePage({
   const sp = await searchParams;
   const me = user.name;
   const data = makeDashboardData(user);
+  void reconcileRecordingsIfStale().catch(() => {});
   const now = Date.now();
   const [userRecord, appSettings, quotesAll, designsAll] = await Promise.all([
     getUser(user.id), getSettings(), data.quotes(), data.designs(),
