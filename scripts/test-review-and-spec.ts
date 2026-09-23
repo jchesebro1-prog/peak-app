@@ -4491,6 +4491,17 @@ async function asyncChecks(): Promise<void> {
     );
     const fs1053 = all.find((s) => s.id === "FS-1053");
     ok(!!fs1053, "FS-1053 is present in the seed");
+    // The seeded-survey lookups below dereference `fs1053`/`fs1055`/`withMeas`
+    // directly. The dev auto-seed is fire-and-forget (getDb() in src/db/index.ts
+    // does not await it), so on a fresh datadir this find() can lose the race and
+    // return undefined — and the unguarded deref then threw a TypeError that
+    // rejected the promise chain and killed the process. Because asyncChecks() is
+    // second-to-last in that chain, the crash silently skipped the remaining 50
+    // assertions here AND all of templateScheduleAsyncChecks(), which had
+    // therefore never run at all. Guarding turns a lost seed race back into what
+    // it should always have been: the one honest FAIL above, and the dependent
+    // assertions skipped rather than the suite dying (#158).
+    if (fs1053) {
     ok(
       (fs1053 as Record<string, unknown>).venueClass === "theatre",
       "FS-1053 (Proscenium theater) migrates to theatre"
@@ -4958,6 +4969,7 @@ async function asyncChecks(): Promise<void> {
     }
   }
 
+  }
   /* --- #158 Task 2: ports persist through the catalog edit form --- */
   {
     const { mergeUpsert, get: getCatalogPart } = await import("@/lib/stores/catalog");
