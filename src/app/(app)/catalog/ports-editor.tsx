@@ -89,12 +89,22 @@ export default function PortsEditor({ initial }: { initial: Port[] }) {
           </select>
           <input
             aria-label={`Port ${i + 1} count`}
+            type="number"
+            min={1}
+            step={1}
             value={row.count == null ? "" : String(row.count)}
             onChange={(e) => {
               const v = e.target.value.trim();
-              patch(i, { count: v === "" ? undefined : Number(v) });
+              // type="number" sanitizes the DOM value to "" or a valid
+              // floating-point token, but an out-of-range exponent (e.g.
+              // "1e400") still parses to a non-finite number — never let
+              // NaN/Infinity reach state, where it would render back as the
+              // literal string "NaN" and get silently dropped on submit
+              // (JSON.stringify(NaN) -> null, which parsePortsField treats
+              // as absent).
+              const n = v === "" ? undefined : Number(v);
+              patch(i, { count: n !== undefined && Number.isFinite(n) ? n : undefined });
             }}
-            inputMode="numeric"
             placeholder="1"
             style={cell}
           />
