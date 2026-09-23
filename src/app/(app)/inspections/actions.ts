@@ -54,7 +54,7 @@ export async function scheduleInspection(formData: FormData): Promise<void> {
     });
   } catch (error) {
     console.error("scheduleInspection failed", error);
-    redirect("/inspections?err=" + encodeURIComponent("Couldn’t schedule that inspection — please try again."));
+    redirect("/inspections/scheduling?err=" + encodeURIComponent("Couldn’t schedule that inspection — please try again."));
   }
   revalidatePath("/", "layout");
 }
@@ -70,7 +70,7 @@ export async function unscheduleInspection(formData: FormData): Promise<void> {
     await unschedule(id);
   } catch (error) {
     console.error("unscheduleInspection failed", error);
-    redirect("/inspections?err=" + encodeURIComponent("Couldn’t unschedule that inspection — please try again."));
+    redirect("/inspections/scheduling?err=" + encodeURIComponent("Couldn’t unschedule that inspection — please try again."));
   }
   revalidatePath("/", "layout");
 }
