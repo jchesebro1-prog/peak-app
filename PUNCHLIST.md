@@ -5161,7 +5161,8 @@ the existing offline flash) instead of raw 500s. The shared task card now also r
 failures for design and estimator task creation, covering those actions without redirecting away
 from the current record. The shared Apply Template control now does the same for project, quote,
 and design template fan-out failures, preserving the current record and reporting the writer's
-error instead of surfacing a raw 500. The remaining FormData mutation surface needs a broader
+error instead of surfacing a raw 500. Inspection-report renovation quote creation now redirects
+back to the report with the same visible error banner on mint failure. The remaining FormData mutation surface needs a broader
 audit of every task/import/create action and a consistent typed-result contract; the five-page
 error channel described above is now in place for the paths covered here.
 
