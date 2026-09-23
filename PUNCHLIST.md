@@ -4876,7 +4876,7 @@ earlier? **Ties to #78.**
 
 ---
 
-## 80. `insertWithPrefixedId` throws, and almost nothing catches it — PARTIAL 2026-08-06 — 6 of 11 call sites guarded; the other 5 need UI that does not exist (#85)
+## 80. `insertWithPrefixedId` throws, and almost nothing catches it — DONE 2026-09-23 — remaining FormData paths closed by #85
 
 **Area:** `src/db/doc-store.ts:284-299` (the throw), ~14 store modules that mint through it, and the
 server actions above them
@@ -4925,7 +4925,7 @@ overwritten record — is exactly what #62 existed to stop. Do NOT make it retur
 
 **Ties to:** #62 (created it), #74 (no transactions to unwind partial state), #59 (raises the odds).
 
-**Status:** PARTIAL 2026-08-06 — **Jeff's call was option 1 (explicit guards). Half of it is built; the other half was refused on purpose, not forgotten.** Three corrections to the entry above, all found by actually enumerating the call sites instead of trusting the count:
+**Status:** DONE 2026-09-23 — **Jeff's call was option 1 (explicit guards).** Three corrections to the entry above, all found by actually enumerating the call sites instead of trusting the count:
 
 1. **The real scope was 11 unguarded call sites, not "~12 of ~14 store modules."** The entry counted *store modules that mint*, which is the wrong unit — what matters is the *server action* above the mint, since that is the only place a failure can be reported. And one of the modules it counted was already covered: **`import/registry.ts`'s mints never escaped**, because `commitImport` wraps every row in its own try/catch and converts a throw into `res.errored++`. The importer has reported mint failures correctly this whole time.
 2. **Only 6 of those 11 were guarded.** The other 5 are `Promise<void>` FormData actions — `design/grid/actions.ts`, `field-work/actions.ts`, `projects/actions.ts`, `inspections/actions.ts`, `field-survey/actions.ts` — which have **nowhere to return an error to**. Giving them an `?err=` redirect would have been the cheap-looking fix and was **deliberately rejected**: no destination page renders such a param, so the result would be a redirect back to an unchanged list with no message — a **silent no-op that reads as success**. That is precisely the failure mode #62 existed to eliminate, arrived at from the other direction. A loud crash is worse UX and better information. **Deferred whole to #85** rather than half-fixed.
@@ -4933,7 +4933,7 @@ overwritten record — is exactly what #62 existed to stop. Do NOT make it retur
 
 **A real bug surfaced by this work, and it is the reason the pass was worth doing at all:** `lead-drawer.tsx` was **discarding `createLeadAction`'s return value entirely** — calling it, ignoring the result, and closing the drawer. Because nothing read the return, widening that action's type to carry a failure could not make `tsc` complain; the code would have gone on cheerfully reporting success for a lead that was never written, on the intake surface. The result is now routed into the drawer's existing `nfErr` surface. This is the same class as #78's lesson: the type system cannot flag a value nobody looks at.
 
-**Remaining:** #85 (the 5 void actions), #86 (mints inside page-load sync functions, which need a third fix shape), #88 (the intake route's advertised retry does not actually work). `addToQuotesAction` is now guarded and its Quick Design caller renders the typed failure (2026-09-23).
+**Remaining:** no known code-only remainder in this mint-failure family. #86 and #88 are now done. `addToQuotesAction` is guarded and its Quick Design caller renders the typed failure (2026-09-23).
 
 ---
 
@@ -5125,7 +5125,7 @@ gap #81's verification exposed. Same rule as the rest of the file: log-only unti
 
 ---
 
-## 85. Five void FormData actions still crash on a mint failure — PARTIAL 2026-09-23
+## 85. Five void FormData actions still crash on a mint failure — DONE 2026-09-23
 
 **Area:** `src/app/(app)/design/grid/actions.ts:19`, `src/app/(app)/field-work/actions.ts:38`,
 `src/app/(app)/projects/actions.ts:175`, `src/app/(app)/inspections/actions.ts:23`,
@@ -5161,7 +5161,7 @@ over.
 **Ties to:** #80 (this is its unbuilt remainder), #62 (the bug class the half-fix would have
 recreated).
 
-**Status:** PARTIAL 2026-09-23 — the previously unguarded Quick Design promotion, inspection
+**Status:** DONE 2026-09-23 — the previously unguarded Quick Design promotion, inspection
 creation, venue-assessment creation/quote paths, Grid draft-quote creation, all three service
 quote save/approve flows, rental quote save/approve flows, project conversion/sign-off/follow-up
 task paths, and offline Field Work task creation now convert mint failures into visible error UI (or
@@ -5180,6 +5180,9 @@ notes, and time entries now redirect to the field-work error banner; inspection 
 outreach, and deletion now redirect to visible inspection errors. The five-page error channel
 described above is now in place for the paths covered here. Grid assembly creation now also
 converts its underlying symbol mint failure into the typed error already rendered by the editor.
+Project actions now handle missing-record returns as well as thrown failures, and task forms
+preserve their parent project context. The five originally deferred FormData surfaces therefore
+have both failure handling and a visible destination error channel.
 
 ---
 
