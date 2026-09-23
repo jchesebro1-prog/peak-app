@@ -1447,6 +1447,7 @@ ok(cutViaCut.goods !== null && cutBase.goods !== null && cutViaCut.goods > cutBa
 
 /* --- The Grid BOM math (D108) --- */
 import { bomLines, bomTotals, type PartLite } from "@/lib/design/grid-bom";
+import { buildClientPackageManifest } from "@/lib/client-package";
 
 const gridParts: PartLite[] = [
   { id: "S4LED", sku: "S4LED", desc: "ETC Source Four LED", category: "Lighting", unit: "ea", list: 1200, cost: 800 },
@@ -1464,6 +1465,25 @@ const gGhost = bomLines([place("GONE")], gridParts);
 ok(gGhost.length === 1 && gGhost[0].ext === 0 && /removed/i.test(gGhost[0].desc),
   "a placement whose part left the catalog stays visible at $0, flagged removed");
 ok(bomTotals([], gridParts).margin === 0, "empty project has margin 0, not NaN");
+
+const packageProject = {
+  id: "GRD-PKG",
+  name: "Package test",
+  options: [{ id: "opt-base", name: "Base", placements: [], routes: [] }],
+  placements: [
+    { id: "gp-a", partId: "PKG-A", optionId: "opt-base" },
+    { id: "gp-b", partId: "PKG-A", optionId: "opt-base" },
+    { id: "gp-c", partId: "PKG-B", optionId: "opt-base" },
+  ],
+} as any;
+const packageCatalog = [
+  { id: "PKG-A", sku: "PKG-A", desc: "Attached product", category: "Lighting", unit: "ea", list: 1, cost: 1, datasheetBlobKey: "part-datasheets/PKG-A/a.pdf", datasheetName: "A.pdf", specSectionId: "lighting", specBody: "Use attached product." },
+  { id: "PKG-B", sku: "PKG-B", desc: "Unpopulated product", category: "Lighting", unit: "ea", list: 1, cost: 1 },
+] as any;
+const packageManifest = buildClientPackageManifest(packageProject, packageCatalog);
+ok(packageManifest.bom.find((r) => r.sku === "PKG-A")?.qty === 2, "client package walker aggregates repeated Grid placements");
+ok(packageManifest.datasheets.length === 1 && packageManifest.datasheets[0].sku === "PKG-A", "client package walker carries catalog datasheet attachments");
+ok(packageManifest.gaps.some((g) => g.kind === "missing-datasheet" && g.sku === "PKG-B") && packageManifest.gaps.some((g) => g.kind === "missing-spec" && g.sku === "PKG-B"), "client package walker reports every missing attachment");
 
 /* --- The Grid geometry (D109) --- */
 import { pointInPolygon, polygonArea, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";

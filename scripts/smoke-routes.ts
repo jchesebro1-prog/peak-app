@@ -200,6 +200,7 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/design/grid/GRD-5001/riser", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/schedule", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/lineset", reject: "no longer exists" },
+  { route: "/api/grid/GRD-5001/package-manifest" },
   { route: "/design/grid/GRD-5001?option=opt-base", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001?option=opt-does-not-exist", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/riser?option=opt-base", reject: "no longer exists" },

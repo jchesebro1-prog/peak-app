@@ -3118,7 +3118,13 @@ across the six beta categories; **(c)** the generator: one action walks a BOM an
 datasheet package + spec + rough drawings. Much exists (Grid→D94 bridge, derived riser, .docx
 output) — the missing piece is assembly; completeness depends on (a)+(b) population.
 
-**Status:** OPEN — wave 2 (depends on #39 attachments being populated).
+**Status:** PARTIAL 2026-09-23 — the dependency-ready bundle walker now derives every
+Grid BOM line, catalog-backed datasheet reference, spec-ready row, and explicit missing
+catalog/datasheet/spec gaps without exposing private Blob keys. The authenticated
+read-only `/api/grid/[id]/package-manifest` seam exposes safe datasheet proxy URLs for
+the future package writer and readiness UI. The actual merged PDF/ZIP writer, plan/riser
+PDF rendering, and one-click download/storage remain open; catalog population still
+depends on Jeff's #39 starter-set review.
 
 ---
 
