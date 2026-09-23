@@ -4113,6 +4113,36 @@ ok(g131("speaker").glyph === symbolGeometry("speaker", 44, 30).glyph && g131("sp
 ok(symbolGeometry("speaker", 12, 9).glyph !== g131("speaker").glyph, "#131: glyphs scale with the symbol box");
 ok(markerColor("Speakers") === markerColor("Speakers") && /^#[0-9a-f]{6}$/.test(markerColor("Speakers")), "#131: markerColor is a stable hex per category");
 
+/* ---- #43 §1 — widget registry (pure) ---- */
+import {
+  WIDGETS, PRESETS, presetFor, normalizeLayout, addWidget, removeWidget, moveWidget,
+  galleryFor, resolveRange, layoutNeedsRange, widgetDef, dashHref,
+} from "@/lib/dashboard/registry";
+{
+  const ids = WIDGETS.map((w) => w.id);
+  ok(new Set(ids).size === ids.length, "#43 registry ids are unique");
+  ok(WIDGETS.every((w) => ["tile", "half", "full"].includes(w.size)), "#43 every widget has a size class");
+  ok(PRESETS.home.every((id) => !!widgetDef(id)) && PRESETS.reports.every((id) => !!widgetDef(id)), "#43 presets only name registered widgets");
+  ok(PRESETS.home[0] === "my-open-pipeline" && PRESETS.home.includes("my-queue"), "#43 home preset starts with today's stat row and carries the queue card");
+  const admin = ["Admin"], est = ["Estimator"];
+  ok(presetFor("reports", admin).includes("book-margin"), "#43 admins see margin widgets");
+  ok(!presetFor("reports", est).includes("book-margin"), "#43 estimators do not see margin widgets (approve gate)");
+  ok(!galleryFor("reports", est).some((w) => w.perm === "approve"), "#43 gallery hides gated widgets");
+  ok(!galleryFor("reports", admin).some((w) => w.id === "my-queue"), "#43 personal cards are home-only");
+  ok(normalizeLayout(null, "home", est).join() === presetFor("home", est).join(), "#43 null layout resolves to the preset");
+  ok(normalizeLayout([], "home", est).length === 0, "#43 an emptied layout stays empty");
+  ok(normalizeLayout(["nope", "my-queue", "my-queue", "book-margin"], "home", est).join() === "my-queue", "#43 normalize drops unknown, duplicate and gated ids");
+  ok(normalizeLayout(["my-queue"], "reports", admin).length === 0, "#43 normalize drops widgets not offered on the surface");
+  ok(addWidget(["a"], "b").join() === "a,b" && addWidget(["a"], "a").join() === "a", "#43 addWidget appends once");
+  ok(removeWidget(["a", "b"], "a").join() === "b", "#43 removeWidget");
+  ok(moveWidget(["a", "b", "c"], "c", -1).join() === "a,c,b", "#43 moveWidget up");
+  ok(moveWidget(["a", "b", "c"], "a", -1).join() === "a,b,c", "#43 moveWidget clamps at the top");
+  ok(moveWidget(["a", "b", "c"], "a", 1).join() === "b,a,c", "#43 moveWidget down");
+  ok(resolveRange("12m") === "12m" && resolveRange("bogus") === "6m" && resolveRange(undefined) === "6m", "#43 resolveRange defaults to 6m");
+  ok(!layoutNeedsRange(["my-queue"]) && layoutNeedsRange(["my-queue", "total-quoted"]), "#43 range chips only when a history widget is on the layout");
+  ok(dashHref("/", { range: "12m", customize: undefined }) === "/?range=12m" && dashHref("/reports", {}) === "/reports", "#43 dashHref drops empty params");
+}
+
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
   {
