@@ -4191,6 +4191,27 @@ import {
   ok(f.toBill === 1500 && f.byStage.length === 2, "#43 toBill sums targets inside the horizon; byStage groups the book");
 }
 
+/* ---- #43 §5 — Home card metrics (pure) ---- */
+import { myQuoteStats, homeAlerts, resolvePipe } from "@/lib/dashboard/home-metrics";
+{
+  const T = Date.UTC(2026, 8, 15, 12);
+  const D = 86_400_000;
+  const mk = (o: Record<string, unknown>) => ({ id: "Q", name: "N", customer: "", customerId: null, locationId: null, value: 0, margin: 0, status: "draft", source: "estimator", owner: "Me", review: { state: "none" }, createdAt: T - D, updatedAt: T - D, history: [], ...o }) as unknown as Quote;
+  const all = [
+    mk({ id: "1", status: "sent", value: 100, updatedAt: T - 8 * D }),
+    mk({ id: "2", status: "won", value: 300 }),
+    mk({ id: "3", status: "lost", value: 50 }),
+    mk({ id: "4", owner: "Other", status: "draft", value: 999 }),
+  ];
+  const s = myQuoteStats(all, "Me");
+  ok(s.openQuotes.length === 1 && s.openValue === 100 && s.winRate === 50 && s.sentCount === 1, "#43 myQuoteStats scopes to owner and computes win rate");
+  ok(s.pipeCounts.all === 3 && s.pipeCounts.won === 1 && s.pipeCounts.draft === 0, "#43 pipeCounts feed the pipeline filter chips");
+  const a = homeAlerts(all, [], "Me", T, (id) => `/?sheet=${id}`);
+  ok(a.alerts.length === 1 && a.alerts[0].tag === "8d" && a.urgentCount === 1, "#43 a sent quote 8 days old is an urgent follow-up alert");
+  ok(a.alerts[0].href === "/?sheet=1" && a.openReviewCount === 0, "#43 alert hrefs come from the injected sheetHref");
+  ok(resolvePipe("won") === "won" && resolvePipe("x") === "all" && resolvePipe(undefined) === "all", "#43 resolvePipe");
+}
+
 /* ---- #43 §4 — once() memoises a loader per request ---- */
 import { once } from "@/lib/dashboard/once";
 {
