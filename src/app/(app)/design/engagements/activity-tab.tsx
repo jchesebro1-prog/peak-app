@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import type { ConsultingEngagement } from "@/lib/stores/engagements";
 import type { NoteRecord } from "@/lib/stores/notes";
 import type { TaskRecord, TaskStatus } from "@/lib/stores/tasks";
-import type { FileRef } from "@/lib/consulting-files";
+import { DATA_URL_MAX_BYTES, fileRefHref, type FileRef } from "@/lib/consulting-files";
+import { VENDOR_UPLOAD_MAX_BYTES, VENDOR_UPLOAD_MAX_LABEL } from "@/lib/vendor-quote-file";
 import { mergeActivity, type ActivityEntry } from "@/lib/engagement-activity";
 import { captureAction } from "./activity-actions";
 import { Card, EmptyState, Pill } from "@/components/ui";
@@ -53,7 +54,17 @@ const SMALL_BTN: React.CSSProperties = {
   cursor: "pointer",
 };
 
-const MAX_FILE_BYTES = 2 * 1024 * 1024; // 2 MB — same ceiling as DocList's uploads (view.tsx)
+/**
+ * #145 wiring — the one ceiling the DATA-URL fallback can hit, sourced
+ * from the same constant the upload route enforces (`dataModeOrTooBig`,
+ * upload/route.ts) rather than a UI-invented number. `VENDOR_UPLOAD_MAX_LABEL`
+ * (the Blob/Drive-fallback ceiling) is imported and used directly below —
+ * whichever ceiling actually applies to a given file is decided
+ * server-side, per file, by POST /api/engagement-files/upload; this is
+ * only for the label so the drop zone never advertises a number the route
+ * can't back up.
+ */
+const DATA_MODE_MAX_LABEL = `${Math.round(DATA_URL_MAX_BYTES / 1024)}KB`;
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
   open: "Open",
@@ -77,8 +88,174 @@ function nextRowKey(): string {
   return "row-" + rowKeySeq;
 }
 
+let uploadKeySeq = 0;
+function nextUploadKey(): string {
+  uploadKeySeq += 1;
+  return "up-" + uploadKeySeq;
+}
+
 type PendingTask = { key: string; title: string; assigneeUserId: string; dueAt: string };
 export type ActivityPerson = { id: string; name: string };
+
+/**
+ * #145 — client side of the engagement-file upload seam (upload/route.ts).
+ * Two-phase, matching the route's own contract exactly: phase 1 is a
+ * metadata-only POST (engagementId/name/mime/size, no bytes) that asks
+ * where the file should go; the route's answer decides which of the three
+ * legs below runs. This is what lets a too-big data-URL fallback be
+ * refused BEFORE a single byte is read or sent, and what lets a Drive
+ * upload skip this app's own request body entirely.
+ */
+type UploadPlan =
+  | { mode: "drive"; sessionUrl: string }
+  | { mode: "blob" }
+  | { mode: "data"; warning?: string };
+type UploadPlanFailure = { ok: false; error: string; maxBytes?: number };
+
+function isPlanFailure(x: UploadPlan | UploadPlanFailure): x is UploadPlanFailure {
+  return (x as UploadPlanFailure).ok === false;
+}
+
+async function requestUploadPlan(file: File, engagementId: string): Promise<UploadPlan> {
+  let res: Response;
+  try {
+    res = await fetch("/api/engagement-files/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        engagementId,
+        name: file.name,
+        mime: file.type || "application/octet-stream",
+        size: file.size,
+      }),
+    });
+  } catch {
+    throw new Error(`Could not reach the server to start uploading "${file.name}".`);
+  }
+  const json = (await res.json().catch(() => null)) as (UploadPlan | UploadPlanFailure) | null;
+  if (!json) throw new Error(`The server sent back something unexpected for "${file.name}".`);
+  if (!res.ok || isPlanFailure(json)) {
+    throw new Error((isPlanFailure(json) && json.error) || `"${file.name}" could not be uploaded.`);
+  }
+  return json;
+}
+
+/**
+ * Drive leg (#145): the route only OPENS the resumable session — the
+ * browser PUTs the bytes straight to Google from here, which is the whole
+ * reason the route exists: it bypasses next.config.ts's serverActions
+ * bodySizeLimit (1200kb) and Vercel's ~4.5MB function-body ceiling. The
+ * session was opened with `fields=id,webViewLink` (drive.ts,
+ * initiateResumableSession), so Drive's own PUT response carries
+ * everything needed to build the FileRef — this app's server never sees
+ * these bytes.
+ */
+async function uploadToDrive(file: File, sessionUrl: string): Promise<FileRef> {
+  let put: Response;
+  try {
+    put = await fetch(sessionUrl, {
+      method: "PUT",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+  } catch {
+    throw new Error(`"${file.name}" could not be sent to Drive — check the connection and try again.`);
+  }
+  if (!put.ok) {
+    throw new Error(
+      `Drive rejected "${file.name}" (status ${put.status}) — try again, or check the archive mailbox connection in Settings → Mailboxes.`
+    );
+  }
+  const info = (await put.json().catch(() => null)) as { id?: string; webViewLink?: string } | null;
+  if (!info?.id) {
+    throw new Error(`Drive did not confirm the upload of "${file.name}" — try again.`);
+  }
+  return {
+    kind: "drive",
+    fileId: info.id,
+    webViewLink: info.webViewLink || `https://drive.google.com/file/d/${encodeURIComponent(info.id)}/view`,
+    name: file.name,
+    mime: file.type || "application/octet-stream",
+    size: file.size,
+  };
+}
+
+type BlobUploadResponse =
+  | { mode: "blob"; pathname: string; name?: string; mime?: string; size?: number }
+  | { ok: false; error: string };
+
+function isBlobUploadFailure(x: BlobUploadResponse): x is { ok: false; error: string } {
+  return (x as { ok?: boolean }).ok === false;
+}
+
+/**
+ * Blob leg (#145): a SECOND call to the same route, this time multipart
+ * and carrying the bytes — the route tells the two calls apart by
+ * Content-Type. Pre-checked here against VENDOR_UPLOAD_MAX_BYTES, the
+ * exact ceiling the route enforces (#143), so an oversized file is
+ * refused before its bytes are ever sent, not after a wasted upload.
+ */
+async function uploadToBlob(file: File, engagementId: string): Promise<FileRef> {
+  if (file.size > VENDOR_UPLOAD_MAX_BYTES) {
+    throw new Error(`"${file.name}" is larger than ${VENDOR_UPLOAD_MAX_LABEL} — the most Blob storage will take here.`);
+  }
+  const form = new FormData();
+  form.append("file", file);
+  form.append("engagementId", engagementId);
+  let res: Response;
+  try {
+    res = await fetch("/api/engagement-files/upload", { method: "POST", body: form });
+  } catch {
+    throw new Error(`"${file.name}" could not be uploaded — check the connection and try again.`);
+  }
+  const json = (await res.json().catch(() => null)) as BlobUploadResponse | null;
+  if (!json || isBlobUploadFailure(json)) {
+    throw new Error((json && isBlobUploadFailure(json) && json.error) || `"${file.name}" could not be uploaded.`);
+  }
+  return {
+    kind: "blob",
+    pathname: json.pathname,
+    name: json.name || file.name,
+    mime: json.mime || file.type || "application/octet-stream",
+    size: json.size ?? file.size,
+  };
+}
+
+/**
+ * `{ mode: "data" }` leg (#145): unchanged FileReader behaviour, but only
+ * ever reached once phase 1 (above) has ALREADY confirmed this file's raw
+ * size clears DATA_URL_MAX_BYTES on the server — never the UI's own guess.
+ */
+function readAsDataRef(file: File): Promise<FileRef> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve({
+        kind: "data",
+        dataUrl: String(reader.result || ""),
+        name: file.name,
+        mime: file.type || "application/octet-stream",
+        size: file.size,
+      });
+    };
+    reader.onerror = () => reject(new Error(`"${file.name}" could not be read.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Orchestrates one file end-to-end: ask the route for a plan, then follow
+ * whichever leg it names. `warning` surfaces only on a degraded data-URL
+ * fallback (e.g. Drive is configured but a live call to it failed) — the
+ * attachment still saved, just not on the leg it ideally would have, so
+ * the caller shows this as a note rather than a refusal.
+ */
+async function uploadOne(file: File, engagementId: string): Promise<{ ref: FileRef; warning?: string }> {
+  const plan = await requestUploadPlan(file, engagementId);
+  if (plan.mode === "drive") return { ref: await uploadToDrive(file, plan.sessionUrl) };
+  if (plan.mode === "blob") return { ref: await uploadToBlob(file, engagementId) };
+  return { ref: await readAsDataRef(file), warning: plan.warning };
+}
 
 export function ActivityTab({
   eng,
@@ -95,6 +272,7 @@ export function ActivityTab({
 
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<FileRef[]>([]);
+  const [uploads, setUploads] = useState<{ key: string; name: string }[]>([]);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -139,21 +317,24 @@ export function ActivityTab({
   }, [notes, eng.meetings, eng.decisions, eng.phases]);
 
   function addFiles(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
     setSubmitErr(null);
-    for (const f of Array.from(files)) {
-      if (f.size > MAX_FILE_BYTES) {
-        setSubmitErr(`"${f.name}" is too large (2 MB max).`);
-        continue;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = String(reader.result || "");
-        setAttachments((prev) => [
-          ...prev,
-          { kind: "data", dataUrl, name: f.name, mime: f.type || "application/octet-stream", size: f.size },
-        ]);
-      };
-      reader.readAsDataURL(f);
+    for (const f of list) {
+      const key = nextUploadKey();
+      setUploads((prev) => [...prev, { key, name: f.name }]);
+      uploadOne(f, eng.id)
+        .then(({ ref, warning }) => {
+          setAttachments((prev) => [...prev, ref]);
+          if (warning) setSubmitErr((prev) => (prev ? `${prev} ${warning}` : warning));
+        })
+        .catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : `"${f.name}" could not be attached.`;
+          setSubmitErr((prev) => (prev ? `${prev} ${msg}` : msg));
+        })
+        .finally(() => {
+          setUploads((prev) => prev.filter((u) => u.key !== key));
+        });
     }
   }
 
@@ -242,7 +423,10 @@ export function ActivityTab({
             background: dragOver ? "color-mix(in srgb, var(--accent) 6%, #fff)" : "#fafbfc",
           }}
         >
-          Drop files here, or click to browse (2 MB max each)
+          Drop files here, or click to browse
+          <div style={{ marginTop: 2, fontSize: 11 }}>
+            {`Up to ${VENDOR_UPLOAD_MAX_LABEL} with Drive or Blob storage connected · ${DATA_MODE_MAX_LABEL} otherwise`}
+          </div>
           <input
             id="activity-file-input"
             type="file"
@@ -254,6 +438,11 @@ export function ActivityTab({
             }}
           />
         </div>
+        {uploads.length > 0 && (
+          <div style={{ fontSize: 11, color: "#8c919c", marginTop: 6 }}>
+            {`Uploading ${uploads.map((u) => u.name).join(", ")}…`}
+          </div>
+        )}
         {attachments.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
             {attachments.map((a, i) => (
@@ -265,7 +454,13 @@ export function ActivityTab({
                   border: "1px solid #e4e7ec", borderRadius: 20, padding: "3px 6px 3px 10px",
                 }}
               >
-                {a.name}
+                <a
+                  href={fileRefHref(a, eng.id)}
+                  download={a.name}
+                  style={{ color: "inherit", textDecoration: "none" }}
+                >
+                  {a.name}
+                </a>
                 <button
                   type="button"
                   onClick={() => removeAttachment(i)}
@@ -318,8 +513,14 @@ export function ActivityTab({
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
-          <button type="button" className="pk-btn-accent" disabled={isPending} onClick={submit} style={{ opacity: isPending ? 0.6 : 1 }}>
-            {isPending ? "Capturing…" : "Capture"}
+          <button
+            type="button"
+            className="pk-btn-accent"
+            disabled={isPending || uploads.length > 0}
+            onClick={submit}
+            style={{ opacity: isPending || uploads.length > 0 ? 0.6 : 1 }}
+          >
+            {isPending ? "Capturing…" : uploads.length > 0 ? "Uploading…" : "Capture"}
           </button>
           {submitErr && <span style={{ fontSize: 11.5, color: "#a0442b", fontWeight: 600 }}>{submitErr}</span>}
         </div>
@@ -339,6 +540,7 @@ export function ActivityTab({
             note={e.kind === "note" ? notesById[e.id] : undefined}
             meeting={e.kind === "meeting" ? meetingsById[e.id] : undefined}
             tasksById={tasksById}
+            engagementId={eng.id}
           />
         ))}
       </Card>
@@ -351,11 +553,13 @@ function ActivityRow({
   note,
   meeting,
   tasksById,
+  engagementId,
 }: {
   entry: ActivityEntry;
   note?: NoteRecord;
   meeting?: ConsultingEngagement["meetings"][number];
   tasksById: Record<string, TaskRecord>;
+  engagementId: string;
 }) {
   const kindLabel: Record<ActivityEntry["kind"], string> = {
     note: "Note", meeting: "Meeting", decision: "Decision", file: "File",
@@ -400,22 +604,16 @@ function ActivityRow({
       )}
       {attachments.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-          {attachments.map((a, i) =>
-            a.kind === "data" ? (
-              <a
-                key={i}
-                href={a.dataUrl}
-                download={a.name}
-                style={{ fontSize: 11.5, color: "var(--accent)", textDecoration: "none" }}
-              >
-                📎 {a.name}
-              </a>
-            ) : (
-              <span key={i} style={{ fontSize: 11.5, color: "#5b616e" }}>
-                📎 {a.name}
-              </span>
-            )
-          )}
+          {attachments.map((a, i) => (
+            <a
+              key={i}
+              href={fileRefHref(a, engagementId)}
+              download={a.name}
+              style={{ fontSize: 11.5, color: "var(--accent)", textDecoration: "none" }}
+            >
+              📎 {a.name}
+            </a>
+          ))}
         </div>
       )}
       {entry.taskIds.length > 0 && (
