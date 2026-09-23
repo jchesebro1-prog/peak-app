@@ -811,6 +811,26 @@ export default async function SchedulePage({
         </div>
       )}
 
+      {view === "timeline" && projects.length > 0 && (
+        <div
+          aria-label="Timeline scale note"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            margin: "-4px 0 12px",
+            color: "#8c919c",
+            fontSize: 10.5,
+            fontFamily: "var(--font-mono)",
+            letterSpacing: ".03em",
+          }}
+        >
+          <span style={{ height: 1, flex: 1, background: "#e7e9ee" }} />
+          <span>INSTALLS BELOW · separate date ruler and zoom</span>
+          <span style={{ height: 1, flex: 1, background: "#e7e9ee" }} />
+        </div>
+      )}
+
       {/* ===== board area + map ===== */}
       <div style={{ display: "flex", gap: 0, alignItems: "stretch", minHeight: 0 }}>
         <div
