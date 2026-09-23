@@ -4191,6 +4191,15 @@ import {
   ok(f.toBill === 1500 && f.byStage.length === 2, "#43 toBill sums targets inside the horizon; byStage groups the book");
 }
 
+/* ---- #43 §4 — once() memoises a loader per request ---- */
+import { once } from "@/lib/dashboard/once";
+{
+  let calls = 0;
+  const load = once(async () => { calls++; return 42; });
+  void load(); void load();
+  ok(calls === 1, "#43 once() invokes the loader a single time no matter how many widgets ask");
+}
+
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
   {
