@@ -250,6 +250,15 @@ export default function LinkSidebar({
       className="ib-scroll"
       style={{ ...asideStyle, fontFamily: "var(--font-ui)", color: "#16181d" }}
     >
+      {/* Link-to-work is intentionally first: the primary Inbox action is
+          attaching the thread to an existing quote/survey/project, while CRM
+          customer resolution remains available below it (#123). */}
+      {children && (
+        <div style={CARD}>
+          <div style={H}>Work</div>
+          {children}
+        </div>
+      )}
       {/* ---- linked ---- */}
       {vm.resolution === "linked" && vm.customerCard && (
         <div style={CARD}>
@@ -329,12 +338,6 @@ export default function LinkSidebar({
                   false
                 )}
               </div>
-            </div>
-          )}
-          {children && (
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #eef0f3" }}>
-              <div style={H}>Work</div>
-              {children}
             </div>
           )}
         </div>
@@ -520,13 +523,6 @@ export default function LinkSidebar({
       {/* ---- work link on a thread that has no customer (rare: the link
            predates the customer, or the customer was removed) — keeps the
            chip + remove reachable ---- */}
-      {vm.resolution !== "linked" && vm.link && children && (
-        <div style={CARD}>
-          <div style={H}>Work</div>
-          {children}
-        </div>
-      )}
-
       {/* ---- quick add (once a customer is in play; ambiguous picks one first) ---- */}
       {(targetCustomerId || vm.resolution === "ambiguous") &&
         vm.resolution !== "unknown" && (
