@@ -14,7 +14,6 @@ import {
   hasCalendarScope,
   hasDriveScope,
   hasTasksScope,
-  personalKey,
   redirectHostMismatch,
   SHARED_KEYS,
 } from "@/lib/gmail/config";
@@ -41,15 +40,10 @@ export default async function SettingsPage() {
   const redirectWarning = gmailOn ? redirectHostMismatch() : null;
   const connections = isAdmin && gmailOn ? await listConnections() : [];
   const connByKey = new Map(connections.map((c) => [c.mailboxKey, c]));
-  const myKey = personalKey(me.id);
-  const mailboxVMs = [
-    {
-      key: myKey,
-      label: me.name,
-      kind: "personal" as const,
-      desc: "Your own inbox — send as yourself and log your threads.",
-    },
-    ...SHARED_KEYS.map((k) => ({
+  // Personal mailbox settings belong only on /account. Settings exposes the
+  // company-owned shared boxes; this prevents an admin settings view from
+  // becoming a directory of individual account preferences.
+  const mailboxVMs = SHARED_KEYS.map((k) => ({
       key: k as string,
       label: SHARED_LABEL[k] || k,
       kind: "shared" as const,
@@ -59,8 +53,7 @@ export default async function SettingsPage() {
           : k === "installs"
             ? "Projects, scheduling & field coordination."
             : "General inbound — the address on the website.",
-    })),
-  ].map((mb) => {
+    })).map((mb) => {
     const c = connByKey.get(mb.key);
     return {
       ...mb,
