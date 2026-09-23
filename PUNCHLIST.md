@@ -5162,9 +5162,11 @@ failures for design and estimator task creation, covering those actions without 
 from the current record. The shared Apply Template control now does the same for project, quote,
 and design template fan-out failures, preserving the current record and reporting the writer's
 error instead of surfacing a raw 500. Inspection-report renovation quote creation now redirects
-back to the report with the same visible error banner on mint failure. The remaining FormData mutation surface needs a broader
-audit of every task/import/create action and a consistent typed-result contract; the five-page
-error channel described above is now in place for the paths covered here.
+back to the report with the same visible error banner on mint failure. The consulting quote save
+path is now included: quote/lead mint failures are caught and returned to the builder with a
+visible error banner, preserving the edit id when applicable. The remaining FormData mutation
+surface needs a broader audit of every task/import/create action and a consistent typed-result
+contract; the five-page error channel described above is now in place for the paths covered here.
 
 ---
 
