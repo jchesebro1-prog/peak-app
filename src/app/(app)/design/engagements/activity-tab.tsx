@@ -275,6 +275,7 @@ export function ActivityTab({
   const [uploads, setUploads] = useState<{ key: string; name: string }[]>([]);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [isPending, startTransition] = useTransition();
 
@@ -320,13 +321,17 @@ export function ActivityTab({
     const list = Array.from(files);
     if (list.length === 0) return;
     setSubmitErr(null);
+    setUploadNotice(null);
     for (const f of list) {
       const key = nextUploadKey();
       setUploads((prev) => [...prev, { key, name: f.name }]);
       uploadOne(f, eng.id)
         .then(({ ref, warning }) => {
           setAttachments((prev) => [...prev, ref]);
-          if (warning) setSubmitErr((prev) => (prev ? `${prev} ${warning}` : warning));
+          // A degraded fallback still SAVED the attachment — this is a
+          // notice, not a refusal, so it gets its own (differently styled)
+          // slot rather than reading like the hard failures below.
+          if (warning) setUploadNotice((prev) => (prev ? `${prev} ${warning}` : warning));
         })
         .catch((e: unknown) => {
           const msg = e instanceof Error ? e.message : `"${f.name}" could not be attached.`;
@@ -381,6 +386,7 @@ export function ActivityTab({
         setText("");
         setAttachments([]);
         setPendingTasks([]);
+        setUploadNotice(null);
         router.refresh();
       } catch {
         setSubmitErr("Couldn't save that capture — please try again.");
@@ -425,7 +431,11 @@ export function ActivityTab({
         >
           Drop files here, or click to browse
           <div style={{ marginTop: 2, fontSize: 11 }}>
-            {`Up to ${VENDOR_UPLOAD_MAX_LABEL} with Drive or Blob storage connected · ${DATA_MODE_MAX_LABEL} otherwise`}
+            {/* Each leg has its own real ceiling — Drive's resumable session
+                has none (that's the reason it exists), so it must never be
+                conflated with Blob's VENDOR_UPLOAD_MAX_BYTES cap, which the
+                route only enforces on the Blob leg. */}
+            {`No limit via Drive · up to ${VENDOR_UPLOAD_MAX_LABEL} via Blob · ${DATA_MODE_MAX_LABEL} if neither is connected`}
           </div>
           <input
             id="activity-file-input"
@@ -454,13 +464,26 @@ export function ActivityTab({
                   border: "1px solid #e4e7ec", borderRadius: 20, padding: "3px 6px 3px 10px",
                 }}
               >
-                <a
-                  href={fileRefHref(a, eng.id)}
-                  download={a.name}
-                  style={{ color: "inherit", textDecoration: "none" }}
-                >
-                  {a.name}
-                </a>
+                {/* A "data" ref's href is the inline data: URL itself — no
+                    proxy round trip, so it's downloadable immediately. A
+                    "blob"/"drive" ref's href instead points at the
+                    ownership-checked proxy, which only recognizes refs
+                    already persisted on a SAVED note (the download
+                    route's `refs` set comes from `allNotes()`); before
+                    Capture there is no note yet, so that link would 404.
+                    Plain text here — it becomes a real link once it shows
+                    up in the Activity feed below. */}
+                {a.kind === "data" ? (
+                  <a
+                    href={fileRefHref(a, eng.id)}
+                    download={a.name}
+                    style={{ color: "inherit", textDecoration: "none" }}
+                  >
+                    {a.name}
+                  </a>
+                ) : (
+                  a.name
+                )}
                 <button
                   type="button"
                   onClick={() => removeAttachment(i)}
@@ -523,6 +546,10 @@ export function ActivityTab({
             {isPending ? "Capturing…" : uploads.length > 0 ? "Uploading…" : "Capture"}
           </button>
           {submitErr && <span style={{ fontSize: 11.5, color: "#a0442b", fontWeight: 600 }}>{submitErr}</span>}
+          {/* Distinct from submitErr on purpose: a `warning` here means an
+              attachment DID save, just via a degraded fallback — it must
+              never read like the refusals above, which mean it did NOT. */}
+          {uploadNotice && <span style={{ fontSize: 11.5, color: "#8c6d1f", fontWeight: 500 }}>{uploadNotice}</span>}
         </div>
       </Card>
 
