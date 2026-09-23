@@ -1835,6 +1835,21 @@ async function main() {
     assert.equal(bare2!.locations[0].primary, true, "#137 C1 …and it stays primary");
   }
 
+  // #43 — per-user layouts persist in the blobs table, one key per surface
+  const { layoutFor, saveLayout, resetLayout } = await import("@/lib/dashboard/layout-store");
+  const { presetFor } = await import("@/lib/dashboard/registry");
+  const fresh = await layoutFor("u-t43", "home", ["Admin"]);
+  assert.equal(fresh.customized, false, "#43 no row → preset");
+  assert.deepEqual(fresh.ids, presetFor("home", ["Admin"]), "#43 preset ids when nothing stored");
+  await saveLayout("u-t43", "home", ["my-queue", "bogus", "my-queue"], ["Admin"]);
+  const saved = await layoutFor("u-t43", "home", ["Admin"]);
+  assert.deepEqual(saved.ids, ["my-queue"], "#43 save normalizes before writing");
+  assert.equal(saved.customized, true, "#43 a stored row marks the layout customized");
+  await saveLayout("u-t43", "reports", ["total-quoted"], ["Admin"]);
+  assert.deepEqual((await layoutFor("u-t43", "home", ["Admin"])).ids, ["my-queue"], "#43 saving reports leaves home untouched (per-key merge)");
+  await resetLayout("u-t43", "home");
+  assert.equal((await layoutFor("u-t43", "home", ["Admin"])).customized, false, "#43 reset returns to the preset");
+
   console.log("review regression checks passed");
 }
 
