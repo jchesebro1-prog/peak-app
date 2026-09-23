@@ -4957,6 +4957,44 @@ async function asyncChecks(): Promise<void> {
       }
     }
   }
+
+  /* --- #158 Task 2: ports persist through the catalog edit form --- */
+  {
+    const { mergeUpsert, get: getCatalogPart } = await import("@/lib/stores/catalog");
+    const { parsePortsField } = await import("@/lib/catalog-ports");
+
+    try {
+      await mergeUpsert("TEST:PORTS-1", { desc: "Ports test device", category: "Speakers", unit: "ea", list: 100, cost: 50 });
+
+      const parsed = parsePortsField(JSON.stringify([
+        { name: "Audio in", direction: "in", connectionType: "speakON NL4" },
+        { name: "Link out", direction: "out", connectionType: "speakON NL4" },
+      ]));
+      ok(parsed.ok === true, "ports/db: the fixture rows parse");
+      if (parsed.ok) await mergeUpsert("TEST:PORTS-1", { ports: parsed.ports });
+
+      const saved = await getCatalogPart("TEST:PORTS-1");
+      ok((saved?.ports || []).length === 2, "ports/db: ports persist on the part");
+      ok(saved?.desc === "Ports test device", "ports/db: saving ports leaves the other fields alone");
+
+      // The clearing contract: an explicit empty array must wipe them, because
+      // mergeUpsert only overwrites keys the patch actually carries.
+      await mergeUpsert("TEST:PORTS-1", { ports: [] });
+      const cleared = await getCatalogPart("TEST:PORTS-1");
+      ok((cleared?.ports || []).length === 0, "ports/db: an explicit empty array clears the ports");
+
+      // …and a patch that omits `ports` must NOT disturb them.
+      if (parsed.ok) await mergeUpsert("TEST:PORTS-1", { ports: parsed.ports });
+      await mergeUpsert("TEST:PORTS-1", { note: "price checked" });
+      const untouched = await getCatalogPart("TEST:PORTS-1");
+      ok((untouched?.ports || []).length === 2, "ports/db: a save that omits ports leaves them in place");
+    } finally {
+      // Teardown: same idiom as the #145 T10 cleanup just above — remove the
+      // fixture regardless of how far setup got, so a throw mid-block doesn't
+      // leave TEST:PORTS-1 behind in the catalog store.
+      await softDeleteDoc("catalog_parts", "TEST:PORTS-1");
+    }
+  }
 }
 
 /* --- Venue Assessments: class model --- */
@@ -6111,37 +6149,6 @@ async function writeBackAsyncChecks(): Promise<void> {
     rateLimited = e instanceof KrispRateLimitError;
   }
   ok(rateLimited, "pollKrispImport: 429 propagates as KrispRateLimitError (reconcile stops that account)");
-
-  /* --- #158 Task 2: ports persist through the catalog edit form --- */
-  {
-    const { mergeUpsert, get: getCatalogPart } = await import("@/lib/stores/catalog");
-    const { parsePortsField } = await import("@/lib/catalog-ports");
-
-    await mergeUpsert("TEST:PORTS-1", { desc: "Ports test device", category: "Speakers", unit: "ea", list: 100, cost: 50 });
-
-    const parsed = parsePortsField(JSON.stringify([
-      { name: "Audio in", direction: "in", connectionType: "speakON NL4" },
-      { name: "Link out", direction: "out", connectionType: "speakON NL4" },
-    ]));
-    ok(parsed.ok === true, "ports/db: the fixture rows parse");
-    if (parsed.ok) await mergeUpsert("TEST:PORTS-1", { ports: parsed.ports });
-
-    const saved = await getCatalogPart("TEST:PORTS-1");
-    ok((saved?.ports || []).length === 2, "ports/db: ports persist on the part");
-    ok(saved?.desc === "Ports test device", "ports/db: saving ports leaves the other fields alone");
-
-    // The clearing contract: an explicit empty array must wipe them, because
-    // mergeUpsert only overwrites keys the patch actually carries.
-    await mergeUpsert("TEST:PORTS-1", { ports: [] });
-    const cleared = await getCatalogPart("TEST:PORTS-1");
-    ok((cleared?.ports || []).length === 0, "ports/db: an explicit empty array clears the ports");
-
-    // …and a patch that omits `ports` must NOT disturb them.
-    if (parsed.ok) await mergeUpsert("TEST:PORTS-1", { ports: parsed.ports });
-    await mergeUpsert("TEST:PORTS-1", { note: "price checked" });
-    const untouched = await getCatalogPart("TEST:PORTS-1");
-    ok((untouched?.ports || []).length === 2, "ports/db: a save that omits ports leaves them in place");
-  }
 }
 
 /* ====== #145: the schedule tab is a real tab key ====== */
