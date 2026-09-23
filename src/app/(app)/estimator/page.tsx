@@ -18,6 +18,7 @@ import { getFixtureRates } from "@/lib/stores/pricing";
 import { blobEnabled } from "@/lib/blob";
 import { tasksForQuote } from "@/lib/stores/tasks";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
+import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import EstimatorClient from "./estimator-client";
 import type {
   AiSource,
@@ -322,6 +323,7 @@ export default async function EstimatorPage({
       people={roster.map((u) => ({ id: u.id, name: u.name }))}
       quoteTasks={quoteTasks}
       templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
+      assumptionLibrary={mergedConsultingAssumptions(settings.consultingAssumptions)}
     />
   );
 }

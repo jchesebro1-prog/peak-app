@@ -388,4 +388,6 @@ export type EstimatorProps = {
   /** Reusable task-template sets applicable to quotes (D149, #118), for the
    *  "Apply template" control next to the Tasks card. */
   templateSets: { id: string; name: string }[];
+  /** Company-managed checked assumptions shared with consulting proposals. */
+  assumptionLibrary: string[];
 };

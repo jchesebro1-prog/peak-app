@@ -2926,10 +2926,11 @@ attachment infra: `src/app/(app)/design/engagements/view.tsx:1258` ("Attach docu
 assumptions/narrative/attachments are snapshotted per revision).
 
 **Status:** PARTIAL 2026-09-23 — per-system narrative presentation, customer preview toggles,
-vendor-quote attachments/CSV lines, and PM handoff support are shipped. The estimator now also
-has a persisted quote-level Assumptions & exceptions field that appears in the customer preview
-and survives quote edits/revisions. Remaining: a Settings-editable checked-assumption library,
-explicit exception taxonomy, and any Jeff-selected attachment policy beyond vendor quotes.
+vendor-quote attachments/CSV lines, PM handoff support, and a persisted quote-level Assumptions &
+exceptions field are shipped. The estimator now consumes the company-managed assumptions library
+from Settings as checkable defaults while retaining editable quote-specific text; selections appear
+in the customer preview and survive quote edits/revisions. Remaining: an explicit exception
+taxonomy and any Jeff-selected attachment policy beyond vendor quotes.
 
 ---
 

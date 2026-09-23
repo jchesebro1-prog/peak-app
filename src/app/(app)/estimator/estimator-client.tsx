@@ -287,6 +287,7 @@ export default function EstimatorClient({
   people,
   quoteTasks,
   templateSets,
+  assumptionLibrary,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   const [sections, setSections] = useState<SpecSection[]>(
@@ -325,6 +326,7 @@ export default function EstimatorClient({
   const [contactName, setContactName] = useState(initial.contactName);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
   const [assumptions, setAssumptions] = useState(initial.assumptions || "");
+  const checkedAssumptions = useMemo(() => new Set(assumptions.split("\n").map((line) => line.trim()).filter(Boolean)), [assumptions]);
   const [installTimeframe, setInstallTimeframe] = useState(initial.installTimeframe);
   const [paymentTerms, setPaymentTerms] = useState(initial.paymentTerms);
   // #110: user-named quote category — persisted on blur, not per keystroke.
@@ -734,6 +736,13 @@ export default function EstimatorClient({
     if (!loadedId) return;
     if (assumptionsTimer.current) clearTimeout(assumptionsTimer.current);
     assumptionsTimer.current = setTimeout(() => persistMeta({ assumptions: v }), 500);
+  };
+  const toggleAssumption = (line: string) => {
+    const current = assumptions.split("\n").map((item) => item.trim()).filter(Boolean);
+    const next = checkedAssumptions.has(line)
+      ? current.filter((item) => item !== line)
+      : [...current, line];
+    onAssumptions(next.join("\n"));
   };
   const onInstallTimeframe = (v: string) => {
     setInstallTimeframe(v);
@@ -1968,15 +1977,27 @@ export default function EstimatorClient({
             }}
           >
             <span style={{ ...CTX_LABEL, paddingTop: 8 }}>Assumptions</span>
-            <textarea
-              className="est-notefield"
-              value={assumptions}
-              onChange={(e) => onAssumptions(e.target.value)}
-              placeholder="Assumptions, exclusions, and exceptions for this estimate…"
-              rows={2}
-              style={{ flex: 1, minWidth: 0, resize: "vertical", fontFamily: "var(--font-ui)", fontSize: 12.5, color: "#fff", background: "#2b2e35", border: "1px solid #3a3e46", borderRadius: 7, padding: "8px 11px" }}
-            />
-            <span style={{ fontSize: 10.5, color: "#6b7079", flexShrink: 0, paddingTop: 8 }}>Optional · shown on the quote</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {assumptionLibrary.length > 0 && (
+                <div style={{ display: "grid", gap: 5, marginBottom: 7 }}>
+                  {assumptionLibrary.map((line) => (
+                    <label key={line} style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 11.5, color: "#d7dae0", lineHeight: 1.35, cursor: "pointer" }}>
+                      <input type="checkbox" checked={checkedAssumptions.has(line)} onChange={() => toggleAssumption(line)} style={{ marginTop: 2 }} />
+                      <span>{line}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <textarea
+                className="est-notefield"
+                value={assumptions}
+                onChange={(e) => onAssumptions(e.target.value)}
+                placeholder="Add quote-specific assumptions, exclusions, and exceptions…"
+                rows={2}
+                style={{ width: "100%", minWidth: 0, resize: "vertical", fontFamily: "var(--font-ui)", fontSize: 12.5, color: "#fff", background: "#2b2e35", border: "1px solid #3a3e46", borderRadius: 7, padding: "8px 11px" }}
+              />
+            </div>
+            <span style={{ fontSize: 10.5, color: "#6b7079", flexShrink: 0, paddingTop: 8 }}>Company defaults + editable exceptions</span>
           </div>
 
           <div
