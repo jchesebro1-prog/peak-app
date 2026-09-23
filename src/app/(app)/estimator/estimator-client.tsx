@@ -131,6 +131,10 @@ const CSS = `
 
 const freshCustom = (): CustomDraft => ({
   desc: "",
+  manufacturer: "",
+  manufacturerPartNumber: "",
+  vendor: "",
+  priceGoodThrough: new Date().toISOString().slice(0, 10),
   link: "",
   allowance: "",
   sku: "",
@@ -309,6 +313,7 @@ export default function EstimatorClient({
   const [moveNotice, setMoveNotice] = useState<
     { ok: true; targetId: string; targetName: string } | { ok: false; error: string } | null
   >(null);
+  const [projectName, setProjectName] = useState(initial.projectName);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
@@ -391,6 +396,7 @@ export default function EstimatorClient({
     const lines: VendorLineDraft[] = v.lines.map((l) => ({
       id: l.id,
       description: l.description,
+      manufacturerPartNumber: l.manufacturerPartNumber || "",
       qty: String(l.qty),
       unit: l.unit,
       amount: String(l.amount),
@@ -538,7 +544,7 @@ export default function EstimatorClient({
     startTransition(async () => {
       try {
         const res = await saveQuoteAction(loadedId, {
-          name: initial.projectName,
+          name: projectName,
           customer: cname,
           customerId: customerId || null,
           locationId: locationId || null,
@@ -713,6 +719,10 @@ export default function EstimatorClient({
     if (noteTimer.current) clearTimeout(noteTimer.current);
     noteTimer.current = setTimeout(() => persistMeta({ quoteNote: v }), 500);
   };
+  const onProjectName = (v: string) => {
+    setProjectName(v);
+    if (loadedId) persistMeta({ name: v });
+  };
 
   /* ---------------- sections & items ---------------- */
   const isExpanded = (id: string) => expanded[id] !== false;
@@ -726,6 +736,21 @@ export default function EstimatorClient({
           : s
       )
     );
+  const setItemPrice = (id: number, value: string) => {
+    const price = Number(value.replace(/[$,\s]/g, ""));
+    if (!Number.isFinite(price) || price < 0) return;
+    patchItem(id, (it) => ({ ...it, price: round2(price), sellOverride: true }));
+  };
+  const moveItem = (secId: string, id: number, direction: -1 | 1) =>
+    setSections((ss) => ss.map((s) => {
+      if (s.id !== secId) return s;
+      const index = s.items.findIndex((item) => item.id === id);
+      const next = index + direction;
+      if (index < 0 || next < 0 || next >= s.items.length) return s;
+      const items = [...s.items];
+      [items[index], items[next]] = [items[next], items[index]];
+      return { ...s, items: items.map((item, i) => ({ ...item, lineOrder: i })) };
+    }));
   const inc = (id: number) => patchItem(id, (it) => ({ ...it, qty: it.qty + 1 }));
   const dec = (id: number) => patchItem(id, (it) => ({ ...it, qty: Math.max(0, it.qty - 1) }));
   const setQty = (id: number, v: string) => {
@@ -1052,12 +1077,16 @@ export default function EstimatorClient({
   const addCustomPart = (secId: string) => {
     const d = customDraft;
     const desc = (d.desc || "").trim();
-    const price = parseFloat(d.price);
-    if (!desc || isNaN(price) || price <= 0) return;
+    const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
     let qty = parseInt(d.qty, 10);
     if (isNaN(qty) || qty < 1) qty = 1;
     let cost = parseFloat(d.cost);
     if (isNaN(cost) || cost < 0) cost = 0;
+    const typedPrice = parseFloat(d.price);
+    const price = d.allowance && (!Number.isFinite(typedPrice) || typedPrice <= 0)
+      ? round2(cost / (1 - margin))
+      : typedPrice;
+    if (!desc || !Number.isFinite(price) || price <= 0) return;
     pushItems(secId, [
       {
         id: nextId(),
@@ -1068,6 +1097,9 @@ export default function EstimatorClient({
         cost,
         price,
         custom: true,
+        manufacturer: d.manufacturer.trim() || undefined,
+        manufacturerPartNumber: d.manufacturerPartNumber.trim() || undefined,
+        priceGoodThrough: d.priceGoodThrough || undefined,
         link: (d.link || "").trim() || undefined,
         allowance: d.allowance ? true : undefined,
       },
@@ -1098,7 +1130,7 @@ export default function EstimatorClient({
     setVendorDraft((d) => ({
       ...d,
       lines: d.lines.concat([
-        { id: ++vendorLineIdRef.current, description: "", qty: "1", unit: "ea", amount: "" },
+        { id: ++vendorLineIdRef.current, description: "", manufacturerPartNumber: "", qty: "1", unit: "ea", amount: "" },
       ]),
     }));
   const removeVendorLine = (id: number) =>
@@ -1146,6 +1178,7 @@ export default function EstimatorClient({
       lines: vendorKeptLines(d.lines).map((l) => ({
         id: l.id,
         description: (l.description || "").trim(),
+        ...(l.manufacturerPartNumber.trim() ? { manufacturerPartNumber: l.manufacturerPartNumber.trim() } : {}),
         qty: parseMoney(l.qty) || 0,
         unit: (l.unit || "").trim() || "ea",
         amount: round2(parseMoney(l.amount) || 0),
@@ -1615,7 +1648,12 @@ export default function EstimatorClient({
                     textOverflow: "ellipsis",
                   }}
                 >
-                  {initial.projectName}
+                  <input
+                    value={projectName}
+                    onChange={(e) => onProjectName(e.target.value)}
+                    aria-label="Estimate name"
+                    style={{ background: "transparent", border: "1px solid transparent", color: "#fff", font: "inherit", width: "100%", minWidth: 140, outline: "none" }}
+                  />
                 </div>
                 <div
                   style={{
@@ -2664,6 +2702,8 @@ export default function EstimatorClient({
                   onInc={inc}
                   onDec={dec}
                   onSetQty={setQty}
+                  onSetPrice={setItemPrice}
+                  onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
                   onRemoveItem={removeItem}
                   onToggleCatalog={() => openInputMethod("catalog", sec.id)}
                   onToggleCurtain={() => openInputMethod("curtain", sec.id)}

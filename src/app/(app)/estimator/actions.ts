@@ -482,6 +482,7 @@ export async function moveSystemToEstimateAction(
 export async function updateQuoteMetaAction(
   id: string,
   meta: {
+    name?: string;
     customerId?: string | null;
     locationId?: string | null;
     customer?: string;
@@ -498,6 +499,7 @@ export async function updateQuoteMetaAction(
   // bypassing the permission-gated review actions below. Approval/status/price
   // changes have their own checked mutators (approveReviewAction, setStatus…).
   const patch: QuotePatch = {};
+  if (typeof meta.name === "string") patch.name = meta.name.trim();
   if ("customerId" in meta) patch.customerId = meta.customerId;
   if ("locationId" in meta) patch.locationId = meta.locationId;
   if (typeof meta.customer === "string") patch.customer = meta.customer;

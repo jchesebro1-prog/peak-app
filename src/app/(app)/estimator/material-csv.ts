@@ -1,6 +1,7 @@
 export type ImportedMaterial = {
   sku: string;
   desc: string;
+  manufacturerPartNumber?: string;
   qty: number;
   unit: string;
   cost: number;
@@ -40,6 +41,7 @@ export const VENDOR_CSV_TEMPLATE =
 
 const ALIASES = {
   sku: ["sku", "part no", "part number", "part", "model", "item"],
+  manufacturerPartNumber: ["mfr p/n", "mfr part number", "manufacturer part number", "manufacturer p/n"],
   desc: ["description", "desc", "item name", "name", "product"],
   qty: ["quantity", "qty", "count"],
   unit: ["unit", "uom"],
@@ -111,6 +113,7 @@ export function parseMaterialCsv(text: string, opts: MaterialCsvOptions = {}): M
     : ALIASES.cost;
   const col = {
     sku: indexOf(headers, ALIASES.sku),
+    manufacturerPartNumber: indexOf(headers, ALIASES.manufacturerPartNumber),
     desc: indexOf(headers, ALIASES.desc),
     qty: indexOf(headers, ALIASES.qty),
     unit: indexOf(headers, ALIASES.unit),
@@ -132,6 +135,7 @@ export function parseMaterialCsv(text: string, opts: MaterialCsvOptions = {}): M
     // needs a description and a positive sell price, since nothing else can
     // price it.
     const sku = col.sku >= 0 ? (cells[col.sku] || "").trim() : "";
+    const manufacturerPartNumber = col.manufacturerPartNumber >= 0 ? (cells[col.manufacturerPartNumber] || "").trim() : "";
     const desc = col.desc >= 0 ? (cells[col.desc] || "").trim() : "";
     const qty = col.qty >= 0 ? Number(cells[col.qty]) : 1;
     const price = col.price >= 0 ? parseMoney(cells[col.price] || "0") : 0;
@@ -160,6 +164,7 @@ export function parseMaterialCsv(text: string, opts: MaterialCsvOptions = {}): M
     items.push({
       sku,
       desc,
+      ...(manufacturerPartNumber ? { manufacturerPartNumber } : {}),
       qty,
       // Blank stays blank so a catalog SKU can inherit the part's unit (#112);
       // the estimator falls back to "ea" for custom rows.

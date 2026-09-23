@@ -84,6 +84,8 @@ export type SectionCardProps = {
   onInc: (id: number) => void;
   onDec: (id: number) => void;
   onSetQty: (id: number, v: string) => void;
+  onSetPrice: (id: number, v: string) => void;
+  onMoveItem: (id: number, direction: -1 | 1) => void;
   onRemoveItem: (id: number) => void;
   onToggleCatalog: () => void;
   onToggleCurtain: () => void;
@@ -176,7 +178,7 @@ export default function SectionCard(p: SectionCardProps) {
   const cdPrice = parseFloat(cd.price) || 0;
   const cdCost = parseFloat(cd.cost) || 0;
   const cdMargin = cdPrice > 0 ? (cdPrice - cdCost) / cdPrice : 0;
-  const cdValid = (cd.desc || "").trim().length > 0 && cdPrice > 0;
+  const cdValid = (cd.desc || "").trim().length > 0 && (cdPrice > 0 || (!!cd.allowance && cdCost > 0));
   const showLink = linkRevealed || !!cd.link;
   const openMethod = p.openMethod;
 
@@ -928,7 +930,19 @@ export default function SectionCard(p: SectionCardProps) {
                       {fmt(it.cost)}
                     </span>
                   )}
-                  <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#5b616e" }}>{fmt(it.price)}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
+                    <input
+                      className="est-input"
+                      defaultValue={String(it.price)}
+                      onBlur={(e) => p.onSetPrice(it.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      aria-label={`Unit sell for ${it.desc}`}
+                      style={{ width: 76, height: 24, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#5b616e" }}
+                    />
+                    <span title="Line margin" style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: marginColor(it.price > 0 ? (it.price - it.cost) / it.price : 0) }}>
+                      {it.price > 0 ? Math.round(((it.price - it.cost) / it.price) * 100) : 0}%
+                    </span>
+                  </div>
                   <span
                     style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
                   >
@@ -952,6 +966,8 @@ export default function SectionCard(p: SectionCardProps) {
                   >
                     ×
                   </button>
+                  <button type="button" onClick={() => p.onMoveItem(it.id, -1)} title="Move line up" style={{ border: "none", background: "transparent", color: "#aab0bb", cursor: "pointer", padding: 0 }}>↑</button>
+                  <button type="button" onClick={() => p.onMoveItem(it.id, 1)} title="Move line down" style={{ border: "none", background: "transparent", color: "#aab0bb", cursor: "pointer", padding: 0 }}>↓</button>
                 </div>
               );
             })}
@@ -1123,8 +1139,8 @@ export default function SectionCard(p: SectionCardProps) {
                     alignItems: "end",
                   }}
                 >
-                  <div>
-                    <label style={LBL}>Part no. / SKU</label>
+                <div>
+                  <label style={LBL}>Part no. / SKU</label>
                     <input
                       className="est-input est-field"
                       value={cd.sku}
@@ -1132,6 +1148,14 @@ export default function SectionCard(p: SectionCardProps) {
                       placeholder="CUSTOM-001"
                       style={PORTAL_FIELD}
                     />
+                  </div>
+                  <div>
+                    <label style={LBL}>Manufacturer</label>
+                    <input className="est-input est-field" value={cd.manufacturer} onChange={(e) => p.onSetCustomDraft("manufacturer", e.target.value)} placeholder="ETC" style={PORTAL_FIELD} />
+                  </div>
+                  <div>
+                    <label style={LBL}>MFR P/N</label>
+                    <input className="est-input est-field" value={cd.manufacturerPartNumber} onChange={(e) => p.onSetCustomDraft("manufacturerPartNumber", e.target.value)} placeholder="7060A" style={PORTAL_FIELD} />
                   </div>
                   <div>
                     <label style={LBL}>Unit</label>
@@ -1203,6 +1227,10 @@ export default function SectionCard(p: SectionCardProps) {
                       />
                     </div>
                   </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+                  <label style={{ ...LBL, margin: 0 }}>Price good through</label>
+                  <input type="date" className="est-input est-field" value={cd.priceGoodThrough} onChange={(e) => p.onSetCustomDraft("priceGoodThrough", e.target.value)} style={{ ...PORTAL_FIELD, width: 150 }} />
                 </div>
 
                 <div

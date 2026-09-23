@@ -30,6 +30,14 @@ export type SpecItem = {
   unit: string;
   cost: number;
   price: number;
+  /** True when the sell value was explicitly edited on this line. */
+  sellOverride?: boolean;
+  /** Stable display ordering within its system; array order remains the legacy fallback. */
+  lineOrder?: number;
+  manufacturer?: string;
+  manufacturerPartNumber?: string;
+  manufacturerModelNumber?: string;
+  priceGoodThrough?: string;
   /** flags set by the add flows (custom part / curtain / fixture / labor) */
   custom?: boolean;
   curtain?: boolean;
@@ -79,6 +87,7 @@ export const VENDOR_ATTACHMENT_BUDGET = 820_000;
 export type VendorQuoteLine = {
   id: number;
   description: string;
+  manufacturerPartNumber?: string;
   qty: number;
   unit: string;
   amount: number;
@@ -132,6 +141,10 @@ export type SpecSection = {
 
 export type CustomDraft = {
   desc: string;
+  manufacturer: string;
+  manufacturerPartNumber: string;
+  vendor: string;
+  priceGoodThrough: string;
   link: string;
   sku: string;
   unit: string;
@@ -159,6 +172,7 @@ export type CurtainDraft = {
 export type VendorLineDraft = {
   id: number;
   description: string;
+  manufacturerPartNumber: string;
   qty: string;
   unit: string;
   amount: string;
