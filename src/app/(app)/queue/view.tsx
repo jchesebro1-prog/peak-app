@@ -168,7 +168,11 @@ export default function QueueView({
                     type="checkbox"
                     checked={false}
                     onChange={async () => {
-                      await setAssignmentDoneAction(it.key.replace("assignment:", ""), true);
+                      const r = await setAssignmentDoneAction(it.key.replace("assignment:", ""), true);
+                      if (!r.ok) {
+                        setErr(r.error);
+                        return;
+                      }
                       router.refresh();
                     }}
                     title="Mark done"
@@ -209,7 +213,11 @@ export default function QueueView({
               <button
                 style={{ ...BTN, padding: "3px 8px", fontSize: 11 }}
                 onClick={async () => {
-                  await setAssignmentDoneAction(a.id, false);
+                  const r = await setAssignmentDoneAction(a.id, false);
+                  if (!r.ok) {
+                    setErr(r.error);
+                    return;
+                  }
                   router.refresh();
                 }}
               >

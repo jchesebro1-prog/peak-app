@@ -50,7 +50,12 @@ export async function setAssignmentDoneAction(
   done: boolean
 ): Promise<Result> {
   await requireUser();
-  await setAssignmentDone(id, done, "app");
+  try {
+    await setAssignmentDone(id, done, "app");
+  } catch (error) {
+    console.error("setAssignmentDoneAction: assignment update failed", error);
+    return { ok: false, error: "Couldn’t update the assignment — please try again." };
+  }
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -60,7 +65,12 @@ export async function updateAssignmentAction(
   patch: { title?: string; assignee?: string; dueDate?: number }
 ): Promise<Result> {
   await requireUser();
-  await updateAssignment(id, patch);
+  try {
+    await updateAssignment(id, patch);
+  } catch (error) {
+    console.error("updateAssignmentAction: assignment update failed", error);
+    return { ok: false, error: "Couldn’t update the assignment — please try again." };
+  }
   revalidatePath("/", "layout");
   return { ok: true };
 }
