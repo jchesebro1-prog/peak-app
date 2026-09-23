@@ -5178,7 +5178,8 @@ with customer-safe retry messages. The remaining FormData mutation surface needs
 of every task/import/create action and a consistent typed-result contract. Field Work task toggles,
 notes, and time entries now redirect to the field-work error banner; inspection scheduling, renewal
 outreach, and deletion now redirect to visible inspection errors. The five-page error channel
-described above is now in place for the paths covered here.
+described above is now in place for the paths covered here. Grid assembly creation now also
+converts its underlying symbol mint failure into the typed error already rendered by the editor.
 
 ---
 
