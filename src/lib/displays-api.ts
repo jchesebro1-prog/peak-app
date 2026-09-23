@@ -16,6 +16,40 @@ export async function authorizeDisplaysRequest(req: Request): Promise<void> {
   await requireUser();
 }
 
+function publicProductMetadata(part: CatalogPart) {
+  const metadata = part.productMetadata;
+  if (!metadata) return null;
+  return {
+    productFamily: metadata.productFamily || null,
+    specSection: metadata.specSection || null,
+    specArticle: metadata.specArticle || null,
+    specLanguageKey: metadata.specLanguageKey || null,
+    researchStatus: metadata.researchStatus || null,
+    source: metadata.source
+      ? {
+          manufacturerUrl: metadata.source.manufacturerUrl || null,
+          sourceDocumentName: metadata.source.sourceDocumentName || null,
+          sourceDocumentDate: metadata.source.sourceDocumentDate ?? null,
+          researchedAt: metadata.source.researchedAt ?? null,
+        }
+      : null,
+    // Never return private Blob keys. External consumers get metadata and a
+    // browser-safe URL; the authenticated Peak proxy remains the document gate.
+    datasheets: (metadata.datasheets || []).map((file) => ({
+      kind: file.kind,
+      fileName: file.fileName,
+      sourceUrl: file.sourceUrl || null,
+      verifiedAt: file.verifiedAt ?? null,
+    })),
+    accessories: (metadata.accessories || []).map((accessory) => ({
+      sku: accessory.sku || null,
+      manufacturerPartNumber: accessory.manufacturerPartNumber || null,
+      description: accessory.description,
+      required: accessory.required ?? false,
+    })),
+  };
+}
+
 export function publicCatalogPart(part: CatalogPart & PartSpecFields) {
   return {
     id: part.id,
@@ -32,7 +66,7 @@ export function publicCatalogPart(part: CatalogPart & PartSpecFields) {
     datasheets: part.datasheetName
       ? [{ name: part.datasheetName, url: `/api/part-datasheet/${encodeURIComponent(part.sku)}` }]
       : (part.productMetadata?.datasheets || []).map((file) => ({ name: file.fileName, url: `/api/part-datasheet/${encodeURIComponent(part.sku)}` })),
-    productMetadata: part.productMetadata ?? null,
+    productMetadata: publicProductMetadata(part),
     spec: part.specBody?.trim() ? { sectionId: part.specSectionId || null, body: part.specBody.trim() } : null,
     updatedAt: part.updatedAt ?? null,
     pricedAt: part.pricedAt ?? null,
