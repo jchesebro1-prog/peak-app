@@ -503,6 +503,30 @@ const projectStoreSource = readFileSync(join(process.cwd(), "src/lib/stores/proj
 ok(projectActionsSource.includes('str(formData, "signature")') && projectActionsSource.includes("data:image\\/png;base64"), "#44 sign-off action requires a bounded drawn PNG signature");
 ok(projectViewSource.includes('import SignaturePad') && projectViewSource.includes("<SignaturePad />"), "#44 sign-off form captures a phone-drawn signature");
 ok(projectStoreSource.includes("signature?: string") && projectStoreSource.includes("scopeChecks?: Record<string, boolean>") && projectActionsSource.includes("Walk the completed site with the end user"), "#44 stores sign-off signature, per-scope checks, and creates the walkthrough follow-up");
+const projectActionBody = (name: string) => {
+  const start = projectActionsSource.indexOf(`export async function ${name}`);
+  const end = projectActionsSource.indexOf("\nexport ", start + 1);
+  return projectActionsSource.slice(start, end < 0 ? undefined : end);
+};
+ok(
+  projectActionsSource.includes("function projectErrorPath") && projectActionsSource.includes('params.set("tab", tab)') && projectActionsSource.includes('params.set("err", message)'),
+  "#85 project mutation failures retain the detail tab and render through ActionError"
+);
+for (const name of [
+  "setStageAction", "cycleLineAction", "setLinePoAction", "cycleDeliveryAction",
+  "addCrewAction", "removeCrewAction", "addNoteAction", "addTimeAction",
+  "setTaskStatusAction", "updateTaskAction",
+]) {
+  ok(projectActionBody(name).includes("projectErrorPath("), `#85 ${name} redirects write failures to the project error route`);
+}
+ok(
+  projectActionBody("signoffAction").split("projectErrorPath(").length - 1 >= 2,
+  "#85 sign-off redirects both its save and completion-write failures to the sign-off tab"
+);
+ok(
+  projectActionBody("setTaskStatusAction").includes("await getTask(taskId)") && projectActionBody("updateTaskAction").includes("await getTask(taskId)"),
+  "#85 task failures recover the owning project before redirecting"
+);
 const inboxFixture = commsSeed().find((thread) => thread.id === "C-1019");
 ok(!!inboxFixture && inboxFixture.link === null && inboxFixture.messages.length === 3 && new Set(inboxFixture.messages.map((message) => message.author)).size === 3, "#46 seed includes a chip-less three-author thread for participant rendering");
 
