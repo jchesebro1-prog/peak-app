@@ -747,6 +747,24 @@ ok(
 );
 ok(PORT_DIRECTIONS.length === 3, "ports: three directions are offered (in/out/io)");
 
+/* --- #159 Task 1: shared port shapes --- */
+import * as Shapes from "@/lib/catalog-port-shapes";
+
+ok(Shapes.passiveSpeakerPorts()[0].connectionType === "speakON NL2", "shapes: a passive speaker takes one speakON NL2 in");
+ok(Shapes.passiveSpeakerPorts()[0].direction === "in", "shapes: a passive speaker's audio port is an input");
+ok(Shapes.dimmerRackPorts(12)[2].count === 12, "shapes: dimmerRackPorts carries its output count");
+ok(Shapes.matrixPorts(4, 4)[1].connectionType === "HDBaseT (Cat6a)", "shapes: matrixPorts defaults its output to HDBaseT");
+ok(Shapes.matrixPorts(4, 4, "HDMI")[1].connectionType === "HDMI", "shapes: matrixPorts honours an HDMI output override");
+ok(Shapes.mechanicalPorts().length === 0, "shapes: a mechanical part has no ports");
+
+// The guard that matters: a shape emitting a connectionType outside the
+// vocabulary would make every part it touches silently unwireable.
+const connSet = new Set(CONNECTION_TYPES);
+const badShape = Object.entries(Shapes.ALL_SHAPES).find(([, make]) =>
+  make().some((prt) => !connSet.has(prt.connectionType))
+);
+ok(!badShape, `shapes: every shape emits only known connection types${badShape ? ` (offender: ${badShape[0]})` : ""}`);
+
 
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
