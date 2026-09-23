@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { SuggestPart } from "./estimator-data";
-import { fmt, marginColor, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
+import { fmt, lineExtSellOf, marginColor, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import CatalogPicker from "./catalog-picker";
@@ -87,6 +87,7 @@ export type SectionCardProps = {
   onDec: (id: number) => void;
   onSetQty: (id: number, v: string) => void;
   onSetPrice: (id: number, v: string) => void;
+  onSetExtSell: (id: number, v: string) => void;
   onMoveItem: (id: number, direction: -1 | 1) => void;
   onRemoveItem: (id: number) => void;
   onToggleCatalog: () => void;
@@ -948,15 +949,18 @@ export default function SectionCard(p: SectionCardProps) {
                       aria-label={`Unit sell for ${it.desc}`}
                       style={{ width: 76, height: 24, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#5b616e" }}
                     />
-                    <span title="Line margin" style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: marginColor(it.price > 0 ? (it.price - it.cost) / it.price : 0) }}>
-                      {it.price > 0 ? Math.round(((it.price - it.cost) / it.price) * 100) : 0}%
+                    <span title="Line margin" style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: marginColor(lineExtSellOf(it) > 0 ? (lineExtSellOf(it) - it.qty * it.cost) / lineExtSellOf(it) : 0) }}>
+                      {lineExtSellOf(it) > 0 ? Math.round(((lineExtSellOf(it) - it.qty * it.cost) / lineExtSellOf(it)) * 100) : 0}%
                     </span>
                   </div>
-                  <span
-                    style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
-                  >
-                    {fmt(it.qty * it.price)}
-                  </span>
+                  <input
+                    className="est-input"
+                    defaultValue={String(lineExtSellOf(it))}
+                    onBlur={(e) => p.onSetExtSell(it.id, e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    aria-label={`Extended sell for ${it.desc}`}
+                    style={{ width: 88, height: 24, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#5b616e", fontWeight: 600 }}
+                  />
                   <button
                     type="button"
                     className="est-x"

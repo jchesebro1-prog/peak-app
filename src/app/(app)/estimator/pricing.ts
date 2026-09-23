@@ -15,6 +15,7 @@ import type {
   LaborDraft,
   MobDraft,
   SpecSection,
+  SpecItem,
 } from "./types";
 
 /**
@@ -58,6 +59,13 @@ export function lineMarginOf(cost: number, price: number): number | null {
   if (!(price > 0)) return null;
   const m = (price - cost) / price;
   return Number.isFinite(m) && m < 1 ? m : null;
+}
+
+/** The customer-facing extended sell for a line, including a manual override. */
+export function lineExtSellOf(it: Pick<SpecItem, "qty" | "price" | "extSellOverride">): number {
+  return it.extSellOverride != null && Number.isFinite(it.extSellOverride)
+    ? Math.max(0, it.extSellOverride)
+    : it.qty * it.price;
 }
 
 /**
@@ -104,7 +112,7 @@ export function vendorTotalSeed(storedTotal: number, linesTotal: number): string
 /* ---------------- section + quote totals ---------------- */
 
 export function systemItemsRev(sec: SpecSection): number {
-  return sec.items.filter((x) => !x.option).reduce((a, x) => a + x.qty * x.price, 0);
+  return sec.items.filter((x) => !x.option).reduce((a, x) => a + lineExtSellOf(x), 0);
 }
 
 export function systemItemsCost(sec: SpecSection): number {
@@ -148,7 +156,7 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
     cost = 0;
   for (const sec of sections) {
     for (const it of sec.items) {
-      const ext = it.qty * it.price;
+      const ext = lineExtSellOf(it);
       if (it.option) {
         opt += ext;
         continue;

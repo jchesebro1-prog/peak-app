@@ -740,7 +740,12 @@ export default function EstimatorClient({
   const setItemPrice = (id: number, value: string) => {
     const price = Number(value.replace(/[$,\s]/g, ""));
     if (!Number.isFinite(price) || price < 0) return;
-    patchItem(id, (it) => ({ ...it, price: round2(price), sellOverride: true }));
+    patchItem(id, (it) => ({ ...it, price: round2(price), sellOverride: true, extSellOverride: undefined }));
+  };
+  const setItemExtSell = (id: number, value: string) => {
+    const ext = Number(value.replace(/[$,\s]/g, ""));
+    if (!Number.isFinite(ext) || ext < 0) return;
+    patchItem(id, (it) => ({ ...it, extSellOverride: round2(ext) }));
   };
   const moveItem = (secId: string, id: number, direction: -1 | 1) =>
     setSections((ss) => ss.map((s) => {
@@ -2711,6 +2716,7 @@ export default function EstimatorClient({
                   onDec={dec}
                   onSetQty={setQty}
                   onSetPrice={setItemPrice}
+                  onSetExtSell={setItemExtSell}
                   onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
                   onRemoveItem={removeItem}
                   onToggleCatalog={() => openInputMethod("catalog", sec.id)}

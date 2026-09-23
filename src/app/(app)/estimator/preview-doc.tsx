@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
-import { fmt, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
+import { fmt, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 
 /**
@@ -134,7 +134,7 @@ export default function PreviewDoc(p: PreviewProps) {
                   sub: [] as { key: string; qty: number; unit: string; text: string }[],
                   qty: "" as string | number,
                   unit: "",
-                  ext: fmt(visible.reduce((a, it) => a + it.qty * it.price, 0)),
+                  ext: fmt(visible.reduce((a, it) => a + lineExtSellOf(it), 0)),
                 },
               ]
             : visible.map((it) => {
@@ -170,7 +170,7 @@ export default function PreviewDoc(p: PreviewProps) {
                       : [],
                   qty: it.qty as string | number,
                   unit: it.unit,
-                  ext: fmt(it.qty * it.price),
+                  ext: fmt(lineExtSellOf(it)),
                 };
               }),
       };
@@ -701,7 +701,7 @@ export default function PreviewDoc(p: PreviewProps) {
                   )}
                   {p.pdfPrices && (
                     <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}>
-                      {fmt(it.qty * it.price)}
+                      {fmt(lineExtSellOf(it))}
                     </span>
                   )}
                 </div>

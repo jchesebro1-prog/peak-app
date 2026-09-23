@@ -32,6 +32,8 @@ export type SpecItem = {
   price: number;
   /** True when the sell value was explicitly edited on this line. */
   sellOverride?: boolean;
+  /** Optional manual extended sell override; otherwise qty × unit sell is used. */
+  extSellOverride?: number;
   /** Stable display ordering within its system; array order remains the legacy fallback. */
   lineOrder?: number;
   manufacturer?: string;
