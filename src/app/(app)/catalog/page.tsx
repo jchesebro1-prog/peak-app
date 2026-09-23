@@ -15,6 +15,7 @@ import { activeUsers } from "@/lib/users";
 import { allVendorProfiles, vendorCompanies } from "@/lib/stores/vendors";
 import { claimOwnerByKey, resolveCatalogOwner } from "@/lib/vendor-status";
 import { CatalogOwnerCard } from "./catalog-owner-card";
+import PortsEditor from "./ports-editor";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
 
@@ -73,6 +74,7 @@ export default async function CatalogPage({
   const isNew = one(sp.new) === "1";
   const importedN = one(sp.imported);
   const importError = one(sp.importError);
+  const partError = one(sp.partError);
   const reset = one(sp.reset) === "1";
 
   const mfrOf = (p: CatalogPart) => (p.mfr && p.mfr.trim() ? p.mfr.trim() : UNSPEC);
@@ -378,7 +380,7 @@ export default async function CatalogPage({
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                     }}>{p.desc}</span>
-                    {(p.note || p.datasheetBlobKey) && (
+                    {(p.note || p.datasheetBlobKey || (p.ports?.length ?? 0) > 0) && (
                       <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
                         {p.note && (
                           <span
@@ -400,6 +402,14 @@ export default async function CatalogPage({
                         )}
                         {p.datasheetBlobKey && (
                           <span style={{ fontSize: 10.5, color: "#8c919c" }}>Datasheet</span>
+                        )}
+                        {(p.ports?.length ?? 0) > 0 && (
+                          <span
+                            title={`${p.ports!.length} port${p.ports!.length === 1 ? "" : "s"} — wireable in The Grid`}
+                            style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#6b7280", marginLeft: 6 }}
+                          >
+                            {p.ports!.length}⚊
+                          </span>
                         )}
                       </span>
                     )}
@@ -466,6 +476,7 @@ export default async function CatalogPage({
           categories={categories}
           manufacturers={manufacturers.filter((m) => m !== UNSPEC)}
           isAdmin={isAdmin}
+          error={partError}
         />
       )}
     </div>
@@ -572,6 +583,7 @@ function PartFormModal({
   categories,
   manufacturers,
   isAdmin,
+  error,
 }: {
   part: CatalogPart | null;
   /** #133 — the part's effective price date (own pricedAt or the manufacturer's book date), null when undated. */
@@ -581,6 +593,8 @@ function PartFormModal({
   /** Datasheet attach/replace/remove (punch #39, Task 5) is admin-gated —
    *  same convention as the Categories & trades card. */
   isAdmin: boolean;
+  /** #158 — a rejected `ports` field bounces here via ?partError=; empty string renders nothing. */
+  error: string;
 }) {
   const editing = !!part;
   const label = (t: string) => (
@@ -666,6 +680,18 @@ function PartFormModal({
           </div>
 
           <form action={upsertPart} style={{ padding: "18px 20px", overflowY: "auto" }}>
+            {error && (
+              <div
+                role="alert"
+                style={{
+                  marginBottom: 12, padding: "9px 11px", borderRadius: 8,
+                  border: "1px solid #e7c3bd", background: "#fbf3f1",
+                  fontSize: 12.5, color: "#8a3a2a",
+                }}
+              >
+                {error}
+              </div>
+            )}
             <div style={{ marginBottom: 13 }}>
               {label("SKU")}
               <input
@@ -733,6 +759,10 @@ function PartFormModal({
               <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 4 }}>
                 Shows as a flag on the part. Clear it once the pricing is confirmed.
               </div>
+            </div>
+
+            <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
+              <PortsEditor initial={part?.ports ?? []} />
             </div>
 
             {/* Datasheet attach/replace/remove (punch #39, Task 5) — admin
