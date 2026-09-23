@@ -1,7 +1,10 @@
 # Company settings, dashboard preferences, catalog metadata, and Displays Manager API — Design
 
 **Date:** 2026-09-22  
-**Status:** Proposed; decisions confirmed by Jeff 2026-09-22  
+**Status:** Implemented in slices; decisions confirmed by Jeff 2026-09-22. Company settings,
+dashboard defaults/overrides, catalog metadata import, and the read-only Displays Manager API
+are live in the current rebuild. Organization-scoped token management and production data
+population remain deployment/data gates.
 **Scope:** design only. No application code, migrations, or external API are included in this document.
 
 ## Confirmed decisions

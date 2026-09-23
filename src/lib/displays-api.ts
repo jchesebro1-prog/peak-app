@@ -83,6 +83,39 @@ export function catalogEtag(parts: CatalogPart[]): string {
   return `"${createHash("sha1").update(source).digest("hex")}"`;
 }
 
+export type DisplaysCursor = { updatedAt: number; id: string };
+
+/** Stable, opaque cursor for the public catalog ordering (newest first, id tie-break). */
+export function encodeDisplaysCursor(part: Pick<CatalogPart, "id" | "updatedAt" | "pricedAt">): string {
+  const value: DisplaysCursor = { updatedAt: part.updatedAt || part.pricedAt || 0, id: part.id };
+  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+}
+
+export function decodeDisplaysCursor(raw: string | null): DisplaysCursor | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as Partial<DisplaysCursor>;
+    const updatedAt = value.updatedAt;
+    const id = value.id;
+    if (!Number.isFinite(updatedAt) || typeof id !== "string" || !id) throw new Error("invalid");
+    return { updatedAt: updatedAt as number, id };
+  } catch {
+    throw new Error("Invalid cursor.");
+  }
+}
+
+export function displayTimestamp(part: Pick<CatalogPart, "updatedAt" | "pricedAt">): number {
+  return part.updatedAt || part.pricedAt || 0;
+}
+
+export function isAfterDisplaysCursor(
+  part: Pick<CatalogPart, "id" | "updatedAt" | "pricedAt">,
+  cursor: DisplaysCursor
+): boolean {
+  const timestamp = displayTimestamp(part);
+  return timestamp < cursor.updatedAt || (timestamp === cursor.updatedAt && part.id.localeCompare(cursor.id) > 0);
+}
+
 export function unauthorizedMessage(error: unknown): string {
   return error instanceof Error && error.message.includes("token") ? error.message : "Authentication required.";
 }
