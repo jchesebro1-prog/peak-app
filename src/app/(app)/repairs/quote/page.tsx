@@ -13,6 +13,7 @@ import { getSettings } from "@/lib/settings";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Repair quote — Quartzite-6" };
 
@@ -288,14 +289,17 @@ export default async function RepairQuotePage({
   }
 
   return (
-    <QuoteBuilder
-      customers={customers}
-      offices={offices}
-      rates={rates}
-      categories={CATEGORIES.map((c) => ({ key: c.key, label: c.label }))}
-      priorities={PRIORITIES.map((p) => ({ key: p.key, label: p.label }))}
-      initial={initial}
-      accent={settings.accent || "#7b3f8a"}
-    />
+    <>
+      <ActionError message={one(sp.err)} />
+      <QuoteBuilder
+        customers={customers}
+        offices={offices}
+        rates={rates}
+        categories={CATEGORIES.map((c) => ({ key: c.key, label: c.label }))}
+        priorities={PRIORITIES.map((p) => ({ key: p.key, label: p.label }))}
+        initial={initial}
+        accent={settings.accent || "#7b3f8a"}
+      />
+    </>
   );
 }
