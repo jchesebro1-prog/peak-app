@@ -968,14 +968,14 @@ ok(
 );
 
 // ---- General dissolution (D99): Settings sections + Admin ----
-ok(resolveSettingsSection(undefined) === "general", "no ?section= defaults to general");
-ok(resolveSettingsSection("nope") === "general", "an unknown ?section= falls back to general");
-ok(resolveSettingsSection("team") === "team", "?section=team is honored");
+ok(resolveSettingsSection(undefined) === "company", "no ?section= defaults to company");
+ok(resolveSettingsSection("nope") === "company", "an unknown ?section= falls back to company");
+ok(resolveSettingsSection("general") === "company", "legacy ?section=general maps to company");
 ok(resolveSettingsSection("admin") === "admin", "?section=admin is honored");
 ok(resolveSettingsSection(["admin", "team"]) === "admin", "an array ?section= takes the first value");
 ok(
-  SETTINGS_SECTIONS.map((s) => s.key).join(",") === "general,team,admin",
-  "Settings exposes general, team, admin sections in order",
+  SETTINGS_SECTIONS.map((s) => s.key).join(",") === "company,admin",
+  "Settings exposes company and admin sections in order",
 );
 ok(ADMIN_SCREENS.length === 5, "Admin lists exactly five screens");
 ok(

@@ -8,8 +8,7 @@
  */
 
 export const SETTINGS_SECTIONS = [
-  { key: "general", label: "General" },
-  { key: "team", label: "Team & Roles" },
+  { key: "company", label: "Company" },
   { key: "admin", label: "Admin" },
 ] as const;
 
@@ -27,14 +26,15 @@ export const ADMIN_SCREENS = [
   { label: "Import / Export", href: "/import", desc: "Move records in and out of Peak." },
 ] as const;
 
-/** Validate the `?section=` param into a known section key (defaults general). */
+/** Validate the `?section=` param into a known section key (defaults company). */
 export function resolveSettingsSection(
   param: string | string[] | undefined,
 ): SettingsSection {
   const v = Array.isArray(param) ? param[0] : param;
+  if (v === "general") return "company";
   return SETTINGS_SECTIONS.some((s) => s.key === v)
     ? (v as SettingsSection)
-    : "general";
+    : "company";
 }
 
 /**

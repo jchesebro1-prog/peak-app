@@ -365,7 +365,12 @@ export default async function CatalogPage({
                         textOverflow: "ellipsis",
                       }}
                     >
-                      {p.sku}
+                    {p.manufacturerPartNumber || p.sku}
+                    {p.manufacturerModelNumber && p.manufacturerModelNumber !== p.manufacturerPartNumber && (
+                      <span style={{ display: "block", fontSize: 10.5, color: "#9aa0ab" }}>
+                        M/N {p.manufacturerModelNumber}
+                      </span>
+                    )}
                     </span>
                   </span>
                   <span style={{ minWidth: 0 }}>
@@ -726,6 +731,23 @@ function PartFormModal({
                   <option key={m} value={m} />
                 ))}
               </datalist>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 13, marginBottom: 13 }}>
+              <div>
+                {label("MFR P/N")}
+                <input name="manufacturerPartNumber" defaultValue={part?.manufacturerPartNumber || ""} placeholder="7060A" style={inputStyle} />
+              </div>
+              <div>
+                {label("MFR M/N")}
+                <input name="manufacturerModelNumber" defaultValue={part?.manufacturerModelNumber || ""} placeholder="Source Four LED" style={inputStyle} />
+              </div>
+            </div>
+            <div style={{ marginBottom: 4 }}>
+              {label("MAP / minimum advertised price")}
+              <input name="mapPrice" defaultValue={part?.mapPrice != null ? String(part.mapPrice) : ""} inputMode="decimal" placeholder="1699" style={inputStyle} />
+              <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 4 }}>
+                Separate from Peak cost, list price, and quote sell price.
+              </div>
             </div>
             <div style={{ marginTop: 13, marginBottom: 4 }}>
               {label("Note")}

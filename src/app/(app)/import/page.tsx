@@ -80,7 +80,7 @@ export default async function ImportPage({
           >
             ADMIN
           </span>
-          <span style={{ fontSize: 11.5, color: "#aab0bb", whiteSpace: "nowrap" }}>CSV · Excel · paste</span>
+          <span style={{ fontSize: 11.5, color: "#aab0bb", whiteSpace: "nowrap" }}>CSV · paste</span>
         </div>
       </div>
 
@@ -216,7 +216,7 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
         </div>
         <div style={{ fontSize: 12, color: "#8c919c", maxWidth: 540, lineHeight: 1.45 }}>
           {tab === "import"
-            ? "Paste a CSV or spreadsheet export — rows write straight into Peak."
+            ? "Upload or paste a CSV export — rows write straight into Peak."
             : "Download what’s in Peak as CSV — edit and re-import, or keep it as a backup. Same columns as the import template."}
         </div>
       </div>
@@ -241,7 +241,7 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
           <div style={{ minWidth: 200, flex: 1 }}>
             <div style={{ fontSize: 13.5, fontWeight: 600 }}>Moving in from another system?</div>
             <div style={{ fontSize: 12, color: "#8c919c", marginTop: 2, lineHeight: 1.45 }}>
-              Export a CSV or spreadsheet from wherever your data lives now, then import each type
+              Export a CSV from wherever your data lives now, then import each type
               below. Pick a data type to start.
             </div>
           </div>
@@ -387,7 +387,7 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
                     <a
                       href={`/import/export?type=${encodeURIComponent(t.key)}&kind=template`}
                       className="im-outbtn"
-                      title="Download a blank CSV template"
+                      title="Download the CSV field template"
                       style={{
                         fontSize: 12.5,
                         fontWeight: 600,
@@ -697,7 +697,7 @@ function ImportFlowModal({
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 12.5, fontWeight: 600 }}>Uploading a file?</div>
                     <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 1, lineHeight: 1.4 }}>
-                      Choose an Excel file, or copy rows from any spreadsheet and paste them below — same result.
+                      Choose a CSV file, or copy rows from any spreadsheet and paste them below — same result.
                     </div>
                   </div>
                   <a

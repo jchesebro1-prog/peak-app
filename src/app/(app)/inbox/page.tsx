@@ -282,7 +282,7 @@ export default async function InboxPage({
     needsReplyCount(me),
     callsCount(me),
     flaggedCount(me),
-    allThreads(),
+    view === "unmatched" ? allThreads() : Promise.resolve([] as CommThread[]),
     followUpCount({ unownedOrMine: true, me }),
     // Unmatched builds its own list from allComms — skip the query it would discard.
     view === "unmatched"
@@ -477,6 +477,10 @@ export default async function InboxPage({
       pinned: !!t.pinned,
       categoryColor: cat?.color || "",
       categoryLabel: cat?.label || "",
+      labels: labelOptions
+        .filter((l) => l.type === "user")
+        .filter((l) => (t.messages || []).some((m) => (m.gmailLabelIds || []).includes(l.id)))
+        .slice(0, 3),
       name: nm,
       msgCount: (t.messages || []).length,
       participants: participantsFor(t),

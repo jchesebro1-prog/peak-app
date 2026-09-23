@@ -56,6 +56,8 @@ import HomePipeline, { type PipelineRow } from "./home-pipeline";
 import HomeVenueAssessments, { type SurveyCard } from "./home-venue-assessments";
 import HomeTeamActivity, { type TeamActivityRow } from "./home-team-activity";
 import HomeNeedsAttention, { type AlertRow } from "./home-needs-attention";
+import { resolveDashboardLayout } from "@/lib/dashboard-layout";
+import { getDashboardOverride } from "@/lib/stores/notif-prefs";
 
 /**
  * Home dashboard — faithful port of app/Home.dc.html.
@@ -136,9 +138,16 @@ export default async function HomePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireUser();
-  const [userRecord, appSettings] = await Promise.all([getUser(user.id), getSettings()]);
+  const [userRecord, appSettings, dashboardOverride] = await Promise.all([
+    getUser(user.id),
+    getSettings(),
+    getDashboardOverride(user.name),
+  ]);
   const me = user.name;
   const sp = await searchParams;
+  const dashboardLayout = resolveDashboardLayout(appSettings.dashboardDefaults, dashboardOverride);
+  const dashboardVisible = (key: Parameters<typeof resolveDashboardLayout>[0]["widgets"][number]["key"]) =>
+    dashboardLayout.widgets.find((w) => w.key === key)?.visible !== false;
 
   const pipeParam = first(sp.pipe);
   const pipe: "all" | QuoteStatus =
@@ -543,60 +552,68 @@ export default async function HomePage({
       />
 
       {/* stat tiles */}
-      <HomeStats stats={stats} />
+      {dashboardVisible("stats") && <HomeStats stats={stats} />}
 
       {/* ===== My Queue (D98) — placed first among the content cards so
           urgency is visible without scrolling; the queue previously had no
           dashboard presence at all. ===== */}
-      <HomeQueue open={queueOpen} overdue={queueOverdue} rows={queueRows} />
+      {dashboardVisible("queue") && <HomeQueue open={queueOpen} overdue={queueOverdue} rows={queueRows} />}
 
       {/* ===== Inbox dashboard ===== */}
-      <HomeInbox
-        inboxNeedsCount={inboxNeedsCount}
-        inboxUnread={inboxUnread}
-        inboxItems={inboxItems}
-        inboxBoxes={inboxBoxes}
-      />
+      {dashboardVisible("inbox") && (
+        <HomeInbox
+          inboxNeedsCount={inboxNeedsCount}
+          inboxUnread={inboxUnread}
+          inboxItems={inboxItems}
+          inboxBoxes={inboxBoxes}
+        />
+      )}
 
       {/* ===== My leads (follow-up worklist) ===== */}
-      <HomeMyLeads myFollowCount={myFollowCount} leadGroups={leadGroups} />
+      {dashboardVisible("leads") && <HomeMyLeads myFollowCount={myFollowCount} leadGroups={leadGroups} />}
 
       {/* ===== My designs (sandbox) ===== */}
-      <HomeMyDesigns cards={designCards} />
+      {dashboardVisible("designs") && <HomeMyDesigns cards={designCards} />}
 
       {/* ===== two columns ===== */}
       <div className="pkh-main">
         {/* LEFT: pipeline + catalog */}
         <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
-          <HomePipeline
-            pipe={pipe}
-            filterDefs={filterDefs}
-            pipeCounts={pipeCounts}
-            filteredQuotes={filteredQuotes}
-          />
+          {dashboardVisible("pipeline") && (
+            <HomePipeline
+              pipe={pipe}
+              filterDefs={filterDefs}
+              pipeCounts={pipeCounts}
+              filteredQuotes={filteredQuotes}
+            />
+          )}
 
           {/* catalog (moved under pipeline to balance the grid) */}
-          <HomeCatalog books={books} partCount={catalogParts.length} />
+          {dashboardVisible("catalog") && <HomeCatalog books={books} partCount={catalogParts.length} />}
         </div>
 
         {/* RIGHT: calendar + surveys + team activity + needs attention */}
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           {/* calendar (D77) */}
-          <HomeCalendar
-            items={agenda}
-            calendarOn={calendarOn}
-            gmailOn={gmailOn}
-            recordVisitIds={recordVisitIds}
-          />
+          {dashboardVisible("calendar") && (
+            <HomeCalendar
+              items={agenda}
+              calendarOn={calendarOn}
+              gmailOn={gmailOn}
+              recordVisitIds={recordVisitIds}
+            />
+          )}
 
           {/* field surveys */}
-          <HomeVenueAssessments surveyCards={surveyCards} surveyPendingCount={surveyPendingCount} />
+          {dashboardVisible("surveys") && (
+            <HomeVenueAssessments surveyCards={surveyCards} surveyPendingCount={surveyPendingCount} />
+          )}
 
           {/* team activity glance */}
-          <HomeTeamActivity teamActivity={teamActivity} />
+          {dashboardVisible("teamActivity") && <HomeTeamActivity teamActivity={teamActivity} />}
 
           {/* needs attention */}
-          <HomeNeedsAttention alerts={alerts} />
+          {dashboardVisible("needsAttention") && <HomeNeedsAttention alerts={alerts} />}
         </div>
       </div>
 

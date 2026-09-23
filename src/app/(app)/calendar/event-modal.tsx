@@ -109,6 +109,7 @@ export default function EventModal({
   const [recurrence, setRecurrence] = useState("");
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [htmlLink, setHtmlLink] = useState("");
+  const [meetingUrl, setMeetingUrl] = useState("");
 
   const [attendeeQuery, setAttendeeQuery] = useState("");
   const [suggestions, setSuggestions] = useState<Attendee[]>([]);
@@ -135,6 +136,7 @@ export default function EventModal({
       setLocation(e.location);
       setDescription(e.description);
       setHtmlLink(e.htmlLink);
+      setMeetingUrl(e.meetingUrl);
       setAttendees(e.attendees.map((a) => ({ email: a.email, name: a.name })));
       setLoading(false);
     })();
@@ -374,6 +376,12 @@ export default function EventModal({
             {htmlLink && (
               <a href={htmlLink} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: "var(--accent)", display: "inline-block", marginTop: 10 }}>
                 Open in Google Calendar ↗
+              </a>
+            )}
+
+            {meetingUrl && (
+              <a href={meetingUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--accent)", display: "inline-block", marginTop: 8, fontWeight: 700 }}>
+                Join virtual meeting ↗
               </a>
             )}
 

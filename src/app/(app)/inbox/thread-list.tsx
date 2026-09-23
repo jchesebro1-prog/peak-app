@@ -672,6 +672,25 @@ function Row({
         >
           {r.snippet}
         </span>
+        {r.labels.length > 0 && (
+          <span style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
+            {r.labels.map((label) => (
+              <span
+                key={label.id}
+                style={{
+                  fontSize: 9.5,
+                  fontWeight: 600,
+                  color: label.textColor || "#5b616e",
+                  background: label.backgroundColor || "#f1f2f5",
+                  borderRadius: 4,
+                  padding: "2px 6px",
+                }}
+              >
+                {label.name}
+              </span>
+            ))}
+          </span>
+        )}
         {hasMetaChips && (
         <span style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8 }}>
           {r.showBoxTag && (

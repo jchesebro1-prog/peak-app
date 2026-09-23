@@ -188,6 +188,9 @@ export function catalogPatch(
     list: num(v.list) || num(e.list),
     cost: num(v.cost) || num(e.cost),
     ...(mfr ? { mfr } : {}),
+    ...(str(v.manufacturerPartNumber) ? { manufacturerPartNumber: str(v.manufacturerPartNumber) } : {}),
+    ...(str(v.manufacturerModelNumber) ? { manufacturerModelNumber: str(v.manufacturerModelNumber) } : {}),
+    ...(v.mapPrice !== undefined ? { mapPrice: num(v.mapPrice) } : {}),
   };
 }
 
@@ -1023,6 +1026,9 @@ const WRITERS: Record<string, Writer> = {
         list: p.list ?? 0,
         cost: p.cost ?? 0,
         mfr: p.mfr || "",
+        manufacturerPartNumber: p.manufacturerPartNumber || "",
+        manufacturerModelNumber: p.manufacturerModelNumber || "",
+        mapPrice: p.mapPrice ?? "",
       }));
     },
   },

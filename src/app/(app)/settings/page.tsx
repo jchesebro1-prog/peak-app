@@ -174,6 +174,7 @@ export default async function SettingsPage() {
             feedbackEmail: settings.feedbackEmail,
             logoLight: settings.logoLight || null,
             logoDark: settings.logoDark || null,
+            dashboardDefaults: settings.dashboardDefaults,
           }}
           intakeCatalog={mergedCatalog(settings.intakeCatalog)}
           visitReasons={mergedVisitReasons(settings.visitReasons)}

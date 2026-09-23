@@ -68,6 +68,9 @@ export async function upsertPart(formData: FormData): Promise<void> {
     list: num(formData.get("list")),
     cost: num(formData.get("cost")),
     mfr: String(formData.get("mfr") || "").trim() || undefined,
+    manufacturerPartNumber: String(formData.get("manufacturerPartNumber") || "").trim() || undefined,
+    manufacturerModelNumber: String(formData.get("manufacturerModelNumber") || "").trim() || undefined,
+    mapPrice: formData.has("mapPrice") ? num(formData.get("mapPrice")) : undefined,
     note: String(formData.get("note") || "").trim() || undefined,
     ...(ports ? { ports } : {}),
   });

@@ -186,15 +186,18 @@ export function PastePreview({
     { id: "create", label: "Create new" },
   ];
 
-  /* punch #81 — .xlsx upload. The file is converted to CSV server-side
-     (exceljs is server-only; importing it here would drag Node stream
-     internals into the client bundle and 500 the page, per #78) and the
-     result lands in the same `text` state the textarea binds to, so preview,
-     mapping and commit all run unchanged from here. */
+  /* CSV-only import contract. Spreadsheet users can export the active sheet
+     as CSV before choosing it here; the preview/mapping/commit path remains
+     the same for pasted and uploaded text. */
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // let the same file be re-picked after a failure
     if (!file) return;
+    if (!/\.(csv|tsv)$/i.test(file.name)) {
+      setUploadErr("Choose a CSV or TSV file. Export Excel sheets as CSV first.");
+      setUploadNote("");
+      return;
+    }
     if (isCatalog) {
       // #134 — refuse over-size workbooks here, before any upload.
       const fileSize = checkSize(file.size);
@@ -208,21 +211,13 @@ export function PastePreview({
     setUploadErr("");
     setUploadNote("");
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("type", typeKey);
-      const res = await fetch("/api/import/xlsx", { method: "POST", body: fd });
-      const data = (await res.json()) as
-        | { ok: true; csv: string; rows: number; sheetName: string }
-        | { ok: false; error: string };
-      if (!data.ok) {
-        setUploadErr(data.error);
+      const csv = await file.text();
+      if (!csv.trim()) {
+        setUploadErr("That CSV file is empty.");
         return;
       }
-      setText(data.csv);
-      setUploadNote(
-        `Read ${data.rows} row${data.rows === 1 ? "" : "s"} from “${data.sheetName}” in ${file.name}. Check the preview below before importing.`
-      );
+      setText(csv);
+      setUploadNote(`Loaded ${file.name}. Check the preview below before importing.`);
     } catch {
       setUploadErr("That upload didn’t go through. Check your connection and try again.");
     } finally {
@@ -265,15 +260,15 @@ export function PastePreview({
         >
           <input
             type="file"
-            accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            accept=".csv,.tsv,text/csv,text/tab-separated-values"
             onChange={onFile}
             disabled={uploading}
             style={{ display: "none" }}
           />
-          {uploading ? "Reading…" : "Choose an Excel file"}
+          {uploading ? "Reading…" : "Choose a CSV file"}
         </label>
         <span style={{ fontSize: 11.5, color: "#aab0bb" }}>
-          .xlsx — first sheet, header row required. Or paste below.
+          .csv or .tsv — include the header row. Or paste below.
         </span>
       </div>
 

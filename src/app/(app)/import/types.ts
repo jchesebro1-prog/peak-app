@@ -257,7 +257,7 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     label: "Catalog parts",
     mono: "CA",
     color: "#2f6f8f",
-    blurb: "Vendor price lists — SKU, description, list and dealer cost.",
+    blurb: "Vendor price lists — SKU, manufacturer identity, pricing, and MAP.",
     dedupeLabel: "SKU",
     viewHref: "/catalog",
     viewLabel: "View in Catalog",
@@ -269,6 +269,9 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "list", header: "List Price", label: "List price", kind: "number", aliases: ["list", "list price", "msrp", "retail", "srp", "suggested retail", "price"], example: "1899.50" },
       { key: "cost", header: "Cost", label: "Dealer cost", kind: "number", aliases: ["cost", "dealer", "dealer net", "dealer price", "dealer cost", "net", "net price", "wholesale", "our cost"], example: "1139.70" },
       { key: "mfr", header: "Manufacturer", label: "Manufacturer", required: true, aliases: ["mfr", "manufacturer", "brand", "mfg", "vendor", "make"], example: "ETC" },
+      { key: "manufacturerPartNumber", header: "MFR P/N", label: "Manufacturer part number", aliases: ["mfr p/n", "mfr pn", "manufacturer part number", "manufacturer pn", "mpn"], example: "7060A" },
+      { key: "manufacturerModelNumber", header: "MFR M/N", label: "Manufacturer model number", aliases: ["mfr m/n", "mfr mn", "manufacturer model number", "manufacturer mn", "model number"], example: "7060A" },
+      { key: "mapPrice", header: "MAP", label: "Minimum advertised price", kind: "number", aliases: ["map", "map price", "minimum advertised price", "advertised price"], example: "1699.00" },
     ],
   },
   {

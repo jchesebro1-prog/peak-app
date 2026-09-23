@@ -31,6 +31,12 @@ export type CatalogPart = {
   list: number;
   cost: number;
   mfr?: string;
+  /** Manufacturer's printed part number, distinct from Peak's SKU. */
+  manufacturerPartNumber?: string;
+  /** Manufacturer's model number, when the vendor distinguishes it from P/N. */
+  manufacturerModelNumber?: string;
+  /** Minimum advertised price; never treated as Peak cost or sell. */
+  mapPrice?: number | null;
   /** Fabric rows only — curtain configurator material cost basis. */
   costPerSqft?: number;
   /** Fabric rows only — weight basis, so one fabric choice drives both price

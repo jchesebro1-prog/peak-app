@@ -611,7 +611,7 @@ export default function Nav({
                         Account settings
                       </Link>
                       <Link href="/settings" className="pk-menu-link" onClick={closeAll}>
-                        <span>General settings</span>
+                        <span>Company settings</span>
                         <span className="pk-admin-chip">ADMIN</span>
                       </Link>
                     </div>

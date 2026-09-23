@@ -61,9 +61,10 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
         desc: r.desc,
         category: r.category || "Uncategorized",
         unit: r.unit,
-        ...(parsed.hasList || isNew ? { list: r.list } : {}),
-        ...(parsed.hasCost || isNew ? { cost: r.cost } : {}),
-        mfr,
+        mfr: r.mfr || mfr,
+        ...(r.manufacturerPartNumber ? { manufacturerPartNumber: r.manufacturerPartNumber } : {}),
+        ...(r.manufacturerModelNumber ? { manufacturerModelNumber: r.manufacturerModelNumber } : {}),
+        ...(parsed.hasMap || isNew ? { mapPrice: r.mapPrice || null } : {}),
       },
       { pricedAt: input.effectiveAt }
     );

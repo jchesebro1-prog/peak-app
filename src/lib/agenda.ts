@@ -35,6 +35,8 @@ export type AgendaItem = {
   location: string;
   /** external Google link or internal path ("" = not clickable) */
   href: string;
+  /** Provider join URL extracted from the Google event, when present. */
+  meetingUrl?: string;
   source: "google" | "visit" | "external";
   /** Set only for source "external" — which connection/calendar this came
    *  from, and the color the client should render it in (the calendar's
@@ -85,6 +87,7 @@ export async function loadAgendaRange(
             allDay: e.allDay,
             location: e.location,
             href: e.htmlLink,
+            meetingUrl: e.meetingUrl,
             source: "google",
           });
         }
@@ -128,6 +131,7 @@ export async function loadAgendaRange(
                     allDay: e.allDay,
                     location: e.location,
                     href: e.htmlLink,
+                    meetingUrl: e.meetingUrl,
                     source: "external",
                     external: { connectionId: conn.id, calendarId: cal.id, color },
                   });

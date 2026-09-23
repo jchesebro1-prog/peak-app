@@ -34,6 +34,8 @@ import {
   setUserStatusAction,
   updateMemberAction,
 } from "./actions";
+import DashboardLayoutEditor from "@/components/dashboard-layout-editor";
+import type { DashboardLayout } from "@/lib/dashboard-layout";
 import type { UserStatus } from "@/lib/users";
 import type { GeoSearchHit } from "@/lib/geo";
 import type { CustomFieldDef } from "@/lib/customer-fields";
@@ -185,6 +187,7 @@ export default function SettingsClient({
     feedbackEmail: string;
     logoLight: string | null;
     logoDark: string | null;
+    dashboardDefaults: DashboardLayout;
   };
   intakeCatalog: Record<string, string[]>;
   visitReasons: string[];
@@ -706,12 +709,13 @@ export default function SettingsClient({
         <SegmentedToggle
           options={SETTINGS_SECTIONS.map((s) => ({ key: s.key, label: s.label }))}
           active={section}
-          hrefFor={(k) => (k === "general" ? "/settings" : `/settings?section=${k}`)}
+          hrefFor={(k) => (k === "company" ? "/settings" : `/settings?section=${k}`)}
         />
       </div>
 
-      {section === "general" && (
+      {section === "company" && (
         <>
+          <DashboardLayoutEditor mode="company" initial={settings.dashboardDefaults} />
           {/* ---- Branding ---- */}
           <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
         <div style={{ fontSize: 14.5, fontWeight: 600 }}>Branding</div>
@@ -1827,7 +1831,7 @@ export default function SettingsClient({
         </>
       )}
 
-      {section === "team" && (
+      {section === "admin" && (
         <div
           style={{
             display: "grid",
