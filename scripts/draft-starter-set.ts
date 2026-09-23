@@ -38,7 +38,14 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GROUP_TRADES, type CatalogGroup, type Trade } from "../src/lib/catalog-taxonomy";
-import { CONNECTION_TYPES, type Port, type PortDirection } from "../src/lib/catalog-connect";
+import { CONNECTION_TYPES, type Port } from "../src/lib/catalog-connect";
+import {
+  p, consolePorts, wingPorts, dimmerRackPorts, conventionalFixturePorts, ledFixturePorts,
+  ptzCameraPorts, encoderDecoderPorts, sdiCardPorts, captureOnlyPorts, matrixPorts,
+  hdbasetMatrixPorts, extenderKitPorts, splitterPorts, passiveSpeakerPorts,
+  seventyVSpeakerPorts, poweredSpeakerPorts, mixerAllInOnePorts, mixSurfacePorts,
+  mixRackPorts, mechanicalPorts, motorHoistPorts,
+} from "../src/lib/catalog-port-shapes";
 
 const REPO_ROOT = join(__dirname, "..");
 const DB_PATH = join(REPO_ROOT, "scripts", "catalog-import-data.json");
@@ -109,90 +116,6 @@ function loadSheet(): SourceRow[] | null {
  * speakON out; DSP = Dante io + XLR io; video switcher = HDMI in×N/out;
  * hoist motor = motor power in + pendant control in). Uncertain ones get an
  * explicit "(verify — …)" portNote rather than a silent guess. */
-
-const p = (name: string, direction: PortDirection, connectionType: string, count?: number): Port =>
-  count !== undefined ? { name, direction, connectionType, count } : { name, direction, connectionType };
-
-const consolePorts = (): Port[] => [
-  p("DMX Out", "out", "DMX512 (5-pin XLR)", 2),
-  p("Network (sACN/Art-Net)", "io", "sACN/Art-Net (etherCON/Cat6)"),
-];
-
-const wingPorts = (): Port[] => [
-  p("Console Link (sACN/Art-Net)", "io", "sACN/Art-Net (etherCON/Cat6)"),
-];
-
-const dimmerRackPorts = (outCount: number): Port[] => [
-  p("DMX In", "in", "DMX512 (5-pin XLR)"),
-  p("RDM", "io", "RDM"),
-  p("Dimmed Power Out", "out", "stage pin", outCount),
-];
-
-const conventionalFixturePorts = (): Port[] => [p("Power In", "in", "Edison")];
-
-const ledFixturePorts = (): Port[] => [
-  p("DMX In", "in", "DMX512 (5-pin XLR)"),
-  p("DMX Thru", "out", "DMX512 (5-pin XLR)"),
-  p("Power In", "in", "powerCON/True1"),
-];
-
-const ptzCameraPorts = (video: "HDMI" | "SDI/BNC"): Port[] => [p("Video Out", "out", video)];
-
-const encoderDecoderPorts = (): Port[] => [p("HDMI", "io", "HDMI")];
-
-const sdiCardPorts = (n: number): Port[] => [p("SDI In", "in", "SDI/BNC", n)];
-
-const captureOnlyPorts = (): Port[] => [p("HDMI In", "in", "HDMI")];
-
-const matrixPorts = (inN: number, outN: number, io: "HDMI" | "HDBaseT (Cat6a)" = "HDBaseT (Cat6a)"): Port[] => [
-  p("HDMI In", "in", "HDMI", inN),
-  p(io === "HDMI" ? "HDMI Out" : "HDBaseT Out", "out", io, outN),
-];
-
-const hdbasetMatrixPorts = (inN: number, outN: number): Port[] => [
-  p("HDBaseT In", "in", "HDBaseT (Cat6a)", inN),
-  p("HDBaseT Out", "out", "HDBaseT (Cat6a)", outN),
-];
-
-const extenderKitPorts = (): Port[] => [
-  p("HDMI In (TX)", "in", "HDMI"),
-  p("HDBaseT Out (RX)", "out", "HDBaseT (Cat6a)"),
-];
-
-const splitterPorts = (outN: number): Port[] => [
-  p("HDMI In", "in", "HDMI"),
-  p("HDMI Out", "out", "HDMI", outN),
-];
-
-const passiveSpeakerPorts = (): Port[] => [p("Audio In", "in", "speakON NL2")];
-
-const seventyVSpeakerPorts = (): Port[] => [p("Audio In (70V)", "in", "70V pair")];
-
-const poweredSpeakerPorts = (): Port[] => [
-  p("Audio In", "in", "XLR line/mic"),
-  p("Power In", "in", "powerCON/True1"),
-];
-
-const mixerAllInOnePorts = (): Port[] => [
-  p("XLR In", "in", "XLR line/mic"),
-  p("XLR Out", "out", "XLR line/mic"),
-  p("Network (Dante/AES67)", "io", "Dante/AES67 (Cat6)"),
-];
-
-const mixSurfacePorts = (): Port[] => [p("Network to MixRack (Dante/AES67)", "io", "Dante/AES67 (Cat6)")];
-
-const mixRackPorts = (inN: number, outN: number): Port[] => [
-  p("XLR In", "in", "XLR line/mic", inN),
-  p("XLR Out", "out", "XLR line/mic", outN),
-  p("Network (Dante/AES67)", "io", "Dante/AES67 (Cat6)"),
-];
-
-const mechanicalPorts = (): Port[] => [];
-
-const motorHoistPorts = (): Port[] => [
-  p("Motor Power In", "in", "motor power"),
-  p("Pendant Control In", "in", "low-voltage pendant control"),
-];
 
 /* ------------------------------------------------------------- picks ----*/
 /* Selection bar (binding, per the plan/brief) — breadth over depth, ≥2

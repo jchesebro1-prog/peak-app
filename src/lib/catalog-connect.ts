@@ -28,6 +28,19 @@ export type WireType = {
   connectionTypes: string[];
   cableSku?: string;
   dollarsPerFt?: number;
+  /**
+   * Opt-in: any connector in this family physically mates with any other in
+   * it, so `canConnect` accepts a cross-type pair inside the family instead of
+   * demanding exact `connectionType` equality.
+   *
+   * This is deliberately NOT the default for a wire type. `connectionTypes`
+   * answers "what cable carries this signal", which is a different question
+   * from "what mates with what" — `cat6` carries Dante audio AND HDBaseT
+   * video, `powercon-power` carries Edison AND Socapex, and neither pair
+   * should ever be wireable. Only flag a family whose members really do
+   * inter-operate at the connector, and say why in a comment.
+   */
+  interchangeable?: true;
 };
 
 /**
@@ -86,6 +99,13 @@ export const DEFAULT_WIRE_TYPES: WireType[] = [
     id: "speaker-pair",
     label: "Speaker pair",
     connectionTypes: ["speakON NL2", "speakON NL4", "speakON NL8", "70V pair"],
+    // The only interchangeable family (#159 gate review). Amplifiers ship
+    // speakON NL4 outs, passive cabinets present NL2 ins, and 70V taps land
+    // on bare pairs — in the field these are all the same two conductors,
+    // mated with an adapter or a re-terminated tail, and an installer wires
+    // them together every day. Requiring exact equality made every ported
+    // amplifier unwireable to every ported speaker, which is why this exists.
+    interchangeable: true,
   },
   { id: "xlr-audio", label: "XLR audio", connectionTypes: ["XLR line/mic", "AES/EBU"] },
   { id: "sdi-coax", label: "SDI coax", connectionTypes: ["SDI/BNC"] },
@@ -105,13 +125,26 @@ export function resolveWireTypes(stored?: WireType[]): WireType[] {
 }
 
 /**
- * Two ports may connect when they share a connectionType and at least one
- * side is bidirectional ("io"), or the two directions differ (in vs out).
- * Same-direction in/in or out/out never connects.
+ * Two ports may connect when the directions complement (at least one side is
+ * bidirectional "io", or the two differ — in vs out; same-direction in/in or
+ * out/out never connects) AND the connectors mate: either the same
+ * `connectionType`, or two members of the same `interchangeable` wire-type
+ * family (today: `speaker-pair` only — see the flag's doc comment).
+ *
+ * Pure and synchronous: the wire-type registry is an optional defaulted
+ * parameter so a caller holding the admin-edited list (resolveWireTypes)
+ * can pass it, exactly like `driveMiles(a, b, travel)` in lib/geo.ts.
  */
-export function canConnect(a: Port, b: Port): boolean {
-  if (a.connectionType !== b.connectionType) return false;
-  return a.direction === "io" || b.direction === "io" || a.direction !== b.direction;
+export function canConnect(a: Port, b: Port, types: WireType[] = DEFAULT_WIRE_TYPES): boolean {
+  const directionOk = a.direction === "io" || b.direction === "io" || a.direction !== b.direction;
+  if (!directionOk) return false;
+  if (a.connectionType === b.connectionType) return true;
+  return types.some(
+    (wt) =>
+      wt.interchangeable &&
+      wt.connectionTypes.includes(a.connectionType) &&
+      wt.connectionTypes.includes(b.connectionType)
+  );
 }
 
 /** Wire types (from `types`) that carry the given connection type. */
@@ -131,10 +164,19 @@ export function compatibleWireTypes(conn: string, types: WireType[]): WireType[]
  * migrated to ports yet, and an un-migrated device must never block a
  * route). Only a refusal where both sides HAD ports and still found no
  * compatible pair is a real validation failure.
+ *
+ * `types` is threaded straight through to `canConnect` (same defaulted-
+ * parameter shape) so a caller with the admin-edited wire-type registry gets
+ * that registry's `interchangeable` families. When a pair matches across an
+ * interchangeable family rather than exactly, the stamped `connectionType` is
+ * still `a.connectionType` — the FROM/output side. That is deliberate: the
+ * source end is what the run is terminated to and what the cable BOM prices,
+ * so an NL4 amp feeding an NL2 cabinet stamps `speakON NL4`.
  */
 export function validateDeviceWire(
   fromPart: { ports?: Port[] },
-  toPart: { ports?: Port[] }
+  toPart: { ports?: Port[] },
+  types: WireType[] = DEFAULT_WIRE_TYPES
 ): { ok: true; connectionType: string } | { ok: false; reason: string } {
   const fromPorts = fromPart.ports || [];
   const toPorts = toPart.ports || [];
@@ -143,7 +185,7 @@ export function validateDeviceWire(
   }
   for (const a of fromPorts) {
     for (const b of toPorts) {
-      if (canConnect(a, b)) return { ok: true, connectionType: a.connectionType };
+      if (canConnect(a, b, types)) return { ok: true, connectionType: a.connectionType };
     }
   }
   return { ok: false, reason: "no compatible port pair" };

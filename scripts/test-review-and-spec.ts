@@ -202,6 +202,44 @@ import { join } from "node:path";
 import { mergeActivity, prefillFromMeeting } from "@/lib/engagement-activity";
 import { performCapture, type CaptureDeps } from "@/lib/engagement-activity-write";
 
+/**
+ * THIS SUITE WRITES TO THE DATABASE. It creates and deletes catalog parts,
+ * grid projects and other real rows, so it must only ever be pointed at a
+ * throwaway PGlite datadir — never `.data/pglite` (the real book, 14,725
+ * parts) and never a hosted `DATABASE_URL` (preview and production share one
+ * Neon database).
+ *
+ * Same guard as scripts/test-grid-options.ts. `npm run test:specs` supplies
+ * the scratch datadir itself, so the documented gate is safe on its own; this
+ * throw is what stops a bare `tsx scripts/test-review-and-spec.ts` from
+ * resolving whatever the ambient environment points at.
+ */
+if (!process.env.PGLITE_PATH) {
+  throw new Error(
+    "Refusing to run: this suite WRITES to the database and PGLITE_PATH is unset,\n" +
+      "so it would resolve .data/pglite — the real catalog.\n" +
+      "Run it on a throwaway datadir:\n" +
+      "  npm run test:specs\n" +
+      'or, by hand:  TEST_DB=$(mktemp -d) && PGLITE_PATH="$TEST_DB" tsx scripts/test-review-and-spec.ts'
+  );
+}
+
+// PGLITE_PATH alone does NOT make this safe. getDb() (src/db/index.ts) returns
+// the postgres-js client whenever DATABASE_URL is set and never consults
+// PGLITE_PATH — and `npm run test:specs` always sets PGLITE_PATH, so the guard
+// above can never fire for this case. On a shell that exported DATABASE_URL
+// (a hosted db:export, a CI job) the repo's own mandated gate would otherwise
+// write its fixtures into the shared production Neon database. Preview and
+// production share one database here, so there is no safe hosted target.
+if (process.env.DATABASE_URL) {
+  throw new Error(
+    "Refusing to run: DATABASE_URL is set, so this suite would write to the\n" +
+      "HOSTED database (preview and production share one Neon instance).\n" +
+      "Unset it for this command:\n" +
+      "  env -u DATABASE_URL npm run test:specs"
+  );
+}
+
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
 
@@ -626,6 +664,35 @@ ok(canConnect(portIo("DMX512 (5-pin XLR)"), portIn("DMX512 (5-pin XLR)")), "conn
 ok(canConnect(portIo("DMX512 (5-pin XLR)"), portIo("DMX512 (5-pin XLR)")), "connect: io->io same type connects");
 ok(!canConnect(portOut("DMX512 (5-pin XLR)"), portIn("HDMI")), "connect: different connection types never connect");
 
+/* --- #159 gate review FIX 2: interchangeable connector families --- */
+// The shapes shipped by #159 do not compose under exact equality: amplifiers
+// emit speakON NL4 OUT, passive cabinets present speakON NL2 IN, 70V devices
+// present a 70V pair IN. Nothing in the catalog could drive a ported speaker
+// (854 of 1,390 proposals affected), and it was a regression — both sides
+// portless meant the Grid allowed the route. `speaker-pair` is flagged
+// `interchangeable`; every other wire type is NOT, deliberately.
+ok(canConnect(portOut("speakON NL4"), portIn("speakON NL2")), "connect: an NL4 out connects to an NL2 in — the speaker family interoperates");
+ok(canConnect(portOut("speakON NL4"), portIn("70V pair")), "connect: a 70V pair in accepts an NL4 out");
+ok(canConnect(portOut("speakON NL8"), portIn("speakON NL2")), "connect: NL8 out to NL2 in connects — the whole speaker family, not a pair of special cases");
+ok(!canConnect(portOut("speakON NL4"), portOut("speakON NL2")), "connect: direction complement is still enforced INSIDE an interchangeable family (out->out refused)");
+ok(!canConnect(portIn("speakON NL4"), portIn("70V pair")), "connect: in->in inside the speaker family is refused too");
+ok(canConnect(portIo("speakON NL2"), portIn("speakON NL4")), "connect: io still connects across the speaker family");
+// cat6 carries Dante audio AND HDBaseT video; powercon-power carries Edison
+// AND Socapex. Those families describe what a cable carries, not what mates,
+// and must never have become wireable.
+ok(!canConnect(portOut("Dante/AES67 (Cat6)"), portIn("HDBaseT (Cat6a)")), "connect: Dante out does NOT reach an HDBaseT in — cat6 is not an interchangeable family");
+ok(!canConnect(portOut("Edison"), portIn("Socapex")), "connect: Edison does NOT connect to Socapex — powercon-power is not an interchangeable family");
+ok(!canConnect(portOut("motor power"), portIn("low-voltage pendant control")), "connect: motor power does NOT connect to low-voltage pendant control");
+ok(
+  DEFAULT_WIRE_TYPES.filter((wt) => wt.interchangeable).map((wt) => wt.id).join(",") === "speaker-pair",
+  "connect: speaker-pair is the ONLY interchangeable family in the defaults"
+);
+// The registry is an optional defaulted parameter (lib/geo.ts driveMiles
+// pattern), so a caller holding the admin-edited list gets that list's rules.
+const noFamilies = DEFAULT_WIRE_TYPES.map((wt) => ({ id: wt.id, label: wt.label, connectionTypes: wt.connectionTypes }));
+ok(!canConnect(portOut("speakON NL4"), portIn("speakON NL2"), noFamilies), "connect: an admin registry with no interchangeable family falls back to exact equality");
+ok(canConnect(portOut("speakON NL4"), portIn("speakON NL4"), noFamilies), "connect: exact equality still connects under a custom registry");
+
 const dmxCompat = compatibleWireTypes("DMX512 (5-pin XLR)", DEFAULT_WIRE_TYPES);
 ok(dmxCompat.length > 0, "connect: compatibleWireTypes finds at least one DMX wire type in the defaults");
 
@@ -682,6 +749,25 @@ ok(
   multiFrom.ok === true && multiFrom.ok && multiFrom.connectionType === "HDMI",
   "wire: first canConnect-satisfying port pair (fromPart order, then toPart order) wins"
 );
+
+/* --- #159 gate review FIX 2: validateDeviceWire across a family --- */
+// A real amplifier (amplifierPorts → speakON NL4 out) against a real passive
+// cabinet (passiveSpeakerPorts → speakON NL2 in).
+const ampToSpeaker = validateDeviceWire(
+  { ports: [portIn("XLR line/mic"), portOut("speakON NL4")] },
+  { ports: [portIn("speakON NL2")] }
+);
+ok(ampToSpeaker.ok === true, "wire: an NL4 amplifier output validates against an NL2 passive cabinet input");
+ok(
+  ampToSpeaker.ok === true && ampToSpeaker.connectionType === "speakON NL4",
+  "wire: a family match stamps the FROM/output side's connector (NL4), which is what the cable BOM prices"
+);
+const ampTo70v = validateDeviceWire({ ports: [portOut("speakON NL4")] }, { ports: [portIn("70V pair")] });
+ok(ampTo70v.ok === true && ampTo70v.connectionType === "speakON NL4", "wire: a 70V pair input accepts an NL4 output, stamped NL4");
+const danteToHdbaset = validateDeviceWire({ ports: [portOut("Dante/AES67 (Cat6)")] }, { ports: [portIn("HDBaseT (Cat6a)")] });
+ok(danteToHdbaset.ok === false, "wire: Dante audio out to HDBaseT video in is still refused (cat6 is not interchangeable)");
+const twoAmps = validateDeviceWire({ ports: [portOut("speakON NL4")] }, { ports: [portOut("speakON NL2")] });
+ok(twoAmps.ok === false, "wire: two outputs in the same family are still refused");
 
 
 /* --- #158 Task 1: catalog-ports parse/validate/serialize --- */
@@ -747,6 +833,313 @@ ok(
 );
 ok(PORT_DIRECTIONS.length === 3, "ports: three directions are offered (in/out/io)");
 
+/* --- #159 Task 1: shared port shapes --- */
+import * as Shapes from "@/lib/catalog-port-shapes";
+
+ok(Shapes.passiveSpeakerPorts()[0].connectionType === "speakON NL2", "shapes: a passive speaker takes one speakON NL2 in");
+ok(Shapes.passiveSpeakerPorts()[0].direction === "in", "shapes: a passive speaker's audio port is an input");
+ok(Shapes.dimmerRackPorts(12)[2].count === 12, "shapes: dimmerRackPorts carries its output count");
+ok(Shapes.matrixPorts(4, 4)[1].connectionType === "HDBaseT (Cat6a)", "shapes: matrixPorts defaults its output to HDBaseT");
+ok(Shapes.matrixPorts(4, 4, "HDMI")[1].connectionType === "HDMI", "shapes: matrixPorts honours an HDMI output override");
+ok(Shapes.mechanicalPorts().length === 0, "shapes: a mechanical part has no ports");
+
+// The guard that matters: a shape emitting a connectionType outside the
+// vocabulary would make every part it touches silently unwireable.
+const connSet = new Set(CONNECTION_TYPES);
+const badShape = Object.entries(Shapes.ALL_SHAPES).find(([, make]) =>
+  make().some((prt) => !connSet.has(prt.connectionType))
+);
+ok(!badShape, `shapes: every shape emits only known connection types${badShape ? ` (offender: ${badShape[0]})` : ""}`);
+
+/* --- #159 Task 2: the rule matcher --- */
+import { matchRule, proposeForPart, type PortRule, type RulePart } from "@/lib/catalog-port-rules";
+
+const rpart = (desc: string, extra: Partial<RulePart> = {}): RulePart =>
+  ({ sku: "X:1", desc, category: "Audio", mfr: "EAW", ...extra });
+
+const testRules: PortRule[] = [
+  { id: "acc", desc: /\b(bracket|cover)\b/i, accessory: true, shape: () => [], note: "accessory" },
+  { id: "passive", mfr: "EAW", desc: /passive.*(sub|speaker)/i, shape: () => Shapes.passiveSpeakerPorts(), note: "passive box" },
+  { id: "any-speaker", desc: /speaker/i, shape: () => Shapes.poweredSpeakerPorts(), note: "fallback" },
+];
+
+ok(matchRule(rpart("Passive 18\" Subwoofer"), testRules)?.id === "passive", "rules: the first matching rule wins");
+ok(matchRule(rpart("Powered speaker"), testRules)?.id === "any-speaker", "rules: a later rule matches when earlier ones do not");
+ok(matchRule(rpart("Mounting bracket for speaker"), testRules)?.id === "acc", "rules: the accessory layer beats a device rule");
+ok(matchRule(rpart("Passive Speaker", { mfr: "RCF" }), testRules)?.id === "any-speaker", "rules: an mfr-scoped rule does not match another brand");
+ok(matchRule(rpart("Widget"), testRules) === null, "rules: an unmatched part yields null, never a guess");
+
+const acc = proposeForPart(rpart("Mounting bracket for speaker"), testRules);
+ok(acc === null, "rules: an accessory proposes no ports");
+const prop = proposeForPart(rpart("Passive 18\" Subwoofer"), testRules);
+ok(prop?.ports[0].connectionType === "speakON NL2", "rules: a device match proposes its shape's ports");
+ok(prop?.rule.id === "passive", "rules: the proposal names the rule that produced it, for the report");
+
+const excl: PortRule[] = [
+  { id: "sub-only", desc: /subwoofer/i, exclude: /passive/i, shape: () => Shapes.poweredSpeakerPorts(), note: "powered subs" },
+];
+ok(matchRule(rpart("Passive 18\" Subwoofer"), excl) === null, "rules: exclude suppresses an otherwise-matching rule");
+ok(matchRule(rpart("Powered 18\" Subwoofer"), excl)?.id === "sub-only", "rules: exclude does not suppress a non-matching description");
+
+const catRule: PortRule[] = [
+  { id: "sb", category: /^SB$/, desc: /./, shape: () => Shapes.passiveSpeakerPorts(), note: "EAW SB line" },
+];
+ok(matchRule(rpart("anything", { category: "SB" }), catRule)?.id === "sb", "rules: a category pattern matches");
+ok(matchRule(rpart("anything", { category: "Audio" }), catRule) === null, "rules: a category pattern that misses blocks the rule");
+
+/* --- #159 Task 3: the shipped rule set --- */
+import { PORT_RULES } from "@/lib/catalog-port-rules";
+
+// Task 1 review follow-up: lock in the three new shapes' port names, directions
+// and counts — previously only their connectionTypes were checked.
+const amp4 = Shapes.amplifierPorts(4);
+ok(amp4.find((p) => p.name === "Line In")?.direction === "in", "shapes: an amplifier's line input is an input");
+ok(amp4.find((p) => p.name === "Speaker Out")?.direction === "out", "shapes: an amplifier's speaker output is an output");
+ok(amp4.find((p) => p.name === "Speaker Out")?.count === 4, "shapes: an amplifier carries its channel count");
+const rx2 = Shapes.wirelessReceiverPorts(2);
+ok(rx2.find((p) => p.name === "Audio Out")?.direction === "out", "shapes: a wireless receiver's audio port is an output");
+ok(rx2.find((p) => p.name === "Audio Out")?.count === 2, "shapes: a wireless receiver carries its channel count");
+const dsp = Shapes.dspPorts(8, 8);
+ok(dsp.find((p) => p.name === "Analog In")?.direction === "in" && dsp.find((p) => p.name === "Analog Out")?.direction === "out",
+  "shapes: a DSP has analog in and analog out in the right directions");
+
+ok(PORT_RULES.length > 0, "ruleset: rules are defined");
+ok(PORT_RULES.filter((r) => r.accessory).length > 0, "ruleset: an accessory layer exists");
+ok(PORT_RULES.findIndex((r) => r.accessory) < PORT_RULES.findIndex((r) => !r.accessory),
+  "ruleset: the accessory layer is ordered BEFORE device rules, so a bracket never gets device ports");
+ok(new Set(PORT_RULES.map((r) => r.id)).size === PORT_RULES.length, "ruleset: rule ids are unique");
+ok(PORT_RULES.every((r) => r.note.trim().length > 10), "ruleset: every rule carries a real note for review");
+
+// The vocabulary guard again, at the rule level this time.
+const rConn = new Set(CONNECTION_TYPES);
+const badRule = PORT_RULES.filter((r) => !r.accessory).find((r) =>
+  r.shape({ sku: "T:1", desc: "4 Channel", category: "Audio", mfr: r.mfr }).some((prt) => !rConn.has(prt.connectionType))
+);
+ok(!badRule, `ruleset: every rule emits only known connection types${badRule ? ` (offender: ${badRule.id})` : ""}`);
+
+// A bracket must never reach a device rule.
+ok(matchRule({ sku: "RCF:X", desc: "Horizontal Bracket for MR50", category: "Audio", mfr: "RCF" })?.accessory === true,
+  "ruleset: a real bracket description matches the accessory layer");
+ok(matchRule({ sku: "EAW:SB1002", desc: 'Passive 18" Installation Subwoofer. Black', category: "SB", mfr: "EAW" })?.accessory !== true,
+  "ruleset: a real passive subwoofer description does NOT match the accessory layer");
+
+ok(matchRule({ sku: "QSC:X", desc: "RU 4 Channel ENERGY STAR amplifier", category: "Audio", mfr: "QSC" })?.id === "amplifier",
+  "ruleset: a real QSC amplifier description matches the amplifier rule");
+const ampProp = proposeForPart({ sku: "QSC:X", desc: "RU 4 Channel ENERGY STAR amplifier", category: "Audio", mfr: "QSC" });
+ok(ampProp?.ports.find((prt) => prt.name === "Speaker Out")?.count === 4,
+  "ruleset: the amplifier rule reads its channel count from the description");
+const mtx = proposeForPart({ sku: "AV:X", desc: "8x8 HDBaseT Matrix Switcher", category: "AV Distribution", mfr: "AVPro Edge" });
+ok(mtx?.ports[0].count === 8 && mtx?.ports[1].count === 8, "ruleset: a matrix reads NxM from the description");
+
+/* ---- real-data fixes (#159 Task 3 review of scripts/*.tsv dumped from the
+   live catalog, D198) — each of these is a description sampled verbatim from
+   the real dev DB that the brief's draft rule set got wrong. See
+   task-3-report.md for the full account. ---- */
+
+// A passive RCF speaker that is ALSO 70V/100V-transformer-tapped must get the
+// 70V pair shape, not speakON — the draft order (passive before 70V) silently
+// mis-wired ~42 real EAW/RCF SKUs to the wrong connector.
+ok(proposeForPart({
+  sku: "RCF:X", mfr: "RCF", category: "BUSINESS AUDIO WALL MOUNTED SPEAKERS - PASSIVE",
+  desc: 'Passive 160W 5" 2-Way Wall Mount Monitor Speaker w/ Transformer - 8 Ω, 70/100V',
+})?.rule.id === "speaker-70v",
+  "ruleset: a passive speaker that is also 70V-transformer-tapped gets the 70V shape, not speakON");
+
+// "loudspeaker" is one token, not "speaker" preceded by "loud" — the draft's
+// \bspeaker\b missed all 44 real QSC/EAW/Shure SKUs that use this word.
+ok(proposeForPart({
+  sku: "EAW:X", mfr: "EAW", category: "RSX",
+  desc: "8\" Powered Loudspeaker. Horz: 90˚ Vert: 60˚. Dante. Black.",
+})?.rule.id === "speaker-powered",
+  "ruleset: 'Powered Loudspeaker' matches the powered-speaker rule, not just 'Powered Speaker'");
+
+// AVPro Edge's "AV Distribution" catalog uses "processor" for video-wall and
+// remote-control gear, and QSC sells bare "Q-SYS Core ... Software License"
+// SKUs under category Audio — neither is a physical fixed-I/O audio DSP.
+ok(matchRule({
+  sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution",
+  desc: "8K HDR 2x2 scaling video wall processor featuring VRR",
+})?.id !== "dsp",
+  "ruleset: an AV-Distribution video-wall processor does not match the audio DSP rule");
+ok(matchRule({
+  sku: "QSC:X", mfr: "QSC", category: "Audio",
+  desc: "Q-SYS Core 110 Scripting Engine Software License, Perpetual.",
+})?.id !== "dsp",
+  "ruleset: a Q-SYS Core software license is not a physical DSP");
+
+// Shure gooseneck mics routinely mention a status "LED" or "LED Indicator" —
+// without a manufacturer scope this shipped every one of them as a lighting
+// fixture. Chauvet Professional is the only lighting brand in scope.
+ok(matchRule({
+  sku: "SHU:X", mfr: "Shure", category: "Audio",
+  desc: "Cardioid-12\" Gooseneck Condenser Microphone, Attached Preamp with XLR, Shock Mount, Flange Mount, Snap-Fit Foam Windscreen, Mute Switch, LED Indicator",
+})?.id !== "fixture-led",
+  "ruleset: a microphone's status LED does not make it a lighting fixture");
+
+// RCF's install amplifiers/mixer-amps list 70/100V outputs in their own spec —
+// those must stay amplifiers, not get reinterpreted as a passive 70V speaker
+// INPUT.
+ok(matchRule({
+  sku: "RCF:X", mfr: "RCF", category: "POWER AMPLIFIERS",
+  desc: "Class D Power Amplifier with Dual Input per Channel - 4 Ω, 70/100V, 2 x 250W",
+})?.id === "amplifier",
+  "ruleset: a 70V-capable power amplifier matches the amplifier rule, not speaker-70v");
+
+// QSC ceiling/surface 70V speakers routinely describe their OWN bundled
+// mounting hardware ("blind mount installation", "includes yoke mount") —
+// the bare accessory keyword "mount" swallowed ~100 real speaker SKUs.
+ok(proposeForPart({
+  sku: "QSC:X", mfr: "QSC", category: "Audio",
+  desc: "6.5\" Two-way ceiling speaker, 70/100V transformer with 8Ω bypass, 110° conical coverage, includes C-ring and rails for blind mount installation.",
+})?.rule.id === "speaker-70v",
+  "ruleset: a ceiling speaker describing its own mount hardware is not swallowed by the accessory layer");
+
+/* ---- #159 rule-set review fixes (D199) — every description below is
+   verbatim from the live catalog and was measured wrong before the fix. See
+   .superpowers/sdd/rule-fix-report.md for the before/after counts. ---- */
+
+import { channelCount, portCount } from "@/lib/catalog-port-rules";
+
+// C1: the bare token "amp" is not the word "amplifier". 61 passive EAW/QSC/
+// Fulcrum speakers say "Bi-Amp"/"Tri-amp"/"amp channels" and were being wired
+// as amplifiers — one speakON NL2 INPUT turned into four speakON NL4 OUTPUTS.
+const biAmp = proposeForPart({
+  sku: "EAW:2039611", mfr: "EAW", category: "QX",
+  desc: 'Passive 12" 3-Way Bi-Amp Speaker. 4 x 12" LF, 1 x 2" Exit 3.5" Voice Coil MF and 1 x 2" Exit 1.75" HF. Horz: 90˚ Vert: 60˚. Black',
+});
+ok(biAmp?.rule.id === "speaker-passive",
+  "ruleset: a passive speaker that mentions bi-amping is still a passive speaker");
+ok(biAmp?.ports.length === 1 && biAmp.ports[0].direction === "in" && biAmp.ports[0].connectionType === "speakON NL2",
+  "ruleset: that bi-amp passive speaker gets one speakON NL2 input, not amplifier outputs");
+ok(matchRule({ sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution", desc: "PS16-1, KX2, KX7 16 VCD 1 Amp Power Supply" }) === null,
+  "ruleset: \"1 Amp Power Supply\" is amperes, not an amplifier");
+
+// C3: QSC's CX/ISA power amps never use the word "amplifier" — they were
+// given a 70V speaker INPUT, backwards for a device that drives the line.
+const cx108v = proposeForPart({
+  sku: "QSC:CX108V", mfr: "QSC", category: "Audio",
+  desc: "8 channels, 100 watts/ch at 70V.",
+});
+ok(cx108v?.rule.id === "amplifier",
+  "ruleset: \"8 channels, 100 watts/ch at 70V.\" is a power amplifier, not a 70V speaker");
+ok(cx108v?.ports.find((prt) => prt.name === "Speaker Out")?.count === 8,
+  "ruleset: that power amp's channel count comes from its spec line");
+
+// C2: a device that lists its own bundled hardware is not an accessory.
+ok(proposeForPart({
+  sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution",
+  desc: "Four Channel Dual Mode 70 Volt DSP Amplifier with Dante; includes rack mount",
+})?.rule.id === "amplifier",
+  "ruleset: an amplifier that includes a rack mount is an amplifier, not an accessory");
+ok(matchRule({
+  sku: "QSC:12x", mfr: "QSC", category: "Audio",
+  desc: "Optical Zoom 80° Horizontal Field of View, PTZ Network Camera, PoE, with HDMI and SDI output. Includes PTZ-WMB1 wall mount bracket",
+})?.id === "camera-ptz",
+  "ruleset: a PTZ camera that bundles its own wall bracket is still a camera");
+ok(matchRule({
+  sku: "SHU:X", mfr: "Shure", category: "Audio",
+  desc: "Four--channel receiver. Includes AD4Q, locking power and jumper cables, BNC bulkhead adapter, coaxial antenna, BNC cable assemblies, BNC cable, Ethernet cables, rackmount hardware",
+})?.id === "wireless-receiver",
+  "ruleset: a rack receiver whose box contains cables and an antenna is still a receiver");
+
+// I4: the other side of the same coin — an accessory FOR a speaker is an
+// accessory, and must stay out of the coverage-gap report (D195).
+for (const [desc, mfr, cat] of [
+  ["Cluster Bracket for P4228/P5228 (Connects (2) Speakers)", "RCF", "Audio"],
+  ["Caster Wheel for Subwoofer", "EAW", "RS"],
+  ["Soft padded cover for the KLA181 Subwoofer", "QSC", "Audio"],
+  ["STRIKE Array Flush Bracket", "Chauvet Professional", "STRIKE Series Accessories"],
+] as const) {
+  ok(matchRule({ sku: "T:1", desc, category: cat, mfr })?.accessory === true,
+    `ruleset: "${desc.slice(0, 40)}" is an accessory for a speaker, not a speaker`);
+}
+
+// I1: an RX-only half must not get the TX+RX kit shape — both directions
+// would be inverted — and there is no receive-only shape to invent.
+ok(matchRule({
+  sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution",
+  desc: "HDBaseT (CAT6) RECEIVER ONLY. ICT 18G, 70m 4K (100m HD) Slim Extender with I-Pass, Bi-Directional Power, RS232, IR - ICT for full HDR/HDMI Pass-Through. Full HDR, 4K60 4:4:4.",
+}) === null,
+  "ruleset: a receive-only HDBaseT unit is left unmatched, not given an extender kit's ports");
+ok(matchRule({ sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution", desc: "Power Supply for VIP-UHD-TX/RX (only required if not using PoE)" }) === null,
+  "ruleset: a power supply for an extender is not an extender");
+ok(matchRule({ sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution", desc: "2Ch Audio Extender" }) === null,
+  "ruleset: an audio extender is not an HDMI extender");
+
+// I2: a bare \bmatrix\b stole a wall-plate extender kit on a NEGATION, and
+// gave audio matrices HDMI ports.
+ok(matchRule({
+  sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution",
+  desc: "HDMI Single Gang Decora Style Wall Plate (White) HDBaseT Basic Extender Kit (70M HD 1080p) **These MUST be used as a kit – not for use as a transmitter or receiver for any matrix switch.**",
+})?.id === "av-extender",
+  "ruleset: \"not for use ... for any matrix switch\" does not make a part a matrix");
+ok(matchRule({ sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution", desc: "Audio Distribution 16x16 DSP Matrix" }) === null,
+  "ruleset: an audio matrix is not given HDMI ports");
+
+// I5: `exclude` is only ever tested against desc, so a Chauvet accessory in an
+// "… Series Accessories" category was getting DMX + powerCON regardless.
+ok(matchRule({
+  sku: "CHV:OVE2IRIS", mfr: "Chauvet Professional", category: "Ovation Series Accessories",
+  desc: "Drop-in Iris: Ovation E-2 FC",
+})?.id !== "fixture-led",
+  "ruleset: a Chauvet accessory-category row is not an LED fixture");
+ok(matchRule({
+  sku: "CHV:F2X4", mfr: "Chauvet Professional", category: "F Series",
+  desc: "F2 - SMD LED Video Panel 4-Pack",
+})?.id !== "fixture-led",
+  "ruleset: an SMD LED video panel is fed by a processor, not DMX + powerCON");
+
+// I6: the distribution-amplifier branch was dead while `amplifier` ran first.
+ok(matchRule({ sku: "AV:X", mfr: "AVPro Edge", category: "AV Distribution", desc: "48Gbps HDMI scaling distribution amplifier with one input, and four outputs" })?.id === "av-splitter",
+  "ruleset: an HDMI distribution amplifier is a splitter, not an install amplifier");
+
+// I7: the count helpers.
+ok(portCount('2 x 15" Subwoofer', "in", 4) === 4 && portCount('2 x 15" Subwoofer', "out", 4) === 4,
+  "ruleset: a driver complement (2 x 15\") is never read as a port count");
+ok(portCount("40Gbps 8 HDMI input, 8 HDMI output 8K Matrix Switcher", "in", 4) === 8,
+  "ruleset: \"N input ... N output\" prose is read as a port count");
+ok(portCount("18Gbps HDMI 16x16 Matrix w/Audio Deembedding", "out", 4) === 16,
+  "ruleset: an NxM is still read as a port count");
+ok(channelCount("128 Channel Dante amplifier", 4) === 4,
+  "ruleset: a 3-digit channel count falls back instead of reading its last two digits");
+ok(channelCount("2U Sixteen Channel 100 Watt Amplifier", 4) === 16,
+  "ruleset: a word-form channel count is parsed");
+ok(proposeForPart({ sku: "SHU:X", mfr: "Shure", category: "Audio", desc: "Access Point/Charger/DSP - 2 Ch." })?.ports[0].count === 2,
+  "ruleset: a DSP is sized from its stated channel count, not a hardcoded 8x8");
+
+// FIX 1 (D200): isModelish now lives in catalog-port-apply.ts and is shared
+// by the report and the apply path — locked here directly so the two can
+// never drift back into separate copies.
+import { isModelish } from "@/lib/catalog-port-apply";
+ok(isModelish("", "EAW:SB1002") === true, "isModelish: an empty description is modelish");
+ok(isModelish("2039611", "EAW:2039611") === true, "isModelish: a bare digit string is modelish");
+ok(isModelish("SB 1002", "EAW:SB1002") === true, "isModelish: a spaced-out repeat of the bare SKU is still modelish");
+ok(isModelish('Passive 18" Installation Subwoofer. Black', "EAW:SB1002") === false,
+  "isModelish: real prose is not modelish");
+
+// M1/M2/M4: the negation and RF traps.
+ok(matchRule({ sku: "SHU:UA860V", mfr: "Shure", category: "Audio", desc: "Passive Omnidirectional Antenna" })?.id !== "speaker-passive",
+  "ruleset: a passive RF antenna is not a passive speaker");
+ok(matchRule({ sku: "QSC:X", mfr: "QSC", category: "Audio", desc: '6.5" Two-way surface speaker, 16Ω (no transformer) , 105° conical DMT™ coverage, includes X-Mount™ and weather input cup. Color - Black.' })?.id !== "speaker-70v",
+  "ruleset: \"(no transformer)\" does not make a speaker a 70V speaker");
+ok(matchRule({ sku: "QSC:X", mfr: "QSC", category: "Audio", desc: '4" Full-range, low-profile ceiling-mount network loudspeaker, PoE/PoE+ powered. Includes C-ring and tile rails. Color - White.' })?.id !== "speaker-powered",
+  "ruleset: a PoE-powered network loudspeaker is not given a mains inlet");
+
+/* ---- gate review fix (D200) — speaker-70v regression ----
+   The D199 fix correctly stopped evicting genuine passive speakers that
+   mention "Bi-Amp"/"Tri-amp" from speaker-passive by dropping the bare
+   token "amp" from its exclude — but the same change was also made to
+   speaker-70v's exclude, where "amp" was doing real work. Shure's MXN-AMP
+   never says the word "amplifier"; it was matching speaker-70v and getting
+   a 70V speaker INPUT for a device that drives the line. Restoring the bare
+   "amp" guard on speaker-70v only (not speaker-passive) fixes this without
+   reopening the bi-amp regression: nothing 70V-tapped in the live catalog
+   uses "amp" as part of a compound word like "Bi-Amp". */
+ok(matchRule({
+  sku: "Shure:MXN-AMP", mfr: "Shure", category: "Audio",
+  desc: "NETWORKED DANTE LOW IMP/70V POE+ AMP",
+})?.id !== "speaker-70v",
+  "ruleset: a networked amplifier described only as '...POE+ AMP' does not get a 70V speaker input");
 
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
@@ -5071,6 +5464,78 @@ async function asyncChecks(): Promise<void> {
         await softDeleteDoc("catalog_parts", "TEST:SPK");
         await softDeleteDoc("catalog_parts", "TEST:TV");
       }
+    }
+  }
+
+  /* --- #159 Task 5: applying named rules --- */
+  {
+    const { mergeUpsert, get: getPart } = await import("@/lib/stores/catalog");
+    const { softDeleteDoc } = await import("@/db/doc-store");
+    const { applyRules } = await import("@/lib/catalog-port-apply");
+    try {
+      await mergeUpsert("TEST:RULE-SPK", { desc: 'Passive 18" Installation Subwoofer. Black', category: "SB", unit: "ea", list: 1, cost: 1, mfr: "EAW" });
+      await mergeUpsert("TEST:RULE-AMP", { desc: "RU 4 Channel ENERGY STAR amplifier", category: "Audio", unit: "ea", list: 1, cost: 1, mfr: "QSC" });
+      await mergeUpsert("TEST:RULE-HAND", { desc: 'Passive 15" Installation Subwoofer. Black', category: "SB", unit: "ea", list: 1, cost: 1, mfr: "EAW",
+        ports: [{ name: "Hand edited", direction: "in", connectionType: "speakON NL4" }] });
+      // gate review (FIX 1, D200): a bare model number that HAPPENS to be a
+      // rule keyword ("Passive") with no other prose. matchRule() alone would
+      // still propose speaker-passive for it, but the REPORT never shows this
+      // row (scripts/port-rules.ts's isModelish skips it), so apply must skip
+      // it too — that gap (90 rows, 6%, written but never reviewed) was the
+      // whole finding.
+      await mergeUpsert("TEST:RULE-MODELISH", { desc: "Passive", category: "SB", unit: "ea", list: 1, cost: 1, mfr: "EAW" });
+
+      // Every applyRules call below is scoped to exactly the four fixtures
+      // above (gate review FIX 1). applyRules otherwise walks the whole
+      // catalog_parts table, and `speaker-passive` matches 452 REAL parts —
+      // with `commit: true` this block was one unset PGLITE_PATH away from
+      // porting the live book from a test. A test may only write rows it
+      // created.
+      const FIXTURES = ["TEST:RULE-SPK", "TEST:RULE-AMP", "TEST:RULE-HAND", "TEST:RULE-MODELISH"] as const;
+
+      const res = await applyRules(["speaker-passive"], { commit: true, onlySkus: FIXTURES });
+
+      const spk = await getPart("TEST:RULE-SPK");
+      ok((spk?.ports || []).length === 1 && spk?.ports?.[0].connectionType === "speakON NL2",
+        "apply: a named rule ports the parts it matched");
+
+      const amp = await getPart("TEST:RULE-AMP");
+      ok((amp?.ports || []).length === 0, "apply: a rule that was NOT named leaves its parts alone");
+
+      const hand = await getPart("TEST:RULE-HAND");
+      ok(hand?.ports?.[0].name === "Hand edited", "apply: a hand-edited part is never overwritten (D196)");
+      ok(res.skippedHasPorts >= 1, "apply: the result counts parts skipped for having ports");
+
+      const modelish = await getPart("TEST:RULE-MODELISH");
+      ok((modelish?.ports || []).length === 0,
+        "apply: a bare model/part-number description is skipped, same as the report's isModelish filter (FIX 1, D200)");
+
+      ok(res.applied === 1, "apply: the scoped run touched exactly the one fixture the rule matched, nothing else (gate review FIX 1)");
+
+      // Idempotence, genuinely: the first run ported TEST:RULE-SPK, and this
+      // scope contains nothing else speaker-passive can match, so a zero here
+      // is the "already has ports" skip doing its job — not an empty scope.
+      const again = await applyRules(["speaker-passive"], { commit: true, onlySkus: FIXTURES });
+      ok(again.applied === 0, "apply: a second run is a no-op — idempotent");
+      ok(again.skippedHasPorts >= 2, "apply: the second run skipped the now-ported part as well as the hand-edited one");
+
+      const dry = await applyRules(["amplifier"], { commit: false, onlySkus: FIXTURES });
+      ok(dry.applied > 0, "apply: a dry run reports what it would do");
+
+      // The same rule + scope as `dry`, narrowed to a manufacturer the one
+      // matching fixture (QSC) is not — so the drop to 0 is the filter, and
+      // `--mfr=` now means the same thing in apply as it does in the report.
+      const otherMfr = await applyRules(["amplifier"], { commit: false, onlySkus: FIXTURES, mfr: "EAW" });
+      ok(otherMfr.applied === 0, "apply: an mfr filter excludes parts from other manufacturers (FIX 4)");
+      const sameMfr = await applyRules(["amplifier"], { commit: false, onlySkus: FIXTURES, mfr: "QSC" });
+      ok(sameMfr.applied === dry.applied, "apply: an mfr filter naming the matching brand changes nothing");
+      const ampStill = await getPart("TEST:RULE-AMP");
+      ok((ampStill?.ports || []).length === 0, "apply: a dry run writes nothing");
+    } finally {
+      await softDeleteDoc("catalog_parts", "TEST:RULE-SPK");
+      await softDeleteDoc("catalog_parts", "TEST:RULE-AMP");
+      await softDeleteDoc("catalog_parts", "TEST:RULE-HAND");
+      await softDeleteDoc("catalog_parts", "TEST:RULE-MODELISH");
     }
   }
 }
