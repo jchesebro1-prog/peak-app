@@ -407,7 +407,7 @@ route redirects; landing tile and nav entry removed.
 
 ---
 
-## 7. Per-section dashboards (Sales / Design / Install / Service / General) — OPEN
+## 7. Per-section dashboards (Sales / Design / Install / Service / General) — SUPERSEDED BY #43
 
 **Area:** `src/components/nav/nav-data.ts`, `src/components/nav/Nav.tsx`, `src/app/(app)/page.tsx`,
 new section routes
@@ -833,7 +833,7 @@ blob mutation from a quote builder). Portal prices at the grant customer's tier
 
 ---
 
-## 12. New Lead: pick existing customer, link contacts, use canonical contact fields — OPEN
+## 12. New Lead: pick existing customer, link contacts, use canonical contact fields — DONE 2026-09-23
 
 **Area:** `src/app/(app)/leads/lead-drawer.tsx:396-552`, `leads/actions.ts:83-115`,
 `src/lib/stores/leads.ts`, `src/lib/stores/customers.ts`
@@ -3165,7 +3165,7 @@ sort (was always waiting-first) — flag to Jeff if unwanted.
 
 ---
 
-## 43. Reports + Home rebuilt as BUILD-YOUR-OWN widget system — OPEN (supersedes #7)
+## 43. Reports + Home rebuilt as BUILD-YOUR-OWN widget system — PARTIAL (supersedes #7)
 
 **Area:** Reports, Home.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
@@ -3190,7 +3190,7 @@ capacity bands, trade mix, and scheduled-load widgets still depend on the broade
 
 ---
 
-## 44. Projects lifecycle: delivery-driven stages + Install module + phone signoff + walkthrough task — OPEN
+## 44. Projects lifecycle: delivery-driven stages + Install module + phone signoff + walkthrough task — PARTIAL 2026-09-23
 
 **Area:** Projects, Install/Field Work, Schedule, tasks.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
@@ -3229,12 +3229,13 @@ role (falls back to quote owner), due ~7 days: walk the site with the end user. 
   Implementation shape: responsive label switch (full label at desktop breakpoint, short label
   below) — ONE nav build, not two.
 
-**Status:** OPEN — belongs to the tabs/UI rebuild session, not the punch-list build stream.
+**Status:** PARTIAL — Home is done; responsive full-word vs short-label switching remains with the
+tabs/UI rebuild session.
 Do not pick up standalone; the rebuild session owns the nav.
 
 ---
 
-## 46. Inbox round 2 polish (follow-ups from the #42 reviews) — OPEN
+## 46. Inbox round 2 polish (follow-ups from the #42 reviews) — PARTIAL 2026-09-23
 
 **Area:** Inbox. **Logged:** 2026-07-25, bundling the accepted-as-follow-up findings from the
 #42 per-task and whole-branch reviews. None are defects blocking daily use; batch them.
@@ -4370,7 +4371,7 @@ other. **Ties to #41 (split the design estimator) and #51 (design tab consolidat
 
 ---
 
-## 66. The estimator venue adapter maps `width → proWidthFt` for EVERY venue kind — PARTIAL 2026-08-01 — wing double-count fixed; width mapping accepted as-is
+## 66. The estimator venue adapter maps `width → proWidthFt` for EVERY venue kind — DONE 2026-09-23 — wing double-count fixed; width mapping accepted as-is
 
 **Area:** `src/lib/design/venue-dims.ts` (`venueDimsFromEstimator`)
 **Reported:** 2026-07-31 (source audit)
