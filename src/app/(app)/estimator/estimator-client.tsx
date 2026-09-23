@@ -266,6 +266,8 @@ const CTX_LABEL: CSSProperties = {
   flexShrink: 0,
 };
 
+const INSTALL_TIMEFRAMES = ["ASAP", "Under 1 month", "1–3 months", "3–6 months", "6–12 months", "TBD"] as const;
+
 export default function EstimatorClient({
   initial,
   companyName,
@@ -322,6 +324,7 @@ export default function EstimatorClient({
   const [locationId, setLocationId] = useState(initial.locationId);
   const [contactName, setContactName] = useState(initial.contactName);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
+  const [installTimeframe, setInstallTimeframe] = useState(initial.installTimeframe);
   const [paymentTerms, setPaymentTerms] = useState(initial.paymentTerms);
   // #110: user-named quote category — persisted on blur, not per keystroke.
   const [category, setCategory] = useState(initial.category);
@@ -553,6 +556,7 @@ export default function EstimatorClient({
           locationId: locationId || null,
           contactName: contactName || "",
           quoteNote: quoteNote || "",
+          installTimeframe,
           paymentTerms,
           category,
           value: t.grand,
@@ -721,6 +725,10 @@ export default function EstimatorClient({
     if (!loadedId) return;
     if (noteTimer.current) clearTimeout(noteTimer.current);
     noteTimer.current = setTimeout(() => persistMeta({ quoteNote: v }), 500);
+  };
+  const onInstallTimeframe = (v: string) => {
+    setInstallTimeframe(v);
+    persistMeta({ installTimeframe: v });
   };
   const onProjectName = (v: string) => {
     setProjectName(v);
@@ -1939,6 +1947,27 @@ export default function EstimatorClient({
             />
             <span style={{ fontSize: 10.5, color: "#6b7079", flexShrink: 0 }}>
               Shows on the PDF header
+            </span>
+          </div>
+
+          <div
+            className="est-noterow"
+            style={{
+              display: "flex", alignItems: "center", gap: 12, padding: "8px 22px",
+              background: "#23262d", borderTop: "1px solid #2b2e35", color: "#fff", flexShrink: 0,
+            }}
+          >
+            <span style={CTX_LABEL}>Suggested install timeframe</span>
+            <select
+              value={installTimeframe}
+              onChange={(e) => onInstallTimeframe(e.target.value)}
+              aria-label="Suggested install timeframe"
+              style={{ ...DARK_SELECT, minWidth: 150 }}
+            >
+              {INSTALL_TIMEFRAMES.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+            <span style={{ fontSize: 10.5, color: "#6b7079" }}>
+              Carries to the project goal when this quote is won
             </span>
           </div>
 

@@ -91,6 +91,8 @@ export type Quote = {
   quoteNote?: string;
   scopeNarrative?: string;
   quoteBasis?: string;
+  /** Customer's requested install window from the estimator (#15). */
+  installTimeframe?: string;
   preparedBy?: string;
   assumptions?: string;
   termsText?: string;

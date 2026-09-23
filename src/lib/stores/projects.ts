@@ -539,6 +539,17 @@ function deriveProcurement(q: QuoteLike): ProcurementLine[] {
 function fromQuote(q: QuoteLike): Omit<ProjectRecord, "id"> {
   const labor = quoteHasLabor(q);
   const t = now();
+  const requestedWindow = typeof q.installTimeframe === "string" ? q.installTimeframe.trim() : "";
+  const windowDays: Record<string, number> = {
+    ASAP: 14,
+    "Under 1 month": 30,
+    "1–3 months": 90,
+    "3–6 months": 180,
+    "6–12 months": 365,
+  };
+  const targetDays = windowDays[requestedWindow] ?? (labor ? 42 : 21);
+  const targetDate = ahead(targetDays);
+  const installDuration = labor ? Math.max(6, Number((q.spec as { mobs?: { days?: number }[] } | undefined)?.mobs?.reduce((sum, m) => sum + (Number(m.days) || 0), 0)) || 6) : 0;
   const kind: ProjectKind = labor ? "project" : "order";
   return {
     kind,
@@ -554,9 +565,9 @@ function fromQuote(q: QuoteLike): Omit<ProjectRecord, "id"> {
     createdAt: t,
     updatedAt: t,
     startedAt: t,
-    targetDate: ahead(labor ? 42 : 21),
-    installStart: labor ? ahead(38) : null,
-    installEnd: labor ? ahead(44) : null,
+    targetDate,
+    installStart: labor ? ahead(Math.max(0, targetDays - installDuration)) : null,
+    installEnd: labor ? targetDate : null,
     stage: "procurement",
     stageHistory: [], // createProject() anchors the opening entry
     procurement: deriveProcurement(q),

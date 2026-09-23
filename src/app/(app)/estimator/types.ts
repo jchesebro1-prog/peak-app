@@ -321,6 +321,7 @@ export type InitialQuote = {
   locationId: string | null;
   contactName: string;
   quoteNote: string;
+  installTimeframe: string;
   paymentTerms: PaymentTerms;
   /** User-named quote category (#110) — "" when none. */
   category: string;

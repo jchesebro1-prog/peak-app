@@ -108,6 +108,7 @@ export type SavePayload = {
   locationId: string | null;
   contactName: string;
   quoteNote: string;
+  installTimeframe: string;
   paymentTerms: PaymentTerms;
   /** User-named quote category (#110); "" clears it. */
   category: string;
@@ -271,6 +272,7 @@ export async function saveQuoteAction(
     locationId: payload.locationId || null,
     contactName: payload.contactName || "",
     quoteNote: payload.quoteNote || "",
+    installTimeframe: payload.installTimeframe || "TBD",
     paymentTerms: payload.paymentTerms,
     category: (payload.category || "").trim(),
     value: payload.value,
@@ -520,6 +522,7 @@ export async function updateQuoteMetaAction(
     customer?: string;
     contactName?: string;
     quoteNote?: string;
+    installTimeframe?: string;
     category?: string;
   }
 ): Promise<{ ok: boolean; pricingTier?: string; tierMargin?: number }> {
@@ -537,6 +540,7 @@ export async function updateQuoteMetaAction(
   if (typeof meta.customer === "string") patch.customer = meta.customer;
   if (typeof meta.contactName === "string") patch.contactName = meta.contactName;
   if (typeof meta.quoteNote === "string") patch.quoteNote = meta.quoteNote;
+  if (typeof meta.installTimeframe === "string") patch.installTimeframe = meta.installTimeframe.trim();
   if (typeof meta.category === "string") patch.category = meta.category.trim();
 
   // Item 11 (D87): a customer/contact change re-resolves the pricing tier

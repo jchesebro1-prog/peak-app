@@ -1208,7 +1208,7 @@ it was a build-artifact issue, not a code regression, before re-verifying.
 
 ---
 
-## 15. Suggested install timeframe on the estimate → auto-fills the project goal — OPEN
+## 15. Suggested install timeframe on the estimate → auto-fills the project goal — DONE 2026-09-23
 
 **Area:** `src/app/(app)/estimator/estimator-client.tsx` (header rows), `estimator/actions.ts`
 (meta allowlist), `src/lib/stores/quotes.ts`, **`src/lib/stores/projects.ts:488-490`** (the handoff)
@@ -1263,6 +1263,13 @@ timeline as a goal. The line should default to a number of weeks depending on pr
 **Trap to avoid:** `deriveProcurement()` branches on `q.spec.systems`, but **nothing anywhere
 writes `spec.systems`** — the estimator saves only `{sections, mobs}`. It is always `[]` and the
 fallback always fires. **Do not build scope defaults on `spec.systems`.**
+
+**Fixed 2026-09-23:** the estimator now persists the prototype's install-timeframe choices
+(`ASAP`, `Under 1 month`, `1–3 months`, `3–6 months`, `6–12 months`, `TBD`) on the quote, with an
+immediate edit control in the estimate header. Project conversion maps the selected window to its
+target date and derives the labor install window from the quote's mobilization days, retaining the
+existing 21/42-day defaults only for `TBD`/legacy quotes. Typecheck, targeted lint, and the full
+spec suite pass.
 
 **Decisions Jeff needs to make:**
 - **A. Relative weeks or an absolute date?** "Defaults to a number of weeks" implies relative —
