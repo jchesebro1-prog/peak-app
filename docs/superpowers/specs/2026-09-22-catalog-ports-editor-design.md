@@ -181,26 +181,37 @@ answerable by looking rather than by running a script.
 
 ---
 
-## 5. Phase 2 — the curated draft
+## 5. Phase 2 — a ports rules engine (separate spec)
 
-`scripts/draft-starter-set.ts` already emits the right artifact: per-item draft
-ports with direction, count and connection type, plus honest `verify` flags
-(the existing worksheet says things like *"verify — dimmed-output connector
-depends on host rack"*). It has only ever been run across 68 items.
+**Correction, 2026-09-22.** An earlier draft of this spec described
+`scripts/draft-starter-set.ts` as a drafting engine that "has only ever been
+run across 68 items". That is wrong, and the error is recorded here because it
+changed a decision. The script is a **hand-curated pick list**:
 
-It gets extended to the manufacturers Jeff named on 2026-09-22 — **Shure,
-Biamp, JBL, RCF, EAW, QSC, AVPro Edge, Chauvet**, plus the ETC consoles and
-fixtures already in the book — filtered to device-bearing categories, emitting
-**one worksheet per manufacturer** rather than a single unreadable file.
+```ts
+{ sku: "ETC:ION XE 2K-US", ports: consolePorts() },
+{ sku: "ETC:D20AF", ports: dimmerRackPorts(2),
+  portNote: "(verify — dimmed-output connector depends on host rack)" },
+```
 
-**The #39 review gate stays.** "Jeff reviews before import" was a locked
-decision and was explicitly not bypassed in July; it is not bypassed here. The
-script writes worksheets; Jeff prunes and corrects; the import stamps ports
-only on surviving rows. Corrections afterwards go through the Phase 1 editor,
-not another script run — which is precisely why the editor ships first.
+A human chose each of the 68 SKUs and read each description to pick a port
+shape from helpers like `consolePorts()` / `poweredSpeakerPorts()` /
+`matrixPorts(inN, outN)`. There is no manufacturer filter to point at more
+brands — the picks *are* the content. "Extending it to eight manufacturers"
+would mean hand-writing several hundred `{ sku, ports }` entries against
+price-sheet descriptions, which is the same manual work as the editor with
+worse domain knowledge.
 
-**D191 — the bulk draft produces review worksheets, never a direct import**,
-and everything it produces is correctable in-app afterwards.
+**Phase 2 is therefore a ports rules engine, and it gets its own spec**
+(Jeff, 2026-09-22): description/category → port shape, with a confidence flag
+per row, applied across the catalog and re-runnable as the rules improve. It
+is deliberately designed *after* Phase 1 ships, so the rules can be derived
+from the shapes that actually recur in the models Peak places rather than from
+guesses.
+
+**D191 — the bulk pass is a re-runnable rules engine producing review
+worksheets, never a direct import**, and everything it produces stays
+correctable in-app afterwards. #39's "Jeff reviews before import" gate holds.
 
 ---
 
@@ -228,8 +239,8 @@ and everything it produces is correctable in-app afterwards.
 
 1. Review this spec.
 2. Confirm the permissions call in §4.4 (user-editable vs admin-only).
-3. After Phase 1 ships: name the specific models to prioritise, or confirm the
-   eight manufacturers in §5 are the right filter for the draft.
+3. After Phase 1 ships: add ports to your go-to models, which becomes the
+   ground truth the Phase 2 rules engine is designed against.
 4. The July review artifacts — `docs/catalog/STARTER-SET-2026-07-DRAFT.md` (68
    items) and `METADATA-WORKSHEET-2026-07.md` — are still awaiting the read
    they were written for. Phase 2 extends them rather than replacing them.

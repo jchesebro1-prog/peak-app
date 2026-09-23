@@ -31,7 +31,7 @@
 | `src/app/(app)/catalog/actions.ts` **(modify)** | `upsertPart` parses + validates + forwards `ports`; stale docstring corrected. |
 | `src/app/(app)/catalog/page.tsx` **(modify)** | Renders the island inside `PartFormModal`; surfaces `partError`; ports count on the part row. |
 | `scripts/test-review-and-spec.ts` **(modify)** | Unit + integration assertions. |
-| `scripts/draft-starter-set.ts` **(modify, Phase 2)** | Manufacturer filter + one worksheet per manufacturer. |
+| ~~`scripts/draft-starter-set.ts`~~ | **Not touched.** Phase 2 is a separate spec — see Task 6. |
 
 ---
 
@@ -668,52 +668,24 @@ git commit -m "test(catalog): a form-edited part wires in The Grid and refuses m
 
 ---
 
-## Task 6 (Phase 2): Curated draft for the named manufacturers
+## Task 6 (Phase 2): DEFERRED — a ports rules engine, specced separately
 
-**Files:**
-- Modify: `scripts/draft-starter-set.ts`
-- Create: `docs/catalog/PORTS-DRAFT-2026-09-<mfr>.md` (one per manufacturer, written by the script)
+**Do not implement this task in this run.**
 
-**Interfaces:**
-- Consumes: `serializePorts` from Task 1 (so the worksheet's machine-readable column and the editor agree on shape).
-- Produces: worksheets only. **No import.**
+The original Task 6 assumed `scripts/draft-starter-set.ts` could be pointed at
+a list of manufacturers. It cannot: it is a hand-curated pick list
+(`{ sku: "ETC:ION XE 2K-US", ports: consolePorts() }`), where a human chose
+every SKU and read every description to assign a port shape. There is no
+filter to extend — the picks are the content.
 
-- [ ] **Step 1: Add a manufacturer filter and per-manufacturer output**
+Jeff's call (2026-09-22): Phase 2 becomes a **ports rules engine**
+(description/category → port shape, confidence flag per row, re-runnable),
+designed in its own spec **after** Phase 1 ships — so its rules come from the
+port shapes that actually recur in the models Peak places, not from guesses
+against price-sheet text.
 
-`scripts/draft-starter-set.ts` already drafts ports per item with `verify` flags. Add a CLI filter:
-
-```ts
-// #158 Phase 2 — restrict the draft to the manufacturers Jeff named
-// (2026-09-22) and emit ONE worksheet per manufacturer; a single file across
-// eight brands is unreviewable, and review is the point (D191).
-const ONLY = new Set(
-  (process.argv.find((a) => a.startsWith("--mfr="))?.slice(6) || "").split(",").map((s) => s.trim()).filter(Boolean)
-);
-const DEFAULT_MFRS = ["Shure", "Biamp", "JBL", "RCF", "EAW", "QSC", "AVPro Edge", "Chauvet Professional", "ETC"];
-const targets = ONLY.size ? [...ONLY] : DEFAULT_MFRS;
-```
-
-- [ ] **Step 2: Run the draft (writes nothing to the database)**
-
-```bash
-npx tsx scripts/draft-starter-set.ts --mfr=Shure
-ls -la docs/catalog/
-```
-
-Expected: a new `PORTS-DRAFT-2026-09-Shure.md` and **no** database writes — `resolveDbTarget` prints the target and the script only reads.
-
-- [ ] **Step 3: Confirm the review gate is intact**
-
-Read the top of the generated worksheet. It must carry the same banner the July artifact does:
-
-> **Nothing below is imported. Jeff: mark rows to drop, then say "import".**
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add scripts/draft-starter-set.ts docs/catalog/
-git commit -m "feat(catalog): per-manufacturer ports draft worksheets (#158 phase 2, D191)"
-```
+Nothing in Tasks 1–5 depends on this. `serializePorts` from Task 1 is the
+shape the future engine will emit, which is the only coupling.
 
 ---
 
@@ -749,7 +721,7 @@ git push origin HEAD:main
 
 ## Self-Review
 
-**Spec coverage:** §4.1 island + hidden field → Tasks 2, 3. §4.1 merge subtlety → Task 2 Step 3 + the Task 2 test asserting both clearing and non-disturbance. §4.2 row model → Tasks 1, 3. §4.3 closed vocabulary → Task 1 (parse) + Task 2 (server re-validation) + Task 3 (`<select>`). §4.4 permissions → Task 2 (`requireUser`). §4.5 visibility → Task 4 Step 4. §5 curated draft → Task 6. §6 testing → Tasks 1, 2, 5. §7 open items → Task 7.
+**Spec coverage (updated after Task 6 was deferred):** §4.1 island + hidden field → Tasks 2, 3. §4.1 merge subtlety → Task 2 Step 3 + the Task 2 test asserting both clearing and non-disturbance. §4.2 row model → Tasks 1, 3. §4.3 closed vocabulary → Task 1 (parse) + Task 2 (server re-validation) + Task 3 (`<select>`). §4.4 permissions → Task 2 (`requireUser`). §4.5 visibility → Task 4 Step 4. §5 rules engine → deferred to its own spec (Task 6 records why). §6 testing → Tasks 1, 2, 5. §7 open items → Task 7.
 
 **Placeholder scan:** none — every code step carries complete code; every command carries expected output.
 
