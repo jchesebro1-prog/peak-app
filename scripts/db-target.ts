@@ -27,8 +27,16 @@ export function loadEnvLocal(file = ".env.local"): void {
   }
 }
 
+/**
+ * PGLITE_PATH is named explicitly rather than folded into ".data/pglite",
+ * because this label is what an operator reads immediately before authorizing
+ * a write. Saying ".data/pglite" while `src/db/index.ts` is actually opening
+ * a scratch datadir (or vice versa) is the same "the report does not describe
+ * the run" defect this module was written to prevent — see the header.
+ */
 export function dbTargetLabel(): string {
-  return process.env.DATABASE_URL ? "HOSTED (DATABASE_URL)" : "LOCAL PGlite (.data/pglite)";
+  if (process.env.DATABASE_URL) return "HOSTED (DATABASE_URL)";
+  return `LOCAL PGlite (${process.env.PGLITE_PATH || ".data/pglite"})`;
 }
 
 /**

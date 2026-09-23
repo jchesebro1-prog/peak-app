@@ -39,15 +39,27 @@ export function isModelish(desc: string, sku: string): boolean {
  * a rule and re-running costs nothing.
  *
  * Writes `ports` and nothing else.
+ *
+ * `opts` narrows WHICH parts are even considered:
+ *  - `onlySkus` — when present, the run may touch exactly these SKUs and
+ *    nothing else. Without it this function walks every row of
+ *    `catalog_parts`, which is how the spec suite came within one flag of
+ *    writing 452 real parts from four `TEST:` fixtures (gate review FIX 1).
+ *    Tests pass the SKUs they created; a test must not be able to write a row
+ *    it did not make.
+ *  - `mfr` — restrict to one manufacturer, so `--mfr=` means the same thing in
+ *    the report and in the apply (FIX 4; the divergence class D200 exists to
+ *    close).
  */
 export async function applyRules(
   ruleIds: readonly string[],
-  opts: { commit: boolean }
+  opts: { commit: boolean; onlySkus?: readonly string[]; mfr?: string }
 ): Promise<ApplyResult> {
   const { getDb } = await import("@/db");
   const { catalogParts } = await import("@/db/doc-tables");
   const { mergeUpsert } = await import("@/lib/stores/catalog");
   const wanted = new Set(ruleIds);
+  const scope = opts.onlySkus ? new Set(opts.onlySkus) : null;
   const db = await getDb();
   const rows = await db.select().from(catalogParts);
   const res: ApplyResult = { applied: 0, skippedHasPorts: 0, byRule: {} };
@@ -60,6 +72,8 @@ export async function applyRules(
       category: String(d.category || ""), mfr: String(d.mfr || ""),
     };
     if (!part.sku) continue;
+    if (scope && !scope.has(part.sku)) continue;
+    if (opts.mfr && part.mfr !== opts.mfr) continue;
     if (isModelish(part.desc, part.sku)) continue;
     const existing = d.ports as unknown[] | undefined;
     const proposal = proposeForPart(part);

@@ -4696,3 +4696,92 @@ corrects the one row it affected (`Shure:MXN-AMP`, previously given a backwards 
 below don't require reading a commit message to find. 1860 PASS / 5 FAIL (baseline 1854/5; 6 new
 assertions, same 5 pre-existing fresh-datadir seed races).
 
+
+## D201. Speaker connectors interoperate, by an explicit opt-in flag — not by wire-type family (#159 gate review, 2026-09-23)
+
+A final review of the port-rules engine found the shipped shapes do not compose: `amplifierPorts`
+emits `speakON NL4` **out**, `passiveSpeakerPorts` emits `speakON NL2` **in**, and
+`seventyVSpeakerPorts` emits `70V pair` **in**, while `canConnect` required exact
+`connectionType` equality. Nothing in the catalog could drive a ported speaker — 854 of the
+1,390 proposals affected — and it was a **regression**: with both sides portless the Grid allows
+the route today, so applying the rules would have hard-refused wiring an amplifier to a cabinet,
+with no override.
+
+**Decided:** speaker connectors interoperate, but narrowly. `WireType` gains an opt-in
+`interchangeable?: true` flag meaning "any connector in this family physically mates with any
+other in it", and it is set on **`speaker-pair` only** (`speakON NL2` / `NL4` / `NL8` /
+`70V pair`). `canConnect(a, b, types = DEFAULT_WIRE_TYPES)` now checks the direction complement
+as before, then exact `connectionType` match **or** both types in one flagged family;
+`validateDeviceWire` threads the same optional parameter through.
+
+**Rejected: blanket family matching.** `WireType.connectionTypes` answers "what cable carries
+this signal", which is a different question from "what mates with what". Treating every family
+as interchangeable would have allowed Dante audio → HDBaseT video (both `cat6`), Edison →
+Socapex (both `powercon-power`), and motor power → low-voltage pendant control — three wrong
+connections bought for one right one. Assertions pin all three as refused, alongside the
+direction complement still being enforced *inside* a family (two NL4 outs never connect).
+
+A family match stamps the **from/output** side's `connectionType` (an NL4 amp into an NL2
+cabinet stamps `speakON NL4`), which is deliberate: the source end is what the run is terminated
+to and what the cable BOM prices. Verified against the live catalog snapshot —
+`AVPro Edge:AC-DANTE-AMP-2CH` → `1Sound:CM38 (BLACK)` now returns
+`{ ok: true, connectionType: "speakON NL4" }`; before the change it was refused.
+
+This is the only change to shipped #39 code, and every pre-existing `canConnect` /
+`validateDeviceWire` assertion still passes unchanged.
+
+## D202. The spec suite refuses to run without a scratch datadir, and a test may only write rows it created (#159 gate review, 2026-09-23)
+
+The same review found `npm run test:specs` — this repo's own mandated gate — would have written
+**452 real catalog rows**. `scripts/test-review-and-spec.ts` called
+`applyRules(["speaker-passive"], { commit: true })` after creating four `TEST:` fixtures, but
+those fixtures are not a scope: `applyRules` walks every row of `catalog_parts`, and
+`speaker-passive` matches 452 real parts. The script had no `PGLITE_PATH` guard and the npm
+script set none, so it resolved `.data/pglite` — and with an ambient `DATABASE_URL` it would
+have written the shared Neon database with no gate at all. (Not triggered: the dev DB still has
+exactly 55 ported parts.)
+
+**Decided: guard *and* scope, because either alone leaves a real hole.**
+
+1. **Guard.** `scripts/test-review-and-spec.ts` now throws when `PGLITE_PATH` is unset, modelled
+   on `scripts/test-grid-options.ts`, with an error that says the suite writes and gives the
+   correct invocation. `package.json`'s `"test:specs"` supplies the throwaway datadir itself
+   (`TEST_DB=$(mktemp -d) && PGLITE_PATH="$TEST_DB" tsx …`, the existing
+   `"test:review:regressions"` pattern), so anyone running the documented gate is safe by
+   default rather than safe if they remember.
+2. **Scope.** `applyRules` takes `opts.onlySkus?: readonly string[]`, which restricts a run to
+   exactly those SKUs, and the test passes the four fixtures it created. A guard alone would
+   still leave a test able to write 452 rows into whatever datadir it was handed; a test must
+   only ever write rows it made. The idempotence assertion still genuinely tests idempotence —
+   the second scoped run returns 0 because the fixture it ported now has `ports[]`, not because
+   the scope is empty, and a companion assertion pins the skip count.
+
+`applyRules` also gained `opts.mfr`, because `scripts/port-rules.ts` parsed `--mfr=` and then
+ignored it in the `--apply` branch: `--mfr=EAW --apply --rules speaker-passive --commit`
+reported one brand and wrote all thirteen. That is the same report-vs-apply divergence class
+D200 was opened to close, so the flag now narrows both.
+
+## D203. The rules report shows every distinct shape a rule proposes, and its own caveats are counted, not typed (#159 gate review, 2026-09-23)
+
+Two ways the report was quietly lying about itself, both fixed:
+
+1. **One sample's shape stood in for all of them.** The report rendered `proposeForPart(hits[0])`,
+   but `shape()` reads the part — channel counts, HDMI vs SDI, in/out counts — so a rule
+   routinely proposes several shapes across its matches: `amplifier` 9 distinct, `av-matrix` 8,
+   `av-splitter` 4, `dsp` 3, `camera-ptz` 2. `camera-ptz` was the damaging case: 15 parts get
+   `SDI/BNC` and 15 get `HDMI`, and the report printed only SDI, so approving that rule would
+   have written a connector to half its parts that the reviewer never saw — the spec's core
+   promise (review the rule, not the row) failing on its own terms. The report now groups a
+   rule's matches by proposed shape and lists each distinct shape with its count and an example,
+   largest first, with a single-shape rule still rendered on one line as before.
+2. **The "Known gaps" text was hardcoded prose and had already drifted.** It claimed `dsp` had
+   "57 rows … 46 of its rows are amplifiers"; measured against the live catalog, `dsp` matches
+   **38** rows, **27** of them Powersoft/1Sound amplifier modules. Every figure in that section
+   is now counted from the run that prints it — the `dsp` match count and its Powersoft/1Sound
+   share, the rack kits still reaching `amplifier`, the unmatched fibre kits, and the accessory
+   bucket's `c/w` and "FM Plus" rows — so only the judgement (which rows are wrong, and why)
+   stays static. `AVPro Edge:AC-MXNET-POE-PSU24` was dropped from the "fibre extender kits"
+   claim: it is a *"PoE Provider for MXNET Endpoints and 48v Fiber Extenders"*, i.e. a power
+   supply, leaving 2 genuine unmatched fibre kits (`AC-EXO-444-KIT`, `AC-EXO-X-KIT`).
+
+Totals are unchanged by all of this: the report still proposes for **1,390** parts.

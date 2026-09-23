@@ -202,6 +202,28 @@ import { join } from "node:path";
 import { mergeActivity, prefillFromMeeting } from "@/lib/engagement-activity";
 import { performCapture, type CaptureDeps } from "@/lib/engagement-activity-write";
 
+/**
+ * THIS SUITE WRITES TO THE DATABASE. It creates and deletes catalog parts,
+ * grid projects and other real rows, so it must only ever be pointed at a
+ * throwaway PGlite datadir — never `.data/pglite` (the real book, 14,725
+ * parts) and never a hosted `DATABASE_URL` (preview and production share one
+ * Neon database).
+ *
+ * Same guard as scripts/test-grid-options.ts. `npm run test:specs` supplies
+ * the scratch datadir itself, so the documented gate is safe on its own; this
+ * throw is what stops a bare `tsx scripts/test-review-and-spec.ts` from
+ * resolving whatever the ambient environment points at.
+ */
+if (!process.env.PGLITE_PATH) {
+  throw new Error(
+    "Refusing to run: this suite WRITES to the database and PGLITE_PATH is unset,\n" +
+      "so it would resolve .data/pglite (the real catalog) or an ambient DATABASE_URL.\n" +
+      "Run it on a throwaway datadir:\n" +
+      "  npm run test:specs\n" +
+      'or, by hand:  TEST_DB=$(mktemp -d) && PGLITE_PATH="$TEST_DB" tsx scripts/test-review-and-spec.ts'
+  );
+}
+
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
 
@@ -626,6 +648,35 @@ ok(canConnect(portIo("DMX512 (5-pin XLR)"), portIn("DMX512 (5-pin XLR)")), "conn
 ok(canConnect(portIo("DMX512 (5-pin XLR)"), portIo("DMX512 (5-pin XLR)")), "connect: io->io same type connects");
 ok(!canConnect(portOut("DMX512 (5-pin XLR)"), portIn("HDMI")), "connect: different connection types never connect");
 
+/* --- #159 gate review FIX 2: interchangeable connector families --- */
+// The shapes shipped by #159 do not compose under exact equality: amplifiers
+// emit speakON NL4 OUT, passive cabinets present speakON NL2 IN, 70V devices
+// present a 70V pair IN. Nothing in the catalog could drive a ported speaker
+// (854 of 1,390 proposals affected), and it was a regression — both sides
+// portless meant the Grid allowed the route. `speaker-pair` is flagged
+// `interchangeable`; every other wire type is NOT, deliberately.
+ok(canConnect(portOut("speakON NL4"), portIn("speakON NL2")), "connect: an NL4 out connects to an NL2 in — the speaker family interoperates");
+ok(canConnect(portOut("speakON NL4"), portIn("70V pair")), "connect: a 70V pair in accepts an NL4 out");
+ok(canConnect(portOut("speakON NL8"), portIn("speakON NL2")), "connect: NL8 out to NL2 in connects — the whole speaker family, not a pair of special cases");
+ok(!canConnect(portOut("speakON NL4"), portOut("speakON NL2")), "connect: direction complement is still enforced INSIDE an interchangeable family (out->out refused)");
+ok(!canConnect(portIn("speakON NL4"), portIn("70V pair")), "connect: in->in inside the speaker family is refused too");
+ok(canConnect(portIo("speakON NL2"), portIn("speakON NL4")), "connect: io still connects across the speaker family");
+// cat6 carries Dante audio AND HDBaseT video; powercon-power carries Edison
+// AND Socapex. Those families describe what a cable carries, not what mates,
+// and must never have become wireable.
+ok(!canConnect(portOut("Dante/AES67 (Cat6)"), portIn("HDBaseT (Cat6a)")), "connect: Dante out does NOT reach an HDBaseT in — cat6 is not an interchangeable family");
+ok(!canConnect(portOut("Edison"), portIn("Socapex")), "connect: Edison does NOT connect to Socapex — powercon-power is not an interchangeable family");
+ok(!canConnect(portOut("motor power"), portIn("low-voltage pendant control")), "connect: motor power does NOT connect to low-voltage pendant control");
+ok(
+  DEFAULT_WIRE_TYPES.filter((wt) => wt.interchangeable).map((wt) => wt.id).join(",") === "speaker-pair",
+  "connect: speaker-pair is the ONLY interchangeable family in the defaults"
+);
+// The registry is an optional defaulted parameter (lib/geo.ts driveMiles
+// pattern), so a caller holding the admin-edited list gets that list's rules.
+const noFamilies = DEFAULT_WIRE_TYPES.map((wt) => ({ id: wt.id, label: wt.label, connectionTypes: wt.connectionTypes }));
+ok(!canConnect(portOut("speakON NL4"), portIn("speakON NL2"), noFamilies), "connect: an admin registry with no interchangeable family falls back to exact equality");
+ok(canConnect(portOut("speakON NL4"), portIn("speakON NL4"), noFamilies), "connect: exact equality still connects under a custom registry");
+
 const dmxCompat = compatibleWireTypes("DMX512 (5-pin XLR)", DEFAULT_WIRE_TYPES);
 ok(dmxCompat.length > 0, "connect: compatibleWireTypes finds at least one DMX wire type in the defaults");
 
@@ -682,6 +733,25 @@ ok(
   multiFrom.ok === true && multiFrom.ok && multiFrom.connectionType === "HDMI",
   "wire: first canConnect-satisfying port pair (fromPart order, then toPart order) wins"
 );
+
+/* --- #159 gate review FIX 2: validateDeviceWire across a family --- */
+// A real amplifier (amplifierPorts → speakON NL4 out) against a real passive
+// cabinet (passiveSpeakerPorts → speakON NL2 in).
+const ampToSpeaker = validateDeviceWire(
+  { ports: [portIn("XLR line/mic"), portOut("speakON NL4")] },
+  { ports: [portIn("speakON NL2")] }
+);
+ok(ampToSpeaker.ok === true, "wire: an NL4 amplifier output validates against an NL2 passive cabinet input");
+ok(
+  ampToSpeaker.ok === true && ampToSpeaker.connectionType === "speakON NL4",
+  "wire: a family match stamps the FROM/output side's connector (NL4), which is what the cable BOM prices"
+);
+const ampTo70v = validateDeviceWire({ ports: [portOut("speakON NL4")] }, { ports: [portIn("70V pair")] });
+ok(ampTo70v.ok === true && ampTo70v.connectionType === "speakON NL4", "wire: a 70V pair input accepts an NL4 output, stamped NL4");
+const danteToHdbaset = validateDeviceWire({ ports: [portOut("Dante/AES67 (Cat6)")] }, { ports: [portIn("HDBaseT (Cat6a)")] });
+ok(danteToHdbaset.ok === false, "wire: Dante audio out to HDBaseT video in is still refused (cat6 is not interchangeable)");
+const twoAmps = validateDeviceWire({ ports: [portOut("speakON NL4")] }, { ports: [portOut("speakON NL2")] });
+ok(twoAmps.ok === false, "wire: two outputs in the same family are still refused");
 
 
 /* --- #158 Task 1: catalog-ports parse/validate/serialize --- */
@@ -5399,7 +5469,15 @@ async function asyncChecks(): Promise<void> {
       // whole finding.
       await mergeUpsert("TEST:RULE-MODELISH", { desc: "Passive", category: "SB", unit: "ea", list: 1, cost: 1, mfr: "EAW" });
 
-      const res = await applyRules(["speaker-passive"], { commit: true });
+      // Every applyRules call below is scoped to exactly the four fixtures
+      // above (gate review FIX 1). applyRules otherwise walks the whole
+      // catalog_parts table, and `speaker-passive` matches 452 REAL parts —
+      // with `commit: true` this block was one unset PGLITE_PATH away from
+      // porting the live book from a test. A test may only write rows it
+      // created.
+      const FIXTURES = ["TEST:RULE-SPK", "TEST:RULE-AMP", "TEST:RULE-HAND", "TEST:RULE-MODELISH"] as const;
+
+      const res = await applyRules(["speaker-passive"], { commit: true, onlySkus: FIXTURES });
 
       const spk = await getPart("TEST:RULE-SPK");
       ok((spk?.ports || []).length === 1 && spk?.ports?.[0].connectionType === "speakON NL2",
@@ -5416,11 +5494,25 @@ async function asyncChecks(): Promise<void> {
       ok((modelish?.ports || []).length === 0,
         "apply: a bare model/part-number description is skipped, same as the report's isModelish filter (FIX 1, D200)");
 
-      const again = await applyRules(["speaker-passive"], { commit: true });
-      ok(again.applied === 0, "apply: a second run is a no-op — idempotent");
+      ok(res.applied === 1, "apply: the scoped run touched exactly the one fixture the rule matched, nothing else (gate review FIX 1)");
 
-      const dry = await applyRules(["amplifier"], { commit: false });
+      // Idempotence, genuinely: the first run ported TEST:RULE-SPK, and this
+      // scope contains nothing else speaker-passive can match, so a zero here
+      // is the "already has ports" skip doing its job — not an empty scope.
+      const again = await applyRules(["speaker-passive"], { commit: true, onlySkus: FIXTURES });
+      ok(again.applied === 0, "apply: a second run is a no-op — idempotent");
+      ok(again.skippedHasPorts >= 2, "apply: the second run skipped the now-ported part as well as the hand-edited one");
+
+      const dry = await applyRules(["amplifier"], { commit: false, onlySkus: FIXTURES });
       ok(dry.applied > 0, "apply: a dry run reports what it would do");
+
+      // The same rule + scope as `dry`, narrowed to a manufacturer the one
+      // matching fixture (QSC) is not — so the drop to 0 is the filter, and
+      // `--mfr=` now means the same thing in apply as it does in the report.
+      const otherMfr = await applyRules(["amplifier"], { commit: false, onlySkus: FIXTURES, mfr: "EAW" });
+      ok(otherMfr.applied === 0, "apply: an mfr filter excludes parts from other manufacturers (FIX 4)");
+      const sameMfr = await applyRules(["amplifier"], { commit: false, onlySkus: FIXTURES, mfr: "QSC" });
+      ok(sameMfr.applied === dry.applied, "apply: an mfr filter naming the matching brand changes nothing");
       const ampStill = await getPart("TEST:RULE-AMP");
       ok((ampStill?.ports || []).length === 0, "apply: a dry run writes nothing");
     } finally {

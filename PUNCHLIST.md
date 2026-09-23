@@ -7203,27 +7203,58 @@ data the rules were drafted against.**
   gate. Now `--commit` writes and `--yes` confirms, matching `scripts/enrich-addresses.ts`.
 
 **Known gaps — live, not yet fixed, listed so a rule isn't approved blind:**
-- **`dsp` is majority-wrong:** 46 of its 57 matched rows are Powersoft / 1Sound **amplifier
+- **`dsp` is majority-wrong:** 27 of its 38 matched rows are Powersoft / 1Sound **amplifier
   modules** getting a DSP's analog-I/O shape, not an actual DSP. Do not approve `dsp` without
-  checking those rows by hand.
+  checking those rows by hand. (Measured against the live catalog; an earlier "46 of 57" here
+  and in the report was wrong on both numbers. The report now counts them at runtime — D203 —
+  so this figure cannot drift again without the report saying so.)
 - `Lab Gruppen:LAB-LUCIA-RACKKIT` and `RCF:13360426` ("Rackmount Kit for … Amplifiers") still
   reach the `amplifier` rule instead of the accessory layer — `ACCESSORY_NOUN` matches
   `rack ?ear` and `\bmount\b` but not the single word "Rackmount".
 - ~20 real devices still sit in the accessory bucket, including `EAW:2072205-90` ("…Amplifier
   **c/w** Rack Mount Kit" — `c/w` isn't a recognized bundling word) and 13 Williams AV "**FM
   Plus**" systems (the brand name itself contains the bundling word "plus").
-- 3 fibre extender kits are unmatched — no fibre port shape exists yet (adding one is a
-  deliberate human act, out of this work's scope).
+- 2 fibre extender kits (`AVPro Edge:AC-EXO-444-KIT`, `AVPro Edge:AC-EXO-X-KIT`) are unmatched —
+  no fibre port shape exists yet (adding one is a deliberate human act, out of this work's
+  scope). An earlier "3" counted `AVPro Edge:AC-MXNET-POE-PSU24`, which is not an extender kit
+  at all — it is a *"PoE Provider for MXNET Endpoints and 48v Fiber Extenders"*, i.e. a power
+  supply.
 - Biamp (1,148) and JBL (822) remain unreachable by any rule (D192) — their descriptions are
   bare part numbers with nothing to read.
 
+**Final gate review (2026-09-23, D201-D203) — five findings, all fixed:**
+- **CRITICAL — `npm run test:specs` would have written 452 real catalog rows.** The suite called
+  `applyRules([…], { commit: true })` after creating four `TEST:` fixtures, but fixtures are not
+  a scope: `applyRules` walked every row of `catalog_parts`. No `PGLITE_PATH` guard existed, so
+  the repo's own mandated gate resolved `.data/pglite` — and an ambient `DATABASE_URL` would
+  have hit the shared Neon database with no gate at all. Never triggered (the dev DB still has
+  exactly 55 ported parts). Fixed both layers (D202): the suite now refuses to run without
+  `PGLITE_PATH`, `"test:specs"` supplies a `mktemp -d` datadir itself, and `applyRules` gained
+  `opts.onlySkus` so the test can only touch the SKUs it created.
+- **CRITICAL — the shapes did not compose.** `canConnect` demanded exact `connectionType`
+  equality, so an amplifier (`speakON NL4` out) could never wire to a passive cabinet
+  (`speakON NL2` in) or a 70V device — 854 of the 1,390 proposals, and a regression, since a
+  portless pair is allowed today. Fixed by an opt-in `WireType.interchangeable` flag set on
+  `speaker-pair` only (D201); `cat6`, `powercon-power` and `motor-power` stay unflagged and
+  pinned by assertions.
+- **The report showed one sample's ports for rules whose shape varies** (`amplifier` 9 distinct,
+  `av-matrix` 8, `camera-ptz` 2 — 15 SDI + 15 HDMI, printed as SDI only). Now every distinct
+  shape is listed with its count (D203).
+- **`--mfr=` was parsed and ignored in `--apply`** — reported one brand, wrote all of them. Now
+  honoured in both paths (D202).
+- **The hardcoded "Known gaps" prose was already wrong** (`dsp` "57 rows … 46 amplifiers" vs a
+  measured 38 and 27). Now counted at runtime (D203).
+
 **Gates:** `npx tsc --noEmit` clean · `eslint` 0 errors on the changed set · `test:specs`
-**1860 PASS / 5 FAIL** — the 5 are the known fresh-datadir seed races (see #148) · report and
+**1881 PASS / 5 FAIL** — the 5 are the known fresh-datadir seed races (see #148) · report and
 dry-run apply agree exactly at **1,390**.
 
 **Files:** `src/lib/catalog-port-shapes.ts` (new), `src/lib/catalog-port-rules.ts` (new),
 `src/lib/catalog-port-apply.ts` (new), `scripts/port-rules.ts` (new),
-`scripts/draft-starter-set.ts` (imports the shared shapes), `scripts/test-review-and-spec.ts`.
+`scripts/draft-starter-set.ts` (imports the shared shapes), `scripts/test-review-and-spec.ts`,
+plus the gate-review changes: `src/lib/catalog-connect.ts` (the one edit to shipped #39 code —
+`WireType.interchangeable`, `canConnect`, `validateDeviceWire`) and `package.json`
+(`"test:specs"` now supplies its own scratch datadir).
 Design: `docs/superpowers/specs/2026-09-23-catalog-port-rules-engine-design.md`. No schema
 change (`CatalogPart.ports?: Port[]` already existed). Builds on #158 (D187-D191) and #39.
 Still open — the whole review loop is Jeff reading `npm run ports:rules`'s output and replying

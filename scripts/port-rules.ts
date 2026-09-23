@@ -25,6 +25,11 @@ const only = (args.find((a) => a.startsWith("--mfr=")) || "").slice(6);
 const NO_DESC_BRANDS = ["Biamp", "JBL"];
 const n = (x: number) => x.toLocaleString("en-US");
 
+/** One line describing a proposed port set — shared by the report's single-
+ *  shape and multi-shape renderings so the two can never drift apart. */
+const renderPorts = (ports: readonly { name: string; direction: string; connectionType: string; count?: number }[]) =>
+  ports.map((p) => `${p.name} [${p.direction}${p.count ? ` ×${p.count}` : ""}: ${p.connectionType}]`).join("; ") || "(none)";
+
 async function main() {
   if (args.includes("--apply")) {
     const idsArg = (args.find((a) => a.startsWith("--rules=")) || "").slice(8)
@@ -42,8 +47,12 @@ async function main() {
     const commit = args.includes("--commit");
     const { hosted } = resolveDbTarget("port rules apply");
     if (commit) requireHostedConfirmation(hosted, args);
-    const out = await applyRules(ids, { commit });
-    console.log(`\n${commit ? "APPLIED" : "DRY RUN"} — rules: ${ids.join(", ")}`);
+    // --mfr= narrows the apply exactly as it narrows the report (gate review
+    // FIX 4). It used to be parsed and then ignored here, so
+    // `--mfr=EAW --apply --commit` reported one brand and wrote every brand —
+    // the same report-vs-apply divergence D200 was opened to close.
+    const out = await applyRules(ids, { commit, mfr: only || undefined });
+    console.log(`\n${commit ? "APPLIED" : "DRY RUN"} — rules: ${ids.join(", ")}${only ? `  ·  --mfr=${only}` : ""}`);
     for (const [id, count] of Object.entries(out.byRule)) console.log(`  ${String(count).padStart(6)}  ${id}`);
     console.log(`  ${String(out.applied).padStart(6)}  total ${commit ? "written" : "would be written"}`);
     console.log(`  ${String(out.skippedHasPorts).padStart(6)}  skipped — already have ports (hand edits win)`);
@@ -74,14 +83,15 @@ async function main() {
 
   const matchedBy = new Map<string, Row[]>();
   const unmatched: Row[] = [];
-  let accessories = 0, alreadyPorted = 0, noDesc = 0;
+  const accessoryRows: Row[] = [];
+  let alreadyPorted = 0, noDesc = 0;
 
   for (const part of parts) {
     if (part.hasPorts) { alreadyPorted++; continue; }
     if (isModelish(part.desc, part.sku)) { noDesc++; continue; }
     const rule = matchRule(part);
     if (!rule) { unmatched.push(part); continue; }
-    if (rule.accessory) { accessories++; continue; }
+    if (rule.accessory) { accessoryRows.push(part); continue; }
     const list = matchedBy.get(rule.id) || [];
     list.push(part);
     matchedBy.set(rule.id, list);
@@ -105,10 +115,34 @@ async function main() {
     if (rule.accessory) continue;
     const hits = matchedBy.get(rule.id) || [];
     if (!hits.length) { console.log(`\n${rule.id}\n  matches nothing`); continue; }
-    const sample = hits[0];
-    const ports = proposeForPart(sample)?.ports || [];
+
+    // A rule's shape() reads the part it is applied to — channel counts,
+    // HDMI vs SDI, in/out counts — so ONE rule routinely proposes several
+    // different shapes across its matches (amplifier: 9, av-matrix: 8,
+    // camera-ptz: 2). Printing only hits[0]'s shape showed `camera-ptz` as
+    // SDI/BNC when half its rows get HDMI, so approving the rule would have
+    // written a connector the reviewer was never shown — the exact promise
+    // this report exists to keep. Every distinct shape is listed, with its
+    // count, largest first.
+    const shapes = new Map<string, { count: number; sample: Row }>();
+    for (const h of hits) {
+      const key = renderPorts(proposeForPart(h)?.ports || []);
+      const seen = shapes.get(key);
+      if (seen) seen.count++;
+      else shapes.set(key, { count: 1, sample: h });
+    }
+    const byCount = [...shapes].sort((a, b) => b[1].count - a[1].count);
+
     console.log(`\n${rule.id}${rule.mfr ? `  ·  ${rule.mfr}` : ""}`);
-    console.log(`  proposes: ${ports.map((p) => `${p.name} [${p.direction}${p.count ? ` ×${p.count}` : ""}: ${p.connectionType}]`).join("; ") || "(none)"}`);
+    if (byCount.length === 1) {
+      console.log(`  proposes: ${byCount[0][0]}`);
+    } else {
+      console.log(`  proposes ${byCount.length} DIFFERENT shapes across its ${n(hits.length)} matches — approve all of them, not the first:`);
+      for (const [shape, { count, sample }] of byCount) {
+        console.log(`    ${String(count).padStart(5)} ×  ${shape}`);
+        console.log(`            e.g. ${sample.sku} — ${sample.desc.slice(0, 54)}`);
+      }
+    }
     console.log(`  note: ${rule.note}`);
     console.log(`  matches ${n(hits.length)} parts, e.g.`);
     for (const h of hits.slice(0, 4)) console.log(`    ${h.sku.padEnd(26)} ${h.desc.slice(0, 60)}`);
@@ -127,7 +161,7 @@ async function main() {
   console.log(`  parts considered            ${n(parts.length)}`);
   console.log(`  already have ports (skipped) ${n(alreadyPorted)}`);
   console.log(`  no usable description        ${n(noDesc)}   <- ${NO_DESC_BRANDS.join(" / ")} and similar (D192)`);
-  console.log(`  accessories (no ports, ok)   ${n(accessories)}`);
+  console.log(`  accessories (no ports, ok)   ${n(accessoryRows.length)}`);
   console.log(`  matched by a rule            ${n([...matchedBy.values()].reduce((a, l) => a + l.length, 0))}`);
   console.log(`  matched by NOTHING           ${n(unmatched.length)}`);
 
@@ -135,23 +169,47 @@ async function main() {
   // are being left for a human decision — surfaced here so a human reading
   // THIS report sees them, not the next person who discovers one in a live
   // quote. Factual, not exhaustive.
+  //
+  // Gate review FIX 5: these used to be hardcoded prose, and had already
+  // drifted — the dsp figures read "57 rows ... 46 of its rows are
+  // amplifiers" against a measured 38 and 26. Every number below is now
+  // counted from THIS run, so the report cannot lie about itself again; only
+  // the judgement (which rows are wrong, and why) is static text.
+  const dspHits = matchedBy.get("dsp") || [];
+  const DSP_AMP_BRANDS = ["Powersoft", "1Sound"];
+  const dspAmpModules = dspHits.filter((h) => DSP_AMP_BRANDS.includes(h.mfr || "")).length;
+  const RACKKIT_SKUS = ["Lab Gruppen:LAB-LUCIA-RACKKIT", "RCF:13360426"];
+  const rackKits = (matchedBy.get("amplifier") || []).filter((h) => RACKKIT_SKUS.includes(h.sku));
+  const FIBRE_KIT_SKUS = ["AVPro Edge:AC-EXO-444-KIT", "AVPro Edge:AC-EXO-X-KIT"];
+  const fibreKits = unmatched.filter((h) => FIBRE_KIT_SKUS.includes(h.sku));
+  const fmPlus = accessoryRows.filter((h) => /\bFM\s*Plus\b/i.test(h.desc)).length;
+  const eawCw = accessoryRows.filter((h) => /\bc\/w\b/i.test(h.desc)).length;
+  const scoped = only ? `  (counted within --mfr=${only})` : "";
+
   console.log("\n" + "=".repeat(72));
-  console.log("  Known gaps — read before approving any rule above");
-  console.log("  - dsp proposes ports for Powersoft/1Sound AMPLIFIER MODULES that carry");
-  console.log("    onboard DSP (e.g. Powersoft:X4 \"X4 DSP+D\", 1Sound:1SPS-U4L12K4 \"4");
-  console.log("    channel (3000w per channel @2Ω) with DSP\") — 46 of its rows are");
-  console.log("    amplifiers, not DSPs. Do not approve dsp without checking those rows.");
-  console.log("  - A few rack/mount kits still reach device rules: Lab Gruppen:LAB-LUCIA-");
-  console.log("    RACKKIT and RCF:13360426 (\"Rackmount Kit for ... Amplifiers\") match");
-  console.log("    amplifier and would get Line In + 4x speakON NL4 out. The accessory");
-  console.log("    noun list has \"rack ?ear\" and \"\\bmount\\b\", neither matches the single");
-  console.log("    word \"Rackmount\".");
-  console.log("  - ~20 real devices still land in the accessory bucket, including");
-  console.log("    EAW:2072205-90 (\"...Installation Amplifier c/w Rack Mount Kit\" — \"c/w\"");
-  console.log("    is not a bundling word) and 13 Williams AV \"FM Plus\" systems (the");
-  console.log("    brand name contains \"plus\", which IS a bundling word).");
-  console.log("  - 3 fibre extender kits (AVPro Edge AC-EXO-444-KIT, AC-EXO-X-KIT,");
-  console.log("    AC-MXNET-POE-PSU24) are unmatched — no fibre port shape exists.");
+  console.log(`  Known gaps — read before approving any rule above${scoped}`);
+  console.log(`  - dsp matched ${n(dspHits.length)} rows, of which ${n(dspAmpModules)} are ${DSP_AMP_BRANDS.join("/")} AMPLIFIER`);
+  console.log("    MODULES that merely carry onboard DSP (e.g. Powersoft:X4 \"X4 DSP+D\",");
+  console.log("    1Sound:1SPS-U4L12K4 \"4 channel (3000w per channel @2Ω) with DSP\") — they");
+  console.log("    are amplifiers, not DSPs, and would get a DSP's analog-I/O shape. Do not");
+  console.log("    approve dsp without checking those rows.");
+  if (rackKits.length) {
+    console.log(`  - ${n(rackKits.length)} rack/mount kit(s) still reach the amplifier rule instead of the`);
+    console.log(`    accessory layer: ${rackKits.map((h) => h.sku).join(", ")}`);
+    console.log("    (\"Rackmount Kit for ... Amplifiers\") — they would get Line In + speakON");
+    console.log("    NL4 out. The accessory noun list has \"rack ?ear\" and \"\\bmount\\b\", neither");
+    console.log("    of which matches the single word \"Rackmount\".");
+  }
+  console.log(`  - Real devices still land in the accessory bucket (${n(accessoryRows.length)} rows total, most`);
+  console.log(`    of them correctly). Two known causes, counted: rows whose description`);
+  console.log(`    says \"c/w\" — ${n(eawCw)} (e.g. EAW:2072205-90, \"...Installation Amplifier c/w`);
+  console.log(`    Rack Mount Kit\"; \"c/w\" is not a recognized bundling word) — and Williams`);
+  console.log(`    AV \"FM Plus\" systems — ${n(fmPlus)} (the brand name itself contains \"plus\",`);
+  console.log("    which IS a bundling word).");
+  if (fibreKits.length) {
+    console.log(`  - ${n(fibreKits.length)} fibre extender kit(s) unmatched — no fibre port shape exists:`);
+    console.log(`    ${fibreKits.map((h) => h.sku).join(", ")}`);
+  }
 
   console.log(`\n  To apply: npm run ports:rules -- --apply --rules <id,id> --commit`);
   console.log(`  (a hosted DATABASE_URL target also needs --yes)`);
