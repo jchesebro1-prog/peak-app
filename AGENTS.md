@@ -183,6 +183,21 @@ See `.env.example`.
    `projects/peak-system-designer.md`; what remains is Jeff-gated data/infra
    (symbol+datasheet metadata, palette seeding, blob storage). Suite renamed
    **Quartzite** (D107) alongside slice 1.
+11. ✅ **Consulting project management** (#145, D164–D172, D178, D175–D177) —
+    task templates gain a phase/discipline scope and proportional %/%
+    scheduling within phase windows; a pure scheduling engine
+    (`src/lib/consulting-schedule.ts`) generates a consulting engagement's
+    task dates and locked milestones from `startAt`/`endAt` and admin-set
+    phase weights; a per-engagement Schedule tab (Gantt, drag, overrun
+    flag, milestone-shift dialog) and one Activity tab (note + files +
+    tasks in a single linked capture, with Krisp pre-fill); `/task-templates`
+    CSV import/export through the existing Import hub; `/schedule` becomes
+    editable and gains consulting rows plus a By-person portfolio view
+    across consulting and install work alike. Install `Projects` keep their
+    own stage-keyed template scheme untouched (D172) — reachable later
+    through the same engine's seam. Remaining is Jeff-gated: real phase-
+    weight values, first template-set content, the Drive mailbox backing
+    engagement files, and Drive folder naming (PUNCHLIST #145).
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
