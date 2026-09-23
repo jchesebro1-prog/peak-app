@@ -6853,7 +6853,7 @@ Giving those four a genuine `update` needs store-level update APIs and is left o
 **Files:** `src/app/(app)/import/parse.ts`, `src/app/(app)/import/registry.ts`,
 `src/app/(app)/import/controls.tsx`, `src/app/(app)/import/page.tsx`.
 
-## 148. The dev auto-seed is fire-and-forget, making every gate in this repo slightly untrustworthy — OPEN
+## 148. The dev auto-seed is fire-and-forget, making every gate in this repo slightly untrustworthy — DONE 2026-09-23
 
 **Reported:** found independently by multiple agents during #145's review (Tasks 2, 6's merge, 10,
 11, and 12), and hit again directly during #145's own Task 13 gate run: on a fresh datadir, the
@@ -6917,7 +6917,7 @@ those two layers to be safe in the first place.
 **Ask:** reshape `fileRefHref` and the proxy to address a note + attachment index rather than a raw
 `FileRef`, once no other task is mid-edit on the same rendering path.
 
-## 151. Task-template import validation surfaces at commit time, on the receipt — not per-row in the preview — OPEN
+## 151. Task-template import validation surfaces at commit time, on the receipt — not per-row in the preview — DONE 2026-09-23
 
 **Reported:** found during #145 Task 10's review, 2026-09-22. The spec (§5.5) said unknown
 phase/discipline values on a template-set CSV import are "reported per-row in the preview."
@@ -6934,7 +6934,7 @@ promised, and an operator still has to re-diff their own CSV to find which rows 
 unknown values are flagged per-row before commit, the way every other import type in the registry
 already works. Touches shared code beyond `task_templates`, which is why #145 didn't do it inline.
 
-## 152. Gantt: `barRect`'s overrun test is a raw instant where `overrunsEnd` is day-granular — OPEN
+## 152. Gantt: `barRect`'s overrun test is a raw instant where `overrunsEnd` is day-granular — DONE 2026-09-23
 
 **Reported:** found during #145 Task 5's original build, 2026-09-22 — bounded and not reachable
 today, logged so it isn't lost if that changes.
@@ -6949,7 +6949,7 @@ wrong flag today because every post-drag `startAt` is snapped to local midnight
 **Ask:** floor `barRect`'s comparison to the local day the same way, so the two functions agree by
 construction rather than by the coincidence that nothing currently feeds `barRect` an unsnapped time.
 
-## 153. Gantt: a task's first drag can shift its visible length by up to a day — OPEN
+## 153. Gantt: a task's first drag can shift its visible length by up to a day — DONE 2026-09-23
 
 **Reported:** found during #145 Task 5's original build, 2026-09-22.
 
@@ -6997,7 +6997,7 @@ re-rendering that subtree) — logged so a future console-warning triage doesn't
 that this specific mismatch is cosmetic and self-correcting rather than a sign of a real bug, and
 doesn't assume every Gantt-grid caller shares the engagement tab's 0.17% bound.
 
-## 155. A discipline deleted from Settings still renders as a checked box on an existing consulting quote — OPEN
+## 155. A discipline deleted from Settings still renders as a checked box on an existing consulting quote — DONE 2026-09-23
 
 **Reported:** found during #145 Task 11's review, 2026-09-22.
 
@@ -7015,7 +7015,7 @@ box reads as if unchecking it would do something, when saving drops it either wa
 vocabulary as "removed," or accept the current display and just note it in whatever end-user docs
 exist for the quote builder.
 
-## 156. `normalizeLine`'s idempotency on phase casing across repeated export→import cycles is unconfirmed — OPEN
+## 156. `normalizeLine`'s idempotency on phase casing across repeated export→import cycles is unconfirmed — DONE 2026-09-23
 
 **Reported:** found during #145 Task 10's review, 2026-09-22.
 
@@ -7031,7 +7031,7 @@ phase re-exported and re-imported five times stays `"Schematic Design"` or drift
 confirm by inspection that `normalizeLine`'s phase handling is already case-preserving and close
 this as a non-issue.
 
-## 157. `/schedule?view=timeline` stacks two independently-ranged grids — the same x-position means a different date in each — OPEN
+## 157. `/schedule?view=timeline` stacks two independently-ranged grids — the same x-position means a different date in each — DONE 2026-09-23
 
 **Reported:** found during #145 Task 15's whole-branch review, 2026-09-22. The most user-visible of
 the carried minors from this branch; Jeff should not discover it by surprise.

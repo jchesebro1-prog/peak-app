@@ -26,6 +26,29 @@ export type CatalogProductMetadata = {
 };
 
 /**
+ * Metadata is a nested document, while catalog imports are deliberately
+ * sparse patches. Preserve existing provenance/source fields when a later CSV
+ * only supplies one metadata column (for example, a spec section without a
+ * new datasheet URL).
+ */
+export function mergeProductMetadata(
+  existing: CatalogProductMetadata | undefined,
+  patch: CatalogProductMetadata | undefined,
+): CatalogProductMetadata | undefined {
+  if (!existing && !patch) return undefined;
+  if (!existing) return patch;
+  if (!patch) return existing;
+  return {
+    ...existing,
+    ...patch,
+    source:
+      existing.source || patch.source
+        ? { ...existing.source, ...patch.source }
+        : undefined,
+  };
+}
+
+/**
  * Catalog — server port of app/catalog-data.js (window.MASTER_CATALOG +
  * window.catalogByCategory) over collection "catalog_parts". Single source of
  * truth for catalog parts across the system.
@@ -191,7 +214,15 @@ export async function mergeUpsert(
   // field itself) — the runtime contract is enforced by callers, same as
   // the pre-existing `{ ...part, ... } as SpecCatalogPart` pattern in
   // design/engagements/spec/actions.ts.
-  return writePart(existing, { ...(existing ?? {}), ...patch, sku } as Omit<CatalogPart, "id"> & { id?: string }, opts);
+  const merged = {
+    ...(existing ?? {}),
+    ...patch,
+    ...(patch.productMetadata || existing?.productMetadata
+      ? { productMetadata: mergeProductMetadata(existing?.productMetadata, patch.productMetadata) }
+      : {}),
+    sku,
+  };
+  return writePart(existing, merged as Omit<CatalogPart, "id"> & { id?: string }, opts);
 }
 
 /** Explicit go-live reset for the pricing catalog only. Grid symbols and all
