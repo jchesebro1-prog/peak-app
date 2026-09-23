@@ -85,7 +85,12 @@ export async function markInspectionRenewalOutreach(
   if (!id) return;
   const rec = await get(id);
   if (!rec || rec.stage !== "completed") return;
-  await setRenewalOutreach(id, undo ? null : user.name);
+  try {
+    await setRenewalOutreach(id, undo ? null : user.name);
+  } catch (error) {
+    console.error("markInspectionRenewalOutreach failed", error);
+    redirect("/inspections?err=" + encodeURIComponent("Couldn’t update that renewal outreach — please try again."));
+  }
   revalidatePath("/", "layout");
 }
 
@@ -101,7 +106,13 @@ export async function startInspectionRenewalOutreach(
   const user = await requireUser();
   const id = String(formData.get("id") || "");
   if (!id) return;
-  const res = await inspectionRenewalOutreach(id, user.name);
+  let res;
+  try {
+    res = await inspectionRenewalOutreach(id, user.name);
+  } catch (error) {
+    console.error("startInspectionRenewalOutreach failed", error);
+    redirect("/inspections?err=" + encodeURIComponent("Couldn’t prepare that renewal email — please try again."));
+  }
   revalidatePath("/", "layout");
   if (res)
     redirect(

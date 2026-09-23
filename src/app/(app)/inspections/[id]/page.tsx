@@ -22,15 +22,21 @@ import { all as allCustomers } from "@/lib/stores/customers";
 import { activeUsers } from "@/lib/users";
 import InspectionEditor, { type EditorMeta, type EditorCustomer } from "./controls";
 import { loadPrefillPanels, loadRecordingsStrip } from "../../recordings/data";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Inspection — Quartzite-6" };
 
 export default async function InspectionEditorPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { id } = await params;
+  const [{ id }, sp] = await Promise.all([
+    params,
+    searchParams,
+  ]);
   const [, rec, customers, users] = await Promise.all([
     requireUser(),
     get(id),
@@ -82,14 +88,17 @@ export default async function InspectionEditorPage({
   const roster = users.map((u) => u.name);
 
   return (
-    <InspectionEditor
-      record={rec}
-      customers={editorCustomers}
-      roster={roster}
-      meta={meta}
-      recordings={recordings.recordings}
-      canShowRecord={recordings.canRecord}
-      fromRecording={fromRecording}
-    />
+    <>
+      <ActionError message={Array.isArray(sp.err) ? sp.err[0] : sp.err} />
+      <InspectionEditor
+        record={rec}
+        customers={editorCustomers}
+        roster={roster}
+        meta={meta}
+        recordings={recordings.recordings}
+        canShowRecord={recordings.canRecord}
+        fromRecording={fromRecording}
+      />
+    </>
   );
 }

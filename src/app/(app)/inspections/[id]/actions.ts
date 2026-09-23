@@ -84,7 +84,16 @@ export async function advanceInspectionStage(
 
 export async function deleteInspection(id: string): Promise<void> {
   await requireUser();
-  if (id) await remove(id);
+  if (!id) redirect("/inspections");
+  try {
+    await remove(id);
+  } catch (error) {
+    console.error("deleteInspection failed", error);
+    redirect(
+      `/inspections/${encodeURIComponent(id)}?err=` +
+        encodeURIComponent("Couldn’t delete that inspection — please try again.")
+    );
+  }
   revalidatePath("/", "layout");
   redirect("/inspections");
 }
