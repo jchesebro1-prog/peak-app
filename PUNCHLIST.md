@@ -3103,7 +3103,7 @@ Jeff).
 
 ---
 
-## 40. Catalog-anchored datasheets + specs → one-click client package — OPEN
+## 40. Catalog-anchored datasheets + specs → one-click client package — PARTIAL 2026-09-23
 
 **Area:** catalog (`catalog_parts`), The Grid, estimator, designs, D94 spec engine, D116 blob store.
 **Reported:** 2026-07-25 (staged off-mini, flushed 2026-07-25)
@@ -3118,12 +3118,13 @@ across the six beta categories; **(c)** the generator: one action walks a BOM an
 datasheet package + spec + rough drawings. Much exists (Grid→D94 bridge, derived riser, .docx
 output) — the missing piece is assembly; completeness depends on (a)+(b) population.
 
-**Status:** PARTIAL 2026-09-23 — the Grid now has a one-click package action that writes a
-private Blob ZIP containing the D94 specification DOCX, rough plan/riser PDF, original plan
-sheet assets, available catalog datasheets, and a customer-safe index with explicit gaps.
-The bundle walker and authenticated manifest/download seams are covered by the smoke/spec
-harness. Remaining: quote-originated package entry, richer raster/PDF plan rendering, and
-catalog population still depends on Jeff's #39 starter-set review.
+**Status:** PARTIAL 2026-09-23 — The Grid and the Quotes hub now have one-click package actions.
+Both write a private Blob ZIP with a D94 specification DOCX, a rough drawing/equipment PDF,
+available catalog datasheets, and a customer-safe index with explicit catalog/spec/datasheet
+gaps. Grid packages also include original plan-sheet assets and the derived riser summary. The
+bundle walker and authenticated manifest/download seams are covered by the smoke/spec harness.
+Remaining: richer raster/PDF plan rendering and catalog population still depend on Jeff's #39
+starter-set review.
 
 ---
 
@@ -3227,10 +3228,11 @@ role (falls back to quote owner), due ~7 days: walk the site with the end user. 
 
 **Status:** PARTIAL 2026-09-23 — delivery status auto-advances an install project to Scheduled,
 closeout now captures a bounded phone/trackpad-drawn PNG signature, and completion creates the
-end-user site-walk follow-up. Manual stage controls remain available for undo/correction.
-Remaining scope-report/attachment handoff still remains; the closeout now renders and
-persists a required per-scope completion checklist derived from the project's procurement
-lines.
+end-user site-walk follow-up. Manual stage controls remain available for undo/correction. The
+project detail now has a Handoff packet tab that assembles site/schedule, crew, scope-grouped
+materials, field progress, notes, sign-off, and the linked Grid drawing/datasheet handoff in one
+installer-facing view. Remaining: richer attachment/report export and any additional real-world
+package review.
 
 ---
 

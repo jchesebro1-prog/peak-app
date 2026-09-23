@@ -25,6 +25,7 @@ import {
   type LineStatus,
   type DeliveryStatus,
   type QuoteLike,
+  VENDORS,
 } from "@/lib/stores/projects";
 import {
   setStageAction,
@@ -879,6 +880,7 @@ function ProjectDetail({
         ["procurement", "Procurement", lateCount],
         ["deliveries", "Deliveries", 0],
         ["timeline", "Timeline", 0],
+        ["packet", "Handoff packet", 0],
         ["signoff", "Sign-off", 0],
       ]
     : [
@@ -887,6 +889,7 @@ function ProjectDetail({
         ["deliveries", "Deliveries", 0],
         ["crew", "Crew & schedule", 0],
         ["timeline", "Timeline", 0],
+        ["packet", "Handoff packet", 0],
         ["signoff", "Sign-off", 0],
       ];
   const curTab = tabDefs.some((t) => t[0] === tab) ? tab : "overview";
@@ -1147,9 +1150,55 @@ function ProjectDetail({
           <CrewTab p={p} colorOf={colorOf} initialsOf={initialsOf} roster={roster} />
         )}
         {curTab === "timeline" && <TimelineTab p={p} isOrder={isOrder} />}
+        {curTab === "packet" && <HandoffPacketTab p={p} taskRows={taskRows} />}
         {curTab === "signoff" && <SignoffTab p={p} curIdx={curIdx} initialsOf={initialsOf} />}
       </div>
     </>
+  );
+}
+
+/* ---------------- Installer handoff packet (#44b) ---------------- */
+
+function HandoffPacketTab({ p, taskRows }: { p: ProjectRecord; taskRows: TaskRecord[] }) {
+  const scopes = signoffScopes(p);
+  const scopeLines = new Map<string, typeof p.procurement>();
+  for (const line of p.procurement || []) {
+    const scope = VENDORS[line.vendor]?.scope || line.vendor || "General installation";
+    const rows = scopeLines.get(scope) || [];
+    rows.push(line);
+    scopeLines.set(scope, rows);
+  }
+  const projectTasks = taskRows.filter((task) => task.projectId === p.id);
+  const doneTasks = projectTasks.filter((task) => task.status === "done").length;
+  const section = (title: string, children: React.ReactNode) => (
+    <section style={{ border: "1px solid #e8ebf0", borderRadius: 12, padding: "13px 15px", background: "#fff" }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#6f7682", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 9 }}>{title}</div>
+      {children}
+    </section>
+  );
+  const row = (label: string, value: string) => (
+    <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "5px 0", borderTop: "1px solid #f1f2f5", fontSize: 12.5 }}>
+      <span style={{ color: "#8c919c" }}>{label}</span><span style={{ color: "#30343c", textAlign: "right" }}>{value}</span>
+    </div>
+  );
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 650 }}>Installer handoff packet</div>
+          <div style={{ color: "#8c919c", fontSize: 12.5, marginTop: 3 }}>Everything captured so far for the crew and customer hand-off.</div>
+        </div>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#6f7682", background: "#f1f2f5", padding: "4px 7px", borderRadius: 5 }}>{p.id}</span>
+      </div>
+      {section("Site & schedule", <>{row("Customer", p.customer || "—")}{row("Install window", p.installStart ? fmtDate(p.installStart) + " – " + fmtDate(p.installEnd) : "Not scheduled")}{row("Crew", p.crew.length ? p.crew.map((c) => c.person).join(", ") : "Unassigned")}{row("Target", fmtDate(p.targetDate))}</>)}
+      {section("Scope & materials", <div style={{ display: "grid", gap: 9 }}>{scopes.map((scope) => {
+        const lines = scopeLines.get(scope) || [];
+        return <div key={scope}><div style={{ fontSize: 12.5, fontWeight: 650, color: "#30343c", marginBottom: 4 }}>{scope}</div>{lines.length ? lines.map((line) => <div key={line.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "4px 0 4px 10px", fontSize: 12, color: "#5b616e" }}><span>{line.desc}</span><span style={{ fontFamily: "var(--font-mono)", color: "#8c919c" }}>{line.qty} {line.unit} · {line.status}</span></div>) : <div style={{ color: "#9aa0ab", fontSize: 12 }}>No procurement lines recorded.</div>}</div>;
+      })}</div>)}
+      {section("Field progress", <>{row("Tasks", `${doneTasks} of ${projectTasks.length} complete`)}{row("Notes", `${p.notes.length} recorded`)}{p.signoff ? row("Customer acceptance", `Signed by ${p.signoff.name || "customer"} · ${fmtDateY(p.signoff.signedAt)}`) : row("Customer acceptance", "Pending")}</>)}
+      {p.notes.length > 0 && section("Recent notes", <div style={{ display: "grid", gap: 7 }}>{p.notes.slice(0, 8).map((note) => <div key={note.id} style={{ fontSize: 12.5, lineHeight: 1.45, color: "#3d424e" }}><span style={{ color: "#8c919c" }}>{firstName(note.by)} · {fmtDateY(note.at)} </span>{note.text}</div>)}</div>)}
+      {section("Drawings & datasheets", <div style={{ fontSize: 12.5, color: "#5b616e", lineHeight: 1.5 }}>Grid plan sheets, catalog datasheets, and the rough riser belong to the linked design package. Use the Grid client package action when a design is linked; missing assets are reported explicitly in that package index.</div>)}
+    </div>
   );
 }
 

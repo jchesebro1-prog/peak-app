@@ -18,6 +18,7 @@ import { syncFromQuotes as syncInspectionsFromQuotes } from "@/lib/stores/inspec
 import { syncProjectsFromQuotes } from "@/lib/stores/projects";
 import { syncEngagementsFromQuotes } from "@/lib/stores/engagements";
 import { syncFromQuotes as syncBookingsFromQuotes } from "@/lib/stores/equipment-bookings";
+import { createQuoteClientPackage } from "@/lib/client-package-server";
 
 /**
  * Quote pipeline mutations — the QuoteStore calls the prototype makes from
@@ -84,6 +85,23 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
     await syncBookingsFromQuotes();
   }
   revalidatePath("/", "layout");
+}
+
+/** One-click quote-originated client package (#40): the quote need not be a
+ * won project before its equipment/spec package can be prepared. */
+export async function createQuoteClientPackageAction(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const id = String(formData.get("id") || "");
+  if (!id) return;
+  const quote = await get(id);
+  if (!quote) return;
+  try {
+    const result = await createQuoteClientPackage(quote, user.name);
+    redirect(`/api/client-packages/${encodeURIComponent(result.record.id)}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not build the client package.";
+    redirect(`/quotes?id=${encodeURIComponent(id)}&packageError=${encodeURIComponent(message)}`);
+  }
 }
 
 /* ---- revisions (punch item 24) ---- */
