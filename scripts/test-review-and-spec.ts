@@ -217,10 +217,26 @@ import { performCapture, type CaptureDeps } from "@/lib/engagement-activity-writ
 if (!process.env.PGLITE_PATH) {
   throw new Error(
     "Refusing to run: this suite WRITES to the database and PGLITE_PATH is unset,\n" +
-      "so it would resolve .data/pglite (the real catalog) or an ambient DATABASE_URL.\n" +
+      "so it would resolve .data/pglite — the real catalog.\n" +
       "Run it on a throwaway datadir:\n" +
       "  npm run test:specs\n" +
       'or, by hand:  TEST_DB=$(mktemp -d) && PGLITE_PATH="$TEST_DB" tsx scripts/test-review-and-spec.ts'
+  );
+}
+
+// PGLITE_PATH alone does NOT make this safe. getDb() (src/db/index.ts) returns
+// the postgres-js client whenever DATABASE_URL is set and never consults
+// PGLITE_PATH — and `npm run test:specs` always sets PGLITE_PATH, so the guard
+// above can never fire for this case. On a shell that exported DATABASE_URL
+// (a hosted db:export, a CI job) the repo's own mandated gate would otherwise
+// write its fixtures into the shared production Neon database. Preview and
+// production share one database here, so there is no safe hosted target.
+if (process.env.DATABASE_URL) {
+  throw new Error(
+    "Refusing to run: DATABASE_URL is set, so this suite would write to the\n" +
+      "HOSTED database (preview and production share one Neon instance).\n" +
+      "Unset it for this command:\n" +
+      "  env -u DATABASE_URL npm run test:specs"
   );
 }
 

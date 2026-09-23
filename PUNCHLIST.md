@@ -7211,7 +7211,7 @@ data the rules were drafted against.**
 - `Lab Gruppen:LAB-LUCIA-RACKKIT` and `RCF:13360426` ("Rackmount Kit for … Amplifiers") still
   reach the `amplifier` rule instead of the accessory layer — `ACCESSORY_NOUN` matches
   `rack ?ear` and `\bmount\b` but not the single word "Rackmount".
-- ~20 real devices still sit in the accessory bucket, including `EAW:2072205-90` ("…Amplifier
+- A handful of real devices still sit in the accessory bucket (the report prints the live count), including `EAW:2072205-90` ("…Amplifier
   **c/w** Rack Mount Kit" — `c/w` isn't a recognized bundling word) and 13 Williams AV "**FM
   Plus**" systems (the brand name itself contains the bundling word "plus").
 - 2 fibre extender kits (`AVPro Edge:AC-EXO-444-KIT`, `AVPro Edge:AC-EXO-X-KIT`) are unmatched —
