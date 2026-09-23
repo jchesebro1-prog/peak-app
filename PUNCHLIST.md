@@ -7056,3 +7056,80 @@ fixed-pixel, not both) between the two sections, or add a visible separator/rule
 doesn't read as one aligned timeline when it isn't. Not fixed here — this task's scope was the
 milestone-phase dropdown, the leaked test fixture, and the two documentation corrections above;
 logged so it isn't discovered by surprise.
+
+## 158. Catalog ports editor — anyone can make a part wireable, not just a script — PARTIAL 2026-09-22 (D187-D191)
+
+**Reported:** the Grid's wiring engine (`ports[]`, the 22-entry `CONNECTION_TYPES` taxonomy, wire
+types, `validateDeviceWire`, endpoint snapping on routes, cable BOM lines carrying the connection
+type) has been complete since punch #39 (2026-07-25) — but measured against the live catalog on
+2026-09-22, of **14,725** non-deleted catalog parts only **55 (0.37%)** carry `ports[]`, exactly the
+#39 starter set (Speakers 14, Lighting Controls 11, Video Controls 11, Fixtures 10, Audio Controls
+6, Curtains 3), and every other category — including the four largest (Audio 4,636, AV
+Infrastructure 1,454, AV 680, AV Distribution 631) — has zero ported parts. Nothing but a script
+could write the field: no ports control existed in `PartFormModal`, and `upsertPart` didn't read or
+write it.
+
+`promote-sales-compliance` proposed importing a DaVinci ETC export (116 MB, 2,366 device types,
+1,381 with ports, 56 port protocols) to supply ports at scale. Verified four independent ways that
+it does not intersect Peak's catalog: model-number prefixes among ported types are ETC lines; the
+only manufacturer-bearing property has choices like "ETC Rep"; brute-force matching of all 17,831
+identifier-shaped strings in the library against all 14,725 SKUs found 9 matches (8 ETC, one false
+positive); a brand-name search across 316,115 human-readable strings found zero hits for Shure,
+Biamp, JBL, RCF, EAW, QSC, Chauvet, Symetrix, Bose, Listen or AKG. Peak stocks 10 ETC parts against
+a catalog that is Shure (1,303), Biamp (1,148), JBL (822), RCF (597), EAW (556), AVPro Edge (460),
+QSC (389), Chauvet (382). Rejected — D187.
+
+**Shipped:**
+- `src/lib/catalog-ports.ts` (new) — pure parse/validate/serialize of the form's `ports` JSON
+  field; `connectionType` validated against the closed 22-entry `CONNECTION_TYPES` vocabulary.
+- `src/app/(app)/catalog/ports-editor.tsx` (new) — client island; `connectionType` is a `<select>`
+  over `CONNECTION_TYPES`, never free text (D189); the hidden `ports` field renders on every
+  render including zero rows, so an intentional "delete the last port" save still submits an
+  empty array rather than omitting the field (D188).
+- `src/app/(app)/catalog/actions.ts` — `upsertPart` forwards `ports` only when the form supplied
+  it (gated on `typeof rawPorts === "string"`), so callers that don't own ports (price edits,
+  the other importers) can't wipe them, while the editor's explicit empty array still clears
+  them. Invalid input redirects with `partError` instead of being stored — the server re-checks
+  `CONNECTION_TYPES` membership rather than trusting the client-side `<select>` (D189).
+- `src/app/(app)/catalog/page.tsx` — renders the island in `PartFormModal`, shows the error
+  banner, adds a ports badge on the catalog row.
+- `scripts/test-review-and-spec.ts` — unit + round-trip assertions, including proof that a stored
+  part validates through `validateDeviceWire` and that an incompatible pair is still refused.
+- Editing ports requires only `requireUser()`, the same bar as editing a part's price or
+  description — not admin-gated (D190).
+
+**Found and fixed along the way — a pre-existing suite bug.** `asyncChecks()`
+(`scripts/test-review-and-spec.ts`) dereferenced `fs1053` unguarded after a lost dev auto-seed race
+(the same race #148 describes), throwing a `TypeError` that killed the promise chain silently.
+`asyncChecks()` is second-to-last in that chain, so the last 50 assertions of its own body AND all
+106 of `templateScheduleAsyncChecks()` had **never run** — they weren't passing, they were never
+reached. Guarding the dereference took the suite from 1709 PASS to 1767 PASS with no new failures.
+
+**Found and documented, not fixed — a known limitation.** A rejected save loses the user's typed
+input, because `mergeUpsert` never runs and the page re-renders from stored data. This is inherent
+to the plain-FormData-plus-redirect pattern used throughout `PartFormModal` and is not specific to
+ports.
+
+**Still open — this is why the item is PARTIAL.** Phase 2 (a bulk pass giving ports to the models
+Peak actually places, across more manufacturers) is not done. `scripts/draft-starter-set.ts` turned
+out to be a hand-curated pick list — a human chose each of 68 SKUs and hand-picked a port shape from
+helpers like `consolePorts()`/`poweredSpeakerPorts()`/`matrixPorts(inN, outN)` — not a drafting
+engine with a manufacturer filter that could be pointed at more brands; an earlier draft of the spec
+mischaracterized it as one, and the correction is recorded in the spec because it changed the
+decision. Phase 2 becomes a ports rules engine (description/category → port shape, confidence-
+flagged per row, applied across the catalog and re-runnable as the rules improve) with its own spec,
+deliberately designed after Phase 1 ships so the rules are derived from shapes that actually recur
+rather than guesses — D191.
+
+**Gates:** `npx tsc --noEmit` clean · `eslint` on the changed set 0 errors / 5 warnings, all
+pre-existing (4 unused-vars in `actions.ts` predating this work, 1 `Date.now()` purity warning in
+`page.tsx`) · `test:specs` 1772 PASS / 5 FAIL — the 5 are the known fresh-datadir seed races (3×
+`equipment-items`, `seeded surveys exist to migrate`, `FS-1053 is present in the seed`; see #148),
+25 `ports` assertions pass, no crash · `test:smoke` 111 PASS, ALL PASSED.
+
+**Files:** `src/lib/catalog-ports.ts` (new), `src/app/(app)/catalog/ports-editor.tsx` (new),
+`src/app/(app)/catalog/actions.ts`, `src/app/(app)/catalog/page.tsx`,
+`scripts/test-review-and-spec.ts`. Design:
+`docs/superpowers/specs/2026-09-22-catalog-ports-editor-design.md`. No schema change
+(`CatalogPart.ports?: Port[]` already existed; the #39 importer already wrote it). Decisions:
+D187-D191.

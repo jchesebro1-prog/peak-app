@@ -4497,3 +4497,84 @@ docs); whole-project device counts on the `/design` orphan list and the revision
 the Rigging Scope target of $1.8M for a 46 ft Auditorium is pre-existing D139 engine math
 to check.
 
+## D187. The DaVinci ETC library is not imported (#158, 2026-09-22)
+
+Ports for Peak's catalog are curated, not sourced from the DaVinci export
+`promote-sales-compliance` proposed (`data/davinci/`, 116 MB, 2,366 device types, 1,381 with
+ports, 56 port protocols, 25 connector types). It does not intersect Peak's catalog: verified
+four independent ways — model-number prefixes among ported types are ETC product lines;
+the only manufacturer-bearing property among 455 property types has choices like "ETC Rep";
+brute-force matching of all 17,831 identifier-shaped strings in the 42 MB `library.json`
+against all 14,725 SKUs found 9 matches (8 ETC, one false positive, `QSC:SP-36` ↔ `SP3-6`);
+a brand-name search across 316,115 human-readable strings found `ETC 1606` and zero hits for
+Shure, Biamp, JBL, RCF, EAW, QSC, Chauvet, Symetrix, Bose, Listen or AKG. Peak stocks 10 ETC
+parts against a catalog that is Shure (1,303), Biamp (1,148), JBL (822), RCF (597), EAW (556),
+AVPro Edge (460), QSC (389), Chauvet (382). Importing the library would add ~1,381 unpriced ETC
+devices Peak does not sell while leaving all 14,725 real parts exactly as unwireable as before.
+Jeff confirmed 2026-09-22 this is the full export available to him.
+
+Recorded so this is not re-litigated: the analysis above is cheap to repeat and was repeated
+twice already.
+
+## D188. Ports are edited through a client island serializing to one hidden JSON field (#158, 2026-09-22)
+
+Not through indexed FormData names (`port.0.name`, …). Indexed names would keep the no-JS
+purity of `PartFormModal`'s plain `<form action={upsertPart}>`, but make "add a row" a server
+round trip, and a device with eight ports is ordinary. The island renders the rows and keeps
+them in one hidden `ports` input (JSON); `upsertPart` stays a flat FormData action that parses,
+validates, and passes `ports` through to `mergeUpsert`. `CatalogPart.ports?: Port[]` already
+existed and `mergeUpsert` already took it, so there is no store or schema change — the #39
+importer writes this same field today.
+
+The subtlety that motivated shipping this carefully: `mergeUpsert` is `{ ...existing, ...patch
+}` — a key present in `patch` always wins, a key absent from `patch` leaves the existing value
+alone. Before this work `upsertPart` never sent `ports`, so an ordinary price edit correctly
+left them untouched. Now that the form owns ports it must send the field on every save,
+including an empty array — the hidden input renders on every render, even at zero rows —
+otherwise deleting a part's last port would silently leave the old ports in place, wiring the
+part in a way the UI says it cannot.
+
+**Deviation (AGENTS.md: "Deviations get a DECISIONS.md entry"):** the catalog row's badge
+wrapper (`src/app/(app)/catalog/page.tsx`, around line 390) was gated on `(p.note ||
+p.datasheetBlobKey)`; it is widened to `(p.note || p.datasheetBlobKey || (p.ports?.length ?? 0)
+> 0)`, because otherwise a part with ports but no note and no datasheet would never show its
+badge — defeating the §4.5 goal that "which of my parts are wireable" be answerable by looking.
+
+## D189. Connection types are a closed vocabulary at every layer (#158, 2026-09-22)
+
+`connectionType` is selected from `CONNECTION_TYPES`, never typed. `validateDeviceWire` and
+`compatibleWireTypes` both resolve against that 22-entry taxonomy, and a typo would not merely
+look wrong — it would make the device silently unwireable against everything, with no error
+anywhere, the same class of failure as a confidently-wrong geocode. The select constrains, the
+server re-checks membership and rejects unknown values rather than trusting the client (the
+hidden field is user-editable in the DOM), and neither layer trusts the other. Invalid rows fail
+the save with a message; they are never silently dropped.
+
+## D190. Ports are user-editable, not admin-gated (#158, 2026-09-22)
+
+Editing ports requires `requireUser()` — the same bar as editing a part's price or description.
+Ports are ordinary catalog data, and the point of this work is that the team can make a device
+wireable without a developer. Deliberately *not* admin-gated, unlike datasheet attach (which
+writes to blob storage) and the Categories & trades card (which rewrites a shared taxonomy):
+ports are per-part and correctable in place.
+
+Reversible in one line if Jeff would rather restrict it; flagged here because it is arguable,
+since ports do feed quote validation and the cable BOM.
+
+## D191. The bulk pass is a re-runnable rules engine producing review worksheets, never a direct import (#158, 2026-09-22)
+
+`scripts/draft-starter-set.ts` was described in an earlier spec draft as a drafting engine
+"run across 68 items." That was wrong: it is a hand-curated pick list — a human chose each of
+68 SKUs and read each description to pick a port shape from helpers like `consolePorts()` /
+`poweredSpeakerPorts()` / `matrixPorts(inN, outN)`. There is no manufacturer filter to point at
+more brands; the picks *are* the content. Extending it to eight manufacturers would mean
+hand-writing several hundred `{ sku, ports }` entries against price-sheet descriptions — the
+same manual work as the editor, with worse domain knowledge.
+
+Phase 2 is therefore a ports rules engine, with its own spec: description/category → port
+shape, with a confidence flag per row, applied across the catalog and re-runnable as the rules
+improve, producing review worksheets rather than a direct import. It is deliberately designed
+*after* Phase 1 (the editor) ships, so the rules can be derived from the shapes that actually
+recur in the models Peak places rather than from guesses. Everything it produces stays
+correctable in-app afterwards — #39's "Jeff reviews before import" gate holds.
+
