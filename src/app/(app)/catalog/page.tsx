@@ -143,7 +143,14 @@ export default async function CatalogPage({
     (truncated ? " · refine with search or filters to narrow" : "");
 
   const editingPart = editSku ? await get(editSku) : null;
-  const showForm = isNew || !!editingPart;
+  // #158 fix: a rejected brand-new part (invalid ports) redirects to
+  // ?edit=<sku>&partError=... before the SKU exists in the store, so
+  // editingPart comes back null and isNew is false (the param is `edit=`,
+  // not `new=1`). Without this, showForm was false and the error — plus
+  // the whole "your part vanished" modal — never rendered. A present
+  // partError now opens the form on its own so the banner (and an empty
+  // form for the new-part case) always shows.
+  const showForm = isNew || !!editingPart || !!partError;
 
   return (
     <div className="pk-content">
