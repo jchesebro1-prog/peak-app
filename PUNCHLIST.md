@@ -3257,11 +3257,11 @@ attachment embedding/richer drawing export and any additional real-world package
 
 ---
 
-## 45. Header/nav fixes for the in-flight tabs rebuild, (a) DONE 2026-07-27 via #55; (b) OPEN
+## 45. Header/nav fixes for the in-flight tabs rebuild, (a) DONE 2026-07-27 via #55; (b) DONE 2026-09-23
 
 > **(a) Home restored on web AND mobile, DONE 2026-07-27 (D124), see #55.** The tabs rebuild has
-> landed, so this is no longer routed away from the punch-list stream. (b) the responsive full-word
-> vs short-label switch is still open.
+> landed. **(b) DONE 2026-09-23:** desktop group tabs now use full names while the single mobile
+> drawer uses compact labels, with one shared nav structure and unchanged routes/active keys.
 
 **Area:** header/nav (tabs rebuild in flight).
 **Reported:** 2026-07-25 (staged off-mini late, flushed 2026-07-25)
@@ -3274,9 +3274,8 @@ attachment embedding/richer drawing export and any additional real-world package
   Implementation shape: responsive label switch (full label at desktop breakpoint, short label
   below) — ONE nav build, not two.
 
-**Status:** PARTIAL — Home is done; responsive full-word vs short-label switching remains with the
-tabs/UI rebuild session.
-Do not pick up standalone; the rebuild session owns the nav.
+**Status:** DONE 2026-09-23 — Home and the responsive full-word vs short-label switch are both
+landed.
 
 ---
 

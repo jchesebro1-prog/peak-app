@@ -1009,7 +1009,15 @@ ok(COMPANY_SCREENS.length === 1 && COMPANY_SCREENS[0].href === "/catalog", "Comp
 ok(!NAV.some((e) => e.kind === "group" && e.key === "general"), "the General group is gone");
 ok(
   NAV.map((e) => e.key).join(",") === "home,est,pm,crm,design,knowledge",
-  "the top-level chips are Home, EST, PM, CRM, DESIGN, KNOWLEDGE in order (#55 put Home back, D124; #136 added KNOWLEDGE)",
+  "the top-level chips preserve their current order (#55 put Home back, D124; #136 added KNOWLEDGE)",
+);
+ok(
+  NAV.map((e) => e.label).join(",") === "Home,Estimating,Projects,Customers,Design,Knowledge",
+  "desktop top-level chips use full group names",
+);
+ok(
+  NAV.map((e) => e.mobileLabel ?? e.label).join(",") === "Home,EST,PM,CRM,Design,Know",
+  "mobile navigation uses compact group labels",
 );
 ok(
   activeKeyFor("/catalog") === "settings" &&
