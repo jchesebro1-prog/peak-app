@@ -98,6 +98,21 @@ function first(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
 }
 
+type DashboardRange = "30d" | "90d" | "12m" | "all";
+const DASHBOARD_RANGES: Array<{ key: DashboardRange; label: string }> = [
+  { key: "30d", label: "30 days" },
+  { key: "90d", label: "90 days" },
+  { key: "12m", label: "12 months" },
+  { key: "all", label: "All time" },
+];
+
+function dashboardRangeStart(range: DashboardRange, now: number): number | null {
+  if (range === "30d") return now - 30 * DAY;
+  if (range === "90d") return now - 90 * DAY;
+  if (range === "12m") return now - 365 * DAY;
+  return null;
+}
+
 /* ---- responsive + hover rules (prototype hm-* classes, pkh- prefixed) ---- */
 
 const HOME_CSS = `
@@ -154,6 +169,11 @@ export default async function HomePage({
   const dashboardLayout = resolveDashboardLayout(appSettings.dashboardDefaults, dashboardOverride);
 
   const pipeParam = first(sp.pipe);
+  const rangeParam = first(sp.range);
+  const dashboardRange: DashboardRange = DASHBOARD_RANGES.some((r) => r.key === rangeParam)
+    ? (rangeParam as DashboardRange)
+    : "90d";
+  const rangeStart = dashboardRangeStart(dashboardRange, Date.now());
   const pipe: "all" | QuoteStatus =
     pipeParam === "draft" ||
     pipeParam === "sent" ||
@@ -224,22 +244,25 @@ export default async function HomePage({
   /* ---- my pipeline + stat tiles ---- */
 
   const myQuotes: QuoteX[] = quotesAll.filter((q) => q.owner === me);
+  // Historical dashboard metrics honor the global timeframe. The pipeline
+  // remains forward-looking and intentionally stays on the full open book.
+  const historicalQuotes = myQuotes.filter((q) => rangeStart == null || (q.updatedAt || 0) >= rangeStart);
   const openQuotes = myQuotes.filter((q) => q.status === "draft" || q.status === "sent");
   const openValue = openQuotes.reduce((a, q) => a + (q.value || 0), 0);
-  const won = myQuotes.filter((q) => q.status === "won");
-  const lost = myQuotes.filter((q) => q.status === "lost");
+  const won = historicalQuotes.filter((q) => q.status === "won");
+  const lost = historicalQuotes.filter((q) => q.status === "lost");
   const decided = won.length + lost.length;
   const winRate = decided > 0 ? Math.round((won.length / decided) * 100) : 0;
-  const sentCount = myQuotes.filter((q) => q.status === "sent").length;
-  const avg = myQuotes.length
-    ? myQuotes.reduce((a, q) => a + (q.value || 0), 0) / myQuotes.length
+  const sentCount = historicalQuotes.filter((q) => q.status === "sent").length;
+  const avg = historicalQuotes.length
+    ? historicalQuotes.reduce((a, q) => a + (q.value || 0), 0) / historicalQuotes.length
     : 0;
 
   const stats = [
     { label: "Open pipeline", value: shortMoney(openValue), sub: `${openQuotes.length} active quotes` },
     { label: "Win rate", value: `${winRate}%`, sub: `${won.length} won · ${lost.length} lost` },
     { label: "Out for signature", value: String(sentCount), sub: "quotes sent" },
-    { label: "Avg quote", value: shortMoney(avg), sub: `${myQuotes.length} total` },
+    { label: "Avg quote", value: shortMoney(avg), sub: `${historicalQuotes.length} in range` },
   ];
 
   const pipeCounts: Record<"all" | QuoteStatus, number> = {
@@ -571,6 +594,24 @@ export default async function HomePage({
         lastLogin={lastLogin}
         timezone={timezone}
       />
+
+      <div style={{ display: "flex", justifyContent: "flex-end", margin: "-8px 0 16px" }}>
+        <div style={{ display: "flex", gap: 4, padding: 3, border: "1px solid #e4e7ec", borderRadius: 9, background: "#fff" }} aria-label="Dashboard timeframe">
+          {DASHBOARD_RANGES.map((option) => (
+            <a
+              key={option.key}
+              href={option.key === "90d" ? "/" : `/?range=${option.key}`}
+              style={{
+                padding: "5px 9px", borderRadius: 6, fontSize: 11.5, fontWeight: 600,
+                textDecoration: "none", color: dashboardRange === option.key ? "#fff" : "#6b7180",
+                background: dashboardRange === option.key ? "var(--accent)" : "transparent",
+              }}
+            >
+              {option.label}
+            </a>
+          ))}
+        </div>
+      </div>
 
       {/* The Home dashboard is a configured widget surface: settings control
           visibility, order, and size; this renderer intentionally contains no

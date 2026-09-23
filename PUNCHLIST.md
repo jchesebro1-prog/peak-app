@@ -3180,7 +3180,10 @@ PREREQUISITE** (expected install window per quote); stage-default weights + per-
 category→trade mapping (no explicit Rigging category — resolved by #39's mapping table).
 **Supersedes #7** — reconcile in the Daylite-parity design.
 
-**Status:** OPEN — wave 2 (needs #39 categories + #15).
+**Status:** PARTIAL 2026-09-23 — Home now renders from the saved company/personal widget layout
+and exposes a global timeframe selector for historical metrics; the forward-looking pipeline stays
+outside the historical filter. Remaining registry unification with Reports, role presets/gates,
+capacity bands, trade mix, and scheduled-load widgets still depend on the broader #39/#41 work.
 
 ---
 
