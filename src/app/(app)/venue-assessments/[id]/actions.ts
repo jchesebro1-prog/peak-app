@@ -158,7 +158,12 @@ export async function advanceSurveyStage(
 
 export async function deleteSurvey(id: string): Promise<void> {
   await requireUser();
-  if (id) await remove(id);
+  try {
+    if (id) await remove(id);
+  } catch (error) {
+    console.error("deleteSurvey failed", error);
+    redirect(`/venue-assessments/${encodeURIComponent(id)}?err=` + encodeURIComponent("Couldn’t delete this survey — please try again."));
+  }
   revalidatePath("/", "layout");
   redirect("/venue-assessments");
 }
