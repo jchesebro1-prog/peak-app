@@ -7133,3 +7133,99 @@ pre-existing (4 unused-vars in `actions.ts` predating this work, 1 `Date.now()` 
 `docs/superpowers/specs/2026-09-22-catalog-ports-editor-design.md`. No schema change
 (`CatalogPart.ports?: Port[]` already existed; the #39 importer already wrote it). Decisions:
 D187-D191.
+
+## 159. Catalog port rules engine — proposes `ports[]` by rule, review is of rules not rows — PARTIAL 2026-09-23 (D192-D197, D199, D200)
+
+**Reported:** #158 shipped the ports editor but did not move the needle on coverage — measured
+2026-09-23, unchanged since #158: of **14,725** catalog parts, only **55** carried `ports[]`,
+the #39 starter set. `scripts/draft-starter-set.ts` turned out to be a hand-curated pick list
+(a human read each of 68 SKUs and chose a port shape), not a drafting engine that could be
+pointed at more manufacturers — but it left behind 21 hand-written port-shape helpers
+(`consolePorts`, `passiveSpeakerPorts`, `matrixPorts(inN, outN)`, …) that are the real domain
+knowledge and are already correct. This work's only job is deciding which shape applies to
+which part, across Shure, RCF, EAW, QSC, AVPro Edge and Chauvet Professional — **Biamp (1,148
+parts) and JBL (822) are out of scope**: their `desc` field is a bare model/part number
+(`330.0057`, `AC115S`) with nothing to read, so no rules engine can classify them (D192).
+
+**The core decision (D193): review the rule, not the part.** July's 68-row starter worksheet
+sat unreviewed for two months; a worksheet covering thousands of rows would be worse, not
+better. So the reviewable unit is the rule — `/passive.*(subwoofer|sub)/i` in EAW's `SB`
+category → one speakON NL2 in, matches 187 parts — approved, edited or rejected as a unit, with
+review effort scaling with ~13 rules instead of thousands of parts. 13 rules shipped: one
+accessory layer (ordered first, D195) plus 12 device rules.
+
+**The honest classifiability finding.** An earlier pass read "2,479 parts have a usable
+description" as the coverage estimate. It isn't: classifying those parts by device class found
+only ~780 coverable by the pre-existing 21 shapes, rising to ~1,170 once the three D197 shapes
+(`amplifierPorts`, `wirelessReceiverPorts`, `dspPorts`) were added — the rest is a long tail of
+real products whose descriptions don't announce a device class worth a rule. Measured against
+the live catalog, the shipped rule set (all brands, not just the 6 in scope) currently proposes
+ports for **1,390** parts. **Nothing is written to the catalog** — the rules only run, and only
+against the parts they match, when Jeff names them on the command line (`--rules id1,id2 …
+--commit`); nothing has been applied yet, which is why this item is PARTIAL.
+
+**Shipped:**
+- `src/lib/catalog-port-shapes.ts` (new) — the 21 shape helpers moved verbatim out of
+  `scripts/draft-starter-set.ts` (which now imports them) plus 3 new ones (D197): one shared
+  copy of the domain knowledge instead of a second, drifting one (D194).
+- `src/lib/catalog-port-rules.ts` (new) — the `PortRule` type, `matchRule`/`proposeForPart`
+  (pure, first-match-wins — order is the disambiguation mechanism, not a score), and the 13
+  shipped rules (accessory layer + 12 device rules).
+- `src/lib/catalog-port-apply.ts` (new) — `applyRules`; a part that already has `ports[]` is
+  skipped, always (hand edits beat the engine, unconditionally — D196); writes `ports` and
+  nothing else.
+- `scripts/port-rules.ts` (new), `npm run ports:rules` — read-only by default; prints one block
+  per rule (pattern, note, match count, sample parts), the over-broad guard (a rule matching
+  more than 40% of a manufacturer's inferable parts is flagged loudly), and per-manufacturer
+  tallies of accessories/unmatched/no-description/already-ported. `--apply --rules id1,id2 …`
+  runs only the named rules; `--commit` performs the write, `--yes` is the separate hosted-DB
+  confirmation (D196, D200).
+
+**Found and fixed along the way — two review waves against the real catalog, not the sample
+data the rules were drafted against.**
+- A first review measured **~108 of 985 proposed parts wired wrong** and ~45 real devices
+  silently filed as accessories. Worst: `amplifier`'s bare `\bamp\b` matched "Bi-Amp" inside
+  passive-speaker descriptions, so 61 passive speakers were given 4× speakON NL4 **outputs**
+  plus a control network instead of one speakON NL2 **input**; 9 QSC power amplifiers were
+  given a 70V speaker *input* (backwards); and the accessory layer swallowed both real PTZ
+  cameras, 20 wireless receivers and 13 amplifiers for mentioning their own bundled mount or
+  cable. Three rule **notes asserted the opposite of what their regex did** — a spec failure in
+  itself, since the note is what a human reads to approve the rule. Fixed in `c0a4036` (D199):
+  249 rows stopped receiving a wrong shape, 32 became newly correct, and 101 accessories were
+  restored.
+- A second review then found the apply path **wrote 90 rows the report never showed** (1,481 vs
+  1,391), because the report filtered description-less rows and `applyRules` didn't — breaking
+  the feature's core contract, since approving a rule from the report would not have meant what
+  the report displayed. Fixed in `458f8dc` (D200) by sharing one eligibility predicate
+  (`isModelish`) between report and apply; both now report **1,390**, verified per rule. That
+  review also found the hosted-write gate was **dead code**: `--yes` both triggered the write
+  and satisfied `requireHostedConfirmation`'s own bypass, so a hosted apply had no real second
+  gate. Now `--commit` writes and `--yes` confirms, matching `scripts/enrich-addresses.ts`.
+
+**Known gaps — live, not yet fixed, listed so a rule isn't approved blind:**
+- **`dsp` is majority-wrong:** 46 of its 57 matched rows are Powersoft / 1Sound **amplifier
+  modules** getting a DSP's analog-I/O shape, not an actual DSP. Do not approve `dsp` without
+  checking those rows by hand.
+- `Lab Gruppen:LAB-LUCIA-RACKKIT` and `RCF:13360426` ("Rackmount Kit for … Amplifiers") still
+  reach the `amplifier` rule instead of the accessory layer — `ACCESSORY_NOUN` matches
+  `rack ?ear` and `\bmount\b` but not the single word "Rackmount".
+- ~20 real devices still sit in the accessory bucket, including `EAW:2072205-90` ("…Amplifier
+  **c/w** Rack Mount Kit" — `c/w` isn't a recognized bundling word) and 13 Williams AV "**FM
+  Plus**" systems (the brand name itself contains the bundling word "plus").
+- 3 fibre extender kits are unmatched — no fibre port shape exists yet (adding one is a
+  deliberate human act, out of this work's scope).
+- Biamp (1,148) and JBL (822) remain unreachable by any rule (D192) — their descriptions are
+  bare part numbers with nothing to read.
+
+**Gates:** `npx tsc --noEmit` clean · `eslint` 0 errors on the changed set · `test:specs`
+**1860 PASS / 5 FAIL** — the 5 are the known fresh-datadir seed races (see #148) · report and
+dry-run apply agree exactly at **1,390**.
+
+**Files:** `src/lib/catalog-port-shapes.ts` (new), `src/lib/catalog-port-rules.ts` (new),
+`src/lib/catalog-port-apply.ts` (new), `scripts/port-rules.ts` (new),
+`scripts/draft-starter-set.ts` (imports the shared shapes), `scripts/test-review-and-spec.ts`.
+Design: `docs/superpowers/specs/2026-09-23-catalog-port-rules-engine-design.md`. No schema
+change (`CatalogPart.ports?: Port[]` already existed). Builds on #158 (D187-D191) and #39.
+Still open — the whole review loop is Jeff reading `npm run ports:rules`'s output and replying
+with the `--rules` list to apply; nothing is applied until he does. Decisions: D192-D197,
+D199-D200 (D198 skipped — see the D199 entry in DECISIONS.md).

@@ -4578,3 +4578,121 @@ improve, producing review worksheets rather than a direct import. It is delibera
 recur in the models Peak places rather than from guesses. Everything it produces stays
 correctable in-app afterwards — #39's "Jeff reviews before import" gate holds.
 
+## D192. Biamp and JBL are out of scope and reported, not silently skipped (#159, 2026-09-23)
+
+Across the eight manufacturers Jeff named, Biamp (1,148 parts) and JBL (822) have no usable
+`desc` field at all — it's a bare model or part number (Biamp's are `330.0057`, `650.0101`;
+JBL's are `AC115S`, `PD544`). There is nothing to read, so no rules engine can classify them.
+Together with the smaller description gaps at other brands, that is 2,271 parts the engine
+cannot reach. They remain editor-only (#158) until their price books are re-imported with real
+product names. The engine's report names the count per manufacturer every run so the gap stays
+visible rather than disappearing into a denominator.
+
+## D193. The reviewable unit is the rule, not the part (#159, 2026-09-23)
+
+The bottleneck is not inference, it's review. July's starter worksheet was 68 rows and sat
+unreviewed for two months; a thousands-of-rows version of the same artifact would be worse, not
+better. So the reviewable unit is the rule:
+
+> `/passive.*(subwoofer|sub)/i` in EAW's `SB` category → one `speakON NL2` in — **187 parts**
+
+Approve, edit or reject the rule; the verdict applies to every part it matched. Review effort
+scales with rules (~13) rather than parts (thousands).
+
+A rule is also checkable in a way a row is not. Jeff can read "passive subwoofer → speakON NL2
+in" and know from experience whether it's right, and that judgement covers 187 parts at once —
+reading 187 individual rows would tell him nothing he didn't know after the first three.
+
+It degrades honestly, too: a rule he's unsure of gets rejected and its parts stay portless — the
+current state, not a regression. Rejected alternatives: a row-level worksheet (the artifact that
+already went unreviewed for two months) and an in-app accept/reject queue (most of the build,
+still row-by-row).
+
+## D194. Port shapes live in one shared module (#159, 2026-09-23)
+
+The 21 shape helpers move verbatim from `scripts/draft-starter-set.ts` into
+`src/lib/catalog-port-shapes.ts`, which `draft-starter-set.ts` then imports. One copy, for the
+same reason `scripts/daylite-ids.ts` exists: two drifting copies of domain knowledge produce a
+clean-looking run that is quietly wrong. Pure — no DB, no React, no catalog types beyond `Port`.
+
+## D195. Accessory exclusion is an explicit first-class rule layer, and its matches are reported as handled, not as failures (#159, 2026-09-23)
+
+A leading accessory layer (`cover|bracket|mount|cable|barndoor|grille|case|…`) matches first and
+yields no ports, deliberately. 907 of the 5,657 in-scope parts are accessories; without this
+layer a bracket described as "Horizontal Bracket for MR50" can fall through to a speaker rule
+and be given speaker ports. An accessory match is a success, reported separately from "no rule
+matched" — conflating the two would hide real coverage gaps behind a pile of correctly-ignored
+brackets.
+
+## D196. Hand-edited ports always beat the engine, and no rule applies without being named explicitly (#159, 2026-09-23)
+
+Nothing is applied by default. Only the rule ids named on the command line run — there is no
+"apply all." A part that already has `ports[]` is skipped, always: hand edits win over the
+engine, unconditionally. The engine only fills blanks, writes `ports` and nothing else — never
+prices, categories or descriptions — and is idempotent, so re-running an already-applied rule is
+a no-op and improving a rule and re-running costs nothing. Hosted writes go through the existing
+`resolveDbTarget`/`requireHostedConfirmation` gates, like every other script that writes. #39's
+"Jeff reviews before import" gate holds: the report is the review artifact, and approval is the
+`--rules` list.
+
+## D197. Three new port shapes are added deliberately as part of this work (#159, 2026-09-23)
+
+`amplifierPorts`, `wirelessReceiverPorts` and `dspPorts`. Adding a shape stays a human act, not
+something the engine does — these three are named here, reviewed alongside the rules that use
+them, and cover the parts that are classifiable by device class but had nowhere to land before
+this work (an earlier estimate of ~780 parts coverable by the pre-existing 21 shapes rose to
+~1,170 once these three were added). Any further shape needs the same treatment: named,
+reviewed, and justified against real descriptions, not invented by the engine.
+
+## D199. The shipped rule set is corrected against the real catalog (#159, 2026-09-23)
+
+A review of the shipped rule set (`abb0f19`) measured against the live 14,725-part catalog found
+~108 of 985 proposed parts wired wrong and ~45 real devices silently filed as accessories.
+Worst: `amplifier`'s bare `\bamp\b` matched "Bi-Amp" inside passive-speaker descriptions, wiring
+61 passive speakers with 4× speakON NL4 outputs and a control network instead of one speakON
+NL2 input; the accessory layer swallowed ~45 real devices (both PTZ cameras, 20 wireless
+receivers, 13 amplifiers) for mentioning their own bundled mount or cable; and `speaker-70v`
+gave 9 QSC power amplifiers a 70V speaker input, backwards. Three rule notes also asserted the
+opposite of what their regex did — a spec failure in itself, since the note is what a human
+reads to decide whether to approve the rule.
+
+Fixed in `c0a4036`: `amplifier` now requires the whole word "amplifier" (or "power amp", or a
+power-amp spec line), never the bare token "amp"; the accessory layer is restructured to claim a
+part only when a device noun does not precede the first bundling word, rather than matched by a
+flat word list; `speaker-70v` and others gained category/context guards; every rule note was
+rewritten to state what its regex actually does. Measured effect: the matched-by-a-rule count
+moved from 1,439 to 1,391 — 249 rows stopped receiving a wrong shape, 32 became newly correct,
+and 101 accessories were restored. The total going down is the point: the rules claim less and
+are right more often. 1854 PASS / 5 FAIL (baseline 1825/5; 29 new assertions, same 5
+pre-existing fresh-datadir seed races).
+
+**D198 is deliberately skipped.** The commit above (`c0a4036`) was already pushed citing "D199"
+before this numbering was reconciled during bookkeeping, and commit messages can't be rewritten
+— a numbering gap here is less confusing than a decisions log that disagrees with git history.
+
+## D200. The apply CLI shares the report's eligibility filter, and `--commit`/`--yes` replace a doubled `--yes` gate (#159, 2026-09-23)
+
+A gate review of the port-rules engine (`c0a4036`) found two independent problems and fixed both
+in `458f8dc`:
+
+1. **The apply path wrote rows the report never showed.** `isModelish()` — the check that skips
+   a bare model/part-number description — lived only in `scripts/port-rules.ts`'s report, not in
+   `src/lib/catalog-port-apply.ts`'s `applyRules()`. A dry run against the shipped rule set would
+   have written 90 more rows than the report ever displayed for approval (1,481 vs 1,391),
+   breaking the feature's whole contract: approving a rule on the strength of the report would
+   not have meant what the report showed. Fixed by moving `isModelish` into
+   `catalog-port-apply.ts`, exporting it, and having the script import that one copy instead of
+   keeping a second. Report and dry-run apply now agree exactly, per rule, at **1,390**.
+2. **The hosted-write gate was dead code.** `--yes` both triggered the write and satisfied
+   `requireHostedConfirmation`'s own bypass, so a hosted `--apply --rules … --yes` had no real
+   second gate against the shared Neon database (see the standing "preview writes production"
+   hazard). Adopted this repo's existing two-flag convention (`scripts/enrich-addresses.ts`):
+   `--commit` triggers the write, `--yes` is the separate hosted confirmation.
+
+Also fixed in the same commit: `speaker-70v` lost its bare-`amp` exclude guard in the same D199
+edit that correctly removed it from `speaker-passive`; restored on `speaker-70v` only, which
+corrects the one row it affected (`Shure:MXN-AMP`, previously given a backwards 70V input). A
+"Known gaps" section was added to the report itself, printed after the totals, so the caveats
+below don't require reading a commit message to find. 1860 PASS / 5 FAIL (baseline 1854/5; 6 new
+assertions, same 5 pre-existing fresh-datadir seed races).
+
