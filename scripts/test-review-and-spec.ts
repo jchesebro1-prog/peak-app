@@ -494,6 +494,13 @@ ok(inboxShellSource.includes("el.closest('[role=\"dialog\"], [role=\"menu\"]')")
 ok(inboxCommandSource.includes('role="menu"'), "#46 Filter/Sort popovers expose a menu boundary");
 ok(siteVisitSource.includes('role="dialog"') && siteVisitSource.includes('aria-modal="true"'), "#46 site-visit modal exposes a dialog boundary");
 
+const projectActionsSource = readFileSync(join(process.cwd(), "src/app/(app)/projects/actions.ts"), "utf8");
+const projectViewSource = readFileSync(join(process.cwd(), "src/app/(app)/projects/view.tsx"), "utf8");
+const projectStoreSource = readFileSync(join(process.cwd(), "src/lib/stores/projects.ts"), "utf8");
+ok(projectActionsSource.includes('str(formData, "signature")') && projectActionsSource.includes("data:image\\/png;base64"), "#44 sign-off action requires a bounded drawn PNG signature");
+ok(projectViewSource.includes('import SignaturePad') && projectViewSource.includes("<SignaturePad />"), "#44 sign-off form captures a phone-drawn signature");
+ok(projectStoreSource.includes("signature?: string") && projectActionsSource.includes("Walk the completed site with the end user"), "#44 stores sign-off signature and creates the walkthrough follow-up");
+
 /* --- Offline navigation contract --- */
 const serviceWorkerSource = readFileSync(join(process.cwd(), "public/sw.js"), "utf8");
 ok(serviceWorkerSource.includes('req.mode === "navigate"'), "offline cache treats document navigation separately");

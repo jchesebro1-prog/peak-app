@@ -126,7 +126,9 @@ export async function signoffAction(formData: FormData): Promise<void> {
   if (!p) return;
   const role = str(formData, "role").trim() || "Customer";
   const note = str(formData, "note").trim();
-  await setSignoff(id, { name, role, note }, user.name);
+  const signature = str(formData, "signature").trim();
+  if (!/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(signature) || signature.length > 350_000) return;
+  await setSignoff(id, { name, role, note, signature }, user.name);
   // Punch #16 (D14x): narrow idempotency guard — setProjectStage has no
   // "already at this stage" early return (recordStageChange() is a no-op
   // internally but doesn't stop the caller's side effects), so this checks
@@ -138,7 +140,7 @@ export async function signoffAction(formData: FormData): Promise<void> {
   await setProjectStage(id, "complete", user.name);
   if (!wasComplete) {
     await createAssignment({
-      title: `Project complete — check in: ${p.name || p.customer || id}`,
+      title: `Walk the completed site with the end user: ${p.name || p.customer || id}`,
       assignee: p.owner || "Jeff Chesebro",
       createdBy: user.name,
       link: { kind: "project", id, label: p.name || p.customer || id },

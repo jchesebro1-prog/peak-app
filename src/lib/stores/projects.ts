@@ -190,6 +190,8 @@ export type ProjectSignoff = {
   signedBy: string;
   signedAt: number;
   note?: string;
+  /** Small PNG data URL captured on the field device at hand-off. */
+  signature?: string;
 };
 
 export type ProjectRecord = {

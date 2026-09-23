@@ -43,6 +43,7 @@ import { TasksCard } from "@/components/tasks-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
 import { SegmentedToggle } from "@/components/ui";
 import { OwnerSelect } from "@/components/owner-select";
+import SignaturePad from "@/components/signature-pad";
 import BoardView from "@/components/board/board-view";
 import type { BoardCardVM, BoardColumnVM } from "@/components/board/types";
 import { boardProjects, dueChipLabel } from "./board-lib";
@@ -2043,6 +2044,7 @@ function SignoffTab({
           rows={2}
           style={{ ...inputStyle, resize: "vertical" }}
         />
+        <SignaturePad />
         <button
           type="submit"
           style={{
