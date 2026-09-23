@@ -82,12 +82,17 @@ export default function AssemblyBuilder({ initial, parts, priceDates }: { initia
           <div style={{ marginTop: 6, fontSize: 11.5, color: "#8c919c" }}>{pricesNote(assembly.id)}</div>
           <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
             {assembly.components.map((component, index) => (
-              <div key={`${component.sku}-${index}`} style={{ display: "grid", gridTemplateColumns: "minmax(160px,1.2fr) minmax(140px,1fr) 120px 90px 40px", gap: 8, alignItems: "center" }}>
+              <div key={`${component.sku}-${index}`} style={{ display: "grid", gridTemplateColumns: "minmax(160px,1.2fr) minmax(140px,1fr) 120px 90px 110px 84px", gap: 8, alignItems: "center" }}>
                 <div><div style={{ fontSize: 12.5, fontWeight: 650 }}>{component.sku}</div><div style={{ fontSize: 11, color: "#999fa9" }}>Catalog component</div></div>
                 <input aria-label="Builder label" title="Name used in the estimator and BOM" value={component.label} onChange={(event) => patch(assembly.id, { components: assembly.components.map((item, i) => i === index ? { ...item, label: event.target.value } : item) })} style={input} />
                 <select value={component.role} onChange={(event) => patch(assembly.id, { components: assembly.components.map((item, i) => i === index ? { ...item, role: event.target.value as AssemblyRole } : item) })} style={input}>{ASSEMBLY_ROLES.map((role) => <option key={role}>{role}</option>)}</select>
                 <input aria-label="Default quantity" type="number" min="0" step="1" value={component.defaultQty} onChange={(event) => patch(assembly.id, { components: assembly.components.map((item, i) => i === index ? { ...item, defaultQty: Math.max(0, Number(event.target.value) || 0) } : item) })} style={input} />
-                <button aria-label="Remove component" className="pk-btn" onClick={() => patch(assembly.id, { components: assembly.components.filter((_, i) => i !== index) })}>×</button>
+                <input aria-label="Power cable cost override" type="number" min="0" step="0.01" placeholder={component.role === "power" ? "catalog cost" : "—"} disabled={component.role !== "power"} value={component.costOverride ?? ""} onChange={(event) => patch(assembly.id, { components: assembly.components.map((item, i) => i === index ? { ...item, costOverride: event.target.value === "" ? undefined : Math.max(0, Number(event.target.value) || 0) } : item) })} style={input} />
+                <div style={{ display: "flex", gap: 3 }}>
+                  <button aria-label="Move component up" className="pk-btn" disabled={index === 0} onClick={() => patch(assembly.id, { components: assembly.components.map((item, i, all) => i === index - 1 ? all[index] : i === index ? all[index - 1] : item) })}>↑</button>
+                  <button aria-label="Move component down" className="pk-btn" disabled={index === assembly.components.length - 1} onClick={() => patch(assembly.id, { components: assembly.components.map((item, i, all) => i === index + 1 ? all[index] : i === index ? all[index + 1] : item) })}>↓</button>
+                  <button aria-label="Remove component" className="pk-btn" onClick={() => patch(assembly.id, { components: assembly.components.filter((_, i) => i !== index) })}>×</button>
+                </div>
               </div>
             ))}
           </div>
@@ -128,7 +133,7 @@ export default function AssemblyBuilder({ initial, parts, priceDates }: { initia
                     max={20}
                     placeholder={`Search ${section.label.toLowerCase()}…`}
                     ariaLabel={`Search ${section.label.toLowerCase()}`}
-                    inputStyle={{ ...input, padding: "7px 9px", fontSize: 12.5 }}
+                    inputStyle={{ ...input, padding: "7px 9px", fontSize: 12.5, minWidth: 360 }}
                     onPick={(hit) => toggleSection(assembly, section.role, hit, section.multi)}
                     render={(hit) => {
                       const checked = selected.some((c) => c.sku === hit.sku);

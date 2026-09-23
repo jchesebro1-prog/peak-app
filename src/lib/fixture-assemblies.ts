@@ -14,6 +14,8 @@ export type FixtureAssemblyComponent = {
   role: AssemblyRole;
   /** Zero keeps the component available but does not add it by default. */
   defaultQty: number;
+  /** Optional per-assembly landed-cost override, primarily for included ETC power cable. */
+  costOverride?: number;
 };
 
 export type FixtureAssembly = {
@@ -48,11 +50,13 @@ export function sanitizeFixtureAssemblies(value: unknown): FixtureAssembly[] {
       if (!sku) return [];
       const role = ASSEMBLY_ROLES.includes(p.role as AssemblyRole) ? p.role as AssemblyRole : "other";
       const qty = Number(p.defaultQty);
+      const costOverride = Number(p.costOverride);
       return [{
         sku,
         label: String(p.label || sku).trim().slice(0, 160) || sku,
         role,
         defaultQty: Number.isFinite(qty) ? Math.max(0, Math.round(qty * 100) / 100) : 0,
+        ...(Number.isFinite(costOverride) && costOverride >= 0 ? { costOverride } : {}),
       }];
     });
     return components.length ? [{ id, name, components }] : [];
@@ -72,7 +76,7 @@ export function resolveFixtureAssemblies(
         ...component,
         desc: part?.desc || "Catalog part not found",
         unit: part?.unit || "ea",
-        cost: Number(part?.cost) || 0,
+        cost: Number.isFinite(component.costOverride) ? component.costOverride! : Number(part?.cost) || 0,
         list: Number(part?.list) || 0,
         found: !!part,
       };
