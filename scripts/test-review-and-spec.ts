@@ -684,6 +684,49 @@ ok(
 );
 
 
+/* --- #158 Task 1: catalog-ports parse/validate/serialize --- */
+import { parsePortsField, serializePorts, PORT_DIRECTIONS } from "@/lib/catalog-ports";
+
+const pOk = parsePortsField(JSON.stringify([{ name: "DMX In", direction: "in", connectionType: "DMX512 (5-pin XLR)" }]));
+ok(pOk.ok === true, "ports: a well-formed row parses");
+if (pOk.ok) ok(pOk.ports[0].connectionType === "DMX512 (5-pin XLR)", "ports: connectionType survives the round trip");
+if (pOk.ok) ok(pOk.ports[0].count === undefined, "ports: an omitted count stays undefined (1 is implicit)");
+
+const pEmpty = parsePortsField("[]");
+ok(pEmpty.ok === true && pEmpty.ports.length === 0, "ports: an empty array is valid and means 'no ports'");
+
+const pBlank = parsePortsField("");
+ok(pBlank.ok === true && pBlank.ports.length === 0, "ports: a blank field is an empty list, not an error");
+
+const pBadType = parsePortsField(JSON.stringify([{ name: "x", direction: "in", connectionType: "DMX512 5 pin XLR" }]));
+ok(pBadType.ok === false, "ports: a connectionType outside CONNECTION_TYPES is REFUSED");
+if (!pBadType.ok) ok(pBadType.error.includes("DMX512 5 pin XLR"), "ports: the refusal names the offending connection type");
+
+const pBadDir = parsePortsField(JSON.stringify([{ name: "x", direction: "sideways", connectionType: "HDMI" }]));
+ok(pBadDir.ok === false, "ports: an unknown direction is refused");
+
+const pBadCount = parsePortsField(JSON.stringify([{ name: "x", direction: "out", connectionType: "HDMI", count: 0 }]));
+ok(pBadCount.ok === false, "ports: a count below 1 is refused");
+
+const pCount = parsePortsField(JSON.stringify([{ name: "Dimmed Power Out", direction: "out", connectionType: "stage pin", count: 12 }]));
+ok(pCount.ok === true && pCount.ports[0].count === 12, "ports: a multi-port row keeps its count");
+
+const pNotArray = parsePortsField(JSON.stringify({ name: "x" }));
+ok(pNotArray.ok === false, "ports: a non-array payload is refused");
+
+const pGarbage = parsePortsField("{not json");
+ok(pGarbage.ok === false, "ports: unparseable JSON is refused, never silently dropped");
+
+const pNoName = parsePortsField(JSON.stringify([{ direction: "io", connectionType: "RDM" }]));
+ok(pNoName.ok === true && pNoName.ports[0].name === "", "ports: a missing name defaults to empty, not a failure");
+
+ok(
+  serializePorts([{ name: "A", direction: "in", connectionType: "HDMI" }]) === '[{"name":"A","direction":"in","connectionType":"HDMI"}]',
+  "ports: serializePorts emits compact JSON with a stable key order"
+);
+ok(PORT_DIRECTIONS.length === 3, "ports: three directions are offered (in/out/io)");
+
+
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
 import type { Annotation } from "@/lib/annotations";
