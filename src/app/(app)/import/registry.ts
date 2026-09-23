@@ -662,6 +662,8 @@ const WRITERS: Record<string, Writer> = {
           city: loc?.city || "",
           state: loc?.state || "",
           zip: rec.zip || loc?.zip || "",
+          lat: loc?.lat ?? "",
+          lng: loc?.lng ?? "",
           phone: rec.phone || "",
           website: rec.website || "",
         };
@@ -754,6 +756,8 @@ const WRITERS: Record<string, Writer> = {
             city: l.city || "",
             state: l.state || "",
             zip: l.zip || "",
+            lat: l.lat ?? "",
+            lng: l.lng ?? "",
             kind: l.kind || "",
           }))
       );

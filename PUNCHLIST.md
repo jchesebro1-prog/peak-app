@@ -6894,6 +6894,8 @@ mailing address, which is how this shipped.
 - Settings → Beta → **"Travel time — geocode addresses"**: coverage readout plus a batched runner
   that drives both phases to completion 10 venues at a time (D184).
 - `maxDuration = 60` on `/import`, which every other heavy route already had.
+- The Import/Export hub now round-trips venue latitude/longitude in both Customers and Venues
+  CSV exports, matching the existing template/import columns (D186).
 
 **Measured on the real book:** 949 of 990 city-only venues geocoded (95.9%) from 293 deduped
 queries. The 41 failures are source-data typos (`Broadhead`, `Mayvillle`, `Sun Prarie`, `DePere`,
@@ -6912,7 +6914,9 @@ structured query fixed both (Portage now 0.2 mi off; LaCrosse honestly returns n
   omitted them. Until the re-export lands, geocoding yields town centres — usable for scheduling,
   NOT precise enough to price a quote from, which was the stated requirement.
 - The `enrich --csv` path is built but has never been run against a real file (no file to run on).
-- Stage 2 remainder: Import-hub lat/lng columns and `import-daylite.ts` reading the address columns.
+- The remaining data-side work is external: run the enrichment against production and re-export
+  Daylite with real street-address columns. The importer already accepts address and coordinate
+  columns; the standalone Daylite migration still cannot invent fields absent from its source.
 - Stage 3: the "Open in Maps" link.
 - The report on open quotes priced against missing travel (Jeff: report only, decide later).
 
