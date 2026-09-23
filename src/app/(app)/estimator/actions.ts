@@ -30,13 +30,45 @@ import {
   get as getInspection,
   type InspectionRecord,
 } from "@/lib/stores/inspections";
-import { list as catalogList } from "@/lib/stores/catalog";
+import { list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import type { SuggestPart } from "./estimator-data";
 import { totals } from "./pricing";
 import { activeUsers } from "@/lib/users";
+
+export async function saveEstimatorCustomPartAction(input: {
+  sku: string;
+  desc: string;
+  category: string;
+  unit: string;
+  cost: number;
+  list: number;
+  mfr: string;
+  manufacturerPartNumber: string;
+  priceGoodThrough: string;
+}): Promise<{ ok: true; sku: string } | { ok: false; error: string }> {
+  await requireUser();
+  const sku = input.sku.trim();
+  const desc = input.desc.trim();
+  if (!sku || sku.toUpperCase() === "CUSTOM") return { ok: false, error: "A catalog SKU is required." };
+  if (!desc || !Number.isFinite(input.cost) || input.cost < 0 || !Number.isFinite(input.list) || input.list <= 0) {
+    return { ok: false, error: "Catalog parts need a description, cost, and sell price." };
+  }
+  await mergeUpsert(sku, {
+    desc,
+    category: input.category.trim() || "Custom Parts",
+    unit: input.unit.trim() || "ea",
+    cost: input.cost,
+    list: input.list,
+    mfr: input.mfr.trim() || undefined,
+    manufacturerPartNumber: input.manufacturerPartNumber.trim() || undefined,
+    note: input.priceGoodThrough ? `Price good through ${input.priceGoodThrough}` : undefined,
+  });
+  revalidatePath("/catalog");
+  return { ok: true, sku };
+}
 import {
   createTask,
   setTaskStatus as setTaskStatusStore,

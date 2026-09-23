@@ -159,6 +159,8 @@ export type CustomDraft = {
   price: string;
   /** budget allowance — priced line, no SKU (punch #36) */
   allowance: string;
+  /** Add this non-allowance custom part to the shared catalog after saving. */
+  addToCatalog: string;
 };
 
 export type CurtainDraft = {

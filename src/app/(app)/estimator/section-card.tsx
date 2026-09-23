@@ -100,7 +100,7 @@ export type SectionCardProps = {
   /** CSV batch-add (#112): resolves SKUs against the catalog, returns how many priced from it vs. landed custom. */
   onImportMaterials: (items: ImportedMaterial[]) => Promise<{ fromCatalog: number; custom: number }>;
   onSetCustomDraft: (field: keyof CustomDraft, v: string) => void;
-  onAddCustomPart: () => void;
+  onAddCustomPart: () => void | Promise<void>;
   /** Live Single/Itemized flip on a stored vendor quote (#143). */
   onSetVendorDisplay: (vendorQuoteId: string, display: "single" | "itemized") => void;
   /** Reopen the vendor form on a stored quote to edit it in place (#144). */
@@ -1323,6 +1323,10 @@ export default function SectionCard(p: SectionCardProps) {
                     <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#6b7079", cursor: "pointer" }}>
                       <input type="checkbox" checked={!!cd.allowance} onChange={(e) => p.onSetCustomDraft("allowance", e.target.checked ? "1" : "")} />
                       Budget allowance
+                    </label>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: cd.allowance ? "#c4c9d2" : "#6b7079", cursor: cd.allowance ? "not-allowed" : "pointer" }} title={cd.allowance ? "Allowances never enter the catalog" : "Save this part for future estimates"}>
+                      <input type="checkbox" checked={!!cd.addToCatalog} disabled={!!cd.allowance} onChange={(e) => p.onSetCustomDraft("addToCatalog", e.target.checked ? "1" : "")} />
+                      Add to catalog
                     </label>
                     <button
                       type="button"

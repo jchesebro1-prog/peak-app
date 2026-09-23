@@ -67,6 +67,7 @@ import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { assemblyDescription } from "@/lib/fixture-assemblies";
 import { defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
+import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
 import AiScopeModal from "./ai-scope-modal";
@@ -138,6 +139,7 @@ const freshCustom = (): CustomDraft => ({
   priceGoodThrough: new Date().toISOString().slice(0, 10),
   link: "",
   allowance: "",
+  addToCatalog: "",
   sku: "",
   unit: "ea",
   qty: "1",
@@ -1084,7 +1086,7 @@ export default function EstimatorClient({
     openInputMethod("vendor", secId);
   };
 
-  const addCustomPart = (secId: string) => {
+  const addCustomPart = async (secId: string) => {
     const d = customDraft;
     const desc = (d.desc || "").trim();
     const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
@@ -1097,6 +1099,20 @@ export default function EstimatorClient({
       ? round2(cost / (1 - margin))
       : typedPrice;
     if (!desc || !Number.isFinite(price) || price <= 0) return;
+    if (d.addToCatalog && !d.allowance) {
+      const saved = await saveEstimatorCustomPartAction({
+        sku: (d.sku || "").trim(),
+        desc,
+        category: "Custom Parts",
+        unit: (d.unit || "").trim() || "ea",
+        cost,
+        list: price,
+        mfr: d.manufacturer.trim(),
+        manufacturerPartNumber: d.manufacturerPartNumber.trim(),
+        priceGoodThrough: d.priceGoodThrough,
+      });
+      if (!saved.ok) return;
+    }
     pushItems(secId, [
       {
         id: nextId(),
