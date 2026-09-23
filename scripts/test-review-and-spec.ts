@@ -1,5 +1,5 @@
 import {
-  generateSchedule, overrunsEnd, phaseWindows, placeTask, selectLines, shiftForMilestone, validateSpan,
+  generateSchedule, overrunsEnd, phaseWindows, placeTask, selectLines, shiftForMilestone, shiftTasksByIds, validateSpan,
   withEngagementPhaseIds, defaultMilestonePhaseId, phaseIdsByName, startOfLocalDay,
   type PhaseWeight, type ScheduleLine,
 } from "@/lib/consulting-schedule";
@@ -30,6 +30,7 @@ import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentP
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
 import {
   normalizeEngagementRecord, getEngagement, type EngagementPhase, createManualEngagement, allEngagements,
+  setMilestonePhase, patchEngagement,
 } from "@/lib/stores/engagements";
 import { TEMPLATE_RECORD_KINDS, TEMPLATE_RECORD_LABEL } from "@/lib/task-template-kinds";
 import {
@@ -1806,6 +1807,7 @@ ok(legacyEmailFor("Jeff Chesebro") === "jchesebro@peaksystemsgroup.com", "legacy
 import {
   isOverdue, taskFromLegacy, expandTemplate, taskBellItems, autoTaskId,
   normalizeTask, tasksForEngagement, createTask, tasksForProject, removeTask,
+  applyMilestoneTaskShifts, getTask,
   STATUSES, type TaskRecord, type TaskTemplateItem,
 } from "@/lib/stores/tasks";
 import { CATEGORIES } from "@/lib/stores/notif-prefs";
@@ -4411,85 +4413,231 @@ async function asyncChecks(): Promise<void> {
   {
     const { createManualEngagement: createEng145 } = await import("@/lib/stores/engagements");
     const { validateFileRefsForEngagement } = await import("@/lib/consulting-files-server");
-    const eng145 = await createEng145(
-      { customerId: "test-customer-145files", customer: "Test Files Co", name: "Test files engagement (#145)", phases: [] },
-      { name: "test-harness" }
-    );
-
-    const goodBlob145: FileRef = {
-      kind: "blob",
-      pathname: `engagement-files/${eng145.id}/plan.pdf`,
-      name: "plan.pdf",
-      mime: "application/pdf",
-      size: 10,
-    };
-    const validated145 = await validateFileRefsForEngagement([goodBlob145], eng145.id);
-    ok(
-      validated145.length === 1 && validated145[0] === goodBlob145,
-      "#145 validateFileRefsForEngagement returns a correctly-scoped blob ref unchanged"
-    );
-
-    const badBlob145: FileRef = {
-      kind: "blob",
-      pathname: "engagement-files/some-other-engagement/plan.pdf",
-      name: "plan.pdf",
-      mime: "application/pdf",
-      size: 10,
-    };
-    let threwBadBlob145 = false;
+    // Fixed fixture name, declared outside the try so the finally block can
+    // re-look-up and tear down this engagement regardless of how far setup
+    // got before a throw — same idiom as the #145 T3 cleanup below. This
+    // fixture previously had no find-or-create and no teardown: every
+    // test:specs run minted a fresh CE-#### with status "awarded", which
+    // OPEN_ENGAGEMENT_STAGES counts as open, polluting the Consulting hub,
+    // the "Active consulting" KPI, and /schedule?view=timeline in what may
+    // be the one real Neon database shared across Production/Preview/
+    // Development (AGENTS.md, #145 review round 4).
+    const ENG_NAME_145FILES = "Test files engagement (#145)";
     try {
-      await validateFileRefsForEngagement([badBlob145], eng145.id);
-    } catch {
-      threwBadBlob145 = true;
+      const eng145 =
+        (await allEngagements()).find((e) => e.name === ENG_NAME_145FILES) ||
+        (await createEng145(
+          { customerId: "test-customer-145files", customer: "Test Files Co", name: ENG_NAME_145FILES, phases: [] },
+          { name: "test-harness" }
+        ));
+
+      const goodBlob145: FileRef = {
+        kind: "blob",
+        pathname: `engagement-files/${eng145.id}/plan.pdf`,
+        name: "plan.pdf",
+        mime: "application/pdf",
+        size: 10,
+      };
+      const validated145 = await validateFileRefsForEngagement([goodBlob145], eng145.id);
+      ok(
+        validated145.length === 1 && validated145[0] === goodBlob145,
+        "#145 validateFileRefsForEngagement returns a correctly-scoped blob ref unchanged"
+      );
+
+      const badBlob145: FileRef = {
+        kind: "blob",
+        pathname: "engagement-files/some-other-engagement/plan.pdf",
+        name: "plan.pdf",
+        mime: "application/pdf",
+        size: 10,
+      };
+      let threwBadBlob145 = false;
+      try {
+        await validateFileRefsForEngagement([badBlob145], eng145.id);
+      } catch {
+        threwBadBlob145 = true;
+      }
+      ok(threwBadBlob145, "#145 validateFileRefsForEngagement throws on a blob ref scoped to a DIFFERENT engagement");
+
+      const safeData145: FileRef = { kind: "data", dataUrl: "data:text/plain,hello", name: "note.txt", mime: "text/plain", size: 5 };
+      const validatedData145 = await validateFileRefsForEngagement([safeData145], eng145.id);
+      ok(validatedData145.length === 1, "#145 validateFileRefsForEngagement accepts a safe data-URL ref");
+
+      const dangerousData145: FileRef = {
+        kind: "data",
+        dataUrl: "data:text/html,<script>alert(1)</script>",
+        name: "evil.html",
+        mime: "text/html",
+        size: 30,
+      };
+      let threwDangerousData145 = false;
+      try {
+        await validateFileRefsForEngagement([dangerousData145], eng145.id);
+      } catch {
+        threwDangerousData145 = true;
+      }
+      ok(
+        threwDangerousData145,
+        "#145 validateFileRefsForEngagement refuses a data-URL ref with a renderable-as-HTML mime"
+      );
+
+      const driveRef145: FileRef = { kind: "drive", fileId: "somefile", webViewLink: "x", name: "plan.pdf", mime: "application/pdf", size: 10 };
+      let threwDrive145 = false;
+      try {
+        await validateFileRefsForEngagement([driveRef145], eng145.id);
+      } catch {
+        threwDrive145 = true;
+      }
+      ok(
+        threwDrive145,
+        "#145 validateFileRefsForEngagement throws on a drive ref when there is no live Drive connection to verify it against"
+      );
+
+      ok(
+        (await validateFileRefsForEngagement([], eng145.id)).length === 0,
+        "#145 validateFileRefsForEngagement is a no-op on an empty ref list"
+      );
+
+      let threwMissingEngagement145 = false;
+      try {
+        await validateFileRefsForEngagement([goodBlob145], "CE-does-not-exist-145");
+      } catch {
+        threwMissingEngagement145 = true;
+      }
+      ok(threwMissingEngagement145, "#145 validateFileRefsForEngagement throws when the engagement itself doesn't exist");
+    } finally {
+      // Teardown (#145 review round 4): re-queried by the fixed fixture
+      // name rather than trusting `eng145` to have survived an early throw,
+      // so cleanup is complete no matter how far setup got. No tasks are
+      // ever spawned against this engagement, but tasksForEngagement is
+      // swept anyway for parity with the T3 idiom in case that changes.
+      const engToClean145Files = (await allEngagements()).find((e) => e.name === ENG_NAME_145FILES);
+      if (engToClean145Files) {
+        for (const t of await tasksForEngagement(engToClean145Files.id)) await removeTask(t.id);
+        await softDeleteDoc("consulting_engagements", engToClean145Files.id);
+      }
     }
-    ok(threwBadBlob145, "#145 validateFileRefsForEngagement throws on a blob ref scoped to a DIFFERENT engagement");
+  }
 
-    const safeData145: FileRef = { kind: "data", dataUrl: "data:text/plain,hello", name: "note.txt", mime: "text/plain", size: 5 };
-    const validatedData145 = await validateFileRefsForEngagement([safeData145], eng145.id);
-    ok(validatedData145.length === 1, "#145 validateFileRefsForEngagement accepts a safe data-URL ref");
-
-    const dangerousData145: FileRef = {
-      kind: "data",
-      dataUrl: "data:text/html,<script>alert(1)</script>",
-      name: "evil.html",
-      mime: "text/html",
-      size: 30,
-    };
-    let threwDangerousData145 = false;
+  /* ====== #145 Task 15 review — setMilestonePhase + applyMilestoneTaskShifts ======
+   * DB-backed (async, doc-store), same idiom as the block above: a fixed
+   * fixture name declared outside the try, find-or-create, and a finally
+   * that re-queries by that fixed name and tears down every task and the
+   * engagement itself — this may be the one real Neon database shared
+   * across Production/Preview/Development (AGENTS.md).
+   *
+   * Covers the two write paths pulled out of "use server" actions
+   * specifically so they're callable here without a request context
+   * (requireUser() throws "headers was called outside a request scope"
+   * outside one): setMilestonePhase's reject-a-foreign-phaseId path (the
+   * validate-before-write half of the milestone phase dropdown, D168),
+   * and applyMilestoneTaskShifts's null-phase branch (the manual-
+   * checklist half of a milestone move, D168) — moveMilestoneAction's own
+   * DB-backed integration is not re-tested here; this is the unit the
+   * ternary actually dispatches to. */
+  {
+    const ENG_NAME_145MS = "Test milestone-phase engagement (#145)";
     try {
-      await validateFileRefsForEngagement([dangerousData145], eng145.id);
-    } catch {
-      threwDangerousData145 = true;
-    }
-    ok(
-      threwDangerousData145,
-      "#145 validateFileRefsForEngagement refuses a data-URL ref with a renderable-as-HTML mime"
-    );
+      const eng145ms =
+        (await allEngagements()).find((e) => e.name === ENG_NAME_145MS) ||
+        (await createManualEngagement(
+          { customerId: "test-customer-145ms", customer: "Test MS Co", name: ENG_NAME_145MS, phases: ["Assessment", "Design Development"] },
+          { name: "test-harness" }
+        ));
+      const realPhaseId = eng145ms.phases.find((p) => p.name === "Design Development")!.id;
 
-    const driveRef145: FileRef = { kind: "drive", fileId: "somefile", webViewLink: "x", name: "plan.pdf", mime: "application/pdf", size: 10 };
-    let threwDrive145 = false;
-    try {
-      await validateFileRefsForEngagement([driveRef145], eng145.id);
-    } catch {
-      threwDrive145 = true;
-    }
-    ok(
-      threwDrive145,
-      "#145 validateFileRefsForEngagement throws on a drive ref when there is no live Drive connection to verify it against"
-    );
+      /* ---- setMilestonePhase: validate-before-write ---- */
+      await patchEngagement(eng145ms.id, (d) => {
+        if (!d.milestones.some((m) => m.id === "ms-145-test")) {
+          d.milestones.push({ id: "ms-145-test", name: "Test milestone", targetDate: 0, completedAt: null, amount: null, phaseId: null });
+        }
+      });
 
-    ok(
-      (await validateFileRefsForEngagement([], eng145.id)).length === 0,
-      "#145 validateFileRefsForEngagement is a no-op on an empty ref list"
-    );
+      const rejectForeign145ms = await setMilestonePhase(eng145ms.id, "ms-145-test", "ph-not-on-this-engagement");
+      ok(!rejectForeign145ms.ok, "#145 setMilestonePhase refuses a phaseId that isn't one of the engagement's own phases");
+      const afterReject145ms = await getEngagement(eng145ms.id);
+      ok(
+        afterReject145ms?.milestones.find((m) => m.id === "ms-145-test")?.phaseId == null,
+        "#145 setMilestonePhase's rejected write never touched the milestone — it still reads null, not the foreign id"
+      );
 
-    let threwMissingEngagement145 = false;
-    try {
-      await validateFileRefsForEngagement([goodBlob145], "CE-does-not-exist-145");
-    } catch {
-      threwMissingEngagement145 = true;
+      const acceptReal145ms = await setMilestonePhase(eng145ms.id, "ms-145-test", realPhaseId);
+      ok(acceptReal145ms.ok, "#145 setMilestonePhase accepts a phaseId that IS one of the engagement's own phases");
+      const afterAccept145ms = await getEngagement(eng145ms.id);
+      ok(
+        afterAccept145ms?.milestones.find((m) => m.id === "ms-145-test")?.phaseId === realPhaseId,
+        "#145 setMilestonePhase's accepted write actually persisted the real phaseId"
+      );
+
+      const clearBack145ms = await setMilestonePhase(eng145ms.id, "ms-145-test", null);
+      ok(clearBack145ms.ok, "#145 setMilestonePhase accepts null — clearing back to \"No phase\" is always valid");
+
+      const missingMs145 = await setMilestonePhase(eng145ms.id, "ms-does-not-exist-145", realPhaseId);
+      ok(missingMs145.ok, "#145 setMilestonePhase no-ops (still {ok:true}) on a milestone id that doesn't exist, rather than throwing");
+
+      /* ---- applyMilestoneTaskShifts: the null-phase manual-checklist branch ---- */
+      const dayMs145 = 86400000;
+      const tPhase145 = await createTask(
+        {
+          title: "#145 MS test — DD-phase task",
+          engagementId: eng145ms.id,
+          startAt: 1000 * dayMs145,
+          dueAt: 1010 * dayMs145,
+          schedule: { phaseId: realPhaseId, startPct: 0, lengthPct: 50 },
+          handScheduled: false,
+        },
+        { id: "u1", name: "Test Harness" }
+      );
+      const tManual145 = await createTask(
+        {
+          title: "#145 MS test — no-schedule task",
+          engagementId: eng145ms.id,
+          startAt: 2000 * dayMs145,
+          dueAt: 2010 * dayMs145,
+          schedule: null,
+          handScheduled: false,
+        },
+        { id: "u1", name: "Test Harness" }
+      );
+
+      const tasksForShift145 = await tasksForEngagement(eng145ms.id);
+      const delta145 = 7 * dayMs145;
+      // Only tManual145 is ticked. A null-phase milestone has no phase to
+      // infer membership from — before this fix, moveMilestoneAction's own
+      // shiftForMilestone({phaseId:null},...) call always returned
+      // moved: [], so ticking ANY id here would have moved NOTHING.
+      const movedCount145 = await applyMilestoneTaskShifts({ phaseId: null }, delta145, [tManual145.id], tasksForShift145);
+      ok(movedCount145 === 1, "#145 applyMilestoneTaskShifts(null phase) moves exactly the ticked id, not zero and not every task");
+
+      const tManualAfter145 = await getTask(tManual145.id);
+      ok(
+        tManualAfter145?.startAt === 2000 * dayMs145 + delta145 && tManualAfter145?.dueAt === 2010 * dayMs145 + delta145,
+        "#145 applyMilestoneTaskShifts actually wrote the shifted dates onto the ticked task, not just counted it"
+      );
+      const tPhaseAfter145 = await getTask(tPhase145.id);
+      ok(
+        tPhaseAfter145?.startAt === 1000 * dayMs145 && tPhaseAfter145?.dueAt === 1010 * dayMs145,
+        "#145 applyMilestoneTaskShifts(null phase) never touches an UN-ticked task, even one with a real phase schedule"
+      );
+
+      // Phase-matched branch, for the same call site: ticking the
+      // schedule-matched task under a REAL phaseId still moves it (via
+      // shiftForMilestone, not shiftTasksByIds) — regression check that
+      // the null-phase branch didn't change this path's behavior.
+      const movedPhase145 = await applyMilestoneTaskShifts({ phaseId: realPhaseId }, delta145, [tPhase145.id], tasksForShift145);
+      ok(movedPhase145 === 1, "#145 applyMilestoneTaskShifts(real phase) still moves its own phase's ticked task");
+
+      ok(
+        (await applyMilestoneTaskShifts({ phaseId: null }, delta145, [], tasksForShift145)) === 0,
+        "#145 applyMilestoneTaskShifts is a no-op on an empty id list, either branch"
+      );
+    } finally {
+      const engToClean145ms = (await allEngagements()).find((e) => e.name === ENG_NAME_145MS);
+      if (engToClean145ms) {
+        for (const t of await tasksForEngagement(engToClean145ms.id)) await removeTask(t.id);
+        await softDeleteDoc("consulting_engagements", engToClean145ms.id);
+      }
     }
-    ok(threwMissingEngagement145, "#145 validateFileRefsForEngagement throws when the engagement itself doesn't exist");
   }
 
   /* ---- #145 D169 review (Important 1) — the task_templates CSV writer,
@@ -6363,6 +6511,25 @@ ok(shift145.moved.length === 1 && shift145.moved[0].id === "T-1", "#145 shiftFor
 ok(shift145.moved[0].startAt === OCT6 + 14 * DAY145, "#145 a moved task shifts by exactly the milestone's delta");
 ok(shift145.skipped.map((t) => t.id).join(",") === "T-2,T-3,T-4", "#145 a hand-dragged task is never moved by the app");
 ok(shiftForMilestone({ phaseId: null }, DAY145, tasks145).moved.length === 0, "#145 a milestone with no phase pre-ticks nothing and degrades to the manual checklist");
+
+// shiftTasksByIds (#145 Task 15 review): the manual-checklist half of the
+// null-phase path above. Unlike shiftForMilestone it takes NO position on
+// phase or handScheduled — the caller's own id list IS the membership,
+// since there's no phase to infer it from.
+const byIds145 = shiftTasksByIds(["T-2", "T-4", "T-does-not-exist"], 14 * DAY145, tasks145);
+ok(
+  byIds145.length === 2 && byIds145[0].id === "T-2" && byIds145[1].id === "T-4",
+  "#145 shiftTasksByIds returns exactly the ids that exist, in the CALLER's order, silently dropping one that doesn't"
+);
+ok(
+  byIds145[0].startAt === OCT6 + 14 * DAY145 && byIds145[0].dueAt === OCT6 + DAY145 + 14 * DAY145,
+  "#145 shiftTasksByIds shifts a hand-scheduled task too — it has no phase-based opinion, only the ids it's given"
+);
+ok(
+  byIds145[1].startAt === null && byIds145[1].dueAt === null,
+  "#145 shiftTasksByIds keeps a null start/due null rather than shifting into NaN"
+);
+ok(shiftTasksByIds([], DAY145, tasks145).length === 0, "#145 shiftTasksByIds is a no-op on an empty id list");
 
 // Whole-schedule generation.
 const gen145 = generateSchedule({

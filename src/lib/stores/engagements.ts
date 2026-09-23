@@ -422,6 +422,41 @@ export async function patchEngagement(
   });
 }
 
+export type SetMilestonePhaseResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * #145 D168 review — D168's `phaseId` had no writer besides
+ * `generateScheduleAction`'s exact-name match (the minority case — most
+ * milestones come from free-text scope/fee rows, not a name that happens
+ * to match a phase). This is the writer half of the milestone row's phase
+ * dropdown, pulled out of `setMilestonePhaseAction`
+ * (design/engagements/actions.ts, "use server") so it's an ordinary
+ * module import the spec harness can call directly, the same Data Access
+ * Layer split `performCapture` uses — every export of a "use server" file
+ * is directly POST-reachable, so the action is just `requireUser()` then
+ * delegate.
+ *
+ * The posted `phaseId` is validated against the engagement's OWN phases
+ * (never trusted as given) — a stale or foreign id would otherwise sit on
+ * the milestone and silently break `shiftForMilestone`'s phase match.
+ */
+export async function setMilestonePhase(
+  engId: string,
+  msId: string,
+  phaseId: string | null
+): Promise<SetMilestonePhaseResult> {
+  const eng = await getEngagement(engId);
+  if (!eng) return { ok: false, error: "That engagement could not be found." };
+  if (phaseId != null && !eng.phases.some((p) => p.id === phaseId)) {
+    return { ok: false, error: "That phase isn't part of this engagement." };
+  }
+  await patchEngagement(engId, (d) => {
+    const ms = d.milestones.find((m) => m.id === msId);
+    if (ms) ms.phaseId = phaseId;
+  });
+  return { ok: true };
+}
+
 /** The consulting payload a consulting-quote builder writes onto the quote
  *  (quotes.ts `consulting?: unknown` — this module owns the shape).
  *  #35 rebuild: new saves write `scopes` (structured line items, total =

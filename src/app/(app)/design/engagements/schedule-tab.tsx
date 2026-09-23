@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ConsultingEngagement, EngagementMilestone } from "@/lib/stores/engagements";
 import type { TaskRecord, TaskStatus } from "@/lib/stores/tasks";
-import { overrunsEnd, shiftForMilestone, startOfLocalDay, type PhaseWindow } from "@/lib/consulting-schedule";
+import { overrunsEnd, shiftForMilestone, shiftTasksByIds, startOfLocalDay, type PhaseWindow } from "@/lib/consulting-schedule";
 import { toDateInput as epochToDateInput } from "@/app/(app)/vendors/dates";
 import { GanttGrid, type GanttMarker, type GanttRow } from "@/components/gantt/gantt-grid";
 import { Card, EmptyState, Pill } from "@/components/ui";
@@ -542,7 +542,11 @@ function MilestoneShiftDialog({
   );
   const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
   const movedRows = useMemo(
-    () => moved.map((m) => ({ ...m, title: tasksById.get(m.id)?.title || m.id })),
+    // handScheduled is always false here — shiftForMilestone already
+    // excludes a hand-dragged task from `moved` (it shows under "Not
+    // moved" below instead). Carried on the row anyway so movedRows and
+    // manualRows share one shape for checklistRows below.
+    () => moved.map((m) => ({ ...m, title: tasksById.get(m.id)?.title || m.id, handScheduled: false })),
     [moved, tasksById]
   );
   const handDragged = useMemo(
@@ -550,14 +554,41 @@ function MilestoneShiftDialog({
     [skipped, phaseId]
   );
 
+  // #145 review fix (D168) — a null-phase milestone has no phase to infer
+  // membership from, so `moved` above is always empty for it (by design;
+  // see shiftForMilestone's own doc comment). Rather than the dialog
+  // showing nothing, it degrades to a MANUAL checklist: every one of the
+  // engagement's tasks, so a human can pick which ones move with it.
+  // shiftTasksByIds computes the same NEW-dates preview shape for every
+  // task id; moveMilestoneAction takes the identical branch server-side
+  // when the ticked ids are actually applied.
+  // handScheduled is carried per row (never true in movedRows, since
+  // shiftForMilestone already excludes those) so the render below can
+  // flag a hand-scheduled task with the same "moved by hand" Pill the
+  // phase-matched path uses — checkable here (there is no phase to
+  // structurally exclude it), but still visibly marked: handScheduled
+  // records a human's deliberate placement, and ticking through a long
+  // list shouldn't silently override that.
+  const manualRows = useMemo(() => {
+    if (phaseId) return [] as typeof movedRows;
+    return shiftTasksByIds(tasks.map((t) => t.id), delta, tasks).map((m) => ({
+      ...m,
+      title: tasksById.get(m.id)?.title || m.id,
+      handScheduled: tasksById.get(m.id)?.handScheduled ?? false,
+    }));
+  }, [phaseId, tasks, delta, tasksById]);
+  const checklistRows = phaseId ? movedRows : manualRows;
+
   // Pre-tick every `moved` row the first time it's known (lazy — moved's
   // MEMBERSHIP is stable across date edits per the note above, so this
-  // never needs to re-run as dateStr changes).
-  const effectiveTicked = ticked ?? new Set(movedRows.map((m) => m.id));
+  // never needs to re-run as dateStr changes). A null-phase milestone
+  // pre-ticks NOTHING (D168) even though `manualRows` now offers every
+  // task as a candidate — the human chooses, the app never guesses.
+  const effectiveTicked = ticked ?? new Set(phaseId ? movedRows.map((m) => m.id) : []);
 
   function toggle(id: string) {
     setTicked((prev) => {
-      const base = prev ?? new Set(movedRows.map((m) => m.id));
+      const base = prev ?? new Set(phaseId ? movedRows.map((m) => m.id) : []);
       const next = new Set(base);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -572,7 +603,7 @@ function MilestoneShiftDialog({
       return;
     }
     setBusy(true);
-    const ids = movedRows.filter((m) => effectiveTicked.has(m.id)).map((m) => m.id);
+    const ids = checklistRows.filter((m) => effectiveTicked.has(m.id)).map((m) => m.id);
     const r = await moveMilestoneAction(engagementId, milestone.id, targetDate, ids);
     setBusy(false);
     if (!r.ok) {
@@ -609,18 +640,27 @@ function MilestoneShiftDialog({
 
           {!phaseId && (
             <div style={{ marginTop: 12, fontSize: 12, color: "#8c919c" }}>
-              This milestone has no phase set, so no tasks move with it.
+              This milestone has no phase set, so nothing is pre-ticked — pick which tasks move with it below.
             </div>
           )}
 
-          {movedRows.length > 0 && (
+          {checklistRows.length > 0 && (
             <div style={{ marginTop: 14 }}>
               <span style={LABEL}>Move with it</span>
               <div style={{ display: "grid", gap: 6 }}>
-                {movedRows.map((m) => (
+                {checklistRows.map((m) => (
                   <label key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#3a3f4a" }}>
                     <input type="checkbox" checked={effectiveTicked.has(m.id)} onChange={() => toggle(m.id)} />
                     <span style={{ flex: 1 }}>{m.title}</span>
+                    {/* #145 review fix (Minor 1) — the manual (null-phase)
+                        checklist offers a hand-scheduled task as a fully
+                        live, checkable row, unlike the phase-matched path
+                        which excludes it structurally. Unticked by default
+                        is enough on its own, but the same "moved by hand"
+                        Pill the excluded rows below use keeps a human's
+                        deliberate placement visible even here, so ticking
+                        through a long list doesn't quietly override it. */}
+                    {m.handScheduled && <Pill color="#8c919c">moved by hand</Pill>}
                     {typeof m.startAt === "number" && typeof m.dueAt === "number" && (
                       <span style={{ color: "#9aa0ab", fontSize: 11.5, whiteSpace: "nowrap" }}>
                         {fmtShort(m.startAt)} – {fmtShort(m.dueAt)}

@@ -2,6 +2,7 @@ import {
   listDocs, getDoc, upsertDoc, patchDoc, softDeleteDoc, insertDocIfAbsent, insertWithPrefixedId,
 } from "@/db/doc-store";
 import type { ProjectTask, ProjectStage, ProjectRecord } from "@/lib/stores/projects";
+import { shiftForMilestone, shiftTasksByIds } from "@/lib/consulting-schedule";
 
 /* ============================================================
    Tasks (#17) — the app's first cross-record task collection,
@@ -363,6 +364,49 @@ export async function patchTask(
     next.updatedAt = now();
     return next;
   });
+}
+
+/**
+ * #145 D168 review — the writer half of a milestone shift, pulled out of
+ * `moveMilestoneAction` (schedule-actions.ts, "use server") so it's an
+ * ordinary module import the spec harness can call directly, the same
+ * Data Access Layer split `performCapture` uses (engagement-activity-
+ * write.ts) — every export of a "use server" file is directly
+ * POST-reachable, so the actual write logic lives here and the action is
+ * just `requireUser()` then delegate.
+ *
+ * Branches on whether the milestone has a phase: `shiftForMilestone`
+ * pre-ticks and moves only that phase's untouched tasks (a null phase
+ * always returns `moved: []` from it, by design); `shiftTasksByIds`
+ * covers the null-phase manual checklist instead, where the caller's own
+ * `alsoMoveTaskIds` — not a phase match — IS the membership. Either way,
+ * `allowed` re-filters against exactly the ids the caller passed, so a
+ * `shiftTasksByIds` result (already scoped to those same ids) is filtered
+ * redundantly but harmlessly, and a `shiftForMilestone` result stays
+ * scoped to what the caller actually ticked.
+ */
+export async function applyMilestoneTaskShifts(
+  ms: { phaseId: string | null },
+  deltaMs: number,
+  alsoMoveTaskIds: readonly string[],
+  tasks: readonly TaskRecord[]
+): Promise<number> {
+  if (!alsoMoveTaskIds.length) return 0;
+  const shifts = ms.phaseId
+    ? shiftForMilestone({ phaseId: ms.phaseId }, deltaMs, tasks).moved
+    : shiftTasksByIds(alsoMoveTaskIds, deltaMs, tasks);
+  const allowed = new Set(alsoMoveTaskIds);
+  let moved = 0;
+  for (const s of shifts) {
+    if (!allowed.has(s.id)) continue;
+    await patchTask(s.id, (t) => {
+      t.startAt = s.startAt;
+      t.dueAt = s.dueAt;
+      return t; // NOT handScheduled — this was a milestone move, not a drag
+    });
+    moved++;
+  }
+  return moved;
 }
 
 /** One-way, idempotent: copy any project's embedded tasks[] into the tasks

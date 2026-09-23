@@ -4304,9 +4304,19 @@ six months later by following `taskIds` back to the note that spawned it.
 The feed merges, newest first: notes (with their spawned tasks and files inline), meetings,
 decisions, phase attachments, and milestone-move notes. A milestone move (D168) writes a
 **system-authored note** into this same feed rather than introducing a separate history table —
-one feed, one record shape, one place to look for "what happened on this engagement." Krisp/meeting
-pre-fill (opening the composer from a meeting or recording pre-fills the body with minutes and
-attaches attendees) ships in v1; task lines are ticked by a human, nothing is auto-extracted.
+one feed, one record shape, one place to look for "what happened on this engagement." Task lines
+are ticked by a human; nothing is auto-extracted into them.
+
+**Krisp/meeting pre-fill (#145 Task 8, landed as a fast-follow rather than in this composer's
+original commit):** `prefillFromMeeting` (`src/lib/engagement-activity.ts`) seeds the composer's
+body from a meeting's minutes, with attendees surfaced as a caption for the human to read. It's
+reached from two entry points — the Meetings tab's "Capture to Activity" link, and a Krisp
+recording's "Capture to engagement" action — both landing on `?tab=activity&prefill=<id>`; the
+`[id]` page resolves `<id>` against `eng.meetings` first, then (only when needed) projects a linked
+Krisp recording's summary into the same meeting shape via a server-computed prop, never importing
+the recordings store into a client component. The prefill param is cleared with `router.replace`
+once seeded, so a refresh can't re-seed over edits. Body only, matching this decision's own rule
+above — the pre-fill never touches task lines; those stay ticked by a human.
 
 **Rejected alternative:** separate, unlinked flows for adding a note, uploading a file, and creating
 a task, the way most of the app's other record types already work. Rejected because it is exactly

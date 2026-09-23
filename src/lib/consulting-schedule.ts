@@ -164,10 +164,16 @@ export type ShiftCandidate = {
 export type ShiftedTask = { id: string; startAt: number | null; dueAt: number | null };
 
 /**
- * Which tasks a milestone move should offer to bring along (D168): the
+ * Which tasks a milestone move should offer to PRE-TICK (D168): the
  * milestone's own phase, minus anything hand-dragged. A milestone with no
- * phase moves nothing — the dialog degrades to an empty checklist rather
- * than guessing. `moved` carries the NEW dates; the caller persists them.
+ * phase pre-ticks nothing — `moved` is empty, by design, so the dialog
+ * never guesses which tasks belong to it. `moved` carries the NEW dates;
+ * the caller persists them.
+ *
+ * A null-phase milestone still degrades to a full MANUAL checklist in the
+ * UI (every task, unticked) rather than an empty one — see
+ * `shiftTasksByIds`, which the dialog/action use for that path instead of
+ * this function, since there is no phase to infer membership from.
  */
 export function shiftForMilestone<T extends ShiftCandidate>(
   milestone: { phaseId: string | null },
@@ -189,6 +195,34 @@ export function shiftForMilestone<T extends ShiftCandidate>(
     }
   }
   return { moved, skipped };
+}
+
+/**
+ * The manual fallback for a null-phase milestone (D168 review fix): with
+ * no phase to infer membership from, the human's own checklist ticks ARE
+ * the membership — this computes the same NEW-dates shape `shiftForMilestone`
+ * does, but for exactly the ids the caller names, in whatever order `tasks`
+ * has them. Unmatched ids (already removed, wrong engagement, etc.) are
+ * silently dropped rather than throwing — same tolerance `moveMilestoneAction`
+ * already gives the phase-matched path via its own `allowed` filter.
+ */
+export function shiftTasksByIds<T extends ShiftCandidate>(
+  ids: readonly string[],
+  deltaMs: number,
+  tasks: readonly T[]
+): ShiftedTask[] {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const out: ShiftedTask[] = [];
+  for (const id of ids) {
+    const t = byId.get(id);
+    if (!t) continue;
+    out.push({
+      id: t.id,
+      startAt: typeof t.startAt === "number" ? t.startAt + deltaMs : null,
+      dueAt: typeof t.dueAt === "number" ? t.dueAt + deltaMs : null,
+    });
+  }
+  return out;
 }
 
 export type GenerateInput = {

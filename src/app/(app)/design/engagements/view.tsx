@@ -36,6 +36,7 @@ import {
   removePhaseAction,
   setArchitectAction,
   setEngagementStatusAction,
+  setMilestonePhaseAction,
   setPeopleAction,
   setPhaseStatusAction,
   setSubmittalStatusAction,
@@ -1202,6 +1203,17 @@ function MilestonesTab({ eng, quoteValue }: { eng: ConsultingEngagement; quoteVa
               value={m.targetDate}
               onSave={async (ts) => { await updateMilestoneAction(eng.id, m.id, { targetDate: ts }); router.refresh(); }}
             />
+            <select
+              value={m.phaseId ?? ""}
+              onChange={async (e) => { await setMilestonePhaseAction(eng.id, m.id, e.target.value || null); router.refresh(); }}
+              title="Phase — gates which tasks the shift dialog offers to move with this milestone"
+              style={{ ...INPUT, width: 150, padding: "4px 8px", fontSize: 12 }}
+            >
+              <option value="">No phase</option>
+              {eng.phases.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
             <div style={{ width: 90, fontSize: 12.5, textAlign: "right", color: "#3a3f4a" }}>{m.amount ? money(m.amount) : "—"}</div>
             <button style={{ ...SMALL_BTN, padding: "4px 8px", color: "#a0442b" }} onClick={async () => { await removeMilestoneAction(eng.id, m.id); router.refresh(); }}>
               ×

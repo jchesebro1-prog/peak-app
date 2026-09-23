@@ -27,6 +27,7 @@ import {
   patchEngagement,
   setChecklistItem,
   setCommentState,
+  setMilestonePhase,
   setPhaseStatus,
   submitPhaseReview,
   updateMeeting,
@@ -589,6 +590,29 @@ export async function updateMilestoneAction(
           ? null
           : Math.max(0, Math.round(Number(input.amount)));
   });
+  return done();
+}
+
+/**
+ * #145 review — a milestone's phaseId (D168) had no writer at all besides
+ * generateScheduleAction's exact-name match, which only fires for the
+ * minority of milestones whose free-text name happens to match a phase
+ * name. This is the dropdown's action: every export of a "use server" file
+ * is directly POST-reachable in Next 16 (a sibling task was sent back for
+ * missing this), so requireUser() is called before any write. The actual
+ * validate-then-write logic lives in `setMilestonePhase` (stores/
+ * engagements.ts) — an ordinary module export the spec harness can call
+ * directly, the same split `performCapture` uses — so this action is
+ * just the auth gate plus a `revalidatePath`.
+ */
+export async function setMilestonePhaseAction(
+  engId: string,
+  msId: string,
+  phaseId: string | null
+) {
+  await requireUser();
+  const r = await setMilestonePhase(engId, msId, phaseId);
+  if (!r.ok) return r;
   return done();
 }
 
