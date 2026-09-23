@@ -765,6 +765,42 @@ const badShape = Object.entries(Shapes.ALL_SHAPES).find(([, make]) =>
 );
 ok(!badShape, `shapes: every shape emits only known connection types${badShape ? ` (offender: ${badShape[0]})` : ""}`);
 
+/* --- #159 Task 2: the rule matcher --- */
+import { matchRule, proposeForPart, type PortRule, type RulePart } from "@/lib/catalog-port-rules";
+
+const rpart = (desc: string, extra: Partial<RulePart> = {}): RulePart =>
+  ({ sku: "X:1", desc, category: "Audio", mfr: "EAW", ...extra });
+
+const testRules: PortRule[] = [
+  { id: "acc", desc: /\b(bracket|cover)\b/i, accessory: true, shape: () => [], note: "accessory" },
+  { id: "passive", mfr: "EAW", desc: /passive.*(sub|speaker)/i, shape: () => Shapes.passiveSpeakerPorts(), note: "passive box" },
+  { id: "any-speaker", desc: /speaker/i, shape: () => Shapes.poweredSpeakerPorts(), note: "fallback" },
+];
+
+ok(matchRule(rpart("Passive 18\" Subwoofer"), testRules)?.id === "passive", "rules: the first matching rule wins");
+ok(matchRule(rpart("Powered speaker"), testRules)?.id === "any-speaker", "rules: a later rule matches when earlier ones do not");
+ok(matchRule(rpart("Mounting bracket for speaker"), testRules)?.id === "acc", "rules: the accessory layer beats a device rule");
+ok(matchRule(rpart("Passive Speaker", { mfr: "RCF" }), testRules)?.id === "any-speaker", "rules: an mfr-scoped rule does not match another brand");
+ok(matchRule(rpart("Widget"), testRules) === null, "rules: an unmatched part yields null, never a guess");
+
+const acc = proposeForPart(rpart("Mounting bracket for speaker"), testRules);
+ok(acc === null, "rules: an accessory proposes no ports");
+const prop = proposeForPart(rpart("Passive 18\" Subwoofer"), testRules);
+ok(prop?.ports[0].connectionType === "speakON NL2", "rules: a device match proposes its shape's ports");
+ok(prop?.rule.id === "passive", "rules: the proposal names the rule that produced it, for the report");
+
+const excl: PortRule[] = [
+  { id: "sub-only", desc: /subwoofer/i, exclude: /passive/i, shape: () => Shapes.poweredSpeakerPorts(), note: "powered subs" },
+];
+ok(matchRule(rpart("Passive 18\" Subwoofer"), excl) === null, "rules: exclude suppresses an otherwise-matching rule");
+ok(matchRule(rpart("Powered 18\" Subwoofer"), excl)?.id === "sub-only", "rules: exclude does not suppress a non-matching description");
+
+const catRule: PortRule[] = [
+  { id: "sb", category: /^SB$/, desc: /./, shape: () => Shapes.passiveSpeakerPorts(), note: "EAW SB line" },
+];
+ok(matchRule(rpart("anything", { category: "SB" }), catRule)?.id === "sb", "rules: a category pattern matches");
+ok(matchRule(rpart("anything", { category: "Audio" }), catRule) === null, "rules: a category pattern that misses blocks the rule");
+
 
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
