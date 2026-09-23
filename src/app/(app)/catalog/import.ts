@@ -8,7 +8,7 @@
 import { mfrKey } from "@/lib/catalog-books";
 import { checkManufacturer, checkSize } from "@/lib/catalog-import-guard";
 import { setPriceListEffective } from "@/lib/settings";
-import { list as listCatalog, mergeUpsert } from "@/lib/stores/catalog";
+import { list as listCatalog, mergeUpsert, type CatalogProductMetadata } from "@/lib/stores/catalog";
 import { parseCatalog } from "./parse";
 
 export type CatalogImportInput = {
@@ -55,6 +55,28 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
   const priced = parsed.hasList || parsed.hasCost;
   for (const r of valid) {
     const isNew = !existing.has(r.sku);
+    const productMetadata: CatalogProductMetadata = {
+      ...(r.specSection ? { specSection: r.specSection } : {}),
+      ...(r.specArticle ? { specArticle: r.specArticle } : {}),
+      ...(r.researchStatus === "researched" || r.researchStatus === "needs-review" ? { researchStatus: r.researchStatus } : {}),
+      ...((r.manufacturerUrl || r.sourceDocumentName || r.sourceDocumentDate)
+        ? {
+            source: {
+              ...(r.manufacturerUrl ? { manufacturerUrl: r.manufacturerUrl } : {}),
+              ...(r.sourceDocumentName ? { sourceDocumentName: r.sourceDocumentName } : {}),
+              ...(r.sourceDocumentDate ? { sourceDocumentDate: Date.parse(r.sourceDocumentDate) || null } : {}),
+            },
+          }
+        : {}),
+      ...((r.datasheetUrl || r.guideSpecUrl)
+        ? {
+            datasheets: [
+              ...(r.datasheetUrl ? [{ kind: "datasheet" as const, fileName: "", sourceUrl: r.datasheetUrl }] : []),
+              ...(r.guideSpecUrl ? [{ kind: "guide-spec" as const, fileName: "", sourceUrl: r.guideSpecUrl }] : []),
+            ],
+          }
+        : {}),
+    };
     await mergeUpsert(
       r.sku,
       {
@@ -65,6 +87,7 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
         ...(r.manufacturerPartNumber ? { manufacturerPartNumber: r.manufacturerPartNumber } : {}),
         ...(r.manufacturerModelNumber ? { manufacturerModelNumber: r.manufacturerModelNumber } : {}),
         ...(parsed.hasMap || isNew ? { mapPrice: r.mapPrice || null } : {}),
+        ...(Object.keys(productMetadata).length ? { productMetadata } : {}),
       },
       { pricedAt: input.effectiveAt }
     );

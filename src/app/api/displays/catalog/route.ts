@@ -35,6 +35,7 @@ export async function GET(req: Request) {
       datasheet: part.datasheetName
         ? { name: part.datasheetName, url: `/api/part-datasheet/${encodeURIComponent(part.sku)}` }
         : null,
+      productMetadata: part.productMetadata ?? null,
       updatedAt: part.updatedAt ?? null,
       pricedAt: part.pricedAt ?? null,
     }));

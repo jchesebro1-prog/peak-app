@@ -17,6 +17,14 @@ export type CatalogRow = {
   manufacturerPartNumber: string;
   manufacturerModelNumber: string;
   mapPrice: number;
+  specSection: string;
+  specArticle: string;
+  manufacturerUrl: string;
+  datasheetUrl: string;
+  guideSpecUrl: string;
+  researchStatus: string;
+  sourceDocumentName: string;
+  sourceDocumentDate: string;
   valid: boolean;
 };
 
@@ -48,6 +56,14 @@ const ALIASES: Record<keyof Omit<CatalogRow, "valid">, string[]> = {
   manufacturerPartNumber: ["mfr pn", "mfr p/n", "mfr part number", "manufacturer part number", "manufacturer pn", "manufacturer p/n", "mpn"],
   manufacturerModelNumber: ["mfr mn", "mfr m/n", "mfr model number", "manufacturer model number", "manufacturer mn", "manufacturer m/n", "model number"],
   mapPrice: ["map", "map price", "minimum advertised price", "minimum advertised", "advertised price"],
+  specSection: ["spec section", "specification section", "csi section"],
+  specArticle: ["spec article", "article"],
+  manufacturerUrl: ["manufacturer url", "manufacturer website", "product url"],
+  datasheetUrl: ["datasheet url", "data sheet url", "cut sheet url"],
+  guideSpecUrl: ["guide spec url", "guide specification url"],
+  researchStatus: ["research status", "metadata status"],
+  sourceDocumentName: ["source document", "source document name"],
+  sourceDocumentDate: ["source date", "source document date"],
 };
 
 function norm(s: unknown): string {
@@ -160,6 +176,14 @@ export function parseCatalog(text: string, defaultCategory = ""): CatalogParse {
     manufacturerPartNumber: 7,
     manufacturerModelNumber: 8,
     mapPrice: 9,
+    specSection: 10,
+    specArticle: 11,
+    manufacturerUrl: 12,
+    datasheetUrl: 13,
+    guideSpecUrl: 14,
+    researchStatus: 15,
+    sourceDocumentName: 16,
+    sourceDocumentDate: 17,
   };
 
   let hasList: boolean;
@@ -196,6 +220,14 @@ export function parseCatalog(text: string, defaultCategory = ""): CatalogParse {
     const manufacturerPartNumber = at(map.manufacturerPartNumber).trim();
     const manufacturerModelNumber = at(map.manufacturerModelNumber).trim();
     const mapPrice = toNum(at(map.mapPrice));
+    const specSection = at(map.specSection).trim();
+    const specArticle = at(map.specArticle).trim();
+    const manufacturerUrl = at(map.manufacturerUrl).trim();
+    const datasheetUrl = at(map.datasheetUrl).trim();
+    const guideSpecUrl = at(map.guideSpecUrl).trim();
+    const researchStatus = at(map.researchStatus).trim();
+    const sourceDocumentName = at(map.sourceDocumentName).trim();
+    const sourceDocumentDate = at(map.sourceDocumentDate).trim();
     const valid = !!sku && !!desc;
     return {
       sku,
@@ -208,6 +240,14 @@ export function parseCatalog(text: string, defaultCategory = ""): CatalogParse {
       manufacturerPartNumber,
       manufacturerModelNumber,
       mapPrice,
+      specSection,
+      specArticle,
+      manufacturerUrl,
+      datasheetUrl,
+      guideSpecUrl,
+      researchStatus,
+      sourceDocumentName,
+      sourceDocumentDate,
       valid,
     };
   });

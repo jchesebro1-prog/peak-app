@@ -2,6 +2,29 @@ import { clearCollection, getDoc, listDocs, upsertDoc } from "@/db/doc-store";
 import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
 
+export type CatalogProductMetadata = {
+  productFamily?: string;
+  specSection?: string;
+  specArticle?: string;
+  specLanguageKey?: string;
+  researchStatus?: "unverified" | "needs-review" | "researched";
+  source?: {
+    manufacturerUrl?: string;
+    sourceDocumentName?: string;
+    sourceDocumentDate?: number | null;
+    researchedAt?: number | null;
+    researchedBy?: string;
+  };
+  datasheets?: Array<{
+    kind: "datasheet" | "guide-spec" | "manual" | "cut-sheet" | "other";
+    fileName: string;
+    blobKey?: string;
+    sourceUrl?: string;
+    verifiedAt?: number | null;
+  }>;
+  accessories?: Array<{ sku?: string; manufacturerPartNumber?: string; description: string; required?: boolean }>;
+};
+
 /**
  * Catalog — server port of app/catalog-data.js (window.MASTER_CATALOG +
  * window.catalogByCategory) over collection "catalog_parts". Single source of
@@ -74,6 +97,8 @@ export type CatalogPart = {
   datasheetBlobKey?: string;
   /** Original filename of the attached datasheet, for display. */
   datasheetName?: string;
+  /** Researched, provenance-aware fields used by the Specs builder and read-only Displays API. */
+  productMetadata?: CatalogProductMetadata;
   /** Epoch ms of the last write through `upsert`/`mergeUpsert` (PUNCHLIST
    *  #14, decision A) — drives the dashboard's price-book age pills. Unset
    *  on rows that have never been touched since seeding (the seed fixtures

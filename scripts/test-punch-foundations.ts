@@ -28,13 +28,16 @@ function testDashboardInvalidOverrideFallsBack() {
 
 function testCatalogMetadataColumns() {
   const parsed = parseCatalog(
-    "SKU,Description,Category,Unit,List,Cost,Manufacturer,MFR P/N,MFR M/N,MAP\n" +
-      "ETC-S4,Source Four,Fixtures,ea,100,60,ETC,7060A,7060A,95"
+    "SKU,Description,Category,Unit,List,Cost,Manufacturer,MFR P/N,MFR M/N,MAP,Spec Section,Manufacturer URL,Datasheet URL,Research Status\n" +
+      "ETC-S4,Source Four,Fixtures,ea,100,60,ETC,7060A,7060A,95,11 31 00,https://etcconnect.com/s4,https://etcconnect.com/s4.pdf,researched"
   );
   assert.equal(parsed.rows[0]?.mfr, "ETC");
   assert.equal(parsed.rows[0]?.manufacturerPartNumber, "7060A");
   assert.equal(parsed.rows[0]?.manufacturerModelNumber, "7060A");
   assert.equal(parsed.rows[0]?.mapPrice, 95);
+  assert.equal(parsed.rows[0]?.specSection, "11 31 00");
+  assert.equal(parsed.rows[0]?.datasheetUrl, "https://etcconnect.com/s4.pdf");
+  assert.equal(parsed.rows[0]?.researchStatus, "researched");
 }
 
 testDashboardInheritance();
@@ -48,4 +51,4 @@ assert.equal(vendorCsv.items[0]?.manufacturerPartNumber, "ETC-123");
 assert.equal(lineMarginOf(60, 100), 0.4);
 assert.equal(lineExtSellOf({ qty: 2, price: 100 }), 200);
 assert.equal(lineExtSellOf({ qty: 2, price: 100, extSellOverride: 175 }), 175);
-console.log("punch foundations: 8 passed");
+console.log("punch foundations: 11 passed");
