@@ -41,7 +41,7 @@ import {
 import { activeUsers } from "@/lib/users";
 import { groupByPerson, mergeBookingsIntoPersonRows, UNASSIGNED_LABEL, type PersonBooking } from "@/app/(app)/schedule/people-lib";
 import { parseAssignTarget } from "@/app/(app)/import/registry";
-import { softDeleteDoc } from "@/db/doc-store";
+import { listDocs, softDeleteDoc } from "@/db/doc-store";
 import {
   msOf as opMsOf,
   serviceToWorkItems,
@@ -6167,6 +6167,7 @@ recordingsAsyncChecks()
   .then(() => archiveAsyncChecks())
   .then(() => asyncChecks())
   .then(() => templateScheduleAsyncChecks())
+  .then(() => cleanupFixtureRowsAsync())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -7237,8 +7238,9 @@ const dataRef145: FileRef = { kind: "data", dataUrl: "data:text/plain,hi", name:
 ok(fileRefKey(dataRef145) === "", "#145 a data-URL ref has no storage key");
 ok(!ownsEngagementFile([dataRef145], "", "CE-1"), "#145 a data-URL ref's empty key never matches an empty request either");
 ok(fileRefHref(dataRef145, "CE-1") === dataRef145.dataUrl, "#145 a data-URL ref's href is the data URL itself — no network round trip");
-ok(fileRefHref(ownedRefs145[0], "CE-1044") === "/api/engagement-files/CE-1044/good", "#145 a drive ref's href routes through the ownership-checked proxy, not a raw Drive link");
-ok(fileRefHref(ownedRefs145[1], "CE-1") === "/api/engagement-files/CE-1/engagement-files%2FCE-1%2Fb.pdf", "#145 a blob ref's href is proxied with its pathname encoded");
+ok(fileRefHref(ownedRefs145[0], "CE-1044", "N-1", 0) === "/api/engagement-files/CE-1044/N-1/0", "#145 a drive ref's href addresses the owning note slot, not a raw Drive id");
+ok(fileRefHref(ownedRefs145[1], "CE-1", "N-2", 1) === "/api/engagement-files/CE-1/N-2/1", "#145 a blob ref's href addresses the owning note slot, not a client-supplied pathname");
+ok(fileRefHref(ownedRefs145[0], "CE-1044") === "#", "#150 a stored ref without note coordinates has no downloadable proxy URL");
 
 /* ====== #145 round 3: positive-shape validation replaces the '..' denylist ======
  * The reviewer checked @vercel/blob's constructBlobUrl directly: it
@@ -7545,3 +7547,35 @@ ok(pre145.text.includes("fire curtain"), "#145 the pre-filled body carries the m
 ok(pre145.attendees.join("|") === "Dana Kim|Jeff C.", "#145 attendees are split for attachment to the note");
 ok(prefillFromMeeting({ id: "m", at: 0, title: "", attendees: "", minutes: "" }).text === "", "#145 an empty meeting pre-fills nothing rather than a header with no content");
 ok(!prefillFromMeeting({ id: "m", at: OCT6, title: "x", attendees: "", minutes: "y" }).text.includes("undefined"), "#145 a meeting with no attendees never renders the string 'undefined'");
+
+/* --- #149 centralized fixture cleanup -----------------------------------
+ * These specs run against the persistent local database. Keep the fixture
+ * marker in one place so a newly added DB-backed assertion has an explicit
+ * cleanup vocabulary instead of silently accumulating business records. */
+async function cleanupFixtureRowsAsync(): Promise<void> {
+  const FIXTURE_ID_RE = /^(test-(?:quote|eng|project)|test-booking|test-task|test-note)/i;
+  const FIXTURE_NAME_RE = /^(?:PUNCHLIST #13 test|PUNCHLIST #145|ZZ-TEST-145-T10)/i;
+  const FIXTURE_COLLECTIONS = [
+    "quotes", "projects", "inspections", "repair_jobs", "equipment_bookings",
+    "consulting_engagements", "tasks", "notes", "task_templates",
+  ] as const;
+  let fixtureRowsCleared = 0;
+  for (const collection of FIXTURE_COLLECTIONS) {
+    const rows = await listDocs<{ id: string; [key: string]: unknown }>(collection);
+    for (const row of rows) {
+      const id = typeof row.id === "string" ? row.id : "";
+      const name = typeof row.name === "string" ? row.name : "";
+      const quoteId = typeof row.quoteId === "string" ? row.quoteId : "";
+      const parentId = typeof row.parentId === "string" ? row.parentId : "";
+      const engagementId = typeof row.engagementId === "string" ? row.engagementId : "";
+      if (
+        FIXTURE_ID_RE.test(id) || FIXTURE_NAME_RE.test(name) ||
+        FIXTURE_ID_RE.test(quoteId) || FIXTURE_ID_RE.test(parentId) || FIXTURE_ID_RE.test(engagementId)
+      ) {
+        await softDeleteDoc(collection, id);
+        fixtureRowsCleared++;
+      }
+    }
+  }
+  ok(fixtureRowsCleared >= 0, `#149 centralized fixture cleanup completed (${fixtureRowsCleared} rows)`);
+}

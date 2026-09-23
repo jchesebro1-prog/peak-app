@@ -147,9 +147,10 @@ export function engagementFolderPath(customer: string, engagementId: string): st
  * already proven the id belongs to this engagement before it streams
  * anything.
  */
-export function fileRefHref(ref: FileRef, engagementId: string): string {
+export function fileRefHref(ref: FileRef, engagementId: string, noteId?: string, attachmentIndex?: number): string {
   if (ref.kind === "data") return ref.dataUrl;
-  return `/api/engagement-files/${encodeURIComponent(engagementId)}/${encodeURIComponent(fileRefKey(ref))}`;
+  if (!noteId || !Number.isInteger(attachmentIndex) || attachmentIndex! < 0) return "#";
+  return `/api/engagement-files/${encodeURIComponent(engagementId)}/${encodeURIComponent(noteId)}/${attachmentIndex}`;
 }
 
 /**

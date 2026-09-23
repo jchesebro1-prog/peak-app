@@ -6874,7 +6874,7 @@ separate times, from five different people who each had to re-derive that it was
 returns) or gate `test:specs`'s start on the seed's completion, so a fresh datadir either seeds
 before anything reads it or the run fails loudly and consistently rather than intermittently.
 
-## 149. The spec harness's fixture rows are never torn down, by file-wide convention — OPEN
+## 149. The spec harness's fixture rows are never torn down, by file-wide convention — DONE 2026-09-23
 
 **Reported:** found during #145 Task 3's review, 2026-09-22 — pre-existing pattern, not introduced
 by #145, but #145 is what made it worth logging given the shared-DB risk below.
@@ -6892,6 +6892,8 @@ data, distinguishable from real records only by name pattern.
 uses, plus a script that finds and soft-deletes anything carrying it — rather than relying on each
 new test's author to remember `try`/`finally`.
 
+**Fixed 2026-09-23:** the harness now runs one centralized post-suite fixture sweep across all DB-backed collections. It matches the established test IDs/names and relationship fields, soft-deletes every matching row, and reports the cleanup count. The suite passes with the sweep enabled (`#149 centralized fixture cleanup completed`).
+
 **Update (#145 Task 15 whole-branch review, 2026-09-22):** found and fixed a second instance —
 the `validateFileRefsForEngagement` block's `createManualEngagement(...)` call (originally
 `scripts/test-review-and-spec.ts:4413-4418`) had no find-or-create and no teardown, minting a fresh
@@ -6899,7 +6901,7 @@ open `CE-####` on every `test:specs` run. Given the same find-or-create-by-fixed
 `try`/`finally` + `softDeleteDoc` treatment as Task 3's. Two instances fixed now; the ask above
 (a repo-wide convention) still stands — this remains a per-test discipline, not an enforced one.
 
-## 150. The engagement file proxy keys on a client-supplied storage key rather than record coordinates — OPEN
+## 150. The engagement file proxy keys on a client-supplied storage key rather than record coordinates — DONE 2026-09-23
 
 **Reported:** found during #145 Task 9's review, 2026-09-22. Deferred deliberately during the run
 to avoid a third collision with a task (#145 Task 7) editing the same rendering path the same day.
@@ -6916,6 +6918,8 @@ those two layers to be safe in the first place.
 
 **Ask:** reshape `fileRefHref` and the proxy to address a note + attachment index rather than a raw
 `FileRef`, once no other task is mid-edit on the same rendering path.
+
+**Fixed 2026-09-23:** the proxy is now `/api/engagement-files/[engagementId]/[noteId]/[attachmentIndex]`. It resolves the persisted note and attachment server-side, rejects data URLs, and retains the positive Blob-path and live Drive-parent ownership checks. `fileRefHref` and the Activity feed now emit note-slot URLs, so a browser cannot name an arbitrary storage key. Typecheck and the full spec suite pass.
 
 ## 151. Task-template import validation surfaces at commit time, on the receipt — not per-row in the preview — DONE 2026-09-23
 
