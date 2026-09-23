@@ -2976,8 +2976,10 @@ based on that.
 **Ties in:** item **11** (pricing tiers → default margin — this is the manual override path), item
 **24** (revisions — the entered price must snapshot, not recompute).
 
-**Status:** OPEN — logged 2026-07-21, no code touched. Contained — the math and the per-section margin
-field already exist; the work is a sell-price input + deciding A (line distribution).
+**Status:** DONE 2026-09-23 — the internal section Sell field solves the uniform section margin,
+reprices every line, persists through the existing quote section save/revision payload, clamps the
+upper bound to 95%, and treats a target at/below cost as 0% margin. The tier remains the seed for
+new lines; a typed section sell is the explicit manual override.
 
 ---
 
@@ -4387,7 +4389,7 @@ this confusion, and the adapter reintroduces it.
 wall-to-wall width, a fraction of it, or should those venue kinds take a different sizing path
 entirely? This is a domain call, not a code call.
 
-**Status:** PARTIAL 2026-08-01. **Jeff's call: `width -> proWidthFt` stays as-is** (full wall-to-wall is accepted behavior) — that mapping is deliberately UNCHANGED and should not be branched on venue kind. The separate **wing double-count IS fixed**: `2*wing` is now added only for a real proscenium, mirroring the distinction `pipeLenFt` already draws. `venueDimsFromEstimator` takes a required `proscenium` boolean, so the compiler proves every call site was updated.
+**Status:** DONE 2026-09-23. **Jeff's call: `width -> proWidthFt` stays as-is** (full wall-to-wall is accepted behavior) — that mapping is deliberately UNCHANGED and is not branched on venue kind. The separate **wing double-count is fixed**: `2*wing` is added only for a real proscenium, mirroring `pipeLenFt`. `venueDimsFromEstimator` takes a required `proscenium` boolean, so the compiler proves every call site was updated.
 
 ---
 
