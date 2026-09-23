@@ -13,16 +13,16 @@ const SURFACES: readonly Surface[] = ["home", "reports"];
 const pathOf = (s: Surface) => (s === "home" ? "/" : "/reports");
 
 export async function saveLayoutAction(surface: Surface, ids: string[]): Promise<{ ok: boolean }> {
-  const me = await requireUser();
   if (!SURFACES.includes(surface) || !Array.isArray(ids)) return { ok: false };
+  const me = await requireUser();
   await saveLayout(me.id, surface, ids.map(String), me.roles);
   revalidatePath(pathOf(surface));
   return { ok: true };
 }
 
 export async function resetLayoutAction(surface: Surface): Promise<{ ok: boolean }> {
-  const me = await requireUser();
   if (!SURFACES.includes(surface)) return { ok: false };
+  const me = await requireUser();
   await resetLayout(me.id, surface);
   revalidatePath(pathOf(surface));
   return { ok: true };

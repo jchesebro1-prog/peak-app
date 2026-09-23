@@ -1845,10 +1845,18 @@ async function main() {
   const saved = await layoutFor("u-t43", "home", ["Admin"]);
   assert.deepEqual(saved.ids, ["my-queue"], "#43 save normalizes before writing");
   assert.equal(saved.customized, true, "#43 a stored row marks the layout customized");
+  await saveLayout("u-t43-other", "home", ["inbox"], ["Admin"]);
+  assert.deepEqual((await layoutFor("u-t43-other", "home", ["Admin"])).ids, ["inbox"], "#43 layouts are isolated by user id");
+  await saveLayout("u-t43-gated", "reports", ["my-queue", "book-margin", "total-quoted", "my-queue"], ["Estimator"]);
+  assert.deepEqual((await layoutFor("u-t43-gated", "reports", ["Estimator"])).ids, ["total-quoted"], "#43 normalization drops gated and wrong-surface ids");
   await saveLayout("u-t43", "reports", ["total-quoted"], ["Admin"]);
   assert.deepEqual((await layoutFor("u-t43", "home", ["Admin"])).ids, ["my-queue"], "#43 saving reports leaves home untouched (per-key merge)");
   await resetLayout("u-t43", "home");
   assert.equal((await layoutFor("u-t43", "home", ["Admin"])).customized, false, "#43 reset returns to the preset");
+  assert.deepEqual((await layoutFor("u-t43", "reports", ["Admin"])).ids, ["total-quoted"], "#43 resetting home preserves the reports layout");
+  const { saveLayoutAction, resetLayoutAction } = await import("@/app/(app)/dashboard-actions");
+  assert.deepEqual(await saveLayoutAction("invalid" as never, []), { ok: false }, "#43 save action rejects an invalid surface before auth");
+  assert.deepEqual(await resetLayoutAction("invalid" as never), { ok: false }, "#43 reset action rejects an invalid surface before auth");
 
   console.log("review regression checks passed");
 }
