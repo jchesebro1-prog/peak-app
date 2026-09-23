@@ -5572,7 +5572,7 @@ the dark context bar, seeded from the intake.
 Numbering skips #98–#106 (used on `wip/2026-08-11-estimator-quote-overhaul`; never landed on main).
 What was **not** done is logged below as #107–#113.
 
-## 107. Home Queue → Google Tasks (two-way) — OPEN, NEEDS DESIGN
+## 107. Home Queue → Google Tasks (two-way) — DONE 2026-09-23 (shipped as #116)
 
 **Reported:** 2026-09-21 (Jeff): "Queue to be more like tasks that get loaded based on the quotes
 and projects and then gets assigned like reminders and google tasks. I would like google tasks to
@@ -6005,7 +6005,7 @@ catalog facet tooltip + banner vendor link; CRM › Vendors nav; seeded `rose-br
 test:specs, test:review:regressions, test:smoke (`/vendors`, `/vendors/rose-brand` + tabs), eslint
 on touched files. Decision D160.
 
-## 123. Inbox: "Link to work" above the customer picker in the link sidebar, plus quick-add quote — OPEN
+## 123. Inbox: "Link to work" above the customer picker in the link sidebar, plus quick-add quote — DONE 2026-09-23
 
 **Reported:** 2026-09-21 (Jeff): "I want link to work to populate on the left side directly above
 the pick the customer. I want the ability to quick add quote from the link to work."
@@ -6042,7 +6042,7 @@ counterpart address, so a multi-party or forwarded thread suggests from the wron
 addresses the resolver and quick-add use; exact semantics (identity source vs message-level link)
 confirmed with Jeff 2026-09-21 before the spec.
 
-## 126. Inbox: resizable list/reader panes + collapsible menu — OPEN
+## 126. Inbox: resizable list/reader panes + collapsible menu — DONE 2026-09-23
 
 **Reported:** 2026-09-21 (Jeff): "the ability to resize the preview window, inbox, and collapse the
 menu."
@@ -6069,7 +6069,7 @@ starts Reply/Reply-all with an empty body (`thread-reader.tsx:430-452`) and `bui
 shared boxes return) inserted into the composer on new/reply/forward below a `-- ` separator, editable
 before send; forward and reply quoting unchanged.
 
-## 128. Inbox: list row shows the last person who responded (Gmail-style); "waiting on them" badge stays — OPEN
+## 128. Inbox: list row shows the last person who responded (Gmail-style); "waiting on them" badge stays — DONE 2026-09-23
 
 **Reported:** 2026-09-21 (Jeff): "The name in the inbox preview should be who responded last,
 organized similar to how Gmail works, and if I responded last ignore that and hold the last person to
