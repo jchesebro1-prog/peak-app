@@ -35,6 +35,12 @@ const DAY = 86400000;
 
 type PostedLine = { itemId: string; locationId: string; qty: number };
 
+function quoteFailure(formData: FormData, message: string): never {
+  const id = String(formData.get("editingId") || "");
+  const qs = new URLSearchParams({ ...(id ? { id } : {}), err: message });
+  redirect("/rentals/quote?" + qs.toString());
+}
+
 /** "YYYY-MM-DD" (from a date input) -> local midnight epoch ms. Mirrors the
  *  sod()/iso() date-string round-trip already used across the scheduling
  *  screens (e.g. schedule/page.tsx, inspections/scheduling/page.tsx). */
@@ -125,7 +131,13 @@ async function persist(formData: FormData): Promise<string | null> {
 }
 
 export async function saveRentalQuote(formData: FormData): Promise<void> {
-  const id = await persist(formData);
+  let id: string | null;
+  try {
+    id = await persist(formData);
+  } catch (error) {
+    console.error("saveRentalQuote: quote save failed", error);
+    quoteFailure(formData, "Couldn’t save the rental quote — please try again.");
+  }
   revalidatePath("/", "layout");
   if (id) redirect("/rentals/quote?id=" + encodeURIComponent(id) + "&saved=1");
 }
@@ -135,18 +147,24 @@ export async function approveRentalQuote(formData: FormData): Promise<void> {
   // checking after it let a user without `send` still mutate the quote
   // before the throw (final review, punch #93).
   await requirePerm("send");
-  const id = await persist(formData);
-  if (!id) {
-    revalidatePath("/", "layout");
-    return;
+  let id: string | null;
+  try {
+    id = await persist(formData);
+    if (!id) {
+      revalidatePath("/", "layout");
+      return;
+    }
+    await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
+    await createFromQuote(id);
+  } catch (error) {
+    console.error("approveRentalQuote: quote approval failed", error);
+    quoteFailure(formData, "Couldn’t approve the rental quote — please try again.");
   }
   // accept -> mark won, which spawns confirmed equipment bookings. Bypasses
   // the punch #60 approval gate: this screen IS the approval, same reasoning
   // as the repair/flame/inspection builders (see quotes.ts's
   // SetStatusOpts doc — "engine-owned-flow" names exactly these four
   // call sites).
-  await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
-  await createFromQuote(id);
   revalidatePath("/", "layout");
   redirect("/rentals/quote?id=" + encodeURIComponent(id) + "&approved=1");
 }

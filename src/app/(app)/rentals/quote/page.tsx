@@ -5,6 +5,7 @@ import { list as listItems, type EquipmentCategory } from "@/lib/stores/equipmen
 import { list as listLocations } from "@/lib/stores/equipment-locations";
 import { getSettings } from "@/lib/settings";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Rental quote — Quartzite-6" };
 
@@ -154,7 +155,9 @@ export default async function RentalQuotePage({
   }
 
   return (
-    <QuoteBuilder
+    <>
+      <ActionError message={one(sp.err)} />
+      <QuoteBuilder
       customers={customers}
       items={items
         .filter((i) => i.active)
@@ -173,6 +176,7 @@ export default async function RentalQuotePage({
       initial={initial}
       me={user.name}
       accent={settings.accent || "#7b3f8a"}
-    />
+      />
+    </>
   );
 }
