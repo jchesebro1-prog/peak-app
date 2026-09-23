@@ -4785,3 +4785,20 @@ Two ways the report was quietly lying about itself, both fixed:
    supply, leaving 2 genuine unmatched fibre kits (`AC-EXO-444-KIT`, `AC-EXO-X-KIT`).
 
 Totals are unchanged by all of this: the report still proposes for **1,390** parts.
+
+## D204. The dev auto-seed stays fire-and-forget, but is awaitable (#148, 2026-09-23)
+
+`getDb()` cannot await its own seed: `seedIfEmpty()` reaches `getDb()` through the doc-store
+helpers, so awaiting inside `createDb()` awaits the promise it is part of. The seed therefore still
+starts unawaited — but its promise is retained and exported as `seeded()`, which any caller that
+READS seeded data can await. `getDb()` is unchanged, so nothing that did not block before blocks
+now; only the test suite waits.
+
+Chosen over the alternatives: making `getDb()` await the seed (deadlock, and it would slow every
+dev-server cold start for a guarantee only tests need), and seeding synchronously before the app
+boots (the same cost, plus it would seed throwaway build datadirs that are discarded).
+
+The measured effect is the justification: a fresh datadir went from 5 intermittent failures to
+1898 PASS / 0 FAIL, consistently. The failures themselves were never the danger — the danger was
+that they taught everyone to dismiss a red `test:specs`, which five separate people had already
+done before this was fixed.

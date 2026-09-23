@@ -6853,7 +6853,7 @@ Giving those four a genuine `update` needs store-level update APIs and is left o
 **Files:** `src/app/(app)/import/parse.ts`, `src/app/(app)/import/registry.ts`,
 `src/app/(app)/import/controls.tsx`, `src/app/(app)/import/page.tsx`.
 
-## 148. The dev auto-seed is fire-and-forget, making every gate in this repo slightly untrustworthy — OPEN
+## 148. The dev auto-seed is fire-and-forget, making every gate in this repo slightly untrustworthy — DONE 2026-09-23 (D204)
 
 **Reported:** found independently by multiple agents during #145's review (Tasks 2, 6's merge, 10,
 11, and 12), and hit again directly during #145's own Task 13 gate run: on a fresh datadir, the
@@ -6874,6 +6874,28 @@ separate times, from five different people who each had to re-derive that it was
 returns) or gate `test:specs`'s start on the seed's completion, so a fresh datadir either seeds
 before anything reads it or the run fails loudly and consistently rather than intermittently.
 
+
+**Shipped 2026-09-23 (`662745d`):** `getDb()` still fires the seed without awaiting it — that part
+cannot change, because `seedIfEmpty()` reaches `getDb()` through the doc-store helpers, so awaiting
+it inside `createDb()` would await the promise it is itself part of. What changed is that the
+seed's promise is now *retained* (`seedDone`) and exposed as `export async function seeded()`, which
+calls `getDb()` first so the seed is guaranteed to have been kicked off, then awaits it. An external
+waiter has no cycle. `getDb()` itself is unchanged and still resolves without waiting, so the dev
+server's first request is no slower and the deadlock risk does not return.
+
+`scripts/test-review-and-spec.ts` awaits it **once**, in front of the whole async chain
+(`seeded().then(() => recordingsAsyncChecks())…`). The other chained suites were checked and read
+only injected fakes, so one upfront await covers everything that touches seeded data.
+
+**Result — this is the point of the item:** a fresh datadir now gives **1898 PASS / 0 FAIL**,
+consistently. Four runs by the implementer and two independent runs by the controller, all identical,
+exit 0, no `TypeError`. Previously every gate report in this repo carried "5 FAIL (known seed races)"
+— `equipment-items` ×3, `seeded surveys exist to migrate`, `FS-1053 is present in the seed` — which
+is exactly the training the item warned about: five separate people each re-derived that those
+failures were not theirs, and a real regression would have received the same shrug. Gate reports
+from here can be read at face value.
+
+**Files:** `src/db/index.ts`, `scripts/test-review-and-spec.ts`. No schema change.
 ## 149. The spec harness's fixture rows are never torn down, by file-wide convention — OPEN
 
 **Reported:** found during #145 Task 3's review, 2026-09-22 — pre-existing pattern, not introduced
