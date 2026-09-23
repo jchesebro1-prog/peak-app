@@ -187,7 +187,7 @@ import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, s
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { mergeActivity } from "@/lib/engagement-activity";
+import { mergeActivity, prefillFromMeeting } from "@/lib/engagement-activity";
 import { performCapture, type CaptureDeps } from "@/lib/engagement-activity-write";
 
 let fail = 0;
@@ -7182,3 +7182,11 @@ ok(parseAssignTarget("", users145).kind === "team", "#145 a blank Assign To defa
     "#145 with no bookings, the merge changes nothing"
   );
 }
+
+/* ====== #145 D170: Krisp / meeting pre-fill ====== */
+const pre145 = prefillFromMeeting({ id: "mt-1", at: OCT6, title: "Design review — SD", attendees: "Dana Kim, Jeff C.", minutes: "District wants the fire curtain in scope." });
+ok(pre145.text.includes("Design review — SD"), "#145 the pre-filled body leads with the meeting title");
+ok(pre145.text.includes("fire curtain"), "#145 the pre-filled body carries the minutes verbatim");
+ok(pre145.attendees.join("|") === "Dana Kim|Jeff C.", "#145 attendees are split for attachment to the note");
+ok(prefillFromMeeting({ id: "m", at: 0, title: "", attendees: "", minutes: "" }).text === "", "#145 an empty meeting pre-fills nothing rather than a header with no content");
+ok(!prefillFromMeeting({ id: "m", at: OCT6, title: "x", attendees: "", minutes: "y" }).text.includes("undefined"), "#145 a meeting with no attendees never renders the string 'undefined'");

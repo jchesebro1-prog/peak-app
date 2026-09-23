@@ -181,6 +181,13 @@ export default function DetailClient({
   const canCheck = k === "importing" || k === "processing" || (k === "pending" && rec.audio.state !== "on_device");
   const canRetry = k === "failed" || chip === "Stalled";
   const canPostFeed = k === "ready" && !!rec.customerId && !rec.feedNoteId;
+  // #145 D170 (Task 8) — a recording linked directly to a consulting
+  // engagement can seed that engagement's Activity composer with its
+  // summary. Same `?tab=activity&prefill=<id>` link the Meetings tab's
+  // "Capture to Activity" uses — the [id] page resolves `rec.id` there
+  // into a meeting-shaped source since this recording is never logged as
+  // an `eng.meetings[]` entry.
+  const canCaptureToEngagement = rec.parentKind === "engagement" && k === "ready";
 
   const pendingCount = rec.actionItems.filter((a) => a.disposition === "pending").length;
   const counts: Partial<Record<Tab, number>> = {
@@ -206,6 +213,14 @@ export default function DetailClient({
           <button style={SMALL_BTN} disabled={busy} onClick={() => run(() => postFeedNoteAction(rec.id))}>
             Post to customer feed
           </button>
+        )}
+        {canCaptureToEngagement && (
+          <Link
+            href={`/design/engagements/${encodeURIComponent(rec.parentId)}?tab=activity&prefill=${encodeURIComponent(rec.id)}`}
+            style={{ ...SMALL_BTN, textDecoration: "none", display: "inline-block" }}
+          >
+            Capture to engagement
+          </Link>
         )}
         {rec.feedNoteId && rec.customerId && (
           <Link href={`/companies/${encodeURIComponent(rec.customerId)}`} style={{ fontSize: 11.5, color: "#1f7a52", textDecoration: "none" }}>
