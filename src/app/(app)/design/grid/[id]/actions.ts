@@ -47,6 +47,7 @@ import { getSite } from "@/lib/identity/sites";
 import { get as getPart } from "@/lib/stores/catalog";
 import { createGridAssembly, getGridSymbol, setGridSymbolShape } from "@/lib/stores/grid-catalog";
 import { getDesign } from "@/lib/stores/studio-designs";
+import { createClientPackage } from "@/lib/client-package-server";
 import { isGridShape } from "@/lib/design/grid-symbols";
 import {
   GRID_CURTAIN_TYPES,
@@ -219,6 +220,28 @@ export async function linkLinesetDesignAction(
   revalidatePath(editorPath(projectId));
   revalidatePath(`${editorPath(projectId)}/schedule`);
   return { ok: true };
+}
+
+/** Build and store the customer-facing Grid package (punch #40). */
+export async function createClientPackageAction(
+  projectId: string,
+  optionId: string | null,
+): Promise<{ ok: true; packageId: string; url: string; gapCount: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "That design could not be found." };
+  try {
+    const built = await createClientPackage(project, user.name, optionId);
+    revalidatePath(editorPath(projectId));
+    return {
+      ok: true,
+      packageId: built.record.id,
+      url: `/api/client-packages/${encodeURIComponent(built.record.id)}`,
+      gapCount: built.gaps.length,
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "The client package could not be built." };
+  }
 }
 
 export async function placeDeviceAction(

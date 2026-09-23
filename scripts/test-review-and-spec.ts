@@ -1448,6 +1448,7 @@ ok(cutViaCut.goods !== null && cutBase.goods !== null && cutViaCut.goods > cutBa
 /* --- The Grid BOM math (D108) --- */
 import { bomLines, bomTotals, type PartLite } from "@/lib/design/grid-bom";
 import { buildClientPackageManifest } from "@/lib/client-package";
+import { createStoredZip } from "@/lib/zip";
 
 const gridParts: PartLite[] = [
   { id: "S4LED", sku: "S4LED", desc: "ETC Source Four LED", category: "Lighting", unit: "ea", list: 1200, cost: 800 },
@@ -1484,6 +1485,8 @@ const packageManifest = buildClientPackageManifest(packageProject, packageCatalo
 ok(packageManifest.bom.find((r) => r.sku === "PKG-A")?.qty === 2, "client package walker aggregates repeated Grid placements");
 ok(packageManifest.datasheets.length === 1 && packageManifest.datasheets[0].sku === "PKG-A", "client package walker carries catalog datasheet attachments");
 ok(packageManifest.gaps.some((g) => g.kind === "missing-datasheet" && g.sku === "PKG-B") && packageManifest.gaps.some((g) => g.kind === "missing-spec" && g.sku === "PKG-B"), "client package walker reports every missing attachment");
+const packageZip = createStoredZip([{ name: "index.txt", data: Buffer.from("hello", "utf8") }, { name: "nested/data.bin", data: Buffer.from([0, 1, 2]) }]);
+ok(packageZip.readUInt32LE(0) === 0x04034b50 && packageZip.includes(Buffer.from("index.txt")) && packageZip.includes(Buffer.from("nested/data.bin")), "client package ZIP writer emits standard UTF-8 stored entries");
 
 /* --- The Grid geometry (D109) --- */
 import { pointInPolygon, polygonArea, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";

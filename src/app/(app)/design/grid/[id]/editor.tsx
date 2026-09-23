@@ -64,6 +64,7 @@ import {
   setSymbolShapeAction,
   setVenueAction,
   linkLinesetDesignAction,
+  createClientPackageAction,
 } from "./actions";
 import CurtainDrop from "./curtain-drop";
 import LayersPanel from "./layers-panel";
@@ -308,6 +309,9 @@ export default function GridEditor({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [linesetBusy, setLinesetBusy] = useState(false);
+  const [packageBusy, setPackageBusy] = useState(false);
+  const [packageUrl, setPackageUrl] = useState<string | null>(null);
+  const [packageGapCount, setPackageGapCount] = useState<number | null>(null);
 
   async function linkLineset(designId: string) {
     setLinesetBusy(true);
@@ -315,6 +319,18 @@ export default function GridEditor({
     setLinesetBusy(false);
     if (!result.ok) setErr(result.error);
     else router.refresh();
+  }
+
+  async function buildClientPackage() {
+    setPackageBusy(true);
+    setPackageUrl(null);
+    const result = await createClientPackageAction(project.id, activeOptionId);
+    setPackageBusy(false);
+    if (!result.ok) setErr(result.error);
+    else {
+      setPackageUrl(result.url);
+      setPackageGapCount(result.gapCount);
+    }
   }
 
   const [search, setSearch] = useState("");
@@ -1161,6 +1177,14 @@ export default function GridEditor({
           <Link href={`/design/grid/${encodeURIComponent(project.id)}/lineset`} style={{ ...BTN, textDecoration: "none" }}>
             Linesets →
           </Link>
+        )}
+        <button style={BTN} disabled={packageBusy || busy} onClick={buildClientPackage} title="Build a ZIP with the specification, datasheets, plan sheets, and rough riser drawings">
+          {packageBusy ? "Building…" : "Client package"}
+        </button>
+        {packageUrl && (
+          <a href={packageUrl} style={{ ...BTN, textDecoration: "none", color: "#1f7a52" }}>
+            Download{packageGapCount ? ` · ${packageGapCount} gaps` : ""}
+          </a>
         )}
         {canCreate && (
           armDelete ? (
