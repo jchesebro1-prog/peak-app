@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MONDAY_TONE } from "@/components/ui";
-import { barRect, DAY, dateFromX, dayColumns, packTracks, snapToDay } from "./gantt-lib";
+import { barRect, calendarDuration, DAY, dateFromX, dayColumns, packTracks, snapToDay } from "./gantt-lib";
 
 /**
  * Shared draggable Gantt grid (#145) — used standalone here against fixture
@@ -195,7 +195,11 @@ export function GanttGrid({
     setDrag({
       barId: bar.id,
       pointerId: e.pointerId,
-      duration: bar.dueAt - bar.startAt,
+      // Dragging snaps the new start to a local calendar day. Preserve the
+      // task's calendar-day span too, otherwise a first drag of a task whose
+      // generated timestamps have a clock component shortens it by that
+      // component before all later drags become stable.
+      duration: calendarDuration(bar.startAt, bar.dueAt),
       grabOffsetPx: pointerPx - barLeftPx,
       origStart: bar.startAt,
       previewStart: bar.startAt,

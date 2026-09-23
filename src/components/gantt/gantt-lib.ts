@@ -63,14 +63,17 @@ export function barRect(
   // instead, sized by its OWN real duration relative to the visible
   // span, capped at the full width. It stays a legible bar rather than a
   // hairline, and reads as "pinned against the boundary it blew past."
-  if (bar.startAt >= endAt) {
+  // Overrun semantics are calendar-day based everywhere else in the
+  // scheduling stack. Keep geometry on the same contract: a bar that starts
+  // later on the visible end day is still on that day, not fully past it.
+  if (snapToDay(bar.startAt) > snapToDay(endAt)) {
     const widthPct = Math.min(100, Math.max(0.6, ((bar.dueAt - bar.startAt) / span) * 100));
     return { leftPct: Math.max(0, 100 - widthPct), widthPct };
   }
   const s = Math.max(startAt, Math.min(endAt, bar.startAt));
   const e = Math.max(s, Math.min(endAt, bar.dueAt));
-  const leftPct = ((s - startAt) / span) * 100;
   const widthPct = Math.max(0.6, ((e - s) / span) * 100);
+  const leftPct = Math.min(100 - widthPct, ((s - startAt) / span) * 100);
   return { leftPct, widthPct };
 }
 
@@ -78,6 +81,12 @@ export function dateFromX(x: number, width: number, startAt: number, endAt: numb
   if (width <= 0) return startAt;
   const ratio = Math.min(1, Math.max(0, x / width));
   return snapToDay(startAt + ratio * (endAt - startAt));
+}
+
+/** Duration used by a day-snapped drag: preserve calendar days, not clock
+ * milliseconds from a generated timestamp. */
+export function calendarDuration(startAt: number, dueAt: number): number {
+  return Math.max(0, snapToDay(dueAt) - snapToDay(startAt));
 }
 
 /** Greedy overlap packing so bars sharing a row don't collide — moved here

@@ -3,7 +3,7 @@ import {
   withEngagementPhaseIds, defaultMilestonePhaseId, phaseIdsByName, startOfLocalDay,
   type PhaseWeight, type ScheduleLine,
 } from "@/lib/consulting-schedule";
-import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
+import { barRect, calendarDuration, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { TABS } from "@/app/(app)/design/engagements/tabs";
@@ -6837,6 +6837,13 @@ ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exporte
   // clamp itself.
   const massivelyPast145 = barRect({ startAt: OCT6 + 15 * DAY145, dueAt: OCT6 + 45 * DAY145 }, OCT6, OCT6 + 10 * DAY145);
   ok(massivelyPast145.widthPct === 100 && massivelyPast145.leftPct === 0, "#145 review fix: an overrun longer than the whole visible span caps at 100% width instead of overflowing it");
+  const sameDayLateStart145 = new Date(2026, 9, 16, 18, 0, 0).getTime();
+  const sameDayNoonEnd145 = new Date(2026, 9, 16, 12, 0, 0).getTime();
+  const sameDayRect145 = barRect({ startAt: sameDayLateStart145, dueAt: sameDayLateStart145 }, OCT6, sameDayNoonEnd145);
+  ok(sameDayRect145.leftPct <= 100 - sameDayRect145.widthPct, "#152 barRect uses local calendar days, so a late same-day start is not treated as fully past");
+  const generatedStart153 = new Date(2026, 9, 16, 9, 0, 0).getTime();
+  const generatedDue153 = new Date(2026, 9, 18, 9, 0, 0).getTime();
+  ok(calendarDuration(generatedStart153, generatedDue153) === 2 * DAY145, "#153 first drag preserves the task's whole calendar-day duration");
 
   // #145 review fix (found live, not in review): dayColumns must walk by
   // LOCAL CALENDAR DAY, not by adding a raw 86400000ms each step — a DST
