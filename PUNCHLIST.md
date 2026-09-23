@@ -3205,10 +3205,11 @@ into an explicit signoff record). **(d)** Complete → auto-task to the project'
 role (falls back to quote owner), due ~7 days: walk the site with the end user. Depends on
 #17 tasks table (plan 01 LANDED 2026-07-25) + #16E roles model.
 
-**Status:** PARTIAL 2026-09-23 — delivery status auto-advances an install project to Scheduled
-when all shipment lines are received, while manual stage controls remain available for
-undo/correction. Remaining scope-report/phone-signature/checklist work and the completion
-walkthrough task still remain.
+**Status:** PARTIAL 2026-09-23 — delivery status auto-advances an install project to Scheduled,
+closeout now captures a bounded phone/trackpad-drawn PNG signature, and completion creates the
+end-user site-walk follow-up. Manual stage controls remain available for undo/correction.
+Remaining scope-report/attachment handoff and richer per-scope closeout checklist presentation
+still remain.
 
 ---
 
