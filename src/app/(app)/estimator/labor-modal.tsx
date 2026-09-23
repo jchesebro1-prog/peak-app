@@ -257,6 +257,7 @@ export default function LaborModal({
         <button
           type="button"
           onClick={onAddMob}
+          disabled={draft.mobs.length >= 1}
           style={{
             fontFamily: "var(--font-ui)",
             fontSize: 12,
@@ -266,7 +267,8 @@ export default function LaborModal({
             border: "none",
             borderRadius: 7,
             padding: "6px 11px",
-            cursor: "pointer",
+            cursor: draft.mobs.length >= 1 ? "not-allowed" : "pointer",
+            opacity: draft.mobs.length >= 1 ? 0.5 : 1,
           }}
         >
           + Add mobilization

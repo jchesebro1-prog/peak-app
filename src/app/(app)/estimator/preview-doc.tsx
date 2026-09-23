@@ -70,6 +70,7 @@ export type PreviewProps = {
   logoDark: string | null;
   quoteNote: string;
   sections: SpecSection[];
+  setSectionPresentation: (id: string, value: "itemized" | "narrative") => void;
   /** #143 — a vendor line reads from its record here too, but NEVER its cost,
    *  terms or notes: those are internal only (Jeff). */
   vendorQuotes: VendorQuote[];
@@ -114,8 +115,11 @@ export default function PreviewDoc(p: PreviewProps) {
       const secFr = systemFreight(sec);
       const sub = systemItemsRev(sec) + secFr;
       return {
+        id: sec.id,
         num: i + 1,
         name: sec.name,
+        narrative: (sec.narrative || "").trim(),
+        presentation: sec.presentation || "itemized",
         subtotalLabel: fmt(sub),
         hasFreight: secFr > 0,
         freightLabel: fmt(secFr),
@@ -527,9 +531,16 @@ export default function PreviewDoc(p: PreviewProps) {
                 </span>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, flexShrink: 0 }}>
                   {ps.subtotalLabel}
+                  <button type="button" onClick={() => p.setSectionPresentation(ps.id, ps.presentation === "narrative" ? "itemized" : "narrative")} style={{ marginLeft: 8, border: "1px solid rgba(255,255,255,.25)", borderRadius: 5, background: "transparent", color: "#fff", fontSize: 10, padding: "3px 6px", cursor: "pointer" }}>
+                    {ps.presentation === "narrative" ? "Narrative" : "Itemized"}
+                  </button>
                 </span>
               </div>
-              {isItemized && showLines ? (
+              {ps.presentation === "narrative" ? (
+                <div style={{ padding: "10px 13px 12px", fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.55, borderBottom: "1px solid #f0f1f4" }}>
+                  {ps.narrative || "System scope and pricing are included in the total above."}
+                </div>
+              ) : isItemized && showLines ? (
                 <div style={{ marginBottom: 6 }}>
                   {ps.lines.map((ln) => (
                     <div

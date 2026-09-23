@@ -94,6 +94,7 @@ export type ThreadRowVM = {
   name: string;
   /** count of messages[] on the underlying thread; badge hidden when <= 1 */
   msgCount: number;
+  messagePreviews: Array<{ author: string; time: string; snippet: string; out: boolean }>;
   /** unique message authors beyond a single-author thread, e.g. "Jeff, Sarah +1"; "" when <= 1 author */
   participants: string;
   subject: string;

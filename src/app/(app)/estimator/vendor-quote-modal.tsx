@@ -78,6 +78,10 @@ export function vendorDraftTotal(d: VendorDraft): number {
   return vendorLinesTotal(d.lines);
 }
 
+export function vendorDraftTotalSource(d: VendorDraft): "manual" | "lines" {
+  return (d.total || "").trim() !== "" ? "manual" : "lines";
+}
+
 export default function VendorQuoteModal({
   secName,
   draft,

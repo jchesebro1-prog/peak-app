@@ -78,6 +78,8 @@ export type SectionCardProps = {
   registerRef: (id: string, el: HTMLDivElement | null) => void;
   onToggleExpand: () => void;
   onRename: (name: string) => void;
+  onSetNarrative: (value: string) => void;
+  onSetPresentation: (value: "itemized" | "narrative") => void;
   onDelete: () => void;
   onSetMargin: (v: string) => void;
   onSetFreight: (v: string) => void;
@@ -334,6 +336,13 @@ export default function SectionCard(p: SectionCardProps) {
               borderTop: "1px solid #f3f4f7",
             }}
           >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, padding: "0 5px" }} onClick={(e) => e.stopPropagation()}>
+              <select value={sec.presentation || "itemized"} onChange={(e) => p.onSetPresentation(e.target.value as "itemized" | "narrative")} style={{ border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontSize: 11, color: "#5b616e", background: "#fff" }}>
+                <option value="itemized">Customer: itemized</option>
+                <option value="narrative">Customer: narrative</option>
+              </select>
+              <input value={sec.narrative || ""} onChange={(e) => p.onSetNarrative(e.target.value)} onClick={(e) => e.stopPropagation()} placeholder="Brief system explanation for the quote letter" style={{ flex: 1, minWidth: 0, border: "1px solid #e4e7ec", borderRadius: 6, padding: "5px 7px", fontSize: 11.5, color: "#3a3f4a" }} />
+            </div>
             {isInternal && (
               <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                 <span

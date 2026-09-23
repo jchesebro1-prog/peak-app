@@ -75,6 +75,7 @@ import FixtureModal from "./fixture-modal";
 import LaborModal from "./labor-modal";
 import VendorQuoteModal, {
   vendorDraftTotal,
+  vendorDraftTotalSource,
   vendorKeptLines,
   vendorLinesTotal,
 } from "./vendor-quote-modal";
@@ -794,6 +795,10 @@ export default function EstimatorClient({
   };
   const renameSystem = (secId: string, name: string) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, name } : s)));
+  const setSystemNarrative = (secId: string, narrative: string) =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, narrative } : s)));
+  const setSystemPresentation = (secId: string, presentation: "itemized" | "narrative") =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, presentation } : s)));
   const deleteSystem = (secId: string) => {
     const list = sections.filter((s) => s.id !== secId);
     setSections(list);
@@ -1186,6 +1191,7 @@ export default function EstimatorClient({
       terms: d.terms || "",
       notes: d.notes || "",
       total,
+      totalSource: vendorDraftTotalSource(d),
       includesFreight: d.includesFreight,
       display: d.display,
     };
@@ -1338,7 +1344,7 @@ export default function EstimatorClient({
   const resetAutoHrs = (field: "pmHrs" | "drfHrs", flag: "pmAuto" | "drfAuto") =>
     setLaborDraft((d) => ({ ...d, [field]: "", [flag]: true }));
   const addMob = () =>
-    setLaborDraft((d) => ({ ...d, mobs: d.mobs.concat([laborMob(travelEstNow())]) }));
+    setLaborDraft((d) => d.mobs.length >= 1 ? d : { ...d, mobs: [laborMob(travelEstNow())] });
   const removeMob = (idx: number) =>
     setLaborDraft((d) =>
       d.mobs.length <= 1 ? d : { ...d, mobs: d.mobs.filter((_, i) => i !== idx) }
@@ -2696,6 +2702,8 @@ export default function EstimatorClient({
                   }}
                   onToggleExpand={() => toggleExpand(sec.id)}
                   onRename={(name) => renameSystem(sec.id, name)}
+                  onSetNarrative={(value) => setSystemNarrative(sec.id, value)}
+                  onSetPresentation={(value) => setSystemPresentation(sec.id, value)}
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}
                   onSetFreight={(v) => setFreightPct(sec.id, v)}
@@ -2867,7 +2875,7 @@ export default function EstimatorClient({
           }
           hasAttn={hasAttn}
           attnLine={attnLine}
-          projectName={initial.projectName}
+          projectName={projectName}
           venueLabel={(() => {
             const l = locations.find((x) => x.id === locationId);
             if (!l) return "";
@@ -2878,6 +2886,7 @@ export default function EstimatorClient({
           logoDark={logoDark}
           quoteNote={quoteNote}
           sections={sections}
+          setSectionPresentation={(id, value) => setSystemPresentation(id, value)}
           vendorQuotes={vendorQuotes}
           t={t}
           taxRatePct={TAX_RATE_PCT}

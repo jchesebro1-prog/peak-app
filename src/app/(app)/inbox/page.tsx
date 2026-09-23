@@ -483,6 +483,12 @@ export default async function InboxPage({
         .slice(0, 3),
       name: nm,
       msgCount: (t.messages || []).length,
+      messagePreviews: (t.messages || []).slice(-8).map((m) => ({
+        author: m.author || "Unknown",
+        time: timeAgo(m.at),
+        snippet: (m.body || "").replace(/\s+/g, " ").trim().slice(0, 180),
+        out: m.direction === "out",
+      })),
       participants: participantsFor(t),
       subject: t.subject || "(no subject)",
       snippet: snip,

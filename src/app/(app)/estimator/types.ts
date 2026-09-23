@@ -113,6 +113,8 @@ export type VendorQuote = {
   /** Internal only — never rendered on the customer document (Jeff, #143). */
   notes: string;
   total: number;
+  /** Whether the saved cost came from an explicit total or summed quote lines. */
+  totalSource?: "manual" | "lines";
   /** Jeff's freight exemption: the vendor's price already includes freight,
    *  so the section freight slider skips this line. */
   includesFreight: boolean;
@@ -130,6 +132,8 @@ export function vendorAttachmentLoad(quotes: VendorQuote[]): number {
 export type SpecSection = {
   id: string;
   name: string;
+  narrative?: string;
+  presentation?: "itemized" | "narrative";
   /** 'materials' | 'labor' */
   kind: string;
   mfr: string;

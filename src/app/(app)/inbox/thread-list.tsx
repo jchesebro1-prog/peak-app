@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { DraftPayload, ListVM, Opt, ThreadRowVM } from "./types";
 import type { SearchRow } from "./actions";
 import { ChanGlyph, CheckIcon, FlagIcon, Magnifier, PinIcon, RestoreIcon, TrashIcon } from "./icons";
@@ -520,6 +521,7 @@ function Row({
   onClick: () => void;
   actions: RowActions;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const chColor = r.waitingUs ? "#b4543a" : "#5b616e";
   const wrapBg = r.waitingUs ? "#f8ece7" : r.isDraft ? "#fbf3dd" : "#f1f2f5";
   // Task 4 (#42): line 4 (status pill / waiting / Outbox / boxTag / assignee)
@@ -619,7 +621,10 @@ function Row({
             {r.participants || r.name}
           </span>
           {r.msgCount > 1 && (
-            <span
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setExpanded((value) => !value); }}
+              title={expanded ? "Hide messages" : "Preview messages"}
               style={{
                 fontSize: 11,
                 fontWeight: 600,
@@ -628,10 +633,12 @@ function Row({
                 borderRadius: 8,
                 padding: "0 6px",
                 flexShrink: 0,
+                border: "none",
+                cursor: "pointer",
               }}
             >
-              {r.msgCount}
-            </span>
+              {expanded ? "⌄" : "›"} {r.msgCount}
+            </button>
           )}
           {r.pinned && (
             <span style={{ color: "#8c919c", display: "flex" }} title="Pinned">
@@ -776,6 +783,17 @@ function Row({
             </span>
           )}
         </span>
+        )}
+        {expanded && r.messagePreviews.length > 1 && (
+          <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 8, padding: "7px 9px", borderLeft: "2px solid #e4e7ec", background: "#fafbfc", borderRadius: 5 }}>
+            {r.messagePreviews.map((message, index) => (
+              <div key={`${r.id}-${index}`} style={{ display: "flex", gap: 7, fontSize: 10.5, color: "#6b7079", lineHeight: 1.35, marginTop: index ? 6 : 0 }}>
+                <span style={{ fontWeight: 700, color: message.out ? "var(--accent)" : "#3a3f4a", whiteSpace: "nowrap" }}>{message.author}</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.snippet || "(empty message)"}</span>
+                <span style={{ color: "#aab0bb", whiteSpace: "nowrap" }}>{message.time}</span>
+              </div>
+            ))}
+          </div>
         )}
       </span>
 
