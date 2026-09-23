@@ -324,6 +324,7 @@ export default function EstimatorClient({
   const [locationId, setLocationId] = useState(initial.locationId);
   const [contactName, setContactName] = useState(initial.contactName);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
+  const [assumptions, setAssumptions] = useState(initial.assumptions || "");
   const [installTimeframe, setInstallTimeframe] = useState(initial.installTimeframe);
   const [paymentTerms, setPaymentTerms] = useState(initial.paymentTerms);
   // #110: user-named quote category — persisted on blur, not per keystroke.
@@ -463,6 +464,7 @@ export default function EstimatorClient({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const assumptionsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -556,6 +558,7 @@ export default function EstimatorClient({
           locationId: locationId || null,
           contactName: contactName || "",
           quoteNote: quoteNote || "",
+          assumptions: assumptions || "",
           installTimeframe,
           paymentTerms,
           category,
@@ -725,6 +728,12 @@ export default function EstimatorClient({
     if (!loadedId) return;
     if (noteTimer.current) clearTimeout(noteTimer.current);
     noteTimer.current = setTimeout(() => persistMeta({ quoteNote: v }), 500);
+  };
+  const onAssumptions = (v: string) => {
+    setAssumptions(v);
+    if (!loadedId) return;
+    if (assumptionsTimer.current) clearTimeout(assumptionsTimer.current);
+    assumptionsTimer.current = setTimeout(() => persistMeta({ assumptions: v }), 500);
   };
   const onInstallTimeframe = (v: string) => {
     setInstallTimeframe(v);
@@ -1950,6 +1959,26 @@ export default function EstimatorClient({
             </span>
           </div>
 
+          {/* quote assumptions / exceptions (#36) */}
+          <div
+            className="est-noterow"
+            style={{
+              display: "flex", alignItems: "flex-start", gap: 12, padding: "9px 22px",
+              background: "#23262d", borderTop: "1px solid #2b2e35", color: "#fff", flexShrink: 0,
+            }}
+          >
+            <span style={{ ...CTX_LABEL, paddingTop: 8 }}>Assumptions</span>
+            <textarea
+              className="est-notefield"
+              value={assumptions}
+              onChange={(e) => onAssumptions(e.target.value)}
+              placeholder="Assumptions, exclusions, and exceptions for this estimate…"
+              rows={2}
+              style={{ flex: 1, minWidth: 0, resize: "vertical", fontFamily: "var(--font-ui)", fontSize: 12.5, color: "#fff", background: "#2b2e35", border: "1px solid #3a3e46", borderRadius: 7, padding: "8px 11px" }}
+            />
+            <span style={{ fontSize: 10.5, color: "#6b7079", flexShrink: 0, paddingTop: 8 }}>Optional · shown on the quote</span>
+          </div>
+
           <div
             className="est-noterow"
             style={{
@@ -2936,6 +2965,7 @@ export default function EstimatorClient({
           companyName={companyName}
           logoDark={logoDark}
           quoteNote={quoteNote}
+          assumptions={assumptions}
           sections={sections}
           setSectionPresentation={(id, value) => setSystemPresentation(id, value)}
           vendorQuotes={vendorQuotes}

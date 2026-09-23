@@ -2878,7 +2878,7 @@ letter homework.
 
 ---
 
-## 36. Estimator: assumptions/exceptions, BOM vs narrative quotes, and document attachments — OPEN
+## 36. Estimator: assumptions/exceptions, BOM vs narrative quotes, and document attachments — PARTIAL 2026-09-23
 
 **Area:** `src/lib/stores/quotes.ts` (`Quote` — the target for new fields), the estimator
 (`src/app/(app)/estimator/estimator-client.tsx`, `preview-doc.tsx`, `actions.ts`). Reusable
@@ -2925,8 +2925,11 @@ attachment infra: `src/app/(app)/design/engagements/view.tsx:1258` ("Attach docu
 (the quote→project→PM handoff and where attachments live), item **24** (revisions — decide whether
 assumptions/narrative/attachments are snapshotted per revision).
 
-**Status:** OPEN — logged 2026-07-21, no code touched. Three separable parts (A/B/C); A and C are
-smaller (patterns exist), B (narrative mode) is the larger design piece.
+**Status:** PARTIAL 2026-09-23 — per-system narrative presentation, customer preview toggles,
+vendor-quote attachments/CSV lines, and PM handoff support are shipped. The estimator now also
+has a persisted quote-level Assumptions & exceptions field that appears in the customer preview
+and survives quote edits/revisions. Remaining: a Settings-editable checked-assumption library,
+explicit exception taxonomy, and any Jeff-selected attachment policy beyond vendor quotes.
 
 ---
 

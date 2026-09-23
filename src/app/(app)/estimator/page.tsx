@@ -55,11 +55,13 @@ const FALLBACK = {
   projectName: "New estimate",
   custName: "",
   quoteNote: "",
+  assumptions: "",
 };
 
 type QuoteDoc = Quote & {
   contactName?: string;
   quoteNote?: string;
+  assumptions?: string;
   paymentTerms?: PaymentTerms;
   spec?: { sections?: unknown; mobs?: unknown } | null;
 };
@@ -96,6 +98,7 @@ async function initialFrom(
       locationId: null,
       contactName: "",
       quoteNote: FALLBACK.quoteNote,
+      assumptions: FALLBACK.assumptions,
       installTimeframe: "TBD",
       paymentTerms: "Unknown",
       category: "",
@@ -141,7 +144,8 @@ async function initialFrom(
     customerId: cid,
     locationId: locId,
     contactName: contactName || "",
-    quoteNote: q.quoteNote != null ? q.quoteNote : FALLBACK.quoteNote,
+      quoteNote: q.quoteNote != null ? q.quoteNote : FALLBACK.quoteNote,
+      assumptions: q.assumptions != null ? q.assumptions : "",
     installTimeframe: q.installTimeframe || "TBD",
     paymentTerms: q.paymentTerms || "Unknown",
     category: q.category || "",

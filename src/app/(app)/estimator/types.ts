@@ -321,6 +321,8 @@ export type InitialQuote = {
   locationId: string | null;
   contactName: string;
   quoteNote: string;
+  /** Editable quote-level assumptions/exceptions carried into the customer document. */
+  assumptions: string;
   installTimeframe: string;
   paymentTerms: PaymentTerms;
   /** User-named quote category (#110) — "" when none. */

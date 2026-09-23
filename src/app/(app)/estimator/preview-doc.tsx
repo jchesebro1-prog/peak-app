@@ -69,6 +69,7 @@ export type PreviewProps = {
   /** Uploaded document logo (Settings → Branding), falls back to the baked letterhead. */
   logoDark: string | null;
   quoteNote: string;
+  assumptions: string;
   sections: SpecSection[];
   setSectionPresentation: (id: string, value: "itemized" | "narrative") => void;
   /** #143 — a vendor line reads from its record here too, but NEVER its cost,
@@ -494,7 +495,7 @@ export default function PreviewDoc(p: PreviewProps) {
                 borderLeft: `3px solid ${ACCENT_BD}`,
               }}
             >
-              {p.quoteNote}
+          {p.quoteNote}
             </div>
           )}
 
@@ -855,6 +856,12 @@ export default function PreviewDoc(p: PreviewProps) {
               </span>
             </div>
           </div>
+          {p.assumptions.trim() && (
+            <div style={{ marginTop: 18, padding: "12px 14px", background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 8 }}>
+              <div style={{ ...microLabel, marginBottom: 5 }}>Assumptions &amp; exceptions</div>
+              <div style={{ whiteSpace: "pre-wrap", fontSize: 12.5, color: "#5b616e", lineHeight: 1.55 }}>{p.assumptions}</div>
+            </div>
+          )}
         </div>
       </div>
       </div>

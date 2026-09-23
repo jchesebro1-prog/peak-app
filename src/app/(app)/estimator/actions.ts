@@ -91,6 +91,7 @@ import { applyTaskTemplate } from "@/lib/stores/task-templates";
 type QuoteExtras = {
   contactName?: string;
   quoteNote?: string;
+  assumptions?: string;
   paymentTerms?: PaymentTerms;
   spec?: { sections: SpecSection[]; mobs: SpecMob[] };
   /** #143: top-level, NOT inside `spec` — the attachment proxy route reads
@@ -108,6 +109,7 @@ export type SavePayload = {
   locationId: string | null;
   contactName: string;
   quoteNote: string;
+  assumptions: string;
   installTimeframe: string;
   paymentTerms: PaymentTerms;
   /** User-named quote category (#110); "" clears it. */
@@ -272,6 +274,7 @@ export async function saveQuoteAction(
     locationId: payload.locationId || null,
     contactName: payload.contactName || "",
     quoteNote: payload.quoteNote || "",
+    assumptions: payload.assumptions || "",
     installTimeframe: payload.installTimeframe || "TBD",
     paymentTerms: payload.paymentTerms,
     category: (payload.category || "").trim(),
@@ -339,6 +342,7 @@ export async function saveQuoteAction(
     q = await update(created.id, {
       contactName: payload.contactName || "",
       quoteNote: payload.quoteNote || "",
+      assumptions: payload.assumptions || "",
       paymentTerms: payload.paymentTerms,
       category: (payload.category || "").trim(),
       vendorQuotes: storedVendorQuotes,
@@ -522,6 +526,7 @@ export async function updateQuoteMetaAction(
     customer?: string;
     contactName?: string;
     quoteNote?: string;
+    assumptions?: string;
     installTimeframe?: string;
     category?: string;
   }
@@ -540,6 +545,7 @@ export async function updateQuoteMetaAction(
   if (typeof meta.customer === "string") patch.customer = meta.customer;
   if (typeof meta.contactName === "string") patch.contactName = meta.contactName;
   if (typeof meta.quoteNote === "string") patch.quoteNote = meta.quoteNote;
+  if (typeof meta.assumptions === "string") patch.assumptions = meta.assumptions;
   if (typeof meta.installTimeframe === "string") patch.installTimeframe = meta.installTimeframe.trim();
   if (typeof meta.category === "string") patch.category = meta.category.trim();
 
