@@ -10,6 +10,8 @@ import { setPriceListEffective, setSettings } from "@/lib/settings";
 import { GROUPS, TRADES, type CategoryMap } from "@/lib/catalog-taxonomy";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { runCatalogImport } from "./import";
+import { parsePortsField } from "@/lib/catalog-ports";
+import type { Port } from "@/lib/catalog-connect";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -28,18 +30,36 @@ export async function deleteCatalogPriceListAction(formData: FormData): Promise<
  */
 
 /**
- * Add or edit a single part. The edit form only owns sku/desc/category/unit/
- * list/cost/mfr/note (see the fields in page.tsx's edit modal) — it never
- * shows ports, trade, datasheet, discipline/role, costPerSqft, etc., so a
- * save here must not wipe those. mergeUpsert (lib/stores/catalog) loads the
- * existing part and overlays just the form-owned fields; a blanked mfr/note
- * still clears intentionally (undefined wins over whatever was stored).
+ * Add or edit a single part. The edit form owns sku/desc/category/unit/list/
+ * cost/mfr/note and — since #158 — `ports`. It never shows trade, datasheet,
+ * discipline/role, costPerSqft, pricedAt, so a save here must not wipe those.
+ * mergeUpsert (lib/stores/catalog) loads the existing part and overlays just
+ * the form-owned fields; a blanked mfr/note still clears intentionally
+ * (undefined wins over whatever was stored).
+ *
+ * `ports` is forwarded ONLY when the form actually submitted the field. That
+ * distinction is load-bearing: mergeUpsert leaves absent keys alone, so a
+ * caller that does not own ports (or a pre-#158 form) leaves them untouched,
+ * while the ports editor — which always submits, including an empty list —
+ * can delete a part's last port. Unknown connection types are refused rather
+ * than stored, because validateDeviceWire resolves against CONNECTION_TYPES
+ * and a bad value would silently unwire the device (D189).
  */
 export async function upsertPart(formData: FormData): Promise<void> {
   await requireUser();
   const sku = String(formData.get("sku") || "").trim();
   const desc = String(formData.get("desc") || "").trim();
   if (!sku || !desc) return;
+
+  const rawPorts = formData.get("ports");
+  let ports: Port[] | undefined;
+  if (typeof rawPorts === "string") {
+    const parsed = parsePortsField(rawPorts);
+    if (!parsed.ok) {
+      redirect(`/catalog?edit=${encodeURIComponent(sku)}&partError=${encodeURIComponent(parsed.error)}`);
+    }
+    ports = parsed.ports;
+  }
 
   await mergeUpsert(sku, {
     desc,
@@ -49,6 +69,7 @@ export async function upsertPart(formData: FormData): Promise<void> {
     cost: num(formData.get("cost")),
     mfr: String(formData.get("mfr") || "").trim() || undefined,
     note: String(formData.get("note") || "").trim() || undefined,
+    ...(ports ? { ports } : {}),
   });
   revalidatePath("/", "layout");
   redirect("/catalog");
