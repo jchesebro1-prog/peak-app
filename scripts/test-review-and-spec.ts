@@ -3439,6 +3439,10 @@ import {
 ok(VENDOR_COMPANY_TYPE === "vendor/manufacturer" && isVendorType(" vendor/manufacturer ") && !isVendorType("Vendor"), "#122 isVendorType: exact COMPANY_TYPES string (trimmed), not the legacy 'Vendor'");
 ok(PARTNER_TYPES.has(VENDOR_COMPANY_TYPE), "#122 PARTNER_TYPES carries the exact vendor type string");
 ok(PARTNER_TYPES.has("Vendor"), "#122 PARTNER_TYPES keeps the legacy 'Vendor' spelling");
+for (const partnerType of ["architect", "general contractor", "electrical contractor", "engineer or AV consultant"]) {
+  ok(PARTNER_TYPES.has(partnerType) && baseVenueKind(partnerType, "Partner Co") === null,
+    `#139 exact COMPANY_TYPES partner value ${partnerType} never mints a base venue`);
+}
 ok(baseVenueKind(VENDOR_COMPANY_TYPE, "Rose Brand Church Supply") === null, "#122 a vendor company is never minted a base venue, whatever its name says");
 
 /* ---- #122 §2 — vendor status + owner tasks ---- */

@@ -48,7 +48,7 @@ import {
 } from "./api";
 import { buildRaw, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
-import { queueLabelSync } from "./label-sync";
+import { queueLabelSync, reconcilePeakLabelsForMailbox } from "./label-sync";
 import { interpretLabelEvents } from "./label-interpret";
 
 /**
@@ -690,6 +690,11 @@ async function syncMailbox(
     await syncLabels(key);
   } catch (err) {
     console.error("[gmail] label sync failed for", key, err);
+  }
+  try {
+    await reconcilePeakLabelsForMailbox(key);
+  } catch (err) {
+    console.error("[gmail] dormant label reconcile failed for", key, err);
   }
   return { ran: true, last, changed: last !== null || flips > 0 || labelsChanged };
 }

@@ -761,6 +761,15 @@ export default async function InboxPage({
         size: a.size,
         dataUrl: a.dataUrl,
       })),
+      link: m.link
+        ? {
+            type: m.link.type,
+            kindLabel: m.link.type.charAt(0).toUpperCase() + m.link.type.slice(1),
+            label: m.link.label || m.link.id,
+            color: LINK_KIND_COLOR[m.link.type] || "#5b616e",
+            href: linkHref(m.link),
+          }
+        : null,
     }));
 
     reader = {

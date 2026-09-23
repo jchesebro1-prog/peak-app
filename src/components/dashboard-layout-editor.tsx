@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import {
-  DASHBOARD_WIDGETS,
   type DashboardLayout,
   type DashboardOverride,
   type DashboardWidgetKey,
@@ -23,6 +22,13 @@ const LABELS: Record<DashboardWidgetKey, string> = {
   needsAttention: "Needs attention",
   catalog: "Catalog",
 };
+
+const WIDTHS: Array<{ value: DashboardLayout["widgets"][number]["width"]; label: string }> = [
+  { value: "full", label: "Full" },
+  { value: "half", label: "Half" },
+  { value: "third", label: "Third" },
+  { value: "sidebar", label: "Sidebar" },
+];
 
 type Props =
   | { mode: "company"; initial: DashboardLayout }
@@ -80,17 +86,30 @@ export default function DashboardLayoutEditor(props: Props) {
     }
   };
 
+  const setWidth = (key: DashboardWidgetKey, width: DashboardLayout["widgets"][number]["width"]) => {
+    if (props.mode === "company") {
+      setLayout((prev) => ({
+        ...prev,
+        widgets: prev.widgets.map((w) => (w.key === key ? { ...w, width } : w)),
+      }));
+    } else {
+      setOverride((prev) => ({ ...prev, widths: { ...(prev.widths || {}), [key]: width } }));
+    }
+  };
+
   const reset = () => {
     if (props.mode === "company") setLayout(props.initial);
     else setOverride({});
     setSaved(false);
   };
 
+  const personalOrder = override.order || layout.widgets.map((w) => w.key);
+  const personalRank = new Map(personalOrder.map((key, index) => [key, index]));
   const rows = props.mode === "company"
     ? layout.widgets
     : layout.widgets
         .map((w) => ({ ...w, visible: !(override.hidden || []).includes(w.key) }))
-        .sort((a, b) => (override.order || []).indexOf(a.key) - (override.order || []).indexOf(b.key));
+        .sort((a, b) => (personalRank.get(a.key) ?? Number.MAX_SAFE_INTEGER) - (personalRank.get(b.key) ?? Number.MAX_SAFE_INTEGER));
 
   return (
     <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
@@ -114,6 +133,14 @@ export default function DashboardLayoutEditor(props: Props) {
               {row.visible ? "✓" : "–"}
             </button>
             <span style={{ flex: 1, fontSize: 12.5, color: row.visible ? "#30343b" : "#aab0bb" }}>{LABELS[row.key]}</span>
+            <select
+              value={props.mode === "personal" ? (override.widths?.[row.key] || row.width) : row.width}
+              onChange={(e) => setWidth(row.key, e.target.value as DashboardLayout["widgets"][number]["width"])}
+              aria-label={`${LABELS[row.key]} width`}
+              style={{ border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 5px", fontSize: 11, color: "#5b616e", background: "#fff" }}
+            >
+              {WIDTHS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+            </select>
             <button type="button" onClick={() => move(row.key, -1)} disabled={index === 0} aria-label={`Move ${LABELS[row.key]} up`} style={smallButton}>&uarr;</button>
             <button type="button" onClick={() => move(row.key, 1)} disabled={index === rows.length - 1} aria-label={`Move ${LABELS[row.key]} down`} style={smallButton}>&darr;</button>
           </div>
@@ -136,4 +163,3 @@ const smallButton: React.CSSProperties = {
   color: "#68707b",
   cursor: "pointer",
 };
-

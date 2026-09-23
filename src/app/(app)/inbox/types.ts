@@ -136,6 +136,7 @@ export type MessageVM = {
   time: string;
   body: string;
   attachments?: AttachmentVM[];
+  link: LinkVM | null;
 };
 
 export type LinkVM = {

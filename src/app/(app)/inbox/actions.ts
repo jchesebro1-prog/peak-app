@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { patchDoc } from "@/db/doc-store";
 import { AUTO_SYNC_MIN_AGE_MS } from "@/lib/gmail/config";
 import {
   addMessage,
@@ -36,6 +37,7 @@ import {
   update,
   updateDraft,
   type CommLink,
+  type CommThread,
   type CommSearchScope,
   type Direction,
   type FolderId,
@@ -44,6 +46,8 @@ import {
 import { nameFor } from "@/lib/stores/customers";
 import type { LabelOpt } from "./types";
 import { setCrmMode } from "@/lib/stores/notif-prefs";
+import { getUser } from "@/lib/users";
+import { withEmailSignature } from "@/lib/email-signature";
 import {
   byRenewalOf,
   setStatus as setQuoteStatus,
@@ -296,13 +300,34 @@ export async function setLinkAction(
   revalidate();
 }
 
+/** Link one inbound or outbound message without changing the thread's broad
+ * CRM link. */
+export async function setMessageLinkAction(
+  threadId: string,
+  messageId: string,
+  link: CommLink | null,
+) {
+  await requireUser();
+  const thread = await getThread(threadId);
+  if (!thread) return { ok: false as const, error: "Thread not found." };
+  if (!(thread.messages || []).some((m) => m.id === messageId))
+    return { ok: false as const, error: "Message not found." };
+  await patchDoc<CommThread>("comms", threadId, (d) => {
+    const message = (d.messages || []).find((m) => m.id === messageId);
+    if (message) message.link = link;
+  });
+  revalidate();
+  return { ok: true as const };
+}
+
 /* ---- reader: reply / forward / call log ---- */
 
 export async function replyAction(id: string, body: string) {
   const user = await requireUser();
   const b = (body || "").trim();
   if (!b) return { ok: false as const };
-  await reply(id, { body: b, me: user.name });
+  const profile = await getUser(user.id);
+  await reply(id, { body: withEmailSignature(b, profile || { name: user.name, email: user.email }), me: user.name });
   revalidate();
   return { ok: true as const };
 }
@@ -383,13 +408,15 @@ async function completeRenewalOutreach(
 export async function composeSendAction(d: ComposePayload) {
   const user = await requireUser();
   const me = user.name;
+  const profile = await getUser(user.id);
+  const body = withEmailSignature(d.body || "", profile || { name: me, email: user.email });
   if (!(d.to || "").trim() || !((d.subject || "").trim() || (d.body || "").trim())) {
     return { ok: false as const, id: null };
   }
   const customer = d.customerId ? await nameFor(d.customerId) : "";
   let id: string | null = null;
   if (d.id) {
-    await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body: d.body });
+    await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body });
     const rec = await sendDraft(d.id);
     id = rec ? rec.id : d.id;
     await completeRenewalOutreach(id, me);
@@ -399,7 +426,7 @@ export async function composeSendAction(d: ComposePayload) {
       mailboxUser: me,
       cc: d.cc,
       subject: (d.subject || "").trim() || "(no subject)",
-      body: d.body,
+      body,
       customerId: d.customerId || null,
       customer,
       contactName: d.contactName,
@@ -509,4 +536,3 @@ export async function autoSyncAction() {
   const r = await checkMailIfStale(AUTO_SYNC_MIN_AGE_MS);
   return { ok: true as const, ran: r.ran, changed: r.changed, id: r.id };
 }
-

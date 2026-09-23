@@ -7,6 +7,23 @@ import { ChanGlyph, CheckIcon, FlagIcon, Magnifier, PinIcon, RestoreIcon, TrashI
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 
+const LABEL_SWATCHES = [
+  ["#3155a8", "#e9eefb"],
+  ["#1f7a52", "#eaf6ef"],
+  ["#8a6d1f", "#fbf3dd"],
+  ["#b4543a", "#f8ece7"],
+  ["#7b5fb0", "#f1ebf8"],
+] as const;
+
+function labelColors(label: { id: string; textColor?: string | null; backgroundColor?: string | null }) {
+  if (label.textColor || label.backgroundColor)
+    return { color: label.textColor || "#5b616e", background: label.backgroundColor || "#f1f2f5" };
+  let hash = 0;
+  for (const char of label.id) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  const [color, background] = LABEL_SWATCHES[Math.abs(hash) % LABEL_SWATCHES.length];
+  return { color, background };
+}
+
 export type RowActions = {
   onArchive: (id: string) => void;
   onFlag: (id: string, on: boolean) => void;
@@ -689,17 +706,7 @@ function Row({
         {r.labels.length > 0 && (
           <span style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
             {r.labels.map((label) => (
-              <span
-                key={label.id}
-                style={{
-                  fontSize: 9.5,
-                  fontWeight: 600,
-                  color: label.textColor || "#5b616e",
-                  background: label.backgroundColor || "#f1f2f5",
-                  borderRadius: 4,
-                  padding: "2px 6px",
-                }}
-              >
+              <span key={label.id} style={{ fontSize: 9.5, fontWeight: 600, ...labelColors(label), borderRadius: 4, padding: "2px 6px" }}>
                 {label.name}
               </span>
             ))}

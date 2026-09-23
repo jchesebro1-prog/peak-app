@@ -22,6 +22,10 @@ export const PARTNER_TYPES = new Set([
   "Engineer",
   "Vendor", // legacy spelling on rows that predate #122 — still a partner
   VENDOR_COMPANY_TYPE, // #122 — the COMPANY_TYPES value the Vendors module keys on
+  "architect",
+  "general contractor",
+  "electrical contractor",
+  "engineer or AV consultant",
   "Competitor",
   "Consultant",
 ]);

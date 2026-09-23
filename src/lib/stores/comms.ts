@@ -220,6 +220,9 @@ export type CommMessage = {
    *  "IMPORTANT", "Label_12") — resolve names via listGmailLabels(). Absent
    *  for simulated/local-only messages. */
   gmailLabelIds?: string[];
+  /** Optional record link for this specific message; the thread link remains
+   * the broad CRM context. */
+  link?: CommLink | null;
 };
 
 export type CommDraft = {

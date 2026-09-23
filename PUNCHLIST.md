@@ -5614,7 +5614,7 @@ Google Calendar someone owns and the team writes to, or a new Peak-side shared-e
 with its own write/permission model — a subscribe-only read feature doesn't cover it. Needs its own
 spec (design the write/ownership model first) before code, same as this item originally asked.
 
-## 109. Inbox: label color coding + visual cleanup — OPEN (extends #96)
+## 109. Inbox: label color coding + visual cleanup — DONE 2026-09-23 (extends #96)
 
 **Reported:** 2026-09-21 (Jeff): "I still want labels, color coding, and for it to look better and
 cleaner."
@@ -6019,7 +6019,7 @@ nothing in the Inbox links to it.
 intake pre-filled with the thread's customer/contact and links the thread to the created quote on
 save; add `lead` to the work-link types (the interpreter already writes `type:"lead"`).
 
-## 124. Inbox: link a venue through the selected customer — OPEN
+## 124. Inbox: link a venue through the selected customer — DONE 2026-09-23
 
 **Reported:** 2026-09-21 (Jeff): "The Venue should also be linkable via the customer when selected."
 
@@ -6029,7 +6029,7 @@ appends a `CustomerLocation` to the customer but never attaches it to the thread
 **Ask:** once a customer is linked, a venue select (that customer's sites + quick-add) that stamps
 `siteId` on the thread; work links created from the thread (quote, survey, inspection) inherit it.
 
-## 125. Inbox: per-message picker to link from a specific message (in or out) — OPEN
+## 125. Inbox: per-message picker to link from a specific message (in or out) — DONE 2026-09-23
 
 **Reported:** 2026-09-21 (Jeff): "a dropdown menu for a thread and select that message in the thread,
 both incoming and outgoing, to link quicker."
@@ -6056,7 +6056,7 @@ with a mobile drawer, not a rail.
 widths remembered per user (localStorage, with sane min/max), and — if Jeff means the app nav — a
 compact mode for the top bar.
 
-## 127. Inbox: email signatures, auto-appended — OPEN
+## 127. Inbox: email signatures, auto-appended — DONE 2026-09-23
 
 **Reported:** 2026-09-21 (Jeff): "There needs an ability to add signatures so they automatically get
 added."
@@ -6293,7 +6293,7 @@ follow-up). Files: `src/app/(app)/import/{types,parse,link,registry,actions,page
 `inbox/link-actions.ts`. Tests: `test:specs` (#137 T2/T3), `test:review:regressions` (#137
 T1/T4/T5/T6), `test:smoke` (hub + export routes). Decisions: D158.
 
-## 138. Cron reconcile of Peak/* label drift on dormant threads — OPEN (re-logged; was #98)
+## 138. Cron reconcile of Peak/* label drift on dormant threads — DONE 2026-09-23
 
 D142's Peak→Gmail writer (`queueLabelSync`) is fire-and-forget: it's queued from the store mutation
 inside a server action, with no `waitUntil`, so on serverless the process can freeze or recycle before
@@ -6310,7 +6310,7 @@ differ would close this: bounded cost (one `getDoc` + one label-cache read per l
 only needs to run on the cron path, not the interactive one, since interactive traffic already
 self-heals via the next mutation. Reference D142.
 
-## 139. `PARTNER_TYPES` still mismatches `COMPANY_TYPES` for four non-vendor partner types — OPEN
+## 139. `PARTNER_TYPES` still mismatches `COMPANY_TYPES` for four non-vendor partner types — DONE 2026-09-23
 
 **Reported:** found during #122 (Vendors module) reviews, 2026-09-21 — pre-existing, out of that
 punch's scope.
@@ -6358,7 +6358,7 @@ the ledger visible AND the queue quiet, at the cost of one more chip in `VENDOR_
 `/vendors` status filter. Whichever is picked, the spec §2 status table, `DECISIONS.md` D160 and the
 `#122` harness assertions move with it. Reference #122 / D160.
 
-## 141. Vendor Overview: the remount that fixed concurrent overwrites also eats the "Saved" chip and unsaved keystrokes — OPEN
+## 141. Vendor Overview: the remount that fixed concurrent overwrites also eats the "Saved" chip and unsaved keystrokes — DONE 2026-09-23
 
 **Reported:** found during the #122 (Vendors module) re-review, 2026-09-22 — introduced by that
 module's own fix wave, so it ships with the feature rather than predating it.
