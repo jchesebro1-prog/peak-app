@@ -149,13 +149,18 @@ export async function signoffAction(formData: FormData): Promise<void> {
   const wasComplete = p.stage === "complete";
   await setProjectStage(id, "complete", user.name);
   if (!wasComplete) {
-    await createAssignment({
-      title: `Walk the completed site with the end user: ${p.name || p.customer || id}`,
-      assignee: p.owner || "Jeff Chesebro",
-      createdBy: user.name,
-      link: { kind: "project", id, label: p.name || p.customer || id },
-      source: "auto: project complete (#16)",
-    });
+    try {
+      await createAssignment({
+        title: `Walk the completed site with the end user: ${p.name || p.customer || id}`,
+        assignee: p.owner || "Jeff Chesebro",
+        createdBy: user.name,
+        link: { kind: "project", id, label: p.name || p.customer || id },
+        source: "auto: project complete (#16)",
+      });
+    } catch (error) {
+      console.error("signoffAction: follow-up mint failed", error);
+      redirect(`/projects/${encodeURIComponent(id)}?tab=signoff&err=` + encodeURIComponent("Sign-off was recorded, but the follow-up task could not be created. Please try again."));
+    }
   }
   revalidatePath("/", "layout");
 }
@@ -165,7 +170,13 @@ export async function startConversionAction(formData: FormData): Promise<void> {
   await requireUser();
   const quoteId = str(formData, "quoteId");
   if (!quoteId) return;
-  const p = await createProjectFromQuote(quoteId);
+  let p;
+  try {
+    p = await createProjectFromQuote(quoteId);
+  } catch (error) {
+    console.error("startConversionAction: project mint failed", error);
+    redirect("/projects?err=" + encodeURIComponent("Couldn’t start the project — please try again."));
+  }
   revalidatePath("/", "layout");
   if (p) redirect("/projects/" + encodeURIComponent(p.id));
 }
@@ -203,11 +214,16 @@ export async function addTaskAction(formData: FormData) {
   const assigneeName = assigneeUserId
     ? (await activeUsers()).find((u) => u.id === assigneeUserId)?.name || ""
     : "";
-  await createTask(
-    { title, section, projectId, assigneeUserId, assigneeName,
-      dueAt: due ? new Date(due + "T12:00:00").getTime() : null },
-    me,
-  );
+  try {
+    await createTask(
+      { title, section, projectId, assigneeUserId, assigneeName,
+        dueAt: due ? new Date(due + "T12:00:00").getTime() : null },
+      me,
+    );
+  } catch (error) {
+    console.error("addTaskAction: task mint failed", error);
+    redirect(`/projects/${encodeURIComponent(projectId)}?tab=tasks&err=` + encodeURIComponent("Couldn’t add that task — please try again."));
+  }
   revalidatePath("/", "layout");
 }
 

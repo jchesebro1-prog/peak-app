@@ -174,14 +174,20 @@ export async function createQuoteFromSurvey(id: string, patch: SurveyPatch): Pro
   const rec = id ? await get(id) : null;
   if (!rec) return;
   await update(id, { ...(patch as Partial<SurveyRecord>), stage: "completed" });
-  const q = await createQuote({
-    name: (patch.customer || rec.customer || "Venue assessment") + " — " + (patch.venue || rec.venue || rec.venueType || "Site"),
-    customer: patch.customer || rec.customer || "",
-    customerId: patch.customerId ?? rec.customerId ?? null,
-    locationId: patch.locationId ?? rec.locationId ?? null,
-    owner: user.name,
-    source: "survey",
-  });
+  let q;
+  try {
+    q = await createQuote({
+      name: (patch.customer || rec.customer || "Venue assessment") + " — " + (patch.venue || rec.venue || rec.venueType || "Site"),
+      customer: patch.customer || rec.customer || "",
+      customerId: patch.customerId ?? rec.customerId ?? null,
+      locationId: patch.locationId ?? rec.locationId ?? null,
+      owner: user.name,
+      source: "survey",
+    });
+  } catch (error) {
+    console.error("createQuoteFromSurvey: quote mint failed", error);
+    redirect(`/venue-assessments/${encodeURIComponent(id)}?err=` + encodeURIComponent("Couldn’t create the quote — please try again."));
+  }
   revalidatePath("/", "layout");
   redirect(`/estimator?id=${encodeURIComponent(q.id)}`);
 }

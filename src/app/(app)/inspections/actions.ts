@@ -21,11 +21,17 @@ import { removeServiceCalendar, syncServiceCalendar } from "@/lib/service-calend
  */
 export async function createInspection(): Promise<void> {
   const user = await requireUser();
-  const rec = await create({
-    owner: user.name,
-    requestedBy: user.name,
-    stage: "requested",
-  });
+  let rec;
+  try {
+    rec = await create({
+      owner: user.name,
+      requestedBy: user.name,
+      stage: "requested",
+    });
+  } catch (error) {
+    console.error("createInspection: record mint failed", error);
+    redirect("/inspections?err=" + encodeURIComponent("Couldn’t create the inspection — please try again."));
+  }
   revalidatePath("/", "layout");
   redirect(`/inspections/${encodeURIComponent(rec.id)}`);
 }

@@ -20,6 +20,7 @@ import { getEngine } from "./engine";
  */
 
 export type SaveResult = { queued: boolean };
+export type ServerSaveResult = { ok: true } | { ok: false; error: string };
 
 /** Next's redirect()/notFound() throw control-flow errors we must not swallow. */
 function isControlFlowError(e: unknown): boolean {
@@ -36,14 +37,15 @@ export async function saveThroughOutbox(opts: {
   collection: string;
   id: string;
   doc: Record<string, unknown>;
-  action: () => Promise<void>;
+  action: () => Promise<void | ServerSaveResult>;
 }): Promise<SaveResult> {
   const engine = getEngine();
   const rev = Number(opts.doc.rev) || 1;
 
   if (engine.connected()) {
     try {
-      await opts.action();
+      const result = await opts.action();
+      if (result && !result.ok) throw new Error(result.error);
       await engine.recordSynced(opts.collection, opts.id, opts.doc, rev);
       return { queued: false };
     } catch (e) {

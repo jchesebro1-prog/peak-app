@@ -15,7 +15,13 @@ import { create as createQuote } from "@/lib/stores/quotes";
  */
 export async function createSurvey(): Promise<void> {
   const user = await requireUser();
-  const rec = await create({ owner: user.name, requestedBy: user.name, stage: "requested" }, user.name);
+  let rec;
+  try {
+    rec = await create({ owner: user.name, requestedBy: user.name, stage: "requested" }, user.name);
+  } catch (error) {
+    console.error("createSurvey: record mint failed", error);
+    redirect("/venue-assessments?err=" + encodeURIComponent("Couldn’t create the venue assessment — please try again."));
+  }
   revalidatePath("/", "layout");
   redirect(`/venue-assessments/${encodeURIComponent(rec.id)}`);
 }
@@ -72,14 +78,20 @@ export async function quoteFromSurvey(formData: FormData): Promise<void> {
   const rec = id ? await get(id) : null;
   if (!rec) return;
   if (rec.stage !== "completed") await update(id, { stage: "completed" });
-  const q = await createQuote({
-    name: (rec.customer || "Venue assessment") + " — " + (rec.venue || rec.venueType || "Site"),
-    customer: rec.customer || "",
-    customerId: rec.customerId || null,
-    locationId: rec.locationId || null,
-    owner: user.name,
-    source: "survey",
-  });
+  let q;
+  try {
+    q = await createQuote({
+      name: (rec.customer || "Venue assessment") + " — " + (rec.venue || rec.venueType || "Site"),
+      customer: rec.customer || "",
+      customerId: rec.customerId || null,
+      locationId: rec.locationId || null,
+      owner: user.name,
+      source: "survey",
+    });
+  } catch (error) {
+    console.error("quoteFromSurvey: quote mint failed", error);
+    redirect("/venue-assessments?err=" + encodeURIComponent("Couldn’t create the quote — please try again."));
+  }
   revalidatePath("/", "layout");
   redirect(`/estimator?id=${encodeURIComponent(q.id)}`);
 }

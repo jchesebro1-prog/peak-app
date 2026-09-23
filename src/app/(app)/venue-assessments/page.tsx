@@ -21,6 +21,7 @@ import VisitRequests, { type VisitRequestVM } from "./visit-requests";
 import { RecordControl } from "@/components/recordings/record-control";
 import { RecordingCountBadge } from "@/components/recordings/record-control-link";
 import { recordingCountByParent } from "../recordings/data";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Venue assessments — Quartzite-6" };
 
@@ -216,6 +217,7 @@ export default async function FieldSurveyPage({
   return (
     <div className="pk-content fs-pad">
       <style>{CSS}</style>
+      <ActionError message={one(sp.err)} />
 
       {/* header */}
       <div

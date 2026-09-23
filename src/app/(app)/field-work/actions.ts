@@ -29,18 +29,24 @@ export async function toggleFieldTask(formData: FormData): Promise<void> {
 }
 
 /** Add a punch-list task (Install section, assigned to the signed-in user). */
-export async function addFieldTask(formData: FormData): Promise<void> {
+export async function addFieldTask(formData: FormData): Promise<{ ok: true } | { ok: false; error: string }> {
   const me = await requireUser();
   const projectId = String(formData.get("id") || "");
   const title = String(formData.get("title") || "").trim();
   const clientId = String(formData.get("taskId") || "");
-  if (!projectId || !title) return;
-  await createTask(
-    { id: clientId || undefined, title, section: "Install", projectId,
-      assigneeUserId: me.id, assigneeName: me.name },
-    me,
-  );
+  if (!projectId || !title) return { ok: false, error: "A task title is required." };
+  try {
+    await createTask(
+      { id: clientId || undefined, title, section: "Install", projectId,
+        assigneeUserId: me.id, assigneeName: me.name },
+      me,
+    );
+  } catch (error) {
+    console.error("addFieldTask: task mint failed", error);
+    return { ok: false, error: "Couldn’t add that task — please try again." };
+  }
   revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 /** Log a field note (text only in this build — photo upload deferred). */
