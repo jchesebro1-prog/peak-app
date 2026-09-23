@@ -28,14 +28,19 @@ export async function createAssignmentAction(input: {
   const title = String(input?.title || "").trim();
   if (!title) return { ok: false, error: "The assignment needs a title." };
   const assignee = String(input?.assignee || "").trim() || user.name;
-  await createAssignment({
-    title,
-    assignee,
-    createdBy: user.name,
-    dueDate: Number(input?.dueDate) || 0,
-    link: input?.link || null,
-    source: input?.source,
-  });
+  try {
+    await createAssignment({
+      title,
+      assignee,
+      createdBy: user.name,
+      dueDate: Number(input?.dueDate) || 0,
+      link: input?.link || null,
+      source: input?.source,
+    });
+  } catch (error) {
+    console.error("createAssignmentAction: assignment mint failed", error);
+    return { ok: false, error: "Couldn’t create the assignment — please try again." };
+  }
   revalidatePath("/", "layout");
   return { ok: true };
 }

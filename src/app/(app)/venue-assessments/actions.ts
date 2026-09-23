@@ -47,24 +47,30 @@ export async function importSurveyCsv(formData: FormData): Promise<void> {
   if (lines.length < 2) return;
   const headers = csvCells(lines[0]).map((h) => h.toLowerCase());
   let imported = 0;
+  let failed = 0;
   for (const line of lines.slice(1)) {
-    const cells = csvCells(line); const row = Object.fromEntries(headers.map((h, i) => [h, cells[i] || ""]));
-    const id = row.survey_id?.trim();
-    const patch = {
-      customer: row.customer || "", venue: row.venue || "", venueType: row.venue_type || "",
-      address: row.address || "", reason: row.reason || "", scopeOfWork: row.scope_of_work || "",
-      notes: row.notes || "", stage: (["requested", "scheduled", "onsite", "completed"].includes(row.stage) ? row.stage : "requested") as SurveyStage,
-      measurements: Object.fromEntries(Object.entries(row).filter(([key, value]) => key.startsWith("measure_") && value).map(([key, value]) => [key.slice(8), value])),
-    } as const;
-    if (id) {
-      const existing = await get(id);
-      if (existing) { await update(id, patch); imported++; continue; }
+    try {
+      const cells = csvCells(line); const row = Object.fromEntries(headers.map((h, i) => [h, cells[i] || ""]));
+      const id = row.survey_id?.trim();
+      const patch = {
+        customer: row.customer || "", venue: row.venue || "", venueType: row.venue_type || "",
+        address: row.address || "", reason: row.reason || "", scopeOfWork: row.scope_of_work || "",
+        notes: row.notes || "", stage: (["requested", "scheduled", "onsite", "completed"].includes(row.stage) ? row.stage : "requested") as SurveyStage,
+        measurements: Object.fromEntries(Object.entries(row).filter(([key, value]) => key.startsWith("measure_") && value).map(([key, value]) => [key.slice(8), value])),
+      } as const;
+      if (id) {
+        const existing = await get(id);
+        if (existing) { await update(id, patch); imported++; continue; }
+      }
+      await create({ ...patch, owner: user.name, requestedBy: user.name }, user.name);
+      imported++;
+    } catch (error) {
+      failed++;
+      console.error("importSurveyCsv: row import failed", error);
     }
-    await create({ ...patch, owner: user.name, requestedBy: user.name }, user.name);
-    imported++;
   }
   revalidatePath("/venue-assessments");
-  redirect(`/venue-assessments?imported=${imported}`);
+  redirect(`/venue-assessments?imported=${imported}&failed=${failed}`);
 }
 
 /**
