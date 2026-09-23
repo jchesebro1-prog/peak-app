@@ -5160,7 +5160,11 @@ itself the thing to revisit instead of patching its error handling?
 **Ties to:** #80 (same throw, third fix shape), #74 (the same page-load sync machinery, documented
 there), #16 (triggers re-running on every page load).
 
-**Status:** OPEN — logged only, no code.
+**Status:** PARTIAL 2026-09-23 — the three page-load reconciliation boundaries now catch a
+single quote's mint/sync failure, log the skipped quote, and continue rendering the rest of the
+page instead of surfacing a raw 500. This deliberately does not roll back earlier writes or claim
+transactional behavior; transaction design remains #74. A future pass can add a visible degraded
+state and/or move reconciliation out of render once the product decision is made.
 
 ---
 

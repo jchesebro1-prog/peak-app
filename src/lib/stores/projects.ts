@@ -700,27 +700,31 @@ export async function syncProjectsFromQuotes(): Promise<number> {
     )
       continue;
     if (haveQ.has(q.id) || skip.includes(q.id)) continue;
-    const body = fromQuote(q);
-    const rec = await insertWithPrefixedId<ProjectRecord>(
-      "projects",
-      body.kind === "order" ? "S" : "P",
-      body.kind === "order" ? 4000 : 3000,
-      (id) => ({ ...body, id })
-    );
-    const id = rec.id;
-    haveQ.add(q.id);
-    made++;
+    try {
+      const body = fromQuote(q);
+      const rec = await insertWithPrefixedId<ProjectRecord>(
+        "projects",
+        body.kind === "order" ? "S" : "P",
+        body.kind === "order" ? 4000 : 3000,
+        (id) => ({ ...body, id })
+      );
+      const id = rec.id;
+      haveQ.add(q.id);
+      made++;
 
-    // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
-    // Unassigned until the project-roles model exists (D87: assign-by-role
-    // later). Deterministic coverageKey makes double-hooking alongside
-    // createProjectFromQuote's own call harmless (createAutoTask no-ops).
-    await createAutoTask({
-      coverageKey: `item16:sold:${id}`,
-      title: `Sold — kickoff call for ${body.name}`,
-      projectId: id, quoteId: body.quoteId, section: "Follow-up",
-      dueAt: Date.now() + 7 * DAY, // kickoff within a week of sale; overdue then nags the bell (unassigned until roles model, D87)
-    });
+      // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
+      // Unassigned until the project-roles model exists (D87: assign-by-role
+      // later). Deterministic coverageKey makes double-hooking alongside
+      // createProjectFromQuote's own call harmless (createAutoTask no-ops).
+      await createAutoTask({
+        coverageKey: `item16:sold:${id}`,
+        title: `Sold — kickoff call for ${body.name}`,
+        projectId: id, quoteId: body.quoteId, section: "Follow-up",
+        dueAt: Date.now() + 7 * DAY, // kickoff within a week of sale; overdue then nags the bell (unassigned until roles model, D87)
+      });
+    } catch (error) {
+      console.error(`syncProjectsFromQuotes: skipped ${q.id} during page-load reconciliation`, error);
+    }
   }
   return made;
 }

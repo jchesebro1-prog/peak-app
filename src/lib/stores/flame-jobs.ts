@@ -466,16 +466,20 @@ export async function syncFromQuotes(): Promise<number> {
   let made = 0;
   for (const q of won) {
     if (have[q.id]) continue;
-    const rec = await fromQuote(q);
-    const t = now();
-    await insertWithPrefixedId<FlameJob>("flame_jobs", "FT", 3000, (id) => ({
-      ...rec,
-      id,
-      createdAt: t,
-      updatedAt: t,
-    }));
-    have[q.id] = true;
-    made++;
+    try {
+      const rec = await fromQuote(q);
+      const t = now();
+      await insertWithPrefixedId<FlameJob>("flame_jobs", "FT", 3000, (id) => ({
+        ...rec,
+        id,
+        createdAt: t,
+        updatedAt: t,
+      }));
+      have[q.id] = true;
+      made++;
+    } catch (error) {
+      console.error(`syncFromQuotes(flame): skipped ${q.id} during page-load reconciliation`, error);
+    }
   }
   return made;
 }

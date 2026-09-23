@@ -636,34 +636,38 @@ export async function syncEngagementsFromQuotes(): Promise<number> {
       : null;
     const action = engagementSyncAction(String(q.status || ""), stage);
     if (!action) continue;
-    if (action.kind === "create") {
-      const body = fromQuote(q, action.stage);
-      const rec = await insertWithPrefixedId<ConsultingEngagement>(
-        "consulting_engagements",
-        "CE",
-        1000,
-        (id) => ({ ...body, id })
-      );
-      byQuote.set(q.id, rec);
-    } else if (action.kind === "advance" || action.kind === "reopen") {
-      // "advance" (→ awarded) and "reopen" (→ proposal_sent) are both a
-      // plain stage overwrite; only "close" below needs the decision entry.
-      await patchEngagement(existing!.id, (d) => {
-        d.status = action.stage;
-      });
-    } else {
-      await patchEngagement(existing!.id, (d) => {
-        d.status = "closed";
-        d.decisions.unshift({
-          id: uid("dc-"),
-          at: Date.now(),
-          by: "System",
-          decision: "Proposal lost",
-          context: `Consulting quote ${q.id} was marked lost while this engagement was still at Proposal sent.`,
+    try {
+      if (action.kind === "create") {
+        const body = fromQuote(q, action.stage);
+        const rec = await insertWithPrefixedId<ConsultingEngagement>(
+          "consulting_engagements",
+          "CE",
+          1000,
+          (id) => ({ ...body, id })
+        );
+        byQuote.set(q.id, rec);
+      } else if (action.kind === "advance" || action.kind === "reopen") {
+        // "advance" (→ awarded) and "reopen" (→ proposal_sent) are both a
+        // plain stage overwrite; only "close" below needs the decision entry.
+        await patchEngagement(existing!.id, (d) => {
+          d.status = action.stage;
         });
-      });
+      } else {
+        await patchEngagement(existing!.id, (d) => {
+          d.status = "closed";
+          d.decisions.unshift({
+            id: uid("dc-"),
+            at: Date.now(),
+            by: "System",
+            decision: "Proposal lost",
+            context: `Consulting quote ${q.id} was marked lost while this engagement was still at Proposal sent.`,
+          });
+        });
+      }
+      changed++;
+    } catch (error) {
+      console.error(`syncEngagementsFromQuotes: skipped ${q.id} during page-load reconciliation`, error);
     }
-    changed++;
   }
   return changed;
 }
