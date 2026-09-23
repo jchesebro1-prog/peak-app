@@ -15,6 +15,7 @@ import {
 import { boxMeta, waitingSince, waitLabel as commWaitLabel } from "@/lib/stores/comms";
 import { priceBooks } from "@/lib/catalog-books";
 import { queueCardCounts, queueDueLabel } from "@/lib/queue";
+import { recordableParentIds } from "@/app/(app)/recordings/data";
 import type { WidgetCtx, WidgetRenderer } from "@/lib/dashboard/context";
 import { homeAlerts, myQuoteStats, resolvePipe, sheetHrefFor, shortMoney } from "@/lib/dashboard/home-metrics";
 import { tile } from "./tile";
@@ -154,13 +155,19 @@ export const HOME_RENDERERS = {
   /* ---- catalog (page.tsx 177, 567) ---- */
   catalog: async (ctx) => {
     const parts = await ctx.data.catalogParts();
-    return <HomeCatalog books={priceBooks(parts)} partCount={parts.length} />;
+    return <HomeCatalog books={priceBooks(parts, await ctx.data.settings())} partCount={parts.length} />;
   },
 
   /* ---- calendar (D77) ---- */
   calendar: async (ctx) => {
     const { gmailOn, calendarOn, items } = await ctx.data.agenda();
-    return <HomeCalendar items={items} calendarOn={calendarOn} gmailOn={gmailOn} />;
+    let recordVisitIds: string[] = [];
+    try {
+      recordVisitIds = await recordableParentIds("site_visit", items.filter((item) => item.source === "visit").map((item) => item.id));
+    } catch {
+      recordVisitIds = [];
+    }
+    return <HomeCalendar items={items} calendarOn={calendarOn} gmailOn={gmailOn} recordVisitIds={recordVisitIds} />;
   },
 
   /* ---- venue assessments (page.tsx 459-474) ---- */

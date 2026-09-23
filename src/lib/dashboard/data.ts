@@ -16,6 +16,7 @@ import { threadsIn, unreadCount, folderCounts, mailboxes as commMailboxes } from
 import { list as catalogList } from "@/lib/stores/catalog";
 import { loadQueue } from "@/lib/queue";
 import { loadHomeAgenda } from "@/lib/agenda";
+import { getSettings } from "@/lib/settings";
 import { once } from "./once";
 
 export function makeDashboardData(user: SessionUser) {
@@ -38,6 +39,7 @@ export function makeDashboardData(user: SessionUser) {
     queueItems: once(() => loadQueue(me)),
     agenda: once(() => loadHomeAgenda(user.id, me)),
     boxCounts: once(() => Promise.all(boxes.map((b) => folderCounts(b.id, me)))),
+    settings: once(getSettings),
   };
 }
 
