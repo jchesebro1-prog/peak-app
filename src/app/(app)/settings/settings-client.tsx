@@ -2111,14 +2111,6 @@ export default function SettingsClient({
       {section === "admin" && (
         <>
           <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 600 }}>Beta</div>
-            <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3, marginBottom: 12 }}>Development and rollout controls for administrators.</div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "10px 0", borderTop: "1px solid #f3f4f7" }}>
-              <div><div style={{ fontSize: 13.5, fontWeight: 600 }}>Demo data</div><div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>Seed prototype records while testing.</div></div>
-              <Toggle on={settings.seedDemo} onChange={(v) => saveSetting({ seedDemo: v })} />
-            </div>
-          </section>
-          <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Admin</div>
             <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 4, marginBottom: 14 }}>
               Data administration. Each screen keeps its own page.
