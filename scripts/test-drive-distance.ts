@@ -10,6 +10,7 @@ import { setSettings } from "@/lib/settings";
 import { routeKey } from "@/lib/geo";
 import { compareDrive, driveTitle, fmtDrive, parseDriveSort, type Drive } from "@/lib/drive-format";
 import { travelForPoints } from "@/lib/travel-bulk";
+import { baseOffice, resolveTravelOrigin } from "@/lib/travel-origin";
 
 globalThis.fetch = (async () => new Response("[]", { status: 200 })) as typeof fetch;
 
@@ -85,6 +86,36 @@ async function main() {
   assert.equal(r.byId.get("nowhere")?.source, "none");
   assert.equal((await travelForPoints([])).byId.size, 0);
   console.log("PASS drive: travelForPoints");
+
+  /* ---- resolveTravelOrigin ---- */
+  {
+    const offs = [
+      { id: "o-mil", name: "Milwaukee Remote", lat: 43.0389, lng: -87.9065 },
+      { id: "o-mad", name: "Madison Office", lat: 43.0731, lng: -89.4012, quoteDefault: true },
+      { id: "o-nocoords", name: "Pop-up", lat: null, lng: null },
+    ];
+    const hit = async (q: string) => (q.includes("Baraboo") ? [{ lat: 43.47, lng: -89.74 }] : []);
+    assert.equal(baseOffice(offs, null)?.id, "o-mad", "no based-out-of → quote origin");
+    assert.equal(baseOffice(offs, "o-mil")?.id, "o-mil", "based-out-of wins");
+    assert.equal(baseOffice(offs, "o-gone")?.id, "o-mad", "unknown based-out-of → quote origin");
+
+    const typed = await resolveTravelOrigin({ address: "  123 Oak St, Baraboo, WI " }, { offices: offs, search: hit });
+    assert.deepEqual(typed, { origin: { name: "123 Oak St, Baraboo, WI", lat: 43.47, lng: -89.74 } });
+
+    const miss = await resolveTravelOrigin({ address: "Nowhere Rd" }, { offices: offs, baseOfficeId: "o-mil", search: hit });
+    assert.equal(miss.origin?.name, "Milwaukee Remote");
+    assert.equal(miss.note, "Couldn’t find “Nowhere Rd”, so this is measured from Milwaukee Remote.");
+
+    const office = await resolveTravelOrigin({ officeId: "o-mil" }, { offices: offs, search: hit });
+    assert.equal(office.origin?.name, "Milwaukee Remote");
+    const noCoords = await resolveTravelOrigin({ officeId: "o-nocoords" }, { offices: offs, search: hit });
+    assert.equal(noCoords.origin?.name, "Madison Office", "office without coords → base");
+    const blank = await resolveTravelOrigin({ address: "   " }, { offices: offs, search: hit });
+    assert.equal(blank.origin?.name, "Madison Office");
+    assert.equal(blank.note, undefined);
+    assert.deepEqual(await resolveTravelOrigin(undefined, { offices: [], search: hit }), { origin: null });
+    console.log("PASS drive: resolveTravelOrigin");
+  }
 
   console.log("ALL PASSED");
 }
