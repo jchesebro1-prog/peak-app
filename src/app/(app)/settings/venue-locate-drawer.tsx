@@ -157,7 +157,10 @@ export default function VenueLocateDrawer({
         setMsg({ ok: false, text: reasonLabel(r.reason, r.got) + "." + hint });
         // Deleted meanwhile (spec §4): the sidebar says so, and the list
         // drops the row — same as a fix, just no ✓ state here.
-        if (r.reason === "gone") onGone(venue.siteId);
+        if (r.reason === "gone") {
+          onGone(venue.siteId);
+          setDone(true);
+        }
       }
     } catch {
       setMsg({ ok: false, text: "Lookup failed. Try again, or drop a pin." });
