@@ -4986,3 +4986,11 @@ affects #164 equally and belongs in one fix for both rails.
 - **The sidebar never writes `travelMiles`/`travelMin`.** The Companies "Route" button does, and that freezes travel as a manual override. Here travel stays live through the route cache, warmed at fix time.
 - **Writes** are one targeted `UPDATE … WHERE id AND NOT deleted RETURNING`. Zero rows means `gone`.
 - **Quote origin** is set explicitly per location: a pill plus *Use for quotes*. The implicit "first listed" fallback stays, but is labelled so it is visible. Calendar travel blocks still start from each person's "Based out of" office and fall back to the quote origin; per-appointment origins are a separate item.
+
+## D229. Directory drive times measure from the quote origin; a calendar trip can start anywhere (#176, 2026-09-24)
+
+- **One origin for the directories.** The Drive column uses the same rule as every quote: `quoteOrigin()`, `coordsOf()` and `estimateFromParts()` (manual > routed > auto > none). It reads only the route cache, and a straight-line estimate is marked `~`, so a directory page never calls OSRM. With no located quote origin, every cell is "—", even for manual overrides, so the column can't imply a distance from nowhere.
+- **Companies use the primary venue** (`primaryLoc`). Nearest-of-many was rejected: it makes the row's number depend on a venue the row doesn't name.
+- **Unlocated rows sort last in both directions.** "Farthest first" should not open with 200 unknowns.
+- **The calendar origin is chosen per appointment:** a typed address, then a saved location with coordinates, then the person's base ("Based out of", else the quote origin). A typed miss falls back to the base and says so in the block's description; it doesn't silently drop the block. The travel block runs in `after()` so a slow geocoder can't time out the save and invite a duplicate meeting. Edits still don't regenerate the block (D144).
+- **Numbering.** #175/#176 and D228/D229, not #169/#170 and D225/D226, which a parallel session claimed first.

@@ -7546,3 +7546,52 @@ Each location in Settings → Locations now shows a **Quote origin** pill, marke
 - The type-ahead is debounced but still an autocomplete against public Nominatim, which its usage policy discourages. The Companies search does the same, app-wide.
 - The drawer has no focus trap.
 - Next does not cross a "Show more" page boundary.
+
+---
+
+## 176. Drive distance on the directories, and "Traveling from" on calendar appointments — DONE 2026-09-24 (D229)
+
+**Reported:** 2026-09-24 (Jeff): "one of things we need to have is basically a distance to all of the locations … people can add where they are traveling from when they set up appointments via the calendar." He chose a sortable drive column measured from the quote origin, and asked that people can type any address. The "estimate out of Madison" half of the request shipped in #175 as the quote-origin control.
+
+**Drive column.**
+- **Where:** `/venues` shows a **Drive** cell on every row. The `/companies` directory shows the same cell, taken from each company's primary venue.
+- **What the cell says:**
+  - `62 mi · 1h 8m` for a routed drive;
+  - `~62 mi · 1h 8m` for a straight-line estimate that is still waiting for a route;
+  - the entered value for a manual override;
+  - `—` for a venue that isn't located. Every cell reads `—` when no quote origin with coordinates is set.
+  - A tooltip explains each case.
+- **Sorting:** both pages get Recent activity / Default, Nearest first and Farthest first (`?sort=near|far`). The sort survives search and the filters. Unlocated rows always sort last.
+- **Speed:** travel for every row comes from one bulk helper, `src/lib/travel-bulk.ts` `travelForPoints()`. It reads offices and rates once and makes one `routeCachedBulk` query. Formatting and sorting live in the pure `src/lib/drive-format.ts`.
+
+**Calendar.** The New event form has a **Traveling from** select, shown in create mode and only for timed events:
+- **My base** — the person's "Based out of" office, else the quote origin;
+- each located saved location;
+- **Another address…**, which reveals a text field.
+
+The auto "Drive to …" block uses `src/lib/travel-origin.ts` `resolveTravelOrigin()`. It geocodes the destination first, then routes with a live OSRM call and falls back to a straight-line estimate. The block names where it measured from. If a typed address can't be found, it falls back to the base and says so.
+
+The block now runs in `after()` (next/server), so saving an appointment never waits on Nominatim or OSRM. `/calendar` also gains `maxDuration = 60`.
+
+**Renumbered 2026-09-24.** This item and the unlocated-venues sidebar were first drafted as #169/#170 (D225/D226). The quote-spawn-hardening session (unpushed branch `feat/quote-spawn-hardening`) already claims #169–#174 and D225–D227, so they became #175/#176 and D228/D229. Their commit subjects keep the old numbers.
+
+**Tests:** `npm run test:drive-distance` (new; scratch PGlite, `fetch` stubbed) covers:
+- cell formats and tooltips;
+- sort order, including unlocated rows last in both directions and tie handling;
+- `travelForPoints` for each source: routed, auto, manual, none, a shared cache key, the 19-city fallback, and no origin;
+- origin options (offices without coordinates excluded);
+- every `resolveTravelOrigin` branch, including a search that rejects.
+
+**Browser verification** (worktree dev DB, quote origin set to Madison):
+- `/venues` with all three sorts, a search keeping the sort, and the tooltips;
+- `/companies` with the sort select, the "Drive times from Madison Office" line, and a location-less company showing "—" last;
+- both pages at phone width, with no sideways scroll.
+
+**Not browser-verified:** the calendar create form. It opens only with a connected Google Calendar, which the worktree lacks. Check it on production after deploy by opening a new event; the check is read-only.
+
+**Gates:** tsc 0 errors, `test:specs` 2044 PASS / 0 FAIL, `test:smoke` ALL PASSED, eslint 124 problems / 0 errors (same as origin/main at 974451b).
+
+**Open, deliberately:**
+- Per-shop side-by-side distances, map colouring, type-ahead on the typed origin, and a return-trip block (spec §5).
+- The Drive cell markup is duplicated between the two pages.
+- After switching the origin to Madison, most rows read `~` until *Geocode addresses* re-warms routes from Madison.
