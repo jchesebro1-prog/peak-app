@@ -1,6 +1,6 @@
 # DaVinci → catalog enrichment: ports, datasheets and the ETC book
 
-**Punch:** #160 · **Date:** 2026-09-23 · **Supersedes the reasoning in D187**
+**Punch:** #162 · **Date:** 2026-09-23 · **Supersedes the reasoning in D187**
 
 ## 1. What this is
 
@@ -354,11 +354,11 @@ the only interchangeable family, for the reasons documented on the flag.
 Add to `CatalogPart`:
 
 ```ts
-/** Manufacturer document links (#160). Distinct from datasheetBlobKey, which
+/** Manufacturer document links (#162). Distinct from datasheetBlobKey, which
  *  is a Peak-uploaded PDF in Blob storage: these are the manufacturer's own
  *  public URLs, carried from the DaVinci library, and are never proxied. */
 docs?: { kind: "datasheet" | "manual"; label: string; url: string }[];
-/** Provenance for anything written by the DaVinci enricher (#160) — which
+/** Provenance for anything written by the DaVinci enricher (#162) — which
  *  library export and which ETC type a row's ports and docs came from, so a
  *  later run can tell its own writes from a human's. */
 davinci?: { typeId: string; libraryTimestamp: string; enrichedAt: number };

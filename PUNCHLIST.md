@@ -7318,3 +7318,20 @@ Hang 2×3, Commissioning 2×3, Training 1×1) are crew-size × days defaults per
 **Fix:** `defaultLaborMobs` (`estimator/labor-defaults.ts:45`) returns one blank row; picking a
 type fills people/days from the lookup only while they're untouched. Supersedes D136's opening
 rows. Same spec as #160. Decision to log on build: D207.
+
+---
+
+## 162. DaVinci → catalog enrichment — ports + datasheet links on the ETC book — OPEN
+
+**Reported:** 2026-09-23. D187 closed this on 2026-09-22 as "does not intersect Peak's catalog",
+but every check behind that ran against local dev (10 ETC rows). Production holds **3,959 ETC
+parts, all priced**, and **3,424 (86.5%)** match a DaVinci entry: 2,629 would receive ports,
+2,866 document links. Production currently has **0** parts carrying `ports[]` (§9 of the spec).
+
+**Design:** an enricher, not an importer — matches on SKU, writes only `ports[]` and document
+links onto rows Peak already owns, never creates rows, never touches list/cost/pricedAt. Unmapped
+ETC protocols pass through verbatim (no collapse into the nearest Peak type); the protocol map is
+keyed on UUID and the tool refuses an unknown one. Developed against a local copy, run against
+production explicitly.
+Spec: `docs/superpowers/specs/2026-09-23-davinci-etc-catalog-enrichment-design.md` (originally
+labelled #160, which collided with the quote-intake item — renumbered 2026-09-23).
