@@ -199,7 +199,7 @@ import {
   sheetMimeVerdict,
 } from "@/lib/grid-sheet-file";
 import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor } from "@/app/(app)/estimator/labor-defaults";
-import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev, vendorTotalSeed } from "@/app/(app)/estimator/pricing";
+import { computeLabor, computeMob, lineMarginOf, parseAddQty, repricedAtLineMargin, round2, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev, vendorTotalSeed } from "@/app/(app)/estimator/pricing";
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -349,6 +349,11 @@ import {
   ok(wonEditMessage("venue") === "This quote is won — its project/job keeps the old venue. Change the quote anyway?", "#160 won-edit confirm copy");
   ok(systemQuoteName("Lakefront PAC", "") === "Lakefront PAC — System" && systemQuoteName("Lakefront PAC", " Acoustics ") === "Lakefront PAC — Acoustics" && systemQuoteName("", "") === "New estimate", "#160 blank-name fallback for Estimator quotes");
 }
+
+/* --- #160: catalog rapid-add quantity box --- */
+ok(parseAddQty("4") === 4 && parseAddQty("12") === 12, "#160 the catalog qty box adds the typed quantity");
+ok(parseAddQty("") === 1 && parseAddQty("0") === 1 && parseAddQty("-3") === 1 && parseAddQty("abc") === 1, "#160 a blank, zero, negative or non-numeric qty adds 1");
+ok(parseAddQty("2.7") === 2, "#160 a fractional qty is floored to a whole unit");
 
 /* --- Estimator material/vendor quote CSV --- */
 const materialCsv = parseMaterialCsv(`sku,description,quantity,unit,unit_cost,unit_sell,link

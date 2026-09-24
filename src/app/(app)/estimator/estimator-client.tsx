@@ -872,12 +872,14 @@ export default function EstimatorClient({
       ss.map((s) => (s.id === secId ? { ...s, items: [...s.items, ...items] } : s))
     );
 
-  const addPart = (secId: string, cat: SuggestPart) => {
+  /** #160: a catalog add carries its qty and keeps the picker OPEN (rapid-fire);
+   *  the panel closes only via its toggle or ×. */
+  const addPart = (secId: string, cat: SuggestPart, qty = 1) => {
     const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
+    const n = Math.max(1, Math.floor(qty) || 1);
     pushItems(secId, [
-      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: 1, unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
+      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: n, unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
     ]);
-    closeInput();
   };
 
   /* ---- CSV batch-add (#112) ----
@@ -2744,7 +2746,7 @@ export default function EstimatorClient({
                   onToggleLabor={() => openInputMethod("labor", sec.id)}
                   onToggleCustom={() => openInputMethod("custom", sec.id)}
                   onToggleVendor={() => openInputMethod("vendor", sec.id)}
-                  onAddPart={(cat) => addPart(sec.id, cat)}
+                  onAddPart={(cat, qty) => addPart(sec.id, cat, qty)}
                   onImportMaterials={(items) => importMaterials(sec.id, items)}
                   onSetVendorDisplay={setVendorDisplay}
                   onEditVendor={(vqId) => openVendorEdit(sec.id, vqId)}
