@@ -10,6 +10,7 @@ import {
   create,
   get,
   getAll,
+  retireReplacedDraft,
   requestChanges,
   requireApprovalToAdvance,
   setStatus,
@@ -103,6 +104,7 @@ type QuoteExtras = {
 type QuotePatch = Partial<Quote> & QuoteExtras;
 
 export type SavePayload = {
+  replaces?: string | null;
   name: string;
   customer: string;
   customerId: string | null;
@@ -347,6 +349,7 @@ export async function saveQuoteAction(
       category: (payload.category || "").trim(),
       vendorQuotes: storedVendorQuotes,
     } as QuotePatch);
+    if (payload.replaces) await retireReplacedDraft(payload.replaces);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand
       // new quote can never already carry an approval record, so this can

@@ -312,6 +312,7 @@ export type TravelLite = {
 
 export type InitialQuote = {
   loadedId: string | null;
+  replaces?: string | null;
   quoteId: string;
   status: QuoteStatus;
   review: QuoteReview;

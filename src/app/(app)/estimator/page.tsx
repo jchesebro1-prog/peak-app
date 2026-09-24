@@ -178,6 +178,10 @@ export default async function EstimatorPage({
   const preCustomer = rawId ? undefined : one(sp.customer);
   // #110: the intake's "Custom category" card hands its name over the same way.
   const preCategory = rawId ? undefined : one(sp.category);
+  const preName = rawId ? undefined : one(sp.name);
+  const preVenue = rawId ? undefined : one(sp.venue);
+  const preContact = rawId ? undefined : one(sp.contact);
+  const replaces = rawId ? undefined : one(sp.replaces);
 
   /* ---- Scope draft source (S12/D83 — rules-based): resolve the linked
      survey/inspection. ?surveyId= / ?inspectionId= links the source; we
@@ -257,6 +261,7 @@ export default async function EstimatorPage({
   }));
 
   const initial = await initialFrom(q, customers, user.name);
+  initial.replaces = replaces || null;
 
   // Seed the customer/venue/contact picked in the guided intake screen
   // (quotes/new) — venue/contact default to the customer's primary, same
@@ -268,8 +273,9 @@ export default async function EstimatorPage({
       const primaryContact = cust.contacts.find((c) => c.primary) || cust.contacts[0] || null;
       initial.customerId = cust.id;
       initial.custName = cust.name;
-      initial.locationId = prim?.id || null;
-      initial.contactName = primaryContact?.name || "";
+      initial.locationId = cust.locations.some((l) => l.id === preVenue) ? preVenue || null : prim?.id || null;
+      initial.contactName = cust.contacts.some((c) => c.name === preContact) ? preContact || "" : primaryContact?.name || "";
+      initial.projectName = preName?.trim() || `${cust.name} — ${preCategory?.trim() || "System"}`;
     }
   }
   if (preCategory && preCategory.trim()) initial.category = preCategory.trim();

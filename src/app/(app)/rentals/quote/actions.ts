@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requirePerm } from "@/lib/session";
 import { get as getCustomer, nameFor } from "@/lib/stores/customers";
-import { create as createQuote, update as updateQuote, setStatus } from "@/lib/stores/quotes";
+import { create as createQuote, update as updateQuote, setStatus, retireReplacedDraft } from "@/lib/stores/quotes";
 import { get as getEquipmentItem } from "@/lib/stores/equipment-items";
 import { availableQty, createFromQuote } from "@/lib/stores/equipment-bookings";
 import { priceRental } from "@/lib/pricing/rental";
@@ -61,6 +61,7 @@ function daysBetween(startDate: number, endDate: number): number {
 async function persist(formData: FormData): Promise<string | null> {
   const user = await requireUser();
   const editingId = String(formData.get("editingId") || "");
+  const replaces = String(formData.get("replaces") || "").trim();
   const customerId = String(formData.get("customerId") || "");
   const quoteName = String(formData.get("quoteName") || "").trim();
   const contactName = String(formData.get("contactName") || "").trim();
@@ -127,6 +128,7 @@ async function persist(formData: FormData): Promise<string | null> {
   };
 
   const q = editingId ? await updateQuote(editingId, payload) : await createQuote(payload);
+  if (!editingId && q && replaces) await retireReplacedDraft(replaces);
   return (q && q.id) || editingId || null;
 }
 

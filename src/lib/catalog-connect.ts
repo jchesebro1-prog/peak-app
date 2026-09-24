@@ -43,6 +43,7 @@ export const CONNECTION_TYPES: readonly string[] = [
   "stage pin",
   "Socapex",
   "bare-end",
+  "line power (unspecified)",
   // lighting data
   "DMX512 (5-pin XLR)",
   "sACN/Art-Net (etherCON/Cat6)",
@@ -64,6 +65,17 @@ export const CONNECTION_TYPES: readonly string[] = [
   // rigging
   "motor power",
   "low-voltage pendant control",
+  // ETC / DaVinci manufacturer protocols
+  "EchoConnect",
+  "LinkConnect",
+  "F-Drive D4",
+  "F-Drive D2",
+  "F-Drive D1HO",
+  "DALI",
+  "0-10V",
+  "Multiverse",
+  "USB",
+  "MIDI",
 ];
 
 /**
@@ -93,9 +105,19 @@ export const DEFAULT_WIRE_TYPES: WireType[] = [
   {
     id: "powercon-power",
     label: "powerCON power",
-    connectionTypes: ["powerCON/True1", "Edison", "stage pin", "Socapex", "bare-end"],
+    connectionTypes: ["powerCON/True1", "Edison", "stage pin", "Socapex", "bare-end", "line power (unspecified)"],
   },
   { id: "motor-power", label: "Motor power", connectionTypes: ["motor power", "low-voltage pendant control"] },
+  { id: "etc-echo-connect", label: "ETC EchoConnect", connectionTypes: ["EchoConnect"] },
+  { id: "etc-link-connect", label: "ETC LinkConnect", connectionTypes: ["LinkConnect"] },
+  { id: "etc-f-drive-d4", label: "ETC F-Drive D4", connectionTypes: ["F-Drive D4"] },
+  { id: "etc-f-drive-d2", label: "ETC F-Drive D2", connectionTypes: ["F-Drive D2"] },
+  { id: "etc-f-drive-d1ho", label: "ETC F-Drive D1HO", connectionTypes: ["F-Drive D1HO"] },
+  { id: "etc-dali", label: "DALI", connectionTypes: ["DALI"] },
+  { id: "etc-0-10v", label: "0-10V", connectionTypes: ["0-10V"] },
+  { id: "etc-multiverse", label: "ETC Multiverse", connectionTypes: ["Multiverse"] },
+  { id: "usb", label: "USB", connectionTypes: ["USB"] },
+  { id: "midi", label: "MIDI", connectionTypes: ["MIDI"] },
 ];
 
 /** stored ?? defaults — always a fresh array copy so a mutating caller can

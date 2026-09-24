@@ -99,8 +99,28 @@ export function isServiceType(v: string | null | undefined): v is ServiceType {
 /** Where each service type's builder lives, matching NewQuoteMenu's six hrefs.
  *  `category` only applies to the "custom" type (#110): it rides to the
  *  Estimator as ?category= and is seeded onto the new quote. */
-export function builderPath(type: ServiceType, customerId: string, category?: string): string {
-  const qs = customerId ? "?customer=" + encodeURIComponent(customerId) : "";
+export type BuilderPathOptions = {
+  name?: string;
+  venue?: string;
+  contact?: string;
+  replaces?: string;
+};
+
+export function builderPath(
+  type: ServiceType,
+  customerId: string,
+  categoryOrOptions?: string | BuilderPathOptions,
+  options?: BuilderPathOptions
+): string {
+  const category = typeof categoryOrOptions === "string" ? categoryOrOptions : undefined;
+  const opts = typeof categoryOrOptions === "object" ? categoryOrOptions : options;
+  const params: string[] = [];
+  if (customerId) params.push("customer=" + encodeURIComponent(customerId));
+  if (opts?.name?.trim()) params.push("name=" + encodeURIComponent(opts.name.trim()));
+  if (type !== "rental" && opts?.venue?.trim()) params.push("venue=" + encodeURIComponent(opts.venue.trim()));
+  if (opts?.contact?.trim()) params.push("contact=" + encodeURIComponent(opts.contact.trim()));
+  if (opts?.replaces?.trim()) params.push("replaces=" + encodeURIComponent(opts.replaces.trim()));
+  const qs = params.length ? "?" + params.join("&") : "";
   switch (type) {
     case "system":
       return "/estimator" + qs;
@@ -152,6 +172,8 @@ export type IntakeSubmit = {
   type: ServiceType;
   /** User-named quote category — only read when `type` is "custom" (#110). */
   category?: string;
+  name?: string;
+  replaces?: string;
   customerMode: "pick" | "new";
   customerId: string;
   newCustomerName: string;

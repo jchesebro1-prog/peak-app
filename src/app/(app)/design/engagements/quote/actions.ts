@@ -8,6 +8,7 @@ import {
   create as createQuote,
   get as getQuote,
   update as updateQuote,
+  retireReplacedDraft,
 } from "@/lib/stores/quotes";
 import {
   create as createLead,
@@ -46,6 +47,7 @@ type PostedScope = { id?: string; title?: string; description?: string; fee?: nu
 async function persist(formData: FormData): Promise<string | null> {
   const user = await requireUser();
   const editingId = String(formData.get("editingId") || "");
+  const replaces = String(formData.get("replaces") || "").trim();
   const customerId = String(formData.get("customerId") || "");
   const venueCustomerId = String(formData.get("venueCustomerId") || "");
   const locationId = String(formData.get("locationId") || "");
@@ -166,6 +168,7 @@ async function persist(formData: FormData): Promise<string | null> {
     ? await updateQuote(editingId, payload)
     : await createQuote(payload);
   const qid = (q && q.id) || editingId || null;
+  if (!editingId && q && replaces) await retireReplacedDraft(replaces);
 
   /* ---- #35 auto-lead with dedupe — CREATE path only, never edits ---- */
   if (!editingId && q) {

@@ -383,7 +383,7 @@ export default async function CatalogPage({
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                     }}>{p.desc}</span>
-                    {(p.note || p.datasheetBlobKey) && (
+                    {(p.note || p.datasheetBlobKey || p.docs?.length) && (
                       <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
                         {p.note && (
                           <span
@@ -406,6 +406,11 @@ export default async function CatalogPage({
                         {p.datasheetBlobKey && (
                           <span style={{ fontSize: 10.5, color: "#8c919c" }}>Datasheet</span>
                         )}
+                        {p.docs?.map((doc) => (
+                          <a key={doc.url} href={doc.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10.5, color: "var(--accent)", textDecoration: "none" }}>
+                            {doc.label || doc.kind} ↗
+                          </a>
+                        ))}
                       </span>
                     )}
                   </span>
@@ -762,7 +767,9 @@ function PartFormModal({
                 the blob pathname is keyed under). */}
             {isAdmin && editing && part && (
               <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
-                <PartDatasheetControl sku={part.sku} datasheetName={part.datasheetName} />
+              {part.davinci && <div style={{ margin: "10px 0", fontSize: 11, color: "#6d5a25", background: "#fff9e8", border: "1px solid #efe4c4", borderRadius: 7, padding: "7px 9px" }}>Ports and documents include manufacturer data from ETC DaVinci. Editing ports will override this imported shape.</div>}
+              {part.docs?.length ? <div style={{ margin: "10px 0" }}><div style={{ fontSize: 11, fontWeight: 700, color: "#8c919c", textTransform: "uppercase" }}>Documents</div>{part.docs.map((doc) => <a key={doc.url} href={doc.url} target="_blank" rel="noopener noreferrer" style={{ display: "block", fontSize: 12, color: "var(--accent)", textDecoration: "none", marginTop: 5 }}>{doc.label || doc.kind} ↗</a>)}</div> : null}
+              <PartDatasheetControl sku={part.sku} datasheetName={part.datasheetName} />
               </div>
             )}
 

@@ -197,7 +197,9 @@ import {
   isAllowedSheetMime,
   sheetMimeVerdict,
 } from "@/lib/grid-sheet-file";
-import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
+import { defaultLaborMobs, disciplineForSystemTitle, laborMob } from "@/app/(app)/estimator/labor-defaults";
+import { builderPath } from "@/app/(app)/quotes/new/types";
+import { retireReplacedDraft } from "@/lib/stores/quotes";
 import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev, vendorTotalSeed } from "@/app/(app)/estimator/pricing";
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync } from "node:fs";
@@ -213,12 +215,15 @@ ok(disciplineForSystemTitle("Lighting control") === "LIG", "labor scope defaults
 ok(disciplineForSystemTitle("Video projection") === "AUD", "audio and video share one labor scope");
 ok(disciplineForSystemTitle("General conditions") === "OTH", "an unmatched system defaults to Other");
 const defaultMobs = defaultLaborMobs(null);
-ok(defaultMobs.map((mob) => `${mob.name}:${mob.people}x${mob.days}`).join("|") === "Site Visit:1x1|Install:4x5|Hang:2x3|Commissioning:2x3|Training:1x1", "labor opens with the five requested crew/day defaults");
+ok(defaultMobs.length === 1 && defaultMobs[0]?.name === "" && defaultMobs[0]?.people === "1" && defaultMobs[0]?.days === "1", "labor opens with one untouched mobilization row");
+ok(builderPath("system", "c-1", { name: "Main quote", venue: "loc-1", contact: "Pat Smith" }) === "/estimator?customer=c-1&name=Main%20quote&venue=loc-1&contact=Pat%20Smith", "system intake carries quote name, venue, and contact");
+ok(builderPath("rental", "c-1", { name: "Rental", venue: "ignored", contact: "Pat" }) === "/rentals/quote?customer=c-1&name=Rental&contact=Pat", "rental intake carries name/contact but ignores venue");
 const testRate = ((sku: string) => ({ "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 75, "DRF-SUB": 50 }[sku] || 0)) as any;
-const day10 = computeMob({ ...defaultMobs[1], hoursPerDay: "10" }, "RIG", testRate);
+const installMob = laborMob(null, "Install", "4", "5");
+const day10 = computeMob({ ...installMob, hoursPerDay: "10" }, "RIG", testRate);
 ok(day10.reg === 160 && day10.otHrs === 40, "hours beyond 8 per day become crew overtime");
 ok(day10.supHrs === 40 && day10.regCost === 9000, "the first person is the supervisor within the crew, not an added worker");
-const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [defaultMobs[1]], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, testRate);
+const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [installMob], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, testRate);
 ok(laborCalc.drfAutoHrs === 3.2, "drafting defaults to 2% of total regular hours");
 ok(laborCalc.performanceBonus === laborCalc.baseCost * 0.05, "labor adds a 5% performance bonus based on base cost");
 
@@ -658,6 +663,8 @@ import {
   compatibleWireTypes,
   type Port,
 } from "@/lib/catalog-connect";
+import { normalizeSku } from "@/lib/davinci/match";
+import { directionFor, mapProtocol } from "@/lib/davinci/protocol-map";
 
 const portOut = (connectionType: string): Port => ({ name: "out", direction: "out", connectionType });
 const portIn = (connectionType: string): Port => ({ name: "in", direction: "in", connectionType });
@@ -669,6 +676,13 @@ ok(!canConnect(portIn("DMX512 (5-pin XLR)"), portIn("DMX512 (5-pin XLR)")), "con
 ok(canConnect(portIo("DMX512 (5-pin XLR)"), portIn("DMX512 (5-pin XLR)")), "connect: io->in connects");
 ok(canConnect(portIo("DMX512 (5-pin XLR)"), portIo("DMX512 (5-pin XLR)")), "connect: io->io same type connects");
 ok(!canConnect(portOut("DMX512 (5-pin XLR)"), portIn("HDMI")), "connect: different connection types never connect");
+ok(normalizeSku("IRWLZ-30/80-120-C-DALI-1") === normalizeSku("irwlz3080120cdali1"), "DaVinci SKU normalization ignores punctuation and case");
+let unknownProtocolThrows = false;
+try { mapProtocol("not-a-real-protocol", "Power"); } catch { unknownProtocolThrows = true; }
+ok(unknownProtocolThrows, "DaVinci protocol mapping refuses unknown UUIDs");
+ok((mapProtocol("power", "Power") as { connectionType: string }).connectionType === "line power (unspecified)", "DaVinci generic power stays explicitly unspecified");
+ok((mapProtocol("power", "powerCON In") as { connectionType: string }).connectionType === "powerCON/True1", "DaVinci powerCON connector refines generic power");
+ok(directionFor("Bus") === "io" && directionFor("Configurable") === "io", "DaVinci bus/configurable ports are bidirectional");
 
 const dmxCompat = compatibleWireTypes("DMX512 (5-pin XLR)", DEFAULT_WIRE_TYPES);
 ok(dmxCompat.length > 0, "connect: compatibleWireTypes finds at least one DMX wire type in the defaults");

@@ -122,6 +122,10 @@ export type CatalogPart = {
   datasheetName?: string;
   /** Researched, provenance-aware fields used by the Specs builder and read-only Displays API. */
   productMetadata?: CatalogProductMetadata;
+  /** Manufacturer document links from the DaVinci enrichment (#160). */
+  docs?: Array<{ kind: "datasheet" | "manual"; label: string; url: string }>;
+  /** Provenance for manufacturer-authored ports/docs written by the enricher. */
+  davinci?: { typeId: string; libraryTimestamp: string; enrichedAt: number };
   /** Epoch ms of the last write through `upsert`/`mergeUpsert` (PUNCHLIST
    *  #14, decision A) — drives the dashboard's price-book age pills. Unset
    *  on rows that have never been touched since seeding (the seed fixtures

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import type { CSSProperties } from "react";
 import { firstName } from "@/lib/team";
 import { approvedReviewLine } from "@/lib/review-line";
@@ -65,7 +66,7 @@ import type {
 } from "./types";
 import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { assemblyDescription } from "@/lib/fixture-assemblies";
-import { defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
+import { defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
@@ -532,6 +533,11 @@ export default function EstimatorClient({
   /* ---------------- persistence ---------------- */
   const persistMeta = (meta: Parameters<typeof updateQuoteMetaAction>[1]) => {
     if (!loadedId) return;
+    if (
+      status === "won" &&
+      ("customerId" in meta || "locationId" in meta || "contactName" in meta) &&
+      !window.confirm("This quote is won — its project/job keeps the old value. Change the quote anyway?")
+    ) return;
     const id = loadedId;
     startTransition(async () => {
       const r = await updateQuoteMetaAction(id, meta);
@@ -554,6 +560,7 @@ export default function EstimatorClient({
     startTransition(async () => {
       try {
         const res = await saveQuoteAction(loadedId, {
+          replaces: initial.replaces,
           name: projectName,
           customer: cname,
           customerId: customerId || null,
@@ -753,6 +760,10 @@ export default function EstimatorClient({
     if (loadedId) persistMeta({ name: v });
   };
 
+  const changeTypeHref = loadedId
+    ? `/quotes/new?replaces=${encodeURIComponent(loadedId)}&type=system${customerId ? `&customer=${encodeURIComponent(customerId)}` : ""}${locationId ? `&venue=${encodeURIComponent(locationId)}` : ""}${contactName ? `&contact=${encodeURIComponent(contactName)}` : ""}${projectName ? `&name=${encodeURIComponent(projectName)}` : ""}`
+    : "#";
+
   /* ---------------- sections & items ---------------- */
   const isExpanded = (id: string) => expanded[id] !== false;
   const toggleExpand = (id: string) => setExpanded((e) => ({ ...e, [id]: !isExpanded(id) }));
@@ -906,12 +917,11 @@ export default function EstimatorClient({
       ss.map((s) => (s.id === secId ? { ...s, items: [...s.items, ...items] } : s))
     );
 
-  const addPart = (secId: string, cat: SuggestPart) => {
+  const addPart = (secId: string, cat: SuggestPart, qty = 1) => {
     const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
     pushItems(secId, [
-      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: 1, unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
+      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: Math.max(1, qty), unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
     ]);
-    closeInput();
   };
 
   /* ---- CSV batch-add (#112) ----
@@ -1391,7 +1401,7 @@ export default function EstimatorClient({
   const resetAutoHrs = (field: "pmHrs" | "drfHrs", flag: "pmAuto" | "drfAuto") =>
     setLaborDraft((d) => ({ ...d, [field]: "", [flag]: true }));
   const addMob = () =>
-    setLaborDraft((d) => d.mobs.length >= 1 ? d : { ...d, mobs: [laborMob(travelEstNow())] });
+    setLaborDraft((d) => ({ ...d, mobs: [...d.mobs, laborMob(travelEstNow())] }));
   const removeMob = (idx: number) =>
     setLaborDraft((d) =>
       d.mobs.length <= 1 ? d : { ...d, mobs: d.mobs.filter((_, i) => i !== idx) }
@@ -1407,7 +1417,16 @@ export default function EstimatorClient({
       mobs: d.mobs.map((m, i) => {
         if (i !== idx) return m;
         if (val === "__custom__") return { ...m, nameCustom: true, name: "" };
-        return { ...m, name: val, nameCustom: false };
+        const previous = mobDefaultsFor(m.name);
+        const untouched =
+          (previous ? m.people === previous.people && m.days === previous.days : m.people === "1" && m.days === "1");
+        const next = mobDefaultsFor(val);
+        return {
+          ...m,
+          name: val,
+          nameCustom: false,
+          ...(untouched && next ? { people: next.people, days: next.days } : {}),
+        };
       }),
     }));
   const useMobNameList = (idx: number) =>
@@ -1724,6 +1743,22 @@ export default function EstimatorClient({
               className="est-topright"
               style={{ display: "flex", alignItems: "center", gap: 22, flexShrink: 0 }}
             >
+              <Link
+                href={changeTypeHref}
+                aria-disabled={!loadedId || status !== "draft"}
+                onClick={(e) => {
+                  if (!loadedId || status !== "draft") e.preventDefault();
+                }}
+                title={status === "draft" ? "Start a replacement quote with a different type" : "Already sent — start a new quote instead."}
+                style={{
+                  fontSize: 11,
+                  color: loadedId && status === "draft" ? "#d9b8ff" : "#777d88",
+                  textDecoration: "none",
+                  pointerEvents: loadedId && status === "draft" ? "auto" : "none",
+                }}
+              >
+                Change type
+              </Link>
               <div style={{ textAlign: "right" }}>
                 <div
                   style={{
@@ -2820,7 +2855,7 @@ export default function EstimatorClient({
                   onToggleLabor={() => openInputMethod("labor", sec.id)}
                   onToggleCustom={() => openInputMethod("custom", sec.id)}
                   onToggleVendor={() => openInputMethod("vendor", sec.id)}
-                  onAddPart={(cat) => addPart(sec.id, cat)}
+                  onAddPart={(cat, qty) => addPart(sec.id, cat, qty)}
                   onImportMaterials={(items) => importMaterials(sec.id, items)}
                   onSetVendorDisplay={setVendorDisplay}
                   onEditVendor={(vqId) => openVendorEdit(sec.id, vqId)}

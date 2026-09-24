@@ -55,6 +55,10 @@ export default async function InspectionQuotePage({
 
   const editId = one(sp.id);
   const preCustomer = one(sp.customer);
+  const preName = one(sp.name);
+  const preVenue = one(sp.venue);
+  const preContact = one(sp.contact);
+  const replaces = one(sp.replaces);
   const preLevel = levelMeta(one(sp.level) || "1").key;
   const saved = one(sp.saved) === "1";
   const approved = one(sp.approved) === "1";
@@ -104,6 +108,7 @@ export default async function InspectionQuotePage({
   /* ---- initial builder state (edit / preselected customer) ---- */
   let initial: BuilderInitial = {
     editingId: null,
+    replaces,
     customerId: "",
     quoteName: "",
     venueSel: {},
@@ -160,16 +165,16 @@ export default async function InspectionQuotePage({
       const locs = cust.locations;
       const venueSel: BuilderInitial["venueSel"] = {};
       locs.forEach((l) => {
-        venueSel[l.id] = { on: !!l.primary || locs.length === 1, lineSets: "" };
+        venueSel[l.id] = { on: preVenue ? l.id === preVenue : !!l.primary || locs.length === 1, lineSets: "" };
       });
       if (locs.length && !locs.some((l) => venueSel[l.id]?.on)) {
         venueSel[locs[0].id] = { on: true, lineSets: "" };
       }
-      const primary = cust.contacts.find((c) => c.primary) || cust.contacts[0] || null;
+      const primary = cust.contacts.find((c) => c.name === preContact) || cust.contacts.find((c) => c.primary) || cust.contacts[0] || null;
       initial = {
         ...initial,
         customerId: cust.id,
-        quoteName: cust.name + " — Rigging inspection",
+        quoteName: preName || cust.name + " — Rigging inspection",
         venueSel,
         contactSel: primary ? primary.name : "",
         saved: false,

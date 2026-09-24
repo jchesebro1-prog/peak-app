@@ -96,7 +96,7 @@ export type SectionCardProps = {
   onToggleLabor: () => void;
   onToggleCustom: () => void;
   onToggleVendor: () => void;
-  onAddPart: (cat: SuggestPart) => void;
+  onAddPart: (cat: SuggestPart, qty: number) => void;
   /** CSV batch-add (#112): resolves SKUs against the catalog, returns how many priced from it vs. landed custom. */
   onImportMaterials: (items: ImportedMaterial[]) => Promise<{ fromCatalog: number; custom: number }>;
   onSetCustomDraft: (field: keyof CustomDraft, v: string) => void;

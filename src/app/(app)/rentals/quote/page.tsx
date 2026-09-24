@@ -76,6 +76,9 @@ export default async function RentalQuotePage({
 
   const editId = one(sp.id);
   const preCustomer = one(sp.customer);
+  const preName = one(sp.name);
+  const preContact = one(sp.contact);
+  const replaces = one(sp.replaces);
   const saved = one(sp.saved) === "1";
   const approved = one(sp.approved) === "1";
 
@@ -92,6 +95,7 @@ export default async function RentalQuotePage({
 
   let initial: BuilderInitial = {
     editingId: null,
+    replaces,
     customerId: "",
     quoteName: "",
     contactSel: "",
@@ -146,8 +150,8 @@ export default async function RentalQuotePage({
       initial = {
         ...initial,
         customerId: cust.id,
-        quoteName: cust.name + " — Rental",
-        contactSel: primary ? primary.name : "",
+        quoteName: preName || cust.name + " — Rental",
+        contactSel: cust.contacts.some((c) => c.name === preContact) ? preContact : primary ? primary.name : "",
         saved: false,
         approved: false,
       };

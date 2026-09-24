@@ -8,6 +8,7 @@ import {
   create as createQuote,
   update as updateQuote,
   setStatus,
+  retireReplacedDraft,
 } from "@/lib/stores/quotes";
 import {
   CATEGORIES,
@@ -53,6 +54,7 @@ type PostedPart = { name: string; qty: number; cost: number };
 async function persist(formData: FormData): Promise<string | null> {
   const user = await requireUser();
   const editingId = String(formData.get("editingId") || "");
+  const replaces = String(formData.get("replaces") || "").trim();
   const customerId = String(formData.get("customerId") || "");
   const quoteName = String(formData.get("quoteName") || "").trim();
   const contactName = String(formData.get("contactName") || "").trim();
@@ -225,6 +227,7 @@ async function persist(formData: FormData): Promise<string | null> {
   const q = editingId
     ? await updateQuote(editingId, payload)
     : await createQuote(payload);
+  if (!editingId && q && replaces) await retireReplacedDraft(replaces);
   return (q && q.id) || editingId || null;
 }
 
