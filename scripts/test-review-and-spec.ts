@@ -3297,7 +3297,7 @@ import {
   canAttestApproval,
   type QuoteReview,
 } from "@/lib/stores/quotes";
-import { create as createQuote160, get as getQuote160, remove as removeQuote160, setStatus as setStatus160, retireReplacedDraft } from "@/lib/stores/quotes";
+import { create as createQuote160, get as getQuote160, remove as removeQuote160, setStatus as setStatus160, retireReplacedDraft, retireReplacedDraftSafely } from "@/lib/stores/quotes";
 
 function review(over: Partial<QuoteReview> = {}): QuoteReview {
   return {
@@ -8794,6 +8794,22 @@ async function retireDraftAsyncChecks(): Promise<void> {
     ok((await retireReplacedDraft(draft.id, replacement.id)) === true, "#160 retireReplacedDraft retires a draft");
     ok((await getQuote160(draft.id)) === null, "#160 the retired draft no longer loads (soft-deleted)");
     ok((await retireReplacedDraft(draft.id, replacement.id)) === false, "#160 retiring twice is a no-op");
+
+    // I1 fixup: retireReplacedDraftSafely never throws, even on garbage input —
+    // the caller has already committed the replacement quote by the time it runs.
+    const safeDraft = await createQuote160({ name: "#160 fixture safe draft", customer: "Spec fixture", owner: "spec" });
+    made.push(safeDraft.id);
+    const safeReplacement = await createQuote160({ name: "#160 fixture safe replacement", customer: "Spec fixture", owner: "spec" });
+    made.push(safeReplacement.id);
+
+    ok((await retireReplacedDraftSafely({}, safeReplacement.id, "spec")) === false, "#160 retireReplacedDraftSafely returns false on a non-string object");
+    ok((await retireReplacedDraftSafely(null, safeReplacement.id, "spec")) === false, "#160 retireReplacedDraftSafely returns false on null");
+    ok((await retireReplacedDraftSafely(undefined, safeReplacement.id, "spec")) === false, "#160 retireReplacedDraftSafely returns false on undefined");
+    ok((await retireReplacedDraftSafely("   ", safeReplacement.id, "spec")) === false, "#160 retireReplacedDraftSafely returns false on a blank string");
+    ok((await retireReplacedDraftSafely(safeDraft.id, safeDraft.id, "spec")) === false, "#160 retireReplacedDraftSafely self-guards against retiring the quote being saved");
+    ok((await getQuote160(safeDraft.id)) !== null, "#160 …and that quote is still there");
+    ok((await retireReplacedDraftSafely(safeDraft.id, safeReplacement.id, "spec")) === true, "#160 retireReplacedDraftSafely retires a real draft");
+    ok((await getQuote160(safeDraft.id)) === null, "#160 …and it is gone afterward");
   } finally {
     for (const id of made) await removeQuote160(id);
   }

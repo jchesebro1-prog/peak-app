@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requirePerm } from "@/lib/session";
 import { get as getCustomer, nameFor } from "@/lib/stores/customers";
-import { create as createQuote, update as updateQuote, setStatus, retireReplacedDraft } from "@/lib/stores/quotes";
+import { create as createQuote, update as updateQuote, setStatus, retireReplacedDraftSafely } from "@/lib/stores/quotes";
 import { get as getEquipmentItem } from "@/lib/stores/equipment-items";
 import { availableQty, createFromQuote } from "@/lib/stores/equipment-bookings";
 import { priceRental } from "@/lib/pricing/rental";
@@ -125,12 +125,8 @@ async function persist(formData: FormData): Promise<string | null> {
   // D205: first save of a "Change type" replacement retires the old draft.
   // The new quote already exists, so a failed retire is logged, never thrown —
   // a throw would read as "nothing was written" and a re-save would duplicate.
-  if (!editingId && q && typeof replaces === "string" && replaces.trim()) {
-    try {
-      await retireReplacedDraft(replaces, q.id);
-    } catch (e) {
-      console.error("[rentals quote] retiring replaced draft failed:", e);
-    }
+  if (!editingId && q) {
+    await retireReplacedDraftSafely(replaces, q.id, "rentals quote");
   }
   return (q && q.id) || editingId || null;
 }

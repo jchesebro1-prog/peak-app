@@ -7,7 +7,7 @@ import { get as getCustomer, nameFor } from "@/lib/stores/customers";
 import {
   create as createQuote,
   update as updateQuote,
-  retireReplacedDraft,
+  retireReplacedDraftSafely,
   setStatus,
 } from "@/lib/stores/quotes";
 import { syncFromQuotes } from "@/lib/stores/flame-jobs";
@@ -152,12 +152,8 @@ async function persist(formData: FormData): Promise<string | null> {
   // D205: first save of a "Change type" replacement retires the old draft.
   // The new quote already exists, so a failed retire is logged, never thrown —
   // a throw would read as "nothing was written" and a re-save would duplicate.
-  if (!editingId && q && typeof replaces === "string" && replaces.trim()) {
-    try {
-      await retireReplacedDraft(replaces, q.id);
-    } catch (e) {
-      console.error("[flame-tests quote] retiring replaced draft failed:", e);
-    }
+  if (!editingId && q) {
+    await retireReplacedDraftSafely(replaces, q.id, "flame-tests quote");
   }
   return (q && q.id) || editingId || null;
 }

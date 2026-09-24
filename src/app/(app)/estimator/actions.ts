@@ -12,7 +12,7 @@ import {
   getAll,
   requestChanges,
   requireApprovalToAdvance,
-  retireReplacedDraft,
+  retireReplacedDraftSafely,
   setStatus,
   STAGES,
   submitForReview,
@@ -326,7 +326,7 @@ export async function saveQuoteAction(
     }
     q = q || created;
     // D205: the replaced draft goes only once its replacement exists.
-    if (payload.replaces) await retireReplacedDraft(payload.replaces, created.id);
+    await retireReplacedDraftSafely(payload.replaces, created.id, "estimator");
   }
   refresh();
   return {

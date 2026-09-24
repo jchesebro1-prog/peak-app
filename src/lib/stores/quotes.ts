@@ -705,11 +705,33 @@ export async function remove(id: string): Promise<void> {
  */
 export async function retireReplacedDraft(id: string, replacementId?: string | null): Promise<boolean> {
   const oldId = (id || "").trim();
-  if (!oldId || oldId === replacementId) return false;
+  if (!oldId || oldId === (replacementId || "").trim()) return false;
   const old = await get(oldId);
   if (!old || old.status !== "draft") return false;
   await remove(oldId);
   return true;
+}
+
+/**
+ * I1 fixup — a never-throw wrapper for `retireReplacedDraft`, for every quote
+ * builder's create path. By the time this runs the replacement quote already
+ * exists in the DB; if it threw, the caller's server action would reject, the
+ * client would think the save itself failed (never setting `loadedId`), and
+ * the next Save would duplicate the quote. So any failure here — a bad
+ * `replaces` value, a DB error — is swallowed and logged instead.
+ */
+export async function retireReplacedDraftSafely(
+  replaces: unknown,
+  replacementId: string,
+  tag: string
+): Promise<boolean> {
+  if (typeof replaces !== "string" || !replaces.trim()) return false;
+  try {
+    return await retireReplacedDraft(replaces, replacementId);
+  } catch (e) {
+    console.error(`[${tag}] retiring replaced draft failed:`, e);
+    return false;
+  }
 }
 
 /* ---- review & approval workflow ---- */
