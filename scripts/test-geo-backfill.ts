@@ -17,7 +17,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { sites } from "@/db/schema";
 import { setSettings } from "@/lib/settings";
-import { backfillVenueCoords, cleanStreet, warmRoutes } from "@/lib/geo-backfill";
+import { backfillVenueCoords, cleanStreet, geocodeVenue, newGeocodeCtx, warmRoutes } from "@/lib/geo-backfill";
 
 type Hit = { lat: number; lng: number; city: string; state: string; road?: string };
 
@@ -199,6 +199,26 @@ async function main() {
   assert.equal(warmed, 3, "the three routable venues are warmed despite twelve failures ahead of them");
   assert.equal(skipKeys.length, 12);
   console.log("PASS geo-backfill: route runner gets past failed routes");
+
+  /* ---- 5. geocodeVenue: the one-venue path the sidebar's Retry uses ---- */
+  {
+    const ctx = newGeocodeCtx(0);
+    const ok = await geocodeVenue({ address: "605 Erie Avenue Suite 101", city: "Sheboygan", state: "WI" }, ctx);
+    assert.ok(ok.ok && ok.precision === "building", "suite address resolves at building precision");
+    const miss = await geocodeVenue({ address: "9 Nowhere Ln", city: "Deadville", state: "WI" }, ctx);
+    assert.deepEqual(miss, { ok: false, reason: "no-hit" });
+    nominatim.push({
+      when: (u) => q(u).startsWith("1 wrongstate rd"),
+      hit: { lat: 41.9, lng: -87.6, city: "Chicago", state: "Illinois" },
+    });
+    const st = await geocodeVenue({ address: "1 Wrongstate Rd", city: "Madison", state: "WI" }, ctx);
+    assert.ok(!st.ok && st.reason === "state-mismatch" && st.got === "Chicago, IL");
+    const far = await geocodeVenue({ address: "100 Main St", city: "Portage", state: "WI" }, ctx);
+    assert.ok(!far.ok && far.reason === "city-mismatch", "far same-name street still rejected");
+    const town = await geocodeVenue({ address: "P.O. Box 615", city: "Reedsburg", state: "WI" }, ctx);
+    assert.ok(town.ok && town.precision === "city");
+    console.log("PASS geo-backfill: geocodeVenue single-venue outcomes");
+  }
 
   console.log(`ALL PASSED (${calls} stubbed fetches)`);
 }
