@@ -4499,6 +4499,10 @@ to check.
 
 ## D187. The DaVinci ETC library is not imported (#158, 2026-09-22)
 
+> **SUPERSEDED by D208 (2026-09-23).** The conclusion below is wrong: every check behind it ran
+> against local dev (10 ETC rows), not production (3,959 ETC rows, all priced), where the
+> intersection is 86.5%. The reasoning is kept intact as the record of how it went wrong.
+
 Ports for Peak's catalog are curated, not sourced from the DaVinci export
 `promote-sales-compliance` proposed (`data/davinci/`, 116 MB, 2,366 device types, 1,381 with
 ports, 56 port protocols, 25 connector types). It does not intersect Peak's catalog: verified
@@ -4802,3 +4806,45 @@ The measured effect is the justification: a fresh datadir went from 5 intermitte
 1898 PASS / 0 FAIL, consistently. The failures themselves were never the danger — the danger was
 that they taught everyone to dismiss a red `test:specs`, which five separate people had already
 done before this was fixed.
+
+## D208. D187 is superseded: the DaVinci library intersects the catalog by 86.5% (#162, 2026-09-23)
+
+D187 closed the DaVinci import on 2026-09-22 with "it does not intersect Peak's catalog",
+verified four independent ways — including a brute-force match of 17,831 identifier-shaped
+strings against 14,725 SKUs that found 9 matches. Every one of those checks ran against **local
+dev**, which holds 14,725 parts and 10 ETC rows. **Production holds 37,403 parts and 3,959 ETC
+rows, every one carrying both list and dealer cost.** Measured against production on 2026-09-23:
+
+| | rows | share of 3,959 |
+|---|---|---|
+| Matched a DaVinci model/part number | 3,424 | **86.5%** |
+| …would receive `ports[]` | 2,629 | 66.4% |
+| …would receive document links | 2,866 | 72.4% |
+| No DaVinci entry | 535 | 13.5% |
+
+The 535 misses are correct misses — `99XX-XX-XX` configurator placeholders, bare option codes
+(`AD`, `AO`, `BP24`), lamps, clamps. DaVinci does not model those as devices.
+
+**D187's factual claims about the library all still hold** (2,366 types, 1,381 ported, 56
+protocols, 25 connector types, and that this is the full export Jeff has). Only its conclusion
+falls, along with the sentence "~1,381 unpriced ETC devices Peak does not sell": Peak sells 3,959
+of them and has dealer cost on all of them. D187's reasoning stays in the log intact — it gains
+only a pointer to this entry — because it is the clearest record this project has of how a
+careful, repeated, four-way verification still reaches a false conclusion when it measures the
+wrong database.
+
+**The generalizable lesson, and the reason this gets its own number rather than a footnote:**
+local dev and production have diverged to the point where they answer catalog questions
+differently. Local dev has no Legrand AV (9,088 in prod), no Draper (8,605), no Crestron (1,633),
+and 10 ETC rows against 3,959. Any claim of the form "the catalog has / does not have X" is
+unsound unless it names the database it measured. Jeff caught this one by looking at the deployed
+app and saying he did not believe the answer.
+
+Related, found in the same pass and logged as §9 of the #162 spec: **production has 0 parts
+carrying `ports[]`, out of 37,403.** The #39 starter set and everything #158 and #159 built exist
+only in local dev, so Grid wiring validation is inert in production today — #39's status line
+claiming the starter set was imported "to BOTH local and prod in one run" is false against
+production.
+
+Supersedes D187. The enrichment design it unblocks is
+`docs/superpowers/specs/2026-09-23-davinci-etc-catalog-enrichment-design.md` (punch #162).
