@@ -12,13 +12,13 @@ export type DavinciRecord = {
   displayName: string;
   category: string;
   /** Every model AND part number of this type, already through normalizeSku. */
-  modelNumbers: string[];
-  ports: Port[];
-  docs: DavinciDoc[];
+  modelNumbers: readonly string[];
+  ports: readonly Port[];
+  docs: readonly DavinciDoc[];
 };
 
 export type DavinciExtract = {
   libraryTimestamp: string;
   generatedAt: number;
-  records: DavinciRecord[];
+  records: readonly DavinciRecord[];
 };

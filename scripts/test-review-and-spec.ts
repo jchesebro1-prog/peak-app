@@ -201,8 +201,11 @@ import {
 import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
 import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev, vendorTotalSeed } from "@/app/(app)/estimator/pricing";
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { loadExtract } from "@/lib/davinci/load";
+import type { DavinciExtract } from "@/lib/davinci/types";
 import { mergeActivity, prefillFromMeeting } from "@/lib/engagement-activity";
 import { performCapture, type CaptureDeps } from "@/lib/engagement-activity-write";
 
@@ -8298,3 +8301,30 @@ const dupe162 = buildIndex([
   { typeId: "B", displayName: "B", category: "c", modelNumbers: ["SHARED"], ports: [], docs: [] },
 ]);
 ok(matchSku("SHARED", dupe162)?.typeId === "A", "#162 a duplicated identifier resolves to the first record, deterministically");
+
+/* ====== #162 load ====== */
+{
+  const dir162 = mkdtempSync(join(tmpdir(), "davinci-load-test-"));
+  const fileA162 = join(dir162, "a.json");
+  const fileB162 = join(dir162, "b.json");
+  try {
+    const extractA162: DavinciExtract = { libraryTimestamp: "2020-01-01T00:00:00.000Z", generatedAt: 1, records: [] };
+    const extractB162: DavinciExtract = { libraryTimestamp: "2021-02-02T00:00:00.000Z", generatedAt: 2, records: [] };
+    writeFileSync(fileA162, JSON.stringify(extractA162));
+    writeFileSync(fileB162, JSON.stringify(extractB162));
+
+    const loadedA162 = loadExtract(fileA162);
+    const loadedB162 = loadExtract(fileB162);
+    ok(
+      loadedA162.libraryTimestamp !== loadedB162.libraryTimestamp,
+      "#162 loadExtract keys its cache by file path — a second distinct file is not served the first file's contents"
+    );
+
+    const loadedAAgain162 = loadExtract(fileA162);
+    ok(loadedAAgain162 === loadedA162, "#162 loadExtract still memoizes — the same path returns the identical object");
+
+    ok(Object.isFrozen(loadedA162.records), "#162 the cached extract's records array is frozen");
+  } finally {
+    rmSync(dir162, { recursive: true, force: true });
+  }
+}

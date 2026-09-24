@@ -4,7 +4,11 @@
  * Both sides go through `normalizeSku`, which is why it lives in its own module:
  * production writes bare model numbers, local dev writes `MFR:`-prefixed ones,
  * and DaVinci writes bare model AND part numbers. Measured 2026-09-23 against
- * production: 3,424 of 3,959 ETC rows (86.5%) match.
+ * production: 2,917 of 3,959 ETC rows (73.7%) match, of which 2,636 carry ports
+ * and 2,872 carry document links. That's lower than a raw type-count match
+ * because `extract.ts` drops types with neither ports nor documents (lens
+ * tubes, back boxes, accessories) before the index is ever built — they have
+ * nothing to contribute, so excluding them is correct, not a shortfall.
  */
 import { normalizeSku } from "./sku";
 import type { DavinciRecord } from "./types";
