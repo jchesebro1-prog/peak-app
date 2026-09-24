@@ -1,5 +1,5 @@
 /**
- * Where a calendar appointment's auto travel block starts from (#170, D226).
+ * Where a calendar appointment's auto travel block starts from (#176, D229).
  * Order: a typed address (geocoded) → a chosen saved location → the person's
  * base ("Based out of", else the quote origin). A typed address that can't
  * be found falls back to the base WITH a note, so the block still appears

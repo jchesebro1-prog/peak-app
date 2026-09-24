@@ -1,5 +1,5 @@
 /**
- * Drive distance (#170) — scenario on a SCRATCH PGlite, fetch stubbed.
+ * Drive distance (#176) — scenario on a SCRATCH PGlite, fetch stubbed.
  * Run only via `npm run test:drive-distance`. Never point at .data/pglite.
  */
 import assert from "node:assert/strict";

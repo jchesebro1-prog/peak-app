@@ -21,7 +21,7 @@
 - Button classes: `pk-btn-accent` (primary) and `pk-btn-outline` (secondary). **`pk-btn` and `pk-btn-quiet` do not exist.**
 - No hardcoded accent colours: use `var(--accent)`.
 - eslint-plugin-react-hooks 7.x: no synchronous setState in an effect body, no ref writes during render. The repo is at 0 eslint errors.
-- Punch #170, decision D226. **Do not push.**
+- Punch #176, decision D229. **Do not push.**
 - Commit with `git -c user.name="SM" commit`, ending the message with a blank line then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ---
@@ -54,7 +54,7 @@
 
 ```ts
 /**
- * Drive distance (#170) — scenario on a SCRATCH PGlite, fetch stubbed.
+ * Drive distance (#176) — scenario on a SCRATCH PGlite, fetch stubbed.
  * Run only via `npm run test:drive-distance`. Never point at .data/pglite.
  */
 import assert from "node:assert/strict";
@@ -157,7 +157,7 @@ main().then(() => process.exit(0), (e) => { console.error("FAIL", e); process.ex
 
 ```ts
 /**
- * Drive-distance cell formatting + sorting (#170, D226). Pure and
+ * Drive-distance cell formatting + sorting (#176, D229). Pure and
  * client-safe — imports nothing — so server pages and client components can
  * both use it. The numbers come from lib/travel-bulk.ts.
  */
@@ -221,7 +221,7 @@ export function compareDrive(
 
 ```ts
 /**
- * Travel for MANY places in a fixed number of queries (#170, D226) — the
+ * Travel for MANY places in a fixed number of queries (#176, D229) — the
  * punch-#90 travelForCustomerVenues pattern generalised to any list, so the
  * Venues and Companies directories can show a drive column for ~1,500 rows
  * without a query per row: offices + travel rates once, one routeCachedBulk
@@ -285,7 +285,7 @@ export async function travelForPoints(
   - If `estimateFromParts`' manual branch returns `minutes: 20` for `travelMin: 20`, the test holds.
   - If the "auto" case unexpectedly reads `none` because `hasCoords` on string or number lat fails, check `hasCoords` in `geo.ts` and report it. Do not weaken the test.
 
-- [ ] **Step 5: Commit.** `feat(geo): travelForPoints bulk travel + pure drive formatting/sort (#170)`
+- [ ] **Step 5: Commit.** `feat(geo): travelForPoints bulk travel + pure drive formatting/sort (#176)`
 
 ---
 
@@ -355,7 +355,7 @@ export async function travelForPoints(
 
 ```ts
 /**
- * Where a calendar appointment's auto travel block starts from (#170, D226).
+ * Where a calendar appointment's auto travel block starts from (#176, D229).
  * Order: a typed address (geocoded) → a chosen saved location → the person's
  * base ("Based out of", else the quote origin). A typed address that can't
  * be found falls back to the base WITH a note, so the block still appears
@@ -418,7 +418,7 @@ export async function resolveTravelOrigin(
 - [ ] **Step 4: Run the tests and confirm they pass.** `npm run -s test:drive-distance` → the new PASS line and ALL PASSED.
 
 - [ ] **Step 5: Wire it into `src/app/(app)/calendar-actions.ts`.**
-  1. Add `import type { TravelFrom } from "@/lib/travel-origin";` at the top, and add `travelFrom?: TravelFrom;` to `EventFormInput`, with a comment `/** #170 — where the auto travel block starts from (create only). */`.
+  1. Add `import type { TravelFrom } from "@/lib/travel-origin";` at the top, and add `travelFrom?: TravelFrom;` to `EventFormInput`, with a comment `/** #176 — where the auto travel block starts from (create only). */`.
   2. Change `addTravelBlock`'s signature to add a final parameter `travelFrom?: TravelFrom`. Replace its body's origin logic, the whole section from `const settings = await getSettings();` through `const est = await estimate([office], { lat: hit.lat, lng: hit.lng });`, with:
 ```ts
     const [{ resolveTravelOrigin }, { route }] = await Promise.all([
@@ -440,7 +440,7 @@ export async function resolveTravelOrigin(
     const hit = hits[0];
     if (!hit) return;
 
-    // #170: a real route (OSRM, cached) rather than only reading the cache —
+    // #176: a real route (OSRM, cached) rather than only reading the cache —
     // a typed origin has never been routed from before. Falls back to the
     // straight-line estimate when OSRM is unavailable.
     const target = { lat: hit.lat, lng: hit.lng };
@@ -463,7 +463,7 @@ export async function resolveTravelOrigin(
   3. In `addCalendarEventAction`, pass `input.travelFrom` as the new last argument to `addTravelBlock(...)`. Sanitize it first: `const travelFrom = input.travelFrom && typeof input.travelFrom === "object" ? { officeId: typeof input.travelFrom.officeId === "string" ? input.travelFrom.officeId.slice(0, 80) : undefined, address: typeof input.travelFrom.address === "string" ? input.travelFrom.address.slice(0, 200) : undefined } : undefined;`
   4. Add the options action, next to `addCalendarEventAction`:
 ```ts
-/** #170 — the "Traveling from" choices for the New event form. */
+/** #176 — the "Traveling from" choices for the New event form. */
 export async function travelOriginOptionsAction(): Promise<{
   base: { id: string; name: string } | null;
   offices: Array<{ id: string; name: string }>;
@@ -485,7 +485,7 @@ export async function travelOriginOptionsAction(): Promise<{
 ```
      Check how `getSettings`, `getUser` and `search` are imported in this file today (static or dynamic), and follow the file's existing pattern. `requireUser` is already imported (it is used by `requireCalendarGrant`).
 
-- [ ] **Step 6: Typecheck and lint, then commit.** Run `npx tsc --noEmit` and `npx eslint "src/app/(app)/calendar-actions.ts" src/lib/travel-origin.ts scripts/test-drive-distance.ts`, both clean. Commit: `feat(calendar): travel block starts from a chosen location or typed address (#170)`
+- [ ] **Step 6: Typecheck and lint, then commit.** Run `npx tsc --noEmit` and `npx eslint "src/app/(app)/calendar-actions.ts" src/lib/travel-origin.ts scripts/test-drive-distance.ts`, both clean. Commit: `feat(calendar): travel block starts from a chosen location or typed address (#176)`
 
 ---
 
@@ -505,7 +505,7 @@ export async function travelOriginOptionsAction(): Promise<{
   6. In each row, add a Drive cell after the city/state span:
      `<span className="ve-row-drive" title={driveTitle(d)} style={{ width: 118, flexShrink: 0, textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 11.5, color: d && d.source !== "none" ? "#3a3f4a" : "#b0b5bf", whiteSpace: "nowrap" }}>{fmtDrive(d)}</span>`
      where `const d = travel.byId.get(row.site.id);`. In the page's `CSS` string, inside the existing `@media (max-width: 720px)`, hide the city column instead of the drive column on phones: give the city span `className="ve-row-city"` and add `.ve-row-city { display: none !important; }`.
-- [ ] **Step 2: Check.** Run `rm -rf .next && npx tsc --noEmit` and `npx eslint "src/app/(app)/venues"`, both clean. Commit: `feat(venues): drive-from-origin column + nearest/farthest sort (#170)`
+- [ ] **Step 2: Check.** Run `rm -rf .next && npx tsc --noEmit` and `npx eslint "src/app/(app)/venues"`, both clean. Commit: `feat(venues): drive-from-origin column + nearest/farthest sort (#176)`
 
 ---
 
@@ -526,7 +526,7 @@ export async function travelOriginOptionsAction(): Promise<{
      - extend `pushWith`'s patch type with `sort?: string`: `const nso = patch.sort !== undefined ? patch.sort : sort; if (nso) p.set("sort", nso);`;
      - add a `<select className="pk-searchbar-select" aria-label="Sort" value={sort} onChange={(e) => pushWith({ sort: e.target.value })}>` with options `""` → "Default order", `"near"` → "Nearest first", `"far"` → "Farthest first". Put it inside the `SearchFilterBar` children after the owner select;
      - add a line under the chips row: `<div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 8 }}>{originName ? `Drive times from ${originName}` : "Set a quote origin in Settings → Locations to see drive times"}</div>`.
-- [ ] **Step 2: Check.** Run `rm -rf .next && npx tsc --noEmit` and `npx eslint "src/app/(app)/companies"`, both clean. Commit: `feat(companies): drive-from-origin column + nearest/farthest sort (#170)`
+- [ ] **Step 2: Check.** Run `rm -rf .next && npx tsc --noEmit` and `npx eslint "src/app/(app)/companies"`, both clean. Commit: `feat(companies): drive-from-origin column + nearest/farthest sort (#176)`
 
 ---
 
@@ -570,7 +570,7 @@ export async function travelOriginOptionsAction(): Promise<{
   5. In `save()`, add `travelFrom` to `input` for create mode only:
      `travelFrom: target.mode === "create" ? (originChoice === "__addr" ? { address: originAddress.trim() } : originChoice ? { officeId: originChoice } : undefined) : undefined,`
      Update then receives the same object type, and the field is ignored there. Make sure the TypeScript object literal still satisfies both actions' input types.
-- [ ] **Step 2: Check.** Run `npx tsc --noEmit` and `npx eslint "src/app/(app)/calendar"`, both clean. Commit: `feat(calendar): "Traveling from" choice on new appointments (#170)`
+- [ ] **Step 2: Check.** Run `npx tsc --noEmit` and `npx eslint "src/app/(app)/calendar"`, both clean. Commit: `feat(calendar): "Traveling from" choice on new appointments (#176)`
 
 ---
 
@@ -583,4 +583,4 @@ export async function travelOriginOptionsAction(): Promise<{
   - phone width on `/venues`.
 - [ ] `preview_stop`, then confirm no stray processes remain.
 - [ ] Gates, with real numbers: `rm -rf .next && npx tsc --noEmit`, `npm run -s test:drive-distance`, `npm run -s test:geo-backfill`, `npm run -s test:specs`, `npm run -s test:smoke`, `npx eslint` (baseline 124 / 0).
-- [ ] Re-check that #170 and D226 are free on a freshly fetched origin/main and all branches, then append the PUNCHLIST and DECISIONS entries and commit. **Do not push.**
+- [ ] Re-check that #176 and D229 are free on a freshly fetched origin/main and all branches, then append the PUNCHLIST and DECISIONS entries and commit. **Do not push.**

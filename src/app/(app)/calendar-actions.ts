@@ -82,7 +82,7 @@ async function addTravelBlock(
     const hit = hits[0];
     if (!hit) return;
 
-    // #170: a real route (OSRM, cached) rather than only reading the cache —
+    // #176: a real route (OSRM, cached) rather than only reading the cache —
     // a typed origin has never been routed from before. Falls back to the
     // straight-line estimate when OSRM is unavailable.
     const target = { lat: hit.lat, lng: hit.lng };
@@ -125,7 +125,7 @@ export type EventFormInput = {
   /** "" | "daily" | "weekly" | "monthly" | "yearly" — recurrence.ts */
   recurrencePreset?: string;
   attendeeEmails?: string[];
-  /** #170 — where the auto travel block starts from (create only). */
+  /** #176 — where the auto travel block starts from (create only). */
   travelFrom?: TravelFrom;
 };
 
@@ -183,7 +183,7 @@ export async function addCalendarEventAction(
   return { ok: true };
 }
 
-/** #170 — the "Traveling from" choices for the New event form. */
+/** #176 — the "Traveling from" choices for the New event form. */
 export async function travelOriginOptionsAction(): Promise<{
   base: { id: string; name: string } | null;
   offices: Array<{ id: string; name: string }>;

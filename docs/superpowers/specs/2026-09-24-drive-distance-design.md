@@ -1,17 +1,17 @@
 # Drive distance on the directories + "Traveling from" on calendar appointments
 
 - **Date:** 2026-09-24
-- **Punch:** #170
-- **Decision:** D226
+- **Punch:** #176
+- **Decision:** D229
 - **Status:** design approved by Jeff 2026-09-24 ("A, and let them type any address")
-- **Builds on:** #169 / D225, the explicit quote origin (Madison), which lives on branch
+- **Builds on:** #175 / D228, the explicit quote origin (Madison), which lives on branch
   `feat/geo-fix-sidebar`; D144, the calendar auto travel block
 
 ## 1. What Jeff asked for
 
 1. "A distance to all of the locations". He chose option A: a drive column on the directories,
    measured from the quote origin, that you can sort by.
-2. "All estimating and rules should be out of the central shop which is Madison". Shipped in #169:
+2. "All estimating and rules should be out of the central shop which is Madison". Shipped in #175:
    the quote-origin control.
 3. "People can add where they are traveling from when they set up appointments via the calendar,"
    including by typing any address.
@@ -162,5 +162,5 @@ stated in the punch entry.
 
 ## 7. Shipping
 
-This is branch `feat/drive-distance`, stacked on `feat/geo-fix-sidebar`. It ships after #169 and
+This is branch `feat/drive-distance`, stacked on `feat/geo-fix-sidebar`. It ships after #175 and
 not during Jeff's production geocode run.

@@ -1,5 +1,5 @@
 /**
- * Drive-distance cell formatting + sorting (#170, D226). Pure and
+ * Drive-distance cell formatting + sorting (#176, D229). Pure and
  * client-safe — imports nothing — so server pages and client components can
  * both use it. The numbers come from lib/travel-bulk.ts.
  */

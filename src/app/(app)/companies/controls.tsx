@@ -128,7 +128,7 @@ export function FilterBar({
             </option>
           ))}
         </select>
-        {/* Drive sort (#170, D226) — Default keeps today's directory order. */}
+        {/* Drive sort (#176, D229) — Default keeps today's directory order. */}
         <select
           className="pk-searchbar-select"
           aria-label="Sort"

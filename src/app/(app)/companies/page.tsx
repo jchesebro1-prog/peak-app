@@ -116,7 +116,7 @@ export default async function CustomersPage({
   const addedCount = preAdded.filter(isRecent).length;
   const filtered = added ? preAdded.filter(isRecent) : preAdded;
 
-  /* ---- drive-from-origin (#170, D226): one bulk lookup covering every
+  /* ---- drive-from-origin (#176, D229): one bulk lookup covering every
    *  customer's primary venue, then sort a COPY of `filtered` so nothing
    *  else (preAdded, the map pins below) is disturbed. Default (no sort)
    *  keeps today's store order exactly. ---- */

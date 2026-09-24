@@ -1,5 +1,5 @@
 /**
- * Travel for MANY places in a fixed number of queries (#170, D226) — the
+ * Travel for MANY places in a fixed number of queries (#176, D229) — the
  * punch-#90 travelForCustomerVenues pattern generalised to any list, so the
  * Venues and Companies directories can show a drive column for ~1,500 rows
  * without a query per row: offices + travel rates once, one routeCachedBulk

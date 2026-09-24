@@ -78,7 +78,7 @@ export default async function VenuesPage({
     return true;
   });
 
-  /* ---- drive-from-origin (#170, D226): computed for ALL rows (not just the
+  /* ---- drive-from-origin (#176, D229): computed for ALL rows (not just the
    *  visible page) so nearest/farthest sort is correct across the whole set,
    *  before the PAGE cap below. ---- */
   const travel = await travelForPoints(
@@ -198,7 +198,7 @@ export default async function VenuesPage({
 
           <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 11 }}>{resultLabel}</div>
 
-          {/* Sort (#170, D226) — recent activity (default) vs. drive distance
+          {/* Sort (#176, D229) — recent activity (default) vs. drive distance
            *  from the quote origin, nearest/farthest first. */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
             {(
