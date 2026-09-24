@@ -29,6 +29,7 @@ import {
 } from "./actions";
 import { TasksCard } from "@/components/tasks-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
+import { ChangeTypeControl, useWonEditGuard } from "@/components/quote-flow-controls";
 import type { DraftedLine } from "./ai-scope-modal";
 import {
   DISC_LABEL,
@@ -298,6 +299,7 @@ export default function EstimatorClient({
   const [loadedId, setLoadedId] = useState(initial.loadedId);
   const [quoteId, setQuoteId] = useState(initial.quoteId);
   const [status, setStatus] = useState<QuoteStatus>(initial.status);
+  const guardWon = useWonEditGuard(status);
   const [review, setReview] = useState<QuoteReview>(initial.review);
   const [reviewerSel, setReviewerSel] = useState("queue");
   const [rcOpen, setRcOpen] = useState(false);
@@ -709,6 +711,7 @@ export default function EstimatorClient({
     : [];
 
   const pickCustomer = (id: string) => {
+    if (!guardWon("customer")) return;
     const c = id ? customers.find((x) => x.id === id) : undefined;
     const prim = c ? c.locations.find((l) => l.primary) || c.locations[0] : undefined;
     const locId = prim?.id || null;
@@ -723,11 +726,13 @@ export default function EstimatorClient({
     reapplyAutoTrips(id || null, locId);
   };
   const pickVenue = (locId: string) => {
+    if (!guardWon("venue")) return;
     setLocationId(locId || null);
     persistMeta({ locationId: locId || null });
     reapplyAutoTrips(customerId, locId || null);
   };
   const pickContact = (name: string) => {
+    if (!guardWon("contact")) return;
     setContactName(name || "");
     persistMeta({ contactName: name || "" });
   };
@@ -1689,15 +1694,11 @@ export default function EstimatorClient({
                     {projectName}
                   </button>
                 )}
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "#9aa0ab",
-                    fontFamily: "var(--font-mono)",
-                    marginTop: 2,
-                  }}
-                >
-                  {quoteId} · Rev {revNum}
+                <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 2 }}>
+                  <span style={{ fontSize: 11, color: "#9aa0ab", fontFamily: "var(--font-mono)" }}>
+                    {quoteId} · Rev {revNum}
+                  </span>
+                  {loadedId && <ChangeTypeControl quoteId={loadedId} status={status} tone="dark" />}
                 </div>
               </div>
             </div>
