@@ -90,11 +90,15 @@ export type ThreadRowVM = {
   /** category preset color, "" when none */
   categoryColor: string;
   categoryLabel: string;
+  labels: LabelOpt[];
   name: string;
   /** count of messages[] on the underlying thread; badge hidden when <= 1 */
   msgCount: number;
+  messagePreviews: Array<{ author: string; time: string; snippet: string; out: boolean }>;
   /** unique message authors beyond a single-author thread, e.g. "Jeff, Sarah +1"; "" when <= 1 author */
   participants: string;
+  /** Compact last-responder context for scanning a busy thread list. */
+  lastResponder: string;
   subject: string;
   snippet: string;
   time: string;
@@ -132,6 +136,7 @@ export type MessageVM = {
   time: string;
   body: string;
   attachments?: AttachmentVM[];
+  link: LinkVM | null;
 };
 
 export type LinkVM = {

@@ -27,7 +27,7 @@ const FIELD: CSSProperties = {
   outline: "none",
 };
 
-export default function CatalogPicker({ onAdd }: { onAdd: (p: SuggestPart) => void }) {
+export default function CatalogPicker({ onAdd }: { onAdd: (p: SuggestPart, qty: number) => void }) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<CatalogHit[]>([]);
   const [total, setTotal] = useState(0);
@@ -36,6 +36,8 @@ export default function CatalogPicker({ onAdd }: { onAdd: (p: SuggestPart) => vo
   // they still match what is typed, which also keeps the previous query's
   // hits from flashing during the next query's 220ms debounce.
   const [resultQ, setResultQ] = useState("");
+  const [qty, setQty] = useState("1");
+  const [added, setAdded] = useState("");
   const [pending, start] = useTransition();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const seq = useRef(0);
@@ -66,6 +68,17 @@ export default function CatalogPicker({ onAdd }: { onAdd: (p: SuggestPart) => vo
   const shownHits = fresh ? hits : [];
   const shownTotal = fresh ? total : 0;
 
+  function add(p: SuggestPart) {
+    const n = Math.max(1, Math.floor(Number(qty) || 1));
+    onAdd(p, n);
+    setAdded(`✓ Added ${n} × ${p.desc}`);
+    setQ("");
+    setResultQ("");
+    setHits([]);
+    window.setTimeout(() => setAdded(""), 2000);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
   return (
     <div
       style={{
@@ -83,6 +96,22 @@ export default function CatalogPicker({ onAdd }: { onAdd: (p: SuggestPart) => vo
         placeholder="Search the catalog — description, SKU, or manufacturer…"
         style={FIELD}
       />
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8 }}>
+        <label style={{ fontSize: 11, color: "#8c919c" }} htmlFor="catalog-qty">Qty</label>
+        <input
+          id="catalog-qty"
+          type="number"
+          min={1}
+          step={1}
+          value={qty}
+          onChange={(e) => setQty(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.preventDefault();
+          }}
+          style={{ ...FIELD, width: 72, padding: "6px 8px" }}
+        />
+        {added && <span style={{ fontSize: 11, color: "#2f7a52" }}>{added}</span>}
+      </div>
 
       <div style={{ marginTop: 4, fontSize: 10.5, color: "#aab0bb", padding: "2px 2px" }}>
         {!q.trim()
@@ -103,7 +132,7 @@ export default function CatalogPicker({ onAdd }: { onAdd: (p: SuggestPart) => vo
             type="button"
             key={h.sku}
             className="est-sug"
-            onClick={() => onAdd({ sku: h.sku, desc: h.desc, cost: h.cost, price: h.list, unit: h.unit })}
+            onClick={() => add({ sku: h.sku, desc: h.desc, cost: h.cost, price: h.list, unit: h.unit })}
             style={{
               width: "100%",
               display: "flex",

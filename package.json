@@ -35,7 +35,9 @@
     "test:smoke:upload": "tsx scripts/smoke-upload.ts",
     "test:smoke:grid-sheet": "tsx scripts/smoke-grid-sheet-upload.ts",
     "test:review:regressions": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-review-regressions.ts && tsx scripts/test-quote-email-regression.ts",
-    "test:grid-options": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-grid-options.ts"
+    "test:grid-options": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-grid-options.ts",
+    "davinci:extract": "tsx scripts/davinci-extract.ts",
+    "davinci:enrich": "tsx scripts/davinci-enrich.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",

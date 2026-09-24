@@ -2,6 +2,43 @@ import { clearCollection, getDoc, listDocs, upsertDoc } from "@/db/doc-store";
 import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
 
+export type CatalogProductMetadata = {
+  productFamily?: string;
+  specSection?: string;
+  specArticle?: string;
+  specLanguageKey?: string;
+  researchStatus?: "unverified" | "needs-review" | "researched";
+  source?: {
+    manufacturerUrl?: string;
+    sourceDocumentName?: string;
+    sourceDocumentDate?: number | null;
+    researchedAt?: number | null;
+    researchedBy?: string;
+  };
+  datasheets?: Array<{
+    kind: "datasheet" | "guide-spec" | "manual" | "cut-sheet" | "other";
+    fileName: string;
+    blobKey?: string;
+    sourceUrl?: string;
+    verifiedAt?: number | null;
+  }>;
+  accessories?: Array<{ sku?: string; manufacturerPartNumber?: string; description: string; required?: boolean }>;
+};
+
+export function mergeProductMetadata(
+  existing: CatalogProductMetadata | undefined,
+  patch: CatalogProductMetadata | undefined,
+): CatalogProductMetadata | undefined {
+  if (!existing && !patch) return undefined;
+  if (!existing) return patch;
+  if (!patch) return existing;
+  return {
+    ...existing,
+    ...patch,
+    source: existing.source || patch.source ? { ...existing.source, ...patch.source } : undefined,
+  };
+}
+
 /**
  * Catalog — server port of app/catalog-data.js (window.MASTER_CATALOG +
  * window.catalogByCategory) over collection "catalog_parts". Single source of
@@ -31,6 +68,12 @@ export type CatalogPart = {
   list: number;
   cost: number;
   mfr?: string;
+  /** Manufacturer's printed part number, distinct from Peak's SKU. */
+  manufacturerPartNumber?: string;
+  /** Manufacturer's model number, when the vendor distinguishes it from P/N. */
+  manufacturerModelNumber?: string;
+  /** Minimum advertised price; never treated as Peak cost or sell. */
+  mapPrice?: number | null;
   /** Fabric rows only — curtain configurator material cost basis. */
   costPerSqft?: number;
   /** Fabric rows only — weight basis, so one fabric choice drives both price
@@ -68,6 +111,8 @@ export type CatalogPart = {
   datasheetBlobKey?: string;
   /** Original filename of the attached datasheet, for display. */
   datasheetName?: string;
+  /** Researched, provenance-aware fields used by the Specs builder and read-only Displays API. */
+  productMetadata?: CatalogProductMetadata;
   /** Manufacturer document links (#162). Distinct from `datasheetBlobKey`,
    *  which is a Peak-uploaded PDF in Blob storage: these are the
    *  manufacturer's own public URLs carried from ETC's DaVinci library. They
@@ -170,7 +215,15 @@ export async function mergeUpsert(
   // field itself) — the runtime contract is enforced by callers, same as
   // the pre-existing `{ ...part, ... } as SpecCatalogPart` pattern in
   // design/engagements/spec/actions.ts.
-  return writePart(existing, { ...(existing ?? {}), ...patch, sku } as Omit<CatalogPart, "id"> & { id?: string }, opts);
+  const merged = {
+    ...(existing ?? {}),
+    ...patch,
+    ...(patch.productMetadata || existing?.productMetadata
+      ? { productMetadata: mergeProductMetadata(existing?.productMetadata, patch.productMetadata) }
+      : {}),
+    sku,
+  };
+  return writePart(existing, merged as Omit<CatalogPart, "id"> & { id?: string }, opts);
 }
 
 /** Explicit go-live reset for the pricing catalog only. Grid symbols and all

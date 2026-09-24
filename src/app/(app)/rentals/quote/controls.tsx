@@ -39,6 +39,7 @@ export type BuilderOption = { key: string; label: string };
 export type BuilderLineInit = { itemId: string; locationId: string; qty: string };
 export type BuilderInitial = {
   editingId: string | null;
+  replaces?: string;
   customerId: string;
   quoteName: string;
   contactSel: string;
@@ -291,6 +292,7 @@ export function QuoteBuilder({
   function buildForm(): FormData {
     const fd = new FormData();
     fd.set("editingId", editingId || "");
+    fd.set("replaces", initial.replaces || "");
     fd.set("customerId", customerId);
     fd.set("quoteName", quoteName);
     const c = selectedContact();

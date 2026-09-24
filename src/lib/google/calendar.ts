@@ -1,6 +1,7 @@
 import { accessTokenFor } from "@/lib/gmail/connections";
 import { accessTokenForConnection } from "./calendar-connections";
 import { presetFromRrule, rruleFor } from "./recurrence";
+import { findMeetingLink } from "./meeting-link";
 
 /**
  * Thin Google Calendar v3 client (D77) — plain fetch, bearer auth, zero deps,
@@ -102,6 +103,7 @@ export type CalendarEvent = {
   allDay: boolean;
   location: string;
   htmlLink: string;
+  meetingUrl: string;
 };
 
 export type Attendee = { email: string; name: string; status: string };
@@ -118,6 +120,7 @@ export type EventDetail = {
   allDay: boolean;
   location: string;
   htmlLink: string;
+  meetingUrl: string;
   /** "" | "daily" | "weekly" | "monthly" | "yearly" — see recurrence.ts;
    *  a recurrence Google sent that doesn't match one of our presets still
    *  round-trips (rawRecurrence is what gets sent back untouched unless the
@@ -138,6 +141,7 @@ function toDetail(e: GoogleEvent): EventDetail {
     allDay: !!e.start?.date,
     location: e.location || "",
     htmlLink: e.htmlLink || "",
+    meetingUrl: findMeetingLink(e.location, e.description),
     recurrencePreset: presetFromRrule((e.recurrence || [])[0]),
     rawRecurrence: e.recurrence || [],
     attendees: (e.attendees || []).map((a) => ({
@@ -172,6 +176,7 @@ function toCalendarEvents(items: GoogleEvent[] | undefined): CalendarEvent[] {
       allDay: !!e.start?.date,
       location: e.location || "",
       htmlLink: e.htmlLink || "",
+      meetingUrl: findMeetingLink(e.location, e.description),
     }))
     .filter((e) => e.startMs > 0);
 }

@@ -1,12 +1,17 @@
 import type { MobDraft, TravelLite } from "./types";
 
-const MOB_DEFAULTS = [
-  ["Site Visit", "1", "1"],
-  ["Install", "4", "5"],
-  ["Hang", "2", "3"],
-  ["Commissioning", "2", "3"],
-  ["Training", "1", "1"],
-] as const;
+export const MOB_DEFAULTS = {
+  "Site Visit": ["1", "1"],
+  Install: ["4", "5"],
+  Hang: ["2", "3"],
+  Commissioning: ["2", "3"],
+  Training: ["1", "1"],
+} as const;
+
+export function mobDefaultsFor(name: string): { people: string; days: string } | null {
+  const pair = MOB_DEFAULTS[name as keyof typeof MOB_DEFAULTS];
+  return pair ? { people: pair[0], days: pair[1] } : null;
+}
 
 export function disciplineForSystemTitle(title: string): "RIG" | "LIG" | "AUD" | "OTH" {
   const value = (title || "").toLowerCase();
@@ -43,5 +48,25 @@ export function laborMob(
 }
 
 export function defaultLaborMobs(travel: TravelLite | null): MobDraft[] {
-  return MOB_DEFAULTS.map(([name, people, days]) => laborMob(travel, name, people, days));
+  return [laborMob(travel)];
+}
+
+/**
+ * Removes only the old untouched five-row seed. Real multi-mobilization work
+ * is preserved, including a user who changed any crew/day value or label.
+ */
+export function normalizeLaborMobs(mobs: MobDraft[], travel: TravelLite | null = null): MobDraft[] {
+  const legacy = [
+    ["Site Visit", "1", "1"],
+    ["Install", "4", "5"],
+    ["Hang", "2", "3"],
+    ["Commissioning", "2", "3"],
+    ["Training", "1", "1"],
+  ] as const;
+  if (mobs.length !== legacy.length) return mobs;
+  const untouched = mobs.every((m, i) => {
+    const [name, people, days] = legacy[i];
+    return m.name === name && m.people === people && m.days === days && !m.nameCustom;
+  });
+  return untouched ? [laborMob(travel)] : mobs;
 }

@@ -10,6 +10,7 @@ import {
   reopenAction,
   replyAction,
   setLinkAction,
+  setMessageLinkAction,
   setStatusAction,
   unarchiveAction,
 } from "./actions";
@@ -141,10 +142,14 @@ function ExpandedMessage({
   m,
   collapsible,
   onCollapse,
+  linkOptions,
+  onLink,
 }: {
   m: MessageVM;
   collapsible: boolean;
   onCollapse: () => void;
+  linkOptions: Record<"quote" | "survey" | "inspection" | "project", Opt[]>;
+  onLink: (link: { type: string; id: string; label: string } | null) => void;
 }) {
   return (
     <div style={{ display: "flex", gap: 11, marginBottom: 16 }}>
@@ -199,6 +204,26 @@ function ExpandedMessage({
             </span>
           )}
           <span style={{ fontSize: 11, color: "#aab0bb" }}>{m.time}</span>
+          <select
+            value={m.link ? `${m.link.type}|${m.link.label}` : ""}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              const [type, id] = e.target.value.split("|");
+              if (!type || !id) onLink(null);
+              else {
+                const option = linkOptions[type as keyof typeof linkOptions]?.find((o) => o.value === id);
+                if (option) onLink({ type, id: option.value, label: option.label });
+              }
+            }}
+            title="Link this message to a work record"
+            style={{ border: "1px solid #e4e7ec", borderRadius: 6, padding: "2px 4px", color: "#68707b", fontSize: 10.5, background: "#fff" }}
+          >
+            <option value="">Link message…</option>
+            {Object.entries(linkOptions).map(([type, options]) => options.map((o) => (
+              <option key={`${type}|${o.value}`} value={`${type}|${o.value}`}>{type} · {o.label}</option>
+            )))}
+            {m.link && <option value="">Remove message link</option>}
+          </select>
         </div>
         <div
           style={{
@@ -261,7 +286,15 @@ function ExpandedMessage({
 /** How many earlier stubs to show before folding the middle away. */
 const STUBS_BEFORE_FOLD = 3;
 
-function Conversation({ messages }: { messages: MessageVM[] }) {
+function Conversation({
+  messages,
+  linkOptions,
+  onLink,
+}: {
+  messages: MessageVM[];
+  linkOptions: Record<"quote" | "survey" | "inspection" | "project", Opt[]>;
+  onLink: (messageId: string, link: { type: string; id: string; label: string } | null) => void;
+}) {
   // id -> explicit user choice; anything absent falls back to "newest is open"
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
   const [showEarlier, setShowEarlier] = useState(false);
@@ -289,6 +322,8 @@ function Conversation({ messages }: { messages: MessageVM[] }) {
         m={m}
         collapsible
         onCollapse={() => toggle(m.id, false)}
+        linkOptions={linkOptions}
+        onLink={(link) => onLink(m.id, link)}
       />
     ) : (
       <CollapsedMessage key={m.id} m={m} onOpen={() => toggle(m.id, true)} />
@@ -338,6 +373,8 @@ function Conversation({ messages }: { messages: MessageVM[] }) {
             m={newest}
             collapsible={messages.length > 1}
             onCollapse={() => toggle(newest.id, false)}
+            linkOptions={linkOptions}
+            onLink={(link) => onLink(newest.id, link)}
           />
         ) : (
           <CollapsedMessage
@@ -824,7 +861,13 @@ export default function ThreadReader({
           className="ib-scroll"
           style={{ flex: 1, overflowY: "auto", padding: "18px 20px", background: "#fafbfc" }}
         >
-          <Conversation messages={vm.messages} />
+          <Conversation
+            messages={vm.messages}
+            linkOptions={vm.linkOptions}
+            onLink={(messageId, link) => {
+              void setMessageLinkAction(vm.id, messageId, link).then(() => router.refresh());
+            }}
+          />
         </div>
 
         {/* actions + composer */}

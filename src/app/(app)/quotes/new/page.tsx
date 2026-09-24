@@ -22,6 +22,11 @@ export default async function NewQuotePage({
 
   const rawType = Array.isArray(sp.type) ? sp.type[0] : sp.type;
   const initialType: ServiceType = isServiceType(rawType) ? rawType : "system";
+  const requestedCustomer = Array.isArray(sp.customer) ? sp.customer[0] : sp.customer;
+  const requestedName = Array.isArray(sp.name) ? sp.name[0] : sp.name;
+  const requestedVenue = Array.isArray(sp.venue) ? sp.venue[0] : sp.venue;
+  const requestedContact = Array.isArray(sp.contact) ? sp.contact[0] : sp.contact;
+  const requestedReplaces = Array.isArray(sp.replaces) ? sp.replaces[0] : sp.replaces;
 
   const customers: IntakeCustomer[] = customerDocs
     .map((c: CustomerDoc) => ({
@@ -43,5 +48,19 @@ export default async function NewQuotePage({
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  return <QuoteIntakeForm customers={customers} initialType={initialType} />;
+  const initialCustomerId = customers.some((c) => c.id === requestedCustomer) ? requestedCustomer || "" : "";
+  const initialCustomer = customers.find((c) => c.id === initialCustomerId);
+  const initialVenueId = initialCustomer?.locations.some((l) => l.id === requestedVenue) ? requestedVenue || "" : "";
+  const initialContactName = initialCustomer?.contacts.some((c) => c.name === requestedContact) ? requestedContact || "" : "";
+  return (
+    <QuoteIntakeForm
+      customers={customers}
+      initialType={initialType}
+      initialCustomerId={initialCustomerId}
+      initialName={requestedName || ""}
+      initialVenueId={initialVenueId}
+      initialContactName={initialContactName}
+      initialReplaces={requestedReplaces || ""}
+    />
+  );
 }

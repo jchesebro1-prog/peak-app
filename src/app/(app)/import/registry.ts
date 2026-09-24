@@ -181,6 +181,44 @@ export function catalogPatch(
 ): Partial<Omit<Catalog.CatalogPart, "id" | "sku">> {
   const e = ex ?? {};
   const mfr = str(v.mfr) || str(e.mfr);
+  const existingMetadata = (e.productMetadata || undefined) as Catalog.CatalogProductMetadata | undefined;
+  const metadata: Catalog.CatalogProductMetadata = { ...(existingMetadata || {}) };
+  let hasMetadata = false;
+  const productFamily = str(v.productFamily);
+  const specSection = str(v.specSection);
+  const specArticle = str(v.specArticle);
+  const specLanguageKey = str(v.specLanguageKey);
+  const researchStatus = str(v.researchStatus) as Catalog.CatalogProductMetadata["researchStatus"];
+  if (productFamily) { metadata.productFamily = productFamily; hasMetadata = true; }
+  if (specSection) { metadata.specSection = specSection; hasMetadata = true; }
+  if (specArticle) { metadata.specArticle = specArticle; hasMetadata = true; }
+  if (specLanguageKey) { metadata.specLanguageKey = specLanguageKey; hasMetadata = true; }
+  if (["unverified", "needs-review", "researched"].includes(researchStatus || "")) {
+    metadata.researchStatus = researchStatus;
+    hasMetadata = true;
+  }
+  const source: NonNullable<Catalog.CatalogProductMetadata["source"]> = { ...(existingMetadata?.source || {}) };
+  const manufacturerUrl = str(v.manufacturerUrl);
+  const sourceDocumentName = str(v.sourceDocumentName);
+  const sourceDocumentDate = isoToMs(str(v.sourceDocumentDate));
+  if (manufacturerUrl) { source.manufacturerUrl = manufacturerUrl; hasMetadata = true; }
+  if (sourceDocumentName) { source.sourceDocumentName = sourceDocumentName; hasMetadata = true; }
+  if (sourceDocumentDate != null) { source.sourceDocumentDate = sourceDocumentDate; hasMetadata = true; }
+  if (hasMetadata || Object.keys(source).length > 0) metadata.source = source;
+  const docs = [...(existingMetadata?.datasheets || [])];
+  const addSourceDoc = (kind: "datasheet" | "guide-spec", url: string) => {
+    const index = docs.findIndex((doc) => doc.kind === kind);
+    const fileName = sourceDocumentName || url.split("/").pop()?.split("?")[0] || `${sku}-${kind}.pdf`;
+    const doc = { kind, fileName, sourceUrl: url } as const;
+    if (index >= 0) docs[index] = { ...docs[index], ...doc };
+    else docs.push(doc);
+    hasMetadata = true;
+  };
+  const datasheetUrl = str(v.datasheetUrl);
+  const guideSpecUrl = str(v.guideSpecUrl);
+  if (datasheetUrl) addSourceDoc("datasheet", datasheetUrl);
+  if (guideSpecUrl) addSourceDoc("guide-spec", guideSpecUrl);
+  if (docs.length && hasMetadata) metadata.datasheets = docs;
   return {
     desc: str(v.desc) || str(e.desc) || sku,
     category: str(v.category) || str(e.category) || "Uncategorized",
@@ -188,6 +226,10 @@ export function catalogPatch(
     list: num(v.list) || num(e.list),
     cost: num(v.cost) || num(e.cost),
     ...(mfr ? { mfr } : {}),
+    ...(str(v.manufacturerPartNumber) ? { manufacturerPartNumber: str(v.manufacturerPartNumber) } : {}),
+    ...(str(v.manufacturerModelNumber) ? { manufacturerModelNumber: str(v.manufacturerModelNumber) } : {}),
+    ...(v.mapPrice !== undefined ? { mapPrice: num(v.mapPrice) } : {}),
+    ...(hasMetadata ? { productMetadata: metadata } : {}),
   };
 }
 
@@ -226,7 +268,14 @@ async function refreshCache(cache: Record<string, unknown>[], id: string): Promi
 
 /** True when a customers row carries anything for its address venue. */
 function hasVenueColumns(v: Values): boolean {
-  return !!(str(v.venue) || str(v.address) || str(v.city) || str(v.state) || str(v.zip));
+  return !!(str(v.venue) || str(v.address) || str(v.city) || str(v.state) || str(v.zip) || coordinate(v.lat) !== undefined || coordinate(v.lng) !== undefined);
+}
+
+function coordinate(value: unknown): number | undefined {
+  const raw = String(value ?? "").trim();
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 /**
@@ -253,7 +302,7 @@ function customerRecordFor(
   if (hasVenueColumns(v)) {
     locations = mergeLocation(
       locations,
-      { label: str(v.venue), address: str(v.address), city: str(v.city), state: str(v.state), zip: str(v.zip) },
+      { label: str(v.venue), address: str(v.address), city: str(v.city), state: str(v.state), zip: str(v.zip), lat: coordinate(v.lat), lng: coordinate(v.lng) },
       "l" + id + "-" + seq(),
       // claimBlank "any": unlike a venues row, this row genuinely IS the
       // customer's address venue, so a legacy file's Venue column may name
@@ -353,6 +402,8 @@ async function writeVenueRow(cust: Customers.CustomerDoc, v: Values): Promise<vo
       city: str(v.city),
       state: str(v.state),
       zip: str(v.zip),
+      lat: coordinate(v.lat),
+      lng: coordinate(v.lng),
       kind: str(v.kind),
     },
     "l" + cust.id + "-" + seq(),
@@ -611,6 +662,8 @@ const WRITERS: Record<string, Writer> = {
           city: loc?.city || "",
           state: loc?.state || "",
           zip: rec.zip || loc?.zip || "",
+          lat: loc?.lat ?? "",
+          lng: loc?.lng ?? "",
           phone: rec.phone || "",
           website: rec.website || "",
         };
@@ -703,6 +756,8 @@ const WRITERS: Record<string, Writer> = {
             city: l.city || "",
             state: l.state || "",
             zip: l.zip || "",
+            lat: l.lat ?? "",
+            lng: l.lng ?? "",
             kind: l.kind || "",
           }))
       );
@@ -1023,6 +1078,19 @@ const WRITERS: Record<string, Writer> = {
         list: p.list ?? 0,
         cost: p.cost ?? 0,
         mfr: p.mfr || "",
+        manufacturerPartNumber: p.manufacturerPartNumber || "",
+        manufacturerModelNumber: p.manufacturerModelNumber || "",
+        mapPrice: p.mapPrice ?? "",
+        productFamily: p.productMetadata?.productFamily || "",
+        specSection: p.productMetadata?.specSection || "",
+        specArticle: p.productMetadata?.specArticle || "",
+        specLanguageKey: p.productMetadata?.specLanguageKey || "",
+        researchStatus: p.productMetadata?.researchStatus || "",
+        manufacturerUrl: p.productMetadata?.source?.manufacturerUrl || "",
+        datasheetUrl: p.productMetadata?.datasheets?.find((d) => d.kind === "datasheet")?.sourceUrl || "",
+        guideSpecUrl: p.productMetadata?.datasheets?.find((d) => d.kind === "guide-spec")?.sourceUrl || "",
+        sourceDocumentName: p.productMetadata?.source?.sourceDocumentName || "",
+        sourceDocumentDate: p.productMetadata?.source?.sourceDocumentDate ? isoOf(p.productMetadata.source.sourceDocumentDate) : "",
       }));
     },
   },

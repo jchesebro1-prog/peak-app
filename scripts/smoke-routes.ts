@@ -158,6 +158,7 @@ const ROUTES = [
  */
 const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/projects/P-3001" },
+  { route: "/api/projects/P-3001/handoff" },
   { route: "/inspections/RI-2042" },
   { route: "/venue-assessments/FS-1055" },
   // #119 Recordings (D152): the recorder page for a seeded survey and the beta/no-Krisp gates.
@@ -199,6 +200,11 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   /* The Grid's derived drawings (D112 riser, device schedule). */
   { route: "/design/grid/GRD-5001/riser", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/schedule", reject: "no longer exists" },
+  { route: "/design/grid/GRD-5001/lineset", reject: "no longer exists" },
+  { route: "/api/grid/GRD-5001/package-manifest" },
+  { route: "/api/v1/displays/catalog" },
+  { route: "/api/v1/displays/manufacturers" },
+  { route: "/api/v1/displays/specs" },
   { route: "/design/grid/GRD-5001?option=opt-base", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001?option=opt-does-not-exist", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/riser?option=opt-base", reject: "no longer exists" },

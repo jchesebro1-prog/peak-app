@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
-import { fmt, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
+import { fmt, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 
 /**
@@ -69,7 +69,9 @@ export type PreviewProps = {
   /** Uploaded document logo (Settings → Branding), falls back to the baked letterhead. */
   logoDark: string | null;
   quoteNote: string;
+  assumptions: string;
   sections: SpecSection[];
+  setSectionPresentation: (id: string, value: "itemized" | "narrative") => void;
   /** #143 — a vendor line reads from its record here too, but NEVER its cost,
    *  terms or notes: those are internal only (Jeff). */
   vendorQuotes: VendorQuote[];
@@ -114,8 +116,11 @@ export default function PreviewDoc(p: PreviewProps) {
       const secFr = systemFreight(sec);
       const sub = systemItemsRev(sec) + secFr;
       return {
+        id: sec.id,
         num: i + 1,
         name: sec.name,
+        narrative: (sec.narrative || "").trim(),
+        presentation: sec.presentation || "itemized",
         subtotalLabel: fmt(sub),
         hasFreight: secFr > 0,
         freightLabel: fmt(secFr),
@@ -130,7 +135,7 @@ export default function PreviewDoc(p: PreviewProps) {
                   sub: [] as { key: string; qty: number; unit: string; text: string }[],
                   qty: "" as string | number,
                   unit: "",
-                  ext: fmt(visible.reduce((a, it) => a + it.qty * it.price, 0)),
+                  ext: fmt(visible.reduce((a, it) => a + lineExtSellOf(it), 0)),
                 },
               ]
             : visible.map((it) => {
@@ -166,7 +171,7 @@ export default function PreviewDoc(p: PreviewProps) {
                       : [],
                   qty: it.qty as string | number,
                   unit: it.unit,
-                  ext: fmt(it.qty * it.price),
+                  ext: fmt(lineExtSellOf(it)),
                 };
               }),
       };
@@ -490,7 +495,7 @@ export default function PreviewDoc(p: PreviewProps) {
                 borderLeft: `3px solid ${ACCENT_BD}`,
               }}
             >
-              {p.quoteNote}
+          {p.quoteNote}
             </div>
           )}
 
@@ -527,9 +532,16 @@ export default function PreviewDoc(p: PreviewProps) {
                 </span>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, flexShrink: 0 }}>
                   {ps.subtotalLabel}
+                  <button type="button" onClick={() => p.setSectionPresentation(ps.id, ps.presentation === "narrative" ? "itemized" : "narrative")} style={{ marginLeft: 8, border: "1px solid rgba(255,255,255,.25)", borderRadius: 5, background: "transparent", color: "#fff", fontSize: 10, padding: "3px 6px", cursor: "pointer" }}>
+                    {ps.presentation === "narrative" ? "Narrative" : "Itemized"}
+                  </button>
                 </span>
               </div>
-              {isItemized && showLines ? (
+              {ps.presentation === "narrative" ? (
+                <div style={{ padding: "10px 13px 12px", fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.55, borderBottom: "1px solid #f0f1f4" }}>
+                  {ps.narrative || "System scope and pricing are included in the total above."}
+                </div>
+              ) : isItemized && showLines ? (
                 <div style={{ marginBottom: 6 }}>
                   {ps.lines.map((ln) => (
                     <div
@@ -690,7 +702,7 @@ export default function PreviewDoc(p: PreviewProps) {
                   )}
                   {p.pdfPrices && (
                     <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}>
-                      {fmt(it.qty * it.price)}
+                      {fmt(lineExtSellOf(it))}
                     </span>
                   )}
                 </div>
@@ -844,6 +856,12 @@ export default function PreviewDoc(p: PreviewProps) {
               </span>
             </div>
           </div>
+          {p.assumptions.trim() && (
+            <div style={{ marginTop: 18, padding: "12px 14px", background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 8 }}>
+              <div style={{ ...microLabel, marginBottom: 5 }}>Assumptions &amp; exceptions</div>
+              <div style={{ whiteSpace: "pre-wrap", fontSize: 12.5, color: "#5b616e", lineHeight: 1.55 }}>{p.assumptions}</div>
+            </div>
+          )}
         </div>
       </div>
       </div>

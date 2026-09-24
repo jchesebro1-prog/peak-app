@@ -456,15 +456,16 @@ export function ConsultingQuoteBuilder({
         <label style={LBL}>Disciplines bought (gates which template tasks apply)</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
           {disciplineOptions.map((d) => (
-            <label key={d} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#3a3f4a", cursor: "pointer" }}>
+            <label key={d} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: disciplineMenu.includes(d) ? "#3a3f4a" : "#9a7d1f", cursor: disciplineMenu.includes(d) ? "pointer" : "not-allowed" }} title={disciplineMenu.includes(d) ? undefined : "This discipline was removed from Settings and will be dropped when the quote is saved."}>
               <input
                 type="checkbox"
                 checked={disciplines.includes(d)}
+                disabled={!disciplineMenu.includes(d)}
                 onChange={() =>
                   setDisciplines(disciplines.includes(d) ? disciplines.filter((x) => x !== d) : [...disciplines, d])
                 }
               />
-              {disciplineLabel(d)}
+              {disciplineLabel(d)}{!disciplineMenu.includes(d) ? " (removed)" : ""}
             </label>
           ))}
         </div>

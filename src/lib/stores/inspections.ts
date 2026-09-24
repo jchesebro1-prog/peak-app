@@ -1328,10 +1328,14 @@ export async function syncFromQuotes(): Promise<number> {
   for (const q of quotes) {
     if (q.quoteType !== "inspection" || q.status !== "won") continue;
     if (have[q.id]) continue;
-    const out = await createFromQuote(q.id);
-    if (out && out.length) {
-      have[q.id] = true;
-      made += out.length;
+    try {
+      const out = await createFromQuote(q.id);
+      if (out && out.length) {
+        have[q.id] = true;
+        made += out.length;
+      }
+    } catch (error) {
+      console.error(`syncFromQuotes(inspection): skipped ${q.id} during page-load reconciliation`, error);
     }
   }
   return made;

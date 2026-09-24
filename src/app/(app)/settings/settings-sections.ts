@@ -8,8 +8,7 @@
  */
 
 export const SETTINGS_SECTIONS = [
-  { key: "general", label: "General" },
-  { key: "team", label: "Team & Roles" },
+  { key: "company", label: "Company" },
   { key: "admin", label: "Admin" },
 ] as const;
 
@@ -20,21 +19,27 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["key"];
  * Settings. Each keeps its own route; the Admin area only links to them.
  */
 export const ADMIN_SCREENS = [
-  { label: "Catalog", href: "/catalog", desc: "Price books, parts, and manufacturers." },
   { label: "Templates", href: "/templates", desc: "Document and message wording." },
   { label: "Estimating Rules", href: "/estimating-rules", desc: "Rates and formulas the estimator uses." },
   { label: "Task Templates", href: "/task-templates", desc: "Reusable checklists for projects, quotes, and designs." },
   { label: "Import / Export", href: "/import", desc: "Move records in and out of Peak." },
 ] as const;
 
-/** Validate the `?section=` param into a known section key (defaults general). */
+/** Company-owned configuration screens. Catalog is a company price book,
+ * not an administrator/user-management screen. */
+export const COMPANY_SCREENS = [
+  { label: "Catalog", href: "/catalog", desc: "Company price books, parts, and manufacturers." },
+] as const;
+
+/** Validate the `?section=` param into a known section key (defaults company). */
 export function resolveSettingsSection(
   param: string | string[] | undefined,
 ): SettingsSection {
   const v = Array.isArray(param) ? param[0] : param;
+  if (v === "general") return "company";
   return SETTINGS_SECTIONS.some((s) => s.key === v)
     ? (v as SettingsSection)
-    : "general";
+    : "company";
 }
 
 /**

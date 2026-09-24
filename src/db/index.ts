@@ -1,5 +1,6 @@
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import * as schema from "./schema";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
  * Database client.
@@ -15,7 +16,12 @@ import * as schema from "./schema";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Db = PgDatabase<any, typeof schema>;
 
-const globalForDb = globalThis as unknown as { __peakDb?: Promise<Db> };
+const globalForDb = globalThis as unknown as {
+  __peakDb?: Promise<Db>;
+  __peakReady?: Promise<Db>;
+  __peakSeeding?: boolean;
+};
+const transactionStore = new AsyncLocalStorage<Db>();
 
 /**
  * True while `next build` is running. The build fans out across ~7 worker
@@ -68,9 +74,9 @@ async function createDb(): Promise<Db> {
  *  it. Never awaited inside createDb(): seedIfEmpty() calls getDb() through
  *  the doc-store helpers, so awaiting it there would await the promise it is
  *  itself part of. An external waiter has no such cycle. */
-let seedDone: Promise<void> | null = null;
-
 export function getDb(): Promise<Db> {
+  const active = transactionStore.getStore();
+  if (active) return Promise.resolve(active);
   if (!globalForDb.__peakDb) {
     globalForDb.__peakDb = createDb();
     // Dev auto-seed runs AFTER the db promise resolves — never inside
@@ -78,24 +84,41 @@ export function getDb(): Promise<Db> {
     // (awaiting the same promise → deadlock). Skipped during a build: those
     // datadirs are throwaway, so seeding them is wasted work per worker.
     if (!process.env.DATABASE_URL && !isBuild) {
-      seedDone = globalForDb.__peakDb
-        .then(async (db) => {
+      globalForDb.__peakReady = globalForDb.__peakDb.then(async (db) => {
+        globalForDb.__peakSeeding = true;
+        try {
           const { seedIfEmpty } = await import("./seed-data");
           await seedIfEmpty(db);
-        })
-        .catch((err) => console.error("[db] dev auto-seed failed:", err));
+          return db;
+        } finally {
+          globalForDb.__peakSeeding = false;
+        }
+      });
+    } else {
+      globalForDb.__peakReady = globalForDb.__peakDb;
     }
   }
-  return globalForDb.__peakDb;
+  return globalForDb.__peakSeeding
+    ? globalForDb.__peakDb
+    : (globalForDb.__peakReady ?? globalForDb.__peakDb);
 }
 
 /** Resolves once the dev auto-seed has finished (or immediately when there is
  *  nothing to seed — hosted DATABASE_URL, or a build's throwaway datadir).
  *  Call this before reading seeded data (#148). */
 export async function seeded(): Promise<void> {
-  // Ensure the seed has actually been kicked off (getDb() assigns seedDone
-  // synchronously on first call) even if this is the very first call in the
-  // process — then wait on it, if there is one.
+  // Ensure the seed has actually been kicked off even if this is the first
+  // call in the process, then wait for readiness.
   await getDb();
-  if (seedDone) await seedDone;
+  await (globalForDb.__peakReady ?? globalForDb.__peakDb);
+}
+
+/** Run a unit of document/identity writes atomically. Nested calls join the outer transaction. */
+export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+  const active = transactionStore.getStore();
+  if (active) return fn();
+  const db = await getDb();
+  return (db as unknown as { transaction: (work: (tx: Db) => Promise<T>) => Promise<T> }).transaction(
+    (tx) => transactionStore.run(tx, fn)
+  );
 }

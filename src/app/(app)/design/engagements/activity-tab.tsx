@@ -527,7 +527,7 @@ export function ActivityTab({
                     up in the Activity feed below. */}
                 {a.kind === "data" ? (
                   <a
-                    href={fileRefHref(a, eng.id)}
+                    href={fileRefHref(a, eng.id, "draft", i)}
                     download={a.name}
                     style={{ color: "inherit", textDecoration: "none" }}
                   >
@@ -686,7 +686,7 @@ function ActivityRow({
           {attachments.map((a, i) => (
             <a
               key={i}
-              href={fileRefHref(a, engagementId)}
+              href={fileRefHref(a, engagementId, entry.id, i)}
               download={a.name}
               style={{ fontSize: 11.5, color: "var(--accent)", textDecoration: "none" }}
             >

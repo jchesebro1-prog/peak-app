@@ -9,6 +9,7 @@ import {
 import { quotesSeed } from "@/db/seeds/quotes";
 import { canSetPoReceived } from "@/lib/opportunities";
 import { createAssignment } from "@/lib/stores/assignments";
+import { withTransaction } from "@/db";
 
 /**
  * QuoteStore — server port of app/store.js (localStorage key rss_pipeline_v2).
@@ -91,6 +92,8 @@ export type Quote = {
   quoteNote?: string;
   scopeNarrative?: string;
   quoteBasis?: string;
+  /** Customer's requested install window from the estimator (#15). */
+  installTimeframe?: string;
   preparedBy?: string;
   assumptions?: string;
   termsText?: string;
@@ -630,6 +633,7 @@ export async function setStatus(
   by?: string | null,
   opts: SetStatusOpts = {}
 ): Promise<Quote | null> {
+  return withTransaction(async () => {
   if (!STAGES.includes(status)) return null;
   const q = await getDoc<Quote>("quotes", id);
   if (!q || q.status === status) return q;
@@ -673,7 +677,12 @@ export async function setStatus(
     });
   }
 
+  if (result) {
+    const { spawnFromQuote } = await import("./quote-spawn");
+    await spawnFromQuote(result, q.status);
+  }
   return result;
+  });
 }
 
 /**
@@ -694,6 +703,21 @@ export async function setPoReceived(id: string, on: boolean): Promise<Quote | nu
 /** Soft delete (prototype filtered the array; server keeps a tombstone for sync). */
 export async function remove(id: string): Promise<void> {
   await softDeleteDoc("quotes", id);
+}
+
+/**
+ * Retire the draft that a user is replacing with a quote of another type.
+ * This is deliberately checked at the moment the replacement is first saved:
+ * backing out of the new builder must leave the original draft intact, and a
+ * sent/won/lost quote must never be silently removed.
+ */
+export async function retireReplacedDraft(id: string): Promise<boolean> {
+  const clean = (id || "").trim();
+  if (!clean) return false;
+  const q = await get(clean);
+  if (!q || q.status !== "draft") return false;
+  await remove(clean);
+  return true;
 }
 
 /* ---- review & approval workflow ---- */

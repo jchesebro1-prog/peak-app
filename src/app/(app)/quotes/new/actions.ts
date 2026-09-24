@@ -94,5 +94,12 @@ export async function createQuoteIntakeAction(
 
   if (!customerId) return { ok: false, error: "Pick or create a customer first." };
 
-  redirect(builderPath(input.type, customerId, category));
+  let venue = input.locationMode === "pick" ? input.locationId.trim() : "";
+  let contact = input.contactMode === "pick" ? input.contactName.trim() : "";
+  const refreshed = await getCustomer(customerId);
+  if (refreshed) {
+    if (!refreshed.locations.some((l) => l.id === venue)) venue = "";
+    if (!refreshed.contacts.some((c) => c.name === contact)) contact = "";
+  }
+  redirect(builderPath(input.type, customerId, category, { name: input.name, venue, contact, replaces: input.replaces }));
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import type { CSSProperties } from "react";
 import { firstName } from "@/lib/team";
 import { approvedReviewLine } from "@/lib/review-line";
@@ -65,8 +66,9 @@ import type {
 } from "./types";
 import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { assemblyDescription } from "@/lib/fixture-assemblies";
-import { defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
+import { defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor, normalizeLaborMobs } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
+import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
 import AiScopeModal from "./ai-scope-modal";
@@ -75,6 +77,7 @@ import FixtureModal from "./fixture-modal";
 import LaborModal from "./labor-modal";
 import VendorQuoteModal, {
   vendorDraftTotal,
+  vendorDraftTotalSource,
   vendorKeptLines,
   vendorLinesTotal,
 } from "./vendor-quote-modal";
@@ -131,8 +134,13 @@ const CSS = `
 
 const freshCustom = (): CustomDraft => ({
   desc: "",
+  manufacturer: "",
+  manufacturerPartNumber: "",
+  vendor: "",
+  priceGoodThrough: new Date().toISOString().slice(0, 10),
   link: "",
   allowance: "",
+  addToCatalog: "",
   sku: "",
   unit: "ea",
   qty: "1",
@@ -259,6 +267,8 @@ const CTX_LABEL: CSSProperties = {
   flexShrink: 0,
 };
 
+const INSTALL_TIMEFRAMES = ["ASAP", "Under 1 month", "1–3 months", "3–6 months", "6–12 months", "TBD"] as const;
+
 export default function EstimatorClient({
   initial,
   companyName,
@@ -278,6 +288,7 @@ export default function EstimatorClient({
   people,
   quoteTasks,
   templateSets,
+  assumptionLibrary,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   const [sections, setSections] = useState<SpecSection[]>(
@@ -309,11 +320,15 @@ export default function EstimatorClient({
   const [moveNotice, setMoveNotice] = useState<
     { ok: true; targetId: string; targetName: string } | { ok: false; error: string } | null
   >(null);
+  const [projectName, setProjectName] = useState(initial.projectName);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
   const [contactName, setContactName] = useState(initial.contactName);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
+  const [assumptions, setAssumptions] = useState(initial.assumptions || "");
+  const checkedAssumptions = useMemo(() => new Set(assumptions.split("\n").map((line) => line.trim()).filter(Boolean)), [assumptions]);
+  const [installTimeframe, setInstallTimeframe] = useState(initial.installTimeframe);
   const [paymentTerms, setPaymentTerms] = useState(initial.paymentTerms);
   // #110: user-named quote category — persisted on blur, not per keystroke.
   const [category, setCategory] = useState(initial.category);
@@ -391,6 +406,7 @@ export default function EstimatorClient({
     const lines: VendorLineDraft[] = v.lines.map((l) => ({
       id: l.id,
       description: l.description,
+      manufacturerPartNumber: l.manufacturerPartNumber || "",
       qty: String(l.qty),
       unit: l.unit,
       amount: String(l.amount),
@@ -451,6 +467,7 @@ export default function EstimatorClient({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const assumptionsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -516,6 +533,11 @@ export default function EstimatorClient({
   /* ---------------- persistence ---------------- */
   const persistMeta = (meta: Parameters<typeof updateQuoteMetaAction>[1]) => {
     if (!loadedId) return;
+    if (
+      status === "won" &&
+      ("customerId" in meta || "locationId" in meta || "contactName" in meta) &&
+      !window.confirm("This quote is won — its project/job keeps the old value. Change the quote anyway?")
+    ) return;
     const id = loadedId;
     startTransition(async () => {
       const r = await updateQuoteMetaAction(id, meta);
@@ -538,12 +560,15 @@ export default function EstimatorClient({
     startTransition(async () => {
       try {
         const res = await saveQuoteAction(loadedId, {
-          name: initial.projectName,
+          replaces: initial.replaces,
+          name: projectName,
           customer: cname,
           customerId: customerId || null,
           locationId: locationId || null,
           contactName: contactName || "",
           quoteNote: quoteNote || "",
+          assumptions: assumptions || "",
+          installTimeframe,
           paymentTerms,
           category,
           value: t.grand,
@@ -713,6 +738,31 @@ export default function EstimatorClient({
     if (noteTimer.current) clearTimeout(noteTimer.current);
     noteTimer.current = setTimeout(() => persistMeta({ quoteNote: v }), 500);
   };
+  const onAssumptions = (v: string) => {
+    setAssumptions(v);
+    if (!loadedId) return;
+    if (assumptionsTimer.current) clearTimeout(assumptionsTimer.current);
+    assumptionsTimer.current = setTimeout(() => persistMeta({ assumptions: v }), 500);
+  };
+  const toggleAssumption = (line: string) => {
+    const current = assumptions.split("\n").map((item) => item.trim()).filter(Boolean);
+    const next = checkedAssumptions.has(line)
+      ? current.filter((item) => item !== line)
+      : [...current, line];
+    onAssumptions(next.join("\n"));
+  };
+  const onInstallTimeframe = (v: string) => {
+    setInstallTimeframe(v);
+    persistMeta({ installTimeframe: v });
+  };
+  const onProjectName = (v: string) => {
+    setProjectName(v);
+    if (loadedId) persistMeta({ name: v });
+  };
+
+  const changeTypeHref = loadedId
+    ? `/quotes/new?replaces=${encodeURIComponent(loadedId)}&type=system${customerId ? `&customer=${encodeURIComponent(customerId)}` : ""}${locationId ? `&venue=${encodeURIComponent(locationId)}` : ""}${contactName ? `&contact=${encodeURIComponent(contactName)}` : ""}${projectName ? `&name=${encodeURIComponent(projectName)}` : ""}`
+    : "#";
 
   /* ---------------- sections & items ---------------- */
   const isExpanded = (id: string) => expanded[id] !== false;
@@ -726,6 +776,26 @@ export default function EstimatorClient({
           : s
       )
     );
+  const setItemPrice = (id: number, value: string) => {
+    const price = Number(value.replace(/[$,\s]/g, ""));
+    if (!Number.isFinite(price) || price < 0) return;
+    patchItem(id, (it) => ({ ...it, price: round2(price), sellOverride: true, extSellOverride: undefined }));
+  };
+  const setItemExtSell = (id: number, value: string) => {
+    const ext = Number(value.replace(/[$,\s]/g, ""));
+    if (!Number.isFinite(ext) || ext < 0) return;
+    patchItem(id, (it) => ({ ...it, extSellOverride: round2(ext) }));
+  };
+  const moveItem = (secId: string, id: number, direction: -1 | 1) =>
+    setSections((ss) => ss.map((s) => {
+      if (s.id !== secId) return s;
+      const index = s.items.findIndex((item) => item.id === id);
+      const next = index + direction;
+      if (index < 0 || next < 0 || next >= s.items.length) return s;
+      const items = [...s.items];
+      [items[index], items[next]] = [items[next], items[index]];
+      return { ...s, items: items.map((item, i) => ({ ...item, lineOrder: i })) };
+    }));
   const inc = (id: number) => patchItem(id, (it) => ({ ...it, qty: it.qty + 1 }));
   const dec = (id: number) => patchItem(id, (it) => ({ ...it, qty: Math.max(0, it.qty - 1) }));
   const setQty = (id: number, v: string) => {
@@ -769,6 +839,10 @@ export default function EstimatorClient({
   };
   const renameSystem = (secId: string, name: string) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, name } : s)));
+  const setSystemNarrative = (secId: string, narrative: string) =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, narrative } : s)));
+  const setSystemPresentation = (secId: string, presentation: "itemized" | "narrative") =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, presentation } : s)));
   const deleteSystem = (secId: string) => {
     const list = sections.filter((s) => s.id !== secId);
     setSections(list);
@@ -843,12 +917,11 @@ export default function EstimatorClient({
       ss.map((s) => (s.id === secId ? { ...s, items: [...s.items, ...items] } : s))
     );
 
-  const addPart = (secId: string, cat: SuggestPart) => {
+  const addPart = (secId: string, cat: SuggestPart, qty = 1) => {
     const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
     pushItems(secId, [
-      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: 1, unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
+      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: Math.max(1, qty), unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
     ]);
-    closeInput();
   };
 
   /* ---- CSV batch-add (#112) ----
@@ -1004,9 +1077,10 @@ export default function EstimatorClient({
         // nor into the NEXT open of the same method on the same system — hence
         // the sequence number rather than a kind/secId comparison.
         if (openSeqRef.current !== seq) return;
-        setLaborDraft(
-          freshLabor(est, tierMargin, sections.find((section) => section.id === secId)?.name || "")
-        );
+        setLaborDraft((draft) => ({
+          ...freshLabor(est, tierMargin, sections.find((section) => section.id === secId)?.name || ""),
+          mobs: normalizeLaborMobs(draft.mobs, est),
+        }));
       });
     }
   };
@@ -1049,15 +1123,33 @@ export default function EstimatorClient({
     openInputMethod("vendor", secId);
   };
 
-  const addCustomPart = (secId: string) => {
+  const addCustomPart = async (secId: string) => {
     const d = customDraft;
     const desc = (d.desc || "").trim();
-    const price = parseFloat(d.price);
-    if (!desc || isNaN(price) || price <= 0) return;
+    const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
     let qty = parseInt(d.qty, 10);
     if (isNaN(qty) || qty < 1) qty = 1;
     let cost = parseFloat(d.cost);
     if (isNaN(cost) || cost < 0) cost = 0;
+    const typedPrice = parseFloat(d.price);
+    const price = d.allowance && (!Number.isFinite(typedPrice) || typedPrice <= 0)
+      ? round2(cost / (1 - margin))
+      : typedPrice;
+    if (!desc || !Number.isFinite(price) || price <= 0) return;
+    if (d.addToCatalog && !d.allowance) {
+      const saved = await saveEstimatorCustomPartAction({
+        sku: (d.sku || "").trim(),
+        desc,
+        category: "Custom Parts",
+        unit: (d.unit || "").trim() || "ea",
+        cost,
+        list: price,
+        mfr: d.manufacturer.trim(),
+        manufacturerPartNumber: d.manufacturerPartNumber.trim(),
+        priceGoodThrough: d.priceGoodThrough,
+      });
+      if (!saved.ok) return;
+    }
     pushItems(secId, [
       {
         id: nextId(),
@@ -1068,6 +1160,9 @@ export default function EstimatorClient({
         cost,
         price,
         custom: true,
+        manufacturer: d.manufacturer.trim() || undefined,
+        manufacturerPartNumber: d.manufacturerPartNumber.trim() || undefined,
+        priceGoodThrough: d.priceGoodThrough || undefined,
         link: (d.link || "").trim() || undefined,
         allowance: d.allowance ? true : undefined,
       },
@@ -1098,7 +1193,7 @@ export default function EstimatorClient({
     setVendorDraft((d) => ({
       ...d,
       lines: d.lines.concat([
-        { id: ++vendorLineIdRef.current, description: "", qty: "1", unit: "ea", amount: "" },
+        { id: ++vendorLineIdRef.current, description: "", manufacturerPartNumber: "", qty: "1", unit: "ea", amount: "" },
       ]),
     }));
   const removeVendorLine = (id: number) =>
@@ -1146,6 +1241,7 @@ export default function EstimatorClient({
       lines: vendorKeptLines(d.lines).map((l) => ({
         id: l.id,
         description: (l.description || "").trim(),
+        ...(l.manufacturerPartNumber.trim() ? { manufacturerPartNumber: l.manufacturerPartNumber.trim() } : {}),
         qty: parseMoney(l.qty) || 0,
         unit: (l.unit || "").trim() || "ea",
         amount: round2(parseMoney(l.amount) || 0),
@@ -1153,6 +1249,7 @@ export default function EstimatorClient({
       terms: d.terms || "",
       notes: d.notes || "",
       total,
+      totalSource: vendorDraftTotalSource(d),
       includesFreight: d.includesFreight,
       display: d.display,
     };
@@ -1305,7 +1402,7 @@ export default function EstimatorClient({
   const resetAutoHrs = (field: "pmHrs" | "drfHrs", flag: "pmAuto" | "drfAuto") =>
     setLaborDraft((d) => ({ ...d, [field]: "", [flag]: true }));
   const addMob = () =>
-    setLaborDraft((d) => ({ ...d, mobs: d.mobs.concat([laborMob(travelEstNow())]) }));
+    setLaborDraft((d) => ({ ...d, mobs: [...d.mobs, laborMob(travelEstNow())] }));
   const removeMob = (idx: number) =>
     setLaborDraft((d) =>
       d.mobs.length <= 1 ? d : { ...d, mobs: d.mobs.filter((_, i) => i !== idx) }
@@ -1321,7 +1418,16 @@ export default function EstimatorClient({
       mobs: d.mobs.map((m, i) => {
         if (i !== idx) return m;
         if (val === "__custom__") return { ...m, nameCustom: true, name: "" };
-        return { ...m, name: val, nameCustom: false };
+        const previous = mobDefaultsFor(m.name);
+        const untouched =
+          (previous ? m.people === previous.people && m.days === previous.days : m.people === "1" && m.days === "1");
+        const next = mobDefaultsFor(val);
+        return {
+          ...m,
+          name: val,
+          nameCustom: false,
+          ...(untouched && next ? { people: next.people, days: next.days } : {}),
+        };
       }),
     }));
   const useMobNameList = (idx: number) =>
@@ -1615,7 +1721,12 @@ export default function EstimatorClient({
                     textOverflow: "ellipsis",
                   }}
                 >
-                  {initial.projectName}
+                  <input
+                    value={projectName}
+                    onChange={(e) => onProjectName(e.target.value)}
+                    aria-label="Estimate name"
+                    style={{ background: "transparent", border: "1px solid transparent", color: "#fff", font: "inherit", width: "100%", minWidth: 140, outline: "none" }}
+                  />
                 </div>
                 <div
                   style={{
@@ -1633,6 +1744,22 @@ export default function EstimatorClient({
               className="est-topright"
               style={{ display: "flex", alignItems: "center", gap: 22, flexShrink: 0 }}
             >
+              <Link
+                href={changeTypeHref}
+                aria-disabled={!loadedId || status !== "draft"}
+                onClick={(e) => {
+                  if (!loadedId || status !== "draft") e.preventDefault();
+                }}
+                title={status === "draft" ? "Start a replacement quote with a different type" : "Already sent — start a new quote instead."}
+                style={{
+                  fontSize: 11,
+                  color: loadedId && status === "draft" ? "#d9b8ff" : "#777d88",
+                  textDecoration: "none",
+                  pointerEvents: loadedId && status === "draft" ? "auto" : "none",
+                }}
+              >
+                Change type
+              </Link>
               <div style={{ textAlign: "right" }}>
                 <div
                   style={{
@@ -1874,6 +2001,59 @@ export default function EstimatorClient({
             />
             <span style={{ fontSize: 10.5, color: "#6b7079", flexShrink: 0 }}>
               Shows on the PDF header
+            </span>
+          </div>
+
+          {/* quote assumptions / exceptions (#36) */}
+          <div
+            className="est-noterow"
+            style={{
+              display: "flex", alignItems: "flex-start", gap: 12, padding: "9px 22px",
+              background: "#23262d", borderTop: "1px solid #2b2e35", color: "#fff", flexShrink: 0,
+            }}
+          >
+            <span style={{ ...CTX_LABEL, paddingTop: 8 }}>Assumptions</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {assumptionLibrary.length > 0 && (
+                <div style={{ display: "grid", gap: 5, marginBottom: 7 }}>
+                  {assumptionLibrary.map((line) => (
+                    <label key={line} style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 11.5, color: "#d7dae0", lineHeight: 1.35, cursor: "pointer" }}>
+                      <input type="checkbox" checked={checkedAssumptions.has(line)} onChange={() => toggleAssumption(line)} style={{ marginTop: 2 }} />
+                      <span>{line}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <textarea
+                className="est-notefield"
+                value={assumptions}
+                onChange={(e) => onAssumptions(e.target.value)}
+                placeholder="Add quote-specific assumptions, exclusions, and exceptions…"
+                rows={2}
+                style={{ width: "100%", minWidth: 0, resize: "vertical", fontFamily: "var(--font-ui)", fontSize: 12.5, color: "#fff", background: "#2b2e35", border: "1px solid #3a3e46", borderRadius: 7, padding: "8px 11px" }}
+              />
+            </div>
+            <span style={{ fontSize: 10.5, color: "#6b7079", flexShrink: 0, paddingTop: 8 }}>Company defaults + editable exceptions</span>
+          </div>
+
+          <div
+            className="est-noterow"
+            style={{
+              display: "flex", alignItems: "center", gap: 12, padding: "8px 22px",
+              background: "#23262d", borderTop: "1px solid #2b2e35", color: "#fff", flexShrink: 0,
+            }}
+          >
+            <span style={CTX_LABEL}>Suggested install timeframe</span>
+            <select
+              value={installTimeframe}
+              onChange={(e) => onInstallTimeframe(e.target.value)}
+              aria-label="Suggested install timeframe"
+              style={{ ...DARK_SELECT, minWidth: 150 }}
+            >
+              {INSTALL_TIMEFRAMES.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+            <span style={{ fontSize: 10.5, color: "#6b7079" }}>
+              Carries to the project goal when this quote is won
             </span>
           </div>
 
@@ -2658,12 +2838,17 @@ export default function EstimatorClient({
                   }}
                   onToggleExpand={() => toggleExpand(sec.id)}
                   onRename={(name) => renameSystem(sec.id, name)}
+                  onSetNarrative={(value) => setSystemNarrative(sec.id, value)}
+                  onSetPresentation={(value) => setSystemPresentation(sec.id, value)}
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}
                   onSetFreight={(v) => setFreightPct(sec.id, v)}
                   onInc={inc}
                   onDec={dec}
                   onSetQty={setQty}
+                  onSetPrice={setItemPrice}
+                  onSetExtSell={setItemExtSell}
+                  onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
                   onRemoveItem={removeItem}
                   onToggleCatalog={() => openInputMethod("catalog", sec.id)}
                   onToggleCurtain={() => openInputMethod("curtain", sec.id)}
@@ -2671,7 +2856,7 @@ export default function EstimatorClient({
                   onToggleLabor={() => openInputMethod("labor", sec.id)}
                   onToggleCustom={() => openInputMethod("custom", sec.id)}
                   onToggleVendor={() => openInputMethod("vendor", sec.id)}
-                  onAddPart={(cat) => addPart(sec.id, cat)}
+                  onAddPart={(cat, qty) => addPart(sec.id, cat, qty)}
                   onImportMaterials={(items) => importMaterials(sec.id, items)}
                   onSetVendorDisplay={setVendorDisplay}
                   onEditVendor={(vqId) => openVendorEdit(sec.id, vqId)}
@@ -2827,7 +3012,7 @@ export default function EstimatorClient({
           }
           hasAttn={hasAttn}
           attnLine={attnLine}
-          projectName={initial.projectName}
+          projectName={projectName}
           venueLabel={(() => {
             const l = locations.find((x) => x.id === locationId);
             if (!l) return "";
@@ -2837,7 +3022,9 @@ export default function EstimatorClient({
           companyName={companyName}
           logoDark={logoDark}
           quoteNote={quoteNote}
+          assumptions={assumptions}
           sections={sections}
+          setSectionPresentation={(id, value) => setSystemPresentation(id, value)}
           vendorQuotes={vendorQuotes}
           t={t}
           taxRatePct={TAX_RATE_PCT}

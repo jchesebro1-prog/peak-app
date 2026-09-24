@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import ActionError from "@/components/action-error";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor } from "@/lib/team";
 import {
@@ -15,6 +16,7 @@ import { ensureProjectTasksMigrated, allTasks, type TaskRecord } from "@/lib/sto
 import { RecordingsStrip } from "@/components/recordings/recordings-strip";
 import { loadRecordingsStrip, loadRecordingsStrips } from "../recordings/data";
 import FieldWorkDetail, { type FieldIdentity } from "./controls";
+import { safeSweep } from "@/lib/safe-sweep";
 
 export const metadata = { title: "Field work — Quartzite-6" };
 
@@ -116,7 +118,12 @@ export default async function FieldWorkPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [me, sp] = await Promise.all([requireUser(), searchParams]);
-  await syncProjectsFromQuotes();
+  const projectSyncOutcome = await safeSweep("field work projects", syncProjectsFromQuotes, { created: 0, skipped: [] });
+  const projectSyncBase = projectSyncOutcome.value;
+  const projectSync = {
+    ...projectSyncBase,
+    skipped: projectSyncOutcome.error ? [...projectSyncBase.skipped, projectSyncOutcome.error] : projectSyncBase.skipped,
+  };
   const [all, users, serviceWork] = await Promise.all([
     getAllProjects(),
     activeUsers(),
@@ -348,6 +355,7 @@ export default async function FieldWorkPage({
     return (
       <div style={{ maxWidth: 560, margin: "0 auto", padding: "18px 16px 80px" }}>
         <style>{CSS}</style>
+        <ActionError message={one(sp.err) || (projectSync.skipped.length ? `Some won quotes could not be reconciled into Field Work (${projectSync.skipped.join(", ")}). Refresh later or contact an administrator.` : undefined)} />
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-.015em", marginRight: "auto" }}>
@@ -418,14 +426,17 @@ export default async function FieldWorkPage({
   const strip = await loadRecordingsStrip("project", p.id);
 
   return (
-    <FieldWorkDetail
-      project={p}
-      tasks={jobTasks}
-      meName={me.name}
-      identity={identity}
-      initialTab={tab}
-      recordings={strip.recordings}
-      canShowRecord={strip.canRecord}
-    />
+    <>
+      <ActionError message={one(sp.err) || (projectSync.skipped.length ? `Some won quotes could not be reconciled into Field Work (${projectSync.skipped.join(", ")}). Refresh later or contact an administrator.` : undefined)} />
+      <FieldWorkDetail
+        project={p}
+        tasks={jobTasks}
+        meName={me.name}
+        identity={identity}
+        initialTab={tab}
+        recordings={strip.recordings}
+        canShowRecord={strip.canRecord}
+      />
+    </>
   );
 }

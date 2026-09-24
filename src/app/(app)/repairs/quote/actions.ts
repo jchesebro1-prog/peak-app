@@ -8,11 +8,11 @@ import {
   create as createQuote,
   update as updateQuote,
   setStatus,
+  retireReplacedDraft,
 } from "@/lib/stores/quotes";
 import {
   CATEGORIES,
   PRIORITIES,
-  createFromQuote,
   type RepairSourceKind,
 } from "@/lib/stores/repair-jobs";
 import {
@@ -26,6 +26,12 @@ import { resolveTier } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { coordsOf, quoteOrigin, driveMiles, driveMinutes } from "@/lib/geo";
+
+function quoteFailure(formData: FormData, message: string): never {
+  const id = String(formData.get("editingId") || "");
+  const qs = new URLSearchParams({ ...(id ? { id } : {}), err: message });
+  redirect("/repairs/quote?" + qs.toString());
+}
 
 /**
  * Repair quote mutations (repair twin of the flame-test quote actions).
@@ -47,6 +53,7 @@ type PostedPart = { name: string; qty: number; cost: number };
 async function persist(formData: FormData): Promise<string | null> {
   const user = await requireUser();
   const editingId = String(formData.get("editingId") || "");
+  const replaces = String(formData.get("replaces") || "").trim();
   const customerId = String(formData.get("customerId") || "");
   const quoteName = String(formData.get("quoteName") || "").trim();
   const contactName = String(formData.get("contactName") || "").trim();
@@ -219,27 +226,35 @@ async function persist(formData: FormData): Promise<string | null> {
   const q = editingId
     ? await updateQuote(editingId, payload)
     : await createQuote(payload);
+  if (!editingId && q && replaces) await retireReplacedDraft(replaces);
   return (q && q.id) || editingId || null;
 }
 
 export async function saveRepairQuote(formData: FormData): Promise<void> {
-  const id = await persist(formData);
+  let id: string | null;
+  try {
+    id = await persist(formData);
+  } catch (error) {
+    console.error("saveRepairQuote: quote save failed", error);
+    quoteFailure(formData, "Couldn’t save the repair quote — please try again.");
+  }
   revalidatePath("/", "layout");
   if (id) redirect("/repairs/quote?id=" + encodeURIComponent(id) + "&saved=1");
 }
 
 export async function approveRepairQuote(formData: FormData): Promise<void> {
-  const id = await persist(formData);
-  if (!id) {
-    revalidatePath("/", "layout");
-    return;
+  let id: string | null;
+  try {
+    id = await persist(formData);
+    if (!id) {
+      revalidatePath("/", "layout");
+      return;
+    }
+    await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
+  } catch (error) {
+    console.error("approveRepairQuote: quote approval failed", error);
+    quoteFailure(formData, "Couldn’t approve the repair quote — please try again.");
   }
-  // accept → mark won, which spins up the approved repair job. Bypasses the
-  // punch #60 approval gate: this screen IS the approval — accepting a repair
-  // quote here is a self-contained flow with no separate estimator review
-  // queue to check a record against, unlike the estimator's send/won paths.
-  await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
-  await createFromQuote(id);
   revalidatePath("/", "layout");
   redirect("/repairs/quote?id=" + encodeURIComponent(id) + "&approved=1");
 }

@@ -21,11 +21,17 @@ import { removeServiceCalendar, syncServiceCalendar } from "@/lib/service-calend
  */
 export async function createInspection(): Promise<void> {
   const user = await requireUser();
-  const rec = await create({
-    owner: user.name,
-    requestedBy: user.name,
-    stage: "requested",
-  });
+  let rec;
+  try {
+    rec = await create({
+      owner: user.name,
+      requestedBy: user.name,
+      stage: "requested",
+    });
+  } catch (error) {
+    console.error("createInspection: record mint failed", error);
+    redirect("/inspections?err=" + encodeURIComponent("Couldn’t create the inspection — please try again."));
+  }
   revalidatePath("/", "layout");
   redirect(`/inspections/${encodeURIComponent(rec.id)}`);
 }
@@ -39,21 +45,17 @@ export async function scheduleInspection(formData: FormData): Promise<void> {
   if (!id || !scheduledDate) return;
   const rec = await get(id);
   if (!rec) return;
-  await assign(
-    id,
-    assignedTo,
-    scheduledDate
-  );
-  await syncServiceCalendar({
-    kind: "inspection",
-    id,
-    assignedTo,
-    previousAssignedTo: rec.assignedTo,
-    date: scheduledDate,
-    title: `${rec.venue || rec.customer} — Rigging inspection`,
-    location: rec.venue || rec.customer,
-    description: `Inspection ${rec.id} · ${rec.customer}`,
-  });
+  try {
+    await assign(id, assignedTo, scheduledDate);
+    await syncServiceCalendar({
+      kind: "inspection", id, assignedTo, previousAssignedTo: rec.assignedTo,
+      date: scheduledDate, title: `${rec.venue || rec.customer} — Rigging inspection`,
+      location: rec.venue || rec.customer, description: `Inspection ${rec.id} · ${rec.customer}`,
+    });
+  } catch (error) {
+    console.error("scheduleInspection failed", error);
+    redirect("/inspections/scheduling?err=" + encodeURIComponent("Couldn’t schedule that inspection — please try again."));
+  }
   revalidatePath("/", "layout");
 }
 
@@ -63,8 +65,13 @@ export async function unscheduleInspection(formData: FormData): Promise<void> {
   if (!id) return;
   const rec = await get(id);
   if (!rec) return;
-  await removeServiceCalendar({ kind: "inspection", id, assignedTo: rec.assignedTo });
-  await unschedule(id);
+  try {
+    await removeServiceCalendar({ kind: "inspection", id, assignedTo: rec.assignedTo });
+    await unschedule(id);
+  } catch (error) {
+    console.error("unscheduleInspection failed", error);
+    redirect("/inspections/scheduling?err=" + encodeURIComponent("Couldn’t unschedule that inspection — please try again."));
+  }
   revalidatePath("/", "layout");
 }
 
@@ -78,7 +85,12 @@ export async function markInspectionRenewalOutreach(
   if (!id) return;
   const rec = await get(id);
   if (!rec || rec.stage !== "completed") return;
-  await setRenewalOutreach(id, undo ? null : user.name);
+  try {
+    await setRenewalOutreach(id, undo ? null : user.name);
+  } catch (error) {
+    console.error("markInspectionRenewalOutreach failed", error);
+    redirect("/inspections?err=" + encodeURIComponent("Couldn’t update that renewal outreach — please try again."));
+  }
   revalidatePath("/", "layout");
 }
 
@@ -94,7 +106,13 @@ export async function startInspectionRenewalOutreach(
   const user = await requireUser();
   const id = String(formData.get("id") || "");
   if (!id) return;
-  const res = await inspectionRenewalOutreach(id, user.name);
+  let res;
+  try {
+    res = await inspectionRenewalOutreach(id, user.name);
+  } catch (error) {
+    console.error("startInspectionRenewalOutreach failed", error);
+    redirect("/inspections?err=" + encodeURIComponent("Couldn’t prepare that renewal email — please try again."));
+  }
   revalidatePath("/", "layout");
   if (res)
     redirect(

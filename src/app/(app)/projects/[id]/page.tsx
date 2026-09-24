@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { ProjectsView } from "../view";
 import { loadProjectsData, one, normFilter } from "../data";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Project — Quartzite-6" };
 
@@ -35,21 +36,24 @@ export default async function ProjectDetailPage({
   const pending = ownerName ? data.pending.filter((q) => (q.owner || "") === ownerName) : data.pending;
 
   return (
-    <ProjectsView
-      projects={projects}
-      pending={pending}
-      sel={sel}
-      filter={filter}
-      tab={tab}
-      view={view}
-      who={who}
-      meName={user.name}
-      custById={data.custById}
-      identity={data.identity}
-      roster={data.roster}
-      taskRows={data.taskRows}
-      people={data.people}
-      templateSets={data.templateSets}
-    />
+    <>
+      <ActionError message={one(sp.err) || (data.syncSkipped.length ? `Some won quotes could not be reconciled into Projects (${data.syncSkipped.join(", ")}). Refresh later or contact an administrator.` : undefined)} />
+      <ProjectsView
+        projects={projects}
+        pending={pending}
+        sel={sel}
+        filter={filter}
+        tab={tab}
+        view={view}
+        who={who}
+        meName={user.name}
+        custById={data.custById}
+        identity={data.identity}
+        roster={data.roster}
+        taskRows={data.taskRows}
+        people={data.people}
+        templateSets={data.templateSets}
+      />
+    </>
   );
 }

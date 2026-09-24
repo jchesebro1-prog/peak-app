@@ -3,7 +3,7 @@
  * Peak/* labels on its Gmail thread. Never blocks the Peak write: every
  * failure is logged and the next sync pass reconciles.
  */
-import { getDoc, patchDoc } from "@/db/doc-store";
+import { getDoc, listDocs, patchDoc } from "@/db/doc-store";
 import type { CommThread } from "@/lib/stores/comms";
 import { GMAIL_MODIFY_SCOPE, gmailEnabled } from "./config";
 import { createLabel, listLabels, modifyThread } from "./api";
@@ -100,6 +100,17 @@ export async function syncPeakLabels(threadId: string): Promise<void> {
   } catch (err) {
     console.error("[gmail] peak label sync failed for", threadId, err);
   }
+}
+
+/** Reconcile dormant bridged threads during the mailbox cron pass. Interactive
+ * mutations queue their own sync, but a dropped serverless fire-and-forget
+ * write otherwise has no future trigger once a thread goes quiet. */
+export async function reconcilePeakLabelsForMailbox(key: string): Promise<number> {
+  if (!gmailEnabled()) return 0;
+  const threads = await listDocs<CommThread>("comms");
+  const candidates = threads.filter((t) => t.gmailThreadId && t.gmailAccountKey === key);
+  for (const thread of candidates) await syncPeakLabels(thread.id);
+  return candidates.length;
 }
 
 /* ---- bounded fan-out ------------------------------------------------------- */

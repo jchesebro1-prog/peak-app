@@ -17,6 +17,7 @@ import { designsSeed } from "./seeds/designs";
 import { gridProjectsSeed } from "./seeds/grid-projects";
 import { equipmentLocationsSeed, equipmentItemsSeed } from "./seeds/equipment";
 import { vendorProfilesSeed } from "./seeds/vendors";
+import { defaultDashboardLayout } from "@/lib/dashboard-layout";
 
 /**
  * Seed roster — the real Peak team (D126/D128): the prototype six plus
@@ -49,6 +50,7 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
   federalHolidays: true,
   seedDemo: false,
   feedbackEmail: "",
+  dashboardDefaults: defaultDashboardLayout(),
   // Recordings → Drive archive + pilot gate (Krisp recordings spec §1.3).
   recordingsArchiveMailbox: null,
   recordingsArchiveFolderId: null,

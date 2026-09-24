@@ -155,8 +155,10 @@ export interface LeadRecord {
   id: string; // L-#### (base 1050)
   org: string;
   contact: string;
+  contactRole: string;
   email: string;
   phone: string;
+  address: string;
   city: string;
   state: string;
   source: LeadSource;
@@ -206,8 +208,10 @@ export interface LeadSeedSpec {
   id: string;
   org?: string;
   contact?: string;
+  contactRole?: string;
   email?: string;
   phone?: string;
+  address?: string;
   city?: string;
   state?: string;
   source?: string;
@@ -246,8 +250,10 @@ export function mkLead(o: LeadSeedSpec): LeadRecord {
     id: o.id,
     org: o.org || "",
     contact: o.contact || "",
+    contactRole: o.contactRole || "",
     email: o.email || "",
     phone: o.phone || "",
+    address: o.address || "",
     city: o.city || "",
     state: o.state || "WI",
     source:
@@ -464,8 +470,10 @@ export interface LeadCreateInput {
   id?: string;
   org?: string;
   contact?: string;
+  contactRole?: string;
   email?: string;
   phone?: string;
+  address?: string;
   city?: string;
   state?: string;
   source?: string;
@@ -505,8 +513,10 @@ export async function create(
       id,
       org: partial.org || "",
       contact: partial.contact || "",
+      contactRole: partial.contactRole || "",
       email: partial.email || "",
       phone: partial.phone || "",
+      address: partial.address || "",
       city: partial.city || "",
       state: partial.state || "WI",
       source: src,
@@ -717,6 +727,7 @@ export async function convert(
       primary: true,
       city: l.city || "",
       state: l.state || "WI",
+      address: l.address || "",
       venueKind: opts.venueKind || "proscenium",
       travelMiles: null,
       travelMin: null,
@@ -727,7 +738,7 @@ export async function convert(
       ? [
           {
             name: l.contact,
-            role: opts.role || "",
+            role: opts.role || l.contactRole || "",
             email: l.email || "",
             phone: l.phone || "",
             primary: true,

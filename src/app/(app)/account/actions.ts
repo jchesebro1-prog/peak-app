@@ -13,6 +13,8 @@ import { getSettings } from "@/lib/settings";
 import { updateUser } from "@/lib/users";
 import { createKrispClient, KrispAuthError, KrispApiError } from "@/lib/krisp/client";
 import { deleteKrispConnection, saveKrispConnection } from "@/lib/krisp/connections";
+import { setDashboardOverride } from "@/lib/stores/notif-prefs";
+import type { DashboardOverride } from "@/lib/dashboard-layout";
 
 /**
  * Personal account actions. Notification prefs are stored per user NAME
@@ -41,6 +43,13 @@ export async function setAllNotifAction(on: boolean) {
 export async function setInvitePrefAction(on: boolean) {
   const me = await requireUser();
   await setInvitesOn(on, me.name);
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+export async function saveDashboardOverrideAction(override: DashboardOverride | null) {
+  const me = await requireUser();
+  await setDashboardOverride(me.name, override);
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import { safeSweep } from "@/lib/safe-sweep";
+import ActionError from "@/components/action-error";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor } from "@/lib/team";
 import { coordsOf } from "@/lib/geo";
@@ -139,7 +141,12 @@ export default async function SchedulePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [, sp] = await Promise.all([requireUser(), searchParams]);
-  await syncProjectsFromQuotes();
+  const projectSyncOutcome = await safeSweep("schedule projects", syncProjectsFromQuotes, { created: 0, skipped: [] });
+  const projectSyncBase = projectSyncOutcome.value;
+  const projectSync = {
+    ...projectSyncBase,
+    skipped: projectSyncOutcome.error ? [...projectSyncBase.skipped, projectSyncOutcome.error] : projectSyncBase.skipped,
+  };
   const [projects, users] = await Promise.all([getAllProjects(), activeUsers()]);
   const serviceWork = await loadServiceWork();
 
@@ -164,7 +171,14 @@ export default async function SchedulePage({
   // consulting quote with no engagement record yet (nothing else on this
   // request path has visited the engagements hub) would read as "no
   // consulting engagements" here even though one is really pending.
-  if (view === "timeline" || view === "people") await syncEngagementsFromQuotes();
+  const engagementSyncOutcome = view === "timeline" || view === "people"
+    ? await safeSweep("schedule consulting engagements", syncEngagementsFromQuotes, { created: 0, skipped: [] })
+    : { value: { created: 0, skipped: [] as string[] }, error: null };
+  const engagementSyncBase = engagementSyncOutcome.value;
+  const engagementSync = {
+    ...engagementSyncBase,
+    skipped: engagementSyncOutcome.error ? [...engagementSyncBase.skipped, engagementSyncOutcome.error] : engagementSyncBase.skipped,
+  };
   const engagements = view === "timeline" || view === "people" ? await allEngagements() : [];
   const openEngagements = engagements.filter((e) => OPEN_ENGAGEMENT_STAGES.includes(e.status));
   const consultingTasks =
@@ -611,6 +625,13 @@ export default async function SchedulePage({
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
       <style>{CSS}</style>
+      <ActionError
+        message={
+          projectSync.skipped.length || engagementSync.skipped.length
+            ? `Some won quotes could not be reconciled for this schedule (${[...projectSync.skipped, ...engagementSync.skipped].join(", ")}). Refresh later or contact an administrator.`
+            : undefined
+        }
+      />
 
       {/* ===== toolbar ===== */}
       <div
@@ -808,6 +829,26 @@ export default async function SchedulePage({
               No consulting engagements yet.
             </div>
           )}
+        </div>
+      )}
+
+      {view === "timeline" && projects.length > 0 && (
+        <div
+          aria-label="Timeline scale note"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            margin: "-4px 0 12px",
+            color: "#8c919c",
+            fontSize: 10.5,
+            fontFamily: "var(--font-mono)",
+            letterSpacing: ".03em",
+          }}
+        >
+          <span style={{ height: 1, flex: 1, background: "#e7e9ee" }} />
+          <span>INSTALLS BELOW · separate date ruler and zoom</span>
+          <span style={{ height: 1, flex: 1, background: "#e7e9ee" }} />
         </div>
       )}
 

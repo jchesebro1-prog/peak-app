@@ -114,6 +114,20 @@ export default function InboxShell({
   crmMode: boolean;
 }) {
   const router = useRouter();
+  const [sideCollapsed, setSideCollapsed] = useState(false);
+  const [listWidth, setListWidth] = useState(392);
+  const beginListResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = listWidth;
+    const move = (e: PointerEvent) => setListWidth(Math.max(300, Math.min(620, startWidth + e.clientX - startX)));
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  };
 
   // prototype tracked window width for pane/overlay behavior
   const [narrow, setNarrow] = useState(false);
@@ -133,6 +147,13 @@ export default function InboxShell({
   // can't race the first one's persist and land out of order.
   const [crmMode, setCrmModeState] = useState(initialCrmMode);
   const [modePending, startTransition] = useTransition();
+  // A refresh from another tab/device can change the server preference while
+  // this shell stays mounted; reconcile the optimistic local copy with it.
+  const [previousInitialCrmMode, setPreviousInitialCrmMode] = useState(initialCrmMode);
+  if (previousInitialCrmMode !== initialCrmMode) {
+    setPreviousInitialCrmMode(initialCrmMode);
+    setCrmModeState(initialCrmMode);
+  }
   const onToggleMode = (on: boolean) => {
     const previous = crmMode;
     setCrmModeState(on);
@@ -433,10 +454,29 @@ export default function InboxShell({
   // current (possibly shorter) list so ArrowDown/ArrowUp continue from where
   // the vanished row was.
   const lastIndexRef = useRef(0);
+  const lastArrowAtRef = useRef(0);
+  const lastListKeyRef = useRef(listKey);
+  useEffect(() => {
+    if (lastListKeyRef.current !== listKey) {
+      lastListKeyRef.current = listKey;
+      lastIndexRef.current = 0;
+    }
+  }, [listKey]);
+  useEffect(() => {
+    if (narrow || isSearch) return;
+    const ids = list.rows.filter((r) => !r.isDraft).map((r) => r.id);
+    const index = currentThreadId ? ids.indexOf(currentThreadId) : -1;
+    if (index >= 0) lastIndexRef.current = index;
+  }, [currentThreadId, list.rows, narrow, isSearch]);
   useEffect(() => {
     if (narrow || isSearch || !!compose || logging) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const now = performance.now();
+      // A held arrow key should advance at a readable cadence, not issue a
+      // navigation/mark-read request for every browser repeat event.
+      if (e.repeat && now - lastArrowAtRef.current < 120) return;
+      lastArrowAtRef.current = now;
       const el = e.target as HTMLElement | null;
       // SELECT isn't in the brief's guard list, but the reading pane (Owner,
       // link-type/link-record pickers in thread-reader.tsx) and the list's
@@ -448,7 +488,8 @@ export default function InboxShell({
         (el.tagName === "INPUT" ||
           el.tagName === "TEXTAREA" ||
           el.tagName === "SELECT" ||
-          el.isContentEditable)
+          el.isContentEditable ||
+          el.closest('[role="dialog"], [role="menu"]'))
       )
         return;
       const ids = list.rows.filter((r) => !r.isDraft).map((r) => r.id);
@@ -573,15 +614,26 @@ export default function InboxShell({
       <div
         className="ib-side"
         style={{
-          width: 238,
+          width: sideCollapsed ? 54 : 238,
           flexShrink: 0,
           background: "#fbfbfc",
           borderRight: "1px solid #ececf0",
           display: "flex",
           flexDirection: "column",
           minHeight: 0,
+          overflow: "hidden",
         }}
       >
+        <button
+          type="button"
+          onClick={() => setSideCollapsed((v) => !v)}
+          title={sideCollapsed ? "Expand mailbox menu" : "Collapse mailbox menu"}
+          aria-label={sideCollapsed ? "Expand mailbox menu" : "Collapse mailbox menu"}
+          style={{ alignSelf: "flex-end", margin: "8px 8px 0", border: "1px solid #e4e7ec", background: "#fff", borderRadius: 7, color: "#5b616e", cursor: "pointer", width: 28, height: 26, flexShrink: 0 }}
+        >
+          {sideCollapsed ? "›" : "‹"}
+        </button>
+        <div style={{ display: sideCollapsed ? "none" : "contents" }}>
         <div style={{ padding: "14px 13px 10px", flexShrink: 0 }}>
           <button
             onClick={() => setCompose(blankCompose(composeDefaultBox))}
@@ -854,6 +906,7 @@ export default function InboxShell({
             </span>
           </div>
         </div>
+        </div>
       </div>
 
       {/* ===== message list ===== */}
@@ -945,6 +998,14 @@ export default function InboxShell({
         searching={searching}
         onOpenResult={openSearchResult}
         rowActions={rowActions}
+        width={listWidth}
+      />
+
+      <div
+        role="separator"
+        aria-label="Resize message list"
+        onPointerDown={beginListResize}
+        style={{ width: 6, flexShrink: 0, cursor: "col-resize", background: "#f0f1f4", borderRight: "1px solid #e4e7ec", borderLeft: "1px solid #e4e7ec" }}
       />
 
       {/* ===== reading pane (desktop) ===== */}

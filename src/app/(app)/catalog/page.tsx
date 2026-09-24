@@ -387,7 +387,7 @@ export default async function CatalogPage({
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                     }}>{p.desc}</span>
-                    {(p.note || p.datasheetBlobKey || (p.ports?.length ?? 0) > 0) && (
+                    {(p.note || p.datasheetBlobKey || (p.ports?.length ?? 0) > 0 || p.docs?.length) && (
                       <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
                         {p.note && (
                           <span
@@ -418,6 +418,11 @@ export default async function CatalogPage({
                             {p.ports!.length}⚊
                           </span>
                         )}
+                        {p.docs?.map((doc) => (
+                          <a key={doc.url} href={doc.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10.5, color: "var(--accent)", textDecoration: "none" }}>
+                            {doc.label || doc.kind} ↗
+                          </a>
+                        ))}
                       </span>
                     )}
                   </span>

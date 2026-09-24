@@ -258,12 +258,12 @@ ok(disciplineForSystemTitle("Lighting control") === "LIG", "labor scope defaults
 ok(disciplineForSystemTitle("Video projection") === "AUD", "audio and video share one labor scope");
 ok(disciplineForSystemTitle("General conditions") === "OTH", "an unmatched system defaults to Other");
 const defaultMobs = defaultLaborMobs(null);
-ok(defaultMobs.map((mob) => `${mob.name}:${mob.people}x${mob.days}`).join("|") === "Site Visit:1x1|Install:4x5|Hang:2x3|Commissioning:2x3|Training:1x1", "labor opens with the five requested crew/day defaults");
+ok(defaultMobs.length === 1 && defaultMobs[0]?.people === "1" && defaultMobs[0]?.days === "1", "labor opens with one mobilization");
 const testRate = ((sku: string) => ({ "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 75, "DRF-SUB": 50 }[sku] || 0)) as any;
-const day10 = computeMob({ ...defaultMobs[1], hoursPerDay: "10" }, "RIG", testRate);
+const day10 = computeMob({ ...defaultMobs[0], people: "4", days: "5", hoursPerDay: "10" }, "RIG", testRate);
 ok(day10.reg === 160 && day10.otHrs === 40, "hours beyond 8 per day become crew overtime");
 ok(day10.supHrs === 40 && day10.regCost === 9000, "the first person is the supervisor within the crew, not an added worker");
-const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [defaultMobs[1]], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, testRate);
+const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [{ ...defaultMobs[0], people: "4", days: "5" }], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, testRate);
 ok(laborCalc.drfAutoHrs === 3.2, "drafting defaults to 2% of total regular hours");
 ok(laborCalc.performanceBonus === laborCalc.baseCost * 0.05, "labor adds a 5% performance bonus based on base cost");
 
@@ -1392,20 +1392,20 @@ ok(
 );
 
 // ---- General dissolution (D99): Settings sections + Admin ----
-ok(resolveSettingsSection(undefined) === "general", "no ?section= defaults to general");
-ok(resolveSettingsSection("nope") === "general", "an unknown ?section= falls back to general");
-ok(resolveSettingsSection("team") === "team", "?section=team is honored");
+ok(resolveSettingsSection(undefined) === "company", "no ?section= defaults to company");
+ok(resolveSettingsSection("nope") === "company", "an unknown ?section= falls back to company");
+ok(resolveSettingsSection("team") === "company", "a removed ?section=team falls back to company");
 ok(resolveSettingsSection("admin") === "admin", "?section=admin is honored");
 ok(resolveSettingsSection(["admin", "team"]) === "admin", "an array ?section= takes the first value");
 ok(
-  SETTINGS_SECTIONS.map((s) => s.key).join(",") === "general,team,admin",
-  "Settings exposes general, team, admin sections in order",
+  SETTINGS_SECTIONS.map((s) => s.key).join(",") === "company,admin",
+  "Settings exposes company and admin sections in order",
 );
-ok(ADMIN_SCREENS.length === 5, "Admin lists exactly five screens");
+ok(ADMIN_SCREENS.length === 4, "Admin lists exactly four screens");
 ok(
   ADMIN_SCREENS.map((s) => s.href).join(",") ===
-    "/catalog,/templates,/estimating-rules,/task-templates,/import",
-  "Admin links Catalog, Templates, Estimating Rules, Task Templates, Import — by their own routes",
+    "/templates,/estimating-rules,/task-templates,/import",
+  "Admin links Templates, Estimating Rules, Task Templates, Import — by their own routes",
 );
 
 // ---- General dissolution (D99): the group is gone ----
@@ -7031,9 +7031,9 @@ async function archiveAsyncChecks(): Promise<void> {
   ok(!!cu && !!ct && !!vn, "#137 T3 customers / contacts / venues types are registered");
   if (cu && ct && vn) {
     const visible = (t: ImportTypeMeta) => visibleColumns(t.fields).map((f) => f.header).join(",");
-    ok(visible(cu) === "Customer Name,Category,Address,City,State,Zip,Phone,Website", "#137 T3 customers template columns (embedded contact/venue columns gone)");
+    ok(visible(cu) === "Customer Name,Category,Address,City,State,Zip,Latitude,Longitude,Phone,Website", "#137 T3 customers template columns (embedded contact/venue columns gone)");
     ok(visible(ct) === "Customer,Customer ID,Name,Email,Phone,Mobile,Title,Role,Primary", "#137 T3 contacts template columns");
-    ok(visible(vn) === "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category", "#137 T3 venues template columns");
+    ok(visible(vn) === "Customer,Customer ID,Venue Name,Address,City,State,Zip,Latitude,Longitude,Category", "#137 T3 venues template columns");
     // #137 T7 — the hub may only advertise what it honours. No customer,
     // contact or venue record has a notes field: every Notes cell was
     // dropped on import and the export wrote "". Hidden, so an old file's
@@ -7786,8 +7786,8 @@ const dataRef145: FileRef = { kind: "data", dataUrl: "data:text/plain,hi", name:
 ok(fileRefKey(dataRef145) === "", "#145 a data-URL ref has no storage key");
 ok(!ownsEngagementFile([dataRef145], "", "CE-1"), "#145 a data-URL ref's empty key never matches an empty request either");
 ok(fileRefHref(dataRef145, "CE-1") === dataRef145.dataUrl, "#145 a data-URL ref's href is the data URL itself — no network round trip");
-ok(fileRefHref(ownedRefs145[0], "CE-1044") === "/api/engagement-files/CE-1044/good", "#145 a drive ref's href routes through the ownership-checked proxy, not a raw Drive link");
-ok(fileRefHref(ownedRefs145[1], "CE-1") === "/api/engagement-files/CE-1/engagement-files%2FCE-1%2Fb.pdf", "#145 a blob ref's href is proxied with its pathname encoded");
+ok(fileRefHref(ownedRefs145[0], "CE-1044", "N-1", 0) === "/api/engagement-files/CE-1044/N-1/0", "#145 a drive ref's href routes through the ownership-checked proxy, not a raw Drive link");
+ok(fileRefHref(ownedRefs145[1], "CE-1", "N-2", 1) === "/api/engagement-files/CE-1/N-2/1", "#145 a blob ref's href is proxied through the note attachment route");
 
 /* ====== #145 round 3: positive-shape validation replaces the '..' denylist ======
  * The reviewer checked @vercel/blob's constructBlobUrl directly: it

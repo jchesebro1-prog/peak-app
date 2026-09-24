@@ -12,6 +12,7 @@ import { getSettings, phaseWeightsFor } from "@/lib/settings";
 import { withEngagementPhaseIds, phaseWindows, type PhaseWindow } from "@/lib/consulting-schedule";
 import { getRecording, type RecordingSummarySection } from "@/lib/stores/recordings";
 import type { MeetingSource } from "@/lib/engagement-activity";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Consulting — Quartzite-6" };
 
@@ -112,19 +113,22 @@ export default async function ConsultingDetailPage({
       )
     : [];
   return (
-    <ConsultingView
-      data={data}
-      sel={sel}
-      tab={tab}
-      notes={notes}
-      tasks={tasks}
-      people={users.map((u) => ({ id: u.id, name: u.name }))}
-      templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
-      phaseBands={phaseBands}
-      prefillId={prefillId}
-      recordingSource={recordingSource}
-      // Recordings spec §6 — server-rendered card slotted under Oversight.
-      oversightExtra={tab === "oversight" ? <RecordingsCard parentKind="engagement" parentId={sel.id} /> : null}
-    />
+    <>
+      <ActionError message={data.syncSkipped.length ? `Some consulting quotes could not be reconciled (${data.syncSkipped.join(", ")}). Refresh later or contact an administrator.` : undefined} />
+      <ConsultingView
+        data={data}
+        sel={sel}
+        tab={tab}
+        notes={notes}
+        tasks={tasks}
+        people={users.map((u) => ({ id: u.id, name: u.name }))}
+        templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
+        phaseBands={phaseBands}
+        prefillId={prefillId}
+        recordingSource={recordingSource}
+        // Recordings spec §6 — server-rendered card slotted under Oversight.
+        oversightExtra={tab === "oversight" ? <RecordingsCard parentKind="engagement" parentId={sel.id} /> : null}
+      />
+    </>
   );
 }

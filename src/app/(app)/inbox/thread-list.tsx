@@ -1,10 +1,28 @@
 "use client";
 
+import { useState } from "react";
 import type { DraftPayload, ListVM, Opt, ThreadRowVM } from "./types";
 import type { SearchRow } from "./actions";
 import { ChanGlyph, CheckIcon, FlagIcon, Magnifier, PinIcon, RestoreIcon, TrashIcon } from "./icons";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
+
+const LABEL_SWATCHES = [
+  ["#3155a8", "#e9eefb"],
+  ["#1f7a52", "#eaf6ef"],
+  ["#8a6d1f", "#fbf3dd"],
+  ["#b4543a", "#f8ece7"],
+  ["#7b5fb0", "#f1ebf8"],
+] as const;
+
+function labelColors(label: { id: string; textColor?: string | null; backgroundColor?: string | null }) {
+  if (label.textColor || label.backgroundColor)
+    return { color: label.textColor || "#5b616e", background: label.backgroundColor || "#f1f2f5" };
+  let hash = 0;
+  for (const char of label.id) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  const [color, background] = LABEL_SWATCHES[Math.abs(hash) % LABEL_SWATCHES.length];
+  return { color, background };
+}
 
 export type RowActions = {
   onArchive: (id: string) => void;
@@ -38,6 +56,7 @@ export default function ThreadList({
   searching,
   onOpenResult,
   rowActions,
+  width = 392,
 }: {
   list: ListVM;
   selectedId: string | null;
@@ -62,6 +81,7 @@ export default function ThreadList({
   searching: boolean;
   onOpenResult: (id: string) => void;
   rowActions: RowActions;
+  width?: number;
 }) {
   const rows = list.rows;
 
@@ -96,7 +116,7 @@ export default function ThreadList({
     <div
       className="ib-list"
       style={{
-        width: 392,
+        width,
         flexShrink: 0,
         background: "#fff",
         borderRight: "1px solid #ececf0",
@@ -520,6 +540,7 @@ function Row({
   onClick: () => void;
   actions: RowActions;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const chColor = r.waitingUs ? "#b4543a" : "#5b616e";
   const wrapBg = r.waitingUs ? "#f8ece7" : r.isDraft ? "#fbf3dd" : "#f1f2f5";
   // Task 4 (#42): line 4 (status pill / waiting / Outbox / boxTag / assignee)
@@ -619,7 +640,10 @@ function Row({
             {r.participants || r.name}
           </span>
           {r.msgCount > 1 && (
-            <span
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setExpanded((value) => !value); }}
+              title={expanded ? "Hide messages" : "Preview messages"}
               style={{
                 fontSize: 11,
                 fontWeight: 600,
@@ -628,10 +652,12 @@ function Row({
                 borderRadius: 8,
                 padding: "0 6px",
                 flexShrink: 0,
+                border: "none",
+                cursor: "pointer",
               }}
             >
-              {r.msgCount}
-            </span>
+              {expanded ? "⌄" : "›"} {r.msgCount}
+            </button>
           )}
           {r.pinned && (
             <span style={{ color: "#8c919c", display: "flex" }} title="Pinned">
@@ -672,6 +698,20 @@ function Row({
         >
           {r.snippet}
         </span>
+        {r.msgCount > 1 && r.lastResponder && (
+          <span style={{ display: "block", fontSize: 10.5, color: "#b0b5bf", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            Last reply: {r.lastResponder}
+          </span>
+        )}
+        {r.labels.length > 0 && (
+          <span style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
+            {r.labels.map((label) => (
+              <span key={label.id} style={{ fontSize: 9.5, fontWeight: 600, ...labelColors(label), borderRadius: 4, padding: "2px 6px" }}>
+                {label.name}
+              </span>
+            ))}
+          </span>
+        )}
         {hasMetaChips && (
         <span style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8 }}>
           {r.showBoxTag && (
@@ -757,6 +797,17 @@ function Row({
             </span>
           )}
         </span>
+        )}
+        {expanded && r.messagePreviews.length > 1 && (
+          <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 8, padding: "7px 9px", borderLeft: "2px solid #e4e7ec", background: "#fafbfc", borderRadius: 5 }}>
+            {r.messagePreviews.map((message, index) => (
+              <div key={`${r.id}-${index}`} style={{ display: "flex", gap: 7, fontSize: 10.5, color: "#6b7079", lineHeight: 1.35, marginTop: index ? 6 : 0 }}>
+                <span style={{ fontWeight: 700, color: message.out ? "var(--accent)" : "#3a3f4a", whiteSpace: "nowrap" }}>{message.author}</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.snippet || "(empty message)"}</span>
+                <span style={{ color: "#aab0bb", whiteSpace: "nowrap" }}>{message.time}</span>
+              </div>
+            ))}
+          </div>
         )}
       </span>
 

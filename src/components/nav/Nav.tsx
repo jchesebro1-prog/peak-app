@@ -611,7 +611,7 @@ export default function Nav({
                         Account settings
                       </Link>
                       <Link href="/settings" className="pk-menu-link" onClick={closeAll}>
-                        <span>General settings</span>
+                        <span>Company settings</span>
                         <span className="pk-admin-chip">ADMIN</span>
                       </Link>
                     </div>
@@ -749,13 +749,13 @@ export default function Nav({
                         padding: "14px 8px 5px",
                       }}
                     >
-                      {entry.label}
+                      {entry.mobileLabel ?? entry.label}
                     </div>
                     {entry.children.map((c) => (
                       <DrawerLink
                         key={c.key}
                         href={c.href}
-                        label={c.label}
+                        label={c.mobileLabel ?? c.label}
                         active={activeKey === c.key}
                         child
                         badge={counts[c.key] ?? 0}

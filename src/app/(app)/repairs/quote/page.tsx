@@ -13,6 +13,7 @@ import { getSettings } from "@/lib/settings";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Repair quote — Quartzite-6" };
 
@@ -68,6 +69,10 @@ export default async function RepairQuotePage({
 
   const editId = one(sp.id);
   const preCustomer = one(sp.customer);
+  const preName = one(sp.name);
+  const preVenue = one(sp.venue);
+  const preContact = one(sp.contact);
+  const replaces = one(sp.replaces);
   const inspId = one(sp.inspection);
   const logId = one(sp.log);
   const saved = one(sp.saved) === "1";
@@ -118,6 +123,7 @@ export default async function RepairQuotePage({
   /* ---- initial builder state (edit / inspection finding / preselected customer) ---- */
   let initial: BuilderInitial = {
     editingId: null,
+    replaces,
     customerId: "",
     quoteName: "",
     venueSel: {},
@@ -263,7 +269,7 @@ export default async function RepairQuotePage({
       initial = {
         ...initial,
         customerId: cust.id,
-        quoteName: cust.name + " — Repair",
+        quoteName: preName || cust.name + " — Repair",
         venueSel,
         contactSel: primary ? primary.name : "",
         saved: false,
@@ -288,14 +294,17 @@ export default async function RepairQuotePage({
   }
 
   return (
-    <QuoteBuilder
-      customers={customers}
-      offices={offices}
-      rates={rates}
-      categories={CATEGORIES.map((c) => ({ key: c.key, label: c.label }))}
-      priorities={PRIORITIES.map((p) => ({ key: p.key, label: p.label }))}
-      initial={initial}
-      accent={settings.accent || "#7b3f8a"}
-    />
+    <>
+      <ActionError message={one(sp.err)} />
+      <QuoteBuilder
+        customers={customers}
+        offices={offices}
+        rates={rates}
+        categories={CATEGORIES.map((c) => ({ key: c.key, label: c.label }))}
+        priorities={PRIORITIES.map((p) => ({ key: p.key, label: p.label }))}
+        initial={initial}
+        accent={settings.accent || "#7b3f8a"}
+      />
+    </>
   );
 }

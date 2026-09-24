@@ -5,6 +5,7 @@ import { list as listItems, type EquipmentCategory } from "@/lib/stores/equipmen
 import { list as listLocations } from "@/lib/stores/equipment-locations";
 import { getSettings } from "@/lib/settings";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Rental quote — Quartzite-6" };
 
@@ -75,6 +76,9 @@ export default async function RentalQuotePage({
 
   const editId = one(sp.id);
   const preCustomer = one(sp.customer);
+  const preName = one(sp.name);
+  const preContact = one(sp.contact);
+  const replaces = one(sp.replaces);
   const saved = one(sp.saved) === "1";
   const approved = one(sp.approved) === "1";
 
@@ -91,6 +95,7 @@ export default async function RentalQuotePage({
 
   let initial: BuilderInitial = {
     editingId: null,
+    replaces,
     customerId: "",
     quoteName: "",
     contactSel: "",
@@ -145,8 +150,8 @@ export default async function RentalQuotePage({
       initial = {
         ...initial,
         customerId: cust.id,
-        quoteName: cust.name + " — Rental",
-        contactSel: primary ? primary.name : "",
+        quoteName: preName || cust.name + " — Rental",
+        contactSel: cust.contacts.some((c) => c.name === preContact) ? preContact : primary ? primary.name : "",
         saved: false,
         approved: false,
       };
@@ -154,7 +159,9 @@ export default async function RentalQuotePage({
   }
 
   return (
-    <QuoteBuilder
+    <>
+      <ActionError message={one(sp.err)} />
+      <QuoteBuilder
       customers={customers}
       items={items
         .filter((i) => i.active)
@@ -173,6 +180,7 @@ export default async function RentalQuotePage({
       initial={initial}
       me={user.name}
       accent={settings.accent || "#7b3f8a"}
-    />
+      />
+    </>
   );
 }

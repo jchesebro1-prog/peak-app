@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/session";
+import ActionError from "@/components/action-error";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
 import {
@@ -43,6 +44,7 @@ export default async function ConsultingQuotePage({
   const editId = one(sp.id);
   const preCustomer = one(sp.customer);
   const saved = one(sp.saved) === "1";
+  const error = one(sp.err);
 
   const customers: BuilderCustomer[] = customerDocs.map((c: CustomerDoc) => ({
     id: c.id,
@@ -100,14 +102,17 @@ export default async function ConsultingQuotePage({
   }
 
   return (
-    <ConsultingQuoteBuilder
-      customers={customers}
-      phaseMenu={phaseMenu}
-      disciplineMenu={disciplineMenu}
-      assumptionsMenu={assumptionsMenu}
-      initial={initial}
-      preCustomerId={preCustomer}
-      justSaved={saved}
-    />
+    <>
+      <ActionError message={error || undefined} />
+      <ConsultingQuoteBuilder
+        customers={customers}
+        phaseMenu={phaseMenu}
+        disciplineMenu={disciplineMenu}
+        assumptionsMenu={assumptionsMenu}
+        initial={initial}
+        preCustomerId={preCustomer}
+        justSaved={saved}
+      />
+    </>
   );
 }

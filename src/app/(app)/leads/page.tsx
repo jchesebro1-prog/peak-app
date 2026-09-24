@@ -328,6 +328,14 @@ export default async function LeadsPage({
           phone: ct.phone || "",
           primary: !!ct.primary,
         })),
+        locations: (c.locations || []).map((loc) => ({
+          id: loc.id || "",
+          label: loc.label || "",
+          address: loc.address || "",
+          city: loc.city || "",
+          state: loc.state || "",
+          primary: !!loc.primary,
+        })),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }

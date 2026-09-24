@@ -7,6 +7,8 @@ import {
   upsertDoc,
 } from "@/db/doc-store";
 import { create as createQuote, update as updateQuote, get as getQuoteById, type Quote } from "@/lib/stores/quotes";
+import { getProject } from "@/lib/stores/grid-projects";
+import { buildGridQuote } from "@/lib/design/grid-quote";
 
 /**
  * SandboxStore — the Design Dashboard's data layer. Port of app/sandbox.js
@@ -164,12 +166,33 @@ function normalizeDesign(d: DesignRecord): DesignRecord {
 /** All designs, newest activity first (port of getAll). */
 export async function getAllDesigns(): Promise<DesignRecord[]> {
   const list = await listDocs<DesignRecord>("designs");
-  return list.map(normalizeDesign).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const designs = list.map(normalizeDesign).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return Promise.all(designs.map(withLiveGridBudget));
 }
 
 export async function getDesign(id: string): Promise<DesignRecord | null> {
   const d = await getDoc<DesignRecord>("designs", id);
-  return d ? normalizeDesign(d) : null;
+  return d ? withLiveGridBudget(normalizeDesign(d)) : null;
+}
+
+/** Manual/Grid designs do not have a reliable parametric `budget` snapshot.
+ * Read their current BOM total instead, so the Designs dashboard cannot show
+ * the creation-time zero after a designer has placed equipment. Quick Design
+ * records retain their saved equation result. */
+async function withLiveGridBudget(d: DesignRecord): Promise<DesignRecord> {
+  if (d.layoutMode !== "manual" || !d.gridProjectId) return d;
+  const project = await getProject(d.gridProjectId);
+  if (!project) return d;
+  const optionId = project.options?.[0]?.id;
+  if (!optionId) return d;
+  try {
+    const built = await buildGridQuote(project, optionId);
+    if (built.ok) return { ...d, budget: built.build.value };
+  } catch {
+    // A dashboard read must not fail because a partially edited Grid cannot
+    // currently be priced; the persisted budget remains the safe fallback.
+  }
+  return d;
 }
 
 export async function createDesign(

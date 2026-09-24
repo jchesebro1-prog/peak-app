@@ -103,6 +103,7 @@ export default async function PortalRequestPage({
         venues={venues}
         requester={{ name: session.name, email: session.email }}
         showDetailsError={err === "details"}
+        showSubmitError={err === "send"}
       />
     </PortalShell>
   );

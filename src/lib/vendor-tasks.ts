@@ -66,7 +66,7 @@ async function loadContext(onlyId?: string): Promise<Context> {
       const profile = profileById.get(c.id) ?? blankProfile(c.id);
       const lastList = newestList(profile.priceLists);
       const catalogEffectiveAt = catalogEffectiveAtFor(parts, profile.manufacturers, settings);
-      const status = vendorStatus({ lastList, catalogEffectiveAt, now });
+      const status = vendorStatus({ lastList, catalogEffectiveAt, hasClaims: profile.manufacturers.length > 0, now });
       const open = assignments
         .filter((a) => !a.done && a.source.startsWith(autoPrefix(c.id)))
         .sort((a, b) => b.createdAt - a.createdAt)[0];

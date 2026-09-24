@@ -59,6 +59,7 @@ export type BuilderSource = {
 } | null;
 export type BuilderInitial = {
   editingId: string | null;
+  replaces?: string;
   customerId: string;
   quoteName: string;
   venueSel: Record<string, { on: boolean }>;
@@ -460,6 +461,7 @@ export function QuoteBuilder({
   function buildForm(): FormData {
     const fd = new FormData();
     fd.set("editingId", editingId || "");
+    fd.set("replaces", initial.replaces || "");
     fd.set("customerId", customerId);
     fd.set("quoteName", quoteName);
     const c = selectedContact();
