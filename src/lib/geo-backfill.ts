@@ -36,15 +36,17 @@ import { and, eq, isNull, isNotNull, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { sites, type SiteRow } from "@/db/schema";
 import {
+  haversineMiles,
   hasCoords,
   officesFromSettings,
   quoteOrigin,
   route,
-  routeCached,
+  routeCachedBulk,
   routeKey,
   search,
   searchCity,
   stateAbbr,
+  type GeoSearchHit,
 } from "@/lib/geo";
 import type { Office } from "@/lib/settings";
 
@@ -120,6 +122,8 @@ export type WarmReport = {
   alreadyCached: number;
   warmed: number;
   failed: number;
+  /** Route-cache keys that failed this batch — pass back as `skipKeys`. */
+  failedKeys: string[];
   remaining: number;
   dryRun: boolean;
 };
@@ -129,6 +133,31 @@ function addressableRows(rows: SiteRow[]): SiteRow[] {
   return rows.filter((r) => (r.address || "").trim() || (r.city || "").trim());
 }
 
+/**
+ * Strip what a mailing address carries that a geocoder cannot use: suite /
+ * unit / floor designators and P.O. boxes. Nominatim matches buildings, not
+ * suites, and returns NOTHING for "605 Erie Avenue Suite 101" while finding
+ * "605 Erie Avenue" — measured against the real book on 2026-09-24, five of
+ * eight street-level misses were exactly this. A P.O. box alone is not a
+ * place at all, so it cleans to "" and the venue falls to city precision.
+ *
+ * Designators only match as whole words ("Ste" never eats "Stewart"), and
+ * only when followed by a real unit id — one containing a digit, or a single
+ * letter ("STE G") — so a street NAMED "Room Rd" or "Floor St" survives.
+ * Wisconsin grid addresses ("W185 S8750 Racine Ave.") pass through untouched.
+ */
+export function cleanStreet(street: string | null | undefined): string {
+  return (street || "")
+    .replace(/,?\s*\b(p\.?\s*o\.?|post\s+office)\s*box\s*[\w-]*/gi, "")
+    .replace(
+      /,?\s*\b(suite|ste|apt|apartment|unit|floor|fl|room|rm|bldg)\b\.?\s*#?\s*(?:[\w-]*\d[\w-]*|[a-z])\b/gi,
+      ""
+    )
+    .replace(/,?\s*#\s*[\w-]+/g, "")
+    .replace(/[\s,]+$/, "")
+    .trim();
+}
+
 /** "<street>, <city>, <ST> <zip>" — whatever parts exist, in postal order. */
 export function geocodeQuery(row: {
   address?: string | null;
@@ -136,7 +165,7 @@ export function geocodeQuery(row: {
   state?: string | null;
   zip?: string | null;
 }): string {
-  const street = (row.address || "").trim();
+  const street = cleanStreet(row.address);
   const city = (row.city || "").trim();
   const state = (row.state || "").trim();
   const zip = (row.zip || "").trim();
@@ -145,7 +174,39 @@ export function geocodeQuery(row: {
 }
 
 export function precisionOf(row: { address?: string | null }): GeocodePrecision {
-  return (row.address || "").trim() ? "building" : "city";
+  return cleanStreet(row.address) ? "building" : "city";
+}
+
+/**
+ * How far a building may sit from its stated town's centre and still count as
+ * that town. US mailing cities are postal, not municipal: 8301 Old Sauk Road
+ * is mailed as Middleton but OSM files it under Madison, 2 miles from
+ * Middleton's centre. The #147 same-name hazard (Portage → Portage County) was
+ * 64 miles out, so a 10-mile radius separates the two cleanly.
+ */
+export const POSTAL_CITY_RADIUS_MI = 10;
+
+/**
+ * Is a street-level hit within POSTAL_CITY_RADIUS_MI of the venue's stated
+ * town centre? The centre is looked up once per town per run (cached in
+ * `centres`), paced like every other Nominatim call, and must itself pass the
+ * exact city gate — an unresolvable or mismatched town means "no".
+ */
+async function nearStatedTown(
+  hit: GeoSearchHit,
+  row: { city?: string | null; state?: string | null },
+  centres: Map<string, GeoSearchHit | null>,
+  delayMs: number
+): Promise<boolean> {
+  const key = `${(row.city || "").trim().toLowerCase()}|${(row.state || "").trim().toLowerCase()}`;
+  if (!centres.has(key)) {
+    await sleep(delayMs);
+    const [c] = await searchCity(row.city, row.state, { limit: 1 });
+    centres.set(key, c && samePlace(row.city, c.city) ? c : null);
+  }
+  const centre = centres.get(key);
+  const d = centre ? haversineMiles(hit, centre) : null;
+  return d != null && d <= POSTAL_CITY_RADIUS_MI;
 }
 
 /**
@@ -178,6 +239,14 @@ export async function backfillVenueCoords(opts?: {
   limit?: number;
   dryRun?: boolean;
   delayMs?: number;
+  /**
+   * Queries that already failed earlier in this run. A failed venue keeps no
+   * coordinates, so it stays a candidate and — without this — sorts back to
+   * the head of every batch: once `limit` failures pile up there, a batched
+   * caller re-asks the same dead addresses forever and never reaches the
+   * rest of the book. That is how prod sat at 3 of 1,480 located.
+   */
+  skipQueries?: readonly string[];
   onProgress?: (done: number, total: number) => void;
 }): Promise<BackfillReport> {
   const dryRun = opts?.dryRun ?? true;
@@ -210,8 +279,11 @@ export async function backfillVenueCoords(opts?: {
     else byQuery.set(q, [row]);
   }
 
-  const queries = [...byQuery.keys()];
+  const skip = new Set(opts?.skipQueries ?? []);
+  const queries = [...byQuery.keys()].filter((q) => !skip.has(q));
   const budget = opts?.limit ?? queries.length;
+  // Stated-town centres, looked up only when a building's city disagrees.
+  const townCentres = new Map<string, GeoSearchHit | null>();
   const toRun = queries.slice(0, budget);
   report.remaining = queries.length - toRun.length;
 
@@ -268,7 +340,20 @@ export async function backfillVenueCoords(opts?: {
     // state check — "Portage" -> Portage County, "LaCrosse" -> Town of
     // Baraboo. Require the resolved city to BE the stated city. A venue whose
     // stated city is blank has nothing to check against and passes.
-    if ((seed.city || "").trim() && !samePlace(seed.city, hit.city)) {
+    //
+    // One exception, for buildings only: a mailing city is postal, so a real
+    // street-level hit can carry a neighbouring municipality's name. Accept it
+    // when it sits within POSTAL_CITY_RADIUS_MI of the stated town's centre —
+    // itself resolved through the same structured, city-gated lookup, so the
+    // Portage County trap cannot sneak back in through the reference point.
+    if (
+      (seed.city || "").trim() &&
+      !samePlace(seed.city, hit.city) &&
+      !(
+        precisionOf(seed) === "building" &&
+        (await nearStatedTown(hit, seed, townCentres, delayMs))
+      )
+    ) {
       for (const r of rows)
         report.failures.push({
           siteId: r.id,
@@ -308,6 +393,9 @@ export async function warmRoutes(opts?: {
   limit?: number;
   dryRun?: boolean;
   delayMs?: number;
+  /** Keys that already failed this run — same head-of-queue hazard as
+   *  backfillVenueCoords' `skipQueries`. */
+  skipKeys?: readonly string[];
   onProgress?: (done: number, total: number) => void;
 }): Promise<WarmReport> {
   const dryRun = opts?.dryRun ?? true;
@@ -322,6 +410,7 @@ export async function warmRoutes(opts?: {
     alreadyCached: 0,
     warmed: 0,
     failed: 0,
+    failedKeys: [],
     remaining: 0,
     dryRun,
   };
@@ -341,7 +430,7 @@ export async function warmRoutes(opts?: {
       )
     );
 
-  const report: WarmReport = { ...empty, officeName: office.name || "(unnamed office)" };
+  const report: WarmReport = { ...empty, failedKeys: [], officeName: office.name || "(unnamed office)" };
   report.candidates = rows.length;
 
   // Venues rounding to the same coordinate pair share one route — the cache
@@ -354,9 +443,15 @@ export async function warmRoutes(opts?: {
   }
   report.distinctPairs = pairs.size;
 
+  // One cache query for every pair, not one per venue — a batched caller
+  // repeats this read every 10 routes, and ~1,250 round-trips per batch is
+  // what would push the Settings runner past its server-action timeout.
+  const skip = new Set(opts?.skipKeys ?? []);
+  const cached = await routeCachedBulk([...pairs.keys()]);
   const todo: Array<{ lat: string; lng: string }> = [];
-  for (const target of pairs.values()) {
-    if (await routeCached(office, target)) report.alreadyCached++;
+  for (const [key, target] of pairs) {
+    if (skip.has(key)) continue;
+    if (cached.has(key)) report.alreadyCached++;
     else todo.push(target);
   }
 
@@ -373,7 +468,10 @@ export async function warmRoutes(opts?: {
     // route() writes through to geo_cache on success and fails soft to null.
     const r = await route(office, target);
     if (r) report.warmed++;
-    else report.failed++;
+    else {
+      report.failed++;
+      report.failedKeys.push(routeKey(office, target));
+    }
   }
   if (dryRun) report.warmed = slice.length; // what a commit run would attempt
 

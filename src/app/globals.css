@@ -868,3 +868,10 @@ button.pk-searchbar-glass {
   border-color: #c4c9d2;
   background: var(--hover-lighter);
 }
+
+/* Map basemap (LeafletMap.tsx) — OSM's standard tiles are full-colour; wash
+   them out to the quiet light basemap the prototype used so status-coloured
+   pins stay the loudest thing on the map. Only the tile layer is filtered. */
+.pk-map-tiles {
+  filter: grayscale(1) brightness(1.08) contrast(0.88);
+}

@@ -417,12 +417,17 @@ export default function SettingsClient({
     setGeoFails([]);
     try {
       for (const phase of ["geocode", "routes"] as const) {
+        // What already failed this run. A failed venue keeps no coordinates,
+        // so without this it sorts back to the head of every batch and the
+        // runner re-asks the same dead addresses until the hard stop.
+        const skip: string[] = [];
         // Hard stop so a bug that never decrements `remaining` cannot spin
         // forever against Nominatim: 1,300 venues / 10 per batch = 130 calls,
         // so 400 is generous headroom and still bounded.
         for (let i = 0; i < 400; i++) {
-          const r = await geocodeBatchAction({ limit: 10, phase });
+          const r = await geocodeBatchAction({ limit: 10, phase, skip });
           if (!r.ok) break;
+          skip.push(...r.failedKeys);
           if (phase === "geocode" && "failures" in r && r.failures?.length) {
             setGeoFails((prev) => [...prev, ...r.failures].slice(0, 50));
           }

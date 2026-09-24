@@ -388,25 +388,32 @@ export async function travelCoverageAction() {
  * shows `remaining`. Both phases are idempotent, so a batch that dies is
  * retried simply by calling again (D184).
  */
-export async function geocodeBatchAction(input?: { limit?: number; phase?: "geocode" | "routes" }) {
+export async function geocodeBatchAction(input?: {
+  limit?: number;
+  phase?: "geocode" | "routes";
+  /** Queries (geocode) or route keys (routes) that already failed this run. */
+  skip?: string[];
+}) {
   await requirePerm("manage_users");
   const limit = Math.max(1, Math.min(25, Number(input?.limit) || 10));
+  const skip = Array.isArray(input?.skip) ? input.skip.filter((s) => typeof s === "string") : [];
   const { backfillVenueCoords, warmRoutes } = await import("@/lib/geo-backfill");
 
   if (input?.phase === "routes") {
-    const r = await warmRoutes({ limit, dryRun: false });
+    const r = await warmRoutes({ limit, dryRun: false, skipKeys: skip });
     revalidatePath("/", "layout");
     return {
       ok: true as const,
       phase: "routes" as const,
       done: r.warmed,
       failed: r.failed,
+      failedKeys: r.failedKeys,
       remaining: r.remaining,
       originName: r.officeName,
     };
   }
 
-  const r = await backfillVenueCoords({ limit, dryRun: false });
+  const r = await backfillVenueCoords({ limit, dryRun: false, skipQueries: skip });
   revalidatePath("/", "layout");
   return {
     ok: true as const,
@@ -419,6 +426,9 @@ export async function geocodeBatchAction(input?: { limit?: number; phase?: "geoc
     // Surface the rejections — a venue the geocoder got wrong is worse than
     // one it skipped, so the reasons are shown rather than buried in a count.
     failures: r.failures.slice(0, 25).map((f) => ({ query: f.query, reason: f.reason, got: f.got })),
+    // Every distinct failed query (≤ limit per batch), so the runner can skip
+    // them next batch instead of re-asking them forever.
+    failedKeys: [...new Set(r.failures.map((f) => f.query))],
     originName: "",
   };
 }

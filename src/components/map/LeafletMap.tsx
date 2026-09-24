@@ -46,13 +46,21 @@ export default function LeafletMap({
           scrollWheelZoom: false,
           attributionControl: false,
         });
-        L.tileLayer(
-          "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-          { maxZoom: 19 }
-        ).addTo(mapRef.current);
+        // OpenStreetMap's standard tiles, desaturated to the light basemap
+        // the prototype specced. CARTO's light_all used to be keyless; since
+        // 2026 every tile comes back watermarked "API KEY REQUIRED", which is
+        // what every map in the app was showing. OSM stays key-free (like
+        // the rest of geo.ts) — its tile policy asks for the attribution
+        // below and a Referer, which next.config's Referrer-Policy sends.
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          className: "pk-map-tiles",
+        }).addTo(mapRef.current);
         L.control
           .attribution({ prefix: false })
-          .addAttribution("© OpenStreetMap · CARTO")
+          .addAttribution(
+            '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+          )
           .addTo(mapRef.current);
         layerRef.current = L.layerGroup().addTo(mapRef.current);
       }

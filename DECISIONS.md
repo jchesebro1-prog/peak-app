@@ -4931,3 +4931,20 @@ a laptop and open on a monitor; (3) the stored value is applied in a mount effec
 `useState` initializer, so hydration always renders it open and a collapsed user sees a brief
 settle instead of a React hydration error. D218's "nothing was made collapsible" is superseded by
 this entry; its layout stays.
+
+## D222. Maps use OpenStreetMap tiles; the geocoder skips this run's failures, strips suites, and lets a building sit up to 10 mi from its postal town (#166, 2026-09-24)
+
+- **Basemap:** CARTO's keyless `light_all` tiles now carry an "API KEY REQUIRED" watermark. We
+  stay key-free (the #147 design's stance for all of geo) and switch to OpenStreetMap's standard
+  tiles, washed out with a CSS filter on the tile layer only so status pins stay the loudest
+  thing. Rejected: a CARTO/Stadia/MapTiler key (a new secret and account for a cosmetic layer);
+  Esri's legacy keyless canvas (licensing for commercial use is unclear). If OSM's tile policy
+  ever objects to our volume, a keyed provider is a one-line URL change in `LeafletMap.tsx`.
+- **Batch runner:** failures are carried as a per-run skip-list by the caller rather than marked
+  on the venue row — no schema change, and a later run (after a hand fix) retries them naturally.
+- **Street cleanup:** unit designators and P.O. boxes are dropped from the *query only*; the
+  stored address is never rewritten.
+- **Postal-city radius (10 mi):** US mailing cities are postal, not municipal, so an exact city
+  match wrongly rejects real buildings (Middleton → Madison, Milwaukee → Wauwatosa). The
+  exception applies to street-level hits only; city-only rows keep D185's exact gate. 10 mi
+  clears the observed postal cases (≈2 mi) with wide margin under the Portage hazard (64 mi).

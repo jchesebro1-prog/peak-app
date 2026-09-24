@@ -7384,3 +7384,57 @@ Verified in a browser at 1440×900: Hide → 36px strip and the cards column gre
 1142px; reload → still collapsed; a real click on the strip → expanded again, stored `"1"`.
 Gates: tsc 0 errors, `test:specs` 2032 PASS / 0 FAIL, `test:smoke` ALL PASSED, eslint 124
 problems / 0 errors — identical to the origin/main baseline at 9c5b719. Decision D219.
+
+---
+
+## 166. Maps blank/watermarked and travel time still missing — root causes fixed — DONE 2026-09-24 (D222)
+
+**Reported:** 2026-09-24 (Jeff): "look at the venue map and see where everyone is located … confirm
+why some addresses still don't have their travel time."
+
+**Found on production (read-only):** Settings → Admin → *Check coverage* read **3 of 1,480 venues
+have coordinates** — even though **1,254 now carry a street address** (the Daylite re-export landed
+through the Import hub, which accepts lat/lng but never geocodes). The Company map's "398 located
+venues" were not geocoded at all: they are `coordsOf()` falling back to the 19-city table in
+`geo.ts`, which is why ~400 pins sat on ~20 dots. Three separate defects:
+
+1. **Every map showed "API KEY REQUIRED".** CARTO's `light_all` basemap now watermarks every
+   keyless tile (confirmed by fetching a tile directly — HTTP 200, watermark baked into the PNG).
+   Nothing in our code changed. `LeafletMap.tsx` (the one tile layer every map in the app uses)
+   now loads OpenStreetMap's standard tiles, desaturated via `.pk-map-tiles` in `globals.css` to
+   keep the prototype's light basemap; attribution per OSM's tile policy. Still key-free.
+2. **The "Geocode addresses" runner could never finish.** `backfillVenueCoords({limit: 10})` took
+   the first 10 uncoordinated queries; a failed lookup keeps no coordinates, so it stays at the
+   head of every later batch. Once 10 failures piled up the runner re-asked the same dead
+   addresses until its 400-batch hard stop (~70 min) and never reached the rest of the book.
+   `warmRoutes` had the same shape. Both now take a skip-list (`skipQueries` / `skipKeys`) of what
+   already failed this run, the server action returns each batch's `failedKeys`, and the Settings
+   runner carries them forward. Reproduced first as a failing test (20 batches, never terminates,
+   good venues behind 12 bad ones never reached).
+3. **Real street addresses missed ~38% of the time.** 24 real prod addresses through the existing
+   query + gates: 15 hit. Causes: suite / STE / P.O. Box fragments (Nominatim returns nothing for
+   "605 Erie Avenue Suite 101" and finds "605 Erie Avenue"), and postal-vs-municipal city ("8301
+   Old Sauk Rd, Middleton" is filed under Madison by OSM → rejected by the exact city gate).
+   `cleanStreet()` drops unit designators and P.O. boxes before the lookup (a P.O. box alone now
+   correctly falls to city precision); a *building* hit whose city disagrees is accepted only
+   within `POSTAL_CITY_RADIUS_MI` (10) of the stated town's centre — itself resolved through the
+   structured, city-gated lookup, so the Portage County trap (64 mi) stays closed. Same 24
+   addresses: **20 hit**, every one verified plausible. The 4 left are reported for a hand fix:
+   `DePere` / `LaCrosse` spellings, and two addresses OSM does not have.
+4. **Runner headroom.** `warmRoutes` read the route cache with one query per venue on every
+   batch (~1,250 Neon round-trips per 10 routes); it now uses the existing `routeCachedBulk`.
+   `/settings` gains `maxDuration = 60`, like `/import` and `/inbox`, since a geocode batch
+   can now run ~20s.
+
+**Tests:** `npm run test:geo-backfill` (new; scratch PGlite, `fetch` stubbed — never touches
+Nominatim/OSRM or `.data/pglite`): cleanStreet cases, runner termination past failures, suite +
+P.O. box precision, postal-city accept-near / reject-far, route runner past failures.
+Gates: tsc 0 errors, `test:specs` 2032 PASS / 0 FAIL, `test:smoke` ALL PASSED, eslint 124
+problems / 0 errors with every touched file at 0/0. Map verified in a browser (worktree dev
+server): OSM tiles render, pins fit, no console errors.
+
+**Still Jeff's to do — production data is untouched by this change:** after deploy, Settings →
+Admin → **Geocode addresses** (≈1,250 lookups at 1/sec, then the route phase — keep the tab open
+~30–45 min), then *Check coverage*. Addresses listed as unresolved get fixed on the venue and the
+button re-run. #147's remaining items (quote re-price report, Import-hub post-commit geocode)
+stay open there.
