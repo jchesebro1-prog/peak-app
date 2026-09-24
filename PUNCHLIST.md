@@ -7506,7 +7506,7 @@ because the pressed button unmounts (same in #164); a focus-restore effect would
 
 ---
 
-## 169. Fix unlocated venues from a sidebar, and choose the quote origin — DONE 2026-09-24 (D225)
+## 169. Fix unlocated venues from a sidebar, and choose the quote origin — DONE 2026-09-24 (D228)
 
 **Reported:** 2026-09-24 (Jeff, watching the #166 geocode run): "a useful feature is being able to click on the address and have that venue's information open on a side bar to update the bad addresses and before resending." Mid-build: "all estimating and rules should be out of the central shop which is Madison."
 

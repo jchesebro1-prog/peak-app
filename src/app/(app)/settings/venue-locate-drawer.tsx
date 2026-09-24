@@ -35,7 +35,7 @@ function fmtTravel(r: Extract<LocateResult, { ok: true }>): string {
 }
 
 /**
- * The fix-it sidebar (#169, D225): three ways to locate ONE venue — edit the
+ * The fix-it sidebar (#175, D228): three ways to locate ONE venue — edit the
  * address and retry it through the batch's own gates, pick a search
  * suggestion, or drop a pin — each saved + routed immediately.
  */
@@ -64,7 +64,7 @@ export default function VenueLocateDrawer({
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<VenueAddressHit[]>([]);
   // The query `hits` belongs to — lets stale type-ahead results be told apart
-  // from the query currently in the box (#169 review).
+  // from the query currently in the box (#175 review).
   const [hitsFor, setHitsFor] = useState("");
   const [searching, setSearching] = useState(false);
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
@@ -93,7 +93,7 @@ export default function VenueLocateDrawer({
   }, []);
 
   // Centre the pin map on the stated town when it resolves — but never once
-  // the user has already dropped a pin (#169 review: this used to yank the
+  // the user has already dropped a pin (#175 review: this used to yank the
   // map out from under a placed pin if it resolved late). Uses the gated
   // town-centre lookup (item 3), not a free-text search, which put
   // "DePere, WI" on Menasha; on a miss the Wisconsin default stands.
@@ -118,7 +118,7 @@ export default function VenueLocateDrawer({
   // Debounced type-ahead. `hitsFor` (not just `hits`) tracks which query the
   // results belong to, so a fast typist never sees the previous query's
   // clickable hits, and "No matches" never flashes before a new search has
-  // even started (#169 review). No synchronous setState in the effect body
+  // even started (#175 review). No synchronous setState in the effect body
   // (react-hooks/set-state-in-effect) — the state writes below happen inside
   // the debounce timer's callback.
   const trimmedQuery = query.trim();

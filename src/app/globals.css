@@ -921,7 +921,7 @@ button.pk-searchbar-glass {
   filter: grayscale(1) brightness(1.08) contrast(0.88);
 }
 
-/* Locate-venue sidebar (#169): full width under the 640px breakpoint the
+/* Locate-venue sidebar (#175): full width under the 640px breakpoint the
    spec calls for, not just under 420px. */
 .pk-locate-drawer {
   width: 420px;

@@ -33,7 +33,7 @@ export default function LeafletMap({
   height?: number;
   center?: [number, number];
   zoom?: number;
-  /** Pick mode (#169): one draggable pin at `picked`; a map click or a pin
+  /** Pick mode (#175): one draggable pin at `picked`; a map click or a pin
    *  drag reports the point through `onPick`. Absent => display-only, as
    *  every other map in the app uses it. */
   picked?: { lat: number; lng: number } | null;

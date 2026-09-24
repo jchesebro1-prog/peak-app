@@ -1,6 +1,6 @@
 /**
  * Unlocated venues — the Settings → Admin worklist and its one-venue fix
- * (punch #169, D225). Spec: docs/superpowers/specs/2026-09-24-geo-fix-sidebar-design.md
+ * (punch #175, D228). Spec: docs/superpowers/specs/2026-09-24-geo-fix-sidebar-design.md
  *
  * The worklist is a live query, not the batch run's memory: every venue that
  * has an address (or a city) but no coordinates and no manual travel
@@ -201,7 +201,7 @@ export async function locateVenue(
     if (input.mode === "pick") {
       // A picked suggestion's street/city/state/zip only overwrites what's
       // stored when it actually says something. A town-level hit (blank
-      // street) or a street with no house number (#169 D225 item 2 — a
+      // street) or a street with no house number (#175 D228 item 2 — a
       // human picked the PLACE, not necessarily a corrected address) must
       // not wipe a real stored value down to NULL or truncate it.
       const pickedStreet = clip(input.address);

@@ -4976,7 +4976,7 @@ select a system the user cannot see. Deliberately not done here: restoring keybo
 counterpart control after a toggle (the pressed button unmounts, so focus falls to <body>); it
 affects #164 equally and belongs in one fix for both rails.
 
-## D225. Unlocated venues are fixed one at a time from a live worklist; the quote origin is an explicit choice (#169, 2026-09-24)
+## D228. Unlocated venues are fixed one at a time from a live worklist; the quote origin is an explicit choice (#175, 2026-09-24)
 
 - **The worklist is a query, not the run's memory.** It lists live venues with an address or city, no usable coordinates, and no `travelMiles` override, ordered case-insensitively by company then venue. The rule matches `estimateFromParts`, where only `travelMiles` counts as manual. Reasons from the current page's batch run are shown when known and never persisted, which avoids a schema change for a transient list.
 - **Three fixes, no town-centre shortcut** (Jeff declined it):

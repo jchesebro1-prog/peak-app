@@ -433,7 +433,7 @@ export async function geocodeBatchAction(input?: {
   };
 }
 
-/* ---------------- Unlocated venues worklist (#169, D225) ---------------- */
+/* ---------------- Unlocated venues worklist (#175, D228) ---------------- */
 
 export async function listUnlocatedVenuesAction(input?: { q?: string; offset?: number; limit?: number }) {
   await requirePerm("manage_users");
@@ -483,7 +483,7 @@ export async function locateVenueAction(input: import("@/lib/venue-locate").Loca
 }
 
 /**
- * Centre point for the sidebar's pin map (#169 D225 item 3). A free-text
+ * Centre point for the sidebar's pin map (#175 D228 item 3). A free-text
  * "City, ST" search (what the drawer used to call) can resolve to the wrong
  * place entirely — "DePere, WI" landed on Menasha. This uses the same
  * structured city search + exact-place gate the batch geocoder trusts

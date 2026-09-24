@@ -6,7 +6,7 @@ import { listUnlocatedVenuesAction } from "./actions";
 import VenueLocateDrawer from "./venue-locate-drawer";
 
 /**
- * Settings → Admin worklist of venues that can't be located (#169, D225).
+ * Settings → Admin worklist of venues that can't be located (#175, D228).
  * A live query (see lib/venue-locate.ts), so it survives reloads and shrinks
  * as venues are fixed. Clicking a row opens the fix-it sidebar.
  */
@@ -29,7 +29,7 @@ export default function UnlocatedVenues({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   // True once the first load has resolved, so the header doesn't misreport
-  // "0 venues" before the counts are real (#169 review).
+  // "0 venues" before the counts are real (#175 review).
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState<{ venue: UnlocatedVenue; idx: number; located: boolean } | null>(null);
   const seq = useRef(0);
@@ -59,7 +59,7 @@ export default function UnlocatedVenues({
   }, [q, refreshKey, load]);
 
   // Removes a row that's no longer a worklist candidate — fixed, or deleted
-  // out from under us (`onGone`, #169 review: same list bookkeeping either
+  // out from under us (`onGone`, #175 review: same list bookkeeping either
   // way, and `open.located` only ever drives the Next-index math below, not
   // any ✓ display — that lives in the drawer's own `done` state).
   function located(siteId: string) {

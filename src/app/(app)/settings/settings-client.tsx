@@ -455,7 +455,7 @@ export default function SettingsClient({
     } finally {
       setGeoRunning(false);
       // Bumped here (not just on the success path) so a run that ends
-      // "Stopped: …" still reloads the worklist below it (#169 review).
+      // "Stopped: …" still reloads the worklist below it (#175 review).
       setGeoListKey((k) => k + 1);
     }
   }

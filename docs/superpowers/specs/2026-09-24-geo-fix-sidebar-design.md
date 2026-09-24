@@ -1,8 +1,8 @@
 # Unlocated venues — worklist + fix-it sidebar in Settings → Admin
 
 - **Date:** 2026-09-24
-- **Punch:** #169
-- **Decision:** D225
+- **Punch:** #175
+- **Decision:** D228
 - **Status:** design approved by Jeff 2026-09-24; spec awaiting review
 - **Builds on:** #147 (D179–D185, geocoding backfill), #166 (D222, runner stall + street cleanup +
   postal-city gate)

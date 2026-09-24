@@ -241,7 +241,7 @@ export type GeocodeOutcome =
 /**
  * Geocode ONE venue's address through exactly the checks the batch applies —
  * query choice, the state gate, the city gate and its postal-city radius.
- * Shared by backfillVenueCoords() and the Settings sidebar's Retry (#169) so
+ * Shared by backfillVenueCoords() and the Settings sidebar's Retry (#175) so
  * the two can never disagree about what a good match is. Writes nothing.
  */
 export async function geocodeVenue(

@@ -249,7 +249,7 @@ async function main() {
   assert.deepEqual((await listUnlocatedVenues({ offset: 1, limit: 1 })).rows.map((r) => r.siteId), ["st-w1"]);
   console.log("PASS geo-backfill: unlocated worklist query");
 
-  // #169 D225 item 4: estimateFromParts() only treats travelMiles as a manual
+  // #175 D228 item 4: estimateFromParts() only treats travelMiles as a manual
   // override (src/lib/geo.ts) — travelMin alone is not one, so the worklist
   // must not exclude a venue just because travelMin is set.
   await site("st-travelmin-only", "co-a", { address: "9 TravelMin St", city: "X", state: "WI", travelMin: "45" });
@@ -260,7 +260,7 @@ async function main() {
   );
   console.log("PASS geo-backfill: travelMin-only override does not hide the worklist row");
 
-  // #169 item 7: a literal % or _ in the search box must not act as a SQL
+  // #175 item 7: a literal % or _ in the search box must not act as a SQL
   // wildcard against unrelated rows.
   assert.equal((await listUnlocatedVenues({ q: "%" })).rows.length, 0, "a literal % matches nothing here");
   assert.equal((await listUnlocatedVenues({ q: "_" })).rows.length, 0, "a literal _ matches nothing here");
@@ -378,7 +378,7 @@ async function main() {
   assert.equal((await listUnlocatedVenues({})).total, 0, "both fixed venues left the worklist");
   console.log("PASS geo-backfill: locateVenue retry / pick / pin");
 
-  /* ---- 8. pick() protects existing address parts (#169 D225 item 2) ---- */
+  /* ---- 8. pick() protects existing address parts (#175 D228 item 2) ---- */
   {
     // A picked suggestion with a blank street (a town-level hit) must not
     // wipe the venue's real street address.
@@ -429,7 +429,7 @@ async function main() {
     console.log("PASS geo-backfill: pick() never blanks a real street or zip");
   }
 
-  /* ---- 9. precision reported on the result (#169 D225 item 5) ---- */
+  /* ---- 9. precision reported on the result (#175 D228 item 5) ---- */
   {
     // retry: a city-only match reports "city" precision.
     await insertSite("st-precision-city", { address: "", city: "Reedsburg", state: "WI" });

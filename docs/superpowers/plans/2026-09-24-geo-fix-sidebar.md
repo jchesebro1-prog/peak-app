@@ -18,7 +18,7 @@
 - Writes are targeted `UPDATE sites … WHERE id = ?`, never an upsert (D181). They never touch `travelMiles`/`travelMin`, the `companies` row, or any other venue.
 - Client components must NOT import `@/lib/geo` or `@/lib/geo-backfill`, because those pull in `@/db`. Type-only imports (`import type`) are fine.
 - Timestamps are epoch-ms numbers. `lat`/`lng` are stored as strings (text columns).
-- Punch #169, decision D225.
+- Punch #175, decision D228.
 - **Do not push.** Jeff's production geocode run must finish first, and pushing to main deploys.
 
 ---
@@ -90,7 +90,7 @@ export type GeocodeOutcome =
 /**
  * Geocode ONE venue's address through exactly the checks the batch applies —
  * query choice, the state gate, the city gate and its postal-city radius.
- * Shared by backfillVenueCoords() and the Settings sidebar's Retry (#169) so
+ * Shared by backfillVenueCoords() and the Settings sidebar's Retry (#175) so
  * the two can never disagree about what a good match is. Writes nothing.
  */
 export async function geocodeVenue(
@@ -178,7 +178,7 @@ export async function geocodeVenue(
 - [ ] **Step 5: Commit.**
 ```bash
 git add src/lib/geo-backfill.ts scripts/test-geo-backfill.ts
-git commit -m "refactor(geo): extract geocodeVenue() so the batch and the fix sidebar share one set of gates (#169)"
+git commit -m "refactor(geo): extract geocodeVenue() so the batch and the fix sidebar share one set of gates (#175)"
 ```
 
 ---
@@ -318,7 +318,7 @@ git commit -m "refactor(geo): extract geocodeVenue() so the batch and the fix si
 ```ts
 /**
  * Unlocated venues — the Settings → Admin worklist and its one-venue fix
- * (punch #169, D225). Spec: docs/superpowers/specs/2026-09-24-geo-fix-sidebar-design.md
+ * (punch #175, D228). Spec: docs/superpowers/specs/2026-09-24-geo-fix-sidebar-design.md
  *
  * The worklist is a live query, not the batch run's memory: every venue that
  * has an address (or a city) but no coordinates and no manual travel
@@ -548,7 +548,7 @@ export async function locateVenue(
 - [ ] **Step 5: Commit.**
 ```bash
 git add src/lib/venue-locate.ts scripts/test-geo-backfill.ts
-git commit -m "feat(geo): unlocated-venue worklist query + one-venue locateVenue (retry/pick/pin) (#169)"
+git commit -m "feat(geo): unlocated-venue worklist query + one-venue locateVenue (retry/pick/pin) (#175)"
 ```
 
 ---
@@ -582,7 +582,7 @@ git commit -m "feat(geo): unlocated-venue worklist query + one-venue locateVenue
 
 - [ ] **Step 2: Add the three actions** directly after `geocodeBatchAction`:
 ```ts
-/* ---------------- Unlocated venues worklist (#169, D225) ---------------- */
+/* ---------------- Unlocated venues worklist (#175, D228) ---------------- */
 
 export async function listUnlocatedVenuesAction(input?: { q?: string; offset?: number; limit?: number }) {
   await requirePerm("manage_users");
@@ -637,7 +637,7 @@ export async function locateVenueAction(input: import("@/lib/venue-locate").Loca
 - [ ] **Step 4: Commit.**
 ```bash
 git add "src/app/(app)/settings/actions.ts"
-git commit -m "feat(settings): admin actions for the unlocated-venue worklist; batch failures carry siteId (#169)"
+git commit -m "feat(settings): admin actions for the unlocated-venue worklist; batch failures carry siteId (#175)"
 ```
 
 ---
@@ -662,7 +662,7 @@ git commit -m "feat(settings): admin actions for the unlocated-venue worklist; b
   height?: number;
   center?: [number, number];
   zoom?: number;
-  /** Pick mode (#169): one draggable pin at `picked`; a map click or a pin
+  /** Pick mode (#175): one draggable pin at `picked`; a map click or a pin
    *  drag reports the point through `onPick`. Absent => display-only, as
    *  every other map in the app uses it. */
   picked?: { lat: number; lng: number } | null;
@@ -739,7 +739,7 @@ git commit -m "feat(settings): admin actions for the unlocated-venue worklist; b
 - [ ] **Step 3: Commit.**
 ```bash
 git add src/components/map/LeafletMap.tsx
-git commit -m "feat(map): opt-in pick mode on LeafletMap — click or drag one pin (#169)"
+git commit -m "feat(map): opt-in pick mode on LeafletMap — click or drag one pin (#175)"
 ```
 
 ---
@@ -768,7 +768,7 @@ import { listUnlocatedVenuesAction } from "./actions";
 import VenueLocateDrawer from "./venue-locate-drawer";
 
 /**
- * Settings → Admin worklist of venues that can't be located (#169, D225).
+ * Settings → Admin worklist of venues that can't be located (#175, D228).
  * A live query (see lib/venue-locate.ts), so it survives reloads and shrinks
  * as venues are fixed. Clicking a row opens the fix-it sidebar.
  */
@@ -953,7 +953,7 @@ function fmtTravel(r: Extract<LocateResult, { ok: true }>): string {
 }
 
 /**
- * The fix-it sidebar (#169, D225): three ways to locate ONE venue — edit the
+ * The fix-it sidebar (#175, D228): three ways to locate ONE venue — edit the
  * address and retry it through the batch's own gates, pick a search
  * suggestion, or drop a pin — each saved + routed immediately.
  */
@@ -1269,7 +1269,7 @@ export default function VenueLocateDrawer({
 - [ ] **Step 5: Commit.**
 ```bash
 git add "src/app/(app)/settings/unlocated-venues.tsx" "src/app/(app)/settings/venue-locate-drawer.tsx" "src/app/(app)/settings/settings-client.tsx"
-git commit -m "feat(settings): unlocated-venues worklist + fix-it sidebar (retry / search / pin) (#169)"
+git commit -m "feat(settings): unlocated-venues worklist + fix-it sidebar (retry / search / pin) (#175)"
 ```
 
 ---
@@ -1277,7 +1277,7 @@ git commit -m "feat(settings): unlocated-venues worklist + fix-it sidebar (retry
 ### Task 6: Browser verification, gates, PUNCHLIST + DECISIONS
 
 **Files:**
-- Modify: `PUNCHLIST.md` (append #169), `DECISIONS.md` (append D225)
+- Modify: `PUNCHLIST.md` (append #175), `DECISIONS.md` (append D228)
 
 - [ ] **Step 1: Seed the unlocated case in the worktree's OWN dev DB.** The worktree's `.data` is its own, never the main checkout's. Start the dev server through `preview_start` with a temporary `.claude/launch.json` entry in the main checkout, and restore that file afterwards. The launch entry must `cd` to the worktree and run `npm run dev` with `autoPort: true`. In the Settings → Admin section, confirm the list renders. The demo seed may have no unlocated venues. If so, edit a demo venue in Companies and clear its coordinates by removing and retyping the address without picking a suggestion, then reload Settings.
 - [ ] **Step 2: Exercise every path in the browser:**
@@ -1292,10 +1292,10 @@ git commit -m "feat(settings): unlocated-venues worklist + fix-it sidebar (retry
 - [ ] **Step 3: `preview_stop`**, then confirm no dev server remains for this worktree (`ps aux | grep peak-app-worktree-geo-fix`). Restore `.claude/launch.json` in the main checkout with `git checkout .claude/launch.json`.
 - [ ] **Step 4: Run the four gates plus the geo test, and record real numbers:**
   `rm -rf .next && npx tsc --noEmit` → 0 errors; `npm run -s test:geo-backfill` → ALL PASSED; `npm run -s test:specs` → PASS/FAIL counts; `npm run -s test:smoke` → ALL PASSED; `npx eslint` → problems/errors, compared with the origin/main baseline of 124 problems / 0 errors.
-- [ ] **Step 5: Append PUNCHLIST #169 and DECISIONS D225.** Use the same shape as #166/D222: reported, what shipped, tests, gates with real numbers, anything open. D225 records the decisions from spec §2 and §3.3: worklist is a live query; no town-centre fix; a human pick or pin bypasses the gates; the sidebar never writes manual travel overrides; reasons aren't persisted.
+- [ ] **Step 5: Append PUNCHLIST #175 and DECISIONS D228.** Use the same shape as #166/D222: reported, what shipped, tests, gates with real numbers, anything open. D228 records the decisions from spec §2 and §3.3: worklist is a live query; no town-centre fix; a human pick or pin bypasses the gates; the sidebar never writes manual travel overrides; reasons aren't persisted.
 - [ ] **Step 6: Commit.**
 ```bash
 git add PUNCHLIST.md DECISIONS.md
-git commit -m "docs: punch #169 and D225 — unlocated-venues worklist + fix-it sidebar"
+git commit -m "docs: punch #175 and D228 — unlocated-venues worklist + fix-it sidebar"
 ```
 - [ ] **Step 7: Do NOT push.** Report to Jeff and wait for him to confirm his production geocode run has finished.
