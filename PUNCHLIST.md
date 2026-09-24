@@ -7438,3 +7438,46 @@ Admin → **Geocode addresses** (≈1,250 lookups at 1/sec, then the route phase
 ~30–45 min), then *Check coverage*. Addresses listed as unresolved get fixed on the venue and the
 button re-run. #147's remaining items (quote re-price report, Import-hub post-commit geocode)
 stay open there.
+
+## 167. Documents look right on screen but export to PDF badly — page breaking fixed — DONE 2026-09-24 (D223)
+
+**Reported:** 2026-09-24 (Jeff): "PDFs look great in the program until you export and then it
+doesn't export cleanly" — on a lot of the templates.
+
+**Root causes (reproduced with headless-Chrome print-to-PDF of every document, before/after):**
+1. `.pk-doc-page` print resets had no `!important`, so inline on-screen padding/width (e.g. the
+   consulting letter's 48/56px, the `26px 16px 60px` wrappers) stacked on top of `@page` margins.
+2. `page-break-after: always` on the last sheet emitted a **blank trailing page** — 9 of 16
+   captured documents ended in one.
+3. No keep-together rules anywhere: rows, fee boxes, signature blocks and callouts could split.
+4. The six "single-page" letters were ~0.7in taller than a page even on screen, so the notice +
+   footer printed alone on page 2 (plus the blank page 3).
+5. Rigging Inspection Report sheets are fixed 11in with `overflow: hidden`; venue info, the
+   rubric (2 sheets), the summary and the compact grid overran → 4–7 headerless spill pages per
+   layout.
+6. `pdf.ts` letters (renewal attachment, rental agreement) had no page numbers, no continuation
+   header, no orphan control; the field sheet dropped its header on overflow and miscounted pages.
+7. The estimator's customer-quote "Download PDF" button had no handler.
+
+**Done 2026-09-24.** globals.css print block + `pk-doc-wrap` / `pk-keep` / `pk-keep-next`
+applied across the proposal letters, consulting letter/spec, flame + repair reports and
+`SinglePageLetter`; new `FitOnePage` scales a single-page letter to fit (reflow-aware binary
+search, 0.72 floor, then it may run to 2 pages); inspection report chunks every variable section
+by measured height into "(continued)" sheets with the print `overflow: visible` safety net;
+`pdf.ts` defers "Page n of N" footers, draws continued headers, keeps paragraphs ≥2 lines per
+side and the cost+tax group together, and the field sheet numbers physical pages; estimator
+Download PDF → `window.print()` with a print sheet that isolates the quote document.
+
+**Before → after (sample data, headless Chrome, Letter):** single-page letters 2–3 pages → 1
+(zoom 0.81–0.97); flame/repair reports 3 → 1–2 with no blank page; inspection report 33/33/22
+pages with 4/4/7 headerless spills → 32/32/21 with 0 (every sheet measured ≤ 11in); rental
+agreement 2 pages with page numbers + continued header. Gates: tsc 0 errors, eslint 124 / 0
+errors (= baseline), `test:specs` 2044 PASS / 0 FAIL (+12 new pdf pagination specs),
+`test:smoke` 117 ALL PASSED.
+
+**Open / noticed, not changed:** the proposal work order's "SHEET 1 of 1" label is hard-coded
+(prints on a 2-page proposal); a long itemized estimator quote was not print-tested (no seeded
+quote has line items); inspection-report height budgets are calibrated on RI-2042 — anything
+they misjudge now spills to a following page instead of being cut off. The Word export of every
+template for Jeff's wording pass lives outside the repo (~/Downloads/Quartzite Templates for
+Editing 2026-09-24/).

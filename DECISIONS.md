@@ -4948,3 +4948,18 @@ this entry; its layout stays.
   match wrongly rejects real buildings (Middleton → Madison, Milwaukee → Wauwatosa). The
   exception applies to street-level hits only; city-only rows keep D185's exact gate. 10 mi
   clears the observed postal cases (≈2 mi) with wide margin under the Portage hazard (64 mi).
+
+## D223. Printed documents keep blocks together and one-page letters scale to fit, instead of hand-paginating every page (#167, 2026-09-24)
+
+- **CSS keep rules over per-document pagination** for browser-printed letters/reports: rows,
+  signature blocks, fee boxes, callouts and header bands carry `pk-keep`; section labels carry
+  `pk-keep-next`. Chrome then paginates; nothing is pre-split in React. Only the Rigging
+  Inspection Report keeps its fixed-sheet model (running head/foot per sheet), so it alone
+  chunks by estimated height.
+- **Single-page letters scale rather than spill:** print `zoom` from a reflow-aware measurement,
+  floored at 0.72 (≈9pt body); 4% safety margin because 0.985 tipped two letters onto page 2
+  (the notice+footer keep block needs room). Below the floor a letter may run to 2 pages.
+- **Clip nothing:** inspection sheets print with `overflow: visible`; a misestimated sheet
+  spills to a following page rather than losing content.
+- **pdf.ts footers appear only on multi-page output**, so a one-page PDF is byte-identical to
+  before.
