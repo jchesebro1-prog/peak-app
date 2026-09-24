@@ -31,6 +31,23 @@ export function baseOffice(offices: OriginOffice[], baseOfficeId?: string | null
   return mine || offices.find((o) => o.quoteDefault) || offices[0] || null;
 }
 
+/**
+ * #176 fix 3 — the "Traveling from" choices for the New event form: the base
+ * (unchanged, even if it has no coordinates — resolveTravelOrigin already
+ * treats an uncoordinated base as "no fallback") plus only the offices that
+ * can actually be routed from. Factored out as a pure function so it's
+ * testable without the settings/session plumbing in the server action.
+ */
+export function originOptions(
+  offices: OriginOffice[],
+  baseOfficeId?: string | null
+): { base: OriginOffice | null; offices: OriginOffice[] } {
+  return {
+    base: baseOffice(offices, baseOfficeId),
+    offices: offices.filter(located),
+  };
+}
+
 export async function resolveTravelOrigin(
   from: TravelFrom | null | undefined,
   ctx: {

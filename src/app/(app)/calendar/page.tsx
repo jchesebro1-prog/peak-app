@@ -6,6 +6,9 @@ import HomeTabs from "../home-tabs";
 
 export const metadata = { title: "Calendar — Quartzite-6" };
 
+// #176 fix 1 — addCalendarEventAction's after() travel-block work (origin search, destination search, live OSRM) still runs inside this invocation, so it needs the same 60s ceiling as the other heavy routes (see import/page.tsx).
+export const maxDuration = 60;
+
 /**
  * Full-page calendar (S13 / D81, extended to day/week views in the S13
  * full-build) over the same merged sources as the Home dashboard card: the

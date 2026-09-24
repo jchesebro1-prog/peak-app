@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { gmailEnabled, hasCalendarScope, personalKey } from "@/lib/gmail/config";
 import { getConnectionInfo } from "@/lib/gmail/connections";
@@ -58,15 +59,22 @@ async function addTravelBlock(
 ): Promise<void> {
   if (!looksLikePhysicalAddress(location)) return;
   try {
-    const [{ getUser }, { getSettings }, { search, estimate }] = await Promise.all([
+    const [{ getUser }, { getSettings }, { search, estimate, route }] = await Promise.all([
       import("@/lib/users"),
       import("@/lib/settings"),
       import("@/lib/geo"),
     ]);
-    const [{ resolveTravelOrigin }, { route }] = await Promise.all([
-      import("@/lib/travel-origin"),
-      import("@/lib/geo"),
-    ]);
+
+    // #176 fix 2 — geocode the destination FIRST. The location is free text,
+    // not lat/lng, so it needs geocoding either way; doing it before the
+    // origin search means a location that doesn't geocode returns before
+    // paying for an origin search too (which, for a typed address, is its
+    // own network call).
+    const hits = await search(location, { limit: 1 });
+    const hit = hits[0];
+    if (!hit) return;
+
+    const { resolveTravelOrigin } = await import("@/lib/travel-origin");
     const settings = await getSettings();
     const offices = settings.offices || [];
     const me = await getUser(userId);
@@ -76,11 +84,6 @@ async function addTravelBlock(
       search: (q) => search(q, { limit: 1 }),
     });
     if (!origin) return; // no office configured anywhere and nothing typed — nothing to estimate from
-
-    // The location is free text, not lat/lng, so it needs geocoding first.
-    const hits = await search(location, { limit: 1 });
-    const hit = hits[0];
-    if (!hit) return;
 
     // #176: a real route (OSRM, cached) rather than only reading the cache —
     // a typed origin has never been routed from before. Falls back to the
@@ -177,29 +180,50 @@ export async function addCalendarEventAction(
               typeof input.travelFrom.address === "string" ? input.travelFrom.address.slice(0, 200) : undefined,
           }
         : undefined;
-    await addTravelBlock(grant.key, grant.userId, title, input.location, input.startAt, travelFrom);
+    // #176 fix 1 — the worst case here is ~15s (origin search, destination
+    // search, then a live OSRM call), all after the meeting is already
+    // saved; awaiting it risked a platform timeout that would make the user
+    // retry and duplicate the meeting. after() (next/server) schedules it to
+    // run once the response is on its way, per the docs: "allows you to
+    // schedule work to be executed after a response ... is finished. This is
+    // useful for tasks and other side effects that should not block the
+    // response." Everything the callback needs is captured into plain
+    // values below, before the response is returned, rather than read from
+    // `input`/`grant` inside the callback.
+    const travelKey = grant.key;
+    const travelUserId = grant.userId;
+    const travelTitle = title;
+    const travelLocation = input.location;
+    const travelStartAt = input.startAt;
+    after(() => addTravelBlock(travelKey, travelUserId, travelTitle, travelLocation, travelStartAt, travelFrom));
   }
+  // The auto travel block (if any) is written by after() below, i.e. after
+  // this revalidate has already fired — it shows up on the visitor's next
+  // navigation/refresh rather than this one. Accepted (#176 fix 1): it's a
+  // best-effort, freely-removable extra event, not the meeting itself.
   revalidatePath("/", "layout");
   return { ok: true };
 }
 
-/** #176 — the "Traveling from" choices for the New event form. */
+/** #176 — the "Traveling from" choices for the New event form. Only offices
+ *  with coordinates are offered — a routeless pick would silently fall back
+ *  to the base anyway (fix 3, D229). */
 export async function travelOriginOptionsAction(): Promise<{
   base: { id: string; name: string } | null;
   offices: Array<{ id: string; name: string }>;
 }> {
   const me = await requireUser();
-  const [{ getSettings }, { getUser }, { baseOffice }] = await Promise.all([
+  const [{ getSettings }, { getUser }, { originOptions }] = await Promise.all([
     import("@/lib/settings"),
     import("@/lib/users"),
     import("@/lib/travel-origin"),
   ]);
   const offices = (await getSettings()).offices || [];
   const user = await getUser(me.id);
-  const base = baseOffice(offices, user?.officeId);
+  const { base, offices: located } = originOptions(offices, user?.officeId);
   return {
     base: base ? { id: base.id, name: base.name } : null,
-    offices: offices.map((o) => ({ id: o.id, name: o.name })),
+    offices: located.map((o) => ({ id: o.id, name: o.name })),
   };
 }
 
