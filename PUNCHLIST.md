@@ -7377,3 +7377,23 @@ errors and 0 new warnings. Decisions D208 (supersedes D187) and D209.
 Two blockers were caught by the final whole-branch review and fixed before the write, both verified
 against real data — see D209.
 
+
+---
+
+## 163. Estimator — the quote-details rows became a right-hand column — DONE 2026-09-24 (D218)
+
+**Reported:** 2026-09-24 (Jeff, screenshot of Q-2046 in production). The four dark rows under
+the estimator's header — Prepared for / venue / attn / category, Quote note, Assumptions (with
+the company-default checklist), Suggested install timeframe — consumed the entire first viewport
+once the assumption library reached ten lines, so the Systems list and every section card sat
+below the fold. Ask: keep the header, move the gray block to a sidebar on the right.
+
+**Done 2026-09-24.** `estimator-client.tsx` build mode now splits the body three ways: Systems
+(left, 262px) | section cards (center, scrolls) | **Quote details** (right, 300px, scrolls on its
+own, same dark surface). The header, the collapsible review bar, the cards and every modal are
+untouched; each moved control kept its exact value/handler/title/placeholder/options — only the
+layout changed. Below 860px the column goes full-width above Systems (phones never render build
+mode; they get the customer document). Verified at 1440×900: the body split starts 175px from
+the top, no horizontal overflow, the column scrolls internally. Gates: tsc 0 errors, `test:specs`
+2032 PASS / 0 FAIL, `test:smoke` ALL PASSED, eslint 124 problems / 0 errors — identical to the
+origin/main baseline at 77c657c. Decision D218.
