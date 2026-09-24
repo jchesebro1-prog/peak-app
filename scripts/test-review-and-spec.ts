@@ -8241,6 +8241,7 @@ const LIB162 = {
       partInformation: { generatorData: { lookupData: [
         { modelNumber: "CSPAR", partNumber: "7410A1001" },
         { modelNumber: "CSPAR-X", partNumber: "7410A1002" },
+        { modelNumber: "cs-par/lo 3", partNumber: "7410a1003" },
       ] } },
       documents: ["DOC-1", "DOC-2", "DOC-3"],
       ports: [
@@ -8263,8 +8264,16 @@ ok(ex162.libraryTimestamp === "2026-09-02T01:37:52.850Z", "#162 the extract stam
 ok(ex162.records.length === 1, "#162 internal-category and contentless types are dropped from the extract");
 const r162 = ex162.records[0];
 ok(r162.modelNumbers.includes("CSPAR") && r162.modelNumbers.includes("7410A1001"), "#162 both model and part numbers are indexed");
-ok(r162.modelNumbers.length === 4, "#162 all four identifiers of a two-variant type are indexed");
+ok(r162.modelNumbers.length === 6, "#162 all six identifiers of a three-variant type are indexed");
 ok(r162.modelNumbers.every((m) => m === m.toUpperCase()), "#162 indexed identifiers are pre-normalized");
+ok(
+  r162.modelNumbers.includes("CSPARLO3") && r162.modelNumbers.includes("7410A1003"),
+  "#162 normalizeSku actually ran: the dirty variant's separators are stripped and case is upper"
+);
+ok(
+  !r162.modelNumbers.includes("cs-par/lo 3") && !r162.modelNumbers.includes("7410a1003"),
+  "#162 the raw, un-normalized forms never survive into modelNumbers"
+);
 ok(r162.docs.length === 1 && r162.docs[0].kind === "datasheet", "#162 only the English Datasheet/Manual documents survive");
 ok(r162.docs[0].url === "https://example.test/ds-en.pdf", "#162 the document URL is carried verbatim");
 ok(r162.ports.length === 3, "#162 every port of a kept type is emitted");

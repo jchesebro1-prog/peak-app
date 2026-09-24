@@ -1,14 +1,19 @@
 /**
  * DaVinci `library.json` → the committed extract (#162, D8).
  *
- * The full library is 116 MB, gitignored, and exists on one machine. This
- * distils it to the 0.52 MB `data/davinci-extract.json` that ships in the repo:
- * 908 device types, 7,083 indexed identifiers, 2,335 ports and 1,173 document
- * links. Ports are mapped here, once, so the extract is directly reviewable and
- * the enricher never has to reason about DaVinci's UUIDs.
+ * The DaVinci export (`data/davinci/`) is 116 MB — 42 MB of `library.json`
+ * plus 73 MB of images — gitignored, and exists on one machine. This distils
+ * `library.json` into the ~1.34 MB `data/davinci-extract.json` that ships in
+ * the repo: 1,720 device types, 14,108 indexed identifiers, 6,241 ports and
+ * 2,836 document links. The extract deliberately covers every eligible type,
+ * not just the ones that match today's catalog, so a future price-book
+ * import needs no regeneration. Ports are mapped here, once, so the extract
+ * is directly reviewable and the enricher never has to reason about
+ * DaVinci's UUIDs.
  *
- * Deliberately tolerant of shape but NOT of unknown protocols: mapProtocol
- * throws, and that is the point (D2).
+ * Deliberately tolerant of shape but NOT of unknown protocols or port
+ * directions: mapProtocol throws and so does an unmapped direction, and
+ * that is the point (D2).
  */
 import type { Port } from "@/lib/catalog-connect";
 import { normalizeSku } from "./sku";
@@ -64,8 +69,15 @@ export function extractLibrary(lib: unknown): DavinciExtract {
       const connector = conns.get(str(p.connectorTypeId)) || "";
       const resolved = mapProtocol(str(p.portProtocolId), connector);
       if ("excluded" in resolved) continue;
-      const direction = DIRECTION_MAP[dirs.get(str(p.portDirectionId)) || ""];
-      if (!direction) continue;
+      const dirLabel = dirs.get(str(p.portDirectionId)) || "";
+      const direction = DIRECTION_MAP[dirLabel];
+      if (!direction) {
+        throw new Error(
+          `#162 unmapped DaVinci port direction "${dirLabel}". A library revision has added a direction: ` +
+            `add it to DIRECTION_MAP (src/lib/davinci/protocol-map.ts) after deciding what it is. ` +
+            `Refusing to guess — a silently dropped port is missing signal with no indication anything is wrong.`
+        );
+      }
       ports.push({
         // DaVinci leaves most port names blank; the connector is the most
         // useful thing a human can be shown in its place.

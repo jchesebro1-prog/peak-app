@@ -3,11 +3,12 @@
  *
  *   npm run davinci:extract
  *
- * Reads `data/davinci/source/<newest timestamp>/library.json` (116 MB,
- * gitignored, this machine only) and writes the ~0.5 MB extract that IS
+ * Reads `data/davinci/source/<newest timestamp>/library.json` (42 MB of the
+ * 116 MB export — the rest is 73 MB of images this script never touches),
+ * gitignored, this machine only, and writes the ~1.34 MB extract that IS
  * committed. Touches no database. Re-run when ETC ships a new export; if it has
- * added a port protocol, the extract will throw with the new UUID rather than
- * mis-typing its ports.
+ * added a port protocol or port direction, the extract will throw with the new
+ * UUID or label rather than mis-typing or silently dropping its ports.
  */
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -19,7 +20,8 @@ const OUT = "data/davinci-extract.json";
 function main() {
   if (!existsSync(SRC)) {
     console.error(
-      `No ${SRC}. The 116 MB DaVinci library is gitignored and lives on Jeff's machine only.\n` +
+      `No ${SRC}. The 116 MB DaVinci export (42 MB library.json + 73 MB images) is gitignored ` +
+        `and lives on Jeff's machine only.\n` +
         `The committed ${OUT} is what the enricher reads — you only need this script to refresh it.`
     );
     process.exit(1);
