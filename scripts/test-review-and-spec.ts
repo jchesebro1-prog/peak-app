@@ -198,7 +198,7 @@ import {
   isAllowedSheetMime,
   sheetMimeVerdict,
 } from "@/lib/grid-sheet-file";
-import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
+import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor } from "@/app/(app)/estimator/labor-defaults";
 import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev, vendorTotalSeed } from "@/app/(app)/estimator/pricing";
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -258,12 +258,28 @@ ok(disciplineForSystemTitle("Lighting control") === "LIG", "labor scope defaults
 ok(disciplineForSystemTitle("Video projection") === "AUD", "audio and video share one labor scope");
 ok(disciplineForSystemTitle("General conditions") === "OTH", "an unmatched system defaults to Other");
 const defaultMobs = defaultLaborMobs(null);
-ok(defaultMobs.map((mob) => `${mob.name}:${mob.people}x${mob.days}`).join("|") === "Site Visit:1x1|Install:4x5|Hang:2x3|Commissioning:2x3|Training:1x1", "labor opens with the five requested crew/day defaults");
+ok(defaultMobs.length === 1, "#161 labor opens with exactly one mobilization");
+ok(defaultMobs[0].name === "" && defaultMobs[0].people === "1" && defaultMobs[0].days === "1", "#161 the one opening row is a blank type at 1 person x 1 day");
+ok(
+  ["Site Visit", "Install", "Hang", "Commissioning", "Training"].map((n) => `${n}:${mobDefaultsFor(n).people}x${mobDefaultsFor(n).days}`).join("|") ===
+    "Site Visit:1x1|Install:4x5|Hang:2x3|Commissioning:2x3|Training:1x1",
+  "#161 the D136 values survive as per-type crew x day defaults"
+);
+const pickedInstall = applyMobType(defaultMobs[0], "Install");
+ok(pickedInstall.name === "Install" && pickedInstall.people === "4" && pickedInstall.days === "5", "#161 picking Install on an untouched blank row fills 4x5");
+const pickedHang = applyMobType(pickedInstall, "Hang");
+ok(pickedHang.people === "2" && pickedHang.days === "3", "#161 switching type on still-default numbers refills from the new type");
+const touched161 = applyMobType({ ...pickedInstall, people: "6" }, "Hang");
+ok(touched161.name === "Hang" && touched161.people === "6" && touched161.days === "5", "#161 numbers the user edited are never overwritten by a type pick");
+const custom161 = applyMobType({ ...laborMob(null, "Rig day"), nameCustom: true }, "Install");
+ok(custom161.people === "1" && custom161.days === "1", "#161 a custom-named row keeps its numbers when a type is picked");
+ok(applyMobType(defaultMobs[0], "Install").nameCustom === false, "#161 picking a listed type clears the custom flag");
+const installMob = laborMob(null, "Install", "4", "5");
 const testRate = ((sku: string) => ({ "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 75, "DRF-SUB": 50 }[sku] || 0)) as any;
-const day10 = computeMob({ ...defaultMobs[1], hoursPerDay: "10" }, "RIG", testRate);
+const day10 = computeMob({ ...installMob, hoursPerDay: "10" }, "RIG", testRate);
 ok(day10.reg === 160 && day10.otHrs === 40, "hours beyond 8 per day become crew overtime");
 ok(day10.supHrs === 40 && day10.regCost === 9000, "the first person is the supervisor within the crew, not an added worker");
-const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [defaultMobs[1]], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, testRate);
+const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [installMob], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, testRate);
 ok(laborCalc.drfAutoHrs === 3.2, "drafting defaults to 2% of total regular hours");
 ok(laborCalc.performanceBonus === laborCalc.baseCost * 0.05, "labor adds a 5% performance bonus based on base cost");
 

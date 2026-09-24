@@ -65,7 +65,7 @@ import type {
 } from "./types";
 import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { assemblyDescription } from "@/lib/fixture-assemblies";
-import { defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
+import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import SectionCard, { type InputKind } from "./section-card";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
@@ -1321,7 +1321,7 @@ export default function EstimatorClient({
       mobs: d.mobs.map((m, i) => {
         if (i !== idx) return m;
         if (val === "__custom__") return { ...m, nameCustom: true, name: "" };
-        return { ...m, name: val, nameCustom: false };
+        return applyMobType(m, val);
       }),
     }));
   const useMobNameList = (idx: number) =>
