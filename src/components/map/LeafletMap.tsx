@@ -161,6 +161,7 @@ export default function LeafletMap({
     return () => {
       mapRef.current?.remove();
       mapRef.current = null;
+      pickMarkerRef.current = null;
     };
   }, []);
 
