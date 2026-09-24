@@ -6,6 +6,7 @@ import { venueTravelAction, type VenueTravel } from "../../quote-builder-travel"
 import type { CSSProperties } from "react";
 import { saveFlameQuote, approveFlameQuote } from "./actions";
 import { CustomerCombobox } from "@/components/customer-combobox";
+import { ChangeTypeControl, useWonEditGuard } from "@/components/quote-flow-controls";
 
 /**
  * QuoteBuilder — the auto-priced flame-test quote estimator (client port of
@@ -58,6 +59,12 @@ export type BuilderInitial = {
   saved: boolean;
   approved: boolean;
   savedId: string;
+  /** Quote status — drives the won-edit confirm (D206) and Change type (D205). "draft" when new. */
+  status: string;
+  /** #160 / D205 — the draft this new quote replaces; posted on the create save. */
+  replaces: string;
+  /** #160 — the intake supplied a name: don't auto-rename on venue toggles. */
+  nameLocked: boolean;
 };
 
 /* ---------- inlined pure pricing (port of flametest-engine.ts) ---------- */
@@ -244,7 +251,7 @@ export function QuoteBuilder({
     customers.find((c) => c.id === initial.customerId)?.name || ""
   );
   const [quoteName, setQuoteName] = useState(initial.quoteName);
-  const quoteNameManual = useRef(!!initial.editingId);
+  const quoteNameManual = useRef(!!initial.editingId || initial.nameLocked);
   const [venueSel, setVenueSel] = useState(initial.venueSel);
   const [contactSel, setContactSel] = useState(initial.contactSel);
   const [contactManual, setContactManual] = useState(initial.contactManual);
@@ -254,6 +261,7 @@ export function QuoteBuilder({
   const [laborRate, setLaborRate] = useState(String(Math.round(baseRates.laborRate)));
   const [savedFlag, setSavedFlag] = useState(initial.saved || initial.approved);
   const [pending, startTransition] = useTransition();
+  const guardWon = useWonEditGuard(initial.status);
 
   const editingId = initial.editingId;
   const savedId = initial.savedId;
@@ -303,6 +311,7 @@ export function QuoteBuilder({
   }
 
   function pickCustomer(id: string) {
+    if (id !== customerId && !guardWon("customer")) return;
     ensureVenueTravel(id);
     const c = customers.find((x) => x.id === id) || null;
     const locs = c?.locations || [];
@@ -329,6 +338,7 @@ export function QuoteBuilder({
     setSavedFlag(false);
   }
   function toggleVenue(locId: string) {
+    if (!guardWon("venue")) return;
     setVenueSel((prev) => {
       const cur = prev[locId] || { on: false, curtains: "" };
       const next = { ...prev, [locId]: { ...cur, on: !cur.on } };
@@ -398,6 +408,7 @@ export function QuoteBuilder({
     fd.set("editingId", editingId || "");
     fd.set("customerId", customerId);
     fd.set("quoteName", quoteName);
+    fd.set("replaces", editingId ? "" : initial.replaces);
     const c = selectedContact();
     fd.set("contactName", c?.name || "");
     fd.set("contactRole", c?.role || "");
@@ -493,6 +504,7 @@ export function QuoteBuilder({
             >
               Auto-priced
             </span>
+            {editingId && <ChangeTypeControl quoteId={editingId} status={initial.status} />}
           </div>
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5 }}>
             Auto-priced from travel distance, curtain count, and multi-venue bundling. Adjust rates
@@ -536,6 +548,7 @@ export function QuoteBuilder({
                 }))}
                 value={customerId}
                 onChange={pickCustomer}
+                canChange={() => guardWon("customer")}
                 placeholder="Search customer or venue…"
                 inputStyle={{ ...FIELD, fontWeight: 600 }}
               />
@@ -564,6 +577,7 @@ export function QuoteBuilder({
                 className="ftq-sel"
                 value={contactSel}
                 onChange={(e) => {
+                  if (!guardWon("contact")) return;
                   setContactSel(e.target.value);
                   dirty();
                 }}

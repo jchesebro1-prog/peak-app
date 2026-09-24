@@ -7,6 +7,7 @@ import { get as getCustomer, nameFor } from "@/lib/stores/customers";
 import {
   create as createQuote,
   update as updateQuote,
+  retireReplacedDraft,
   setStatus,
 } from "@/lib/stores/quotes";
 import { createFromQuote, levelMeta } from "@/lib/stores/inspections";
@@ -42,6 +43,7 @@ async function persist(formData: FormData): Promise<string | null> {
   const editingId = String(formData.get("editingId") || "");
   const customerId = String(formData.get("customerId") || "");
   const quoteName = String(formData.get("quoteName") || "").trim();
+  const replaces = String(formData.get("replaces") || "").trim();
   const contactName = String(formData.get("contactName") || "").trim();
   const contactRole = String(formData.get("contactRole") || "").trim();
   const contactEmail = String(formData.get("contactEmail") || "").trim();
@@ -162,6 +164,16 @@ async function persist(formData: FormData): Promise<string | null> {
   const q = editingId
     ? await updateQuote(editingId, payload)
     : await createQuote(payload);
+  // D205: first save of a "Change type" replacement retires the old draft.
+  // The new quote already exists, so a failed retire is logged, never thrown —
+  // a throw would read as "nothing was written" and a re-save would duplicate.
+  if (!editingId && q && typeof replaces === "string" && replaces.trim()) {
+    try {
+      await retireReplacedDraft(replaces, q.id);
+    } catch (e) {
+      console.error("[inspections quote] retiring replaced draft failed:", e);
+    }
+  }
   return (q && q.id) || editingId || null;
 }
 

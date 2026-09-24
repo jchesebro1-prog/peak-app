@@ -13,6 +13,7 @@ import { getSettings } from "@/lib/settings";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
+import { pickContactName, readHandoff, seedVenueOn } from "@/app/(app)/quotes/new/handoff";
 
 export const metadata = { title: "Repair quote — Quartzite-6" };
 
@@ -68,6 +69,7 @@ export default async function RepairQuotePage({
 
   const editId = one(sp.id);
   const preCustomer = one(sp.customer);
+  const handoff = readHandoff(sp);
   const inspId = one(sp.inspection);
   const logId = one(sp.log);
   const saved = one(sp.saved) === "1";
@@ -134,6 +136,8 @@ export default async function RepairQuotePage({
     saved,
     approved,
     savedId: "",
+    status: "draft",
+    replaces: "",
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
@@ -185,6 +189,8 @@ export default async function RepairQuotePage({
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
+      status: editQuote.status,
+      replaces: "",
     };
   } else if (inspId) {
     const insp = await getInspection(inspId);
@@ -246,28 +252,27 @@ export default async function RepairQuotePage({
         saved: false,
         approved: false,
         savedId: "",
+        status: "draft",
+        replaces: "",
       };
     }
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;
     if (cust) {
-      const locs = cust.locations;
+      const on = seedVenueOn(cust.locations, handoff.venueId);
       const venueSel: BuilderInitial["venueSel"] = {};
-      locs.forEach((l) => {
-        venueSel[l.id] = { on: !!l.primary || locs.length === 1 };
+      cust.locations.forEach((l) => {
+        venueSel[l.id] = { on: !!on[l.id] };
       });
-      if (locs.length && !locs.some((l) => venueSel[l.id]?.on)) {
-        venueSel[locs[0].id] = { on: true };
-      }
-      const primary = cust.contacts.find((c) => c.primary) || cust.contacts[0] || null;
       initial = {
         ...initial,
         customerId: cust.id,
-        quoteName: cust.name + " — Repair",
+        quoteName: handoff.name || cust.name + " — Repair",
         venueSel,
-        contactSel: primary ? primary.name : "",
+        contactSel: pickContactName(cust, handoff.contactName),
         saved: false,
         approved: false,
+        replaces: handoff.replaces,
       };
     }
   }
