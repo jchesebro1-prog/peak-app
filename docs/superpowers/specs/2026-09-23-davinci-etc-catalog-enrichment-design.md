@@ -254,7 +254,7 @@ ports (already mapped), its English document links, and provenance
 (`libraryTimestamp`, `typeId`).
 
 Measured, not estimated: **1.35 MB minified** — 1,720 records, 14,108 indexed
-identifiers, 6,241 ports and 2,836 document links, covering every eligible
+identifiers, 6,168 ports and 2,828 document links, covering every eligible
 DaVinci type. (The subset that matches today's catalog is smaller still: the
 2,917 enriched rows are backed by only **908 distinct types**, because one type
 covers many SKU variants — `ColorSource PAR` alone covers 11 — and comes to
