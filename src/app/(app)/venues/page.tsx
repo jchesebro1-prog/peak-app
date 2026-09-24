@@ -4,6 +4,8 @@ import { requireUser } from "@/lib/session";
 import { loadVenueDirectory } from "@/lib/venue-history-server";
 import { timeAgo } from "@/lib/format";
 import { cityState, mono } from "../companies/lib";
+import { travelForPoints } from "@/lib/travel-bulk";
+import { compareDrive, driveTitle, fmtDrive, parseDriveSort } from "@/lib/drive-format";
 
 /**
  * Venues directory (D101) — mirrors the Companies list's server-component +
@@ -25,6 +27,7 @@ const CSS = `
   .ve-row:hover { background: #fafbff; }
   @media (max-width: 720px) {
     .ve-row-activity { display: none !important; }
+    .ve-row-city { display: none !important; }
   }
 `;
 
@@ -75,16 +78,43 @@ export default async function VenuesPage({
     return true;
   });
 
-  /* ---- sort: most recently active first; venues with no activity sort last
-   *  (then by name, so the no-activity tail is still browsable). ---- */
-  filtered.sort((a, b) => {
-    if (a.lastActivity !== b.lastActivity) {
-      if (a.lastActivity === null) return 1;
-      if (b.lastActivity === null) return -1;
-      return b.lastActivity - a.lastActivity;
-    }
-    return a.site.name.localeCompare(b.site.name);
-  });
+  /* ---- drive-from-origin (#170, D226): computed for ALL rows (not just the
+   *  visible page) so nearest/farthest sort is correct across the whole set,
+   *  before the PAGE cap below. ---- */
+  const travel = await travelForPoints(
+    rows.map((r) => ({
+      id: r.site.id,
+      lat: r.site.lat,
+      lng: r.site.lng,
+      city: r.site.city,
+      state: r.site.state,
+      travelMiles: r.site.travelMiles,
+      travelMin: r.site.travelMin,
+    }))
+  );
+
+  const sort = parseDriveSort(one(sp.sort));
+
+  /* ---- sort: most recently active first by default; venues with no
+   *  activity sort last (then by name, so the no-activity tail is still
+   *  browsable). When a drive sort is chosen, order by drive distance
+   *  instead, nearest/farthest first, unlocated last, then by name. ---- */
+  if (sort) {
+    filtered.sort(
+      (a, b) =>
+        compareDrive(travel.byId.get(a.site.id), travel.byId.get(b.site.id), sort) ||
+        a.site.name.localeCompare(b.site.name)
+    );
+  } else {
+    filtered.sort((a, b) => {
+      if (a.lastActivity !== b.lastActivity) {
+        if (a.lastActivity === null) return 1;
+        if (b.lastActivity === null) return -1;
+        return b.lastActivity - a.lastActivity;
+      }
+      return a.site.name.localeCompare(b.site.name);
+    });
+  }
 
   // The directory can hold thousands of venues; render only a page of them
   // so the DOM stays light (punch #92 — same cap-with-count-label default
@@ -99,13 +129,18 @@ export default async function VenuesPage({
     ` venue${matchCount === 1 ? "" : "s"}` +
     (activeCompanyName ? " · " + activeCompanyName : "") +
     (ql ? ` · “${q.trim()}”` : "") +
-    (truncated ? " · refine with search or filters to narrow" : "");
+    (truncated ? " · refine with search or filters to narrow" : "") +
+    (travel.originName
+      ? ` · Drive from ${travel.originName}`
+      : " · Set a quote origin in Settings → Locations to see drive times");
 
-  const linkWith = (patch: { company?: string }) => {
+  const linkWith = (patch: { company?: string; sort?: string }) => {
     const p = new URLSearchParams();
     if (q.trim()) p.set("q", q.trim());
     const nextCompany = patch.company !== undefined ? patch.company : company;
     if (nextCompany) p.set("company", nextCompany);
+    const nextSort = patch.sort !== undefined ? patch.sort : sort;
+    if (nextSort) p.set("sort", nextSort);
     const s = p.toString();
     return "/venues" + (s ? "?" + s : "");
   };
@@ -127,6 +162,7 @@ export default async function VenuesPage({
             {/* #121: search + the company filter on ONE row. `submit` keeps
                 the magnifier as the form's submit button — with two text
                 inputs and no button, Enter would not submit. */}
+            {sort && <input type="hidden" name="sort" value={sort} />}
             <SearchFilterBar name="q" defaultValue={q} placeholder="Search venues…" ariaLabel="Search venues" submit>
               {companyOptions.length > 1 && (
                 <>
@@ -161,6 +197,38 @@ export default async function VenuesPage({
           </form>
 
           <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 11 }}>{resultLabel}</div>
+
+          {/* Sort (#170, D226) — recent activity (default) vs. drive distance
+           *  from the quote origin, nearest/farthest first. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
+            {(
+              [
+                { label: "Recent activity", value: "" },
+                { label: "Nearest first", value: "near" },
+                { label: "Farthest first", value: "far" },
+              ] as const
+            ).map((opt) => {
+              const active = sort === opt.value;
+              return (
+                <Link
+                  key={opt.value || "recent"}
+                  href={linkWith({ sort: opt.value })}
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: active ? 600 : 500,
+                    padding: "4px 11px",
+                    borderRadius: 20,
+                    border: `1px solid ${active ? "var(--accent)" : "#e4e7ec"}`,
+                    color: active ? "inherit" : "#5b616e",
+                    textDecoration: "none",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {opt.label}
+                </Link>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -173,39 +241,57 @@ export default async function VenuesPage({
         </div>
       ) : (
         <div className="pk-card" style={{ padding: 0, overflow: "hidden" }}>
-          {visible.map((row) => (
-            <Link
-              key={row.site.id}
-              href={"/venues/" + encodeURIComponent(row.site.id)}
-              className="ve-row"
-              style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
-            >
-              <span style={{ width: 38, height: 38, borderRadius: 9, background: "#f1f2f5", color: "#5b616e", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12.5, fontFamily: "var(--font-mono)", flexShrink: 0 }}>
-                {mono(row.site.name)}
-              </span>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {row.site.name || "Untitled venue"}
+          {visible.map((row) => {
+            const d = travel.byId.get(row.site.id);
+            return (
+              <Link
+                key={row.site.id}
+                href={"/venues/" + encodeURIComponent(row.site.id)}
+                className="ve-row"
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
+              >
+                <span style={{ width: 38, height: 38, borderRadius: 9, background: "#f1f2f5", color: "#5b616e", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12.5, fontFamily: "var(--font-mono)", flexShrink: 0 }}>
+                  {mono(row.site.name)}
                 </span>
-                <span style={{ display: "block", fontSize: 11.5, color: "#8c919c", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {row.companyName}
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {row.site.name || "Untitled venue"}
+                  </span>
+                  <span style={{ display: "block", fontSize: 11.5, color: "#8c919c", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {row.companyName}
+                  </span>
                 </span>
-              </span>
-              <span style={{ width: 130, flexShrink: 0, fontSize: 12.5, color: "#5b616e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {cityState({
-                  city: row.city,
-                  state: row.site.state ?? undefined,
-                  primary: row.site.isPrimary,
-                  venueKind: row.site.venueKind,
-                  travelMiles: null,
-                  travelMin: null,
-                }) || "—"}
-              </span>
-              <span className="ve-row-activity" style={{ textAlign: "right", flexShrink: 0, fontSize: 12, color: "#9aa0ab", width: 64 }}>
-                {timeAgo(row.lastActivity)}
-              </span>
-            </Link>
-          ))}
+                <span className="ve-row-city" style={{ width: 130, flexShrink: 0, fontSize: 12.5, color: "#5b616e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {cityState({
+                    city: row.city,
+                    state: row.site.state ?? undefined,
+                    primary: row.site.isPrimary,
+                    venueKind: row.site.venueKind,
+                    travelMiles: null,
+                    travelMin: null,
+                  }) || "—"}
+                </span>
+                <span
+                  className="ve-row-drive"
+                  title={driveTitle(d)}
+                  style={{
+                    width: 118,
+                    flexShrink: 0,
+                    textAlign: "right",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11.5,
+                    color: d && d.source !== "none" ? "#3a3f4a" : "#b0b5bf",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {fmtDrive(d)}
+                </span>
+                <span className="ve-row-activity" style={{ textAlign: "right", flexShrink: 0, fontSize: 12, color: "#9aa0ab", width: 64 }}>
+                  {timeAgo(row.lastActivity)}
+                </span>
+              </Link>
+            );
+          })}
           {filtered.length === 0 && (
             <div style={{ padding: "50px 22px", textAlign: "center", color: "#9aa0ab", fontSize: 13 }}>
               {ql ? `No venues match “${q.trim()}”.` : "No venues match these filters."}
