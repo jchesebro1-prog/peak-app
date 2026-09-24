@@ -38,14 +38,21 @@ const HARDWIRED_CONNECTORS = new Set(["Terminal Block", "Screw Terminal", "Flyin
 
 export const PROTOCOL_MAP: Readonly<Record<string, ProtocolMapping>> = {
   // ---- power (D4) -------------------------------------------------------
+  // Power480V/Power208V/AuxPower* used to collapse into a shared "bare-end"
+  // whenever the connector was hardwired (Terminal Block/Screw Terminal/
+  // Flying Leads), which let a low-voltage auxiliary bus validate against a
+  // 480V hoist feeder as the same connection type. Each voltage class now
+  // keeps its own pass-through identity so voltage classes can never match
+  // each other; only generic, unspecified Power still lets the connector
+  // pick a Peak type.
   "aa07559e-6609-4ec6-8df3-8990d6bc9909": { kind: "power" }, // Power | POWER | 2195
-  "25636fee-a970-4c76-b5cc-7de92724a664": { kind: "peak", connectionType: "bare-end" }, // Power480V | 26 | hoist feeders, always hardwired
-  "ca96a25e-b72f-4bb6-a628-f83dfb1caa83": { kind: "peak", connectionType: "bare-end" }, // Power208V | 21
-  "29a18143-da9b-47c9-8b7f-6b1b4d71e696": { kind: "peak", connectionType: "bare-end" }, // Power208VFP | 3
-  "e4309323-4f8d-4dc6-9f90-7607696e951b": { kind: "peak", connectionType: "bare-end" }, // Power480VFP | 3
-  "1a0f1e55-53a5-452a-8294-9f8fd5c60783": { kind: "power" }, // AuxPowerReciever | AUXILIARY | 72
-  "0c508822-833d-4169-b3cf-3fc1bd667947": { kind: "power" }, // AuxiliaryPower | AUXILIARY | 39
-  "9c23dfb5-6ec6-4afc-818a-e6de8acf3bcc": { kind: "power" }, // ParadigmAuxiliaryPower | AUXILIARY | 14
+  "25636fee-a970-4c76-b5cc-7de92724a664": { kind: "passthrough", connectionType: "ETC 480V feeder" }, // Power480V | 26
+  "e4309323-4f8d-4dc6-9f90-7607696e951b": { kind: "passthrough", connectionType: "ETC 480V feeder" }, // Power480VFP | 3
+  "ca96a25e-b72f-4bb6-a628-f83dfb1caa83": { kind: "passthrough", connectionType: "ETC 208V feeder" }, // Power208V | 21
+  "29a18143-da9b-47c9-8b7f-6b1b4d71e696": { kind: "passthrough", connectionType: "ETC 208V feeder" }, // Power208VFP | 3
+  "1a0f1e55-53a5-452a-8294-9f8fd5c60783": { kind: "passthrough", connectionType: "ETC auxiliary power" }, // AuxPowerReciever | AUXILIARY | 72 | co-occurs with the other two on one Bus
+  "0c508822-833d-4169-b3cf-3fc1bd667947": { kind: "passthrough", connectionType: "ETC auxiliary power" }, // AuxiliaryPower | AUXILIARY | 39
+  "9c23dfb5-6ec6-4afc-818a-e6de8acf3bcc": { kind: "passthrough", connectionType: "ETC auxiliary power" }, // ParadigmAuxiliaryPower | AUXILIARY | 14
   "813d35ed-b976-4c98-bfe6-00ce240b42f9": { kind: "passthrough", connectionType: "ETC F-Drive R12 power supply" }, // F-DriveR12PowerSupply | 2
   "98fd246f-8612-4545-b303-a097beaba911": { kind: "passthrough", connectionType: "ETC F-Drive RX power supply" }, // F-DriveRXPowerSupply | 2
 

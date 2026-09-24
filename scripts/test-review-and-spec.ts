@@ -8123,8 +8123,10 @@ const fdrive162 = [
   "e4699b60-48e4-491b-8b8d-c0c90bff073e", "3b247b12-0139-4755-9303-986fd7f147e4",
   "9f1f7378-5890-4e8f-9e0f-a746d696e0d7", "39f8e3dc-6877-4d84-81e4-8db395a72eba",
   "c6ad45b9-e2d6-4a9e-95ac-d3c4fd63dd7d", "e1c07a88-547d-43bd-9c6c-bb230ad94de7",
+  "e246c0e7-39ba-47c3-9bd1-52454b6e9149", "9b6372db-22d6-4690-a41f-89cd5b752575",
+  "813d35ed-b976-4c98-bfe6-00ce240b42f9", "98fd246f-8612-4545-b303-a097beaba911",
 ].map((id) => mapProtocol(id, "RJ45 Female")).map((r) => ("connectionType" in r ? r.connectionType : "X"));
-ok(new Set(fdrive162).size === 6, "#162 the F-DRIVE protocols do not collapse into one connection type");
+ok(new Set(fdrive162).size === 10, "#162 the ten F-DRIVE protocols do not collapse into one connection type");
 
 // D3/D4 — power is the only place the connector refines the answer.
 const POWER162 = "aa07559e-6609-4ec6-8df3-8990d6bc9909";
@@ -8135,6 +8137,21 @@ ok(ct162(POWER162, "Terminal Block") === "bare-end", "#162 a hardwired connector
 ok(ct162(POWER162, "Screw Terminal") === "bare-end", "#162 screw terminals are bare-end");
 ok(ct162(POWER162, "Power") === "line power (unspecified)", "#162 DaVinci's generic Power connector is not guessed as Edison or stage pin");
 ok(ct162(POWER162, "") === "line power (unspecified)", "#162 a power port with no connector is unspecified, not bare-end");
+
+// Voltage classes must never share an identity — a low-voltage auxiliary bus
+// validating against a 480V feeder is the exact failure this map exists to prevent.
+const AUX162 = "0c508822-833d-4169-b3cf-3fc1bd667947";
+const V208_162 = "ca96a25e-b72f-4bb6-a628-f83dfb1caa83";
+const V480_162 = "25636fee-a970-4c76-b5cc-7de92724a664";
+ok(ct162(AUX162, "Terminal Block") !== ct162(V480_162, "Terminal Block"), "#162 auxiliary power and a 480V feeder are different connection types");
+ok(ct162(V208_162, "Terminal Block") !== ct162(V480_162, "Terminal Block"), "#162 208V and 480V feeders are different connection types");
+ok(ct162(AUX162, "Terminal Block") !== ct162(POWER162, "Terminal Block"), "#162 auxiliary power is not the same as hardwired mains");
+// The three auxiliary protocols DO share one identity — they co-occur on one device as a Bus.
+ok(
+  ct162("1a0f1e55-53a5-452a-8294-9f8fd5c60783", "Terminal Block") === ct162(AUX162, "Terminal Block") &&
+    ct162("9c23dfb5-6ec6-4afc-818a-e6de8acf3bcc", "Terminal Block") === ct162(AUX162, "Terminal Block"),
+  "#162 the three auxiliary-power protocols share one identity so the bus still connects"
+);
 
 // The connector is advisory everywhere else: DMX is DMX on any connector.
 const DMX162 = "698f9701-604c-4432-902f-19866c061108";
