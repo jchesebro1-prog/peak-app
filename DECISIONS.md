@@ -4808,6 +4808,46 @@ The measured effect is the justification: a fresh datadir went from 5 intermitte
 that they taught everyone to dismiss a red `test:specs`, which five separate people had already
 done before this was fixed.
 
+## D205. Change type is drafts-only and deletes the old draft — no void status (#160, 2026-09-24)
+
+A quote's type decides its builder, its engine subdoc and what winning spawns, so a type change is
+a new quote, not an edit. "Change type" therefore exists only on a **draft** (sent/won/lost render it
+disabled: "Already sent — start a new quote instead."). It reopens `/quotes/new?replaces=<id>`
+pre-filled from that quote. Picking a different builder confirms with the old quote's id and line count,
+then opens the new builder carrying `replaces`. The old draft is soft-deleted (`remove()`) by
+`retireReplacedDraft()` **only on the replacement's first save**, and only after a server-side re-check that
+it is still a draft. Backing out leaves it untouched, and a quote sent in another tab in the meantime survives.
+System and custom both build in the Estimator (category is editable there), so moving between them
+reopens the same quote rather than replacing it.
+
+Rejected: a `void` status or marking the old quote `lost`. Either keeps a phantom row in the pipeline,
+and `lost` would count against win-rate reports.
+
+Two edge cases left as-is: the same-builder case (e.g. flame→flame) returns to the old quote without
+applying the intake edits — the only hint is the "Back to <id> →" label. And a draft linked from a Grid
+project or Quick Design that gets replaced leaves that link pointing at a deleted quote; the next
+re-quote from there mints a fresh one.
+
+## D206. Editing customer, venue or contact on a won quote warns — it doesn't block (#160, 2026-09-24)
+
+Winning spawns a project/job that copies the customer, venue and contact at that moment. Later quote edits
+do not flow into it. Every builder now confirms first ("This quote is won — its project/job keeps the old
+<field>. Change the quote anyway?"), once per field per visit, and proceeds on OK. Renaming never warns.
+The rental builder is exempt because a won rental's Save is already locked. Syncing edits into spawned
+records stays out of scope.
+
+Changing the customer on a won quote also resets venue and contact to the new customer's primaries,
+under the single "customer" confirm — venue and contact don't get their own separate prompts in that case.
+
+## D207. Labor opens with one mobilization; the D136 five are per-type defaults (#161, 2026-09-24)
+
+Supersedes D136's opening rows. Labor now opens with one blank row (Select type…, 1 × 1).
+Jeff: the five D136 values (Site Visit 1×1, Install 4×5, Hang 2×3, Commissioning 2×3, Training 1×1) were
+always meant as crew-size × days defaults. Picking a type fills them only while the row's numbers still equal
+the previous type's defaults (1 × 1 for a blank row). Numbers the user typed, and rows with a custom name,
+are left alone. "+ Add mobilization" still adds exactly one row. Resolves PUNCHLIST's "Labor: single
+mobilization" question.
+
 ## D208. D187 is superseded: the DaVinci library intersects the catalog by 73.7% (#162, 2026-09-23)
 
 D187 closed the DaVinci import on 2026-09-22 with "it does not intersect Peak's catalog",
