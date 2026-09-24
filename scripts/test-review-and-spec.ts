@@ -7,6 +7,7 @@ import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/compone
 import { normalizeSku } from "@/lib/davinci/sku";
 import { PROTOCOL_MAP, DIRECTION_MAP, mapProtocol, PASSTHROUGH_TYPES } from "@/lib/davinci/protocol-map";
 import { extractLibrary } from "@/lib/davinci/extract";
+import { buildIndex, matchSku } from "@/lib/davinci/match";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { TABS } from "@/app/(app)/design/engagements/tabs";
@@ -8281,3 +8282,19 @@ ok(r162.ports[0].connectionType === "powerCON/True1" && r162.ports[0].direction 
 ok(r162.ports[1].connectionType === "DMX512 (5-pin XLR)", "#162 a DMX port maps through");
 ok(r162.ports[2].connectionType === "line power (unspecified)" && r162.ports[2].direction === "io", "#162 a generic-connector Bus power port becomes unspecified/io");
 ok(r162.ports.every((p) => typeof p.name === "string"), "#162 every emitted port has a string name, never undefined");
+
+/* ====== #162 matcher ====== */
+const IDX162 = buildIndex(ex162.records);
+ok(matchSku("CSPAR", IDX162)?.typeId === "TY-1", "#162 a bare production SKU matches");
+ok(matchSku("ETC:CSPAR", IDX162)?.typeId === "TY-1", "#162 a prefixed dev SKU matches the same record");
+ok(matchSku("7410A1001", IDX162)?.typeId === "TY-1", "#162 a part number matches as well as a model number");
+ok(matchSku("cspar", IDX162)?.typeId === "TY-1", "#162 matching is case-insensitive");
+ok(matchSku("NOT-A-PART", IDX162) === null, "#162 an unknown SKU returns null, never a near miss");
+ok(matchSku("", IDX162) === null, "#162 an empty SKU never matches");
+ok(matchSku("   ", IDX162) === null, "#162 a whitespace SKU never matches");
+// First record wins on a collision, deterministically — never a random one.
+const dupe162 = buildIndex([
+  { typeId: "A", displayName: "A", category: "c", modelNumbers: ["SHARED"], ports: [], docs: [] },
+  { typeId: "B", displayName: "B", category: "c", modelNumbers: ["SHARED"], ports: [], docs: [] },
+]);
+ok(matchSku("SHARED", dupe162)?.typeId === "A", "#162 a duplicated identifier resolves to the first record, deterministically");
