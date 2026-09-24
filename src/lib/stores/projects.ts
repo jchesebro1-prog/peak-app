@@ -479,6 +479,48 @@ function recordStageChange(p: ProjectRecord, to: string, by: string, pipes: Pipe
   p.stageMeta = projectStageMeta(pipes, p);
 }
 
+type StageAt = { stage: string; tag: ProjectTag };
+
+function stageAt(p: ProjectRecord, pipes: Pipelines): StageAt {
+  return { stage: p.stage, tag: projectTag(p, pipes) };
+}
+
+/**
+ * The one post-transition hook — every stage writer (setProjectStage, the
+ * delivery auto-advance, sign-off) calls it AFTER its patch lands, with the
+ * before/after stage + tag. No-op when the stage didn't change.
+ *
+ * - #17 template expansion: entering a stage adds its standard checklist once
+ *   (coverage-key de-dup), whichever path moved the record there.
+ * - Done hook (Item 16 / punch #16): the first time a record lands on its
+ *   pipeline's Done-tagged stage, mint the "walk the completed site" Home
+ *   Queue assignment (moved here from signoffAction). A failed mint is logged,
+ *   never thrown — the stage change is already saved and must not be reported
+ *   to the user as a failed stage update.
+ */
+async function afterStageChange(p: ProjectRecord, prev: StageAt, next: StageAt, by: string): Promise<void> {
+  if (prev.stage === next.stage) return;
+  const { TASK_TEMPLATE, expandTemplate, tasksForProject, createAutoTask } = await import("@/lib/stores/tasks");
+  const existing = new Set((await tasksForProject(p.id)).map((t) => t.coverageKey).filter(Boolean) as string[]);
+  for (const item of expandTemplate(TASK_TEMPLATE[next.stage] || [], p.id + ":" + next.stage, existing)) {
+    await createAutoTask({ ...item, projectId: p.id, title: item.title });
+  }
+  if (prev.tag !== "done" && next.tag === "done") {
+    const label = p.name || p.customer || p.id;
+    try {
+      await createAssignment({
+        title: `Walk the completed site with the end user: ${label}`,
+        assignee: p.owner || "Jeff Chesebro",
+        createdBy: by,
+        link: { kind: "project", id: p.id, label },
+        source: "auto: project complete (#16)",
+      });
+    } catch (error) {
+      console.error(`afterStageChange: completion follow-up for ${p.id} could not be created`, error);
+    }
+  }
+}
+
 /**
  * Move a record to a stage of its own pipeline. Refuses (returns null) a stage
  * id that isn't in the record's pipeline, or a missing/deleted record.
@@ -492,42 +534,17 @@ export async function setProjectStage(
   const current = await getDoc<ProjectRecord>("projects", id);
   if (!current) return null;
   if (!stageById(projectPipelineFor(pipes, current), stageId)) return null;
-  const prev: { tag: ProjectTag | null } = { tag: null };
+  const prev: { at: StageAt | null } = { at: null };
   const result = await patchDoc<ProjectRecord>("projects", id, (p) => {
     normalizeProject(p, pipes);
-    prev.tag = projectTag(p, pipes);
+    prev.at = stageAt(p, pipes);
     recordStageChange(p, stageId, by, pipes);
     p.updatedAt = now();
     return p;
   });
-
-  // #17 template expansion: entering a stage adds its standard checklist once
-  // (coverage-key de-dup). Guarded on `result` — patchDoc returns null for a
-  // nonexistent or soft-deleted project, and the expansion must not fire when
-  // the stage patch never actually applied.
-  if (result) {
-    const { TASK_TEMPLATE, expandTemplate, tasksForProject, createAutoTask } = await import("@/lib/stores/tasks");
-    const existing = new Set((await tasksForProject(id)).map((t) => t.coverageKey).filter(Boolean) as string[]);
-    for (const item of expandTemplate(TASK_TEMPLATE[stageId] || [], id + ":" + stageId, existing)) {
-      await createAutoTask({ ...item, projectId: id, title: item.title });
-    }
-
-    // Done hook (Item 16 / punch #16): the first time a record lands on its
-    // pipeline's Done-tagged stage, mint the "walk the completed site" Home
-    // Queue assignment. Moved here from signoffAction — sign-off now stops at
-    // closeout, so any path that reaches Done (the stage tracker, Advance)
-    // owns the follow-up. Re-entering Done from Done never re-mints.
-    if (projectTag(result, pipes) === "done" && prev.tag !== "done") {
-      const label = result.name || result.customer || id;
-      await createAssignment({
-        title: `Walk the completed site with the end user: ${label}`,
-        assignee: result.owner || "Jeff Chesebro",
-        createdBy: by,
-        link: { kind: "project", id, label },
-        source: "auto: project complete (#16)",
-      });
-    }
-  }
+  // Guarded on `result` — patchDoc returns null for a nonexistent or
+  // soft-deleted project, and the hook must not fire when the patch never applied.
+  if (result && prev.at) await afterStageChange(result, prev.at, stageAt(result, pipes), by);
 
   return result;
 }
@@ -864,8 +881,10 @@ export async function setDeliveryStatus(
   if (!p) return null;
   if (!(p.deliveries || []).some((d) => d.id === deliveryId)) return null;
   const pipes = await loadPipelines();
-  return patchDoc<ProjectRecord>("projects", id, (doc) => {
+  const prev: { at: StageAt | null } = { at: null };
+  const result = await patchDoc<ProjectRecord>("projects", id, (doc) => {
     normalizeProject(doc, pipes);
+    prev.at = stageAt(doc, pipes);
     const pl = projectPipelineFor(pipes, doc);
     const deliveries = Array.isArray(doc.deliveries) ? doc.deliveries : [];
     doc.deliveries = deliveries;
@@ -890,6 +909,8 @@ export async function setDeliveryStatus(
     doc.updatedAt = now();
     return doc;
   });
+  if (result && prev.at) await afterStageChange(result, prev.at, stageAt(result, pipes), "System");
+  return result;
 }
 
 /* ---------- crew ---------- */
@@ -995,8 +1016,10 @@ export async function setSignoff(
   signedBy?: string
 ): Promise<ProjectRecord | null> {
   const pipes = await loadPipelines();
-  return patchDoc<ProjectRecord>("projects", id, (p) => {
+  const prev: { at: StageAt | null } = { at: null };
+  const result = await patchDoc<ProjectRecord>("projects", id, (p) => {
     normalizeProject(p, pipes);
+    prev.at = stageAt(p, pipes);
     p.signoff = signoff
       ? { signedBy: signedBy || DEFAULT_ACTOR, signedAt: now(), ...signoff }
       : null;
@@ -1011,6 +1034,8 @@ export async function setSignoff(
     p.updatedAt = now();
     return p;
   });
+  if (result && prev.at) await afterStageChange(result, prev.at, stageAt(result, pipes), signedBy || DEFAULT_ACTOR);
+  return result;
 }
 
 /* ---------- derived helpers (lead times) — pure, synchronous ---------- */

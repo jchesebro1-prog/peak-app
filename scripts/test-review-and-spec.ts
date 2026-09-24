@@ -6985,6 +6985,22 @@ async function projectsPipelineAsyncChecks(): Promise<void> {
 
     for (const id of [a.id, o.id, "P-legacy-1", svc.id]) await P.removeProject(id);
   }
+  // One post-transition hook: every path into Done mints the #16 follow-up once; auto-moves expand checklists.
+  {
+    const { allAssignments } = await import("@/lib/stores/assignments");
+    const x = await ProjStore.createProject({ name: "pl-test done hook" });
+    const doneCount = async () =>
+      (await allAssignments()).filter((as) => as.source === "auto: project complete (#16)" && as.link?.kind === "project" && as.link?.id === x.id).length;
+    await ProjStore.setProjectStage(x.id, "complete", "Test");
+    ok((await doneCount()) === 1, "projects: entering Complete mints exactly one completion follow-up");
+    await ProjStore.setProjectStage(x.id, "complete", "Test");
+    ok((await doneCount()) === 1, "projects: re-entering Complete does not mint a second follow-up");
+    const y = await ProjStore.createProject({ name: "pl-test signoff checklist", stage: "initial-contact" });
+    await ProjStore.setSignoff(y.id, { name: "Pat", role: "Customer" }, "Test");
+    const yKeys = (await tasksForProject(y.id)).map((t) => t.coverageKey || "");
+    ok(yKeys.some((k) => k.startsWith(y.id + ":invoice:")), "projects: sign-off into Invoice expands the Invoice checklist");
+    for (const id of [x.id, y.id]) await ProjStore.removeProject(id);
+  }
   // Task 2's deferred in-use guard — a stage id a live project sits in can't be removed.
   {
     const { loadPipelines, savePipelines } = await import("@/lib/pipelines-server");
