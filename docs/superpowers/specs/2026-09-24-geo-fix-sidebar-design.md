@@ -57,7 +57,8 @@ whether the fix came from the sidebar, the batch runner, or the Companies editor
 
 Each row shows:
 
-- company name, which links to the company as it does elsewhere;
+- company name. The whole row opens the sidebar, so the link to the company sits in the
+  sidebar header rather than on the row, where it would fight the row click;
 - venue name (`Untitled venue` when blank, matching `/venues`);
 - the stored address: street · city, state zip;
 - **reason**, when this browser's current run recorded one for that venue ("No match",
@@ -87,7 +88,8 @@ Clicking a row opens a right-hand slide-over panel (fixed, full height, ~420px; 
 640px). It closes on ×, Escape, or a click on the backdrop. It holds three fix paths and one
 result area.
 
-**Header:** company · venue, and the stored address as it was when opened.
+**Header:** company (linked to `/companies/<id>`, new tab) · venue, and the stored address as it
+was when opened.
 
 **A. Edit + retry.** Street, City, State and Zip fields, pre-filled from the venue. **Retry**
 runs this one venue through exactly the batch's logic (§3.4): `cleanStreet()`, free-text versus
