@@ -10,7 +10,7 @@ import { setPriceListEffective, setSettings } from "@/lib/settings";
 import { GROUPS, TRADES, type CategoryMap } from "@/lib/catalog-taxonomy";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { runCatalogImport } from "./import";
-import { parsePortsField } from "@/lib/catalog-ports";
+import { parsePortsField, serializePorts } from "@/lib/catalog-ports";
 import type { Port } from "@/lib/catalog-connect";
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -44,6 +44,14 @@ export async function deleteCatalogPriceListAction(formData: FormData): Promise<
  * can delete a part's last port. Unknown connection types are refused rather
  * than stored, because validateDeviceWire resolves against CONNECTION_TYPES
  * and a bad value would silently unwire the device (D189).
+ *
+ * Replacing the ports also clears the `davinci` provenance stamp (#162). The
+ * stamp means "the enricher wrote these" — it drives the editor's "These ports
+ * came from ETC's DaVinci library" banner and, since the enricher now
+ * recognises its own prior writes, whether a later library revision may
+ * overwrite them. Leaving it on ports a human just replaced would keep showing
+ * a banner about ports DaVinci no longer wrote, and would put the hand edit
+ * back in the enricher's path.
  */
 export async function upsertPart(formData: FormData): Promise<void> {
   await requireUser();
@@ -61,7 +69,16 @@ export async function upsertPart(formData: FormData): Promise<void> {
     ports = parsed.ports;
   }
 
+  // Compared through serializePorts — the same stable key order the editor's
+  // hidden field uses — so re-saving the modal without touching the ports is a
+  // no-op and keeps the stamp. `undefined` in a mergeUpsert patch drops the key
+  // from the stored JSON document, which is how the stamp is cleared.
+  const existing = ports ? await getPart(sku) : null;
+  const portsReplaced =
+    !!existing?.davinci && !!ports && serializePorts(existing.ports ?? []) !== serializePorts(ports);
+
   await mergeUpsert(sku, {
+    ...(portsReplaced ? { davinci: undefined } : {}),
     desc,
     category: String(formData.get("category") || "").trim() || "Uncategorized",
     unit: String(formData.get("unit") || "").trim() || "ea",

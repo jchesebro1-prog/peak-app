@@ -18,6 +18,15 @@ import { PORT_DIRECTIONS, serializePorts } from "@/lib/catalog-ports";
  * typo would make the device silently unwireable rather than visibly wrong
  * (D189). The server re-validates anyway; this hidden input is editable in
  * devtools.
+ *
+ * Row order leads with connectionType, not name (#162). DaVinci's connector
+ * data is dirty in places — when the library leaves a port's name blank, the
+ * enricher falls back to the connector's own name, so a real production row
+ * can read `name: "DMX Male"` on a port whose connectionType is correctly
+ * "line power (unspecified)". The type is right (the enricher maps by
+ * protocol); the name is what misleads. Leading with connectionType and
+ * styling name as secondary keeps a contradictory name from being mistaken
+ * for the port's actual type.
  */
 
 const cell: React.CSSProperties = {
@@ -34,7 +43,16 @@ const cell: React.CSSProperties = {
 
 const DIRECTION_LABEL: Record<PortDirection, string> = { in: "In", out: "Out", io: "In/Out" };
 
-export default function PortsEditor({ initial }: { initial: Port[] }) {
+export default function PortsEditor({
+  initial,
+  davinci,
+}: {
+  initial: Port[];
+  /** Provenance stamp (#162) — present when these ports were written by a
+   *  DaVinci enrichment run, so a human editing here knows a future run will
+   *  leave their version alone rather than silently overwrite it. */
+  davinci?: { enrichedAt: number };
+}) {
   const [rows, setRows] = useState<Port[]>(initial);
 
   const patch = (i: number, next: Partial<Port>) =>
@@ -52,6 +70,23 @@ export default function PortsEditor({ initial }: { initial: Port[] }) {
         it refuses to connect two that do not share a connection type.
       </div>
 
+      {davinci && (
+        <div
+          style={{
+            fontSize: 11,
+            color: "#8a6d1f",
+            background: "#fbf3dd",
+            border: "1px solid #f0e2bd",
+            borderRadius: 7,
+            padding: "7px 10px",
+            marginBottom: 8,
+          }}
+        >
+          These ports came from ETC&rsquo;s DaVinci library ({new Date(davinci.enrichedAt).toLocaleDateString()}).
+          Editing them here means a future enrichment run will leave your version alone.
+        </div>
+      )}
+
       {rows.length === 0 && (
         <div style={{ fontSize: 12, color: "#aab0bb", padding: "8px 0" }}>
           No ports — this part cannot be wired in The Grid yet.
@@ -59,24 +94,7 @@ export default function PortsEditor({ initial }: { initial: Port[] }) {
       )}
 
       {rows.map((row, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "1.1fr .7fr 1.5fr 56px 30px", gap: 6, marginBottom: 6, alignItems: "center" }}>
-          <input
-            aria-label={`Port ${i + 1} name`}
-            value={row.name}
-            onChange={(e) => patch(i, { name: e.target.value })}
-            placeholder="Audio in"
-            style={cell}
-          />
-          <select
-            aria-label={`Port ${i + 1} direction`}
-            value={row.direction}
-            onChange={(e) => patch(i, { direction: e.target.value as PortDirection })}
-            style={cell}
-          >
-            {PORT_DIRECTIONS.map((d) => (
-              <option key={d} value={d}>{DIRECTION_LABEL[d]}</option>
-            ))}
-          </select>
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr .7fr 56px 30px", gap: 6, marginBottom: 6, alignItems: "center" }}>
           <select
             aria-label={`Port ${i + 1} connection type`}
             value={row.connectionType}
@@ -92,6 +110,26 @@ export default function PortsEditor({ initial }: { initial: Port[] }) {
             <option value="" disabled>Choose a connection type…</option>
             {CONNECTION_TYPES.map((c) => (
               <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          {/* Secondary detail (#162) — connectionType above is what actually
+              governs wireability; name is display-only and, on DaVinci rows,
+              can be a leftover connector label that disagrees with it. */}
+          <input
+            aria-label={`Port ${i + 1} name`}
+            value={row.name}
+            onChange={(e) => patch(i, { name: e.target.value })}
+            placeholder="Audio in"
+            style={{ ...cell, color: "#5b616e", fontSize: 12 }}
+          />
+          <select
+            aria-label={`Port ${i + 1} direction`}
+            value={row.direction}
+            onChange={(e) => patch(i, { direction: e.target.value as PortDirection })}
+            style={cell}
+          >
+            {PORT_DIRECTIONS.map((d) => (
+              <option key={d} value={d}>{DIRECTION_LABEL[d]}</option>
             ))}
           </select>
           <input

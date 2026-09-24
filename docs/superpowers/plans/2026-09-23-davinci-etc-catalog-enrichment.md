@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Write manufacturer-authored ports and datasheet links onto the 3,424 production catalog rows that match an entry in ETC's DaVinci library, without creating a row or touching a price.
+**Goal:** Write manufacturer-authored ports and datasheet links onto the 2,917 production catalog rows that match a DaVinci entry carrying either, without creating a row or touching a price.
 
 **Architecture:** A pure mapping layer (`src/lib/davinci/*`) turns DaVinci's UUID-referenced port records into Peak `Port[]`. A build step distils the 116 MB library into a 0.52 MB committed extract. A single writer module plans and applies enrichment against the catalog doc-store. A CLI reports, dry-runs, then commits behind the repo's two-flag hosted gate.
 
@@ -35,6 +35,7 @@ These apply to every task. Violating any one of them fails the task's review.
 | `src/lib/davinci/types.ts` | `DavinciRecord`, `DavinciDoc` |
 | `src/lib/davinci/extract.ts` | `library.json` → `DavinciRecord[]` |
 | `src/lib/davinci/match.ts` | index + lookup |
+| `src/lib/davinci/load.ts` | reads the committed extract (the only `node:fs` in the layer) |
 | `src/lib/catalog-davinci-apply.ts` | the only module that writes |
 | `scripts/davinci-extract.ts` | regenerates the committed extract |
 | `scripts/davinci-enrich.ts` | report / dry-run / commit CLI |
@@ -502,9 +503,12 @@ In `src/lib/catalog-connect.ts`, append to `CONNECTION_TYPES` before the closing
   // DMX terminal block. 508 ETC parts (19.3% of those with ports) would import
   // unwireable without these.
   "ETC 0-10V dimming",
+  "ETC 208V feeder",
+  "ETC 480V feeder",
   "ETC ArcSystem D1HO driver",
   "ETC ArcSystem D2 driver",
   "ETC ArcSystem D4 driver",
+  "ETC auxiliary power",
   "ETC BluesSystem low voltage",
   "ETC CANbus",
   "ETC Control/SafetyLink (MCX)",
@@ -557,6 +561,11 @@ Add `"line power (unspecified)"` to the existing `powercon-power` wire type's
     ],
   },
   { id: "etc-arcsystem", label: "ETC ArcSystem driver", connectionTypes: ["ETC ArcSystem D1HO driver", "ETC ArcSystem D2 driver", "ETC ArcSystem D4 driver"] },
+  // 208V and 480V share a wire type but NOT an identity — a wire type answers
+  // "what cable runs this", never "what mates with what" (cat6 already carries
+  // Dante, sACN and HDBaseT, none of which mate).
+  { id: "etc-feeder", label: "ETC feeder (208V/480V)", connectionTypes: ["ETC 208V feeder", "ETC 480V feeder"] },
+  { id: "etc-aux-power", label: "ETC auxiliary power", connectionTypes: ["ETC auxiliary power"] },
   { id: "etc-dali", label: "DALI", connectionTypes: ["ETC DALI"] },
   { id: "etc-0-10v", label: "0-10V dimming", connectionTypes: ["ETC 0-10V dimming"] },
   { id: "etc-usb", label: "USB", connectionTypes: ["ETC USB"] },
@@ -890,10 +899,14 @@ export PATH="$HOME/.local/node/bin:$PATH" && npm run davinci:extract
 Expected, measured against the real library on 2026-09-23:
 
 ```
-[davinci] 1720 records · 14108 identifiers · 6241 ports · 2836 docs · 1.35 MB → data/davinci-extract.json
+[davinci] 1720 records · 14108 identifiers · 6241 ports · 2836 docs · ~1.35 MB → data/davinci-extract.json
 ```
 
-Treat a material deviation as a bug in Task 2 or Task 4, not as drift. The
+The four counts are exact — they were measured against the real library. The
+**size is approximate**: the measurement used a fixed-width placeholder for
+`connectionType`, and the real labels vary in length, so anything in the
+1.2–1.6 MB range is correct. Treat a deviation in the *counts* as a bug in
+Task 2 or Task 4, not as drift. The
 extract covers every eligible type, not only the 908 that match today's
 catalog, which is why it is larger than the 0.52 MB measured for matches alone.
 If it throws on an unmapped protocol UUID, Task 2's map is incomplete — add the
@@ -911,15 +924,21 @@ git commit -m "feat(davinci): extract the library to a committed 0.5MB artifact 
 ### Task 5: The matcher
 
 **Files:**
-- Create: `src/lib/davinci/match.ts`
+- Create: `src/lib/davinci/match.ts` — pure, no I/O
+- Create: `src/lib/davinci/load.ts` — the only file here that touches the filesystem
 - Test: `scripts/test-review-and-spec.ts`
 
 **Interfaces:**
 - Consumes: `normalizeSku`, `DavinciRecord`, `DavinciExtract`
 - Produces:
-  - `buildIndex(records: readonly DavinciRecord[]): Map<string, DavinciRecord>`
-  - `matchSku(sku: string, index: Map<string, DavinciRecord>): DavinciRecord | null`
-  - `loadExtract(): DavinciExtract` — reads the committed JSON, memoized
+  - `match.ts`: `buildIndex(records: readonly DavinciRecord[]): Map<string, DavinciRecord>`
+  - `match.ts`: `matchSku(sku: string, index: Map<string, DavinciRecord>): DavinciRecord | null`
+  - `load.ts`: `loadExtract(file?: string): DavinciExtract` — memoized
+
+**Why two files:** `loadExtract` needs `node:fs`. Keeping it out of `match.ts`
+means `match.ts` stays pure and safe to import from anywhere, including a
+client component — `node:fs` reached through a client import chain is a build
+error, and the split costs nothing.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -960,11 +979,10 @@ export PATH="$HOME/.local/node/bin:$PATH" && npm run test:specs 2>&1 | tail -20
  * Both sides go through `normalizeSku`, which is why it lives in its own module:
  * production writes bare model numbers, local dev writes `MFR:`-prefixed ones,
  * and DaVinci writes bare model AND part numbers. Measured 2026-09-23 against
- * production: 3,424 of 3,959 ETC rows (86.5%) match.
+ * production: 2,917 of 3,959 ETC rows (73.7%) match.
  */
-import { readFileSync } from "node:fs";
 import { normalizeSku } from "./sku";
-import type { DavinciExtract, DavinciRecord } from "./types";
+import type { DavinciRecord } from "./types";
 
 export function buildIndex(records: readonly DavinciRecord[]): Map<string, DavinciRecord> {
   const idx = new Map<string, DavinciRecord>();
@@ -985,8 +1003,24 @@ export function matchSku(sku: string, index: Map<string, DavinciRecord>): Davinc
   return index.get(key) ?? null;
 }
 
+```
+
+`src/lib/davinci/load.ts`:
+
+```ts
+/**
+ * Read the committed DaVinci extract (#162, D8).
+ *
+ * Separate from `match.ts` purely so that `match.ts` stays free of `node:fs`
+ * and is therefore safe to import from a client component. This module is
+ * server/script only.
+ */
+import { readFileSync } from "node:fs";
+import type { DavinciExtract } from "./types";
+
 let cached: DavinciExtract | null = null;
-/** The committed extract. Memoized — callers walk 37k catalog rows against it. */
+
+/** Memoized — callers walk 37k catalog rows against the same extract. */
 export function loadExtract(file = "data/davinci-extract.json"): DavinciExtract {
   if (!cached) cached = JSON.parse(readFileSync(file, "utf8")) as DavinciExtract;
   return cached;
@@ -1002,7 +1036,7 @@ export PATH="$HOME/.local/node/bin:$PATH" && npm run test:specs 2>&1 | tail -5
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/lib/davinci/match.ts scripts/test-review-and-spec.ts
+git add src/lib/davinci/match.ts src/lib/davinci/load.ts scripts/test-review-and-spec.ts
 git commit -m "feat(davinci): SKU matcher over the committed extract (#162)"
 ```
 
@@ -1016,7 +1050,7 @@ git commit -m "feat(davinci): SKU matcher over the committed extract (#162)"
 - Test: `scripts/test-review-and-spec.ts`
 
 **Interfaces:**
-- Consumes: `loadExtract`, `buildIndex`, `matchSku`, catalog store `list`/`mergeUpsert`
+- Consumes: `loadExtract` (from `@/lib/davinci/load`), `buildIndex`/`matchSku` (from `@/lib/davinci/match`), catalog store `list`/`mergeUpsert`
 - Produces:
   - `type EnrichPlan = { sku: string; displayName: string; ports: Port[]; docs: DavinciDoc[]; typeId: string; skip?: "has-ports" | "nothing-to-write" }`
   - `planEnrichment(opts: { mfr?: string; onlySkus?: string[]; force?: boolean }): Promise<{ plans: EnrichPlan[]; stats: EnrichStats }>`
@@ -1118,7 +1152,8 @@ export PATH="$HOME/.local/node/bin:$PATH" && npm run test:specs 2>&1 | tail -20
  */
 import type { Port } from "@/lib/catalog-connect";
 import { list as allParts, mergeUpsert, type CatalogPart } from "@/lib/stores/catalog";
-import { buildIndex, loadExtract, matchSku } from "@/lib/davinci/match";
+import { buildIndex, matchSku } from "@/lib/davinci/match";
+import { loadExtract } from "@/lib/davinci/load";
 import type { DavinciDoc } from "@/lib/davinci/types";
 
 export type EnrichPlan = {
@@ -1446,8 +1481,8 @@ set -a && . ./.env.production.local && set +a
 npx tsx scripts/davinci-enrich.ts --mfr=ETC
 ```
 
-Expected, from the 2026-09-23 measurement: `scanned 3,959`, `matched ~3,424`,
-`writable ~2,866`, `skipped, has ports 0`, `unmatched ~535`. **Report these to
+Expected, from the verified 2026-09-24 end-to-end run: `scanned 3,959`, `matched ~2,917`,
+`writable ~2,917`, `skipped, has ports 0`, `unmatched ~1,042`. **Report these to
 Jeff and stop.** A materially different number means something changed and is
 worth understanding before writing.
 

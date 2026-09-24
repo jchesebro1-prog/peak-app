@@ -4501,7 +4501,8 @@ to check.
 
 > **SUPERSEDED by D208 (2026-09-23).** The conclusion below is wrong: every check behind it ran
 > against local dev (10 ETC rows), not production (3,959 ETC rows, all priced), where the
-> intersection is 86.5%. The reasoning is kept intact as the record of how it went wrong.
+> intersection is 86.5% by entry, 73.7% by usable data. The reasoning is kept intact as the
+> record of how it went wrong.
 
 Ports for Peak's catalog are curated, not sourced from the DaVinci export
 `promote-sales-compliance` proposed (`data/davinci/`, 116 MB, 2,366 device types, 1,381 with
@@ -4807,7 +4808,7 @@ The measured effect is the justification: a fresh datadir went from 5 intermitte
 that they taught everyone to dismiss a red `test:specs`, which five separate people had already
 done before this was fixed.
 
-## D208. D187 is superseded: the DaVinci library intersects the catalog by 86.5% (#162, 2026-09-23)
+## D208. D187 is superseded: the DaVinci library intersects the catalog by 73.7% (#162, 2026-09-23)
 
 D187 closed the DaVinci import on 2026-09-22 with "it does not intersect Peak's catalog",
 verified four independent ways — including a brute-force match of 17,831 identifier-shaped
@@ -4817,9 +4818,11 @@ rows, every one carrying both list and dealer cost.** Measured against productio
 
 | | rows | share of 3,959 |
 |---|---|---|
-| Matched a DaVinci model/part number | 3,424 | **86.5%** |
-| …would receive `ports[]` | 2,629 | 66.4% |
-| …would receive document links | 2,866 | 72.4% |
+| Has a DaVinci model/part number | 3,424 | 86.5% |
+| …that entry has neither ports nor documents | 507 | 12.8% |
+| **Will actually be enriched** | **2,917** | **73.7%** |
+| …would receive `ports[]` | 2,636 | 66.6% |
+| …would receive document links | 2,872 | 72.5% |
 | No DaVinci entry | 535 | 13.5% |
 
 The 535 misses are correct misses — `99XX-XX-XX` configurator placeholders, bare option codes
@@ -4848,3 +4851,58 @@ production.
 
 Supersedes D187. The enrichment design it unblocks is
 `docs/superpowers/specs/2026-09-23-davinci-etc-catalog-enrichment-design.md` (punch #162).
+
+## D209. The DaVinci enrichment shipped — scoped by manufacturer, ports deduped (#162, 2026-09-24)
+
+2,917 of production's 3,959 ETC catalog rows now carry manufacturer-authored ports (2,647) and
+public ETC document links (2,872), written after a full backup. All 3,959 still carry `list` and
+`cost`, the catalog is still 37,403 rows, and no non-ETC row was touched. This is the first port
+data production has ever held.
+
+**It is an enricher, not an importer.** It matches on SKU, so it only ever touches rows Peak already
+owns and prices; it creates no rows and has no opinion on price. Re-running it after a future
+price-book import picks up the new rows with no code change. The source is a committed 1.39 MB
+extract (`data/davinci-extract.json`, 1,720 records) distilled from ETC's 42 MB library, which stays
+gitignored on one machine.
+
+**Two defects the final whole-branch review caught, both of which would have shipped:**
+
+1. **Nothing constrained a match to the right manufacturer.** Matching is by normalized SKU alone,
+   and the documented write command was unscoped. Verified against the real extract: `Symetrix:4.50%`
+   normalizes to `450` and matched ETC's "Source Four 50 Degree"; so did `Draper:450`, `Crestron:405`
+   and `Biamp:0`. Production holds 19,326 Draper / Crestron / Legrand AV rows whose part numbers look
+   exactly like that, and none had ever been run against the index. This is the same false-positive
+   class D187 recorded as `QSC:SP-36` ↔ `SP3-6`, and it would have put another manufacturer's
+   datasheet in front of a customer. Fixed: the extract now carries DaVinci's manufacturer, an
+   explicit allowlist maps ETC / Echoflex / High End Systems onto Peak's single `ETC` book,
+   `planEnrichment` **requires** a manufacturer scope and throws without one, comparison goes through
+   `mfrKey()` like the rest of the codebase, and the report prints a `rejected, wrong mfr` count.
+
+2. **62 of 1,720 records carried duplicate ports**, which `parsePortsField` rejects because the Grid
+   inspector keys on `${name}-${connectionType}`. Enriching those rows would have made them
+   permanently un-saveable: any later edit — even a price change — would fail validation and strand
+   the row behind a `partError`. Fixed by collapsing identical ports into `count: N`, which `Port`
+   already supported.
+
+**Design decisions that survived review**, recorded because each was a real fork:
+
+- Unmapped ETC protocols pass through verbatim as their own namespaced connection types rather than
+  collapsing into the nearest Peak one. `canConnect` is exact string equality, so a passed-through
+  `ETC EchoConnect` mates only with itself — no false positives. Collapsing would have let the Grid
+  validate an Echoflex sensor against a DMX terminal block. 508 parts would have imported unwireable
+  without this.
+- The protocol map is keyed on UUID, never a name: `constantName` "NewPortProtocol" names three
+  distinct ArcSystem driver channels plus an internal blank, and ten protocols share the signal name
+  `F-DRIVE`. An unknown UUID throws rather than guessing.
+- Voltage classes stay distinct (D4b in the spec). The draft sent every hardwired power protocol to
+  `bare-end`, which would have let a low-voltage auxiliary bus validate against a 480V feeder.
+- Collisions are resolved deterministically — 440 identifiers are owned by more than one DaVinci
+  type — preferring an active type over a discontinued one, then the one with more ports.
+
+**Still open, deliberately:** `RDM` remains the one connection type with no wire type (DaVinci never
+emits it; whether it belongs on `dmx-5pin` is a call about Peak's own taxonomy). 1,042 ETC rows
+matched nothing — configurator placeholders, bare option codes, lamps, clamps — and
+`npm run davinci:enrich -- --mfr=ETC --unmatched` lists them.
+
+Spec: `docs/superpowers/specs/2026-09-23-davinci-etc-catalog-enrichment-design.md`.
+Supersedes nothing; extends D208.

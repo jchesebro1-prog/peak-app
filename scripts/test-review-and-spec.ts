@@ -4,6 +4,10 @@ import {
   type PhaseWeight, type ScheduleLine,
 } from "@/lib/consulting-schedule";
 import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
+import { normalizeSku } from "@/lib/davinci/sku";
+import { PROTOCOL_MAP, DIRECTION_MAP, mapProtocol, PASSTHROUGH_TYPES } from "@/lib/davinci/protocol-map";
+import { extractLibrary } from "@/lib/davinci/extract";
+import { buildIndex, buildIndexWithStats, matchSku } from "@/lib/davinci/match";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { TABS } from "@/app/(app)/design/engagements/tabs";
@@ -197,8 +201,14 @@ import {
 import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
 import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev, vendorTotalSeed } from "@/app/(app)/estimator/pricing";
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { loadExtract } from "@/lib/davinci/load";
+import type { DavinciExtract, DavinciRecord } from "@/lib/davinci/types";
+import { requireHostedConfirmation } from "./db-target";
+import { planEnrichment, applyEnrichment } from "@/lib/catalog-davinci-apply";
+import { upsert as upsertPart, get as getPart } from "@/lib/stores/catalog";
 import { mergeActivity, prefillFromMeeting } from "@/lib/engagement-activity";
 import { performCapture, type CaptureDeps } from "@/lib/engagement-activity-write";
 
@@ -6714,6 +6724,7 @@ seeded()
   .then(() => archiveAsyncChecks())
   .then(() => asyncChecks())
   .then(() => templateScheduleAsyncChecks())
+  .then(() => davinciWriterAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -8083,3 +8094,590 @@ ok(pre145.text.includes("fire curtain"), "#145 the pre-filled body carries the m
 ok(pre145.attendees.join("|") === "Dana Kim|Jeff C.", "#145 attendees are split for attachment to the note");
 ok(prefillFromMeeting({ id: "m", at: 0, title: "", attendees: "", minutes: "" }).text === "", "#145 an empty meeting pre-fills nothing rather than a header with no content");
 ok(!prefillFromMeeting({ id: "m", at: OCT6, title: "x", attendees: "", minutes: "y" }).text.includes("undefined"), "#145 a meeting with no attendees never renders the string 'undefined'");
+
+/* ====== #162 DaVinci enrichment — SKU normalizer ====== */
+ok(normalizeSku("ETC:ION XE 2K-US") === "IONXE2KUS", "#162 a MFR: prefix is stripped before normalizing");
+ok(normalizeSku("ION XE 2K-US") === "IONXE2KUS", "#162 a bare production SKU normalizes to the same key");
+ok(normalizeSku("ETC:ION XE 2K-US") === normalizeSku("ION XE 2K-US"), "#162 dev and prod spellings of one part agree");
+ok(normalizeSku("IRWLZ-30/80-120-C-DALI-1") === "IRWLZ3080120CDALI1", "#162 slashes and dashes are dropped");
+ok(normalizeSku("  arcp1s360wy  ") === "ARCP1S360WY", "#162 case and surrounding space are normalized");
+ok(normalizeSku("") === "", "#162 an empty SKU normalizes to empty, not to a match-everything key");
+ok(normalizeSku("::::") === "", "#162 a SKU that is only separators normalizes to empty");
+// A colon INSIDE the model number must not eat the real identifier.
+ok(normalizeSku("Allen & Heath:AH-DLIVE-CDM32-RUFX") === "AHDLIVECDM32RUFX", "#162 only the first prefix segment is dropped");
+
+/* ====== #162 protocol map ====== */
+ok(Object.keys(PROTOCOL_MAP).length === 56, "#162 every one of DaVinci's 56 protocols is mapped explicitly");
+
+// An unknown protocol must fail loudly, never default to something plausible.
+let threw162 = false;
+try { mapProtocol("00000000-0000-0000-0000-000000000000", "RJ45 Female"); } catch { threw162 = true; }
+ok(threw162, "#162 an unmapped protocol UUID throws rather than guessing a connection type");
+
+// D2 — the four NewPortProtocol entries are four different protocols.
+const arc162 = [
+  "a39a614e-3592-48f8-81d5-5d26a1d09e86",
+  "a9f1dd53-e35a-439a-b4d4-898408b208f4",
+  "ce5efb79-1a6b-4419-b597-2883291b6fad",
+].map((id) => mapProtocol(id, "Molex Thru"));
+const arcTypes162 = arc162.map((r) => ("connectionType" in r ? r.connectionType : "EXCLUDED"));
+ok(new Set(arcTypes162).size === 3, "#162 the three ARCSYSTEM protocols stay three distinct connection types");
+ok(
+  "excluded" in mapProtocol("1660207c-f71c-492e-9978-ad1e3859b8cc", "Ethercon Male"),
+  "#162 the blank fourth NewPortProtocol (RouteStubPrototype only) is excluded"
+);
+
+// The ten F-DRIVE protocols must not collapse either.
+const fdrive162 = [
+  "e4699b60-48e4-491b-8b8d-c0c90bff073e", "3b247b12-0139-4755-9303-986fd7f147e4",
+  "9f1f7378-5890-4e8f-9e0f-a746d696e0d7", "39f8e3dc-6877-4d84-81e4-8db395a72eba",
+  "c6ad45b9-e2d6-4a9e-95ac-d3c4fd63dd7d", "e1c07a88-547d-43bd-9c6c-bb230ad94de7",
+  "e246c0e7-39ba-47c3-9bd1-52454b6e9149", "9b6372db-22d6-4690-a41f-89cd5b752575",
+  "813d35ed-b976-4c98-bfe6-00ce240b42f9", "98fd246f-8612-4545-b303-a097beaba911",
+].map((id) => mapProtocol(id, "RJ45 Female")).map((r) => ("connectionType" in r ? r.connectionType : "X"));
+ok(new Set(fdrive162).size === 10, "#162 the ten F-DRIVE protocols do not collapse into one connection type");
+
+// D3/D4 — power is the only place the connector refines the answer.
+const POWER162 = "aa07559e-6609-4ec6-8df3-8990d6bc9909";
+const ct162 = (id: string, c: string) => { const r = mapProtocol(id, c); return "connectionType" in r ? r.connectionType : "EXCLUDED"; };
+ok(ct162(POWER162, "powerCON In") === "powerCON/True1", "#162 a powerCON connector resolves power to powerCON/True1");
+ok(ct162(POWER162, "powerCON TRUE1 Male") === "powerCON/True1", "#162 TRUE1 resolves to powerCON/True1");
+ok(ct162(POWER162, "Terminal Block") === "bare-end", "#162 a hardwired connector resolves power to bare-end");
+ok(ct162(POWER162, "Screw Terminal") === "bare-end", "#162 screw terminals are bare-end");
+ok(ct162(POWER162, "Power") === "line power (unspecified)", "#162 DaVinci's generic Power connector is not guessed as Edison or stage pin");
+ok(ct162(POWER162, "") === "line power (unspecified)", "#162 a power port with no connector is unspecified, not bare-end");
+
+// Voltage classes must never share an identity — a low-voltage auxiliary bus
+// validating against a 480V feeder is the exact failure this map exists to prevent.
+const AUX162 = "0c508822-833d-4169-b3cf-3fc1bd667947";
+const V208_162 = "ca96a25e-b72f-4bb6-a628-f83dfb1caa83";
+const V480_162 = "25636fee-a970-4c76-b5cc-7de92724a664";
+ok(ct162(AUX162, "Terminal Block") !== ct162(V480_162, "Terminal Block"), "#162 auxiliary power and a 480V feeder are different connection types");
+ok(ct162(V208_162, "Terminal Block") !== ct162(V480_162, "Terminal Block"), "#162 208V and 480V feeders are different connection types");
+ok(ct162(AUX162, "Terminal Block") !== ct162(POWER162, "Terminal Block"), "#162 auxiliary power is not the same as hardwired mains");
+// The three auxiliary protocols DO share one identity — they co-occur on one device as a Bus.
+ok(
+  ct162("1a0f1e55-53a5-452a-8294-9f8fd5c60783", "Terminal Block") === ct162(AUX162, "Terminal Block") &&
+    ct162("9c23dfb5-6ec6-4afc-818a-e6de8acf3bcc", "Terminal Block") === ct162(AUX162, "Terminal Block"),
+  "#162 the three auxiliary-power protocols share one identity so the bus still connects"
+);
+
+// The connector is advisory everywhere else: DMX is DMX on any connector.
+const DMX162 = "698f9701-604c-4432-902f-19866c061108";
+ok(
+  ct162(DMX162, "Terminal Block") === ct162(DMX162, "DMX Female") && ct162(DMX162, "DMX Female") === "DMX512 (5-pin XLR)",
+  "#162 DaVinci's dirty connector data never changes a non-power protocol's type"
+);
+
+// Directions — Bus and Configurable both become io.
+ok(DIRECTION_MAP["Input"] === "in" && DIRECTION_MAP["Output"] === "out", "#162 Input/Output map to in/out");
+ok(DIRECTION_MAP["Bidirectional"] === "io", "#162 Bidirectional maps to io");
+ok(DIRECTION_MAP["Bus"] === "io", "#162 a Bus port maps to io — it connects in either direction");
+ok(DIRECTION_MAP["Configurable"] === "io", "#162 a Configurable port maps to io");
+ok(Object.keys(DIRECTION_MAP).length === 5, "#162 all five DaVinci directions are mapped");
+
+ok(PASSTHROUGH_TYPES.length > 0 && PASSTHROUGH_TYPES.every((t) => t.startsWith("ETC ")), "#162 every pass-through type is namespaced so it cannot collide with a Peak type");
+
+/* ====== #162 taxonomy ====== */
+ok(CONNECTION_TYPES.includes("line power (unspecified)"), "#162 the unspecified-power type exists");
+ok(
+  PASSTHROUGH_TYPES.every((t) => CONNECTION_TYPES.includes(t)),
+  "#162 every pass-through type the protocol map can emit is a declared connection type"
+);
+// No orphans: anything the map emits must be carried by some wire type, or the
+// Grid can validate the wire but offer no cable for it.
+const emitted162 = [...new Set(Object.values(PROTOCOL_MAP).flatMap((m) =>
+  m.kind === "peak" || m.kind === "passthrough" ? [m.connectionType] : []
+).concat(["powerCON/True1", "bare-end", "line power (unspecified)"]))];
+const orphans162 = emitted162.filter((t) => compatibleWireTypes(t, DEFAULT_WIRE_TYPES).length === 0);
+ok(orphans162.length === 0, `#162 no connection type is left without a wire type (orphans: ${orphans162.join(", ")})`);
+
+// D1 — pass-through mates with itself and nothing else.
+const p162 = (connectionType: string, direction: "in" | "out" | "io") => ({ name: "", direction, connectionType });
+ok(
+  canConnect(p162("ETC EchoConnect", "out"), p162("ETC EchoConnect", "in")),
+  "#162 an EchoConnect output reaches an EchoConnect input"
+);
+ok(
+  !canConnect(p162("ETC EchoConnect", "out"), p162("contact closure", "in")),
+  "#162 EchoConnect does NOT reach a contact closure — the collapse this design refuses"
+);
+ok(
+  !canConnect(p162("ETC ArcSystem D4 driver", "out"), p162("ETC ArcSystem D2 driver", "in")),
+  "#162 two different ArcSystem driver families never cross-connect"
+);
+ok(
+  canConnect(p162("ETC ArcSystem D4 driver", "out"), p162("ETC ArcSystem D4 driver", "in")),
+  "#162 one ArcSystem driver family connects to itself"
+);
+// D4 — unspecified power reaches unspecified power (fixture ↔ dimmer) but is
+// not silently equated with a specific connector.
+ok(
+  canConnect(p162("line power (unspecified)", "in"), p162("line power (unspecified)", "out")),
+  "#162 a Source Four's unspecified power inlet reaches a dimmer's unspecified outlet"
+);
+ok(
+  !canConnect(p162("line power (unspecified)", "in"), p162("Edison", "out")),
+  "#162 unspecified power is not silently treated as Edison"
+);
+// speaker-pair stays the ONLY interchangeable family.
+ok(
+  DEFAULT_WIRE_TYPES.filter((w) => w.interchangeable).map((w) => w.id).join(",") === "speaker-pair",
+  "#162 no ETC wire type is marked interchangeable — speaker-pair remains the only one"
+);
+
+/* ====== #162 extractor ====== */
+const LIB162 = {
+  timestamp: "2026-09-02T01:37:52.850Z",
+  constants: {
+    languages: [{ languageId: "L-EN", text: "English" }, { languageId: "L-FR", text: "Francais" }],
+    documentTypes: [{ documentTypeId: "T-DS", text: "Datasheet" }, { documentTypeId: "T-MN", text: "Manual" }, { documentTypeId: "T-BR", text: "Brochure" }],
+    categories: [{ categoryId: "C-1", text: "ColorSource" }, { categoryId: "C-X", text: "Internal-DO NOT USE" }],
+    portDirections: [{ portDirectionId: "D-IN", text: "Input" }, { portDirectionId: "D-OUT", text: "Output" }, { portDirectionId: "D-BUS", text: "Bus" }],
+    connectorTypes: [{ connectorTypeId: "K-PC", text: "powerCON In" }, { connectorTypeId: "K-DMX", text: "DMX Male" }, { connectorTypeId: "K-GEN", text: "Power" }],
+    manufacturers: [{ manufacturerId: "M-ETC", text: "ETC" }, { manufacturerId: "M-HES", text: "High End Systems" }],
+    portProtocols: [],
+  },
+  documents: { documents: [
+    { documentId: "DOC-1", url: "https://example.test/ds-en.pdf", metadata: { name: "CSPAR Datasheet", type: "T-DS", language: "L-EN" } },
+    { documentId: "DOC-2", url: "https://example.test/ds-fr.pdf", metadata: { name: "CSPAR Datasheet FR", type: "T-DS", language: "L-FR" } },
+    { documentId: "DOC-3", url: "https://example.test/br-en.pdf", metadata: { name: "CSPAR Brochure", type: "T-BR", language: "L-EN" } },
+    // Same URL as DOC-1 under a second document id — 8 real records do this.
+    { documentId: "DOC-4", url: "https://example.test/ds-en.pdf", metadata: { name: "CSPAR Datasheet (reissue)", type: "T-DS", language: "L-EN" } },
+  ] },
+  types: [
+    {
+      typeId: "TY-1",
+      typeInformation: {
+        displayName: "ColorSource PAR", categoryId: "C-1", manufacturerId: "M-ETC",
+        typeActive: { legacy: false, endActiveDate: "2999-12-31 23:59:59" },
+      },
+      partInformation: { generatorData: { lookupData: [
+        { modelNumber: "CSPAR", partNumber: "7410A1001" },
+        { modelNumber: "CSPAR-X", partNumber: "7410A1002" },
+        { modelNumber: "cs-par/lo 3", partNumber: "7410a1003" },
+      ] } },
+      documents: ["DOC-1", "DOC-2", "DOC-3", "DOC-4"],
+      ports: [
+        { name: "", portProtocolId: "aa07559e-6609-4ec6-8df3-8990d6bc9909", connectorTypeId: "K-PC", portDirectionId: "D-IN" },
+        { name: "", portProtocolId: "698f9701-604c-4432-902f-19866c061108", connectorTypeId: "K-DMX", portDirectionId: "D-IN" },
+        { name: "", portProtocolId: "aa07559e-6609-4ec6-8df3-8990d6bc9909", connectorTypeId: "K-GEN", portDirectionId: "D-BUS" },
+        // Identical to the DMX port above — 62 real records carry a repeat like
+        // this, and parsePortsField refuses duplicates outright.
+        { name: "", portProtocolId: "698f9701-604c-4432-902f-19866c061108", connectorTypeId: "K-DMX", portDirectionId: "D-IN" },
+      ],
+    },
+    // Excluded: internal category.
+    { typeId: "TY-X", typeInformation: { displayName: "RouteStubPrototype", categoryId: "C-X", manufacturerId: "M-ETC" },
+      partInformation: { generatorData: { lookupData: [{ modelNumber: "STUB", partNumber: "X" }] } },
+      documents: [], ports: [{ name: "", portProtocolId: "698f9701-604c-4432-902f-19866c061108", connectorTypeId: "K-DMX", portDirectionId: "D-IN" }] },
+    // No ports and no docs: nothing to contribute, must not appear.
+    { typeId: "TY-0", typeInformation: { displayName: "Empty", categoryId: "C-1", manufacturerId: "M-ETC" },
+      partInformation: { generatorData: { lookupData: [{ modelNumber: "EMPTY", partNumber: "E" }] } }, documents: [], ports: [] },
+    // A retired type: legacy false but the end date is long past.
+    { typeId: "TY-OLD",
+      typeInformation: { displayName: "Discontinued PAR", categoryId: "C-1", manufacturerId: "M-HES",
+        typeActive: { legacy: false, endActiveDate: "2021-01-01 00:00:00" } },
+      partInformation: { generatorData: { lookupData: [{ modelNumber: "OLDPAR", partNumber: "9999" }] } },
+      documents: ["DOC-1"], ports: [] },
+  ],
+};
+const ex162 = extractLibrary(LIB162);
+ok(ex162.libraryTimestamp === "2026-09-02T01:37:52.850Z", "#162 the extract stamps the library's own timestamp");
+ok(ex162.records.length === 2, "#162 internal-category and contentless types are dropped from the extract");
+const r162 = ex162.records[0];
+const old162 = ex162.records[1];
+ok(r162.modelNumbers.includes("CSPAR") && r162.modelNumbers.includes("7410A1001"), "#162 both model and part numbers are indexed");
+ok(r162.modelNumbers.length === 6, "#162 all six identifiers of a three-variant type are indexed");
+ok(r162.modelNumbers.every((m) => m === m.toUpperCase()), "#162 indexed identifiers are pre-normalized");
+ok(
+  r162.modelNumbers.includes("CSPARLO3") && r162.modelNumbers.includes("7410A1003"),
+  "#162 normalizeSku actually ran: the dirty variant's separators are stripped and case is upper"
+);
+ok(
+  !r162.modelNumbers.includes("cs-par/lo 3") && !r162.modelNumbers.includes("7410a1003"),
+  "#162 the raw, un-normalized forms never survive into modelNumbers"
+);
+ok(r162.docs.length === 1 && r162.docs[0].kind === "datasheet", "#162 only the English Datasheet/Manual documents survive");
+ok(r162.docs[0].url === "https://example.test/ds-en.pdf", "#162 the document URL is carried verbatim");
+// Review finding 8 — the catalog modal keys its document list on the URL, so a
+// record repeating one is a duplicate React key and a doubled link.
+ok(
+  r162.docs.filter((d) => d.url === "https://example.test/ds-en.pdf").length === 1,
+  "#162 a document URL repeated under a second document id is emitted once"
+);
+ok(r162.ports.length === 3, "#162 every port of a kept type is emitted");
+ok(r162.ports[0].connectionType === "powerCON/True1" && r162.ports[0].direction === "in", "#162 a powerCON input maps through");
+ok(r162.ports[1].connectionType === "DMX512 (5-pin XLR)", "#162 a DMX port maps through");
+ok(r162.ports[2].connectionType === "line power (unspecified)" && r162.ports[2].direction === "io", "#162 a generic-connector Bus power port becomes unspecified/io");
+ok(r162.ports.every((p) => typeof p.name === "string"), "#162 every emitted port has a string name, never undefined");
+
+// Review finding 2 (BLOCKER) — parsePortsField REFUSES two ports sharing
+// name+direction+connectionType, so an un-collapsed record would make the
+// enriched catalog row un-saveable: even a price change would fail validation
+// and strand the row behind a partError. The repeat has to become a `count`.
+ok(r162.ports[1].count === 2, "#162 a repeated port collapses into one port with count 2");
+ok(r162.ports[0].count === undefined, "#162 a port that occurs once carries no count (1 is the default)");
+{
+  const keys162 = r162.ports.map((p) => `${p.name}|${p.direction}|${p.connectionType}`);
+  ok(new Set(keys162).size === keys162.length, "#162 no emitted record carries two ports with the same name+direction+connectionType");
+  const parsed162 = parsePortsField(serializePorts(r162.ports));
+  ok(parsed162.ok, "#162 a DaVinci record's ports survive the catalog editor's own validator — the enriched row stays saveable");
+  ok(parsed162.ok && parsed162.ports[1].count === 2, "#162 the count round-trips through serializePorts/parsePortsField");
+}
+
+// Review finding 1 (BLOCKER) — the manufacturer has to reach the enricher, or
+// a match on the normalized SKU alone puts ETC ports on a Draper part.
+ok(r162.manufacturer === "ETC", "#162 the record carries DaVinci's own manufacturer label");
+ok(old162.manufacturer === "High End Systems", "#162 the non-ETC DaVinci manufacturers are carried verbatim, not folded into ETC");
+// Review finding 3 — active/legacy is what breaks an identifier collision.
+ok(r162.active === true, "#162 a type whose end date is in the future is active");
+ok(old162.active === false, "#162 a type whose endActiveDate has passed is not active, even with legacy: false");
+ok(
+  extractLibrary({ ...LIB162, types: [{ ...LIB162.types[0], typeInformation: { ...LIB162.types[0].typeInformation, typeActive: { legacy: true, endActiveDate: "2999-12-31 23:59:59" } } }] }).records[0].active === false,
+  "#162 an explicitly legacy type is inactive whatever its end date says"
+);
+ok(
+  extractLibrary({ ...LIB162, types: [{ ...LIB162.types[0], typeInformation: { displayName: "x", categoryId: "C-1", manufacturerId: "M-ETC" } }] }).records[0].active === true,
+  "#162 a type with no typeActive block at all is treated as active — missing data never demotes a live type"
+);
+
+/* ====== #162 matcher ====== */
+const IDX162 = buildIndex(ex162.records);
+ok(matchSku("CSPAR", IDX162)?.typeId === "TY-1", "#162 a bare production SKU matches");
+ok(matchSku("ETC:CSPAR", IDX162)?.typeId === "TY-1", "#162 a prefixed dev SKU matches the same record");
+ok(matchSku("7410A1001", IDX162)?.typeId === "TY-1", "#162 a part number matches as well as a model number");
+ok(matchSku("cspar", IDX162)?.typeId === "TY-1", "#162 matching is case-insensitive");
+ok(matchSku("NOT-A-PART", IDX162) === null, "#162 an unknown SKU returns null, never a near miss");
+ok(matchSku("", IDX162) === null, "#162 an empty SKU never matches");
+ok(matchSku("   ", IDX162) === null, "#162 a whitespace SKU never matches");
+// Review finding 3 — 440 of the 13,633 distinct identifiers are claimed by
+// more than one type, so "first wins" is not a curiosity: 25 of them resolved
+// to a record with NO ports while a live alternative had some. The tie-break is
+// active → more ports → first-wins, in that order.
+const rec162 = (o: Partial<DavinciRecord> & { typeId: string }): DavinciRecord => ({
+  displayName: o.typeId, category: "c", manufacturer: "ETC", active: true,
+  modelNumbers: ["SHARED"], ports: [], docs: [], ...o,
+});
+const port162 = (connectionType: string): Port => ({ name: "", direction: "in", connectionType });
+const dupe162 = buildIndex([rec162({ typeId: "A" }), rec162({ typeId: "B" })]);
+ok(matchSku("SHARED", dupe162)?.typeId === "A", "#162 a duplicated identifier with nothing to choose between resolves to the first record, deterministically");
+
+ok(
+  matchSku("SHARED", buildIndex([
+    rec162({ typeId: "DISCONTINUED", active: false, ports: [port162("DMX512 (5-pin XLR)"), port162("fiber")] }),
+    rec162({ typeId: "LIVE", active: true, ports: [port162("DMX512 (5-pin XLR)")] }),
+  ]))?.typeId === "LIVE",
+  "#162 a live type beats a discontinued one for a contested identifier, even with fewer ports"
+);
+ok(
+  matchSku("SHARED", buildIndex([
+    rec162({ typeId: "EMPTY", ports: [] }),
+    rec162({ typeId: "PORTED", ports: [port162("DMX512 (5-pin XLR)")] }),
+  ]))?.typeId === "PORTED",
+  "#162 between two live types the one that actually carries ports wins — the IQCI/S4WRDPAR case"
+);
+ok(
+  matchSku("SHARED", buildIndex([
+    rec162({ typeId: "FIRST", ports: [port162("fiber")] }),
+    rec162({ typeId: "SECOND", ports: [port162("DMX512 (5-pin XLR)")] }),
+  ]))?.typeId === "FIRST",
+  "#162 an equal-standing collision still falls back to first-wins, so the result stays reproducible"
+);
+{
+  const stats162 = buildIndexWithStats([
+    rec162({ typeId: "A", modelNumbers: ["SHARED", "OWN-A"] }),
+    rec162({ typeId: "B", modelNumbers: ["SHARED", "OWN-B"] }),
+    rec162({ typeId: "C", modelNumbers: ["SHARED"] }),
+  ]);
+  ok(stats162.collisions === 1, "#162 the collision count counts contested identifiers once, not once per extra claimant");
+  ok(stats162.index.size === 3, "#162 every identifier still resolves to exactly one record");
+}
+ok(buildIndexWithStats([rec162({ typeId: "A" })]).collisions === 0, "#162 an uncontested extract reports zero collisions");
+
+/* ====== #162 load ====== */
+{
+  const dir162 = mkdtempSync(join(tmpdir(), "davinci-load-test-"));
+  const fileA162 = join(dir162, "a.json");
+  const fileB162 = join(dir162, "b.json");
+  try {
+    const extractA162: DavinciExtract = { libraryTimestamp: "2020-01-01T00:00:00.000Z", generatedAt: 1, records: [] };
+    const extractB162: DavinciExtract = { libraryTimestamp: "2021-02-02T00:00:00.000Z", generatedAt: 2, records: [] };
+    writeFileSync(fileA162, JSON.stringify(extractA162));
+    writeFileSync(fileB162, JSON.stringify(extractB162));
+
+    const loadedA162 = loadExtract(fileA162);
+    const loadedB162 = loadExtract(fileB162);
+    ok(
+      loadedA162.libraryTimestamp !== loadedB162.libraryTimestamp,
+      "#162 loadExtract keys its cache by file path — a second distinct file is not served the first file's contents"
+    );
+
+    const loadedAAgain162 = loadExtract(fileA162);
+    ok(loadedAAgain162 === loadedA162, "#162 loadExtract still memoizes — the same path returns the identical object");
+
+    ok(Object.isFrozen(loadedA162.records), "#162 the cached extract's records array is frozen");
+  } finally {
+    rmSync(dir162, { recursive: true, force: true });
+  }
+}
+
+/* ====== #162 the hosted-write gate ====== */
+// The gate the spec promises and nothing tested: preview and production share
+// one Neon database, so `--commit` alone must never be enough against a hosted
+// target. requireHostedConfirmation ends in process.exit(1), which would kill
+// this suite, so exit and the console are stubbed and restored in a finally.
+{
+  const realExit = process.exit;
+  const realError = console.error;
+  const realLog = console.log;
+  let exitedWith: number | null = null;
+  let errorText = "";
+  try {
+    process.exit = ((code?: number) => { exitedWith = code ?? 0; }) as unknown as typeof process.exit;
+    console.error = (...a: unknown[]) => { errorText += a.join(" "); };
+    console.log = () => {};
+
+    requireHostedConfirmation(true, ["--commit"]);
+    const refusedExit = exitedWith;
+    const refusedText = errorText;
+
+    exitedWith = null;
+    errorText = "";
+    requireHostedConfirmation(true, ["--commit", "--yes"]);
+    const allowedExit = exitedWith;
+
+    exitedWith = null;
+    requireHostedConfirmation(false, ["--commit"]);
+    const localExit = exitedWith;
+
+    process.exit = realExit;
+    console.error = realError;
+    console.log = realLog;
+
+    ok(refusedExit === 1, "#162 a hosted write without --yes exits non-zero instead of writing");
+    ok(/--yes/.test(refusedText) && /HOSTED/.test(refusedText), "#162 the refusal says it is the hosted database and names --yes");
+    ok(allowedExit === null, "#162 --yes permits the hosted write");
+    ok(localExit === null, "#162 a local PGlite target never needs --yes");
+  } finally {
+    process.exit = realExit;
+    console.error = realError;
+    console.log = realLog;
+  }
+}
+
+/* ====== #162 the writer (scratch datadir only) ====== */
+// Needs `await`, and this file's promise chain (see `seeded()...then(...)`
+// above) is the only place a top-level await is legal — a stray one at
+// module scope breaks the tsx/esbuild cjs build (see the #145 comment near
+// "no per-block async runner" earlier in this file).
+async function davinciWriterAsyncChecks(): Promise<void> {
+  const SKU_A = "TEST162:CSPAR";       // will match DaVinci's CSPAR
+  // Brief used "TEST162:HAS-PORTS", but this suite runs against the real
+  // committed extract (data/davinci-extract.json), which has no such model
+  // number — matchSku would return null and no plan would ever be created,
+  // making the has-ports skip path indistinguishable from SKU_C's no-match
+  // path. Swapped in a model number that's actually in the committed extract
+  // (a real ETC dimmer type, 3 ports/5 docs) so the fixture truly matches and
+  // the pre-set hand-made ports genuinely exercise the skip branch.
+  const SKU_B = "TEST162:USDOCSMDIM5";
+  const SKU_C = "TEST162:NO-MATCH-AT-ALL-XYZ";
+  // Review finding 1 (BLOCKER): the manufacturer is now a gate, not just a
+  // filter — a DaVinci record may only be written onto the Peak manufacturer
+  // its own brand maps to. These fixtures therefore have to be ETC rows (the
+  // `TEST162:` prefix is stripped by normalizeSku, so the SKUs still match),
+  // and every plan call below is scoped by onlySkus so a seeded ETC row can
+  // never widen the fixture set out from under the stats assertions.
+  const ONLY = [SKU_A, SKU_B, SKU_C];
+  await upsertPart({ id: SKU_A, sku: SKU_A, desc: "t", category: "Fixtures", unit: "ea", list: 1040, cost: 624, mfr: "ETC" });
+  await upsertPart({ id: SKU_B, sku: SKU_B, desc: "t", category: "Fixtures", unit: "ea", list: 10, cost: 6, mfr: "ETC",
+    ports: [{ name: "hand-made", direction: "in", connectionType: "Edison" }] });
+  await upsertPart({ id: SKU_C, sku: SKU_C, desc: "t", category: "Fixtures", unit: "ea", list: 5, cost: 3, mfr: "ETC" });
+  // The cross-manufacturer hazard itself: `450` normalizes to ETC's Source Four
+  // 50 Degree, and production holds 19,326 Draper/Crestron/Legrand AV rows
+  // whose part numbers look exactly like that.
+  const SKU_D = "DRAPER162:450";
+  await upsertPart({ id: SKU_D, sku: SKU_D, desc: "projection screen", category: "Fixtures", unit: "ea", list: 9, cost: 4, mfr: "Draper" });
+
+  try {
+    // Review finding 1: an explicitly-passed empty onlySkus must scope to
+    // ZERO rows — it is not the same as "no scope" (that's `undefined`).
+    // Collapsing the two is the D202 bug class: a writer that quietly widens
+    // its own scope. This must not touch any of the three fixtures below.
+    const scopedToNothing = await planEnrichment({ mfr: "ETC", onlySkus: [] });
+    ok(
+      scopedToNothing.plans.length === 0 && scopedToNothing.stats.scanned === 0,
+      "#162 onlySkus: [] matches nothing, not everything"
+    );
+
+    // Review finding 1 (BLOCKER), part one: there is no unscoped mode. matchSku
+    // keys on the normalized SKU alone, so a run with no manufacturer would put
+    // ETC ports and ETC datasheet links on every brand whose part numbers
+    // collide — and the unscoped command was the one the CLI usage block and
+    // the rollout both documented.
+    let unscoped162 = "";
+    try {
+      await planEnrichment({ mfr: "" });
+    } catch (e) { unscoped162 = String((e as Error).message); }
+    ok(unscoped162.includes("requires a manufacturer"), "#162 planEnrichment refuses to run without a manufacturer");
+    let blankMfr162 = "";
+    try { await planEnrichment({ mfr: "   " }); } catch (e) { blankMfr162 = String((e as Error).message); }
+    ok(blankMfr162.includes("requires a manufacturer"), "#162 a whitespace-only manufacturer is refused too, not treated as a scope");
+
+    // Part two: scoping the scan is necessary but not sufficient — scoping to
+    // Draper still finds ETC's record behind Draper's part number `450`. The
+    // record's own manufacturer has to be checked against the row's.
+    const draper162 = await planEnrichment({ mfr: "Draper", onlySkus: [SKU_D] });
+    ok(draper162.stats.scanned === 1, "#162 the Draper fixture is in scope for a Draper run");
+    ok(
+      matchSku(SKU_D, buildIndex(loadExtract().records))?.manufacturer === "ETC",
+      "#162 Draper's `450` really does hit an ETC record — the hazard is not hypothetical"
+    );
+    ok(draper162.plans.length === 0, "#162 an ETC record is never planned onto a Draper row");
+    ok(draper162.stats.matched === 0 && draper162.stats.rejectedWrongMfr === 1, "#162 the cross-manufacturer match is counted as rejected, not matched");
+    // mfrKey(), not `===`: the rest of the codebase compares manufacturer names
+    // case- and punctuation-insensitively, and this was the only raw `===`.
+    ok(
+      (await planEnrichment({ mfr: "etc.", onlySkus: [SKU_A] })).stats.writable === 1,
+      "#162 manufacturers are compared with mfrKey — 'etc.' and 'ETC' are one brand"
+    );
+
+    const planned = await planEnrichment({ mfr: "ETC", onlySkus: ONLY });
+    const bySku = (s: string) => planned.plans.find((p) => p.sku === s);
+    ok(bySku(SKU_B)?.skip === "has-ports", "#162 a part with hand-edited ports is skipped, not overwritten");
+    ok(!bySku(SKU_C), "#162 a part with no DaVinci entry produces no plan at all");
+    ok((bySku(SKU_A)?.ports.length ?? 0) > 0, "#162 a matching part is planned with ports");
+
+    // Review finding 4: pin the report's stats for this exact fixture set —
+    // A and B match (C doesn't), B is the one hand-edited part so it's the
+    // only skip, and A is the only writable row. Values are derived from the
+    // fixtures above, not asserted as magic numbers.
+    ok(planned.stats.scanned === 3, "#162 stats: scanned counts all three TEST162 fixtures");
+    ok(planned.stats.matched === 2, "#162 stats: A and B match a DaVinci record, C does not");
+    ok(planned.stats.writable === 1, "#162 stats: only A is writable — B is skipped, C never matched");
+    ok(planned.stats.skippedHasPorts === 1, "#162 stats: B is the one part skipped for having hand-made ports");
+    // Review finding 5: skippedNothingToWrite closes the gap between matched
+    // and writable + skippedHasPorts, so the report never has an unexplained
+    // shortfall. Neither fixture here hits that branch (extract.ts already
+    // drops DaVinci types with neither ports nor docs), so it's 0 — and the
+    // identity below proves matched is fully accounted for either way.
+    ok(planned.stats.skippedNothingToWrite === 0, "#162 stats: no fixture matches a DaVinci entry with neither ports nor docs");
+    ok(
+      planned.stats.matched === planned.stats.writable + planned.stats.skippedHasPorts + planned.stats.skippedNothingToWrite,
+      "#162 stats: matched is fully accounted for by writable + both skip reasons"
+    );
+    ok(
+      planned.stats.unmatched.length === 1 && planned.stats.unmatched.includes(SKU_C),
+      "#162 stats: unmatched names exactly the no-match SKU"
+    );
+    // Review finding 6: the report has to name the library export every written
+    // row will be attributed to — applyEnrichment stamps exactly this string
+    // into each row's `davinci` provenance.
+    ok(
+      planned.stats.libraryTimestamp === loadExtract().libraryTimestamp && !!planned.stats.libraryTimestamp,
+      "#162 stats: the report carries the library timestamp the rows will be stamped with"
+    );
+    ok(planned.stats.libraryRecords === loadExtract().records.length, "#162 stats: the report carries the extract's record count");
+    ok(planned.stats.rejectedWrongMfr === 0, "#162 stats: an in-brand run rejects nothing");
+    ok(planned.stats.forcedOverHumanEdits === 0, "#162 stats: without --force nothing is written over a human's ports");
+
+    // Dry run writes nothing.
+    await applyEnrichment(planned.plans, { commit: false });
+    ok(!(await getPart(SKU_A))?.ports?.length, "#162 a dry run writes nothing at all");
+
+    const before = await getPart(SKU_A);
+    const res = await applyEnrichment(planned.plans, { commit: true });
+    const after = await getPart(SKU_A);
+    ok(res.written === 1, "#162 exactly the planned rows are written");
+    ok(res.missing === 0, "#162 nothing is missing when every planned row still exists");
+    ok((after?.ports?.length ?? 0) > 0, "#162 a commit writes the ports");
+    ok(after?.davinci?.typeId != null, "#162 a commit stamps provenance");
+    ok(after?.list === before?.list && after?.cost === before?.cost, "#162 list and cost are byte-identical after a commit");
+    ok(after?.pricedAt === before?.pricedAt, "#162 pricedAt is never moved by enrichment");
+
+    // Review finding 2: applyEnrichment must never CREATE a row. A plan whose
+    // SKU has no existing catalog row (its row was deleted between planning
+    // and applying) is skipped and counted as missing, not upserted into
+    // existence — reusing a real, fully-formed plan so only the SKU is stale.
+    const ghostSku = "TEST162:GHOST-DELETED-BETWEEN-PLAN-AND-APPLY";
+    const ghostPlan = { ...bySku(SKU_A)!, sku: ghostSku };
+    const ghostRes = await applyEnrichment([ghostPlan], { commit: true });
+    ok(
+      ghostRes.written === 0 && ghostRes.missing === 1,
+      "#162 a plan for a row that no longer exists is counted as missing, not written"
+    );
+    ok((await getPart(ghostSku)) === null, "#162 applying a plan for a deleted row never creates it");
+
+    // The hand-made ports on B survived.
+    ok((await getPart(SKU_B))?.ports?.[0]?.connectionType === "Edison", "#162 the hand-edited part is untouched by a commit");
+
+    // Review finding 4: the `davinci` stamp is written AND read. After the
+    // commit above A has ports, so a skip that tests `p.ports?.length` alone
+    // would call A a human edit for ever — which is what made a later library
+    // revision reachable only with --force, the flag that also destroys real
+    // hand edits. A's ports came from the enricher, so it is not has-ports.
+    const replanned = await planEnrichment({ mfr: "ETC", onlySkus: ONLY });
+    const replannedA = replanned.plans.find((p) => p.sku === SKU_A);
+    ok(replannedA?.skip !== "has-ports", "#162 the enricher recognises its own prior write — its own ports are not a human edit");
+    // …and a second run against the SAME library is a genuine no-op rather
+    // than a fresh enrichedAt on every row (the spec claims idempotence).
+    ok(replannedA?.skip === "nothing-to-write", "#162 re-running against the same library plans no write for an already-enriched row");
+    ok(replanned.stats.writable === 0 && replanned.stats.skippedNothingToWrite === 1, "#162 an idempotent re-run has nothing writable");
+    const stampBefore = (await getPart(SKU_A))?.davinci?.enrichedAt;
+    await applyEnrichment(replanned.plans, { commit: true });
+    ok((await getPart(SKU_A))?.davinci?.enrichedAt === stampBefore, "#162 a no-op re-run does not restamp enrichedAt");
+
+    // A NEW library export must still land, with no --force anywhere.
+    const staleA = await getPart(SKU_A);
+    await upsertPart({ ...staleA!, davinci: { ...staleA!.davinci!, libraryTimestamp: "1999-01-01T00:00:00.000Z" } });
+    const revised = await planEnrichment({ mfr: "ETC", onlySkus: ONLY });
+    ok(
+      revised.plans.find((p) => p.sku === SKU_A)?.skip === undefined,
+      "#162 a row stamped from an older library export is writable again without --force"
+    );
+    await applyEnrichment(revised.plans, { commit: true });
+    ok(
+      (await getPart(SKU_A))?.davinci?.libraryTimestamp === loadExtract().libraryTimestamp,
+      "#162 the revision write re-stamps the row with the current library export"
+    );
+
+    // Review finding 3: force lets a hand-edited part be overwritten too.
+    // With force: true, B is no longer skipped as has-ports, and a commit
+    // then does overwrite its hand-made Edison port with DaVinci's own ports.
+    const forced = await planEnrichment({ mfr: "ETC", onlySkus: ONLY, force: true });
+    const forcedBySku = (s: string) => forced.plans.find((p) => p.sku === s);
+    ok(forcedBySku(SKU_B)?.skip !== "has-ports", "#162 force: the hand-edited part is no longer marked has-ports");
+    // Review finding 5: under --force the has-ports branch never runs, so
+    // skippedHasPorts reads 0 and the hand-edited rows about to be destroyed
+    // used to be folded silently into `writable`. The operator authorizing the
+    // write needs that count named.
+    ok(forced.stats.skippedHasPorts === 0, "#162 force: nothing is reported as skipped-for-ports, because nothing is");
+    ok(forced.stats.forcedOverHumanEdits === 1, "#162 force: the one hand-edited row about to be overwritten is counted, not hidden in `writable`");
+    ok(
+      forced.stats.forcedOverHumanEdits <= forced.stats.writable,
+      "#162 force: the forced-over count is a subset of the rows that will be written"
+    );
+    const bForcedPlanPorts = forcedBySku(SKU_B)?.ports ?? [];
+    ok(bForcedPlanPorts.length > 0, "#162 force: the hand-edited part is planned with real DaVinci ports");
+    const forcedRes = await applyEnrichment(forced.plans, { commit: true });
+    ok(
+      forcedRes.written === forced.stats.writable && forcedRes.missing === 0,
+      "#162 force: the commit writes exactly the now-writable rows"
+    );
+    const bAfterForce = await getPart(SKU_B);
+    ok(
+      bAfterForce?.ports?.[0]?.connectionType !== "Edison",
+      "#162 force: a commit overwrites the hand-made port with DaVinci's"
+    );
+    ok(
+      bAfterForce?.ports?.length === bForcedPlanPorts.length,
+      "#162 force: the written ports match exactly what was planned"
+    );
+
+    // Scope: applyEnrichment writes ONLY what it was handed (D202's lesson).
+    const empty = await applyEnrichment([], { commit: true });
+    ok(empty.written === 0 && empty.missing === 0, "#162 an empty plan list writes nothing — apply never queries for more rows");
+  } finally {
+    for (const s of [SKU_A, SKU_B, SKU_C, SKU_D]) await softDeleteDoc("catalog_parts", s);
+  }
+}

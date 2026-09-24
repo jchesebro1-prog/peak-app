@@ -77,6 +77,54 @@ export const CONNECTION_TYPES: readonly string[] = [
   // rigging
   "motor power",
   "low-voltage pendant control",
+  // power, continued (#162 D4) — DaVinci records 1,417 power ports whose
+  // connector is the generic "Power", meaning "needs line power, connector
+  // unspecified". Peak's other power types are all specific and deliberately
+  // not interchangeable, so calling a Source Four's pigtail "bare-end" would
+  // be a lie on the label. This type connects to itself and claims nothing.
+  "line power (unspecified)",
+  // ETC (DaVinci import, #162 D1) — carried verbatim from ETC's library rather
+  // than collapsed into the nearest Peak type. canConnect is exact string
+  // equality, so each mates only with itself: correct, with no false positives.
+  // Collapsing them would let the Grid validate an Echoflex sensor against a
+  // DMX terminal block. 508 ETC parts (19.3% of those with ports) would import
+  // unwireable without these.
+  "ETC 0-10V dimming",
+  "ETC 208V feeder",
+  "ETC 480V feeder",
+  "ETC ArcSystem D1HO driver",
+  "ETC ArcSystem D2 driver",
+  "ETC ArcSystem D4 driver",
+  "ETC auxiliary power",
+  "ETC BluesSystem low voltage",
+  "ETC CANbus",
+  "ETC Control/SafetyLink (MCX)",
+  "ETC DALI",
+  "ETC EchoConnect",
+  "ETC EchoConnect (line voltage)",
+  "ETC Echoflex (wireless)",
+  "ETC F-Drive ARC",
+  "ETC F-Drive CC",
+  "ETC F-Drive CV",
+  "ETC F-Drive Chroma",
+  "ETC F-Drive FTW",
+  "ETC F-Drive R12 power supply",
+  "ETC F-Drive RX CC",
+  "ETC F-Drive RX CV",
+  "ETC F-Drive RX FTW",
+  "ETC F-Drive RX power supply",
+  "ETC LSH control",
+  "ETC LinkConnect",
+  "ETC LinkConnect (Paradigm portable)",
+  "ETC LinkConnect (SPS)",
+  "ETC MIDI",
+  "ETC MeshConnect (wireless)",
+  "ETC Multiverse (wireless DMX)",
+  "ETC SMPTE timecode",
+  "ETC Sense",
+  "ETC USB",
+  "ETC control (generic)",
+  "ETC serial",
 ];
 
 /**
@@ -110,12 +158,51 @@ export const DEFAULT_WIRE_TYPES: WireType[] = [
   { id: "xlr-audio", label: "XLR audio", connectionTypes: ["XLR line/mic", "AES/EBU"] },
   { id: "sdi-coax", label: "SDI coax", connectionTypes: ["SDI/BNC"] },
   { id: "hdmi", label: "HDMI", connectionTypes: ["HDMI"] },
+  // Pre-existing CONNECTION_TYPES entries the DaVinci import can emit (D162
+  // orphan check) that had no carrying wire type before this task — without
+  // one the Grid validates the wire but can offer no cable for it.
+  { id: "contact-closure", label: "Contact closure", connectionTypes: ["contact closure"] },
+  { id: "fiber", label: "Fiber", connectionTypes: ["fiber"] },
   {
     id: "powercon-power",
     label: "powerCON power",
-    connectionTypes: ["powerCON/True1", "Edison", "stage pin", "Socapex", "bare-end"],
+    connectionTypes: ["powerCON/True1", "Edison", "stage pin", "Socapex", "bare-end", "line power (unspecified)"],
   },
   { id: "motor-power", label: "Motor power", connectionTypes: ["motor power", "low-voltage pendant control"] },
+  // ETC families (#162). None is `interchangeable`: speaker-pair remains the
+  // only family where mismatched connectors mate, for the reasons on that flag.
+  // Several of these are wireless (Echoflex, Multiverse, MeshConnect) and have
+  // no cable at all — they get a wire type anyway so the Grid has something to
+  // name the link, and their dollarsPerFt stays unset.
+  { id: "etc-echoconnect", label: "ETC EchoConnect", connectionTypes: ["ETC EchoConnect", "ETC EchoConnect (line voltage)"] },
+  { id: "etc-linkconnect", label: "ETC LinkConnect", connectionTypes: ["ETC LinkConnect", "ETC LinkConnect (Paradigm portable)", "ETC LinkConnect (SPS)"] },
+  {
+    id: "etc-fdrive",
+    label: "ETC F-Drive",
+    connectionTypes: [
+      "ETC F-Drive ARC", "ETC F-Drive CC", "ETC F-Drive CV", "ETC F-Drive Chroma",
+      "ETC F-Drive FTW", "ETC F-Drive R12 power supply", "ETC F-Drive RX CC",
+      "ETC F-Drive RX CV", "ETC F-Drive RX FTW", "ETC F-Drive RX power supply",
+    ],
+  },
+  { id: "etc-arcsystem", label: "ETC ArcSystem driver", connectionTypes: ["ETC ArcSystem D1HO driver", "ETC ArcSystem D2 driver", "ETC ArcSystem D4 driver"] },
+  // 208V and 480V share a wire type but NOT an identity — a wire type answers
+  // "what cable runs this", never "what mates with what" (cat6 already carries
+  // Dante, sACN and HDBaseT, none of which mate).
+  { id: "etc-feeder", label: "ETC feeder (208V/480V)", connectionTypes: ["ETC 208V feeder", "ETC 480V feeder"] },
+  { id: "etc-aux-power", label: "ETC auxiliary power", connectionTypes: ["ETC auxiliary power"] },
+  { id: "etc-dali", label: "DALI", connectionTypes: ["ETC DALI"] },
+  { id: "etc-0-10v", label: "0-10V dimming", connectionTypes: ["ETC 0-10V dimming"] },
+  { id: "etc-usb", label: "USB", connectionTypes: ["ETC USB"] },
+  { id: "etc-midi", label: "MIDI", connectionTypes: ["ETC MIDI"] },
+  { id: "etc-serial", label: "Serial / SMPTE", connectionTypes: ["ETC serial", "ETC SMPTE timecode"] },
+  // A convenience bundle, not one cable: MCX, LSH, Sense, CANbus, BluesSystem
+  // low voltage and generic control are six physically different runs. Split it
+  // into per-family wire types BEFORE setting any `dollarsPerFt` or `cableSku`
+  // on it — a price or a part number here would be charged to whichever of the
+  // six a Grid route happens to use, and five of them would be wrong.
+  { id: "etc-control", label: "ETC control", connectionTypes: ["ETC Control/SafetyLink (MCX)", "ETC LSH control", "ETC Sense", "ETC CANbus", "ETC BluesSystem low voltage", "ETC control (generic)"] },
+  { id: "etc-wireless", label: "ETC wireless (no cable)", connectionTypes: ["ETC Echoflex (wireless)", "ETC Multiverse (wireless DMX)", "ETC MeshConnect (wireless)"] },
 ];
 
 /** stored ?? defaults — always a fresh array copy so a mutating caller can
