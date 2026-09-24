@@ -27,7 +27,7 @@ import {
   route,
   type TravelSource,
 } from "@/lib/geo";
-import { geocodeVenue, newGeocodeCtx, type GeocodeFailure } from "@/lib/geo-backfill";
+import { geocodeVenue, newGeocodeCtx, type GeocodeFailure, type GeocodePrecision } from "@/lib/geo-backfill";
 
 export type UnlocatedVenue = {
   siteId: string;
@@ -61,8 +61,9 @@ export async function listUnlocatedVenues(opts?: {
     noCoords,
     or(present(sites.address), present(sites.city)),
     // A manual override already gives estimate() a travel number.
-    blank(sites.travelMiles),
-    blank(sites.travelMin)
+    // estimateFromParts() (src/lib/geo.ts) only treats travelMiles as the
+    // override — travelMin alone is not one, so it must not exclude a row.
+    blank(sites.travelMiles)
   )!;
   const like = `%${q.replace(/[\\%_]/g, (m) => "\\" + m)}%`;
   const where = q
@@ -144,6 +145,7 @@ export type LocateResult =
       ok: true;
       lat: number;
       lng: number;
+      precision: GeocodePrecision;
       miles: number | null;
       minutes: number | null;
       source: TravelSource;
@@ -171,6 +173,7 @@ export async function locateVenue(
 
   let lat: number;
   let lng: number;
+  let precision: GeocodePrecision;
   const set: Partial<typeof sites.$inferInsert> = { updatedAt: Date.now() };
 
   if (input.mode === "retry") {
@@ -184,6 +187,7 @@ export async function locateVenue(
     if (!out.ok) return { ok: false, reason: out.reason, ...(out.got ? { got: out.got } : {}) };
     lat = out.lat;
     lng = out.lng;
+    precision = out.precision;
     Object.assign(set, {
       address: orNull(fields.address),
       city: orNull(fields.city),
@@ -194,13 +198,25 @@ export async function locateVenue(
     if (!validCoord(input.lat, input.lng)) return { ok: false, reason: "invalid" };
     lat = input.lat;
     lng = input.lng;
-    if (input.mode === "pick")
+    if (input.mode === "pick") {
+      // A picked suggestion's street/city/state/zip only overwrites what's
+      // stored when it actually says something. A town-level hit (blank
+      // street) or a street with no house number (#169 D225 item 2 — a
+      // human picked the PLACE, not necessarily a corrected address) must
+      // not wipe a real stored value down to NULL or truncate it.
+      const pickedStreet = clip(input.address);
+      const finalStreet = /\d/.test(pickedStreet) ? pickedStreet : row.address || "";
       Object.assign(set, {
-        address: orNull(clip(input.address)),
-        city: orNull(clip(input.city, 100)),
-        state: orNull(clip(input.state, 40)),
-        zip: orNull(clip(input.zip, 20)),
+        address: /\d/.test(pickedStreet) ? pickedStreet : row.address,
+        city: clip(input.city, 100) || row.city,
+        state: clip(input.state, 40) || row.state,
+        zip: clip(input.zip, 20) || row.zip,
       });
+      precision = /\d/.test(finalStreet) ? "building" : "city";
+    } else {
+      // pin: a human placed the exact point on the map.
+      precision = "building";
+    }
   } else {
     return { ok: false, reason: "invalid" };
   }
@@ -227,6 +243,7 @@ export async function locateVenue(
     ok: true,
     lat,
     lng,
+    precision,
     miles: est.miles,
     minutes: est.minutes,
     source: est.source,

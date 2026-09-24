@@ -249,6 +249,26 @@ async function main() {
   assert.deepEqual((await listUnlocatedVenues({ offset: 1, limit: 1 })).rows.map((r) => r.siteId), ["st-w1"]);
   console.log("PASS geo-backfill: unlocated worklist query");
 
+  // #169 D225 item 4: estimateFromParts() only treats travelMiles as a manual
+  // override (src/lib/geo.ts) — travelMin alone is not one, so the worklist
+  // must not exclude a venue just because travelMin is set.
+  await site("st-travelmin-only", "co-a", { address: "9 TravelMin St", city: "X", state: "WI", travelMin: "45" });
+  assert.deepEqual(
+    (await listUnlocatedVenues({ q: "travelmin" })).rows.map((r) => r.siteId),
+    ["st-travelmin-only"],
+    "a venue with only travelMin set and no coordinates is still listed"
+  );
+  console.log("PASS geo-backfill: travelMin-only override does not hide the worklist row");
+
+  // #169 item 7: a literal % or _ in the search box must not act as a SQL
+  // wildcard against unrelated rows.
+  assert.equal((await listUnlocatedVenues({ q: "%" })).rows.length, 0, "a literal % matches nothing here");
+  assert.equal((await listUnlocatedVenues({ q: "_" })).rows.length, 0, "a literal _ matches nothing here");
+  console.log("PASS geo-backfill: search % and _ are escaped, not wildcards");
+  // Test-only row for item 4/7 above — remove it so later "worklist is empty"
+  // assertions aren't thrown off by it.
+  await db.delete(sites).where(eq(sites.id, "st-travelmin-only"));
+
   /* ---- 7. locateVenue: retry / pick / pin, and nothing else changes ---- */
   const snapshot = async () =>
     JSON.stringify({
@@ -357,6 +377,92 @@ async function main() {
   assert.deepEqual(await locateVenue({ siteId: "nope", mode: "pin", lat: 43, lng: -89 }), { ok: false, reason: "gone" });
   assert.equal((await listUnlocatedVenues({})).total, 0, "both fixed venues left the worklist");
   console.log("PASS geo-backfill: locateVenue retry / pick / pin");
+
+  /* ---- 8. pick() protects existing address parts (#169 D225 item 2) ---- */
+  {
+    // A picked suggestion with a blank street (a town-level hit) must not
+    // wipe the venue's real street address.
+    await insertSite("st-pick-blank-street", {
+      address: "100 Original St", city: "Origtown", state: "WI", zip: "12345",
+    });
+    const p1 = await locateVenue({
+      siteId: "st-pick-blank-street", mode: "pick",
+      address: "", city: "Newtown", state: "WI", zip: "99999", lat: 43.1, lng: -89.1,
+    });
+    assert.ok(p1.ok, JSON.stringify(p1));
+    const [r1] = await db.select().from(sites).where(eq(sites.id, "st-pick-blank-street"));
+    assert.equal(r1.address, "100 Original St", "a blank picked street leaves the stored street alone");
+    assert.equal(r1.city, "Newtown", "a non-blank picked city still overwrites");
+    assert.equal(r1.zip, "99999");
+
+    // A picked suggestion without a house number (town/area match) must not
+    // truncate a real street address either.
+    await insertSite("st-pick-no-digit-street", {
+      address: "200 Original Ave", city: "Origtown", state: "WI", zip: "12345",
+    });
+    const p2 = await locateVenue({
+      siteId: "st-pick-no-digit-street", mode: "pick",
+      address: "South Broadway", city: "De Pere", state: "WI", zip: "54115", lat: 44.4, lng: -88.0,
+    });
+    assert.ok(p2.ok, JSON.stringify(p2));
+    const [r2b] = await db.select().from(sites).where(eq(sites.id, "st-pick-no-digit-street"));
+    assert.equal(
+      r2b.address,
+      "200 Original Ave",
+      "a street suggestion with no house number leaves the stored street alone"
+    );
+    assert.equal(r2b.city, "De Pere");
+
+    // A blank picked zip must not clear a stored zip.
+    await insertSite("st-pick-blank-zip", {
+      address: "300 Original Blvd", city: "Origtown", state: "WI", zip: "54115",
+    });
+    const p3 = await locateVenue({
+      siteId: "st-pick-blank-zip", mode: "pick",
+      address: "1302 South Broadway", city: "De Pere", state: "WI", zip: "", lat: 44.4, lng: -88.0,
+    });
+    assert.ok(p3.ok, JSON.stringify(p3));
+    const [r3b] = await db.select().from(sites).where(eq(sites.id, "st-pick-blank-zip"));
+    assert.equal(r3b.address, "1302 South Broadway", "a real house-numbered street still overwrites");
+    assert.equal(r3b.zip, "54115", "a blank picked zip leaves the stored zip alone");
+
+    console.log("PASS geo-backfill: pick() never blanks a real street or zip");
+  }
+
+  /* ---- 9. precision reported on the result (#169 D225 item 5) ---- */
+  {
+    // retry: a city-only match reports "city" precision.
+    await insertSite("st-precision-city", { address: "", city: "Reedsburg", state: "WI" });
+    const rc = await locateVenue(
+      { siteId: "st-precision-city", mode: "retry", address: "", city: "Reedsburg", state: "WI", zip: "" },
+      { delayMs: 0 }
+    );
+    assert.ok(rc.ok && rc.precision === "city", "a city-only retry reports city precision");
+
+    // pick: a house-numbered street reports building precision.
+    await insertSite("st-precision-pick-building", { address: "", city: "X", state: "WI" });
+    const pb = await locateVenue({
+      siteId: "st-precision-pick-building", mode: "pick",
+      address: "1302 South Broadway", city: "De Pere", state: "WI", zip: "54115", lat: 44.4, lng: -88.0,
+    });
+    assert.ok(pb.ok && pb.precision === "building", "a house-numbered pick reports building precision");
+
+    // pick: a town-level suggestion (no house number, existing street blank
+    // too) reports city precision.
+    await insertSite("st-precision-pick-city", { address: "", city: "X", state: "WI" });
+    const pc = await locateVenue({
+      siteId: "st-precision-pick-city", mode: "pick",
+      address: "", city: "De Pere", state: "WI", zip: "54115", lat: 44.4, lng: -88.0,
+    });
+    assert.ok(pc.ok && pc.precision === "city", "a town-level pick with no stored street reports city precision");
+
+    // pin: always building precision — a human placed the exact point.
+    await insertSite("st-precision-pin", { address: "", city: "X", state: "WI" });
+    const pp = await locateVenue({ siteId: "st-precision-pin", mode: "pin", lat: 44.4, lng: -88.0 });
+    assert.ok(pp.ok && pp.precision === "building", "a pin always reports building precision");
+
+    console.log("PASS geo-backfill: precision reported on retry/pick/pin");
+  }
 
   console.log(`ALL PASSED (${calls} stubbed fetches)`);
 }

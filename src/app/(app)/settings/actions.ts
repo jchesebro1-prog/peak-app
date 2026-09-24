@@ -482,6 +482,29 @@ export async function locateVenueAction(input: import("@/lib/venue-locate").Loca
   return r;
 }
 
+/**
+ * Centre point for the sidebar's pin map (#169 D225 item 3). A free-text
+ * "City, ST" search (what the drawer used to call) can resolve to the wrong
+ * place entirely — "DePere, WI" landed on Menasha. This uses the same
+ * structured city search + exact-place gate the batch geocoder trusts
+ * (searchCity + samePlace), so the map only recentres on a town it is sure
+ * is the right one; otherwise the caller keeps its Wisconsin fallback.
+ */
+export async function townCentreAction(
+  city: string,
+  state: string
+): Promise<{ lat: number; lng: number } | null> {
+  await requirePerm("manage_users");
+  const { searchCity } = await import("@/lib/geo");
+  const { samePlace } = await import("@/lib/geo-backfill");
+  const c = String(city || "").trim().slice(0, 100);
+  const st = String(state || "").trim().slice(0, 40);
+  if (!c) return null;
+  const [hit] = await searchCity(c, st, { limit: 1 });
+  if (!hit || !samePlace(c, hit.city)) return null;
+  return { lat: hit.lat, lng: hit.lng };
+}
+
 /* ---------------- Locations (offices) ----------------
    Port of Settings.dc.html saveOffice/removeOffice — the offices array is a
    field of the AppSettings blob (setSettings({ offices })). Coords come from
