@@ -103,6 +103,8 @@ const CSS = `
 .est-meta::-webkit-scrollbar-thumb { background: #3a3e46; border-color: #23262d; }
 .est-meta-toggle:hover { color: #fff !important; border-color: #4a4e56 !important; }
 .est-meta-tab:hover { color: #fff !important; background: #2b2e35 !important; }
+.est-side-toggle:hover { color: #16181d !important; border-color: #c4c9d2 !important; }
+.est-side-tab:hover { color: #16181d !important; background: #f7f8fa !important; }
 .est-field:focus { border-color: #c4c9d2 !important; outline: none; }
 .est-warm:focus { border-color: #e3cf94 !important; outline: none; }
 .est-secname:hover { border-color: #e4e7ec !important; }
@@ -124,6 +126,8 @@ const CSS = `
   .est-meta { width: 100% !important; order: -1; overflow: visible !important; border-left: none !important; border-bottom: 1px solid #2b2e35 !important; }
   .est-meta-collapsed .est-meta-tab { flex-direction: row !important; justify-content: center !important; padding: 8px 12px !important; }
   .est-meta-vlabel { writing-mode: horizontal-tb !important; }
+  .est-side-collapsed .est-side-tab { flex-direction: row !important; justify-content: center !important; padding: 8px 12px !important; }
+  .est-side-vlabel { writing-mode: horizontal-tb !important; }
   .est-main { overflow: visible !important; padding: 16px 16px 48px !important; }
   .est-docwrap { padding: 16px !important; }
   .est-doc { width: 100% !important; padding: 26px 20px !important; }
@@ -303,6 +307,19 @@ const META_TOGGLE: CSSProperties = {
   cursor: "pointer",
   whiteSpace: "nowrap",
 };
+const SIDE_OPEN_KEY = "quartzite.estimator.sideOpen";
+const SIDE_TOGGLE: CSSProperties = {
+  fontFamily: "var(--font-ui)",
+  fontSize: 11,
+  fontWeight: 600,
+  color: "#9aa0ab",
+  background: "transparent",
+  border: "1px solid #e4e7ec",
+  borderRadius: 6,
+  padding: "3px 7px",
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
 
 const INSTALL_TIMEFRAMES = ["ASAP", "Under 1 month", "1–3 months", "3–6 months", "6–12 months", "TBD"] as const;
 
@@ -365,6 +382,24 @@ export default function EstimatorClient({
     setMetaOpen(next);
     try {
       window.localStorage.setItem(META_OPEN_KEY, next ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  };
+  /** Systems rail (#168). Same hydration-safe pattern as metaOpen above. */
+  const [sideOpen, setSideOpen] = useState(true);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(SIDE_OPEN_KEY) === "0") setSideOpen(false);
+    } catch {
+      /* storage unavailable — stay open */
+    }
+  }, []);
+  const toggleSide = () => {
+    const next = !sideOpen;
+    setSideOpen(next);
+    try {
+      window.localStorage.setItem(SIDE_OPEN_KEY, next ? "1" : "0");
     } catch {
       /* ignore */
     }
@@ -2466,249 +2501,299 @@ export default function EstimatorClient({
 
           {/* body */}
           <div className="est-body" style={{ flex: 1, display: "flex", minHeight: 0 }}>
-            {/* left sidebar */}
-            <div
-              className="est-side"
-              style={{
-                width: 262,
-                background: "#fff",
-                borderRight: "1px solid #ececf0",
-                display: "flex",
-                flexDirection: "column",
-                flexShrink: 0,
-              }}
-            >
-              <div style={{ padding: "16px 14px 8px" }}>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    marginBottom: 10,
-                    padding: "0 6px",
-                  }}
-                >
-                  <span
+            {/* left sidebar — collapsible to a 36px tab, remembered per browser (#168, D224) */}
+            {sideOpen ? (
+              <div
+                className="est-side"
+                style={{
+                  width: 262,
+                  background: "#fff",
+                  borderRight: "1px solid #ececf0",
+                  display: "flex",
+                  flexDirection: "column",
+                  flexShrink: 0,
+                }}
+              >
+                <div style={{ padding: "16px 14px 8px" }}>
+                  <div
                     style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: "#9aa0ab",
-                      letterSpacing: ".06em",
-                      textTransform: "uppercase",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 10,
+                      padding: "0 6px",
                     }}
                   >
-                    Systems
-                  </span>
-                  <button
-                    type="button"
-                    onClick={addSystem}
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: "var(--accent)",
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                      padding: 0,
-                    }}
-                  >
-                    + Add
-                  </button>
-                </div>
-                {sections.map((sec) => {
-                  const sub = systemItemsRev(sec) + systemFreight(sec);
-                  const active = activeId === sec.id;
-                  const label = sec.name
-                    .split(" — ")[0]
-                    .split(" & ")[0]
-                    .replace("Motorized Hoists", "Hoists");
-                  return (
-                    <button
-                      type="button"
-                      key={sec.id}
-                      onClick={() => selectSystem(sec.id)}
+                    <span
                       style={{
-                        width: "100%",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 8,
-                        padding: active ? "10px 12px 10px 9px" : "10px 12px",
-                        borderRadius: 9,
-                        marginBottom: 3,
-                        border: "none",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        background: active ? ACCENT_SOFT : "transparent",
-                        borderLeft: active ? "3px solid var(--accent)" : undefined,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "#9aa0ab",
+                        letterSpacing: ".06em",
+                        textTransform: "uppercase",
                       }}
                     >
-                      <span
+                      Systems
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={addSystem}
                         style={{
-                          fontSize: 13,
-                          fontWeight: active ? 600 : 500,
-                          color: active ? ACCENT_INK : "#3a3f4a",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "var(--accent)",
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          padding: 0,
                         }}
                       >
-                        {label || "Untitled"}
-                      </span>
-                      <span
+                        + Add
+                      </button>
+                      <button
+                        type="button"
+                        className="est-side-toggle"
+                        onClick={toggleSide}
+                        aria-expanded={true}
+                        title="Hide systems"
+                        style={SIDE_TOGGLE}
+                      >
+                        ‹ Hide
+                      </button>
+                    </div>
+                  </div>
+                  {sections.map((sec) => {
+                    const sub = systemItemsRev(sec) + systemFreight(sec);
+                    const active = activeId === sec.id;
+                    const label = sec.name
+                      .split(" — ")[0]
+                      .split(" & ")[0]
+                      .replace("Motorized Hoists", "Hoists");
+                    return (
+                      <button
+                        type="button"
+                        key={sec.id}
+                        onClick={() => selectSystem(sec.id)}
                         style={{
-                          fontFamily: "var(--font-mono)",
-                          fontSize: 11.5,
-                          color: active ? ACCENT_INK : "#9aa0ab",
-                          flexShrink: 0,
+                          width: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 8,
+                          padding: active ? "10px 12px 10px 9px" : "10px 12px",
+                          borderRadius: 9,
+                          marginBottom: 3,
+                          border: "none",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          background: active ? ACCENT_SOFT : "transparent",
+                          borderLeft: active ? "3px solid var(--accent)" : undefined,
                         }}
                       >
-                        {short(sub)}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+                        <span
+                          style={{
+                            fontSize: 13,
+                            fontWeight: active ? 600 : 500,
+                            color: active ? ACCENT_INK : "#3a3f4a",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {label || "Untitled"}
+                        </span>
+                        <span
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            fontSize: 11.5,
+                            color: active ? ACCENT_INK : "#9aa0ab",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {short(sub)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
 
-              <div
-                style={{ margin: "6px 14px", padding: 13, background: "#f7f8fa", borderRadius: 10 }}
-              >
                 <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    marginBottom: 9,
-                  }}
+                  style={{ margin: "6px 14px", padding: 13, background: "#f7f8fa", borderRadius: 10 }}
                 >
-                  <span
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 9,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "#9aa0ab",
+                        letterSpacing: ".05em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Margin · all systems
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        color: ACCENT_INK,
+                      }}
+                    >
+                      {Math.round(t.margin * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={55}
+                    value={Math.round(t.margin * 100)}
+                    onChange={(e) => setMarginAll(e.target.value)}
+                    style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }}
+                  />
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: 10,
+                      color: "#9aa0ab",
+                      marginTop: 3,
+                    }}
+                  >
+                    <span>0%</span>
+                    <span>Reprice every line</span>
+                    <span>55%</span>
+                  </div>
+                </div>
+
+                <div
+                  style={{ margin: "6px 14px", padding: 13, background: "#f7f8fa", borderRadius: 10 }}
+                >
+                  <div
                     style={{
                       fontSize: 11,
                       fontWeight: 600,
                       color: "#9aa0ab",
                       letterSpacing: ".05em",
                       textTransform: "uppercase",
+                      marginBottom: 10,
                     }}
                   >
-                    Margin · all systems
-                  </span>
-                  <span
+                    Cost breakdown
+                  </div>
+                  <div
                     style={{
-                      fontFamily: "var(--font-mono)",
+                      display: "flex",
+                      justifyContent: "space-between",
                       fontSize: 12.5,
-                      fontWeight: 600,
-                      color: ACCENT_INK,
+                      marginBottom: 7,
                     }}
                   >
-                    {Math.round(t.margin * 100)}%
-                  </span>
+                    <span style={{ color: "#5b616e" }}>Materials</span>
+                    <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(t.mat)}</span>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: 12.5,
+                      marginBottom: 7,
+                    }}
+                  >
+                    <span style={{ color: "#5b616e" }}>Labor</span>
+                    <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(t.lab)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+                    <span style={{ color: "#5b616e" }}>Freight</span>
+                    <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(t.fr)}</span>
+                  </div>
                 </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={55}
-                  value={Math.round(t.margin * 100)}
-                  onChange={(e) => setMarginAll(e.target.value)}
-                  style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }}
-                />
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 10,
-                    color: "#9aa0ab",
-                    marginTop: 3,
-                  }}
-                >
-                  <span>0%</span>
-                  <span>Reprice every line</span>
-                  <span>55%</span>
+
+                {/* Tasks (PUNCHLIST #17 remainder) — needs a saved quote to
+                    attach to; a brand-new unsaved draft has nowhere for
+                    quoteId to point yet. */}
+                <div style={{ margin: "6px 14px 14px" }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "#9aa0ab",
+                      letterSpacing: ".05em",
+                      textTransform: "uppercase",
+                      marginBottom: 8,
+                    }}
+                  >
+                    Tasks
+                  </div>
+                  {loadedId ? (
+                    <>
+                      <ApplyTemplateControl
+                        parentField="quoteId"
+                        parentId={loadedId}
+                        templateSets={templateSets}
+                        action={applyQuoteTemplateAction}
+                      />
+                      <TasksCard
+                        parentField="quoteId"
+                        parentId={loadedId}
+                        tasks={quoteTasks}
+                        people={people}
+                        addAction={addQuoteTaskAction}
+                        setStatusAction={setQuoteTaskStatusAction}
+                        updateAction={updateQuoteTaskAction}
+                        defaultSection="Review"
+                      />
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the quote to add tasks.</div>
+                  )}
                 </div>
               </div>
-
+            ) : (
               <div
-                style={{ margin: "6px 14px", padding: 13, background: "#f7f8fa", borderRadius: 10 }}
+                className="est-side est-side-collapsed"
+                style={{ width: 36, flexShrink: 0, minHeight: 0, display: "flex", flexDirection: "column", background: "#fff", borderRight: "1px solid #ececf0" }}
               >
-                <div
+                <button
+                  type="button"
+                  className="est-side-tab"
+                  onClick={toggleSide}
+                  aria-expanded={false}
+                  title="Show systems"
                   style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: "#9aa0ab",
-                    letterSpacing: ".05em",
-                    textTransform: "uppercase",
-                    marginBottom: 10,
-                  }}
-                >
-                  Cost breakdown
-                </div>
-                <div
-                  style={{
+                    flex: 1,
                     display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 12.5,
-                    marginBottom: 7,
-                  }}
-                >
-                  <span style={{ color: "#5b616e" }}>Materials</span>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(t.mat)}</span>
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 12.5,
-                    marginBottom: 7,
-                  }}
-                >
-                  <span style={{ color: "#5b616e" }}>Labor</span>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(t.lab)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
-                  <span style={{ color: "#5b616e" }}>Freight</span>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(t.fr)}</span>
-                </div>
-              </div>
-
-              {/* Tasks (PUNCHLIST #17 remainder) — needs a saved quote to
-                  attach to; a brand-new unsaved draft has nowhere for
-                  quoteId to point yet. */}
-              <div style={{ margin: "6px 14px 14px" }}>
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "flex-start",
+                    gap: 10,
+                    padding: "12px 0",
+                    background: "transparent",
+                    border: "none",
                     color: "#9aa0ab",
-                    letterSpacing: ".05em",
-                    textTransform: "uppercase",
-                    marginBottom: 8,
+                    cursor: "pointer",
+                    fontFamily: "var(--font-ui)",
                   }}
                 >
-                  Tasks
-                </div>
-                {loadedId ? (
-                  <>
-                    <ApplyTemplateControl
-                      parentField="quoteId"
-                      parentId={loadedId}
-                      templateSets={templateSets}
-                      action={applyQuoteTemplateAction}
-                    />
-                    <TasksCard
-                      parentField="quoteId"
-                      parentId={loadedId}
-                      tasks={quoteTasks}
-                      people={people}
-                      addAction={addQuoteTaskAction}
-                      setStatusAction={setQuoteTaskStatusAction}
-                      updateAction={updateQuoteTaskAction}
-                      defaultSection="Review"
-                    />
-                  </>
-                ) : (
-                  <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the quote to add tasks.</div>
-                )}
+                  <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>›</span>
+                  <span
+                    className="est-side-vlabel"
+                    style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", writingMode: "vertical-rl", whiteSpace: "nowrap" }}
+                  >
+                    Systems
+                  </span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#6b7079" }}>{sections.length}</span>
+                </button>
               </div>
-            </div>
+            )}
 
             {/* main cards */}
             <div

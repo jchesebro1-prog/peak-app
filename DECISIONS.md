@@ -4963,3 +4963,15 @@ this entry; its layout stays.
   spills to a following page rather than losing content.
 - **pdf.ts footers appear only on multi-page output**, so a one-page PDF is byte-identical to
   before.
+
+## D224. The Systems rail collapses the same way the Quote details column does (#168, 2026-09-24)
+
+Same three calls as D219, applied to the left rail so the two edges of the estimator behave
+identically: a 36px tab rather than nothing (the way back stays visible, and the tab carries the
+system count so a hidden rail still says how many systems the quote has), a per-browser
+localStorage preference under its own key (a laptop wants both rails hidden; a monitor wants both
+open; the two choices are independent), and a mount-effect read so hydration always renders it
+open. "+ Add" lives only in the expanded rail — adding a system while the list is hidden would
+select a system the user cannot see. Deliberately not done here: restoring keyboard focus to the
+counterpart control after a toggle (the pressed button unmounts, so focus falls to <body>); it
+affects #164 equally and belongs in one fix for both rails.

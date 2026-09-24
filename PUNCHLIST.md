@@ -7481,3 +7481,25 @@ quote has line items); inspection-report height budgets are calibrated on RI-204
 they misjudge now spills to a following page instead of being cut off. The Word export of every
 template for Jeff's wording pass lives outside the repo (~/Downloads/Quartzite Templates for
 Editing 2026-09-24/).
+
+---
+
+
+## 168. Estimator — the Systems rail is collapsible too — DONE 2026-09-24 (D224)
+
+**Reported:** 2026-09-24 (Jeff, right after #164): "make the left systems sidebar collapsible too."
+
+**Done 2026-09-24.** The Systems rail's header row now reads `SYSTEMS · + Add · ‹ Hide`; hiding it
+leaves a 36px white tab (`›`, a vertical "Systems" label and the system count) whose whole
+height is the Show button, and the section cards take the freed 226px — with both rails hidden
+the cards column runs 1368px wide at 1440. Remembered per browser under
+`localStorage["quartzite.estimator.sideOpen"]`, applied after mount exactly like #164's
+`metaOpen`. The rail's four blocks (systems list, Margin · all systems, Cost breakdown, Tasks)
+are byte-identical to before; "+ Add" is unchanged. Below 860px the tab becomes a horizontal
+bar. Verified in a browser at 1440×900: Hide → 36px strip, cards 878→1104px; both rails hidden
+→ 1368px, no horizontal overflow; reload → both still hidden; a real click on the strip →
+expanded, stored `"1"`. Gates: tsc 0 errors, `test:specs` 2044 PASS / 0 FAIL,
+`test:smoke` ALL PASSED, eslint ✖ 124 problems (0 errors, 124 warnings) — run on the merged tree at cfc5d1f; tsc/eslint identical to the 4351052 baseline, and the
+spec count moved 2032 → 2044 only because #167's harness change added twelve specs.
+Decision D224. Follow-up noted, not done: focus lands on `<body>` after either rail's toggle
+because the pressed button unmounts (same in #164); a focus-restore effect would fix both.
