@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor } from "@/lib/team";
-import { all as allCustomers } from "@/lib/stores/customers";
+import { all as allCustomers, primaryLoc } from "@/lib/stores/customers";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAllProjects } from "@/lib/stores/projects";
 import { coordsOf } from "@/lib/geo";
@@ -13,6 +13,8 @@ import EditCustomerModal from "./edit-modal";
 import { cityState, custLocation, mono, moneyK, typeColor } from "./lib";
 import { getSettings } from "@/lib/settings";
 import { resolveFieldDefs } from "@/lib/customer-fields";
+import { travelForPoints } from "@/lib/travel-bulk";
+import { compareDrive, driveTitle, fmtDrive, parseDriveSort } from "@/lib/drive-format";
 
 export const metadata = { title: "Companies — Quartzite-6" };
 
@@ -114,6 +116,33 @@ export default async function CustomersPage({
   const addedCount = preAdded.filter(isRecent).length;
   const filtered = added ? preAdded.filter(isRecent) : preAdded;
 
+  /* ---- drive-from-origin (#170, D226): one bulk lookup covering every
+   *  customer's primary venue, then sort a COPY of `filtered` so nothing
+   *  else (preAdded, the map pins below) is disturbed. Default (no sort)
+   *  keeps today's store order exactly. ---- */
+  const travel = await travelForPoints(
+    customers.map((c) => {
+      const l = primaryLoc(c.locations);
+      return {
+        id: c.id,
+        lat: l?.lat,
+        lng: l?.lng,
+        city: l?.city,
+        state: l?.state,
+        travelMiles: l?.travelMiles,
+        travelMin: l?.travelMin,
+      };
+    })
+  );
+  const sort = parseDriveSort(one(sp.sort));
+  const sorted = sort
+    ? [...filtered].sort(
+        (a, b) =>
+          compareDrive(travel.byId.get(a.c.id), travel.byId.get(b.c.id), sort) ||
+          a.c.name.localeCompare(b.c.name)
+      )
+    : filtered;
+
   const types = ["all", ...Array.from(new Set(customers.map((c) => c.type).filter(Boolean)))];
   const ownerOptions = [
     { value: "all", label: "All teammates" },
@@ -196,7 +225,18 @@ export default async function CustomersPage({
           </div>
 
           {hasCustomers && (
-            <FilterBar q={q} type={typeParam} scope={scope} added={added} addedCount={addedCount} types={types} ownerOptions={ownerOptions} meName={me.name} />
+            <FilterBar
+              q={q}
+              type={typeParam}
+              scope={scope}
+              added={added}
+              addedCount={addedCount}
+              types={types}
+              ownerOptions={ownerOptions}
+              meName={me.name}
+              sort={sort}
+              originName={travel.originName}
+            />
           )}
 
           {!hasCustomers ? (
@@ -214,7 +254,7 @@ export default async function CustomersPage({
             </div>
           ) : (
             <div className="pk-card" style={{ padding: 0, overflow: "hidden" }}>
-              {filtered.map(({ c, openValue, quoteCount, owner }) => {
+              {sorted.map(({ c, openValue, quoteCount, owner }) => {
                 const ident = owner ? identOf(owner) : null;
                 const venueN = (c.locations || []).length;
                 const sub =
@@ -222,6 +262,7 @@ export default async function CustomersPage({
                   " · " +
                   custLocation(c) +
                   (venueN > 1 ? " · " + venueN + " venues" : "");
+                const d = travel.byId.get(c.id);
                 return (
                   <Link
                     key={c.id}
@@ -239,6 +280,21 @@ export default async function CustomersPage({
                       <span style={{ display: "block", fontSize: 11.5, color: "#8c919c", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {sub}
                       </span>
+                    </span>
+                    <span
+                      className="cu-row-drive"
+                      title={driveTitle(d)}
+                      style={{
+                        width: 110,
+                        flexShrink: 0,
+                        textAlign: "right",
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 11.5,
+                        color: d && d.source !== "none" ? "#3a3f4a" : "#b0b5bf",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {fmtDrive(d)}
                     </span>
                     <span className="cu-row-owner" style={{ flexShrink: 0 }}>
                       {ident ? (
@@ -258,7 +314,7 @@ export default async function CustomersPage({
                   </Link>
                 );
               })}
-              {filtered.length === 0 && (
+              {sorted.length === 0 && (
                 <div style={{ padding: "50px 22px", textAlign: "center", color: "#9aa0ab", fontSize: 13 }}>
                   {ql ? `No companies match “${q.trim()}”.` : "No companies match these filters."}
                 </div>
