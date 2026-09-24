@@ -309,6 +309,10 @@ export default function EstimatorClient({
   const [quoteId, setQuoteId] = useState(initial.quoteId);
   const [status, setStatus] = useState<QuoteStatus>(initial.status);
   const [review, setReview] = useState<QuoteReview>(initial.review);
+  // Keep the review status visible without making its action controls consume
+  // the estimator's first viewport. The bar can be expanded whenever a user
+  // needs to submit, claim, decide, attest, or send the quote.
+  const [reviewBarOpen, setReviewBarOpen] = useState(false);
   const [reviewerSel, setReviewerSel] = useState("queue");
   const [rcOpen, setRcOpen] = useState(false);
   const [rcNote, setRcNote] = useState("");
@@ -2066,7 +2070,7 @@ export default function EstimatorClient({
                 gap: 14,
                 flexWrap: "wrap",
                 rowGap: 11,
-                padding: "11px 22px",
+                padding: reviewBarOpen ? "11px 22px" : "7px 22px",
                 background: rm.bg,
                 borderBottom: "1px solid " + rm.bd,
                 flexShrink: 0,
@@ -2093,7 +2097,27 @@ export default function EstimatorClient({
                 <div style={{ fontSize: 13, fontWeight: 600, color: rm.ink }}>{rm.title}</div>
                 <div style={{ fontSize: 12, color: "#5b616e", marginTop: 1 }}>{rbSub}</div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                aria-expanded={reviewBarOpen}
+                aria-controls="estimator-review-actions"
+                onClick={() => setReviewBarOpen((open) => !open)}
+                style={{
+                  fontSize: 11.5,
+                  fontWeight: 650,
+                  color: rm.ink,
+                  background: "rgba(255,255,255,.68)",
+                  border: "1px solid " + rm.bd,
+                  borderRadius: 7,
+                  padding: "7px 10px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {reviewBarOpen ? "Hide review actions" : "Review actions"} {reviewBarOpen ? "⌃" : "⌄"}
+              </button>
+              {reviewBarOpen && (
+              <div id="estimator-review-actions" style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
                 {rbCanSubmit && (
                   <>
                     <select
@@ -2233,6 +2257,7 @@ export default function EstimatorClient({
                   </button>
                 )}
               </div>
+              )}
             </div>
           )}
 
