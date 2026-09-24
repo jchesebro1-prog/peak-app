@@ -6,6 +6,7 @@ import { gmailEnabled, hasCalendarScope, personalKey } from "@/lib/gmail/config"
 import { getConnectionInfo } from "@/lib/gmail/connections";
 import { searchPeople, type PersonMatch } from "@/lib/people-search";
 import type { EventDetail } from "@/lib/google/calendar";
+import type { TravelFrom } from "@/lib/travel-origin";
 
 /** Resolves the signed-in user's own connected+granted mailbox key, or an
  *  error string explaining why calendar writes aren't available. Every
@@ -52,37 +53,43 @@ async function addTravelBlock(
   userId: string,
   meetingTitle: string,
   location: string,
-  meetingStartMs: number
+  meetingStartMs: number,
+  travelFrom?: TravelFrom
 ): Promise<void> {
   if (!looksLikePhysicalAddress(location)) return;
   try {
-    const [{ getUser }, { getSettings }, { search, estimate, quoteOrigin }] = await Promise.all([
+    const [{ getUser }, { getSettings }, { search, estimate }] = await Promise.all([
       import("@/lib/users"),
       import("@/lib/settings"),
+      import("@/lib/geo"),
+    ]);
+    const [{ resolveTravelOrigin }, { route }] = await Promise.all([
+      import("@/lib/travel-origin"),
       import("@/lib/geo"),
     ]);
     const settings = await getSettings();
     const offices = settings.offices || [];
     const me = await getUser(userId);
-    const myOfficeId = me?.officeId;
-    // Fall back to the quote-default office (Settings -> Locations) so a
-    // user who never set "Based out of" (Account page) still gets a
-    // reasonable travel estimate instead of none at all.
-    const office =
-      (myOfficeId && offices.find((o) => o.id === myOfficeId)) ||
-      quoteOrigin(offices);
-    if (!office) return; // no office configured anywhere — nothing to estimate from
+    const { origin, note } = await resolveTravelOrigin(travelFrom, {
+      offices,
+      baseOfficeId: me?.officeId,
+      search: (q) => search(q, { limit: 1 }),
+    });
+    if (!origin) return; // no office configured anywhere and nothing typed — nothing to estimate from
 
-    // The location is free text, not lat/lng, so it needs geocoding first —
-    // estimate()'s target wants coordinates. search() is the same Nominatim
-    // lookup the address-search UI uses; it fails soft (empty array) on a
-    // network hiccup or an address it can't resolve, which is exactly the
-    // "skip silently" case this feature wants.
+    // The location is free text, not lat/lng, so it needs geocoding first.
     const hits = await search(location, { limit: 1 });
     const hit = hits[0];
     if (!hit) return;
 
-    const est = await estimate([office], { lat: hit.lat, lng: hit.lng });
+    // #170: a real route (OSRM, cached) rather than only reading the cache —
+    // a typed origin has never been routed from before. Falls back to the
+    // straight-line estimate when OSRM is unavailable.
+    const target = { lat: hit.lat, lng: hit.lng };
+    const live = await route(origin, target);
+    const est = live
+      ? { minutes: live.minutes }
+      : await estimate([{ ...origin, quoteDefault: true }], target);
     // Sanity-cap the estimate: a bad geocode hit or a haversine outlier
     // producing an absurd duration should not plant a travel block days
     // before the meeting. Six hours comfortably covers any real same-day
@@ -99,8 +106,9 @@ async function addTravelBlock(
         "Auto-added travel time — safe to delete or edit. Estimated " +
         est.minutes +
         " min from " +
-        (office.name || "your base office") +
-        ".",
+        origin.name +
+        "." +
+        (note ? " " + note : ""),
     });
   } catch (err) {
     console.error("[calendar] travel block skipped:", err);
@@ -117,6 +125,8 @@ export type EventFormInput = {
   /** "" | "daily" | "weekly" | "monthly" | "yearly" — recurrence.ts */
   recurrencePreset?: string;
   attendeeEmails?: string[];
+  /** #170 — where the auto travel block starts from (create only). */
+  travelFrom?: TravelFrom;
 };
 
 function validate(input: EventFormInput): string | null {
@@ -158,10 +168,39 @@ export async function addCalendarEventAction(
   // entry has no meaningful arrival time to count back from, so it's
   // skipped too.
   if (!input.allDay && input.location) {
-    await addTravelBlock(grant.key, grant.userId, title, input.location, input.startAt);
+    const travelFrom =
+      input.travelFrom && typeof input.travelFrom === "object"
+        ? {
+            officeId:
+              typeof input.travelFrom.officeId === "string" ? input.travelFrom.officeId.slice(0, 80) : undefined,
+            address:
+              typeof input.travelFrom.address === "string" ? input.travelFrom.address.slice(0, 200) : undefined,
+          }
+        : undefined;
+    await addTravelBlock(grant.key, grant.userId, title, input.location, input.startAt, travelFrom);
   }
   revalidatePath("/", "layout");
   return { ok: true };
+}
+
+/** #170 — the "Traveling from" choices for the New event form. */
+export async function travelOriginOptionsAction(): Promise<{
+  base: { id: string; name: string } | null;
+  offices: Array<{ id: string; name: string }>;
+}> {
+  const me = await requireUser();
+  const [{ getSettings }, { getUser }, { baseOffice }] = await Promise.all([
+    import("@/lib/settings"),
+    import("@/lib/users"),
+    import("@/lib/travel-origin"),
+  ]);
+  const offices = (await getSettings()).offices || [];
+  const user = await getUser(me.id);
+  const base = baseOffice(offices, user?.officeId);
+  return {
+    base: base ? { id: base.id, name: base.name } : null,
+    offices: offices.map((o) => ({ id: o.id, name: o.name })),
+  };
 }
 
 /** Fetches full detail (recurrence, attendees, description) for the edit
