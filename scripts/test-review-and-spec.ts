@@ -6848,6 +6848,84 @@ async function writeBackAsyncChecks(): Promise<void> {
 ok((TABS as readonly string[]).includes("schedule"), "#145 schedule is a valid engagement tab (?tab= validation depends on it)");
 ok((TABS as readonly string[]).includes("activity"), "#145 activity is a valid engagement tab");
 
+/* ============ PIPELINES (Daylite stages) — pure ============ */
+import {
+  DEFAULT_PIPELINES, DEFAULT_PROJECT_PIPELINES, DEFAULT_QUOTE_PIPELINES, validateProjectPipeline, validateQuotePipeline,
+  resolvePipelines, projectPipelineFor, quotePipelineFor, firstStage, firstStageWithTag, nextStage, resolveProjectStage,
+  projectStageMeta, projectTag, isDone, isOnSite, isBacklog, isActive, stageLabelFor, carriesPipeline,
+  statusForQuoteStage, quoteStageForStatus,
+} from "@/lib/pipelines";
+{
+  const install = DEFAULT_PROJECT_PIPELINES.find((p) => p.id === "install")!;
+  ok(install.stages.map((s) => s.id).join(",") === "deposit,equipment-ordered,initial-contact,scheduled,installation,invoice,complete", "pipelines: install seed ids in Daylite order");
+  ok(install.stages.map((s) => s.label).join("|") === "Deposit/PO received|Equipment ordered|Initial contact|Scheduled|Installation|Invoice|Complete", "pipelines: install seed labels");
+  ok(install.stages.map((s) => s.tag).join(",") === "backlog,backlog,backlog,scheduled,onsite,closeout,done", "pipelines: install seed tags");
+  ok(install.stages.find((s) => s.id === "equipment-ordered")?.advanceOnDelivered === true, "pipelines: equipment-ordered advances on delivered");
+  const order = DEFAULT_PROJECT_PIPELINES.find((p) => p.id === "order")!;
+  ok(order.stages.map((s) => s.id + ":" + s.tag).join(",") === "order-materials:backlog,deliveries:backlog,delivered:closeout,complete:done", "pipelines: order seed");
+  const ed = DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "estimate-design")!;
+  const bs = DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "bid-spec")!;
+  ok(ed.stages.map((s) => s.id + ":" + s.tag).join(",") === "first-contact:draft,design:draft,presentation:sent,acceptance:won", "pipelines: estimate-design seed");
+  ok(bs.stages.map((s) => s.id + ":" + s.tag).join(",") === "collect-info:draft,create-bid:draft,bid-sent:sent,awarded:won", "pipelines: bid-spec seed");
+  ok(DEFAULT_PIPELINES.defaultQuotePipelineId === "estimate-design", "pipelines: default quote pipeline");
+  for (const p of DEFAULT_PROJECT_PIPELINES) ok(validateProjectPipeline(p).length === 0, `pipelines: seed ${p.id} validates`);
+  for (const p of DEFAULT_QUOTE_PIPELINES) ok(validateQuotePipeline(p).length === 0, `pipelines: seed ${p.id} validates`);
+
+  // validator
+  ok(validateProjectPipeline({ id: "x", label: "X", stages: [{ id: "a", label: "A", tag: "done" }] }).length > 0, "pipelines: a done-only pipeline is refused");
+  ok(validateProjectPipeline({ id: "x", label: "X", stages: [{ id: "a", label: "A", tag: "done" }, { id: "b", label: "B", tag: "backlog" }] }).length > 0, "pipelines: done must be last");
+  ok(validateProjectPipeline({ id: "x", label: "X", stages: [{ id: "a", label: "A", tag: "backlog" }, { id: "a", label: "B", tag: "done" }] }).length > 0, "pipelines: duplicate stage ids refused");
+  ok(validateProjectPipeline({ id: "x", label: "X", stages: [{ id: "a", label: " ", tag: "backlog" }, { id: "b", label: "B", tag: "done" }] }).length > 0, "pipelines: blank label refused");
+  ok(validateQuotePipeline({ id: "q", label: "Q", stages: [{ id: "a", label: "A", tag: "sent" }, { id: "b", label: "B", tag: "won" }] }).length > 0, "pipelines: quote needs a draft stage");
+  ok(validateQuotePipeline({ id: "q", label: "Q", stages: [{ id: "a", label: "A", tag: "draft" }, { id: "b", label: "B", tag: "won" }, { id: "c", label: "C", tag: "sent" }] }).length > 0, "pipelines: quote tags must not go backwards / won last");
+
+  // resolve: absent → defaults; invalid stored list → defaults; valid stored → used
+  ok(resolvePipelines(null).project.length === 2, "pipelines: absent settings resolve to seeds");
+  ok(resolvePipelines({ projectPipelines: [{ id: "bad", label: "B", stages: [] }] }).project[0].id === "install", "pipelines: an invalid stored list falls back to seeds");
+  const custom = resolvePipelines({ projectPipelines: [{ id: "install", label: "Install", stages: [{ id: "a", label: "A", tag: "backlog" }, { id: "z", label: "Z", tag: "done" }] }, order] });
+  ok(custom.project[0].stages.length === 2, "pipelines: a valid stored list wins");
+  ok(resolvePipelines({ defaultQuotePipelineId: "nope" }).defaultQuotePipelineId === "estimate-design", "pipelines: unknown default quote pipeline falls back");
+
+  // pipeline lookup
+  ok(projectPipelineFor(DEFAULT_PIPELINES, { kind: "order" }).id === "order", "pipelines: order kind → order pipeline");
+  ok(projectPipelineFor(DEFAULT_PIPELINES, { kind: "project" }).id === "install", "pipelines: project kind → install pipeline");
+  ok(projectPipelineFor(DEFAULT_PIPELINES, { kind: "project", pipelineId: "gone" }).id === "install", "pipelines: unknown pipelineId falls back by kind");
+  ok(quotePipelineFor(DEFAULT_PIPELINES, { pipelineId: "bid-spec" }).id === "bid-spec", "pipelines: quote pipeline by id");
+  ok(quotePipelineFor(DEFAULT_PIPELINES, {}).id === "estimate-design", "pipelines: quote default pipeline");
+  ok(firstStage(install).id === "deposit" && firstStageWithTag(install, "closeout")?.id === "invoice", "pipelines: first / first-with-tag");
+  ok(nextStage(install, "equipment-ordered")?.id === "initial-contact" && nextStage(install, "complete") === null, "pipelines: nextStage");
+
+  // legacy conversion (spec §3.6)
+  const conv = (kind: string, s: string) => resolveProjectStage(projectPipelineFor(DEFAULT_PIPELINES, { kind }), kind, s);
+  ok(conv("project", "procurement") === "equipment-ordered" && conv("project", "delivery") === "equipment-ordered", "pipelines: legacy procurement/delivery → equipment-ordered");
+  ok(conv("project", "scheduled") === "scheduled" && conv("project", "install") === "installation" && conv("project", "training") === "installation", "pipelines: legacy scheduled/install/training");
+  ok(conv("project", "signoff") === "invoice" && conv("project", "complete") === "complete", "pipelines: legacy signoff → invoice, complete stays");
+  ok(conv("order", "procurement") === "order-materials" && conv("order", "delivery") === "deliveries" && conv("order", "signoff") === "delivered" && conv("order", "complete") === "complete", "pipelines: legacy order stages");
+  ok(conv("project", "") === "deposit" && conv("project", "bogus") === "deposit", "pipelines: missing/unknown → first stage");
+  ok(conv("project", "invoice") === "invoice", "pipelines: a current id is kept");
+
+  // meta + predicates
+  const m = projectStageMeta(DEFAULT_PIPELINES, { kind: "project", stage: "installation" });
+  ok(m.tag === "onsite" && m.label === "Installation" && m.index === 4 && m.count === 7 && m.pipelineId === "install", "pipelines: stage meta");
+  ok(isOnSite({ kind: "project", stage: "installation" }) && !isDone({ kind: "project", stage: "installation" }), "pipelines: isOnSite / isDone");
+  ok(isDone({ kind: "project", stage: "complete" }) && isDone({ kind: "project", stage: "complete" }, DEFAULT_PIPELINES), "pipelines: complete is done");
+  ok(isDone({ kind: "project", stage: "complete-legacy-unknown", stageMeta: { pipelineId: "install", tag: "done", label: "Complete", index: 6, count: 7 } }), "pipelines: stamped stageMeta wins over recomputation");
+  ok(isBacklog({ kind: "project", stage: "procurement" }), "pipelines: a legacy stage on an unconverted record still resolves (offline copies)");
+  ok(isActive({ kind: "project", stage: "invoice" }) && !isActive({ kind: "project", stage: "deposit" }), "pipelines: isActive = scheduled|onsite|closeout");
+  ok(projectTag({ kind: "order", stage: "delivered" }) === "closeout", "pipelines: projectTag for orders");
+  ok(stageLabelFor(DEFAULT_PIPELINES, { kind: "project" }, "training") === "Training" && stageLabelFor(DEFAULT_PIPELINES, { kind: "project" }, "scheduled") === "Scheduled", "pipelines: history labels — legacy keys keep their old names");
+
+  // quotes
+  ok(carriesPipeline("system") && carriesPipeline(undefined) && !carriesPipeline("flame_test") && !carriesPipeline("consulting"), "pipelines: only system quotes carry a pipeline");
+  ok(statusForQuoteStage(ed, "design") === "draft" && statusForQuoteStage(ed, "presentation") === "sent" && statusForQuoteStage(ed, "acceptance") === "won", "pipelines: stage → status");
+  ok(quoteStageForStatus(ed, "sent", "first-contact") === "presentation", "pipelines: status sent snaps a draft-stage quote forward");
+  ok(quoteStageForStatus(ed, "draft", "design") === "design", "pipelines: same-tag status keeps the current stage");
+  ok(quoteStageForStatus(ed, "won", "presentation") === "acceptance", "pipelines: won snaps to the won stage");
+  ok(quoteStageForStatus(ed, "lost", "presentation") === "presentation", "pipelines: lost leaves the stage where the deal died");
+  ok(quoteStageForStatus(ed, "draft", null) === "first-contact", "pipelines: no stage + draft → first stage");
+  ok(quoteStageForStatus(ed, "sent", "acceptance") === "presentation", "pipelines: a status moving backwards moves the stage back to that status's first stage");
+}
+
 // #148: wait for the dev auto-seed once, up front, before any of this async
 // chain runs — asyncChecks() below reads seeded equipment items and surveys,
 // and without this the gate races a cold datadir's seed intermittently
