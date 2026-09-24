@@ -16,6 +16,7 @@ import { ensureProjectTasksMigrated, allTasks, type TaskRecord } from "@/lib/sto
 import { RecordingsStrip } from "@/components/recordings/recordings-strip";
 import { loadRecordingsStrip, loadRecordingsStrips } from "../recordings/data";
 import FieldWorkDetail, { type FieldIdentity } from "./controls";
+import { safeSweep } from "@/lib/safe-sweep";
 
 export const metadata = { title: "Field work — Quartzite-6" };
 
@@ -117,7 +118,12 @@ export default async function FieldWorkPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [me, sp] = await Promise.all([requireUser(), searchParams]);
-  const projectSync = await syncProjectsFromQuotes();
+  const projectSyncOutcome = await safeSweep("field work projects", syncProjectsFromQuotes, { created: 0, skipped: [] });
+  const projectSyncBase = projectSyncOutcome.value;
+  const projectSync = {
+    ...projectSyncBase,
+    skipped: projectSyncOutcome.error ? [...projectSyncBase.skipped, projectSyncOutcome.error] : projectSyncBase.skipped,
+  };
   const [all, users, serviceWork] = await Promise.all([
     getAllProjects(),
     activeUsers(),

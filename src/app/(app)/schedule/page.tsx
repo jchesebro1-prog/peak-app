@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import { safeSweep } from "@/lib/safe-sweep";
 import ActionError from "@/components/action-error";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor } from "@/lib/team";
@@ -140,7 +141,12 @@ export default async function SchedulePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [, sp] = await Promise.all([requireUser(), searchParams]);
-  const projectSync = await syncProjectsFromQuotes();
+  const projectSyncOutcome = await safeSweep("schedule projects", syncProjectsFromQuotes, { created: 0, skipped: [] });
+  const projectSyncBase = projectSyncOutcome.value;
+  const projectSync = {
+    ...projectSyncBase,
+    skipped: projectSyncOutcome.error ? [...projectSyncBase.skipped, projectSyncOutcome.error] : projectSyncBase.skipped,
+  };
   const [projects, users] = await Promise.all([getAllProjects(), activeUsers()]);
   const serviceWork = await loadServiceWork();
 
@@ -165,9 +171,14 @@ export default async function SchedulePage({
   // consulting quote with no engagement record yet (nothing else on this
   // request path has visited the engagements hub) would read as "no
   // consulting engagements" here even though one is really pending.
-  const engagementSync = view === "timeline" || view === "people"
-    ? await syncEngagementsFromQuotes()
-    : { created: 0, skipped: [] as string[] };
+  const engagementSyncOutcome = view === "timeline" || view === "people"
+    ? await safeSweep("schedule consulting engagements", syncEngagementsFromQuotes, { created: 0, skipped: [] })
+    : { value: { created: 0, skipped: [] as string[] }, error: null };
+  const engagementSyncBase = engagementSyncOutcome.value;
+  const engagementSync = {
+    ...engagementSyncBase,
+    skipped: engagementSyncOutcome.error ? [...engagementSyncBase.skipped, engagementSyncOutcome.error] : engagementSyncBase.skipped,
+  };
   const engagements = view === "timeline" || view === "people" ? await allEngagements() : [];
   const openEngagements = engagements.filter((e) => OPEN_ENGAGEMENT_STAGES.includes(e.status));
   const consultingTasks =

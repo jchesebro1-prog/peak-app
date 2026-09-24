@@ -12,12 +12,6 @@ import {
   STAGES,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
-import { syncFromQuotes } from "@/lib/stores/flame-jobs";
-import { syncFromQuotes as syncRepairsFromQuotes } from "@/lib/stores/repair-jobs";
-import { syncFromQuotes as syncInspectionsFromQuotes } from "@/lib/stores/inspections";
-import { syncProjectsFromQuotes } from "@/lib/stores/projects";
-import { syncEngagementsFromQuotes } from "@/lib/stores/engagements";
-import { syncFromQuotes as syncBookingsFromQuotes } from "@/lib/stores/equipment-bookings";
 import { createQuoteClientPackage } from "@/lib/client-package-server";
 
 /**
@@ -54,36 +48,9 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
     redirect(back + (back.includes("?") ? "&" : "?") + "statusError=" + encodeURIComponent(msg));
   }
   if (!q) return;
-  if (status === "sent" && q.quoteType === "consulting") {
-    // Spec §1 spawn model: SENDING a consulting proposal opens the
-    // engagement at Proposal sent — winning later advances it to Awarded.
-    // Routed through the sweep (not ensureEngagementForQuote) so the
-    // "sent while closed" reopen rule in engagementSyncAction fires
-    // immediately on re-send, instead of waiting for the next
-    // loadConsultingData safety-net pass. Idempotent either way.
-    await syncEngagementsFromQuotes();
-  }
-  if (status === "lost" && q.quoteType === "consulting") {
-    // A proposal lost while still at Proposal sent closes its engagement
-    // with a "Proposal lost" decision — the sweep owns that rule.
-    await syncEngagementsFromQuotes();
-  }
-  if (status === "won") {
-    // Acceptance auto-spawns downstream work exactly like the prototype:
-    // won flame-test quotes become FT jobs, won repair quotes become repair
-    // jobs, won inspection quotes become requested inspections, won system
-    // quotes become Installs projects, won consulting quotes ensure /
-    // advance ConsultingEngagements (spec §1: proposal_sent → awarded), and
-    // won rental quotes become confirmed equipment bookings. Each sync
-    // filters to its own quoteType and is idempotent, so calling all six is
-    // safe.
-    await syncFromQuotes();
-    await syncRepairsFromQuotes();
-    await syncInspectionsFromQuotes();
-    await syncProjectsFromQuotes();
-    await syncEngagementsFromQuotes();
-    await syncBookingsFromQuotes();
-  }
+  // setStatus is the single atomic quote-transition seam. It performs the
+  // type-specific spawn inside the same transaction, so no caller can forget
+  // downstream work or leave a won quote half-materialized.
   revalidatePath("/", "layout");
 }
 

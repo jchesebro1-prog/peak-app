@@ -6,7 +6,7 @@ import { requireUser, requirePerm } from "@/lib/session";
 import { get as getCustomer, nameFor } from "@/lib/stores/customers";
 import { create as createQuote, update as updateQuote, setStatus, retireReplacedDraft } from "@/lib/stores/quotes";
 import { get as getEquipmentItem } from "@/lib/stores/equipment-items";
-import { availableQty, createFromQuote } from "@/lib/stores/equipment-bookings";
+import { availableQty } from "@/lib/stores/equipment-bookings";
 import { priceRental } from "@/lib/pricing/rental";
 
 /**
@@ -157,7 +157,6 @@ export async function approveRentalQuote(formData: FormData): Promise<void> {
       return;
     }
     await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
-    await createFromQuote(id);
   } catch (error) {
     console.error("approveRentalQuote: quote approval failed", error);
     quoteFailure(formData, "Couldn’t approve the rental quote — please try again.");

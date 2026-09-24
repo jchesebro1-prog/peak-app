@@ -13,7 +13,6 @@ import {
 import {
   CATEGORIES,
   PRIORITIES,
-  createFromQuote,
   type RepairSourceKind,
 } from "@/lib/stores/repair-jobs";
 import {
@@ -252,7 +251,6 @@ export async function approveRepairQuote(formData: FormData): Promise<void> {
       return;
     }
     await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
-    await createFromQuote(id);
   } catch (error) {
     console.error("approveRepairQuote: quote approval failed", error);
     quoteFailure(formData, "Couldn’t approve the repair quote — please try again.");

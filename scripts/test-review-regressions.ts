@@ -10,7 +10,8 @@ import {
   getEngagement,
   syncEngagementsFromQuotes,
 } from "@/lib/stores/engagements";
-import { upsertDoc, patchDoc } from "@/db/doc-store";
+import { getDoc, upsertDoc, patchDoc } from "@/db/doc-store";
+import { withTransaction } from "@/db";
 import type { Quote } from "@/lib/stores/quotes";
 import { contactByEmail } from "@/lib/identity/lookup";
 import { contactsForCompany, emailsFor, saveContact, setEmails, softDeleteContact } from "@/lib/identity/contacts";
@@ -62,6 +63,22 @@ function prepImport(key: string, csv: string) {
 }
 
 async function main() {
+  // Engineering batch B1 — ambient transactions must roll back doc-store
+  // writes, including writes made through a nested helper transaction.
+  const txProbe = `engineering-tx-${Date.now()}`;
+  await assert.rejects(
+    withTransaction(async () => {
+      await upsertDoc("quotes", { id: txProbe, value: "rolled-back" } as any);
+      await withTransaction(async () => {
+        await patchDoc("quotes", txProbe, (doc: any) => ({ ...doc, nested: true }));
+      });
+      throw new Error("intentional transaction rollback");
+    }),
+    /intentional transaction rollback/,
+    "B1 transaction failure propagates",
+  );
+  assert.equal(await getDoc("quotes", txProbe), null, "B1 failed transaction rolls back nested doc writes");
+
   const flame = await setFlameRates({ laborRate: 123, mileageRate: 1.23 });
   assert.equal(flame.laborRate, 123, "flame-test setRates must return the editable labor rate");
   assert.equal((await getFlameRates()).mileageRate, 1.23, "flame-test getRates must preserve mileage overrides");
@@ -200,7 +217,6 @@ async function main() {
   await claimDomain("t96sweep.org", "lakefront", "manual", "test");
   const n = await resweepThreads({ domain: "t96sweep.org" });
   assert.equal(n, 1, "#96 resweep touched the unlinked thread");
-  const { getDoc } = await import("@/db/doc-store");
   const swept = await getDoc<any>("comms", "C-t96");
   assert.equal(swept?.resolution, "suggested", "#96 domain claim surfaces as a suggestion");
   assert.equal(swept?.suggestedCustomerId, "lakefront", "#96 suggestion names the domain owner");

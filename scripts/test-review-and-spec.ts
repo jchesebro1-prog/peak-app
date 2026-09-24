@@ -3563,6 +3563,7 @@ ok(baseVenueKind(VENDOR_COMPANY_TYPE, "Rose Brand Church Supply") === null, "#12
   const now = Date.UTC(2026, 8, 21, 12);
   const list = (effectiveAt: number): VendorPriceListEntry => ({ id: "pl-x", receivedAt: effectiveAt, effectiveAt, note: "", loggedBy: "t" });
   ok(vendorStatus({ lastList: null, catalogEffectiveAt: now, now }) === "no-list", "#122 vendorStatus: no ledger entry → no-list (even with a fresh catalog)");
+  ok(vendorStatus({ lastList: list(now - DAY), catalogEffectiveAt: null, hasClaims: false, now }) === "no-claims", "#140 vendor with a price list but no claimed manufacturers → no-claims");
   ok(vendorStatus({ lastList: list(now - DAY), catalogEffectiveAt: null, now }) === "newer-list", "#122 vendorStatus: a list but an undated catalog → newer-list");
   ok(vendorStatus({ lastList: list(now - DAY), catalogEffectiveAt: now - 2 * DAY, now }) === "newer-list", "#122 vendorStatus: list newer than the catalog → newer-list");
   ok(vendorStatus({ lastList: list(now - 2 * DAY), catalogEffectiveAt: now - DAY, now }) === "current", "#122 vendorStatus: catalog dated after the list → current");
@@ -3577,7 +3578,7 @@ ok(baseVenueKind(VENDOR_COMPANY_TYPE, "Rose Brand Church Supply") === null, "#12
   ok(!!t1 && t1.title.startsWith("Update catalog: Rose Brand price list effective ") && t1.source === `auto: vendor v1 newer-list ${now - DAY}`, "#122 vendorTasks: newer-list → 'Update catalog' keyed by the list's effectiveAt");
   const t2 = vendorTasks("outdated", { id: "v1", name: "Rose Brand", lastList: list(edge - 1), catalogEffectiveAt: edge - 5 });
   ok(!!t2 && t2.title === "Request updated price list from Rose Brand" && t2.source === `auto: vendor v1 outdated ${edge - 1}`, "#122 vendorTasks: outdated → 'Request updated price list' keyed by the newer of list/catalog");
-  ok(vendorTasks("current", { id: "v1", name: "X", lastList: list(now), catalogEffectiveAt: now }) === null && vendorTasks("no-list", { id: "v1", name: "X", lastList: null, catalogEffectiveAt: null }) === null, "#122 vendorTasks: current / no-list → no task");
+  ok(vendorTasks("current", { id: "v1", name: "X", lastList: list(now), catalogEffectiveAt: now }) === null && vendorTasks("no-list", { id: "v1", name: "X", lastList: null, catalogEffectiveAt: null }) === null && vendorTasks("no-claims", { id: "v1", name: "X", lastList: list(now), catalogEffectiveAt: null }) === null, "#140 no-claims stays visible without minting an owner task");
 
   // `as unknown as` — the catalog plan may type this parameter as the full AppSettingsData.
   const settings0 = { priceListEffective: {} } as unknown as Parameters<typeof catalogEffectiveAtFor>[2];

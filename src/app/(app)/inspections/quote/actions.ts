@@ -10,7 +10,7 @@ import {
   setStatus,
   retireReplacedDraft,
 } from "@/lib/stores/quotes";
-import { createFromQuote, levelMeta } from "@/lib/stores/inspections";
+import { levelMeta } from "@/lib/stores/inspections";
 import {
   getRates,
   setRates,
@@ -195,7 +195,6 @@ export async function approveInspectionQuote(formData: FormData): Promise<void> 
       return;
     }
     await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
-    await createFromQuote(id);
   } catch (error) {
     console.error("approveInspectionQuote: quote approval failed", error);
     quoteFailure(formData, "Couldn’t approve the inspection quote — please try again.");

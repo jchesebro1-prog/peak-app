@@ -1,5 +1,6 @@
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import * as schema from "./schema";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
  * Database client.
@@ -20,6 +21,10 @@ const globalForDb = globalThis as unknown as {
   __peakReady?: Promise<Db>;
   __peakSeeding?: boolean;
 };
+
+// One ambient handle lets existing stores participate in a transaction
+// without threading a transaction parameter through every store API.
+const transactionStore = new AsyncLocalStorage<Db>();
 
 /**
  * True while `next build` is running. The build fans out across ~7 worker
@@ -69,6 +74,8 @@ async function createDb(): Promise<Db> {
 }
 
 export function getDb(): Promise<Db> {
+  const active = transactionStore.getStore();
+  if (active) return Promise.resolve(active);
   if (!globalForDb.__peakDb) {
     globalForDb.__peakDb = createDb();
     // Dev auto-seed runs after the database opens and is part of the readiness
@@ -96,4 +103,15 @@ export function getDb(): Promise<Db> {
   return globalForDb.__peakSeeding
     ? globalForDb.__peakDb
     : (globalForDb.__peakReady ?? globalForDb.__peakDb);
+}
+
+/** Run a unit of document/identity writes atomically. Nested calls join the
+ * outer transaction; they do not create savepoints or partial commits. */
+export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+  const active = transactionStore.getStore();
+  if (active) return fn();
+  const db = await getDb();
+  return (db as unknown as { transaction: (work: (tx: Db) => Promise<T>) => Promise<T> }).transaction(
+    (tx) => transactionStore.run(tx, fn)
+  );
 }

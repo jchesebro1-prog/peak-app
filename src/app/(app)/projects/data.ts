@@ -4,6 +4,7 @@ import { activeUsers } from "@/lib/users";
 import { ensureProjectTasksMigrated, allTasks, type TaskRecord } from "@/lib/stores/tasks";
 import { taskTemplateSetsFor, type TaskTemplateSetRecord } from "@/lib/stores/task-templates";
 import type { Identity } from "./view";
+import { safeSweep } from "@/lib/safe-sweep";
 
 /**
  * Shared loader for the Projects screen (list + detail routes). Mirrors the
@@ -23,7 +24,8 @@ export async function loadProjectsData(): Promise<{
   templateSets: TaskTemplateSetRecord[];
   syncSkipped: string[];
 }> {
-  const sync = await syncProjectsFromQuotes();
+  const syncOutcome = await safeSweep("projects", syncProjectsFromQuotes, { created: 0, skipped: [] });
+  const sync = syncOutcome.value;
   const [projects, pending, customers, users, templateSets] = await Promise.all([
     getAllProjects(),
     pendingConversions(),
@@ -44,7 +46,10 @@ export async function loadProjectsData(): Promise<{
   }));
   const roster = users.map((u) => u.name);
   const people = users.map((u) => ({ id: u.id, name: u.name }));
-  return { projects, pending, custById, identity, roster, taskRows, people, templateSets, syncSkipped: sync.skipped };
+  return {
+    projects, pending, custById, identity, roster, taskRows, people, templateSets,
+    syncSkipped: syncOutcome.error ? [...sync.skipped, syncOutcome.error] : sync.skipped,
+  };
 }
 
 /** Normalize a searchParams value to a single string. */

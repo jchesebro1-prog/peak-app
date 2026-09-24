@@ -10,7 +10,6 @@ import {
   setStatus,
   retireReplacedDraft,
 } from "@/lib/stores/quotes";
-import { syncFromQuotes } from "@/lib/stores/flame-jobs";
 import { getRates, setRates, compute, type FlameTestVenueInput } from "@/lib/flametest-engine";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
@@ -180,7 +179,6 @@ export async function approveFlameQuote(formData: FormData): Promise<void> {
       return;
     }
     await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
-    await syncFromQuotes();
   } catch (error) {
     console.error("approveFlameQuote: quote approval failed", error);
     quoteFailure(formData, "Couldn’t approve the flame-test quote — please try again.");
