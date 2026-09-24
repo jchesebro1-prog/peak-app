@@ -59,3 +59,6 @@ next-env.d.ts
 /dealer-import-data.json
 .data-dirty*/
 .data-*/
+
+# DaVinci ETC library export (116MB, licensed source data — never committed)
+/data/davinci/
