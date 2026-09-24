@@ -7,7 +7,7 @@
 Peak's production catalog holds **3,959 ETC parts**, every one carrying both a
 list price and a dealer cost. None of them carries a port, a datasheet link or
 a symbol. ETC's own DaVinci product library — a 116 MB export sitting on Jeff's
-machine — holds that missing metadata for **86.5% of them**.
+machine — holds usable metadata for **2,917 of them (73.7%)**.
 
 This feature reads the DaVinci library, matches it against catalog rows Peak
 already owns, and writes ports and document links onto the matches. It creates
@@ -57,10 +57,18 @@ be developed against a local copy and run against production explicitly.**
 
 | | rows | share of 3,959 |
 |---|---|---|
-| Matched a DaVinci entry | 3,424 | **86.5%** |
-| …would receive ports | 2,629 | 66.4% |
-| …would receive document links | 2,866 | 72.4% |
-| No DaVinci entry | 535 | 13.5% |
+| Has a DaVinci entry | 3,424 | 86.5% |
+| …entry has neither ports nor documents — nothing to give | 507 | 12.8% |
+| **Will actually be enriched** | **2,917** | **73.7%** |
+| …would receive ports | 2,636 | 66.6% |
+| …would receive document links | 2,872 | 72.5% |
+| No DaVinci entry at all | 535 | 13.5% |
+
+**73.7% is the number that matters**, not 86.5%. An earlier measurement indexed
+every DaVinci type and reported 3,424 matches; 507 of those are types with no
+connectors and no datasheet (lens tubes, back boxes, accessories), which the
+extractor drops because they have nothing to write. Verified end-to-end by
+running the shipped matcher against production.
 
 The 535 misses are correct misses: `99XX-XX-XX` connector-strip configurator
 placeholders, bare option codes (`AD`, `AO`, `BP24`), lamps (`HPL375/240X`),
@@ -72,7 +80,7 @@ DaVinci describes a port with three UUID references: a **protocol** (56),
 a **connector type** (25) and a **direction** (5). Peak's `CONNECTION_TYPES`
 (`src/lib/catalog-connect.ts`) has 22 entries.
 
-Across the 2,629 matched parts that carry ports — **10,601 port rows**:
+Across the 2,636 matched parts that carry ports — **10,601 port rows**:
 
 | | rows | share |
 |---|---|---|
@@ -103,7 +111,8 @@ strings against 14,725 SKUs that found **9 matches**.
 Every one of those checks was run against **local dev**, which holds 14,725
 parts and 10 ETC rows. Production holds 37,403 parts and 3,959 ETC rows. The
 measurements were accurate; the database was the wrong one. Against production
-the intersection is 3,424 rows — 86.5%.
+3,424 rows (86.5%) have a DaVinci entry, and 2,917 (73.7%) have one carrying
+ports or documents.
 
 D187's factual claims about the library itself (2,366 types, 1,381 ported, 56
 protocols, 25 connector types) all still hold. Only its conclusion falls. It
@@ -175,6 +184,44 @@ Add **`"line power (unspecified)"`** to `CONNECTION_TYPES` and to the
 reaches a D20AF dimmer output, which is the real-world behaviour — and claims
 nothing false. Jeff can refine individual rows in the #158 ports editor.
 
+### D4b — Voltage classes stay distinct identities (added during implementation)
+
+Found in review of the protocol map, and it would have been a genuine safety
+defect. The first draft sent every power protocol whose connector was hardwired
+(Terminal Block / Screw Terminal / Flying Leads) to `"bare-end"`. Measured, that
+is not hypothetical: 65 of 72 `AuxPowerReciever` ports, 27 of 39
+`AuxiliaryPower` and 9 of 14 `ParadigmAuxiliaryPower` sit on Terminal Block,
+and `Power208V`/`Power480V` were mapped straight to `bare-end`. A low-voltage
+auxiliary bus would have validated as connectable to a 480V hoist feeder.
+
+Each voltage class now gets its own pass-through identity:
+
+| protocols | connection type |
+|---|---|
+| `AuxPowerReciever`, `AuxiliaryPower`, `ParadigmAuxiliaryPower` | `ETC auxiliary power` |
+| `Power208V`, `Power208VFP` | `ETC 208V feeder` |
+| `Power480V`, `Power480VFP` | `ETC 480V feeder` |
+
+The three auxiliary protocols deliberately share one identity: they co-occur on
+the same devices and are almost all `Bus` direction, so they are one bus and
+must still connect to each other. 208V and 480V share a *wire type* but not an
+identity — a wire type answers "what cable runs this", never "what mates".
+
+`bare-end` is now reachable only through the connector-refined generic `Power`
+protocol.
+
+### D4c — Two pre-existing Peak types had no wire type
+
+The orphan test written for this feature surfaced a gap that predates it:
+`"contact closure"` and `"fiber"` were in `CONNECTION_TYPES` with no `WireType`
+carrying them, so the Grid could never have offered a cable for either. That
+matters here because DaVinci maps five protocols onto `contact closure` (509
+port rows). Both now have a minimal single-type wire type.
+
+Still orphaned and deliberately left alone: `"RDM"`, which DaVinci never emits.
+It arguably belongs on the `dmx-5pin` wire type, but that is a judgement about
+Peak's own taxonomy, not something this feature should decide.
+
 ### D5 — Exclusions
 
 - Category `Internal-DO NOT USE` and the `RouteStubPrototype` type: ETC internal
@@ -209,7 +256,7 @@ ports (already mapped), its English document links, and provenance
 Measured, not estimated: **1.35 MB minified** — 1,720 records, 14,108 indexed
 identifiers, 6,241 ports and 2,836 document links, covering every eligible
 DaVinci type. (The subset that matches today's catalog is smaller still: the
-3,424 matched rows are backed by only **908 distinct types**, because one type
+2,917 enriched rows are backed by only **908 distinct types**, because one type
 covers many SKU variants — `ColorSource PAR` alone covers 11 — and comes to
 0.52 MB. The extract carries the full set so a future price-book import needs
 no regeneration.) Small enough to commit, diff and review like any other

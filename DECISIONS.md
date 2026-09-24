@@ -4501,7 +4501,8 @@ to check.
 
 > **SUPERSEDED by D208 (2026-09-23).** The conclusion below is wrong: every check behind it ran
 > against local dev (10 ETC rows), not production (3,959 ETC rows, all priced), where the
-> intersection is 86.5%. The reasoning is kept intact as the record of how it went wrong.
+> intersection is 86.5% by entry, 73.7% by usable data. The reasoning is kept intact as the
+> record of how it went wrong.
 
 Ports for Peak's catalog are curated, not sourced from the DaVinci export
 `promote-sales-compliance` proposed (`data/davinci/`, 116 MB, 2,366 device types, 1,381 with
@@ -4807,7 +4808,7 @@ The measured effect is the justification: a fresh datadir went from 5 intermitte
 that they taught everyone to dismiss a red `test:specs`, which five separate people had already
 done before this was fixed.
 
-## D208. D187 is superseded: the DaVinci library intersects the catalog by 86.5% (#162, 2026-09-23)
+## D208. D187 is superseded: the DaVinci library intersects the catalog by 73.7% (#162, 2026-09-23)
 
 D187 closed the DaVinci import on 2026-09-22 with "it does not intersect Peak's catalog",
 verified four independent ways — including a brute-force match of 17,831 identifier-shaped
@@ -4817,9 +4818,11 @@ rows, every one carrying both list and dealer cost.** Measured against productio
 
 | | rows | share of 3,959 |
 |---|---|---|
-| Matched a DaVinci model/part number | 3,424 | **86.5%** |
-| …would receive `ports[]` | 2,629 | 66.4% |
-| …would receive document links | 2,866 | 72.4% |
+| Has a DaVinci model/part number | 3,424 | 86.5% |
+| …that entry has neither ports nor documents | 507 | 12.8% |
+| **Will actually be enriched** | **2,917** | **73.7%** |
+| …would receive `ports[]` | 2,636 | 66.6% |
+| …would receive document links | 2,872 | 72.5% |
 | No DaVinci entry | 535 | 13.5% |
 
 The 535 misses are correct misses — `99XX-XX-XX` configurator placeholders, bare option codes

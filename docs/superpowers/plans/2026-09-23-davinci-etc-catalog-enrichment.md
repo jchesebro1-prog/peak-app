@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Write manufacturer-authored ports and datasheet links onto the 3,424 production catalog rows that match an entry in ETC's DaVinci library, without creating a row or touching a price.
+**Goal:** Write manufacturer-authored ports and datasheet links onto the 2,917 production catalog rows that match a DaVinci entry carrying either, without creating a row or touching a price.
 
 **Architecture:** A pure mapping layer (`src/lib/davinci/*`) turns DaVinci's UUID-referenced port records into Peak `Port[]`. A build step distils the 116 MB library into a 0.52 MB committed extract. A single writer module plans and applies enrichment against the catalog doc-store. A CLI reports, dry-runs, then commits behind the repo's two-flag hosted gate.
 
@@ -979,7 +979,7 @@ export PATH="$HOME/.local/node/bin:$PATH" && npm run test:specs 2>&1 | tail -20
  * Both sides go through `normalizeSku`, which is why it lives in its own module:
  * production writes bare model numbers, local dev writes `MFR:`-prefixed ones,
  * and DaVinci writes bare model AND part numbers. Measured 2026-09-23 against
- * production: 3,424 of 3,959 ETC rows (86.5%) match.
+ * production: 2,917 of 3,959 ETC rows (73.7%) match.
  */
 import { normalizeSku } from "./sku";
 import type { DavinciRecord } from "./types";
@@ -1481,8 +1481,8 @@ set -a && . ./.env.production.local && set +a
 npx tsx scripts/davinci-enrich.ts --mfr=ETC
 ```
 
-Expected, from the 2026-09-23 measurement: `scanned 3,959`, `matched ~3,424`,
-`writable ~2,866`, `skipped, has ports 0`, `unmatched ~535`. **Report these to
+Expected, from the verified 2026-09-24 end-to-end run: `scanned 3,959`, `matched ~2,917`,
+`writable ~2,917`, `skipped, has ports 0`, `unmatched ~1,042`. **Report these to
 Jeff and stop.** A materially different number means something changed and is
 worth understanding before writing.
 

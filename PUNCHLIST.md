@@ -7325,8 +7325,9 @@ rows. Same spec as #160. Decision to log on build: D207.
 
 **Reported:** 2026-09-23. D187 closed this on 2026-09-22 as "does not intersect Peak's catalog",
 but every check behind that ran against local dev (10 ETC rows). Production holds **3,959 ETC
-parts, all priced**, and **3,424 (86.5%)** match a DaVinci entry: 2,629 would receive ports,
-2,866 document links. Production currently has **0** parts carrying `ports[]` (§9 of the spec).
+parts, all priced**. 3,424 (86.5%) have a DaVinci entry, but 507 of those entries carry neither
+ports nor documents, so **2,917 (73.7%)** will actually be enriched: 2,636 receive ports, 2,872
+document links. Production currently has **0** parts carrying `ports[]` (§9 of the spec).
 
 **Design:** an enricher, not an importer — matches on SKU, writes only `ports[]` and document
 links onto rows Peak already owns, never creates rows, never touches list/cost/pricedAt. Unmapped
