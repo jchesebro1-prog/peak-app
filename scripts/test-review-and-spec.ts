@@ -197,7 +197,7 @@ import {
   isAllowedSheetMime,
   sheetMimeVerdict,
 } from "@/lib/grid-sheet-file";
-import { defaultLaborMobs, disciplineForSystemTitle, laborMob } from "@/app/(app)/estimator/labor-defaults";
+import { defaultLaborMobs, disciplineForSystemTitle, laborMob, normalizeLaborMobs } from "@/app/(app)/estimator/labor-defaults";
 import { builderPath } from "@/app/(app)/quotes/new/types";
 import { retireReplacedDraft } from "@/lib/stores/quotes";
 import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev, vendorTotalSeed } from "@/app/(app)/estimator/pricing";
@@ -216,6 +216,14 @@ ok(disciplineForSystemTitle("Video projection") === "AUD", "audio and video shar
 ok(disciplineForSystemTitle("General conditions") === "OTH", "an unmatched system defaults to Other");
 const defaultMobs = defaultLaborMobs(null);
 ok(defaultMobs.length === 1 && defaultMobs[0]?.name === "" && defaultMobs[0]?.people === "1" && defaultMobs[0]?.days === "1", "labor opens with one untouched mobilization row");
+const legacyDefaults = [
+  laborMob(null, "Site Visit", "1", "1"),
+  laborMob(null, "Install", "4", "5"),
+  laborMob(null, "Hang", "2", "3"),
+  laborMob(null, "Commissioning", "2", "3"),
+  laborMob(null, "Training", "1", "1"),
+];
+ok(normalizeLaborMobs(legacyDefaults).length === 1 && normalizeLaborMobs(legacyDefaults)[0]?.name === "", "legacy five-row defaults collapse to one blank mobilization");
 ok(builderPath("system", "c-1", { name: "Main quote", venue: "loc-1", contact: "Pat Smith" }) === "/estimator?customer=c-1&name=Main%20quote&venue=loc-1&contact=Pat%20Smith", "system intake carries quote name, venue, and contact");
 ok(builderPath("rental", "c-1", { name: "Rental", venue: "ignored", contact: "Pat" }) === "/rentals/quote?customer=c-1&name=Rental&contact=Pat", "rental intake carries name/contact but ignores venue");
 const testRate = ((sku: string) => ({ "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 75, "DRF-SUB": 50 }[sku] || 0)) as any;

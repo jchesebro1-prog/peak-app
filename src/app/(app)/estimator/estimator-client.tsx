@@ -66,7 +66,7 @@ import type {
 } from "./types";
 import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { assemblyDescription } from "@/lib/fixture-assemblies";
-import { defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor } from "./labor-defaults";
+import { defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor, normalizeLaborMobs } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
@@ -1077,9 +1077,10 @@ export default function EstimatorClient({
         // nor into the NEXT open of the same method on the same system — hence
         // the sequence number rather than a kind/secId comparison.
         if (openSeqRef.current !== seq) return;
-        setLaborDraft(
-          freshLabor(est, tierMargin, sections.find((section) => section.id === secId)?.name || "")
-        );
+        setLaborDraft((draft) => ({
+          ...freshLabor(est, tierMargin, sections.find((section) => section.id === secId)?.name || ""),
+          mobs: normalizeLaborMobs(draft.mobs, est),
+        }));
       });
     }
   };
