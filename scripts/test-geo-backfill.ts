@@ -290,19 +290,61 @@ async function main() {
   const cached = await db.select().from(geoCache);
   assert.ok(cached.some((r) => r.key.endsWith("|44.4486,-88.0604")), "route warmed for the new coordinates");
 
+  // a venue soft-deleted between the SELECT and the UPDATE (retry mode makes
+  // paced network calls in between) must be reported gone, not located
+  {
+    await insertSite("st-vanish", { address: "77 Vanish St", city: "Vanishton", state: "WI" });
+    nominatim.push({
+      when: (u) => q(u).startsWith("77 vanish st"),
+      hit: { lat: 45.0, lng: -89.9, city: "Vanishton", state: "Wisconsin" },
+    });
+    const stubbedFetch = globalThis.fetch;
+    let armed = true;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (armed) {
+        armed = false;
+        // The lookup that would otherwise resolve this venue races a delete
+        // that lands on the DB before the geocoder's answer comes back.
+        await db.update(sites).set({ deleted: true }).where(eq(sites.id, "st-vanish"));
+      }
+      return stubbedFetch(input);
+    }) as typeof fetch;
+    try {
+      const vanished = await locateVenue(
+        { siteId: "st-vanish", mode: "retry", address: "77 Vanish St", city: "Vanishton", state: "WI", zip: "" },
+        { delayMs: 0 }
+      );
+      assert.deepEqual(vanished, { ok: false, reason: "gone" });
+    } finally {
+      globalThis.fetch = stubbedFetch;
+    }
+    const [vRow] = await db.select().from(sites).where(eq(sites.id, "st-vanish"));
+    assert.equal(vRow.lat, null, "lat is still null — the vanished venue was never written");
+    console.log("PASS geo-backfill: locateVenue reports gone when the venue vanishes mid-call");
+  }
+
   // pin writes ONLY lat/lng
+  const [w2Before] = await db.select().from(sites).where(eq(sites.id, "st-w2"));
+  const w2OthersBeforePin = await others("st-w2");
   const pinned = await locateVenue({ siteId: "st-w2", mode: "pin", lat: 42.9, lng: -88.13 });
   assert.ok(pinned.ok);
+  assert.equal(await others("st-w2"), w2OthersBeforePin, "pin touches no other row");
   const [w2] = await db.select().from(sites).where(eq(sites.id, "st-w2"));
   assert.equal(w2.lat, "42.9");
   assert.equal(w2.city, "Muskego", "pin leaves the address text alone");
+  assert.equal(w2.address, w2Before.address, "pin leaves address unchanged");
+  assert.equal(w2.state, w2Before.state, "pin leaves state unchanged");
+  assert.equal(w2.zip, w2Before.zip, "pin leaves zip unchanged");
+  assert.equal(w2.name, w2Before.name, "pin leaves name unchanged");
 
   // pick writes every field
+  const w2OthersBeforePick = await others("st-w2");
   const pick = await locateVenue({
     siteId: "st-w2", mode: "pick", address: "W185 S8750 Racine Ave", city: "Muskego", state: "WI",
     zip: "53150", lat: 42.8923, lng: -88.1301,
   });
   assert.ok(pick.ok);
+  assert.equal(await others("st-w2"), w2OthersBeforePick, "pick touches no other row");
   const [w2b] = await db.select().from(sites).where(eq(sites.id, "st-w2"));
   assert.equal(w2b.address, "W185 S8750 Racine Ave");
   assert.equal(w2b.zip, "53150");

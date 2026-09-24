@@ -91,7 +91,11 @@ export async function listUnlocatedVenues(opts?: {
     .from(sites)
     .leftJoin(companies, eq(companies.id, sites.companyId))
     .where(where)
-    .orderBy(asc(sql`coalesce(${companies.name}, '')`), asc(sites.name), asc(sites.id))
+    .orderBy(
+      asc(sql`lower(coalesce(${companies.name}, ''))`),
+      asc(sql`lower(coalesce(${sites.name}, ''))`),
+      asc(sites.id)
+    )
     .limit(limit)
     .offset(offset);
 
@@ -203,7 +207,14 @@ export async function locateVenue(
 
   set.lat = String(lat);
   set.lng = String(lng);
-  await db.update(sites).set(set).where(and(eq(sites.id, row.id), eq(sites.deleted, false)));
+  const updated = await db
+    .update(sites)
+    .set(set)
+    .where(and(eq(sites.id, row.id), eq(sites.deleted, false)))
+    .returning({ id: sites.id });
+  // A venue soft-deleted between the SELECT above and this UPDATE (retry mode
+  // makes paced network calls in between) must not be reported located.
+  if (updated.length === 0) return { ok: false, reason: "gone" };
 
   // Warm the real route now so travel reads "routed", not the haversine tier.
   // route() fails soft to null; estimate() then falls back on its own.
