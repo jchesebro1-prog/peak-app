@@ -423,14 +423,63 @@ export async function geocodeBatchAction(input?: {
     city: r.geocodedCity,
     failed: r.failures.length,
     remaining: r.remaining,
-    // Surface the rejections — a venue the geocoder got wrong is worse than
-    // one it skipped, so the reasons are shown rather than buried in a count.
-    failures: r.failures.slice(0, 25).map((f) => ({ query: f.query, reason: f.reason, got: f.got })),
+    // Every failing venue (with its id) — the Settings worklist shows the
+    // reason beside the venue, so nothing here may be capped or anonymous.
+    failures: r.failures.map((f) => ({ siteId: f.siteId, query: f.query, reason: f.reason, got: f.got })),
     // Every distinct failed query (≤ limit per batch), so the runner can skip
     // them next batch instead of re-asking them forever.
     failedKeys: [...new Set(r.failures.map((f) => f.query))],
     originName: "",
   };
+}
+
+/* ---------------- Unlocated venues worklist (#169, D225) ---------------- */
+
+export async function listUnlocatedVenuesAction(input?: { q?: string; offset?: number; limit?: number }) {
+  await requirePerm("manage_users");
+  const { listUnlocatedVenues } = await import("@/lib/venue-locate");
+  return listUnlocatedVenues({
+    q: typeof input?.q === "string" ? input.q : "",
+    offset: Number(input?.offset) || 0,
+    limit: Number(input?.limit) || 50,
+  });
+}
+
+export type VenueAddressHit = {
+  title: string;
+  sub: string;
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+  lat: number;
+  lng: number;
+};
+
+/** Address type-ahead for the fix sidebar — like the Companies one, but keeps zip. */
+export async function searchVenueAddressAction(query: string): Promise<VenueAddressHit[]> {
+  await requirePerm("manage_users");
+  const { search } = await import("@/lib/geo");
+  const hits = await search(String(query || "").slice(0, 200), { limit: 6 });
+  return hits.map((h) => ({
+    title: h.title,
+    sub: h.sub,
+    street: h.street,
+    city: h.city,
+    state: h.state,
+    zip: h.zip,
+    lat: h.lat,
+    lng: h.lng,
+  }));
+}
+
+/** Locate ONE venue from the sidebar (retry / pick / pin), then route it. */
+export async function locateVenueAction(input: import("@/lib/venue-locate").LocateInput) {
+  await requirePerm("manage_users");
+  const { locateVenue } = await import("@/lib/venue-locate");
+  const r = await locateVenue(input);
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
 }
 
 /* ---------------- Locations (offices) ----------------
