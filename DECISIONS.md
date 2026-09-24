@@ -4975,3 +4975,14 @@ open. "+ Add" lives only in the expanded rail — adding a system while the list
 select a system the user cannot see. Deliberately not done here: restoring keyboard focus to the
 counterpart control after a toggle (the pressed button unmounts, so focus falls to <body>); it
 affects #164 equally and belongs in one fix for both rails.
+
+## D225. Unlocated venues are fixed one at a time from a live worklist; the quote origin is an explicit choice (#169, 2026-09-24)
+
+- **The worklist is a query, not the run's memory.** It lists live venues with an address or city, no usable coordinates, and no `travelMiles` override, ordered case-insensitively by company then venue. The rule matches `estimateFromParts`, where only `travelMiles` counts as manual. Reasons from the current page's batch run are shown when known and never persisted, which avoids a schema change for a transient list.
+- **Three fixes, no town-centre shortcut** (Jeff declined it):
+  - **Retry** reuses `geocodeVenue()`, the same gates as the batch.
+  - **A human pick or pin bypasses the gates**, because a person chose the place. A pick never erases stored data: the street is replaced only by one carrying a house number, and blank fields keep their stored values. This stops a town-level suggestion from becoming a back-door town-centre fix.
+  - **Precision is reported.** A city-precision result says "town centre".
+- **The sidebar never writes `travelMiles`/`travelMin`.** The Companies "Route" button does, and that freezes travel as a manual override. Here travel stays live through the route cache, warmed at fix time.
+- **Writes** are one targeted `UPDATE … WHERE id AND NOT deleted RETURNING`. Zero rows means `gone`.
+- **Quote origin** is set explicitly per location: a pill plus *Use for quotes*. The implicit "first listed" fallback stays, but is labelled so it is visible. Calendar travel blocks still start from each person's "Based out of" office and fall back to the quote origin; per-appointment origins are a separate item.
