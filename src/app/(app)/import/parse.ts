@@ -196,7 +196,13 @@ export function normalizeZip(v: unknown): string {
 
 export function coerce(field: FieldDef, v: unknown): string | number {
   const s = v == null ? "" : String(v).trim();
-  if (field.kind === "number") return toNum(s);
+  // Optional coordinates must distinguish a blank cell from the real point
+  // (0, 0). Keeping the blank as text lets the writers omit the field and
+  // preserve an existing location during export → import round trips.
+  if (field.kind === "number") {
+    if ((field.key === "lat" || field.key === "lng") && !s) return "";
+    return toNum(s);
+  }
   if (field.kind === "date") return toISO(s);
   if (field.kind === "email") return s.toLowerCase();
   if (field.kind === "zip") return normalizeZip(s);

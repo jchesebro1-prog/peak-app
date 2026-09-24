@@ -13,6 +13,8 @@ import NotifControls from "./notif-controls";
 import InviteToggle from "./invite-toggle";
 import OfficePicker from "./office-picker";
 import KrispCard, { type KrispCardInfo } from "./krisp-card";
+import DashboardLayoutEditor from "@/components/dashboard-layout-editor";
+import { getDashboardOverride } from "@/lib/stores/notif-prefs";
 
 export const metadata = { title: "Account settings — Quartzite-6" };
 
@@ -23,7 +25,11 @@ export default async function AccountPage() {
 
   // D144 — "Based out of" (self-service; Settings -> Team's admin form
   // edits the same users.officeId field but needs manage_users).
-  const [settings, myRow] = await Promise.all([getSettings(), getUser(user.id)]);
+  const [settings, myRow, dashboardOverride] = await Promise.all([
+    getSettings(),
+    getUser(user.id),
+    getDashboardOverride(user.name),
+  ]);
   const officeOptions = settings.offices.map((o) => ({ id: o.id, name: o.name }));
   const myOfficeId = myRow?.officeId || "";
 
@@ -141,6 +147,12 @@ export default async function AccountPage() {
 
       {/* ---- based out of (D144 — feeds Calendar's auto travel-time block) ---- */}
       <OfficePicker offices={officeOptions} initialOfficeId={myOfficeId} />
+
+      <DashboardLayoutEditor
+        mode="personal"
+        company={settings.dashboardDefaults}
+        initial={dashboardOverride}
+      />
 
       {/* ---- to-do notifications ---- */}
       <NotifControls rows={rows} />

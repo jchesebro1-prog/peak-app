@@ -47,6 +47,7 @@ export function PastePreview({
   today,
   customerIndex,
   canUpdate = true,
+  validationOptions,
 }: {
   typeKey: string;
   /** EVERY field of the type, hidden ones included: auto-mapping must still
@@ -68,6 +69,8 @@ export function PastePreview({
    *  to create() for those and silently duplicate the record the user asked
    *  to update, so the mode is not offered at all. */
   canUpdate?: boolean;
+  /** Live vocabularies used to flag task-template rows before commit. */
+  validationOptions?: { phases: string[]; disciplines: string[] };
 }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"skip" | "update" | "create">("skip");
@@ -109,6 +112,20 @@ export function PastePreview({
     mappedFields.length ? mappedFields : visibleColumns(fields).slice(0, 3)
   ).slice(0, 4);
   const previewRows = (prep?.rows || []).slice(0, 5);
+  const templateWarnings = typeKey === "task_templates" && prep && validationOptions
+    ? prep.rows.flatMap((row) => {
+        const warnings: string[] = [];
+        const phase = String(row.values.phase || "").trim();
+        const discipline = String(row.values.discipline || "").trim();
+        if (phase && !validationOptions.phases.some((v) => v.trim().toLowerCase() === phase.toLowerCase())) {
+          warnings.push(`unknown phase "${phase}"`);
+        }
+        if (discipline && !validationOptions.disciplines.some((v) => v.trim().toLowerCase() === discipline.toLowerCase())) {
+          warnings.push(`unknown discipline "${discipline}"`);
+        }
+        return warnings.length ? [{ row: row.i + 2, warnings }] : [];
+      })
+    : [];
 
   // #137 — link-back preview for contacts / venues, resolved over the WHOLE
   // table (a create on row 40 still belongs in the "will create" list) even
@@ -186,15 +203,18 @@ export function PastePreview({
     { id: "create", label: "Create new" },
   ];
 
-  /* punch #81 — .xlsx upload. The file is converted to CSV server-side
-     (exceljs is server-only; importing it here would drag Node stream
-     internals into the client bundle and 500 the page, per #78) and the
-     result lands in the same `text` state the textarea binds to, so preview,
-     mapping and commit all run unchanged from here. */
+  /* CSV-only import contract. Spreadsheet users can export the active sheet
+     as CSV before choosing it here; the preview/mapping/commit path remains
+     the same for pasted and uploaded text. */
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // let the same file be re-picked after a failure
     if (!file) return;
+    if (!/\.(csv|tsv)$/i.test(file.name)) {
+      setUploadErr("Choose a CSV or TSV file. Export Excel sheets as CSV first.");
+      setUploadNote("");
+      return;
+    }
     if (isCatalog) {
       // #134 — refuse over-size workbooks here, before any upload.
       const fileSize = checkSize(file.size);
@@ -208,21 +228,13 @@ export function PastePreview({
     setUploadErr("");
     setUploadNote("");
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("type", typeKey);
-      const res = await fetch("/api/import/xlsx", { method: "POST", body: fd });
-      const data = (await res.json()) as
-        | { ok: true; csv: string; rows: number; sheetName: string }
-        | { ok: false; error: string };
-      if (!data.ok) {
-        setUploadErr(data.error);
+      const csv = await file.text();
+      if (!csv.trim()) {
+        setUploadErr("That CSV file is empty.");
         return;
       }
-      setText(data.csv);
-      setUploadNote(
-        `Read ${data.rows} row${data.rows === 1 ? "" : "s"} from “${data.sheetName}” in ${file.name}. Check the preview below before importing.`
-      );
+      setText(csv);
+      setUploadNote(`Loaded ${file.name}. Check the preview below before importing.`);
     } catch {
       setUploadErr("That upload didn’t go through. Check your connection and try again.");
     } finally {
@@ -265,15 +277,15 @@ export function PastePreview({
         >
           <input
             type="file"
-            accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            accept=".csv,.tsv,text/csv,text/tab-separated-values"
             onChange={onFile}
             disabled={uploading}
             style={{ display: "none" }}
           />
-          {uploading ? "Reading…" : "Choose an Excel file"}
+          {uploading ? "Reading…" : "Choose a CSV file"}
         </label>
         <span style={{ fontSize: 11.5, color: "#aab0bb" }}>
-          .xlsx — first sheet, header row required. Or paste below.
+          .csv or .tsv — include the header row. Or paste below.
         </span>
       </div>
 
@@ -451,6 +463,29 @@ export function PastePreview({
             </div>
           )}
         </>
+      )}
+
+      {templateWarnings.length > 0 && (
+        <div
+          style={{
+            marginTop: 12,
+            background: "#fff8e8",
+            border: "1px solid #f0e2bd",
+            borderRadius: 9,
+            padding: "10px 12px",
+            fontSize: 12,
+            color: "#80651d",
+            lineHeight: 1.5,
+          }}
+        >
+          <b>Review before importing:</b> {templateWarnings.length} task-template row{templateWarnings.length === 1 ? "" : "s"} use a phase or discipline that is not in the current settings vocabulary.
+          <div style={{ marginTop: 4, display: "grid", gap: 2 }}>
+            {templateWarnings.slice(0, 8).map((item) => (
+              <div key={item.row}>Row {item.row}: {item.warnings.join("; ")}</div>
+            ))}
+            {templateWarnings.length > 8 && <div>+ {templateWarnings.length - 8} more rows</div>}
+          </div>
+        </div>
       )}
 
       {/* preview */}

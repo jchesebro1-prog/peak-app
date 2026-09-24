@@ -190,6 +190,10 @@ export type ProjectSignoff = {
   signedBy: string;
   signedAt: number;
   note?: string;
+  /** Small PNG data URL captured on the field device at hand-off. */
+  signature?: string;
+  /** Per-scope completion acknowledgements captured at hand-off. */
+  scopeChecks?: Record<string, boolean>;
 };
 
 export type ProjectRecord = {
@@ -226,6 +230,17 @@ export type ProjectRecord = {
   signoff: ProjectSignoff | null;
   trainingAt: number | null;
 };
+
+/** Stable closeout scopes derived from the project's purchased lines. */
+export function signoffScopes(project: Pick<ProjectRecord, "procurement">): string[] {
+  const scopes = new Set<string>();
+  for (const line of project.procurement || []) {
+    const scope = VENDORS[line.vendor]?.scope || line.vendor;
+    if (scope?.trim()) scopes.add(scope.trim());
+  }
+  if (!scopes.size) scopes.add("General installation");
+  return [...scopes].sort((a, b) => a.localeCompare(b));
+}
 
 /**
  * One stage transition, appended on every stage write. Mirrors QuoteHistoryEntry
@@ -539,6 +554,17 @@ function deriveProcurement(q: QuoteLike): ProcurementLine[] {
 function fromQuote(q: QuoteLike): Omit<ProjectRecord, "id"> {
   const labor = quoteHasLabor(q);
   const t = now();
+  const requestedWindow = typeof q.installTimeframe === "string" ? q.installTimeframe.trim() : "";
+  const windowDays: Record<string, number> = {
+    ASAP: 14,
+    "Under 1 month": 30,
+    "1–3 months": 90,
+    "3–6 months": 180,
+    "6–12 months": 365,
+  };
+  const targetDays = windowDays[requestedWindow] ?? (labor ? 42 : 21);
+  const targetDate = ahead(targetDays);
+  const installDuration = labor ? Math.max(6, Number((q.spec as { mobs?: { days?: number }[] } | undefined)?.mobs?.reduce((sum, m) => sum + (Number(m.days) || 0), 0)) || 6) : 0;
   const kind: ProjectKind = labor ? "project" : "order";
   return {
     kind,
@@ -554,9 +580,9 @@ function fromQuote(q: QuoteLike): Omit<ProjectRecord, "id"> {
     createdAt: t,
     updatedAt: t,
     startedAt: t,
-    targetDate: ahead(labor ? 42 : 21),
-    installStart: labor ? ahead(38) : null,
-    installEnd: labor ? ahead(44) : null,
+    targetDate,
+    installStart: labor ? ahead(Math.max(0, targetDays - installDuration)) : null,
+    installEnd: labor ? targetDate : null,
     stage: "procurement",
     stageHistory: [], // createProject() anchors the opening entry
     procurement: deriveProcurement(q),
@@ -648,7 +674,7 @@ export async function spawnServiceLinkedProject(
  * Flame-test quotes have their own independent job lifecycle (FlameJobStore)
  * — they must NOT become Installs projects (port of syncFromQuotes).
  */
-export async function syncProjectsFromQuotes(): Promise<number> {
+export async function syncProjectsFromQuotes(): Promise<{ created: number; skipped: string[] }> {
   const skip = await dismissedQuoteIds();
   const projects = await listDocs<ProjectRecord>("projects");
   const haveQ = new Set<string>();
@@ -658,6 +684,7 @@ export async function syncProjectsFromQuotes(): Promise<number> {
     .slice()
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   let made = 0;
+  const skipped: string[] = [];
   const { createAutoTask } = await import("@/lib/stores/tasks");
   for (const q of quotes) {
     // Only install/system quotes become Projects. Repair and inspection wins
@@ -674,29 +701,34 @@ export async function syncProjectsFromQuotes(): Promise<number> {
     )
       continue;
     if (haveQ.has(q.id) || skip.includes(q.id)) continue;
-    const body = fromQuote(q);
-    const rec = await insertWithPrefixedId<ProjectRecord>(
-      "projects",
-      body.kind === "order" ? "S" : "P",
-      body.kind === "order" ? 4000 : 3000,
-      (id) => ({ ...body, id })
-    );
-    const id = rec.id;
-    haveQ.add(q.id);
-    made++;
+    try {
+      const body = fromQuote(q);
+      const rec = await insertWithPrefixedId<ProjectRecord>(
+        "projects",
+        body.kind === "order" ? "S" : "P",
+        body.kind === "order" ? 4000 : 3000,
+        (id) => ({ ...body, id })
+      );
+      const id = rec.id;
+      haveQ.add(q.id);
+      made++;
 
-    // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
-    // Unassigned until the project-roles model exists (D87: assign-by-role
-    // later). Deterministic coverageKey makes double-hooking alongside
-    // createProjectFromQuote's own call harmless (createAutoTask no-ops).
-    await createAutoTask({
-      coverageKey: `item16:sold:${id}`,
-      title: `Sold — kickoff call for ${body.name}`,
-      projectId: id, quoteId: body.quoteId, section: "Follow-up",
-      dueAt: Date.now() + 7 * DAY, // kickoff within a week of sale; overdue then nags the bell (unassigned until roles model, D87)
-    });
+      // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
+      // Unassigned until the project-roles model exists (D87: assign-by-role
+      // later). Deterministic coverageKey makes double-hooking alongside
+      // createProjectFromQuote's own call harmless (createAutoTask no-ops).
+      await createAutoTask({
+        coverageKey: `item16:sold:${id}`,
+        title: `Sold — kickoff call for ${body.name}`,
+        projectId: id, quoteId: body.quoteId, section: "Follow-up",
+        dueAt: Date.now() + 7 * DAY, // kickoff within a week of sale; overdue then nags the bell (unassigned until roles model, D87)
+      });
+    } catch (error) {
+      skipped.push(q.id);
+      console.error(`syncProjectsFromQuotes: skipped ${q.id} during page-load reconciliation`, error);
+    }
   }
-  return made;
+  return { created: made, skipped };
 }
 
 /** Won quotes that have not been converted yet — the "ready to start" strip (port of pendingConversions). */
@@ -765,10 +797,25 @@ export async function setDeliveryStatus(
   if (!p) return null;
   if (!(p.deliveries || []).some((d) => d.id === deliveryId)) return null;
   return patchDoc<ProjectRecord>("projects", id, (doc) => {
-    const d = (doc.deliveries || []).find((x) => x.id === deliveryId);
+    const deliveries = Array.isArray(doc.deliveries) ? doc.deliveries : [];
+    doc.deliveries = deliveries;
+    const d = deliveries.find((x) => x.id === deliveryId);
     if (!d) return doc;
     d.status = status;
     if (status === "received") d.receivedAt = now();
+    // Delivery-driven lifecycle (#44): once every shipment is physically
+    // received, put an install project into the scheduling queue. This does
+    // not block crew booking and the normal stage controls can still undo or
+    // correct the transition when a receipt was entered in error.
+    if (
+      status === "received" &&
+      doc.kind === "project" &&
+      doc.stage === "delivery" &&
+      deliveries.length > 0 &&
+      deliveries.every((row) => row.status === "received")
+    ) {
+      recordStageChange(doc, "scheduled", "System");
+    }
     doc.updatedAt = now();
     return doc;
   });

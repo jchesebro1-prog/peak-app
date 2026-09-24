@@ -8,6 +8,7 @@ import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
 import { pickContactName, readHandoff, seedVenueOn } from "@/app/(app)/quotes/new/handoff";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Flame test quote — Quartzite-6" };
 
@@ -191,12 +192,15 @@ export default async function FlameTestQuotePage({
   }
 
   return (
-    <QuoteBuilder
-      customers={customers}
-      offices={offices}
-      rates={rates}
-      initial={initial}
-      accent={settings.accent || "#7b3f8a"}
-    />
+    <>
+      <ActionError message={one(sp.err)} />
+      <QuoteBuilder
+        customers={customers}
+        offices={offices}
+        rates={rates}
+        initial={initial}
+        accent={settings.accent || "#7b3f8a"}
+      />
+    </>
   );
 }

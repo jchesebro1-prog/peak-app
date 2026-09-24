@@ -28,6 +28,7 @@ import {
   setOptionQuote,
   setPlacementCategory,
   setScopeInputs,
+  setLinesetDesign,
   setSheetCalibration,
   setVenue,
   saveGridIntake,
@@ -45,6 +46,8 @@ import { getSite } from "@/lib/identity/sites";
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
 import { get as getPart } from "@/lib/stores/catalog";
 import { createGridAssembly, getGridSymbol, setGridSymbolShape } from "@/lib/stores/grid-catalog";
+import { getDesign } from "@/lib/stores/studio-designs";
+import { createClientPackage } from "@/lib/client-package-server";
 import { isGridShape } from "@/lib/design/grid-symbols";
 import {
   GRID_CURTAIN_TYPES,
@@ -87,15 +90,21 @@ export async function createGridAssemblyAction(input: {
   const user = await requireUser();
   if (!input.name.trim()) return { ok: false, error: "Name the assembly." };
   if (!input.members.length) return { ok: false, error: "Choose at least one child symbol." };
-  const assembly = await createGridAssembly({
-    name: input.name,
-    manufacturer: input.manufacturer,
-    modelNumber: input.modelNumber,
-    scope: input.scope,
-    members: input.members,
-    shape: isGridShape(input.shape) ? input.shape : null,
-    by: user.name,
-  });
+  let assembly: Awaited<ReturnType<typeof createGridAssembly>>;
+  try {
+    assembly = await createGridAssembly({
+      name: input.name,
+      manufacturer: input.manufacturer,
+      modelNumber: input.modelNumber,
+      scope: input.scope,
+      members: input.members,
+      shape: isGridShape(input.shape) ? input.shape : null,
+      by: user.name,
+    });
+  } catch (error) {
+    console.error("createGridAssemblyAction: assembly mint failed", error);
+    return { ok: false, error: "Couldn’t save that assembly — please try again." };
+  }
   revalidatePath("/design/grid");
   return { ok: true, id: assembly.id };
 }
@@ -198,6 +207,47 @@ export async function seedStartingLayoutAction(
   if (!updated) return { ok: false, error: "That design could not be found." };
   revalidatePath(editorPath(projectId));
   return { ok: true, added: delta.length, skipped: desired.length - delta.length };
+}
+
+/** Link the Grid to a saved Lineset Builder design. The schedule remains a
+ * live derivation of the saved inputs, so edits to that design are reflected
+ * the next time the Grid schedule is opened. */
+export async function linkLinesetDesignAction(
+  projectId: string,
+  designId: string | null
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  if (designId) {
+    const design = await getDesign(designId);
+    if (!design || design.kind !== "lineset") return { ok: false, error: "Choose a saved Lineset Builder design." };
+  }
+  const updated = await setLinesetDesign(projectId, designId);
+  if (!updated) return { ok: false, error: "That design could not be found." };
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/schedule`);
+  return { ok: true };
+}
+
+/** Build and store the customer-facing Grid package (punch #40). */
+export async function createClientPackageAction(
+  projectId: string,
+  optionId: string | null,
+): Promise<{ ok: true; packageId: string; url: string; gapCount: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "That design could not be found." };
+  try {
+    const built = await createClientPackage(project, user.name, optionId);
+    revalidatePath(editorPath(projectId));
+    return {
+      ok: true,
+      packageId: built.record.id,
+      url: `/api/client-packages/${encodeURIComponent(built.record.id)}`,
+      gapCount: built.gaps.length,
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "The client package could not be built." };
+  }
 }
 
 export async function placeDeviceAction(
@@ -698,20 +748,26 @@ export async function createDraftQuoteAction(
     return { ok: true, quoteId: existing.id, updated: true, fallbackLines: build.fallbackLines };
   }
 
-  const q = await createQuote({
-    name: build.quoteName,
-    customer: project.customer,
-    customerId: project.customerId,
-    locationId: build.locationId,
-    value: build.value,
-    margin: build.margin,
-    pricingTier: build.tier.tier,
-    tierMargin: build.tier.margin,
-    source: "grid",
-    quoteType: "system",
-    owner: user.name,
-    spec: build.spec,
-  });
+  let q;
+  try {
+    q = await createQuote({
+      name: build.quoteName,
+      customer: project.customer,
+      customerId: project.customerId,
+      locationId: build.locationId,
+      value: build.value,
+      margin: build.margin,
+      pricingTier: build.tier.tier,
+      tierMargin: build.tier.margin,
+      source: "grid",
+      quoteType: "system",
+      owner: user.name,
+      spec: build.spec,
+    });
+  } catch (error) {
+    console.error("createDraftQuoteAction: quote mint failed", error);
+    return { ok: false, error: "Couldn’t create the draft quote — please try again." };
+  }
   await setOptionQuote(project.id, resolvedOptionId, q.id);
   await addRevision(projectId, { by: user.name, reason: "quote", note: `${option.name} quoted as ${q.id}` });
   revalidatePath(editorPath(projectId));

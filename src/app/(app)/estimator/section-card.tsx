@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { SuggestPart } from "./estimator-data";
-import { fmt, marginColor, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
+import { fmt, lineExtSellOf, marginColor, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import CatalogPicker from "./catalog-picker";
@@ -78,12 +78,17 @@ export type SectionCardProps = {
   registerRef: (id: string, el: HTMLDivElement | null) => void;
   onToggleExpand: () => void;
   onRename: (name: string) => void;
+  onSetNarrative: (value: string) => void;
+  onSetPresentation: (value: "itemized" | "narrative") => void;
   onDelete: () => void;
   onSetMargin: (v: string) => void;
   onSetFreight: (v: string) => void;
   onInc: (id: number) => void;
   onDec: (id: number) => void;
   onSetQty: (id: number, v: string) => void;
+  onSetPrice: (id: number, v: string) => void;
+  onSetExtSell: (id: number, v: string) => void;
+  onMoveItem: (id: number, direction: -1 | 1) => void;
   onRemoveItem: (id: number) => void;
   onToggleCatalog: () => void;
   onToggleCurtain: () => void;
@@ -95,7 +100,7 @@ export type SectionCardProps = {
   /** CSV batch-add (#112): resolves SKUs against the catalog, returns how many priced from it vs. landed custom. */
   onImportMaterials: (items: ImportedMaterial[]) => Promise<{ fromCatalog: number; custom: number }>;
   onSetCustomDraft: (field: keyof CustomDraft, v: string) => void;
-  onAddCustomPart: () => void;
+  onAddCustomPart: () => void | Promise<void>;
   /** Live Single/Itemized flip on a stored vendor quote (#143). */
   onSetVendorDisplay: (vendorQuoteId: string, display: "single" | "itemized") => void;
   /** Reopen the vendor form on a stored quote to edit it in place (#144). */
@@ -176,7 +181,7 @@ export default function SectionCard(p: SectionCardProps) {
   const cdPrice = parseFloat(cd.price) || 0;
   const cdCost = parseFloat(cd.cost) || 0;
   const cdMargin = cdPrice > 0 ? (cdPrice - cdCost) / cdPrice : 0;
-  const cdValid = (cd.desc || "").trim().length > 0 && cdPrice > 0;
+  const cdValid = (cd.desc || "").trim().length > 0 && (cdPrice > 0 || (!!cd.allowance && cdCost > 0));
   const showLink = linkRevealed || !!cd.link;
   const openMethod = p.openMethod;
 
@@ -332,6 +337,13 @@ export default function SectionCard(p: SectionCardProps) {
               borderTop: "1px solid #f3f4f7",
             }}
           >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, padding: "0 5px" }} onClick={(e) => e.stopPropagation()}>
+              <select value={sec.presentation || "itemized"} onChange={(e) => p.onSetPresentation(e.target.value as "itemized" | "narrative")} style={{ border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontSize: 11, color: "#5b616e", background: "#fff" }}>
+                <option value="itemized">Customer: itemized</option>
+                <option value="narrative">Customer: narrative</option>
+              </select>
+              <input value={sec.narrative || ""} onChange={(e) => p.onSetNarrative(e.target.value)} onClick={(e) => e.stopPropagation()} placeholder="Brief system explanation for the quote letter" style={{ flex: 1, minWidth: 0, border: "1px solid #e4e7ec", borderRadius: 6, padding: "5px 7px", fontSize: 11.5, color: "#3a3f4a" }} />
+            </div>
             {isInternal && (
               <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                 <span
@@ -928,12 +940,27 @@ export default function SectionCard(p: SectionCardProps) {
                       {fmt(it.cost)}
                     </span>
                   )}
-                  <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#5b616e" }}>{fmt(it.price)}</span>
-                  <span
-                    style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}
-                  >
-                    {fmt(it.qty * it.price)}
-                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
+                    <input
+                      className="est-input"
+                      defaultValue={String(it.price)}
+                      onBlur={(e) => p.onSetPrice(it.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      aria-label={`Unit sell for ${it.desc}`}
+                      style={{ width: 76, height: 24, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#5b616e" }}
+                    />
+                    <span title="Line margin" style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: marginColor(lineExtSellOf(it) > 0 ? (lineExtSellOf(it) - it.qty * it.cost) / lineExtSellOf(it) : 0) }}>
+                      {lineExtSellOf(it) > 0 ? Math.round(((lineExtSellOf(it) - it.qty * it.cost) / lineExtSellOf(it)) * 100) : 0}%
+                    </span>
+                  </div>
+                  <input
+                    className="est-input"
+                    defaultValue={String(lineExtSellOf(it))}
+                    onBlur={(e) => p.onSetExtSell(it.id, e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    aria-label={`Extended sell for ${it.desc}`}
+                    style={{ width: 88, height: 24, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#5b616e", fontWeight: 600 }}
+                  />
                   <button
                     type="button"
                     className="est-x"
@@ -952,6 +979,8 @@ export default function SectionCard(p: SectionCardProps) {
                   >
                     ×
                   </button>
+                  <button type="button" onClick={() => p.onMoveItem(it.id, -1)} title="Move line up" style={{ border: "none", background: "transparent", color: "#aab0bb", cursor: "pointer", padding: 0 }}>↑</button>
+                  <button type="button" onClick={() => p.onMoveItem(it.id, 1)} title="Move line down" style={{ border: "none", background: "transparent", color: "#aab0bb", cursor: "pointer", padding: 0 }}>↓</button>
                 </div>
               );
             })}
@@ -1123,8 +1152,8 @@ export default function SectionCard(p: SectionCardProps) {
                     alignItems: "end",
                   }}
                 >
-                  <div>
-                    <label style={LBL}>Part no. / SKU</label>
+                <div>
+                  <label style={LBL}>Part no. / SKU</label>
                     <input
                       className="est-input est-field"
                       value={cd.sku}
@@ -1132,6 +1161,14 @@ export default function SectionCard(p: SectionCardProps) {
                       placeholder="CUSTOM-001"
                       style={PORTAL_FIELD}
                     />
+                  </div>
+                  <div>
+                    <label style={LBL}>Manufacturer</label>
+                    <input className="est-input est-field" value={cd.manufacturer} onChange={(e) => p.onSetCustomDraft("manufacturer", e.target.value)} placeholder="ETC" style={PORTAL_FIELD} />
+                  </div>
+                  <div>
+                    <label style={LBL}>MFR P/N</label>
+                    <input className="est-input est-field" value={cd.manufacturerPartNumber} onChange={(e) => p.onSetCustomDraft("manufacturerPartNumber", e.target.value)} placeholder="7060A" style={PORTAL_FIELD} />
                   </div>
                   <div>
                     <label style={LBL}>Unit</label>
@@ -1203,6 +1240,10 @@ export default function SectionCard(p: SectionCardProps) {
                       />
                     </div>
                   </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+                  <label style={{ ...LBL, margin: 0 }}>Price good through</label>
+                  <input type="date" className="est-input est-field" value={cd.priceGoodThrough} onChange={(e) => p.onSetCustomDraft("priceGoodThrough", e.target.value)} style={{ ...PORTAL_FIELD, width: 150 }} />
                 </div>
 
                 <div
@@ -1282,6 +1323,10 @@ export default function SectionCard(p: SectionCardProps) {
                     <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#6b7079", cursor: "pointer" }}>
                       <input type="checkbox" checked={!!cd.allowance} onChange={(e) => p.onSetCustomDraft("allowance", e.target.checked ? "1" : "")} />
                       Budget allowance
+                    </label>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: cd.allowance ? "#c4c9d2" : "#6b7079", cursor: cd.allowance ? "not-allowed" : "pointer" }} title={cd.allowance ? "Allowances never enter the catalog" : "Save this part for future estimates"}>
+                      <input type="checkbox" checked={!!cd.addToCatalog} disabled={!!cd.allowance} onChange={(e) => p.onSetCustomDraft("addToCatalog", e.target.checked ? "1" : "")} />
+                      Add to catalog
                     </label>
                     <button
                       type="button"

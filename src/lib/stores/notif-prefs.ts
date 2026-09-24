@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { notifPrefs } from "@/db/schema";
+import type { DashboardOverride } from "@/lib/dashboard-layout";
 
 /* ============================================================
    NotifPrefs — server port of app/notifprefs.js (localStorage
@@ -53,7 +54,7 @@ export const KEYS: NotifCategoryKey[] = CATEGORIES.map((c) => c.key);
 /** Full on/off map for a user; every known key present. */
 export type NotifPrefsMap = Record<NotifCategoryKey, boolean>;
 
-async function readRow(user: string): Promise<Record<string, boolean>> {
+async function readRow(user: string): Promise<Record<string, unknown>> {
   const db = await getDb();
   const rows = await db
     .select()
@@ -65,7 +66,7 @@ async function readRow(user: string): Promise<Record<string, boolean>> {
 
 async function writeRow(
   user: string,
-  prefs: Record<string, boolean>
+  prefs: Record<string, unknown>
 ): Promise<void> {
   const db = await getDb();
   await db
@@ -80,7 +81,7 @@ async function writeRow(
 /** Full on/off map for a user; every known key present, missing → ON.
  *  (Prototype NotifPrefs.get.) */
 export async function getPrefs(user?: string): Promise<NotifPrefsMap> {
-  const stored = await readRow(user || DEFAULT_USER);
+  const stored = (await readRow(user || DEFAULT_USER)) as Record<string, boolean>;
   const out = {} as NotifPrefsMap;
   KEYS.forEach((k) => {
     out[k] = stored[k] !== false;
@@ -126,7 +127,7 @@ export async function setAll(
   user?: string
 ): Promise<NotifPrefsMap> {
   const u = user || DEFAULT_USER;
-  const mine: Record<string, boolean> = { ...(await readRow(u)) };
+  const mine: Record<string, unknown> = { ...(await readRow(u)) };
   KEYS.forEach((k) => {
     mine[k] = !!on;
   });
@@ -170,6 +171,24 @@ export async function crmModeOn(user: string): Promise<boolean> {
 export async function setCrmMode(on: boolean, user: string): Promise<void> {
   const mine = { ...(await readRow(user)) };
   mine[CRM_MODE_KEY] = !!on;
+  await writeRow(user, mine);
+}
+
+const DASHBOARD_OVERRIDE_KEY = "dashboard_override";
+
+export async function getDashboardOverride(user: string): Promise<DashboardOverride | null> {
+  const stored = await readRow(user);
+  const value = stored[DASHBOARD_OVERRIDE_KEY];
+  return value && typeof value === "object" ? (value as DashboardOverride) : null;
+}
+
+export async function setDashboardOverride(
+  user: string,
+  override: DashboardOverride | null,
+): Promise<void> {
+  const mine = await readRow(user);
+  if (override) mine[DASHBOARD_OVERRIDE_KEY] = override;
+  else delete mine[DASHBOARD_OVERRIDE_KEY];
   await writeRow(user, mine);
 }
 

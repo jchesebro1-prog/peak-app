@@ -12,6 +12,7 @@ import {
   SHARED_KEYS,
   isPersonalKey,
   userIdOfKey,
+  USERINFO_EMAIL_SCOPE,
 } from "@/lib/gmail/config";
 import { authorizeUrl, signCalendarConnectState, signState } from "@/lib/gmail/oauth";
 
@@ -106,6 +107,10 @@ async function startCalendarConnect(req: NextRequest, origin: string): Promise<N
 
   const state = signCalendarConnectState({ userId: me.id });
   return NextResponse.redirect(
-    authorizeUrl(state, undefined, [], [CALENDAR_READONLY_SCOPE])
+    // userinfo.email is required because the callback stores the authorized
+    // account address alongside its calendar subscriptions. Requesting only
+    // calendar.readonly made the second-account flow fail at userinfo before
+    // it could create the connection.
+    authorizeUrl(state, undefined, [], [CALENDAR_READONLY_SCOPE, USERINFO_EMAIL_SCOPE])
   );
 }

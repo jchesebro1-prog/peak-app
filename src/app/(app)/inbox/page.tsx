@@ -282,7 +282,7 @@ export default async function InboxPage({
     needsReplyCount(me),
     callsCount(me),
     flaggedCount(me),
-    allThreads(),
+    view === "unmatched" ? allThreads() : Promise.resolve([] as CommThread[]),
     followUpCount({ unownedOrMine: true, me }),
     // Unmatched builds its own list from allComms — skip the query it would discard.
     view === "unmatched"
@@ -477,9 +477,23 @@ export default async function InboxPage({
       pinned: !!t.pinned,
       categoryColor: cat?.color || "",
       categoryLabel: cat?.label || "",
+      labels: labelOptions
+        // System labels are useful context too (e.g. Starred, Important,
+        // Sent); Gmail's inbox/sent/draft routing labels are omitted because
+        // the folder already communicates them.
+        .filter((l) => l.type === "user" || !["INBOX", "SENT", "DRAFT", "TRASH", "SPAM", "ALL_MAIL"].includes(l.id))
+        .filter((l) => (t.messages || []).some((m) => (m.gmailLabelIds || []).includes(l.id)))
+        .slice(0, 4),
       name: nm,
       msgCount: (t.messages || []).length,
+      messagePreviews: (t.messages || []).slice(-8).map((m) => ({
+        author: m.author || "Unknown",
+        time: timeAgo(m.at),
+        snippet: (m.body || "").replace(/\s+/g, " ").trim().slice(0, 180),
+        out: m.direction === "out",
+      })),
       participants: participantsFor(t),
+      lastResponder: (t.messages || []).at(-1)?.author || t.contactName || "Unknown",
       subject: t.subject || "(no subject)",
       snippet: snip,
       time: timeAgo(t.updatedAt),
@@ -747,6 +761,15 @@ export default async function InboxPage({
         size: a.size,
         dataUrl: a.dataUrl,
       })),
+      link: m.link
+        ? {
+            type: m.link.type,
+            kindLabel: m.link.type.charAt(0).toUpperCase() + m.link.type.slice(1),
+            label: m.link.label || m.link.id,
+            color: LINK_KIND_COLOR[m.link.type] || "#5b616e",
+            href: linkHref(m.link),
+          }
+        : null,
     }));
 
     reader = {

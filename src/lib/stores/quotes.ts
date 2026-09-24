@@ -9,6 +9,7 @@ import {
 import { quotesSeed } from "@/db/seeds/quotes";
 import { canSetPoReceived } from "@/lib/opportunities";
 import { createAssignment } from "@/lib/stores/assignments";
+import { withTransaction } from "@/db";
 
 /**
  * QuoteStore — server port of app/store.js (localStorage key rss_pipeline_v2).
@@ -91,6 +92,8 @@ export type Quote = {
   quoteNote?: string;
   scopeNarrative?: string;
   quoteBasis?: string;
+  /** Customer's requested install window from the estimator (#15). */
+  installTimeframe?: string;
   preparedBy?: string;
   assumptions?: string;
   termsText?: string;
@@ -630,6 +633,7 @@ export async function setStatus(
   by?: string | null,
   opts: SetStatusOpts = {}
 ): Promise<Quote | null> {
+  return withTransaction(async () => {
   if (!STAGES.includes(status)) return null;
   const q = await getDoc<Quote>("quotes", id);
   if (!q || q.status === status) return q;
@@ -673,7 +677,12 @@ export async function setStatus(
     });
   }
 
+  if (result) {
+    const { spawnFromQuote } = await import("./quote-spawn");
+    await spawnFromQuote(result, q.status);
+  }
   return result;
+  });
 }
 
 /**

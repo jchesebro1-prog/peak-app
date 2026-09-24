@@ -78,6 +78,10 @@ export function vendorDraftTotal(d: VendorDraft): number {
   return vendorLinesTotal(d.lines);
 }
 
+export function vendorDraftTotalSource(d: VendorDraft): "manual" | "lines" {
+  return (d.total || "").trim() !== "" ? "manual" : "lines";
+}
+
 export default function VendorQuoteModal({
   secName,
   draft,
@@ -305,6 +309,7 @@ export default function VendorQuoteModal({
       onLoadLines(
         res.items.map((it) => ({
           description: it.desc || it.sku,
+          manufacturerPartNumber: it.manufacturerPartNumber || "",
           qty: String(it.qty),
           unit: it.unit || "ea",
           amount: String(it.cost > 0 ? it.cost : it.price),
@@ -578,7 +583,7 @@ export default function VendorQuoteModal({
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 70px 70px 100px 26px",
+                gridTemplateColumns: "1fr 130px 70px 70px 100px 26px",
                 gap: 8,
                 padding: "7px 10px",
                 background: "#fafbfc",
@@ -591,6 +596,7 @@ export default function VendorQuoteModal({
               }}
             >
               <span>Description</span>
+              <span>MFR P/N</span>
               <span style={{ textAlign: "right" }}>Qty</span>
               <span>Unit</span>
               {/* #143: the line's extended total, not a per-unit price. */}
@@ -602,7 +608,7 @@ export default function VendorQuoteModal({
                 key={line.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 70px 70px 100px 26px",
+                  gridTemplateColumns: "1fr 130px 70px 70px 100px 26px",
                   gap: 8,
                   padding: "7px 10px",
                   alignItems: "center",
@@ -614,6 +620,13 @@ export default function VendorQuoteModal({
                   value={line.description}
                   onChange={(e) => onSetLine(line.id, "description", e.target.value)}
                   placeholder="Item"
+                  style={{ ...FIELD, fontSize: 12.5, padding: "7px 9px" }}
+                />
+                <input
+                  className="est-field"
+                  value={line.manufacturerPartNumber}
+                  onChange={(e) => onSetLine(line.id, "manufacturerPartNumber", e.target.value)}
+                  placeholder="Manufacturer P/N"
                   style={{ ...FIELD, fontSize: 12.5, padding: "7px 9px" }}
                 />
                 <input

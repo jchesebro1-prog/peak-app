@@ -6,14 +6,14 @@
 
 import { HOME_TABS } from "@/app/(app)/home-tabs-keys";
 
-export type NavChild = { key: string; label: string; href: string };
+export type NavChild = { key: string; label: string; href: string; mobileLabel?: string };
 export type NavEntry =
-  | { kind: "link"; key: string; label: string; href: string }
-  | { kind: "group"; key: string; label: string; children: NavChild[] };
+  | { kind: "link"; key: string; label: string; href: string; mobileLabel?: string }
+  | { kind: "group"; key: string; label: string; mobileLabel?: string; children: NavChild[] };
 
 export const NAV: NavEntry[] = [
   /* Q-6 rebrand (D117): the header reads like the brand lockup —
-   * [Q6 mark = Home] EST · PM · CRM · DESIGN. Home left the tab row (the
+   * [Q6 mark = Home] Estimating · Projects · Customers · Design · Knowledge. Home left the tab row (the
    * mark is the link); Quotes/Estimator/Reviews split out of Sales into
    * EST; the rest of Sales became CRM; Operations became PM. Routes are
    * untouched — only group keys/labels moved. */
@@ -30,7 +30,8 @@ export const NAV: NavEntry[] = [
   {
     kind: "group",
     key: "est",
-    label: "EST",
+    label: "Estimating",
+    mobileLabel: "EST",
     children: [
       { key: "quotes", label: "Quotes", href: "/quotes" },
       /* #22 Mine/All nav children — querystring hrefs render verbatim.
@@ -49,7 +50,8 @@ export const NAV: NavEntry[] = [
   {
     kind: "group",
     key: "pm",
-    label: "PM",
+    label: "Projects",
+    mobileLabel: "PM",
     children: [
       { key: "projects", label: "Projects", href: "/projects" },
       { key: "myprojects", label: "My Projects", href: "/projects?who=mine" }, // #22 — see the EST note
@@ -64,7 +66,8 @@ export const NAV: NavEntry[] = [
   {
     kind: "group",
     key: "crm",
-    label: "CRM",
+    label: "Customers",
+    mobileLabel: "CRM",
     children: [
       { key: "opportunities", label: "Opportunities", href: "/opportunities" },
       { key: "leads", label: "Leads", href: "/leads" },
@@ -79,7 +82,8 @@ export const NAV: NavEntry[] = [
   {
     kind: "group",
     key: "design",
-    label: "DESIGN",
+    label: "Design",
+    mobileLabel: "Design",
     children: [
       { key: "designoverview", label: "Overview", href: "/design" },
       { key: "engagements", label: "Consulting", href: "/design/engagements" },
@@ -100,7 +104,8 @@ export const NAV: NavEntry[] = [
   {
     kind: "group",
     key: "knowledge",
-    label: "KNOWLEDGE",
+    label: "Knowledge",
+    mobileLabel: "Know",
     children: [
       { key: "knowledgeoverview", label: "Overview", href: "/knowledge" },
       { key: "steel", label: "Steel Calculator", href: "/knowledge/steel" },

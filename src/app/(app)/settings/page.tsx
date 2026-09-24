@@ -7,8 +7,6 @@ import { mergedConsultingPhases } from "@/lib/stores/engagements";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { resolveFieldDefs } from "@/lib/customer-fields";
 import { allUsers } from "@/lib/users";
-import { listGridSymbols } from "@/lib/stores/grid-catalog";
-import { resolveCategoryShapes } from "@/lib/design/grid-symbols";
 import {
   callbackUrl,
   GMAIL_MODIFY_SCOPE,
@@ -16,7 +14,6 @@ import {
   hasCalendarScope,
   hasDriveScope,
   hasTasksScope,
-  personalKey,
   redirectHostMismatch,
   SHARED_KEYS,
 } from "@/lib/gmail/config";
@@ -37,30 +34,16 @@ export default async function SettingsPage() {
   const settings = await getSettings();
   const users = isAdmin ? await allUsers() : [];
 
-  // Grid symbols card (#131, D154) — live catalog categories, derived the
-  // same way design/grid/[id]/page.tsx derives them for the editor's own
-  // parts list, so the card can show a category no default matches (e.g.
-  // the shipped catalog uses "control-io", not "Control").
-  const gridSymbols = isAdmin ? await listGridSymbols() : [];
-  const gridLiveCategories = Array.from(
-    new Set(gridSymbols.map((s) => s.category || "Other"))
-  ).sort();
-
   // ---- Mailboxes (Gmail) — admin surface, env-gated ----
   const gmailOn = gmailEnabled();
   const redirectUri = callbackUrl();
   const redirectWarning = gmailOn ? redirectHostMismatch() : null;
   const connections = isAdmin && gmailOn ? await listConnections() : [];
   const connByKey = new Map(connections.map((c) => [c.mailboxKey, c]));
-  const myKey = personalKey(me.id);
-  const mailboxVMs = [
-    {
-      key: myKey,
-      label: me.name,
-      kind: "personal" as const,
-      desc: "Your own inbox — send as yourself and log your threads.",
-    },
-    ...SHARED_KEYS.map((k) => ({
+  // Personal mailbox settings belong only on /account. Settings exposes the
+  // company-owned shared boxes; this prevents an admin settings view from
+  // becoming a directory of individual account preferences.
+  const mailboxVMs = SHARED_KEYS.map((k) => ({
       key: k as string,
       label: SHARED_LABEL[k] || k,
       kind: "shared" as const,
@@ -70,8 +53,7 @@ export default async function SettingsPage() {
           : k === "installs"
             ? "Projects, scheduling & field coordination."
             : "General inbound — the address on the website.",
-    })),
-  ].map((mb) => {
+    })).map((mb) => {
     const c = connByKey.get(mb.key);
     return {
       ...mb,
@@ -174,6 +156,7 @@ export default async function SettingsPage() {
             feedbackEmail: settings.feedbackEmail,
             logoLight: settings.logoLight || null,
             logoDark: settings.logoDark || null,
+            dashboardDefaults: settings.dashboardDefaults,
           }}
           intakeCatalog={mergedCatalog(settings.intakeCatalog)}
           visitReasons={mergedVisitReasons(settings.visitReasons)}
@@ -185,8 +168,6 @@ export default async function SettingsPage() {
           )}
           consultingDisciplines={mergedConsultingDisciplines(settings.consultingDisciplines)}
           customerFieldDefs={resolveFieldDefs(settings.customerFieldDefs)}
-          gridCategoryShapes={resolveCategoryShapes(settings.gridCategoryShapes)}
-          gridLiveCategories={gridLiveCategories}
           offices={settings.offices.map((o) => ({
             id: o.id,
             type: o.type || "Main Office",

@@ -172,7 +172,7 @@ export async function getDesignAction(id: string): Promise<DesignRecord | null> 
    convention (submitDesignReviewAction et al.), same as the estimator's
    quote-task wrappers. */
 
-export async function addDesignTaskAction(formData: FormData) {
+export async function addDesignTaskAction(formData: FormData): Promise<{ ok: true } | { ok: false; error: string } | void> {
   const me = await requireUser();
   const designId = String(formData.get("designId") || "");
   const title = String(formData.get("title") || "").trim();
@@ -183,11 +183,16 @@ export async function addDesignTaskAction(formData: FormData) {
   const assigneeName = assigneeUserId
     ? (await activeUsers()).find((u) => u.id === assigneeUserId)?.name || ""
     : "";
-  await createTask(
-    { title, section, designId, assigneeUserId, assigneeName,
-      dueAt: due ? new Date(due + "T12:00:00").getTime() : null },
-    me,
-  );
+  try {
+    await createTask(
+      { title, section, designId, assigneeUserId, assigneeName,
+        dueAt: due ? new Date(due + "T12:00:00").getTime() : null },
+      me,
+    );
+  } catch (error) {
+    console.error("addDesignTaskAction: task mint failed", error);
+    return { ok: false, error: "Couldn’t add that task — please try again." };
+  }
   revalidatePath("/design/designs");
 }
 
@@ -221,11 +226,16 @@ export async function updateDesignTaskAction(formData: FormData) {
 
 /** Apply a reusable task-template set (D149, #118) to this design — thin
  *  FormData wrapper over task-templates.ts's applyTaskTemplate(). */
-export async function applyDesignTemplateAction(formData: FormData) {
+export async function applyDesignTemplateAction(formData: FormData): Promise<{ ok: true } | { ok: false; error: string } | void> {
   const me = await requireUser();
   const designId = String(formData.get("designId") || "");
   const setId = String(formData.get("setId") || "");
   if (!designId || !setId) return;
-  await applyTaskTemplate(setId, { kind: "design", id: designId }, me);
+  try {
+    await applyTaskTemplate(setId, { kind: "design", id: designId }, me);
+  } catch (error) {
+    console.error("applyDesignTemplateAction: task template failed", error);
+    return { ok: false, error: error instanceof Error ? error.message : "Couldn’t apply that template — please try again." };
+  }
   revalidatePath("/design/designs");
 }

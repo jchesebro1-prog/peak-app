@@ -31,13 +31,45 @@ import {
   get as getInspection,
   type InspectionRecord,
 } from "@/lib/stores/inspections";
-import { list as catalogList } from "@/lib/stores/catalog";
+import { list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import type { SuggestPart } from "./estimator-data";
 import { totals } from "./pricing";
 import { activeUsers } from "@/lib/users";
+
+export async function saveEstimatorCustomPartAction(input: {
+  sku: string;
+  desc: string;
+  category: string;
+  unit: string;
+  cost: number;
+  list: number;
+  mfr: string;
+  manufacturerPartNumber: string;
+  priceGoodThrough: string;
+}): Promise<{ ok: true; sku: string } | { ok: false; error: string }> {
+  await requireUser();
+  const sku = input.sku.trim();
+  const desc = input.desc.trim();
+  if (!sku || sku.toUpperCase() === "CUSTOM") return { ok: false, error: "A catalog SKU is required." };
+  if (!desc || !Number.isFinite(input.cost) || input.cost < 0 || !Number.isFinite(input.list) || input.list <= 0) {
+    return { ok: false, error: "Catalog parts need a description, cost, and sell price." };
+  }
+  await mergeUpsert(sku, {
+    desc,
+    category: input.category.trim() || "Custom Parts",
+    unit: input.unit.trim() || "ea",
+    cost: input.cost,
+    list: input.list,
+    mfr: input.mfr.trim() || undefined,
+    manufacturerPartNumber: input.manufacturerPartNumber.trim() || undefined,
+    note: input.priceGoodThrough ? `Price good through ${input.priceGoodThrough}` : undefined,
+  });
+  revalidatePath("/catalog");
+  return { ok: true, sku };
+}
 import {
   createTask,
   setTaskStatus as setTaskStatusStore,
@@ -60,6 +92,7 @@ import { applyTaskTemplate } from "@/lib/stores/task-templates";
 type QuoteExtras = {
   contactName?: string;
   quoteNote?: string;
+  assumptions?: string;
   paymentTerms?: PaymentTerms;
   spec?: { sections: SpecSection[]; mobs: SpecMob[] };
   /** #143: top-level, NOT inside `spec` — the attachment proxy route reads
@@ -77,6 +110,8 @@ export type SavePayload = {
   locationId: string | null;
   contactName: string;
   quoteNote: string;
+  assumptions: string;
+  installTimeframe: string;
   paymentTerms: PaymentTerms;
   /** User-named quote category (#110); "" clears it. */
   category: string;
@@ -242,6 +277,8 @@ export async function saveQuoteAction(
     locationId: payload.locationId || null,
     contactName: payload.contactName || "",
     quoteNote: payload.quoteNote || "",
+    assumptions: payload.assumptions || "",
+    installTimeframe: payload.installTimeframe || "TBD",
     paymentTerms: payload.paymentTerms,
     category: (payload.category || "").trim(),
     value: payload.value,
@@ -308,6 +345,7 @@ export async function saveQuoteAction(
     q = await update(created.id, {
       contactName: payload.contactName || "",
       quoteNote: payload.quoteNote || "",
+      assumptions: payload.assumptions || "",
       paymentTerms: payload.paymentTerms,
       category: (payload.category || "").trim(),
       vendorQuotes: storedVendorQuotes,
@@ -492,6 +530,8 @@ export async function updateQuoteMetaAction(
     customer?: string;
     contactName?: string;
     quoteNote?: string;
+    assumptions?: string;
+    installTimeframe?: string;
     category?: string;
     name?: string;
   }
@@ -509,6 +549,8 @@ export async function updateQuoteMetaAction(
   if (typeof meta.customer === "string") patch.customer = meta.customer;
   if (typeof meta.contactName === "string") patch.contactName = meta.contactName;
   if (typeof meta.quoteNote === "string") patch.quoteNote = meta.quoteNote;
+  if (typeof meta.assumptions === "string") patch.assumptions = meta.assumptions;
+  if (typeof meta.installTimeframe === "string") patch.installTimeframe = meta.installTimeframe.trim();
   if (typeof meta.category === "string") patch.category = meta.category.trim();
   // #160: the click-to-edit Estimator title. Blank never clears a name.
   if (typeof meta.name === "string" && meta.name.trim()) patch.name = meta.name.trim();
@@ -1008,7 +1050,7 @@ export async function travelForSelectionAction(
    (they only ever touch taskId), so only "add" needs a quote-specific
    version — it writes quoteId instead of projectId. */
 
-export async function addQuoteTaskAction(formData: FormData) {
+export async function addQuoteTaskAction(formData: FormData): Promise<{ ok: true } | { ok: false; error: string } | void> {
   const me = await requireUser();
   const quoteId = String(formData.get("quoteId") || "");
   const title = String(formData.get("title") || "").trim();
@@ -1019,17 +1061,22 @@ export async function addQuoteTaskAction(formData: FormData) {
   const assigneeName = assigneeUserId
     ? (await activeUsers()).find((u) => u.id === assigneeUserId)?.name || ""
     : "";
-  await createTask(
-    {
-      title,
-      section,
-      quoteId,
-      assigneeUserId,
-      assigneeName,
-      dueAt: due ? new Date(due + "T12:00:00").getTime() : null,
-    },
-    me
-  );
+  try {
+    await createTask(
+      {
+        title,
+        section,
+        quoteId,
+        assigneeUserId,
+        assigneeName,
+        dueAt: due ? new Date(due + "T12:00:00").getTime() : null,
+      },
+      me
+    );
+  } catch (error) {
+    console.error("addQuoteTaskAction: task mint failed", error);
+    return { ok: false, error: "Couldn’t add that task — please try again." };
+  }
   revalidatePath("/", "layout");
 }
 
@@ -1064,11 +1111,16 @@ export async function updateQuoteTaskAction(formData: FormData) {
 /** Apply a reusable task-template set (D149, #118) to this quote — thin
  *  FormData wrapper over task-templates.ts's applyTaskTemplate(), same
  *  no-op-on-bad-input convention as addQuoteTaskAction above. */
-export async function applyQuoteTemplateAction(formData: FormData) {
+export async function applyQuoteTemplateAction(formData: FormData): Promise<{ ok: true } | { ok: false; error: string } | void> {
   const me = await requireUser();
   const quoteId = String(formData.get("quoteId") || "");
   const setId = String(formData.get("setId") || "");
   if (!quoteId || !setId) return;
-  await applyTaskTemplate(setId, { kind: "quote", id: quoteId }, me);
+  try {
+    await applyTaskTemplate(setId, { kind: "quote", id: quoteId }, me);
+  } catch (error) {
+    console.error("applyQuoteTemplateAction: task template failed", error);
+    return { ok: false, error: error instanceof Error ? error.message : "Couldn’t apply that template — please try again." };
+  }
   revalidatePath("/", "layout");
 }

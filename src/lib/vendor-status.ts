@@ -25,7 +25,7 @@ export type VendorRegistration = { program: string; url: string; accountNumber: 
 /** One catalog manufacturer (grouped by mfrKey) and which vendor claims it. */
 export type ManufacturerEntry = { name: string; count: number; vendorId: string | null };
 
-export const VENDOR_STATUS_KEYS = ["no-list", "newer-list", "outdated", "current"] as const;
+export const VENDOR_STATUS_KEYS = ["no-list", "no-claims", "newer-list", "outdated", "current"] as const;
 export type VendorStatusKey = (typeof VENDOR_STATUS_KEYS)[number];
 
 /** Chip colours follow the app's status-chip families (comms statusMeta). */
@@ -34,6 +34,7 @@ export const VENDOR_STATUS_META: Record<VendorStatusKey, { label: string; ink: s
   "newer-list": { label: "Newer list received", ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" },
   outdated: { label: "Outdated", ink: "#b4543a", soft: "#f8ece7", bd: "#eccfc4" },
   "no-list": { label: "No list logged", ink: "#8c919c", soft: "#f1f2f5", bd: "#e4e7ec" },
+  "no-claims": { label: "No manufacturers claimed", ink: "#8c6b1f", soft: "#fbf3dd", bd: "#f0e2bd" },
 };
 
 /** Spec §1: the default catalog owner, by display name, when Settings has none. */
@@ -87,10 +88,12 @@ export function partCountFor(parts: Array<{ mfr?: string }>, manufacturers: stri
 export function vendorStatus(input: {
   lastList: PriceListEntry | null;
   catalogEffectiveAt: number | null;
+  hasClaims?: boolean;
   now: number;
 }): VendorStatusKey {
-  const { lastList, catalogEffectiveAt, now } = input;
+  const { lastList, catalogEffectiveAt, hasClaims = true, now } = input;
   if (!lastList) return "no-list";
+  if (!hasClaims) return "no-claims";
   if (lastList.effectiveAt > (catalogEffectiveAt ?? 0)) return "newer-list";
   if (now - Math.max(lastList.effectiveAt, catalogEffectiveAt ?? 0) > OUTDATED_AFTER_MS) return "outdated";
   return "current";

@@ -164,6 +164,12 @@ export default async function VenuePage({
     ]
       .filter(Boolean)
       .join(" · ") || "—";
+  const mapsQuery = [site.address, site.city, site.state, site.zip].filter(Boolean).join(", ");
+  const mapsHref = mapsQuery
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQuery)}`
+    : site.lat != null && site.lng != null
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${site.lat},${site.lng}`)}`
+      : null;
 
   // Corrupt/non-numeric travel data (Number(...) -> NaN) is treated as absent
   // per-field, rather than rendering "NaN mi" / "NaNh" for that field.
@@ -257,6 +263,14 @@ export default async function VenuePage({
             </Link>
             {" · "}
             {address}
+            {mapsHref && (
+              <>
+                {" · "}
+                <a href={mapsHref} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
+                  Open in Maps
+                </a>
+              </>
+            )}
           </div>
           {hasTravel && (
             <div style={{ fontSize: 12, color: "#5b616e", marginTop: 6 }}>

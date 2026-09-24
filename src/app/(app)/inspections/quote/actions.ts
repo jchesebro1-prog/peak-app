@@ -10,7 +10,7 @@ import {
   retireReplacedDraftSafely,
   setStatus,
 } from "@/lib/stores/quotes";
-import { createFromQuote, levelMeta } from "@/lib/stores/inspections";
+import { levelMeta } from "@/lib/stores/inspections";
 import {
   getRates,
   setRates,
@@ -21,6 +21,12 @@ import { resolveTier } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { coordsOf, quoteOrigin, driveMiles, driveMinutes } from "@/lib/geo";
+
+function quoteFailure(formData: FormData, message: string): never {
+  const id = String(formData.get("editingId") || "");
+  const qs = new URLSearchParams({ ...(id ? { id } : {}), err: message });
+  redirect("/inspections/quote?" + qs.toString());
+}
 
 /**
  * Inspection quote mutations (inspection twin of the flame-test / repair
@@ -174,23 +180,30 @@ async function persist(formData: FormData): Promise<string | null> {
 }
 
 export async function saveInspectionQuote(formData: FormData): Promise<void> {
-  const id = await persist(formData);
+  let id: string | null;
+  try {
+    id = await persist(formData);
+  } catch (error) {
+    console.error("saveInspectionQuote: quote save failed", error);
+    quoteFailure(formData, "Couldn’t save the inspection quote — please try again.");
+  }
   revalidatePath("/", "layout");
   if (id) redirect("/inspections/quote?id=" + encodeURIComponent(id) + "&saved=1");
 }
 
 export async function approveInspectionQuote(formData: FormData): Promise<void> {
-  const id = await persist(formData);
-  if (!id) {
-    revalidatePath("/", "layout");
-    return;
+  let id: string | null;
+  try {
+    id = await persist(formData);
+    if (!id) {
+      revalidatePath("/", "layout");
+      return;
+    }
+    await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
+  } catch (error) {
+    console.error("approveInspectionQuote: quote approval failed", error);
+    quoteFailure(formData, "Couldn’t approve the inspection quote — please try again.");
   }
-  // accept → mark won, which spawns the requested inspection record(s).
-  // Bypasses the punch #60 approval gate: this screen IS the approval — a
-  // self-contained accept flow, not a quote routed through the estimator's
-  // review queue.
-  await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
-  await createFromQuote(id);
   revalidatePath("/", "layout");
   redirect("/inspections/quote?id=" + encodeURIComponent(id) + "&approved=1");
 }

@@ -10,6 +10,7 @@ import { getAllDesigns } from "@/lib/stores/designs";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { activeUsers } from "@/lib/users";
 import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
+import { safeSweep } from "@/lib/safe-sweep";
 
 /**
  * Shared server loader for the Consulting module (D90) — the projects-module
@@ -55,13 +56,15 @@ export type ConsultingData = {
   visits: VisitLite[];
   /** Every customer + its venues, for the manual-project modal (#135). */
   customers: CustomerLite[];
+  syncSkipped: string[];
 };
 
 export async function loadConsultingData(): Promise<ConsultingData> {
   // #35 safety net (the projects data.ts idiom): estimator/inbox/home status
   // paths never run the quote→engagement syncs, so every consulting load
   // sweeps first — sent proposals appear, wins advance, lost proposals close.
-  await syncEngagementsFromQuotes();
+  const syncOutcome = await safeSweep("consulting engagements", syncEngagementsFromQuotes, { created: 0, skipped: [] });
+  const sync = syncOutcome.value;
   const [engagements, quotes, designs, users, settings, visits, customerDocs] = await Promise.all([
     allEngagements(),
     getAllQuotes(),
@@ -127,5 +130,6 @@ export async function loadConsultingData(): Promise<ConsultingData> {
         .filter((l) => l.id),
       contactNames: (c.contacts || []).map((ct) => ct.name),
     })),
+    syncSkipped: syncOutcome.error ? [...sync.skipped, syncOutcome.error] : sync.skipped,
   };
 }

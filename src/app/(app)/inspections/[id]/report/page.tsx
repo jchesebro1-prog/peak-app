@@ -5,6 +5,7 @@ import { get, counts, reportBoilerplate } from "@/lib/stores/inspections";
 import { getSettings } from "@/lib/settings";
 import { PrintButton, RenovationQuoteButton } from "./controls";
 import { InspectionReportSheets, type ReportLayout } from "./report-doc";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Inspection report — Quartzite-6" };
 
@@ -46,6 +47,7 @@ export default async function InspectionReportPage({
   const showBoiler = one(sp.boiler) !== "0";
   const showClosed = one(sp.closed) !== "0";
   const showRubric = one(sp.rubric) !== "0";
+  const error = one(sp.err);
 
   const accent = settings.accent || "#7b3f8a";
   const companyName = settings.companyName || "Peak Systems Group";
@@ -125,6 +127,7 @@ export default async function InspectionReportPage({
             {rec.id + " · " + LAYOUT_LABEL[layout] + " layout · " + c.total + " logs"}
           </div>
         </div>
+        {error && <ActionError message={error} />}
 
         <div style={{ display: "flex", background: "#23262d", border: "1px solid #2f323a", borderRadius: 10, padding: 3, flexShrink: 0 }}>
           {LAYOUTS.map((k) => {

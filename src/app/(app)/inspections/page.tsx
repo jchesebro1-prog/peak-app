@@ -26,6 +26,7 @@ import {
   startInspectionRenewalOutreach,
 } from "./actions";
 import type { MapPin } from "@/components/map/LeafletMap";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Rigging Inspections — Quartzite-6" };
 
@@ -406,6 +407,7 @@ export default async function InspectionsPage({
   return (
     <div className="pk-content">
       <style>{CSS}</style>
+      <ActionError message={one(sp.err)} />
 
       {/* header */}
       <div

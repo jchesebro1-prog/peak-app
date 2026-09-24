@@ -45,10 +45,12 @@ export function RequestForm({
   venues,
   requester,
   showDetailsError,
+  showSubmitError,
 }: {
   venues: Array<{ id: string; label: string; place: string }>;
   requester: { name: string; email: string };
   showDetailsError: boolean;
+  showSubmitError: boolean;
 }) {
   const [venue, setVenue] = useState(venues[0]?.id || "");
   const [service, setService] = useState(SERVICES[0]);
@@ -82,6 +84,11 @@ export function RequestForm({
         gap: 16,
       }}
     >
+      {showSubmitError && (
+        <div role="alert" style={{ color: "#8a2f22", background: "#fff2ef", border: "1px solid #f1c9c0", borderRadius: 9, padding: "10px 12px", fontSize: 12.5 }}>
+          We couldn’t submit that request right now. Please try again.
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <div>
           <label style={LABEL}>Your name</label>

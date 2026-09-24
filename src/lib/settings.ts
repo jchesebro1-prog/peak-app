@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { appSettings } from "@/db/schema";
 import { DEFAULT_SETTINGS } from "@/db/seed-data";
+import type { DashboardLayout } from "@/lib/dashboard-layout";
 
 /**
  * AppSettings — port of settings.js. The DB row stores a sparse patch over
@@ -121,6 +122,8 @@ export type AppSettingsData = {
    *  (spec §1). null/absent = the default rule in resolveCatalogOwner()
    *  (the user named "Jena Tolksdorf" if present, else the first Admin). */
   catalogOwner?: { userId: string } | null;
+  /** Company-wide dashboard layout; users may override sparsely. */
+  dashboardDefaults: DashboardLayout;
 };
 
 export type RecordingsArchiveLastRun = {

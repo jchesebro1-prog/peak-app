@@ -114,16 +114,28 @@ export async function saveRevisionAction(
 export async function addToQuotesAction(
   id: string | null,
   partial: DesignPartial
-): Promise<{ ok: true; quoteId: string }> {
+): Promise<{ ok: true; quoteId: string } | { ok: false; error: string }> {
   const user = await requireUser();
-  const saved = await persistDesign(id, partial, user.name);
+  let saved: DesignRecord;
+  try {
+    saved = await persistDesign(id, partial, user.name);
+  } catch (err) {
+    console.error("addToQuotesAction: design mint failed", err);
+    return { ok: false, error: "Couldn’t save that design for quoting — please try again." };
+  }
   // Tier stamp at promotion (item 11, D88): Quick Design stays a sandbox at
   // its own engine margins; the customer's tier takes over when the design
   // becomes a quote (it's flagged requote and re-priced in the Estimator).
   // promoteDesignToQuote() → designToQuotePartial() already resolves and
   // stamps pricingTier/tierMargin (punch #65) — no need to re-resolve here.
-  const q = await promoteDesignToQuote(saved.id, user.name);
-  if (!q) throw new Error("Design not found");
+  let q: Awaited<ReturnType<typeof promoteDesignToQuote>>;
+  try {
+    q = await promoteDesignToQuote(saved.id, user.name);
+  } catch (err) {
+    console.error("addToQuotesAction: quote promotion failed", err);
+    return { ok: false, error: "Couldn’t create the quote — please try again." };
+  }
+  if (!q) return { ok: false, error: "That design could not be found for quoting." };
   revalidatePath("/design/designs");
   revalidatePath("/quotes");
   return { ok: true, quoteId: q.id };

@@ -185,5 +185,20 @@ export function commsSeed(): CommThread[] {
       ],
       createdAt: ago(3), updatedAt: hrs(30), syncState: "synced", syncedAt: hrs(29), rev: 2,
     },
+    // Unlinked three-author thread — keeps the Inbox review fixture honest:
+    // the participant badge must render +N without relying on a CRM chip.
+    {
+      id: "C-1019", mailbox: "info", unread: false,
+      customerId: null, customer: "Cedar Grove Middle School",
+      contactName: "Megan Ortiz", contactEmail: "mortiz@cedargrove.k12.wi.us",
+      subject: "Production coordination questions", channel: "email",
+      status: "waiting_them", assignedTo: "Jeff Chesebro", link: null,
+      messages: [
+        { id: mid(1), at: ago(4), direction: "in", channel: "email", author: "Megan Ortiz", body: "Looping in the facilities and production teams so we can coordinate the gym-a-torium walkthrough." },
+        { id: mid(2), at: ago(3), direction: "in", channel: "email", author: "Rafael Kim", body: "Facilities can open the loading door after 8:00 AM." },
+        { id: mid(3), at: ago(2), direction: "out", channel: "email", author: "Jeff Chesebro", body: "Thanks — I’ll bring the survey kit and confirm the final time." },
+      ],
+      createdAt: ago(4), updatedAt: ago(2), syncState: "synced", syncedAt: ago(2), rev: 3,
+    },
   ];
 }

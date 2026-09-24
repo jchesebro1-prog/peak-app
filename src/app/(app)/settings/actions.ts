@@ -26,6 +26,7 @@ import {
   type CustomFieldDef,
 } from "@/lib/customer-fields";
 import { cleanGridCategoryShapes } from "@/lib/design/grid-symbols";
+import type { DashboardLayout } from "@/lib/dashboard-layout";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -168,6 +169,7 @@ export async function saveSettingsAction(patch: {
   federalHolidays?: boolean;
   seedDemo?: boolean;
   feedbackEmail?: string;
+  dashboardDefaults?: DashboardLayout;
 }) {
   await requirePerm("manage_users");
   const clean: Record<string, unknown> = {};
@@ -180,6 +182,8 @@ export async function saveSettingsAction(patch: {
   if (typeof patch.seedDemo === "boolean") clean.seedDemo = patch.seedDemo;
   if (typeof patch.feedbackEmail === "string")
     clean.feedbackEmail = patch.feedbackEmail;
+  if (patch.dashboardDefaults?.version === 1 && Array.isArray(patch.dashboardDefaults.widgets))
+    clean.dashboardDefaults = patch.dashboardDefaults;
   await setSettings(clean);
   // Turning demo data ON fills any still-empty collections with the
   // prototype fixtures (existing data is never touched).

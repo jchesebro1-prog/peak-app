@@ -1,4 +1,9 @@
-import type { CSSProperties } from "react";
+"use client";
+
+import { useState, type CSSProperties, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+
+type ActionResult = { ok: true } | { ok: false; error: string } | void;
 
 /**
  * Shared "Apply template" control (D149, #118) — sits next to a record's
@@ -23,8 +28,10 @@ export function ApplyTemplateControl({
   parentField: string;
   parentId: string;
   templateSets: { id: string; name: string }[];
-  action: (formData: FormData) => void | Promise<void>;
+  action: (formData: FormData) => ActionResult | Promise<ActionResult>;
 }) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
   if (!templateSets.length) return null;
 
   const selectStyle: CSSProperties = {
@@ -41,9 +48,20 @@ export function ApplyTemplateControl({
 
   return (
     <form
-      action={action}
+      onSubmit={async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        setError(null);
+        const result = await action(new FormData(form));
+        if (result && !result.ok) {
+          setError(result.error);
+          return;
+        }
+        router.refresh();
+      }}
       style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}
     >
+      {error && <div role="alert" style={{ flex: "1 0 100%", color: "#b4543a", fontSize: 11.5 }}>{error}</div>}
       <input type="hidden" name={parentField} value={parentId} />
       <select name="setId" defaultValue={templateSets[0].id} style={selectStyle}>
         {templateSets.map((s) => (

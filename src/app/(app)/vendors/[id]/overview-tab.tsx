@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { CSSProperties } from "react";
 import type { ManufacturerEntry, VendorDiscounts, VendorRegistration } from "@/lib/vendor-status";
@@ -40,6 +40,18 @@ export default function OverviewTab({
   const [d, setD] = useState({ note: discounts.note, pct: pctText, terms: discounts.terms });
   const [r, setR] = useState<VendorRegistration>({ ...registration });
   const [pick, setPick] = useState("");
+  const localDirty = useRef(false);
+
+  // The page refreshes after saves and manufacturer claims. Keep the
+  // concurrent-edit protection in the server page, but do not remount this
+  // form: a refresh must preserve an in-progress edit and let the Saved chip
+  // remain visible. A clean form can still accept a newer server snapshot.
+  useEffect(() => {
+    if (localDirty.current) return;
+    setD({ note: discounts.note, pct: pctText, terms: discounts.terms });
+    setR({ ...registration });
+    setSaved(false);
+  }, [discounts.note, discounts.percentOffList, discounts.terms, registration, pctText]);
 
   const dirty =
     d.note !== discounts.note || d.terms !== discounts.terms || d.pct !== pctText ||
@@ -54,6 +66,7 @@ export default function OverviewTab({
         setErr(res.error);
         return;
       }
+      localDirty.current = false;
       after?.();
       router.refresh();
     });
@@ -108,16 +121,16 @@ export default function OverviewTab({
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 140px", gap: 12 }}>
           <div>
             <label style={LBL}>Note</label>
-            <input value={d.note} onChange={(e) => { setSaved(false); setD({ ...d, note: e.target.value }); }} placeholder="e.g. dealer program, tiered by annual volume" style={IN} />
+            <input value={d.note} onChange={(e) => { localDirty.current = true; setSaved(false); setD({ ...d, note: e.target.value }); }} placeholder="e.g. dealer program, tiered by annual volume" style={IN} />
           </div>
           <div>
             <label style={LBL}>% off list</label>
-            <input value={d.pct} inputMode="decimal" onChange={(e) => { setSaved(false); setD({ ...d, pct: e.target.value }); }} placeholder="e.g. 35" style={{ ...IN, fontFamily: "var(--font-mono)" }} />
+            <input value={d.pct} inputMode="decimal" onChange={(e) => { localDirty.current = true; setSaved(false); setD({ ...d, pct: e.target.value }); }} placeholder="e.g. 35" style={{ ...IN, fontFamily: "var(--font-mono)" }} />
           </div>
         </div>
         <div style={{ marginTop: 12 }}>
           <label style={LBL}>Terms</label>
-          <input value={d.terms} onChange={(e) => { setSaved(false); setD({ ...d, terms: e.target.value }); }} placeholder="e.g. Net 30, freight prepaid over $2,500" style={IN} />
+          <input value={d.terms} onChange={(e) => { localDirty.current = true; setSaved(false); setD({ ...d, terms: e.target.value }); }} placeholder="e.g. Net 30, freight prepaid over $2,500" style={IN} />
         </div>
       </div>
 
@@ -126,20 +139,20 @@ export default function OverviewTab({
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 12 }}>
           <div>
             <label style={LBL}>Program</label>
-            <input value={r.program} onChange={(e) => { setSaved(false); setR({ ...r, program: e.target.value }); }} placeholder="e.g. Partner project registration" style={IN} />
+            <input value={r.program} onChange={(e) => { localDirty.current = true; setSaved(false); setR({ ...r, program: e.target.value }); }} placeholder="e.g. Partner project registration" style={IN} />
           </div>
           <div>
             <label style={LBL}>Account #</label>
-            <input value={r.accountNumber} onChange={(e) => { setSaved(false); setR({ ...r, accountNumber: e.target.value }); }} style={{ ...IN, fontFamily: "var(--font-mono)" }} />
+            <input value={r.accountNumber} onChange={(e) => { localDirty.current = true; setSaved(false); setR({ ...r, accountNumber: e.target.value }); }} style={{ ...IN, fontFamily: "var(--font-mono)" }} />
           </div>
         </div>
         <div style={{ marginTop: 12 }}>
           <label style={LBL}>URL</label>
-          <input value={r.url} onChange={(e) => { setSaved(false); setR({ ...r, url: e.target.value }); }} placeholder="https://…" style={{ ...IN, fontFamily: "var(--font-mono)" }} />
+          <input value={r.url} onChange={(e) => { localDirty.current = true; setSaved(false); setR({ ...r, url: e.target.value }); }} placeholder="https://…" style={{ ...IN, fontFamily: "var(--font-mono)" }} />
         </div>
         <div style={{ marginTop: 12 }}>
           <label style={LBL}>Notes</label>
-          <textarea value={r.notes} onChange={(e) => { setSaved(false); setR({ ...r, notes: e.target.value }); }} rows={3} placeholder="Who registers, lead time, what it protects" style={{ ...IN, resize: "vertical" }} />
+          <textarea value={r.notes} onChange={(e) => { localDirty.current = true; setSaved(false); setR({ ...r, notes: e.target.value }); }} rows={3} placeholder="Who registers, lead time, what it protects" style={{ ...IN, resize: "vertical" }} />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
           <button type="button" className="pk-btn-accent" disabled={pending || !dirty} onClick={save} style={{ opacity: pending || !dirty ? 0.55 : 1 }}>

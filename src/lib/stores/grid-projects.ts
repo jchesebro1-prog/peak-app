@@ -195,6 +195,8 @@ export type GridProject = {
   options?: GridOption[];
   /** Draft quote minted from this design, when one exists. */
   quoteId: string | null;
+  /** Optional saved Lineset Builder design used by the derived schedule. */
+  linesetDesignId?: string | null;
   /** Live-revisable basic-info snapshot (D-manual-scope-targets) — venue,
    *  size, dimensions, systems-in-scope. `null` until the Scope panel's
    *  inputs are filled in at least once; never a one-time creation step, it
@@ -410,6 +412,13 @@ export async function saveGridIntake(
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.intake = input;
+    p.updatedAt = Date.now();
+  });
+}
+
+export async function setLinesetDesign(projectId: string, designId: string | null): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.linesetDesignId = designId;
     p.updatedAt = Date.now();
   });
 }

@@ -145,6 +145,8 @@ export type LocationPatch = {
   state?: string;
   zip?: string;
   kind?: string;
+  lat?: number | string | null;
+  lng?: number | string | null;
 };
 
 export type MergeLocationOpts = {
@@ -237,6 +239,8 @@ export function mergeLocation(
     hit.state = or(incoming.state, hit.state);
     hit.zip = or(incoming.zip, hit.zip);
     hit.kind = or(incoming.kind, hit.kind);
+    if (incoming.lat !== undefined && incoming.lat !== null && String(incoming.lat).trim() !== "") hit.lat = incoming.lat;
+    if (incoming.lng !== undefined && incoming.lng !== null && String(incoming.lng).trim() !== "") hit.lng = incoming.lng;
     return { locations: list, created: false };
   }
   // #137 I3 — the customer's first NAMED venue takes primary from the unnamed
@@ -253,6 +257,8 @@ export function mergeLocation(
     state: txt(incoming.state) || undefined,
     zip: txt(incoming.zip) || undefined,
     kind: txt(incoming.kind) || undefined,
+    lat: incoming.lat === undefined || incoming.lat === null || String(incoming.lat).trim() === "" ? undefined : incoming.lat,
+    lng: incoming.lng === undefined || incoming.lng === null || String(incoming.lng).trim() === "" ? undefined : incoming.lng,
     venueKind: txt(opts.venueKind) || venueKindFromCategory(incoming.kind),
     travelMiles: null,
     travelMin: null,

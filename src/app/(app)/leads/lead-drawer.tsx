@@ -248,8 +248,10 @@ function fromDateInput(s: string): number | null {
 type NewForm = {
   org: string;
   contact: string;
+  contactRole: string;
   email: string;
   phone: string;
+  address: string;
   city: string;
   state: string;
   source: string;
@@ -311,8 +313,10 @@ export default function LeadDrawer({
   const [nf, setNf] = useState<NewForm>(() => ({
     org: "",
     contact: "",
+    contactRole: "",
     email: "",
     phone: "",
+    address: "",
     city: "",
     state: "WI",
     source: "phone",
@@ -373,7 +377,7 @@ export default function LeadDrawer({
     if (!id) {
       // Switching back to "no customer" clears the prefill so a stale
       // customer's contact info can't linger under a null customerId.
-      setNfField({ contact: "", email: "", phone: "" });
+      setNfField({ contact: "", contactRole: "", email: "", phone: "", address: "" });
       return;
     }
     // Prefill-and-override (Decision A default): overwrite the plain-text
@@ -381,10 +385,15 @@ export default function LeadDrawer({
     // blank if none). No lock — freely editable afterward, no write-back.
     const c = customers.find((x) => x.id === id);
     const ct = primaryOrFirstContact(c);
+    const loc = c?.locations.find((x) => x.primary) || c?.locations[0];
     setNfField({
       contact: ct?.name || "",
+      contactRole: ct?.role || "",
       email: ct?.email || "",
       phone: ct?.phone || "",
+      address: loc?.address || "",
+      city: loc?.city || "",
+      state: loc?.state || nf.state,
     });
   };
 
@@ -398,8 +407,10 @@ export default function LeadDrawer({
         source: nf.source,
         org: nf.org.trim(),
         contact: nf.contact.trim(),
+        contactRole: nf.contactRole.trim(),
         email: nf.email.trim(),
         phone: nf.phone.trim(),
+        address: nf.address.trim(),
         city: nf.city.trim(),
         state: nf.state.trim() || "WI",
         interest: nf.interest.trim(),
@@ -616,6 +627,18 @@ export default function LeadDrawer({
                   />
                 </div>
                 <div>
+                  <div style={lbl}>Role / title</div>
+                  <input
+                    className="ldw-in"
+                    value={nf.contactRole}
+                    onChange={(e) => setNfField({ contactRole: e.target.value })}
+                    placeholder="e.g. Technical Director"
+                    style={inStyle}
+                  />
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
                   <div style={lbl}>Source</div>
                   <select
                     className="ldw-in"
@@ -630,6 +653,16 @@ export default function LeadDrawer({
                     ))}
                   </select>
                 </div>
+              </div>
+              <div>
+                <div style={lbl}>Street address</div>
+                <input
+                  className="ldw-in"
+                  value={nf.address}
+                  onChange={(e) => setNfField({ address: e.target.value })}
+                  placeholder="123 Main Street"
+                  style={inStyle}
+                />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div>
@@ -764,6 +797,7 @@ export default function LeadDrawer({
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 7, fontSize: 12.5, color: "#5b616e" }}>
                   {vm.contact && <span style={{ fontWeight: 600, color: "#3a3f4a" }}>{vm.contact}</span>}
+                  {vm.contactRole && <span style={{ color: "#8c919c" }}>{vm.contactRole}</span>}
                   {vm.email && (
                     <a href={`mailto:${vm.email}`} style={{ color: ACCENT_INK, textDecoration: "none" }}>
                       {vm.email}
@@ -771,7 +805,9 @@ export default function LeadDrawer({
                   )}
                   {vm.phone && <span style={{ color: "#8c919c" }}>{vm.phone}</span>}
                 </div>
-                <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 5 }}>{vm.locLine}</div>
+                <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 5 }}>
+                  {[vm.address, vm.locLine].filter(Boolean).join(" · ")}
+                </div>
               </div>
 
               {/* ===== MAIN view ===== */}

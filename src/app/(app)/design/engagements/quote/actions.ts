@@ -206,7 +206,17 @@ async function persist(formData: FormData): Promise<string | null> {
 }
 
 export async function saveConsultingQuote(formData: FormData): Promise<void> {
-  const id = await persist(formData);
+  const editingId = String(formData.get("editingId") || "");
+  let id: string | null = null;
+  try {
+    id = await persist(formData);
+  } catch (error) {
+    console.error("saveConsultingQuote: quote or lead mint failed", error);
+    const target = editingId
+      ? "/design/engagements/quote?id=" + encodeURIComponent(editingId)
+      : "/design/engagements/quote";
+    redirect(target + "&err=" + encodeURIComponent("Couldn’t save the consulting quote — please try again."));
+  }
   revalidatePath("/", "layout");
   if (id)
     redirect("/design/engagements/quote?id=" + encodeURIComponent(id) + "&saved=1");

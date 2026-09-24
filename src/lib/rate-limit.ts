@@ -28,18 +28,18 @@ export function rateLimit(
   key: string,
   limit: number,
   windowMs: number
-): { ok: boolean; retryAfterMs: number } {
+): { ok: boolean; retryAfterMs: number; remaining: number } {
   const now = Date.now();
   const recent = (hits.get(key) || []).filter((t) => now - t < windowMs);
 
   if (recent.length >= limit) {
     hits.set(key, recent);
-    return { ok: false, retryAfterMs: windowMs - (now - recent[0]) };
+    return { ok: false, retryAfterMs: windowMs - (now - recent[0]), remaining: 0 };
   }
 
   recent.push(now);
   hits.set(key, recent);
-  return { ok: true, retryAfterMs: 0 };
+  return { ok: true, retryAfterMs: 0, remaining: Math.max(0, limit - recent.length) };
 }
 
 /**

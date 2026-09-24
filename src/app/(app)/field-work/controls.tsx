@@ -12,7 +12,7 @@ import {
   postFieldNote,
   logFieldTime,
 } from "./actions";
-import { saveThroughOutbox } from "@/lib/sync/save";
+import { saveThroughOutbox, type ServerSaveResult } from "@/lib/sync/save";
 
 /* ============================================================
  * Field Work — job detail (client, offline-capable).
@@ -191,7 +191,7 @@ export default function FieldWorkDetail({
    */
   async function persist(
     next: ProjectRecord,
-    action: () => Promise<void>
+    action: () => Promise<void | ServerSaveResult>
   ): Promise<void> {
     const prev = pRef.current;
     pRef.current = next;
@@ -205,10 +205,10 @@ export default function FieldWorkDetail({
         action,
       });
       if (queued) flash("Saved on this device — will sync when you're back online");
-    } catch {
+    } catch (error) {
       pRef.current = prev;
       setP(prev);
-      flash("Couldn't save — please try again");
+      flash(error instanceof Error ? error.message : "Couldn't save — please try again");
     } finally {
       setBusy(false);
     }
@@ -221,7 +221,7 @@ export default function FieldWorkDetail({
    */
   async function persistTask(
     next: TaskRecord,
-    action: () => Promise<void>
+    action: () => Promise<void | ServerSaveResult>
   ): Promise<void> {
     const prev = tasksRef.current;
     const nextRows = prev.some((t) => t.id === next.id)
@@ -238,10 +238,10 @@ export default function FieldWorkDetail({
         action,
       });
       if (queued) flash("Saved on this device — will sync when you're back online");
-    } catch {
+    } catch (error) {
       tasksRef.current = prev;
       setTaskRows(prev);
-      flash("Couldn't save — please try again");
+      flash(error instanceof Error ? error.message : "Couldn't save — please try again");
     } finally {
       setBusy(false);
     }

@@ -28,14 +28,19 @@ export async function createAssignmentAction(input: {
   const title = String(input?.title || "").trim();
   if (!title) return { ok: false, error: "The assignment needs a title." };
   const assignee = String(input?.assignee || "").trim() || user.name;
-  await createAssignment({
-    title,
-    assignee,
-    createdBy: user.name,
-    dueDate: Number(input?.dueDate) || 0,
-    link: input?.link || null,
-    source: input?.source,
-  });
+  try {
+    await createAssignment({
+      title,
+      assignee,
+      createdBy: user.name,
+      dueDate: Number(input?.dueDate) || 0,
+      link: input?.link || null,
+      source: input?.source,
+    });
+  } catch (error) {
+    console.error("createAssignmentAction: assignment mint failed", error);
+    return { ok: false, error: "Couldn’t create the assignment — please try again." };
+  }
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -45,7 +50,12 @@ export async function setAssignmentDoneAction(
   done: boolean
 ): Promise<Result> {
   await requireUser();
-  await setAssignmentDone(id, done, "app");
+  try {
+    await setAssignmentDone(id, done, "app");
+  } catch (error) {
+    console.error("setAssignmentDoneAction: assignment update failed", error);
+    return { ok: false, error: "Couldn’t update the assignment — please try again." };
+  }
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -55,7 +65,12 @@ export async function updateAssignmentAction(
   patch: { title?: string; assignee?: string; dueDate?: number }
 ): Promise<Result> {
   await requireUser();
-  await updateAssignment(id, patch);
+  try {
+    await updateAssignment(id, patch);
+  } catch (error) {
+    console.error("updateAssignmentAction: assignment update failed", error);
+    return { ok: false, error: "Couldn’t update the assignment — please try again." };
+  }
   revalidatePath("/", "layout");
   return { ok: true };
 }

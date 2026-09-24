@@ -30,6 +30,16 @@ export type SpecItem = {
   unit: string;
   cost: number;
   price: number;
+  /** True when the sell value was explicitly edited on this line. */
+  sellOverride?: boolean;
+  /** Optional manual extended sell override; otherwise qty × unit sell is used. */
+  extSellOverride?: number;
+  /** Stable display ordering within its system; array order remains the legacy fallback. */
+  lineOrder?: number;
+  manufacturer?: string;
+  manufacturerPartNumber?: string;
+  manufacturerModelNumber?: string;
+  priceGoodThrough?: string;
   /** flags set by the add flows (custom part / curtain / fixture / labor) */
   custom?: boolean;
   curtain?: boolean;
@@ -79,6 +89,7 @@ export const VENDOR_ATTACHMENT_BUDGET = 820_000;
 export type VendorQuoteLine = {
   id: number;
   description: string;
+  manufacturerPartNumber?: string;
   qty: number;
   unit: string;
   amount: number;
@@ -104,6 +115,8 @@ export type VendorQuote = {
   /** Internal only — never rendered on the customer document (Jeff, #143). */
   notes: string;
   total: number;
+  /** Whether the saved cost came from an explicit total or summed quote lines. */
+  totalSource?: "manual" | "lines";
   /** Jeff's freight exemption: the vendor's price already includes freight,
    *  so the section freight slider skips this line. */
   includesFreight: boolean;
@@ -121,6 +134,8 @@ export function vendorAttachmentLoad(quotes: VendorQuote[]): number {
 export type SpecSection = {
   id: string;
   name: string;
+  narrative?: string;
+  presentation?: "itemized" | "narrative";
   /** 'materials' | 'labor' */
   kind: string;
   mfr: string;
@@ -132,6 +147,10 @@ export type SpecSection = {
 
 export type CustomDraft = {
   desc: string;
+  manufacturer: string;
+  manufacturerPartNumber: string;
+  vendor: string;
+  priceGoodThrough: string;
   link: string;
   sku: string;
   unit: string;
@@ -140,6 +159,8 @@ export type CustomDraft = {
   price: string;
   /** budget allowance — priced line, no SKU (punch #36) */
   allowance: string;
+  /** Add this non-allowance custom part to the shared catalog after saving. */
+  addToCatalog: string;
 };
 
 export type CurtainDraft = {
@@ -159,6 +180,7 @@ export type CurtainDraft = {
 export type VendorLineDraft = {
   id: number;
   description: string;
+  manufacturerPartNumber: string;
   qty: string;
   unit: string;
   amount: string;
@@ -299,6 +321,9 @@ export type InitialQuote = {
   locationId: string | null;
   contactName: string;
   quoteNote: string;
+  /** Editable quote-level assumptions/exceptions carried into the customer document. */
+  assumptions: string;
+  installTimeframe: string;
   paymentTerms: PaymentTerms;
   /** User-named quote category (#110) — "" when none. */
   category: string;
@@ -366,4 +391,6 @@ export type EstimatorProps = {
   /** Reusable task-template sets applicable to quotes (D149, #118), for the
    *  "Apply template" control next to the Tasks card. */
   templateSets: { id: string; name: string }[];
+  /** Company-managed checked assumptions shared with consulting proposals. */
+  assumptionLibrary: string[];
 };

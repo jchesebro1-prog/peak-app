@@ -19,15 +19,19 @@ import SurveyEditor, { type EditorMeta, type EditorCustomer } from "./controls";
 import { resolveCerts } from "@/lib/venue-assessment-certs";
 import { resolveVenueDoctrine } from "@/lib/venue-doctrine";
 import { loadPrefillPanels, loadRecordingsStrip } from "../../recordings/data";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Site survey — Quartzite-6" };
 
 export default async function SurveyEditorPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
+  const sp = await searchParams;
   const [, rec, customers, users, settings] = await Promise.all([
     requireUser(),
     get(id),
@@ -84,14 +88,17 @@ export default async function SurveyEditorPage({
   const roster = users.map((u) => u.name);
 
   return (
-    <SurveyEditor
-      record={rec}
-      customers={editorCustomers}
-      roster={roster}
-      meta={meta}
-      recordings={recordings.recordings}
-      canShowRecord={recordings.canRecord}
-      fromRecording={fromRecording}
-    />
+    <>
+      <ActionError message={Array.isArray(sp.err) ? sp.err[0] : sp.err} />
+      <SurveyEditor
+        record={rec}
+        customers={editorCustomers}
+        roster={roster}
+        meta={meta}
+        recordings={recordings.recordings}
+        canShowRecord={recordings.canRecord}
+        fromRecording={fromRecording}
+      />
+    </>
   );
 }

@@ -10,7 +10,8 @@ import {
   getEngagement,
   syncEngagementsFromQuotes,
 } from "@/lib/stores/engagements";
-import { upsertDoc, patchDoc } from "@/db/doc-store";
+import { getDoc, upsertDoc, patchDoc } from "@/db/doc-store";
+import { withTransaction } from "@/db";
 import type { Quote } from "@/lib/stores/quotes";
 import { contactByEmail } from "@/lib/identity/lookup";
 import { contactsForCompany, emailsFor, saveContact, setEmails, softDeleteContact } from "@/lib/identity/contacts";
@@ -62,6 +63,22 @@ function prepImport(key: string, csv: string) {
 }
 
 async function main() {
+  // Engineering batch B1 — ambient transactions must roll back doc-store
+  // writes, including writes made through a nested helper transaction.
+  const txProbe = `engineering-tx-${Date.now()}`;
+  await assert.rejects(
+    withTransaction(async () => {
+      await upsertDoc("quotes", { id: txProbe, value: "rolled-back" } as any);
+      await withTransaction(async () => {
+        await patchDoc("quotes", txProbe, (doc: any) => ({ ...doc, nested: true }));
+      });
+      throw new Error("intentional transaction rollback");
+    }),
+    /intentional transaction rollback/,
+    "B1 transaction failure propagates",
+  );
+  assert.equal(await getDoc("quotes", txProbe), null, "B1 failed transaction rolls back nested doc writes");
+
   const flame = await setFlameRates({ laborRate: 123, mileageRate: 1.23 });
   assert.equal(flame.laborRate, 123, "flame-test setRates must return the editable labor rate");
   assert.equal((await getFlameRates()).mileageRate, 1.23, "flame-test getRates must preserve mileage overrides");
@@ -200,7 +217,6 @@ async function main() {
   await claimDomain("t96sweep.org", "lakefront", "manual", "test");
   const n = await resweepThreads({ domain: "t96sweep.org" });
   assert.equal(n, 1, "#96 resweep touched the unlinked thread");
-  const { getDoc } = await import("@/db/doc-store");
   const swept = await getDoc<any>("comms", "C-t96");
   assert.equal(swept?.resolution, "suggested", "#96 domain claim surfaces as a suggestion");
   assert.equal(swept?.suggestedCustomerId, "lakefront", "#96 suggestion names the domain owner");
@@ -1458,7 +1474,7 @@ async function main() {
     // #137 T7 — no Notes column: nothing on a customer record stores it, so
     // the hub stopped advertising it (the input file above still carries one,
     // and it is still absorbed without erroring).
-    assert.equal(exp.headers.join(","), "Customer Name,Category,Address,City,State,Zip,Phone,Website", "#137 T4 customers export columns = template columns (hidden aliases excluded)");
+    assert.equal(exp.headers.join(","), "Customer Name,Category,Address,City,State,Zip,Latitude,Longitude,Phone,Website", "#137 T4 customers export columns = template columns (hidden aliases excluded)");
     const row = exp.objects.find((o) => o["Customer Name"] === "T137 Import Playhouse");
     assert.ok(row, "#137 T4 exported row present");
     assert.equal(row!.Category, "Performing arts", "#137 T4 export Category");
@@ -1579,7 +1595,7 @@ async function main() {
 
     const csv = await exportCsv("venues");
     const exp = parseCsv(csv);
-    assert.equal(exp.headers.join(","), "Customer,Customer ID,Venue Name,Address,City,State,Zip,Category", "#137 T6 venues export columns = template columns (no Notes — a venue has nowhere to store it)");
+    assert.equal(exp.headers.join(","), "Customer,Customer ID,Venue Name,Address,City,State,Zip,Latitude,Longitude,Category", "#137 T6 venues export columns = template columns (no Notes — a venue has nowhere to store it)");
     const row = exp.objects.find((o) => o["Customer ID"] === "c-t137-vn" && o["Venue Name"] === "Black Box");
     assert.ok(row, "#137 T6 exported venue present");
     assert.ok(row!.Zip === "54913-1234" && row!.Category === "black box" && row!.Customer === "T137 Venues District" && row!.Address === "5000 N Ballard Rd", "#137 T6 exported venue carries the customer's name + id and its fields");
@@ -1834,6 +1850,29 @@ async function main() {
     assert.equal(bare2!.locations[0].address, "12 Bare St", "#137 C1 …and the row's address");
     assert.equal(bare2!.locations[0].primary, true, "#137 C1 …and it stays primary");
   }
+
+  // #43 — per-user layouts persist in the blobs table, one key per surface
+  const { layoutFor, saveLayout, resetLayout } = await import("@/lib/dashboard/layout-store");
+  const { presetFor } = await import("@/lib/dashboard/registry");
+  const fresh = await layoutFor("u-t43", "home", ["Admin"]);
+  assert.equal(fresh.customized, false, "#43 no row → preset");
+  assert.deepEqual(fresh.ids, presetFor("home", ["Admin"]), "#43 preset ids when nothing stored");
+  await saveLayout("u-t43", "home", ["my-queue", "bogus", "my-queue"], ["Admin"]);
+  const saved = await layoutFor("u-t43", "home", ["Admin"]);
+  assert.deepEqual(saved.ids, ["my-queue"], "#43 save normalizes before writing");
+  assert.equal(saved.customized, true, "#43 a stored row marks the layout customized");
+  await saveLayout("u-t43-other", "home", ["inbox"], ["Admin"]);
+  assert.deepEqual((await layoutFor("u-t43-other", "home", ["Admin"])).ids, ["inbox"], "#43 layouts are isolated by user id");
+  await saveLayout("u-t43-gated", "reports", ["my-queue", "book-margin", "total-quoted", "my-queue"], ["Estimator"]);
+  assert.deepEqual((await layoutFor("u-t43-gated", "reports", ["Estimator"])).ids, ["total-quoted"], "#43 normalization drops gated and wrong-surface ids");
+  await saveLayout("u-t43", "reports", ["total-quoted"], ["Admin"]);
+  assert.deepEqual((await layoutFor("u-t43", "home", ["Admin"])).ids, ["my-queue"], "#43 saving reports leaves home untouched (per-key merge)");
+  await resetLayout("u-t43", "home");
+  assert.equal((await layoutFor("u-t43", "home", ["Admin"])).customized, false, "#43 reset returns to the preset");
+  assert.deepEqual((await layoutFor("u-t43", "reports", ["Admin"])).ids, ["total-quoted"], "#43 resetting home preserves the reports layout");
+  const { saveLayoutAction, resetLayoutAction } = await import("@/app/(app)/dashboard-actions");
+  assert.deepEqual(await saveLayoutAction("invalid" as never, []), { ok: false }, "#43 save action rejects an invalid surface before auth");
+  assert.deepEqual(await resetLayoutAction("invalid" as never), { ok: false }, "#43 reset action rejects an invalid surface before auth");
 
   console.log("review regression checks passed");
 }

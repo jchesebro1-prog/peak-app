@@ -21,6 +21,7 @@ import VisitRequests, { type VisitRequestVM } from "./visit-requests";
 import { RecordControl } from "@/components/recordings/record-control";
 import { RecordingCountBadge } from "@/components/recordings/record-control-link";
 import { recordingCountByParent } from "../recordings/data";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Venue assessments — Quartzite-6" };
 
@@ -193,6 +194,7 @@ export default async function FieldSurveyPage({
 
   const mineWord = mine ? " assigned to you" : "";
   const imported = one(sp.imported);
+  const failed = one(sp.failed);
   let emptyTitle: string;
   let emptyBody: string;
   if (stage === "requested") {
@@ -216,6 +218,7 @@ export default async function FieldSurveyPage({
   return (
     <div className="pk-content fs-pad">
       <style>{CSS}</style>
+      <ActionError message={one(sp.err)} />
 
       {/* header */}
       <div
@@ -256,6 +259,7 @@ export default async function FieldSurveyPage({
       </div>
 
       {imported && <div style={{ marginBottom: 16, padding: "10px 14px", borderRadius: 10, background: "#eaf6ef", border: "1px solid #cce9da", color: "#1f7a52", fontSize: 12.5, fontWeight: 600 }}>✓ Imported {imported} field survey row{imported === "1" ? "" : "s"}.</div>}
+      {failed && failed !== "0" && <div style={{ marginBottom: 16, padding: "10px 14px", borderRadius: 10, background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", fontSize: 12.5, fontWeight: 600 }}>⚠ Couldn’t import {failed} row{failed === "1" ? "" : "s"}. The remaining rows were imported; check those records and try again.</div>}
 
       {/* sync strip */}
       <div

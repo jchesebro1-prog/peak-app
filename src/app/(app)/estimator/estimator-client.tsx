@@ -68,6 +68,7 @@ import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { assemblyDescription } from "@/lib/fixture-assemblies";
 import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
+import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
 import AiScopeModal from "./ai-scope-modal";
@@ -76,6 +77,7 @@ import FixtureModal from "./fixture-modal";
 import LaborModal from "./labor-modal";
 import VendorQuoteModal, {
   vendorDraftTotal,
+  vendorDraftTotalSource,
   vendorKeptLines,
   vendorLinesTotal,
 } from "./vendor-quote-modal";
@@ -133,8 +135,13 @@ const CSS = `
 
 const freshCustom = (): CustomDraft => ({
   desc: "",
+  manufacturer: "",
+  manufacturerPartNumber: "",
+  vendor: "",
+  priceGoodThrough: new Date().toISOString().slice(0, 10),
   link: "",
   allowance: "",
+  addToCatalog: "",
   sku: "",
   unit: "ea",
   qty: "1",
@@ -261,6 +268,8 @@ const CTX_LABEL: CSSProperties = {
   flexShrink: 0,
 };
 
+const INSTALL_TIMEFRAMES = ["ASAP", "Under 1 month", "1–3 months", "3–6 months", "6–12 months", "TBD"] as const;
+
 export default function EstimatorClient({
   initial,
   companyName,
@@ -280,6 +289,7 @@ export default function EstimatorClient({
   people,
   quoteTasks,
   templateSets,
+  assumptionLibrary,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   const [sections, setSections] = useState<SpecSection[]>(
@@ -301,6 +311,10 @@ export default function EstimatorClient({
   const [status, setStatus] = useState<QuoteStatus>(initial.status);
   const guardWon = useWonEditGuard(status);
   const [review, setReview] = useState<QuoteReview>(initial.review);
+  // Keep the review status visible without making its action controls consume
+  // the estimator's first viewport. The bar can be expanded whenever a user
+  // needs to submit, claim, decide, attest, or send the quote.
+  const [reviewBarOpen, setReviewBarOpen] = useState(false);
   const [reviewerSel, setReviewerSel] = useState("queue");
   const [rcOpen, setRcOpen] = useState(false);
   const [rcNote, setRcNote] = useState("");
@@ -322,6 +336,9 @@ export default function EstimatorClient({
   const [titleDraft, setTitleDraft] = useState(initial.projectName);
   const titleOpenRef = useRef(false);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
+  const [assumptions, setAssumptions] = useState(initial.assumptions || "");
+  const checkedAssumptions = useMemo(() => new Set(assumptions.split("\n").map((line) => line.trim()).filter(Boolean)), [assumptions]);
+  const [installTimeframe, setInstallTimeframe] = useState(initial.installTimeframe);
   const [paymentTerms, setPaymentTerms] = useState(initial.paymentTerms);
   // #110: user-named quote category — persisted on blur, not per keystroke.
   const [category, setCategory] = useState(initial.category);
@@ -399,6 +416,7 @@ export default function EstimatorClient({
     const lines: VendorLineDraft[] = v.lines.map((l) => ({
       id: l.id,
       description: l.description,
+      manufacturerPartNumber: l.manufacturerPartNumber || "",
       qty: String(l.qty),
       unit: l.unit,
       amount: String(l.amount),
@@ -459,6 +477,7 @@ export default function EstimatorClient({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const assumptionsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -570,6 +589,8 @@ export default function EstimatorClient({
           locationId: locationId || null,
           contactName: contactName || "",
           quoteNote: quoteNote || "",
+          assumptions: assumptions || "",
+          installTimeframe,
           paymentTerms,
           category,
           value: t.grand,
@@ -742,6 +763,23 @@ export default function EstimatorClient({
     if (noteTimer.current) clearTimeout(noteTimer.current);
     noteTimer.current = setTimeout(() => persistMeta({ quoteNote: v }), 500);
   };
+  const onAssumptions = (v: string) => {
+    setAssumptions(v);
+    if (!loadedId) return;
+    if (assumptionsTimer.current) clearTimeout(assumptionsTimer.current);
+    assumptionsTimer.current = setTimeout(() => persistMeta({ assumptions: v }), 500);
+  };
+  const toggleAssumption = (line: string) => {
+    const current = assumptions.split("\n").map((item) => item.trim()).filter(Boolean);
+    const next = checkedAssumptions.has(line)
+      ? current.filter((item) => item !== line)
+      : [...current, line];
+    onAssumptions(next.join("\n"));
+  };
+  const onInstallTimeframe = (v: string) => {
+    setInstallTimeframe(v);
+    persistMeta({ installTimeframe: v });
+  };
 
   /* ---------------- sections & items ---------------- */
   const isExpanded = (id: string) => expanded[id] !== false;
@@ -755,6 +793,26 @@ export default function EstimatorClient({
           : s
       )
     );
+  const setItemPrice = (id: number, value: string) => {
+    const price = Number(value.replace(/[$,\s]/g, ""));
+    if (!Number.isFinite(price) || price < 0) return;
+    patchItem(id, (it) => ({ ...it, price: round2(price), sellOverride: true, extSellOverride: undefined }));
+  };
+  const setItemExtSell = (id: number, value: string) => {
+    const ext = Number(value.replace(/[$,\s]/g, ""));
+    if (!Number.isFinite(ext) || ext < 0) return;
+    patchItem(id, (it) => ({ ...it, extSellOverride: round2(ext) }));
+  };
+  const moveItem = (secId: string, id: number, direction: -1 | 1) =>
+    setSections((ss) => ss.map((s) => {
+      if (s.id !== secId) return s;
+      const index = s.items.findIndex((item) => item.id === id);
+      const next = index + direction;
+      if (index < 0 || next < 0 || next >= s.items.length) return s;
+      const items = [...s.items];
+      [items[index], items[next]] = [items[next], items[index]];
+      return { ...s, items: items.map((item, i) => ({ ...item, lineOrder: i })) };
+    }));
   const inc = (id: number) => patchItem(id, (it) => ({ ...it, qty: it.qty + 1 }));
   const dec = (id: number) => patchItem(id, (it) => ({ ...it, qty: Math.max(0, it.qty - 1) }));
   const setQty = (id: number, v: string) => {
@@ -798,6 +856,10 @@ export default function EstimatorClient({
   };
   const renameSystem = (secId: string, name: string) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, name } : s)));
+  const setSystemNarrative = (secId: string, narrative: string) =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, narrative } : s)));
+  const setSystemPresentation = (secId: string, presentation: "itemized" | "narrative") =>
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, presentation } : s)));
   const deleteSystem = (secId: string) => {
     const list = sections.filter((s) => s.id !== secId);
     setSections(list);
@@ -1080,15 +1142,33 @@ export default function EstimatorClient({
     openInputMethod("vendor", secId);
   };
 
-  const addCustomPart = (secId: string) => {
+  const addCustomPart = async (secId: string) => {
     const d = customDraft;
     const desc = (d.desc || "").trim();
-    const price = parseFloat(d.price);
-    if (!desc || isNaN(price) || price <= 0) return;
+    const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
     let qty = parseInt(d.qty, 10);
     if (isNaN(qty) || qty < 1) qty = 1;
     let cost = parseFloat(d.cost);
     if (isNaN(cost) || cost < 0) cost = 0;
+    const typedPrice = parseFloat(d.price);
+    const price = d.allowance && (!Number.isFinite(typedPrice) || typedPrice <= 0)
+      ? round2(cost / (1 - margin))
+      : typedPrice;
+    if (!desc || !Number.isFinite(price) || price <= 0) return;
+    if (d.addToCatalog && !d.allowance) {
+      const saved = await saveEstimatorCustomPartAction({
+        sku: (d.sku || "").trim(),
+        desc,
+        category: "Custom Parts",
+        unit: (d.unit || "").trim() || "ea",
+        cost,
+        list: price,
+        mfr: d.manufacturer.trim(),
+        manufacturerPartNumber: d.manufacturerPartNumber.trim(),
+        priceGoodThrough: d.priceGoodThrough,
+      });
+      if (!saved.ok) return;
+    }
     pushItems(secId, [
       {
         id: nextId(),
@@ -1099,6 +1179,9 @@ export default function EstimatorClient({
         cost,
         price,
         custom: true,
+        manufacturer: d.manufacturer.trim() || undefined,
+        manufacturerPartNumber: d.manufacturerPartNumber.trim() || undefined,
+        priceGoodThrough: d.priceGoodThrough || undefined,
         link: (d.link || "").trim() || undefined,
         allowance: d.allowance ? true : undefined,
       },
@@ -1129,7 +1212,7 @@ export default function EstimatorClient({
     setVendorDraft((d) => ({
       ...d,
       lines: d.lines.concat([
-        { id: ++vendorLineIdRef.current, description: "", qty: "1", unit: "ea", amount: "" },
+        { id: ++vendorLineIdRef.current, description: "", manufacturerPartNumber: "", qty: "1", unit: "ea", amount: "" },
       ]),
     }));
   const removeVendorLine = (id: number) =>
@@ -1177,6 +1260,7 @@ export default function EstimatorClient({
       lines: vendorKeptLines(d.lines).map((l) => ({
         id: l.id,
         description: (l.description || "").trim(),
+        ...(l.manufacturerPartNumber.trim() ? { manufacturerPartNumber: l.manufacturerPartNumber.trim() } : {}),
         qty: parseMoney(l.qty) || 0,
         unit: (l.unit || "").trim() || "ea",
         amount: round2(parseMoney(l.amount) || 0),
@@ -1184,6 +1268,7 @@ export default function EstimatorClient({
       terms: d.terms || "",
       notes: d.notes || "",
       total,
+      totalSource: vendorDraftTotalSource(d),
       includesFreight: d.includesFreight,
       display: d.display,
     };
@@ -1952,43 +2037,121 @@ export default function EstimatorClient({
             </span>
           </div>
 
+          {/* quote assumptions / exceptions (#36) */}
+          <div
+            className="est-noterow"
+            style={{
+              display: "flex", alignItems: "flex-start", gap: 12, padding: "9px 22px",
+              background: "#23262d", borderTop: "1px solid #2b2e35", color: "#fff", flexShrink: 0,
+            }}
+          >
+            <span style={{ ...CTX_LABEL, paddingTop: 8 }}>Assumptions</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {assumptionLibrary.length > 0 && (
+                <div style={{ display: "grid", gap: 5, marginBottom: 7 }}>
+                  {assumptionLibrary.map((line) => (
+                    <label key={line} style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 11.5, color: "#d7dae0", lineHeight: 1.35, cursor: "pointer" }}>
+                      <input type="checkbox" checked={checkedAssumptions.has(line)} onChange={() => toggleAssumption(line)} style={{ marginTop: 2 }} />
+                      <span>{line}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <textarea
+                className="est-notefield"
+                value={assumptions}
+                onChange={(e) => onAssumptions(e.target.value)}
+                placeholder="Add quote-specific assumptions, exclusions, and exceptions…"
+                rows={2}
+                style={{ width: "100%", minWidth: 0, resize: "vertical", fontFamily: "var(--font-ui)", fontSize: 12.5, color: "#fff", background: "#2b2e35", border: "1px solid #3a3e46", borderRadius: 7, padding: "8px 11px" }}
+              />
+            </div>
+            <span style={{ fontSize: 10.5, color: "#6b7079", flexShrink: 0, paddingTop: 8 }}>Company defaults + editable exceptions</span>
+          </div>
+
+          <div
+            className="est-noterow"
+            style={{
+              display: "flex", alignItems: "center", gap: 12, padding: "8px 22px",
+              background: "#23262d", borderTop: "1px solid #2b2e35", color: "#fff", flexShrink: 0,
+            }}
+          >
+            <span style={CTX_LABEL}>Suggested install timeframe</span>
+            <select
+              value={installTimeframe}
+              onChange={(e) => onInstallTimeframe(e.target.value)}
+              aria-label="Suggested install timeframe"
+              style={{ ...DARK_SELECT, minWidth: 150 }}
+            >
+              {INSTALL_TIMEFRAMES.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+            <span style={{ fontSize: 10.5, color: "#6b7079" }}>
+              Carries to the project goal when this quote is won
+            </span>
+          </div>
+
           {/* review & approval banner */}
           {showReviewBar && (
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
+                justifyContent: reviewBarOpen ? "initial" : "flex-end",
                 gap: 14,
                 flexWrap: "wrap",
                 rowGap: 11,
-                padding: "11px 22px",
+                padding: reviewBarOpen ? "11px 22px" : "7px 22px",
                 background: rm.bg,
                 borderBottom: "1px solid " + rm.bd,
                 flexShrink: 0,
               }}
             >
-              <span
+              {reviewBarOpen && (
+                <>
+                  <span
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: "50%",
+                      background: "#fff",
+                      border: "1px solid " + rm.bd,
+                      color: rm.ink,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 14,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {rm.icon}
+                  </span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: rm.ink }}>{rm.title}</div>
+                    <div style={{ fontSize: 12, color: "#5b616e", marginTop: 1 }}>{rbSub}</div>
+                  </div>
+                </>
+              )}
+              <button
+                type="button"
+                aria-expanded={reviewBarOpen}
+                aria-controls="estimator-review-actions"
+                onClick={() => setReviewBarOpen((open) => !open)}
                 style={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: "50%",
-                  background: "#fff",
-                  border: "1px solid " + rm.bd,
+                  fontSize: 11.5,
+                  fontWeight: 650,
                   color: rm.ink,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 14,
-                  flexShrink: 0,
+                  background: "rgba(255,255,255,.68)",
+                  border: "1px solid " + rm.bd,
+                  borderRadius: 7,
+                  padding: "7px 10px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
                 }}
               >
-                {rm.icon}
-              </span>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: rm.ink }}>{rm.title}</div>
-                <div style={{ fontSize: 12, color: "#5b616e", marginTop: 1 }}>{rbSub}</div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                {reviewBarOpen ? "Collapse review status" : "Show review status"} {reviewBarOpen ? "⌃" : "⌄"}
+              </button>
+              {reviewBarOpen && (
+                <div id="estimator-review-actions" style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
                 {rbCanSubmit && (
                   <>
                     <select
@@ -2127,7 +2290,8 @@ export default function EstimatorClient({
                     Send to customer →
                   </button>
                 )}
-              </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -2733,12 +2897,17 @@ export default function EstimatorClient({
                   }}
                   onToggleExpand={() => toggleExpand(sec.id)}
                   onRename={(name) => renameSystem(sec.id, name)}
+                  onSetNarrative={(value) => setSystemNarrative(sec.id, value)}
+                  onSetPresentation={(value) => setSystemPresentation(sec.id, value)}
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}
                   onSetFreight={(v) => setFreightPct(sec.id, v)}
                   onInc={inc}
                   onDec={dec}
                   onSetQty={setQty}
+                  onSetPrice={setItemPrice}
+                  onSetExtSell={setItemExtSell}
+                  onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
                   onRemoveItem={removeItem}
                   onToggleCatalog={() => openInputMethod("catalog", sec.id)}
                   onToggleCurtain={() => openInputMethod("curtain", sec.id)}
@@ -2912,7 +3081,9 @@ export default function EstimatorClient({
           companyName={companyName}
           logoDark={logoDark}
           quoteNote={quoteNote}
+          assumptions={assumptions}
           sections={sections}
+          setSectionPresentation={(id, value) => setSystemPresentation(id, value)}
           vendorQuotes={vendorQuotes}
           t={t}
           taxRatePct={TAX_RATE_PCT}

@@ -708,6 +708,7 @@ export default function SurveyEditor({
     try {
       await deleteSurvey(record.id);
     } catch {
+      setSaveError("Could not delete the survey — please try again.");
       setSaving(false);
     }
   }

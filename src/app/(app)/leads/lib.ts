@@ -172,8 +172,10 @@ export function buildDrawerVM(l: LeadRecord): DrawerDetailVM {
     id: l.id,
     org: l.org,
     contact: l.contact,
+    contactRole: l.contactRole || "",
     email: l.email,
     phone: l.phone,
+    address: l.address || "",
     srcShort: src.short,
     srcColor: src.color,
     locLine:

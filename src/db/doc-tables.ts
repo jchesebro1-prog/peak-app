@@ -171,7 +171,7 @@ export const blobs = pgTable("blobs", {
 /** Per-user notification category mutes — rss_notifprefs_v1 (notifprefs.js). */
 export const notifPrefs = pgTable("notif_prefs", {
   userName: text("user_name").primaryKey(),
-  prefs: jsonb("prefs").$type<Record<string, boolean>>().notNull(),
+  prefs: jsonb("prefs").$type<Record<string, unknown>>().notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 });
 

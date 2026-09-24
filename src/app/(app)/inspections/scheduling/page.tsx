@@ -15,6 +15,7 @@ import { coordsOf } from "@/lib/geo";
 import { InspectionMap } from "../controls";
 import { ScheduleButton } from "./controls";
 import type { MapPin } from "@/components/map/LeafletMap";
+import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Inspection scheduler — Quartzite-6" };
 
@@ -27,6 +28,10 @@ export const metadata = { title: "Inspection scheduler — Quartzite-6" };
 
 const DAY = 86400000;
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function one(v: string | string[] | undefined): string {
+  return Array.isArray(v) ? v[0] ?? "" : v ?? "";
+}
 
 function iso(ts: number): string {
   const d = new Date(ts);
@@ -70,9 +75,14 @@ const CSS = `
   @media (max-width: 940px) { .ins-grid { grid-template-columns: 1fr !important; } }
 `;
 
-export default async function InspectionSchedulingPage() {
-  const [, records, roster, customers] = await Promise.all([
+export default async function InspectionSchedulingPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const [, sp, records, roster, customers] = await Promise.all([
     requireUser(),
+    searchParams,
     getAll(),
     activeUsers(),
     allCustomers(),
@@ -163,6 +173,7 @@ export default async function InspectionSchedulingPage() {
   return (
     <div className="pk-content">
       <style>{CSS}</style>
+      <ActionError message={one(sp.err)} />
 
       <Link
         href="/inspections"

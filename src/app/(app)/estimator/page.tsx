@@ -19,6 +19,7 @@ import { blobEnabled } from "@/lib/blob";
 import { tasksForQuote } from "@/lib/stores/tasks";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
+import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import EstimatorClient from "./estimator-client";
 import type {
   AiSource,
@@ -56,11 +57,13 @@ const FALLBACK = {
   projectName: "New estimate",
   custName: "",
   quoteNote: "",
+  assumptions: "",
 };
 
 type QuoteDoc = Quote & {
   contactName?: string;
   quoteNote?: string;
+  assumptions?: string;
   paymentTerms?: PaymentTerms;
   spec?: { sections?: unknown; mobs?: unknown } | null;
 };
@@ -97,6 +100,8 @@ async function initialFrom(
       locationId: null,
       contactName: "",
       quoteNote: FALLBACK.quoteNote,
+      assumptions: FALLBACK.assumptions,
+      installTimeframe: "TBD",
       paymentTerms: "Unknown",
       category: "",
       owner: userName,
@@ -142,7 +147,9 @@ async function initialFrom(
     customerId: cid,
     locationId: locId,
     contactName: contactName || "",
-    quoteNote: q.quoteNote != null ? q.quoteNote : FALLBACK.quoteNote,
+      quoteNote: q.quoteNote != null ? q.quoteNote : FALLBACK.quoteNote,
+      assumptions: q.assumptions != null ? q.assumptions : "",
+    installTimeframe: q.installTimeframe || "TBD",
     paymentTerms: q.paymentTerms || "Unknown",
     category: q.category || "",
     owner: q.owner || userName,
@@ -323,6 +330,7 @@ export default async function EstimatorPage({
       people={roster.map((u) => ({ id: u.id, name: u.name }))}
       quoteTasks={quoteTasks}
       templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
+      assumptionLibrary={mergedConsultingAssumptions(settings.consultingAssumptions)}
     />
   );
 }

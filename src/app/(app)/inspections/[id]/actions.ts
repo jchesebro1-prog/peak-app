@@ -84,7 +84,16 @@ export async function advanceInspectionStage(
 
 export async function deleteInspection(id: string): Promise<void> {
   await requireUser();
-  if (id) await remove(id);
+  if (!id) redirect("/inspections");
+  try {
+    await remove(id);
+  } catch (error) {
+    console.error("deleteInspection failed", error);
+    redirect(
+      `/inspections/${encodeURIComponent(id)}?err=` +
+        encodeURIComponent("Couldn’t delete that inspection — please try again.")
+    );
+  }
   revalidatePath("/", "layout");
   redirect("/inspections");
 }
@@ -99,14 +108,20 @@ export async function startRenovationQuote(id: string): Promise<void> {
   const user = await requireUser();
   const rec = id ? await get(id) : null;
   if (!rec) return;
-  const q = await createQuote({
-    name: (rec.customer || "Inspection") + " — " + (rec.venue || "Rigging") + " renovation",
-    customer: rec.customer || "",
-    customerId: rec.customerId || null,
-    locationId: rec.locationId || null,
-    owner: user.name,
-    source: "inspection",
-  });
+  let q;
+  try {
+    q = await createQuote({
+      name: (rec.customer || "Inspection") + " — " + (rec.venue || "Rigging") + " renovation",
+      customer: rec.customer || "",
+      customerId: rec.customerId || null,
+      locationId: rec.locationId || null,
+      owner: user.name,
+      source: "inspection",
+    });
+  } catch (error) {
+    console.error("startRenovationQuote: quote mint failed", error);
+    redirect(`/inspections/${encodeURIComponent(id)}/report?err=` + encodeURIComponent("Couldn’t create the renovation quote — please try again."));
+  }
   revalidatePath("/", "layout");
   redirect(`/estimator?id=${encodeURIComponent(q.id)}`);
 }

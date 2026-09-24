@@ -44,6 +44,7 @@ export default async function PortalEstimatePage({
   const companyName = settings.companyName || "Peak Systems Group";
   const tabParam = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
   const initialTab: "drapery" | "equipment" = tabParam === "equipment" ? "equipment" : "drapery";
+  const submitError = Array.isArray(sp.err) ? sp.err[0] : sp.err;
 
   if (!session) {
     return (
@@ -126,6 +127,11 @@ export default async function PortalEstimatePage({
           binding.
         </div>
       </div>
+      {submitError === "submit" && (
+        <div role="alert" style={{ color: "#8a2f22", background: "#fff2ef", border: "1px solid #f1c9c0", borderRadius: 9, padding: "10px 12px", fontSize: 12.5, marginBottom: 16 }}>
+          We couldn’t submit that estimate right now. Please try again.
+        </div>
+      )}
       <EstimateBuilder
         companyName={companyName}
         venues={venues}
