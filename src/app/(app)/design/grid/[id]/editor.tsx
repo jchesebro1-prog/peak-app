@@ -1535,8 +1535,17 @@ export default function GridEditor({
                 <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #f0dcbb", fontSize: 10.5, color: "#5b616e" }}>
                   <div style={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#9a7a48", marginBottom: 3 }}>Ports</div>
                   {(partById.get(selectedPlacement.partId)?.ports || []).map((port) => (
+                    /* Leads with connectionType, like the catalog ports editor
+                       (#162): this is the screen where a designer judges a
+                       wire, and a DaVinci-sourced port can read
+                       `name: "DMX Male"` while being correctly typed
+                       "line power (unspecified)" — the enricher maps by
+                       protocol and falls back to the connector label only for
+                       the name. The type governs wireability; the name is the
+                       part that misleads. */
                     <div key={`${port.name}-${port.connectionType}`} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      <span>{port.name} · {port.direction}</span><span style={{ fontFamily: "var(--font-mono)", color: "#8c6d3d" }}>{port.connectionType}</span>
+                      <span style={{ fontFamily: "var(--font-mono)", color: "#8c6d3d" }}>{port.connectionType}</span>
+                      <span style={{ color: "#8a8f9a", textAlign: "right" }}>{port.direction}{port.name ? ` · ${port.name}` : ""}</span>
                     </div>
                   ))}
                 </div>

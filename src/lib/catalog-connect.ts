@@ -196,6 +196,11 @@ export const DEFAULT_WIRE_TYPES: WireType[] = [
   { id: "etc-usb", label: "USB", connectionTypes: ["ETC USB"] },
   { id: "etc-midi", label: "MIDI", connectionTypes: ["ETC MIDI"] },
   { id: "etc-serial", label: "Serial / SMPTE", connectionTypes: ["ETC serial", "ETC SMPTE timecode"] },
+  // A convenience bundle, not one cable: MCX, LSH, Sense, CANbus, BluesSystem
+  // low voltage and generic control are six physically different runs. Split it
+  // into per-family wire types BEFORE setting any `dollarsPerFt` or `cableSku`
+  // on it — a price or a part number here would be charged to whichever of the
+  // six a Grid route happens to use, and five of them would be wrong.
   { id: "etc-control", label: "ETC control", connectionTypes: ["ETC Control/SafetyLink (MCX)", "ETC LSH control", "ETC Sense", "ETC CANbus", "ETC BluesSystem low voltage", "ETC control (generic)"] },
   { id: "etc-wireless", label: "ETC wireless (no cable)", connectionTypes: ["ETC Echoflex (wireless)", "ETC Multiverse (wireless DMX)", "ETC MeshConnect (wireless)"] },
 ];
