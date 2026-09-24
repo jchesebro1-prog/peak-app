@@ -34,6 +34,8 @@ import {
   setUserStatusAction,
   updateMemberAction,
 } from "./actions";
+import UnlocatedVenues from "./unlocated-venues";
+import { reasonLabel } from "./venue-locate-drawer";
 import DashboardLayoutEditor from "@/components/dashboard-layout-editor";
 import type { DashboardLayout } from "@/lib/dashboard-layout";
 import type { UserStatus } from "@/lib/users";
@@ -266,7 +268,10 @@ export default function SettingsClient({
   const [geoCov, setGeoCov] = useState<Awaited<ReturnType<typeof travelCoverageAction>> | null>(null);
   const [geoRunning, setGeoRunning] = useState(false);
   const [geoMsg, setGeoMsg] = useState("");
-  const [geoFails, setGeoFails] = useState<Array<{ query: string; reason: string; got?: string }>>([]);
+  // Why each venue failed in THIS page's run, keyed by site id — read by the
+  // unlocated-venues worklist. Not persisted (spec §5).
+  const [geoReasons, setGeoReasons] = useState<Record<string, string>>({});
+  const [geoListKey, setGeoListKey] = useState(0);
   const [clearConfirm, setClearConfirm] = useState("");
   const [clearDone, setClearDone] = useState<string | null>(null);
 
@@ -414,7 +419,7 @@ export default function SettingsClient({
   /** Drive both phases to completion, one bounded batch at a time. */
   async function runGeocode() {
     setGeoRunning(true);
-    setGeoFails([]);
+    setGeoReasons({});
     try {
       for (const phase of ["geocode", "routes"] as const) {
         // What already failed this run. A failed venue keeps no coordinates,
@@ -429,7 +434,9 @@ export default function SettingsClient({
           if (!r.ok) break;
           skip.push(...r.failedKeys);
           if (phase === "geocode" && "failures" in r && r.failures?.length) {
-            setGeoFails((prev) => [...prev, ...r.failures].slice(0, 50));
+            const add: Record<string, string> = {};
+            for (const f of r.failures) add[f.siteId] = reasonLabel(f.reason, f.got);
+            setGeoReasons((prev) => ({ ...prev, ...add }));
           }
           setGeoMsg(
             phase === "geocode"
@@ -441,6 +448,7 @@ export default function SettingsClient({
       }
       setGeoMsg("Done.");
       await refreshGeoCoverage();
+      setGeoListKey((k) => k + 1);
     } catch (e) {
       setGeoMsg("Stopped: " + (e instanceof Error ? e.message : "unknown error"));
     } finally {
@@ -1693,22 +1701,11 @@ export default function SettingsClient({
             {geoMsg && (
               <div style={{ marginTop: 8, fontSize: 12.5, color: "#5d636e" }}>{geoMsg}</div>
             )}
-            {geoFails.length > 0 && (
-              <div style={{ marginTop: 8, fontSize: 12, color: "#8a3a2a", maxWidth: 520 }}>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                  {geoFails.length} address{geoFails.length === 1 ? "" : "es"} could not be
-                  resolved safely — fix these on the venue and re-run:
-                </div>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, lineHeight: 1.6 }}>
-                  {geoFails.slice(0, 20).map((f, i) => (
-                    <div key={i}>
-                      {f.query} — {f.reason}
-                      {f.got ? ` (got ${f.got})` : ""}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <UnlocatedVenues
+              reasons={geoReasons}
+              refreshKey={geoListKey}
+              onChanged={() => void refreshGeoCoverage()}
+            />
           </div>
         </div>
 
