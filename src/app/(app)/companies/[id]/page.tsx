@@ -11,7 +11,8 @@ import { RecordingCountBadge } from "@/components/recordings/record-control-link
 import { recordingCountByParent } from "../../recordings/data";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
-import { getAllProjects, riskFlags, stageIndex, stagesFor } from "@/lib/stores/projects";
+import { getAllProjects, riskFlags } from "@/lib/stores/projects";
+import { isDone } from "@/lib/pipelines";
 import { getAll as getAllSurveys, stageMeta as surveyStageMeta } from "@/lib/stores/surveys";
 import { byCustomer as commsByCustomer, snippet as commSnippet, statusMeta as commStatusMeta } from "@/lib/stores/comms";
 import {
@@ -497,15 +498,14 @@ export default async function CustomerDetailPage({
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>{custProjects.length}</span>
           </div>
           {custProjects.map((p) => {
-            const stages = stagesFor(p.kind);
-            const st = stages[stageIndex(p.kind, p.stage)] || stages[0];
-            const done = p.stage === "complete";
+            const label = p.stageMeta?.label ?? p.stage;
+            const done = isDone(p);
             const risk = !done && riskFlags(p).length > 0;
             const m = done
-              ? { ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da", l: "Complete" }
+              ? { ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da", l: label }
               : risk
-                ? { ink: "#b4543a", soft: "#f8ece7", bd: "#eccfc4", l: st.short }
-                : { ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3", l: st.short };
+                ? { ink: "#b4543a", soft: "#f8ece7", bd: "#eccfc4", l: label }
+                : { ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3", l: label };
             return (
               <Link
                 key={p.id}

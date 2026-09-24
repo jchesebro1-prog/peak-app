@@ -1,4 +1,5 @@
 import { followUps, followUpInfo } from "@/lib/stores/leads";
+import { isDone } from "@/lib/pipelines";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAllDesigns } from "@/lib/stores/designs";
 import { getAllProjects, riskFlags } from "@/lib/stores/projects";
@@ -87,7 +88,7 @@ export async function navData(me: string): Promise<{
       d.owner !== me
   );
   const riskProjects = projects.filter(
-    (p) => p.stage !== "complete" && riskFlags(p).length > 0
+    (p) => !isDone(p) && riskFlags(p).length > 0
   );
   const requestedInspections = inspections.filter(
     (r) => (r.stage || "requested") === "requested"

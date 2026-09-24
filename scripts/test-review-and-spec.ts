@@ -1576,9 +1576,19 @@ ok(quoteDeepLink("flame_test", "Q-1") === "/flame-tests/quote?id=Q-1", "flame qu
 ok(quoteDeepLink("consulting", "Q-2") === "/design/engagements/quote?id=Q-2", "consulting quote deep-links to the engagements quote builder");
 ok(quoteDeepLink("system", "Q-3") === "/estimator?id=Q-3", "a system quote deep-links to the estimator");
 
-ok(isOpenStage("project", "install") === true && isOpenStage("project", "complete") === false, "project open = any stage but complete");
+ok(isOpenStage("project", "installation") === true && isOpenStage("project", "complete") === false, "project open = any stage but complete");
 ok(isOpenStage("inspection", "onsite") === true, "inspection onsite counts as open work (the 4th stage)");
 ok(isOpenStage("quote", "won") === false && isOpenStage("quote", "sent") === true, "quote open = draft or sent");
+
+/* --- dashboard metrics (#43, task 4a) — openProjects/backlogProjects read the
+ *  pipeline tag (isActive/isBacklog), not a hardcoded stage-literal list. --- */
+import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects } from "@/lib/dashboard/metrics";
+const metricsProjects = [
+  { kind: "project", stage: "scheduled" },
+  { kind: "project", stage: "deposit" },
+] as any;
+ok(metricsOpenProjects(metricsProjects).length === 1, "#43: openProjects keeps only the scheduled-tag record");
+ok(metricsBacklogProjects(metricsProjects).length === 1, "#43: backlogProjects keeps only the backlog-tag record");
 
 /* --- venue dimensions (lineset PRO dims, task 1) --- */
 const vdEst = venueDimsFromEstimator({ width: 36, ph: 18, depth: 26, grid: 24, wing: 12, proscenium: true });
@@ -2835,7 +2845,9 @@ import {
   ok(s.length === 1 && s[0].title === "Survey FS-1054 — Completed" && s[0].ts === T3, "#21: survey row titles id + stage label");
   ok(s[0].href === "/venue-assessments?id=FS-1054", "#21: survey row deep-links the survey");
 
-  // projects — stage-history rows (loader-passed short labels) + newest-first notes handled
+  // projects — stage-history rows (task 4a: labeled via stageLabelFor against
+  // the loaded Pipelines, legacy pre-pipeline keys render their frozen
+  // LEGACY_STAGE_LABELS name) + newest-first notes handled
   const pj = projectFeedRows(
     {
       id: "P-3001",
@@ -2849,12 +2861,12 @@ import {
         { id: "nt-a", at: T1, by: "Jeff Chesebro", text: "Kickoff scheduled" },
       ],
     },
-    { procurement: "Materials", install: "Install" }
+    DEFAULT_PIPELINES
   );
   ok(pj.length === 4, "#21: stage-history + project-note rows all present");
   ok(
-    pj[0].title === "Project P-3001 → Materials" && pj[1].title === "Project P-3001 → Install" && pj[1].by === "Mike Torres",
-    "#21: stage rows use the passed short labels + actor (D83 anchors an opening from:null entry — renders the same way)"
+    pj[0].title === "Project P-3001 → Order materials" && pj[1].title === "Project P-3001 → Install" && pj[1].by === "Mike Torres",
+    "#21: stage rows render legacy keys via their frozen LEGACY_STAGE_LABELS name + actor (D83 anchors an opening from:null entry — renders the same way)"
   );
   ok(pj[2].title.length === 80, "#21: project-note titles clamp to 80 chars");
   ok(pj[2].ts === T3 && pj[3].ts === T1, "#21: NEWEST-FIRST ProjectNote order passes through untouched — the loader sorts by ts");

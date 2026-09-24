@@ -36,7 +36,7 @@ export async function GET(
       rows: [
         { label: "Customer", value: project.customer || "—" },
         { label: "Project", value: project.name || project.id },
-        { label: "Stage", value: project.stage },
+        { label: "Stage", value: project.stageMeta?.label ?? project.stage },
         { label: "Install window", value: project.installStart ? `${fmtDateY(project.installStart)} – ${fmtDateY(project.installEnd)}` : "Not scheduled" },
         { label: "Target date", value: fmtDateY(project.targetDate) },
         { label: "Crew", value: crew },

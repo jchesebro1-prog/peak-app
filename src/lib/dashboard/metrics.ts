@@ -4,9 +4,10 @@
  * and forecast maths were lifted verbatim from reports/page.tsx.
  */
 import type { Quote } from "@/lib/stores/quotes";
-import type { ProjectRecord, ProjectStage } from "@/lib/stores/projects";
+import type { ProjectRecord } from "@/lib/stores/projects";
 import type { ConsultingEngagement } from "@/lib/stores/engagements";
 import type { RangeKey } from "./registry";
+import { isActive, isBacklog, isDone, projectTag, type ProjectTag } from "@/lib/pipelines";
 
 export const DAY = 86_400_000;
 
@@ -85,23 +86,20 @@ export function salesMetrics(quotes: Quote[], a: number, b: number): SalesMetric
 
 /* ---- projects ---- */
 
-export const ACTIVE_STAGES: readonly ProjectStage[] = ["scheduled", "install", "training", "signoff"];
-export const BACKLOG_STAGES: readonly ProjectStage[] = ["procurement", "delivery"];
-
 const byTarget = (a: ProjectRecord, b: ProjectRecord) =>
   (a.targetDate ?? Number.MAX_SAFE_INTEGER) - (b.targetDate ?? Number.MAX_SAFE_INTEGER);
 
 export function openProjects(projects: ProjectRecord[]): ProjectRecord[] {
-  return projects.filter((p) => ACTIVE_STAGES.includes(p.stage)).sort(byTarget);
+  return projects.filter((p) => isActive(p)).sort(byTarget);
 }
 
 export function backlogProjects(projects: ProjectRecord[]): ProjectRecord[] {
-  return projects.filter((p) => BACKLOG_STAGES.includes(p.stage)).sort(byTarget);
+  return projects.filter((p) => isBacklog(p)).sort(byTarget);
 }
 
 /** "Project profit" v1 (decision 9): projected, value × margin over the open book. */
 export function projectedProfit(projects: ProjectRecord[]): { value: number; profit: number; margin: number } {
-  const book = projects.filter((p) => p.stage !== "complete");
+  const book = projects.filter((p) => !isDone(p));
   const value = sumValue(book);
   const profit = book.reduce((s, p) => s + (p.value || 0) * (p.margin || 0), 0);
   return { value, profit, margin: value ? profit / value : 0 };
@@ -173,7 +171,7 @@ export function installsForecast(
   bucketMs: number;
   toBill: number;
   collected: number;
-  byStage: Array<{ stage: string; count: number; value: number }>;
+  byStage: Array<{ stage: string; tag: ProjectTag; count: number; value: number }>;
   upcoming: ProjectRecord[];
   timeline: ProjectRecord[];
   windowMs: number;
@@ -181,7 +179,7 @@ export function installsForecast(
   const H = horizonMonths;
   const windowMs = H * 30 * DAY;
   const horizonEnd = now + windowMs;
-  const book = projects.filter((p) => p.stage !== "complete" && (p.targetDate == null || p.targetDate <= horizonEnd));
+  const book = projects.filter((p) => !isDone(p) && (p.targetDate == null || p.targetDate <= horizonEnd));
   const totalValue = sumValue(book);
   const blended = totalValue ? book.reduce((a, p) => a + (p.value || 0) * (p.margin || 0), 0) / totalValue : 0;
   const cost = Math.round(totalValue * (1 - blended));
@@ -219,14 +217,15 @@ export function installsForecast(
     sumValue(book.filter((p) => (p.targetDate || 0) + 30 * DAY >= now && (p.targetDate || 0) + 30 * DAY <= horizonEnd)) +
     msPoints.filter((m) => m.targetDate + 30 * DAY >= now && m.targetDate + 30 * DAY <= horizonEnd).reduce((a, m) => a + (m.amount || 0), 0);
 
-  const stageMap = new Map<string, { value: number; count: number }>();
+  const stageMap = new Map<string, { value: number; count: number; tag: ProjectTag }>();
   book.forEach((p) => {
-    const e = stageMap.get(p.stage) || { value: 0, count: 0 };
+    const label = p.stageMeta?.label ?? p.stage;
+    const e = stageMap.get(label) || { value: 0, count: 0, tag: projectTag(p) };
     e.value += p.value || 0;
     e.count += 1;
-    stageMap.set(p.stage, e);
+    stageMap.set(label, e);
   });
-  const byStage = [...stageMap.entries()].map(([stage, e]) => ({ stage, count: e.count, value: e.value }));
+  const byStage = [...stageMap.entries()].map(([stage, e]) => ({ stage, tag: e.tag, count: e.count, value: e.value }));
 
   const timeline = [...book].sort((a, b) => (a.targetDate || 0) - (b.targetDate || 0));
   return { book, totalValue, blended, cost, buckets, bucketMs, toBill, collected, byStage, upcoming: timeline.slice(0, 6), timeline, windowMs };

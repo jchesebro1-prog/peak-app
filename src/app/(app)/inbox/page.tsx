@@ -11,6 +11,7 @@ import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { getAll as allInspections } from "@/lib/stores/inspections";
 import { getAllProjects } from "@/lib/stores/projects";
+import { isDone } from "@/lib/pipelines";
 import {
   domainOf,
   GMAIL_MODIFY_SCOPE,
@@ -734,7 +735,7 @@ export default async function InboxPage({
                 nameToId.get((q.customer || "").toLowerCase()) === linkedCustomer.id)
           ).length,
           openProjects: projects.filter(
-            (p) => p.customerId === linkedCustomer.id && p.stage !== "complete"
+            (p) => p.customerId === linkedCustomer.id && !isDone(p)
           ).length,
           contactName:
             (senderEmailLc &&

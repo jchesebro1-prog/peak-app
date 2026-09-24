@@ -2,7 +2,8 @@ import { byCustomer as commsByCustomer } from "@/lib/stores/comms";
 import { getAll as getAllFlame } from "@/lib/stores/flame-jobs";
 import { completedAtOf, getAll as getAllInspections } from "@/lib/stores/inspections";
 import { notesForCustomer } from "@/lib/stores/notes";
-import { getAllProjects, stagesFor } from "@/lib/stores/projects";
+import { getAllProjects } from "@/lib/stores/projects";
+import { loadPipelines } from "@/lib/pipelines-server";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAll as getAllRepairs } from "@/lib/stores/repair-jobs";
 import { getAll as getAllSurveys } from "@/lib/stores/surveys";
@@ -27,15 +28,15 @@ import {
  *
  * The two store-owned conversions the pure builders must not know about
  * happen here: inspection completion via completedAtOf (ISO → ms) and
- * project stage labels via stagesFor (they differ between projects and
- * orders). Tombstones are already excluded by listDocs.
+ * project stage labels via the Pipelines loaded once (loadPipelines) and
+ * passed down to projectFeedRows. Tombstones are already excluded by listDocs.
  */
 
 /** Feed cap — "Show more" is deferred (product flag, D121). */
 export const FEED_CAP = 60;
 
 export async function loadCustomerFeed(cust: { id: string; name: string }): Promise<FeedRow[]> {
-  const [notes, quotes, threads, visits, flames, repairs, inspections, surveys, projects] =
+  const [notes, quotes, threads, visits, flames, repairs, inspections, surveys, projects, pipes] =
     await Promise.all([
       notesForCustomer(cust.id),
       getAllQuotes(),
@@ -46,6 +47,7 @@ export async function loadCustomerFeed(cust: { id: string; name: string }): Prom
       getAllInspections(),
       getAllSurveys(),
       getAllProjects(),
+      loadPipelines(),
     ]);
 
   const rows: FeedRow[] = [];
@@ -98,11 +100,8 @@ export async function loadCustomerFeed(cust: { id: string; name: string }): Prom
 
   for (const s of surveys.filter((x) => x.customerId === cust.id)) rows.push(...surveyFeedRows(s));
 
-  for (const p of projects.filter((x) => x.customerId === cust.id)) {
-    const shortOf: Record<string, string> = {};
-    for (const st of stagesFor(p.kind)) shortOf[st.key] = st.short;
-    rows.push(...projectFeedRows(p, shortOf));
-  }
+  for (const p of projects.filter((x) => x.customerId === cust.id))
+    rows.push(...projectFeedRows(p, pipes));
 
   rows.sort((a, b) => b.ts - a.ts);
   return rows.slice(0, FEED_CAP);

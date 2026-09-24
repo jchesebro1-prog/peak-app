@@ -9,9 +9,13 @@
  * this module makes that mistake impossible by resolving through the same
  * doc-loc id the stores use, and the spec test pins it with a regression guard.
  *
- * Fully self-contained: this module has zero imports (not even `import type`)
- * and nothing from @/db, so it stays client-safe and testable.
+ * Self-contained: this module's only import is the pure pipelines module
+ * (no @/db, no store), so it stays client-safe and testable. Project "open"
+ * is no longer a fixed stage list — a project pipeline's stages carry
+ * arbitrary ids, so open = not on the pipeline's Done-tagged stage (isDone).
  */
+
+import { isDone, DEFAULT_PIPELINES } from "@/lib/pipelines";
 
 export type VenueHistoryKind =
   | "quote"
@@ -74,14 +78,15 @@ export function quoteDeepLink(quoteType: string, id: string): string {
   }
 }
 
-/** Open (not-closed) stage/status values per kind. Visits are time-based, handled by the caller. */
-const OPEN_STAGES: Record<Exclude<VenueHistoryKind, "visit">, readonly string[]> = {
+/** Open (not-closed) stage/status values per kind. Visits are time-based, handled by the caller.
+ *  Projects are NOT here — a project pipeline's stage ids are admin-editable, so "open" is
+ *  decided by the pipeline tag (isDone), not a fixed list. See isOpenStage below. */
+const OPEN_STAGES: Record<Exclude<VenueHistoryKind, "visit" | "project">, readonly string[]> = {
   quote: ["draft", "sent"],
-  project: ["procurement", "delivery", "scheduled", "install", "training", "signoff"], // all but "complete"
   // Six-stage consulting lifecycle (spec §1, D123) — every stage but
   // "closed" is open (D113.11). Duplicated from lib/consulting-stages ON
-  // PURPOSE (this module's zero-import constraint, see header); the spec
-  // harness pins the two lists in agreement.
+  // PURPOSE (this module deliberately stays off lib/consulting-stages); the
+  // spec harness pins the two lists in agreement.
   engagement: ["proposal_sent", "awarded", "design", "out_to_bid", "construction_admin"],
   flame: ["approved", "scheduled"],
   inspection: ["requested", "scheduled", "onsite"],
@@ -90,6 +95,7 @@ const OPEN_STAGES: Record<Exclude<VenueHistoryKind, "visit">, readonly string[]>
 };
 
 export function isOpenStage(kind: Exclude<VenueHistoryKind, "visit">, stage: string): boolean {
+  if (kind === "project") return !isDone({ kind: "project", stage }, DEFAULT_PIPELINES);
   return OPEN_STAGES[kind].includes(stage);
 }
 

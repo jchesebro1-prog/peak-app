@@ -13,6 +13,8 @@ import * as Inspections from "@/lib/stores/inspections";
 import * as Surveys from "@/lib/stores/surveys";
 import * as Quotes from "@/lib/stores/quotes";
 import * as Projects from "@/lib/stores/projects";
+import { loadPipelines } from "@/lib/pipelines-server";
+import { DEFAULT_PIPELINES, firstStage, projectPipelineFor, type Pipelines } from "@/lib/pipelines";
 import * as Catalog from "@/lib/stores/catalog";
 import * as Equipment from "@/lib/stores/equipment-items";
 import * as TaskTemplates from "@/lib/stores/task-templates";
@@ -84,7 +86,7 @@ export type ImportResult = {
  *  the task_templates writer reads `me` for `createdBy` on a set it mints
  *  (#145 D169) — optional because scripts/regression callers (and the
  *  catalog path, which never creates a set) have no session to hand it. */
-export type CommitContext = { effectiveAt: number; me?: { name: string } };
+export type CommitContext = { effectiveAt: number; me?: { name: string }; pipes?: Pipelines };
 
 /** The link-back tally a contacts/venues writer keeps for one commit.
  *  `createdIds` remembers the customers THIS file created, so a later row
@@ -1014,14 +1016,22 @@ const WRITERS: Record<string, Writer> = {
     count: async () => (await Projects.getAllProjects()).length,
     load: async () => (await Projects.getAllProjects()) as unknown as Record<string, unknown>[],
     find: (v, cache) => cache.find((p) => ci(p.name, v.name)) || null,
-    create: async (v, cache) => {
+    create: async (v, cache, ctx) => {
       const targetMs = isoToMs(str(v.targetDate));
+      const kind = pick(v.kind, ["project", "order"] as const, "project");
+      // Stage is free text (Settings → Pipelines makes stage ids/labels
+      // admin-editable, so there's no fixed enum to import against) — match
+      // case-insensitively against the kind's pipeline stage id OR label;
+      // unmatched or blank rows land on the pipeline's first stage.
+      const pl = projectPipelineFor(ctx.pipes ?? DEFAULT_PIPELINES, { kind });
+      const raw = str(v.stage).trim().toLowerCase();
+      const matched = raw ? pl.stages.find((s) => s.id.toLowerCase() === raw || s.label.toLowerCase() === raw) : null;
       await Projects.createProject({
         name: str(v.name),
         customer: str(v.customer),
-        kind: pick(v.kind, ["project", "order"] as const, "project"),
+        kind,
         value: num(v.value),
-        stage: pick(v.stage, ["procurement", "delivery", "scheduled", "install", "training", "signoff", "complete"] as const, "procurement"),
+        stage: (matched || firstStage(pl)).id,
         ...(targetMs ? { targetDate: targetMs } : {}),
       });
       cache.push({ name: str(v.name) });
@@ -1033,7 +1043,7 @@ const WRITERS: Record<string, Writer> = {
         customer: p.customer || "",
         kind: p.kind || "",
         value: p.value || 0,
-        stage: p.stage || "",
+        stage: p.stageMeta?.label ?? p.stage ?? "",
         targetDate: p.targetDate ? isoOf(p.targetDate) : "",
       }));
     },
@@ -1257,7 +1267,9 @@ export async function allCounts(): Promise<Record<string, number>> {
  * Write prepared rows into the type's store per `mode`. Invalid rows are
  * counted as errored (never written). Mirrors importkit.commit. `ctx`
  * carries the price list's effective date for the catalog writer (#133);
- * every other writer ignores it.
+ * every other writer ignores it. `pipes` (Settings → Pipelines) is loaded
+ * ONCE here — not per row — and threaded through `ctx` for the projects
+ * writer's stage match.
  */
 export async function commitImport(
   key: string,
@@ -1280,6 +1292,8 @@ export async function commitImport(
   };
   if (!w) return res;
   const cache = await w.load();
+  const pipes = ctx.pipes ?? (key === "projects" ? await loadPipelines() : DEFAULT_PIPELINES);
+  const fullCtx: CommitContext = { ...ctx, pipes };
   const link: LinkStats = { customersCreated: 0, customersLinked: 0, createdIds: new Set<string>() };
   const noteWarnings = (rowIndex: number, warn: void | string[]) => {
     if (warn?.length) res.warnings.push(...warn.map((m) => `Row ${rowIndex + 1}: ${m}`));
@@ -1306,12 +1320,12 @@ export async function commitImport(
           res.skipped++;
           continue;
         }
-        noteWarnings(r.i, await w.update(existing, r.values, cache, ctx, link));
+        noteWarnings(r.i, await w.update(existing, r.values, cache, fullCtx, link));
         res.updated++;
         res.written.push(r);
         continue;
       }
-      noteWarnings(r.i, await w.create(r.values, cache, ctx, link));
+      noteWarnings(r.i, await w.create(r.values, cache, fullCtx, link));
       res.created++;
       res.written.push(r);
     } catch {
