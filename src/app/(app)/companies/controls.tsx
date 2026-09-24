@@ -199,7 +199,7 @@ export function FilterBar({
       </div>
 
       <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 8 }}>
-        {originName ? `Drive times from ${originName}` : "Set a quote origin in Settings → Locations to see drive times"}
+        {originName ? `Drive times from ${originName}` : "Set a quote origin with coordinates in Settings → Locations to see drive times"}
       </div>
     </div>
   );

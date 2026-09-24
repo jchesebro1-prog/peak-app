@@ -132,7 +132,7 @@ export default async function VenuesPage({
     (truncated ? " · refine with search or filters to narrow" : "") +
     (travel.originName
       ? ` · Drive from ${travel.originName}`
-      : " · Set a quote origin in Settings → Locations to see drive times");
+      : " · Set a quote origin with coordinates in Settings → Locations to see drive times");
 
   const linkWith = (patch: { company?: string; sort?: string }) => {
     const p = new URLSearchParams();
@@ -273,7 +273,7 @@ export default async function VenuesPage({
                 </span>
                 <span
                   className="ve-row-drive"
-                  title={driveTitle(d)}
+                  title={driveTitle(d, !!travel.originName)}
                   style={{
                     width: 118,
                     flexShrink: 0,

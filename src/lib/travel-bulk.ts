@@ -40,6 +40,16 @@ export async function travelForPoints(
   const origin = quoteOrigin(offices);
   const office = origin && hasCoords(origin) ? origin : null;
 
+  // #176 fix 4 — with no quote origin, every cell reads "—" (spec §2.1),
+  // including a manual travelMiles override: estimateFromParts() would
+  // otherwise honor the override even with a null office, which is right
+  // for a single quote's manual entry but wrong for a directory column that
+  // promises "measured from the quote origin."
+  if (!office) {
+    for (const p of points) byId.set(p.id, { miles: null, minutes: null, source: "none" });
+    return { originName: null, byId };
+  }
+
   const targets = points.map((p) => {
     const c = coordsOf(p);
     return { id: p.id, target: c ? { ...p, lat: c.lat, lng: c.lng } : p };

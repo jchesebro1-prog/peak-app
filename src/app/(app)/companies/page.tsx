@@ -27,6 +27,12 @@ const CSS = `
   @media (max-width: 720px) {
     .cu-row-owner { display: none !important; }
   }
+  /* #176 fix 7 — the drive cell's inline width crowds the name column on a
+     phone; the cell has an inline width (110px) so this needs !important to
+     win, same as the rule above. */
+  @media (max-width: 480px) {
+    .cu-row-drive { width: 84px !important; font-size: 10.5px !important; }
+  }
 `;
 
 export default async function CustomersPage({
@@ -283,7 +289,7 @@ export default async function CustomersPage({
                     </span>
                     <span
                       className="cu-row-drive"
-                      title={driveTitle(d)}
+                      title={driveTitle(d, !!travel.originName)}
                       style={{
                         width: 110,
                         flexShrink: 0,

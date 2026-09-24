@@ -22,10 +22,17 @@ export function fmtDrive(d: Drive | null | undefined): string {
   return (d.source === "auto" ? "~" : "") + mi + t;
 }
 
-/** Hover text explaining where a cell's number came from. */
-export function driveTitle(d: Drive | null | undefined): string {
+/**
+ * Hover text explaining where a cell's number came from. `hasOrigin` (#176
+ * fix 5) is whether the page found a quote origin with coordinates at all —
+ * when it's explicitly false, an unlocated cell's tooltip points at the
+ * actual cause (no origin) instead of the per-venue "fix it" message.
+ */
+export function driveTitle(d: Drive | null | undefined, hasOrigin?: boolean): string {
   if (!d || d.source === "none" || d.miles == null)
-    return "Not located — fix it in Settings → Admin";
+    return hasOrigin === false
+      ? "Set a quote origin (with coordinates) in Settings → Locations"
+      : "Not located — fix it in Settings → Admin";
   if (d.source === "auto") return "Estimated — run Geocode addresses to fetch the real route";
   if (d.source === "manual") return "Manual travel override";
   return "Driving route";
