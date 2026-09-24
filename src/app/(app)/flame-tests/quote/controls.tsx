@@ -347,7 +347,8 @@ export function QuoteBuilder({
     });
     dirty();
     const loc = locations.find((l) => l.id === locId);
-    if (loc && !venueSel[locId]?.on) setQuoteName(`${loc.label} ${new Date().getFullYear()}`);
+    if (loc && !venueSel[locId]?.on && !quoteNameManual.current)
+      setQuoteName(`${loc.label} ${new Date().getFullYear()}`);
   }
   function setCurtains(locId: string, val: string) {
     const clean = val === "" ? "" : String(Math.max(0, Math.floor(+val || 0)));
