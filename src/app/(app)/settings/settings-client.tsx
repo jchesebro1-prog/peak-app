@@ -448,11 +448,13 @@ export default function SettingsClient({
       }
       setGeoMsg("Done.");
       await refreshGeoCoverage();
-      setGeoListKey((k) => k + 1);
     } catch (e) {
       setGeoMsg("Stopped: " + (e instanceof Error ? e.message : "unknown error"));
     } finally {
       setGeoRunning(false);
+      // Bumped here (not just on the success path) so a run that ends
+      // "Stopped: …" still reloads the worklist below it (#169 review).
+      setGeoListKey((k) => k + 1);
     }
   }
 

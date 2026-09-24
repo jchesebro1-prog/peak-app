@@ -920,3 +920,15 @@ button.pk-searchbar-glass {
 .pk-map-tiles {
   filter: grayscale(1) brightness(1.08) contrast(0.88);
 }
+
+/* Locate-venue sidebar (#169): full width under the 640px breakpoint the
+   spec calls for, not just under 420px. */
+.pk-locate-drawer {
+  width: 420px;
+  max-width: 100vw;
+}
+@media (max-width: 640px) {
+  .pk-locate-drawer {
+    width: 100vw;
+  }
+}

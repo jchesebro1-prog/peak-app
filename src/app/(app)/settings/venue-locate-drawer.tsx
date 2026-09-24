@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { LocateResult, UnlocatedVenue } from "@/lib/venue-locate";
 import { locateVenueAction, searchVenueAddressAction, type VenueAddressHit } from "./actions";
 
@@ -45,6 +45,7 @@ export default function VenueLocateDrawer({
   onNext,
   onClose,
   onLocated,
+  onGone,
 }: {
   venue: UnlocatedVenue;
   reason?: string;
@@ -52,6 +53,7 @@ export default function VenueLocateDrawer({
   onNext: () => void;
   onClose: () => void;
   onLocated: (siteId: string) => void;
+  onGone: (siteId: string) => void;
 }) {
   const [f, setF] = useState({ address: venue.address, city: venue.city, state: venue.state, zip: venue.zip });
   const [busy, setBusy] = useState<"" | "retry" | "pick" | "pin">("");
@@ -60,11 +62,18 @@ export default function VenueLocateDrawer({
   );
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<VenueAddressHit[]>([]);
+  // The query `hits` belongs to — lets stale type-ahead results be told apart
+  // from the query currently in the box (#169 review).
+  const [hitsFor, setHitsFor] = useState("");
   const [searching, setSearching] = useState(false);
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [centre, setCentre] = useState<{ c: [number, number]; z: number }>({ c: WI, z: 6 });
   const [done, setDone] = useState(false);
   const noPins = useMemo(() => [], []);
+  // Set (not during render) the moment a pin is dropped, so the town-centre
+  // lookup below knows not to yank the map away from a placed pin.
+  const pinPlacedRef = useRef(false);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
 
   // Escape closes.
   useEffect(() => {
@@ -73,29 +82,56 @@ export default function VenueLocateDrawer({
     return () => window.removeEventListener("keydown", k);
   }, [onClose]);
 
-  // Centre the pin map on the stated town when it resolves.
+  // Dialog focus: move focus into the sidebar on open, restore it on close.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    closeBtnRef.current?.focus();
+    return () => {
+      previouslyFocused?.focus?.();
+    };
+  }, []);
+
+  // Centre the pin map on the stated town when it resolves — but never once
+  // the user has already dropped a pin (#169 review: this used to yank the
+  // map out from under a placed pin if it resolved late).
   useEffect(() => {
     if (!venue.city) return;
     let live = true;
-    void searchVenueAddressAction([venue.city, venue.state].filter(Boolean).join(", ")).then((h) => {
-      if (live && h[0]) setCentre({ c: [h[0].lat, h[0].lng], z: 13 });
-    });
+    searchVenueAddressAction([venue.city, venue.state].filter(Boolean).join(", "))
+      .then((h) => {
+        if (live && !pinPlacedRef.current && h[0]) setCentre({ c: [h[0].lat, h[0].lng], z: 13 });
+      })
+      .catch(() => {});
     return () => {
       live = false;
     };
   }, [venue.city, venue.state]);
 
-  // Debounced type-ahead. Short queries show nothing via `shown` below —
-  // no synchronous setState in the effect (react-hooks/set-state-in-effect).
-  const shown = query.trim().length >= 3 ? hits : [];
+  function handlePick(p: { lat: number; lng: number }) {
+    pinPlacedRef.current = true;
+    setPin(p);
+  }
+
+  // Debounced type-ahead. `hitsFor` (not just `hits`) tracks which query the
+  // results belong to, so a fast typist never sees the previous query's
+  // clickable hits, and "No matches" never flashes before a new search has
+  // even started (#169 review). No synchronous setState in the effect body
+  // (react-hooks/set-state-in-effect) — the state writes below happen inside
+  // the debounce timer's callback.
+  const trimmedQuery = query.trim();
+  const shown = hitsFor === trimmedQuery ? hits : [];
+  const showSearching = trimmedQuery.length >= 3 && hitsFor !== trimmedQuery;
+  const showNoMatches = trimmedQuery.length >= 3 && hitsFor === trimmedQuery && !searching && hits.length === 0;
   useEffect(() => {
     if (query.trim().length < 3) return;
     let live = true;
     const t = setTimeout(async () => {
       setSearching(true);
+      const q = query.trim();
       const h = await searchVenueAddressAction(query).catch(() => []);
       if (live) {
         setHits(h);
+        setHitsFor(q);
         setSearching(false);
       }
     }, 400);
@@ -119,6 +155,9 @@ export default function VenueLocateDrawer({
       } else {
         const hint = r.reason === "no-hit" ? " Try again, or drop a pin." : "";
         setMsg({ ok: false, text: reasonLabel(r.reason, r.got) + "." + hint });
+        // Deleted meanwhile (spec §4): the sidebar says so, and the list
+        // drops the row — same as a fix, just no ✓ state here.
+        if (r.reason === "gone") onGone(venue.siteId);
       }
     } catch {
       setMsg({ ok: false, text: "Lookup failed. Try again, or drop a pin." });
@@ -146,13 +185,14 @@ export default function VenueLocateDrawer({
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(22,24,29,.28)" }} />
       <aside
         role="dialog"
+        aria-modal="true"
         aria-label="Locate venue"
+        className="pk-locate-drawer"
         style={{
           position: "absolute",
           top: 0,
           right: 0,
           bottom: 0,
-          width: "min(420px, 100vw)",
           background: "#fff",
           boxShadow: "-8px 0 24px rgba(0,0,0,.12)",
           overflowY: "auto",
@@ -177,6 +217,7 @@ export default function VenueLocateDrawer({
             </div>
           </div>
           <button
+            ref={closeBtnRef}
             type="button"
             aria-label="Close"
             onClick={onClose}
@@ -241,15 +282,15 @@ export default function VenueLocateDrawer({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-            {searching && <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 4 }}>Searching…</div>}
-            {!searching && query.trim().length >= 3 && shown.length === 0 && (
+            {showSearching && <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 4 }}>Searching…</div>}
+            {showNoMatches && (
               <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 4 }}>
                 No matches — try a shorter query, or drop a pin.
               </div>
             )}
             {shown.map((h, i) => (
               <button
-                key={i}
+                key={`${h.lat},${h.lng},${i}`}
                 type="button"
                 disabled={!!busy}
                 onClick={() =>
@@ -291,7 +332,7 @@ export default function VenueLocateDrawer({
               center={mapCenter}
               zoom={centre.z}
               picked={pin}
-              onPick={setPin}
+              onPick={handlePick}
             />
             <button
               type="button"

@@ -28,6 +28,9 @@ export default function UnlocatedVenues({
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // True once the first load has resolved, so the header doesn't misreport
+  // "0 venues" before the counts are real (#169 review).
+  const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState<{ venue: UnlocatedVenue; idx: number; located: boolean } | null>(null);
   const seq = useRef(0);
 
@@ -41,6 +44,7 @@ export default function UnlocatedVenues({
       setRows((prev) => (offset ? [...prev, ...r.rows] : r.rows));
       setTotal(r.total);
       setNoAddress(r.noAddress);
+      setLoaded(true);
     } catch (e) {
       if (mine === seq.current) setError(e instanceof Error ? e.message : "Could not load the list");
     } finally {
@@ -54,6 +58,10 @@ export default function UnlocatedVenues({
     return () => clearTimeout(t);
   }, [q, refreshKey, load]);
 
+  // Removes a row that's no longer a worklist candidate — fixed, or deleted
+  // out from under us (`onGone`, #169 review: same list bookkeeping either
+  // way, and `open.located` only ever drives the Next-index math below, not
+  // any ✓ display — that lives in the drawer's own `done` state).
   function located(siteId: string) {
     setRows((prev) => prev.filter((r) => r.siteId !== siteId));
     setTotal((t) => Math.max(0, t - 1));
@@ -68,10 +76,16 @@ export default function UnlocatedVenues({
     <div style={{ marginTop: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div style={{ fontSize: 13, fontWeight: 600 }}>
-          {total.toLocaleString()} venue{total === 1 ? "" : "s"} can’t be located
-          <span style={{ fontWeight: 400, color: "#9aa0ab" }}>
-            {" "}· {noAddress.toLocaleString()} have no address at all
-          </span>
+          {error ? null : !loaded ? (
+            "Loading venues…"
+          ) : (
+            <>
+              {total.toLocaleString()} venue{total === 1 ? "" : "s"} can’t be located
+              <span style={{ fontWeight: 400, color: "#9aa0ab" }}>
+                {" "}· {noAddress.toLocaleString()} have no address at all
+              </span>
+            </>
+          )}
         </div>
         <input
           className="pk-input"
@@ -146,6 +160,7 @@ export default function UnlocatedVenues({
           }}
           onClose={() => setOpen(null)}
           onLocated={located}
+          onGone={located}
         />
       )}
     </div>
