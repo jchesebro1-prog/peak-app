@@ -604,6 +604,8 @@ function PartFormModal({
   error: string;
 }) {
   const editing = !!part;
+  /** Manufacturer document links (#162) — see the render block below. */
+  const docs = part?.docs ?? [];
   const label = (t: string) => (
     <div style={{ fontSize: 10.5, fontWeight: 600, color: "#9aa0ab", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 5 }}>
       {t}
@@ -769,8 +771,56 @@ function PartFormModal({
             </div>
 
             <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
-              <PortsEditor initial={part?.ports ?? []} />
+              <PortsEditor initial={part?.ports ?? []} davinci={part?.davinci} />
             </div>
+
+            {/* Manufacturer document links (#162) — carried from ETC's
+                DaVinci library onto this row. Plain outbound links only:
+                third-party etcconnect.com URLs, never fetched server-side,
+                never proxied, never embedded. Visible to anyone who can open
+                this editor (they're read-only), unlike the datasheet upload
+                below, which is admin-gated because it writes Peak's own
+                storage. */}
+            {docs.length > 0 && (
+              <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: "#9aa0ab",
+                    textTransform: "uppercase",
+                    letterSpacing: ".05em",
+                    marginBottom: 6,
+                  }}
+                >
+                  Manufacturer documents
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {docs.map((d) => (
+                    <div key={d.url} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <a
+                        href={d.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: 12.5, color: "#3a3f4a", textDecoration: "none", fontWeight: 500 }}
+                      >
+                        {d.label || d.kind} ↗
+                      </a>
+                      <span
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 10.5,
+                          color: "#aab0bb",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {d.kind}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Datasheet attach/replace/remove (punch #39, Task 5) — admin
                 only, and only once the part exists (its SKU is the doc id
