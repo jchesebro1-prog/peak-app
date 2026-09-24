@@ -134,6 +134,7 @@ export function validateQuotePipeline(p: QuotePipeline): string[] {
   const errs = baseErrors(p, QUOTE_TAGS);
   if (errs.length) return errs;
   if (!p.stages.some((s) => s.tag === "draft")) errs.push("A quote pipeline needs at least one Draft stage.");
+  if (!p.stages.some((s) => s.tag === "sent")) errs.push("A quote pipeline needs at least one Sent stage.");
   if (p.stages.filter((s) => s.tag === "won").length !== 1 || p.stages[p.stages.length - 1].tag !== "won")
     errs.push("A quote pipeline needs exactly one Won stage, and it must be last.");
   for (let i = 1; i < p.stages.length; i++)
@@ -255,5 +256,5 @@ export function quoteStageForStatus(pl: QuotePipeline, status: string, currentSt
   if (status === "lost") return cur ? cur.id : null;
   if (!QUOTE_TAGS.includes(status as QuoteTag)) return cur ? cur.id : null;
   if (cur && cur.tag === status) return cur.id;
-  return firstStageWithTag(pl, status as QuoteTag)?.id || firstStage(pl).id;
+  return firstStageWithTag(pl, status as QuoteTag)?.id || (cur ? cur.id : firstStage(pl).id);
 }

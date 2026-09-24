@@ -6924,6 +6924,8 @@ import {
   ok(quoteStageForStatus(ed, "lost", "presentation") === "presentation", "pipelines: lost leaves the stage where the deal died");
   ok(quoteStageForStatus(ed, "draft", null) === "first-contact", "pipelines: no stage + draft → first stage");
   ok(quoteStageForStatus(ed, "sent", "acceptance") === "presentation", "pipelines: a status moving backwards moves the stage back to that status's first stage");
+  ok(validateQuotePipeline({ id: "q", label: "Q", stages: [{ id: "a", label: "A", tag: "draft" }, { id: "b", label: "B", tag: "won" }] }).length > 0, "pipelines: quote needs a sent stage");
+  ok(quoteStageForStatus({ id: "q", label: "Q", stages: [{ id: "a", label: "A", tag: "draft" }, { id: "b", label: "B", tag: "won" }] }, "sent", "a") === "a", "pipelines: a status with no matching stage keeps the current stage");
 }
 
 // #148: wait for the dev auto-seed once, up front, before any of this async
