@@ -140,7 +140,7 @@ export default function UnlocatedVenues({
       {rows.length < total && (
         <button
           type="button"
-          className="pk-btn-quiet"
+          className="pk-btn-outline"
           style={{ marginTop: 6, fontSize: 12 }}
           disabled={loading}
           onClick={() => void load(q, rows.length)}

@@ -1655,7 +1655,7 @@ export default function SettingsClient({
               </div>
             </div>
             <button
-              className="pk-btn"
+              className="pk-btn-accent"
               style={{ whiteSpace: "nowrap" }}
               disabled={geoRunning}
               onClick={() => {
@@ -1667,7 +1667,7 @@ export default function SettingsClient({
           </div>
           <div style={{ marginTop: 10 }}>
             <button
-              className="pk-btn-quiet"
+              className="pk-btn-outline"
               style={{ fontSize: 12 }}
               onClick={() => {
                 void refreshGeoCoverage();

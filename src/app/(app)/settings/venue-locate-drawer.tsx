@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LocateResult, UnlocatedVenue } from "@/lib/venue-locate";
-import { locateVenueAction, searchVenueAddressAction, type VenueAddressHit } from "./actions";
+import { locateVenueAction, searchVenueAddressAction, townCentreAction, type VenueAddressHit } from "./actions";
 
 const LeafletMap = dynamic(() => import("@/components/map/LeafletMap"), {
   ssr: false,
@@ -30,7 +30,8 @@ function fmtTravel(r: Extract<LocateResult, { ok: true }>): string {
   const h = Math.floor(m / 60);
   const t = h ? `${h}h${m % 60 ? ` ${m % 60}m` : ""}` : `${m}m`;
   const how = r.source === "routed" ? "routed" : r.source === "manual" ? "manual" : "estimated";
-  return `✓ Located · ${Math.round(r.miles).toLocaleString()} mi · ${t} from ${r.officeName} (${how})`;
+  const office = r.precision === "city" ? `${r.officeName} · town centre` : r.officeName;
+  return `✓ Located · ${Math.round(r.miles).toLocaleString()} mi · ${t} from ${office} (${how})`;
 }
 
 /**
@@ -93,13 +94,15 @@ export default function VenueLocateDrawer({
 
   // Centre the pin map on the stated town when it resolves — but never once
   // the user has already dropped a pin (#169 review: this used to yank the
-  // map out from under a placed pin if it resolved late).
+  // map out from under a placed pin if it resolved late). Uses the gated
+  // town-centre lookup (item 3), not a free-text search, which put
+  // "DePere, WI" on Menasha; on a miss the Wisconsin default stands.
   useEffect(() => {
     if (!venue.city) return;
     let live = true;
-    searchVenueAddressAction([venue.city, venue.state].filter(Boolean).join(", "))
-      .then((h) => {
-        if (live && !pinPlacedRef.current && h[0]) setCentre({ c: [h[0].lat, h[0].lng], z: 13 });
+    townCentreAction(venue.city, venue.state)
+      .then((p) => {
+        if (live && !pinPlacedRef.current && p) setCentre({ c: [p.lat, p.lng], z: 13 });
       })
       .catch(() => {});
     return () => {
@@ -224,8 +227,14 @@ export default function VenueLocateDrawer({
             type="button"
             aria-label="Close"
             onClick={onClose}
-            className="pk-btn-quiet"
-            style={{ marginLeft: "auto", fontSize: 18, lineHeight: 1 }}
+            style={{
+              marginLeft: "auto",
+              fontSize: 18,
+              lineHeight: 1,
+              background: "none",
+              border: 0,
+              cursor: "pointer",
+            }}
           >
             ×
           </button>
@@ -248,11 +257,11 @@ export default function VenueLocateDrawer({
         {done && (
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             {hasNext && (
-              <button type="button" className="pk-btn" onClick={onNext}>
+              <button type="button" className="pk-btn-accent" onClick={onNext}>
                 Next venue →
               </button>
             )}
-            <button type="button" className="pk-btn-quiet" onClick={onClose}>
+            <button type="button" className="pk-btn-outline" onClick={onClose}>
               Close
             </button>
           </div>
@@ -269,7 +278,7 @@ export default function VenueLocateDrawer({
             </div>
             <button
               type="button"
-              className="pk-btn"
+              className="pk-btn-accent"
               style={{ marginTop: 8 }}
               disabled={!!busy || !(f.address.trim() || f.city.trim())}
               onClick={() => void run("retry", { siteId: venue.siteId, mode: "retry", ...f })}
@@ -291,39 +300,51 @@ export default function VenueLocateDrawer({
                 No matches — try a shorter query, or drop a pin.
               </div>
             )}
-            {shown.map((h, i) => (
-              <button
-                key={`${h.lat},${h.lng},${i}`}
-                type="button"
-                disabled={!!busy}
-                onClick={() =>
-                  void run("pick", {
-                    siteId: venue.siteId,
-                    mode: "pick",
-                    address: h.street,
-                    city: h.city,
-                    state: h.state,
-                    zip: h.zip,
-                    lat: h.lat,
-                    lng: h.lng,
-                  })
-                }
-                style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "left",
-                  marginTop: 4,
-                  padding: "6px 8px",
-                  border: "1px solid #ececf0",
-                  borderRadius: 6,
-                  background: "#fff",
-                  cursor: "pointer",
-                }}
-              >
-                <div style={{ fontSize: 12.5, fontWeight: 600 }}>{h.title}</div>
-                <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>{h.sub}</div>
-              </button>
-            ))}
+            {shown.map((h, i) => {
+              // A hit with no house number is a town/area match, not a
+              // building — still clickable (the server now protects the
+              // stored address either way, item 2), but flagged so a human
+              // doesn't mistake it for a precise pick.
+              const townOnly = !/\d/.test(h.street || "");
+              return (
+                <button
+                  key={`${h.lat},${h.lng},${i}`}
+                  type="button"
+                  disabled={!!busy}
+                  onClick={() =>
+                    void run("pick", {
+                      siteId: venue.siteId,
+                      mode: "pick",
+                      address: h.street,
+                      city: h.city,
+                      state: h.state,
+                      zip: h.zip,
+                      lat: h.lat,
+                      lng: h.lng,
+                    })
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    marginTop: 4,
+                    padding: "6px 8px",
+                    border: "1px solid #ececf0",
+                    borderRadius: 6,
+                    background: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ fontSize: 12.5, fontWeight: 600 }}>{h.title}</div>
+                  <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>{h.sub}</div>
+                  {townOnly && (
+                    <div style={{ fontSize: 11, color: "#b7bcc4", marginTop: 2 }}>
+                      (town / area — no street)
+                    </div>
+                  )}
+                </button>
+              );
+            })}
 
             <div style={h3}>DROP A PIN</div>
             <div style={{ fontSize: 12, color: "#9aa0ab", marginBottom: 6 }}>
@@ -339,7 +360,7 @@ export default function VenueLocateDrawer({
             />
             <button
               type="button"
-              className="pk-btn"
+              className="pk-btn-accent"
               style={{ marginTop: 8 }}
               disabled={!pin || !!busy}
               onClick={() => pin && void run("pin", { siteId: venue.siteId, mode: "pin", ...pin })}
