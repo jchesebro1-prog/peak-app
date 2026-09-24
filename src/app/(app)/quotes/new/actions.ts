@@ -3,6 +3,8 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { get as getCustomer } from "@/lib/stores/customers";
+import { get as getQuote } from "@/lib/stores/quotes";
+import { quoteEditPath, quoteServiceType, sameBuilder } from "./handoff";
 import { saveCustomerAction } from "@/app/(app)/companies/actions";
 import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
 import type { ContactInput, LocationInput } from "@/app/(app)/companies/types";
@@ -28,6 +30,15 @@ export async function createQuoteIntakeAction(
   // the label is the one thing the card requires.
   const category = (input.category || "").trim();
   if (input.type === "custom" && !category) return { ok: false, error: "Name the category." };
+
+  // D205 — "Change type" on a draft. Re-checked here: the quote may have been
+  // sent since the intake opened.
+  const replacesId = (input.replaces || "").trim();
+  const old = replacesId ? await getQuote(replacesId) : null;
+  if (replacesId && (!old || old.status !== "draft")) {
+    return { ok: false, error: "That quote is no longer a draft — start a new quote instead." };
+  }
+  if (old && sameBuilder(input.type, quoteServiceType(old))) redirect(quoteEditPath(old));
 
   const creatingCustomer = input.customerMode === "new";
   const newCustomerName = (input.newCustomerName || "").trim();
@@ -94,5 +105,28 @@ export async function createQuoteIntakeAction(
 
   if (!customerId) return { ok: false, error: "Pick or create a customer first." };
 
-  redirect(builderPath(input.type, customerId, { category }));
+  // #160: forward the venue/contact actually chosen — the builders used to
+  // drop them and fall back to primaries.
+  let venueId = input.locationMode === "pick" ? (input.locationId || "").trim() : "";
+  if (input.locationMode === "new") {
+    const before = new Set((existing?.locations || []).map((l) => l.id));
+    const after = await getCustomer(customerId);
+    venueId = (after?.locations || []).find((l) => l.id && !before.has(l.id))?.id || "";
+  }
+  const contact =
+    input.contactMode === "pick"
+      ? (input.contactName || "").trim()
+      : input.contactMode === "new"
+        ? (input.newContactName || "").trim()
+        : "";
+
+  redirect(
+    builderPath(input.type, customerId, {
+      category,
+      name: input.name,
+      venue: venueId,
+      contact,
+      replaces: old ? old.id : "",
+    })
+  );
 }

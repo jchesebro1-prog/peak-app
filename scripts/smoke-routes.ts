@@ -175,6 +175,11 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/inbox?customer=rose-brand" },
   { route: "/inbox?customer=rose-brand&log=1" },
   { route: "/estimator?id=Q-2041" },
+  // #160 intake hand-off: company preselected, and "Change type" on the seeded draft Q-2041.
+  { route: "/quotes/new?customer=lakefront" },
+  { route: "/quotes/new?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+quote&type=repair" },
+  { route: "/quotes/new?replaces=Q-2041" },
+  { route: "/quotes/new?customer=ghost-id" },
   { route: "/design/grid/GRD-5001", reject: "no longer exists" },
   // CE-1001 is not seeded directly: it is lazily minted by
   // syncEngagementsFromQuotes() from the seeded won consulting quote Q-2045.

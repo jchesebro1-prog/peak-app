@@ -321,7 +321,7 @@ export default async function CustomerDetailPage({
               Edit
             </Link>
             <Link
-              href="/estimator"
+              href={`/quotes/new?customer=${encodeURIComponent(cust.id)}`}
               style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: "var(--accent)", borderRadius: 8, padding: "10px 15px", textDecoration: "none" }}
             >
               + New quote
