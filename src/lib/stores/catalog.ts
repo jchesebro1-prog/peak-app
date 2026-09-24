@@ -68,6 +68,16 @@ export type CatalogPart = {
   datasheetBlobKey?: string;
   /** Original filename of the attached datasheet, for display. */
   datasheetName?: string;
+  /** Manufacturer document links (#162). Distinct from `datasheetBlobKey`,
+   *  which is a Peak-uploaded PDF in Blob storage: these are the
+   *  manufacturer's own public URLs carried from ETC's DaVinci library. They
+   *  are rendered as outbound links and are never fetched server-side or
+   *  proxied — treat them as third-party content. */
+  docs?: { kind: "datasheet" | "manual"; label: string; url: string }[];
+  /** Provenance for anything the DaVinci enricher wrote (#162) — which library
+   *  export and which ETC type a row's ports and docs came from, so a later run
+   *  can tell its own writes from a human's edit in the #158 ports editor. */
+  davinci?: { typeId: string; libraryTimestamp: string; enrichedAt: number };
   /** Epoch ms of the last write through `upsert`/`mergeUpsert` (PUNCHLIST
    *  #14, decision A) — drives the dashboard's price-book age pills. Unset
    *  on rows that have never been touched since seeding (the seed fixtures

@@ -206,6 +206,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadExtract } from "@/lib/davinci/load";
 import type { DavinciExtract } from "@/lib/davinci/types";
+import { planEnrichment, applyEnrichment } from "@/lib/catalog-davinci-apply";
+import { upsert as upsertPart, get as getPart } from "@/lib/stores/catalog";
 import { mergeActivity, prefillFromMeeting } from "@/lib/engagement-activity";
 import { performCapture, type CaptureDeps } from "@/lib/engagement-activity-write";
 
@@ -6721,6 +6723,7 @@ seeded()
   .then(() => archiveAsyncChecks())
   .then(() => asyncChecks())
   .then(() => templateScheduleAsyncChecks())
+  .then(() => davinciWriterAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -8326,5 +8329,57 @@ ok(matchSku("SHARED", dupe162)?.typeId === "A", "#162 a duplicated identifier re
     ok(Object.isFrozen(loadedA162.records), "#162 the cached extract's records array is frozen");
   } finally {
     rmSync(dir162, { recursive: true, force: true });
+  }
+}
+
+/* ====== #162 the writer (scratch datadir only) ====== */
+// Needs `await`, and this file's promise chain (see `seeded()...then(...)`
+// above) is the only place a top-level await is legal — a stray one at
+// module scope breaks the tsx/esbuild cjs build (see the #145 comment near
+// "no per-block async runner" earlier in this file).
+async function davinciWriterAsyncChecks(): Promise<void> {
+  const SKU_A = "TEST162:CSPAR";       // will match DaVinci's CSPAR
+  // Brief used "TEST162:HAS-PORTS", but this suite runs against the real
+  // committed extract (data/davinci-extract.json), which has no such model
+  // number — matchSku would return null and no plan would ever be created,
+  // making the has-ports skip path indistinguishable from SKU_C's no-match
+  // path. Swapped in a model number that's actually in the committed extract
+  // (a real ETC dimmer type, 3 ports/5 docs) so the fixture truly matches and
+  // the pre-set hand-made ports genuinely exercise the skip branch.
+  const SKU_B = "TEST162:USDOCSMDIM5";
+  const SKU_C = "TEST162:NO-MATCH-AT-ALL-XYZ";
+  await upsertPart({ id: SKU_A, sku: SKU_A, desc: "t", category: "Fixtures", unit: "ea", list: 1040, cost: 624, mfr: "TEST162" });
+  await upsertPart({ id: SKU_B, sku: SKU_B, desc: "t", category: "Fixtures", unit: "ea", list: 10, cost: 6, mfr: "TEST162",
+    ports: [{ name: "hand-made", direction: "in", connectionType: "Edison" }] });
+  await upsertPart({ id: SKU_C, sku: SKU_C, desc: "t", category: "Fixtures", unit: "ea", list: 5, cost: 3, mfr: "TEST162" });
+
+  try {
+    const planned = await planEnrichment({ mfr: "TEST162" });
+    const bySku = (s: string) => planned.plans.find((p) => p.sku === s);
+    ok(bySku(SKU_B)?.skip === "has-ports", "#162 a part with hand-edited ports is skipped, not overwritten");
+    ok(!bySku(SKU_C), "#162 a part with no DaVinci entry produces no plan at all");
+    ok((bySku(SKU_A)?.ports.length ?? 0) > 0, "#162 a matching part is planned with ports");
+
+    // Dry run writes nothing.
+    await applyEnrichment(planned.plans, { commit: false });
+    ok(!(await getPart(SKU_A))?.ports?.length, "#162 a dry run writes nothing at all");
+
+    const before = await getPart(SKU_A);
+    const res = await applyEnrichment(planned.plans, { commit: true });
+    const after = await getPart(SKU_A);
+    ok(res.written === 1, "#162 exactly the planned rows are written");
+    ok((after?.ports?.length ?? 0) > 0, "#162 a commit writes the ports");
+    ok(after?.davinci?.typeId != null, "#162 a commit stamps provenance");
+    ok(after?.list === before?.list && after?.cost === before?.cost, "#162 list and cost are byte-identical after a commit");
+    ok(after?.pricedAt === before?.pricedAt, "#162 pricedAt is never moved by enrichment");
+
+    // The hand-made ports on B survived.
+    ok((await getPart(SKU_B))?.ports?.[0]?.connectionType === "Edison", "#162 the hand-edited part is untouched by a commit");
+
+    // Scope: applyEnrichment writes ONLY what it was handed (D202's lesson).
+    const empty = await applyEnrichment([], { commit: true });
+    ok(empty.written === 0, "#162 an empty plan list writes nothing — apply never queries for more rows");
+  } finally {
+    for (const s of [SKU_A, SKU_B, SKU_C]) await softDeleteDoc("catalog_parts", s);
   }
 }
