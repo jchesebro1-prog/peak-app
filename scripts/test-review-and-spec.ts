@@ -5,6 +5,7 @@ import {
 } from "@/lib/consulting-schedule";
 import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { normalizeSku } from "@/lib/davinci/sku";
+import { PROTOCOL_MAP, DIRECTION_MAP, mapProtocol, PASSTHROUGH_TYPES } from "@/lib/davinci/protocol-map";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { TABS } from "@/app/(app)/design/engagements/tabs";
@@ -8095,3 +8096,58 @@ ok(normalizeSku("") === "", "#162 an empty SKU normalizes to empty, not to a mat
 ok(normalizeSku("::::") === "", "#162 a SKU that is only separators normalizes to empty");
 // A colon INSIDE the model number must not eat the real identifier.
 ok(normalizeSku("Allen & Heath:AH-DLIVE-CDM32-RUFX") === "AHDLIVECDM32RUFX", "#162 only the first prefix segment is dropped");
+
+/* ====== #162 protocol map ====== */
+ok(Object.keys(PROTOCOL_MAP).length === 56, "#162 every one of DaVinci's 56 protocols is mapped explicitly");
+
+// An unknown protocol must fail loudly, never default to something plausible.
+let threw162 = false;
+try { mapProtocol("00000000-0000-0000-0000-000000000000", "RJ45 Female"); } catch { threw162 = true; }
+ok(threw162, "#162 an unmapped protocol UUID throws rather than guessing a connection type");
+
+// D2 — the four NewPortProtocol entries are four different protocols.
+const arc162 = [
+  "a39a614e-3592-48f8-81d5-5d26a1d09e86",
+  "a9f1dd53-e35a-439a-b4d4-898408b208f4",
+  "ce5efb79-1a6b-4419-b597-2883291b6fad",
+].map((id) => mapProtocol(id, "Molex Thru"));
+const arcTypes162 = arc162.map((r) => ("connectionType" in r ? r.connectionType : "EXCLUDED"));
+ok(new Set(arcTypes162).size === 3, "#162 the three ARCSYSTEM protocols stay three distinct connection types");
+ok(
+  "excluded" in mapProtocol("1660207c-f71c-492e-9978-ad1e3859b8cc", "Ethercon Male"),
+  "#162 the blank fourth NewPortProtocol (RouteStubPrototype only) is excluded"
+);
+
+// The ten F-DRIVE protocols must not collapse either.
+const fdrive162 = [
+  "e4699b60-48e4-491b-8b8d-c0c90bff073e", "3b247b12-0139-4755-9303-986fd7f147e4",
+  "9f1f7378-5890-4e8f-9e0f-a746d696e0d7", "39f8e3dc-6877-4d84-81e4-8db395a72eba",
+  "c6ad45b9-e2d6-4a9e-95ac-d3c4fd63dd7d", "e1c07a88-547d-43bd-9c6c-bb230ad94de7",
+].map((id) => mapProtocol(id, "RJ45 Female")).map((r) => ("connectionType" in r ? r.connectionType : "X"));
+ok(new Set(fdrive162).size === 6, "#162 the F-DRIVE protocols do not collapse into one connection type");
+
+// D3/D4 — power is the only place the connector refines the answer.
+const POWER162 = "aa07559e-6609-4ec6-8df3-8990d6bc9909";
+const ct162 = (id: string, c: string) => { const r = mapProtocol(id, c); return "connectionType" in r ? r.connectionType : "EXCLUDED"; };
+ok(ct162(POWER162, "powerCON In") === "powerCON/True1", "#162 a powerCON connector resolves power to powerCON/True1");
+ok(ct162(POWER162, "powerCON TRUE1 Male") === "powerCON/True1", "#162 TRUE1 resolves to powerCON/True1");
+ok(ct162(POWER162, "Terminal Block") === "bare-end", "#162 a hardwired connector resolves power to bare-end");
+ok(ct162(POWER162, "Screw Terminal") === "bare-end", "#162 screw terminals are bare-end");
+ok(ct162(POWER162, "Power") === "line power (unspecified)", "#162 DaVinci's generic Power connector is not guessed as Edison or stage pin");
+ok(ct162(POWER162, "") === "line power (unspecified)", "#162 a power port with no connector is unspecified, not bare-end");
+
+// The connector is advisory everywhere else: DMX is DMX on any connector.
+const DMX162 = "698f9701-604c-4432-902f-19866c061108";
+ok(
+  ct162(DMX162, "Terminal Block") === ct162(DMX162, "DMX Female") && ct162(DMX162, "DMX Female") === "DMX512 (5-pin XLR)",
+  "#162 DaVinci's dirty connector data never changes a non-power protocol's type"
+);
+
+// Directions — Bus and Configurable both become io.
+ok(DIRECTION_MAP["Input"] === "in" && DIRECTION_MAP["Output"] === "out", "#162 Input/Output map to in/out");
+ok(DIRECTION_MAP["Bidirectional"] === "io", "#162 Bidirectional maps to io");
+ok(DIRECTION_MAP["Bus"] === "io", "#162 a Bus port maps to io — it connects in either direction");
+ok(DIRECTION_MAP["Configurable"] === "io", "#162 a Configurable port maps to io");
+ok(Object.keys(DIRECTION_MAP).length === 5, "#162 all five DaVinci directions are mapped");
+
+ok(PASSTHROUGH_TYPES.length > 0 && PASSTHROUGH_TYPES.every((t) => t.startsWith("ETC ")), "#162 every pass-through type is namespaced so it cannot collide with a Peak type");
