@@ -104,6 +104,12 @@ export type AppSettingsData = {
    *  lib/design/grid-symbols returns the seed when absent and exactly the
    *  stored map when present. Edited in Settings → Admin → Grid symbols. */
   gridCategoryShapes?: Record<string, import("@/lib/design/grid-symbols").GridShape>;
+  /** Pipelines (spec 2026-09-24 §3) — FULL REPLACEMENT lists (the wireTypes
+   *  idiom). resolvePipelines in lib/pipelines returns the Daylite seeds when
+   *  absent or invalid. Edited in Settings → Pipelines. */
+  projectPipelines?: import("@/lib/pipelines").ProjectPipeline[];
+  quotePipelines?: import("@/lib/pipelines").QuotePipeline[];
+  defaultQuotePipelineId?: string;
   /** Recordings → Drive archive (Krisp recordings spec §1.3). Connection key
    *  of the mailbox whose Google account owns the archive; null = not
    *  configured, the nightly archive job waits. */

@@ -6928,6 +6928,23 @@ import {
   ok(quoteStageForStatus({ id: "q", label: "Q", stages: [{ id: "a", label: "A", tag: "draft" }, { id: "b", label: "B", tag: "won" }] }, "sent", "a") === "a", "pipelines: a status with no matching stage keeps the current stage");
 }
 
+/* ============ PIPELINES (Daylite stages) — settings storage + server loader ============ */
+import { loadPipelines, savePipelines } from "@/lib/pipelines-server";
+
+async function pipelinesServerAsyncChecks(): Promise<void> {
+  const before = await loadPipelines();
+  ok(before.project[0].id === "install", "pipelines-server: fresh settings load the seeds");
+  const bad = await savePipelines({ project: [{ id: "install", label: "Install", stages: [{ id: "a", label: "A", tag: "done" }] }] });
+  ok(!bad.ok && bad.errors.length > 0, "pipelines-server: an invalid pipeline is refused, not stored");
+  const install = before.project[0];
+  const renamed = { ...install, stages: install.stages.map((s) => s.id === "invoice" ? { ...s, label: "Final invoice" } : s) };
+  const good = await savePipelines({ project: [renamed, before.project[1]] });
+  ok(good.ok, "pipelines-server: a valid edit saves");
+  ok((await loadPipelines()).project[0].stages.find((s) => s.id === "invoice")?.label === "Final invoice", "pipelines-server: the saved label reads back");
+  // Task 3 will add the idChange assertion (needs createProject to accept stage ids)
+  await savePipelines({ project: before.project, quote: before.quote, defaultQuotePipelineId: "estimate-design" }); // restore
+}
+
 // #148: wait for the dev auto-seed once, up front, before any of this async
 // chain runs — asyncChecks() below reads seeded equipment items and surveys,
 // and without this the gate races a cold datadir's seed intermittently
@@ -6941,6 +6958,7 @@ seeded()
   .then(() => asyncChecks())
   .then(() => templateScheduleAsyncChecks())
   .then(() => davinciWriterAsyncChecks())
+  .then(() => pipelinesServerAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
