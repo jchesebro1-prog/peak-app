@@ -503,9 +503,12 @@ In `src/lib/catalog-connect.ts`, append to `CONNECTION_TYPES` before the closing
   // DMX terminal block. 508 ETC parts (19.3% of those with ports) would import
   // unwireable without these.
   "ETC 0-10V dimming",
+  "ETC 208V feeder",
+  "ETC 480V feeder",
   "ETC ArcSystem D1HO driver",
   "ETC ArcSystem D2 driver",
   "ETC ArcSystem D4 driver",
+  "ETC auxiliary power",
   "ETC BluesSystem low voltage",
   "ETC CANbus",
   "ETC Control/SafetyLink (MCX)",
@@ -558,6 +561,11 @@ Add `"line power (unspecified)"` to the existing `powercon-power` wire type's
     ],
   },
   { id: "etc-arcsystem", label: "ETC ArcSystem driver", connectionTypes: ["ETC ArcSystem D1HO driver", "ETC ArcSystem D2 driver", "ETC ArcSystem D4 driver"] },
+  // 208V and 480V share a wire type but NOT an identity — a wire type answers
+  // "what cable runs this", never "what mates with what" (cat6 already carries
+  // Dante, sACN and HDBaseT, none of which mate).
+  { id: "etc-feeder", label: "ETC feeder (208V/480V)", connectionTypes: ["ETC 208V feeder", "ETC 480V feeder"] },
+  { id: "etc-aux-power", label: "ETC auxiliary power", connectionTypes: ["ETC auxiliary power"] },
   { id: "etc-dali", label: "DALI", connectionTypes: ["ETC DALI"] },
   { id: "etc-0-10v", label: "0-10V dimming", connectionTypes: ["ETC 0-10V dimming"] },
   { id: "etc-usb", label: "USB", connectionTypes: ["ETC USB"] },
