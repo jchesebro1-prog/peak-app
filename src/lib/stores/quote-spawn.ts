@@ -81,9 +81,14 @@ export async function spawnFromQuote(
  * here rather than inside `createProjectFromQuote` so the explicit convert
  * action still means what it says.
  *
- * No other spawner has a dismissed-list concept — a deleted flame job,
- * repair, inspection or booking is not "dismissed", and inventing one here
- * would be a new lifecycle rule, not a bug fix.
+ * That is a claim about the dismissed BLOB only: it is a projects-only
+ * mechanism, no other spawner has one, and minting a second dismissed list
+ * here would be a new lifecycle rule rather than a bug fix. It is NOT a
+ * ruling on deletion generally. The four service creators dedupe through
+ * their own `byQuote`, which reads `listDocs` and therefore cannot see a
+ * soft-deleted record — delete a flame job and re-approve the already-won
+ * quote and the job comes back, a surface #170's replay widened. The
+ * tombstone-aware fix for that is punch #173; nothing is decided here.
  */
 async function spawnProject(quoteId: string): Promise<void> {
   const { createProjectFromQuote, dismissedQuoteIds } = await import("./projects");
@@ -119,14 +124,21 @@ async function spawnConsulting(quote: Quote): Promise<void> {
   const stage = existing ? normalizeEngagementStatus(String(existing.status)) : null;
   const action = engagementSyncAction(String(quote.status || ""), stage);
   if (!action) return;
-  if (action.kind === "create" || action.kind === "advance") {
-    // Idempotent: creates, or advances proposal_sent → awarded, nothing else.
+  if (action.kind === "create") {
+    // The one case that cannot use the shared writer: there is no row yet, so
+    // it needs the quote itself (`fromQuote`) plus the id mint. `create` is
+    // only ever returned when `existing` is null, so the lookup inside
+    // `ensureEngagementForQuote` is the second scan of this path — kept
+    // because the builder it wraps is not exported on its own.
     await ensureEngagementForQuote(quote.id, action.stage);
     return;
   }
-  // close / reopen. `engagementSyncAction` only returns either when `stage`
-  // was non-null, i.e. `existing` is set — the guard is for the type checker,
-  // never a silent skip of work that was due.
+  // advance / close / reopen — `existing` is already in hand, so all three go
+  // STRAIGHT to the shared per-row writer: no second full-collection scan
+  // inside the transaction, and every write this branch makes goes through the
+  // one writer, as the module claims. `engagementSyncAction` only returns
+  // these three when `stage` was non-null, i.e. `existing` is set — the guard
+  // is for the type checker, never a silent skip of work that was due.
   if (!existing) return;
   await applyEngagementStageAction(action, existing.id, quote.id);
 }

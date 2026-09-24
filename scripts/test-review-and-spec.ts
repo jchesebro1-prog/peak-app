@@ -8839,9 +8839,9 @@ async function davinciWriterAsyncChecks(): Promise<void> {
    Fixtures are `TEST169:`-prefixed and torn down in `finally`, because
    this may run against the one shared Neon instance, not a scratch DB.
    ==================================================================== */
-import { getBlob, listDocs as listDocs169, patchDoc as patchDoc169, setBlob } from "../src/db/doc-store";
+import { getDoc as getDoc169, listDocs as listDocs169, patchDoc as patchDoc169, setBlob } from "../src/db/doc-store";
 import { setStatus as setQuoteStatus169 } from "../src/lib/stores/quotes";
-import { dismissedQuoteIds } from "../src/lib/stores/projects";
+import { DISMISSED_BLOB_ID, dismissedQuoteIds } from "../src/lib/stores/projects";
 import { getEngagementByQuote } from "../src/lib/stores/engagements";
 import { byQuote as flameByQuote } from "../src/lib/stores/flame-jobs";
 
@@ -8864,6 +8864,13 @@ async function quoteSpawnAsyncChecks(): Promise<void> {
   // back verbatim rather than edited in place (the ids this test adds are
   // removed by the restore below, whatever else is in the list).
   const dismissedBefore = await dismissedQuoteIds();
+  /** #16 "Install sold" assignments pointing at one quote. The replay path
+   *  must create none; a real transition on the same fixture shape does,
+   *  which is what keeps the negative assertion from being vacuous. */
+  const assignmentsFor = async (quoteId: string) =>
+    (await listDocs169("assignments")).filter(
+      (a) => ((a.link as { id?: string } | null)?.id || "") === quoteId
+    );
 
   /** A complete-enough quote doc. `upsertDoc` writes the collection
    *  directly — the same way the #13 block above fakes its quotes — so
@@ -8905,6 +8912,10 @@ async function quoteSpawnAsyncChecks(): Promise<void> {
     await win(Q_PROJECT);
     const born = await getProjectByQuote(Q_PROJECT);
     ok(!!born, "#169 winning a system quote spawns its Installs project");
+    ok(
+      (await assignmentsFor(Q_PROJECT)).length === 1,
+      "#16 a REAL draft→won transition on a system quote does create the 'Install sold' assignment"
+    );
     if (born) await removeProject(born.id);
     ok(
       (await dismissedQuoteIds()).includes(Q_PROJECT),
@@ -9010,10 +9021,36 @@ async function quoteSpawnAsyncChecks(): Promise<void> {
     const projectReplay = `${PRE}system-replay`;
     QUOTE_IDS.push(projectReplay);
     await seedQuote(projectReplay, "system", "won");
+    // The replay path's safety contract (quotes.ts setStatus, unchanged-status
+    // branch): it does the spawn and NOTHING ELSE. `system` is the type that
+    // fires the #16 assignment above, so this fixture exercises every piece of
+    // machinery the branch returns before reaching.
+    const replayBefore = await getDoc169("quotes", projectReplay);
+    const histLen = (q: Record<string, unknown> | null) =>
+      Array.isArray(q?.history) ? (q.history as unknown[]).length : 0;
+    const revLen = (q: Record<string, unknown> | null) =>
+      Array.isArray(q?.revisions) ? (q.revisions as unknown[]).length : 0;
     await win(projectReplay);
     ok(
       !!(await getProjectByQuote(projectReplay)),
       "#170 re-approving an already-won system quote creates its project"
+    );
+    const replayAfter = await getDoc169("quotes", projectReplay);
+    ok(
+      !!replayBefore && !!replayAfter && histLen(replayAfter) === histLen(replayBefore),
+      "#170 the replay stamps no history entry"
+    );
+    ok(
+      !!replayBefore && !!replayAfter && replayAfter.updatedAt === replayBefore.updatedAt,
+      "#170 the replay does not write the quote at all (updatedAt unchanged)"
+    );
+    ok(
+      revLen(replayAfter) === revLen(replayBefore),
+      "#170 the replay cuts no revision"
+    );
+    ok(
+      (await assignmentsFor(projectReplay)).length === 0,
+      "#170 the replay raises no #16 'Install sold' assignment"
     );
 
     /* ---------- #171: losing A must not touch B ----------
@@ -9061,6 +9098,26 @@ async function quoteSpawnAsyncChecks(): Promise<void> {
       "#171 quote B's engagement is not written to at all during A's transaction"
     );
 
+    /* ---------- the one BEHAVIOUR change #171 makes ----------
+     * The pure rule is now applied to this quote at its status change rather
+     * than at the next page-load sweep, so re-sending a lost consulting
+     * proposal reopens its closed engagement immediately. A's engagement is
+     * `closed` from the block above. */
+    await setQuoteStatus169(Q_LOST_A, "sent", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    const engAReopened = await getEngagementByQuote(Q_LOST_A);
+    ok(
+      engAReopened?.status === "proposal_sent",
+      `#171 re-sending a lost consulting quote reopens its engagement at the status change (is ${engAReopened?.status})`
+    );
+    ok(
+      !!engAReopened && engAReopened.id === engAAfter?.id,
+      "#171 the reopen reuses A's OWN engagement — it does not mint a second one"
+    );
+    ok(
+      (await listDocs169("consulting_engagements")).filter((e) => e.quoteId === Q_LOST_A).length === 1,
+      "#171 quote A still has exactly one engagement after the reopen"
+    );
+
     /* ---------- an unrecognised quoteType never throws ---------- */
     await seedQuote(Q_UNKNOWN, "no-such-quote-type", "draft");
     let threw = false;
@@ -9084,9 +9141,9 @@ async function quoteSpawnAsyncChecks(): Promise<void> {
     }
     for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
     // Blob singleton — put the snapshot back rather than editing in place.
-    await setBlob("projects_dismissed", { ids: dismissedBefore });
+    await setBlob(DISMISSED_BLOB_ID, { ids: dismissedBefore });
     ok(
-      (await getBlob<{ ids: string[] }>("projects_dismissed", { ids: [] })).ids.every((i) => !i.startsWith(PRE)),
+      (await dismissedQuoteIds()).every((i) => !i.startsWith(PRE)),
       "#169 teardown leaves no TEST169 id on the dismissed list"
     );
   }

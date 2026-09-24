@@ -47,7 +47,10 @@ export const STAGING_BUFFER = 7;
 /** Prototype fallback for window.Team.CURRENT (team.js default identity). */
 const DEFAULT_ACTOR = "Jeff Chesebro";
 
-const DISMISSED_BLOB_ID = "projects_dismissed";
+/** Blob id of the dismissed list. Exported so no other module — including
+ *  the test harness, which snapshots and restores the singleton — has to
+ *  restate the literal. */
+export const DISMISSED_BLOB_ID = "projects_dismissed";
 
 function now(): number {
   return Date.now();

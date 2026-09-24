@@ -650,7 +650,10 @@ export async function setStatus(
     // everywhere except this one idempotent repair. The approval gate is
     // deliberately not consulted either: no status is being advanced, and
     // every creator the replay reaches dedupes on the quote id, so the cost
-    // when the record already exists is one read.
+    // when the record already exists is one read. That "nothing else happens"
+    // claim is load-bearing and is pinned by test: the #170 `system-replay`
+    // fixture (a type that DOES fire the #16 assignment) asserts history,
+    // updatedAt, revisions and the assignments table are all untouched.
     const { spawnFromQuote } = await import("./quote-spawn");
     await spawnFromQuote(q, q.status, { replayUnchanged: true });
     return q;
