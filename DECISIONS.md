@@ -4906,3 +4906,17 @@ matched nothing — configurator placeholders, bare option codes, lamps, clamps 
 
 Spec: `docs/superpowers/specs/2026-09-23-davinci-etc-catalog-enrichment-design.md`.
 Supersedes nothing; extends D208.
+
+## D218. The estimator's quote-details rows live in a right-hand column, not above the body (#163, 2026-09-24)
+
+The prototype (and the port through 77c657c) stacked the customer/venue context bar, the quote
+note, the assumptions block and the install timeframe as full-width rows between the estimator's
+sticky header and the Systems/cards split. That was fine while assumptions was a single textarea;
+#36's company-default checklist made the block ten checkbox lines tall and pushed the whole
+estimating surface below the fold — Jeff's screenshot of Q-2046 showed nothing but the header and
+the list. The four groups now render as an `<aside className="est-meta">` (300px, `#23262d`,
+`overflow-y: auto`) as the third flex child of `.est-body`, after the section cards. This is a
+deviation from the prototype's layout only: markup, state, handlers and copy are unchanged, and
+nothing was made collapsible — the review bar already is (77c657c), and a second toggle would hide
+fields the estimator needs on every quote. If 300px proves tight on a laptop, narrowing the
+Systems rail or letting the column collapse is the next lever, not moving the fields back.
